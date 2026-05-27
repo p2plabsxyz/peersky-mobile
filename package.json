@@ -20,10 +20,14 @@
   },
   "homepage": "https://github.com/p2plabsxyz/peersky-mobile#readme",
   "dependencies": {
+    "@expo/cli": "^56.1.12",
+    "@types/react": "~19.2.10",
     "b4a": "^1.6.7",
     "expo": "~55.0.23",
     "expo-build-properties": "~55.0.9",
     "expo-constants": "~55.0.7",
+    "expo-dev-client": "^55.0.23",
+    "expo-font": "~55.0.8",
     "expo-linking": "~55.0.15",
     "expo-router": "~55.0.14",
     "expo-system-ui": "~55.0.17",
@@ -37,7 +41,7 @@
   },
   "devDependencies": {
     "@types/react": "~19.2.10",
-    "babel-preset-expo": "^56.0.12",
+    "babel-preset-expo": "~55.0.8",
     "standard": "^17.1.0",
     "typescript": "^5.3.3"
   }
