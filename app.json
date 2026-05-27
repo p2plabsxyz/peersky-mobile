@@ -3,7 +3,6 @@
     "name": "PeerSky Browser",
     "slug": "peersky-mobile",
     "version": "1.0.0",
-    "newArchEnabled": true,
     "orientation": "portrait",
     "scheme": "peersky",
     "icon": "./assets/images/icon.png",
@@ -25,7 +24,9 @@
       "package": "xyz.p2plabs.peersky"
     },
     "plugins": [
-      ["expo-router"],
+      [
+        "expo-router"
+      ],
       [
         "expo-build-properties",
         {
@@ -33,7 +34,8 @@
             "minSdkVersion": 29
           }
         }
-      ]
+      ],
+      "expo-font"
     ]
   }
 }
