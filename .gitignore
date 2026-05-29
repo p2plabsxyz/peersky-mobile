@@ -14,3 +14,4 @@ npm-debug.*
 *.bundle.js
 web-build/
 .DS_Store
+app/app.bundle.mjs
