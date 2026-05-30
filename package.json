@@ -23,8 +23,6 @@
   },
   "homepage": "https://github.com/p2plabsxyz/peersky-mobile#readme",
   "dependencies": {
-    "@expo/cli": "^56.1.12",
-    "@types/react": "~19.2.10",
     "b4a": "^1.6.7",
     "bare-rpc": "^0.2.13",
     "expo": "~55.0.23",
@@ -46,6 +44,7 @@
     "react-native-screens": "~4.23.0"
   },
   "devDependencies": {
+    "@expo/cli": "^56.1.12",
     "@types/b4a": "^1.6.5",
     "@types/react": "~19.2.10",
     "babel-preset-expo": "~55.0.8",
