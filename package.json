@@ -34,6 +34,7 @@
     "expo-linking": "~55.0.15",
     "expo-router": "~55.0.14",
     "expo-system-ui": "~55.0.17",
+    "holesail": "^2.4.1",
     "hyper-sdk": "^6.2.2",
     "react": "19.2.0",
     "react-dom": "19.2.0",
