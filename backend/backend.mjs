@@ -15,5 +15,7 @@ function createRpc () {
 Bare.on('beforeExit', async () => {
   try {
     await closeHyperRuntime()
-  } catch {}
+  } catch (error) {
+    console.error('[hyper] Failed to close runtime on beforeExit:', error)
+  }
 })

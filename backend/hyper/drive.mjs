@@ -3,9 +3,9 @@ import { getHyperRuntime } from './runtime.mjs'
 
 export async function createDrive ({ name } = {}) {
   const runtime = await getHyperRuntime()
-  const driveName = typeof name === 'string' && name.trim()
-    ? name.trim()
-    : `drive-${Date.now()}`
+  const trimmedName = typeof name === 'string' ? name.trim() : ''
+  const isValidName = /^[A-Za-z0-9_-]+$/.test(trimmedName)
+  const driveName = isValidName ? trimmedName : `drive-${Date.now()}`
 
   const drive = await runtime.getDrive(driveName)
   const indexPath = '/index.html'
