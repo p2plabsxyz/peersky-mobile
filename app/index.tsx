@@ -64,7 +64,7 @@ export default function App () {
       const worklet = new Worklet()
       worklet.start('/app.bundle', bundle, [storageDir])
 
-      const rpc = new RPC(worklet.IPC as unknown as any, () => {})
+      const rpc = new RPC(worklet.IPC, () => {})
 
       workletRef.current = worklet
       rpcRef.current = rpc
