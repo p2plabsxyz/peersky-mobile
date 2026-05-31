@@ -44,7 +44,7 @@ export default function App () {
   const [status, setStatus] = useState('Starting Hyper runtime...')
   const [url, setUrl] = useState('hyper://localhost/')
   const [lastResult, setLastResult] = useState<RpcResponse | null>(null)
-  const [hsLivePort, setHsLivePort] = useState('8080')
+  const [hsLivePort, setHsLivePort] = useState('8989')
   const [hsLiveHost, setHsLiveHost] = useState('127.0.0.1')
   const [hsConnector, setHsConnector] = useState('')
   const [hsConnectKey, setHsConnectKey] = useState('')

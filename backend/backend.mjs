@@ -16,7 +16,9 @@ function createRpc () {
 Bare.on('beforeExit', async () => {
   try {
     await stopHolesail()
-  } catch {}
+  } catch (error) {
+    console.error('[holesail] Failed to stop session on beforeExit:', error)
+  }
 
   try {
     await closeHyperRuntime()
