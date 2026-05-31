@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Button,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -35,6 +36,8 @@ type RpcResponse = {
   headers?: Record<string, string>
 }
 
+type RuntimeTab = 'hyper' | 'holesail'
+
 export default function App () {
   const workletRef = useRef<Worklet | null>(null)
   const rpcRef = useRef<RPC | null>(null)
@@ -43,6 +46,7 @@ export default function App () {
   const [isLoading, setIsLoading] = useState(false)
   const [status, setStatus] = useState('Starting Hyper runtime...')
   const [url, setUrl] = useState('hyper://localhost/')
+  const [activeTab, setActiveTab] = useState<RuntimeTab>('hyper')
   const [lastResult, setLastResult] = useState<RpcResponse | null>(null)
   const [hsLivePort, setHsLivePort] = useState('8989')
   const [hsLiveHost, setHsLiveHost] = useState('127.0.0.1')
@@ -251,107 +255,133 @@ export default function App () {
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <ScrollView contentContainerStyle={styles.content}>
-        <Text style={styles.title}>Hyper Runtime Check</Text>
+        <Text style={styles.title}>Runtime Check</Text>
+        <View style={styles.tabRow}>
+          <Pressable
+            style={[styles.tabButton, activeTab === 'hyper' ? styles.tabButtonActive : null]}
+            onPress={() => setActiveTab('hyper')}
+            disabled={isBooting || isLoading}
+          >
+            <Text style={[styles.tabButtonText, activeTab === 'hyper' ? styles.tabButtonTextActive : null]}>
+              Hyper
+            </Text>
+          </Pressable>
+          <Pressable
+            style={[styles.tabButton, activeTab === 'holesail' ? styles.tabButtonActive : null]}
+            onPress={() => setActiveTab('holesail')}
+            disabled={isBooting || isLoading}
+          >
+            <Text style={[styles.tabButtonText, activeTab === 'holesail' ? styles.tabButtonTextActive : null]}>
+              Holesail
+            </Text>
+          </Pressable>
+        </View>
         <Text style={styles.status}>{status}</Text>
 
-        <TextInput
-          style={styles.input}
-          autoCapitalize='none'
-          autoCorrect={false}
-          value={url}
-          onChangeText={setUrl}
-          placeholder='hyper://...'
-        />
-
-        <View style={styles.buttons}>
-          <Button
-            title='Create Drive'
-            onPress={() => void onCreateDrive()}
-            disabled={isBooting || isLoading}
-          />
-          <Button
-            title='Fetch URL'
-            onPress={() => void onFetch()}
-            disabled={isBooting || isLoading}
-          />
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Holesail Runtime Check</Text>
-          <TextInput
-            style={styles.input}
-            autoCapitalize='none'
-            autoCorrect={false}
-            value={hsLivePort}
-            onChangeText={setHsLivePort}
-            placeholder='Live port (for --live)'
-          />
-          <TextInput
-            style={styles.input}
-            autoCapitalize='none'
-            autoCorrect={false}
-            value={hsLiveHost}
-            onChangeText={setHsLiveHost}
-            placeholder='Live host (default 127.0.0.1)'
-          />
-          <TextInput
-            style={styles.input}
-            autoCapitalize='none'
-            autoCorrect={false}
-            value={hsConnector}
-            onChangeText={setHsConnector}
-            placeholder='Optional custom connection string'
-          />
-          <View style={styles.buttons}>
-            <Button
-              title='Start Live'
-              onPress={() => void onHolesailStartLive()}
-              disabled={isBooting || isLoading}
+        {activeTab === 'hyper' && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Hyper Runtime Check</Text>
+            <TextInput
+              style={styles.input}
+              autoCapitalize='none'
+              autoCorrect={false}
+              value={url}
+              onChangeText={setUrl}
+              placeholder='hyper://...'
             />
-            <Button
-              title='Status'
-              onPress={() => void onHolesailStatus()}
-              disabled={isBooting || isLoading}
-            />
+
+            <View style={styles.buttons}>
+              <Button
+                title='Create Drive'
+                onPress={() => void onCreateDrive()}
+                disabled={isBooting || isLoading}
+              />
+              <Button
+                title='Fetch URL'
+                onPress={() => void onFetch()}
+                disabled={isBooting || isLoading}
+              />
+            </View>
           </View>
+        )}
+        {activeTab === 'holesail' && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Holesail Runtime Check</Text>
+            <TextInput
+              style={styles.input}
+              autoCapitalize='none'
+              autoCorrect={false}
+              value={hsLivePort}
+              onChangeText={setHsLivePort}
+              placeholder='Live port (for --live)'
+            />
+            <TextInput
+              style={styles.input}
+              autoCapitalize='none'
+              autoCorrect={false}
+              value={hsLiveHost}
+              onChangeText={setHsLiveHost}
+              placeholder='Live host (default 127.0.0.1)'
+            />
+            <TextInput
+              style={styles.input}
+              autoCapitalize='none'
+              autoCorrect={false}
+              value={hsConnector}
+              onChangeText={setHsConnector}
+              placeholder='Optional custom connection string'
+            />
+            <View style={styles.buttons}>
+              <Button
+                title='Start Live'
+                onPress={() => void onHolesailStartLive()}
+                disabled={isBooting || isLoading}
+              />
+              <Button
+                title='Status'
+                onPress={() => void onHolesailStatus()}
+                disabled={isBooting || isLoading}
+              />
+            </View>
 
-          <TextInput
-            style={styles.input}
-            autoCapitalize='none'
-            autoCorrect={false}
-            value={hsConnectKey}
-            onChangeText={setHsConnectKey}
-            placeholder='hs://... connection key'
-          />
-          <TextInput
-            style={styles.input}
-            autoCapitalize='none'
-            autoCorrect={false}
-            value={hsConnectPort}
-            onChangeText={setHsConnectPort}
-            placeholder='Client bind port (default 8989)'
-          />
-          <TextInput
-            style={styles.input}
-            autoCapitalize='none'
-            autoCorrect={false}
-            value={hsConnectHost}
-            onChangeText={setHsConnectHost}
-            placeholder='Client bind host (default 127.0.0.1)'
-          />
-          <View style={styles.buttons}>
-            <Button
-              title='Connect'
-              onPress={() => void onHolesailConnect()}
-              disabled={isBooting || isLoading}
+            <TextInput
+              style={styles.input}
+              autoCapitalize='none'
+              autoCorrect={false}
+              value={hsConnectKey}
+              onChangeText={setHsConnectKey}
+              placeholder='hs://... connection key'
             />
-            <Button
-              title='Stop'
-              onPress={() => void onHolesailStop()}
-              disabled={isBooting || isLoading}
+            <TextInput
+              style={styles.input}
+              autoCapitalize='none'
+              autoCorrect={false}
+              value={hsConnectPort}
+              onChangeText={setHsConnectPort}
+              placeholder='Client bind port (default 8989)'
             />
+            <TextInput
+              style={styles.input}
+              autoCapitalize='none'
+              autoCorrect={false}
+              value={hsConnectHost}
+              onChangeText={setHsConnectHost}
+              placeholder='Client bind host (default 127.0.0.1)'
+            />
+            <View style={styles.buttons}>
+              <Button
+                title='Connect'
+                onPress={() => void onHolesailConnect()}
+                disabled={isBooting || isLoading}
+              />
+              <Button
+                title='Stop'
+                onPress={() => void onHolesailStop()}
+                disabled={isBooting || isLoading}
+              />
+            </View>
           </View>
-        </View>
+        )}
 
         {(isBooting || isLoading) && <ActivityIndicator size='small' />}
 
@@ -386,6 +416,30 @@ const styles = StyleSheet.create({
   },
   status: {
     fontSize: 14
+  },
+  tabRow: {
+    flexDirection: 'row',
+    gap: 10
+  },
+  tabButton: {
+    backgroundColor: '#f1f1f1',
+    borderColor: '#d8d8d8',
+    borderRadius: 8,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 10
+  },
+  tabButtonActive: {
+    backgroundColor: '#0f6fd4',
+    borderColor: '#0f6fd4'
+  },
+  tabButtonText: {
+    color: '#222',
+    fontSize: 14,
+    fontWeight: '600'
+  },
+  tabButtonTextActive: {
+    color: '#fff'
   },
   input: {
     borderColor: '#bbb',
