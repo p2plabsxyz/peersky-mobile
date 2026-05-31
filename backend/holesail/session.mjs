@@ -22,17 +22,33 @@ export async function startHolesailLive ({
 
   await stopHolesail()
 
-  session = new Holesail({
+  const instance = new Holesail({
     server: true,
     secure: Boolean(secure),
     udp: Boolean(udp),
-    log,
+    log: Boolean(log),
     port: livePort.port,
     host: liveHost.host,
     key: connectorKey.key
   })
 
-  await session.ready()
+  session = instance
+
+  try {
+    await instance.ready()
+  } catch (error) {
+    session = null
+    mode = null
+
+    try {
+      await instance.close()
+    } catch (closeError) {
+      console.error('[holesail] Failed to close session after start error:', closeError)
+    }
+
+    throw error
+  }
+
   mode = 'server'
 
   return {
@@ -60,16 +76,32 @@ export async function connectHolesail ({
 
   await stopHolesail()
 
-  session = new Holesail({
+  const instance = new Holesail({
     client: true,
     key: targetKey.key,
     udp: Boolean(udp),
-    log,
+    log: Boolean(log),
     port: targetPort.port,
     host: targetHost.host
   })
 
-  await session.ready()
+  session = instance
+
+  try {
+    await instance.ready()
+  } catch (error) {
+    session = null
+    mode = null
+
+    try {
+      await instance.close()
+    } catch (closeError) {
+      console.error('[holesail] Failed to close session after connect error:', closeError)
+    }
+
+    throw error
+  }
+
   mode = 'client'
 
   return {

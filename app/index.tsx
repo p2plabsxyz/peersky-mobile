@@ -173,8 +173,9 @@ export default function App () {
     setLastResult(null)
 
     try {
+      const livePortValue = hsLivePort.trim()
       const response = await callRpc(RPC_HOLESAIL_START_LIVE, {
-        port: Number(hsLivePort),
+        port: livePortValue === '' ? undefined : Number(livePortValue),
         host: hsLiveHost.trim(),
         connector: hsConnector.trim() || undefined,
         secure: true
@@ -200,9 +201,10 @@ export default function App () {
     setLastResult(null)
 
     try {
+      const connectPortValue = hsConnectPort.trim()
       const response = await callRpc(RPC_HOLESAIL_CONNECT, {
         key: hsConnectKey.trim(),
-        port: Number(hsConnectPort),
+        port: connectPortValue === '' ? undefined : Number(connectPortValue),
         host: hsConnectHost.trim()
       })
       setLastResult(response)
@@ -311,6 +313,7 @@ export default function App () {
               style={styles.input}
               autoCapitalize='none'
               autoCorrect={false}
+              keyboardType='numeric'
               value={hsLivePort}
               onChangeText={setHsLivePort}
               placeholder='Live port (for --live)'
@@ -356,6 +359,7 @@ export default function App () {
               style={styles.input}
               autoCapitalize='none'
               autoCorrect={false}
+              keyboardType='numeric'
               value={hsConnectPort}
               onChangeText={setHsConnectPort}
               placeholder='Client bind port (default 8989)'
