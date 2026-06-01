@@ -2,6 +2,7 @@ import Holesail from 'holesail'
 
 let session = null
 let mode = null
+let sessionTransition = Promise.resolve()
 
 export async function startHolesailLive ({
   port,
@@ -11,51 +12,53 @@ export async function startHolesailLive ({
   udp = false,
   log = false
 } = {}) {
-  const livePort = resolvePort(port, 8989)
-  if (!livePort.ok) return livePort
+  return withSessionTransition(async () => {
+    const livePort = resolvePort(port, 8989)
+    if (!livePort.ok) return livePort
 
-  const liveHost = normalizeHost(host, '127.0.0.1')
-  if (!liveHost.ok) return liveHost
+    const liveHost = normalizeHost(host, '127.0.0.1')
+    if (!liveHost.ok) return liveHost
 
-  const connectorKey = normalizeHolesailKey(connector, true)
-  if (!connectorKey.ok) return connectorKey
+    const connectorKey = normalizeHolesailKey(connector, true)
+    if (!connectorKey.ok) return connectorKey
 
-  await stopHolesail()
+    await stopSessionInternal()
 
-  const instance = new Holesail({
-    server: true,
-    secure: Boolean(secure),
-    udp: Boolean(udp),
-    log: Boolean(log),
-    port: livePort.port,
-    host: liveHost.host,
-    key: connectorKey.key
-  })
+    const instance = new Holesail({
+      server: true,
+      secure: Boolean(secure),
+      udp: Boolean(udp),
+      log: Boolean(log),
+      port: livePort.port,
+      host: liveHost.host,
+      key: connectorKey.key
+    })
 
-  session = instance
-
-  try {
-    await instance.ready()
-  } catch (error) {
-    session = null
-    mode = null
+    session = instance
 
     try {
-      await instance.close()
-    } catch (closeError) {
-      console.error('[holesail] Failed to close session after start error:', closeError)
+      await instance.ready()
+    } catch (error) {
+      session = null
+      mode = null
+
+      try {
+        await instance.close()
+      } catch (closeError) {
+        console.error('[holesail] Failed to close session after start error:', closeError)
+      }
+
+      throw error
     }
 
-    throw error
-  }
+    mode = 'server'
 
-  mode = 'server'
-
-  return {
-    ok: true,
-    mode,
-    info: session.info
-  }
+    return {
+      ok: true,
+      mode,
+      info: session.info
+    }
+  })
 }
 
 export async function connectHolesail ({
@@ -65,50 +68,52 @@ export async function connectHolesail ({
   udp = false,
   log = false
 } = {}) {
-  const targetKey = normalizeHolesailKey(key, false)
-  if (!targetKey.ok) return targetKey
+  return withSessionTransition(async () => {
+    const targetKey = normalizeHolesailKey(key, false)
+    if (!targetKey.ok) return targetKey
 
-  const targetPort = resolvePort(port, 8989)
-  if (!targetPort.ok) return targetPort
+    const targetPort = resolvePort(port, 8989)
+    if (!targetPort.ok) return targetPort
 
-  const targetHost = normalizeHost(host, '127.0.0.1')
-  if (!targetHost.ok) return targetHost
+    const targetHost = normalizeHost(host, '127.0.0.1')
+    if (!targetHost.ok) return targetHost
 
-  await stopHolesail()
+    await stopSessionInternal()
 
-  const instance = new Holesail({
-    client: true,
-    key: targetKey.key,
-    udp: Boolean(udp),
-    log: Boolean(log),
-    port: targetPort.port,
-    host: targetHost.host
-  })
+    const instance = new Holesail({
+      client: true,
+      key: targetKey.key,
+      udp: Boolean(udp),
+      log: Boolean(log),
+      port: targetPort.port,
+      host: targetHost.host
+    })
 
-  session = instance
-
-  try {
-    await instance.ready()
-  } catch (error) {
-    session = null
-    mode = null
+    session = instance
 
     try {
-      await instance.close()
-    } catch (closeError) {
-      console.error('[holesail] Failed to close session after connect error:', closeError)
+      await instance.ready()
+    } catch (error) {
+      session = null
+      mode = null
+
+      try {
+        await instance.close()
+      } catch (closeError) {
+        console.error('[holesail] Failed to close session after connect error:', closeError)
+      }
+
+      throw error
     }
 
-    throw error
-  }
+    mode = 'client'
 
-  mode = 'client'
-
-  return {
-    ok: true,
-    mode,
-    info: session.info
-  }
+    return {
+      ok: true,
+      mode,
+      info: session.info
+    }
+  })
 }
 
 export function getHolesailStatus () {
@@ -129,6 +134,10 @@ export function getHolesailStatus () {
 }
 
 export async function stopHolesail () {
+  return withSessionTransition(stopSessionInternal)
+}
+
+async function stopSessionInternal () {
   if (!session) {
     return { ok: true, running: false, mode: null }
   }
@@ -143,6 +152,23 @@ export async function stopHolesail () {
   }
 
   return { ok: true, running: false, mode: null }
+}
+
+async function withSessionTransition (operation) {
+  const previousTransition = sessionTransition
+  let release
+
+  sessionTransition = new Promise((resolve) => {
+    release = resolve
+  })
+
+  await previousTransition
+
+  try {
+    return await operation()
+  } finally {
+    release()
+  }
 }
 
 function resolvePort (value, fallback) {
