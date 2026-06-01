@@ -86,6 +86,12 @@ export async function connectHolesail ({
 
     const targetHost = normalizeHost(host, '127.0.0.1')
     if (!targetHost.ok) return targetHost
+    if (!isLoopbackHost(targetHost.host)) {
+      return {
+        ok: false,
+        error: 'Host must be loopback (127.0.0.1, ::1, or localhost)'
+      }
+    }
 
     await stopSessionInternal()
 
@@ -255,11 +261,7 @@ function isValidHost (value) {
   const ipv4 = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/
   if (ipv4.test(value)) return true
 
-  const ipv6Bracketed = /^\[[A-Fa-f0-9:]+\]$/
-  if (ipv6Bracketed.test(value)) return true
-
-  const ipv6 = /^[A-Fa-f0-9:]+$/
-  if (value.includes(':') && ipv6.test(value)) return true
+  if (isValidIpv6(value)) return true
 
   const hostname = /^(?=.{1,253}$)(?!-)[A-Za-z0-9-]{1,63}(?<!-)(\.(?!-)[A-Za-z0-9-]{1,63}(?<!-))*$/
   return hostname.test(value)
@@ -273,4 +275,47 @@ function isLoopbackHost (value) {
   if (LOOPBACK_HOSTS.has(normalized)) return true
 
   return normalized === '[::1]'
+}
+
+function isValidIpv6 (value) {
+  if (typeof value !== 'string') return false
+
+  let candidate = value.trim()
+  if (!candidate || !candidate.includes(':')) return false
+
+  if (candidate.startsWith('[') || candidate.endsWith(']')) {
+    if (!(candidate.startsWith('[') && candidate.endsWith(']'))) return false
+    candidate = candidate.slice(1, -1)
+  }
+
+  if (!candidate) return false
+
+  const hasCompression = candidate.includes('::')
+  if (hasCompression && candidate.split('::').length > 2) return false
+
+  if (!/^[A-Fa-f0-9:]+$/.test(candidate)) return false
+
+  if (hasCompression) {
+    const [left, right] = candidate.split('::')
+    const leftGroups = left ? left.split(':') : []
+    const rightGroups = right ? right.split(':') : []
+
+    if (leftGroups.some((group) => group.length === 0) || rightGroups.some((group) => group.length === 0)) {
+      return false
+    }
+
+    if (!leftGroups.every(isValidIpv6Group) || !rightGroups.every(isValidIpv6Group)) {
+      return false
+    }
+
+    return leftGroups.length + rightGroups.length < 8
+  }
+
+  const groups = candidate.split(':')
+  if (groups.length !== 8) return false
+  return groups.every(isValidIpv6Group)
+}
+
+function isValidIpv6Group (group) {
+  return group.length >= 1 && group.length <= 4 && /^[A-Fa-f0-9]+$/.test(group)
 }
