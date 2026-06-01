@@ -1,5 +1,7 @@
 import Holesail from 'holesail'
 
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost'])
+
 let session = null
 let mode = null
 let sessionTransition = Promise.resolve()
@@ -18,6 +20,13 @@ export async function startHolesailLive ({
 
     const liveHost = normalizeHost(host, '127.0.0.1')
     if (!liveHost.ok) return liveHost
+
+    if (!isLoopbackHost(liveHost.host)) {
+      return {
+        ok: false,
+        error: 'Host must be loopback (127.0.0.1, ::1, or localhost)'
+      }
+    }
 
     const connectorKey = normalizeHolesailKey(connector, true)
     if (!connectorKey.ok) return connectorKey
@@ -254,4 +263,14 @@ function isValidHost (value) {
 
   const hostname = /^(?=.{1,253}$)(?!-)[A-Za-z0-9-]{1,63}(?<!-)(\.(?!-)[A-Za-z0-9-]{1,63}(?<!-))*$/
   return hostname.test(value)
+}
+
+function isLoopbackHost (value) {
+  if (typeof value !== 'string') return false
+
+  const normalized = value.trim().toLowerCase()
+  if (!normalized) return false
+  if (LOOPBACK_HOSTS.has(normalized)) return true
+
+  return normalized === '[::1]'
 }
