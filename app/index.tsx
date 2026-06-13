@@ -14,6 +14,7 @@ import { Paths } from 'expo-file-system'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import b4a from 'b4a'
 import RPC from 'bare-rpc'
+import { WebView } from 'react-native-webview'
 import bundle from './app.bundle.mjs'
 import {
   RPC_HOLESAIL_CONNECT,
@@ -22,7 +23,10 @@ import {
   RPC_HOLESAIL_STOP,
   RPC_HYPER_CREATE_DRIVE,
   RPC_HYPER_FETCH,
-  RPC_HYPER_INIT
+  RPC_HYPER_INIT,
+  RPC_P2PMD_SERVER_START,
+  RPC_P2PMD_SERVER_STATUS,
+  RPC_P2PMD_SERVER_STOP
 } from '../backend/rpc/commands.mjs'
 
 type RpcResponse = {
@@ -34,9 +38,13 @@ type RpcResponse = {
   body?: string
   storagePath?: string
   headers?: Record<string, string>
+  running?: boolean
+  host?: string
+  port?: number
+  localUrl?: string
 }
 
-type RuntimeTab = 'hyper' | 'holesail'
+type RuntimeTab = 'hyper' | 'holesail' | 'p2pmd'
 
 export default function App () {
   const workletRef = useRef<Worklet | null>(null)
@@ -54,6 +62,8 @@ export default function App () {
   const [hsConnectKey, setHsConnectKey] = useState('')
   const [hsConnectPort, setHsConnectPort] = useState('8989')
   const [hsConnectHost, setHsConnectHost] = useState('127.0.0.1')
+  const [p2pmdUrl, setP2pmdUrl] = useState<string | null>(null)
+  const [p2pmdBridgeMessage, setP2pmdBridgeMessage] = useState('')
 
   useEffect(() => {
     void startWorklet()
@@ -254,6 +264,69 @@ export default function App () {
     }
   }
 
+  async function onP2pmdServerStart () {
+    setIsLoading(true)
+    setStatus('Starting P2PMD loopback server...')
+    setLastResult(null)
+    setP2pmdBridgeMessage('')
+
+    try {
+      const response = await callRpc(RPC_P2PMD_SERVER_START, {})
+      setLastResult(response)
+
+      if (!response.ok || !response.localUrl) {
+        setStatus(response.error || 'Failed starting P2PMD server')
+        return
+      }
+
+      setP2pmdUrl(response.localUrl)
+      setStatus(`P2PMD server ready (${response.localUrl})`)
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error))
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  async function onP2pmdServerStatus () {
+    setIsLoading(true)
+    setStatus('Reading P2PMD server status...')
+    setLastResult(null)
+
+    try {
+      const response = await callRpc(RPC_P2PMD_SERVER_STATUS, {})
+      setLastResult(response)
+
+      if (response.running && response.localUrl) {
+        setP2pmdUrl(response.localUrl)
+      }
+
+      setStatus(response.running ? 'P2PMD server is running' : 'P2PMD server is stopped')
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error))
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  async function onP2pmdServerStop () {
+    setIsLoading(true)
+    setStatus('Stopping P2PMD loopback server...')
+    setLastResult(null)
+
+    try {
+      const response = await callRpc(RPC_P2PMD_SERVER_STOP, {})
+      setLastResult(response)
+      setP2pmdUrl(null)
+      setP2pmdBridgeMessage('')
+      setStatus(response.ok ? 'P2PMD server stopped' : (response.error || 'Failed stopping P2PMD server'))
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error))
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <ScrollView contentContainerStyle={styles.content}>
@@ -275,6 +348,15 @@ export default function App () {
           >
             <Text style={[styles.tabButtonText, activeTab === 'holesail' ? styles.tabButtonTextActive : null]}>
               Holesail
+            </Text>
+          </Pressable>
+          <Pressable
+            style={[styles.tabButton, activeTab === 'p2pmd' ? styles.tabButtonActive : null]}
+            onPress={() => setActiveTab('p2pmd')}
+            disabled={isBooting || isLoading}
+          >
+            <Text style={[styles.tabButtonText, activeTab === 'p2pmd' ? styles.tabButtonTextActive : null]}>
+              P2PMD
             </Text>
           </Pressable>
         </View>
@@ -386,6 +468,49 @@ export default function App () {
             </View>
           </View>
         )}
+        {activeTab === 'p2pmd' && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>P2PMD Foundation Check</Text>
+            <View style={styles.buttons}>
+              <Button
+                title='Start Server'
+                onPress={() => void onP2pmdServerStart()}
+                disabled={isBooting || isLoading}
+              />
+              <Button
+                title='Status'
+                onPress={() => void onP2pmdServerStatus()}
+                disabled={isBooting || isLoading}
+              />
+              <Button
+                title='Stop'
+                onPress={() => void onP2pmdServerStop()}
+                disabled={isBooting || isLoading}
+              />
+            </View>
+
+            {p2pmdUrl && (
+              <View style={styles.webViewFrame}>
+                <WebView
+                  source={{ uri: p2pmdUrl }}
+                  onMessage={(event) => {
+                    setP2pmdBridgeMessage(event.nativeEvent.data)
+                    setStatus('P2PMD WebView connected to Bare server')
+                  }}
+                  onError={(event) => {
+                    setStatus(`P2PMD WebView failed: ${event.nativeEvent.description}`)
+                  }}
+                />
+              </View>
+            )}
+
+            {p2pmdBridgeMessage && (
+              <Text selectable={true} style={styles.bridgeMessage}>
+                WebView bridge: {p2pmdBridgeMessage}
+              </Text>
+            )}
+          </View>
+        )}
 
         {(isBooting || isLoading) && <ActivityIndicator size='small' />}
 
@@ -454,6 +579,7 @@ const styles = StyleSheet.create({
   },
   buttons: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 10
   },
   section: {
@@ -473,6 +599,18 @@ const styles = StyleSheet.create({
     padding: 10
   },
   resultText: {
+    fontFamily: 'monospace',
+    fontSize: 12
+  },
+  webViewFrame: {
+    borderColor: '#bbb',
+    borderRadius: 8,
+    borderWidth: 1,
+    height: 280,
+    overflow: 'hidden'
+  },
+  bridgeMessage: {
+    color: '#076c50',
     fontFamily: 'monospace',
     fontSize: 12
   }

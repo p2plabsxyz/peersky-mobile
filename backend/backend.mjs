@@ -3,6 +3,7 @@
 import RPC from 'bare-rpc'
 import { closeHyperRuntime } from './hyper/runtime.mjs'
 import { stopHolesail } from './holesail/session.mjs'
+import { stopP2pmdServer } from './p2pmd/server.mjs'
 import { routeRpcRequest } from './rpc/router.mjs'
 
 const { IPC } = BareKit
@@ -14,6 +15,12 @@ function createRpc () {
 }
 
 Bare.on('beforeExit', async () => {
+  try {
+    await stopP2pmdServer()
+  } catch (error) {
+    console.error('[p2pmd] Failed to stop server on beforeExit:', error)
+  }
+
   try {
     await stopHolesail()
   } catch (error) {
