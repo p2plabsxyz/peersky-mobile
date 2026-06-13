@@ -7,6 +7,6 @@ export const RPC_HOLESAIL_CONNECT = 11
 export const RPC_HOLESAIL_STATUS = 12
 export const RPC_HOLESAIL_STOP = 13
 
-export const RPC_P2PMD_SERVER_START = 20
-export const RPC_P2PMD_SERVER_STATUS = 21
-export const RPC_P2PMD_SERVER_STOP = 22
+export const RPC_P2PMD_ROOM_CREATE = 20
+export const RPC_P2PMD_ROOM_STATUS = 21
+export const RPC_P2PMD_ROOM_DISCONNECT = 22

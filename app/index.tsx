@@ -24,10 +24,20 @@ import {
   RPC_HYPER_CREATE_DRIVE,
   RPC_HYPER_FETCH,
   RPC_HYPER_INIT,
-  RPC_P2PMD_SERVER_START,
-  RPC_P2PMD_SERVER_STATUS,
-  RPC_P2PMD_SERVER_STOP
+  RPC_P2PMD_ROOM_CREATE,
+  RPC_P2PMD_ROOM_DISCONNECT,
+  RPC_P2PMD_ROOM_STATUS
 } from '../backend/rpc/commands.mjs'
+
+type P2pmdRoom = {
+  key: string
+  role: 'host' | 'client'
+  localUrl: string
+  host: string
+  port: number
+  secure: boolean
+  udp: boolean
+}
 
 type RpcResponse = {
   ok: boolean
@@ -42,6 +52,7 @@ type RpcResponse = {
   host?: string
   port?: number
   localUrl?: string
+  room?: P2pmdRoom | null
 }
 
 type RuntimeTab = 'hyper' | 'holesail' | 'p2pmd'
@@ -63,6 +74,7 @@ export default function App () {
   const [hsConnectPort, setHsConnectPort] = useState('8989')
   const [hsConnectHost, setHsConnectHost] = useState('127.0.0.1')
   const [p2pmdUrl, setP2pmdUrl] = useState<string | null>(null)
+  const [p2pmdRoom, setP2pmdRoom] = useState<P2pmdRoom | null>(null)
   const [p2pmdBridgeMessage, setP2pmdBridgeMessage] = useState('')
 
   useEffect(() => {
@@ -264,23 +276,27 @@ export default function App () {
     }
   }
 
-  async function onP2pmdServerStart () {
+  async function onP2pmdRoomCreate () {
     setIsLoading(true)
-    setStatus('Starting P2PMD loopback server...')
+    setStatus('Creating P2PMD room...')
     setLastResult(null)
     setP2pmdBridgeMessage('')
 
     try {
-      const response = await callRpc(RPC_P2PMD_SERVER_START, {})
+      const response = await callRpc(RPC_P2PMD_ROOM_CREATE, {
+        secure: true,
+        udp: false
+      })
       setLastResult(response)
 
-      if (!response.ok || !response.localUrl) {
-        setStatus(response.error || 'Failed starting P2PMD server')
+      if (!response.ok || !response.room) {
+        setStatus(response.error || 'Failed creating P2PMD room')
         return
       }
 
-      setP2pmdUrl(response.localUrl)
-      setStatus(`P2PMD server ready (${response.localUrl})`)
+      setP2pmdRoom(response.room)
+      setP2pmdUrl(response.room.localUrl)
+      setStatus('P2PMD room created')
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error))
     } finally {
@@ -288,20 +304,24 @@ export default function App () {
     }
   }
 
-  async function onP2pmdServerStatus () {
+  async function onP2pmdRoomStatus () {
     setIsLoading(true)
-    setStatus('Reading P2PMD server status...')
+    setStatus('Reading P2PMD room status...')
     setLastResult(null)
 
     try {
-      const response = await callRpc(RPC_P2PMD_SERVER_STATUS, {})
+      const response = await callRpc(RPC_P2PMD_ROOM_STATUS, {})
       setLastResult(response)
 
-      if (response.running && response.localUrl) {
-        setP2pmdUrl(response.localUrl)
+      if (response.running && response.room) {
+        setP2pmdRoom(response.room)
+        setP2pmdUrl(response.room.localUrl)
+      } else {
+        setP2pmdRoom(null)
+        setP2pmdUrl(null)
       }
 
-      setStatus(response.running ? 'P2PMD server is running' : 'P2PMD server is stopped')
+      setStatus(response.running ? 'P2PMD room is running' : 'No P2PMD room is running')
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error))
     } finally {
@@ -309,17 +329,18 @@ export default function App () {
     }
   }
 
-  async function onP2pmdServerStop () {
+  async function onP2pmdRoomDisconnect () {
     setIsLoading(true)
-    setStatus('Stopping P2PMD loopback server...')
+    setStatus('Disconnecting P2PMD room...')
     setLastResult(null)
 
     try {
-      const response = await callRpc(RPC_P2PMD_SERVER_STOP, {})
+      const response = await callRpc(RPC_P2PMD_ROOM_DISCONNECT, {})
       setLastResult(response)
       setP2pmdUrl(null)
+      setP2pmdRoom(null)
       setP2pmdBridgeMessage('')
-      setStatus(response.ok ? 'P2PMD server stopped' : (response.error || 'Failed stopping P2PMD server'))
+      setStatus(response.ok ? 'P2PMD room disconnected' : (response.error || 'Failed disconnecting P2PMD room'))
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error))
     } finally {
@@ -473,21 +494,33 @@ export default function App () {
             <Text style={styles.sectionTitle}>P2PMD Local Document Check</Text>
             <View style={styles.buttons}>
               <Button
-                title='Start Server'
-                onPress={() => void onP2pmdServerStart()}
+                title='Create Room'
+                onPress={() => void onP2pmdRoomCreate()}
                 disabled={isBooting || isLoading}
               />
               <Button
-                title='Status'
-                onPress={() => void onP2pmdServerStatus()}
+                title='Room Status'
+                onPress={() => void onP2pmdRoomStatus()}
                 disabled={isBooting || isLoading}
               />
               <Button
-                title='Stop'
-                onPress={() => void onP2pmdServerStop()}
+                title='Disconnect'
+                onPress={() => void onP2pmdRoomDisconnect()}
                 disabled={isBooting || isLoading}
               />
             </View>
+
+            {p2pmdRoom && (
+              <View style={styles.roomDetails}>
+                <Text style={styles.roomLabel}>Role: {p2pmdRoom.role}</Text>
+                <Text selectable={true} style={styles.roomKey}>
+                  {p2pmdRoom.key}
+                </Text>
+                <Text selectable={true} style={styles.roomUrl}>
+                  {p2pmdRoom.localUrl}
+                </Text>
+              </View>
+            )}
 
             {p2pmdUrl && (
               <View style={styles.webViewFrame}>
@@ -627,6 +660,23 @@ const styles = StyleSheet.create({
   },
   bridgeMessage: {
     color: '#076c50',
+    fontFamily: 'monospace',
+    fontSize: 12
+  },
+  roomDetails: {
+    gap: 6
+  },
+  roomLabel: {
+    fontSize: 14,
+    fontWeight: '600'
+  },
+  roomKey: {
+    color: '#076c50',
+    fontFamily: 'monospace',
+    fontSize: 12
+  },
+  roomUrl: {
+    color: '#526158',
     fontFamily: 'monospace',
     fontSize: 12
   }
