@@ -470,7 +470,7 @@ export default function App () {
         )}
         {activeTab === 'p2pmd' && (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>P2PMD Foundation Check</Text>
+            <Text style={styles.sectionTitle}>P2PMD Local Document Check</Text>
             <View style={styles.buttons}>
               <Button
                 title='Start Server'
@@ -494,8 +494,24 @@ export default function App () {
                 <WebView
                   source={{ uri: p2pmdUrl }}
                   onMessage={(event) => {
-                    setP2pmdBridgeMessage(event.nativeEvent.data)
-                    setStatus('P2PMD WebView connected to Bare server')
+                    const message = event.nativeEvent.data
+                    setP2pmdBridgeMessage(message)
+
+                    try {
+                      const parsed = JSON.parse(message)
+
+                      if (parsed.type === 'p2pmd-document-loaded') {
+                        setStatus('P2PMD document loaded from Bare server')
+                      } else if (parsed.type === 'p2pmd-document-saved') {
+                        setStatus(`P2PMD document saved (${parsed.contentLength} characters)`)
+                      } else if (parsed.type === 'p2pmd-document-error') {
+                        setStatus(parsed.error || 'P2PMD document request failed')
+                      } else {
+                        setStatus('P2PMD WebView connected to Bare server')
+                      }
+                    } catch {
+                      setStatus('P2PMD WebView connected to Bare server')
+                    }
                   }}
                   onError={(event) => {
                     setStatus(`P2PMD WebView failed: ${event.nativeEvent.description}`)
