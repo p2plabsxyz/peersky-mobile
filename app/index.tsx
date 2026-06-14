@@ -587,6 +587,8 @@ export default function App () {
                         setStatus('P2PMD document loaded from Bare server')
                       } else if (parsed.type === 'p2pmd-document-saved') {
                         setStatus(`P2PMD document saved (${parsed.contentLength} characters)`)
+                      } else if (parsed.type === 'p2pmd-document-updated') {
+                        setStatus(`P2PMD remote update received (${parsed.contentLength} characters)`)
                       } else if (parsed.type === 'p2pmd-document-error') {
                         setStatus(parsed.error || 'P2PMD document request failed')
                       } else {

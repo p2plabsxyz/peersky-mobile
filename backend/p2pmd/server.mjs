@@ -1,7 +1,10 @@
 import http from 'bare-http1'
 import {
+  applyDocumentUpdate,
+  getEncodedDocumentState,
   getDocumentState,
   getMaxDocumentLength,
+  subscribeToDocumentUpdates,
   updateDocumentState
 } from './document.mjs'
 import { P2PMD_LOOPBACK_HOST } from './network.mjs'
@@ -9,6 +12,13 @@ import { P2PMD_LOOPBACK_HOST } from './network.mjs'
 let server = null
 let serverInfo = null
 let serverTransition = Promise.resolve()
+const eventClients = new Set()
+let keepaliveInterval = null
+
+subscribeToDocumentUpdates(({ document, update }) => {
+  broadcastEvent('yjsupdate', update)
+  broadcastEvent('update', JSON.stringify(document))
+})
 
 export async function startP2pmdServer () {
   return withServerTransition(async () => {
@@ -74,6 +84,7 @@ export async function stopP2pmdServer () {
 async function stopServerInternal () {
   if (!server) {
     serverInfo = null
+    closeEventClients()
     return {
       ok: true,
       running: false
@@ -83,6 +94,7 @@ async function stopServerInternal () {
   const existing = server
   server = null
   serverInfo = null
+  closeEventClients()
 
   await new Promise((resolve, reject) => {
     existing.close((error) => {
@@ -100,11 +112,17 @@ async function stopServerInternal () {
 function handleRequest (req, res) {
   const pathname = String(req.url || '/').split('?')[0]
 
+  if (req.method === 'OPTIONS') {
+    sendEmpty(res, 204)
+    return
+  }
+
   if (req.method === 'GET' && pathname === '/status') {
     sendJson(res, 200, {
       ok: true,
       service: 'p2pmd',
-      running: true
+      running: true,
+      peers: eventClients.size
     })
     return
   }
@@ -115,10 +133,29 @@ function handleRequest (req, res) {
   }
 
   if (req.method === 'GET' && pathname === '/doc') {
+    sendJson(res, 200, getDocumentState())
+    return
+  }
+
+  if (req.method === 'GET' && pathname === '/doc/yjsstate') {
     sendJson(res, 200, {
-      ok: true,
-      document: getDocumentState()
+      yjsState: getEncodedDocumentState()
     })
+    return
+  }
+
+  if (req.method === 'POST' && pathname === '/doc/update') {
+    readJsonBody(req)
+      .then((body) => {
+        const result = applyDocumentUpdate(body.update)
+        sendJson(res, result.ok ? 200 : 400, result)
+      })
+      .catch((error) => {
+        sendJson(res, error.statusCode || 400, {
+          ok: false,
+          error: error.message
+        })
+      })
     return
   }
 
@@ -134,6 +171,11 @@ function handleRequest (req, res) {
           error: error.message
         })
       })
+    return
+  }
+
+  if (req.method === 'GET' && pathname === '/events') {
+    openEventStream(res)
     return
   }
 
@@ -165,6 +207,7 @@ function sendJson (res, statusCode, body) {
   res.statusCode = statusCode
   res.setHeader('Content-Type', 'application/json; charset=utf-8')
   res.setHeader('Cache-Control', 'no-store')
+  setCorsHeaders(res)
   res.setHeader('Connection', 'close')
   res.end(payload)
 }
@@ -173,8 +216,87 @@ function sendHtml (res, statusCode, body) {
   res.statusCode = statusCode
   res.setHeader('Content-Type', 'text/html; charset=utf-8')
   res.setHeader('Cache-Control', 'no-store')
+  setCorsHeaders(res)
   res.setHeader('Connection', 'close')
   res.end(body)
+}
+
+function sendEmpty (res, statusCode) {
+  res.statusCode = statusCode
+  setCorsHeaders(res)
+  res.setHeader('Connection', 'close')
+  res.end()
+}
+
+function setCorsHeaders (res) {
+  res.setHeader('Access-Control-Allow-Origin', '*')
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
+}
+
+function openEventStream (res) {
+  res.statusCode = 200
+  res.setHeader('Content-Type', 'text/event-stream')
+  res.setHeader('Cache-Control', 'no-cache')
+  res.setHeader('Connection', 'keep-alive')
+  setCorsHeaders(res)
+  res.flushHeaders()
+
+  eventClients.add(res)
+  writeEvent(res, 'peers', String(eventClients.size))
+  writeEvent(res, 'yjsupdate', getEncodedDocumentState())
+  broadcastEvent('peers', String(eventClients.size))
+
+  if (!keepaliveInterval) {
+    keepaliveInterval = setInterval(() => {
+      broadcastRaw(':keepalive\n\n')
+    }, 20000)
+  }
+}
+
+function broadcastEvent (event, data) {
+  broadcastRaw(`event: ${event}\ndata: ${data}\n\n`)
+}
+
+function broadcastRaw (payload) {
+  let removed = false
+
+  for (const client of [...eventClients]) {
+    try {
+      client.write(payload)
+    } catch (error) {
+      console.error('[p2pmd] Removing SSE client after write failure:', error)
+      eventClients.delete(client)
+      removed = true
+    }
+  }
+
+  if (removed && eventClients.size > 0) {
+    broadcastEvent('peers', String(eventClients.size))
+  }
+
+  if (eventClients.size === 0 && keepaliveInterval) {
+    clearInterval(keepaliveInterval)
+    keepaliveInterval = null
+  }
+}
+
+function writeEvent (res, event, data) {
+  res.write(`event: ${event}\ndata: ${data}\n\n`)
+}
+
+function closeEventClients () {
+  if (keepaliveInterval) {
+    clearInterval(keepaliveInterval)
+    keepaliveInterval = null
+  }
+
+  for (const client of eventClients) {
+    try {
+      client.end()
+    } catch {}
+  }
+  eventClients.clear()
 }
 
 function readJsonBody (req) {
@@ -296,14 +418,14 @@ function getFoundationPage () {
           const response = await fetch('/doc')
           const result = await response.json()
 
-          if (!response.ok || !result.ok) {
+          if (!response.ok || typeof result.content !== 'string') {
             throw new Error(result.error || 'Unable to load document')
           }
 
-          input.value = result.document.content
+          input.value = result.content
           status.textContent = 'Document loaded'
           notifyNative('p2pmd-document-loaded', {
-            updatedAt: result.document.updatedAt
+            updatedAt: result.updatedAt
           })
         } catch (error) {
           status.textContent = error.message
@@ -348,8 +470,32 @@ function getFoundationPage () {
         }
       }
 
+      function connectEvents() {
+        const source = new EventSource('/events')
+
+        source.addEventListener('update', (event) => {
+          try {
+            const documentState = JSON.parse(event.data)
+            if (typeof documentState.content !== 'string') return
+            if (documentState.content === input.value) return
+
+            input.value = documentState.content
+            status.textContent = 'Remote document update received'
+            notifyNative('p2pmd-document-updated', {
+              updatedAt: documentState.updatedAt,
+              contentLength: documentState.content.length
+            })
+          } catch {}
+        })
+
+        source.onerror = () => {
+          status.textContent = 'Reconnecting to room updates...'
+        }
+      }
+
       saveButton.addEventListener('click', saveDocument)
       loadDocument()
+      connectEvents()
     </script>
   </body>
 </html>`
