@@ -1,7 +1,7 @@
 import b4a from 'b4a'
 import * as Y from 'yjs'
 
-const MAX_DOCUMENT_LENGTH = 1024 * 1024
+const MAX_DOCUMENT_LENGTH = 10 * 1024 * 1024
 const MAX_UPDATE_LENGTH = 1024 * 1024
 
 const ydoc = new Y.Doc()
@@ -116,7 +116,7 @@ function validateDocumentContent (content) {
   if (content.length > MAX_DOCUMENT_LENGTH) {
     return {
       ok: false,
-      error: 'Document is too large. Maximum size is 1 MB.'
+      error: 'Document is too large. Maximum size is 10 MB.'
     }
   }
 

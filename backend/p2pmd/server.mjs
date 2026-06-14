@@ -1,4 +1,5 @@
 import http from 'bare-http1'
+import MarkdownIt from 'markdown-it'
 import {
   applyDocumentUpdate,
   getEncodedDocumentState,
@@ -14,6 +15,11 @@ let serverInfo = null
 let serverTransition = Promise.resolve()
 const eventClients = new Set()
 let keepaliveInterval = null
+const markdownRenderer = new MarkdownIt({
+  html: false,
+  linkify: true,
+  breaks: true
+})
 
 subscribeToDocumentUpdates(({ document, update }) => {
   broadcastEvent('yjsupdate', update)
@@ -164,6 +170,39 @@ function handleRequest (req, res) {
       .then((body) => {
         const result = updateDocumentState(body.content)
         sendJson(res, result.ok ? 200 : 400, result)
+      })
+      .catch((error) => {
+        sendJson(res, error.statusCode || 400, {
+          ok: false,
+          error: error.message
+        })
+      })
+    return
+  }
+
+  if (req.method === 'POST' && pathname === '/preview') {
+    readJsonBody(req)
+      .then((body) => {
+        if (typeof body.content !== 'string') {
+          sendJson(res, 400, {
+            ok: false,
+            error: 'Invalid Markdown content. Expected a string.'
+          })
+          return
+        }
+
+        if (body.content.length > getMaxDocumentLength()) {
+          sendJson(res, 413, {
+            ok: false,
+            error: 'Markdown is too large. Maximum size is 10 MB.'
+          })
+          return
+        }
+
+        sendJson(res, 200, {
+          ok: true,
+          html: markdownRenderer.render(body.content)
+        })
       })
       .catch((error) => {
         sendJson(res, error.statusCode || 400, {
@@ -373,8 +412,43 @@ function getFoundationPage () {
         font: 15px/1.5 monospace;
         resize: vertical;
       }
-      button {
+      #preview {
+        box-sizing: border-box;
+        min-height: 180px;
+        padding: 12px 14px;
+        border: 1px solid #d4dbd6;
+        border-radius: 6px;
+        background: #fff;
+        overflow-wrap: anywhere;
+      }
+      #preview > :first-child { margin-top: 0; }
+      #preview > :last-child { margin-bottom: 0; }
+      #preview pre {
+        padding: 12px;
+        border-radius: 5px;
+        background: #edf1ed;
+        overflow-x: auto;
+      }
+      #preview code {
+        font-family: monospace;
+      }
+      #preview blockquote {
+        margin-left: 0;
+        padding-left: 14px;
+        border-left: 3px solid #8aa398;
+        color: #526158;
+      }
+      #preview img {
+        max-width: 100%;
+      }
+      #editor-controls {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
         margin-top: 12px;
+      }
+      button {
         padding: 10px 16px;
         border: 0;
         border-radius: 6px;
@@ -383,7 +457,24 @@ function getFoundationPage () {
         font-size: 15px;
         font-weight: 700;
       }
+      #toggle-preview {
+        display: inline-grid;
+        width: 42px;
+        height: 42px;
+        padding: 0;
+        place-items: center;
+      }
+      #toggle-preview svg {
+        width: 21px;
+        height: 21px;
+        fill: none;
+        stroke: currentColor;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        stroke-width: 2;
+      }
       button:disabled { opacity: 0.55; }
+      [hidden] { display: none !important; }
       #document-status {
         min-height: 22px;
         margin: 10px 0 0;
@@ -396,12 +487,31 @@ function getFoundationPage () {
     <h1>P2PMD Local Document</h1>
     <p>Edit the document stored in the Bare worklet.</p>
     <textarea id="document-input" aria-label="Markdown document" placeholder="Write Markdown here..."></textarea>
-    <button id="save-document" type="button">Save Document</button>
+    <article id="preview" aria-label="Markdown preview" hidden></article>
+    <div id="editor-controls">
+      <button id="save-document" type="button">Save Document</button>
+      <button id="toggle-preview" type="button" title="Preview Markdown" aria-label="Preview Markdown" aria-pressed="false">
+        <svg id="preview-icon" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12"></path>
+          <circle cx="12" cy="12" r="2.5"></circle>
+        </svg>
+        <svg id="edit-icon" viewBox="0 0 24 24" aria-hidden="true" hidden>
+          <path d="M4 20h4l11-11-4-4L4 16v4"></path>
+          <path d="m13.5 6.5 4 4"></path>
+        </svg>
+      </button>
+    </div>
     <p id="document-status" role="status">Loading document...</p>
     <script>
       const input = document.getElementById('document-input')
+      const preview = document.getElementById('preview')
       const saveButton = document.getElementById('save-document')
+      const toggleButton = document.getElementById('toggle-preview')
+      const previewIcon = document.getElementById('preview-icon')
+      const editIcon = document.getElementById('edit-icon')
       const status = document.getElementById('document-status')
+      let isPreviewMode = false
+      let previewRequestId = 0
 
       function notifyNative(type, details) {
         if (!window.ReactNativeWebView) return
@@ -470,6 +580,64 @@ function getFoundationPage () {
         }
       }
 
+      async function renderPreview() {
+        const requestId = ++previewRequestId
+        preview.setAttribute('aria-busy', 'true')
+        status.textContent = 'Rendering Markdown preview...'
+
+        try {
+          const response = await fetch('/preview', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              content: input.value
+            })
+          })
+          const result = await response.json()
+
+          if (!response.ok || !result.ok || typeof result.html !== 'string') {
+            throw new Error(result.error || 'Unable to render Markdown preview')
+          }
+
+          if (requestId !== previewRequestId || !isPreviewMode) return
+
+          preview.innerHTML = result.html
+          status.textContent = 'Markdown preview'
+        } catch (error) {
+          if (requestId !== previewRequestId || !isPreviewMode) return
+          status.textContent = error.message
+          notifyNative('p2pmd-document-error', {
+            error: error.message
+          })
+        } finally {
+          if (requestId === previewRequestId) {
+            preview.removeAttribute('aria-busy')
+          }
+        }
+      }
+
+      function togglePreview() {
+        isPreviewMode = !isPreviewMode
+        input.hidden = isPreviewMode
+        preview.hidden = !isPreviewMode
+        previewIcon.hidden = isPreviewMode
+        editIcon.hidden = !isPreviewMode
+        saveButton.hidden = isPreviewMode
+        toggleButton.title = isPreviewMode ? 'Edit Markdown' : 'Preview Markdown'
+        toggleButton.setAttribute('aria-label', toggleButton.title)
+        toggleButton.setAttribute('aria-pressed', String(isPreviewMode))
+
+        if (isPreviewMode) {
+          renderPreview()
+        } else {
+          previewRequestId += 1
+          status.textContent = 'Edit mode'
+          input.focus()
+        }
+      }
+
       function connectEvents() {
         const source = new EventSource('/events')
 
@@ -481,6 +649,7 @@ function getFoundationPage () {
 
             input.value = documentState.content
             status.textContent = 'Remote document update received'
+            if (isPreviewMode) renderPreview()
             notifyNative('p2pmd-document-updated', {
               updatedAt: documentState.updatedAt,
               contentLength: documentState.content.length
@@ -494,6 +663,7 @@ function getFoundationPage () {
       }
 
       saveButton.addEventListener('click', saveDocument)
+      toggleButton.addEventListener('click', togglePreview)
       loadDocument()
       connectEvents()
     </script>

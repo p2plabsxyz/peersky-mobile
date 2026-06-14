@@ -712,7 +712,7 @@ const styles = StyleSheet.create({
     borderColor: '#bbb',
     borderRadius: 8,
     borderWidth: 1,
-    height: 280,
+    height: 520,
     overflow: 'hidden'
   },
   bridgeMessage: {
