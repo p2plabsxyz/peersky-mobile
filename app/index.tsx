@@ -26,6 +26,7 @@ import {
   RPC_HYPER_INIT,
   RPC_P2PMD_ROOM_CREATE,
   RPC_P2PMD_ROOM_DISCONNECT,
+  RPC_P2PMD_ROOM_JOIN,
   RPC_P2PMD_ROOM_STATUS
 } from '../backend/rpc/commands.mjs'
 
@@ -75,6 +76,7 @@ export default function App () {
   const [hsConnectHost, setHsConnectHost] = useState('127.0.0.1')
   const [p2pmdUrl, setP2pmdUrl] = useState<string | null>(null)
   const [p2pmdRoom, setP2pmdRoom] = useState<P2pmdRoom | null>(null)
+  const [p2pmdJoinKey, setP2pmdJoinKey] = useState('')
   const [p2pmdBridgeMessage, setP2pmdBridgeMessage] = useState('')
 
   useEffect(() => {
@@ -280,6 +282,8 @@ export default function App () {
     setIsLoading(true)
     setStatus('Creating P2PMD room...')
     setLastResult(null)
+    setP2pmdRoom(null)
+    setP2pmdUrl(null)
     setP2pmdBridgeMessage('')
 
     try {
@@ -297,6 +301,36 @@ export default function App () {
       setP2pmdRoom(response.room)
       setP2pmdUrl(response.room.localUrl)
       setStatus('P2PMD room created')
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error))
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  async function onP2pmdRoomJoin () {
+    setIsLoading(true)
+    setStatus('Joining P2PMD room...')
+    setLastResult(null)
+    setP2pmdRoom(null)
+    setP2pmdUrl(null)
+    setP2pmdBridgeMessage('')
+
+    try {
+      const response = await callRpc(RPC_P2PMD_ROOM_JOIN, {
+        key: p2pmdJoinKey.trim(),
+        udp: false
+      })
+      setLastResult(response)
+
+      if (!response.ok || !response.room) {
+        setStatus(response.error || 'Failed joining P2PMD room')
+        return
+      }
+
+      setP2pmdRoom(response.room)
+      setP2pmdUrl(response.room.localUrl)
+      setStatus('P2PMD room joined')
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error))
     } finally {
@@ -510,6 +544,22 @@ export default function App () {
               />
             </View>
 
+            <View style={styles.joinRoom}>
+              <TextInput
+                style={styles.input}
+                autoCapitalize='none'
+                autoCorrect={false}
+                value={p2pmdJoinKey}
+                onChangeText={setP2pmdJoinKey}
+                placeholder='hs://... room key'
+              />
+              <Button
+                title='Join Room'
+                onPress={() => void onP2pmdRoomJoin()}
+                disabled={isBooting || isLoading || !p2pmdJoinKey.trim()}
+              />
+            </View>
+
             {p2pmdRoom && (
               <View style={styles.roomDetails}>
                 <Text style={styles.roomLabel}>Role: {p2pmdRoom.role}</Text>
@@ -548,6 +598,11 @@ export default function App () {
                   }}
                   onError={(event) => {
                     setStatus(`P2PMD WebView failed: ${event.nativeEvent.description}`)
+                  }}
+                  onLoad={() => {
+                    if (p2pmdRoom?.role === 'client') {
+                      setStatus('P2PMD joined room page loaded')
+                    }
                   }}
                 />
               </View>
@@ -665,6 +720,9 @@ const styles = StyleSheet.create({
   },
   roomDetails: {
     gap: 6
+  },
+  joinRoom: {
+    gap: 10
   },
   roomLabel: {
     fontSize: 14,

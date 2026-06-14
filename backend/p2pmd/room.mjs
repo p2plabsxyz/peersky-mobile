@@ -1,8 +1,13 @@
 import {
+  connectHolesail,
   getHolesailStatus,
   startHolesailLive,
   stopHolesail
 } from '../holesail/session.mjs'
+import {
+  getAvailableLoopbackPort,
+  P2PMD_LOOPBACK_HOST
+} from './network.mjs'
 import {
   getP2pmdServerStatus,
   startP2pmdServer,
@@ -72,6 +77,63 @@ export async function createP2pmdRoom ({
   })
 }
 
+export async function joinP2pmdRoom ({
+  key,
+  udp = false,
+  log = false
+} = {}) {
+  return withRoomTransition(async () => {
+    await disconnectRoomInternal()
+
+    const port = await getAvailableLoopbackPort()
+    const holesailResult = await connectHolesail({
+      key,
+      host: P2PMD_LOOPBACK_HOST,
+      port,
+      udp,
+      log
+    })
+
+    if (!holesailResult.ok) return holesailResult
+
+    const roomKey = holesailResult.info?.url
+    if (typeof roomKey !== 'string' || !roomKey) {
+      await stopHolesail()
+      return {
+        ok: false,
+        error: 'Holesail connected without a valid room key.'
+      }
+    }
+
+    const boundPort = holesailResult.info?.port
+    if (!Number.isInteger(boundPort) || boundPort < 1) {
+      await stopHolesail()
+      return {
+        ok: false,
+        error: 'Holesail connected without a valid local port.'
+      }
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 500))
+
+    room = {
+      key: roomKey,
+      role: 'client',
+      localUrl: `http://${P2PMD_LOOPBACK_HOST}:${boundPort}`,
+      host: P2PMD_LOOPBACK_HOST,
+      port: boundPort,
+      secure: holesailResult.info?.secure === true,
+      udp: Boolean(udp)
+    }
+
+    return {
+      ok: true,
+      running: true,
+      room: { ...room }
+    }
+  })
+}
+
 export function getP2pmdRoomStatus () {
   if (!room) {
     return {
@@ -83,7 +145,9 @@ export function getP2pmdRoomStatus () {
 
   const serverStatus = getP2pmdServerStatus()
   const holesailStatus = getHolesailStatus()
-  const running = serverStatus.running === true && holesailStatus.running === true
+  const running = room.role === 'host'
+    ? serverStatus.running === true && holesailStatus.running === true
+    : holesailStatus.running === true
 
   return {
     ok: true,

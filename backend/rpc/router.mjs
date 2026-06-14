@@ -8,6 +8,7 @@ import {
   RPC_HYPER_INIT,
   RPC_P2PMD_ROOM_CREATE,
   RPC_P2PMD_ROOM_DISCONNECT,
+  RPC_P2PMD_ROOM_JOIN,
   RPC_P2PMD_ROOM_STATUS
 } from './commands.mjs'
 import { createDrive } from '../hyper/drive.mjs'
@@ -22,7 +23,8 @@ import {
 import {
   createP2pmdRoom,
   disconnectP2pmdRoom,
-  getP2pmdRoomStatus
+  getP2pmdRoomStatus,
+  joinP2pmdRoom
 } from '../p2pmd/room.mjs'
 import { parseJsonMessage, replyJson } from './messages.mjs'
 
@@ -71,6 +73,11 @@ export async function routeRpcRequest (req) {
 
     if (req.command === RPC_P2PMD_ROOM_STATUS) {
       replyJson(req, getP2pmdRoomStatus())
+      return
+    }
+
+    if (req.command === RPC_P2PMD_ROOM_JOIN) {
+      replyJson(req, await joinP2pmdRoom(parseJsonMessage(req.data)))
       return
     }
 

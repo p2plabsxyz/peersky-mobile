@@ -4,8 +4,7 @@ import {
   getMaxDocumentLength,
   updateDocumentState
 } from './document.mjs'
-
-const HOST = '127.0.0.1'
+import { P2PMD_LOOPBACK_HOST } from './network.mjs'
 
 let server = null
 let serverInfo = null
@@ -33,9 +32,9 @@ export async function startP2pmdServer () {
 
       server = instance
       serverInfo = {
-        host: HOST,
+        host: P2PMD_LOOPBACK_HOST,
         port,
-        localUrl: `http://${HOST}:${port}`
+        localUrl: `http://${P2PMD_LOOPBACK_HOST}:${port}`
       }
 
       return {
@@ -157,7 +156,7 @@ function listen (instance) {
 
     instance.once('error', onError)
     instance.once('listening', onListening)
-    instance.listen(0, HOST)
+    instance.listen(0, P2PMD_LOOPBACK_HOST)
   })
 }
 
