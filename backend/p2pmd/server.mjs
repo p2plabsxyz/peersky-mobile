@@ -444,7 +444,7 @@ function getFoundationPage () {
       #editor-controls {
         display: flex;
         align-items: center;
-        justify-content: space-between;
+        justify-content: flex-end;
         gap: 10px;
         margin-top: 12px;
       }
@@ -473,7 +473,6 @@ function getFoundationPage () {
         stroke-linejoin: round;
         stroke-width: 2;
       }
-      button:disabled { opacity: 0.55; }
       [hidden] { display: none !important; }
       #document-status {
         min-height: 22px;
@@ -489,7 +488,6 @@ function getFoundationPage () {
     <textarea id="document-input" aria-label="Markdown document" placeholder="Write Markdown here..."></textarea>
     <article id="preview" aria-label="Markdown preview" hidden></article>
     <div id="editor-controls">
-      <button id="save-document" type="button">Save Document</button>
       <button id="toggle-preview" type="button" title="Preview Markdown" aria-label="Preview Markdown" aria-pressed="false">
         <svg id="preview-icon" viewBox="0 0 24 24" aria-hidden="true">
           <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12"></path>
@@ -505,13 +503,16 @@ function getFoundationPage () {
     <script>
       const input = document.getElementById('document-input')
       const preview = document.getElementById('preview')
-      const saveButton = document.getElementById('save-document')
       const toggleButton = document.getElementById('toggle-preview')
       const previewIcon = document.getElementById('preview-icon')
       const editIcon = document.getElementById('edit-icon')
       const status = document.getElementById('document-status')
       let isPreviewMode = false
       let previewRequestId = 0
+      let saveTimer = null
+      let pendingContent = null
+      let saveInFlight = false
+      let lastSyncedContent = ''
 
       function notifyNative(type, details) {
         if (!window.ReactNativeWebView) return
@@ -533,6 +534,7 @@ function getFoundationPage () {
           }
 
           input.value = result.content
+          lastSyncedContent = result.content
           status.textContent = 'Document loaded'
           notifyNative('p2pmd-document-loaded', {
             updatedAt: result.updatedAt
@@ -545,38 +547,61 @@ function getFoundationPage () {
         }
       }
 
-      async function saveDocument() {
-        saveButton.disabled = true
-        status.textContent = 'Saving document...'
+      function scheduleDocumentSave() {
+        if (saveTimer) clearTimeout(saveTimer)
+        status.textContent = 'Changes pending...'
+
+        saveTimer = setTimeout(() => {
+          saveTimer = null
+          pendingContent = input.value
+          flushDocumentSave()
+        }, 200)
+      }
+
+      async function flushDocumentSave() {
+        if (saveInFlight || pendingContent === null) return
+
+        saveInFlight = true
 
         try {
-          const response = await fetch('/doc', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-              content: input.value
+          while (pendingContent !== null) {
+            const content = pendingContent
+            pendingContent = null
+
+            if (content === lastSyncedContent) continue
+
+            status.textContent = 'Syncing changes...'
+
+            const response = await fetch('/doc', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                content
+              })
             })
-          })
-          const result = await response.json()
+            const result = await response.json()
 
-          if (!response.ok || !result.ok) {
-            throw new Error(result.error || 'Unable to save document')
+            if (!response.ok || !result.ok) {
+              throw new Error(result.error || 'Unable to save document')
+            }
+
+            lastSyncedContent = result.document.content
+            status.textContent = 'Changes synced'
+            notifyNative('p2pmd-document-saved', {
+              updatedAt: result.document.updatedAt,
+              contentLength: result.document.content.length
+            })
           }
-
-          status.textContent = 'Document saved'
-          notifyNative('p2pmd-document-saved', {
-            updatedAt: result.document.updatedAt,
-            contentLength: result.document.content.length
-          })
         } catch (error) {
           status.textContent = error.message
           notifyNative('p2pmd-document-error', {
             error: error.message
           })
         } finally {
-          saveButton.disabled = false
+          saveInFlight = false
+          if (pendingContent !== null) flushDocumentSave()
         }
       }
 
@@ -624,7 +649,6 @@ function getFoundationPage () {
         preview.hidden = !isPreviewMode
         previewIcon.hidden = isPreviewMode
         editIcon.hidden = !isPreviewMode
-        saveButton.hidden = isPreviewMode
         toggleButton.title = isPreviewMode ? 'Edit Markdown' : 'Preview Markdown'
         toggleButton.setAttribute('aria-label', toggleButton.title)
         toggleButton.setAttribute('aria-pressed', String(isPreviewMode))
@@ -645,9 +669,13 @@ function getFoundationPage () {
           try {
             const documentState = JSON.parse(event.data)
             if (typeof documentState.content !== 'string') return
-            if (documentState.content === input.value) return
+            if (documentState.content === input.value) {
+              lastSyncedContent = documentState.content
+              return
+            }
 
             input.value = documentState.content
+            lastSyncedContent = documentState.content
             status.textContent = 'Remote document update received'
             if (isPreviewMode) renderPreview()
             notifyNative('p2pmd-document-updated', {
@@ -662,7 +690,7 @@ function getFoundationPage () {
         }
       }
 
-      saveButton.addEventListener('click', saveDocument)
+      input.addEventListener('input', scheduleDocumentSave)
       toggleButton.addEventListener('click', togglePreview)
       loadDocument()
       connectEvents()
