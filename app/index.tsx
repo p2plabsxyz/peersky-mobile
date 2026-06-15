@@ -4,6 +4,7 @@ import {
   Button,
   Pressable,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
   TextInput,
@@ -382,6 +383,19 @@ export default function App () {
     }
   }
 
+  async function onP2pmdShareRoom () {
+    if (!p2pmdRoom) return
+
+    try {
+      await Share.share({
+        title: 'Join my P2PMD room',
+        message: `Join my P2PMD room:\n${p2pmdRoom.key}`
+      })
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error))
+    }
+  }
+
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <ScrollView contentContainerStyle={styles.content}>
@@ -569,6 +583,13 @@ export default function App () {
                 <Text selectable={true} style={styles.roomUrl}>
                   {p2pmdRoom.localUrl}
                 </Text>
+                <View style={styles.buttons}>
+                  <Button
+                    title='Share Room Key'
+                    onPress={() => void onP2pmdShareRoom()}
+                    disabled={isBooting || isLoading}
+                  />
+                </View>
               </View>
             )}
 
