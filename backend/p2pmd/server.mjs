@@ -480,11 +480,23 @@ function getFoundationPage () {
         color: #526158;
         font-size: 14px;
       }
+      #peer-status {
+        display: inline-flex;
+        align-items: center;
+        margin: 0 0 12px;
+        padding: 5px 9px;
+        border-radius: 999px;
+        background: #dcebe5;
+        color: #285444;
+        font-size: 13px;
+        font-weight: 700;
+      }
     </style>
   </head>
   <body>
     <h1>P2PMD Local Document</h1>
     <p>Edit the document stored in the Bare worklet.</p>
+    <p id="peer-status" role="status">Participants: connecting...</p>
     <textarea id="document-input" aria-label="Markdown document" placeholder="Write Markdown here..."></textarea>
     <article id="preview" aria-label="Markdown preview" hidden></article>
     <div id="editor-controls">
@@ -507,6 +519,7 @@ function getFoundationPage () {
       const previewIcon = document.getElementById('preview-icon')
       const editIcon = document.getElementById('edit-icon')
       const status = document.getElementById('document-status')
+      const peerStatus = document.getElementById('peer-status')
       let isPreviewMode = false
       let previewRequestId = 0
       let saveTimer = null
@@ -664,6 +677,13 @@ function getFoundationPage () {
 
       function connectEvents() {
         const source = new EventSource('/events')
+
+        source.addEventListener('peers', (event) => {
+          const count = Number(event.data)
+          if (!Number.isInteger(count) || count < 0) return
+
+          peerStatus.textContent = 'Participants: ' + count
+        })
 
         source.addEventListener('update', (event) => {
           try {
