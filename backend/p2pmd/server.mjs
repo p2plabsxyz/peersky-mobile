@@ -407,6 +407,7 @@ function getFoundationPage () {
           linear-gradient(180deg, #fbfaf4 0%, var(--page) 100%);
         color: var(--ink);
         font-family: "Georgia", "Times New Roman", serif;
+        -webkit-touch-callout: none;
       }
       h1 { margin: 0; font-size: 27px; letter-spacing: -0.03em; }
       p { line-height: 1.5; }
@@ -443,17 +444,60 @@ function getFoundationPage () {
         background: rgba(255, 253, 247, 0.92);
         box-shadow: 0 12px 32px rgba(20, 35, 28, 0.08);
       }
+      .editor-frame {
+        display: grid;
+        grid-template-columns: 44px minmax(0, 1fr);
+        align-items: stretch;
+        border: 1px solid #9aa79f;
+        border-radius: 12px;
+        background: #fff;
+        overflow: hidden;
+      }
+      #line-gutter-wrap {
+        position: relative;
+        min-height: min(58vh, 520px);
+        border-right: 1px solid #e1e7e2;
+        background: #f3f6f1;
+        overflow: hidden;
+      }
+      #line-gutter {
+        position: absolute;
+        top: 12px;
+        right: 0;
+        left: 0;
+        color: #7b8a80;
+        font: 12px/1.5 monospace;
+        text-align: right;
+      }
+      .gutter-line {
+        box-sizing: border-box;
+        min-height: 22.5px;
+        padding: 0 8px 0 4px;
+        border-right: 3px solid transparent;
+      }
+      .gutter-line.local {
+        border-right-color: var(--accent);
+        color: #285444;
+        font-weight: 700;
+      }
+      .gutter-line.remote {
+        border-right-color: #d78a2d;
+        color: #8c5b20;
+        font-weight: 700;
+      }
       textarea {
         box-sizing: border-box;
         width: 100%;
         min-height: min(58vh, 520px);
         padding: 12px;
-        border: 1px solid #9aa79f;
-        border-radius: 12px;
+        border: 0;
+        border-radius: 0;
         background: #fff;
         color: var(--ink);
         font: 15px/1.5 monospace;
         resize: vertical;
+        -webkit-user-select: text;
+        user-select: text;
       }
       #preview {
         box-sizing: border-box;
@@ -490,6 +534,9 @@ function getFoundationPage () {
         margin-bottom: 10px;
         padding: 0 0 5px;
         overflow-x: auto;
+        overscroll-behavior-x: contain;
+        -webkit-user-select: none;
+        user-select: none;
       }
       #formatting-toolbar button {
         flex: 0 0 auto;
@@ -500,6 +547,9 @@ function getFoundationPage () {
         background: #e7eee9;
         color: #234438;
         font: 700 13px/1 sans-serif;
+        touch-action: manipulation;
+        -webkit-user-select: none;
+        user-select: none;
       }
       #editor-controls {
         display: flex;
@@ -589,7 +639,12 @@ function getFoundationPage () {
           <button type="button" data-format="code-block" title="Code block">Block</button>
           <button type="button" data-format="quote" title="Quote">Quote</button>
         </div>
-        <textarea id="document-input" aria-label="Markdown document" placeholder="Write Markdown here..."></textarea>
+        <div class="editor-frame">
+          <div id="line-gutter-wrap" aria-hidden="true">
+            <div id="line-gutter"></div>
+          </div>
+          <textarea id="document-input" aria-label="Markdown document" placeholder="Write Markdown here..."></textarea>
+        </div>
         <article id="preview" aria-label="Markdown preview" hidden></article>
         <div id="editor-controls">
           <span id="editor-meta">0 chars</span>
@@ -616,12 +671,14 @@ function getFoundationPage () {
       const peerStatus = document.getElementById('peer-status')
       const formattingToolbar = document.getElementById('formatting-toolbar')
       const editorMeta = document.getElementById('editor-meta')
+      const lineGutter = document.getElementById('line-gutter')
       let isPreviewMode = false
       let previewRequestId = 0
       let saveTimer = null
       let pendingContent = null
       let saveInFlight = false
       let lastSyncedContent = ''
+      let lineOrigins = []
       let toolbarPointerHandled = false
       const newline = String.fromCharCode(10)
       const wordSeparator = new RegExp('[ ' + String.fromCharCode(9, 10, 13) + ']+')
@@ -648,6 +705,7 @@ function getFoundationPage () {
           input.value = result.content
           lastSyncedContent = result.content
           updateEditorMeta()
+          renderLineGutter('loaded')
           status.textContent = 'Document loaded'
           notifyNative('p2pmd-document-loaded', {
             updatedAt: result.updatedAt
@@ -663,6 +721,7 @@ function getFoundationPage () {
       function scheduleDocumentSave() {
         if (saveTimer) clearTimeout(saveTimer)
         updateEditorMeta()
+        renderLineGutter('local')
         status.textContent = 'Changes pending...'
 
         saveTimer = setTimeout(() => {
@@ -784,10 +843,48 @@ function getFoundationPage () {
         return true
       }
 
+      function preventNativeContextMenu(event) {
+        if (event.target !== input) return
+        event.preventDefault()
+      }
+
       function updateEditorMeta() {
         const chars = input.value.length
         const words = input.value.trim() ? input.value.trim().split(wordSeparator).length : 0
         editorMeta.textContent = chars + ' chars / ' + words + ' words'
+      }
+
+      function renderLineGutter(origin) {
+        const lines = input.value.split(newline)
+        const count = Math.max(lines.length, 1)
+
+        if (origin) {
+          lineOrigins = Array(count).fill(origin)
+        } else {
+          while (lineOrigins.length < count) lineOrigins.push('loaded')
+          if (lineOrigins.length > count) lineOrigins = lineOrigins.slice(0, count)
+        }
+
+        lineGutter.replaceChildren()
+
+        for (let index = 0; index < count; index++) {
+          const line = document.createElement('div')
+          const lineOrigin = lineOrigins[index] || 'loaded'
+          line.className = 'gutter-line ' + lineOrigin
+          line.title = lineOrigin === 'remote'
+            ? 'Updated from remote peer'
+            : lineOrigin === 'local'
+              ? 'Edited on this device'
+              : 'Loaded document line'
+          line.textContent = String(index + 1)
+          lineGutter.appendChild(line)
+        }
+
+        syncLineGutterScroll()
+      }
+
+      function syncLineGutterScroll() {
+        lineGutter.style.transform = 'translateY(-' + input.scrollTop + 'px)'
       }
 
       function continueListOnEnter(event) {
@@ -899,6 +996,7 @@ function getFoundationPage () {
       function togglePreview() {
         isPreviewMode = !isPreviewMode
         input.hidden = isPreviewMode
+        input.parentElement.hidden = isPreviewMode
         preview.hidden = !isPreviewMode
         formattingToolbar.hidden = isPreviewMode
         previewIcon.hidden = isPreviewMode
@@ -938,6 +1036,7 @@ function getFoundationPage () {
             input.value = documentState.content
             lastSyncedContent = documentState.content
             updateEditorMeta()
+            renderLineGutter('remote')
             status.textContent = 'Remote document update received'
             if (isPreviewMode) renderPreview()
             notifyNative('p2pmd-document-updated', {
@@ -954,6 +1053,9 @@ function getFoundationPage () {
 
       input.addEventListener('input', scheduleDocumentSave)
       input.addEventListener('keydown', continueListOnEnter)
+      input.addEventListener('scroll', syncLineGutterScroll)
+      input.addEventListener('contextmenu', preventNativeContextMenu)
+      document.addEventListener('contextmenu', preventNativeContextMenu)
       formattingToolbar.addEventListener('pointerdown', (event) => {
         event.preventDefault()
         toolbarPointerHandled = handleToolbarFormat(event)
