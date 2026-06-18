@@ -386,258 +386,261 @@ function getFoundationPage () {
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>P2PMD Foundation</title>
+    <title>P2PMD</title>
     <style>
       :root {
-        --page: #f4f1e8;
-        --panel: #fffdf7;
-        --ink: #14231c;
-        --muted: #617267;
-        --line: #d7ded8;
-        --accent: #076c50;
-        --accent-soft: #dcebe5;
+        --page: #1f2027;
+        --panel-deep: #202128;
+        --ink: #f1f2f7;
+        --line: #3a3d49;
+        --accent: #2f80ed;
+        --local: #f2d35b;
+        --remote: #59a6ff;
+        --ui-font: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        --editor-font: "FontWithASyntaxHighlighter", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
       }
       body {
         box-sizing: border-box;
         margin: 0;
-        min-height: 100vh;
-        padding: 14px;
-        background:
-          radial-gradient(circle at 12% 0%, rgba(7, 108, 80, 0.12), transparent 34%),
-          linear-gradient(180deg, #fbfaf4 0%, var(--page) 100%);
+        width: 100vw;
+        height: 100vh;
+        padding: 0;
+        background: var(--page);
         color: var(--ink);
-        font-family: "Georgia", "Times New Roman", serif;
+        font-family: var(--ui-font);
+        overflow: hidden;
         -webkit-touch-callout: none;
       }
-      h1 { margin: 0; font-size: 27px; letter-spacing: -0.03em; }
+      h1 { margin: 0; font-size: 19px; letter-spacing: 0.01em; }
       p { line-height: 1.5; }
       code { color: var(--accent); }
       .app-shell {
         display: flex;
         flex-direction: column;
-        gap: 12px;
-      }
-      .hero {
-        display: flex;
-        justify-content: space-between;
-        gap: 10px;
-        align-items: flex-start;
-      }
-      .subtitle {
-        margin: 5px 0 0;
-        color: var(--muted);
-        font-size: 14px;
-      }
-      .mode-pill {
-        flex: 0 0 auto;
-        padding: 6px 10px;
-        border: 1px solid rgba(7, 108, 80, 0.18);
-        border-radius: 999px;
-        background: var(--accent-soft);
-        color: #285444;
-        font: 700 12px/1 sans-serif;
+        width: 100vw;
+        height: 100vh;
       }
       .editor-card {
-        padding: 12px;
-        border: 1px solid var(--line);
-        border-radius: 16px;
-        background: rgba(255, 253, 247, 0.92);
-        box-shadow: 0 12px 32px rgba(20, 35, 28, 0.08);
+        display: flex;
+        flex: 1;
+        flex-direction: column;
+        padding: 0;
+        border: 0;
+        border-radius: 0;
+        background: var(--panel-deep);
+        box-shadow: none;
       }
       .editor-frame {
         display: grid;
-        grid-template-columns: 44px minmax(0, 1fr);
+        grid-template-columns: 56px minmax(0, 1fr);
+        flex: 1;
         align-items: stretch;
-        border: 1px solid #9aa79f;
-        border-radius: 12px;
-        background: #fff;
+        border: 0;
+        border-radius: 0;
+        background: var(--panel-deep);
         overflow: hidden;
       }
       #line-gutter-wrap {
         position: relative;
-        min-height: min(58vh, 520px);
-        border-right: 1px solid #e1e7e2;
-        background: #f3f6f1;
+        min-height: 0;
+        border-right: 1px solid #2d3039;
+        background: #23252d;
         overflow: hidden;
       }
       #line-gutter {
         position: absolute;
-        top: 12px;
+        top: 14px;
         right: 0;
         left: 0;
-        color: #7b8a80;
-        font: 12px/1.5 monospace;
+        color: #6f7484;
+        font: 15px/1.55 var(--editor-font);
         text-align: right;
       }
       .gutter-line {
         box-sizing: border-box;
-        min-height: 22.5px;
-        padding: 0 8px 0 4px;
+        min-height: 23.25px;
+        padding: 0 10px 0 4px;
         border-right: 3px solid transparent;
       }
       .gutter-line.local {
-        border-right-color: var(--accent);
-        color: #285444;
+        border-right-color: var(--local);
+        color: #b8a95a;
         font-weight: 700;
       }
       .gutter-line.remote {
-        border-right-color: #d78a2d;
-        color: #8c5b20;
+        border-right-color: var(--remote);
+        color: #6aa5ea;
         font-weight: 700;
       }
       textarea {
         box-sizing: border-box;
         width: 100%;
-        min-height: min(58vh, 520px);
-        padding: 12px;
+        height: 100%;
+        min-height: 0;
+        padding: 14px 12px;
         border: 0;
         border-radius: 0;
-        background: #fff;
+        background: var(--panel-deep);
         color: var(--ink);
-        font: 15px/1.5 monospace;
-        resize: vertical;
+        caret-color: var(--remote);
+        font: 16px/1.55 var(--editor-font);
+        resize: none;
+        overflow: auto;
         -webkit-user-select: text;
         user-select: text;
       }
+      textarea:focus {
+        outline: none;
+      }
       #preview {
         box-sizing: border-box;
-        min-height: min(58vh, 520px);
-        padding: 12px 14px;
-        border: 1px solid #d4dbd6;
-        border-radius: 12px;
-        background: #fff;
+        flex: 1;
+        min-height: 0;
+        padding: 18px;
+        border: 0;
+        border-radius: 0;
+        background: var(--panel-deep);
+        color: var(--ink);
+        overflow: auto;
         overflow-wrap: anywhere;
+        font: 16px/1.6 var(--ui-font);
+      }
+      #preview h1,
+      #preview h2,
+      #preview h3 {
+        letter-spacing: -0.02em;
+        line-height: 1.15;
       }
       #preview > :first-child { margin-top: 0; }
       #preview > :last-child { margin-bottom: 0; }
       #preview pre {
         padding: 12px;
-        border-radius: 5px;
-        background: #edf1ed;
+        border-radius: 8px;
+        background: #181a20;
         overflow-x: auto;
       }
       #preview code {
-        font-family: monospace;
+        color: #d8dcff;
+        font-family: var(--editor-font);
+      }
+      #preview :not(pre) > code {
+        padding: 0.12rem 0.34rem;
+        border: 1px solid #3a3d49;
+        border-radius: 6px;
+        background: #2b2d38;
+        color: #f1f2f7;
+        font-size: 0.92em;
+      }
+      #preview pre code {
+        padding: 0;
+        border: 0;
+        background: transparent;
       }
       #preview blockquote {
         margin-left: 0;
         padding-left: 14px;
-        border-left: 3px solid #8aa398;
-        color: #526158;
+        border-left: 3px solid var(--remote);
+        color: #c4c8d8;
       }
       #preview img {
         max-width: 100%;
       }
       #formatting-toolbar {
         display: flex;
-        gap: 6px;
-        margin-bottom: 10px;
-        padding: 0 0 5px;
+        align-items: center;
+        gap: 2px;
+        padding: 6px 8px;
+        border-bottom: 1px solid var(--line);
+        background: #24262f;
         overflow-x: auto;
         overscroll-behavior-x: contain;
+        touch-action: pan-x;
+        -webkit-overflow-scrolling: touch;
         -webkit-user-select: none;
         user-select: none;
       }
       #formatting-toolbar button {
+        align-items: center;
+        justify-content: center;
         flex: 0 0 auto;
-        min-width: 40px;
-        padding: 8px 10px;
-        border: 1px solid #b8c7bf;
-        border-radius: 10px;
-        background: #e7eee9;
-        color: #234438;
-        font: 700 13px/1 sans-serif;
+        display: flex;
+        width: 38px;
+        height: 36px;
+        padding: 8px;
+        border: 1px solid transparent;
+        border-radius: 6px;
+        background: transparent;
+        color: rgba(255, 255, 255, 0.72);
+        font: 700 14px/1 var(--ui-font);
         touch-action: manipulation;
+        transition: background-color 0.15s ease, color 0.15s ease;
         -webkit-user-select: none;
         user-select: none;
       }
-      #editor-controls {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 10px;
-        margin-top: 12px;
+      #formatting-toolbar button:hover {
+        color: #ffffff;
       }
-      #editor-meta {
-        color: var(--muted);
-        font: 12px/1.3 monospace;
+      #formatting-toolbar button:active {
+        background: #343744;
+        color: #ffffff;
       }
-      button {
-        padding: 10px 16px;
-        border: 0;
-        border-radius: 10px;
-        background: var(--accent);
-        color: #fff;
-        font-size: 15px;
-        font-weight: 700;
+      .toolbar-icon {
+        display: block;
+        width: 16px;
+        height: 16px;
+        fill: currentColor;
       }
-      #toggle-preview {
-        display: inline-grid;
-        width: 42px;
-        height: 42px;
-        padding: 0;
-        place-items: center;
-      }
-      #toggle-preview svg {
-        width: 21px;
-        height: 21px;
-        fill: none;
-        stroke: currentColor;
-        stroke-linecap: round;
-        stroke-linejoin: round;
-        stroke-width: 2;
+      .toolbar-divider {
+        flex: 0 0 auto;
+        width: 1px;
+        height: 24px;
+        margin: 0 4px;
+        background: var(--line);
       }
       [hidden] { display: none !important; }
-      #document-status {
-        min-height: 22px;
-        margin: 10px 0 0;
-        color: var(--muted);
-        font-size: 14px;
-      }
-      #peer-status {
-        display: inline-flex;
-        align-items: center;
-        margin: 0;
-        padding: 5px 9px;
-        border-radius: 999px;
-        background: var(--accent-soft);
-        color: #285444;
-        font-size: 13px;
-        font-weight: 700;
-      }
-      .status-row {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 8px;
-        align-items: center;
-      }
     </style>
   </head>
   <body>
     <div class="app-shell">
-      <header class="hero">
-        <div>
-          <h1>P2PMD</h1>
-          <p class="subtitle">Collaborative Markdown over Holesail.</p>
-        </div>
-        <span class="mode-pill">Mobile editor</span>
-      </header>
-      <div class="status-row">
-        <p id="peer-status" role="status">Participants: connecting...</p>
-        <p id="document-status" role="status">Loading document...</p>
-      </div>
       <main class="editor-card">
         <div id="formatting-toolbar" role="toolbar" aria-label="Markdown formatting">
-          <button type="button" data-format="bold" title="Bold">B</button>
-          <button type="button" data-format="italic" title="Italic">I</button>
-          <button type="button" data-format="h1" title="Heading 1">H1</button>
-          <button type="button" data-format="h2" title="Heading 2">H2</button>
-          <button type="button" data-format="ul" title="Bullet list">UL</button>
-          <button type="button" data-format="ol" title="Numbered list">OL</button>
-          <button type="button" data-format="link" title="Insert link">Link</button>
-          <button type="button" data-format="inline-code" title="Inline code">Code</button>
-          <button type="button" data-format="code-block" title="Code block">Block</button>
-          <button type="button" data-format="quote" title="Quote">Quote</button>
+          <button type="button" data-format="bold" title="Bold" aria-label="Bold">
+            <svg class="toolbar-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M8.21 13c2.106 0 3.412-1.087 3.412-2.823 0-1.306-.984-2.283-2.324-2.386v-.055a2.176 2.176 0 0 0 1.852-2.14c0-1.51-1.162-2.46-3.014-2.46H3.843V13zM5.908 4.674h1.696c.963 0 1.517.451 1.517 1.244 0 .834-.629 1.32-1.73 1.32H5.908V4.673zm0 6.788V8.598h1.73c1.217 0 1.88.492 1.88 1.415 0 .943-.643 1.449-1.832 1.449H5.907z"/></svg>
+          </button>
+          <button type="button" data-format="italic" title="Italic" aria-label="Italic">
+            <svg class="toolbar-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M7.991 11.674 9.53 4.455c.123-.595.246-.71 1.347-.807l.11-.52H7.211l-.11.52c1.06.096 1.128.212 1.005.807L6.57 11.674c-.123.595-.246.71-1.346.806l-.11.52h3.774l.11-.52c-1.06-.095-1.129-.211-1.006-.806z"/></svg>
+          </button>
+          <div class="toolbar-divider" aria-hidden="true"></div>
+          <button type="button" data-format="h1" title="Heading 1" aria-label="Heading 1">
+            <svg class="toolbar-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M8.637 13V3.669H7.379V7.62H2.758V3.67H1.5V13h1.258V8.728h4.62V13h1.259zm5.329 0V3.669h-1.244L10.5 5.316v1.265l2.16-1.565h.062V13h1.244z"/></svg>
+          </button>
+          <button type="button" data-format="h2" title="Heading 2" aria-label="Heading 2">
+            <svg class="toolbar-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M7.638 13V3.669H6.38V7.62H1.759V3.67H.5V13h1.258V8.728h4.62V13zm3.022-6.733v-.048c0-.889.63-1.668 1.716-1.668.957 0 1.675.608 1.675 1.572 0 .855-.554 1.504-1.067 2.085l-3.513 3.999V13H15.5v-1.094h-4.245v-.075l2.481-2.844c.875-.998 1.586-1.784 1.586-2.953 0-1.463-1.155-2.556-2.919-2.556-1.941 0-2.966 1.326-2.966 2.74v.049z"/></svg>
+          </button>
+          <div class="toolbar-divider" aria-hidden="true"></div>
+          <button type="button" data-format="ul" title="Bullet list" aria-label="Bullet list">
+            <svg class="toolbar-icon" viewBox="0 0 16 16" aria-hidden="true"><path fill-rule="evenodd" d="M5 11.5a.5.5 0 0 1 .5-.5h9a.5.5 0 0 1 0 1h-9a.5.5 0 0 1-.5-.5m0-4a.5.5 0 0 1 .5-.5h9a.5.5 0 0 1 0 1h-9a.5.5 0 0 1-.5-.5m0-4a.5.5 0 0 1 .5-.5h9a.5.5 0 0 1 0 1h-9a.5.5 0 0 1-.5-.5m-3 1a1 1 0 1 0 0-2 1 1 0 0 0 0 2m0 4a1 1 0 1 0 0-2 1 1 0 0 0 0 2m0 4a1 1 0 1 0 0-2 1 1 0 0 0 0 2"/></svg>
+          </button>
+          <button type="button" data-format="ol" title="Numbered list" aria-label="Numbered list">
+            <svg class="toolbar-icon" viewBox="0 0 16 16" aria-hidden="true"><path fill-rule="evenodd" d="M5 11.5a.5.5 0 0 1 .5-.5h9a.5.5 0 0 1 0 1h-9a.5.5 0 0 1-.5-.5m0-4a.5.5 0 0 1 .5-.5h9a.5.5 0 0 1 0 1h-9a.5.5 0 0 1-.5-.5m0-4a.5.5 0 0 1 .5-.5h9a.5.5 0 0 1 0 1h-9a.5.5 0 0 1-.5-.5"/><path d="M1.713 11.865v-.474H2c.217 0 .363-.137.363-.317 0-.185-.158-.31-.361-.31-.223 0-.367.152-.373.31h-.59c.016-.467.373-.787.986-.787.588-.002.954.291.957.703a.595.595 0 0 1-.492.594v.033a.615.615 0 0 1 .569.631c.003.533-.502.8-1.051.8-.656 0-1-.37-1.008-.794h.582c.008.178.186.306.422.309.254 0 .424-.145.422-.35-.002-.195-.155-.348-.414-.348h-.3zm-.004-4.699h-.604v-.035c0-.408.295-.844.958-.844.583 0 .96.326.96.756 0 .389-.257.617-.476.848l-.537.572v.03h1.054V9H1.143v-.395l.957-.99c.138-.142.293-.304.293-.508 0-.18-.147-.32-.342-.32a.33.33 0 0 0-.342.338zM2.564 5h-.635V2.924h-.031l-.598.42v-.567l.629-.443h.635z"/></svg>
+          </button>
+          <div class="toolbar-divider" aria-hidden="true"></div>
+          <button type="button" data-format="link" title="Insert link" aria-label="Insert link">
+            <svg class="toolbar-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.715 6.542 3.343 7.914a3 3 0 1 0 4.243 4.243l1.828-1.829A3 3 0 0 0 8.586 5.5L8 6.086a1 1 0 0 0-.154.199 2 2 0 0 1 .861 3.337L6.88 11.45a2 2 0 1 1-2.83-2.83l.793-.792a4 4 0 0 1-.128-1.287z"/><path d="M6.586 4.672A3 3 0 0 0 7.414 9.5l.775-.776a2 2 0 0 1-.896-3.346L9.12 3.55a2 2 0 1 1 2.83 2.83l-.793.792c.112.42.155.855.128 1.287l1.372-1.372a3 3 0 1 0-4.243-4.243z"/></svg>
+          </button>
+          <button type="button" data-format="image" title="Insert image" aria-label="Insert image">
+            <svg class="toolbar-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M6.002 5.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0"/><path d="M2.002 1a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2zm12 1a1 1 0 0 1 1 1v6.5l-3.777-1.947a.5.5 0 0 0-.577.093l-3.71 3.71-2.66-1.772a.5.5 0 0 0-.63.062L1.002 12V3a1 1 0 0 1 1-1z"/></svg>
+          </button>
+          <div class="toolbar-divider" aria-hidden="true"></div>
+          <button type="button" data-format="inline-code" title="Inline code" aria-label="Inline code">
+            <svg class="toolbar-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M10.478 1.647a.5.5 0 1 0-.956-.294l-4 13a.5.5 0 0 0 .956.294zM4.854 4.146a.5.5 0 0 1 0 .708L1.707 8l3.147 3.146a.5.5 0 0 1-.708.708l-3.5-3.5a.5.5 0 0 1 0-.708l3.5-3.5a.5.5 0 0 1 .708 0m6.292 0a.5.5 0 0 0 0 .708L14.293 8l-3.147 3.146a.5.5 0 0 0 .708.708l3.5-3.5a.5.5 0 0 0 0-.708l-3.5-3.5a.5.5 0 0 0-.708 0"/></svg>
+          </button>
+          <button type="button" data-format="code-block" title="Code block" aria-label="Code block">
+            <svg class="toolbar-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M14 1a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1zM2 0a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2z"/><path d="M6.854 4.646a.5.5 0 0 1 0 .708L4.207 8l2.647 2.646a.5.5 0 0 1-.708.708l-3-3a.5.5 0 0 1 0-.708l3-3a.5.5 0 0 1 .708 0m2.292 0a.5.5 0 0 0 0 .708L11.793 8l-2.647 2.646a.5.5 0 0 0 .708.708l3-3a.5.5 0 0 0 0-.708l-3-3a.5.5 0 0 0-.708 0"/></svg>
+          </button>
+          <button type="button" data-format="quote" title="Quote" aria-label="Quote">
+            <svg class="toolbar-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M12 12a1 1 0 0 0 1-1V8.558a1 1 0 0 0-1-1h-1.388q0-.527.062-1.054.093-.558.31-.992t.559-.683q.34-.279.868-.279V3q-.868 0-1.52.372a3.3 3.3 0 0 0-1.085.992 4.9 4.9 0 0 0-.62 1.458A7.7 7.7 0 0 0 9 7.558V11a1 1 0 0 0 1 1zm-6 0a1 1 0 0 0 1-1V8.558a1 1 0 0 0-1-1H4.612q0-.527.062-1.054.094-.558.31-.992.217-.434.559-.683.34-.279.868-.279V3q-.868 0-1.52.372a3.3 3.3 0 0 0-1.085.992 4.9 4.9 0 0 0-.62 1.458A7.7 7.7 0 0 0 3 7.558V11a1 1 0 0 0 1 1z"/></svg>
+          </button>
         </div>
         <div class="editor-frame">
           <div id="line-gutter-wrap" aria-hidden="true">
@@ -646,32 +649,14 @@ function getFoundationPage () {
           <textarea id="document-input" aria-label="Markdown document" placeholder="Write Markdown here..."></textarea>
         </div>
         <article id="preview" aria-label="Markdown preview" hidden></article>
-        <div id="editor-controls">
-          <span id="editor-meta">0 chars</span>
-          <button id="toggle-preview" type="button" title="Preview Markdown" aria-label="Preview Markdown" aria-pressed="false">
-            <svg id="preview-icon" viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12"></path>
-              <circle cx="12" cy="12" r="2.5"></circle>
-            </svg>
-            <svg id="edit-icon" viewBox="0 0 24 24" aria-hidden="true" hidden>
-              <path d="M4 20h4l11-11-4-4L4 16v4"></path>
-              <path d="m13.5 6.5 4 4"></path>
-            </svg>
-          </button>
-        </div>
       </main>
     </div>
     <script>
       const input = document.getElementById('document-input')
       const preview = document.getElementById('preview')
-      const toggleButton = document.getElementById('toggle-preview')
-      const previewIcon = document.getElementById('preview-icon')
-      const editIcon = document.getElementById('edit-icon')
-      const status = document.getElementById('document-status')
-      const peerStatus = document.getElementById('peer-status')
       const formattingToolbar = document.getElementById('formatting-toolbar')
-      const editorMeta = document.getElementById('editor-meta')
       const lineGutter = document.getElementById('line-gutter')
+      const TOOLBAR_TAP_MOVEMENT_LIMIT = 8
       let isPreviewMode = false
       let previewRequestId = 0
       let saveTimer = null
@@ -679,9 +664,9 @@ function getFoundationPage () {
       let saveInFlight = false
       let lastSyncedContent = ''
       let lineOrigins = []
-      let toolbarPointerHandled = false
+      let toolbarPointerState = null
+      let suppressToolbarClick = false
       const newline = String.fromCharCode(10)
-      const wordSeparator = new RegExp('[ ' + String.fromCharCode(9, 10, 13) + ']+')
 
       function notifyNative(type, details) {
         if (!window.ReactNativeWebView) return
@@ -704,14 +689,11 @@ function getFoundationPage () {
 
           input.value = result.content
           lastSyncedContent = result.content
-          updateEditorMeta()
           renderLineGutter('loaded')
-          status.textContent = 'Document loaded'
           notifyNative('p2pmd-document-loaded', {
             updatedAt: result.updatedAt
           })
         } catch (error) {
-          status.textContent = error.message
           notifyNative('p2pmd-document-error', {
             error: error.message
           })
@@ -720,9 +702,7 @@ function getFoundationPage () {
 
       function scheduleDocumentSave() {
         if (saveTimer) clearTimeout(saveTimer)
-        updateEditorMeta()
         renderLineGutter('local')
-        status.textContent = 'Changes pending...'
 
         saveTimer = setTimeout(() => {
           saveTimer = null
@@ -814,6 +794,22 @@ function getFoundationPage () {
         replaceDocumentRange(start, end, replacement, urlStart, urlStart + 3)
       }
 
+      function insertImage() {
+        const start = input.selectionStart
+        const end = input.selectionEnd
+        const selected = input.value.slice(start, end)
+
+        if (selected && /^(https?:[/][/]|www[.]|[a-z0-9-]+[.][a-z]{2,}|[.]?[/])/i.test(selected.trim())) {
+          const replacement = '![](' + selected + ')'
+          replaceDocumentRange(start, end, replacement, start + 3, start + 3)
+          return
+        }
+
+        const altText = selected || 'image'
+        const replacement = '![' + altText + ']()'
+        replaceDocumentRange(start, end, replacement, start + replacement.length - 1, start + replacement.length - 1)
+      }
+
       function applyFormatting(format) {
         const codeMarker = String.fromCharCode(96)
 
@@ -823,6 +819,7 @@ function getFoundationPage () {
         else if (format === 'h2') replaceCurrentLinePrefix('## ', /^#+[ \t]+/)
         else if (format === 'ul' || format === 'ol') replaceSelectedLines(format)
         else if (format === 'link') insertLink()
+        else if (format === 'image') insertImage()
         else if (format === 'inline-code') wrapSelection(codeMarker, codeMarker)
         else if (format === 'code-block') {
           wrapSelection(codeMarker.repeat(3) + newline, newline + codeMarker.repeat(3))
@@ -843,15 +840,52 @@ function getFoundationPage () {
         return true
       }
 
+      function restoreSelection(selection) {
+        if (!selection) return
+        input.focus()
+        input.setSelectionRange(selection.start, selection.end)
+      }
+
+      function handleToolbarPointerDown(event) {
+        const button = getToolbarButton(event)
+        if (!button || isPreviewMode) {
+          toolbarPointerState = null
+          return
+        }
+
+        toolbarPointerState = {
+          button,
+          pointerId: event.pointerId,
+          x: event.clientX,
+          y: event.clientY,
+          selection: {
+            start: input.selectionStart,
+            end: input.selectionEnd
+          }
+        }
+      }
+
+      function handleToolbarPointerUp(event) {
+        const state = toolbarPointerState
+        toolbarPointerState = null
+        if (!state || state.pointerId !== event.pointerId || isPreviewMode) return
+
+        const movedX = Math.abs(event.clientX - state.x)
+        const movedY = Math.abs(event.clientY - state.y)
+        if (movedX > TOOLBAR_TAP_MOVEMENT_LIMIT || movedY > TOOLBAR_TAP_MOVEMENT_LIMIT) {
+          suppressToolbarClick = true
+          return
+        }
+
+        event.preventDefault()
+        suppressToolbarClick = true
+        restoreSelection(state.selection)
+        applyFormatting(state.button.dataset.format)
+      }
+
       function preventNativeContextMenu(event) {
         if (event.target !== input) return
         event.preventDefault()
-      }
-
-      function updateEditorMeta() {
-        const chars = input.value.length
-        const words = input.value.trim() ? input.value.trim().split(wordSeparator).length : 0
-        editorMeta.textContent = chars + ' chars / ' + words + ' words'
       }
 
       function renderLineGutter(origin) {
@@ -920,8 +954,6 @@ function getFoundationPage () {
 
             if (content === lastSyncedContent) continue
 
-            status.textContent = 'Syncing changes...'
-
             const response = await fetch('/doc', {
               method: 'POST',
               headers: {
@@ -938,14 +970,12 @@ function getFoundationPage () {
             }
 
             lastSyncedContent = result.document.content
-            status.textContent = 'Changes synced'
             notifyNative('p2pmd-document-saved', {
               updatedAt: result.document.updatedAt,
               contentLength: result.document.content.length
             })
           }
         } catch (error) {
-          status.textContent = error.message
           notifyNative('p2pmd-document-error', {
             error: error.message
           })
@@ -958,7 +988,6 @@ function getFoundationPage () {
       async function renderPreview() {
         const requestId = ++previewRequestId
         preview.setAttribute('aria-busy', 'true')
-        status.textContent = 'Rendering Markdown preview...'
 
         try {
           const response = await fetch('/preview', {
@@ -979,10 +1008,8 @@ function getFoundationPage () {
           if (requestId !== previewRequestId || !isPreviewMode) return
 
           preview.innerHTML = result.html
-          status.textContent = 'Markdown preview'
         } catch (error) {
           if (requestId !== previewRequestId || !isPreviewMode) return
-          status.textContent = error.message
           notifyNative('p2pmd-document-error', {
             error: error.message
           })
@@ -999,17 +1026,14 @@ function getFoundationPage () {
         input.parentElement.hidden = isPreviewMode
         preview.hidden = !isPreviewMode
         formattingToolbar.hidden = isPreviewMode
-        previewIcon.hidden = isPreviewMode
-        editIcon.hidden = !isPreviewMode
-        toggleButton.title = isPreviewMode ? 'Edit Markdown' : 'Preview Markdown'
-        toggleButton.setAttribute('aria-label', toggleButton.title)
-        toggleButton.setAttribute('aria-pressed', String(isPreviewMode))
+        notifyNative('p2pmd-preview-mode', {
+          preview: isPreviewMode
+        })
 
         if (isPreviewMode) {
           renderPreview()
         } else {
           previewRequestId += 1
-          status.textContent = 'Edit mode'
           input.focus()
         }
       }
@@ -1021,7 +1045,9 @@ function getFoundationPage () {
           const count = Number(event.data)
           if (!Number.isInteger(count) || count < 0) return
 
-          peerStatus.textContent = 'Participants: ' + count
+          notifyNative('p2pmd-peers', {
+            count
+          })
         })
 
         source.addEventListener('update', (event) => {
@@ -1035,9 +1061,7 @@ function getFoundationPage () {
 
             input.value = documentState.content
             lastSyncedContent = documentState.content
-            updateEditorMeta()
             renderLineGutter('remote')
-            status.textContent = 'Remote document update received'
             if (isPreviewMode) renderPreview()
             notifyNative('p2pmd-document-updated', {
               updatedAt: documentState.updatedAt,
@@ -1046,9 +1070,6 @@ function getFoundationPage () {
           } catch {}
         })
 
-        source.onerror = () => {
-          status.textContent = 'Reconnecting to room updates...'
-        }
       }
 
       input.addEventListener('input', scheduleDocumentSave)
@@ -1056,19 +1077,20 @@ function getFoundationPage () {
       input.addEventListener('scroll', syncLineGutterScroll)
       input.addEventListener('contextmenu', preventNativeContextMenu)
       document.addEventListener('contextmenu', preventNativeContextMenu)
-      formattingToolbar.addEventListener('pointerdown', (event) => {
-        event.preventDefault()
-        toolbarPointerHandled = handleToolbarFormat(event)
+      formattingToolbar.addEventListener('pointerdown', handleToolbarPointerDown)
+      formattingToolbar.addEventListener('pointerup', handleToolbarPointerUp)
+      formattingToolbar.addEventListener('pointercancel', () => {
+        toolbarPointerState = null
       })
       formattingToolbar.addEventListener('click', (event) => {
-        if (toolbarPointerHandled) {
-          toolbarPointerHandled = false
+        if (suppressToolbarClick) {
+          suppressToolbarClick = false
           return
         }
 
         handleToolbarFormat(event)
       })
-      toggleButton.addEventListener('click', togglePreview)
+      window.__p2pmdTogglePreview = togglePreview
       loadDocument()
       connectEvents()
     </script>

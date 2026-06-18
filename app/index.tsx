@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { type ComponentRef, useEffect, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Button,
@@ -62,7 +62,7 @@ type RuntimeTab = 'hyper' | 'holesail' | 'p2pmd'
 export default function App () {
   const workletRef = useRef<Worklet | null>(null)
   const rpcRef = useRef<RPC | null>(null)
-
+  const p2pmdWebViewRef = useRef<ComponentRef<typeof WebView> | null>(null)
   const [isBooting, setIsBooting] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [status, setStatus] = useState('Starting Hyper runtime...')
@@ -78,7 +78,8 @@ export default function App () {
   const [p2pmdUrl, setP2pmdUrl] = useState<string | null>(null)
   const [p2pmdRoom, setP2pmdRoom] = useState<P2pmdRoom | null>(null)
   const [p2pmdJoinKey, setP2pmdJoinKey] = useState('')
-  const [p2pmdBridgeMessage, setP2pmdBridgeMessage] = useState('')
+  const [p2pmdParticipants, setP2pmdParticipants] = useState<number | null>(null)
+  const [p2pmdIsPreviewMode, setP2pmdIsPreviewMode] = useState(false)
 
   useEffect(() => {
     void startWorklet()
@@ -285,7 +286,8 @@ export default function App () {
     setLastResult(null)
     setP2pmdRoom(null)
     setP2pmdUrl(null)
-    setP2pmdBridgeMessage('')
+    setP2pmdParticipants(null)
+    setP2pmdIsPreviewMode(false)
 
     try {
       const response = await callRpc(RPC_P2PMD_ROOM_CREATE, {
@@ -315,7 +317,8 @@ export default function App () {
     setLastResult(null)
     setP2pmdRoom(null)
     setP2pmdUrl(null)
-    setP2pmdBridgeMessage('')
+    setP2pmdParticipants(null)
+    setP2pmdIsPreviewMode(false)
 
     try {
       const response = await callRpc(RPC_P2PMD_ROOM_JOIN, {
@@ -339,7 +342,7 @@ export default function App () {
     }
   }
 
-  async function onP2pmdRoomStatus () {
+  async function onP2pmdRoomRefresh () {
     setIsLoading(true)
     setStatus('Reading P2PMD room status...')
     setLastResult(null)
@@ -351,9 +354,13 @@ export default function App () {
       if (response.running && response.room) {
         setP2pmdRoom(response.room)
         setP2pmdUrl(response.room.localUrl)
+        setP2pmdParticipants(null)
+        setP2pmdIsPreviewMode(false)
       } else {
         setP2pmdRoom(null)
         setP2pmdUrl(null)
+        setP2pmdParticipants(null)
+        setP2pmdIsPreviewMode(false)
       }
 
       setStatus(response.running ? 'P2PMD room is running' : 'No P2PMD room is running')
@@ -374,7 +381,8 @@ export default function App () {
       setLastResult(response)
       setP2pmdUrl(null)
       setP2pmdRoom(null)
-      setP2pmdBridgeMessage('')
+      setP2pmdParticipants(null)
+      setP2pmdIsPreviewMode(false)
       setStatus(response.ok ? 'P2PMD room disconnected' : (response.error || 'Failed disconnecting P2PMD room'))
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error))
@@ -394,6 +402,115 @@ export default function App () {
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error))
     }
+  }
+
+  function onP2pmdTogglePreview () {
+    p2pmdWebViewRef.current?.injectJavaScript(
+      'window.__p2pmdTogglePreview && window.__p2pmdTogglePreview(); true;'
+    )
+  }
+
+  function onP2pmdWebViewMessage (message: string) {
+    try {
+      const parsed = JSON.parse(message)
+
+      switch (parsed.type) {
+        case 'p2pmd-peers':
+          if (Number.isInteger(parsed.count) && parsed.count >= 0) {
+            setP2pmdParticipants(parsed.count)
+          }
+          break
+        case 'p2pmd-document-loaded':
+          setStatus('P2PMD document loaded')
+          break
+        case 'p2pmd-document-saved':
+          setStatus(`P2PMD saved (${parsed.contentLength} characters)`)
+          break
+        case 'p2pmd-document-updated':
+          setStatus(`P2PMD remote update received (${parsed.contentLength} characters)`)
+          break
+        case 'p2pmd-document-error':
+          setStatus(parsed.error || 'P2PMD document request failed')
+          break
+        case 'p2pmd-preview-mode':
+          setP2pmdIsPreviewMode(Boolean(parsed.preview))
+          setStatus(parsed.preview ? 'P2PMD preview mode' : 'P2PMD write mode')
+          break
+        default:
+          setStatus('P2PMD editor connected')
+      }
+    } catch {
+      setStatus('P2PMD editor connected')
+    }
+  }
+
+  if (activeTab === 'p2pmd' && p2pmdRoom && p2pmdUrl) {
+    return (
+      <SafeAreaView style={styles.p2pmdWorkspace} edges={['top', 'left', 'right', 'bottom']}>
+        <View style={styles.p2pmdWorkspaceHeader}>
+          <Text style={styles.p2pmdWorkspaceTitle}>P2PMD</Text>
+          <Text style={styles.p2pmdWorkspaceParticipants}>
+            Participants: {p2pmdParticipants ?? '-'}
+          </Text>
+          <Pressable
+            style={styles.p2pmdPreviewButton}
+            onPress={onP2pmdTogglePreview}
+            disabled={isBooting || isLoading}
+          >
+            <View style={styles.p2pmdPreviewButtonContent}>
+              {p2pmdIsPreviewMode
+                ? <Text style={styles.p2pmdPreviewButtonIcon}>✎</Text>
+                : (
+                  <View style={styles.p2pmdEyeIcon}>
+                    <View style={styles.p2pmdEyeIconDot} />
+                  </View>
+                  )}
+              <Text style={styles.p2pmdPreviewButtonText}>
+                {p2pmdIsPreviewMode ? 'Edit' : 'Preview'}
+              </Text>
+            </View>
+          </Pressable>
+        </View>
+
+        <View style={styles.p2pmdWorkspaceMeta}>
+          <Text selectable={true} numberOfLines={1} style={styles.p2pmdWorkspaceUrl}>
+            {p2pmdRoom.localUrl}
+          </Text>
+          <Button
+            title='Share key'
+            onPress={() => void onP2pmdShareRoom()}
+            disabled={isBooting || isLoading}
+          />
+          <Button
+            title='Disconnect'
+            onPress={() => void onP2pmdRoomDisconnect()}
+            disabled={isBooting || isLoading}
+          />
+        </View>
+
+        <WebView
+          ref={p2pmdWebViewRef}
+          source={{ uri: p2pmdUrl }}
+          textZoom={100}
+          style={styles.p2pmdWorkspaceWebView}
+          onMessage={(event) => onP2pmdWebViewMessage(event.nativeEvent.data)}
+          onError={(event) => {
+            setStatus(`P2PMD WebView failed: ${event.nativeEvent.description}`)
+          }}
+          onLoad={() => {
+            if (p2pmdRoom.role === 'client') {
+              setStatus('P2PMD joined room page loaded')
+            }
+          }}
+        />
+
+        {(isBooting || isLoading) && (
+          <View style={styles.p2pmdWorkspaceLoader}>
+            <ActivityIndicator size='small' />
+          </View>
+        )}
+      </SafeAreaView>
+    )
   }
 
   return (
@@ -538,8 +655,18 @@ export default function App () {
           </View>
         )}
         {activeTab === 'p2pmd' && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>P2PMD Local Document Check</Text>
+          <View style={[styles.section, styles.p2pmdSection]}>
+            <View style={styles.p2pmdHeader}>
+              <View style={styles.p2pmdHeaderCopy}>
+                <Text style={[styles.sectionTitle, styles.p2pmdTitle]}>P2PMD</Text>
+                <Text style={styles.helperText}>
+                  Create or join a Holesail-backed Markdown room, then edit together in the embedded mobile editor.
+                </Text>
+              </View>
+              <Text style={[styles.roomPill, p2pmdRoom ? styles.roomPillLive : null]}>
+                {p2pmdRoom ? 'live' : 'ready'}
+              </Text>
+            </View>
             <View style={styles.buttons}>
               <Button
                 title='Create Room'
@@ -547,8 +674,8 @@ export default function App () {
                 disabled={isBooting || isLoading}
               />
               <Button
-                title='Room Status'
-                onPress={() => void onP2pmdRoomStatus()}
+                title='Refresh'
+                onPress={() => void onP2pmdRoomRefresh()}
                 disabled={isBooting || isLoading}
               />
               <Button
@@ -558,9 +685,19 @@ export default function App () {
               />
             </View>
 
+            {!p2pmdRoom && (
+              <View style={styles.emptyRoomCard}>
+                <Text style={styles.emptyRoomTitle}>Start a collaborative note</Text>
+                <Text style={styles.helperText}>
+                  Create a room to host from this phone, or paste an hs:// key to join a room hosted elsewhere.
+                </Text>
+              </View>
+            )}
+
             <View style={styles.joinRoom}>
+              <Text style={styles.fieldLabel}>Join existing room</Text>
               <TextInput
-                style={styles.input}
+                style={[styles.input, styles.p2pmdInput]}
                 autoCapitalize='none'
                 autoCorrect={false}
                 value={p2pmdJoinKey}
@@ -574,74 +711,12 @@ export default function App () {
               />
             </View>
 
-            {p2pmdRoom && (
-              <View style={styles.roomDetails}>
-                <Text style={styles.roomLabel}>Role: {p2pmdRoom.role}</Text>
-                <Text selectable={true} style={styles.roomKey}>
-                  {p2pmdRoom.key}
-                </Text>
-                <Text selectable={true} style={styles.roomUrl}>
-                  {p2pmdRoom.localUrl}
-                </Text>
-                <View style={styles.buttons}>
-                  <Button
-                    title='Share Room Key'
-                    onPress={() => void onP2pmdShareRoom()}
-                    disabled={isBooting || isLoading}
-                  />
-                </View>
-              </View>
-            )}
-
-            {p2pmdUrl && (
-              <View style={styles.webViewFrame}>
-                <WebView
-                  source={{ uri: p2pmdUrl }}
-                  onMessage={(event) => {
-                    const message = event.nativeEvent.data
-                    setP2pmdBridgeMessage(message)
-
-                    try {
-                      const parsed = JSON.parse(message)
-
-                      if (parsed.type === 'p2pmd-document-loaded') {
-                        setStatus('P2PMD document loaded from Bare server')
-                      } else if (parsed.type === 'p2pmd-document-saved') {
-                        setStatus(`P2PMD document saved (${parsed.contentLength} characters)`)
-                      } else if (parsed.type === 'p2pmd-document-updated') {
-                        setStatus(`P2PMD remote update received (${parsed.contentLength} characters)`)
-                      } else if (parsed.type === 'p2pmd-document-error') {
-                        setStatus(parsed.error || 'P2PMD document request failed')
-                      } else {
-                        setStatus('P2PMD WebView connected to Bare server')
-                      }
-                    } catch {
-                      setStatus('P2PMD WebView connected to Bare server')
-                    }
-                  }}
-                  onError={(event) => {
-                    setStatus(`P2PMD WebView failed: ${event.nativeEvent.description}`)
-                  }}
-                  onLoad={() => {
-                    if (p2pmdRoom?.role === 'client') {
-                      setStatus('P2PMD joined room page loaded')
-                    }
-                  }}
-                />
-              </View>
-            )}
-
-            {p2pmdBridgeMessage && (
-              <Text selectable={true} style={styles.bridgeMessage}>
-                WebView bridge: {p2pmdBridgeMessage}
-              </Text>
-            )}
           </View>
         )}
 
         {(isBooting || isLoading) && <ActivityIndicator size='small' />}
 
-        {lastResult && (
+        {lastResult && activeTab !== 'p2pmd' && (
           <View style={styles.result}>
             <Text selectable={true} style={styles.resultText}>
               {JSON.stringify(lastResult, null, 2)}
@@ -661,6 +736,99 @@ function toBareFsPath (uri: string) {
 const styles = StyleSheet.create({
   container: {
     flex: 1
+  },
+  p2pmdWorkspace: {
+    backgroundColor: '#1f2027',
+    flex: 1
+  },
+  p2pmdWorkspaceHeader: {
+    alignItems: 'center',
+    backgroundColor: '#24262f',
+    borderBottomColor: '#3a3d49',
+    borderBottomWidth: 1,
+    flexDirection: 'row',
+    gap: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8
+  },
+  p2pmdWorkspaceTitle: {
+    color: '#f1f2f7',
+    fontSize: 18,
+    fontWeight: '800'
+  },
+  p2pmdWorkspaceParticipants: {
+    backgroundColor: '#30364a',
+    borderRadius: 999,
+    color: '#cdd6ff',
+    flexShrink: 1,
+    fontSize: 12,
+    fontWeight: '700',
+    overflow: 'hidden',
+    paddingHorizontal: 9,
+    paddingVertical: 5
+  },
+  p2pmdPreviewButton: {
+    backgroundColor: '#2f80ed',
+    borderRadius: 8,
+    marginLeft: 'auto',
+    paddingHorizontal: 11,
+    paddingVertical: 8
+  },
+  p2pmdPreviewButtonContent: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 7
+  },
+  p2pmdPreviewButtonIcon: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '800',
+    lineHeight: 16
+  },
+  p2pmdPreviewButtonText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '800'
+  },
+  p2pmdEyeIcon: {
+    alignItems: 'center',
+    borderColor: '#fff',
+    borderRadius: 9,
+    borderWidth: 2,
+    height: 12,
+    justifyContent: 'center',
+    width: 19
+  },
+  p2pmdEyeIconDot: {
+    backgroundColor: '#fff',
+    borderRadius: 3,
+    height: 6,
+    width: 6
+  },
+  p2pmdWorkspaceMeta: {
+    alignItems: 'center',
+    backgroundColor: '#202128',
+    borderBottomColor: '#3a3d49',
+    borderBottomWidth: 1,
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 7
+  },
+  p2pmdWorkspaceUrl: {
+    color: '#a2a8bb',
+    flex: 1,
+    fontFamily: 'monospace',
+    fontSize: 11
+  },
+  p2pmdWorkspaceWebView: {
+    backgroundColor: '#202128',
+    flex: 1
+  },
+  p2pmdWorkspaceLoader: {
+    bottom: 12,
+    position: 'absolute',
+    right: 12
   },
   content: {
     gap: 12,
@@ -716,9 +884,44 @@ const styles = StyleSheet.create({
     gap: 10,
     padding: 10
   },
+  p2pmdSection: {
+    backgroundColor: '#1f2027',
+    borderColor: '#3a3d49',
+    borderRadius: 14,
+    padding: 12
+  },
+  p2pmdHeader: {
+    alignItems: 'flex-start',
+    flexDirection: 'row',
+    gap: 10,
+    justifyContent: 'space-between'
+  },
+  p2pmdHeaderCopy: {
+    flex: 1,
+    gap: 4
+  },
   sectionTitle: {
     fontSize: 18,
     fontWeight: '600'
+  },
+  p2pmdTitle: {
+    color: '#f1f2f7'
+  },
+  helperText: {
+    color: '#a2a8bb',
+    fontSize: 13,
+    lineHeight: 19
+  },
+  fieldLabel: {
+    color: '#8c93a8',
+    fontSize: 12,
+    fontWeight: '700',
+    textTransform: 'uppercase'
+  },
+  p2pmdInput: {
+    backgroundColor: '#262832',
+    borderColor: '#3a3d49',
+    color: '#f1f2f7'
   },
   result: {
     backgroundColor: '#f6f6f6',
@@ -729,36 +932,34 @@ const styles = StyleSheet.create({
     fontFamily: 'monospace',
     fontSize: 12
   },
-  webViewFrame: {
-    borderColor: '#bbb',
-    borderRadius: 8,
+  emptyRoomCard: {
+    backgroundColor: '#262832',
+    borderColor: '#3a3d49',
+    borderRadius: 12,
     borderWidth: 1,
-    height: 520,
-    overflow: 'hidden'
+    gap: 6,
+    padding: 12
   },
-  bridgeMessage: {
-    color: '#076c50',
-    fontFamily: 'monospace',
-    fontSize: 12
-  },
-  roomDetails: {
-    gap: 6
+  emptyRoomTitle: {
+    color: '#f1f2f7',
+    fontSize: 15,
+    fontWeight: '700'
   },
   joinRoom: {
     gap: 10
   },
-  roomLabel: {
-    fontSize: 14,
-    fontWeight: '600'
+  roomPill: {
+    backgroundColor: '#30364a',
+    borderRadius: 999,
+    color: '#cdd6ff',
+    fontSize: 12,
+    fontWeight: '700',
+    overflow: 'hidden',
+    paddingHorizontal: 10,
+    paddingVertical: 4
   },
-  roomKey: {
-    color: '#076c50',
-    fontFamily: 'monospace',
-    fontSize: 12
-  },
-  roomUrl: {
-    color: '#526158',
-    fontFamily: 'monospace',
-    fontSize: 12
+  roomPillLive: {
+    backgroundColor: '#2f80ed',
+    color: '#fff'
   }
 })
