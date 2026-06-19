@@ -449,8 +449,11 @@ export default function App () {
       <SafeAreaView style={styles.p2pmdWorkspace} edges={['top', 'left', 'right', 'bottom']}>
         <View style={styles.p2pmdWorkspaceHeader}>
           <Text style={styles.p2pmdWorkspaceTitle}>P2PMD</Text>
+          <Text style={[styles.p2pmdWorkspaceRole, p2pmdRoom.role === 'host' ? styles.p2pmdWorkspaceRoleHost : null]}>
+            {p2pmdRoom.role}
+          </Text>
           <Text style={styles.p2pmdWorkspaceParticipants}>
-            Participants: {p2pmdParticipants ?? '-'}
+            Peers: {p2pmdParticipants ?? '-'}
           </Text>
           <Pressable
             style={styles.p2pmdPreviewButton}
@@ -459,7 +462,12 @@ export default function App () {
           >
             <View style={styles.p2pmdPreviewButtonContent}>
               {p2pmdIsPreviewMode
-                ? <Text style={styles.p2pmdPreviewButtonIcon}>✎</Text>
+                ? (
+                  <View style={styles.p2pmdPencilIcon}>
+                    <View style={styles.p2pmdPencilBody} />
+                    <View style={styles.p2pmdPencilTip} />
+                  </View>
+                  )
                 : (
                   <View style={styles.p2pmdEyeIcon}>
                     <View style={styles.p2pmdEyeIconDot} />
@@ -473,21 +481,32 @@ export default function App () {
         </View>
 
         <View style={styles.p2pmdWorkspaceMeta}>
-          <Text selectable={true} numberOfLines={1} style={styles.p2pmdWorkspaceUrl}>
-            {p2pmdRoom.localUrl}
-          </Text>
-          <Button
-            title='Share key'
+          <View style={styles.p2pmdRoomIdentity}>
+            <View style={styles.p2pmdWorkspaceKeyRow}>
+              <Text style={styles.p2pmdWorkspaceKeyLabel}>Key</Text>
+              <Text selectable={true} numberOfLines={1} style={styles.p2pmdWorkspaceKey}>
+                {formatP2pmdRoomKey(p2pmdRoom.key)}
+              </Text>
+            </View>
+            <Text selectable={true} numberOfLines={1} style={styles.p2pmdWorkspaceUrl}>
+              {p2pmdRoom.localUrl}
+            </Text>
+          </View>
+          <Pressable
+            style={styles.p2pmdMetaButton}
             onPress={() => void onP2pmdShareRoom()}
             disabled={isBooting || isLoading}
-          />
-          <Button
-            title='Disconnect'
+          >
+            <Text style={styles.p2pmdMetaButtonText}>Share</Text>
+          </Pressable>
+          <Pressable
+            style={[styles.p2pmdMetaButton, styles.p2pmdMetaButtonDanger]}
             onPress={() => void onP2pmdRoomDisconnect()}
             disabled={isBooting || isLoading}
-          />
+          >
+            <Text style={styles.p2pmdMetaButtonText}>Leave</Text>
+          </Pressable>
         </View>
-
         <WebView
           ref={p2pmdWebViewRef}
           source={{ uri: p2pmdUrl }}
@@ -667,48 +686,56 @@ export default function App () {
                 {p2pmdRoom ? 'live' : 'ready'}
               </Text>
             </View>
-            <View style={styles.buttons}>
-              <Button
-                title='Create Room'
-                onPress={() => void onP2pmdRoomCreate()}
-                disabled={isBooting || isLoading}
-              />
-              <Button
-                title='Refresh'
-                onPress={() => void onP2pmdRoomRefresh()}
-                disabled={isBooting || isLoading}
-              />
-              <Button
-                title='Disconnect'
-                onPress={() => void onP2pmdRoomDisconnect()}
-                disabled={isBooting || isLoading}
-              />
-            </View>
-
             {!p2pmdRoom && (
               <View style={styles.emptyRoomCard}>
                 <Text style={styles.emptyRoomTitle}>Start a collaborative note</Text>
                 <Text style={styles.helperText}>
                   Create a room to host from this phone, or paste an hs:// key to join a room hosted elsewhere.
                 </Text>
+                <View style={styles.p2pmdActionRow}>
+                  <Pressable
+                    style={[styles.p2pmdPrimaryAction, isBooting || isLoading ? styles.p2pmdActionDisabled : null]}
+                    onPress={() => void onP2pmdRoomCreate()}
+                    disabled={isBooting || isLoading}
+                  >
+                    <Text style={styles.p2pmdPrimaryActionText}>Create Room</Text>
+                    <Text style={styles.p2pmdActionHint}>Host from this phone</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.p2pmdSecondaryAction, isBooting || isLoading ? styles.p2pmdActionDisabled : null]}
+                    onPress={() => void onP2pmdRoomRefresh()}
+                    disabled={isBooting || isLoading}
+                  >
+                    <Text style={styles.p2pmdSecondaryActionText}>Refresh</Text>
+                  </Pressable>
+                </View>
               </View>
             )}
 
-            <View style={styles.joinRoom}>
+            <View style={styles.joinRoomCard}>
               <Text style={styles.fieldLabel}>Join existing room</Text>
+              <Text style={styles.helperText}>
+                Paste a room key shared by another peer to connect through Holesail.
+              </Text>
               <TextInput
                 style={[styles.input, styles.p2pmdInput]}
                 autoCapitalize='none'
                 autoCorrect={false}
                 value={p2pmdJoinKey}
                 onChangeText={setP2pmdJoinKey}
+                placeholderTextColor='#6f7484'
                 placeholder='hs://... room key'
               />
-              <Button
-                title='Join Room'
+              <Pressable
+                style={[
+                  styles.p2pmdJoinAction,
+                  isBooting || isLoading || !p2pmdJoinKey.trim() ? styles.p2pmdActionDisabled : null
+                ]}
                 onPress={() => void onP2pmdRoomJoin()}
                 disabled={isBooting || isLoading || !p2pmdJoinKey.trim()}
-              />
+              >
+                <Text style={styles.p2pmdJoinActionText}>Join Room</Text>
+              </Pressable>
             </View>
 
           </View>
@@ -731,6 +758,12 @@ export default function App () {
 function toBareFsPath (uri: string) {
   if (!uri.startsWith('file://')) return uri
   return decodeURIComponent(new URL(uri).pathname).replace(/\/$/, '')
+}
+
+function formatP2pmdRoomKey (key: string) {
+  const readableKey = key.replace(/^hs:\/\//, '')
+  if (readableKey.length <= 18) return `hs://${readableKey}`
+  return `hs://${readableKey.slice(0, 8)}...${readableKey.slice(-6)}`
 }
 
 const styles = StyleSheet.create({
@@ -767,43 +800,76 @@ const styles = StyleSheet.create({
     paddingHorizontal: 9,
     paddingVertical: 5
   },
+  p2pmdWorkspaceRole: {
+    backgroundColor: '#3a3020',
+    borderRadius: 999,
+    color: '#ffd27a',
+    fontSize: 11,
+    fontWeight: '800',
+    overflow: 'hidden',
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    textTransform: 'uppercase'
+  },
+  p2pmdWorkspaceRoleHost: {
+    backgroundColor: '#1d513d',
+    color: '#c6f6df'
+  },
   p2pmdPreviewButton: {
     backgroundColor: '#2f80ed',
-    borderRadius: 8,
+    borderRadius: 12,
     marginLeft: 'auto',
-    paddingHorizontal: 11,
-    paddingVertical: 8
+    paddingHorizontal: 12,
+    paddingVertical: 9
   },
   p2pmdPreviewButtonContent: {
     alignItems: 'center',
     flexDirection: 'row',
     gap: 7
   },
-  p2pmdPreviewButtonIcon: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '800',
-    lineHeight: 16
-  },
   p2pmdPreviewButtonText: {
     color: '#fff',
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: '800'
   },
   p2pmdEyeIcon: {
     alignItems: 'center',
     borderColor: '#fff',
-    borderRadius: 9,
+    borderRadius: 3,
     borderWidth: 2,
-    height: 12,
+    height: 14,
     justifyContent: 'center',
-    width: 19
+    transform: [{ rotate: '45deg' }],
+    width: 14
   },
   p2pmdEyeIconDot: {
     backgroundColor: '#fff',
-    borderRadius: 3,
-    height: 6,
-    width: 6
+    borderRadius: 2,
+    height: 4,
+    transform: [{ rotate: '-45deg' }],
+    width: 4
+  },
+  p2pmdPencilIcon: {
+    height: 17,
+    justifyContent: 'center',
+    width: 17
+  },
+  p2pmdPencilBody: {
+    backgroundColor: '#fff',
+    borderRadius: 2,
+    height: 3,
+    left: 1,
+    transform: [{ rotate: '-35deg' }],
+    width: 14
+  },
+  p2pmdPencilTip: {
+    backgroundColor: '#fff',
+    height: 4,
+    position: 'absolute',
+    right: 1,
+    top: 3,
+    transform: [{ rotate: '-35deg' }],
+    width: 3
   },
   p2pmdWorkspaceMeta: {
     alignItems: 'center',
@@ -815,11 +881,56 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 7
   },
+  p2pmdRoomIdentity: {
+    flex: 1,
+    gap: 3,
+    minWidth: 0
+  },
+  p2pmdWorkspaceKeyRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 6,
+    minWidth: 0
+  },
+  p2pmdWorkspaceKeyLabel: {
+    backgroundColor: '#30364a',
+    borderRadius: 6,
+    color: '#cdd6ff',
+    fontSize: 10,
+    fontWeight: '800',
+    overflow: 'hidden',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    textTransform: 'uppercase'
+  },
+  p2pmdWorkspaceKey: {
+    color: '#59a6ff',
+    flexShrink: 1,
+    fontFamily: 'monospace',
+    fontSize: 11,
+    fontWeight: '700'
+  },
   p2pmdWorkspaceUrl: {
     color: '#a2a8bb',
-    flex: 1,
     fontFamily: 'monospace',
     fontSize: 11
+  },
+  p2pmdMetaButton: {
+    backgroundColor: '#30364a',
+    borderColor: '#4c5675',
+    borderRadius: 8,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 9
+  },
+  p2pmdMetaButtonDanger: {
+    backgroundColor: '#4a2730',
+    borderColor: '#7c3b48'
+  },
+  p2pmdMetaButtonText: {
+    color: '#f1f2f7',
+    fontSize: 12,
+    fontWeight: '800'
   },
   p2pmdWorkspaceWebView: {
     backgroundColor: '#202128',
@@ -945,8 +1056,67 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '700'
   },
-  joinRoom: {
-    gap: 10
+  p2pmdActionRow: {
+    alignItems: 'stretch',
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 6
+  },
+  p2pmdPrimaryAction: {
+    backgroundColor: '#2f80ed',
+    borderRadius: 12,
+    flex: 1,
+    gap: 3,
+    paddingHorizontal: 14,
+    paddingVertical: 12
+  },
+  p2pmdPrimaryActionText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '800'
+  },
+  p2pmdActionHint: {
+    color: '#dbeafe',
+    fontSize: 11,
+    fontWeight: '600'
+  },
+  p2pmdSecondaryAction: {
+    alignItems: 'center',
+    backgroundColor: '#30364a',
+    borderColor: '#4c5675',
+    borderRadius: 12,
+    borderWidth: 1,
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 12
+  },
+  p2pmdSecondaryActionText: {
+    color: '#f1f2f7',
+    fontSize: 13,
+    fontWeight: '800'
+  },
+  p2pmdActionDisabled: {
+    opacity: 0.5
+  },
+  joinRoomCard: {
+    backgroundColor: '#22242c',
+    borderColor: '#343744',
+    borderRadius: 12,
+    borderWidth: 1,
+    gap: 10,
+    padding: 12
+  },
+  p2pmdJoinAction: {
+    alignItems: 'center',
+    backgroundColor: '#1d513d',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12
+  },
+  p2pmdJoinActionText: {
+    color: '#c6f6df',
+    fontSize: 14,
+    fontWeight: '800'
   },
   roomPill: {
     backgroundColor: '#30364a',
