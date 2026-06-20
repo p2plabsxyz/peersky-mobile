@@ -14,15 +14,17 @@ let server = null
 let serverInfo = null
 let serverTransition = Promise.resolve()
 const eventClients = new Set()
+const peerPresence = new Map()
 let keepaliveInterval = null
+let nextPeerId = 1
 const markdownRenderer = new MarkdownIt({
   html: false,
   linkify: true,
   breaks: true
 })
 
-subscribeToDocumentUpdates(({ document, update }) => {
-  broadcastEvent('yjsupdate', update)
+subscribeToDocumentUpdates(({ document }) => {
+  broadcastEvent('yjsupdate', getEncodedDocumentState())
   broadcastEvent('update', JSON.stringify(document))
 })
 
@@ -128,7 +130,36 @@ function handleRequest (req, res) {
       ok: true,
       service: 'p2pmd',
       running: true,
-      peers: eventClients.size
+      peers: getPeerCount(),
+      peerList: getPeerList(),
+      activityCount: 0
+    })
+    return
+  }
+
+  if (req.method === 'POST' && pathname === '/presence') {
+    readJsonBody(req)
+      .then((body) => {
+        upsertPeerPresence(body)
+        broadcastPeerState()
+        sendJson(res, 200, {
+          ok: true,
+          peers: peerPresence.size
+        })
+      })
+      .catch((error) => {
+        sendJson(res, error.statusCode || 400, {
+          ok: false,
+          error: error.message
+        })
+      })
+    return
+  }
+
+  if (req.method === 'GET' && pathname === '/activity') {
+    sendJson(res, 200, {
+      ok: true,
+      activity: []
     })
     return
   }
@@ -153,7 +184,11 @@ function handleRequest (req, res) {
   if (req.method === 'POST' && pathname === '/doc/update') {
     readJsonBody(req)
       .then((body) => {
-        const result = applyDocumentUpdate(body.update)
+        const result = applyDocumentUpdate(body.update, body.lineAttributions ?? body.lineAuthors)
+        if (result.ok) {
+          upsertPeerPresence(body)
+          broadcastPeerState()
+        }
         sendJson(res, result.ok ? 200 : 400, result)
       })
       .catch((error) => {
@@ -168,7 +203,11 @@ function handleRequest (req, res) {
   if (req.method === 'POST' && pathname === '/doc') {
     readJsonBody(req)
       .then((body) => {
-        const result = updateDocumentState(body.content)
+        const result = updateDocumentState(body.content, body.lineAttributions ?? body.lineAuthors)
+        if (result.ok) {
+          upsertPeerPresence(body)
+          broadcastPeerState()
+        }
         sendJson(res, result.ok ? 200 : 400, result)
       })
       .catch((error) => {
@@ -214,7 +253,7 @@ function handleRequest (req, res) {
   }
 
   if (req.method === 'GET' && pathname === '/events') {
-    openEventStream(res)
+    openEventStream(req, res)
     return
   }
 
@@ -273,7 +312,9 @@ function setCorsHeaders (res) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
 }
 
-function openEventStream (res) {
+function openEventStream (req, res) {
+  const peerPayload = readPeerFromEventRequest(req)
+
   res.statusCode = 200
   res.setHeader('Content-Type', 'text/event-stream')
   res.setHeader('Cache-Control', 'no-cache')
@@ -281,10 +322,21 @@ function openEventStream (res) {
   setCorsHeaders(res)
   res.flushHeaders()
 
-  eventClients.add(res)
-  writeEvent(res, 'peers', String(eventClients.size))
+  const client = {
+    res,
+    peerKey: upsertPeerPresence(peerPayload)
+  }
+
+  eventClients.add(client)
+  writeEvent(res, 'peers', String(getPeerCount()))
   writeEvent(res, 'yjsupdate', getEncodedDocumentState())
-  broadcastEvent('peers', String(eventClients.size))
+  writeEvent(res, 'update', JSON.stringify(getDocumentState()))
+  writeEvent(res, 'peerlist', JSON.stringify(getPeerList()))
+  broadcastPeerState()
+
+  res.on('close', () => {
+    removeEventClient(client)
+  })
 
   if (!keepaliveInterval) {
     keepaliveInterval = setInterval(() => {
@@ -302,17 +354,15 @@ function broadcastRaw (payload) {
 
   for (const client of [...eventClients]) {
     try {
-      client.write(payload)
+      client.res.write(payload)
     } catch (error) {
       console.error('[p2pmd] Removing SSE client after write failure:', error)
-      eventClients.delete(client)
+      removeEventClient(client, false)
       removed = true
     }
   }
 
-  if (removed && eventClients.size > 0) {
-    broadcastEvent('peers', String(eventClients.size))
-  }
+  if (removed && eventClients.size > 0) broadcastPeerState()
 
   if (eventClients.size === 0 && keepaliveInterval) {
     clearInterval(keepaliveInterval)
@@ -332,10 +382,154 @@ function closeEventClients () {
 
   for (const client of eventClients) {
     try {
-      client.end()
+      client.res.end()
     } catch {}
   }
   eventClients.clear()
+  peerPresence.clear()
+}
+
+function removeEventClient (client, shouldBroadcast = true) {
+  const deleted = eventClients.delete(client)
+  if (client.peerKey) peerPresence.delete(client.peerKey)
+
+  if (deleted && shouldBroadcast) {
+    broadcastPeerState()
+  }
+
+  if (eventClients.size === 0 && keepaliveInterval) {
+    clearInterval(keepaliveInterval)
+    keepaliveInterval = null
+  }
+}
+
+function broadcastPeerState () {
+  broadcastEvent('peers', String(getPeerCount()))
+  broadcastEvent('peerlist', JSON.stringify(getPeerList()))
+}
+
+function getPeerList () {
+  return Array.from(peerPresence.values())
+}
+
+function getPeerCount () {
+  let count = 0
+  for (const peer of peerPresence.values()) {
+    if (peer.role !== 'host') count += 1
+  }
+  return count
+}
+
+function readPeerFromEventRequest (req) {
+  let params
+  try {
+    params = new URL(req.url || '/events', 'http://127.0.0.1').searchParams
+  } catch {
+    params = new URLSearchParams()
+  }
+
+  return {
+    clientId: params.get('clientId') || undefined,
+    role: params.get('role') || undefined,
+    name: params.get('name') || undefined,
+    color: params.get('color') || undefined
+  }
+}
+
+function upsertPeerPresence (payload) {
+  if (!payload || typeof payload !== 'object') return null
+
+  const clientId = typeof payload.clientId === 'string' && payload.clientId.trim()
+    ? payload.clientId.trim().slice(0, 120)
+    : `anonymous-${nextPeerId++}`
+  const previous = peerPresence.get(clientId)
+  const now = Date.now()
+  const lineAttributions = normalizePeerLineAttributions(payload.lineAttributions ?? payload.lineAuthors)
+
+  if (lineAttributions) {
+    removeLineAttributionsFromOtherPeers(clientId, lineAttributions)
+  }
+
+  peerPresence.set(clientId, {
+    id: previous?.id || peerPresence.size + 1,
+    role: normalizePeerRole(payload.role),
+    clientId,
+    color: normalizePeerColor(payload.color) || previous?.color || '',
+    name: normalizePeerName(payload.name) || previous?.name || `Peer ${clientId.slice(0, 6)}`,
+    cursorLine: normalizeOptionalNumber(payload.cursorLine),
+    cursorColumn: normalizeOptionalNumber(payload.cursorColumn),
+    selectionStart: normalizeOptionalNumber(payload.selectionStart),
+    selectionEnd: normalizeOptionalNumber(payload.selectionEnd),
+    latexModeEnabled: typeof payload.latexModeEnabled === 'boolean' ? payload.latexModeEnabled : null,
+    isTyping: payload.isTyping === true,
+    lineAttributions: lineAttributions || previous?.lineAttributions || null,
+    joinedAt: previous?.joinedAt || now,
+    updatedAt: now
+  })
+
+  return clientId
+}
+
+function removeLineAttributionsFromOtherPeers (clientId, lineAttributions) {
+  const editedLines = new Set(Object.keys(lineAttributions))
+  if (editedLines.size === 0) return
+
+  for (const [peerKey, peer] of peerPresence.entries()) {
+    if (peerKey === clientId || !peer.lineAttributions) continue
+
+    for (const line of editedLines) {
+      delete peer.lineAttributions[line]
+    }
+
+    if (Object.keys(peer.lineAttributions).length === 0) {
+      peer.lineAttributions = null
+    }
+  }
+}
+
+function normalizePeerRole (role) {
+  if (role === 'host') return 'host'
+  if (role === 'client') return 'client'
+  return 'viewer'
+}
+
+function normalizePeerName (name) {
+  if (typeof name !== 'string') return ''
+  return name.trim().slice(0, 80)
+}
+
+function normalizePeerColor (color) {
+  if (typeof color !== 'string') return ''
+  const value = color.trim()
+  if (!value || value.length > 64) return ''
+  return value
+}
+
+function normalizeOptionalNumber (value) {
+  const number = Number(value)
+  return Number.isFinite(number) ? number : null
+}
+
+function normalizePeerLineAttributions (lineAttributions) {
+  if (!lineAttributions || typeof lineAttributions !== 'object') return null
+
+  const normalized = {}
+
+  for (const [line, attribution] of Object.entries(lineAttributions)) {
+    const lineNumber = Number(line)
+    if (!Number.isInteger(lineNumber) || lineNumber < 1) continue
+    if (!attribution || typeof attribution !== 'object') continue
+
+    const color = normalizePeerColor(attribution.color)
+    if (!color) continue
+
+    normalized[String(lineNumber)] = {
+      color,
+      name: normalizePeerName(attribution.name)
+    }
+  }
+
+  return Object.keys(normalized).length > 0 ? normalized : null
 }
 
 function readJsonBody (req) {
@@ -663,10 +857,52 @@ function getFoundationPage () {
       let pendingContent = null
       let saveInFlight = false
       let lastSyncedContent = ''
-      let lineOrigins = []
+      let lastInputContent = ''
+      let lineAttributions = {}
       let toolbarPointerState = null
       let suppressToolbarClick = false
       const newline = String.fromCharCode(10)
+      const CLIENT_ID_KEY = 'p2pmd-mobile-client-id'
+      const clientId = getClientId()
+      const roomRole = getRoomRole()
+      const localAuthor = {
+        clientId,
+        color: colorFromClientId(clientId),
+        name: 'Mobile peer'
+      }
+
+      function getRoomRole() {
+        try {
+          const role = new URLSearchParams(window.location.search).get('role')
+          return role === 'host' ? 'host' : 'client'
+        } catch {
+          return 'client'
+        }
+      }
+
+      function getClientId() {
+        try {
+          const stored = window.localStorage.getItem(CLIENT_ID_KEY)
+          if (stored) return stored
+
+          const generated = Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10)
+          window.localStorage.setItem(CLIENT_ID_KEY, generated)
+          return generated
+        } catch {
+          return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10)
+        }
+      }
+
+      function colorFromClientId(value) {
+        let hash = 0
+        for (let index = 0; index < value.length; index++) {
+          hash = ((hash << 5) - hash) + value.charCodeAt(index)
+          hash |= 0
+        }
+
+        const hue = Math.abs(hash) % 360
+        return 'hsl(' + hue + ' 74% 58%)'
+      }
 
       function notifyNative(type, details) {
         if (!window.ReactNativeWebView) return
@@ -676,6 +912,15 @@ function getFoundationPage () {
           source: 'bare-http1',
           ...details
         }))
+      }
+
+      function getPeerPayload() {
+        return {
+          clientId,
+          role: roomRole,
+          name: localAuthor.name,
+          color: localAuthor.color
+        }
       }
 
       async function loadDocument() {
@@ -689,7 +934,8 @@ function getFoundationPage () {
 
           input.value = result.content
           lastSyncedContent = result.content
-          renderLineGutter('loaded')
+          lastInputContent = result.content
+          applyLineAttributionsFromDocument(result)
           notifyNative('p2pmd-document-loaded', {
             updatedAt: result.updatedAt
           })
@@ -702,7 +948,10 @@ function getFoundationPage () {
 
       function scheduleDocumentSave() {
         if (saveTimer) clearTimeout(saveTimer)
-        renderLineGutter('local')
+        markEditedLines(lastInputContent, input.value)
+        lastInputContent = input.value
+        renderLineGutter()
+        notifyNative('p2pmd-document-pending', {})
 
         saveTimer = setTimeout(() => {
           saveTimer = null
@@ -888,25 +1137,109 @@ function getFoundationPage () {
         event.preventDefault()
       }
 
-      function renderLineGutter(origin) {
+      function applyLineAttributionsFromDocument(documentState) {
+        lineAttributions = normalizeLineAttributions(
+          documentState.lineAttributions || documentState.lineAuthors,
+          documentState.content || ''
+        )
+        renderLineGutter()
+      }
+
+      function normalizeLineAttributions(attributions, content) {
+        const count = getLineCount(content)
+        const normalized = {}
+
+        if (Array.isArray(attributions)) {
+          attributions.forEach((value, index) => {
+            const attribution = normalizeLineAttribution(value)
+            if (attribution && index < count) normalized[String(index + 1)] = attribution
+          })
+          return normalized
+        }
+
+        if (attributions && typeof attributions === 'object') {
+          Object.keys(attributions).forEach((line) => {
+            const lineNumber = Number(line)
+            const attribution = normalizeLineAttribution(attributions[line])
+            if (!Number.isInteger(lineNumber) || lineNumber < 1 || lineNumber > count || !attribution) return
+
+            normalized[String(lineNumber)] = attribution
+          })
+        }
+
+        return normalized
+      }
+
+      function normalizeLineAttribution(attribution) {
+        if (!attribution || typeof attribution !== 'object') return null
+
+        const color = typeof attribution.color === 'string' ? attribution.color.trim() : ''
+        if (!color) return null
+
+        return {
+          clientId: typeof attribution.clientId === 'string' ? attribution.clientId : '',
+          color,
+          name: typeof attribution.name === 'string' ? attribution.name : ''
+        }
+      }
+
+      function getLineCount(content) {
+        return Math.max(String(content || '').split(newline).length, 1)
+      }
+
+      function markEditedLines(previousContent, nextContent) {
+        const previousLines = String(previousContent || '').split(newline)
+        const nextLines = String(nextContent || '').split(newline)
+        const nextAttributions = {}
+        let prefix = 0
+
+        while (
+          prefix < previousLines.length &&
+          prefix < nextLines.length &&
+          previousLines[prefix] === nextLines[prefix]
+        ) {
+          const existing = lineAttributions[String(prefix + 1)]
+          if (existing) nextAttributions[String(prefix + 1)] = existing
+          prefix += 1
+        }
+
+        let previousSuffix = previousLines.length - 1
+        let nextSuffix = nextLines.length - 1
+        while (
+          previousSuffix >= prefix &&
+          nextSuffix >= prefix &&
+          previousLines[previousSuffix] === nextLines[nextSuffix]
+        ) {
+          const existing = lineAttributions[String(previousSuffix + 1)]
+          if (existing) nextAttributions[String(nextSuffix + 1)] = existing
+          previousSuffix -= 1
+          nextSuffix -= 1
+        }
+
+        for (let index = prefix; index <= nextSuffix; index++) {
+          nextAttributions[String(index + 1)] = localAuthor
+        }
+
+        lineAttributions = nextAttributions
+      }
+
+      function renderLineGutter() {
         const lines = input.value.split(newline)
         const count = Math.max(lines.length, 1)
-
-        if (origin) {
-          lineOrigins = Array(count).fill(origin)
-        } else {
-          while (lineOrigins.length < count) lineOrigins.push('loaded')
-          if (lineOrigins.length > count) lineOrigins = lineOrigins.slice(0, count)
-        }
 
         lineGutter.replaceChildren()
 
         for (let index = 0; index < count; index++) {
           const line = document.createElement('div')
-          const lineOrigin = lineOrigins[index] || 'loaded'
+          const attribution = lineAttributions[String(index + 1)] || null
+          const isLocal = attribution && attribution.clientId === clientId
+          const lineOrigin = attribution ? (isLocal ? 'local' : 'remote') : 'loaded'
           line.className = 'gutter-line ' + lineOrigin
+          if (attribution) {
+            line.style.borderRightColor = attribution.color
+          }
           line.title = lineOrigin === 'remote'
-            ? 'Updated from remote peer'
+            ? 'Edited by ' + (attribution.name || 'remote peer')
             : lineOrigin === 'local'
               ? 'Edited on this device'
               : 'Loaded document line'
@@ -954,13 +1287,17 @@ function getFoundationPage () {
 
             if (content === lastSyncedContent) continue
 
+            notifyNative('p2pmd-document-syncing', {})
+
             const response = await fetch('/doc', {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json'
               },
               body: JSON.stringify({
-                content
+                content,
+                ...getPeerPayload(),
+                lineAttributions
               })
             })
             const result = await response.json()
@@ -970,6 +1307,7 @@ function getFoundationPage () {
             }
 
             lastSyncedContent = result.document.content
+            applyLineAttributionsFromDocument(result.document)
             notifyNative('p2pmd-document-saved', {
               updatedAt: result.document.updatedAt,
               contentLength: result.document.content.length
@@ -1039,7 +1377,8 @@ function getFoundationPage () {
       }
 
       function connectEvents() {
-        const source = new EventSource('/events')
+        const params = new URLSearchParams(getPeerPayload())
+        const source = new EventSource('/events?' + params.toString())
 
         source.addEventListener('peers', (event) => {
           const count = Number(event.data)
@@ -1056,12 +1395,15 @@ function getFoundationPage () {
             if (typeof documentState.content !== 'string') return
             if (documentState.content === input.value) {
               lastSyncedContent = documentState.content
+              lastInputContent = documentState.content
+              applyLineAttributionsFromDocument(documentState)
               return
             }
 
             input.value = documentState.content
             lastSyncedContent = documentState.content
-            renderLineGutter('remote')
+            lastInputContent = documentState.content
+            applyLineAttributionsFromDocument(documentState)
             if (isPreviewMode) renderPreview()
             notifyNative('p2pmd-document-updated', {
               updatedAt: documentState.updatedAt,

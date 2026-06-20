@@ -80,6 +80,7 @@ export default function App () {
   const [p2pmdJoinKey, setP2pmdJoinKey] = useState('')
   const [p2pmdParticipants, setP2pmdParticipants] = useState<number | null>(null)
   const [p2pmdIsPreviewMode, setP2pmdIsPreviewMode] = useState(false)
+  const [p2pmdSyncStatus, setP2pmdSyncStatus] = useState('Ready')
 
   useEffect(() => {
     void startWorklet()
@@ -288,6 +289,7 @@ export default function App () {
     setP2pmdUrl(null)
     setP2pmdParticipants(null)
     setP2pmdIsPreviewMode(false)
+    setP2pmdSyncStatus('Creating room...')
 
     try {
       const response = await callRpc(RPC_P2PMD_ROOM_CREATE, {
@@ -319,6 +321,7 @@ export default function App () {
     setP2pmdUrl(null)
     setP2pmdParticipants(null)
     setP2pmdIsPreviewMode(false)
+    setP2pmdSyncStatus('Joining room...')
 
     try {
       const response = await callRpc(RPC_P2PMD_ROOM_JOIN, {
@@ -356,11 +359,13 @@ export default function App () {
         setP2pmdUrl(response.room.localUrl)
         setP2pmdParticipants(null)
         setP2pmdIsPreviewMode(false)
+        setP2pmdSyncStatus('Ready')
       } else {
         setP2pmdRoom(null)
         setP2pmdUrl(null)
         setP2pmdParticipants(null)
         setP2pmdIsPreviewMode(false)
+        setP2pmdSyncStatus('Ready')
       }
 
       setStatus(response.running ? 'P2PMD room is running' : 'No P2PMD room is running')
@@ -383,6 +388,7 @@ export default function App () {
       setP2pmdRoom(null)
       setP2pmdParticipants(null)
       setP2pmdIsPreviewMode(false)
+      setP2pmdSyncStatus('Ready')
       setStatus(response.ok ? 'P2PMD room disconnected' : (response.error || 'Failed disconnecting P2PMD room'))
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error))
@@ -421,15 +427,25 @@ export default function App () {
           }
           break
         case 'p2pmd-document-loaded':
+          setP2pmdSyncStatus('Loaded')
           setStatus('P2PMD document loaded')
           break
+        case 'p2pmd-document-pending':
+          setP2pmdSyncStatus('Unsaved changes')
+          break
+        case 'p2pmd-document-syncing':
+          setP2pmdSyncStatus('Syncing...')
+          break
         case 'p2pmd-document-saved':
+          setP2pmdSyncStatus('Saved')
           setStatus(`P2PMD saved (${parsed.contentLength} characters)`)
           break
         case 'p2pmd-document-updated':
+          setP2pmdSyncStatus('Remote update')
           setStatus(`P2PMD remote update received (${parsed.contentLength} characters)`)
           break
         case 'p2pmd-document-error':
+          setP2pmdSyncStatus('Sync error')
           setStatus(parsed.error || 'P2PMD document request failed')
           break
         case 'p2pmd-preview-mode':
@@ -491,6 +507,9 @@ export default function App () {
             <Text selectable={true} numberOfLines={1} style={styles.p2pmdWorkspaceUrl}>
               {p2pmdRoom.localUrl}
             </Text>
+            <Text numberOfLines={1} style={styles.p2pmdWorkspaceSyncStatus}>
+              {p2pmdSyncStatus}
+            </Text>
           </View>
           <Pressable
             style={styles.p2pmdMetaButton}
@@ -509,7 +528,7 @@ export default function App () {
         </View>
         <WebView
           ref={p2pmdWebViewRef}
-          source={{ uri: p2pmdUrl }}
+          source={{ uri: `${p2pmdUrl}?role=${encodeURIComponent(p2pmdRoom.role)}` }}
           textZoom={100}
           style={styles.p2pmdWorkspaceWebView}
           onMessage={(event) => onP2pmdWebViewMessage(event.nativeEvent.data)}
@@ -914,6 +933,11 @@ const styles = StyleSheet.create({
     color: '#a2a8bb',
     fontFamily: 'monospace',
     fontSize: 11
+  },
+  p2pmdWorkspaceSyncStatus: {
+    color: '#cdd6ff',
+    fontSize: 11,
+    fontWeight: '700'
   },
   p2pmdMetaButton: {
     backgroundColor: '#30364a',
