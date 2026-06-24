@@ -96,6 +96,17 @@ export function getEncodedDocumentState () {
   return b4a.toString(Y.encodeStateAsUpdate(ydoc), 'base64')
 }
 
+export function resetDocumentState () {
+  const current = ytext.toString()
+  if (current.length > 0) {
+    ydoc.transact(() => {
+      ytext.delete(0, current.length)
+    }, 'document-reset')
+  }
+
+  updatedAt = Date.now()
+}
+
 export function subscribeToDocumentUpdates (listener) {
   updateListeners.add(listener)
   return () => updateListeners.delete(listener)
