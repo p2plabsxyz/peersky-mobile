@@ -16,6 +16,8 @@ let serverTransition = Promise.resolve()
 const eventClients = new Set()
 let keepaliveInterval = null
 const markdownRenderer = new MarkdownIt({
+  // Security-critical: preview output is injected with innerHTML in the WebView.
+  // Keep raw HTML disabled unless the preview path is sanitized first.
   html: false,
   linkify: true,
   breaks: true
