@@ -307,8 +307,7 @@ function broadcastRaw (payload) {
       client.write(payload)
     } catch (error) {
       console.error('[p2pmd] Removing SSE client after write failure:', error)
-      eventClients.delete(client)
-      removed = true
+      if (removeEventClient(client)) removed = true
     }
   }
 
@@ -326,18 +325,25 @@ function writeEvent (res, event, data) {
   res.write(`event: ${event}\ndata: ${data}\n\n`)
 }
 
+function removeEventClient (client) {
+  const removed = eventClients.delete(client)
+
+  try {
+    client.end()
+  } catch {}
+
+  return removed
+}
+
 function closeEventClients () {
   if (keepaliveInterval) {
     clearInterval(keepaliveInterval)
     keepaliveInterval = null
   }
 
-  for (const client of eventClients) {
-    try {
-      client.end()
-    } catch {}
+  for (const client of [...eventClients]) {
+    removeEventClient(client)
   }
-  eventClients.clear()
 }
 
 function readJsonBody (req) {
