@@ -13,6 +13,7 @@ import {
   startP2pmdServer,
   stopP2pmdServer
 } from './server.mjs'
+import { resetDocumentState } from './document.mjs'
 
 let room = null
 let roomTransition = Promise.resolve()
@@ -169,6 +170,7 @@ async function disconnectRoomInternal () {
   ])
 
   room = null
+  resetDocumentState()
 
   const failure = results.find((result) => result.status === 'rejected')
   if (failure?.status === 'rejected') {

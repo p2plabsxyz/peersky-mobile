@@ -9,6 +9,7 @@ import {
   updateDocumentState
 } from './document.mjs'
 import { P2PMD_LOOPBACK_HOST } from './network.mjs'
+import yjsBrowserScript from './yjs-runtime.mjs'
 
 let server = null
 let serverInfo = null
@@ -23,8 +24,10 @@ const markdownRenderer = new MarkdownIt({
   breaks: true
 })
 
-subscribeToDocumentUpdates(({ document, update }) => {
-  broadcastEvent('yjsupdate', update)
+subscribeToDocumentUpdates(({ document, origin, update }) => {
+  if (origin !== 'line-attribution-update') {
+    broadcastEvent('yjsupdate', update)
+  }
   broadcastEvent('update', JSON.stringify(document))
 })
 
@@ -164,6 +167,11 @@ function handleRequest (req, res) {
     return
   }
 
+  if (req.method === 'GET' && pathname === '/lib/yjs.min.js') {
+    sendScript(res, 200, yjsBrowserScript)
+    return
+  }
+
   if (req.method === 'GET' && (pathname === '/' || pathname === '/index.html')) {
     sendHtml(res, 200, getFoundationPage())
     return
@@ -294,6 +302,15 @@ function sendHtml (res, statusCode, body) {
   res.statusCode = statusCode
   res.setHeader('Content-Type', 'text/html; charset=utf-8')
   res.setHeader('Cache-Control', 'no-store')
+  setCorsHeaders(res)
+  res.setHeader('Connection', 'close')
+  res.end(body)
+}
+
+function sendScript (res, statusCode, body) {
+  res.statusCode = statusCode
+  res.setHeader('Content-Type', 'application/javascript; charset=utf-8')
+  res.setHeader('Cache-Control', 'public, max-age=86400')
   setCorsHeaders(res)
   res.setHeader('Connection', 'close')
   res.end(body)
@@ -695,6 +712,8 @@ function getFoundationPage () {
         color: var(--ink);
         caret-color: var(--remote);
         font: 16px/1.55 var(--editor-font);
+        white-space: pre;
+        overflow-wrap: normal;
         resize: none;
         overflow: auto;
         -webkit-user-select: text;
@@ -857,22 +876,37 @@ function getFoundationPage () {
           <div id="line-gutter-wrap" aria-hidden="true">
             <div id="line-gutter"></div>
           </div>
-          <textarea id="document-input" aria-label="Markdown document" placeholder="Write Markdown here..."></textarea>
+          <textarea id="document-input" aria-label="Markdown document" placeholder="Write Markdown here..." wrap="off"></textarea>
         </div>
         <article id="preview" aria-label="Markdown preview" hidden></article>
       </main>
     </div>
+    <script src="/lib/yjs.min.js"></script>
     <script>
       const input = document.getElementById('document-input')
       const preview = document.getElementById('preview')
       const formattingToolbar = document.getElementById('formatting-toolbar')
       const lineGutter = document.getElementById('line-gutter')
       const TOOLBAR_TAP_MOVEMENT_LIMIT = 8
+      const REMOTE_UPDATE_BATCH_MS = 80
+      const MAX_PENDING_UPDATE_BYTES = 2 * 1024 * 1024
+      const Y_ORIGIN_REMOTE = 'remote-sse'
+      const Y_ORIGIN_LOCAL_INPUT = 'local-input'
       let isPreviewMode = false
       let previewRequestId = 0
       let saveTimer = null
       let pendingContent = null
       let saveInFlight = false
+      let ydoc = null
+      let ytext = null
+      let pendingUpdate = null
+      let sendUpdateTimer = null
+      let flushRetryTimer = null
+      let eventSource = null
+      let reconnectTimer = null
+      let isApplyingRemote = false
+      let pendingRemoteUpdate = null
+      let remoteUpdateTimer = null
       let lastSyncedContent = ''
       let lastInputContent = ''
       let lineAttributions = {}
@@ -941,6 +975,90 @@ function getFoundationPage () {
         }
       }
 
+      function bytesToBase64(bytes) {
+        let binary = ''
+        for (let index = 0; index < bytes.byteLength; index++) {
+          binary += String.fromCharCode(bytes[index])
+        }
+        return btoa(binary)
+      }
+
+      function base64ToBytes(value) {
+        const binary = atob(value)
+        const bytes = new Uint8Array(binary.length)
+        for (let index = 0; index < binary.length; index++) {
+          bytes[index] = binary.charCodeAt(index)
+        }
+        return bytes
+      }
+
+      function queueRemoteYjsUpdate(encodedUpdate) {
+        if (!ydoc || !window.Y) return
+
+        try {
+          const update = base64ToBytes(encodedUpdate)
+          pendingRemoteUpdate = pendingRemoteUpdate
+            ? window.Y.mergeUpdates([pendingRemoteUpdate, update])
+            : update
+        } catch (error) {
+          notifyNative('p2pmd-document-error', {
+            error: error.message
+          })
+          return
+        }
+
+        if (remoteUpdateTimer) return
+        remoteUpdateTimer = setTimeout(() => {
+          remoteUpdateTimer = null
+          applyPendingRemoteYjsUpdate()
+        }, REMOTE_UPDATE_BATCH_MS)
+      }
+
+      function applyPendingRemoteYjsUpdate() {
+        if (!pendingRemoteUpdate || !ydoc || !window.Y) return
+
+        const update = pendingRemoteUpdate
+        pendingRemoteUpdate = null
+
+        try {
+          isApplyingRemote = true
+          window.Y.applyUpdate(ydoc, update, Y_ORIGIN_REMOTE)
+        } catch (error) {
+          notifyNative('p2pmd-document-error', {
+            error: error.message
+          })
+        } finally {
+          isApplyingRemote = false
+        }
+      }
+
+      function applyTextDiff(ytextRef, oldText, newText, origin) {
+        if (!ytextRef || oldText === newText) return
+
+        let prefix = 0
+        const minLength = Math.min(oldText.length, newText.length)
+        while (prefix < minLength && oldText[prefix] === newText[prefix]) prefix += 1
+
+        let oldSuffix = oldText.length
+        let newSuffix = newText.length
+        while (
+          oldSuffix > prefix &&
+          newSuffix > prefix &&
+          oldText[oldSuffix - 1] === newText[newSuffix - 1]
+        ) {
+          oldSuffix -= 1
+          newSuffix -= 1
+        }
+
+        const deleteLength = oldSuffix - prefix
+        const insertedText = newText.slice(prefix, newSuffix)
+
+        ytextRef.doc.transact(() => {
+          if (deleteLength > 0) ytextRef.delete(prefix, deleteLength)
+          if (insertedText) ytextRef.insert(prefix, insertedText)
+        }, origin)
+      }
+
       async function loadDocument() {
         try {
           const response = await fetch('/doc')
@@ -970,6 +1088,15 @@ function getFoundationPage () {
         lastInputContent = input.value
         renderLineGutter()
         notifyNative('p2pmd-document-pending', {})
+
+        if (ydoc && ytext) {
+          const newText = input.value
+          const oldText = ytext.toString()
+          if (newText !== oldText) {
+            applyTextDiff(ytext, oldText, newText, Y_ORIGIN_LOCAL_INPUT)
+          }
+          return
+        }
 
         saveTimer = setTimeout(() => {
           saveTimer = null
@@ -1367,6 +1494,153 @@ function getFoundationPage () {
         }
       }
 
+      async function flushYjsUpdate() {
+        if (!pendingUpdate) return
+
+        const updateToSend = pendingUpdate
+        pendingUpdate = null
+
+        try {
+          notifyNative('p2pmd-document-syncing', {})
+
+          const response = await fetch('/doc/update', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              update: bytesToBase64(updateToSend),
+              ...getPeerPayload(),
+              lineAttributions,
+              peerLineAttributions: localLineAttributions
+            })
+          })
+          const result = await response.json()
+
+          if (!response.ok || !result.ok) {
+            throw new Error(result.error || 'Unable to sync document update')
+          }
+
+          notifyNative('p2pmd-document-saved', {
+            updatedAt: result.document.updatedAt,
+            contentLength: result.document.content.length
+          })
+          if (flushRetryTimer) {
+            clearTimeout(flushRetryTimer)
+            flushRetryTimer = null
+          }
+        } catch (error) {
+          let mergedUpdate = pendingUpdate
+            ? window.Y.mergeUpdates([updateToSend, pendingUpdate])
+            : updateToSend
+
+          if (mergedUpdate.byteLength > MAX_PENDING_UPDATE_BYTES && ydoc) {
+            try {
+              mergedUpdate = window.Y.encodeStateAsUpdate(ydoc)
+            } catch {}
+          }
+
+          if (mergedUpdate.byteLength > MAX_PENDING_UPDATE_BYTES) {
+            pendingUpdate = null
+            notifyNative('p2pmd-document-error', {
+              error: 'Pending document update is too large to retry'
+            })
+            return
+          }
+
+          pendingUpdate = mergedUpdate
+          notifyNative('p2pmd-document-error', {
+            error: error.message
+          })
+
+          if (!flushRetryTimer) {
+            flushRetryTimer = setTimeout(() => {
+              flushRetryTimer = null
+              flushYjsUpdate()
+            }, 1200)
+          }
+        }
+      }
+
+      async function initializeYjs() {
+        if (!window.Y) return
+
+        ydoc = new window.Y.Doc()
+        ytext = ydoc.getText('content')
+
+        try {
+          const response = await fetch('/doc/yjsstate')
+          const result = await response.json()
+          if (response.ok && typeof result.yjsState === 'string') {
+            window.Y.applyUpdate(ydoc, base64ToBytes(result.yjsState), Y_ORIGIN_REMOTE)
+            const yjsContent = ytext.toString()
+            if (yjsContent || !input.value) {
+              input.value = yjsContent
+              lastSyncedContent = yjsContent
+              lastInputContent = yjsContent
+            }
+          }
+        } catch {}
+
+        if (!ytext.toString() && input.value) {
+          ydoc.transact(() => {
+            ytext.insert(0, input.value)
+          }, Y_ORIGIN_REMOTE)
+        }
+
+        ydoc.on('update', (update, origin) => {
+          if (origin === Y_ORIGIN_REMOTE || isApplyingRemote) return
+
+          pendingUpdate = pendingUpdate
+            ? window.Y.mergeUpdates([pendingUpdate, update])
+            : update
+
+          if (sendUpdateTimer) clearTimeout(sendUpdateTimer)
+          sendUpdateTimer = setTimeout(() => {
+            sendUpdateTimer = null
+            flushYjsUpdate()
+          }, 100)
+        })
+
+        ytext.observe((event) => {
+          const newContent = ytext.toString()
+          lastSyncedContent = newContent
+          lastInputContent = newContent
+
+          if (newContent === input.value) return
+
+          let selectionStart = Number.isFinite(input.selectionStart) ? input.selectionStart : 0
+          let selectionEnd = Number.isFinite(input.selectionEnd) ? input.selectionEnd : selectionStart
+          let position = 0
+
+          for (const delta of event.changes.delta) {
+            if (delta.retain) {
+              position += delta.retain
+            } else if (delta.insert) {
+              const length = typeof delta.insert === 'string' ? delta.insert.length : 0
+              if (position < selectionStart) selectionStart += length
+              if (position < selectionEnd) selectionEnd += length
+              position += length
+            } else if (delta.delete) {
+              const length = delta.delete
+              if (position < selectionStart) selectionStart -= Math.min(length, selectionStart - position)
+              if (position < selectionEnd) selectionEnd -= Math.min(length, selectionEnd - position)
+            }
+          }
+
+          input.value = newContent
+          input.setSelectionRange(
+            Math.max(0, Math.min(selectionStart, newContent.length)),
+            Math.max(0, Math.min(selectionEnd, newContent.length))
+          )
+          renderLineGutter()
+          if (isPreviewMode) renderPreview()
+          notifyNative('p2pmd-document-updated', {
+            contentLength: newContent.length
+          })
+        })
+      }
+
       async function renderPreview() {
         const requestId = ++previewRequestId
         preview.setAttribute('aria-busy', 'true')
@@ -1421,8 +1695,23 @@ function getFoundationPage () {
       }
 
       function connectEvents() {
+        if (eventSource) {
+          try {
+            eventSource.close()
+          } catch {}
+        }
+
         const params = new URLSearchParams(getPeerPayload())
         const source = new EventSource('/events?' + params.toString())
+        eventSource = source
+
+        source.onopen = () => {
+          if (reconnectTimer) {
+            clearTimeout(reconnectTimer)
+            reconnectTimer = null
+          }
+          if (pendingUpdate) flushYjsUpdate()
+        }
 
         source.addEventListener('peers', (event) => {
           const count = Number(event.data)
@@ -1433,10 +1722,25 @@ function getFoundationPage () {
           })
         })
 
+        source.addEventListener('yjsupdate', (event) => {
+          queueRemoteYjsUpdate(event.data)
+        })
+
         source.addEventListener('update', (event) => {
           try {
             const documentState = JSON.parse(event.data)
             if (typeof documentState.content !== 'string') return
+
+            if (ydoc && ytext) {
+              lastSyncedContent = ytext.toString()
+              lastInputContent = lastSyncedContent
+              applyLineAttributionsFromDocument({
+                ...documentState,
+                content: lastSyncedContent
+              })
+              return
+            }
+
             if (documentState.content === input.value) {
               lastSyncedContent = documentState.content
               lastInputContent = documentState.content
@@ -1456,6 +1760,25 @@ function getFoundationPage () {
           } catch {}
         })
 
+        source.onerror = () => {
+          try {
+            source.close()
+          } catch {}
+
+          if (eventSource === source) eventSource = null
+          if (reconnectTimer) return
+
+          reconnectTimer = setTimeout(() => {
+            reconnectTimer = null
+            connectEvents()
+          }, 1200)
+        }
+      }
+
+      async function initializeEditor() {
+        await loadDocument()
+        await initializeYjs()
+        connectEvents()
       }
 
       input.addEventListener('input', scheduleDocumentSave)
@@ -1477,8 +1800,7 @@ function getFoundationPage () {
         handleToolbarFormat(event)
       })
       window.__p2pmdTogglePreview = togglePreview
-      loadDocument()
-      connectEvents()
+      initializeEditor()
     </script>
   </body>
 </html>`
