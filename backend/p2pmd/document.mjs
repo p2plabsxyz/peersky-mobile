@@ -35,8 +35,7 @@ export function getDocumentState () {
   return {
     content: ytext.toString(),
     updatedAt,
-    lineAttributions,
-    lineAuthors: lineAttributions
+    lineAttributions
   }
 }
 

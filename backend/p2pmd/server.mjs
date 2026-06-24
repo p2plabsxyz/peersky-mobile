@@ -23,8 +23,8 @@ const markdownRenderer = new MarkdownIt({
   breaks: true
 })
 
-subscribeToDocumentUpdates(({ document }) => {
-  broadcastEvent('yjsupdate', getEncodedDocumentState())
+subscribeToDocumentUpdates(({ document, update }) => {
+  broadcastEvent('yjsupdate', update)
   broadcastEvent('update', JSON.stringify(document))
 })
 
@@ -391,7 +391,6 @@ function closeEventClients () {
 
 function removeEventClient (client, shouldBroadcast = true) {
   const deleted = eventClients.delete(client)
-  if (client.peerKey) peerPresence.delete(client.peerKey)
 
   if (deleted && shouldBroadcast) {
     broadcastPeerState()
@@ -409,15 +408,31 @@ function broadcastPeerState () {
 }
 
 function getPeerList () {
-  return Array.from(peerPresence.values())
+  const activePeerKeys = getActivePeerKeys()
+  return Array.from(peerPresence.entries())
+    .filter(([peerKey]) => activePeerKeys.has(peerKey))
+    .map(([, peer]) => peer)
 }
 
 function getPeerCount () {
   let count = 0
-  for (const peer of peerPresence.values()) {
-    if (peer.role !== 'host') count += 1
+  const activePeerKeys = getActivePeerKeys()
+
+  for (const peerKey of activePeerKeys) {
+    const peer = peerPresence.get(peerKey)
+    if (peer && peer.role !== 'host') count += 1
   }
   return count
+}
+
+function getActivePeerKeys () {
+  const activePeerKeys = new Set()
+
+  for (const client of eventClients) {
+    if (client.peerKey) activePeerKeys.add(client.peerKey)
+  }
+
+  return activePeerKeys
 }
 
 function readPeerFromEventRequest (req) {
@@ -444,7 +459,9 @@ function upsertPeerPresence (payload) {
     : `anonymous-${nextPeerId++}`
   const previous = peerPresence.get(clientId)
   const now = Date.now()
-  const lineAttributions = normalizePeerLineAttributions(payload.lineAttributions ?? payload.lineAuthors)
+  const lineAttributions = normalizePeerLineAttributions(
+    payload.peerLineAttributions ?? payload.lineAttributions ?? payload.lineAuthors
+  )
 
   if (lineAttributions) {
     removeLineAttributionsFromOtherPeers(clientId, lineAttributions)
@@ -859,6 +876,7 @@ function getFoundationPage () {
       let lastSyncedContent = ''
       let lastInputContent = ''
       let lineAttributions = {}
+      let localLineAttributions = {}
       let toolbarPointerState = null
       let suppressToolbarClick = false
       const newline = String.fromCharCode(10)
@@ -1142,7 +1160,21 @@ function getFoundationPage () {
           documentState.lineAttributions || documentState.lineAuthors,
           documentState.content || ''
         )
+        localLineAttributions = getLocalLineAttributions(lineAttributions)
         renderLineGutter()
+      }
+
+      function getLocalLineAttributions(attributions) {
+        const localAttributions = {}
+
+        Object.keys(attributions || {}).forEach((line) => {
+          const attribution = attributions[line]
+          if (attribution?.clientId === clientId) {
+            localAttributions[line] = attribution
+          }
+        })
+
+        return localAttributions
       }
 
       function normalizeLineAttributions(attributions, content) {
@@ -1191,15 +1223,25 @@ function getFoundationPage () {
         const previousLines = String(previousContent || '').split(newline)
         const nextLines = String(nextContent || '').split(newline)
         const nextAttributions = {}
+        const nextLocalAttributions = {}
         let prefix = 0
+
+        function carryLineAttribution(previousLine, nextLine) {
+          const existing = lineAttributions[String(previousLine)]
+          if (!existing) return
+
+          nextAttributions[String(nextLine)] = existing
+          if (existing.clientId === clientId) {
+            nextLocalAttributions[String(nextLine)] = existing
+          }
+        }
 
         while (
           prefix < previousLines.length &&
           prefix < nextLines.length &&
           previousLines[prefix] === nextLines[prefix]
         ) {
-          const existing = lineAttributions[String(prefix + 1)]
-          if (existing) nextAttributions[String(prefix + 1)] = existing
+          carryLineAttribution(prefix + 1, prefix + 1)
           prefix += 1
         }
 
@@ -1210,17 +1252,18 @@ function getFoundationPage () {
           nextSuffix >= prefix &&
           previousLines[previousSuffix] === nextLines[nextSuffix]
         ) {
-          const existing = lineAttributions[String(previousSuffix + 1)]
-          if (existing) nextAttributions[String(nextSuffix + 1)] = existing
+          carryLineAttribution(previousSuffix + 1, nextSuffix + 1)
           previousSuffix -= 1
           nextSuffix -= 1
         }
 
         for (let index = prefix; index <= nextSuffix; index++) {
           nextAttributions[String(index + 1)] = localAuthor
+          nextLocalAttributions[String(index + 1)] = localAuthor
         }
 
         lineAttributions = nextAttributions
+        localLineAttributions = nextLocalAttributions
       }
 
       function renderLineGutter() {
@@ -1297,7 +1340,8 @@ function getFoundationPage () {
               body: JSON.stringify({
                 content,
                 ...getPeerPayload(),
-                lineAttributions
+                lineAttributions,
+                peerLineAttributions: localLineAttributions
               })
             })
             const result = await response.json()
