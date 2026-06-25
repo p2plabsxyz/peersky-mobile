@@ -4,6 +4,7 @@ import {
   Button,
   Pressable,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
   TextInput,
@@ -14,6 +15,7 @@ import { Paths } from 'expo-file-system'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import b4a from 'b4a'
 import RPC from 'bare-rpc'
+import { WebView } from 'react-native-webview'
 import bundle from './app.bundle.mjs'
 import {
   RPC_HOLESAIL_CONNECT,
@@ -22,8 +24,22 @@ import {
   RPC_HOLESAIL_STOP,
   RPC_HYPER_CREATE_DRIVE,
   RPC_HYPER_FETCH,
-  RPC_HYPER_INIT
+  RPC_HYPER_INIT,
+  RPC_P2PMD_ROOM_CREATE,
+  RPC_P2PMD_ROOM_DISCONNECT,
+  RPC_P2PMD_ROOM_JOIN,
+  RPC_P2PMD_ROOM_STATUS
 } from '../backend/rpc/commands.mjs'
+
+type P2pmdRoom = {
+  key: string
+  role: 'host' | 'client'
+  localUrl: string
+  host: string
+  port: number
+  secure: boolean
+  udp: boolean
+}
 
 type RpcResponse = {
   ok: boolean
@@ -34,9 +50,14 @@ type RpcResponse = {
   body?: string
   storagePath?: string
   headers?: Record<string, string>
+  running?: boolean
+  host?: string
+  port?: number
+  localUrl?: string
+  room?: P2pmdRoom | null
 }
 
-type RuntimeTab = 'hyper' | 'holesail'
+type RuntimeTab = 'hyper' | 'holesail' | 'p2pmd'
 
 export default function App () {
   const workletRef = useRef<Worklet | null>(null)
@@ -54,6 +75,10 @@ export default function App () {
   const [hsConnectKey, setHsConnectKey] = useState('')
   const [hsConnectPort, setHsConnectPort] = useState('8989')
   const [hsConnectHost, setHsConnectHost] = useState('127.0.0.1')
+  const [p2pmdUrl, setP2pmdUrl] = useState<string | null>(null)
+  const [p2pmdRoom, setP2pmdRoom] = useState<P2pmdRoom | null>(null)
+  const [p2pmdJoinKey, setP2pmdJoinKey] = useState('')
+  const [p2pmdBridgeMessage, setP2pmdBridgeMessage] = useState('')
 
   useEffect(() => {
     void startWorklet()
@@ -254,6 +279,123 @@ export default function App () {
     }
   }
 
+  async function onP2pmdRoomCreate () {
+    setIsLoading(true)
+    setStatus('Creating P2PMD room...')
+    setLastResult(null)
+    setP2pmdRoom(null)
+    setP2pmdUrl(null)
+    setP2pmdBridgeMessage('')
+
+    try {
+      const response = await callRpc(RPC_P2PMD_ROOM_CREATE, {
+        secure: true,
+        udp: false
+      })
+      setLastResult(response)
+
+      if (!response.ok || !response.room) {
+        setStatus(response.error || 'Failed creating P2PMD room')
+        return
+      }
+
+      setP2pmdRoom(response.room)
+      setP2pmdUrl(response.room.localUrl)
+      setStatus('P2PMD room created')
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error))
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  async function onP2pmdRoomJoin () {
+    setIsLoading(true)
+    setStatus('Joining P2PMD room...')
+    setLastResult(null)
+    setP2pmdRoom(null)
+    setP2pmdUrl(null)
+    setP2pmdBridgeMessage('')
+
+    try {
+      const response = await callRpc(RPC_P2PMD_ROOM_JOIN, {
+        key: p2pmdJoinKey.trim(),
+        udp: false
+      })
+      setLastResult(response)
+
+      if (!response.ok || !response.room) {
+        setStatus(response.error || 'Failed joining P2PMD room')
+        return
+      }
+
+      setP2pmdRoom(response.room)
+      setP2pmdUrl(response.room.localUrl)
+      setStatus('P2PMD room joined')
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error))
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  async function onP2pmdRoomStatus () {
+    setIsLoading(true)
+    setStatus('Reading P2PMD room status...')
+    setLastResult(null)
+
+    try {
+      const response = await callRpc(RPC_P2PMD_ROOM_STATUS, {})
+      setLastResult(response)
+
+      if (response.running && response.room) {
+        setP2pmdRoom(response.room)
+        setP2pmdUrl(response.room.localUrl)
+      } else {
+        setP2pmdRoom(null)
+        setP2pmdUrl(null)
+      }
+
+      setStatus(response.running ? 'P2PMD room is running' : 'No P2PMD room is running')
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error))
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  async function onP2pmdRoomDisconnect () {
+    setIsLoading(true)
+    setStatus('Disconnecting P2PMD room...')
+    setLastResult(null)
+
+    try {
+      const response = await callRpc(RPC_P2PMD_ROOM_DISCONNECT, {})
+      setLastResult(response)
+      setP2pmdUrl(null)
+      setP2pmdRoom(null)
+      setP2pmdBridgeMessage('')
+      setStatus(response.ok ? 'P2PMD room disconnected' : (response.error || 'Failed disconnecting P2PMD room'))
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error))
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  async function onP2pmdShareRoom () {
+    if (!p2pmdRoom) return
+
+    try {
+      await Share.share({
+        title: 'Join my P2PMD room',
+        message: `Join my P2PMD room:\n${p2pmdRoom.key}`
+      })
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error))
+    }
+  }
+
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <ScrollView contentContainerStyle={styles.content}>
@@ -275,6 +417,15 @@ export default function App () {
           >
             <Text style={[styles.tabButtonText, activeTab === 'holesail' ? styles.tabButtonTextActive : null]}>
               Holesail
+            </Text>
+          </Pressable>
+          <Pressable
+            style={[styles.tabButton, activeTab === 'p2pmd' ? styles.tabButtonActive : null]}
+            onPress={() => setActiveTab('p2pmd')}
+            disabled={isBooting || isLoading}
+          >
+            <Text style={[styles.tabButtonText, activeTab === 'p2pmd' ? styles.tabButtonTextActive : null]}>
+              P2PMD
             </Text>
           </Pressable>
         </View>
@@ -386,6 +537,107 @@ export default function App () {
             </View>
           </View>
         )}
+        {activeTab === 'p2pmd' && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>P2PMD Local Document Check</Text>
+            <View style={styles.buttons}>
+              <Button
+                title='Create Room'
+                onPress={() => void onP2pmdRoomCreate()}
+                disabled={isBooting || isLoading}
+              />
+              <Button
+                title='Room Status'
+                onPress={() => void onP2pmdRoomStatus()}
+                disabled={isBooting || isLoading}
+              />
+              <Button
+                title='Disconnect'
+                onPress={() => void onP2pmdRoomDisconnect()}
+                disabled={isBooting || isLoading}
+              />
+            </View>
+
+            <View style={styles.joinRoom}>
+              <TextInput
+                style={styles.input}
+                autoCapitalize='none'
+                autoCorrect={false}
+                value={p2pmdJoinKey}
+                onChangeText={setP2pmdJoinKey}
+                placeholder='hs://... room key'
+              />
+              <Button
+                title='Join Room'
+                onPress={() => void onP2pmdRoomJoin()}
+                disabled={isBooting || isLoading || !p2pmdJoinKey.trim()}
+              />
+            </View>
+
+            {p2pmdRoom && (
+              <View style={styles.roomDetails}>
+                <Text style={styles.roomLabel}>Role: {p2pmdRoom.role}</Text>
+                <Text selectable={true} style={styles.roomKey}>
+                  {p2pmdRoom.key}
+                </Text>
+                <Text selectable={true} style={styles.roomUrl}>
+                  {p2pmdRoom.localUrl}
+                </Text>
+                <View style={styles.buttons}>
+                  <Button
+                    title='Share Room Key'
+                    onPress={() => void onP2pmdShareRoom()}
+                    disabled={isBooting || isLoading}
+                  />
+                </View>
+              </View>
+            )}
+
+            {p2pmdUrl && (
+              <View style={styles.webViewFrame}>
+                <WebView
+                  source={{ uri: p2pmdUrl }}
+                  onMessage={(event) => {
+                    const message = event.nativeEvent.data
+                    setP2pmdBridgeMessage(message)
+
+                    try {
+                      const parsed = JSON.parse(message)
+
+                      if (parsed.type === 'p2pmd-document-loaded') {
+                        setStatus('P2PMD document loaded from Bare server')
+                      } else if (parsed.type === 'p2pmd-document-saved') {
+                        setStatus(`P2PMD document saved (${parsed.contentLength} characters)`)
+                      } else if (parsed.type === 'p2pmd-document-updated') {
+                        setStatus(`P2PMD remote update received (${parsed.contentLength} characters)`)
+                      } else if (parsed.type === 'p2pmd-document-error') {
+                        setStatus(parsed.error || 'P2PMD document request failed')
+                      } else {
+                        setStatus('P2PMD WebView connected to Bare server')
+                      }
+                    } catch {
+                      setStatus('P2PMD WebView connected to Bare server')
+                    }
+                  }}
+                  onError={(event) => {
+                    setStatus(`P2PMD WebView failed: ${event.nativeEvent.description}`)
+                  }}
+                  onLoad={() => {
+                    if (p2pmdRoom?.role === 'client') {
+                      setStatus('P2PMD joined room page loaded')
+                    }
+                  }}
+                />
+              </View>
+            )}
+
+            {p2pmdBridgeMessage && (
+              <Text selectable={true} style={styles.bridgeMessage}>
+                WebView bridge: {p2pmdBridgeMessage}
+              </Text>
+            )}
+          </View>
+        )}
 
         {(isBooting || isLoading) && <ActivityIndicator size='small' />}
 
@@ -454,6 +706,7 @@ const styles = StyleSheet.create({
   },
   buttons: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 10
   },
   section: {
@@ -473,6 +726,38 @@ const styles = StyleSheet.create({
     padding: 10
   },
   resultText: {
+    fontFamily: 'monospace',
+    fontSize: 12
+  },
+  webViewFrame: {
+    borderColor: '#bbb',
+    borderRadius: 8,
+    borderWidth: 1,
+    height: 520,
+    overflow: 'hidden'
+  },
+  bridgeMessage: {
+    color: '#076c50',
+    fontFamily: 'monospace',
+    fontSize: 12
+  },
+  roomDetails: {
+    gap: 6
+  },
+  joinRoom: {
+    gap: 10
+  },
+  roomLabel: {
+    fontSize: 14,
+    fontWeight: '600'
+  },
+  roomKey: {
+    color: '#076c50',
+    fontFamily: 'monospace',
+    fontSize: 12
+  },
+  roomUrl: {
+    color: '#526158',
     fontFamily: 'monospace',
     fontSize: 12
   }

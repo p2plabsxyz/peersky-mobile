@@ -6,3 +6,8 @@ export const RPC_HOLESAIL_START_LIVE = 10
 export const RPC_HOLESAIL_CONNECT = 11
 export const RPC_HOLESAIL_STATUS = 12
 export const RPC_HOLESAIL_STOP = 13
+
+export const RPC_P2PMD_ROOM_CREATE = 20
+export const RPC_P2PMD_ROOM_STATUS = 21
+export const RPC_P2PMD_ROOM_DISCONNECT = 22
+export const RPC_P2PMD_ROOM_JOIN = 23
