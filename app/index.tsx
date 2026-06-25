@@ -81,6 +81,7 @@ export default function App () {
   const [p2pmdParticipants, setP2pmdParticipants] = useState<number | null>(null)
   const [p2pmdIsPreviewMode, setP2pmdIsPreviewMode] = useState(false)
   const [p2pmdSyncStatus, setP2pmdSyncStatus] = useState('Ready')
+  const shouldShowRuntimeStatus = activeTab !== 'p2pmd'
 
   useEffect(() => {
     void startWorklet()
@@ -554,7 +555,7 @@ export default function App () {
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <ScrollView contentContainerStyle={styles.content}>
-        <Text style={styles.title}>Runtime Check</Text>
+        <Text style={[styles.title, activeTab === 'p2pmd' ? styles.titleOnDark : null]}>Runtime Check</Text>
         <View style={styles.tabRow}>
           <Pressable
             style={[styles.tabButton, activeTab === 'hyper' ? styles.tabButtonActive : null]}
@@ -584,7 +585,7 @@ export default function App () {
             </Text>
           </Pressable>
         </View>
-        <Text style={styles.status}>{status}</Text>
+        {shouldShowRuntimeStatus && <Text style={styles.status}>{status}</Text>}
 
         {activeTab === 'hyper' && (
           <View style={styles.section}>
@@ -972,6 +973,9 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 22,
     fontWeight: '700'
+  },
+  titleOnDark: {
+    color: '#f1f2f7'
   },
   status: {
     fontSize: 14
