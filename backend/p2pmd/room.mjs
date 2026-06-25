@@ -1,3 +1,4 @@
+import http from 'bare-http1'
 import {
   connectHolesail,
   getHolesailStatus,
@@ -14,6 +15,10 @@ import {
   stopP2pmdServer
 } from './server.mjs'
 import { resetDocumentState } from './document.mjs'
+
+const JOIN_READY_ATTEMPTS = 24
+const JOIN_READY_DELAY_MS = 500
+const JOIN_READY_REQUEST_TIMEOUT_MS = 1000
 
 let room = null
 let roomTransition = Promise.resolve()
@@ -115,7 +120,7 @@ export async function joinP2pmdRoom ({
       }
     }
 
-    await new Promise((resolve) => setTimeout(resolve, 500))
+    await waitForJoinedRoomReady(boundPort)
 
     room = {
       key: roomKey,
@@ -199,4 +204,66 @@ async function withRoomTransition (operation) {
   } finally {
     release()
   }
+}
+
+async function waitForJoinedRoomReady (port) {
+  let lastError = null
+
+  for (let attempt = 0; attempt < JOIN_READY_ATTEMPTS; attempt++) {
+    try {
+      if (await requestP2pmdStatus(port)) return
+    } catch (error) {
+      lastError = error
+    }
+
+    await delay(JOIN_READY_DELAY_MS)
+  }
+
+  throw new Error(lastError?.message || 'Timed out waiting for joined P2PMD room.')
+}
+
+function requestP2pmdStatus (port) {
+  return new Promise((resolve, reject) => {
+    let body = ''
+    let settled = false
+
+    const settle = (error, value) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timeout)
+      if (error) reject(error)
+      else resolve(value)
+    }
+
+    const timeout = setTimeout(() => {
+      settle(new Error('Timed out probing joined P2PMD room.'))
+    }, JOIN_READY_REQUEST_TIMEOUT_MS)
+
+    const req = http.request({
+      host: P2PMD_LOOPBACK_HOST,
+      port,
+      method: 'GET',
+      path: '/status'
+    }, (res) => {
+      res.on('data', (chunk) => {
+        body += chunk.toString()
+      })
+      res.on('end', () => {
+        try {
+          const payload = JSON.parse(body || '{}')
+          settle(null, res.statusCode === 200 && payload.ok === true)
+        } catch {
+          settle(null, false)
+        }
+      })
+      res.on('error', settle)
+    })
+
+    req.on('error', settle)
+    req.end()
+  })
+}
+
+function delay (ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }

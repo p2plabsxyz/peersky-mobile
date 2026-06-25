@@ -23,6 +23,8 @@ export async function getAvailableLoopbackPort () {
     reservation.listen(0, P2PMD_LOOPBACK_HOST)
   })
 
+  // The reservation is released before Holesail binds to the returned port.
+  // This leaves a small race window, but loopback port contention is rare on mobile.
   await new Promise((resolve, reject) => {
     reservation.close((error) => {
       if (error) reject(error)

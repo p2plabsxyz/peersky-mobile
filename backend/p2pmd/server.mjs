@@ -19,6 +19,8 @@ const peerPresence = new Map()
 let keepaliveInterval = null
 let nextPeerId = 1
 const markdownRenderer = new MarkdownIt({
+  // Security-critical: preview output is injected with innerHTML in the WebView.
+  // Keep raw HTML disabled unless the preview path is sanitized first.
   html: false,
   linkify: true,
   breaks: true
@@ -374,8 +376,7 @@ function broadcastRaw (payload) {
       client.res.write(payload)
     } catch (error) {
       console.error('[p2pmd] Removing SSE client after write failure:', error)
-      removeEventClient(client, false)
-      removed = true
+      if (removeEventClient(client, false)) removed = true
     }
   }
 
@@ -397,17 +398,18 @@ function closeEventClients () {
     keepaliveInterval = null
   }
 
-  for (const client of eventClients) {
-    try {
-      client.res.end()
-    } catch {}
+  for (const client of [...eventClients]) {
+    removeEventClient(client, false)
   }
-  eventClients.clear()
   peerPresence.clear()
 }
 
 function removeEventClient (client, shouldBroadcast = true) {
   const deleted = eventClients.delete(client)
+
+  try {
+    client.res.end()
+  } catch {}
 
   if (deleted && shouldBroadcast) {
     broadcastPeerState()
@@ -417,6 +419,8 @@ function removeEventClient (client, shouldBroadcast = true) {
     clearInterval(keepaliveInterval)
     keepaliveInterval = null
   }
+
+  return deleted
 }
 
 function broadcastPeerState () {
