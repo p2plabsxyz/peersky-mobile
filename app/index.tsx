@@ -28,6 +28,7 @@ import {
   RPC_P2PMD_ROOM_CREATE,
   RPC_P2PMD_ROOM_DISCONNECT,
   RPC_P2PMD_ROOM_JOIN,
+  RPC_P2PMD_ROOM_PUBLISH,
   RPC_P2PMD_ROOM_STATUS
 } from '../backend/rpc/commands.mjs'
 
@@ -63,6 +64,7 @@ export default function App () {
   const workletRef = useRef<Worklet | null>(null)
   const rpcRef = useRef<RPC | null>(null)
   const p2pmdWebViewRef = useRef<ComponentRef<typeof WebView> | null>(null)
+  const p2pmdPublishInFlightRef = useRef(false)
   const [isBooting, setIsBooting] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [status, setStatus] = useState('Starting Hyper runtime...')
@@ -81,6 +83,8 @@ export default function App () {
   const [p2pmdParticipants, setP2pmdParticipants] = useState<number | null>(null)
   const [p2pmdIsPreviewMode, setP2pmdIsPreviewMode] = useState(false)
   const [p2pmdSyncStatus, setP2pmdSyncStatus] = useState('Ready')
+  const [p2pmdPublishUrl, setP2pmdPublishUrl] = useState<string | null>(null)
+  const [isP2pmdPublishing, setIsP2pmdPublishing] = useState(false)
   const shouldShowRuntimeStatus = activeTab !== 'p2pmd'
 
   useEffect(() => {
@@ -290,6 +294,7 @@ export default function App () {
     setP2pmdUrl(null)
     setP2pmdParticipants(null)
     setP2pmdIsPreviewMode(false)
+    setP2pmdPublishUrl(null)
     setP2pmdSyncStatus('Creating room...')
 
     try {
@@ -322,6 +327,7 @@ export default function App () {
     setP2pmdUrl(null)
     setP2pmdParticipants(null)
     setP2pmdIsPreviewMode(false)
+    setP2pmdPublishUrl(null)
     setP2pmdSyncStatus('Joining room...')
 
     try {
@@ -360,12 +366,14 @@ export default function App () {
         setP2pmdUrl(response.room.localUrl)
         setP2pmdParticipants(null)
         setP2pmdIsPreviewMode(false)
+        setP2pmdPublishUrl(null)
         setP2pmdSyncStatus('Ready')
       } else {
         setP2pmdRoom(null)
         setP2pmdUrl(null)
         setP2pmdParticipants(null)
         setP2pmdIsPreviewMode(false)
+        setP2pmdPublishUrl(null)
         setP2pmdSyncStatus('Ready')
       }
 
@@ -389,6 +397,7 @@ export default function App () {
       setP2pmdRoom(null)
       setP2pmdParticipants(null)
       setP2pmdIsPreviewMode(false)
+      setP2pmdPublishUrl(null)
       setP2pmdSyncStatus('Ready')
       setStatus(response.ok ? 'P2PMD room disconnected' : (response.error || 'Failed disconnecting P2PMD room'))
     } catch (error) {
@@ -415,6 +424,55 @@ export default function App () {
     p2pmdWebViewRef.current?.injectJavaScript(
       'window.__p2pmdTogglePreview && window.__p2pmdTogglePreview(); true;'
     )
+  }
+
+  function onP2pmdPublishToHyper () {
+    if (p2pmdPublishInFlightRef.current) return
+    setP2pmdSyncStatus('Publishing to Hyper...')
+    p2pmdWebViewRef.current?.injectJavaScript(
+      'window.__p2pmdPublishToHyper && window.__p2pmdPublishToHyper(); true;'
+    )
+  }
+
+  async function publishP2pmdContentToHyper (content: unknown) {
+    if (p2pmdPublishInFlightRef.current) return
+
+    if (typeof content !== 'string') {
+      setP2pmdSyncStatus('Publish failed')
+      setStatus('Unable to publish P2PMD note: invalid document content')
+      return
+    }
+
+    p2pmdPublishInFlightRef.current = true
+    setIsP2pmdPublishing(true)
+
+    try {
+      const response = await callRpc(RPC_P2PMD_ROOM_PUBLISH, {
+        content
+      })
+      setLastResult(response)
+
+      if (!response.ok || typeof response.url !== 'string') {
+        throw new Error(response.error || 'Unable to publish note to Hyper')
+      }
+
+      setP2pmdPublishUrl(response.url)
+      setP2pmdSyncStatus('Published to Hyper')
+      setStatus(`P2PMD published: ${response.url}`)
+      try {
+        await Share.share({
+          title: 'Published P2PMD note',
+          message: response.url
+        })
+      } catch {}
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      setP2pmdSyncStatus(`Publish failed: ${message}`)
+      setStatus(message)
+    } finally {
+      p2pmdPublishInFlightRef.current = false
+      setIsP2pmdPublishing(false)
+    }
   }
 
   function onP2pmdWebViewMessage (message: string) {
@@ -446,12 +504,18 @@ export default function App () {
           setStatus(`P2PMD remote update received (${parsed.contentLength} characters)`)
           break
         case 'p2pmd-document-error':
-          setP2pmdSyncStatus('Sync error')
+          setP2pmdSyncStatus(parsed.error ? `Error: ${parsed.error}` : 'Sync error')
           setStatus(parsed.error || 'P2PMD document request failed')
           break
         case 'p2pmd-preview-mode':
           setP2pmdIsPreviewMode(Boolean(parsed.preview))
           setStatus(parsed.preview ? 'P2PMD preview mode' : 'P2PMD write mode')
+          break
+        case 'p2pmd-image-uploaded':
+          setP2pmdSyncStatus('Image uploaded')
+          break
+        case 'p2pmd-publish-requested':
+          void publishP2pmdContentToHyper(parsed.content)
           break
         default:
           setStatus('P2PMD editor connected')
@@ -501,17 +565,32 @@ export default function App () {
           <View style={styles.p2pmdRoomIdentity}>
             <View style={styles.p2pmdWorkspaceKeyRow}>
               <Text style={styles.p2pmdWorkspaceKeyLabel}>Key</Text>
-              <Text selectable={true} numberOfLines={1} style={styles.p2pmdWorkspaceKey}>
-                {formatP2pmdRoomKey(p2pmdRoom.key)}
+              <Text numberOfLines={1} ellipsizeMode='middle' style={styles.p2pmdWorkspaceKey}>
+                {p2pmdRoom.key}
               </Text>
             </View>
-            <Text selectable={true} numberOfLines={1} style={styles.p2pmdWorkspaceUrl}>
+            <Text numberOfLines={1} ellipsizeMode='middle' style={styles.p2pmdWorkspaceUrl}>
               {p2pmdRoom.localUrl}
             </Text>
+            {p2pmdPublishUrl && (
+              <View style={styles.p2pmdPublishedUrlRow}>
+                <Text style={styles.p2pmdPublishedUrlLabel}>Published</Text>
+                <Text numberOfLines={1} ellipsizeMode='middle' style={styles.p2pmdPublishedUrl}>
+                  {p2pmdPublishUrl}
+                </Text>
+              </View>
+            )}
             <Text numberOfLines={1} style={styles.p2pmdWorkspaceSyncStatus}>
               {p2pmdSyncStatus}
             </Text>
           </View>
+          <Pressable
+            style={styles.p2pmdMetaButton}
+            onPress={onP2pmdPublishToHyper}
+            disabled={isBooting || isLoading || isP2pmdPublishing}
+          >
+            <Text style={styles.p2pmdMetaButtonText}>Publish</Text>
+          </Pressable>
           <Pressable
             style={styles.p2pmdMetaButton}
             onPress={() => void onP2pmdShareRoom()}
@@ -780,12 +859,6 @@ function toBareFsPath (uri: string) {
   return decodeURIComponent(new URL(uri).pathname).replace(/\/$/, '')
 }
 
-function formatP2pmdRoomKey (key: string) {
-  const readableKey = key.replace(/^hs:\/\//, '')
-  if (readableKey.length <= 18) return `hs://${readableKey}`
-  return `hs://${readableKey.slice(0, 8)}...${readableKey.slice(-6)}`
-}
-
 const styles = StyleSheet.create({
   container: {
     flex: 1
@@ -916,24 +989,44 @@ const styles = StyleSheet.create({
     backgroundColor: '#30364a',
     borderRadius: 6,
     color: '#cdd6ff',
-    fontSize: 10,
+    fontSize: 9,
     fontWeight: '800',
     overflow: 'hidden',
-    paddingHorizontal: 6,
+    paddingHorizontal: 5,
     paddingVertical: 2,
     textTransform: 'uppercase'
   },
   p2pmdWorkspaceKey: {
     color: '#59a6ff',
+    flex: 1,
     flexShrink: 1,
     fontFamily: 'monospace',
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '700'
   },
   p2pmdWorkspaceUrl: {
     color: '#a2a8bb',
     fontFamily: 'monospace',
-    fontSize: 11
+    fontSize: 11,
+    minWidth: 0
+  },
+  p2pmdPublishedUrlRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 5,
+    minWidth: 0
+  },
+  p2pmdPublishedUrlLabel: {
+    color: '#cdd6ff',
+    fontSize: 10,
+    fontWeight: '800'
+  },
+  p2pmdPublishedUrl: {
+    color: '#59a6ff',
+    flex: 1,
+    fontFamily: 'monospace',
+    fontSize: 10,
+    minWidth: 0
   },
   p2pmdWorkspaceSyncStatus: {
     color: '#cdd6ff',

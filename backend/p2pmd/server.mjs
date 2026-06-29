@@ -1,5 +1,6 @@
 import http from 'bare-http1'
 import MarkdownIt from 'markdown-it'
+import { readHyperFile, uploadHyperFile } from '../hyper/drive.mjs'
 import {
   applyDocumentUpdate,
   getEncodedDocumentState,
@@ -25,6 +26,21 @@ const markdownRenderer = new MarkdownIt({
   linkify: true,
   breaks: true
 })
+const defaultImageRenderer = markdownRenderer.renderer.rules.image || function (tokens, idx, options, env, self) {
+  return self.renderToken(tokens, idx, options)
+}
+
+markdownRenderer.renderer.rules.image = function (tokens, idx, options, env, self) {
+  const srcIndex = tokens[idx].attrIndex('src')
+  if (srcIndex >= 0) {
+    const src = tokens[idx].attrs[srcIndex][1]
+    if (typeof src === 'string' && src.startsWith('hyper://')) {
+      tokens[idx].attrs[srcIndex][1] = `/hyper/file?url=${encodeURIComponent(src)}`
+    }
+  }
+
+  return defaultImageRenderer(tokens, idx, options, env, self)
+}
 
 subscribeToDocumentUpdates(({ document, origin, update }) => {
   if (origin !== 'line-attribution-update') {
@@ -174,6 +190,29 @@ function handleRequest (req, res) {
     return
   }
 
+  if (req.method === 'GET' && pathname === '/hyper/file') {
+    const url = getQueryParam(req.url, 'url')
+    readHyperFile({ url })
+      .then((result) => {
+        if (!result.ok) {
+          sendJson(res, result.status || 400, {
+            ok: false,
+            error: result.error || 'Unable to read Hyper file'
+          })
+          return
+        }
+
+        sendBinary(res, result.status || 200, result.bytes, result.contentType)
+      })
+      .catch((error) => {
+        sendJson(res, 400, {
+          ok: false,
+          error: error.message
+        })
+      })
+    return
+  }
+
   if (req.method === 'GET' && (pathname === '/' || pathname === '/index.html')) {
     sendHtml(res, 200, getFoundationPage())
     return
@@ -262,6 +301,21 @@ function handleRequest (req, res) {
     return
   }
 
+  if (req.method === 'POST' && pathname === '/hyper/image') {
+    readJsonBody(req)
+      .then(async (body) => {
+        const result = await uploadHyperFile(body)
+        sendJson(res, result.ok ? 200 : 400, result)
+      })
+      .catch((error) => {
+        sendJson(res, error.statusCode || 400, {
+          ok: false,
+          error: error.message
+        })
+      })
+    return
+  }
+
   if (req.method === 'GET' && pathname === '/events') {
     openEventStream(req, res)
     return
@@ -313,6 +367,16 @@ function sendScript (res, statusCode, body) {
   res.statusCode = statusCode
   res.setHeader('Content-Type', 'application/javascript; charset=utf-8')
   res.setHeader('Cache-Control', 'public, max-age=86400')
+  setCorsHeaders(res)
+  res.setHeader('Connection', 'close')
+  res.end(body)
+}
+
+function sendBinary (res, statusCode, body, contentType = 'application/octet-stream') {
+  res.statusCode = statusCode
+  res.setHeader('Content-Type', contentType)
+  res.setHeader('Cache-Control', 'no-store')
+  res.setHeader('X-Content-Type-Options', 'nosniff')
   setCorsHeaders(res)
   res.setHeader('Connection', 'close')
   res.end(body)
@@ -612,6 +676,15 @@ function createHttpError (statusCode, message) {
   return error
 }
 
+function getQueryParam (rawUrl, key) {
+  try {
+    const parsed = new URL(String(rawUrl || '/'), 'http://127.0.0.1')
+    return parsed.searchParams.get(key) || ''
+  } catch {
+    return ''
+  }
+}
+
 function getFoundationPage () {
   return `<!doctype html>
 <html lang="en">
@@ -643,6 +716,12 @@ function getFoundationPage () {
         overflow: hidden;
         -webkit-touch-callout: none;
       }
+      body.preview-mode {
+        height: auto;
+        min-height: 100vh;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+      }
       h1 { margin: 0; font-size: 19px; letter-spacing: 0.01em; }
       p { line-height: 1.5; }
       code { color: var(--accent); }
@@ -651,6 +730,10 @@ function getFoundationPage () {
         flex-direction: column;
         width: 100vw;
         height: 100vh;
+      }
+      body.preview-mode .app-shell {
+        height: auto;
+        min-height: 100vh;
       }
       .editor-card {
         display: flex;
@@ -661,6 +744,9 @@ function getFoundationPage () {
         border-radius: 0;
         background: var(--panel-deep);
         box-shadow: none;
+      }
+      body.preview-mode .editor-card {
+        min-height: 100vh;
       }
       .editor-frame {
         display: grid;
@@ -738,6 +824,12 @@ function getFoundationPage () {
         overflow: auto;
         overflow-wrap: anywhere;
         font: 16px/1.6 var(--ui-font);
+      }
+      body.preview-mode #preview {
+        flex: none;
+        min-height: 100vh;
+        overflow: visible;
+        touch-action: pan-y;
       }
       #preview h1,
       #preview h2,
@@ -876,6 +968,7 @@ function getFoundationPage () {
             <svg class="toolbar-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M12 12a1 1 0 0 0 1-1V8.558a1 1 0 0 0-1-1h-1.388q0-.527.062-1.054.093-.558.31-.992t.559-.683q.34-.279.868-.279V3q-.868 0-1.52.372a3.3 3.3 0 0 0-1.085.992 4.9 4.9 0 0 0-.62 1.458A7.7 7.7 0 0 0 9 7.558V11a1 1 0 0 0 1 1zm-6 0a1 1 0 0 0 1-1V8.558a1 1 0 0 0-1-1H4.612q0-.527.062-1.054.094-.558.31-.992.217-.434.559-.683.34-.279.868-.279V3q-.868 0-1.52.372a3.3 3.3 0 0 0-1.085.992 4.9 4.9 0 0 0-.62 1.458A7.7 7.7 0 0 0 3 7.558V11a1 1 0 0 0 1 1z"/></svg>
           </button>
         </div>
+        <input id="image-upload-input" type="file" accept="image/*" hidden />
         <div class="editor-frame">
           <div id="line-gutter-wrap" aria-hidden="true">
             <div id="line-gutter"></div>
@@ -890,6 +983,7 @@ function getFoundationPage () {
       const input = document.getElementById('document-input')
       const preview = document.getElementById('preview')
       const formattingToolbar = document.getElementById('formatting-toolbar')
+      const imageUploadInput = document.getElementById('image-upload-input')
       const lineGutter = document.getElementById('line-gutter')
       const TOOLBAR_TAP_MOVEMENT_LIMIT = 8
       const REMOTE_UPDATE_BATCH_MS = 80
@@ -917,6 +1011,7 @@ function getFoundationPage () {
       let localLineAttributions = {}
       let toolbarPointerState = null
       let suppressToolbarClick = false
+      let pendingImageSelection = null
       const newline = String.fromCharCode(10)
       const CLIENT_ID_KEY = 'p2pmd-mobile-client-id'
       const clientId = getClientId()
@@ -1197,6 +1292,13 @@ function getFoundationPage () {
         const end = input.selectionEnd
         const selected = input.value.slice(start, end)
 
+        if (imageUploadInput) {
+          pendingImageSelection = createPendingImageSelection(start, end, selected || '')
+          imageUploadInput.value = ''
+          imageUploadInput.click()
+          return
+        }
+
         if (selected && /^(https?:[/][/]|www[.]|[a-z0-9-]+[.][a-z]{2,}|[.]?[/])/i.test(selected.trim())) {
           const replacement = '![](' + selected + ')'
           replaceDocumentRange(start, end, replacement, start + 3, start + 3)
@@ -1206,6 +1308,201 @@ function getFoundationPage () {
         const altText = selected || 'image'
         const replacement = '![' + altText + ']()'
         replaceDocumentRange(start, end, replacement, start + replacement.length - 1, start + replacement.length - 1)
+      }
+
+      async function handleImageUploadSelection(event) {
+        const file = event.target.files && event.target.files[0]
+        const selection = pendingImageSelection
+        pendingImageSelection = null
+        if (!file || !selection) return
+
+        const insertion = resolvePendingImageSelection(selection)
+        const placeholder = createImageUploadPlaceholder()
+        const placeholderStart = Math.min(insertion.start, input.value.length)
+        const placeholderBlock = createMarkdownBlock(input.value, insertion.start, insertion.end, placeholder)
+        replaceDocumentRange(insertion.start, insertion.end, placeholderBlock.text, placeholderBlock.cursor, placeholderBlock.cursor)
+
+        try {
+          const uploadFile = await compressImageFile(file)
+          const content = new Uint8Array(await uploadFile.arrayBuffer())
+          const response = await fetch('/hyper/image', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              name: uploadFile.name || file.name || 'image',
+              contentBase64: bytesToBase64(content)
+            })
+          })
+          const result = await response.json()
+
+          if (!response.ok || !result.ok || typeof result.url !== 'string') {
+            throw new Error(result.error || 'Unable to upload image')
+          }
+
+          const altText = normalizeImageAltText(insertion.altText || result.name || uploadFile.name || file.name || 'image')
+          const replacement = createImageMarkdown(altText, result.url)
+          replaceUploadPlaceholder(placeholderStart, placeholder, replacement)
+          notifyNative('p2pmd-image-uploaded', {
+            url: result.url,
+            name: result.name || uploadFile.name || file.name || 'image'
+          })
+        } catch (error) {
+          replaceUploadPlaceholder(placeholderStart, placeholder, '![upload failed]')
+          notifyNative('p2pmd-document-error', {
+            error: error.message
+          })
+        }
+      }
+
+      function createImageUploadPlaceholder() {
+        return '![uploading..](#p2pmd-upload-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2) + ')'
+      }
+
+      function createPendingImageSelection(start, end, altText) {
+        if (ydoc && ytext && window.Y?.createRelativePositionFromTypeIndex) {
+          return {
+            altText,
+            start,
+            end,
+            relativeStart: window.Y.createRelativePositionFromTypeIndex(ytext, start),
+            relativeEnd: window.Y.createRelativePositionFromTypeIndex(ytext, end)
+          }
+        }
+
+        return {
+          altText,
+          start,
+          end
+        }
+      }
+
+      function resolvePendingImageSelection(selection) {
+        if (
+          selection.relativeStart &&
+          selection.relativeEnd &&
+          ydoc &&
+          ytext &&
+          window.Y?.createAbsolutePositionFromRelativePosition
+        ) {
+          const start = window.Y.createAbsolutePositionFromRelativePosition(selection.relativeStart, ydoc)
+          const end = window.Y.createAbsolutePositionFromRelativePosition(selection.relativeEnd, ydoc)
+
+          if (start && end && start.type === ytext && end.type === ytext) {
+            return {
+              start: Math.max(0, Math.min(start.index, input.value.length)),
+              end: Math.max(0, Math.min(end.index, input.value.length)),
+              altText: selection.altText
+            }
+          }
+        }
+
+        return {
+          start: Math.max(0, Math.min(selection.start, input.value.length)),
+          end: Math.max(0, Math.min(selection.end, input.value.length)),
+          altText: selection.altText
+        }
+      }
+
+      function createImageMarkdown(altText, url) {
+        return '![' + altText + '](' + url + ')'
+      }
+
+      function createMarkdownBlock(content, start, end, markdown) {
+        const prefix = start > 0 && content[start - 1] !== newline ? newline : ''
+        const suffix = end < content.length && content[end] !== newline ? newline : ''
+        const text = prefix + markdown + suffix
+        const cursor = start + text.length
+
+        return {
+          text,
+          cursor
+        }
+      }
+
+      function compressImageFile(file) {
+        const skipTypes = ['image/gif', 'image/svg+xml']
+        if (!file.type || skipTypes.includes(file.type)) return Promise.resolve(file)
+
+        return new Promise((resolve) => {
+          const image = new Image()
+          const objectUrl = URL.createObjectURL(file)
+
+          image.onload = () => {
+            URL.revokeObjectURL(objectUrl)
+
+            const maxWidth = 1920
+            let width = image.width
+            let height = image.height
+
+            if (width <= maxWidth && file.size < 500 * 1024) {
+              resolve(file)
+              return
+            }
+
+            if (width > maxWidth) {
+              height = Math.round(height * (maxWidth / width))
+              width = maxWidth
+            }
+
+            const canvas = document.createElement('canvas')
+            canvas.width = width
+            canvas.height = height
+            canvas.getContext('2d').drawImage(image, 0, 0, width, height)
+
+            const outputType = file.type === 'image/png' ? 'image/webp' : (file.type || 'image/jpeg')
+            canvas.toBlob((blob) => {
+              if (!blob || blob.size >= file.size) {
+                resolve(file)
+                return
+              }
+
+              const extension = outputType === 'image/webp'
+                ? '.webp'
+                : ((file.name || '').match(/[.][^.]+$/)?.[0] || '.jpg')
+              const name = (file.name || 'image').replace(/[.][^.]+$/, '') + extension
+              resolve(new File([blob], name, { type: outputType }))
+            }, outputType, 0.8)
+          }
+
+          image.onerror = () => {
+            URL.revokeObjectURL(objectUrl)
+            resolve(file)
+          }
+
+          image.src = objectUrl
+        })
+      }
+
+      function replaceUploadPlaceholder(start, placeholder, replacement) {
+        if (input.value.slice(start, start + placeholder.length) === placeholder) {
+          replaceDocumentRange(start, start + placeholder.length, replacement, start + replacement.length, start + replacement.length)
+          return
+        }
+
+        const index = input.value.indexOf(placeholder)
+        if (index !== -1) {
+          replaceDocumentRange(index, index + placeholder.length, replacement, index + replacement.length, index + replacement.length)
+        }
+      }
+
+      function normalizeImageAltText(value) {
+        let text = String(value || 'image')
+        const extensionIndex = text.lastIndexOf('.')
+        if (extensionIndex > 0) text = text.slice(0, extensionIndex)
+
+        text = text
+          .split('[').join(' ')
+          .split(']').join(' ')
+          .split('(').join(' ')
+          .split(')').join(' ')
+          .split(' ')
+          .filter(Boolean)
+          .join(' ')
+          .trim()
+
+        return text || 'image'
       }
 
       function applyFormatting(format) {
@@ -1682,6 +1979,7 @@ function getFoundationPage () {
 
       function togglePreview() {
         isPreviewMode = !isPreviewMode
+        document.body.classList.toggle('preview-mode', isPreviewMode)
         input.hidden = isPreviewMode
         input.parentElement.hidden = isPreviewMode
         preview.hidden = !isPreviewMode
@@ -1696,6 +1994,12 @@ function getFoundationPage () {
           previewRequestId += 1
           input.focus()
         }
+      }
+
+      function publishToHyper() {
+        notifyNative('p2pmd-publish-requested', {
+          content: input.value
+        })
       }
 
       function connectEvents() {
@@ -1790,6 +2094,7 @@ function getFoundationPage () {
       input.addEventListener('scroll', syncLineGutterScroll)
       input.addEventListener('contextmenu', preventNativeContextMenu)
       document.addEventListener('contextmenu', preventNativeContextMenu)
+      imageUploadInput?.addEventListener('change', handleImageUploadSelection)
       formattingToolbar.addEventListener('pointerdown', handleToolbarPointerDown)
       formattingToolbar.addEventListener('pointerup', handleToolbarPointerUp)
       formattingToolbar.addEventListener('pointercancel', () => {
@@ -1804,6 +2109,7 @@ function getFoundationPage () {
         handleToolbarFormat(event)
       })
       window.__p2pmdTogglePreview = togglePreview
+      window.__p2pmdPublishToHyper = publishToHyper
       initializeEditor()
     </script>
   </body>
