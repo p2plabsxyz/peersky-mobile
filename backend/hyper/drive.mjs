@@ -4,8 +4,12 @@ import { getHyperRuntime } from './runtime.mjs'
 import { parseHyperUrl } from './url.mjs'
 
 const MAX_HYPER_FILE_BYTES = 10 * 1024 * 1024
+const MAX_HYPER_IMAGE_BYTES = 5 * 1024 * 1024
 const HYPER_READ_TIMEOUT_MS = 15000
 const P2PMD_DRIVE_NAME = 'p2pmd'
+const IMAGE_UPLOAD_WINDOW_MS = 60 * 1000
+const MAX_IMAGE_UPLOADS_PER_WINDOW = 5
+const MAX_IMAGE_UPLOAD_BYTES_PER_WINDOW = 10 * 1024 * 1024
 const IMAGE_EXTENSIONS = {
   'image/gif': '.gif',
   'image/jpeg': '.jpg',
@@ -19,6 +23,9 @@ const markdownRenderer = new MarkdownIt({
 })
 let nextAssetId = 0
 let publishTransition = Promise.resolve()
+let imageUploadWindowStartedAt = 0
+let imageUploadCount = 0
+let imageUploadBytes = 0
 
 export async function createDrive ({ name } = {}) {
   const runtime = await getHyperRuntime()
@@ -69,6 +76,9 @@ export async function uploadHyperFile ({
       error: 'Unsupported image format. Use PNG, JPEG, WebP, or GIF.'
     }
   }
+
+  const budget = reserveImageUploadBudget(content.bytes.byteLength)
+  if (!budget.ok) return budget
 
   const filename = normalizeImageFilename(name, contentType)
   const runtime = await getHyperRuntime()
@@ -191,10 +201,10 @@ function decodeBase64Content (contentBase64) {
     }
   }
 
-  if (bytes.byteLength < 1 || bytes.byteLength > MAX_HYPER_FILE_BYTES) {
+  if (bytes.byteLength < 1 || bytes.byteLength > MAX_HYPER_IMAGE_BYTES) {
     return {
       ok: false,
-      error: 'Invalid file size. Maximum size is 10 MB.'
+      error: 'Invalid image size. Maximum size is 5 MB.'
     }
   }
 
@@ -202,6 +212,31 @@ function decodeBase64Content (contentBase64) {
     ok: true,
     bytes
   }
+}
+
+function reserveImageUploadBudget (byteLength) {
+  const now = Date.now()
+
+  if (now - imageUploadWindowStartedAt > IMAGE_UPLOAD_WINDOW_MS) {
+    imageUploadWindowStartedAt = now
+    imageUploadCount = 0
+    imageUploadBytes = 0
+  }
+
+  if (
+    imageUploadCount + 1 > MAX_IMAGE_UPLOADS_PER_WINDOW ||
+    imageUploadBytes + byteLength > MAX_IMAGE_UPLOAD_BYTES_PER_WINDOW
+  ) {
+    return {
+      ok: false,
+      error: 'Image upload rate limit exceeded. Try again later.'
+    }
+  }
+
+  imageUploadCount += 1
+  imageUploadBytes += byteLength
+
+  return { ok: true }
 }
 
 function normalizeFilename (name, fallback) {
