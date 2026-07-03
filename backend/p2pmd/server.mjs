@@ -2107,7 +2107,6 @@ function getFoundationPage () {
       input.addEventListener('keydown', continueListOnEnter)
       input.addEventListener('scroll', syncLineGutterScroll)
       input.addEventListener('contextmenu', preventNativeContextMenu)
-      document.addEventListener('contextmenu', preventNativeContextMenu)
       imageUploadInput?.addEventListener('change', handleImageUploadSelection)
       formattingToolbar.addEventListener('pointerdown', handleToolbarPointerDown)
       formattingToolbar.addEventListener('pointerup', handleToolbarPointerUp)
