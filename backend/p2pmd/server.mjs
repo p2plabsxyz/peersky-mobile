@@ -475,6 +475,10 @@ function removeEventClient (client, shouldBroadcast = true) {
     client.res.end()
   } catch {}
 
+  if (deleted) {
+    prunePeerPresence(client.peerKey)
+  }
+
   if (deleted && shouldBroadcast) {
     broadcastPeerState()
   }
@@ -485,6 +489,16 @@ function removeEventClient (client, shouldBroadcast = true) {
   }
 
   return deleted
+}
+
+function prunePeerPresence (peerKey) {
+  if (!peerKey) return
+
+  for (const client of eventClients) {
+    if (client.peerKey === peerKey) return
+  }
+
+  peerPresence.delete(peerKey)
 }
 
 function broadcastPeerState () {
