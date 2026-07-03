@@ -4,7 +4,8 @@
   "description": "PeerSky Browser for iOS and Android",
   "main": "expo-router/entry",
   "scripts": {
-    "bundle:bare": "bare-pack --host android-arm64 --host android-arm --host android-ia32 --host android-x64 --host ios-arm64 --host ios-arm64-simulator --host ios-x64-simulator --imports backend/bare-imports.json --linked --out app/app.bundle.mjs backend/backend.mjs",
+    "generate:yjs-runtime": "node scripts/generate-yjs-runtime.mjs",
+    "bundle:bare": "npm run generate:yjs-runtime && bare-pack --host android-arm64 --host android-arm --host android-ia32 --host android-x64 --host ios-arm64 --host ios-arm64-simulator --host ios-x64-simulator --imports backend/bare-imports.json --linked --out app/app.bundle.mjs backend/backend.mjs",
     "start": "expo start",
     "preandroid": "npm run bundle:bare",
     "android": "expo run:android",
@@ -55,6 +56,7 @@
     "@types/react": "~19.2.10",
     "babel-preset-expo": "~55.0.8",
     "bare-pack": "^2.0.1",
+    "esbuild": "^0.28.1",
     "standard": "^17.1.0",
     "typescript": "^5.3.3"
   }
