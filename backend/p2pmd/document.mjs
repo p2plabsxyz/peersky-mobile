@@ -2,7 +2,7 @@ import b4a from 'b4a'
 import * as Y from 'yjs'
 
 const MAX_DOCUMENT_LENGTH = 10 * 1024 * 1024
-const MAX_UPDATE_LENGTH = MAX_DOCUMENT_LENGTH * 2
+const MAX_UPDATE_LENGTH = 4 * 1024 * 1024
 const MAX_LINE_ATTRIBUTIONS = 100000
 
 const ydoc = new Y.Doc()
