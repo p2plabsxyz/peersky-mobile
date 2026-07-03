@@ -137,7 +137,17 @@ export async function readHyperFile ({ url } = {}) {
 
   try {
     const runtime = await getHyperRuntime()
-    const drive = await runtime.getDrive(target.driveAddress)
+    const drive = await runtime.getDrive(P2PMD_DRIVE_NAME)
+    const driveAddress = 'hyper://' + drive.id + '/'
+
+    if (target.driveAddress !== driveAddress) {
+      return {
+        ok: false,
+        status: 403,
+        error: 'Only P2PMD drive images can be proxied.'
+      }
+    }
+
     const entry = await drive.entry(target.pathname, { timeout: HYPER_READ_TIMEOUT_MS })
 
     if (!entry?.value.blob) {
