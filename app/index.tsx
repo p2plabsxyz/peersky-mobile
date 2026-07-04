@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { type ComponentRef, useEffect, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Button,
@@ -28,6 +28,7 @@ import {
   RPC_P2PMD_ROOM_CREATE,
   RPC_P2PMD_ROOM_DISCONNECT,
   RPC_P2PMD_ROOM_JOIN,
+  RPC_P2PMD_ROOM_PUBLISH,
   RPC_P2PMD_ROOM_STATUS
 } from '../backend/rpc/commands.mjs'
 
@@ -62,7 +63,8 @@ type RuntimeTab = 'hyper' | 'holesail' | 'p2pmd'
 export default function App () {
   const workletRef = useRef<Worklet | null>(null)
   const rpcRef = useRef<RPC | null>(null)
-
+  const p2pmdWebViewRef = useRef<ComponentRef<typeof WebView> | null>(null)
+  const p2pmdPublishInFlightRef = useRef(false)
   const [isBooting, setIsBooting] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [status, setStatus] = useState('Starting Hyper runtime...')
@@ -78,7 +80,12 @@ export default function App () {
   const [p2pmdUrl, setP2pmdUrl] = useState<string | null>(null)
   const [p2pmdRoom, setP2pmdRoom] = useState<P2pmdRoom | null>(null)
   const [p2pmdJoinKey, setP2pmdJoinKey] = useState('')
-  const [p2pmdBridgeMessage, setP2pmdBridgeMessage] = useState('')
+  const [p2pmdParticipants, setP2pmdParticipants] = useState<number | null>(null)
+  const [p2pmdIsPreviewMode, setP2pmdIsPreviewMode] = useState(false)
+  const [p2pmdSyncStatus, setP2pmdSyncStatus] = useState('Ready')
+  const [p2pmdPublishUrl, setP2pmdPublishUrl] = useState<string | null>(null)
+  const [isP2pmdPublishing, setIsP2pmdPublishing] = useState(false)
+  const shouldShowRuntimeStatus = activeTab !== 'p2pmd'
 
   useEffect(() => {
     void startWorklet()
@@ -285,7 +292,10 @@ export default function App () {
     setLastResult(null)
     setP2pmdRoom(null)
     setP2pmdUrl(null)
-    setP2pmdBridgeMessage('')
+    setP2pmdParticipants(null)
+    setP2pmdIsPreviewMode(false)
+    setP2pmdPublishUrl(null)
+    setP2pmdSyncStatus('Creating room...')
 
     try {
       const response = await callRpc(RPC_P2PMD_ROOM_CREATE, {
@@ -315,7 +325,10 @@ export default function App () {
     setLastResult(null)
     setP2pmdRoom(null)
     setP2pmdUrl(null)
-    setP2pmdBridgeMessage('')
+    setP2pmdParticipants(null)
+    setP2pmdIsPreviewMode(false)
+    setP2pmdPublishUrl(null)
+    setP2pmdSyncStatus('Joining room...')
 
     try {
       const response = await callRpc(RPC_P2PMD_ROOM_JOIN, {
@@ -339,7 +352,7 @@ export default function App () {
     }
   }
 
-  async function onP2pmdRoomStatus () {
+  async function onP2pmdRoomRefresh () {
     setIsLoading(true)
     setStatus('Reading P2PMD room status...')
     setLastResult(null)
@@ -351,9 +364,17 @@ export default function App () {
       if (response.running && response.room) {
         setP2pmdRoom(response.room)
         setP2pmdUrl(response.room.localUrl)
+        setP2pmdParticipants(null)
+        setP2pmdIsPreviewMode(false)
+        setP2pmdPublishUrl(null)
+        setP2pmdSyncStatus('Ready')
       } else {
         setP2pmdRoom(null)
         setP2pmdUrl(null)
+        setP2pmdParticipants(null)
+        setP2pmdIsPreviewMode(false)
+        setP2pmdPublishUrl(null)
+        setP2pmdSyncStatus('Ready')
       }
 
       setStatus(response.running ? 'P2PMD room is running' : 'No P2PMD room is running')
@@ -374,7 +395,10 @@ export default function App () {
       setLastResult(response)
       setP2pmdUrl(null)
       setP2pmdRoom(null)
-      setP2pmdBridgeMessage('')
+      setP2pmdParticipants(null)
+      setP2pmdIsPreviewMode(false)
+      setP2pmdPublishUrl(null)
+      setP2pmdSyncStatus('Ready')
       setStatus(response.ok ? 'P2PMD room disconnected' : (response.error || 'Failed disconnecting P2PMD room'))
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error))
@@ -396,10 +420,221 @@ export default function App () {
     }
   }
 
+  function onP2pmdTogglePreview () {
+    p2pmdWebViewRef.current?.injectJavaScript(
+      'window.__p2pmdTogglePreview && window.__p2pmdTogglePreview(); true;'
+    )
+  }
+
+  function onP2pmdPublishToHyper () {
+    if (p2pmdPublishInFlightRef.current) return
+    setP2pmdSyncStatus('Publishing to Hyper...')
+    p2pmdWebViewRef.current?.injectJavaScript(
+      'window.__p2pmdPublishToHyper && window.__p2pmdPublishToHyper(); true;'
+    )
+  }
+
+  async function publishP2pmdContentToHyper (content: unknown) {
+    if (p2pmdPublishInFlightRef.current) return
+
+    if (typeof content !== 'string') {
+      setP2pmdSyncStatus('Publish failed')
+      setStatus('Unable to publish P2PMD note: invalid document content')
+      return
+    }
+
+    p2pmdPublishInFlightRef.current = true
+    setIsP2pmdPublishing(true)
+
+    try {
+      const response = await callRpc(RPC_P2PMD_ROOM_PUBLISH, {
+        content
+      })
+      setLastResult(response)
+
+      if (!response.ok || typeof response.url !== 'string') {
+        throw new Error(response.error || 'Unable to publish note to Hyper')
+      }
+
+      setP2pmdPublishUrl(response.url)
+      setP2pmdSyncStatus('Published to Hyper')
+      setStatus(`P2PMD published: ${response.url}`)
+      try {
+        await Share.share({
+          title: 'Published P2PMD note',
+          message: response.url
+        })
+      } catch {}
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      setP2pmdSyncStatus(`Publish failed: ${message}`)
+      setStatus(message)
+    } finally {
+      p2pmdPublishInFlightRef.current = false
+      setIsP2pmdPublishing(false)
+    }
+  }
+
+  function onP2pmdWebViewMessage (message: string) {
+    try {
+      const parsed = JSON.parse(message)
+
+      switch (parsed.type) {
+        case 'p2pmd-peers':
+          if (Number.isInteger(parsed.count) && parsed.count >= 0) {
+            setP2pmdParticipants(parsed.count)
+          }
+          break
+        case 'p2pmd-document-loaded':
+          setP2pmdSyncStatus('Loaded')
+          setStatus('P2PMD document loaded')
+          break
+        case 'p2pmd-document-pending':
+          setP2pmdSyncStatus('Unsaved changes')
+          break
+        case 'p2pmd-document-syncing':
+          setP2pmdSyncStatus('Syncing...')
+          break
+        case 'p2pmd-document-saved':
+          setP2pmdSyncStatus('Saved')
+          setStatus(`P2PMD saved (${parsed.contentLength} characters)`)
+          break
+        case 'p2pmd-document-updated':
+          setP2pmdSyncStatus('Remote update')
+          setStatus(`P2PMD remote update received (${parsed.contentLength} characters)`)
+          break
+        case 'p2pmd-document-error':
+          setP2pmdSyncStatus(parsed.error ? `Error: ${parsed.error}` : 'Sync error')
+          setStatus(parsed.error || 'P2PMD document request failed')
+          break
+        case 'p2pmd-preview-mode':
+          setP2pmdIsPreviewMode(Boolean(parsed.preview))
+          setStatus(parsed.preview ? 'P2PMD preview mode' : 'P2PMD write mode')
+          break
+        case 'p2pmd-image-uploaded':
+          setP2pmdSyncStatus('Image uploaded')
+          break
+        case 'p2pmd-publish-requested':
+          void publishP2pmdContentToHyper(parsed.content)
+          break
+        default:
+          setStatus('P2PMD editor connected')
+      }
+    } catch {
+      setStatus('P2PMD editor connected')
+    }
+  }
+
+  if (activeTab === 'p2pmd' && p2pmdRoom && p2pmdUrl) {
+    return (
+      <SafeAreaView style={styles.p2pmdWorkspace} edges={['top', 'left', 'right', 'bottom']}>
+        <View style={styles.p2pmdWorkspaceHeader}>
+          <Text style={styles.p2pmdWorkspaceTitle}>P2PMD</Text>
+          <Text style={[styles.p2pmdWorkspaceRole, p2pmdRoom.role === 'host' ? styles.p2pmdWorkspaceRoleHost : null]}>
+            {p2pmdRoom.role}
+          </Text>
+          <Text style={styles.p2pmdWorkspaceParticipants}>
+            Peers: {p2pmdParticipants ?? '-'}
+          </Text>
+          <Pressable
+            style={styles.p2pmdPreviewButton}
+            onPress={onP2pmdTogglePreview}
+            disabled={isBooting || isLoading}
+          >
+            <View style={styles.p2pmdPreviewButtonContent}>
+              {p2pmdIsPreviewMode
+                ? (
+                  <View style={styles.p2pmdPencilIcon}>
+                    <View style={styles.p2pmdPencilBody} />
+                    <View style={styles.p2pmdPencilTip} />
+                  </View>
+                  )
+                : (
+                  <View style={styles.p2pmdEyeIcon}>
+                    <View style={styles.p2pmdEyeIconDot} />
+                  </View>
+                  )}
+              <Text style={styles.p2pmdPreviewButtonText}>
+                {p2pmdIsPreviewMode ? 'Edit' : 'Preview'}
+              </Text>
+            </View>
+          </Pressable>
+        </View>
+
+        <View style={styles.p2pmdWorkspaceMeta}>
+          <View style={styles.p2pmdRoomIdentity}>
+            <View style={styles.p2pmdWorkspaceKeyRow}>
+              <Text style={styles.p2pmdWorkspaceKeyLabel}>Key</Text>
+              <Text numberOfLines={1} ellipsizeMode='middle' style={styles.p2pmdWorkspaceKey}>
+                {p2pmdRoom.key}
+              </Text>
+            </View>
+            <Text numberOfLines={1} ellipsizeMode='middle' style={styles.p2pmdWorkspaceUrl}>
+              {p2pmdRoom.localUrl}
+            </Text>
+            {p2pmdPublishUrl && (
+              <View style={styles.p2pmdPublishedUrlRow}>
+                <Text style={styles.p2pmdPublishedUrlLabel}>Published</Text>
+                <Text numberOfLines={1} ellipsizeMode='middle' style={styles.p2pmdPublishedUrl}>
+                  {p2pmdPublishUrl}
+                </Text>
+              </View>
+            )}
+            <Text numberOfLines={1} style={styles.p2pmdWorkspaceSyncStatus}>
+              {p2pmdSyncStatus}
+            </Text>
+          </View>
+          <Pressable
+            style={styles.p2pmdMetaButton}
+            onPress={onP2pmdPublishToHyper}
+            disabled={isBooting || isLoading || isP2pmdPublishing}
+          >
+            <Text style={styles.p2pmdMetaButtonText}>Publish</Text>
+          </Pressable>
+          <Pressable
+            style={styles.p2pmdMetaButton}
+            onPress={() => void onP2pmdShareRoom()}
+            disabled={isBooting || isLoading}
+          >
+            <Text style={styles.p2pmdMetaButtonText}>Share</Text>
+          </Pressable>
+          <Pressable
+            style={[styles.p2pmdMetaButton, styles.p2pmdMetaButtonDanger]}
+            onPress={() => void onP2pmdRoomDisconnect()}
+            disabled={isBooting || isLoading}
+          >
+            <Text style={styles.p2pmdMetaButtonText}>Leave</Text>
+          </Pressable>
+        </View>
+        <WebView
+          ref={p2pmdWebViewRef}
+          source={{ uri: `${p2pmdUrl}?role=${encodeURIComponent(p2pmdRoom.role)}` }}
+          textZoom={100}
+          style={styles.p2pmdWorkspaceWebView}
+          onMessage={(event) => onP2pmdWebViewMessage(event.nativeEvent.data)}
+          onError={(event) => {
+            setStatus(`P2PMD WebView failed: ${event.nativeEvent.description}`)
+          }}
+          onLoad={() => {
+            if (p2pmdRoom.role === 'client') {
+              setStatus('P2PMD joined room page loaded')
+            }
+          }}
+        />
+
+        {(isBooting || isLoading) && (
+          <View style={styles.p2pmdWorkspaceLoader}>
+            <ActivityIndicator size='small' />
+          </View>
+        )}
+      </SafeAreaView>
+    )
+  }
+
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <ScrollView contentContainerStyle={styles.content}>
-        <Text style={styles.title}>Runtime Check</Text>
+        <Text style={[styles.title, activeTab === 'p2pmd' ? styles.titleOnDark : null]}>Runtime Check</Text>
         <View style={styles.tabRow}>
           <Pressable
             style={[styles.tabButton, activeTab === 'hyper' ? styles.tabButtonActive : null]}
@@ -429,7 +664,7 @@ export default function App () {
             </Text>
           </Pressable>
         </View>
-        <Text style={styles.status}>{status}</Text>
+        {shouldShowRuntimeStatus && <Text style={styles.status}>{status}</Text>}
 
         {activeTab === 'hyper' && (
           <View style={styles.section}>
@@ -538,110 +773,76 @@ export default function App () {
           </View>
         )}
         {activeTab === 'p2pmd' && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>P2PMD Local Document Check</Text>
-            <View style={styles.buttons}>
-              <Button
-                title='Create Room'
-                onPress={() => void onP2pmdRoomCreate()}
-                disabled={isBooting || isLoading}
-              />
-              <Button
-                title='Room Status'
-                onPress={() => void onP2pmdRoomStatus()}
-                disabled={isBooting || isLoading}
-              />
-              <Button
-                title='Disconnect'
-                onPress={() => void onP2pmdRoomDisconnect()}
-                disabled={isBooting || isLoading}
-              />
-            </View>
-
-            <View style={styles.joinRoom}>
-              <TextInput
-                style={styles.input}
-                autoCapitalize='none'
-                autoCorrect={false}
-                value={p2pmdJoinKey}
-                onChangeText={setP2pmdJoinKey}
-                placeholder='hs://... room key'
-              />
-              <Button
-                title='Join Room'
-                onPress={() => void onP2pmdRoomJoin()}
-                disabled={isBooting || isLoading || !p2pmdJoinKey.trim()}
-              />
-            </View>
-
-            {p2pmdRoom && (
-              <View style={styles.roomDetails}>
-                <Text style={styles.roomLabel}>Role: {p2pmdRoom.role}</Text>
-                <Text selectable={true} style={styles.roomKey}>
-                  {p2pmdRoom.key}
+          <View style={[styles.section, styles.p2pmdSection]}>
+            <View style={styles.p2pmdHeader}>
+              <View style={styles.p2pmdHeaderCopy}>
+                <Text style={[styles.sectionTitle, styles.p2pmdTitle]}>P2PMD</Text>
+                <Text style={styles.helperText}>
+                  Create or join a Holesail-backed Markdown room, then edit together in the embedded mobile editor.
                 </Text>
-                <Text selectable={true} style={styles.roomUrl}>
-                  {p2pmdRoom.localUrl}
+              </View>
+              <Text style={[styles.roomPill, p2pmdRoom ? styles.roomPillLive : null]}>
+                {p2pmdRoom ? 'live' : 'ready'}
+              </Text>
+            </View>
+            {!p2pmdRoom && (
+              <View style={styles.emptyRoomCard}>
+                <Text style={styles.emptyRoomTitle}>Start a collaborative note</Text>
+                <Text style={styles.helperText}>
+                  Create a room to host from this phone, or paste an hs:// key to join a room hosted elsewhere.
                 </Text>
-                <View style={styles.buttons}>
-                  <Button
-                    title='Share Room Key'
-                    onPress={() => void onP2pmdShareRoom()}
+                <View style={styles.p2pmdActionRow}>
+                  <Pressable
+                    style={[styles.p2pmdPrimaryAction, isBooting || isLoading ? styles.p2pmdActionDisabled : null]}
+                    onPress={() => void onP2pmdRoomCreate()}
                     disabled={isBooting || isLoading}
-                  />
+                  >
+                    <Text style={styles.p2pmdPrimaryActionText}>Create Room</Text>
+                    <Text style={styles.p2pmdActionHint}>Host from this phone</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.p2pmdSecondaryAction, isBooting || isLoading ? styles.p2pmdActionDisabled : null]}
+                    onPress={() => void onP2pmdRoomRefresh()}
+                    disabled={isBooting || isLoading}
+                  >
+                    <Text style={styles.p2pmdSecondaryActionText}>Refresh</Text>
+                  </Pressable>
                 </View>
               </View>
             )}
 
-            {p2pmdUrl && (
-              <View style={styles.webViewFrame}>
-                <WebView
-                  source={{ uri: p2pmdUrl }}
-                  onMessage={(event) => {
-                    const message = event.nativeEvent.data
-                    setP2pmdBridgeMessage(message)
-
-                    try {
-                      const parsed = JSON.parse(message)
-
-                      if (parsed.type === 'p2pmd-document-loaded') {
-                        setStatus('P2PMD document loaded from Bare server')
-                      } else if (parsed.type === 'p2pmd-document-saved') {
-                        setStatus(`P2PMD document saved (${parsed.contentLength} characters)`)
-                      } else if (parsed.type === 'p2pmd-document-updated') {
-                        setStatus(`P2PMD remote update received (${parsed.contentLength} characters)`)
-                      } else if (parsed.type === 'p2pmd-document-error') {
-                        setStatus(parsed.error || 'P2PMD document request failed')
-                      } else {
-                        setStatus('P2PMD WebView connected to Bare server')
-                      }
-                    } catch {
-                      setStatus('P2PMD WebView connected to Bare server')
-                    }
-                  }}
-                  onError={(event) => {
-                    setStatus(`P2PMD WebView failed: ${event.nativeEvent.description}`)
-                  }}
-                  onLoad={() => {
-                    if (p2pmdRoom?.role === 'client') {
-                      setStatus('P2PMD joined room page loaded')
-                    }
-                  }}
-                />
-              </View>
-            )}
-
-            {p2pmdBridgeMessage && (
-              <Text selectable={true} style={styles.bridgeMessage}>
-                WebView bridge: {p2pmdBridgeMessage}
+            <View style={styles.joinRoomCard}>
+              <Text style={styles.fieldLabel}>Join existing room</Text>
+              <Text style={styles.helperText}>
+                Paste a room key shared by another peer to connect through Holesail.
               </Text>
-            )}
+              <TextInput
+                style={[styles.input, styles.p2pmdInput]}
+                autoCapitalize='none'
+                autoCorrect={false}
+                value={p2pmdJoinKey}
+                onChangeText={setP2pmdJoinKey}
+                placeholderTextColor='#6f7484'
+                placeholder='hs://... room key'
+              />
+              <Pressable
+                style={[
+                  styles.p2pmdJoinAction,
+                  isBooting || isLoading || !p2pmdJoinKey.trim() ? styles.p2pmdActionDisabled : null
+                ]}
+                onPress={() => void onP2pmdRoomJoin()}
+                disabled={isBooting || isLoading || !p2pmdJoinKey.trim()}
+              >
+                <Text style={styles.p2pmdJoinActionText}>Join Room</Text>
+              </Pressable>
+            </View>
+
           </View>
         )}
 
         {(isBooting || isLoading) && <ActivityIndicator size='small' />}
 
-        {lastResult && (
+        {lastResult && activeTab !== 'p2pmd' && (
           <View style={styles.result}>
             <Text selectable={true} style={styles.resultText}>
               {JSON.stringify(lastResult, null, 2)}
@@ -662,6 +863,202 @@ const styles = StyleSheet.create({
   container: {
     flex: 1
   },
+  p2pmdWorkspace: {
+    backgroundColor: '#1f2027',
+    flex: 1
+  },
+  p2pmdWorkspaceHeader: {
+    alignItems: 'center',
+    backgroundColor: '#24262f',
+    borderBottomColor: '#3a3d49',
+    borderBottomWidth: 1,
+    flexDirection: 'row',
+    gap: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8
+  },
+  p2pmdWorkspaceTitle: {
+    color: '#f1f2f7',
+    fontSize: 18,
+    fontWeight: '800'
+  },
+  p2pmdWorkspaceParticipants: {
+    backgroundColor: '#30364a',
+    borderRadius: 999,
+    color: '#cdd6ff',
+    flexShrink: 1,
+    fontSize: 12,
+    fontWeight: '700',
+    overflow: 'hidden',
+    paddingHorizontal: 9,
+    paddingVertical: 5
+  },
+  p2pmdWorkspaceRole: {
+    backgroundColor: '#3a3020',
+    borderRadius: 999,
+    color: '#ffd27a',
+    fontSize: 11,
+    fontWeight: '800',
+    overflow: 'hidden',
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    textTransform: 'uppercase'
+  },
+  p2pmdWorkspaceRoleHost: {
+    backgroundColor: '#1d513d',
+    color: '#c6f6df'
+  },
+  p2pmdPreviewButton: {
+    backgroundColor: '#2f80ed',
+    borderRadius: 12,
+    marginLeft: 'auto',
+    paddingHorizontal: 12,
+    paddingVertical: 9
+  },
+  p2pmdPreviewButtonContent: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 7
+  },
+  p2pmdPreviewButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '800'
+  },
+  p2pmdEyeIcon: {
+    alignItems: 'center',
+    borderColor: '#fff',
+    borderRadius: 3,
+    borderWidth: 2,
+    height: 14,
+    justifyContent: 'center',
+    transform: [{ rotate: '45deg' }],
+    width: 14
+  },
+  p2pmdEyeIconDot: {
+    backgroundColor: '#fff',
+    borderRadius: 2,
+    height: 4,
+    transform: [{ rotate: '-45deg' }],
+    width: 4
+  },
+  p2pmdPencilIcon: {
+    height: 17,
+    justifyContent: 'center',
+    width: 17
+  },
+  p2pmdPencilBody: {
+    backgroundColor: '#fff',
+    borderRadius: 2,
+    height: 3,
+    left: 1,
+    transform: [{ rotate: '-35deg' }],
+    width: 14
+  },
+  p2pmdPencilTip: {
+    backgroundColor: '#fff',
+    height: 4,
+    position: 'absolute',
+    right: 1,
+    top: 3,
+    transform: [{ rotate: '-35deg' }],
+    width: 3
+  },
+  p2pmdWorkspaceMeta: {
+    alignItems: 'center',
+    backgroundColor: '#202128',
+    borderBottomColor: '#3a3d49',
+    borderBottomWidth: 1,
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 7
+  },
+  p2pmdRoomIdentity: {
+    flex: 1,
+    gap: 3,
+    minWidth: 0
+  },
+  p2pmdWorkspaceKeyRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 6,
+    minWidth: 0
+  },
+  p2pmdWorkspaceKeyLabel: {
+    backgroundColor: '#30364a',
+    borderRadius: 6,
+    color: '#cdd6ff',
+    fontSize: 9,
+    fontWeight: '800',
+    overflow: 'hidden',
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+    textTransform: 'uppercase'
+  },
+  p2pmdWorkspaceKey: {
+    color: '#59a6ff',
+    flex: 1,
+    flexShrink: 1,
+    fontFamily: 'monospace',
+    fontSize: 10,
+    fontWeight: '700'
+  },
+  p2pmdWorkspaceUrl: {
+    color: '#a2a8bb',
+    fontFamily: 'monospace',
+    fontSize: 11,
+    minWidth: 0
+  },
+  p2pmdPublishedUrlRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 5,
+    minWidth: 0
+  },
+  p2pmdPublishedUrlLabel: {
+    color: '#cdd6ff',
+    fontSize: 10,
+    fontWeight: '800'
+  },
+  p2pmdPublishedUrl: {
+    color: '#59a6ff',
+    flex: 1,
+    fontFamily: 'monospace',
+    fontSize: 10,
+    minWidth: 0
+  },
+  p2pmdWorkspaceSyncStatus: {
+    color: '#cdd6ff',
+    fontSize: 11,
+    fontWeight: '700'
+  },
+  p2pmdMetaButton: {
+    backgroundColor: '#30364a',
+    borderColor: '#4c5675',
+    borderRadius: 8,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 9
+  },
+  p2pmdMetaButtonDanger: {
+    backgroundColor: '#4a2730',
+    borderColor: '#7c3b48'
+  },
+  p2pmdMetaButtonText: {
+    color: '#f1f2f7',
+    fontSize: 12,
+    fontWeight: '800'
+  },
+  p2pmdWorkspaceWebView: {
+    backgroundColor: '#202128',
+    flex: 1
+  },
+  p2pmdWorkspaceLoader: {
+    bottom: 12,
+    position: 'absolute',
+    right: 12
+  },
   content: {
     gap: 12,
     padding: 16
@@ -669,6 +1066,9 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 22,
     fontWeight: '700'
+  },
+  titleOnDark: {
+    color: '#f1f2f7'
   },
   status: {
     fontSize: 14
@@ -716,9 +1116,44 @@ const styles = StyleSheet.create({
     gap: 10,
     padding: 10
   },
+  p2pmdSection: {
+    backgroundColor: '#1f2027',
+    borderColor: '#3a3d49',
+    borderRadius: 14,
+    padding: 12
+  },
+  p2pmdHeader: {
+    alignItems: 'flex-start',
+    flexDirection: 'row',
+    gap: 10,
+    justifyContent: 'space-between'
+  },
+  p2pmdHeaderCopy: {
+    flex: 1,
+    gap: 4
+  },
   sectionTitle: {
     fontSize: 18,
     fontWeight: '600'
+  },
+  p2pmdTitle: {
+    color: '#f1f2f7'
+  },
+  helperText: {
+    color: '#a2a8bb',
+    fontSize: 13,
+    lineHeight: 19
+  },
+  fieldLabel: {
+    color: '#8c93a8',
+    fontSize: 12,
+    fontWeight: '700',
+    textTransform: 'uppercase'
+  },
+  p2pmdInput: {
+    backgroundColor: '#262832',
+    borderColor: '#3a3d49',
+    color: '#f1f2f7'
   },
   result: {
     backgroundColor: '#f6f6f6',
@@ -729,36 +1164,93 @@ const styles = StyleSheet.create({
     fontFamily: 'monospace',
     fontSize: 12
   },
-  webViewFrame: {
-    borderColor: '#bbb',
-    borderRadius: 8,
+  emptyRoomCard: {
+    backgroundColor: '#262832',
+    borderColor: '#3a3d49',
+    borderRadius: 12,
     borderWidth: 1,
-    height: 520,
-    overflow: 'hidden'
+    gap: 6,
+    padding: 12
   },
-  bridgeMessage: {
-    color: '#076c50',
-    fontFamily: 'monospace',
-    fontSize: 12
+  emptyRoomTitle: {
+    color: '#f1f2f7',
+    fontSize: 15,
+    fontWeight: '700'
   },
-  roomDetails: {
-    gap: 6
+  p2pmdActionRow: {
+    alignItems: 'stretch',
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 6
   },
-  joinRoom: {
-    gap: 10
+  p2pmdPrimaryAction: {
+    backgroundColor: '#2f80ed',
+    borderRadius: 12,
+    flex: 1,
+    gap: 3,
+    paddingHorizontal: 14,
+    paddingVertical: 12
   },
-  roomLabel: {
-    fontSize: 14,
+  p2pmdPrimaryActionText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '800'
+  },
+  p2pmdActionHint: {
+    color: '#dbeafe',
+    fontSize: 11,
     fontWeight: '600'
   },
-  roomKey: {
-    color: '#076c50',
-    fontFamily: 'monospace',
-    fontSize: 12
+  p2pmdSecondaryAction: {
+    alignItems: 'center',
+    backgroundColor: '#30364a',
+    borderColor: '#4c5675',
+    borderRadius: 12,
+    borderWidth: 1,
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 12
   },
-  roomUrl: {
-    color: '#526158',
-    fontFamily: 'monospace',
-    fontSize: 12
+  p2pmdSecondaryActionText: {
+    color: '#f1f2f7',
+    fontSize: 13,
+    fontWeight: '800'
+  },
+  p2pmdActionDisabled: {
+    opacity: 0.5
+  },
+  joinRoomCard: {
+    backgroundColor: '#22242c',
+    borderColor: '#343744',
+    borderRadius: 12,
+    borderWidth: 1,
+    gap: 10,
+    padding: 12
+  },
+  p2pmdJoinAction: {
+    alignItems: 'center',
+    backgroundColor: '#1d513d',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12
+  },
+  p2pmdJoinActionText: {
+    color: '#c6f6df',
+    fontSize: 14,
+    fontWeight: '800'
+  },
+  roomPill: {
+    backgroundColor: '#30364a',
+    borderRadius: 999,
+    color: '#cdd6ff',
+    fontSize: 12,
+    fontWeight: '700',
+    overflow: 'hidden',
+    paddingHorizontal: 10,
+    paddingVertical: 4
+  },
+  roomPillLive: {
+    backgroundColor: '#2f80ed',
+    color: '#fff'
   }
 })

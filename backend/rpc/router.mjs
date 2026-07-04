@@ -9,9 +9,10 @@ import {
   RPC_P2PMD_ROOM_CREATE,
   RPC_P2PMD_ROOM_DISCONNECT,
   RPC_P2PMD_ROOM_JOIN,
+  RPC_P2PMD_ROOM_PUBLISH,
   RPC_P2PMD_ROOM_STATUS
 } from './commands.mjs'
-import { createDrive } from '../hyper/drive.mjs'
+import { createDrive, publishMarkdownDocument } from '../hyper/drive.mjs'
 import { fetchHyper } from '../hyper/fetch.mjs'
 import { getHyperRuntime, getHyperStoragePath } from '../hyper/runtime.mjs'
 import {
@@ -78,6 +79,11 @@ export async function routeRpcRequest (req) {
 
     if (req.command === RPC_P2PMD_ROOM_JOIN) {
       replyJson(req, await joinP2pmdRoom(parseJsonMessage(req.data)))
+      return
+    }
+
+    if (req.command === RPC_P2PMD_ROOM_PUBLISH) {
+      replyJson(req, await publishMarkdownDocument(parseJsonMessage(req.data)))
       return
     }
 
