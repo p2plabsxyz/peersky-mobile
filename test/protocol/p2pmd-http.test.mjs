@@ -119,6 +119,16 @@ describe('p2pmd HTTP endpoints with injectable Node server', () => {
     activeStreams.add(host)
     activeStreams.add(client)
 
+    const clientPeerCount = await readEvent(client, 'peers')
+    const clientYjsState = await readEvent(client, 'yjsupdate')
+    const clientDocument = JSON.parse(await readEvent(client, 'update'))
+    const clientPeerList = JSON.parse(await readEvent(client, 'peerlist'))
+
+    assert.equal(clientPeerCount, '1')
+    assert.equal(typeof clientYjsState, 'string')
+    assert.equal(typeof clientDocument.content, 'string')
+    assert.equal(clientPeerList.some((peer) => peer.clientId === 'client-1'), true)
+
     let status = await waitForStatus(localUrl, (status) => {
       return status.peers === 1 && status.peerList.length === 2
     })
@@ -404,6 +414,7 @@ async function openEventStream (url) {
   const response = await fetch(url)
   assert.equal(response.status, 200)
   return {
+    buffer: '',
     reader: response.body?.getReader() || null,
     response
   }
@@ -417,6 +428,34 @@ async function closeEventStream (stream) {
   } catch {}
 }
 
+async function readEvent (stream, eventName, timeoutMs = 2000) {
+  assert.ok(stream.reader)
+
+  const decoder = new TextDecoder()
+  const deadline = Date.now() + timeoutMs
+  let matched = parseSseEvents(stream.buffer)
+    .find((event) => event.event === eventName)
+  if (matched) return matched.data
+
+  while (Date.now() < deadline) {
+    const remaining = deadline - Date.now()
+    const read = await Promise.race([
+      stream.reader.read(),
+      delay(remaining).then(() => ({ timeout: true }))
+    ])
+
+    if (read.timeout || read.done) break
+
+    stream.buffer += decoder.decode(read.value, { stream: true })
+
+    matched = parseSseEvents(stream.buffer)
+      .find((event) => event.event === eventName)
+    if (matched) return matched.data
+  }
+
+  throw new Error(`Timed out waiting for SSE event: ${eventName}`)
+}
+
 async function waitForStatus (localUrl, predicate, timeoutMs = 2000) {
   const deadline = Date.now() + timeoutMs
   let latest = null
@@ -428,6 +467,22 @@ async function waitForStatus (localUrl, predicate, timeoutMs = 2000) {
   }
 
   assert.fail(`Timed out waiting for P2PMD status. Latest: ${JSON.stringify(latest)}`)
+}
+
+function parseSseEvents (payload) {
+  return payload
+    .split('\n\n')
+    .map((chunk) => {
+      const lines = chunk.split('\n')
+      const event = lines.find((line) => line.startsWith('event: '))?.slice(7)
+      const data = lines
+        .filter((line) => line.startsWith('data: '))
+        .map((line) => line.slice(6))
+        .join('\n')
+
+      return { event, data }
+    })
+    .filter((event) => event.event)
 }
 
 function delay (ms) {
