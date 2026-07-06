@@ -2,23 +2,24 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 
-const ANDROID_MANIFEST = 'android/app/src/main/AndroidManifest.xml'
-const ANDROID_NETWORK_SECURITY = 'android/app/src/main/res/xml/network_security_config.xml'
+const ANDROID_LOOPBACK_CLEARTEXT_PLUGIN = './plugins/with-android-loopback-cleartext'
+const ANDROID_LOOPBACK_CLEARTEXT_PLUGIN_FILE = 'plugins/with-android-loopback-cleartext.js'
 
 describe('mobile platform runtime configuration', () => {
   it('keeps Android cleartext scoped to loopback only', async () => {
-    const manifest = await readFile(ANDROID_MANIFEST, 'utf8')
-    const networkSecurity = await readFile(ANDROID_NETWORK_SECURITY, 'utf8')
+    const appJson = JSON.parse(await readFile('app.json', 'utf8'))
+    const plugins = appJson.expo?.plugins || []
+    const plugin = await readFile(ANDROID_LOOPBACK_CLEARTEXT_PLUGIN_FILE, 'utf8')
 
-    assert.match(manifest, /android:networkSecurityConfig="@xml\/network_security_config"/)
-    assert.doesNotMatch(manifest, /android:usesCleartextTraffic="true"/)
-    assert.match(networkSecurity, /<base-config\s+cleartextTrafficPermitted="false"\s*\/>/)
-    assert.match(networkSecurity, /<domain-config\s+cleartextTrafficPermitted="true">/)
-    assert.match(networkSecurity, /<domain\s+includeSubdomains="false">localhost<\/domain>/)
-    assert.match(networkSecurity, /<domain\s+includeSubdomains="false">127\.0\.0\.1<\/domain>/)
-    assert.doesNotMatch(networkSecurity, /0\.0\.0\.0/)
-    assert.doesNotMatch(networkSecurity, /192\.168\./)
-    assert.doesNotMatch(networkSecurity, /cleartextTrafficPermitted="true"[\s\S]*<base-config/)
+    assert.equal(hasExpoPlugin(plugins, ANDROID_LOOPBACK_CLEARTEXT_PLUGIN), true)
+    assert.match(plugin, /android:networkSecurityConfig'] = '@xml\/network_security_config'/)
+    assert.match(plugin, /delete applicationAttributes\['android:usesCleartextTraffic'\]/)
+    assert.match(plugin, /<base-config cleartextTrafficPermitted="false" \/>/)
+    assert.match(plugin, /<domain-config cleartextTrafficPermitted="true">/)
+    assert.match(plugin, /<domain includeSubdomains="false">localhost<\/domain>/)
+    assert.match(plugin, /<domain includeSubdomains="false">127\.0\.0\.1<\/domain>/)
+    assert.doesNotMatch(plugin, /0\.0\.0\.0/)
+    assert.doesNotMatch(plugin, /192\.168\./)
   })
 
   it('keeps iOS local networking scoped to localhost support, not arbitrary HTTP', async () => {
@@ -64,3 +65,10 @@ describe('mobile platform runtime configuration', () => {
     assert.match(backend, /console\.error\('\[hyper\] Failed to close runtime on beforeExit:'/)
   })
 })
+
+function hasExpoPlugin (plugins, pluginName) {
+  return plugins.some((plugin) => {
+    if (plugin === pluginName) return true
+    return Array.isArray(plugin) && plugin[0] === pluginName
+  })
+}
