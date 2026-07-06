@@ -1,8 +1,7 @@
 import { afterEach, beforeEach, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import http from 'node:http'
-import b4a from 'b4a'
-import * as Y from 'yjs'
+import { buildLineReplaceUpdate } from '../fixtures/yjs-helpers.mjs'
 import { resetDocumentState } from '../../backend/p2pmd/document.mjs'
 import { createP2pmdHttpServer } from '../../backend/p2pmd/server.mjs'
 
@@ -408,26 +407,6 @@ async function closeEventStream (stream) {
   try {
     await stream.reader?.cancel()
   } catch {}
-}
-
-function buildLineReplaceUpdate (base64State, target, replacement) {
-  const doc = new Y.Doc()
-  const ytext = doc.getText('content')
-
-  Y.applyUpdate(doc, b4a.from(base64State, 'base64'), 'seed')
-
-  const before = ytext.toString()
-  const start = before.indexOf(target)
-  assert.notEqual(start, -1)
-
-  doc.transact(() => {
-    ytext.delete(start, target.length)
-    ytext.insert(start, replacement)
-  }, 'edit')
-
-  const update = b4a.toString(Y.encodeStateAsUpdate(doc), 'base64')
-  doc.destroy()
-  return update
 }
 
 function delay (ms) {
