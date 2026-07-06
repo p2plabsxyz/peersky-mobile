@@ -50,6 +50,13 @@ npm run ios
 npm run android
 ```
 
+## Docs
+
+- [Hyper protocol](docs/hyper.md)
+- [Holesail runtime](docs/holesail.md)
+- [P2PMD](docs/p2pmd.md)
+- [Testing guide](docs/testing.md)
+
 ## License
 
 MIT
