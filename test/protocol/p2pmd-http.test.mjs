@@ -118,9 +118,10 @@ describe('p2pmd HTTP endpoints with injectable Node server', () => {
     const client = await openEventStream(`${localUrl}/events?clientId=client-1&role=client&name=Client&color=%2359a6ff`)
     activeStreams.add(host)
     activeStreams.add(client)
-    await delay(50)
 
-    let status = await getJson(`${localUrl}/status`)
+    let status = await waitForStatus(localUrl, (status) => {
+      return status.peers === 1 && status.peerList.length === 2
+    })
     assert.equal(status.peers, 1)
     assert.equal(status.peerList.length, 2)
 
@@ -149,9 +150,10 @@ describe('p2pmd HTTP endpoints with injectable Node server', () => {
 
     await closeEventStream(client)
     activeStreams.delete(client)
-    await delay(50)
 
-    status = await getJson(`${localUrl}/status`)
+    status = await waitForStatus(localUrl, (status) => {
+      return status.peers === 0 && !status.peerList.some((peer) => peer.clientId === 'client-1')
+    })
     assert.equal(status.peers, 0)
     assert.equal(status.peerList.some((peer) => peer.clientId === 'client-1'), false)
   })
@@ -191,7 +193,9 @@ describe('p2pmd HTTP endpoints with injectable Node server', () => {
 
     await closeEventStream(host)
     activeStreams.delete(host)
-    await delay(50)
+    await waitForStatus(localUrl, (status) => {
+      return !status.peerList.some((peer) => peer.clientId === 'host-device')
+    })
 
     await appendLine(localUrl, 'client-device', 'client', 'Phone', 'Phone: Host is gone')
     await appendLine(localUrl, 'client-device', 'client', 'Phone', 'Phone: Still editing')
@@ -241,7 +245,9 @@ describe('p2pmd HTTP endpoints with injectable Node server', () => {
 
     await closeEventStream(client)
     activeStreams.delete(client)
-    await delay(50)
+    await waitForStatus(localUrl, (status) => {
+      return !status.peerList.some((peer) => peer.clientId === 'client-device')
+    })
 
     await appendLine(localUrl, 'host-device', 'host', 'Host', 'Host: Client left, editing alone')
     await appendLine(localUrl, 'host-device', 'host', 'Host', 'Host: More changes')
@@ -297,7 +303,9 @@ describe('p2pmd HTTP endpoints with injectable Node server', () => {
 
     await closeEventStream(host)
     activeStreams.delete(host)
-    await delay(50)
+    await waitForStatus(localUrl, (status) => {
+      return !status.peerList.some((peer) => peer.clientId === 'host-device')
+    })
 
     await appendLine(localUrl, 'device-b', 'client', 'B', 'B: editing')
     await appendLine(localUrl, 'device-c', 'client', 'C', 'C: also editing')
@@ -407,6 +415,19 @@ async function closeEventStream (stream) {
   try {
     await stream.reader?.cancel()
   } catch {}
+}
+
+async function waitForStatus (localUrl, predicate, timeoutMs = 2000) {
+  const deadline = Date.now() + timeoutMs
+  let latest = null
+
+  while (Date.now() < deadline) {
+    latest = await getJson(`${localUrl}/status`)
+    if (predicate(latest)) return latest
+    await delay(25)
+  }
+
+  assert.fail(`Timed out waiting for P2PMD status. Latest: ${JSON.stringify(latest)}`)
 }
 
 function delay (ms) {
