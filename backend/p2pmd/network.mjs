@@ -1,6 +1,7 @@
 import http from 'bare-http1'
+import { P2PMD_LOOPBACK_HOST } from './constants.mjs'
 
-export const P2PMD_LOOPBACK_HOST = '127.0.0.1'
+export { P2PMD_LOOPBACK_HOST }
 
 export async function getAvailableLoopbackPort () {
   const reservation = http.createServer((req, res) => {
