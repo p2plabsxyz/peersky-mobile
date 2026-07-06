@@ -40,7 +40,8 @@
           }
         }
       ],
-      "expo-font"
+      "expo-font",
+      "./plugins/with-android-loopback-cleartext"
     ]
   }
 }

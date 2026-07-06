@@ -14,13 +14,35 @@ export function parseHyperUrl (url) {
     return { error: 'Only hyper:// URLs are supported' }
   }
 
-  const normalizedPath = normalizeHyperPath(parsed.pathname || '/')
+  if (parsed.hostname && !isValidHyperHost(parsed.hostname)) {
+    return { error: 'Invalid URL format' }
+  }
+
+  const normalizedPath = normalizeHyperPath(getRawHyperPath(url))
   if (normalizedPath.error) return normalizedPath
 
   return {
     driveAddress: parsed.hostname ? `hyper://${parsed.hostname}/` : 'default',
     pathname: normalizedPath.pathname
   }
+}
+
+function getRawHyperPath (url) {
+  const withoutProtocol = url.slice('hyper://'.length)
+  const slashIndex = withoutProtocol.indexOf('/')
+  if (slashIndex === -1) return '/'
+
+  const rawPath = withoutProtocol.slice(slashIndex)
+  const queryIndex = rawPath.search(/[?#]/)
+  return queryIndex === -1 ? rawPath : rawPath.slice(0, queryIndex)
+}
+
+function isValidHyperHost (value) {
+  if (typeof value !== 'string' || !value) return false
+  if (!/^[A-Za-z0-9.-]+$/.test(value)) return false
+  if (value.includes('..')) return false
+  if (value.startsWith('.') || value.endsWith('.')) return false
+  return true
 }
 
 function normalizeHyperPath (rawPathname) {

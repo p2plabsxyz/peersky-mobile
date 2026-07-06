@@ -1,5 +1,3 @@
-import http from 'bare-http1'
-import MarkdownIt from 'markdown-it'
 import { readHyperFile, uploadHyperFile } from '../hyper/drive.mjs'
 import {
   applyDocumentUpdate,
@@ -9,38 +7,18 @@ import {
   subscribeToDocumentUpdates,
   updateDocumentState
 } from './document.mjs'
-import { P2PMD_LOOPBACK_HOST } from './network.mjs'
+import { P2PMD_LOOPBACK_HOST } from './constants.mjs'
+import { createPeerPresenceStore } from './peers.mjs'
+import { renderMarkdownPreview } from './preview.mjs'
 import yjsBrowserScript from './yjs-runtime.mjs'
 
 let server = null
 let serverInfo = null
 let serverTransition = Promise.resolve()
+let bareHttp = null
 const eventClients = new Set()
-const peerPresence = new Map()
+const peerPresence = createPeerPresenceStore()
 let keepaliveInterval = null
-let nextPeerId = 1
-const markdownRenderer = new MarkdownIt({
-  // Security-critical: preview output is injected with innerHTML in the WebView.
-  // Keep raw HTML disabled unless the preview path is sanitized first.
-  html: false,
-  linkify: true,
-  breaks: true
-})
-const defaultImageRenderer = markdownRenderer.renderer.rules.image || function (tokens, idx, options, env, self) {
-  return self.renderToken(tokens, idx, options)
-}
-
-markdownRenderer.renderer.rules.image = function (tokens, idx, options, env, self) {
-  const srcIndex = tokens[idx].attrIndex('src')
-  if (srcIndex >= 0) {
-    const src = tokens[idx].attrs[srcIndex][1]
-    if (typeof src === 'string' && src.startsWith('hyper://')) {
-      tokens[idx].attrs[srcIndex][1] = `/hyper/file?url=${encodeURIComponent(src)}`
-    }
-  }
-
-  return defaultImageRenderer(tokens, idx, options, env, self)
-}
 
 subscribeToDocumentUpdates(({ document, origin, update }) => {
   if (origin !== 'line-attribution-update') {
@@ -59,7 +37,7 @@ export async function startP2pmdServer () {
       }
     }
 
-    const instance = http.createServer(handleRequest)
+    const instance = createP2pmdHttpServer({ httpImpl: await getBareHttp() })
 
     try {
       const address = await listen(instance)
@@ -89,6 +67,14 @@ export async function startP2pmdServer () {
       throw error
     }
   })
+}
+
+export function createP2pmdHttpServer ({ httpImpl } = {}) {
+  if (!httpImpl?.createServer) {
+    throw new Error('P2PMD HTTP server requires an HTTP implementation.')
+  }
+
+  return httpImpl.createServer(handleRequest)
 }
 
 export function getP2pmdServerStatus () {
@@ -138,6 +124,15 @@ async function stopServerInternal () {
   }
 }
 
+async function getBareHttp () {
+  if (!bareHttp) {
+    const module = await import('bare-http1')
+    bareHttp = module.default || module
+  }
+
+  return bareHttp
+}
+
 function handleRequest (req, res) {
   const pathname = String(req.url || '/').split('?')[0]
 
@@ -165,7 +160,7 @@ function handleRequest (req, res) {
         broadcastPeerState()
         sendJson(res, 200, {
           ok: true,
-          peers: peerPresence.size
+          peers: getPeerCount()
         })
       })
       .catch((error) => {
@@ -289,7 +284,7 @@ function handleRequest (req, res) {
 
         sendJson(res, 200, {
           ok: true,
-          html: markdownRenderer.render(body.content)
+          html: renderMarkdownPreview(body.content)
         })
       })
       .catch((error) => {
@@ -492,13 +487,7 @@ function removeEventClient (client, shouldBroadcast = true) {
 }
 
 function prunePeerPresence (peerKey) {
-  if (!peerKey) return
-
-  for (const client of eventClients) {
-    if (client.peerKey === peerKey) return
-  }
-
-  peerPresence.delete(peerKey)
+  peerPresence.prune(peerKey, getActivePeerKeys())
 }
 
 function broadcastPeerState () {
@@ -507,21 +496,11 @@ function broadcastPeerState () {
 }
 
 function getPeerList () {
-  const activePeerKeys = getActivePeerKeys()
-  return Array.from(peerPresence.entries())
-    .filter(([peerKey]) => activePeerKeys.has(peerKey))
-    .map(([, peer]) => peer)
+  return peerPresence.getPeerList(getActivePeerKeys())
 }
 
 function getPeerCount () {
-  let count = 0
-  const activePeerKeys = getActivePeerKeys()
-
-  for (const peerKey of activePeerKeys) {
-    const peer = peerPresence.get(peerKey)
-    if (peer && peer.role !== 'host') count += 1
-  }
-  return count
+  return peerPresence.getPeerCount(getActivePeerKeys())
 }
 
 function getActivePeerKeys () {
@@ -551,101 +530,7 @@ function readPeerFromEventRequest (req) {
 }
 
 function upsertPeerPresence (payload) {
-  if (!payload || typeof payload !== 'object') return null
-
-  const clientId = typeof payload.clientId === 'string' && payload.clientId.trim()
-    ? payload.clientId.trim().slice(0, 120)
-    : `anonymous-${nextPeerId++}`
-  const previous = peerPresence.get(clientId)
-  const now = Date.now()
-  const lineAttributions = normalizePeerLineAttributions(
-    payload.peerLineAttributions ?? payload.lineAttributions ?? payload.lineAuthors
-  )
-
-  if (lineAttributions) {
-    removeLineAttributionsFromOtherPeers(clientId, lineAttributions)
-  }
-
-  peerPresence.set(clientId, {
-    id: previous?.id || peerPresence.size + 1,
-    role: normalizePeerRole(payload.role),
-    clientId,
-    color: normalizePeerColor(payload.color) || previous?.color || '',
-    name: normalizePeerName(payload.name) || previous?.name || `Peer ${clientId.slice(0, 6)}`,
-    cursorLine: normalizeOptionalNumber(payload.cursorLine),
-    cursorColumn: normalizeOptionalNumber(payload.cursorColumn),
-    selectionStart: normalizeOptionalNumber(payload.selectionStart),
-    selectionEnd: normalizeOptionalNumber(payload.selectionEnd),
-    latexModeEnabled: typeof payload.latexModeEnabled === 'boolean' ? payload.latexModeEnabled : null,
-    isTyping: payload.isTyping === true,
-    lineAttributions: lineAttributions || previous?.lineAttributions || null,
-    joinedAt: previous?.joinedAt || now,
-    updatedAt: now
-  })
-
-  return clientId
-}
-
-function removeLineAttributionsFromOtherPeers (clientId, lineAttributions) {
-  const editedLines = new Set(Object.keys(lineAttributions))
-  if (editedLines.size === 0) return
-
-  for (const [peerKey, peer] of peerPresence.entries()) {
-    if (peerKey === clientId || !peer.lineAttributions) continue
-
-    for (const line of editedLines) {
-      delete peer.lineAttributions[line]
-    }
-
-    if (Object.keys(peer.lineAttributions).length === 0) {
-      peer.lineAttributions = null
-    }
-  }
-}
-
-function normalizePeerRole (role) {
-  if (role === 'host') return 'host'
-  if (role === 'client') return 'client'
-  return 'viewer'
-}
-
-function normalizePeerName (name) {
-  if (typeof name !== 'string') return ''
-  return name.trim().slice(0, 80)
-}
-
-function normalizePeerColor (color) {
-  if (typeof color !== 'string') return ''
-  const value = color.trim()
-  if (!value || value.length > 64) return ''
-  return value
-}
-
-function normalizeOptionalNumber (value) {
-  const number = Number(value)
-  return Number.isFinite(number) ? number : null
-}
-
-function normalizePeerLineAttributions (lineAttributions) {
-  if (!lineAttributions || typeof lineAttributions !== 'object') return null
-
-  const normalized = {}
-
-  for (const [line, attribution] of Object.entries(lineAttributions)) {
-    const lineNumber = Number(line)
-    if (!Number.isInteger(lineNumber) || lineNumber < 1) continue
-    if (!attribution || typeof attribution !== 'object') continue
-
-    const color = normalizePeerColor(attribution.color)
-    if (!color) continue
-
-    normalized[String(lineNumber)] = {
-      color,
-      name: normalizePeerName(attribution.name)
-    }
-  }
-
-  return Object.keys(normalized).length > 0 ? normalized : null
+  return peerPresence.upsert(payload)
 }
 
 function readJsonBody (req) {

@@ -11,7 +11,11 @@
     "android": "expo run:android",
     "preios": "npm run bundle:bare",
     "ios": "expo run:ios",
-    "lint": "standard"
+    "lint": "standard",
+    "test": "npm run test:runtime && npm run test:bundle",
+    "test:runtime": "node --test ./test/protocol/*.test.mjs ./test/platform/*.test.mjs",
+    "test:bundle": "npm run bundle:bare",
+    "test:holesail:live": "node --test --test-force-exit ./test/integration/holesail-live.test.mjs"
   },
   "repository": {
     "type": "git",
