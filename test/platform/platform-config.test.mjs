@@ -3,11 +3,12 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 
 const ANDROID_LOOPBACK_CLEARTEXT_PLUGIN = './plugins/with-android-loopback-cleartext'
-const ANDROID_LOOPBACK_CLEARTEXT_PLUGIN_FILE = 'plugins/with-android-loopback-cleartext.js'
+const REPO_ROOT = new URL('../../', import.meta.url)
+const ANDROID_LOOPBACK_CLEARTEXT_PLUGIN_FILE = repoFile('plugins/with-android-loopback-cleartext.js')
 
 describe('mobile platform runtime configuration', () => {
   it('keeps Android cleartext scoped to loopback only', async () => {
-    const appJson = JSON.parse(await readFile('app.json', 'utf8'))
+    const appJson = JSON.parse(await readFile(repoFile('app.json'), 'utf8'))
     const plugins = appJson.expo?.plugins || []
     const plugin = await readFile(ANDROID_LOOPBACK_CLEARTEXT_PLUGIN_FILE, 'utf8')
 
@@ -23,7 +24,7 @@ describe('mobile platform runtime configuration', () => {
   })
 
   it('keeps iOS local networking scoped to localhost support, not arbitrary HTTP', async () => {
-    const appJson = JSON.parse(await readFile('app.json', 'utf8'))
+    const appJson = JSON.parse(await readFile(repoFile('app.json'), 'utf8'))
     const ats = appJson.expo?.ios?.infoPlist?.NSAppTransportSecurity
 
     assert.equal(ats?.NSAllowsLocalNetworking, true)
@@ -31,7 +32,7 @@ describe('mobile platform runtime configuration', () => {
   })
 
   it('bundles the Bare backend before native Android/iOS runs', async () => {
-    const packageJson = JSON.parse(await readFile('package.json', 'utf8'))
+    const packageJson = JSON.parse(await readFile(repoFile('package.json'), 'utf8'))
     const scripts = packageJson.scripts || {}
 
     assert.equal(scripts.preandroid, 'npm run bundle:bare')
@@ -46,7 +47,7 @@ describe('mobile platform runtime configuration', () => {
   })
 
   it('keeps required Bare import aliases explicit', async () => {
-    const imports = JSON.parse(await readFile('backend/bare-imports.json', 'utf8'))
+    const imports = JSON.parse(await readFile(repoFile('backend/bare-imports.json'), 'utf8'))
 
     assert.deepEqual(imports, {
       'node:crypto': 'bare-crypto'
@@ -54,7 +55,7 @@ describe('mobile platform runtime configuration', () => {
   })
 
   it('logs backend cleanup failures during Bare shutdown', async () => {
-    const backend = await readFile('backend/backend.mjs', 'utf8')
+    const backend = await readFile(repoFile('backend/backend.mjs'), 'utf8')
 
     assert.match(backend, /Bare\.on\('beforeExit'/)
     assert.match(backend, /disconnectP2pmdRoom\(\)/)
@@ -71,4 +72,8 @@ function hasExpoPlugin (plugins, pluginName) {
     if (plugin === pluginName) return true
     return Array.isArray(plugin) && plugin[0] === pluginName
   })
+}
+
+function repoFile (relativePath) {
+  return new URL(relativePath, REPO_ROOT)
 }
