@@ -43,6 +43,7 @@
     "expo-system-ui": "~55.0.17",
     "holesail": "^2.4.1",
     "hyper-sdk": "^6.2.2",
+    "hypercore-fetch": "^10.2.0",
     "markdown-it": "^14.2.0",
     "react": "19.2.0",
     "react-dom": "19.2.0",

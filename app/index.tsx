@@ -5,7 +5,6 @@ import {
   Pressable,
   ScrollView,
   Share,
-  StyleSheet,
   Text,
   TextInput,
   View
@@ -17,6 +16,7 @@ import b4a from 'b4a'
 import RPC from 'bare-rpc'
 import { WebView } from 'react-native-webview'
 import bundle from './app.bundle.mjs'
+import { styles } from './styles'
 import {
   RPC_HOLESAIL_CONNECT,
   RPC_HOLESAIL_START_LIVE,
@@ -59,15 +59,42 @@ type RpcResponse = {
 }
 
 type RuntimeTab = 'hyper' | 'holesail' | 'p2pmd'
+type BrowserSource =
+  | { kind: 'home' }
+  | { kind: 'web', uri: string }
+  | { kind: 'hyper', html: string, baseUrl: string }
+  | { kind: 'error', html: string }
+
+type BrowserHistoryEntry = {
+  url: string
+  source: BrowserSource
+}
 
 export default function App () {
   const workletRef = useRef<Worklet | null>(null)
   const rpcRef = useRef<RPC | null>(null)
+  const browserWebViewRef = useRef<ComponentRef<typeof WebView> | null>(null)
   const p2pmdWebViewRef = useRef<ComponentRef<typeof WebView> | null>(null)
   const p2pmdPublishInFlightRef = useRef(false)
+  const browserLoadSeqRef = useRef(0)
   const [isBooting, setIsBooting] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [status, setStatus] = useState('Starting Hyper runtime...')
+  const [showRuntimeTools, setShowRuntimeTools] = useState(false)
+  const [runtimeApp, setRuntimeApp] = useState<RuntimeTab>('p2pmd')
+  const [browserAddress, setBrowserAddress] = useState('')
+  const [browserCurrentUrl, setBrowserCurrentUrl] = useState('peersky://home')
+  const [browserTitle, setBrowserTitle] = useState('PeerSky')
+  const [browserSource, setBrowserSource] = useState<BrowserSource>({ kind: 'home' })
+  const [browserHistory, setBrowserHistory] = useState<BrowserHistoryEntry[]>([
+    { url: 'peersky://home', source: { kind: 'home' } }
+  ])
+  const [browserHistoryIndex, setBrowserHistoryIndex] = useState(0)
+  const [browserCanGoBack, setBrowserCanGoBack] = useState(false)
+  const [browserCanGoForward, setBrowserCanGoForward] = useState(false)
+  const [browserWebCanGoBack, setBrowserWebCanGoBack] = useState(false)
+  const [browserWebCanGoForward, setBrowserWebCanGoForward] = useState(false)
+  const [browserIsLoading, setBrowserIsLoading] = useState(false)
   const [url, setUrl] = useState('hyper://localhost/')
   const [activeTab, setActiveTab] = useState<RuntimeTab>('hyper')
   const [lastResult, setLastResult] = useState<RpcResponse | null>(null)
@@ -198,6 +225,250 @@ export default function App () {
       setIsLoading(false)
     }
   }
+
+  function commitBrowserEntry (url: string, source: BrowserSource) {
+    const nextHistory = browserHistory.slice(0, browserHistoryIndex + 1).concat({ url, source })
+
+    setBrowserHistory(nextHistory)
+    setBrowserHistoryIndex(nextHistory.length - 1)
+    setBrowserCurrentUrl(url)
+    setBrowserAddress(url === 'peersky://home' ? '' : url)
+    setBrowserSource(source)
+    setBrowserCanGoBack(nextHistory.length > 1)
+    setBrowserCanGoForward(false)
+    setBrowserWebCanGoBack(false)
+    setBrowserWebCanGoForward(false)
+  }
+
+  function replaceBrowserEntry (url: string, source: BrowserSource) {
+    const nextHistory = browserHistory.slice()
+    nextHistory[browserHistoryIndex] = { url, source }
+
+    setBrowserHistory(nextHistory)
+    setBrowserCurrentUrl(url)
+    setBrowserAddress(url === 'peersky://home' ? '' : url)
+    setBrowserSource(source)
+    setBrowserCanGoBack(browserHistoryIndex > 0)
+    setBrowserCanGoForward(nextHistory.length > browserHistoryIndex + 1)
+  }
+
+  function syncBrowserEntry (url: string, source: BrowserSource) {
+    const nextHistory = browserHistory.slice()
+    nextHistory[browserHistoryIndex] = { url, source }
+
+    setBrowserHistory(nextHistory)
+    setBrowserCurrentUrl(url)
+    setBrowserAddress(url === 'peersky://home' ? '' : url)
+    setBrowserSource(source)
+  }
+
+  function cancelPendingBrowserLoad () {
+    browserLoadSeqRef.current += 1
+  }
+
+  async function onBrowserSubmit () {
+    await loadBrowserUrl(browserAddress)
+  }
+
+  async function loadBrowserUrl (rawUrl: string) {
+    const nextUrl = normalizeBrowserAddress(rawUrl)
+
+    if (nextUrl === 'peersky://home') {
+      cancelPendingBrowserLoad()
+      openBrowserHome()
+      return
+    }
+
+    if (isHyperUrl(nextUrl)) {
+      await loadHyperBrowserUrl(nextUrl)
+      return
+    }
+
+    if (isWebUrl(nextUrl)) {
+      cancelPendingBrowserLoad()
+      commitBrowserEntry(nextUrl, {
+        kind: 'web',
+        uri: nextUrl
+      })
+      setBrowserTitle(nextUrl)
+      return
+    }
+
+    cancelPendingBrowserLoad()
+    showBrowserError(nextUrl, 'Unsupported URL scheme')
+  }
+
+  async function loadHyperBrowserUrl (nextUrl: string, shouldCommit = true) {
+    const loadSeq = ++browserLoadSeqRef.current
+    setBrowserIsLoading(true)
+    setBrowserTitle('Loading Hyper...')
+    setStatus(`Loading ${nextUrl}`)
+
+    try {
+      const response = await callRpc(RPC_HYPER_FETCH, {
+        url: nextUrl,
+        method: 'GET',
+        inlineAssets: true
+      })
+
+      if (loadSeq !== browserLoadSeqRef.current) return
+
+      if (!response.ok) {
+        throw new Error(response.error || response.statusText || 'Unable to load Hyper page')
+      }
+
+      const source: BrowserSource = {
+        kind: 'hyper',
+        html: createHyperBrowserHtml(response, nextUrl),
+        baseUrl: nextUrl
+      }
+
+      if (shouldCommit) {
+        commitBrowserEntry(response.url || nextUrl, source)
+      } else {
+        replaceBrowserEntry(response.url || nextUrl, source)
+      }
+
+      setBrowserTitle(response.url || nextUrl)
+      setStatus(`Loaded ${response.status || 200} ${response.statusText || 'OK'}`)
+    } catch (error) {
+      if (loadSeq !== browserLoadSeqRef.current) return
+
+      const message = error instanceof Error ? error.message : String(error)
+      const source: BrowserSource = {
+        kind: 'error',
+        html: createBrowserErrorHtml(nextUrl, message)
+      }
+
+      if (shouldCommit) {
+        commitBrowserEntry(nextUrl, source)
+      } else {
+        replaceBrowserEntry(nextUrl, source)
+      }
+
+      setBrowserTitle('Page failed')
+      setStatus(message)
+    } finally {
+      if (loadSeq === browserLoadSeqRef.current) {
+        setBrowserIsLoading(false)
+      }
+    }
+  }
+
+  function openBrowserHome () {
+    commitBrowserEntry('peersky://home', { kind: 'home' })
+    setBrowserTitle('PeerSky')
+    setStatus('Browser home')
+  }
+
+  function openRuntimeApp (app: RuntimeTab) {
+    cancelPendingBrowserLoad()
+    setLastResult(null)
+    setActiveTab(app)
+    setRuntimeApp(app)
+    setShowRuntimeTools(true)
+  }
+
+  function closeRuntimeApp () {
+    setShowRuntimeTools(false)
+  }
+
+  function showBrowserError (targetUrl: string, message: string) {
+    const source: BrowserSource = {
+      kind: 'error',
+      html: createBrowserErrorHtml(targetUrl, message)
+    }
+
+    commitBrowserEntry(targetUrl, source)
+    setBrowserTitle('Page failed')
+    setStatus(message)
+  }
+
+  function onBrowserBack () {
+    cancelPendingBrowserLoad()
+
+    if (browserSource.kind === 'web' && browserWebCanGoBack) {
+      browserWebViewRef.current?.goBack()
+      return
+    }
+
+    if (browserHistoryIndex <= 0) return
+
+    const nextIndex = browserHistoryIndex - 1
+    const entry = browserHistory[nextIndex]
+    setBrowserHistoryIndex(nextIndex)
+    setBrowserCurrentUrl(entry.url)
+    setBrowserAddress(entry.url === 'peersky://home' ? '' : entry.url)
+    setBrowserSource(entry.source)
+    setBrowserTitle(entry.url === 'peersky://home' ? 'PeerSky' : entry.url)
+    setBrowserCanGoBack(nextIndex > 0)
+    setBrowserCanGoForward(browserHistory.length > nextIndex + 1)
+  }
+
+  function onBrowserForward () {
+    cancelPendingBrowserLoad()
+
+    if (browserSource.kind === 'web' && browserWebCanGoForward) {
+      browserWebViewRef.current?.goForward()
+      return
+    }
+
+    if (browserHistoryIndex >= browserHistory.length - 1) return
+
+    const nextIndex = browserHistoryIndex + 1
+    const entry = browserHistory[nextIndex]
+    setBrowserHistoryIndex(nextIndex)
+    setBrowserCurrentUrl(entry.url)
+    setBrowserAddress(entry.url === 'peersky://home' ? '' : entry.url)
+    setBrowserSource(entry.source)
+    setBrowserTitle(entry.url === 'peersky://home' ? 'PeerSky' : entry.url)
+    setBrowserCanGoBack(nextIndex > 0)
+    setBrowserCanGoForward(browserHistory.length > nextIndex + 1)
+  }
+
+  function onBrowserReload () {
+    if (browserIsLoading && browserSource.kind === 'web') {
+      cancelPendingBrowserLoad()
+      browserWebViewRef.current?.stopLoading()
+      return
+    }
+
+    if (browserSource.kind === 'web') {
+      cancelPendingBrowserLoad()
+      browserWebViewRef.current?.reload()
+      return
+    }
+
+    if (browserSource.kind === 'hyper') {
+      void loadHyperBrowserUrl(browserCurrentUrl, false)
+    }
+  }
+
+  function onBrowserShouldStartLoad (request: { url?: string }) {
+    const requestUrl = request.url || ''
+
+    if (requestUrl === 'about:blank' || requestUrl.startsWith('data:')) return true
+
+    if (isHyperUrl(requestUrl)) {
+      void loadBrowserUrl(requestUrl)
+      return false
+    }
+
+    if (!isWebUrl(requestUrl)) return false
+
+    if (browserSource.kind !== 'web') {
+      cancelPendingBrowserLoad()
+      commitBrowserEntry(requestUrl, {
+        kind: 'web',
+        uri: requestUrl
+      })
+      setBrowserTitle(requestUrl)
+      return false
+    }
+
+    return true
+  }
+
 
   async function onHolesailStartLive () {
     setIsLoading(true)
@@ -525,6 +796,13 @@ export default function App () {
     }
   }
 
+  const canBrowserGoBack = browserSource.kind === 'web'
+    ? browserWebCanGoBack || browserCanGoBack
+    : browserCanGoBack
+  const canBrowserGoForward = browserSource.kind === 'web'
+    ? browserWebCanGoForward || browserCanGoForward
+    : browserCanGoForward
+
   if (activeTab === 'p2pmd' && p2pmdRoom && p2pmdUrl) {
     return (
       <SafeAreaView style={styles.p2pmdWorkspace} edges={['top', 'left', 'right', 'bottom']}>
@@ -631,37 +909,153 @@ export default function App () {
     )
   }
 
+  if (!showRuntimeTools) {
+    return (
+      <SafeAreaView style={styles.browserShell} edges={['top', 'left', 'right', 'bottom']}>
+        <View style={styles.browserToolbar}>
+          <Pressable
+            style={[styles.browserNavButton, !canBrowserGoBack ? styles.browserNavButtonDisabled : null]}
+            onPress={onBrowserBack}
+            disabled={!canBrowserGoBack}
+          >
+            <Text style={styles.browserNavButtonText}>{'<'}</Text>
+          </Pressable>
+          <Pressable
+            style={[styles.browserNavButton, !canBrowserGoForward ? styles.browserNavButtonDisabled : null]}
+            onPress={onBrowserForward}
+            disabled={!canBrowserGoForward}
+          >
+            <Text style={styles.browserNavButtonText}>{'>'}</Text>
+          </Pressable>
+          <TextInput
+            style={styles.browserAddress}
+            autoCapitalize='none'
+            autoCorrect={false}
+            keyboardType='url'
+            returnKeyType='go'
+            value={browserAddress}
+            onChangeText={setBrowserAddress}
+            onSubmitEditing={() => void onBrowserSubmit()}
+            placeholder='Search or enter address'
+            placeholderTextColor='#7d8494'
+          />
+          <Pressable style={styles.browserActionButton} onPress={onBrowserReload}>
+            {browserIsLoading
+              ? <ActivityIndicator color='#ffffff' size='small' />
+              : <Text style={styles.browserActionButtonText}>↻</Text>}
+          </Pressable>
+        </View>
+
+        {browserSource.kind === 'home'
+          ? (
+            <ScrollView contentContainerStyle={styles.browserHome}>
+              <View style={styles.browserShortcutGrid}>
+                <Pressable
+                  style={styles.browserShortcut}
+                  onPress={() => void loadBrowserUrl('hyper://peersky.p2plabs.xyz/')}
+                >
+                  <View style={[styles.browserShortcutIcon, styles.browserShortcutIconPeerSky]}>
+                    <Text style={styles.browserShortcutIconText}>P</Text>
+                  </View>
+                  <Text numberOfLines={2} style={styles.browserShortcutTitle}>PeerSky Browser</Text>
+                </Pressable>
+                <Pressable
+                  style={styles.browserShortcut}
+                  onPress={() => void loadBrowserUrl('hyper://akhilesh.art/')}
+                >
+                  <View style={[styles.browserShortcutIcon, styles.browserShortcutIconAkhilesh]}>
+                    <Text style={styles.browserShortcutIconText}>AT</Text>
+                  </View>
+                  <Text numberOfLines={2} style={styles.browserShortcutTitle}>Akhilesh Thite</Text>
+                </Pressable>
+                <Pressable
+                  style={styles.browserShortcut}
+                  onPress={() => openRuntimeApp('p2pmd')}
+                >
+                  <View style={[styles.browserShortcutIcon, styles.browserShortcutIconP2pmd]}>
+                    <Text style={styles.browserShortcutIconText}>MD</Text>
+                  </View>
+                  <Text numberOfLines={2} style={styles.browserShortcutTitle}>P2PMD</Text>
+                </Pressable>
+                <Pressable
+                  style={styles.browserShortcut}
+                  onPress={() => openRuntimeApp('holesail')}
+                >
+                  <View style={[styles.browserShortcutIcon, styles.browserShortcutIconHolesail]}>
+                    <Text style={styles.browserShortcutIconText}>HS</Text>
+                  </View>
+                  <Text numberOfLines={2} style={styles.browserShortcutTitle}>Holesail</Text>
+                </Pressable>
+                <Pressable
+                  style={styles.browserShortcut}
+                  onPress={() => openRuntimeApp('hyper')}
+                >
+                  <View style={[styles.browserShortcutIcon, styles.browserShortcutIconHyper]}>
+                    <Text style={styles.browserShortcutIconText}>H</Text>
+                  </View>
+                  <Text numberOfLines={2} style={styles.browserShortcutTitle}>Hyper Runtime</Text>
+                </Pressable>
+              </View>
+            </ScrollView>
+            )
+          : (
+            <WebView
+              ref={browserWebViewRef}
+              source={browserSource.kind === 'web'
+                ? { uri: browserSource.uri }
+                : { html: browserSource.html, baseUrl: browserSource.kind === 'hyper' ? browserSource.baseUrl : undefined }}
+              originWhitelist={['*']}
+              textZoom={100}
+              style={styles.browserWebView}
+              onShouldStartLoadWithRequest={onBrowserShouldStartLoad}
+              onLoadStart={() => {
+                setBrowserIsLoading(true)
+              }}
+              onLoadEnd={() => {
+                setBrowserIsLoading(false)
+              }}
+              onNavigationStateChange={(navigationState) => {
+                if (browserSource.kind !== 'web') return
+
+                setBrowserWebCanGoBack(navigationState.canGoBack)
+                setBrowserWebCanGoForward(navigationState.canGoForward)
+                syncBrowserEntry(navigationState.url, {
+                  kind: 'web',
+                  uri: navigationState.url
+                })
+                setBrowserTitle(navigationState.title || navigationState.url)
+                setBrowserIsLoading(navigationState.loading)
+              }}
+              onError={(event) => {
+                const failedUrl = event.nativeEvent.url || browserCurrentUrl
+                replaceBrowserEntry(failedUrl, {
+                  kind: 'error',
+                  html: createBrowserErrorHtml(failedUrl, event.nativeEvent.description)
+                })
+                setBrowserTitle('Page failed')
+                setStatus(event.nativeEvent.description)
+              }}
+            />
+            )}
+
+        {isBooting && (
+          <View style={styles.browserLoader}>
+            <ActivityIndicator size='small' />
+          </View>
+        )}
+      </SafeAreaView>
+    )
+  }
+
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <ScrollView contentContainerStyle={styles.content}>
-        <Text style={[styles.title, activeTab === 'p2pmd' ? styles.titleOnDark : null]}>Runtime Check</Text>
-        <View style={styles.tabRow}>
-          <Pressable
-            style={[styles.tabButton, activeTab === 'hyper' ? styles.tabButtonActive : null]}
-            onPress={() => setActiveTab('hyper')}
-            disabled={isBooting || isLoading}
-          >
-            <Text style={[styles.tabButtonText, activeTab === 'hyper' ? styles.tabButtonTextActive : null]}>
-              Hyper
-            </Text>
-          </Pressable>
-          <Pressable
-            style={[styles.tabButton, activeTab === 'holesail' ? styles.tabButtonActive : null]}
-            onPress={() => setActiveTab('holesail')}
-            disabled={isBooting || isLoading}
-          >
-            <Text style={[styles.tabButtonText, activeTab === 'holesail' ? styles.tabButtonTextActive : null]}>
-              Holesail
-            </Text>
-          </Pressable>
-          <Pressable
-            style={[styles.tabButton, activeTab === 'p2pmd' ? styles.tabButtonActive : null]}
-            onPress={() => setActiveTab('p2pmd')}
-            disabled={isBooting || isLoading}
-          >
-            <Text style={[styles.tabButtonText, activeTab === 'p2pmd' ? styles.tabButtonTextActive : null]}>
-              P2PMD
-            </Text>
+        <View style={styles.runtimeHeader}>
+          <Text style={[styles.title, activeTab === 'p2pmd' ? styles.titleOnDark : null]}>
+            {getRuntimeAppTitle(runtimeApp)}
+          </Text>
+          <Pressable style={styles.browserChip} onPress={closeRuntimeApp}>
+            <Text style={styles.browserChipText}>Browser</Text>
           </Pressable>
         </View>
         {shouldShowRuntimeStatus && <Text style={styles.status}>{status}</Text>}
@@ -859,398 +1253,150 @@ function toBareFsPath (uri: string) {
   return decodeURIComponent(new URL(uri).pathname).replace(/\/$/, '')
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1
-  },
-  p2pmdWorkspace: {
-    backgroundColor: '#1f2027',
-    flex: 1
-  },
-  p2pmdWorkspaceHeader: {
-    alignItems: 'center',
-    backgroundColor: '#24262f',
-    borderBottomColor: '#3a3d49',
-    borderBottomWidth: 1,
-    flexDirection: 'row',
-    gap: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 8
-  },
-  p2pmdWorkspaceTitle: {
-    color: '#f1f2f7',
-    fontSize: 18,
-    fontWeight: '800'
-  },
-  p2pmdWorkspaceParticipants: {
-    backgroundColor: '#30364a',
-    borderRadius: 999,
-    color: '#cdd6ff',
-    flexShrink: 1,
-    fontSize: 12,
-    fontWeight: '700',
-    overflow: 'hidden',
-    paddingHorizontal: 9,
-    paddingVertical: 5
-  },
-  p2pmdWorkspaceRole: {
-    backgroundColor: '#3a3020',
-    borderRadius: 999,
-    color: '#ffd27a',
-    fontSize: 11,
-    fontWeight: '800',
-    overflow: 'hidden',
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    textTransform: 'uppercase'
-  },
-  p2pmdWorkspaceRoleHost: {
-    backgroundColor: '#1d513d',
-    color: '#c6f6df'
-  },
-  p2pmdPreviewButton: {
-    backgroundColor: '#2f80ed',
-    borderRadius: 12,
-    marginLeft: 'auto',
-    paddingHorizontal: 12,
-    paddingVertical: 9
-  },
-  p2pmdPreviewButtonContent: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 7
-  },
-  p2pmdPreviewButtonText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '800'
-  },
-  p2pmdEyeIcon: {
-    alignItems: 'center',
-    borderColor: '#fff',
-    borderRadius: 3,
-    borderWidth: 2,
-    height: 14,
-    justifyContent: 'center',
-    transform: [{ rotate: '45deg' }],
-    width: 14
-  },
-  p2pmdEyeIconDot: {
-    backgroundColor: '#fff',
-    borderRadius: 2,
-    height: 4,
-    transform: [{ rotate: '-45deg' }],
-    width: 4
-  },
-  p2pmdPencilIcon: {
-    height: 17,
-    justifyContent: 'center',
-    width: 17
-  },
-  p2pmdPencilBody: {
-    backgroundColor: '#fff',
-    borderRadius: 2,
-    height: 3,
-    left: 1,
-    transform: [{ rotate: '-35deg' }],
-    width: 14
-  },
-  p2pmdPencilTip: {
-    backgroundColor: '#fff',
-    height: 4,
-    position: 'absolute',
-    right: 1,
-    top: 3,
-    transform: [{ rotate: '-35deg' }],
-    width: 3
-  },
-  p2pmdWorkspaceMeta: {
-    alignItems: 'center',
-    backgroundColor: '#202128',
-    borderBottomColor: '#3a3d49',
-    borderBottomWidth: 1,
-    flexDirection: 'row',
-    gap: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 7
-  },
-  p2pmdRoomIdentity: {
-    flex: 1,
-    gap: 3,
-    minWidth: 0
-  },
-  p2pmdWorkspaceKeyRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 6,
-    minWidth: 0
-  },
-  p2pmdWorkspaceKeyLabel: {
-    backgroundColor: '#30364a',
-    borderRadius: 6,
-    color: '#cdd6ff',
-    fontSize: 9,
-    fontWeight: '800',
-    overflow: 'hidden',
-    paddingHorizontal: 5,
-    paddingVertical: 2,
-    textTransform: 'uppercase'
-  },
-  p2pmdWorkspaceKey: {
-    color: '#59a6ff',
-    flex: 1,
-    flexShrink: 1,
-    fontFamily: 'monospace',
-    fontSize: 10,
-    fontWeight: '700'
-  },
-  p2pmdWorkspaceUrl: {
-    color: '#a2a8bb',
-    fontFamily: 'monospace',
-    fontSize: 11,
-    minWidth: 0
-  },
-  p2pmdPublishedUrlRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 5,
-    minWidth: 0
-  },
-  p2pmdPublishedUrlLabel: {
-    color: '#cdd6ff',
-    fontSize: 10,
-    fontWeight: '800'
-  },
-  p2pmdPublishedUrl: {
-    color: '#59a6ff',
-    flex: 1,
-    fontFamily: 'monospace',
-    fontSize: 10,
-    minWidth: 0
-  },
-  p2pmdWorkspaceSyncStatus: {
-    color: '#cdd6ff',
-    fontSize: 11,
-    fontWeight: '700'
-  },
-  p2pmdMetaButton: {
-    backgroundColor: '#30364a',
-    borderColor: '#4c5675',
-    borderRadius: 8,
-    borderWidth: 1,
-    paddingHorizontal: 10,
-    paddingVertical: 9
-  },
-  p2pmdMetaButtonDanger: {
-    backgroundColor: '#4a2730',
-    borderColor: '#7c3b48'
-  },
-  p2pmdMetaButtonText: {
-    color: '#f1f2f7',
-    fontSize: 12,
-    fontWeight: '800'
-  },
-  p2pmdWorkspaceWebView: {
-    backgroundColor: '#202128',
-    flex: 1
-  },
-  p2pmdWorkspaceLoader: {
-    bottom: 12,
-    position: 'absolute',
-    right: 12
-  },
-  content: {
-    gap: 12,
-    padding: 16
-  },
-  title: {
-    fontSize: 22,
-    fontWeight: '700'
-  },
-  titleOnDark: {
-    color: '#f1f2f7'
-  },
-  status: {
-    fontSize: 14
-  },
-  tabRow: {
-    flexDirection: 'row',
-    gap: 10
-  },
-  tabButton: {
-    backgroundColor: '#f1f1f1',
-    borderColor: '#d8d8d8',
-    borderRadius: 8,
-    borderWidth: 1,
-    paddingHorizontal: 14,
-    paddingVertical: 10
-  },
-  tabButtonActive: {
-    backgroundColor: '#0f6fd4',
-    borderColor: '#0f6fd4'
-  },
-  tabButtonText: {
-    color: '#222',
-    fontSize: 14,
-    fontWeight: '600'
-  },
-  tabButtonTextActive: {
-    color: '#fff'
-  },
-  input: {
-    borderColor: '#bbb',
-    borderRadius: 8,
-    borderWidth: 1,
-    paddingHorizontal: 12,
-    paddingVertical: 10
-  },
-  buttons: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10
-  },
-  section: {
-    borderColor: '#ddd',
-    borderRadius: 8,
-    borderWidth: 1,
-    gap: 10,
-    padding: 10
-  },
-  p2pmdSection: {
-    backgroundColor: '#1f2027',
-    borderColor: '#3a3d49',
-    borderRadius: 14,
-    padding: 12
-  },
-  p2pmdHeader: {
-    alignItems: 'flex-start',
-    flexDirection: 'row',
-    gap: 10,
-    justifyContent: 'space-between'
-  },
-  p2pmdHeaderCopy: {
-    flex: 1,
-    gap: 4
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600'
-  },
-  p2pmdTitle: {
-    color: '#f1f2f7'
-  },
-  helperText: {
-    color: '#a2a8bb',
-    fontSize: 13,
-    lineHeight: 19
-  },
-  fieldLabel: {
-    color: '#8c93a8',
-    fontSize: 12,
-    fontWeight: '700',
-    textTransform: 'uppercase'
-  },
-  p2pmdInput: {
-    backgroundColor: '#262832',
-    borderColor: '#3a3d49',
-    color: '#f1f2f7'
-  },
-  result: {
-    backgroundColor: '#f6f6f6',
-    borderRadius: 8,
-    padding: 10
-  },
-  resultText: {
-    fontFamily: 'monospace',
-    fontSize: 12
-  },
-  emptyRoomCard: {
-    backgroundColor: '#262832',
-    borderColor: '#3a3d49',
-    borderRadius: 12,
-    borderWidth: 1,
-    gap: 6,
-    padding: 12
-  },
-  emptyRoomTitle: {
-    color: '#f1f2f7',
-    fontSize: 15,
-    fontWeight: '700'
-  },
-  p2pmdActionRow: {
-    alignItems: 'stretch',
-    flexDirection: 'row',
-    gap: 10,
-    marginTop: 6
-  },
-  p2pmdPrimaryAction: {
-    backgroundColor: '#2f80ed',
-    borderRadius: 12,
-    flex: 1,
-    gap: 3,
-    paddingHorizontal: 14,
-    paddingVertical: 12
-  },
-  p2pmdPrimaryActionText: {
-    color: '#fff',
-    fontSize: 15,
-    fontWeight: '800'
-  },
-  p2pmdActionHint: {
-    color: '#dbeafe',
-    fontSize: 11,
-    fontWeight: '600'
-  },
-  p2pmdSecondaryAction: {
-    alignItems: 'center',
-    backgroundColor: '#30364a',
-    borderColor: '#4c5675',
-    borderRadius: 12,
-    borderWidth: 1,
-    justifyContent: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 12
-  },
-  p2pmdSecondaryActionText: {
-    color: '#f1f2f7',
-    fontSize: 13,
-    fontWeight: '800'
-  },
-  p2pmdActionDisabled: {
-    opacity: 0.5
-  },
-  joinRoomCard: {
-    backgroundColor: '#22242c',
-    borderColor: '#343744',
-    borderRadius: 12,
-    borderWidth: 1,
-    gap: 10,
-    padding: 12
-  },
-  p2pmdJoinAction: {
-    alignItems: 'center',
-    backgroundColor: '#1d513d',
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 12
-  },
-  p2pmdJoinActionText: {
-    color: '#c6f6df',
-    fontSize: 14,
-    fontWeight: '800'
-  },
-  roomPill: {
-    backgroundColor: '#30364a',
-    borderRadius: 999,
-    color: '#cdd6ff',
-    fontSize: 12,
-    fontWeight: '700',
-    overflow: 'hidden',
-    paddingHorizontal: 10,
-    paddingVertical: 4
-  },
-  roomPillLive: {
-    backgroundColor: '#2f80ed',
-    color: '#fff'
+function normalizeBrowserAddress (address: string) {
+  const value = address.trim()
+  if (!value || value === 'peersky://home') return 'peersky://home'
+
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(value)) return value
+
+  if (/^(localhost|127[.]0[.]0[.]1|10[.]0[.]2[.]2)(:\d+)?(\/.*)?$/i.test(value)) {
+    return `http://${value}`
   }
-})
+
+  if (value.includes(' ') || !value.includes('.')) {
+    return `https://duckduckgo.com/?q=${encodeURIComponent(value)}`
+  }
+
+  return `https://${value}`
+}
+
+function isWebUrl (targetUrl: string) {
+  return /^https?:\/\//i.test(targetUrl)
+}
+
+function isHyperUrl (targetUrl: string) {
+  return /^hyper:\/\//i.test(targetUrl)
+}
+
+function getRuntimeAppTitle (app: RuntimeTab) {
+  if (app === 'hyper') return 'Hyper Runtime'
+  if (app === 'holesail') return 'Holesail'
+  return 'P2PMD'
+}
+
+function createHyperBrowserHtml (response: RpcResponse, targetUrl: string) {
+  const body = response.body || ''
+  const contentType = response.headers?.['content-type'] || ''
+
+  if (contentType.includes('application/json')) {
+    return createHyperDirectoryHtml(body, targetUrl)
+  }
+
+  if (contentType.includes('text/html') || looksLikeHtml(body)) {
+    return ensureMobileViewport(body)
+  }
+
+  return createBrowserDocumentHtml(targetUrl, `<pre>${escapeHtml(body)}</pre>`)
+}
+
+function createHyperDirectoryHtml (body: string, targetUrl: string) {
+  try {
+    const files = JSON.parse(body)
+    if (!Array.isArray(files)) throw new Error('Expected a directory listing')
+
+    const links = files
+      .map((file) => {
+        const name = String(file)
+        const href = createHyperChildUrl(targetUrl, name)
+        return `<li><a href="${escapeHtmlAttribute(href)}">${escapeHtml(name)}</a></li>`
+      })
+      .join('')
+
+    return createBrowserDocumentHtml(
+      targetUrl,
+      `<h1>Index of ${escapeHtml(targetUrl)}</h1><ul>${links || '<li>No files found.</li>'}</ul>`
+    )
+  } catch {
+    return createBrowserDocumentHtml(targetUrl, `<pre>${escapeHtml(body)}</pre>`)
+  }
+}
+
+function createBrowserErrorHtml (targetUrl: string, message: string) {
+  return createBrowserDocumentHtml(
+    'PeerSky could not load this page',
+    `<h1>Page failed</h1><p class="muted">${escapeHtml(targetUrl)}</p><pre>${escapeHtml(message)}</pre>`
+  )
+}
+
+function createBrowserDocumentHtml (title: string, body: string) {
+  return `<!doctype html>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>${escapeHtml(title)}</title>
+<style>
+  body {
+    color: #151821;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    line-height: 1.55;
+    margin: 0;
+    padding: 22px;
+  }
+  a { color: #0f6fd4; }
+  ul { padding-left: 20px; }
+  li { margin: 10px 0; overflow-wrap: anywhere; }
+  pre {
+    background: #f4f6f8;
+    border: 1px solid #dce2ea;
+    border-radius: 8px;
+    overflow: auto;
+    padding: 14px;
+    white-space: pre-wrap;
+  }
+  .muted {
+    color: #657086;
+    overflow-wrap: anywhere;
+  }
+</style>
+${body}
+`
+}
+
+function ensureMobileViewport (html: string) {
+  if (/<meta\s+[^>]*name=["']viewport["'][^>]*>/i.test(html)) return html
+
+  const viewport = '<meta name="viewport" content="width=device-width, initial-scale=1" />'
+
+  if (/<head\b[^>]*>/i.test(html)) {
+    return html.replace(/<head\b([^>]*)>/i, `<head$1>${viewport}`)
+  }
+
+  return `${viewport}\n${html}`
+}
+
+function createHyperChildUrl (baseUrl: string, childPath: string) {
+  try {
+    const parsed = new URL(baseUrl)
+    const pathname = childPath.startsWith('/') ? childPath : `${parsed.pathname.replace(/\/?$/, '/')}${childPath}`
+    return `hyper://${parsed.host}${pathname}`
+  } catch {
+    return childPath
+  }
+}
+
+function looksLikeHtml (body: string) {
+  return /^\s*<(?:!doctype|html|head|body|main|section|article|div|h1|p)\b/i.test(body)
+}
+
+function escapeHtml (value: string) {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+function escapeHtmlAttribute (value: string) {
+  return escapeHtml(value).replace(/`/g, '&#96;')
+}
+
