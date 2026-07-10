@@ -345,6 +345,10 @@ export const styles = StyleSheet.create({
     gap: 12,
     padding: 16
   },
+  p2pmdAppContent: {
+    backgroundColor: '#1f2027',
+    flexGrow: 1
+  },
   runtimeHeader: {
     alignItems: 'center',
     flexDirection: 'row',

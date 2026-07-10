@@ -16,6 +16,13 @@ import b4a from 'b4a'
 import RPC from 'bare-rpc'
 import { WebView } from 'react-native-webview'
 import bundle from './app.bundle.mjs'
+import {
+  INTERNAL_APPS,
+  type RuntimeTab,
+  getRuntimeAppFromUrl,
+  getRuntimeAppTitle,
+  getRuntimeAppUrl
+} from './internal-apps'
 import { styles } from './styles'
 import {
   RPC_HOLESAIL_CONNECT,
@@ -58,9 +65,9 @@ type RpcResponse = {
   room?: P2pmdRoom | null
 }
 
-type RuntimeTab = 'hyper' | 'holesail' | 'p2pmd'
 type BrowserSource =
   | { kind: 'home' }
+  | { kind: 'app', app: RuntimeTab }
   | { kind: 'web', uri: string }
   | { kind: 'hyper', html: string, baseUrl: string }
   | { kind: 'error', html: string }
@@ -80,8 +87,6 @@ export default function App () {
   const [isBooting, setIsBooting] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [status, setStatus] = useState('Starting Hyper runtime...')
-  const [showRuntimeTools, setShowRuntimeTools] = useState(false)
-  const [runtimeApp, setRuntimeApp] = useState<RuntimeTab>('p2pmd')
   const [browserAddress, setBrowserAddress] = useState('')
   const [browserCurrentUrl, setBrowserCurrentUrl] = useState('peersky://home')
   const [browserTitle, setBrowserTitle] = useState('PeerSky')
@@ -279,6 +284,12 @@ export default function App () {
       return
     }
 
+    const internalApp = getRuntimeAppFromUrl(nextUrl)
+    if (internalApp) {
+      openInternalApp(internalApp)
+      return
+    }
+
     if (isHyperUrl(nextUrl)) {
       await loadHyperBrowserUrl(nextUrl)
       return
@@ -361,16 +372,19 @@ export default function App () {
     setStatus('Browser home')
   }
 
-  function openRuntimeApp (app: RuntimeTab) {
+  function openInternalApp (app: RuntimeTab, shouldCommit = true) {
+    const appUrl = getRuntimeAppUrl(app)
     cancelPendingBrowserLoad()
     setLastResult(null)
     setActiveTab(app)
-    setRuntimeApp(app)
-    setShowRuntimeTools(true)
-  }
+    setBrowserTitle(getRuntimeAppTitle(app))
+    setStatus(`${getRuntimeAppTitle(app)} opened`)
 
-  function closeRuntimeApp () {
-    setShowRuntimeTools(false)
+    if (shouldCommit) {
+      commitBrowserEntry(appUrl, { kind: 'app', app })
+    } else {
+      replaceBrowserEntry(appUrl, { kind: 'app', app })
+    }
   }
 
   function showBrowserError (targetUrl: string, message: string) {
@@ -400,7 +414,8 @@ export default function App () {
     setBrowserCurrentUrl(entry.url)
     setBrowserAddress(entry.url === 'peersky://home' ? '' : entry.url)
     setBrowserSource(entry.source)
-    setBrowserTitle(entry.url === 'peersky://home' ? 'PeerSky' : entry.url)
+    setBrowserTitle(getBrowserEntryTitle(entry))
+    if (entry.source.kind === 'app') setActiveTab(entry.source.app)
     setBrowserCanGoBack(nextIndex > 0)
     setBrowserCanGoForward(browserHistory.length > nextIndex + 1)
   }
@@ -421,7 +436,8 @@ export default function App () {
     setBrowserCurrentUrl(entry.url)
     setBrowserAddress(entry.url === 'peersky://home' ? '' : entry.url)
     setBrowserSource(entry.source)
-    setBrowserTitle(entry.url === 'peersky://home' ? 'PeerSky' : entry.url)
+    setBrowserTitle(getBrowserEntryTitle(entry))
+    if (entry.source.kind === 'app') setActiveTab(entry.source.app)
     setBrowserCanGoBack(nextIndex > 0)
     setBrowserCanGoForward(browserHistory.length > nextIndex + 1)
   }
@@ -441,6 +457,11 @@ export default function App () {
 
     if (browserSource.kind === 'hyper') {
       void loadHyperBrowserUrl(browserCurrentUrl, false)
+      return
+    }
+
+    if (browserSource.kind === 'app') {
+      openInternalApp(browserSource.app, false)
     }
   }
 
@@ -909,9 +930,8 @@ export default function App () {
     )
   }
 
-  if (!showRuntimeTools) {
-    return (
-      <SafeAreaView style={styles.browserShell} edges={['top', 'left', 'right', 'bottom']}>
+  return (
+    <SafeAreaView style={styles.browserShell} edges={['top', 'left', 'right', 'bottom']}>
         <View style={styles.browserToolbar}>
           <Pressable
             style={[styles.browserNavButton, !canBrowserGoBack ? styles.browserNavButtonDisabled : null]}
@@ -968,36 +988,219 @@ export default function App () {
                   </View>
                   <Text numberOfLines={2} style={styles.browserShortcutTitle}>Akhilesh Thite</Text>
                 </Pressable>
-                <Pressable
-                  style={styles.browserShortcut}
-                  onPress={() => openRuntimeApp('p2pmd')}
-                >
-                  <View style={[styles.browserShortcutIcon, styles.browserShortcutIconP2pmd]}>
-                    <Text style={styles.browserShortcutIconText}>MD</Text>
-                  </View>
-                  <Text numberOfLines={2} style={styles.browserShortcutTitle}>P2PMD</Text>
-                </Pressable>
-                <Pressable
-                  style={styles.browserShortcut}
-                  onPress={() => openRuntimeApp('holesail')}
-                >
-                  <View style={[styles.browserShortcutIcon, styles.browserShortcutIconHolesail]}>
-                    <Text style={styles.browserShortcutIconText}>HS</Text>
-                  </View>
-                  <Text numberOfLines={2} style={styles.browserShortcutTitle}>Holesail</Text>
-                </Pressable>
-                <Pressable
-                  style={styles.browserShortcut}
-                  onPress={() => openRuntimeApp('hyper')}
-                >
-                  <View style={[styles.browserShortcutIcon, styles.browserShortcutIconHyper]}>
-                    <Text style={styles.browserShortcutIconText}>H</Text>
-                  </View>
-                  <Text numberOfLines={2} style={styles.browserShortcutTitle}>Hyper Runtime</Text>
-                </Pressable>
+                {INTERNAL_APPS.map((app) => (
+                  <Pressable
+                    key={app.id}
+                    style={styles.browserShortcut}
+                    onPress={() => void loadBrowserUrl(app.url)}
+                  >
+                    <View style={[styles.browserShortcutIcon, getRuntimeAppIconStyle(app.id)]}>
+                      <Text style={styles.browserShortcutIconText}>{app.icon}</Text>
+                    </View>
+                    <Text numberOfLines={2} style={styles.browserShortcutTitle}>{app.title}</Text>
+                  </Pressable>
+                ))}
               </View>
             </ScrollView>
             )
+          : browserSource.kind === 'app'
+            ? (
+              <ScrollView contentContainerStyle={[
+                styles.content,
+                activeTab === 'p2pmd' ? styles.p2pmdAppContent : null
+              ]}>
+                <View style={styles.runtimeHeader}>
+                  <Text style={[styles.title, activeTab === 'p2pmd' ? styles.titleOnDark : null]}>
+                    {getRuntimeAppTitle(activeTab)}
+                  </Text>
+                  <Text style={styles.browserChipText}>{getRuntimeAppUrl(activeTab)}</Text>
+                </View>
+                {shouldShowRuntimeStatus && <Text style={styles.status}>{status}</Text>}
+
+                {activeTab === 'hyper' && (
+                  <View style={styles.section}>
+                    <Text style={styles.sectionTitle}>Hyper Runtime Check</Text>
+                    <TextInput
+                      style={styles.input}
+                      autoCapitalize='none'
+                      autoCorrect={false}
+                      value={url}
+                      onChangeText={setUrl}
+                      placeholder='hyper://...'
+                    />
+
+                    <View style={styles.buttons}>
+                      <Button
+                        title='Create Drive'
+                        onPress={() => void onCreateDrive()}
+                        disabled={isBooting || isLoading}
+                      />
+                      <Button
+                        title='Fetch URL'
+                        onPress={() => void onFetch()}
+                        disabled={isBooting || isLoading}
+                      />
+                    </View>
+                  </View>
+                )}
+                {activeTab === 'holesail' && (
+                  <View style={styles.section}>
+                    <Text style={styles.sectionTitle}>Holesail Runtime Check</Text>
+                    <TextInput
+                      style={styles.input}
+                      autoCapitalize='none'
+                      autoCorrect={false}
+                      keyboardType='numeric'
+                      value={hsLivePort}
+                      onChangeText={setHsLivePort}
+                      placeholder='Live port (for --live)'
+                    />
+                    <TextInput
+                      style={styles.input}
+                      autoCapitalize='none'
+                      autoCorrect={false}
+                      value={hsLiveHost}
+                      onChangeText={setHsLiveHost}
+                      placeholder='Live host (default 127.0.0.1)'
+                    />
+                    <TextInput
+                      style={styles.input}
+                      autoCapitalize='none'
+                      autoCorrect={false}
+                      value={hsConnector}
+                      onChangeText={setHsConnector}
+                      placeholder='Optional custom connection string'
+                    />
+                    <View style={styles.buttons}>
+                      <Button
+                        title='Start Live'
+                        onPress={() => void onHolesailStartLive()}
+                        disabled={isBooting || isLoading}
+                      />
+                      <Button
+                        title='Status'
+                        onPress={() => void onHolesailStatus()}
+                        disabled={isBooting || isLoading}
+                      />
+                    </View>
+
+                    <TextInput
+                      style={styles.input}
+                      autoCapitalize='none'
+                      autoCorrect={false}
+                      value={hsConnectKey}
+                      onChangeText={setHsConnectKey}
+                      placeholder='hs://... connection key'
+                    />
+                    <TextInput
+                      style={styles.input}
+                      autoCapitalize='none'
+                      autoCorrect={false}
+                      keyboardType='numeric'
+                      value={hsConnectPort}
+                      onChangeText={setHsConnectPort}
+                      placeholder='Client bind port (default 8989)'
+                    />
+                    <TextInput
+                      style={styles.input}
+                      autoCapitalize='none'
+                      autoCorrect={false}
+                      value={hsConnectHost}
+                      onChangeText={setHsConnectHost}
+                      placeholder='Client bind host (default 127.0.0.1)'
+                    />
+                    <View style={styles.buttons}>
+                      <Button
+                        title='Connect'
+                        onPress={() => void onHolesailConnect()}
+                        disabled={isBooting || isLoading}
+                      />
+                      <Button
+                        title='Stop'
+                        onPress={() => void onHolesailStop()}
+                        disabled={isBooting || isLoading}
+                      />
+                    </View>
+                  </View>
+                )}
+                {activeTab === 'p2pmd' && (
+                  <View style={[styles.section, styles.p2pmdSection]}>
+                    <View style={styles.p2pmdHeader}>
+                      <View style={styles.p2pmdHeaderCopy}>
+                        <Text style={[styles.sectionTitle, styles.p2pmdTitle]}>P2PMD</Text>
+                        <Text style={styles.helperText}>
+                          Create or join a Holesail-backed Markdown room, then edit together in the embedded mobile editor.
+                        </Text>
+                      </View>
+                      <Text style={[styles.roomPill, p2pmdRoom ? styles.roomPillLive : null]}>
+                        {p2pmdRoom ? 'live' : 'ready'}
+                      </Text>
+                    </View>
+                    {!p2pmdRoom && (
+                      <View style={styles.emptyRoomCard}>
+                        <Text style={styles.emptyRoomTitle}>Start a collaborative note</Text>
+                        <Text style={styles.helperText}>
+                          Create a room to host from this phone, or paste an hs:// key to join a room hosted elsewhere.
+                        </Text>
+                        <View style={styles.p2pmdActionRow}>
+                          <Pressable
+                            style={[styles.p2pmdPrimaryAction, isBooting || isLoading ? styles.p2pmdActionDisabled : null]}
+                            onPress={() => void onP2pmdRoomCreate()}
+                            disabled={isBooting || isLoading}
+                          >
+                            <Text style={styles.p2pmdPrimaryActionText}>Create Room</Text>
+                            <Text style={styles.p2pmdActionHint}>Host from this phone</Text>
+                          </Pressable>
+                          <Pressable
+                            style={[styles.p2pmdSecondaryAction, isBooting || isLoading ? styles.p2pmdActionDisabled : null]}
+                            onPress={() => void onP2pmdRoomRefresh()}
+                            disabled={isBooting || isLoading}
+                          >
+                            <Text style={styles.p2pmdSecondaryActionText}>Refresh</Text>
+                          </Pressable>
+                        </View>
+                      </View>
+                    )}
+
+                    <View style={styles.joinRoomCard}>
+                      <Text style={styles.fieldLabel}>Join existing room</Text>
+                      <Text style={styles.helperText}>
+                        Paste a room key shared by another peer to connect through Holesail.
+                      </Text>
+                      <TextInput
+                        style={[styles.input, styles.p2pmdInput]}
+                        autoCapitalize='none'
+                        autoCorrect={false}
+                        value={p2pmdJoinKey}
+                        onChangeText={setP2pmdJoinKey}
+                        placeholderTextColor='#6f7484'
+                        placeholder='hs://... room key'
+                      />
+                      <Pressable
+                        style={[
+                          styles.p2pmdJoinAction,
+                          isBooting || isLoading || !p2pmdJoinKey.trim() ? styles.p2pmdActionDisabled : null
+                        ]}
+                        onPress={() => void onP2pmdRoomJoin()}
+                        disabled={isBooting || isLoading || !p2pmdJoinKey.trim()}
+                      >
+                        <Text style={styles.p2pmdJoinActionText}>Join Room</Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                )}
+
+                {(isBooting || isLoading) && <ActivityIndicator size='small' />}
+
+                {lastResult && activeTab !== 'p2pmd' && (
+                  <View style={styles.result}>
+                    <Text selectable={true} style={styles.resultText}>
+                      {JSON.stringify(lastResult, null, 2)}
+                    </Text>
+                  </View>
+                )}
+              </ScrollView>
+              )
           : (
             <WebView
               ref={browserWebViewRef}
@@ -1043,207 +1246,6 @@ export default function App () {
             <ActivityIndicator size='small' />
           </View>
         )}
-      </SafeAreaView>
-    )
-  }
-
-  return (
-    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
-      <ScrollView contentContainerStyle={styles.content}>
-        <View style={styles.runtimeHeader}>
-          <Text style={[styles.title, activeTab === 'p2pmd' ? styles.titleOnDark : null]}>
-            {getRuntimeAppTitle(runtimeApp)}
-          </Text>
-          <Pressable style={styles.browserChip} onPress={closeRuntimeApp}>
-            <Text style={styles.browserChipText}>Browser</Text>
-          </Pressable>
-        </View>
-        {shouldShowRuntimeStatus && <Text style={styles.status}>{status}</Text>}
-
-        {activeTab === 'hyper' && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Hyper Runtime Check</Text>
-            <TextInput
-              style={styles.input}
-              autoCapitalize='none'
-              autoCorrect={false}
-              value={url}
-              onChangeText={setUrl}
-              placeholder='hyper://...'
-            />
-
-            <View style={styles.buttons}>
-              <Button
-                title='Create Drive'
-                onPress={() => void onCreateDrive()}
-                disabled={isBooting || isLoading}
-              />
-              <Button
-                title='Fetch URL'
-                onPress={() => void onFetch()}
-                disabled={isBooting || isLoading}
-              />
-            </View>
-          </View>
-        )}
-        {activeTab === 'holesail' && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Holesail Runtime Check</Text>
-            <TextInput
-              style={styles.input}
-              autoCapitalize='none'
-              autoCorrect={false}
-              keyboardType='numeric'
-              value={hsLivePort}
-              onChangeText={setHsLivePort}
-              placeholder='Live port (for --live)'
-            />
-            <TextInput
-              style={styles.input}
-              autoCapitalize='none'
-              autoCorrect={false}
-              value={hsLiveHost}
-              onChangeText={setHsLiveHost}
-              placeholder='Live host (default 127.0.0.1)'
-            />
-            <TextInput
-              style={styles.input}
-              autoCapitalize='none'
-              autoCorrect={false}
-              value={hsConnector}
-              onChangeText={setHsConnector}
-              placeholder='Optional custom connection string'
-            />
-            <View style={styles.buttons}>
-              <Button
-                title='Start Live'
-                onPress={() => void onHolesailStartLive()}
-                disabled={isBooting || isLoading}
-              />
-              <Button
-                title='Status'
-                onPress={() => void onHolesailStatus()}
-                disabled={isBooting || isLoading}
-              />
-            </View>
-
-            <TextInput
-              style={styles.input}
-              autoCapitalize='none'
-              autoCorrect={false}
-              value={hsConnectKey}
-              onChangeText={setHsConnectKey}
-              placeholder='hs://... connection key'
-            />
-            <TextInput
-              style={styles.input}
-              autoCapitalize='none'
-              autoCorrect={false}
-              keyboardType='numeric'
-              value={hsConnectPort}
-              onChangeText={setHsConnectPort}
-              placeholder='Client bind port (default 8989)'
-            />
-            <TextInput
-              style={styles.input}
-              autoCapitalize='none'
-              autoCorrect={false}
-              value={hsConnectHost}
-              onChangeText={setHsConnectHost}
-              placeholder='Client bind host (default 127.0.0.1)'
-            />
-            <View style={styles.buttons}>
-              <Button
-                title='Connect'
-                onPress={() => void onHolesailConnect()}
-                disabled={isBooting || isLoading}
-              />
-              <Button
-                title='Stop'
-                onPress={() => void onHolesailStop()}
-                disabled={isBooting || isLoading}
-              />
-            </View>
-          </View>
-        )}
-        {activeTab === 'p2pmd' && (
-          <View style={[styles.section, styles.p2pmdSection]}>
-            <View style={styles.p2pmdHeader}>
-              <View style={styles.p2pmdHeaderCopy}>
-                <Text style={[styles.sectionTitle, styles.p2pmdTitle]}>P2PMD</Text>
-                <Text style={styles.helperText}>
-                  Create or join a Holesail-backed Markdown room, then edit together in the embedded mobile editor.
-                </Text>
-              </View>
-              <Text style={[styles.roomPill, p2pmdRoom ? styles.roomPillLive : null]}>
-                {p2pmdRoom ? 'live' : 'ready'}
-              </Text>
-            </View>
-            {!p2pmdRoom && (
-              <View style={styles.emptyRoomCard}>
-                <Text style={styles.emptyRoomTitle}>Start a collaborative note</Text>
-                <Text style={styles.helperText}>
-                  Create a room to host from this phone, or paste an hs:// key to join a room hosted elsewhere.
-                </Text>
-                <View style={styles.p2pmdActionRow}>
-                  <Pressable
-                    style={[styles.p2pmdPrimaryAction, isBooting || isLoading ? styles.p2pmdActionDisabled : null]}
-                    onPress={() => void onP2pmdRoomCreate()}
-                    disabled={isBooting || isLoading}
-                  >
-                    <Text style={styles.p2pmdPrimaryActionText}>Create Room</Text>
-                    <Text style={styles.p2pmdActionHint}>Host from this phone</Text>
-                  </Pressable>
-                  <Pressable
-                    style={[styles.p2pmdSecondaryAction, isBooting || isLoading ? styles.p2pmdActionDisabled : null]}
-                    onPress={() => void onP2pmdRoomRefresh()}
-                    disabled={isBooting || isLoading}
-                  >
-                    <Text style={styles.p2pmdSecondaryActionText}>Refresh</Text>
-                  </Pressable>
-                </View>
-              </View>
-            )}
-
-            <View style={styles.joinRoomCard}>
-              <Text style={styles.fieldLabel}>Join existing room</Text>
-              <Text style={styles.helperText}>
-                Paste a room key shared by another peer to connect through Holesail.
-              </Text>
-              <TextInput
-                style={[styles.input, styles.p2pmdInput]}
-                autoCapitalize='none'
-                autoCorrect={false}
-                value={p2pmdJoinKey}
-                onChangeText={setP2pmdJoinKey}
-                placeholderTextColor='#6f7484'
-                placeholder='hs://... room key'
-              />
-              <Pressable
-                style={[
-                  styles.p2pmdJoinAction,
-                  isBooting || isLoading || !p2pmdJoinKey.trim() ? styles.p2pmdActionDisabled : null
-                ]}
-                onPress={() => void onP2pmdRoomJoin()}
-                disabled={isBooting || isLoading || !p2pmdJoinKey.trim()}
-              >
-                <Text style={styles.p2pmdJoinActionText}>Join Room</Text>
-              </Pressable>
-            </View>
-
-          </View>
-        )}
-
-        {(isBooting || isLoading) && <ActivityIndicator size='small' />}
-
-        {lastResult && activeTab !== 'p2pmd' && (
-          <View style={styles.result}>
-            <Text selectable={true} style={styles.resultText}>
-              {JSON.stringify(lastResult, null, 2)}
-            </Text>
-          </View>
-        )}
-      </ScrollView>
     </SafeAreaView>
   )
 }
@@ -1278,10 +1280,15 @@ function isHyperUrl (targetUrl: string) {
   return /^hyper:\/\//i.test(targetUrl)
 }
 
-function getRuntimeAppTitle (app: RuntimeTab) {
-  if (app === 'hyper') return 'Hyper Runtime'
-  if (app === 'holesail') return 'Holesail'
-  return 'P2PMD'
+function getBrowserEntryTitle (entry: BrowserHistoryEntry) {
+  if (entry.source.kind === 'app') return getRuntimeAppTitle(entry.source.app)
+  return entry.url === 'peersky://home' ? 'PeerSky' : entry.url
+}
+
+function getRuntimeAppIconStyle (app: RuntimeTab) {
+  if (app === 'hyper') return styles.browserShortcutIconHyper
+  if (app === 'holesail') return styles.browserShortcutIconHolesail
+  return styles.browserShortcutIconP2pmd
 }
 
 function createHyperBrowserHtml (response: RpcResponse, targetUrl: string) {
