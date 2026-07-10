@@ -1,12 +1,18 @@
 import b4a from 'b4a'
+import http from 'bare-http1'
 import makeHyperFetch from 'hypercore-fetch'
 import { getHyperRuntime } from './runtime.mjs'
 import { parseHyperUrl } from './url.mjs'
 
 let hyperFetch = null
+let assetServer = null
+let assetServerInfo = null
+let assetServerTransition = Promise.resolve()
 const MAX_INLINE_ASSETS = 32
 const MAX_INLINE_ASSET_BYTES = 2 * 1024 * 1024
 const MAX_INLINE_STYLESHEET_BYTES = 4 * 1024 * 1024
+const HYPER_ASSET_HOST = '127.0.0.1'
+const MAX_PROXY_FALLBACK_BYTES = 32 * 1024 * 1024
 
 export async function fetchHyper ({
   url,
@@ -29,10 +35,12 @@ export async function fetchHyper ({
     let body = await response.text()
 
     if (inlineAssets && isHtmlResponse(headers, body)) {
+      const proxyServer = await startHyperAssetServer(fetch)
       body = await inlineHyperAssets({
         html: body,
         baseUrl: response.url || url,
-        fetch
+        fetch,
+        assetBaseUrl: proxyServer.localUrl
       })
     }
 
@@ -54,6 +62,24 @@ export async function fetchHyper ({
       error: error instanceof Error ? error.message : String(error)
     }
   }
+}
+
+export async function stopHyperAssetServer () {
+  return withAssetServerTransition(async () => {
+    assetServerInfo = null
+
+    if (!assetServer) return
+
+    const existing = assetServer
+    assetServer = null
+
+    await new Promise((resolve, reject) => {
+      existing.close((error) => {
+        if (error) reject(error)
+        else resolve()
+      })
+    })
+  })
 }
 
 async function getHyperFetch (runtime) {
@@ -113,7 +139,8 @@ function isHtmlResponse (headers, body) {
 async function inlineHyperAssets ({
   html,
   baseUrl,
-  fetch
+  fetch,
+  assetBaseUrl
 }) {
   const replacements = new Map()
   let assetCount = 0
@@ -131,7 +158,11 @@ async function inlineHyperAssets ({
     replacements.set(source, dataUrl)
   }
 
-  return rewriteHyperAssetAttributes(html, baseUrl, replacements)
+  return rewriteHyperMediaAttributes(
+    rewriteHyperAssetAttributes(html, baseUrl, replacements),
+    baseUrl,
+    assetBaseUrl
+  )
 }
 
 function findHyperAssetRefs (html, baseUrl) {
@@ -171,6 +202,11 @@ function resolveHyperAssetUrl (source, baseUrl) {
 function shouldInlineAsset (source, assetUrl) {
   const value = `${source} ${assetUrl}`.toLowerCase()
   return /\.(?:avif|bmp|gif|ico|jpeg|jpg|js|mjs|png|svg|webp|css)(?:[?#].*)?$/.test(value)
+}
+
+function shouldProxyMediaAsset (source, assetUrl) {
+  const value = `${source} ${assetUrl}`.toLowerCase()
+  return /\.(?:m4a|mov|mp3|mp4|oga|ogg|ogv|opus|wav|webm)(?:[?#].*)?$/.test(value)
 }
 
 async function fetchAsDataUrl (fetch, assetUrl) {
@@ -220,6 +256,312 @@ function rewriteHyperAssetAttributes (html, baseUrl, replacements) {
   )
 }
 
+function rewriteHyperMediaAttributes (html, baseUrl, assetBaseUrl) {
+  return html.replace(
+    /\b(src|href)(\s*=\s*)(["'])([^"']+)\3/gi,
+    (match, name, separator, quote, source) => {
+      const assetUrl = resolveHyperAssetUrl(source, baseUrl)
+      if (!assetUrl || !shouldProxyMediaAsset(source, assetUrl)) return match
+      return `${name}${separator}${quote}${createProxyAssetUrl(assetBaseUrl, assetUrl)}${quote}`
+    }
+  )
+}
+
+function createProxyAssetUrl (assetBaseUrl, assetUrl) {
+  return `${assetBaseUrl}/asset?url=${encodeURIComponent(assetUrl)}`
+}
+
+async function startHyperAssetServer (fetch) {
+  return withAssetServerTransition(async () => {
+    if (assetServer && assetServerInfo) return assetServerInfo
+
+    const instance = http.createServer((req, res) => {
+      handleHyperAssetRequest(req, res, fetch)
+    })
+
+    try {
+      const address = await listen(instance)
+      const port = typeof address === 'object' && address ? address.port : null
+
+      if (!Number.isInteger(port) || port < 1) {
+        throw new Error('Hyper asset server started without a valid port')
+      }
+
+      assetServer = instance
+      assetServerInfo = {
+        host: HYPER_ASSET_HOST,
+        port,
+        localUrl: `http://${HYPER_ASSET_HOST}:${port}`
+      }
+
+      return assetServerInfo
+    } catch (error) {
+      try {
+        instance.close()
+      } catch {}
+
+      throw error
+    }
+  })
+}
+
+function withAssetServerTransition (task) {
+  const next = assetServerTransition.then(task, task)
+  assetServerTransition = next.catch(() => {})
+  return next
+}
+
+async function listen (server) {
+  return new Promise((resolve, reject) => {
+    const onError = (error) => {
+      server.off('listening', onListening)
+      reject(error)
+    }
+    const onListening = () => {
+      server.off('error', onError)
+      resolve(server.address())
+    }
+
+    server.once('error', onError)
+    server.once('listening', onListening)
+    server.listen(0, HYPER_ASSET_HOST)
+  })
+}
+
+function handleHyperAssetRequest (req, res, fetch) {
+  if (req.method === 'OPTIONS') {
+    sendAssetEmpty(res, 204)
+    return
+  }
+
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    sendAssetText(res, 405, 'Method not allowed')
+    return
+  }
+
+  const requestUrl = new URL(String(req.url || '/'), `http://${HYPER_ASSET_HOST}`)
+  if (requestUrl.pathname !== '/asset') {
+    sendAssetText(res, 404, 'Not found')
+    return
+  }
+
+  const assetUrl = requestUrl.searchParams.get('url')
+  if (!assetUrl) {
+    sendAssetText(res, 400, 'Missing asset url')
+    return
+  }
+
+  const parsed = parseHyperUrl(assetUrl)
+  if (parsed.error) {
+    sendAssetText(res, 400, parsed.error)
+    return
+  }
+
+  streamHyperAsset(fetch, assetUrl, req, res)
+    .catch((error) => {
+      sendAssetError(res, error)
+    })
+}
+
+async function streamHyperAsset (fetch, assetUrl, req, res) {
+  const rangeHeader = getRequestHeader(req, 'range')
+  if (isMalformedRangeHeader(rangeHeader)) {
+    sendAssetEmpty(res, 416)
+    return
+  }
+
+  const response = await fetch(assetUrl, rangeHeader
+    ? { headers: new Headers([['Range', String(rangeHeader)]]) }
+    : undefined)
+
+  if (!response.ok) {
+    throw createHttpError(response.status || 502, response.statusText || 'Unable to fetch Hyper asset')
+  }
+
+  const headers = headersToObject(response.headers)
+  const status = rangeHeader && headers['content-range'] ? 206 : response.status
+  const contentType = headers['content-type'] || getContentTypeFromUrl(assetUrl)
+
+  if (isStreamableBody(response.body)) {
+    sendProxyAssetHeaders(res, {
+      status,
+      headers,
+      contentType
+    })
+
+    if (req.method === 'HEAD') {
+      res.end()
+      return
+    }
+
+    await writeResponseBody(res, response.body)
+    return
+  }
+
+  const bytes = chunkToUint8Array(await response.arrayBuffer())
+  if (bytes.byteLength > MAX_PROXY_FALLBACK_BYTES) {
+    throw createHttpError(413, 'Hyper asset is too large to buffer')
+  }
+
+  sendProxyAssetHeaders(res, {
+    status,
+    headers: {
+      ...headers,
+      'content-length': String(bytes.byteLength)
+    },
+    contentType
+  })
+
+  if (req.method === 'HEAD') {
+    res.end()
+    return
+  }
+
+  res.end(bytes)
+}
+
+function getRequestHeader (req, name) {
+  const headers = req.headers || {}
+  return headers[name] || headers[name.toLowerCase()] || headers[name.toUpperCase()] || null
+}
+
+function isMalformedRangeHeader (rangeHeader) {
+  if (!rangeHeader) return false
+  return !/^bytes=(?:\d+-\d*|\d*-\d+)$/.test(String(rangeHeader))
+}
+
+function sendProxyAssetHeaders (res, {
+  status,
+  headers,
+  contentType
+}) {
+  setAssetCorsHeaders(res)
+  res.statusCode = status
+  res.setHeader('Accept-Ranges', headers['accept-ranges'] || 'bytes')
+  res.setHeader('Cache-Control', headers['cache-control'] || 'public, max-age=300')
+  res.setHeader('Content-Type', contentType)
+  res.setHeader('X-Content-Type-Options', 'nosniff')
+  res.setHeader('Connection', 'close')
+
+  copyProxyHeader(res, headers, 'content-length')
+  copyProxyHeader(res, headers, 'content-range')
+  copyProxyHeader(res, headers, 'etag')
+  copyProxyHeader(res, headers, 'last-modified')
+}
+
+function copyProxyHeader (res, headers, name) {
+  const value = headers[name]
+  if (value !== undefined && value !== null) res.setHeader(name, value)
+}
+
+function isStreamableBody (body) {
+  return Boolean(
+    body &&
+    (
+      typeof body[Symbol.asyncIterator] === 'function' ||
+      typeof body.getReader === 'function' ||
+      typeof body.on === 'function'
+    )
+  )
+}
+
+async function writeResponseBody (res, body) {
+  if (typeof body[Symbol.asyncIterator] === 'function') {
+    for await (const chunk of body) {
+      await writeResponseChunk(res, chunk)
+    }
+    res.end()
+    return
+  }
+
+  if (typeof body.getReader === 'function') {
+    const reader = body.getReader()
+    try {
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        await writeResponseChunk(res, value)
+      }
+    } finally {
+      if (reader.releaseLock) reader.releaseLock()
+    }
+    res.end()
+    return
+  }
+
+  await writeEventedBody(res, body)
+}
+
+function writeResponseChunk (res, chunk) {
+  const bytes = chunkToUint8Array(chunk)
+  if (bytes.byteLength < 1) return Promise.resolve()
+
+  return new Promise((resolve, reject) => {
+    try {
+      res.write(bytes, (error) => {
+        if (error) reject(error)
+        else resolve()
+      })
+    } catch (error) {
+      reject(error)
+    }
+  })
+}
+
+function writeEventedBody (res, body) {
+  return new Promise((resolve, reject) => {
+    body.on('data', (chunk) => {
+      res.write(chunkToUint8Array(chunk))
+    })
+    body.on('end', () => {
+      res.end()
+      resolve()
+    })
+    body.on('error', reject)
+  })
+}
+
+function sendAssetText (res, statusCode, message) {
+  const body = String(message || '')
+  setAssetCorsHeaders(res)
+  res.statusCode = statusCode
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8')
+  res.setHeader('Content-Length', String(b4a.byteLength(body)))
+  res.setHeader('Cache-Control', 'no-store')
+  res.setHeader('Connection', 'close')
+  res.end(body)
+}
+
+function sendAssetError (res, error) {
+  if (res.headersSent) {
+    res.destroy(error)
+    return
+  }
+
+  sendAssetText(res, error.statusCode || 502, error.message)
+}
+
+function sendAssetEmpty (res, statusCode) {
+  setAssetCorsHeaders(res)
+  res.statusCode = statusCode
+  res.setHeader('Cache-Control', 'no-store')
+  res.setHeader('Connection', 'close')
+  res.end()
+}
+
+function setAssetCorsHeaders (res) {
+  res.setHeader('Access-Control-Allow-Origin', '*')
+  res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS')
+  res.setHeader('Access-Control-Allow-Headers', 'Range')
+  res.setHeader('Access-Control-Expose-Headers', 'Accept-Ranges, Content-Length, Content-Range')
+}
+
+function createHttpError (statusCode, message) {
+  const error = new Error(message)
+  error.statusCode = statusCode
+  return error
+}
+
 function getContentTypeFromUrl (url) {
   const pathname = (() => {
     try {
@@ -236,8 +578,16 @@ function getContentTypeFromUrl (url) {
   if (pathname.endsWith('.ico')) return 'image/x-icon'
   if (pathname.endsWith('.jpeg') || pathname.endsWith('.jpg')) return 'image/jpeg'
   if (pathname.endsWith('.js') || pathname.endsWith('.mjs')) return 'text/javascript; charset=utf-8'
+  if (pathname.endsWith('.m4a')) return 'audio/mp4'
+  if (pathname.endsWith('.mov')) return 'video/quicktime'
+  if (pathname.endsWith('.mp3')) return 'audio/mpeg'
+  if (pathname.endsWith('.mp4')) return 'video/mp4'
+  if (pathname.endsWith('.oga') || pathname.endsWith('.ogg') || pathname.endsWith('.opus')) return 'audio/ogg'
+  if (pathname.endsWith('.ogv')) return 'video/ogg'
   if (pathname.endsWith('.png')) return 'image/png'
   if (pathname.endsWith('.svg')) return 'image/svg+xml'
+  if (pathname.endsWith('.wav')) return 'audio/wav'
+  if (pathname.endsWith('.webm')) return 'video/webm'
   if (pathname.endsWith('.webp')) return 'image/webp'
   return 'application/octet-stream'
 }

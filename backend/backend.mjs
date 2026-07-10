@@ -2,6 +2,7 @@
 
 import RPC from 'bare-rpc'
 import { stopHolesail } from './holesail/session.mjs'
+import { stopHyperAssetServer } from './hyper/fetch.mjs'
 import { closeHyperRuntime } from './hyper/runtime.mjs'
 import { disconnectP2pmdRoom } from './p2pmd/room.mjs'
 import { routeRpcRequest } from './rpc/router.mjs'
@@ -28,6 +29,7 @@ Bare.on('beforeExit', async () => {
   }
 
   try {
+    await stopHyperAssetServer()
     await closeHyperRuntime()
   } catch (error) {
     console.error('[hyper] Failed to close runtime on beforeExit:', error)
