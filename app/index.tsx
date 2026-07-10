@@ -1009,12 +1009,13 @@ export default function App () {
                 styles.content,
                 activeTab === 'p2pmd' ? styles.p2pmdAppContent : null
               ]}>
-                <View style={styles.runtimeHeader}>
-                  <Text style={[styles.title, activeTab === 'p2pmd' ? styles.titleOnDark : null]}>
-                    {getRuntimeAppTitle(activeTab)}
-                  </Text>
-                  <Text style={styles.browserChipText}>{getRuntimeAppUrl(activeTab)}</Text>
-                </View>
+                {activeTab !== 'p2pmd' && (
+                  <View style={styles.runtimeHeader}>
+                    <Text style={styles.title}>
+                      {getRuntimeAppTitle(activeTab)}
+                    </Text>
+                  </View>
+                )}
                 {shouldShowRuntimeStatus && <Text style={styles.status}>{status}</Text>}
 
                 {activeTab === 'hyper' && (
@@ -1124,7 +1125,7 @@ export default function App () {
                   </View>
                 )}
                 {activeTab === 'p2pmd' && (
-                  <View style={[styles.section, styles.p2pmdSection]}>
+                  <View style={styles.p2pmdSection}>
                     <View style={styles.p2pmdHeader}>
                       <View style={styles.p2pmdHeaderCopy}>
                         <Text style={[styles.sectionTitle, styles.p2pmdTitle]}>P2PMD</Text>
@@ -1137,7 +1138,7 @@ export default function App () {
                       </Text>
                     </View>
                     {!p2pmdRoom && (
-                      <View style={styles.emptyRoomCard}>
+                      <View style={styles.p2pmdSetupBlock}>
                         <Text style={styles.emptyRoomTitle}>Start a collaborative note</Text>
                         <Text style={styles.helperText}>
                           Create a room to host from this phone, or paste an hs:// key to join a room hosted elsewhere.
@@ -1149,20 +1150,25 @@ export default function App () {
                             disabled={isBooting || isLoading}
                           >
                             <Text style={styles.p2pmdPrimaryActionText}>Create Room</Text>
-                            <Text style={styles.p2pmdActionHint}>Host from this phone</Text>
                           </Pressable>
                           <Pressable
-                            style={[styles.p2pmdSecondaryAction, isBooting || isLoading ? styles.p2pmdActionDisabled : null]}
+                            style={[styles.p2pmdTextAction, isBooting || isLoading ? styles.p2pmdActionDisabled : null]}
                             onPress={() => void onP2pmdRoomRefresh()}
                             disabled={isBooting || isLoading}
                           >
-                            <Text style={styles.p2pmdSecondaryActionText}>Refresh</Text>
+                            <Text style={styles.p2pmdTextActionText}>Refresh</Text>
                           </Pressable>
                         </View>
                       </View>
                     )}
 
-                    <View style={styles.joinRoomCard}>
+                    <View style={styles.p2pmdDividerRow}>
+                      <View style={styles.p2pmdDividerLine} />
+                      <Text style={styles.p2pmdDividerText}>or join</Text>
+                      <View style={styles.p2pmdDividerLine} />
+                    </View>
+
+                    <View style={styles.p2pmdSetupBlock}>
                       <Text style={styles.fieldLabel}>Join existing room</Text>
                       <Text style={styles.helperText}>
                         Paste a room key shared by another peer to connect through Holesail.

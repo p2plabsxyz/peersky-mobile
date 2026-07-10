@@ -409,9 +409,8 @@ export const styles = StyleSheet.create({
   },
   p2pmdSection: {
     backgroundColor: '#1f2027',
-    borderColor: '#3a3d49',
-    borderRadius: 14,
-    padding: 12
+    gap: 20,
+    paddingVertical: 4
   },
   p2pmdHeader: {
     alignItems: 'flex-start',
@@ -455,30 +454,27 @@ export const styles = StyleSheet.create({
     fontFamily: 'monospace',
     fontSize: 12
   },
-  emptyRoomCard: {
-    backgroundColor: '#262832',
-    borderColor: '#3a3d49',
-    borderRadius: 12,
-    borderWidth: 1,
-    gap: 6,
-    padding: 12
-  },
   emptyRoomTitle: {
     color: '#f1f2f7',
     fontSize: 15,
     fontWeight: '700'
   },
+  p2pmdSetupBlock: {
+    gap: 10
+  },
   p2pmdActionRow: {
-    alignItems: 'stretch',
+    alignItems: 'center',
     flexDirection: 'row',
     gap: 10,
-    marginTop: 6
+    marginTop: 4
   },
   p2pmdPrimaryAction: {
+    alignItems: 'center',
     backgroundColor: '#2f80ed',
-    borderRadius: 12,
+    borderRadius: 10,
     flex: 1,
-    gap: 3,
+    justifyContent: 'center',
+    minHeight: 48,
     paddingHorizontal: 14,
     paddingVertical: 12
   },
@@ -492,31 +488,41 @@ export const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600'
   },
-  p2pmdSecondaryAction: {
+  p2pmdTextAction: {
     alignItems: 'center',
-    backgroundColor: '#30364a',
-    borderColor: '#4c5675',
-    borderRadius: 12,
+    borderColor: '#384052',
+    borderRadius: 10,
     borderWidth: 1,
+    flex: 1,
     justifyContent: 'center',
-    paddingHorizontal: 12,
+    minHeight: 48,
+    paddingHorizontal: 14,
     paddingVertical: 12
   },
-  p2pmdSecondaryActionText: {
-    color: '#f1f2f7',
+  p2pmdTextActionText: {
+    color: '#9ec5ff',
     fontSize: 13,
     fontWeight: '800'
   },
   p2pmdActionDisabled: {
     opacity: 0.5
   },
-  joinRoomCard: {
-    backgroundColor: '#22242c',
-    borderColor: '#343744',
-    borderRadius: 12,
-    borderWidth: 1,
+  p2pmdDividerRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
     gap: 10,
-    padding: 12
+    marginVertical: 2
+  },
+  p2pmdDividerLine: {
+    backgroundColor: '#383b46',
+    flex: 1,
+    height: 1
+  },
+  p2pmdDividerText: {
+    color: '#8c93a8',
+    fontSize: 11,
+    fontWeight: '800',
+    textTransform: 'uppercase'
   },
   p2pmdJoinAction: {
     alignItems: 'center',
