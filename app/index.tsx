@@ -17,6 +17,19 @@ import RPC from 'bare-rpc'
 import { WebView } from 'react-native-webview'
 import bundle from './app.bundle.mjs'
 import {
+  BROWSER_HOME_URL,
+  commitBrowserEntryState,
+  getBrowserBackState,
+  getBrowserForwardState,
+  getBrowserRequestAction,
+  isHyperUrl,
+  isStaleBrowserLoad,
+  isWebUrl,
+  normalizeBrowserAddress,
+  replaceBrowserEntryState,
+  syncBrowserEntryState
+} from './browser-shell.mjs'
+import {
   INTERNAL_APPS,
   type RuntimeTab,
   getRuntimeAppFromUrl,
@@ -88,11 +101,11 @@ export default function App () {
   const [isLoading, setIsLoading] = useState(false)
   const [status, setStatus] = useState('Starting Hyper runtime...')
   const [browserAddress, setBrowserAddress] = useState('')
-  const [browserCurrentUrl, setBrowserCurrentUrl] = useState('peersky://home')
+  const [browserCurrentUrl, setBrowserCurrentUrl] = useState(BROWSER_HOME_URL)
   const [browserTitle, setBrowserTitle] = useState('PeerSky')
   const [browserSource, setBrowserSource] = useState<BrowserSource>({ kind: 'home' })
   const [browserHistory, setBrowserHistory] = useState<BrowserHistoryEntry[]>([
-    { url: 'peersky://home', source: { kind: 'home' } }
+    { url: BROWSER_HOME_URL, source: { kind: 'home' } }
   ])
   const [browserHistoryIndex, setBrowserHistoryIndex] = useState(0)
   const [browserCanGoBack, setBrowserCanGoBack] = useState(false)
@@ -232,39 +245,50 @@ export default function App () {
   }
 
   function commitBrowserEntry (url: string, source: BrowserSource) {
-    const nextHistory = browserHistory.slice(0, browserHistoryIndex + 1).concat({ url, source })
-
-    setBrowserHistory(nextHistory)
-    setBrowserHistoryIndex(nextHistory.length - 1)
-    setBrowserCurrentUrl(url)
-    setBrowserAddress(url === 'peersky://home' ? '' : url)
-    setBrowserSource(source)
-    setBrowserCanGoBack(nextHistory.length > 1)
-    setBrowserCanGoForward(false)
-    setBrowserWebCanGoBack(false)
-    setBrowserWebCanGoForward(false)
+    applyBrowserState(commitBrowserEntryState(getBrowserState(), url, source))
   }
 
   function replaceBrowserEntry (url: string, source: BrowserSource) {
-    const nextHistory = browserHistory.slice()
-    nextHistory[browserHistoryIndex] = { url, source }
-
-    setBrowserHistory(nextHistory)
-    setBrowserCurrentUrl(url)
-    setBrowserAddress(url === 'peersky://home' ? '' : url)
-    setBrowserSource(source)
-    setBrowserCanGoBack(browserHistoryIndex > 0)
-    setBrowserCanGoForward(nextHistory.length > browserHistoryIndex + 1)
+    applyBrowserState(replaceBrowserEntryState(getBrowserState(), url, source))
   }
 
   function syncBrowserEntry (url: string, source: BrowserSource) {
-    const nextHistory = browserHistory.slice()
-    nextHistory[browserHistoryIndex] = { url, source }
+    applyBrowserState(syncBrowserEntryState(getBrowserState(), url, source))
+  }
 
-    setBrowserHistory(nextHistory)
-    setBrowserCurrentUrl(url)
-    setBrowserAddress(url === 'peersky://home' ? '' : url)
-    setBrowserSource(source)
+  function getBrowserState () {
+    return {
+      history: browserHistory,
+      historyIndex: browserHistoryIndex
+    }
+  }
+
+  function applyBrowserState (nextState: {
+    history: BrowserHistoryEntry[]
+    historyIndex: number
+    currentUrl: string
+    address: string
+    source: BrowserSource
+    canGoBack: boolean
+    canGoForward: boolean
+    webCanGoBack?: boolean
+    webCanGoForward?: boolean
+  }) {
+    setBrowserHistory(nextState.history)
+    setBrowserHistoryIndex(nextState.historyIndex)
+    setBrowserCurrentUrl(nextState.currentUrl)
+    setBrowserAddress(nextState.address)
+    setBrowserSource(nextState.source)
+    setBrowserCanGoBack(nextState.canGoBack)
+    setBrowserCanGoForward(nextState.canGoForward)
+
+    if (typeof nextState.webCanGoBack === 'boolean') {
+      setBrowserWebCanGoBack(nextState.webCanGoBack)
+    }
+
+    if (typeof nextState.webCanGoForward === 'boolean') {
+      setBrowserWebCanGoForward(nextState.webCanGoForward)
+    }
   }
 
   function cancelPendingBrowserLoad () {
@@ -278,7 +302,7 @@ export default function App () {
   async function loadBrowserUrl (rawUrl: string) {
     const nextUrl = normalizeBrowserAddress(rawUrl)
 
-    if (nextUrl === 'peersky://home') {
+    if (nextUrl === BROWSER_HOME_URL) {
       cancelPendingBrowserLoad()
       openBrowserHome()
       return
@@ -322,7 +346,7 @@ export default function App () {
         inlineAssets: true
       })
 
-      if (loadSeq !== browserLoadSeqRef.current) return
+      if (isStaleBrowserLoad(loadSeq, browserLoadSeqRef.current)) return
 
       if (!response.ok) {
         throw new Error(response.error || response.statusText || 'Unable to load Hyper page')
@@ -343,7 +367,7 @@ export default function App () {
       setBrowserTitle(response.url || nextUrl)
       setStatus(`Loaded ${response.status || 200} ${response.statusText || 'OK'}`)
     } catch (error) {
-      if (loadSeq !== browserLoadSeqRef.current) return
+      if (isStaleBrowserLoad(loadSeq, browserLoadSeqRef.current)) return
 
       const message = error instanceof Error ? error.message : String(error)
       const source: BrowserSource = {
@@ -367,7 +391,7 @@ export default function App () {
   }
 
   function openBrowserHome () {
-    commitBrowserEntry('peersky://home', { kind: 'home' })
+    commitBrowserEntry(BROWSER_HOME_URL, { kind: 'home' })
     setBrowserTitle('PeerSky')
     setStatus('Browser home')
   }
@@ -406,18 +430,13 @@ export default function App () {
       return
     }
 
-    if (browserHistoryIndex <= 0) return
+    const nextState = getBrowserBackState(getBrowserState())
+    if (!nextState) return
 
-    const nextIndex = browserHistoryIndex - 1
-    const entry = browserHistory[nextIndex]
-    setBrowserHistoryIndex(nextIndex)
-    setBrowserCurrentUrl(entry.url)
-    setBrowserAddress(entry.url === 'peersky://home' ? '' : entry.url)
-    setBrowserSource(entry.source)
+    const entry = nextState.history[nextState.historyIndex]
+    applyBrowserState(nextState)
     setBrowserTitle(getBrowserEntryTitle(entry))
     if (entry.source.kind === 'app') setActiveTab(entry.source.app)
-    setBrowserCanGoBack(nextIndex > 0)
-    setBrowserCanGoForward(browserHistory.length > nextIndex + 1)
   }
 
   function onBrowserForward () {
@@ -428,18 +447,13 @@ export default function App () {
       return
     }
 
-    if (browserHistoryIndex >= browserHistory.length - 1) return
+    const nextState = getBrowserForwardState(getBrowserState())
+    if (!nextState) return
 
-    const nextIndex = browserHistoryIndex + 1
-    const entry = browserHistory[nextIndex]
-    setBrowserHistoryIndex(nextIndex)
-    setBrowserCurrentUrl(entry.url)
-    setBrowserAddress(entry.url === 'peersky://home' ? '' : entry.url)
-    setBrowserSource(entry.source)
+    const entry = nextState.history[nextState.historyIndex]
+    applyBrowserState(nextState)
     setBrowserTitle(getBrowserEntryTitle(entry))
     if (entry.source.kind === 'app') setActiveTab(entry.source.app)
-    setBrowserCanGoBack(nextIndex > 0)
-    setBrowserCanGoForward(browserHistory.length > nextIndex + 1)
   }
 
   function onBrowserReload () {
@@ -466,28 +480,26 @@ export default function App () {
   }
 
   function onBrowserShouldStartLoad (request: { url?: string }) {
-    const requestUrl = request.url || ''
+    const action = getBrowserRequestAction({
+      requestUrl: request.url,
+      currentSourceKind: browserSource.kind
+    })
 
-    if (requestUrl === 'about:blank' || requestUrl.startsWith('data:')) return true
+    if (action.action === 'allow') return true
 
-    if (isHyperUrl(requestUrl)) {
-      void loadBrowserUrl(requestUrl)
+    if (action.action === 'load-hyper' && action.url) {
+      void loadBrowserUrl(action.url)
       return false
     }
 
-    if (!isWebUrl(requestUrl)) return false
-
-    if (browserSource.kind !== 'web') {
+    if (action.action === 'commit-web' && action.url && action.source) {
       cancelPendingBrowserLoad()
-      commitBrowserEntry(requestUrl, {
-        kind: 'web',
-        uri: requestUrl
-      })
-      setBrowserTitle(requestUrl)
+      commitBrowserEntry(action.url, action.source as BrowserSource)
+      setBrowserTitle(action.url)
       return false
     }
 
-    return true
+    return false
   }
 
 
@@ -1261,34 +1273,9 @@ function toBareFsPath (uri: string) {
   return decodeURIComponent(new URL(uri).pathname).replace(/\/$/, '')
 }
 
-function normalizeBrowserAddress (address: string) {
-  const value = address.trim()
-  if (!value || value === 'peersky://home') return 'peersky://home'
-
-  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(value)) return value
-
-  if (/^(localhost|127[.]0[.]0[.]1|10[.]0[.]2[.]2)(:\d+)?(\/.*)?$/i.test(value)) {
-    return `http://${value}`
-  }
-
-  if (value.includes(' ') || !value.includes('.')) {
-    return `https://duckduckgo.com/?q=${encodeURIComponent(value)}`
-  }
-
-  return `https://${value}`
-}
-
-function isWebUrl (targetUrl: string) {
-  return /^https?:\/\//i.test(targetUrl)
-}
-
-function isHyperUrl (targetUrl: string) {
-  return /^hyper:\/\//i.test(targetUrl)
-}
-
 function getBrowserEntryTitle (entry: BrowserHistoryEntry) {
   if (entry.source.kind === 'app') return getRuntimeAppTitle(entry.source.app)
-  return entry.url === 'peersky://home' ? 'PeerSky' : entry.url
+  return entry.url === BROWSER_HOME_URL ? 'PeerSky' : entry.url
 }
 
 function getRuntimeAppIconStyle (app: RuntimeTab) {
@@ -1412,4 +1399,3 @@ function escapeHtml (value: string) {
 function escapeHtmlAttribute (value: string) {
   return escapeHtml(value).replace(/`/g, '&#96;')
 }
-

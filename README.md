@@ -12,7 +12,20 @@
     <a href="https://standardjs.com"><img src="https://img.shields.io/badge/code_style-standard-brightgreen.svg" alt="JavaScript Style Guide"></a>
 </div>
 
-A peer-to-peer mobile browser built with [Bare](https://github.com/holepunchto/bare) and [Expo](https://expo.dev).
+A peer-to-peer mobile browser built with [Bare](https://github.com/holepunchto/bare), [Expo](https://expo.dev), and [React Native WebView](https://github.com/react-native-webview/react-native-webview).
+
+## Features
+
+- Browser shell with address/search input, reload, and basic back/forward navigation.
+- `http://` and `https://` browsing through React Native WebView.
+- `hyper://` browsing through the Bare worklet and `hypercore-fetch`.
+- Hyper page asset support for CSS, images, scripts, audio, and video.
+- Local app routes for bundled peer-to-peer tools:
+  - `peersky://p2p/p2pmd/`
+  - `peersky://holesail/`
+  - `peersky://hyper/`
+
+Hyper media is streamed through a local loopback proxy so WebView can play audio/video while the Bare runtime fetches the underlying `hyper://` asset.
 
 ## Usage
 
