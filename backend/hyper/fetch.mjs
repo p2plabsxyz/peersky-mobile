@@ -12,7 +12,6 @@ const MAX_INLINE_ASSETS = 32
 const MAX_INLINE_ASSET_BYTES = 2 * 1024 * 1024
 const MAX_INLINE_STYLESHEET_BYTES = 4 * 1024 * 1024
 const HYPER_ASSET_HOST = '127.0.0.1'
-const MAX_PROXY_FALLBACK_BYTES = 32 * 1024 * 1024
 
 export async function fetchHyper ({
   url,
@@ -398,26 +397,7 @@ async function streamHyperAsset (fetch, assetUrl, req, res) {
     return
   }
 
-  const bytes = chunkToUint8Array(await response.arrayBuffer())
-  if (bytes.byteLength > MAX_PROXY_FALLBACK_BYTES) {
-    throw createHttpError(413, 'Hyper asset is too large to buffer')
-  }
-
-  sendProxyAssetHeaders(res, {
-    status,
-    headers: {
-      ...headers,
-      'content-length': String(bytes.byteLength)
-    },
-    contentType
-  })
-
-  if (req.method === 'HEAD') {
-    res.end()
-    return
-  }
-
-  res.end(bytes)
+  throw createHttpError(502, 'Hyper asset response is not streamable')
 }
 
 function getRequestHeader (req, name) {
