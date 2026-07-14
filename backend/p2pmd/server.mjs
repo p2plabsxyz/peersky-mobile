@@ -584,7 +584,7 @@ function getQueryParam (rawUrl, key) {
   }
 }
 
-function getFoundationPage () {
+export function getP2pmdEditorPage () {
   return `<!doctype html>
 <html lang="en">
   <head>
@@ -877,7 +877,6 @@ function getFoundationPage () {
         <article id="preview" aria-label="Markdown preview" hidden></article>
       </main>
     </div>
-    <script src="/lib/yjs.min.js"></script>
     <script>
       const input = document.getElementById('document-input')
       const preview = document.getElementById('preview')
@@ -886,11 +885,15 @@ function getFoundationPage () {
       const lineGutter = document.getElementById('line-gutter')
       const TOOLBAR_TAP_MOVEMENT_LIMIT = 8
       const REMOTE_UPDATE_BATCH_MS = 80
+      const INITIAL_ROOM_RETRY_ATTEMPTS = 20
+      const INITIAL_ROOM_RETRY_DELAY_MS = 750
       const MAX_PENDING_UPDATE_BYTES = 2 * 1024 * 1024
       const Y_ORIGIN_REMOTE = 'remote-sse'
       const Y_ORIGIN_LOCAL_INPUT = 'local-input'
       let isPreviewMode = false
       let previewRequestId = 0
+      let bridgeRequestId = 0
+      const bridgeRequests = new Map()
       let saveTimer = null
       let pendingContent = null
       let saveInFlight = false
@@ -908,6 +911,7 @@ function getFoundationPage () {
       let lastInputContent = ''
       let lineAttributions = {}
       let localLineAttributions = {}
+      let latestPeerList = []
       let toolbarPointerState = null
       let suppressToolbarClick = false
       let pendingImageSelection = null
@@ -919,6 +923,65 @@ function getFoundationPage () {
         clientId,
         color: colorFromClientId(clientId),
         name: 'Mobile peer'
+      }
+      const roomBaseUrl = getRoomBaseUrl()
+
+      function getRoomBaseUrl() {
+        try {
+          const configured = typeof window.__P2PMD_ROOM_BASE_URL__ === 'string'
+            ? window.__P2PMD_ROOM_BASE_URL__.trim()
+            : ''
+          if (configured) return configured.replace(/\\/$/, '')
+
+          const current = new URL(window.location.href)
+          if (current.origin && current.origin !== 'null') return current.origin
+        } catch {}
+
+        return ''
+      }
+
+      function roomUrl(path) {
+        if (!roomBaseUrl) return path
+        return roomBaseUrl + path
+      }
+
+      function delay(ms) {
+        return new Promise((resolve) => setTimeout(resolve, ms))
+      }
+
+      async function withInitialRoomRetry(operation) {
+        let lastError = null
+
+        for (let attempt = 0; attempt < INITIAL_ROOM_RETRY_ATTEMPTS; attempt++) {
+          try {
+            return await operation()
+          } catch (error) {
+            lastError = error
+            if (attempt === INITIAL_ROOM_RETRY_ATTEMPTS - 1) break
+            await delay(INITIAL_ROOM_RETRY_DELAY_MS)
+          }
+        }
+
+        throw lastError || new Error('Room request failed')
+      }
+
+      function loadScript(src) {
+        return new Promise((resolve, reject) => {
+          const script = document.createElement('script')
+          script.src = src
+          script.onload = resolve
+          script.onerror = () => {
+            script.remove()
+            reject(new Error('Unable to load script: ' + src))
+          }
+          document.head.appendChild(script)
+        })
+      }
+
+      function loadYjsRuntime() {
+        if (window.Y) return Promise.resolve()
+
+        return withInitialRoomRetry(() => loadScript(roomUrl('/lib/yjs.min.js')))
       }
 
       function getRoomRole() {
@@ -964,6 +1027,55 @@ function getFoundationPage () {
         }))
       }
 
+      function notifyDocumentError(error, phase) {
+        notifyNative('p2pmd-document-error', {
+          error: error && error.message ? error.message : String(error || 'Unknown document error'),
+          phase,
+          stack: error && error.stack ? String(error.stack).slice(0, 2000) : ''
+        })
+      }
+
+      function callNativeBridge(action, payload) {
+        if (!window.ReactNativeWebView) {
+          return Promise.reject(new Error('Native bridge is unavailable'))
+        }
+
+        const requestId = 'bridge-' + (++bridgeRequestId)
+        return new Promise((resolve, reject) => {
+          const timeout = setTimeout(() => {
+            bridgeRequests.delete(requestId)
+            reject(new Error('Native bridge request timed out'))
+          }, 30000)
+
+          bridgeRequests.set(requestId, {
+            resolve,
+            reject,
+            timeout
+          })
+
+          notifyNative('p2pmd-bridge-request', {
+            requestId,
+            action,
+            payload
+          })
+        })
+      }
+
+      window.__p2pmdResolveBridgeRequest = function(requestId, result) {
+        const request = bridgeRequests.get(requestId)
+        if (!request) return
+
+        bridgeRequests.delete(requestId)
+        clearTimeout(request.timeout)
+
+        if (!result || result.ok !== true) {
+          request.reject(new Error(result && result.error ? result.error : 'Native bridge request failed'))
+          return
+        }
+
+        request.resolve(result)
+      }
+
       function getPeerPayload() {
         return {
           clientId,
@@ -999,9 +1111,7 @@ function getFoundationPage () {
             ? window.Y.mergeUpdates([pendingRemoteUpdate, update])
             : update
         } catch (error) {
-          notifyNative('p2pmd-document-error', {
-            error: error.message
-          })
+          notifyDocumentError(error, 'editor-error')
           return
         }
 
@@ -1022,9 +1132,7 @@ function getFoundationPage () {
           isApplyingRemote = true
           window.Y.applyUpdate(ydoc, update, Y_ORIGIN_REMOTE)
         } catch (error) {
-          notifyNative('p2pmd-document-error', {
-            error: error.message
-          })
+          notifyDocumentError(error, 'editor-error')
         } finally {
           isApplyingRemote = false
         }
@@ -1059,12 +1167,16 @@ function getFoundationPage () {
 
       async function loadDocument() {
         try {
-          const response = await fetch('/doc')
-          const result = await response.json()
+          const result = await withInitialRoomRetry(async () => {
+            const response = await fetch(roomUrl('/doc'))
+            const body = await response.json()
 
-          if (!response.ok || typeof result.content !== 'string') {
-            throw new Error(result.error || 'Unable to load document')
-          }
+            if (!response.ok || typeof body.content !== 'string') {
+              throw new Error(body.error || 'Unable to load document')
+            }
+
+            return body
+          })
 
           input.value = result.content
           lastSyncedContent = result.content
@@ -1074,9 +1186,7 @@ function getFoundationPage () {
             updatedAt: result.updatedAt
           })
         } catch (error) {
-          notifyNative('p2pmd-document-error', {
-            error: error.message
-          })
+          notifyDocumentError(error, 'editor-error')
         }
       }
 
@@ -1222,36 +1332,27 @@ function getFoundationPage () {
         replaceDocumentRange(insertion.start, insertion.end, placeholderBlock.text, placeholderBlock.cursor, placeholderBlock.cursor)
 
         try {
-          const uploadFile = await compressImageFile(file)
-          const content = new Uint8Array(await uploadFile.arrayBuffer())
-          const response = await fetch('/hyper/image', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-              name: uploadFile.name || file.name || 'image',
-              contentBase64: bytesToBase64(content)
-            })
-          })
-          const result = await response.json()
+          const contentBase64 = await readFileAsBase64(file)
 
-          if (!response.ok || !result.ok || typeof result.url !== 'string') {
+          const result = await callNativeBridge('hyper-image', {
+            name: file.name || 'image',
+            contentBase64
+          })
+
+          if (typeof result.url !== 'string') {
             throw new Error(result.error || 'Unable to upload image')
           }
 
-          const altText = normalizeImageAltText(insertion.altText || result.name || uploadFile.name || file.name || 'image')
+          const altText = normalizeImageAltText(insertion.altText || result.name || file.name || 'image')
           const replacement = createImageMarkdown(altText, result.url)
           replaceUploadPlaceholder(placeholderStart, placeholder, replacement)
           notifyNative('p2pmd-image-uploaded', {
             url: result.url,
-            name: result.name || uploadFile.name || file.name || 'image'
+            name: result.name || file.name || 'image'
           })
         } catch (error) {
           replaceUploadPlaceholder(placeholderStart, placeholder, '![upload failed]')
-          notifyNative('p2pmd-document-error', {
-            error: error.message
-          })
+          notifyDocumentError(error, 'editor-error')
         }
       }
 
@@ -1320,60 +1421,6 @@ function getFoundationPage () {
         }
       }
 
-      function compressImageFile(file) {
-        const skipTypes = ['image/gif', 'image/svg+xml']
-        if (!file.type || skipTypes.includes(file.type)) return Promise.resolve(file)
-
-        return new Promise((resolve) => {
-          const image = new Image()
-          const objectUrl = URL.createObjectURL(file)
-
-          image.onload = () => {
-            URL.revokeObjectURL(objectUrl)
-
-            const maxWidth = 1920
-            let width = image.width
-            let height = image.height
-
-            if (width <= maxWidth && file.size < 500 * 1024) {
-              resolve(file)
-              return
-            }
-
-            if (width > maxWidth) {
-              height = Math.round(height * (maxWidth / width))
-              width = maxWidth
-            }
-
-            const canvas = document.createElement('canvas')
-            canvas.width = width
-            canvas.height = height
-            canvas.getContext('2d').drawImage(image, 0, 0, width, height)
-
-            const outputType = file.type === 'image/png' ? 'image/webp' : (file.type || 'image/jpeg')
-            canvas.toBlob((blob) => {
-              if (!blob || blob.size >= file.size) {
-                resolve(file)
-                return
-              }
-
-              const extension = outputType === 'image/webp'
-                ? '.webp'
-                : ((file.name || '').match(/[.][^.]+$/)?.[0] || '.jpg')
-              const name = (file.name || 'image').replace(/[.][^.]+$/, '') + extension
-              resolve(new File([blob], name, { type: outputType }))
-            }, outputType, 0.8)
-          }
-
-          image.onerror = () => {
-            URL.revokeObjectURL(objectUrl)
-            resolve(file)
-          }
-
-          image.src = objectUrl
-        })
-      }
-
       function replaceUploadPlaceholder(start, placeholder, replacement) {
         if (input.value.slice(start, start + placeholder.length) === placeholder) {
           replaceDocumentRange(start, start + placeholder.length, replacement, start + replacement.length, start + replacement.length)
@@ -1384,6 +1431,30 @@ function getFoundationPage () {
         if (index !== -1) {
           replaceDocumentRange(index, index + placeholder.length, replacement, index + replacement.length, index + replacement.length)
         }
+      }
+
+      function readFileAsBase64(file) {
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader()
+
+          reader.onload = () => {
+            const result = typeof reader.result === 'string' ? reader.result : ''
+            const commaIndex = result.indexOf(',')
+
+            if (commaIndex === -1) {
+              reject(new Error('Unable to read selected image.'))
+              return
+            }
+
+            resolve(result.slice(commaIndex + 1))
+          }
+
+          reader.onerror = () => {
+            reject(reader.error || new Error('Unable to read selected image.'))
+          }
+
+          reader.readAsDataURL(file)
+        })
       }
 
       function normalizeImageAltText(value) {
@@ -1488,7 +1559,53 @@ function getFoundationPage () {
           documentState.content || ''
         )
         localLineAttributions = getLocalLineAttributions(lineAttributions)
+        mergeLineAttributionsFromPeerList(latestPeerList, false)
         renderLineGutter()
+      }
+
+      function getSyncedDocumentFromResponse(result, fallbackContent) {
+        if (result?.document && typeof result.document.content === 'string') {
+          return result.document
+        }
+
+        return {
+          content: typeof fallbackContent === 'string' ? fallbackContent : input.value,
+          updatedAt: Date.now(),
+          lineAttributions
+        }
+      }
+
+      function mergeLineAttributionsFromPeerList(peerList, shouldRender = true) {
+        if (!Array.isArray(peerList) || peerList.length === 0) return
+
+        let changed = false
+        for (const peer of peerList) {
+          if (!peer || typeof peer !== 'object' || !peer.lineAttributions) continue
+
+          const peerClientId = typeof peer.clientId === 'string' ? peer.clientId : ''
+          const peerAttributions = normalizeLineAttributions(peer.lineAttributions, input.value)
+          for (const [line, attribution] of Object.entries(peerAttributions)) {
+            const nextAttribution = {
+              ...attribution,
+              clientId: attribution.clientId || peerClientId
+            }
+            const existing = lineAttributions[line]
+            if (
+              existing?.clientId === nextAttribution.clientId &&
+              existing?.color === nextAttribution.color &&
+              existing?.name === nextAttribution.name
+            ) {
+              continue
+            }
+
+            lineAttributions[line] = nextAttribution
+            changed = true
+          }
+        }
+
+        if (!changed) return
+        localLineAttributions = getLocalLineAttributions(lineAttributions)
+        if (shouldRender) renderLineGutter()
       }
 
       function getLocalLineAttributions(attributions) {
@@ -1659,7 +1776,7 @@ function getFoundationPage () {
 
             notifyNative('p2pmd-document-syncing', {})
 
-            const response = await fetch('/doc', {
+            const response = await fetch(roomUrl('/doc'), {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json'
@@ -1677,17 +1794,16 @@ function getFoundationPage () {
               throw new Error(result.error || 'Unable to save document')
             }
 
-            lastSyncedContent = result.document.content
-            applyLineAttributionsFromDocument(result.document)
+            const syncedDocument = getSyncedDocumentFromResponse(result, content)
+            lastSyncedContent = syncedDocument.content
+            applyLineAttributionsFromDocument(syncedDocument)
             notifyNative('p2pmd-document-saved', {
-              updatedAt: result.document.updatedAt,
-              contentLength: result.document.content.length
+              updatedAt: syncedDocument.updatedAt,
+              contentLength: syncedDocument.content.length
             })
           }
         } catch (error) {
-          notifyNative('p2pmd-document-error', {
-            error: error.message
-          })
+          notifyDocumentError(error, 'editor-error')
         } finally {
           saveInFlight = false
           if (pendingContent !== null) flushDocumentSave()
@@ -1703,7 +1819,7 @@ function getFoundationPage () {
         try {
           notifyNative('p2pmd-document-syncing', {})
 
-          const response = await fetch('/doc/update', {
+          const response = await fetch(roomUrl('/doc/update'), {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json'
@@ -1721,9 +1837,10 @@ function getFoundationPage () {
             throw new Error(result.error || 'Unable to sync document update')
           }
 
+          const syncedDocument = getSyncedDocumentFromResponse(result, ytext ? ytext.toString() : input.value)
           notifyNative('p2pmd-document-saved', {
-            updatedAt: result.document.updatedAt,
-            contentLength: result.document.content.length
+            updatedAt: syncedDocument.updatedAt,
+            contentLength: syncedDocument.content.length
           })
           if (flushRetryTimer) {
             clearTimeout(flushRetryTimer)
@@ -1749,9 +1866,7 @@ function getFoundationPage () {
           }
 
           pendingUpdate = mergedUpdate
-          notifyNative('p2pmd-document-error', {
-            error: error.message
-          })
+          notifyDocumentError(error, 'editor-error')
 
           if (!flushRetryTimer) {
             flushRetryTimer = setTimeout(() => {
@@ -1769,15 +1884,24 @@ function getFoundationPage () {
         ytext = ydoc.getText('content')
 
         try {
-          const response = await fetch('/doc/yjsstate')
-          const result = await response.json()
-          if (response.ok && typeof result.yjsState === 'string') {
+          const result = await withInitialRoomRetry(async () => {
+            const response = await fetch(roomUrl('/doc/yjsstate'))
+            const body = await response.json()
+            if (!response.ok || typeof body.yjsState !== 'string') {
+              throw new Error(body.error || 'Unable to load Yjs state')
+            }
+
+            return body
+          })
+
+          if (typeof result.yjsState === 'string') {
             window.Y.applyUpdate(ydoc, base64ToBytes(result.yjsState), Y_ORIGIN_REMOTE)
             const yjsContent = ytext.toString()
             if (yjsContent || !input.value) {
               input.value = yjsContent
               lastSyncedContent = yjsContent
               lastInputContent = yjsContent
+              mergeLineAttributionsFromPeerList(latestPeerList)
             }
           }
         } catch {}
@@ -1833,6 +1957,7 @@ function getFoundationPage () {
             Math.max(0, Math.min(selectionStart, newContent.length)),
             Math.max(0, Math.min(selectionEnd, newContent.length))
           )
+          mergeLineAttributionsFromPeerList(latestPeerList, false)
           renderLineGutter()
           if (isPreviewMode) renderPreview()
           notifyNative('p2pmd-document-updated', {
@@ -1846,18 +1971,11 @@ function getFoundationPage () {
         preview.setAttribute('aria-busy', 'true')
 
         try {
-          const response = await fetch('/preview', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-              content: input.value
-            })
+          const result = await callNativeBridge('preview', {
+            content: input.value
           })
-          const result = await response.json()
 
-          if (!response.ok || !result.ok || typeof result.html !== 'string') {
+          if (typeof result.html !== 'string') {
             throw new Error(result.error || 'Unable to render Markdown preview')
           }
 
@@ -1866,9 +1984,7 @@ function getFoundationPage () {
           preview.innerHTML = result.html
         } catch (error) {
           if (requestId !== previewRequestId || !isPreviewMode) return
-          notifyNative('p2pmd-document-error', {
-            error: error.message
-          })
+          notifyDocumentError(error, 'editor-error')
         } finally {
           if (requestId === previewRequestId) {
             preview.removeAttribute('aria-busy')
@@ -1909,7 +2025,7 @@ function getFoundationPage () {
         }
 
         const params = new URLSearchParams(getPeerPayload())
-        const source = new EventSource('/events?' + params.toString())
+        const source = new EventSource(roomUrl('/events?' + params.toString()))
         eventSource = source
 
         source.onopen = () => {
@@ -1927,6 +2043,16 @@ function getFoundationPage () {
           notifyNative('p2pmd-peers', {
             count
           })
+        })
+
+        source.addEventListener('peerlist', (event) => {
+          try {
+            const peerList = JSON.parse(event.data || '[]')
+            if (!Array.isArray(peerList)) return
+
+            latestPeerList = peerList
+            mergeLineAttributionsFromPeerList(peerList)
+          } catch {}
         })
 
         source.addEventListener('yjsupdate', (event) => {
@@ -1984,6 +2110,11 @@ function getFoundationPage () {
 
       async function initializeEditor() {
         await loadDocument()
+        try {
+          await loadYjsRuntime()
+        } catch (error) {
+          notifyDocumentError(error, 'editor-error')
+        }
         await initializeYjs()
         connectEvents()
       }
@@ -2012,6 +2143,10 @@ function getFoundationPage () {
     </script>
   </body>
 </html>`
+}
+
+function getFoundationPage () {
+  return getP2pmdEditorPage()
 }
 
 async function withServerTransition (operation) {

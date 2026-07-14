@@ -47,6 +47,9 @@ import {
   RPC_HYPER_INIT,
   RPC_P2PMD_ROOM_CREATE,
   RPC_P2PMD_ROOM_DISCONNECT,
+  RPC_P2PMD_EDITOR_PAGE,
+  RPC_P2PMD_IMAGE_UPLOAD,
+  RPC_P2PMD_PREVIEW,
   RPC_P2PMD_ROOM_JOIN,
   RPC_P2PMD_ROOM_PUBLISH,
   RPC_P2PMD_ROOM_STATUS
@@ -69,6 +72,7 @@ type RpcResponse = {
   statusText?: string
   url?: string
   body?: string
+  html?: string
   storagePath?: string
   headers?: Record<string, string>
   running?: boolean
@@ -76,6 +80,7 @@ type RpcResponse = {
   port?: number
   localUrl?: string
   room?: P2pmdRoom | null
+  warning?: string | null
 }
 
 type BrowserSource =
@@ -124,10 +129,12 @@ export default function App () {
   const [hsConnectHost, setHsConnectHost] = useState('127.0.0.1')
   const [p2pmdUrl, setP2pmdUrl] = useState<string | null>(null)
   const [p2pmdRoom, setP2pmdRoom] = useState<P2pmdRoom | null>(null)
+  const [p2pmdEditorHtml, setP2pmdEditorHtml] = useState<string | null>(null)
   const [p2pmdJoinKey, setP2pmdJoinKey] = useState('')
   const [p2pmdParticipants, setP2pmdParticipants] = useState<number | null>(null)
   const [p2pmdIsPreviewMode, setP2pmdIsPreviewMode] = useState(false)
   const [p2pmdSyncStatus, setP2pmdSyncStatus] = useState('Ready')
+  const [p2pmdSetupError, setP2pmdSetupError] = useState<string | null>(null)
   const [p2pmdPublishUrl, setP2pmdPublishUrl] = useState<string | null>(null)
   const [isP2pmdPublishing, setIsP2pmdPublishing] = useState(false)
   const shouldShowRuntimeStatus = activeTab !== 'p2pmd'
@@ -599,6 +606,8 @@ export default function App () {
     setP2pmdParticipants(null)
     setP2pmdIsPreviewMode(false)
     setP2pmdPublishUrl(null)
+    setP2pmdEditorHtml(null)
+    setP2pmdSetupError(null)
     setP2pmdSyncStatus('Creating room...')
 
     try {
@@ -609,15 +618,23 @@ export default function App () {
       setLastResult(response)
 
       if (!response.ok || !response.room) {
-        setStatus(response.error || 'Failed creating P2PMD room')
+        const message = response.error || 'Failed creating P2PMD room'
+        setP2pmdSetupError(message)
+        setP2pmdSyncStatus('Ready')
+        setStatus(message)
         return
       }
 
+      setP2pmdSetupError(null)
+      await loadP2pmdEditorHtml()
       setP2pmdRoom(response.room)
       setP2pmdUrl(response.room.localUrl)
       setStatus('P2PMD room created')
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : String(error))
+      const message = error instanceof Error ? error.message : String(error)
+      setP2pmdSetupError(message)
+      setP2pmdSyncStatus('Ready')
+      setStatus(message)
     } finally {
       setIsLoading(false)
     }
@@ -632,6 +649,8 @@ export default function App () {
     setP2pmdParticipants(null)
     setP2pmdIsPreviewMode(false)
     setP2pmdPublishUrl(null)
+    setP2pmdEditorHtml(null)
+    setP2pmdSetupError(null)
     setP2pmdSyncStatus('Joining room...')
 
     try {
@@ -642,15 +661,24 @@ export default function App () {
       setLastResult(response)
 
       if (!response.ok || !response.room) {
-        setStatus(response.error || 'Failed joining P2PMD room')
+        const message = response.error || 'Failed joining P2PMD room'
+        setP2pmdSetupError(message)
+        setP2pmdSyncStatus('Ready')
+        setStatus(message)
         return
       }
 
+      setP2pmdSetupError(null)
+      await loadP2pmdEditorHtml()
       setP2pmdRoom(response.room)
       setP2pmdUrl(response.room.localUrl)
+      setP2pmdSyncStatus(response.warning || 'Joining room page...')
       setStatus('P2PMD room joined')
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : String(error))
+      const message = error instanceof Error ? error.message : String(error)
+      setP2pmdSetupError(message)
+      setP2pmdSyncStatus('Ready')
+      setStatus(message)
     } finally {
       setIsLoading(false)
     }
@@ -666,11 +694,13 @@ export default function App () {
       setLastResult(response)
 
       if (response.running && response.room) {
+        await loadP2pmdEditorHtml()
         setP2pmdRoom(response.room)
         setP2pmdUrl(response.room.localUrl)
         setP2pmdParticipants(null)
         setP2pmdIsPreviewMode(false)
         setP2pmdPublishUrl(null)
+        setP2pmdSetupError(null)
         setP2pmdSyncStatus('Ready')
       } else {
         setP2pmdRoom(null)
@@ -678,6 +708,8 @@ export default function App () {
         setP2pmdParticipants(null)
         setP2pmdIsPreviewMode(false)
         setP2pmdPublishUrl(null)
+        setP2pmdEditorHtml(null)
+        setP2pmdSetupError(null)
         setP2pmdSyncStatus('Ready')
       }
 
@@ -702,6 +734,8 @@ export default function App () {
       setP2pmdParticipants(null)
       setP2pmdIsPreviewMode(false)
       setP2pmdPublishUrl(null)
+      setP2pmdEditorHtml(null)
+      setP2pmdSetupError(null)
       setP2pmdSyncStatus('Ready')
       setStatus(response.ok ? 'P2PMD room disconnected' : (response.error || 'Failed disconnecting P2PMD room'))
     } catch (error) {
@@ -722,6 +756,15 @@ export default function App () {
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error))
     }
+  }
+
+  async function loadP2pmdEditorHtml () {
+    const response = await callRpc(RPC_P2PMD_EDITOR_PAGE, {})
+    if (!response.ok || typeof response.html !== 'string') {
+      throw new Error(response.error || 'Unable to load P2PMD editor page')
+    }
+
+    setP2pmdEditorHtml(response.html)
   }
 
   function onP2pmdTogglePreview () {
@@ -779,11 +822,46 @@ export default function App () {
     }
   }
 
+  async function handleP2pmdBridgeRequest (request: Record<string, unknown>) {
+    const requestId = typeof request.requestId === 'string' ? request.requestId : ''
+    const action = typeof request.action === 'string' ? request.action : ''
+    const payload = request.payload && typeof request.payload === 'object'
+      ? request.payload
+      : {}
+
+    if (!requestId) return
+
+    try {
+      const response = action === 'preview'
+        ? await callRpc(RPC_P2PMD_PREVIEW, payload)
+        : action === 'hyper-image'
+          ? await callRpc(RPC_P2PMD_IMAGE_UPLOAD, payload)
+          : { ok: false, error: `Unsupported P2PMD bridge action: ${action}` }
+
+      setLastResult(response)
+      resolveP2pmdBridgeRequest(requestId, response)
+    } catch (error) {
+      resolveP2pmdBridgeRequest(requestId, {
+        ok: false,
+        error: error instanceof Error ? error.message : String(error)
+      })
+    }
+  }
+
+  function resolveP2pmdBridgeRequest (requestId: string, response: RpcResponse | { ok: boolean, error?: string }) {
+    p2pmdWebViewRef.current?.injectJavaScript(
+      `window.__p2pmdResolveBridgeRequest && window.__p2pmdResolveBridgeRequest(${JSON.stringify(requestId)}, ${JSON.stringify(response)}); true;`
+    )
+  }
+
   function onP2pmdWebViewMessage (message: string) {
     try {
       const parsed = JSON.parse(message)
 
       switch (parsed.type) {
+        case 'p2pmd-bridge-request':
+          void handleP2pmdBridgeRequest(parsed)
+          break
         case 'p2pmd-peers':
           if (Number.isInteger(parsed.count) && parsed.count >= 0) {
             setP2pmdParticipants(parsed.count)
@@ -836,7 +914,14 @@ export default function App () {
     ? browserWebCanGoForward || browserCanGoForward
     : browserCanGoForward
 
-  if (activeTab === 'p2pmd' && p2pmdRoom && p2pmdUrl) {
+  if (activeTab === 'p2pmd' && p2pmdRoom && p2pmdUrl && p2pmdEditorHtml) {
+    const p2pmdEditorRoomBaseUrl = p2pmdUrl.replace(/\/$/, '')
+    const p2pmdEditorBaseUrl = `${p2pmdEditorRoomBaseUrl}/?role=${encodeURIComponent(p2pmdRoom.role)}`
+    const p2pmdEditorHtmlWithRoomBase = p2pmdEditorHtml.replace(
+      '<head>',
+      `<head><script>window.__P2PMD_ROOM_BASE_URL__=${JSON.stringify(p2pmdEditorRoomBaseUrl)};</script>`
+    )
+
     return (
       <SafeAreaView style={styles.p2pmdWorkspace} edges={['top', 'left', 'right', 'bottom']}>
         <View style={styles.p2pmdWorkspaceHeader}>
@@ -918,8 +1003,13 @@ export default function App () {
           </Pressable>
         </View>
         <WebView
+          key={`${p2pmdRoom.role}:${p2pmdEditorBaseUrl}:${p2pmdEditorHtml.length}`}
           ref={p2pmdWebViewRef}
-          source={{ uri: `${p2pmdUrl}?role=${encodeURIComponent(p2pmdRoom.role)}` }}
+          source={{
+            html: p2pmdEditorHtmlWithRoomBase,
+            baseUrl: p2pmdEditorBaseUrl
+          }}
+          cacheEnabled={false}
           textZoom={100}
           style={styles.p2pmdWorkspaceWebView}
           onMessage={(event) => onP2pmdWebViewMessage(event.nativeEvent.data)}
@@ -1190,10 +1280,18 @@ export default function App () {
                         autoCapitalize='none'
                         autoCorrect={false}
                         value={p2pmdJoinKey}
-                        onChangeText={setP2pmdJoinKey}
+                        onChangeText={(value) => {
+                          setP2pmdJoinKey(value)
+                          if (p2pmdSetupError) setP2pmdSetupError(null)
+                        }}
                         placeholderTextColor='#6f7484'
                         placeholder='hs://... room key'
                       />
+                      {p2pmdSetupError && (
+                        <Text selectable={true} style={styles.p2pmdSetupError}>
+                          {p2pmdSetupError}
+                        </Text>
+                      )}
                       <Pressable
                         style={[
                           styles.p2pmdJoinAction,

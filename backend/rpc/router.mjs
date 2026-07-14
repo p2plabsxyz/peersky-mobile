@@ -8,11 +8,14 @@ import {
   RPC_HYPER_INIT,
   RPC_P2PMD_ROOM_CREATE,
   RPC_P2PMD_ROOM_DISCONNECT,
+  RPC_P2PMD_EDITOR_PAGE,
+  RPC_P2PMD_IMAGE_UPLOAD,
+  RPC_P2PMD_PREVIEW,
   RPC_P2PMD_ROOM_JOIN,
   RPC_P2PMD_ROOM_PUBLISH,
   RPC_P2PMD_ROOM_STATUS
 } from './commands.mjs'
-import { createDrive, publishMarkdownDocument } from '../hyper/drive.mjs'
+import { createDrive, publishMarkdownDocument, readHyperFile, uploadHyperFile } from '../hyper/drive.mjs'
 import { fetchHyper } from '../hyper/fetch.mjs'
 import { getHyperRuntime, getHyperStoragePath } from '../hyper/runtime.mjs'
 import {
@@ -27,6 +30,9 @@ import {
   getP2pmdRoomStatus,
   joinP2pmdRoom
 } from '../p2pmd/room.mjs'
+import { getMaxDocumentLength } from '../p2pmd/document.mjs'
+import { inlineHyperPreviewImages, renderMarkdownPreview } from '../p2pmd/preview.mjs'
+import { getP2pmdEditorPage } from '../p2pmd/server.mjs'
 import { parseJsonMessage, replyJson } from './messages.mjs'
 
 export async function routeRpcRequest (req) {
@@ -79,6 +85,44 @@ export async function routeRpcRequest (req) {
 
     if (req.command === RPC_P2PMD_ROOM_JOIN) {
       replyJson(req, await joinP2pmdRoom(parseJsonMessage(req.data)))
+      return
+    }
+
+    if (req.command === RPC_P2PMD_EDITOR_PAGE) {
+      replyJson(req, {
+        ok: true,
+        html: getP2pmdEditorPage()
+      })
+      return
+    }
+
+    if (req.command === RPC_P2PMD_PREVIEW) {
+      const body = parseJsonMessage(req.data)
+      if (typeof body.content !== 'string') {
+        replyJson(req, {
+          ok: false,
+          error: 'Invalid Markdown content. Expected a string.'
+        })
+        return
+      }
+
+      if (body.content.length > getMaxDocumentLength()) {
+        replyJson(req, {
+          ok: false,
+          error: 'Markdown is too large. Maximum size is 10 MB.'
+        })
+        return
+      }
+
+      replyJson(req, {
+        ok: true,
+        html: await inlineHyperPreviewImages(renderMarkdownPreview(body.content), readHyperFile)
+      })
+      return
+    }
+
+    if (req.command === RPC_P2PMD_IMAGE_UPLOAD) {
+      replyJson(req, await uploadHyperFile(parseJsonMessage(req.data)))
       return
     }
 

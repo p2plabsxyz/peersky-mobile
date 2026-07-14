@@ -445,6 +445,17 @@ export const styles = StyleSheet.create({
     borderColor: '#3a3d49',
     color: '#f1f2f7'
   },
+  p2pmdSetupError: {
+    backgroundColor: '#4b2430',
+    borderColor: '#8f4c60',
+    borderRadius: 10,
+    borderWidth: 1,
+    color: '#ffd6df',
+    fontSize: 13,
+    lineHeight: 18,
+    paddingHorizontal: 12,
+    paddingVertical: 10
+  },
   result: {
     backgroundColor: '#f6f6f6',
     borderRadius: 8,
@@ -551,4 +562,3 @@ export const styles = StyleSheet.create({
     color: '#fff'
   }
 })
-

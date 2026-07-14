@@ -12,3 +12,6 @@ export const RPC_P2PMD_ROOM_STATUS = 21
 export const RPC_P2PMD_ROOM_DISCONNECT = 22
 export const RPC_P2PMD_ROOM_JOIN = 23
 export const RPC_P2PMD_ROOM_PUBLISH = 24
+export const RPC_P2PMD_EDITOR_PAGE = 25
+export const RPC_P2PMD_PREVIEW = 26
+export const RPC_P2PMD_IMAGE_UPLOAD = 27
