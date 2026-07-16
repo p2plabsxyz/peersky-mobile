@@ -9,6 +9,8 @@ import {
   isHyperUrl,
   isStaleBrowserLoad,
   isWebUrl,
+  MAX_BROWSER_HISTORY_ENTRIES,
+  MAX_BROWSER_URL_LENGTH,
   normalizeBrowserAddress,
   replaceBrowserEntryState,
   syncBrowserEntryState
@@ -115,7 +117,7 @@ describe('browser shell navigation helpers', () => {
 
   test('classifies WebView navigation requests from hyper-rendered pages', () => {
     assert.deepEqual(getBrowserRequestAction({ requestUrl: 'about:blank', currentSourceKind: 'hyper' }), { action: 'allow' })
-    assert.deepEqual(getBrowserRequestAction({ requestUrl: 'data:text/html,ok', currentSourceKind: 'hyper' }), { action: 'allow' })
+    assert.deepEqual(getBrowserRequestAction({ requestUrl: 'data:text/html,ok', currentSourceKind: 'hyper' }), { action: 'block' })
     assert.deepEqual(getBrowserRequestAction({ requestUrl: 'hyper://next/', currentSourceKind: 'hyper' }), {
       action: 'load-hyper',
       url: 'hyper://next/'
@@ -132,6 +134,32 @@ describe('browser shell navigation helpers', () => {
   test('guards stale async hyper loads by sequence number', () => {
     assert.equal(isStaleBrowserLoad(1, 2), true)
     assert.equal(isStaleBrowserLoad(2, 2), false)
+  })
+
+  test('bounds history and releases rendered Hyper pages once they are no longer current', () => {
+    let state = {
+      history: [{ url: BROWSER_HOME_URL, source: { kind: 'home' } }],
+      historyIndex: 0
+    }
+
+    for (let index = 0; index < MAX_BROWSER_HISTORY_ENTRIES + 5; index++) {
+      state = commitBrowserEntryState(state, `hyper://site/${index}`, {
+        kind: 'hyper',
+        html: `<h1>${index}</h1>`,
+        baseUrl: `hyper://site/${index}`
+      })
+    }
+
+    assert.equal(state.history.length, MAX_BROWSER_HISTORY_ENTRIES)
+    assert.equal(state.history.at(-1).source.kind, 'hyper')
+    assert.equal(state.history.slice(0, -1).every((entry) => entry.source.kind === 'restore'), true)
+  })
+
+  test('blocks oversized WebView navigation URLs', () => {
+    assert.deepEqual(getBrowserRequestAction({
+      requestUrl: `https://example.com/${'a'.repeat(MAX_BROWSER_URL_LENGTH)}`,
+      currentSourceKind: 'web'
+    }), { action: 'block' })
   })
 })
 
