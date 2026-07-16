@@ -1,7 +1,9 @@
 import { type ComponentRef, useEffect, useRef, useState } from 'react'
 import {
   ActivityIndicator,
+  AppState,
   Button,
+  Modal,
   Pressable,
   ScrollView,
   Share,
@@ -10,7 +12,7 @@ import {
   View
 } from 'react-native'
 import { Worklet } from 'react-native-bare-kit'
-import { Paths } from 'expo-file-system'
+import { File, Paths } from 'expo-file-system'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import b4a from 'b4a'
 import RPC from 'bare-rpc'
@@ -25,10 +27,25 @@ import {
   isHyperUrl,
   isStaleBrowserLoad,
   isWebUrl,
+  MAX_BROWSER_URL_LENGTH,
   normalizeBrowserAddress,
   replaceBrowserEntryState,
   syncBrowserEntryState
 } from './browser-shell.mjs'
+import {
+  addBrowserTabState,
+  closeBrowserTabState,
+  createBrowserTabsState,
+  isCurrentBrowserTabEntry,
+  MAX_BROWSER_TABS,
+  normalizeBrowserTabTitle,
+  restoreBrowserTabsState,
+  serializeBrowserTabsState,
+  suspendInactiveBrowserTabsState,
+  switchBrowserTabState,
+  touchLiveBrowserTabIds,
+  updateBrowserTabState
+} from './browser-tabs.mjs'
 import {
   INTERNAL_APPS,
   type RuntimeTab,
@@ -89,16 +106,32 @@ type BrowserSource =
   | { kind: 'web', uri: string }
   | { kind: 'hyper', html: string, baseUrl: string }
   | { kind: 'error', html: string }
+  | { kind: 'restore', url: string }
 
 type BrowserHistoryEntry = {
   url: string
   source: BrowserSource
 }
 
+type BrowserTab = {
+  id: string
+  title: string
+  history: BrowserHistoryEntry[]
+  historyIndex: number
+  webCanGoBack: boolean
+  webCanGoForward: boolean
+}
+
+type BrowserTabsState = {
+  tabs: BrowserTab[]
+  activeTabId: string
+  nextTabIndex: number
+}
+
 export default function App () {
   const workletRef = useRef<Worklet | null>(null)
   const rpcRef = useRef<RPC | null>(null)
-  const browserWebViewRef = useRef<ComponentRef<typeof WebView> | null>(null)
+  const browserWebViewRefs = useRef(new Map<string, ComponentRef<typeof WebView>>())
   const p2pmdWebViewRef = useRef<ComponentRef<typeof WebView> | null>(null)
   const p2pmdPublishInFlightRef = useRef(false)
   const browserLoadSeqRef = useRef(0)
@@ -113,6 +146,16 @@ export default function App () {
     { url: BROWSER_HOME_URL, source: { kind: 'home' } }
   ])
   const [browserHistoryIndex, setBrowserHistoryIndex] = useState(0)
+  const [browserTabsState, setBrowserTabsState] = useState<BrowserTabsState>(
+    () => createBrowserTabsState() as BrowserTabsState
+  )
+  const browserTabsStateRef = useRef(browserTabsState)
+  const browserSessionReadyRef = useRef(false)
+  const browserUserInteractedRef = useRef(false)
+  const [browserLiveTabIds, setBrowserLiveTabIds] = useState(['tab-1'])
+  const [browserSessionReady, setBrowserSessionReady] = useState(false)
+  const [browserTabsVisible, setBrowserTabsVisible] = useState(false)
+  const [pendingRestoredUrl, setPendingRestoredUrl] = useState<string | null>(null)
   const [browserCanGoBack, setBrowserCanGoBack] = useState(false)
   const [browserCanGoForward, setBrowserCanGoForward] = useState(false)
   const [browserWebCanGoBack, setBrowserWebCanGoBack] = useState(false)
@@ -147,6 +190,97 @@ export default function App () {
       rpcRef.current = null
     }
   }, [])
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function restoreBrowserSession () {
+      try {
+        const sessionFile = getBrowserSessionFile()
+        if (!sessionFile.exists) return
+
+        const restored = restoreBrowserTabsState(await sessionFile.text()) as BrowserTabsState
+        if (cancelled) return
+
+        if (browserUserInteractedRef.current) return
+
+        const tab = restored.tabs.find((item) => item.id === restored.activeTabId)
+        updateBrowserTabsState(restored)
+        if (tab) applyBrowserTab(tab)
+      } catch (error) {
+        console.error('Failed restoring browser tabs:', error)
+      } finally {
+        if (!cancelled) {
+          browserSessionReadyRef.current = true
+          setBrowserSessionReady(true)
+        }
+      }
+    }
+
+    void restoreBrowserSession()
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!browserSessionReady) return
+
+    const timer = setTimeout(() => writeBrowserSession(browserTabsState), 200)
+    return () => clearTimeout(timer)
+  }, [browserSessionReady, browserTabsState])
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState !== 'active' && browserSessionReadyRef.current) {
+        writeBrowserSession(browserTabsStateRef.current)
+      }
+    })
+
+    return () => subscription.remove()
+  }, [])
+
+  useEffect(() => {
+    if (!isBrowserWebViewSource(browserSource)) return
+
+    setBrowserLiveTabIds((tabIds) => touchLiveBrowserTabIds(
+      tabIds,
+      browserTabsState.activeTabId
+    ))
+  }, [browserSource.kind, browserTabsState.activeTabId])
+
+  useEffect(() => {
+    updateBrowserTabsState((state) => suspendInactiveBrowserTabsState(
+      state,
+      browserLiveTabIds
+    ) as BrowserTabsState)
+  }, [browserLiveTabIds])
+
+  useEffect(() => {
+    if (!pendingRestoredUrl) return
+    if (isHyperUrl(pendingRestoredUrl) && !rpcRef.current) return
+
+    const restoredUrl = pendingRestoredUrl
+    setPendingRestoredUrl(null)
+    void loadRestoredBrowserUrl(restoredUrl)
+  }, [isBooting, pendingRestoredUrl])
+
+  function updateBrowserTabsState (
+    update: BrowserTabsState | ((state: BrowserTabsState) => BrowserTabsState)
+  ) {
+    if (typeof update !== 'function') {
+      browserTabsStateRef.current = update
+      setBrowserTabsState(update)
+      return
+    }
+
+    setBrowserTabsState((state) => {
+      const nextState = update(state)
+      browserTabsStateRef.current = nextState
+      return nextState
+    })
+  }
 
   async function startWorklet () {
     if (workletRef.current) return
@@ -259,8 +393,18 @@ export default function App () {
     applyBrowserState(replaceBrowserEntryState(getBrowserState(), url, source))
   }
 
-  function syncBrowserEntry (url: string, source: BrowserSource) {
-    applyBrowserState(syncBrowserEntryState(getBrowserState(), url, source))
+  function syncBrowserEntry (
+    url: string,
+    source: BrowserSource,
+    webNavigation?: { canGoBack: boolean, canGoForward: boolean },
+    tabId?: string
+  ) {
+    const nextState = syncBrowserEntryState(getBrowserState(), url, source)
+    applyBrowserState({
+      ...nextState,
+      webCanGoBack: webNavigation?.canGoBack,
+      webCanGoForward: webNavigation?.canGoForward
+    }, tabId)
   }
 
   function getBrowserState () {
@@ -280,7 +424,7 @@ export default function App () {
     canGoForward: boolean
     webCanGoBack?: boolean
     webCanGoForward?: boolean
-  }) {
+  }, tabId = browserTabsStateRef.current.activeTabId) {
     setBrowserHistory(nextState.history)
     setBrowserHistoryIndex(nextState.historyIndex)
     setBrowserCurrentUrl(nextState.currentUrl)
@@ -288,6 +432,26 @@ export default function App () {
     setBrowserSource(nextState.source)
     setBrowserCanGoBack(nextState.canGoBack)
     setBrowserCanGoForward(nextState.canGoForward)
+    setPendingRestoredUrl(
+      nextState.source.kind === 'restore' ? nextState.currentUrl : null
+    )
+    updateBrowserTabsState((state) => {
+      const activeTab = state.tabs.find((tab) => tab.id === tabId)
+      return updateBrowserTabState(state, tabId, {
+        title: getBrowserEntryTitle({
+          url: nextState.currentUrl,
+          source: nextState.source
+        }),
+        history: nextState.history,
+        historyIndex: nextState.historyIndex,
+        webCanGoBack: typeof nextState.webCanGoBack === 'boolean'
+          ? nextState.webCanGoBack
+          : activeTab?.webCanGoBack || false,
+        webCanGoForward: typeof nextState.webCanGoForward === 'boolean'
+          ? nextState.webCanGoForward
+          : activeTab?.webCanGoForward || false
+      }) as BrowserTabsState
+    })
 
     if (typeof nextState.webCanGoBack === 'boolean') {
       setBrowserWebCanGoBack(nextState.webCanGoBack)
@@ -298,8 +462,79 @@ export default function App () {
     }
   }
 
+  function updateBrowserTabTitle (tabId: string, title: string) {
+    updateBrowserTabsState((state) => updateBrowserTabState(
+      state,
+      tabId,
+      { title: normalizeBrowserTabTitle(title) }
+    ) as BrowserTabsState)
+  }
+
+  function syncBackgroundBrowserTab (
+    tabId: string,
+    expectedEntry: BrowserHistoryEntry,
+    navigationState: {
+      url: string
+      title?: string
+      canGoBack: boolean
+      canGoForward: boolean
+    }
+  ) {
+    if (!isWebUrl(navigationState.url) || navigationState.url.length > MAX_BROWSER_URL_LENGTH) return
+
+    updateBrowserTabsState((state) => {
+      const tab = state.tabs.find((item) => item.id === tabId)
+      if (!tab || !isCurrentBrowserTabEntry(state, tabId, expectedEntry)) return state
+
+      const nextState = syncBrowserEntryState(
+        { history: tab.history, historyIndex: tab.historyIndex },
+        navigationState.url,
+        { kind: 'web', uri: navigationState.url }
+      )
+
+      return updateBrowserTabState(state, tabId, {
+        title: navigationState.title || navigationState.url,
+        history: nextState.history,
+        historyIndex: nextState.historyIndex,
+        webCanGoBack: navigationState.canGoBack,
+        webCanGoForward: navigationState.canGoForward
+      }) as BrowserTabsState
+    })
+  }
+
+  function updateBackgroundBrowserEntry (
+    tabId: string,
+    expectedEntry: BrowserHistoryEntry,
+    url: string,
+    source: BrowserSource,
+    replace = false
+  ) {
+    updateBrowserTabsState((state) => {
+      const tab = state.tabs.find((item) => item.id === tabId)
+      const entryMatches = replace
+        ? isCurrentBrowserTabEntry(state, tabId, expectedEntry)
+        : tab?.history[tab.historyIndex] === expectedEntry
+      if (!tab || !entryMatches) return state
+
+      const nextState = (replace ? replaceBrowserEntryState : commitBrowserEntryState)(
+        { history: tab.history, historyIndex: tab.historyIndex },
+        url,
+        source
+      )
+
+      return updateBrowserTabState(state, tabId, {
+        title: getBrowserEntryTitle({ url, source }),
+        history: nextState.history,
+        historyIndex: nextState.historyIndex,
+        webCanGoBack: false,
+        webCanGoForward: false
+      }) as BrowserTabsState
+    })
+  }
+
   function cancelPendingBrowserLoad () {
     browserLoadSeqRef.current += 1
+    setBrowserIsLoading(false)
   }
 
   async function onBrowserSubmit () {
@@ -307,7 +542,14 @@ export default function App () {
   }
 
   async function loadBrowserUrl (rawUrl: string) {
+    browserUserInteractedRef.current = true
     const nextUrl = normalizeBrowserAddress(rawUrl)
+
+    if (nextUrl.length > MAX_BROWSER_URL_LENGTH) {
+      cancelPendingBrowserLoad()
+      showBrowserError(BROWSER_HOME_URL, 'URL is too long')
+      return
+    }
 
     if (nextUrl === BROWSER_HOME_URL) {
       cancelPendingBrowserLoad()
@@ -340,6 +582,34 @@ export default function App () {
     showBrowserError(nextUrl, 'Unsupported URL scheme')
   }
 
+  async function loadRestoredBrowserUrl (url: string) {
+    const internalApp = getRuntimeAppFromUrl(url)
+
+    if (url === BROWSER_HOME_URL) {
+      replaceBrowserEntry(BROWSER_HOME_URL, { kind: 'home' })
+      setBrowserTitle('PeerSky')
+      return
+    }
+
+    if (internalApp) {
+      openInternalApp(internalApp, false)
+      return
+    }
+
+    if (isHyperUrl(url)) {
+      await loadHyperBrowserUrl(url, false)
+      return
+    }
+
+    if (isWebUrl(url)) {
+      replaceBrowserEntry(url, { kind: 'web', uri: url })
+      setBrowserTitle(url)
+      return
+    }
+
+    showBrowserError(url, 'Unsupported restored URL scheme')
+  }
+
   async function loadHyperBrowserUrl (nextUrl: string, shouldCommit = true) {
     const loadSeq = ++browserLoadSeqRef.current
     setBrowserIsLoading(true)
@@ -359,6 +629,12 @@ export default function App () {
         throw new Error(response.error || response.statusText || 'Unable to load Hyper page')
       }
 
+      const responseUrl = response.url &&
+        response.url.length <= MAX_BROWSER_URL_LENGTH &&
+        isHyperUrl(response.url)
+        ? response.url
+        : nextUrl
+
       const source: BrowserSource = {
         kind: 'hyper',
         html: createHyperBrowserHtml(response, nextUrl),
@@ -366,12 +642,12 @@ export default function App () {
       }
 
       if (shouldCommit) {
-        commitBrowserEntry(response.url || nextUrl, source)
+        commitBrowserEntry(responseUrl, source)
       } else {
-        replaceBrowserEntry(response.url || nextUrl, source)
+        replaceBrowserEntry(responseUrl, source)
       }
 
-      setBrowserTitle(response.url || nextUrl)
+      setBrowserTitle(responseUrl)
       setStatus(`Loaded ${response.status || 200} ${response.statusText || 'OK'}`)
     } catch (error) {
       if (isStaleBrowserLoad(loadSeq, browserLoadSeqRef.current)) return
@@ -430,10 +706,11 @@ export default function App () {
   }
 
   function onBrowserBack () {
+    browserUserInteractedRef.current = true
     cancelPendingBrowserLoad()
 
     if (browserSource.kind === 'web' && browserWebCanGoBack) {
-      browserWebViewRef.current?.goBack()
+      browserWebViewRefs.current.get(browserTabsState.activeTabId)?.goBack()
       return
     }
 
@@ -447,10 +724,11 @@ export default function App () {
   }
 
   function onBrowserForward () {
+    browserUserInteractedRef.current = true
     cancelPendingBrowserLoad()
 
     if (browserSource.kind === 'web' && browserWebCanGoForward) {
-      browserWebViewRef.current?.goForward()
+      browserWebViewRefs.current.get(browserTabsState.activeTabId)?.goForward()
       return
     }
 
@@ -464,15 +742,16 @@ export default function App () {
   }
 
   function onBrowserReload () {
+    browserUserInteractedRef.current = true
     if (browserIsLoading && browserSource.kind === 'web') {
       cancelPendingBrowserLoad()
-      browserWebViewRef.current?.stopLoading()
+      browserWebViewRefs.current.get(browserTabsState.activeTabId)?.stopLoading()
       return
     }
 
     if (browserSource.kind === 'web') {
       cancelPendingBrowserLoad()
-      browserWebViewRef.current?.reload()
+      browserWebViewRefs.current.get(browserTabsState.activeTabId)?.reload()
       return
     }
 
@@ -486,23 +765,118 @@ export default function App () {
     }
   }
 
-  function onBrowserShouldStartLoad (request: { url?: string }) {
+  function applyBrowserTab (tab: BrowserTab) {
+    const entry = tab.history[tab.historyIndex]
+    if (!entry) return
+
+    setBrowserHistory(tab.history)
+    setBrowserHistoryIndex(tab.historyIndex)
+    setBrowserCurrentUrl(entry.url)
+    setBrowserAddress(entry.url === BROWSER_HOME_URL ? '' : entry.url)
+    setBrowserSource(entry.source)
+    setBrowserCanGoBack(tab.historyIndex > 0)
+    setBrowserCanGoForward(tab.history.length > tab.historyIndex + 1)
+    setBrowserWebCanGoBack(tab.webCanGoBack)
+    setBrowserWebCanGoForward(tab.webCanGoForward)
+    setBrowserTitle(normalizeBrowserTabTitle(tab.title || getBrowserEntryTitle(entry)))
+
+    if (entry.source.kind === 'app') {
+      setActiveTab(entry.source.app)
+    } else {
+      setActiveTab('hyper')
+    }
+
+    setPendingRestoredUrl(
+      entry.source.kind === 'restore' ? entry.url : null
+    )
+  }
+
+  function onBrowserNewTab () {
+    browserUserInteractedRef.current = true
+    cancelPendingBrowserLoad()
+    const nextState = addBrowserTabState(browserTabsStateRef.current) as BrowserTabsState
+    const tab = nextState.tabs.find((item) => item.id === nextState.activeTabId)
+
+    updateBrowserTabsState(nextState)
+    if (tab) applyBrowserTab(tab)
+    setBrowserTabsVisible(false)
+    setBrowserTitle('PeerSky')
+    setStatus('New tab')
+  }
+
+  function onBrowserSwitchTab (tabId: string) {
+    if (tabId === browserTabsStateRef.current.activeTabId) {
+      setBrowserTabsVisible(false)
+      return
+    }
+
+    browserUserInteractedRef.current = true
+    cancelPendingBrowserLoad()
+    const nextState = switchBrowserTabState(browserTabsStateRef.current, tabId) as BrowserTabsState
+    const tab = nextState.tabs.find((item) => item.id === nextState.activeTabId)
+
+    updateBrowserTabsState(nextState)
+    if (tab) applyBrowserTab(tab)
+    setBrowserTabsVisible(false)
+    setStatus('Tab switched')
+  }
+
+  function onBrowserCloseTab (tabId: string) {
+    browserUserInteractedRef.current = true
+    const currentTabsState = browserTabsStateRef.current
+    const isClosingActive = tabId === currentTabsState.activeTabId
+    if (isClosingActive) cancelPendingBrowserLoad()
+
+    const nextState = closeBrowserTabState(currentTabsState, tabId) as BrowserTabsState
+    const tab = nextState.tabs.find((item) => item.id === nextState.activeTabId)
+
+    updateBrowserTabsState(nextState)
+    setBrowserLiveTabIds((tabIds) => tabIds.filter((id) => id !== tabId))
+    if (isClosingActive && tab) applyBrowserTab(tab)
+    setStatus('Tab closed')
+  }
+
+  function onBrowserShouldStartLoad (
+    tabId: string,
+    expectedEntry: BrowserHistoryEntry,
+    request: { url?: string }
+  ) {
+    const currentTab = browserTabsStateRef.current.tabs.find((tab) => tab.id === tabId)
+    if (!currentTab || currentTab.history[currentTab.historyIndex] !== expectedEntry) return false
+
     const action = getBrowserRequestAction({
       requestUrl: request.url,
-      currentSourceKind: browserSource.kind
+      currentSourceKind: expectedEntry.source.kind
     })
+    const isActive = browserTabsStateRef.current.activeTabId === tabId
 
     if (action.action === 'allow') return true
 
     if (action.action === 'load-hyper' && action.url) {
-      void loadBrowserUrl(action.url)
+      if (isActive) {
+        void loadBrowserUrl(action.url)
+      } else {
+        updateBackgroundBrowserEntry(tabId, expectedEntry, action.url, {
+          kind: 'restore',
+          url: action.url
+        })
+      }
       return false
     }
 
     if (action.action === 'commit-web' && action.url && action.source) {
-      cancelPendingBrowserLoad()
-      commitBrowserEntry(action.url, action.source as BrowserSource)
-      setBrowserTitle(action.url)
+      if (isActive) {
+        cancelPendingBrowserLoad()
+        commitBrowserEntry(action.url, action.source as BrowserSource)
+        setBrowserTitle(action.url)
+      } else {
+        updateBackgroundBrowserEntry(
+          tabId,
+          expectedEntry,
+          action.url,
+          action.source as BrowserSource
+        )
+      }
       return false
     }
 
@@ -1055,10 +1429,14 @@ export default function App () {
             autoCorrect={false}
             keyboardType='url'
             returnKeyType='go'
+            maxLength={MAX_BROWSER_URL_LENGTH}
             value={browserAddress}
-            onChangeText={setBrowserAddress}
+            onChangeText={(value) => {
+              browserUserInteractedRef.current = true
+              setBrowserAddress(value)
+            }}
             onSubmitEditing={() => void onBrowserSubmit()}
-            placeholder='Search or enter address'
+            placeholder='Search or type URL'
             placeholderTextColor='#7d8494'
           />
           <Pressable style={styles.browserActionButton} onPress={onBrowserReload}>
@@ -1066,11 +1444,88 @@ export default function App () {
               ? <ActivityIndicator color='#ffffff' size='small' />
               : <Text style={styles.browserActionButtonText}>↻</Text>}
           </Pressable>
+          <Pressable
+            accessibilityLabel={`Open tabs, ${browserTabsState.tabs.length} open`}
+            style={styles.browserTabCountButton}
+            onPress={() => {
+              browserUserInteractedRef.current = true
+              setBrowserTabsVisible(true)
+            }}
+          >
+            <View style={styles.browserTabCountIcon}>
+              <Text style={styles.browserTabCountText}>{browserTabsState.tabs.length}</Text>
+            </View>
+          </Pressable>
         </View>
 
+        <Modal
+          animationType='slide'
+          visible={browserTabsVisible}
+          onRequestClose={() => setBrowserTabsVisible(false)}
+        >
+          <SafeAreaView style={styles.browserTabsScreen} edges={['top', 'left', 'right', 'bottom']}>
+            <View style={styles.browserTabsHeader}>
+              <View>
+                <Text style={styles.browserTabsTitle}>Tabs</Text>
+                <Text style={styles.browserTabsSubtitle}>{browserTabsState.tabs.length} open</Text>
+              </View>
+              <Pressable
+                accessibilityLabel='Open new tab'
+                style={[
+                  styles.browserTabsNewButton,
+                  browserTabsState.tabs.length >= MAX_BROWSER_TABS ? styles.browserTabsNewButtonDisabled : null
+                ]}
+                onPress={onBrowserNewTab}
+                disabled={browserTabsState.tabs.length >= MAX_BROWSER_TABS}
+              >
+                <Text style={styles.browserTabsNewButtonText}>+</Text>
+              </Pressable>
+            </View>
+
+            <ScrollView contentContainerStyle={styles.browserTabsGrid}>
+              {browserTabsState.tabs.map((tab) => {
+                const entry = tab.history[tab.historyIndex]
+
+                return (
+                  <View
+                    key={tab.id}
+                    style={[
+                      styles.browserTabCard,
+                      tab.id === browserTabsState.activeTabId ? styles.browserTabCardActive : null
+                    ]}
+                  >
+                    <Pressable style={styles.browserTabCardBody} onPress={() => onBrowserSwitchTab(tab.id)}>
+                      <View style={styles.browserTabCardPreview}>
+                        <Text style={styles.browserTabCardPreviewText} numberOfLines={2}>
+                          {getBrowserTabLabel(tab)}
+                        </Text>
+                      </View>
+                      <Text style={styles.browserTabCardTitle} numberOfLines={1}>
+                        {getBrowserTabLabel(tab)}
+                      </Text>
+                      <Text style={styles.browserTabCardUrl} numberOfLines={1}>
+                        {entry?.url || BROWSER_HOME_URL}
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      accessibilityLabel={`Close ${getBrowserTabLabel(tab)}`}
+                      style={styles.browserTabCardClose}
+                      onPress={() => onBrowserCloseTab(tab.id)}
+                    >
+                      <Text style={styles.browserTabCardCloseText}>x</Text>
+                    </Pressable>
+                  </View>
+                )
+              })}
+            </ScrollView>
+
+          </SafeAreaView>
+        </Modal>
+
+        <View style={styles.browserContent}>
         {browserSource.kind === 'home'
           ? (
-            <ScrollView contentContainerStyle={styles.browserHome}>
+            <ScrollView style={styles.browserContentPage} contentContainerStyle={styles.browserHome}>
               <View style={styles.browserShortcutGrid}>
                 <Pressable
                   style={styles.browserShortcut}
@@ -1107,7 +1562,7 @@ export default function App () {
             )
           : browserSource.kind === 'app'
             ? (
-              <ScrollView contentContainerStyle={[
+              <ScrollView style={styles.browserContentPage} contentContainerStyle={[
                 styles.content,
                 activeTab === 'p2pmd' ? styles.p2pmdAppContent : null
               ]}>
@@ -1317,45 +1772,109 @@ export default function App () {
                 )}
               </ScrollView>
               )
-          : (
+          : browserSource.kind === 'restore'
+            ? (
+              <View style={styles.browserRestorePage}>
+                <ActivityIndicator size='small' color='#1f6fd1' />
+                <Text style={styles.browserRestoreText}>Restoring tab...</Text>
+              </View>
+              )
+            : null}
+
+        {browserTabsState.tabs.map((tab) => {
+          const entry = tab.history[tab.historyIndex]
+          if (!entry || !isBrowserWebViewSource(entry.source)) return null
+          if (!browserLiveTabIds.includes(tab.id)) return null
+
+          const isActive = tab.id === browserTabsState.activeTabId
+
+          return (
+            <View
+              key={tab.id}
+              pointerEvents={isActive ? 'auto' : 'none'}
+              style={[styles.browserWebViewLayer, !isActive ? styles.browserWebViewLayerHidden : null]}
+            >
             <WebView
-              ref={browserWebViewRef}
-              source={browserSource.kind === 'web'
-                ? { uri: browserSource.uri }
-                : { html: browserSource.html, baseUrl: browserSource.kind === 'hyper' ? browserSource.baseUrl : undefined }}
+              ref={(ref) => {
+                if (ref) {
+                  browserWebViewRefs.current.set(tab.id, ref)
+                } else {
+                  browserWebViewRefs.current.delete(tab.id)
+                }
+              }}
+              source={entry.source.kind === 'web'
+                ? { uri: entry.source.uri }
+                : {
+                    html: entry.source.html,
+                    baseUrl: entry.source.kind === 'hyper' ? entry.source.baseUrl : undefined
+                  }}
+              cacheEnabled={true}
               originWhitelist={['*']}
               textZoom={100}
               style={styles.browserWebView}
-              onShouldStartLoadWithRequest={onBrowserShouldStartLoad}
+              onShouldStartLoadWithRequest={(request) => onBrowserShouldStartLoad(tab.id, entry, request)}
               onLoadStart={() => {
-                setBrowserIsLoading(true)
+                if (
+                  browserTabsStateRef.current.activeTabId === tab.id &&
+                  isCurrentBrowserTabEntry(browserTabsStateRef.current, tab.id, entry)
+                ) {
+                  setBrowserIsLoading(true)
+                }
               }}
               onLoadEnd={() => {
-                setBrowserIsLoading(false)
+                if (
+                  browserTabsStateRef.current.activeTabId === tab.id &&
+                  isCurrentBrowserTabEntry(browserTabsStateRef.current, tab.id, entry)
+                ) {
+                  setBrowserIsLoading(false)
+                }
               }}
               onNavigationStateChange={(navigationState) => {
-                if (browserSource.kind !== 'web') return
+                if (entry.source.kind !== 'web') return
+                if (!isCurrentBrowserTabEntry(browserTabsStateRef.current, tab.id, entry)) return
+                if (!isWebUrl(navigationState.url) || navigationState.url.length > MAX_BROWSER_URL_LENGTH) return
 
-                setBrowserWebCanGoBack(navigationState.canGoBack)
-                setBrowserWebCanGoForward(navigationState.canGoForward)
-                syncBrowserEntry(navigationState.url, {
-                  kind: 'web',
-                  uri: navigationState.url
-                })
-                setBrowserTitle(navigationState.title || navigationState.url)
-                setBrowserIsLoading(navigationState.loading)
+                if (browserTabsStateRef.current.activeTabId === tab.id) {
+                  syncBrowserEntry(navigationState.url, {
+                    kind: 'web',
+                    uri: navigationState.url
+                  }, {
+                    canGoBack: navigationState.canGoBack,
+                    canGoForward: navigationState.canGoForward
+                  }, tab.id)
+                  const title = normalizeBrowserTabTitle(navigationState.title || navigationState.url)
+                  setBrowserTitle(title)
+                  updateBrowserTabTitle(tab.id, title)
+                  setBrowserIsLoading(navigationState.loading)
+                } else {
+                  syncBackgroundBrowserTab(tab.id, entry, navigationState)
+                }
               }}
               onError={(event) => {
-                const failedUrl = event.nativeEvent.url || browserCurrentUrl
-                replaceBrowserEntry(failedUrl, {
+                if (!isCurrentBrowserTabEntry(browserTabsStateRef.current, tab.id, entry)) return
+
+                const candidateUrl = event.nativeEvent.url || entry.url
+                const failedUrl = candidateUrl.length <= MAX_BROWSER_URL_LENGTH
+                  ? candidateUrl
+                  : entry.url
+                const errorSource: BrowserSource = {
                   kind: 'error',
                   html: createBrowserErrorHtml(failedUrl, event.nativeEvent.description)
-                })
-                setBrowserTitle('Page failed')
-                setStatus(event.nativeEvent.description)
+                }
+
+                if (browserTabsStateRef.current.activeTabId === tab.id) {
+                  replaceBrowserEntry(failedUrl, errorSource)
+                  setBrowserTitle('Page failed')
+                  setStatus(event.nativeEvent.description)
+                } else {
+                  updateBackgroundBrowserEntry(tab.id, entry, failedUrl, errorSource, true)
+                }
               }}
             />
-            )}
+            </View>
+          )
+        })}
+        </View>
 
         {isBooting && (
           <View style={styles.browserLoader}>
@@ -1371,9 +1890,38 @@ function toBareFsPath (uri: string) {
   return decodeURIComponent(new URL(uri).pathname).replace(/\/$/, '')
 }
 
+function getBrowserSessionFile () {
+  return new File(Paths.document, 'browser-tabs.json')
+}
+
+function writeBrowserSession (state: BrowserTabsState) {
+  try {
+    const sessionFile = getBrowserSessionFile()
+    if (!sessionFile.exists) sessionFile.create({ intermediates: true })
+    sessionFile.write(serializeBrowserTabsState(state))
+  } catch (error) {
+    console.error('Failed saving browser tabs:', error)
+  }
+}
+
+function isBrowserWebViewSource (
+  source: BrowserSource
+): source is Extract<BrowserSource, { kind: 'web' | 'hyper' | 'error' }> {
+  return source.kind === 'web' || source.kind === 'hyper' || source.kind === 'error'
+}
+
 function getBrowserEntryTitle (entry: BrowserHistoryEntry) {
   if (entry.source.kind === 'app') return getRuntimeAppTitle(entry.source.app)
   return entry.url === BROWSER_HOME_URL ? 'PeerSky' : entry.url
+}
+
+function getBrowserTabLabel (tab: BrowserTab) {
+  if (tab.title && tab.title !== BROWSER_HOME_URL) return tab.title
+
+  const entry = tab.history[tab.historyIndex]
+  if (!entry) return 'New Tab'
+
+  return getBrowserEntryTitle(entry)
 }
 
 function getRuntimeAppIconStyle (app: RuntimeTab) {

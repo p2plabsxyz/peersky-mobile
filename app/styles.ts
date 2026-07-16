@@ -61,6 +61,136 @@ export const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: '800'
   },
+  browserTabCountButton: {
+    alignItems: 'center',
+    backgroundColor: '#e8f0fb',
+    borderRadius: 10,
+    height: 38,
+    justifyContent: 'center',
+    width: 38
+  },
+  browserTabCountIcon: {
+    alignItems: 'center',
+    borderColor: '#24324f',
+    borderRadius: 4,
+    borderWidth: 2,
+    height: 22,
+    justifyContent: 'center',
+    width: 22
+  },
+  browserTabCountText: {
+    color: '#24324f',
+    fontSize: 11,
+    fontWeight: '900'
+  },
+  browserTabsScreen: {
+    backgroundColor: '#eef4fc',
+    flex: 1
+  },
+  browserTabsHeader: {
+    alignItems: 'center',
+    borderBottomColor: '#d2dff1',
+    borderBottomWidth: 1,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 18
+  },
+  browserTabsTitle: {
+    color: '#151821',
+    fontSize: 26,
+    fontWeight: '900',
+    lineHeight: 30
+  },
+  browserTabsSubtitle: {
+    color: '#68738a',
+    fontSize: 13,
+    marginTop: 2
+  },
+  browserTabsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 14,
+    padding: 16
+  },
+  browserTabCard: {
+    backgroundColor: '#ffffff',
+    borderColor: '#d4dfef',
+    borderRadius: 16,
+    borderWidth: 1,
+    minHeight: 190,
+    overflow: 'hidden',
+    position: 'relative',
+    width: '47.8%'
+  },
+  browserTabCardActive: {
+    borderColor: '#2f80ed',
+    borderWidth: 2
+  },
+  browserTabCardBody: {
+    flex: 1,
+    padding: 10
+  },
+  browserTabCardPreview: {
+    alignItems: 'center',
+    backgroundColor: '#f5f8ff',
+    borderRadius: 10,
+    flex: 1,
+    justifyContent: 'center',
+    minHeight: 116,
+    padding: 12
+  },
+  browserTabCardPreviewText: {
+    color: '#52617a',
+    fontSize: 12,
+    fontWeight: '800',
+    textAlign: 'center'
+  },
+  browserTabCardTitle: {
+    color: '#202b43',
+    fontSize: 13,
+    fontWeight: '800',
+    marginTop: 9,
+    paddingRight: 26
+  },
+  browserTabCardUrl: {
+    color: '#7d879a',
+    fontSize: 10,
+    marginTop: 3
+  },
+  browserTabCardClose: {
+    alignItems: 'center',
+    backgroundColor: '#e7eef8',
+    borderRadius: 999,
+    height: 26,
+    justifyContent: 'center',
+    position: 'absolute',
+    right: 8,
+    top: 8,
+    width: 26
+  },
+  browserTabCardCloseText: {
+    color: '#33415e',
+    fontSize: 12,
+    fontWeight: '900'
+  },
+  browserTabsNewButton: {
+    alignItems: 'center',
+    backgroundColor: '#1f6fd1',
+    borderRadius: 10,
+    height: 42,
+    justifyContent: 'center',
+    width: 42
+  },
+  browserTabsNewButtonDisabled: {
+    opacity: 0.4
+  },
+  browserTabsNewButtonText: {
+    color: '#ffffff',
+    fontSize: 25,
+    fontWeight: '500',
+    lineHeight: 28
+  },
   browserChip: {
     backgroundColor: '#e8f0fb',
     borderRadius: 999,
@@ -136,9 +266,40 @@ export const styles = StyleSheet.create({
     color: '#667085',
     fontSize: 12
   },
+  browserContent: {
+    flex: 1,
+    overflow: 'hidden',
+    position: 'relative'
+  },
+  browserContentPage: {
+    flex: 1
+  },
+  browserWebViewLayer: {
+    bottom: 0,
+    left: 0,
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    zIndex: 1
+  },
+  browserWebViewLayerHidden: {
+    display: 'none',
+    zIndex: 0
+  },
   browserWebView: {
     backgroundColor: '#ffffff',
     flex: 1
+  },
+  browserRestorePage: {
+    alignItems: 'center',
+    backgroundColor: '#ffffff',
+    flex: 1,
+    gap: 10,
+    justifyContent: 'center'
+  },
+  browserRestoreText: {
+    color: '#596276',
+    fontSize: 14
   },
   browserLoader: {
     position: 'absolute',

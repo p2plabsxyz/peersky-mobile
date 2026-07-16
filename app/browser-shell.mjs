@@ -1,4 +1,6 @@
 export const BROWSER_HOME_URL = 'peersky://home'
+export const MAX_BROWSER_HISTORY_ENTRIES = 20
+export const MAX_BROWSER_URL_LENGTH = 8192
 
 export function normalizeBrowserAddress (address) {
   const value = String(address || '').trim()
@@ -30,7 +32,11 @@ export function getBrowserAddressForUrl (url) {
 }
 
 export function commitBrowserEntryState (state, url, source) {
-  const nextHistory = state.history.slice(0, state.historyIndex + 1).concat({ url, source })
+  const nextHistory = state.history
+    .slice(0, state.historyIndex + 1)
+    .map(getRestorableHistoryEntry)
+    .concat({ url, source })
+    .slice(-MAX_BROWSER_HISTORY_ENTRIES)
   return buildBrowserState(nextHistory, nextHistory.length - 1, {
     resetWebNavigation: true
   })
@@ -59,7 +65,11 @@ export function getBrowserForwardState (state) {
 export function getBrowserRequestAction ({ requestUrl, currentSourceKind }) {
   const url = String(requestUrl || '')
 
-  if (url === 'about:blank' || url.startsWith('data:')) {
+  if (url.length > MAX_BROWSER_URL_LENGTH) {
+    return { action: 'block' }
+  }
+
+  if (url === 'about:blank') {
     return { action: 'allow' }
   }
 
@@ -84,6 +94,15 @@ export function getBrowserRequestAction ({ requestUrl, currentSourceKind }) {
 
 export function isStaleBrowserLoad (loadSeq, currentSeq) {
   return loadSeq !== currentSeq
+}
+
+function getRestorableHistoryEntry (entry) {
+  if (entry.source.kind !== 'hyper' && entry.source.kind !== 'error') return entry
+
+  return {
+    url: entry.url,
+    source: { kind: 'restore', url: entry.url }
+  }
 }
 
 function buildBrowserState (history, historyIndex, {
