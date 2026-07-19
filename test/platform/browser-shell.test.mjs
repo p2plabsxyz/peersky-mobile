@@ -6,6 +6,7 @@ import {
   getBrowserBackState,
   getBrowserForwardState,
   getBrowserRequestAction,
+  getSearchUrl,
   isHyperUrl,
   isStaleBrowserLoad,
   isWebUrl,
@@ -34,6 +35,9 @@ describe('browser shell navigation helpers', () => {
     assert.equal(normalizeBrowserAddress('akhilesh.art'), 'https://akhilesh.art')
     assert.equal(normalizeBrowserAddress('search words'), 'https://duckduckgo.com/?q=search%20words')
     assert.equal(normalizeBrowserAddress('peersky'), 'https://duckduckgo.com/?q=peersky')
+    assert.equal(normalizeBrowserAddress('search words', 'brave'), 'https://search.brave.com/search?q=search%20words')
+    assert.equal(normalizeBrowserAddress('search words', 'google'), 'https://www.google.com/search?q=search%20words')
+    assert.equal(getSearchUrl('unknown', 'fallback search'), 'https://duckduckgo.com/?q=fallback%20search')
   })
 
   test('detects supported web and hyper schemes only', () => {

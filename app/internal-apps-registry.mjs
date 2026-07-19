@@ -30,9 +30,7 @@ export function getRuntimeAppFromUrl (targetUrl) {
 }
 
 export function getRuntimeAppTitle (app) {
-  if (app === 'hyper') return 'Hyper Runtime'
-  if (app === 'holesail') return 'Holesail'
-  return 'P2PMD'
+  return INTERNAL_APPS.find((item) => item.id === app)?.title || 'P2PMD'
 }
 
 function normalizeInternalAppUrl (targetUrl) {

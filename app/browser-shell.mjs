@@ -1,8 +1,9 @@
 export const BROWSER_HOME_URL = 'peersky://home'
 export const MAX_BROWSER_HISTORY_ENTRIES = 20
 export const MAX_BROWSER_URL_LENGTH = 8192
+export const DEFAULT_SEARCH_ENGINE = 'duckduckgo'
 
-export function normalizeBrowserAddress (address) {
+export function normalizeBrowserAddress (address, searchEngine = DEFAULT_SEARCH_ENGINE) {
   const value = String(address || '').trim()
   if (!value || value === BROWSER_HOME_URL) return BROWSER_HOME_URL
 
@@ -13,10 +14,24 @@ export function normalizeBrowserAddress (address) {
   }
 
   if (value.includes(' ') || !value.includes('.')) {
-    return `https://duckduckgo.com/?q=${encodeURIComponent(value)}`
+    return getSearchUrl(searchEngine, value)
   }
 
   return `https://${value}`
+}
+
+export function getSearchUrl (searchEngine, query) {
+  const encodedQuery = encodeURIComponent(String(query || ''))
+
+  if (searchEngine === 'brave') {
+    return `https://search.brave.com/search?q=${encodedQuery}`
+  }
+
+  if (searchEngine === 'google') {
+    return `https://www.google.com/search?q=${encodedQuery}`
+  }
+
+  return `https://duckduckgo.com/?q=${encodedQuery}`
 }
 
 export function isWebUrl (targetUrl) {

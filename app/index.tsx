@@ -39,7 +39,6 @@ import {
   isCurrentBrowserTabEntry,
   MAX_BROWSER_TABS,
   normalizeBrowserTabTitle,
-  restoreBrowserTabsState,
   serializeBrowserTabsState,
   suspendInactiveBrowserTabsState,
   switchBrowserTabState,
@@ -47,12 +46,19 @@ import {
   updateBrowserTabState
 } from './browser-tabs.mjs'
 import {
+  createBrowserResetSession,
+  resolveBrowserStartupSession
+} from './browser-session.mjs'
+import {
   INTERNAL_APPS,
   type RuntimeTab,
   getRuntimeAppFromUrl,
   getRuntimeAppTitle,
   getRuntimeAppUrl
 } from './internal-apps'
+import { SettingsScreen } from './settings/SettingsScreen'
+import { BrowserOverflowMenu } from './settings/BrowserOverflowMenu'
+import { useBrowserPreferences } from './settings/useBrowserPreferences'
 import { styles } from './styles'
 import {
   RPC_HOLESAIL_CONNECT,
@@ -149,12 +155,22 @@ export default function App () {
   const [browserTabsState, setBrowserTabsState] = useState<BrowserTabsState>(
     () => createBrowserTabsState() as BrowserTabsState
   )
+  const {
+    isReady: browserPreferencesReady,
+    persistenceError: browserPreferencesError,
+    preferences: browserPreferences,
+    setRestoreTabsOnStartup,
+    setSearchEngine
+  } = useBrowserPreferences()
   const browserTabsStateRef = useRef(browserTabsState)
   const browserSessionReadyRef = useRef(false)
+  const browserSessionRestoreStartedRef = useRef(false)
   const browserUserInteractedRef = useRef(false)
   const [browserLiveTabIds, setBrowserLiveTabIds] = useState(['tab-1'])
   const [browserSessionReady, setBrowserSessionReady] = useState(false)
   const [browserTabsVisible, setBrowserTabsVisible] = useState(false)
+  const [browserMenuVisible, setBrowserMenuVisible] = useState(false)
+  const [browserSettingsVisible, setBrowserSettingsVisible] = useState(false)
   const [pendingRestoredUrl, setPendingRestoredUrl] = useState<string | null>(null)
   const [browserCanGoBack, setBrowserCanGoBack] = useState(false)
   const [browserCanGoForward, setBrowserCanGoForward] = useState(false)
@@ -192,17 +208,22 @@ export default function App () {
   }, [])
 
   useEffect(() => {
+    if (!browserPreferencesReady || browserSessionRestoreStartedRef.current) return
+    browserSessionRestoreStartedRef.current = true
     let cancelled = false
 
     async function restoreBrowserSession () {
       try {
         const sessionFile = getBrowserSessionFile()
-        if (!sessionFile.exists) return
-
-        const restored = restoreBrowserTabsState(await sessionFile.text()) as BrowserTabsState
+        const serializedSession = sessionFile.exists ? await sessionFile.text() : null
         if (cancelled) return
 
-        if (browserUserInteractedRef.current) return
+        const restored = resolveBrowserStartupSession({
+          restoreTabsOnStartup: browserPreferences.restoreTabsOnStartup,
+          serializedSession,
+          userInteracted: browserUserInteractedRef.current
+        }) as BrowserTabsState | null
+        if (!restored) return
 
         const tab = restored.tabs.find((item) => item.id === restored.activeTabId)
         updateBrowserTabsState(restored)
@@ -222,7 +243,7 @@ export default function App () {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [browserPreferencesReady])
 
   useEffect(() => {
     if (!browserSessionReady) return
@@ -543,7 +564,7 @@ export default function App () {
 
   async function loadBrowserUrl (rawUrl: string) {
     browserUserInteractedRef.current = true
-    const nextUrl = normalizeBrowserAddress(rawUrl)
+    const nextUrl = normalizeBrowserAddress(rawUrl, browserPreferences.searchEngine)
 
     if (nextUrl.length > MAX_BROWSER_URL_LENGTH) {
       cancelPendingBrowserLoad()
@@ -834,6 +855,24 @@ export default function App () {
     setBrowserLiveTabIds((tabIds) => tabIds.filter((id) => id !== tabId))
     if (isClosingActive && tab) applyBrowserTab(tab)
     setStatus('Tab closed')
+  }
+
+  function onBrowserResetTabs () {
+    browserUserInteractedRef.current = true
+    cancelPendingBrowserLoad()
+    const reset = createBrowserResetSession(browserWebViewRefs.current) as {
+      tabsState: BrowserTabsState
+      liveTabIds: string[]
+    }
+    const nextState = reset.tabsState
+    const tab = nextState.tabs[0]
+
+    updateBrowserTabsState(nextState)
+    setBrowserLiveTabIds(reset.liveTabIds)
+    if (tab) applyBrowserTab(tab)
+    setStatus(writeBrowserSession(nextState)
+      ? 'Tab session reset'
+      : 'Tab session reset, but could not be saved')
   }
 
   function onBrowserShouldStartLoad (
@@ -1288,6 +1327,26 @@ export default function App () {
     ? browserWebCanGoForward || browserCanGoForward
     : browserCanGoForward
 
+  if (browserSettingsVisible) {
+    return (
+      <SafeAreaView style={styles.browserShell} edges={['top', 'left', 'right', 'bottom']}>
+        <SettingsScreen
+          persistenceError={browserPreferencesError}
+          restoreTabsOnStartup={browserPreferences.restoreTabsOnStartup}
+          searchEngine={browserPreferences.searchEngine}
+          onClose={() => setBrowserSettingsVisible(false)}
+          onRestoreTabsOnStartupChange={setRestoreTabsOnStartup}
+          onSearchEngineChange={setSearchEngine}
+          onResetTabs={onBrowserResetTabs}
+          onOpenUrl={(targetUrl) => {
+            setBrowserSettingsVisible(false)
+            void loadBrowserUrl(targetUrl)
+          }}
+        />
+      </SafeAreaView>
+    )
+  }
+
   if (activeTab === 'p2pmd' && p2pmdRoom && p2pmdUrl && p2pmdEditorHtml) {
     const p2pmdEditorRoomBaseUrl = p2pmdUrl.replace(/\/$/, '')
     const p2pmdEditorBaseUrl = `${p2pmdEditorRoomBaseUrl}/?role=${encodeURIComponent(p2pmdRoom.role)}`
@@ -1329,6 +1388,15 @@ export default function App () {
               </Text>
             </View>
           </Pressable>
+          <BrowserOverflowMenu
+            visible={browserMenuVisible}
+            onClose={() => setBrowserMenuVisible(false)}
+            onShow={() => setBrowserMenuVisible(true)}
+            onOpenSettings={() => {
+              setBrowserMenuVisible(false)
+              setBrowserSettingsVisible(true)
+            }}
+          />
         </View>
 
         <View style={styles.p2pmdWorkspaceMeta}>
@@ -1456,6 +1524,15 @@ export default function App () {
               <Text style={styles.browserTabCountText}>{browserTabsState.tabs.length}</Text>
             </View>
           </Pressable>
+          <BrowserOverflowMenu
+            visible={browserMenuVisible}
+            onClose={() => setBrowserMenuVisible(false)}
+            onShow={() => setBrowserMenuVisible(true)}
+            onOpenSettings={() => {
+              setBrowserMenuVisible(false)
+              setBrowserSettingsVisible(true)
+            }}
+          />
         </View>
 
         <Modal
@@ -1760,7 +1837,6 @@ export default function App () {
                     </View>
                   </View>
                 )}
-
                 {(isBooting || isLoading) && <ActivityIndicator size='small' />}
 
                 {lastResult && activeTab !== 'p2pmd' && (
@@ -1899,8 +1975,10 @@ function writeBrowserSession (state: BrowserTabsState) {
     const sessionFile = getBrowserSessionFile()
     if (!sessionFile.exists) sessionFile.create({ intermediates: true })
     sessionFile.write(serializeBrowserTabsState(state))
+    return true
   } catch (error) {
     console.error('Failed saving browser tabs:', error)
+    return false
   }
 }
 
