@@ -1,13 +1,19 @@
 export const DEFAULT_BROWSER_PREFERENCES = {
+  addressBarPosition: 'top',
   restoreTabsOnStartup: true,
-  searchEngine: 'duckduckgo'
+  searchEngine: 'duckduckgo',
+  showFullAddress: false,
+  theme: 'system'
 }
 
-export const SEARCH_ENGINES = [
+export const ADDRESS_BAR_POSITIONS = ['top', 'bottom']
+export const BROWSER_THEMES = ['system', 'light', 'dark']
+
+export const SEARCH_ENGINES = /** @type {const} */ ([
   { id: 'duckduckgo', title: 'DuckDuckGo' },
   { id: 'brave', title: 'Brave Search' },
   { id: 'google', title: 'Google' }
-]
+])
 
 export function parseBrowserPreferences (serialized) {
   let value
@@ -19,12 +25,21 @@ export function parseBrowserPreferences (serialized) {
   }
 
   return {
+    addressBarPosition: ADDRESS_BAR_POSITIONS.includes(value?.addressBarPosition)
+      ? value.addressBarPosition
+      : DEFAULT_BROWSER_PREFERENCES.addressBarPosition,
     restoreTabsOnStartup: typeof value?.restoreTabsOnStartup === 'boolean'
       ? value.restoreTabsOnStartup
       : DEFAULT_BROWSER_PREFERENCES.restoreTabsOnStartup,
     searchEngine: SEARCH_ENGINES.some((engine) => engine.id === value?.searchEngine)
       ? value.searchEngine
-      : DEFAULT_BROWSER_PREFERENCES.searchEngine
+      : DEFAULT_BROWSER_PREFERENCES.searchEngine,
+    showFullAddress: typeof value?.showFullAddress === 'boolean'
+      ? value.showFullAddress
+      : DEFAULT_BROWSER_PREFERENCES.showFullAddress,
+    theme: BROWSER_THEMES.includes(value?.theme)
+      ? value.theme
+      : DEFAULT_BROWSER_PREFERENCES.theme
   }
 }
 

@@ -10,7 +10,16 @@ import {
   View
 } from 'react-native'
 import { SEARCH_ENGINES } from './browser-preferences.mjs'
-import type { SearchEngine } from './useBrowserPreferences'
+import { BROWSER_PALETTES } from '../browser-appearance.mjs'
+import { Appearance } from './Appearance'
+import {
+  ChoiceGroup,
+  SettingCopy,
+  SettingsSection,
+  SettingsThemeProvider,
+  useSettingsDarkMode
+} from './SettingsUI'
+import type { AddressBarPosition, BrowserTheme, SearchEngine } from './useBrowserPreferences'
 
 type SettingsPage =
   | 'main'
@@ -22,12 +31,19 @@ type SettingsPage =
   | 'about'
 
 type SettingsScreenProps = {
+  addressBarPosition: AddressBarPosition
+  isDark: boolean
   persistenceError: string | null
   restoreTabsOnStartup: boolean
   searchEngine: SearchEngine
+  showFullAddress: boolean
+  theme: BrowserTheme
+  onAddressBarPositionChange: (position: AddressBarPosition) => void
   onClose: () => void
   onRestoreTabsOnStartupChange: (enabled: boolean) => void
   onSearchEngineChange: (searchEngine: SearchEngine) => void
+  onShowFullAddressChange: (enabled: boolean) => void
+  onThemeChange: (theme: BrowserTheme) => void
   onResetTabs: () => void
   onOpenUrl: (url: string) => void
 }
@@ -74,28 +90,33 @@ const SETTINGS_PAGES: Array<{
 
 export function SettingsScreen (props: SettingsScreenProps) {
   const [page, setPage] = useState<SettingsPage>('main')
+  let content
 
   if (page === 'main') {
-    return <SettingsHome onClose={props.onClose} onOpenPage={setPage} />
+    content = <SettingsHome onClose={props.onClose} onOpenPage={setPage} />
+  } else {
+    content = (
+      <SettingsSubpage title={getSettingsPageTitle(page)} onBack={() => setPage('main')}>
+        {page === 'general' && <GeneralSettings {...props} />}
+        {page === 'accessibility' && (
+          <SectionPlaceholder description='Website text size and manual page zoom will be added next.' />
+        )}
+        {page === 'appearance' && <Appearance {...props} />}
+        {page === 'data-clearing' && (
+          <SectionPlaceholder description='Browsing-data controls will be added in the Data Clearing step.' />
+        )}
+        {page === 'permissions' && (
+          <SectionPlaceholder description='Site and external-link controls will be added in the Permissions step.' />
+        )}
+        {page === 'about' && <AboutSettings onOpenUrl={props.onOpenUrl} />}
+      </SettingsSubpage>
+    )
   }
 
   return (
-    <SettingsSubpage title={getSettingsPageTitle(page)} onBack={() => setPage('main')}>
-      {page === 'general' && <GeneralSettings {...props} />}
-      {page === 'accessibility' && (
-        <SectionPlaceholder description='Website text size and manual page zoom will be added next.' />
-      )}
-      {page === 'appearance' && (
-        <SectionPlaceholder description='Theme and address bar preferences will be added next.' />
-      )}
-      {page === 'data-clearing' && (
-        <SectionPlaceholder description='Browsing-data controls will be added in the Data Clearing step.' />
-      )}
-      {page === 'permissions' && (
-        <SectionPlaceholder description='Site and external-link controls will be added in the Permissions step.' />
-      )}
-      {page === 'about' && <AboutSettings onOpenUrl={props.onOpenUrl} />}
-    </SettingsSubpage>
+    <SettingsThemeProvider value={props.isDark}>
+      {content}
+    </SettingsThemeProvider>
   )
 }
 
@@ -106,9 +127,11 @@ function SettingsHome ({
   onClose: () => void
   onOpenPage: (page: SettingsPage) => void
 }) {
+  const isDark = useSettingsDarkMode()
+
   return (
-    <View style={styles.screen}>
-      <View style={styles.homeHeader}>
+    <View style={[styles.screen, isDark ? darkStyles.screen : null]}>
+      <View style={[styles.homeHeader, isDark ? darkStyles.header : null]}>
         <Pressable
           accessibilityLabel='Close Settings'
           accessibilityRole='button'
@@ -116,13 +139,13 @@ function SettingsHome ({
           style={({ pressed }) => [styles.backButton, pressed ? styles.rowPressed : null]}
           onPress={onClose}
         >
-          <Text style={styles.backButtonText}>{'<'}</Text>
+          <Text style={[styles.backButtonText, isDark ? darkStyles.primaryText : null]}>{'<'}</Text>
         </Pressable>
-        <Text style={styles.title}>Settings</Text>
+        <Text style={[styles.title, isDark ? darkStyles.primaryText : null]}>Settings</Text>
       </View>
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
-        <View style={styles.menu}>
+        <View style={[styles.menu, isDark ? darkStyles.surface : null]}>
           {SETTINGS_PAGES.map((page, index) => (
             <Pressable
               key={page.id}
@@ -130,12 +153,13 @@ function SettingsHome ({
               style={({ pressed }) => [
                 styles.menuRow,
                 index > 0 ? styles.rowDivider : null,
+                index > 0 && isDark ? darkStyles.divider : null,
                 pressed ? styles.rowPressed : null
               ]}
               onPress={() => onOpenPage(page.id)}
             >
               <SettingCopy title={page.title} description={page.description} />
-              <Text style={styles.chevron}>{'>'}</Text>
+              <Text style={[styles.chevron, isDark ? darkStyles.secondaryText : null]}>{'>'}</Text>
             </Pressable>
           ))}
         </View>
@@ -153,9 +177,11 @@ function SettingsSubpage ({
   onBack: () => void
   children: React.ReactNode
 }) {
+  const isDark = useSettingsDarkMode()
+
   return (
-    <View style={styles.screen}>
-      <View style={styles.subpageHeader}>
+    <View style={[styles.screen, isDark ? darkStyles.screen : null]}>
+      <View style={[styles.subpageHeader, isDark ? darkStyles.header : null]}>
         <Pressable
           accessibilityLabel='Back to Settings'
           accessibilityRole='button'
@@ -163,9 +189,9 @@ function SettingsSubpage ({
           style={({ pressed }) => [styles.backButton, pressed ? styles.rowPressed : null]}
           onPress={onBack}
         >
-          <Text style={styles.backButtonText}>{'<'}</Text>
+          <Text style={[styles.backButtonText, isDark ? darkStyles.primaryText : null]}>{'<'}</Text>
         </Pressable>
-        <Text style={styles.subpageTitle}>{title}</Text>
+        <Text style={[styles.subpageTitle, isDark ? darkStyles.primaryText : null]}>{title}</Text>
       </View>
       <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
         {children}
@@ -182,6 +208,8 @@ function GeneralSettings ({
   onSearchEngineChange,
   onResetTabs
 }: SettingsScreenProps) {
+  const isDark = useSettingsDarkMode()
+
   function confirmResetTabs () {
     Alert.alert(
       'Reset tab session?',
@@ -194,7 +222,7 @@ function GeneralSettings ({
   }
 
   return (
-    <View style={styles.pageContent}>
+    <View style={[styles.pageContent, isDark ? darkStyles.page : null]}>
       {persistenceError && (
         <View style={styles.errorBanner}>
           <Text style={styles.errorText}>{persistenceError}</Text>
@@ -217,28 +245,11 @@ function GeneralSettings ({
       </SettingsSection>
 
       <SettingsSection title='Search engine'>
-        <View style={styles.choiceGroup}>
-          {SEARCH_ENGINES.map((engine) => {
-            const selected = engine.id === searchEngine
-
-            return (
-              <Pressable
-                key={engine.id}
-                accessibilityRole='radio'
-                accessibilityState={{ selected }}
-                style={[styles.choice, selected ? styles.choiceSelected : null]}
-                onPress={() => onSearchEngineChange(engine.id as SearchEngine)}
-              >
-                <Text style={[styles.choiceText, selected ? styles.choiceTextSelected : null]}>
-                  {engine.title}
-                </Text>
-                <View style={[styles.radio, selected ? styles.radioSelected : null]}>
-                  {selected && <View style={styles.radioDot} />}
-                </View>
-              </Pressable>
-            )
-          })}
-        </View>
+        <ChoiceGroup
+          options={SEARCH_ENGINES}
+          selected={searchEngine}
+          onSelect={onSearchEngineChange}
+        />
       </SettingsSection>
 
       <SettingsSection title='Tabs'>
@@ -255,8 +266,10 @@ function GeneralSettings ({
 }
 
 function AboutSettings ({ onOpenUrl }: { onOpenUrl: (url: string) => void }) {
+  const isDark = useSettingsDarkMode()
+
   return (
-    <View style={styles.pageContent}>
+    <View style={[styles.pageContent, isDark ? darkStyles.page : null]}>
       <SettingsSection title='PeerSky Mobile'>
         <View style={styles.aboutRow}>
           <SettingCopy
@@ -265,12 +278,12 @@ function AboutSettings ({ onOpenUrl }: { onOpenUrl: (url: string) => void }) {
           />
         </View>
         <Pressable style={styles.linkRow} onPress={() => onOpenUrl(REPOSITORY_URL)}>
-          <Text style={styles.linkText}>Source code</Text>
-          <Text style={styles.chevron}>{'>'}</Text>
+          <Text style={[styles.linkText, isDark ? darkStyles.primaryText : null]}>Source code</Text>
+          <Text style={[styles.chevron, isDark ? darkStyles.secondaryText : null]}>{'>'}</Text>
         </Pressable>
         <Pressable style={styles.linkRow} onPress={() => onOpenUrl(LICENSE_URL)}>
-          <Text style={styles.linkText}>Open-source licenses</Text>
-          <Text style={styles.chevron}>{'>'}</Text>
+          <Text style={[styles.linkText, isDark ? darkStyles.primaryText : null]}>Open-source licenses</Text>
+          <Text style={[styles.chevron, isDark ? darkStyles.secondaryText : null]}>{'>'}</Text>
         </Pressable>
       </SettingsSection>
     </View>
@@ -278,40 +291,12 @@ function AboutSettings ({ onOpenUrl }: { onOpenUrl: (url: string) => void }) {
 }
 
 function SectionPlaceholder ({ description }: { description: string }) {
-  return (
-    <View style={styles.placeholder}>
-      <Text style={styles.placeholderTitle}>Coming in the next step</Text>
-      <Text style={styles.placeholderDescription}>{description}</Text>
-    </View>
-  )
-}
+  const isDark = useSettingsDarkMode()
 
-function SettingsSection ({
-  title,
-  children
-}: {
-  title: string
-  children: React.ReactNode
-}) {
   return (
-    <View style={styles.section}>
-      <Text style={styles.sectionTitle}>{title}</Text>
-      <View style={styles.sectionCard}>{children}</View>
-    </View>
-  )
-}
-
-function SettingCopy ({
-  title,
-  description
-}: {
-  title: string
-  description: string
-}) {
-  return (
-    <View style={styles.settingCopy}>
-      <Text style={styles.settingTitle}>{title}</Text>
-      <Text style={styles.settingDescription}>{description}</Text>
+    <View style={[styles.placeholder, isDark ? darkStyles.surface : null]}>
+      <Text style={[styles.placeholderTitle, isDark ? darkStyles.primaryText : null]}>Coming in the next step</Text>
+      <Text style={[styles.placeholderDescription, isDark ? darkStyles.secondaryText : null]}>{description}</Text>
     </View>
   )
 }
@@ -400,87 +385,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#f5f8fc',
     flexGrow: 1
   },
-  section: {
-    backgroundColor: '#ffffff'
-  },
-  sectionTitle: {
-    backgroundColor: '#f5f8fc',
-    color: '#687086',
-    fontSize: 12,
-    fontWeight: '700',
-    letterSpacing: 0.8,
-    paddingBottom: 9,
-    paddingHorizontal: 20,
-    paddingTop: 22,
-    textTransform: 'uppercase'
-  },
-  sectionCard: {
-    backgroundColor: '#ffffff',
-    borderBottomColor: '#e1e7f0',
-    borderBottomWidth: 1,
-    borderTopColor: '#e1e7f0',
-    borderTopWidth: 1,
-    overflow: 'hidden'
-  },
   settingRow: {
     alignItems: 'center',
     flexDirection: 'row',
     gap: 12,
     padding: 16
-  },
-  settingCopy: {
-    flex: 1,
-    gap: 4
-  },
-  settingTitle: {
-    color: '#1f2a44',
-    fontSize: 15,
-    fontWeight: '700'
-  },
-  settingDescription: {
-    color: '#687086',
-    fontSize: 13,
-    lineHeight: 18
-  },
-  choiceGroup: {
-    padding: 6
-  },
-  choice: {
-    alignItems: 'center',
-    borderRadius: 10,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    minHeight: 46,
-    paddingHorizontal: 12
-  },
-  choiceSelected: {
-    backgroundColor: '#edf5ff'
-  },
-  choiceText: {
-    color: '#384158',
-    fontSize: 14,
-    fontWeight: '600'
-  },
-  choiceTextSelected: {
-    color: '#1f6fd1'
-  },
-  radio: {
-    alignItems: 'center',
-    borderColor: '#9aa7ba',
-    borderRadius: 10,
-    borderWidth: 2,
-    height: 20,
-    justifyContent: 'center',
-    width: 20
-  },
-  radioSelected: {
-    borderColor: '#1f6fd1'
-  },
-  radioDot: {
-    backgroundColor: '#1f6fd1',
-    borderRadius: 5,
-    height: 10,
-    width: 10
   },
   actionRow: {
     alignItems: 'center',
@@ -539,5 +448,30 @@ const styles = StyleSheet.create({
     color: '#8f2940',
     fontSize: 13,
     lineHeight: 18
+  }
+})
+
+const darkStyles = StyleSheet.create({
+  screen: {
+    backgroundColor: BROWSER_PALETTES.dark.shell
+  },
+  page: {
+    backgroundColor: BROWSER_PALETTES.dark.shell
+  },
+  surface: {
+    backgroundColor: BROWSER_PALETTES.dark.surface
+  },
+  header: {
+    backgroundColor: BROWSER_PALETTES.dark.surface,
+    borderBottomColor: BROWSER_PALETTES.dark.border
+  },
+  divider: {
+    borderTopColor: BROWSER_PALETTES.dark.border
+  },
+  primaryText: {
+    color: BROWSER_PALETTES.dark.text
+  },
+  secondaryText: {
+    color: BROWSER_PALETTES.dark.mutedText
   }
 })

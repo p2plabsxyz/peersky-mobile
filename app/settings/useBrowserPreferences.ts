@@ -7,10 +7,15 @@ import {
 } from './browser-preferences.mjs'
 
 export type SearchEngine = 'duckduckgo' | 'brave' | 'google'
+export type AddressBarPosition = 'top' | 'bottom'
+export type BrowserTheme = 'system' | 'light' | 'dark'
 
 export type BrowserPreferences = {
+  addressBarPosition: AddressBarPosition
   restoreTabsOnStartup: boolean
   searchEngine: SearchEngine
+  showFullAddress: boolean
+  theme: BrowserTheme
 }
 
 export function useBrowserPreferences () {
@@ -72,11 +77,20 @@ export function useBrowserPreferences () {
     isReady,
     persistenceError,
     preferences,
+    setAddressBarPosition: (addressBarPosition: AddressBarPosition) => {
+      return updatePreferences({ addressBarPosition })
+    },
     setRestoreTabsOnStartup: (enabled: boolean) => {
       return updatePreferences({ restoreTabsOnStartup: enabled })
     },
     setSearchEngine: (searchEngine: SearchEngine) => {
       return updatePreferences({ searchEngine })
+    },
+    setShowFullAddress: (showFullAddress: boolean) => {
+      return updatePreferences({ showFullAddress })
+    },
+    setTheme: (theme: BrowserTheme) => {
+      return updatePreferences({ theme })
     }
   }
 }

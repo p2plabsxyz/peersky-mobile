@@ -1,7 +1,11 @@
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
+import { BROWSER_PALETTES } from '../browser-appearance.mjs'
 
 type BrowserOverflowMenuProps = {
+  isDark?: boolean
+  offset?: number
+  position?: 'top' | 'bottom'
   visible: boolean
   onClose: () => void
   onOpenSettings: () => void
@@ -9,6 +13,9 @@ type BrowserOverflowMenuProps = {
 }
 
 export function BrowserOverflowMenu ({
+  isDark = false,
+  offset = 70,
+  position = 'top',
   visible,
   onClose,
   onOpenSettings,
@@ -19,13 +26,13 @@ export function BrowserOverflowMenu ({
       <Pressable
         accessibilityLabel='Open browser menu'
         accessibilityRole='button'
-        style={styles.trigger}
+        style={[styles.trigger, isDark ? darkStyles.trigger : null]}
         onPress={onShow}
       >
         <View style={styles.dots}>
-          <View style={styles.dot} />
-          <View style={styles.dot} />
-          <View style={styles.dot} />
+          <View style={[styles.dot, isDark ? darkStyles.dot : null]} />
+          <View style={[styles.dot, isDark ? darkStyles.dot : null]} />
+          <View style={[styles.dot, isDark ? darkStyles.dot : null]} />
         </View>
       </Pressable>
 
@@ -37,13 +44,21 @@ export function BrowserOverflowMenu ({
       >
         <SafeAreaView style={styles.overlay} edges={['top', 'left', 'right', 'bottom']}>
           <Pressable accessibilityLabel='Close browser menu' style={styles.backdrop} onPress={onClose} />
-          <View style={styles.menu}>
+          <View style={[
+            styles.menu,
+            position === 'bottom' ? { bottom: offset } : { top: offset },
+            isDark ? darkStyles.menu : null
+          ]}>
             <Pressable
               accessibilityRole='button'
-              style={({ pressed }) => [styles.menuItem, pressed ? styles.pressed : null]}
+              style={({ pressed }) => [
+                styles.menuItem,
+                pressed ? styles.pressed : null,
+                pressed && isDark ? darkStyles.pressed : null
+              ]}
               onPress={onOpenSettings}
             >
-              <Text style={styles.menuItemText}>Settings</Text>
+              <Text style={[styles.menuItemText, isDark ? darkStyles.menuItemText : null]}>Settings</Text>
             </Pressable>
           </View>
         </SafeAreaView>
@@ -78,14 +93,14 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(21, 24, 33, 0.16)'
   },
   menu: {
+    position: 'absolute',
+    right: 12,
     alignSelf: 'flex-end',
     backgroundColor: '#ffffff',
     borderColor: '#dbe3ef',
     borderRadius: 12,
     borderWidth: 1,
     elevation: 8,
-    marginRight: 12,
-    marginTop: 54,
     minWidth: 180,
     overflow: 'hidden',
     shadowColor: '#10131a',
@@ -105,5 +120,24 @@ const styles = StyleSheet.create({
     color: '#1f2a44',
     fontSize: 15,
     fontWeight: '700'
+  }
+})
+
+const darkStyles = StyleSheet.create({
+  trigger: {
+    backgroundColor: BROWSER_PALETTES.dark.button
+  },
+  menu: {
+    backgroundColor: BROWSER_PALETTES.dark.surface,
+    borderColor: BROWSER_PALETTES.dark.border
+  },
+  menuItemText: {
+    color: BROWSER_PALETTES.dark.text
+  },
+  dot: {
+    backgroundColor: BROWSER_PALETTES.dark.text
+  },
+  pressed: {
+    backgroundColor: BROWSER_PALETTES.dark.selectedBackground
   }
 })

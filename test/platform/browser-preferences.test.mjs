@@ -14,8 +14,11 @@ describe('browser preferences', () => {
 
   test('restores supported browser preferences', () => {
     const preferences = {
+      addressBarPosition: 'bottom',
       restoreTabsOnStartup: false,
-      searchEngine: 'brave'
+      searchEngine: 'brave',
+      showFullAddress: true,
+      theme: 'dark'
     }
 
     assert.deepEqual(
@@ -26,8 +29,22 @@ describe('browser preferences', () => {
 
   test('rejects unsupported preference values independently', () => {
     assert.deepEqual(parseBrowserPreferences({
+      addressBarPosition: 'side',
       restoreTabsOnStartup: 'yes',
-      searchEngine: 'custom'
+      searchEngine: 'custom',
+      showFullAddress: 'yes',
+      theme: 'sepia'
     }), DEFAULT_BROWSER_PREFERENCES)
+  })
+
+  test('fills missing appearance preferences with defaults', () => {
+    assert.deepEqual(parseBrowserPreferences({
+      restoreTabsOnStartup: false,
+      searchEngine: 'google'
+    }), {
+      ...DEFAULT_BROWSER_PREFERENCES,
+      restoreTabsOnStartup: false,
+      searchEngine: 'google'
+    })
   })
 })

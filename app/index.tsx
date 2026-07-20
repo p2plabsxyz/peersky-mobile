@@ -7,8 +7,10 @@ import {
   Pressable,
   ScrollView,
   Share,
+  StatusBar,
   Text,
   TextInput,
+  useColorScheme,
   View
 } from 'react-native'
 import { Worklet } from 'react-native-bare-kit'
@@ -50,6 +52,10 @@ import {
   resolveBrowserStartupSession
 } from './browser-session.mjs'
 import {
+  getBrowserPalette,
+  resolveBrowserDarkMode
+} from './browser-appearance.mjs'
+import {
   INTERNAL_APPS,
   type RuntimeTab,
   getRuntimeAppFromUrl,
@@ -59,6 +65,7 @@ import {
 import { SettingsScreen } from './settings/SettingsScreen'
 import { BrowserOverflowMenu } from './settings/BrowserOverflowMenu'
 import { useBrowserPreferences } from './settings/useBrowserPreferences'
+import { BrowserToolbar } from './BrowserToolbar'
 import { styles } from './styles'
 import {
   RPC_HOLESAIL_CONNECT,
@@ -135,6 +142,7 @@ type BrowserTabsState = {
 }
 
 export default function App () {
+  const systemColorScheme = useColorScheme()
   const workletRef = useRef<Worklet | null>(null)
   const rpcRef = useRef<RPC | null>(null)
   const browserWebViewRefs = useRef(new Map<string, ComponentRef<typeof WebView>>())
@@ -159,8 +167,11 @@ export default function App () {
     isReady: browserPreferencesReady,
     persistenceError: browserPreferencesError,
     preferences: browserPreferences,
+    setAddressBarPosition,
     setRestoreTabsOnStartup,
-    setSearchEngine
+    setSearchEngine,
+    setShowFullAddress,
+    setTheme
   } = useBrowserPreferences()
   const browserTabsStateRef = useRef(browserTabsState)
   const browserSessionReadyRef = useRef(false)
@@ -1326,17 +1337,33 @@ export default function App () {
   const canBrowserGoForward = browserSource.kind === 'web'
     ? browserWebCanGoForward || browserCanGoForward
     : browserCanGoForward
+  const browserIsDark = resolveBrowserDarkMode(browserPreferences.theme, systemColorScheme)
+  const browserChrome = getBrowserPalette(browserIsDark)
 
   if (browserSettingsVisible) {
     return (
-      <SafeAreaView style={styles.browserShell} edges={['top', 'left', 'right', 'bottom']}>
+      <SafeAreaView
+        style={[styles.browserShell, { backgroundColor: browserChrome.shell }]}
+        edges={['top', 'left', 'right', 'bottom']}
+      >
+        <StatusBar
+          backgroundColor={browserChrome.shell}
+          barStyle={browserIsDark ? 'light-content' : 'dark-content'}
+        />
         <SettingsScreen
+          addressBarPosition={browserPreferences.addressBarPosition}
+          isDark={browserIsDark}
           persistenceError={browserPreferencesError}
           restoreTabsOnStartup={browserPreferences.restoreTabsOnStartup}
           searchEngine={browserPreferences.searchEngine}
+          showFullAddress={browserPreferences.showFullAddress}
+          theme={browserPreferences.theme}
+          onAddressBarPositionChange={setAddressBarPosition}
           onClose={() => setBrowserSettingsVisible(false)}
           onRestoreTabsOnStartupChange={setRestoreTabsOnStartup}
           onSearchEngineChange={setSearchEngine}
+          onShowFullAddressChange={setShowFullAddress}
+          onThemeChange={setTheme}
           onResetTabs={onBrowserResetTabs}
           onOpenUrl={(targetUrl) => {
             setBrowserSettingsVisible(false)
@@ -1357,6 +1384,7 @@ export default function App () {
 
     return (
       <SafeAreaView style={styles.p2pmdWorkspace} edges={['top', 'left', 'right', 'bottom']}>
+        <StatusBar backgroundColor='#1f2027' barStyle='light-content' />
         <View style={styles.p2pmdWorkspaceHeader}>
           <Text style={styles.p2pmdWorkspaceTitle}>P2PMD</Text>
           <Text style={[styles.p2pmdWorkspaceRole, p2pmdRoom.role === 'host' ? styles.p2pmdWorkspaceRoleHost : null]}>
@@ -1474,77 +1502,70 @@ export default function App () {
     )
   }
 
+  const browserToolbar = (
+    <BrowserToolbar
+      address={browserAddress}
+      canGoBack={canBrowserGoBack}
+      canGoForward={canBrowserGoForward}
+      isDark={browserIsDark}
+      isLoading={browserIsLoading}
+      menuVisible={browserMenuVisible}
+      palette={browserChrome}
+      position={browserPreferences.addressBarPosition}
+      showFullAddress={browserPreferences.showFullAddress}
+      tabCount={browserTabsState.tabs.length}
+      onAddressChange={(value) => {
+        browserUserInteractedRef.current = true
+        setBrowserAddress(value)
+      }}
+      onBack={onBrowserBack}
+      onCloseMenu={() => setBrowserMenuVisible(false)}
+      onForward={onBrowserForward}
+      onOpenMenu={() => setBrowserMenuVisible(true)}
+      onOpenSettings={() => {
+        setBrowserMenuVisible(false)
+        setBrowserSettingsVisible(true)
+      }}
+      onOpenTabs={() => {
+        browserUserInteractedRef.current = true
+        setBrowserTabsVisible(true)
+      }}
+      onReload={onBrowserReload}
+      onSubmit={() => void onBrowserSubmit()}
+    />
+  )
+  const runtimeInputTheme = {
+    backgroundColor: browserChrome.address,
+    borderColor: browserChrome.border,
+    color: browserChrome.text
+  }
+
   return (
-    <SafeAreaView style={styles.browserShell} edges={['top', 'left', 'right', 'bottom']}>
-        <View style={styles.browserToolbar}>
-          <Pressable
-            style={[styles.browserNavButton, !canBrowserGoBack ? styles.browserNavButtonDisabled : null]}
-            onPress={onBrowserBack}
-            disabled={!canBrowserGoBack}
-          >
-            <Text style={styles.browserNavButtonText}>{'<'}</Text>
-          </Pressable>
-          <Pressable
-            style={[styles.browserNavButton, !canBrowserGoForward ? styles.browserNavButtonDisabled : null]}
-            onPress={onBrowserForward}
-            disabled={!canBrowserGoForward}
-          >
-            <Text style={styles.browserNavButtonText}>{'>'}</Text>
-          </Pressable>
-          <TextInput
-            style={styles.browserAddress}
-            autoCapitalize='none'
-            autoCorrect={false}
-            keyboardType='url'
-            returnKeyType='go'
-            maxLength={MAX_BROWSER_URL_LENGTH}
-            value={browserAddress}
-            onChangeText={(value) => {
-              browserUserInteractedRef.current = true
-              setBrowserAddress(value)
-            }}
-            onSubmitEditing={() => void onBrowserSubmit()}
-            placeholder='Search or type URL'
-            placeholderTextColor='#7d8494'
-          />
-          <Pressable style={styles.browserActionButton} onPress={onBrowserReload}>
-            {browserIsLoading
-              ? <ActivityIndicator color='#ffffff' size='small' />
-              : <Text style={styles.browserActionButtonText}>↻</Text>}
-          </Pressable>
-          <Pressable
-            accessibilityLabel={`Open tabs, ${browserTabsState.tabs.length} open`}
-            style={styles.browserTabCountButton}
-            onPress={() => {
-              browserUserInteractedRef.current = true
-              setBrowserTabsVisible(true)
-            }}
-          >
-            <View style={styles.browserTabCountIcon}>
-              <Text style={styles.browserTabCountText}>{browserTabsState.tabs.length}</Text>
-            </View>
-          </Pressable>
-          <BrowserOverflowMenu
-            visible={browserMenuVisible}
-            onClose={() => setBrowserMenuVisible(false)}
-            onShow={() => setBrowserMenuVisible(true)}
-            onOpenSettings={() => {
-              setBrowserMenuVisible(false)
-              setBrowserSettingsVisible(true)
-            }}
-          />
-        </View>
+    <SafeAreaView
+      style={[styles.browserShell, { backgroundColor: browserChrome.shell }]}
+      edges={['top', 'left', 'right', 'bottom']}
+    >
+        <StatusBar
+          backgroundColor={browserChrome.shell}
+          barStyle={browserIsDark ? 'light-content' : 'dark-content'}
+        />
+        {browserPreferences.addressBarPosition === 'top' && browserToolbar}
 
         <Modal
           animationType='slide'
           visible={browserTabsVisible}
           onRequestClose={() => setBrowserTabsVisible(false)}
         >
-          <SafeAreaView style={styles.browserTabsScreen} edges={['top', 'left', 'right', 'bottom']}>
-            <View style={styles.browserTabsHeader}>
+          <SafeAreaView
+            style={[styles.browserTabsScreen, { backgroundColor: browserChrome.shell }]}
+            edges={['top', 'left', 'right', 'bottom']}
+          >
+            <View style={[styles.browserTabsHeader, { borderBottomColor: browserChrome.border }]}>
               <View>
-                <Text style={styles.browserTabsTitle}>Tabs</Text>
-                <Text style={styles.browserTabsSubtitle}>{browserTabsState.tabs.length} open</Text>
+                <Text style={[styles.browserTabsTitle, { color: browserChrome.text }]}>Tabs</Text>
+                <Text style={[styles.browserTabsSubtitle, { color: browserChrome.mutedText }]}>
+                  {browserTabsState.tabs.length} open
+                </Text>
               </View>
               <Pressable
                 accessibilityLabel='Open new tab'
@@ -1568,28 +1589,35 @@ export default function App () {
                     key={tab.id}
                     style={[
                       styles.browserTabCard,
+                      {
+                        backgroundColor: browserChrome.address,
+                        borderColor: browserChrome.border
+                      },
                       tab.id === browserTabsState.activeTabId ? styles.browserTabCardActive : null
                     ]}
                   >
                     <Pressable style={styles.browserTabCardBody} onPress={() => onBrowserSwitchTab(tab.id)}>
-                      <View style={styles.browserTabCardPreview}>
-                        <Text style={styles.browserTabCardPreviewText} numberOfLines={2}>
+                      <View style={[styles.browserTabCardPreview, { backgroundColor: browserChrome.button }]}>
+                        <Text
+                          style={[styles.browserTabCardPreviewText, { color: browserChrome.mutedText }]}
+                          numberOfLines={2}
+                        >
                           {getBrowserTabLabel(tab)}
                         </Text>
                       </View>
-                      <Text style={styles.browserTabCardTitle} numberOfLines={1}>
+                      <Text style={[styles.browserTabCardTitle, { color: browserChrome.text }]} numberOfLines={1}>
                         {getBrowserTabLabel(tab)}
                       </Text>
-                      <Text style={styles.browserTabCardUrl} numberOfLines={1}>
+                      <Text style={[styles.browserTabCardUrl, { color: browserChrome.mutedText }]} numberOfLines={1}>
                         {entry?.url || BROWSER_HOME_URL}
                       </Text>
                     </Pressable>
                     <Pressable
                       accessibilityLabel={`Close ${getBrowserTabLabel(tab)}`}
-                      style={styles.browserTabCardClose}
+                      style={[styles.browserTabCardClose, { backgroundColor: browserChrome.button }]}
                       onPress={() => onBrowserCloseTab(tab.id)}
                     >
-                      <Text style={styles.browserTabCardCloseText}>x</Text>
+                      <Text style={[styles.browserTabCardCloseText, { color: browserChrome.text }]}>x</Text>
                     </Pressable>
                   </View>
                 )
@@ -1599,7 +1627,7 @@ export default function App () {
           </SafeAreaView>
         </Modal>
 
-        <View style={styles.browserContent}>
+        <View style={[styles.browserContent, { backgroundColor: browserChrome.shell }]}>
         {browserSource.kind === 'home'
           ? (
             <ScrollView style={styles.browserContentPage} contentContainerStyle={styles.browserHome}>
@@ -1611,7 +1639,7 @@ export default function App () {
                   <View style={[styles.browserShortcutIcon, styles.browserShortcutIconPeerSky]}>
                     <Text style={styles.browserShortcutIconText}>P</Text>
                   </View>
-                  <Text numberOfLines={2} style={styles.browserShortcutTitle}>PeerSky Browser</Text>
+                  <Text numberOfLines={2} style={[styles.browserShortcutTitle, { color: browserChrome.text }]}>PeerSky Browser</Text>
                 </Pressable>
                 <Pressable
                   style={styles.browserShortcut}
@@ -1620,7 +1648,7 @@ export default function App () {
                   <View style={[styles.browserShortcutIcon, styles.browserShortcutIconAkhilesh]}>
                     <Text style={styles.browserShortcutIconText}>AT</Text>
                   </View>
-                  <Text numberOfLines={2} style={styles.browserShortcutTitle}>Akhilesh Thite</Text>
+                  <Text numberOfLines={2} style={[styles.browserShortcutTitle, { color: browserChrome.text }]}>Akhilesh Thite</Text>
                 </Pressable>
                 {INTERNAL_APPS.map((app) => (
                   <Pressable
@@ -1631,7 +1659,9 @@ export default function App () {
                     <View style={[styles.browserShortcutIcon, getRuntimeAppIconStyle(app.id)]}>
                       <Text style={styles.browserShortcutIconText}>{app.icon}</Text>
                     </View>
-                    <Text numberOfLines={2} style={styles.browserShortcutTitle}>{app.title}</Text>
+                    <Text numberOfLines={2} style={[styles.browserShortcutTitle, { color: browserChrome.text }]}>
+                      {app.title}
+                    </Text>
                   </Pressable>
                 ))}
               </View>
@@ -1639,29 +1669,38 @@ export default function App () {
             )
           : browserSource.kind === 'app'
             ? (
-              <ScrollView style={styles.browserContentPage} contentContainerStyle={[
+              <ScrollView
+                style={[
+                  styles.browserContentPage,
+                  activeTab !== 'p2pmd' ? { backgroundColor: browserChrome.surface } : null
+                ]}
+                contentContainerStyle={[
                 styles.content,
                 activeTab === 'p2pmd' ? styles.p2pmdAppContent : null
-              ]}>
+                ]}
+              >
                 {activeTab !== 'p2pmd' && (
                   <View style={styles.runtimeHeader}>
-                    <Text style={styles.title}>
+                    <Text style={[styles.title, { color: browserChrome.text }]}>
                       {getRuntimeAppTitle(activeTab)}
                     </Text>
                   </View>
                 )}
-                {shouldShowRuntimeStatus && <Text style={styles.status}>{status}</Text>}
+                {shouldShowRuntimeStatus && (
+                  <Text style={[styles.status, { color: browserChrome.text }]}>{status}</Text>
+                )}
 
                 {activeTab === 'hyper' && (
-                  <View style={styles.section}>
-                    <Text style={styles.sectionTitle}>Hyper Runtime Check</Text>
+                  <View style={[styles.section, { borderColor: browserChrome.border }]}>
+                    <Text style={[styles.sectionTitle, { color: browserChrome.text }]}>Hyper Runtime Check</Text>
                     <TextInput
-                      style={styles.input}
+                      style={[styles.input, runtimeInputTheme]}
                       autoCapitalize='none'
                       autoCorrect={false}
                       value={url}
                       onChangeText={setUrl}
                       placeholder='hyper://...'
+                      placeholderTextColor={browserChrome.mutedText}
                     />
 
                     <View style={styles.buttons}>
@@ -1679,32 +1718,35 @@ export default function App () {
                   </View>
                 )}
                 {activeTab === 'holesail' && (
-                  <View style={styles.section}>
-                    <Text style={styles.sectionTitle}>Holesail Runtime Check</Text>
+                  <View style={[styles.section, { borderColor: browserChrome.border }]}>
+                    <Text style={[styles.sectionTitle, { color: browserChrome.text }]}>Holesail Runtime Check</Text>
                     <TextInput
-                      style={styles.input}
+                      style={[styles.input, runtimeInputTheme]}
                       autoCapitalize='none'
                       autoCorrect={false}
                       keyboardType='numeric'
                       value={hsLivePort}
                       onChangeText={setHsLivePort}
                       placeholder='Live port (for --live)'
+                      placeholderTextColor={browserChrome.mutedText}
                     />
                     <TextInput
-                      style={styles.input}
+                      style={[styles.input, runtimeInputTheme]}
                       autoCapitalize='none'
                       autoCorrect={false}
                       value={hsLiveHost}
                       onChangeText={setHsLiveHost}
                       placeholder='Live host (default 127.0.0.1)'
+                      placeholderTextColor={browserChrome.mutedText}
                     />
                     <TextInput
-                      style={styles.input}
+                      style={[styles.input, runtimeInputTheme]}
                       autoCapitalize='none'
                       autoCorrect={false}
                       value={hsConnector}
                       onChangeText={setHsConnector}
                       placeholder='Optional custom connection string'
+                      placeholderTextColor={browserChrome.mutedText}
                     />
                     <View style={styles.buttons}>
                       <Button
@@ -1720,29 +1762,32 @@ export default function App () {
                     </View>
 
                     <TextInput
-                      style={styles.input}
+                      style={[styles.input, runtimeInputTheme]}
                       autoCapitalize='none'
                       autoCorrect={false}
                       value={hsConnectKey}
                       onChangeText={setHsConnectKey}
                       placeholder='hs://... connection key'
+                      placeholderTextColor={browserChrome.mutedText}
                     />
                     <TextInput
-                      style={styles.input}
+                      style={[styles.input, runtimeInputTheme]}
                       autoCapitalize='none'
                       autoCorrect={false}
                       keyboardType='numeric'
                       value={hsConnectPort}
                       onChangeText={setHsConnectPort}
                       placeholder='Client bind port (default 8989)'
+                      placeholderTextColor={browserChrome.mutedText}
                     />
                     <TextInput
-                      style={styles.input}
+                      style={[styles.input, runtimeInputTheme]}
                       autoCapitalize='none'
                       autoCorrect={false}
                       value={hsConnectHost}
                       onChangeText={setHsConnectHost}
                       placeholder='Client bind host (default 127.0.0.1)'
+                      placeholderTextColor={browserChrome.mutedText}
                     />
                     <View style={styles.buttons}>
                       <Button
@@ -1840,8 +1885,8 @@ export default function App () {
                 {(isBooting || isLoading) && <ActivityIndicator size='small' />}
 
                 {lastResult && activeTab !== 'p2pmd' && (
-                  <View style={styles.result}>
-                    <Text selectable={true} style={styles.resultText}>
+                  <View style={[styles.result, { backgroundColor: browserChrome.button }]}>
+                    <Text selectable={true} style={[styles.resultText, { color: browserChrome.text }]}>
                       {JSON.stringify(lastResult, null, 2)}
                     </Text>
                   </View>
@@ -1951,6 +1996,8 @@ export default function App () {
           )
         })}
         </View>
+
+        {browserPreferences.addressBarPosition === 'bottom' && browserToolbar}
 
         {isBooting && (
           <View style={styles.browserLoader}>
