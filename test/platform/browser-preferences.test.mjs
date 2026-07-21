@@ -15,10 +15,12 @@ describe('browser preferences', () => {
   test('restores supported browser preferences', () => {
     const preferences = {
       addressBarPosition: 'bottom',
+      enforceManualPageZoom: true,
       restoreTabsOnStartup: false,
       searchEngine: 'brave',
       showFullAddress: true,
-      theme: 'dark'
+      theme: 'dark',
+      websiteTextScale: 150
     }
 
     assert.deepEqual(
@@ -30,10 +32,12 @@ describe('browser preferences', () => {
   test('rejects unsupported preference values independently', () => {
     assert.deepEqual(parseBrowserPreferences({
       addressBarPosition: 'side',
+      enforceManualPageZoom: 'yes',
       restoreTabsOnStartup: 'yes',
       searchEngine: 'custom',
       showFullAddress: 'yes',
-      theme: 'sepia'
+      theme: 'sepia',
+      websiteTextScale: 500
     }), DEFAULT_BROWSER_PREFERENCES)
   })
 

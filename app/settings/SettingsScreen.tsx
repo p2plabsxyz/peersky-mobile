@@ -12,6 +12,7 @@ import {
 import { SEARCH_ENGINES } from './browser-preferences.mjs'
 import { BROWSER_PALETTES } from '../browser-appearance.mjs'
 import { Appearance } from './Appearance'
+import { Accessibility } from './Accessibility'
 import {
   ChoiceGroup,
   SettingCopy,
@@ -19,7 +20,12 @@ import {
   SettingsThemeProvider,
   useSettingsDarkMode
 } from './SettingsUI'
-import type { AddressBarPosition, BrowserTheme, SearchEngine } from './useBrowserPreferences'
+import type {
+  AddressBarPosition,
+  BrowserTheme,
+  SearchEngine,
+  WebsiteTextScale
+} from './useBrowserPreferences'
 
 type SettingsPage =
   | 'main'
@@ -32,18 +38,22 @@ type SettingsPage =
 
 type SettingsScreenProps = {
   addressBarPosition: AddressBarPosition
+  enforceManualPageZoom: boolean
   isDark: boolean
   persistenceError: string | null
   restoreTabsOnStartup: boolean
   searchEngine: SearchEngine
   showFullAddress: boolean
   theme: BrowserTheme
+  websiteTextScale: WebsiteTextScale
   onAddressBarPositionChange: (position: AddressBarPosition) => void
   onClose: () => void
+  onEnforceManualPageZoomChange: (enabled: boolean) => void
   onRestoreTabsOnStartupChange: (enabled: boolean) => void
   onSearchEngineChange: (searchEngine: SearchEngine) => void
   onShowFullAddressChange: (enabled: boolean) => void
   onThemeChange: (theme: BrowserTheme) => void
+  onWebsiteTextScaleChange: (scale: WebsiteTextScale) => void
   onResetTabs: () => void
   onOpenUrl: (url: string) => void
 }
@@ -98,9 +108,7 @@ export function SettingsScreen (props: SettingsScreenProps) {
     content = (
       <SettingsSubpage title={getSettingsPageTitle(page)} onBack={() => setPage('main')}>
         {page === 'general' && <GeneralSettings {...props} />}
-        {page === 'accessibility' && (
-          <SectionPlaceholder description='Website text size and manual page zoom will be added next.' />
-        )}
+        {page === 'accessibility' && <Accessibility {...props} />}
         {page === 'appearance' && <Appearance {...props} />}
         {page === 'data-clearing' && (
           <SectionPlaceholder description='Browsing-data controls will be added in the Data Clearing step.' />

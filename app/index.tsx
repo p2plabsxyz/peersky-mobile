@@ -4,6 +4,7 @@ import {
   AppState,
   Button,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   Share,
@@ -55,6 +56,7 @@ import {
   getBrowserPalette,
   resolveBrowserDarkMode
 } from './browser-appearance.mjs'
+import { createBrowserAccessibilityScript } from './browser-accessibility.mjs'
 import {
   INTERNAL_APPS,
   type RuntimeTab,
@@ -168,10 +170,12 @@ export default function App () {
     persistenceError: browserPreferencesError,
     preferences: browserPreferences,
     setAddressBarPosition,
+    setEnforceManualPageZoom,
     setRestoreTabsOnStartup,
     setSearchEngine,
     setShowFullAddress,
-    setTheme
+    setTheme,
+    setWebsiteTextScale
   } = useBrowserPreferences()
   const browserTabsStateRef = useRef(browserTabsState)
   const browserSessionReadyRef = useRef(false)
@@ -1339,6 +1343,11 @@ export default function App () {
     : browserCanGoForward
   const browserIsDark = resolveBrowserDarkMode(browserPreferences.theme, systemColorScheme)
   const browserChrome = getBrowserPalette(browserIsDark)
+  const browserAccessibilityScript = createBrowserAccessibilityScript({
+    applyTextScale: Platform.OS === 'ios',
+    enforceManualPageZoom: browserPreferences.enforceManualPageZoom,
+    websiteTextScale: browserPreferences.websiteTextScale
+  })
 
   if (browserSettingsVisible) {
     return (
@@ -1352,18 +1361,22 @@ export default function App () {
         />
         <SettingsScreen
           addressBarPosition={browserPreferences.addressBarPosition}
+          enforceManualPageZoom={browserPreferences.enforceManualPageZoom}
           isDark={browserIsDark}
           persistenceError={browserPreferencesError}
           restoreTabsOnStartup={browserPreferences.restoreTabsOnStartup}
           searchEngine={browserPreferences.searchEngine}
           showFullAddress={browserPreferences.showFullAddress}
           theme={browserPreferences.theme}
+          websiteTextScale={browserPreferences.websiteTextScale}
           onAddressBarPositionChange={setAddressBarPosition}
           onClose={() => setBrowserSettingsVisible(false)}
+          onEnforceManualPageZoomChange={setEnforceManualPageZoom}
           onRestoreTabsOnStartupChange={setRestoreTabsOnStartup}
           onSearchEngineChange={setSearchEngine}
           onShowFullAddressChange={setShowFullAddress}
           onThemeChange={setTheme}
+          onWebsiteTextScaleChange={setWebsiteTextScale}
           onResetTabs={onBrowserResetTabs}
           onOpenUrl={(targetUrl) => {
             setBrowserSettingsVisible(false)
@@ -1930,8 +1943,11 @@ export default function App () {
                     baseUrl: entry.source.kind === 'hyper' ? entry.source.baseUrl : undefined
                   }}
               cacheEnabled={true}
+              injectedJavaScript={browserAccessibilityScript}
               originWhitelist={['*']}
-              textZoom={100}
+              setBuiltInZoomControls={true}
+              setDisplayZoomControls={false}
+              textZoom={browserPreferences.websiteTextScale}
               style={styles.browserWebView}
               onShouldStartLoadWithRequest={(request) => onBrowserShouldStartLoad(tab.id, entry, request)}
               onLoadStart={() => {

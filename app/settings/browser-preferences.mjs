@@ -1,13 +1,16 @@
 export const DEFAULT_BROWSER_PREFERENCES = {
   addressBarPosition: 'top',
+  enforceManualPageZoom: false,
   restoreTabsOnStartup: true,
   searchEngine: 'duckduckgo',
   showFullAddress: false,
-  theme: 'system'
+  theme: 'system',
+  websiteTextScale: 100
 }
 
 export const ADDRESS_BAR_POSITIONS = ['top', 'bottom']
 export const BROWSER_THEMES = ['system', 'light', 'dark']
+export const WEBSITE_TEXT_SCALES = [80, 100, 120, 150]
 
 export const SEARCH_ENGINES = /** @type {const} */ ([
   { id: 'duckduckgo', title: 'DuckDuckGo' },
@@ -28,6 +31,9 @@ export function parseBrowserPreferences (serialized) {
     addressBarPosition: ADDRESS_BAR_POSITIONS.includes(value?.addressBarPosition)
       ? value.addressBarPosition
       : DEFAULT_BROWSER_PREFERENCES.addressBarPosition,
+    enforceManualPageZoom: typeof value?.enforceManualPageZoom === 'boolean'
+      ? value.enforceManualPageZoom
+      : DEFAULT_BROWSER_PREFERENCES.enforceManualPageZoom,
     restoreTabsOnStartup: typeof value?.restoreTabsOnStartup === 'boolean'
       ? value.restoreTabsOnStartup
       : DEFAULT_BROWSER_PREFERENCES.restoreTabsOnStartup,
@@ -39,7 +45,10 @@ export function parseBrowserPreferences (serialized) {
       : DEFAULT_BROWSER_PREFERENCES.showFullAddress,
     theme: BROWSER_THEMES.includes(value?.theme)
       ? value.theme
-      : DEFAULT_BROWSER_PREFERENCES.theme
+      : DEFAULT_BROWSER_PREFERENCES.theme,
+    websiteTextScale: WEBSITE_TEXT_SCALES.includes(value?.websiteTextScale)
+      ? value.websiteTextScale
+      : DEFAULT_BROWSER_PREFERENCES.websiteTextScale
   }
 }
 

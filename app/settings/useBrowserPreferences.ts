@@ -9,13 +9,16 @@ import {
 export type SearchEngine = 'duckduckgo' | 'brave' | 'google'
 export type AddressBarPosition = 'top' | 'bottom'
 export type BrowserTheme = 'system' | 'light' | 'dark'
+export type WebsiteTextScale = 80 | 100 | 120 | 150
 
 export type BrowserPreferences = {
   addressBarPosition: AddressBarPosition
+  enforceManualPageZoom: boolean
   restoreTabsOnStartup: boolean
   searchEngine: SearchEngine
   showFullAddress: boolean
   theme: BrowserTheme
+  websiteTextScale: WebsiteTextScale
 }
 
 export function useBrowserPreferences () {
@@ -80,6 +83,9 @@ export function useBrowserPreferences () {
     setAddressBarPosition: (addressBarPosition: AddressBarPosition) => {
       return updatePreferences({ addressBarPosition })
     },
+    setEnforceManualPageZoom: (enforceManualPageZoom: boolean) => {
+      return updatePreferences({ enforceManualPageZoom })
+    },
     setRestoreTabsOnStartup: (enabled: boolean) => {
       return updatePreferences({ restoreTabsOnStartup: enabled })
     },
@@ -91,6 +97,9 @@ export function useBrowserPreferences () {
     },
     setTheme: (theme: BrowserTheme) => {
       return updatePreferences({ theme })
+    },
+    setWebsiteTextScale: (websiteTextScale: WebsiteTextScale) => {
+      return updatePreferences({ websiteTextScale })
     }
   }
 }
