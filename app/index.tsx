@@ -885,9 +885,11 @@ export default function App () {
     updateBrowserTabsState(nextState)
     setBrowserLiveTabIds(reset.liveTabIds)
     if (tab) applyBrowserTab(tab)
-    setStatus(writeBrowserSession(nextState)
+    const sessionSaved = writeBrowserSession(nextState)
+    setStatus(sessionSaved
       ? 'Tab session reset'
       : 'Tab session reset, but could not be saved')
+    return sessionSaved
   }
 
   function onBrowserShouldStartLoad (
@@ -1371,6 +1373,11 @@ export default function App () {
           websiteTextScale={browserPreferences.websiteTextScale}
           onAddressBarPositionChange={setAddressBarPosition}
           onClose={() => setBrowserSettingsVisible(false)}
+          onClearBrowsingData={() => {
+            const sessionSaved = onBrowserResetTabs()
+            if (sessionSaved) setBrowserSettingsVisible(false)
+            return sessionSaved
+          }}
           onEnforceManualPageZoomChange={setEnforceManualPageZoom}
           onRestoreTabsOnStartupChange={setRestoreTabsOnStartup}
           onSearchEngineChange={setSearchEngine}

@@ -124,7 +124,7 @@ export function BrowserToolbar ({
         onBlur={() => setIsAddressFocused(false)}
         onChangeText={onAddressChange}
         onSubmitEditing={onSubmit}
-        placeholder='Search or type URL'
+        placeholder='Search or type'
         placeholderTextColor={palette.mutedText}
       />
       <Pressable

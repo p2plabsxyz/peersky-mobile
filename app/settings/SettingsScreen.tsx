@@ -13,6 +13,7 @@ import { SEARCH_ENGINES } from './browser-preferences.mjs'
 import { BROWSER_PALETTES } from '../browser-appearance.mjs'
 import { Appearance } from './Appearance'
 import { Accessibility } from './Accessibility'
+import { DataClearing } from './DataClearing'
 import {
   ChoiceGroup,
   SettingCopy,
@@ -48,6 +49,7 @@ type SettingsScreenProps = {
   websiteTextScale: WebsiteTextScale
   onAddressBarPositionChange: (position: AddressBarPosition) => void
   onClose: () => void
+  onClearBrowsingData: () => boolean
   onEnforceManualPageZoomChange: (enabled: boolean) => void
   onRestoreTabsOnStartupChange: (enabled: boolean) => void
   onSearchEngineChange: (searchEngine: SearchEngine) => void
@@ -110,9 +112,7 @@ export function SettingsScreen (props: SettingsScreenProps) {
         {page === 'general' && <GeneralSettings {...props} />}
         {page === 'accessibility' && <Accessibility {...props} />}
         {page === 'appearance' && <Appearance {...props} />}
-        {page === 'data-clearing' && (
-          <SectionPlaceholder description='Browsing-data controls will be added in the Data Clearing step.' />
-        )}
+        {page === 'data-clearing' && <DataClearing {...props} />}
         {page === 'permissions' && (
           <SectionPlaceholder description='Site and external-link controls will be added in the Permissions step.' />
         )}
