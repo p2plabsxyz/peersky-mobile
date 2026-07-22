@@ -1,3 +1,5 @@
+import { parseExternalAppLink } from './browser-permissions.mjs'
+
 export const BROWSER_HOME_URL = 'peersky://home'
 export const MAX_BROWSER_HISTORY_ENTRIES = 20
 export const MAX_BROWSER_URL_LENGTH = 8192
@@ -6,6 +8,8 @@ export const DEFAULT_SEARCH_ENGINE = 'duckduckgo'
 export function normalizeBrowserAddress (address, searchEngine = DEFAULT_SEARCH_ENGINE) {
   const value = String(address || '').trim()
   if (!value || value === BROWSER_HOME_URL) return BROWSER_HOME_URL
+
+  if (parseExternalAppLink(value)) return value
 
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(value)) return value
 
@@ -77,7 +81,7 @@ export function getBrowserForwardState (state) {
   return buildBrowserState(state.history, state.historyIndex + 1)
 }
 
-export function getBrowserRequestAction ({ requestUrl, currentSourceKind }) {
+export function getBrowserRequestAction ({ requestUrl, currentSourceKind, isTopFrame = true }) {
   const url = String(requestUrl || '')
 
   if (url.length > MAX_BROWSER_URL_LENGTH) {
@@ -90,6 +94,16 @@ export function getBrowserRequestAction ({ requestUrl, currentSourceKind }) {
 
   if (isHyperUrl(url)) {
     return { action: 'load-hyper', url }
+  }
+
+  const externalLink = parseExternalAppLink(url)
+  if (externalLink) {
+    if (!isTopFrame) return { action: 'block' }
+
+    return {
+      action: 'open-external',
+      ...externalLink
+    }
   }
 
   if (!isWebUrl(url)) {

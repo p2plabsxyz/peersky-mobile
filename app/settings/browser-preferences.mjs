@@ -1,6 +1,9 @@
+import { EXTERNAL_LINK_BEHAVIORS } from '../browser-permissions.mjs'
+
 export const DEFAULT_BROWSER_PREFERENCES = {
   addressBarPosition: 'top',
   enforceManualPageZoom: false,
+  externalLinkBehavior: 'ask',
   restoreTabsOnStartup: true,
   searchEngine: 'duckduckgo',
   showFullAddress: false,
@@ -34,6 +37,9 @@ export function parseBrowserPreferences (serialized) {
     enforceManualPageZoom: typeof value?.enforceManualPageZoom === 'boolean'
       ? value.enforceManualPageZoom
       : DEFAULT_BROWSER_PREFERENCES.enforceManualPageZoom,
+    externalLinkBehavior: EXTERNAL_LINK_BEHAVIORS.includes(value?.externalLinkBehavior)
+      ? value.externalLinkBehavior
+      : DEFAULT_BROWSER_PREFERENCES.externalLinkBehavior,
     restoreTabsOnStartup: typeof value?.restoreTabsOnStartup === 'boolean'
       ? value.restoreTabsOnStartup
       : DEFAULT_BROWSER_PREFERENCES.restoreTabsOnStartup,

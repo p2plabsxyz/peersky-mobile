@@ -14,6 +14,7 @@ import { BROWSER_PALETTES } from '../browser-appearance.mjs'
 import { Appearance } from './Appearance'
 import { Accessibility } from './Accessibility'
 import { DataClearing } from './DataClearing'
+import { Permissions } from './Permissions'
 import {
   ChoiceGroup,
   SettingCopy,
@@ -24,6 +25,7 @@ import {
 import type {
   AddressBarPosition,
   BrowserTheme,
+  ExternalLinkBehavior,
   SearchEngine,
   WebsiteTextScale
 } from './useBrowserPreferences'
@@ -40,6 +42,7 @@ type SettingsPage =
 type SettingsScreenProps = {
   addressBarPosition: AddressBarPosition
   enforceManualPageZoom: boolean
+  externalLinkBehavior: ExternalLinkBehavior
   isDark: boolean
   persistenceError: string | null
   restoreTabsOnStartup: boolean
@@ -51,6 +54,7 @@ type SettingsScreenProps = {
   onClose: () => void
   onClearBrowsingData: () => boolean
   onEnforceManualPageZoomChange: (enabled: boolean) => void
+  onExternalLinkBehaviorChange: (behavior: ExternalLinkBehavior) => void
   onRestoreTabsOnStartupChange: (enabled: boolean) => void
   onSearchEngineChange: (searchEngine: SearchEngine) => void
   onShowFullAddressChange: (enabled: boolean) => void
@@ -91,7 +95,7 @@ const SETTINGS_PAGES: Array<{
   {
     id: 'permissions',
     title: 'Permissions',
-    description: 'Site and external-link permissions'
+    description: 'External app link handling'
   },
   {
     id: 'about',
@@ -113,9 +117,7 @@ export function SettingsScreen (props: SettingsScreenProps) {
         {page === 'accessibility' && <Accessibility {...props} />}
         {page === 'appearance' && <Appearance {...props} />}
         {page === 'data-clearing' && <DataClearing {...props} />}
-        {page === 'permissions' && (
-          <SectionPlaceholder description='Site and external-link controls will be added in the Permissions step.' />
-        )}
+        {page === 'permissions' && <Permissions {...props} />}
         {page === 'about' && <AboutSettings onOpenUrl={props.onOpenUrl} />}
       </SettingsSubpage>
     )

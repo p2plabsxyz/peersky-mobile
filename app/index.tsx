@@ -1,8 +1,10 @@
 import { type ComponentRef, useEffect, useRef, useState } from 'react'
 import {
   ActivityIndicator,
+  Alert,
   AppState,
   Button,
+  Linking,
   Modal,
   Platform,
   Pressable,
@@ -57,6 +59,13 @@ import {
   resolveBrowserDarkMode
 } from './browser-appearance.mjs'
 import { createBrowserAccessibilityScript } from './browser-accessibility.mjs'
+import {
+  canPromptExternalLink,
+  formatExternalLinkForPrompt,
+  getExternalAppName,
+  getExternalLinkBehaviorAction,
+  parseExternalAppLink
+} from './browser-permissions.mjs'
 import {
   INTERNAL_APPS,
   type RuntimeTab,
@@ -151,6 +160,8 @@ export default function App () {
   const p2pmdWebViewRef = useRef<ComponentRef<typeof WebView> | null>(null)
   const p2pmdPublishInFlightRef = useRef(false)
   const browserLoadSeqRef = useRef(0)
+  const externalLinkPromptOpenRef = useRef(false)
+  const lastExternalLinkPromptAtRef = useRef(0)
   const [isBooting, setIsBooting] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [status, setStatus] = useState('Starting Hyper runtime...')
@@ -171,6 +182,7 @@ export default function App () {
     preferences: browserPreferences,
     setAddressBarPosition,
     setEnforceManualPageZoom,
+    setExternalLinkBehavior,
     setRestoreTabsOnStartup,
     setSearchEngine,
     setShowFullAddress,
@@ -599,6 +611,12 @@ export default function App () {
       return
     }
 
+    const externalLink = parseExternalAppLink(nextUrl)
+    if (externalLink) {
+      openExternalAppLink(externalLink.url)
+      return
+    }
+
     if (isHyperUrl(nextUrl)) {
       await loadHyperBrowserUrl(nextUrl)
       return
@@ -895,18 +913,29 @@ export default function App () {
   function onBrowserShouldStartLoad (
     tabId: string,
     expectedEntry: BrowserHistoryEntry,
-    request: { url?: string }
+    request: { url?: string, isTopFrame?: boolean }
   ) {
     const currentTab = browserTabsStateRef.current.tabs.find((tab) => tab.id === tabId)
     if (!currentTab || currentTab.history[currentTab.historyIndex] !== expectedEntry) return false
 
     const action = getBrowserRequestAction({
       requestUrl: request.url,
-      currentSourceKind: expectedEntry.source.kind
+      currentSourceKind: expectedEntry.source.kind,
+      isTopFrame: request.isTopFrame !== false
     })
     const isActive = browserTabsStateRef.current.activeTabId === tabId
 
     if (action.action === 'allow') return true
+
+    if (
+      action.action === 'open-external' &&
+      action.url &&
+      'scheme' in action &&
+      action.scheme
+    ) {
+      if (isActive) openExternalAppLink(action.url)
+      return false
+    }
 
     if (action.action === 'load-hyper' && action.url) {
       if (isActive) {
@@ -937,6 +966,101 @@ export default function App () {
     }
 
     return false
+  }
+
+  function onBrowserOpenWindow (
+    tabId: string,
+    expectedEntry: BrowserHistoryEntry,
+    targetUrl: string
+  ) {
+    const currentTab = browserTabsStateRef.current.tabs.find((tab) => tab.id === tabId)
+    if (
+      !currentTab ||
+      !isCurrentBrowserTabEntry(browserTabsStateRef.current, tabId, expectedEntry) ||
+      browserTabsStateRef.current.activeTabId !== tabId
+    ) return
+
+    const action = getBrowserRequestAction({
+      requestUrl: targetUrl,
+      currentSourceKind: expectedEntry.source.kind
+    })
+
+    if (action.action === 'open-external' && action.url) {
+      openExternalAppLink(action.url)
+      return
+    }
+
+    if (isWebUrl(targetUrl) || isHyperUrl(targetUrl)) {
+      void loadBrowserUrl(targetUrl)
+    }
+  }
+
+  function openExternalAppLink (targetUrl: string) {
+    const externalLink = parseExternalAppLink(targetUrl)
+    if (!externalLink) {
+      setStatus('Unsupported external app link')
+      return
+    }
+
+    const behaviorAction = getExternalLinkBehaviorAction(browserPreferences.externalLinkBehavior)
+    if (behaviorAction === 'block') {
+      setStatus('External app link blocked')
+      return
+    }
+
+    const now = Date.now()
+    if (
+      externalLinkPromptOpenRef.current ||
+      !canPromptExternalLink(lastExternalLinkPromptAtRef.current, now)
+    ) {
+      setStatus('External app link temporarily blocked')
+      return
+    }
+
+    lastExternalLinkPromptAtRef.current = now
+
+    if (behaviorAction === 'open') {
+      launchExternalAppLink(externalLink.url)
+      return
+    }
+
+    externalLinkPromptOpenRef.current = true
+
+    const resetPrompt = () => {
+      externalLinkPromptOpenRef.current = false
+    }
+
+    Alert.alert(
+      'Open another app?',
+      `This page wants to open ${getExternalAppName(externalLink.scheme)}:\n\n${formatExternalLinkForPrompt(externalLink.url)}`,
+      [
+        { text: 'Cancel', style: 'cancel', onPress: resetPrompt },
+        {
+          text: 'Open',
+          onPress: () => launchExternalAppLink(externalLink.url)
+        }
+      ],
+      { cancelable: true, onDismiss: resetPrompt }
+    )
+  }
+
+  function launchExternalAppLink (targetUrl: string) {
+    const externalLink = parseExternalAppLink(targetUrl)
+    if (!externalLink) {
+      externalLinkPromptOpenRef.current = false
+      setStatus('Unsupported external app link')
+      return
+    }
+
+    externalLinkPromptOpenRef.current = true
+    void Linking.openURL(externalLink.url)
+      .catch((error) => {
+        console.error('Failed opening external app link:', error)
+        Alert.alert('Unable to open link', 'No compatible app could open this link.')
+      })
+      .finally(() => {
+        externalLinkPromptOpenRef.current = false
+      })
   }
 
 
@@ -1364,6 +1488,7 @@ export default function App () {
         <SettingsScreen
           addressBarPosition={browserPreferences.addressBarPosition}
           enforceManualPageZoom={browserPreferences.enforceManualPageZoom}
+          externalLinkBehavior={browserPreferences.externalLinkBehavior}
           isDark={browserIsDark}
           persistenceError={browserPreferencesError}
           restoreTabsOnStartup={browserPreferences.restoreTabsOnStartup}
@@ -1379,6 +1504,7 @@ export default function App () {
             return sessionSaved
           }}
           onEnforceManualPageZoomChange={setEnforceManualPageZoom}
+          onExternalLinkBehaviorChange={setExternalLinkBehavior}
           onRestoreTabsOnStartupChange={setRestoreTabsOnStartup}
           onSearchEngineChange={setSearchEngine}
           onShowFullAddressChange={setShowFullAddress}
@@ -1957,6 +2083,7 @@ export default function App () {
               textZoom={browserPreferences.websiteTextScale}
               style={styles.browserWebView}
               onShouldStartLoadWithRequest={(request) => onBrowserShouldStartLoad(tab.id, entry, request)}
+              onOpenWindow={(event) => onBrowserOpenWindow(tab.id, entry, event.nativeEvent.targetUrl)}
               onLoadStart={() => {
                 if (
                   browserTabsStateRef.current.activeTabId === tab.id &&

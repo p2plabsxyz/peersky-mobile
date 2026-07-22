@@ -9,11 +9,13 @@ import {
 export type SearchEngine = 'duckduckgo' | 'brave' | 'google'
 export type AddressBarPosition = 'top' | 'bottom'
 export type BrowserTheme = 'system' | 'light' | 'dark'
+export type ExternalLinkBehavior = 'ask' | 'allow' | 'block'
 export type WebsiteTextScale = 80 | 100 | 120 | 150
 
 export type BrowserPreferences = {
   addressBarPosition: AddressBarPosition
   enforceManualPageZoom: boolean
+  externalLinkBehavior: ExternalLinkBehavior
   restoreTabsOnStartup: boolean
   searchEngine: SearchEngine
   showFullAddress: boolean
@@ -85,6 +87,9 @@ export function useBrowserPreferences () {
     },
     setEnforceManualPageZoom: (enforceManualPageZoom: boolean) => {
       return updatePreferences({ enforceManualPageZoom })
+    },
+    setExternalLinkBehavior: (externalLinkBehavior: ExternalLinkBehavior) => {
+      return updatePreferences({ externalLinkBehavior })
     },
     setRestoreTabsOnStartup: (enabled: boolean) => {
       return updatePreferences({ restoreTabsOnStartup: enabled })

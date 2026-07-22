@@ -28,6 +28,7 @@ describe('browser shell navigation helpers', () => {
     assert.equal(normalizeBrowserAddress(''), BROWSER_HOME_URL)
     assert.equal(normalizeBrowserAddress('  peersky://home  '), BROWSER_HOME_URL)
     assert.equal(normalizeBrowserAddress('hyper://akhilesh.art/'), 'hyper://akhilesh.art/')
+    assert.equal(normalizeBrowserAddress('mailto:test@example.com'), 'mailto:test@example.com')
     assert.equal(normalizeBrowserAddress('https://example.com/path'), 'https://example.com/path')
     assert.equal(normalizeBrowserAddress('localhost:3000'), 'http://localhost:3000')
     assert.equal(normalizeBrowserAddress('127.0.0.1:9090/doc'), 'http://127.0.0.1:9090/doc')
@@ -126,7 +127,22 @@ describe('browser shell navigation helpers', () => {
       action: 'load-hyper',
       url: 'hyper://next/'
     })
-    assert.deepEqual(getBrowserRequestAction({ requestUrl: 'mailto:test@example.com', currentSourceKind: 'hyper' }), { action: 'block' })
+    assert.deepEqual(getBrowserRequestAction({ requestUrl: 'mailto:test@example.com', currentSourceKind: 'hyper' }), {
+      action: 'open-external',
+      scheme: 'mailto',
+      url: 'mailto:test@example.com'
+    })
+    assert.deepEqual(getBrowserRequestAction({
+      requestUrl: 'mailto:test@example.com',
+      currentSourceKind: 'web',
+      isTopFrame: false
+    }), { action: 'block' })
+    assert.deepEqual(getBrowserRequestAction({
+      requestUrl: 'https://frame.example.com',
+      currentSourceKind: 'web',
+      isTopFrame: false
+    }), { action: 'allow' })
+    assert.deepEqual(getBrowserRequestAction({ requestUrl: 'intent://scan/#Intent;end', currentSourceKind: 'web' }), { action: 'block' })
     assert.deepEqual(getBrowserRequestAction({ requestUrl: 'https://example.com', currentSourceKind: 'hyper' }), {
       action: 'commit-web',
       url: 'https://example.com',

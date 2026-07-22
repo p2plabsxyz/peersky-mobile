@@ -16,6 +16,7 @@ describe('browser preferences', () => {
     const preferences = {
       addressBarPosition: 'bottom',
       enforceManualPageZoom: true,
+      externalLinkBehavior: 'allow',
       restoreTabsOnStartup: false,
       searchEngine: 'brave',
       showFullAddress: true,
@@ -33,6 +34,7 @@ describe('browser preferences', () => {
     assert.deepEqual(parseBrowserPreferences({
       addressBarPosition: 'side',
       enforceManualPageZoom: 'yes',
+      externalLinkBehavior: 'always',
       restoreTabsOnStartup: 'yes',
       searchEngine: 'custom',
       showFullAddress: 'yes',
