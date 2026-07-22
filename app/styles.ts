@@ -8,6 +8,9 @@ export const styles = StyleSheet.create({
     backgroundColor: '#f5f8ff',
     flex: 1
   },
+  browserShellContent: {
+    flex: 1
+  },
   browserToolbar: {
     alignItems: 'center',
     backgroundColor: '#f5f8ff',

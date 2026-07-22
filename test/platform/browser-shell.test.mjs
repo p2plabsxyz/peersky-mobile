@@ -6,6 +6,7 @@ import {
   getBrowserBackState,
   getBrowserForwardState,
   getBrowserRequestAction,
+  getBrowserWebViewKey,
   getSearchUrl,
   isHyperUrl,
   isStaleBrowserLoad,
@@ -47,6 +48,15 @@ describe('browser shell navigation helpers', () => {
     assert.equal(isWebUrl('hyper://example.com'), false)
     assert.equal(isHyperUrl('hyper://example.com'), true)
     assert.equal(isHyperUrl('https://example.com'), false)
+  })
+
+  test('isolates native WebView history across rendering modes', () => {
+    assert.equal(getBrowserWebViewKey('tab-1', 'web'), 'tab-1:web')
+    assert.equal(getBrowserWebViewKey('tab-1', 'hyper'), 'tab-1:hyper')
+    assert.notEqual(
+      getBrowserWebViewKey('tab-1', 'web'),
+      getBrowserWebViewKey('tab-1', 'hyper')
+    )
   })
 
   test('commits replaces and syncs active browser history entries', () => {

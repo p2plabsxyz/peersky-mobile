@@ -4,6 +4,7 @@ import {
   Alert,
   AppState,
   Button,
+  KeyboardAvoidingView,
   Linking,
   Modal,
   Platform,
@@ -29,6 +30,7 @@ import {
   getBrowserBackState,
   getBrowserForwardState,
   getBrowserRequestAction,
+  getBrowserWebViewKey,
   isHyperUrl,
   isStaleBrowserLoad,
   isWebUrl,
@@ -1695,6 +1697,11 @@ export default function App () {
           backgroundColor={browserChrome.shell}
           barStyle={browserIsDark ? 'light-content' : 'dark-content'}
         />
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          enabled={browserPreferences.addressBarPosition === 'bottom'}
+          style={styles.browserShellContent}
+        >
         {browserPreferences.addressBarPosition === 'top' && browserToolbar}
 
         <Modal
@@ -2062,6 +2069,7 @@ export default function App () {
               style={[styles.browserWebViewLayer, !isActive ? styles.browserWebViewLayerHidden : null]}
             >
             <WebView
+              key={getBrowserWebViewKey(tab.id, entry.source.kind)}
               ref={(ref) => {
                 if (ref) {
                   browserWebViewRefs.current.set(tab.id, ref)
@@ -2154,6 +2162,7 @@ export default function App () {
             <ActivityIndicator size='small' />
           </View>
         )}
+        </KeyboardAvoidingView>
     </SafeAreaView>
   )
 }

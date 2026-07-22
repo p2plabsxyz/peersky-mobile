@@ -46,6 +46,10 @@ export function isHyperUrl (targetUrl) {
   return /^hyper:\/\//i.test(String(targetUrl || ''))
 }
 
+export function getBrowserWebViewKey (tabId, sourceKind) {
+  return `${tabId}:${sourceKind}`
+}
+
 export function getBrowserAddressForUrl (url) {
   return url === BROWSER_HOME_URL ? '' : url
 }
