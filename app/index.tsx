@@ -81,6 +81,11 @@ import { useBrowserPreferences } from './settings/useBrowserPreferences'
 import { BrowserToolbar } from './BrowserToolbar'
 import { BookmarksScreen } from './bookmarks/BookmarksScreen'
 import { canBookmarkBrowserPage } from './bookmarks/browser-bookmarks.mjs'
+import {
+  combineBrowserInjectedScripts,
+  createBrowserFaviconScript,
+  parseBrowserFaviconMessage
+} from './bookmarks/browser-favicon.mjs'
 import { useBrowserBookmarks } from './bookmarks/useBrowserBookmarks'
 import { styles } from './styles'
 import {
@@ -162,6 +167,7 @@ export default function App () {
   const workletRef = useRef<Worklet | null>(null)
   const rpcRef = useRef<RPC | null>(null)
   const browserWebViewRefs = useRef(new Map<string, ComponentRef<typeof WebView>>())
+  const browserFaviconsRef = useRef(new Map<string, string>())
   const p2pmdWebViewRef = useRef<ComponentRef<typeof WebView> | null>(null)
   const p2pmdPublishInFlightRef = useRef(false)
   const browserLoadSeqRef = useRef(0)
@@ -173,6 +179,7 @@ export default function App () {
   const [browserAddress, setBrowserAddress] = useState('')
   const [browserCurrentUrl, setBrowserCurrentUrl] = useState(BROWSER_HOME_URL)
   const [browserTitle, setBrowserTitle] = useState('PeerSky')
+  const [browserFavicon, setBrowserFavicon] = useState<string | null>(null)
   const [browserSource, setBrowserSource] = useState<BrowserSource>({ kind: 'home' })
   const [browserHistory, setBrowserHistory] = useState<BrowserHistoryEntry[]>([
     { url: BROWSER_HOME_URL, source: { kind: 'home' } }
@@ -494,6 +501,15 @@ export default function App () {
     setBrowserSource(nextState.source)
     setBrowserCanGoBack(nextState.canGoBack)
     setBrowserCanGoForward(nextState.canGoForward)
+    if (
+      nextState.source.kind !== 'web' &&
+      nextState.source.kind !== 'hyper'
+    ) {
+      browserFaviconsRef.current.delete(tabId)
+      if (browserTabsStateRef.current.activeTabId === tabId) {
+        setBrowserFavicon(null)
+      }
+    }
     setPendingRestoredUrl(
       nextState.source.kind === 'restore' ? nextState.currentUrl : null
     )
@@ -847,6 +863,11 @@ export default function App () {
     setBrowserWebCanGoBack(tab.webCanGoBack)
     setBrowserWebCanGoForward(tab.webCanGoForward)
     setBrowserTitle(normalizeBrowserTabTitle(tab.title || getBrowserEntryTitle(entry)))
+    setBrowserFavicon(
+      entry.source.kind === 'web' || entry.source.kind === 'hyper'
+        ? browserFaviconsRef.current.get(tab.id) || null
+        : null
+    )
 
     if (entry.source.kind === 'app') {
       setActiveTab(entry.source.app)
@@ -881,10 +902,15 @@ export default function App () {
   function onBrowserToggleBookmark () {
     const result = toggleBrowserBookmark({
       url: browserCurrentUrl,
-      title: browserTitle
+      title: browserTitle,
+      favicon: browserFavicon
     })
 
-    if (result) {
+    if (result === 'limit-reached') {
+      const message = 'Delete a bookmark before adding another.'
+      setStatus(`Maximum of 200 bookmarks reached. ${message}`)
+      Alert.alert('Bookmark limit reached', message)
+    } else if (result) {
       setStatus(result === 'added' ? 'Bookmark added' : 'Bookmark removed')
     } else {
       setStatus('Unable to update bookmark')
@@ -923,6 +949,7 @@ export default function App () {
     const tab = nextState.tabs.find((item) => item.id === nextState.activeTabId)
 
     updateBrowserTabsState(nextState)
+    browserFaviconsRef.current.delete(tabId)
     setBrowserLiveTabIds((tabIds) => tabIds.filter((id) => id !== tabId))
     if (isClosingActive && tab) applyBrowserTab(tab)
     setStatus('Tab closed')
@@ -939,6 +966,7 @@ export default function App () {
     const tab = nextState.tabs[0]
 
     updateBrowserTabsState(nextState)
+    browserFaviconsRef.current.clear()
     setBrowserLiveTabIds(reset.liveTabIds)
     if (tab) applyBrowserTab(tab)
     const sessionSaved = writeBrowserSession(nextState)
@@ -1512,6 +1540,10 @@ export default function App () {
     enforceManualPageZoom: browserPreferences.enforceManualPageZoom,
     websiteTextScale: browserPreferences.websiteTextScale
   })
+  const browserInjectedScript = combineBrowserInjectedScripts(
+    browserAccessibilityScript,
+    createBrowserFaviconScript()
+  )
   const browserBookmarkActionAvailable = canBookmarkBrowserPage(
     browserSource.kind,
     browserCurrentUrl
@@ -2167,7 +2199,7 @@ export default function App () {
                     baseUrl: entry.source.kind === 'hyper' ? entry.source.baseUrl : undefined
                   }}
               cacheEnabled={true}
-              injectedJavaScript={browserAccessibilityScript}
+              injectedJavaScript={browserInjectedScript}
               originWhitelist={['*']}
               setBuiltInZoomControls={true}
               setDisplayZoomControls={false}
@@ -2176,10 +2208,12 @@ export default function App () {
               onShouldStartLoadWithRequest={(request) => onBrowserShouldStartLoad(tab.id, entry, request)}
               onOpenWindow={(event) => onBrowserOpenWindow(tab.id, entry, event.nativeEvent.targetUrl)}
               onLoadStart={() => {
+                browserFaviconsRef.current.delete(tab.id)
                 if (
                   browserTabsStateRef.current.activeTabId === tab.id &&
                   isCurrentBrowserTabEntry(browserTabsStateRef.current, tab.id, entry)
                 ) {
+                  setBrowserFavicon(null)
                   setBrowserIsLoading(true)
                 }
               }}
@@ -2210,6 +2244,25 @@ export default function App () {
                   setBrowserIsLoading(navigationState.loading)
                 } else {
                   syncBackgroundBrowserTab(tab.id, entry, navigationState)
+                }
+              }}
+              onMessage={(event) => {
+                if (!isCurrentBrowserTabEntry(browserTabsStateRef.current, tab.id, entry)) return
+
+                const favicon = parseBrowserFaviconMessage(
+                  event.nativeEvent.data,
+                  event.nativeEvent.url || entry.url
+                )
+                if (favicon === undefined) return
+
+                if (favicon) {
+                  browserFaviconsRef.current.set(tab.id, favicon)
+                } else {
+                  browserFaviconsRef.current.delete(tab.id)
+                }
+
+                if (browserTabsStateRef.current.activeTabId === tab.id) {
+                  setBrowserFavicon(favicon)
                 }
               }}
               onError={(event) => {

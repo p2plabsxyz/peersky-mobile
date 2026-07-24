@@ -3,6 +3,7 @@ import { File, Paths } from 'expo-file-system'
 import {
   addBrowserBookmark,
   isBrowserUrlBookmarked,
+  MAX_BROWSER_BOOKMARKS,
   parseBrowserBookmarks,
   removeBrowserBookmark,
   serializeBrowserBookmarks
@@ -12,6 +13,7 @@ export type BrowserBookmark = {
   url: string
   title: string
   createdAt: number
+  favicon?: string
 }
 
 export function useBrowserBookmarks () {
@@ -73,11 +75,23 @@ export function useBrowserBookmarks () {
     isReady,
     persistenceError,
     isBookmarked: (url: string) => isBrowserUrlBookmarked(bookmarksRef.current, url),
-    toggleBookmark: ({ url, title }: { url: string, title: string }) => {
+    toggleBookmark: ({
+      url,
+      title,
+      favicon
+    }: {
+      url: string
+      title: string
+      favicon?: string | null
+    }) => {
       const wasBookmarked = isBrowserUrlBookmarked(bookmarksRef.current, url)
+      if (!wasBookmarked && bookmarksRef.current.length >= MAX_BROWSER_BOOKMARKS) {
+        return 'limit-reached'
+      }
+
       const nextBookmarks = wasBookmarked
         ? removeBrowserBookmark(bookmarksRef.current, url)
-        : addBrowserBookmark(bookmarksRef.current, { url, title })
+        : addBrowserBookmark(bookmarksRef.current, { url, title, favicon })
 
       if (!persistBookmarks(nextBookmarks)) return null
       return wasBookmarked ? 'removed' : 'added'

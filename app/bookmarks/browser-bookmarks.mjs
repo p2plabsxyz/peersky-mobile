@@ -3,6 +3,7 @@ import {
   isWebUrl,
   MAX_BROWSER_URL_LENGTH
 } from '../browser-shell.mjs'
+import { normalizeBrowserFavicon } from './browser-favicon.mjs'
 
 export const MAX_BROWSER_BOOKMARKS = 200
 export const MAX_BROWSER_BOOKMARK_TITLE_LENGTH = 256
@@ -45,15 +46,21 @@ export function serializeBrowserBookmarks (bookmarks) {
 export function addBrowserBookmark (bookmarks, {
   url,
   title,
+  favicon,
   createdAt = Date.now()
 }) {
-  const bookmark = normalizeBrowserBookmark({ url, title, createdAt })
+  const bookmark = normalizeBrowserBookmark({ url, title, favicon, createdAt })
   if (!bookmark) return bookmarks
+
+  const existingIndex = bookmarks.findIndex((item) => item.url === bookmark.url)
+  if (existingIndex === -1 && bookmarks.length >= MAX_BROWSER_BOOKMARKS) {
+    return bookmarks
+  }
 
   return [
     bookmark,
     ...bookmarks.filter((item) => item.url !== bookmark.url)
-  ].slice(0, MAX_BROWSER_BOOKMARKS)
+  ]
 }
 
 export function removeBrowserBookmark (bookmarks, url) {
@@ -85,11 +92,13 @@ function normalizeBrowserBookmark (value) {
   const createdAt = Number(value?.createdAt)
   if (!Number.isSafeInteger(createdAt) || createdAt < 0) return null
 
-  return {
+  const bookmark = {
     url,
     title: normalizeBrowserBookmarkTitle(value?.title, url),
     createdAt
   }
+  const favicon = normalizeBrowserFavicon(value?.favicon, url)
+  return favicon ? { ...bookmark, favicon } : bookmark
 }
 
 function normalizeBrowserBookmarkUrl (url) {

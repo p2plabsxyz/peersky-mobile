@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
+import vm from 'node:vm'
 import {
   addBrowserBookmark,
   canBookmarkBrowserPage,
@@ -11,6 +12,14 @@ import {
   serializeBrowserBookmarks
 } from '../../app/bookmarks/browser-bookmarks.mjs'
 import { MAX_BROWSER_URL_LENGTH } from '../../app/browser-shell.mjs'
+import {
+  BROWSER_FAVICON_MESSAGE_TYPE,
+  combineBrowserInjectedScripts,
+  createBrowserFaviconScript,
+  MAX_BROWSER_FAVICON_DATA_LENGTH,
+  normalizeBrowserFavicon,
+  parseBrowserFaviconMessage
+} from '../../app/bookmarks/browser-favicon.mjs'
 
 describe('browser bookmarks', () => {
   test('round-trips valid web and Hyper bookmarks', () => {
@@ -31,6 +40,67 @@ describe('browser bookmarks', () => {
       parseBrowserBookmarks(serializeBrowserBookmarks(bookmarks)),
       bookmarks
     )
+  })
+
+  test('stores valid web and inlined Hyper favicons without requiring them', () => {
+    const bookmarks = [
+      {
+        url: 'https://example.com/',
+        title: 'Web page',
+        createdAt: 1,
+        favicon: 'https://example.com/favicon.ico'
+      },
+      {
+        url: 'hyper://akhilesh.art/',
+        title: 'Hyper page',
+        createdAt: 2,
+        favicon: 'data:image/png;base64,AAAA'
+      }
+    ]
+
+    assert.deepEqual(
+      parseBrowserBookmarks(serializeBrowserBookmarks(bookmarks)),
+      bookmarks
+    )
+  })
+
+  test('normalizes favicon messages and rejects unsafe or oversized icons', () => {
+    assert.equal(
+      normalizeBrowserFavicon('/favicon.ico', 'https://example.com/page'),
+      'https://example.com/favicon.ico'
+    )
+    assert.equal(
+      parseBrowserFaviconMessage(JSON.stringify({
+        type: BROWSER_FAVICON_MESSAGE_TYPE,
+        favicon: 'data:image/png;base64,AAAA'
+      }), 'hyper://example/'),
+      'data:image/png;base64,AAAA'
+    )
+    assert.equal(normalizeBrowserFavicon('javascript:alert(1)', 'https://example.com/'), null)
+    assert.equal(
+      normalizeBrowserFavicon(
+        `data:image/png;base64,${'A'.repeat(MAX_BROWSER_FAVICON_DATA_LENGTH)}`,
+        'hyper://example/'
+      ),
+      null
+    )
+    assert.equal(parseBrowserFaviconMessage('{"type":"other"}', 'https://example.com/'), undefined)
+  })
+
+  test('creates a bounded WebView favicon extraction script', () => {
+    const script = createBrowserFaviconScript()
+
+    assert.match(script, /ReactNativeWebView[.]postMessage/)
+    assert.match(script, /favicon[.]ico/)
+    assert.match(script, new RegExp(BROWSER_FAVICON_MESSAGE_TYPE))
+    assert.match(script, new RegExp(String(MAX_BROWSER_FAVICON_DATA_LENGTH)))
+  })
+
+  test('separates injected scripts into valid JavaScript', () => {
+    const script = combineBrowserInjectedScripts('(() => true)()', '(() => true)()')
+
+    assert.doesNotThrow(() => new vm.Script(script))
+    assert.match(script, /\(\);\n\(\(/)
   })
 
   test('rejects malformed, unsupported, credentialed, and duplicate entries', () => {
@@ -73,7 +143,7 @@ describe('browser bookmarks', () => {
     }), [])
   })
 
-  test('adds newest bookmarks first, updates duplicates, and enforces limits', () => {
+  test('adds newest bookmarks first, updates duplicates, and preserves entries at the limit', () => {
     let bookmarks = []
 
     for (let index = 0; index < MAX_BROWSER_BOOKMARKS + 5; index += 1) {
@@ -85,7 +155,8 @@ describe('browser bookmarks', () => {
     }
 
     assert.equal(bookmarks.length, MAX_BROWSER_BOOKMARKS)
-    assert.equal(bookmarks[0].url, `https://example.com/${MAX_BROWSER_BOOKMARKS + 4}`)
+    assert.equal(bookmarks[0].url, `https://example.com/${MAX_BROWSER_BOOKMARKS - 1}`)
+    assert.equal(bookmarks.at(-1).url, 'https://example.com/0')
 
     bookmarks = addBrowserBookmark(bookmarks, {
       url: bookmarks[5].url,

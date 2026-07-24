@@ -1,6 +1,7 @@
 import {
   ActivityIndicator,
   FlatList,
+  Image,
   Pressable,
   StyleSheet,
   Text,
@@ -87,12 +88,19 @@ export function BookmarksScreen ({
                   style={({ pressed }) => [styles.rowBody, pressed ? styles.pressed : null]}
                   onPress={() => onOpen(bookmark.url)}
                 >
-                  <Text style={[styles.rowTitle, { color: palette.text }]} numberOfLines={1}>
-                    {bookmark.title}
-                  </Text>
-                  <Text style={[styles.rowUrl, { color: palette.mutedText }]} numberOfLines={1}>
-                    {bookmark.url}
-                  </Text>
+                  <View style={[styles.favicon, { backgroundColor: palette.surface }]}>
+                    {bookmark.favicon
+                      ? <Image source={{ uri: bookmark.favicon }} style={styles.faviconImage} />
+                      : <BookmarkIcon width={17} height={17} color={palette.mutedText} />}
+                  </View>
+                  <View style={styles.rowCopy}>
+                    <Text style={[styles.rowTitle, { color: palette.text }]} numberOfLines={1}>
+                      {bookmark.title}
+                    </Text>
+                    <Text style={[styles.rowUrl, { color: palette.mutedText }]} numberOfLines={1}>
+                      {bookmark.url}
+                    </Text>
+                  </View>
                 </Pressable>
                 <Pressable
                   accessibilityLabel={`Remove ${bookmark.title}`}
@@ -172,10 +180,27 @@ const styles = StyleSheet.create({
     minHeight: 72
   },
   rowBody: {
+    alignItems: 'center',
+    flexDirection: 'row',
     flex: 1,
-    justifyContent: 'center',
     minHeight: 72,
     paddingVertical: 12
+  },
+  favicon: {
+    alignItems: 'center',
+    borderRadius: 8,
+    height: 34,
+    justifyContent: 'center',
+    marginRight: 12,
+    overflow: 'hidden',
+    width: 34
+  },
+  faviconImage: {
+    height: 26,
+    width: 26
+  },
+  rowCopy: {
+    flex: 1
   },
   rowTitle: {
     fontSize: 15,
