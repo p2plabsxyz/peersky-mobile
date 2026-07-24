@@ -917,6 +917,21 @@ export default function App () {
     }
   }
 
+  async function onBrowserSharePage () {
+    if (!browserBookmarkActionAvailable) return
+
+    try {
+      await Share.share({
+        title: browserTitle,
+        message: browserCurrentUrl,
+        url: browserCurrentUrl
+      })
+      setStatus('Page shared')
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error))
+    }
+  }
+
   function onBrowserOpenBookmarks () {
     setBrowserMenuVisible(false)
     setBrowserBookmarksVisible(true)
@@ -1773,6 +1788,7 @@ export default function App () {
       palette={browserChrome}
       position={browserPreferences.addressBarPosition}
       showFullAddress={browserPreferences.showFullAddress}
+      shareActionAvailable={browserBookmarkActionAvailable}
       tabCount={browserTabsState.tabs.length}
       onAddressChange={(value) => {
         browserUserInteractedRef.current = true
@@ -1793,6 +1809,7 @@ export default function App () {
         setBrowserTabsVisible(true)
       }}
       onReload={onBrowserReload}
+      onSharePage={() => void onBrowserSharePage()}
       onSubmit={() => void onBrowserSubmit()}
       onToggleBookmark={onBrowserToggleBookmark}
     />

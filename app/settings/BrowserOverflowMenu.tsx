@@ -5,6 +5,7 @@ import ReloadIcon from '../../assets/icons/bootstrap/arrow-clockwise.svg'
 import BookmarksIcon from '../../assets/icons/bootstrap/bookmarks.svg'
 import GearIcon from '../../assets/icons/bootstrap/gear.svg'
 import PlusIcon from '../../assets/icons/bootstrap/plus-lg.svg'
+import ShareIcon from '../../assets/icons/bootstrap/share.svg'
 import StarFillIcon from '../../assets/icons/bootstrap/star-fill.svg'
 import StarIcon from '../../assets/icons/bootstrap/star.svg'
 import { BROWSER_PALETTES } from '../browser-appearance.mjs'
@@ -20,12 +21,14 @@ type BrowserOverflowMenuProps = {
   newTabDisabled?: boolean
   offset?: number
   position?: 'top' | 'bottom'
+  shareActionAvailable?: boolean
   visible: boolean
   onClose: () => void
   onNewTab: () => void
   onOpenBookmarks: () => void
   onOpenSettings: () => void
   onReload?: () => void
+  onSharePage?: () => void
   onShow: () => void
   onToggleBookmark?: () => void
 }
@@ -38,12 +41,14 @@ export function BrowserOverflowMenu ({
   newTabDisabled = false,
   offset = 70,
   position = 'top',
+  shareActionAvailable = false,
   visible,
   onClose,
   onNewTab,
   onOpenBookmarks,
   onOpenSettings,
   onReload,
+  onSharePage,
   onShow,
   onToggleBookmark
 }: BrowserOverflowMenuProps) {
@@ -94,8 +99,16 @@ export function BrowserOverflowMenu ({
                   icon={<ReloadIcon width={QUICK_ACTION_ICON_SIZE} height={QUICK_ACTION_ICON_SIZE} color={iconColor} />}
                   isDark={isDark}
                   onPress={onReload}
-                />
-              </View>
+              />
+            </View>
+            )}
+            {shareActionAvailable && onSharePage && (
+              <MenuItem
+                icon={<ShareIcon width={MENU_ICON_SIZE} height={MENU_ICON_SIZE} color={iconColor} />}
+                isDark={isDark}
+                label='Share'
+                onPress={onSharePage}
+              />
             )}
             <MenuItem
               disabled={newTabDisabled}

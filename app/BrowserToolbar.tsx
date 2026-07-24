@@ -10,6 +10,7 @@ import { MAX_BROWSER_URL_LENGTH } from './browser-shell.mjs'
 import { formatBrowserAddress } from './browser-appearance.mjs'
 import { BrowserOverflowMenu } from './settings/BrowserOverflowMenu'
 import { styles } from './styles'
+import ShareIcon from '../assets/icons/bootstrap/share.svg'
 
 type BrowserToolbarProps = {
   address: string
@@ -33,6 +34,7 @@ type BrowserToolbarProps = {
   }
   position: 'top' | 'bottom'
   showFullAddress: boolean
+  shareActionAvailable: boolean
   tabCount: number
   onAddressChange: (address: string) => void
   onBack: () => void
@@ -44,6 +46,7 @@ type BrowserToolbarProps = {
   onOpenSettings: () => void
   onOpenTabs: () => void
   onReload: () => void
+  onSharePage: () => void
   onSubmit: () => void
   onToggleBookmark: () => void
 }
@@ -62,6 +65,7 @@ export function BrowserToolbar ({
   palette,
   position,
   showFullAddress,
+  shareActionAvailable,
   tabCount,
   onAddressChange,
   onBack,
@@ -73,6 +77,7 @@ export function BrowserToolbar ({
   onOpenSettings,
   onOpenTabs,
   onReload,
+  onSharePage,
   onSubmit,
   onToggleBookmark
 }: BrowserToolbarProps) {
@@ -150,6 +155,16 @@ export function BrowserToolbar ({
           ? <ActivityIndicator color='#ffffff' size='small' />
           : <Text style={styles.browserActionButtonText}>↻</Text>}
       </Pressable>
+      {shareActionAvailable && (
+        <Pressable
+          accessibilityLabel='Share page'
+          accessibilityRole='button'
+          style={[styles.browserShareButton, { backgroundColor: palette.button }]}
+          onPress={onSharePage}
+        >
+          <ShareIcon width={18} height={18} color={palette.text} />
+        </Pressable>
+      )}
       <Pressable
         accessibilityLabel={`Open tabs, ${tabCount} open`}
         style={[styles.browserTabCountButton, { backgroundColor: palette.button }]}
@@ -167,6 +182,7 @@ export function BrowserToolbar ({
         newTabDisabled={newTabDisabled}
         offset={menuOffset}
         position={position}
+        shareActionAvailable={shareActionAvailable}
         visible={menuVisible}
         onClose={onCloseMenu}
         onNewTab={onNewTab}
@@ -176,6 +192,10 @@ export function BrowserToolbar ({
         onReload={() => {
           onCloseMenu()
           onReload()
+        }}
+        onSharePage={() => {
+          onCloseMenu()
+          onSharePage()
         }}
         onToggleBookmark={onToggleBookmark}
       />

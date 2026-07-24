@@ -64,6 +64,14 @@ export const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: '800'
   },
+  browserShareButton: {
+    alignItems: 'center',
+    backgroundColor: '#e8f0fb',
+    borderRadius: 10,
+    height: 38,
+    justifyContent: 'center',
+    width: 38
+  },
   browserTabCountButton: {
     alignItems: 'center',
     backgroundColor: '#e8f0fb',
