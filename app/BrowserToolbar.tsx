@@ -13,11 +13,15 @@ import { styles } from './styles'
 
 type BrowserToolbarProps = {
   address: string
+  bookmarkActionAvailable: boolean
+  bookmarksDisabled: boolean
   canGoBack: boolean
   canGoForward: boolean
+  isBookmarked: boolean
   isDark: boolean
   isLoading: boolean
   menuVisible: boolean
+  newTabDisabled: boolean
   palette: {
     accent: string
     address: string
@@ -35,19 +39,26 @@ type BrowserToolbarProps = {
   onCloseMenu: () => void
   onForward: () => void
   onOpenMenu: () => void
+  onNewTab: () => void
+  onOpenBookmarks: () => void
   onOpenSettings: () => void
   onOpenTabs: () => void
   onReload: () => void
   onSubmit: () => void
+  onToggleBookmark: () => void
 }
 
 export function BrowserToolbar ({
   address,
+  bookmarkActionAvailable,
+  bookmarksDisabled,
   canGoBack,
   canGoForward,
+  isBookmarked,
   isDark,
   isLoading,
   menuVisible,
+  newTabDisabled,
   palette,
   position,
   showFullAddress,
@@ -57,10 +68,13 @@ export function BrowserToolbar ({
   onCloseMenu,
   onForward,
   onOpenMenu,
+  onNewTab,
+  onOpenBookmarks,
   onOpenSettings,
   onOpenTabs,
   onReload,
-  onSubmit
+  onSubmit,
+  onToggleBookmark
 }: BrowserToolbarProps) {
   const [isAddressFocused, setIsAddressFocused] = useState(false)
   const [menuOffset, setMenuOffset] = useState(70)
@@ -146,13 +160,24 @@ export function BrowserToolbar ({
         </View>
       </Pressable>
       <BrowserOverflowMenu
+        bookmarkActionAvailable={bookmarkActionAvailable}
+        bookmarksDisabled={bookmarksDisabled}
+        isBookmarked={isBookmarked}
         isDark={isDark}
+        newTabDisabled={newTabDisabled}
         offset={menuOffset}
         position={position}
         visible={menuVisible}
         onClose={onCloseMenu}
+        onNewTab={onNewTab}
+        onOpenBookmarks={onOpenBookmarks}
         onShow={onOpenMenu}
         onOpenSettings={onOpenSettings}
+        onReload={() => {
+          onCloseMenu()
+          onReload()
+        }}
+        onToggleBookmark={onToggleBookmark}
       />
     </View>
   )

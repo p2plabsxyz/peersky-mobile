@@ -79,6 +79,9 @@ import { SettingsScreen } from './settings/SettingsScreen'
 import { BrowserOverflowMenu } from './settings/BrowserOverflowMenu'
 import { useBrowserPreferences } from './settings/useBrowserPreferences'
 import { BrowserToolbar } from './BrowserToolbar'
+import { BookmarksScreen } from './bookmarks/BookmarksScreen'
+import { canBookmarkBrowserPage } from './bookmarks/browser-bookmarks.mjs'
+import { useBrowserBookmarks } from './bookmarks/useBrowserBookmarks'
 import { styles } from './styles'
 import {
   RPC_HOLESAIL_CONNECT,
@@ -191,6 +194,14 @@ export default function App () {
     setTheme,
     setWebsiteTextScale
   } = useBrowserPreferences()
+  const {
+    bookmarks: browserBookmarks,
+    isReady: browserBookmarksReady,
+    isBookmarked: isBrowserPageBookmarked,
+    persistenceError: browserBookmarksError,
+    removeBookmark: removeBrowserBookmark,
+    toggleBookmark: toggleBrowserBookmark
+  } = useBrowserBookmarks()
   const browserTabsStateRef = useRef(browserTabsState)
   const browserSessionReadyRef = useRef(false)
   const browserSessionRestoreStartedRef = useRef(false)
@@ -200,6 +211,7 @@ export default function App () {
   const [browserTabsVisible, setBrowserTabsVisible] = useState(false)
   const [browserMenuVisible, setBrowserMenuVisible] = useState(false)
   const [browserSettingsVisible, setBrowserSettingsVisible] = useState(false)
+  const [browserBookmarksVisible, setBrowserBookmarksVisible] = useState(false)
   const [pendingRestoredUrl, setPendingRestoredUrl] = useState<string | null>(null)
   const [browserCanGoBack, setBrowserCanGoBack] = useState(false)
   const [browserCanGoForward, setBrowserCanGoForward] = useState(false)
@@ -848,6 +860,11 @@ export default function App () {
   }
 
   function onBrowserNewTab () {
+    if (browserTabsStateRef.current.tabs.length >= MAX_BROWSER_TABS) {
+      setStatus('Maximum number of tabs reached')
+      return
+    }
+
     browserUserInteractedRef.current = true
     cancelPendingBrowserLoad()
     const nextState = addBrowserTabState(browserTabsStateRef.current) as BrowserTabsState
@@ -856,8 +873,27 @@ export default function App () {
     updateBrowserTabsState(nextState)
     if (tab) applyBrowserTab(tab)
     setBrowserTabsVisible(false)
+    setBrowserMenuVisible(false)
     setBrowserTitle('PeerSky')
     setStatus('New tab')
+  }
+
+  function onBrowserToggleBookmark () {
+    const result = toggleBrowserBookmark({
+      url: browserCurrentUrl,
+      title: browserTitle
+    })
+
+    if (result) {
+      setStatus(result === 'added' ? 'Bookmark added' : 'Bookmark removed')
+    } else {
+      setStatus('Unable to update bookmark')
+    }
+  }
+
+  function onBrowserOpenBookmarks () {
+    setBrowserMenuVisible(false)
+    setBrowserBookmarksVisible(true)
   }
 
   function onBrowserSwitchTab (tabId: string) {
@@ -1476,6 +1512,40 @@ export default function App () {
     enforceManualPageZoom: browserPreferences.enforceManualPageZoom,
     websiteTextScale: browserPreferences.websiteTextScale
   })
+  const browserBookmarkActionAvailable = canBookmarkBrowserPage(
+    browserSource.kind,
+    browserCurrentUrl
+  )
+  const browserPageIsBookmarked = browserBookmarkActionAvailable &&
+    isBrowserPageBookmarked(browserCurrentUrl)
+
+  if (browserBookmarksVisible) {
+    return (
+      <SafeAreaView
+        style={[styles.browserShell, { backgroundColor: browserChrome.shell }]}
+        edges={['top', 'left', 'right', 'bottom']}
+      >
+        <StatusBar
+          backgroundColor={browserChrome.shell}
+          barStyle={browserIsDark ? 'light-content' : 'dark-content'}
+        />
+        <BookmarksScreen
+          bookmarks={browserBookmarks}
+          isDark={browserIsDark}
+          isReady={browserBookmarksReady}
+          persistenceError={browserBookmarksError}
+          onClose={() => setBrowserBookmarksVisible(false)}
+          onOpen={(targetUrl) => {
+            setBrowserBookmarksVisible(false)
+            void loadBrowserUrl(targetUrl)
+          }}
+          onRemove={(targetUrl) => {
+            if (removeBrowserBookmark(targetUrl)) setStatus('Bookmark removed')
+          }}
+        />
+      </SafeAreaView>
+    )
+  }
 
   if (browserSettingsVisible) {
     return (
@@ -1565,8 +1635,14 @@ export default function App () {
             </View>
           </Pressable>
           <BrowserOverflowMenu
+            bookmarkActionAvailable={false}
+            bookmarksDisabled={!browserBookmarksReady}
+            isBookmarked={false}
+            newTabDisabled={browserTabsState.tabs.length >= MAX_BROWSER_TABS}
             visible={browserMenuVisible}
             onClose={() => setBrowserMenuVisible(false)}
+            onNewTab={onBrowserNewTab}
+            onOpenBookmarks={onBrowserOpenBookmarks}
             onShow={() => setBrowserMenuVisible(true)}
             onOpenSettings={() => {
               setBrowserMenuVisible(false)
@@ -1653,11 +1729,15 @@ export default function App () {
   const browserToolbar = (
     <BrowserToolbar
       address={browserAddress}
+      bookmarkActionAvailable={browserBookmarkActionAvailable}
+      bookmarksDisabled={!browserBookmarksReady}
       canGoBack={canBrowserGoBack}
       canGoForward={canBrowserGoForward}
+      isBookmarked={browserPageIsBookmarked}
       isDark={browserIsDark}
       isLoading={browserIsLoading}
       menuVisible={browserMenuVisible}
+      newTabDisabled={browserTabsState.tabs.length >= MAX_BROWSER_TABS}
       palette={browserChrome}
       position={browserPreferences.addressBarPosition}
       showFullAddress={browserPreferences.showFullAddress}
@@ -1670,6 +1750,8 @@ export default function App () {
       onCloseMenu={() => setBrowserMenuVisible(false)}
       onForward={onBrowserForward}
       onOpenMenu={() => setBrowserMenuVisible(true)}
+      onNewTab={onBrowserNewTab}
+      onOpenBookmarks={onBrowserOpenBookmarks}
       onOpenSettings={() => {
         setBrowserMenuVisible(false)
         setBrowserSettingsVisible(true)
@@ -1680,6 +1762,7 @@ export default function App () {
       }}
       onReload={onBrowserReload}
       onSubmit={() => void onBrowserSubmit()}
+      onToggleBookmark={onBrowserToggleBookmark}
     />
   )
   const runtimeInputTheme = {
