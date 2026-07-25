@@ -20,6 +20,7 @@ export function createBrowserTab (id, title = 'PeerSky') {
   return {
     id,
     title,
+    desktopView: false,
     history: [{ url: BROWSER_HOME_URL, source: { kind: 'home' } }],
     historyIndex: 0,
     pageZoom: DEFAULT_BROWSER_PAGE_ZOOM,
@@ -73,6 +74,7 @@ export function serializeBrowserTabsState (state) {
 
       return {
         id: tab.id,
+        desktopView: tab.desktopView === true,
         pageZoom: normalizeBrowserPageZoom(tab.pageZoom),
         title: normalizeBrowserTabTitle(tab.title),
         entry: entry
@@ -165,6 +167,7 @@ function restoreBrowserTab (tab) {
 
   return {
     id: tab.id,
+    desktopView: tab.desktopView === true,
     pageZoom: normalizeBrowserPageZoom(tab.pageZoom),
     title: normalizeBrowserTabTitle(tab.title || tab.entry.url),
     history: [{ url: tab.entry.url, source }],
@@ -209,6 +212,9 @@ export function updateBrowserTabState (state, tabId, patch) {
       : {}),
     ...(Object.hasOwn(patch, 'pageZoom')
       ? { pageZoom: normalizeBrowserPageZoom(patch.pageZoom) }
+      : {}),
+    ...(Object.hasOwn(patch, 'desktopView')
+      ? { desktopView: patch.desktopView === true }
       : {})
   }
 

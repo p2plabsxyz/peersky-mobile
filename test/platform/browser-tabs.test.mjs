@@ -175,6 +175,18 @@ describe('browser tab state helpers', () => {
     assert.equal(normalizeBrowserPageZoom(999), 100)
   })
 
+  test('normalizes and persists per-tab desktop view', () => {
+    let state = updateBrowserTabState(createBrowserTabsState(), 'tab-1', {
+      desktopView: true
+    })
+
+    assert.equal(state.tabs[0].desktopView, true)
+
+    state = restoreBrowserTabsState(serializeBrowserTabsState(state))
+
+    assert.equal(state.tabs[0].desktopView, true)
+  })
+
   test('accepts callbacks from the same synchronized native WebView only', () => {
     const originalEntry = { url: 'https://example.com/', source: { kind: 'web', uri: 'https://example.com/' } }
     let state = updateBrowserTabState(createBrowserTabsState(), 'tab-1', { history: [originalEntry] })

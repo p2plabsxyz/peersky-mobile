@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react'
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
+import CheckIcon from '../../assets/icons/bootstrap/check2.svg'
+import DisplayIcon from '../../assets/icons/bootstrap/display.svg'
 import ReloadIcon from '../../assets/icons/bootstrap/arrow-clockwise.svg'
 import BookmarksIcon from '../../assets/icons/bootstrap/bookmarks.svg'
 import GearIcon from '../../assets/icons/bootstrap/gear.svg'
@@ -17,6 +19,7 @@ const QUICK_ACTION_ICON_SIZE = 22
 type BrowserOverflowMenuProps = {
   bookmarkActionAvailable?: boolean
   bookmarksDisabled?: boolean
+  desktopView?: boolean
   isBookmarked?: boolean
   isDark?: boolean
   newTabDisabled?: boolean
@@ -32,12 +35,14 @@ type BrowserOverflowMenuProps = {
   onReload?: () => void
   onSharePage?: () => void
   onShow: () => void
+  onToggleDesktopView?: () => void
   onToggleBookmark?: () => void
 }
 
 export function BrowserOverflowMenu ({
   bookmarkActionAvailable = false,
   bookmarksDisabled = false,
+  desktopView = false,
   isBookmarked = false,
   isDark = false,
   newTabDisabled = false,
@@ -53,6 +58,7 @@ export function BrowserOverflowMenu ({
   onReload,
   onSharePage,
   onShow,
+  onToggleDesktopView,
   onToggleBookmark
 }: BrowserOverflowMenuProps) {
   const iconColor = isDark ? BROWSER_PALETTES.dark.text : BROWSER_PALETTES.light.text
@@ -119,6 +125,15 @@ export function BrowserOverflowMenu ({
                     isDark={isDark}
                     label='Zoom'
                     onPress={onOpenZoom}
+                  />
+                )}
+                {onToggleDesktopView && (
+                  <MenuItem
+                    icon={<DisplayIcon width={MENU_ICON_SIZE} height={MENU_ICON_SIZE} color={iconColor} />}
+                    isDark={isDark}
+                    label='Desktop View'
+                    onPress={onToggleDesktopView}
+                    selected={desktopView}
                   />
                 )}
               </>
@@ -190,17 +205,20 @@ function MenuItem ({
   icon,
   isDark,
   label,
-  onPress
+  onPress,
+  selected = false
 }: {
   disabled?: boolean
   icon: ReactNode
   isDark: boolean
   label: string
   onPress: () => void
+  selected?: boolean
 }) {
   return (
     <Pressable
       accessibilityRole='button'
+      accessibilityState={{ disabled, selected }}
       disabled={disabled}
       style={({ pressed }) => [
         styles.menuItem,
@@ -212,6 +230,9 @@ function MenuItem ({
     >
       <View style={styles.menuItemIcon}>{icon}</View>
       <Text style={[styles.menuItemText, isDark ? darkStyles.menuItemText : null]}>{label}</Text>
+      {selected && (
+        <CheckIcon width={MENU_ICON_SIZE} height={MENU_ICON_SIZE} color={isDark ? BROWSER_PALETTES.dark.text : BROWSER_PALETTES.light.text} />
+      )}
     </Pressable>
   )
 }
@@ -250,7 +271,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     elevation: 8,
-    minWidth: 180,
+    minWidth: 220,
     overflow: 'hidden',
     shadowColor: '#10131a',
     shadowOffset: { width: 0, height: 4 },
@@ -294,6 +315,7 @@ const styles = StyleSheet.create({
   },
   menuItemText: {
     color: '#1f2a44',
+    flex: 1,
     fontSize: 15,
     fontWeight: '600'
   }

@@ -40,4 +40,18 @@ describe('browser accessibility', () => {
     assert.match(script, /viewport\.setAttribute\('content', original\)/)
     assert.match(script, /else viewport\.remove\(\)/)
   })
+
+  test('can request a desktop-width viewport', () => {
+    const script = createBrowserAccessibilityScript({
+      applyTextScale: false,
+      desktopView: true,
+      enforceManualPageZoom: false,
+      websiteTextScale: 100
+    })
+
+    assert.match(script, /width=1024/)
+    assert.match(script, /initial-scale=/)
+    assert.match(script, /minimum-scale=/)
+    assert.match(script, /window\.screen/)
+  })
 })

@@ -154,6 +154,7 @@ type BrowserHistoryEntry = {
 type BrowserTab = {
   id: string
   title: string
+  desktopView: boolean
   history: BrowserHistoryEntry[]
   historyIndex: number
   pageZoom: number
@@ -166,6 +167,8 @@ type BrowserTabsState = {
   activeTabId: string
   nextTabIndex: number
 }
+
+const DESKTOP_BROWSER_USER_AGENT = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 PeerSkyMobile/1.0'
 
 export default function App () {
   const systemColorScheme = useColorScheme()
@@ -972,6 +975,27 @@ export default function App () {
     updateActiveBrowserZoom(DEFAULT_BROWSER_PAGE_ZOOM)
   }
 
+  function onBrowserToggleDesktopView () {
+    const activeTabId = browserTabsStateRef.current.activeTabId
+    const activeTab = browserTabsStateRef.current.tabs.find((tab) => tab.id === activeTabId)
+    const nextDesktopView = activeTab?.desktopView !== true
+
+    updateBrowserTabsState((state) => updateBrowserTabState(
+      state,
+      activeTabId,
+      { desktopView: nextDesktopView }
+    ) as BrowserTabsState)
+
+    if (browserSource.kind === 'web') {
+      cancelPendingBrowserLoad()
+      browserWebViewRefs.current.get(activeTabId)?.reload()
+    } else if (browserSource.kind === 'hyper') {
+      void loadHyperBrowserUrl(browserCurrentUrl, false)
+    }
+
+    setStatus(nextDesktopView ? 'Desktop View enabled' : 'Desktop View disabled')
+  }
+
   function onBrowserOpenBookmarks () {
     setBrowserMenuVisible(false)
     setBrowserBookmarksVisible(true)
@@ -1599,6 +1623,8 @@ export default function App () {
   const activeBrowserPageZoom = normalizeBrowserPageZoom(
     browserTabsState.tabs.find((tab) => tab.id === browserTabsState.activeTabId)?.pageZoom
   )
+  const activeBrowserDesktopView = browserTabsState.tabs
+    .find((tab) => tab.id === browserTabsState.activeTabId)?.desktopView === true
 
   if (browserBookmarksVisible) {
     return (
@@ -1814,6 +1840,7 @@ export default function App () {
       bookmarksDisabled={!browserBookmarksReady}
       canGoBack={canBrowserGoBack}
       canGoForward={canBrowserGoForward}
+      desktopView={activeBrowserDesktopView}
       isBookmarked={browserPageIsBookmarked}
       isDark={browserIsDark}
       isLoading={browserIsLoading}
@@ -1846,6 +1873,7 @@ export default function App () {
       onReload={onBrowserReload}
       onSharePage={() => void onBrowserSharePage()}
       onSubmit={() => void onBrowserSubmit()}
+      onToggleDesktopView={onBrowserToggleDesktopView}
       onToggleBookmark={onBrowserToggleBookmark}
     />
   )
@@ -2229,13 +2257,16 @@ export default function App () {
 
           const isActive = tab.id === browserTabsState.activeTabId
           const tabPageZoom = normalizeBrowserPageZoom(tab.pageZoom)
+          const tabDesktopView = tab.desktopView === true
+          const browserAccessibilityScript = createBrowserAccessibilityScript({
+            applyTextScale: Platform.OS === 'ios',
+            desktopView: tabDesktopView,
+            enforceManualPageZoom: browserPreferences.enforceManualPageZoom,
+            pageZoom: tabPageZoom,
+            websiteTextScale: browserPreferences.websiteTextScale
+          })
           const browserInjectedScript = combineBrowserInjectedScripts(
-            createBrowserAccessibilityScript({
-              applyTextScale: Platform.OS === 'ios',
-              enforceManualPageZoom: browserPreferences.enforceManualPageZoom,
-              pageZoom: tabPageZoom,
-              websiteTextScale: browserPreferences.websiteTextScale
-            }),
+            browserAccessibilityScript,
             createBrowserFaviconScript()
           )
 
@@ -2246,7 +2277,7 @@ export default function App () {
               style={[styles.browserWebViewLayer, !isActive ? styles.browserWebViewLayerHidden : null]}
             >
             <WebView
-              key={getBrowserWebViewKey(tab.id, entry.source.kind)}
+              key={`${getBrowserWebViewKey(tab.id, entry.source.kind)}:${tabDesktopView ? 'desktop' : 'mobile'}`}
               ref={(ref) => {
                 if (ref) {
                   browserWebViewRefs.current.set(tab.id, ref)
@@ -2262,10 +2293,13 @@ export default function App () {
                   }}
               cacheEnabled={true}
               injectedJavaScript={browserInjectedScript}
+              injectedJavaScriptBeforeContentLoaded={browserAccessibilityScript}
               originWhitelist={['*']}
+              scalesPageToFit={true}
               setBuiltInZoomControls={true}
               setDisplayZoomControls={false}
               textZoom={Math.round(browserPreferences.websiteTextScale * tabPageZoom / 100)}
+              userAgent={tabDesktopView ? DESKTOP_BROWSER_USER_AGENT : undefined}
               style={styles.browserWebView}
               onShouldStartLoadWithRequest={(request) => onBrowserShouldStartLoad(tab.id, entry, request)}
               onOpenWindow={(event) => onBrowserOpenWindow(tab.id, entry, event.nativeEvent.targetUrl)}

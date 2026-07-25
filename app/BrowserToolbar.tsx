@@ -18,6 +18,7 @@ type BrowserToolbarProps = {
   bookmarksDisabled: boolean
   canGoBack: boolean
   canGoForward: boolean
+  desktopView: boolean
   isBookmarked: boolean
   isDark: boolean
   isLoading: boolean
@@ -49,6 +50,7 @@ type BrowserToolbarProps = {
   onReload: () => void
   onSharePage: () => void
   onSubmit: () => void
+  onToggleDesktopView: () => void
   onToggleBookmark: () => void
 }
 
@@ -58,6 +60,7 @@ export function BrowserToolbar ({
   bookmarksDisabled,
   canGoBack,
   canGoForward,
+  desktopView,
   isBookmarked,
   isDark,
   isLoading,
@@ -81,6 +84,7 @@ export function BrowserToolbar ({
   onReload,
   onSharePage,
   onSubmit,
+  onToggleDesktopView,
   onToggleBookmark
 }: BrowserToolbarProps) {
   const [isAddressFocused, setIsAddressFocused] = useState(false)
@@ -179,6 +183,7 @@ export function BrowserToolbar ({
       <BrowserOverflowMenu
         bookmarkActionAvailable={bookmarkActionAvailable}
         bookmarksDisabled={bookmarksDisabled}
+        desktopView={desktopView}
         isBookmarked={isBookmarked}
         isDark={isDark}
         newTabDisabled={newTabDisabled}
@@ -202,6 +207,10 @@ export function BrowserToolbar ({
         onSharePage={() => {
           onCloseMenu()
           onSharePage()
+        }}
+        onToggleDesktopView={() => {
+          onCloseMenu()
+          onToggleDesktopView()
         }}
         onToggleBookmark={onToggleBookmark}
       />
