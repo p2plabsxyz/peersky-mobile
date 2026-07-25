@@ -41,10 +41,13 @@ import {
 } from './browser-shell.mjs'
 import {
   addBrowserTabState,
+  BROWSER_PAGE_ZOOMS,
   closeBrowserTabState,
   createBrowserTabsState,
+  DEFAULT_BROWSER_PAGE_ZOOM,
   isCurrentBrowserTabEntry,
   MAX_BROWSER_TABS,
+  normalizeBrowserPageZoom,
   normalizeBrowserTabTitle,
   serializeBrowserTabsState,
   suspendInactiveBrowserTabsState,
@@ -79,6 +82,7 @@ import { SettingsScreen } from './settings/SettingsScreen'
 import { BrowserOverflowMenu } from './settings/BrowserOverflowMenu'
 import { useBrowserPreferences } from './settings/useBrowserPreferences'
 import { BrowserToolbar } from './BrowserToolbar'
+import { BrowserZoomSheet } from './BrowserZoomSheet'
 import { BookmarksScreen } from './bookmarks/BookmarksScreen'
 import { canBookmarkBrowserPage } from './bookmarks/browser-bookmarks.mjs'
 import {
@@ -152,6 +156,7 @@ type BrowserTab = {
   title: string
   history: BrowserHistoryEntry[]
   historyIndex: number
+  pageZoom: number
   webCanGoBack: boolean
   webCanGoForward: boolean
 }
@@ -217,6 +222,7 @@ export default function App () {
   const [browserSessionReady, setBrowserSessionReady] = useState(false)
   const [browserTabsVisible, setBrowserTabsVisible] = useState(false)
   const [browserMenuVisible, setBrowserMenuVisible] = useState(false)
+  const [browserZoomVisible, setBrowserZoomVisible] = useState(false)
   const [browserSettingsVisible, setBrowserSettingsVisible] = useState(false)
   const [browserBookmarksVisible, setBrowserBookmarksVisible] = useState(false)
   const [pendingRestoredUrl, setPendingRestoredUrl] = useState<string | null>(null)
@@ -932,6 +938,40 @@ export default function App () {
     }
   }
 
+  function updateActiveBrowserZoom (nextZoom: number) {
+    const activeTabId = browserTabsStateRef.current.activeTabId
+    const zoom = normalizeBrowserPageZoom(nextZoom)
+
+    updateBrowserTabsState((state) => updateBrowserTabState(
+      state,
+      activeTabId,
+      { pageZoom: zoom }
+    ) as BrowserTabsState)
+    browserWebViewRefs.current.get(activeTabId)?.injectJavaScript(createBrowserAccessibilityScript({
+      applyTextScale: Platform.OS === 'ios',
+      enforceManualPageZoom: browserPreferences.enforceManualPageZoom,
+      pageZoom: zoom,
+      websiteTextScale: browserPreferences.websiteTextScale
+    }))
+    setStatus(`Zoom set to ${zoom}%`)
+  }
+
+  function onBrowserZoomIn () {
+    const currentIndex = BROWSER_PAGE_ZOOMS.indexOf(activeBrowserPageZoom)
+    if (currentIndex < 0 || currentIndex >= BROWSER_PAGE_ZOOMS.length - 1) return
+    updateActiveBrowserZoom(BROWSER_PAGE_ZOOMS[currentIndex + 1])
+  }
+
+  function onBrowserZoomOut () {
+    const currentIndex = BROWSER_PAGE_ZOOMS.indexOf(activeBrowserPageZoom)
+    if (currentIndex <= 0) return
+    updateActiveBrowserZoom(BROWSER_PAGE_ZOOMS[currentIndex - 1])
+  }
+
+  function onBrowserResetZoom () {
+    updateActiveBrowserZoom(DEFAULT_BROWSER_PAGE_ZOOM)
+  }
+
   function onBrowserOpenBookmarks () {
     setBrowserMenuVisible(false)
     setBrowserBookmarksVisible(true)
@@ -1550,21 +1590,15 @@ export default function App () {
     : browserCanGoForward
   const browserIsDark = resolveBrowserDarkMode(browserPreferences.theme, systemColorScheme)
   const browserChrome = getBrowserPalette(browserIsDark)
-  const browserAccessibilityScript = createBrowserAccessibilityScript({
-    applyTextScale: Platform.OS === 'ios',
-    enforceManualPageZoom: browserPreferences.enforceManualPageZoom,
-    websiteTextScale: browserPreferences.websiteTextScale
-  })
-  const browserInjectedScript = combineBrowserInjectedScripts(
-    browserAccessibilityScript,
-    createBrowserFaviconScript()
-  )
   const browserBookmarkActionAvailable = canBookmarkBrowserPage(
     browserSource.kind,
     browserCurrentUrl
   )
   const browserPageIsBookmarked = browserBookmarkActionAvailable &&
     isBrowserPageBookmarked(browserCurrentUrl)
+  const activeBrowserPageZoom = normalizeBrowserPageZoom(
+    browserTabsState.tabs.find((tab) => tab.id === browserTabsState.activeTabId)?.pageZoom
+  )
 
   if (browserBookmarksVisible) {
     return (
@@ -1808,6 +1842,7 @@ export default function App () {
         browserUserInteractedRef.current = true
         setBrowserTabsVisible(true)
       }}
+      onOpenZoom={() => setBrowserZoomVisible(true)}
       onReload={onBrowserReload}
       onSharePage={() => void onBrowserSharePage()}
       onSubmit={() => void onBrowserSubmit()}
@@ -2193,6 +2228,16 @@ export default function App () {
           if (!browserLiveTabIds.includes(tab.id)) return null
 
           const isActive = tab.id === browserTabsState.activeTabId
+          const tabPageZoom = normalizeBrowserPageZoom(tab.pageZoom)
+          const browserInjectedScript = combineBrowserInjectedScripts(
+            createBrowserAccessibilityScript({
+              applyTextScale: Platform.OS === 'ios',
+              enforceManualPageZoom: browserPreferences.enforceManualPageZoom,
+              pageZoom: tabPageZoom,
+              websiteTextScale: browserPreferences.websiteTextScale
+            }),
+            createBrowserFaviconScript()
+          )
 
           return (
             <View
@@ -2220,7 +2265,7 @@ export default function App () {
               originWhitelist={['*']}
               setBuiltInZoomControls={true}
               setDisplayZoomControls={false}
-              textZoom={browserPreferences.websiteTextScale}
+              textZoom={Math.round(browserPreferences.websiteTextScale * tabPageZoom / 100)}
               style={styles.browserWebView}
               onShouldStartLoadWithRequest={(request) => onBrowserShouldStartLoad(tab.id, entry, request)}
               onOpenWindow={(event) => onBrowserOpenWindow(tab.id, entry, event.nativeEvent.targetUrl)}
@@ -2309,6 +2354,16 @@ export default function App () {
         </View>
 
         {browserPreferences.addressBarPosition === 'bottom' && browserToolbar}
+
+        <BrowserZoomSheet
+          isDark={browserIsDark}
+          pageZoom={activeBrowserPageZoom}
+          visible={browserZoomVisible}
+          onClose={() => setBrowserZoomVisible(false)}
+          onReset={onBrowserResetZoom}
+          onZoomIn={onBrowserZoomIn}
+          onZoomOut={onBrowserZoomOut}
+        />
 
         {isBooting && (
           <View style={styles.browserLoader}>

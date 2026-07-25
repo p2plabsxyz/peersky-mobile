@@ -9,6 +9,7 @@ import {
   isCurrentBrowserTabEntry,
   MAX_BROWSER_TITLE_LENGTH,
   MAX_BROWSER_TABS,
+  normalizeBrowserPageZoom,
   restoreBrowserTabsState,
   serializeBrowserTabsState,
   suspendInactiveBrowserTabsState,
@@ -159,6 +160,19 @@ describe('browser tab state helpers', () => {
     })
 
     assert.equal(state.tabs[0].title.length, MAX_BROWSER_TITLE_LENGTH)
+  })
+
+  test('normalizes and persists per-tab page zoom', () => {
+    let state = updateBrowserTabState(createBrowserTabsState(), 'tab-1', {
+      pageZoom: 125
+    })
+
+    assert.equal(state.tabs[0].pageZoom, 125)
+
+    state = restoreBrowserTabsState(serializeBrowserTabsState(state))
+
+    assert.equal(state.tabs[0].pageZoom, 125)
+    assert.equal(normalizeBrowserPageZoom(999), 100)
   })
 
   test('accepts callbacks from the same synchronized native WebView only', () => {

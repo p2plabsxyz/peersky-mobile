@@ -7,10 +7,11 @@ describe('browser accessibility', () => {
     const script = createBrowserAccessibilityScript({
       applyTextScale: true,
       enforceManualPageZoom: true,
+      pageZoom: 125,
       websiteTextScale: 120
     })
 
-    assert.match(script, /-webkit-text-size-adjust', '120%'/)
+    assert.match(script, /-webkit-text-size-adjust', '150%'/)
     assert.match(script, /user-scalable=yes/)
     assert.match(script, /maximum-scale=5/)
   })
@@ -19,6 +20,7 @@ describe('browser accessibility', () => {
     const script = createBrowserAccessibilityScript({
       applyTextScale: 'yes',
       enforceManualPageZoom: 'yes',
+      pageZoom: 999,
       websiteTextScale: '100%); alert(1)'
     })
 

@@ -1,11 +1,17 @@
 import { WEBSITE_TEXT_SCALES } from './settings/browser-preferences.mjs'
+import {
+  DEFAULT_BROWSER_PAGE_ZOOM,
+  normalizeBrowserPageZoom
+} from './browser-tabs.mjs'
 
 export function createBrowserAccessibilityScript ({
   applyTextScale,
   enforceManualPageZoom,
+  pageZoom = DEFAULT_BROWSER_PAGE_ZOOM,
   websiteTextScale
 }) {
-  const scale = WEBSITE_TEXT_SCALES.includes(websiteTextScale) ? websiteTextScale : 100
+  const baseScale = WEBSITE_TEXT_SCALES.includes(websiteTextScale) ? websiteTextScale : 100
+  const scale = Math.round(baseScale * normalizeBrowserPageZoom(pageZoom) / 100)
   const shouldApplyTextScale = applyTextScale === true
   const shouldEnforceZoom = enforceManualPageZoom === true
 

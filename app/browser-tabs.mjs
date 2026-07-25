@@ -7,6 +7,8 @@ import {
 export const MAX_BROWSER_TABS = 50
 export const MAX_LIVE_BROWSER_WEBVIEWS = 5
 export const MAX_BROWSER_TITLE_LENGTH = 256
+export const BROWSER_PAGE_ZOOMS = [80, 90, 100, 110, 125, 150]
+export const DEFAULT_BROWSER_PAGE_ZOOM = 100
 const SESSION_VERSION = 1
 const INTERNAL_APP_URLS = {
   hyper: 'peersky://hyper/',
@@ -20,6 +22,7 @@ export function createBrowserTab (id, title = 'PeerSky') {
     title,
     history: [{ url: BROWSER_HOME_URL, source: { kind: 'home' } }],
     historyIndex: 0,
+    pageZoom: DEFAULT_BROWSER_PAGE_ZOOM,
     webCanGoBack: false,
     webCanGoForward: false
   }
@@ -70,6 +73,7 @@ export function serializeBrowserTabsState (state) {
 
       return {
         id: tab.id,
+        pageZoom: normalizeBrowserPageZoom(tab.pageZoom),
         title: normalizeBrowserTabTitle(tab.title),
         entry: entry
           ? {
@@ -161,6 +165,7 @@ function restoreBrowserTab (tab) {
 
   return {
     id: tab.id,
+    pageZoom: normalizeBrowserPageZoom(tab.pageZoom),
     title: normalizeBrowserTabTitle(tab.title || tab.entry.url),
     history: [{ url: tab.entry.url, source }],
     historyIndex: 0,
@@ -201,6 +206,9 @@ export function updateBrowserTabState (state, tabId, patch) {
     ...patch,
     ...(Object.hasOwn(patch, 'title')
       ? { title: normalizeBrowserTabTitle(patch.title) }
+      : {}),
+    ...(Object.hasOwn(patch, 'pageZoom')
+      ? { pageZoom: normalizeBrowserPageZoom(patch.pageZoom) }
       : {})
   }
 
@@ -266,6 +274,10 @@ export function closeBrowserTabState (state, tabId) {
 
 export function normalizeBrowserTabTitle (title) {
   return String(title || '').slice(0, MAX_BROWSER_TITLE_LENGTH)
+}
+
+export function normalizeBrowserPageZoom (pageZoom) {
+  return BROWSER_PAGE_ZOOMS.includes(pageZoom) ? pageZoom : DEFAULT_BROWSER_PAGE_ZOOM
 }
 
 function normalizeBrowserTabUrl (url) {

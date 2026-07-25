@@ -8,6 +8,7 @@ import PlusIcon from '../../assets/icons/bootstrap/plus-lg.svg'
 import ShareIcon from '../../assets/icons/bootstrap/share.svg'
 import StarFillIcon from '../../assets/icons/bootstrap/star-fill.svg'
 import StarIcon from '../../assets/icons/bootstrap/star.svg'
+import ZoomIcon from '../../assets/icons/bootstrap/zoom-in.svg'
 import { BROWSER_PALETTES } from '../browser-appearance.mjs'
 
 const MENU_ICON_SIZE = 18
@@ -27,6 +28,7 @@ type BrowserOverflowMenuProps = {
   onNewTab: () => void
   onOpenBookmarks: () => void
   onOpenSettings: () => void
+  onOpenZoom?: () => void
   onReload?: () => void
   onSharePage?: () => void
   onShow: () => void
@@ -47,6 +49,7 @@ export function BrowserOverflowMenu ({
   onNewTab,
   onOpenBookmarks,
   onOpenSettings,
+  onOpenZoom,
   onReload,
   onSharePage,
   onShow,
@@ -103,12 +106,22 @@ export function BrowserOverflowMenu ({
             </View>
             )}
             {shareActionAvailable && onSharePage && (
-              <MenuItem
-                icon={<ShareIcon width={MENU_ICON_SIZE} height={MENU_ICON_SIZE} color={iconColor} />}
-                isDark={isDark}
-                label='Share'
-                onPress={onSharePage}
-              />
+              <>
+                <MenuItem
+                  icon={<ShareIcon width={MENU_ICON_SIZE} height={MENU_ICON_SIZE} color={iconColor} />}
+                  isDark={isDark}
+                  label='Share'
+                  onPress={onSharePage}
+                />
+                {onOpenZoom && (
+                  <MenuItem
+                    icon={<ZoomIcon width={MENU_ICON_SIZE} height={MENU_ICON_SIZE} color={iconColor} />}
+                    isDark={isDark}
+                    label='Zoom'
+                    onPress={onOpenZoom}
+                  />
+                )}
+              </>
             )}
             <MenuItem
               disabled={newTabDisabled}
