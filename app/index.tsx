@@ -203,6 +203,7 @@ export default function App () {
     persistenceError: browserPreferencesError,
     preferences: browserPreferences,
     setAddressBarPosition,
+    setCustomSearchEngine,
     setEnforceManualPageZoom,
     setExternalLinkBehavior,
     setRestoreTabsOnStartup,
@@ -642,7 +643,11 @@ export default function App () {
 
   async function loadBrowserUrl (rawUrl: string) {
     browserUserInteractedRef.current = true
-    const nextUrl = normalizeBrowserAddress(rawUrl, browserPreferences.searchEngine)
+    const nextUrl = normalizeBrowserAddress(
+      rawUrl,
+      browserPreferences.searchEngine,
+      browserPreferences.customSearchUrl
+    )
 
     if (nextUrl.length > MAX_BROWSER_URL_LENGTH) {
       cancelPendingBrowserLoad()
@@ -1709,6 +1714,7 @@ export default function App () {
         />
         <SettingsScreen
           addressBarPosition={browserPreferences.addressBarPosition}
+          customSearchUrl={browserPreferences.customSearchUrl}
           enforceManualPageZoom={browserPreferences.enforceManualPageZoom}
           externalLinkBehavior={browserPreferences.externalLinkBehavior}
           isDark={browserIsDark}
@@ -1725,6 +1731,7 @@ export default function App () {
             if (sessionSaved) setBrowserSettingsVisible(false)
             return sessionSaved
           }}
+          onCustomSearchSave={setCustomSearchEngine}
           onEnforceManualPageZoomChange={setEnforceManualPageZoom}
           onExternalLinkBehaviorChange={setExternalLinkBehavior}
           onRestoreTabsOnStartupChange={setRestoreTabsOnStartup}

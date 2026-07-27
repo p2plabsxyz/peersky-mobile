@@ -1,22 +1,19 @@
 import Constants from 'expo-constants'
 import { useState } from 'react'
 import {
-  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
-  Switch,
   Text,
   View
 } from 'react-native'
-import { SEARCH_ENGINES } from './browser-preferences.mjs'
 import { BROWSER_PALETTES } from '../browser-appearance.mjs'
 import { Appearance } from './Appearance'
 import { Accessibility } from './Accessibility'
 import { DataClearing } from './DataClearing'
+import { General } from './General'
 import { Permissions } from './Permissions'
 import {
-  ChoiceGroup,
   SettingCopy,
   SettingsSection,
   SettingsThemeProvider,
@@ -41,6 +38,7 @@ type SettingsPage =
 
 type SettingsScreenProps = {
   addressBarPosition: AddressBarPosition
+  customSearchUrl: string
   enforceManualPageZoom: boolean
   externalLinkBehavior: ExternalLinkBehavior
   isDark: boolean
@@ -53,6 +51,7 @@ type SettingsScreenProps = {
   onAddressBarPositionChange: (position: AddressBarPosition) => void
   onClose: () => void
   onClearBrowsingData: () => boolean
+  onCustomSearchSave: (url: string) => boolean
   onEnforceManualPageZoomChange: (enabled: boolean) => void
   onExternalLinkBehaviorChange: (behavior: ExternalLinkBehavior) => void
   onRestoreTabsOnStartupChange: (enabled: boolean) => void
@@ -113,7 +112,7 @@ export function SettingsScreen (props: SettingsScreenProps) {
   } else {
     content = (
       <SettingsSubpage title={getSettingsPageTitle(page)} onBack={() => setPage('main')}>
-        {page === 'general' && <GeneralSettings {...props} />}
+        {page === 'general' && <General {...props} />}
         {page === 'accessibility' && <Accessibility {...props} />}
         {page === 'appearance' && <Appearance {...props} />}
         {page === 'data-clearing' && <DataClearing {...props} />}
@@ -206,71 +205,6 @@ function SettingsSubpage ({
       <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
         {children}
       </ScrollView>
-    </View>
-  )
-}
-
-function GeneralSettings ({
-  persistenceError,
-  restoreTabsOnStartup,
-  searchEngine,
-  onRestoreTabsOnStartupChange,
-  onSearchEngineChange,
-  onResetTabs
-}: SettingsScreenProps) {
-  const isDark = useSettingsDarkMode()
-
-  function confirmResetTabs () {
-    Alert.alert(
-      'Reset tab session?',
-      'This will close every open tab and return to the home page.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Reset', style: 'destructive', onPress: onResetTabs }
-      ]
-    )
-  }
-
-  return (
-    <View style={[styles.pageContent, isDark ? darkStyles.page : null]}>
-      {persistenceError && (
-        <View style={styles.errorBanner}>
-          <Text style={styles.errorText}>{persistenceError}</Text>
-        </View>
-      )}
-      <SettingsSection title='Startup'>
-        <View style={styles.settingRow}>
-          <SettingCopy
-            title='Restore previous tabs'
-            description='Continue with your open tabs when PeerSky starts.'
-          />
-          <Switch
-            accessibilityLabel='Restore previous tabs on startup'
-            value={restoreTabsOnStartup}
-            onValueChange={onRestoreTabsOnStartupChange}
-            trackColor={{ false: '#bac3d2', true: '#7eb2ee' }}
-            thumbColor={restoreTabsOnStartup ? '#1f6fd1' : '#ffffff'}
-          />
-        </View>
-      </SettingsSection>
-
-      <SettingsSection title='Search engine'>
-        <ChoiceGroup
-          options={SEARCH_ENGINES}
-          selected={searchEngine}
-          onSelect={onSearchEngineChange}
-        />
-      </SettingsSection>
-
-      <SettingsSection title='Tabs'>
-        <Pressable style={styles.actionRow} onPress={confirmResetTabs}>
-          <SettingCopy
-            title='Reset tab session'
-            description='Close all saved tabs and open a fresh home tab.'
-          />
-          <Text style={styles.destructiveAction}>Reset</Text>
-        </Pressable>
-      </SettingsSection>
     </View>
   )
 }
@@ -395,23 +329,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#f5f8fc',
     flexGrow: 1
   },
-  settingRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 12,
-    padding: 16
-  },
-  actionRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 12,
-    padding: 16
-  },
-  destructiveAction: {
-    color: '#a7354a',
-    fontSize: 14,
-    fontWeight: '800'
-  },
   aboutRow: {
     padding: 16
   },
@@ -446,18 +363,6 @@ const styles = StyleSheet.create({
     color: '#687086',
     fontSize: 14,
     lineHeight: 20
-  },
-  errorBanner: {
-    backgroundColor: '#fff1f3',
-    borderBottomColor: '#efb8c2',
-    borderBottomWidth: 1,
-    paddingHorizontal: 20,
-    paddingVertical: 12
-  },
-  errorText: {
-    color: '#8f2940',
-    fontSize: 13,
-    lineHeight: 18
   }
 })
 

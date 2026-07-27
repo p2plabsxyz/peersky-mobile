@@ -5,8 +5,9 @@ import {
   parseBrowserPreferences,
   serializeBrowserPreferences
 } from './browser-preferences.mjs'
+import { normalizeCustomSearchUrl } from '../browser-shell.mjs'
 
-export type SearchEngine = 'duckduckgo' | 'brave' | 'google'
+export type SearchEngine = 'duckduckgo' | 'custom'
 export type AddressBarPosition = 'top' | 'bottom'
 export type BrowserTheme = 'system' | 'light' | 'dark'
 export type ExternalLinkBehavior = 'ask' | 'allow' | 'block'
@@ -14,6 +15,7 @@ export type WebsiteTextScale = 80 | 100 | 120 | 150
 
 export type BrowserPreferences = {
   addressBarPosition: AddressBarPosition
+  customSearchUrl: string
   enforceManualPageZoom: boolean
   externalLinkBehavior: ExternalLinkBehavior
   restoreTabsOnStartup: boolean
@@ -84,6 +86,14 @@ export function useBrowserPreferences () {
     preferences,
     setAddressBarPosition: (addressBarPosition: AddressBarPosition) => {
       return updatePreferences({ addressBarPosition })
+    },
+    setCustomSearchEngine: (customSearchUrl: string) => {
+      const normalizedUrl = normalizeCustomSearchUrl(customSearchUrl)
+      if (!normalizedUrl) return false
+      return updatePreferences({
+        customSearchUrl: normalizedUrl,
+        searchEngine: 'custom'
+      })
     },
     setEnforceManualPageZoom: (enforceManualPageZoom: boolean) => {
       return updatePreferences({ enforceManualPageZoom })

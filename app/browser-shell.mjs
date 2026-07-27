@@ -4,8 +4,14 @@ export const BROWSER_HOME_URL = 'peersky://home'
 export const MAX_BROWSER_HISTORY_ENTRIES = 20
 export const MAX_BROWSER_URL_LENGTH = 8192
 export const DEFAULT_SEARCH_ENGINE = 'duckduckgo'
+export const CUSTOM_SEARCH_QUERY_PLACEHOLDER = '%s'
+export const MAX_CUSTOM_SEARCH_URL_LENGTH = 2048
 
-export function normalizeBrowserAddress (address, searchEngine = DEFAULT_SEARCH_ENGINE) {
+export function normalizeBrowserAddress (
+  address,
+  searchEngine = DEFAULT_SEARCH_ENGINE,
+  customSearchUrl = ''
+) {
   const value = String(address || '').trim()
   if (!value || value === BROWSER_HOME_URL) return BROWSER_HOME_URL
 
@@ -18,24 +24,40 @@ export function normalizeBrowserAddress (address, searchEngine = DEFAULT_SEARCH_
   }
 
   if (value.includes(' ') || !value.includes('.')) {
-    return getSearchUrl(searchEngine, value)
+    return getSearchUrl(searchEngine, value, customSearchUrl)
   }
 
   return `https://${value}`
 }
 
-export function getSearchUrl (searchEngine, query) {
+export function getSearchUrl (searchEngine, query, customSearchUrl = '') {
   const encodedQuery = encodeURIComponent(String(query || ''))
+  const normalizedCustomUrl = normalizeCustomSearchUrl(customSearchUrl)
 
-  if (searchEngine === 'brave') {
-    return `https://search.brave.com/search?q=${encodedQuery}`
-  }
-
-  if (searchEngine === 'google') {
-    return `https://www.google.com/search?q=${encodedQuery}`
+  if (searchEngine === 'custom' && normalizedCustomUrl) {
+    return normalizedCustomUrl.replaceAll(CUSTOM_SEARCH_QUERY_PLACEHOLDER, encodedQuery)
   }
 
   return `https://duckduckgo.com/?q=${encodedQuery}`
+}
+
+export function normalizeCustomSearchUrl (customSearchUrl) {
+  const value = String(customSearchUrl || '').trim()
+  if (
+    value.length < 1 ||
+    value.length > MAX_CUSTOM_SEARCH_URL_LENGTH ||
+    !value.includes(CUSTOM_SEARCH_QUERY_PLACEHOLDER)
+  ) {
+    return null
+  }
+
+  try {
+    const parsed = new URL(value.replaceAll(CUSTOM_SEARCH_QUERY_PLACEHOLDER, 'query'))
+    if (parsed.protocol !== 'https:' || parsed.username || parsed.password) return null
+    return value
+  } catch {
+    return null
+  }
 }
 
 export function isWebUrl (targetUrl) {
