@@ -349,7 +349,7 @@ export default function App () {
 
   useEffect(() => {
     if (!pendingRestoredUrl) return
-    if (isHyperUrl(pendingRestoredUrl) && !rpcRef.current) return
+    if (isHyperUrl(pendingRestoredUrl) && (isBooting || !rpcRef.current)) return
 
     const restoredUrl = pendingRestoredUrl
     setPendingRestoredUrl(null)
@@ -992,18 +992,20 @@ export default function App () {
     const activeTab = browserTabsStateRef.current.tabs.find((tab) => tab.id === activeTabId)
     const nextDesktopView = activeTab?.desktopView !== true
 
+    browserWebViewRefs.current.get(activeTabId)?.injectJavaScript(
+      createBrowserAccessibilityScript({
+        applyTextScale: Platform.OS === 'ios',
+        desktopView: nextDesktopView,
+        enforceManualPageZoom: browserPreferences.enforceManualPageZoom,
+        pageZoom: normalizeBrowserPageZoom(activeTab?.pageZoom),
+        websiteTextScale: browserPreferences.websiteTextScale
+      })
+    )
     updateBrowserTabsState((state) => updateBrowserTabState(
       state,
       activeTabId,
       { desktopView: nextDesktopView }
     ) as BrowserTabsState)
-
-    if (browserSource.kind === 'web') {
-      cancelPendingBrowserLoad()
-      browserWebViewRefs.current.get(activeTabId)?.reload()
-    } else if (browserSource.kind === 'hyper') {
-      void loadHyperBrowserUrl(browserCurrentUrl, false)
-    }
 
     setStatus(nextDesktopView ? 'Desktop View enabled' : 'Desktop View disabled')
   }

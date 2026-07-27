@@ -16,6 +16,9 @@ export function createBrowserAccessibilityScript ({
   const shouldUseDesktopView = desktopView === true
   const shouldApplyTextScale = applyTextScale === true
   const shouldEnforceZoom = enforceManualPageZoom === true
+  const overriddenViewportFields = shouldUseDesktopView
+    ? 'width|initial-scale|minimum-scale|user-scalable|maximum-scale'
+    : 'user-scalable|maximum-scale'
 
   return `(() => {
     const root = document.documentElement
@@ -26,19 +29,28 @@ export function createBrowserAccessibilityScript ({
     const marker = 'data-peersky-original-content'
     let viewport = document.querySelector('meta[name="viewport"]')
 
+    if (!viewport) {
+      viewport = document.createElement('meta')
+      viewport.setAttribute('name', 'viewport')
+      viewport.setAttribute(marker, '')
+      viewport.setAttribute('content', 'width=device-width, initial-scale=1')
+      document.head.appendChild(viewport)
+    }
+
     if (${shouldUseDesktopView} || ${shouldEnforceZoom}) {
-      if (!viewport) {
-        viewport = document.createElement('meta')
-        viewport.setAttribute('name', 'viewport')
-        viewport.setAttribute(marker, '')
-        document.head.appendChild(viewport)
-      } else if (!viewport.hasAttribute(marker)) {
+      if (!viewport.hasAttribute(marker)) {
         viewport.setAttribute(marker, viewport.getAttribute('content') || '')
       }
 
       const original = viewport.getAttribute(marker) || ''
-      const preserved = original.split(',').map((part) => part.trim()).filter((part) => {
-        return part && !/^(width|initial-scale|minimum-scale|user-scalable|maximum-scale)\\s*=/i.test(part)
+      const mobileViewport = 'width=device-width, initial-scale=1'
+      const sourceViewport = original || (${shouldUseDesktopView} ? '' : mobileViewport)
+      const overriddenViewportPattern = new RegExp(
+        '^(${overriddenViewportFields})\\\\s*=',
+        'i'
+      )
+      const preserved = sourceViewport.split(',').map((part) => part.trim()).filter((part) => {
+        return part && !overriddenViewportPattern.test(part)
       })
 
       const applyViewport = () => {
@@ -70,7 +82,7 @@ export function createBrowserAccessibilityScript ({
     } else if (viewport && viewport.hasAttribute(marker)) {
       const original = viewport.getAttribute(marker) || ''
       if (original) viewport.setAttribute('content', original)
-      else viewport.remove()
+      else viewport.setAttribute('content', 'width=device-width, initial-scale=1')
     }
 
     true
