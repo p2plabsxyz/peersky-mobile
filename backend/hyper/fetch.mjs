@@ -6,6 +6,7 @@ import {
   getInlineAssetByteLimit,
   headersToObject,
   rewriteHyperAssetAttributes,
+  rewriteHyperDownloadAttributes,
   rewriteHyperMediaAttributes,
   resolveHyperAssetUrl,
   shouldInlineAsset
@@ -106,10 +107,11 @@ async function inlineHyperAssets ({
   fetch,
   assetBaseUrl
 }) {
+  const rewrittenDownloads = rewriteHyperDownloadAttributes(html, baseUrl, assetBaseUrl)
   const replacements = new Map()
   let assetCount = 0
 
-  const assetRefs = findHyperAssetRefs(html, baseUrl)
+  const assetRefs = findHyperAssetRefs(rewrittenDownloads, baseUrl)
 
   for (const [source, assetUrl] of assetRefs) {
     if (assetCount >= MAX_INLINE_ASSETS) break
@@ -122,11 +124,12 @@ async function inlineHyperAssets ({
     replacements.set(source, dataUrl)
   }
 
-  return rewriteHyperMediaAttributes(
-    rewriteHyperAssetAttributes(html, baseUrl, replacements),
+  const rewrittenAssets = rewriteHyperMediaAttributes(
+    rewriteHyperAssetAttributes(rewrittenDownloads, baseUrl, replacements),
     baseUrl,
     assetBaseUrl
   )
+  return rewrittenAssets
 }
 
 function findHyperAssetRefs (html, baseUrl) {

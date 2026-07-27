@@ -1,8 +1,10 @@
 import b4a from 'b4a'
 import {
+  createDownloadContentDisposition,
   getContentTypeFromUrl,
   headersToObject,
-  isMalformedRangeHeader
+  isMalformedRangeHeader,
+  normalizeDownloadFilename
 } from './assets.mjs'
 import { parseHyperUrl } from './url.mjs'
 
@@ -50,13 +52,17 @@ function handleHyperAssetRequest (req, res, fetch) {
     return
   }
 
-  streamHyperAsset(fetch, assetUrl, req, res)
+  const downloadName = requestUrl.searchParams.has('download')
+    ? normalizeDownloadFilename(requestUrl.searchParams.get('name'), assetUrl)
+    : null
+
+  streamHyperAsset(fetch, assetUrl, req, res, downloadName)
     .catch((error) => {
       sendAssetError(res, error)
     })
 }
 
-async function streamHyperAsset (fetch, assetUrl, req, res) {
+async function streamHyperAsset (fetch, assetUrl, req, res, downloadName) {
   const rangeHeader = getRequestHeader(req, 'range')
   if (isMalformedRangeHeader(rangeHeader)) {
     sendAssetEmpty(res, 416)
@@ -79,7 +85,8 @@ async function streamHyperAsset (fetch, assetUrl, req, res) {
     sendProxyAssetHeaders(res, {
       status,
       headers,
-      contentType
+      contentType,
+      downloadName
     })
 
     if (req.method === 'HEAD') {
@@ -102,7 +109,8 @@ function getRequestHeader (req, name) {
 function sendProxyAssetHeaders (res, {
   status,
   headers,
-  contentType
+  contentType,
+  downloadName
 }) {
   setAssetCorsHeaders(res)
   res.statusCode = status
@@ -111,6 +119,12 @@ function sendProxyAssetHeaders (res, {
   res.setHeader('Content-Type', contentType)
   res.setHeader('X-Content-Type-Options', 'nosniff')
   res.setHeader('Connection', 'close')
+  if (downloadName) {
+    res.setHeader(
+      'Content-Disposition',
+      createDownloadContentDisposition(downloadName)
+    )
+  }
 
   copyProxyHeader(res, headers, 'content-length')
   copyProxyHeader(res, headers, 'content-range')

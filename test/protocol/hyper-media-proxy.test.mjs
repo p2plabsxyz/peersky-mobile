@@ -212,6 +212,33 @@ describe('hyper media proxy server', () => {
       assert.equal(result.aborted, true)
     })
   })
+
+  test('marks explicit Hyper downloads as attachments', async () => {
+    const server = createHyperAssetServer({
+      httpImpl: http,
+      fetch: async () => createStreamResponse({
+        body: ['report'],
+        headers: {
+          'content-type': 'application/pdf',
+          'content-length': '6'
+        }
+      })
+    })
+
+    await withServer(server, async (localUrl) => {
+      const assetUrl = 'hyper://example.com/report.pdf'
+      const response = await fetch(
+        `${localUrl}/asset?url=${encodeURIComponent(assetUrl)}&download=1&name=${encodeURIComponent('report.pdf')}`
+      )
+
+      assert.equal(response.status, 200)
+      assert.equal(
+        response.headers.get('content-disposition'),
+        'attachment; filename="report.pdf"; filename*=UTF-8\'\'report.pdf'
+      )
+      assert.equal(await response.text(), 'report')
+    })
+  })
 })
 
 function createStreamResponse ({

@@ -91,6 +91,8 @@ import {
   parseBrowserFaviconMessage
 } from './bookmarks/browser-favicon.mjs'
 import { useBrowserBookmarks } from './bookmarks/useBrowserBookmarks'
+import { DownloadsScreen } from './downloads/DownloadsScreen'
+import { useBrowserDownloads } from './downloads/useBrowserDownloads'
 import { styles } from './styles'
 import {
   RPC_HOLESAIL_CONNECT,
@@ -217,6 +219,16 @@ export default function App () {
     removeBookmark: removeBrowserBookmark,
     toggleBookmark: toggleBrowserBookmark
   } = useBrowserBookmarks()
+  const [browserDownloadsVisible, setBrowserDownloadsVisible] = useState(false)
+  const {
+    downloads: browserDownloads,
+    error: browserDownloadsError,
+    isReady: browserDownloadsReady,
+    openDownload: openBrowserDownload,
+    refresh: refreshBrowserDownloads,
+    removeDownload: removeBrowserDownload,
+    requestDownload: requestBrowserDownload
+  } = useBrowserDownloads({ enabled: browserDownloadsVisible })
   const browserTabsStateRef = useRef(browserTabsState)
   const browserSessionReadyRef = useRef(false)
   const browserSessionRestoreStartedRef = useRef(false)
@@ -1001,6 +1013,11 @@ export default function App () {
     setBrowserBookmarksVisible(true)
   }
 
+  function onBrowserOpenDownloads () {
+    setBrowserMenuVisible(false)
+    setBrowserDownloadsVisible(true)
+  }
+
   function onBrowserSwitchTab (tabId: string) {
     if (tabId === browserTabsStateRef.current.activeTabId) {
       setBrowserTabsVisible(false)
@@ -1654,6 +1671,30 @@ export default function App () {
     )
   }
 
+  if (browserDownloadsVisible) {
+    return (
+      <SafeAreaView
+        style={[styles.browserShell, { backgroundColor: browserChrome.shell }]}
+        edges={['top', 'left', 'right', 'bottom']}
+      >
+        <StatusBar
+          backgroundColor={browserChrome.shell}
+          barStyle={browserIsDark ? 'light-content' : 'dark-content'}
+        />
+        <DownloadsScreen
+          downloads={browserDownloads}
+          error={browserDownloadsError}
+          isDark={browserIsDark}
+          isReady={browserDownloadsReady}
+          onClose={() => setBrowserDownloadsVisible(false)}
+          onOpen={(downloadId) => void openBrowserDownload(downloadId)}
+          onRefresh={() => void refreshBrowserDownloads()}
+          onRemove={(downloadId) => void removeBrowserDownload(downloadId)}
+        />
+      </SafeAreaView>
+    )
+  }
+
   if (browserSettingsVisible) {
     return (
       <SafeAreaView
@@ -1750,6 +1791,7 @@ export default function App () {
             onClose={() => setBrowserMenuVisible(false)}
             onNewTab={onBrowserNewTab}
             onOpenBookmarks={onBrowserOpenBookmarks}
+            onOpenDownloads={onBrowserOpenDownloads}
             onShow={() => setBrowserMenuVisible(true)}
             onOpenSettings={() => {
               setBrowserMenuVisible(false)
@@ -1861,6 +1903,7 @@ export default function App () {
       onOpenMenu={() => setBrowserMenuVisible(true)}
       onNewTab={onBrowserNewTab}
       onOpenBookmarks={onBrowserOpenBookmarks}
+      onOpenDownloads={onBrowserOpenDownloads}
       onOpenSettings={() => {
         setBrowserMenuVisible(false)
         setBrowserSettingsVisible(true)
@@ -2303,6 +2346,9 @@ export default function App () {
               style={styles.browserWebView}
               onShouldStartLoadWithRequest={(request) => onBrowserShouldStartLoad(tab.id, entry, request)}
               onOpenWindow={(event) => onBrowserOpenWindow(tab.id, entry, event.nativeEvent.targetUrl)}
+              onFileDownload={(event) => {
+                void requestBrowserDownload(event.nativeEvent.downloadUrl)
+              }}
               onLoadStart={() => {
                 browserFaviconsRef.current.delete(tab.id)
                 if (

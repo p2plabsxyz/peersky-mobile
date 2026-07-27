@@ -44,6 +44,7 @@ type BrowserToolbarProps = {
   onOpenMenu: () => void
   onNewTab: () => void
   onOpenBookmarks: () => void
+  onOpenDownloads: () => void
   onOpenSettings: () => void
   onOpenTabs: () => void
   onOpenZoom: () => void
@@ -78,6 +79,7 @@ export function BrowserToolbar ({
   onOpenMenu,
   onNewTab,
   onOpenBookmarks,
+  onOpenDownloads,
   onOpenSettings,
   onOpenTabs,
   onOpenZoom,
@@ -194,6 +196,7 @@ export function BrowserToolbar ({
         onClose={onCloseMenu}
         onNewTab={onNewTab}
         onOpenBookmarks={onOpenBookmarks}
+        onOpenDownloads={onOpenDownloads}
         onOpenZoom={() => {
           onCloseMenu()
           onOpenZoom()
