@@ -34,6 +34,7 @@
     "bare-rpc": "^0.2.13",
     "expo": "~55.0.23",
     "expo-build-properties": "~55.0.9",
+    "expo-camera": "~55.0.21",
     "expo-constants": "~55.0.7",
     "expo-dev-client": "^55.0.23",
     "expo-file-system": "~55.0.22",

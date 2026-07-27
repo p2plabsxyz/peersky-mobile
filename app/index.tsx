@@ -117,6 +117,8 @@ type RpcResponse = {
   body?: string
   html?: string
   storagePath?: string
+  encryptionPublicKey?: string
+  restoredFiles?: number
   headers?: Record<string, string>
   running?: boolean
   host?: string
@@ -167,6 +169,7 @@ export default function App () {
   const [isBooting, setIsBooting] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [status, setStatus] = useState('Starting Hyper runtime...')
+  const [identityStoragePath, setIdentityStoragePath] = useState('')
   const [browserAddress, setBrowserAddress] = useState('')
   const [browserCurrentUrl, setBrowserCurrentUrl] = useState(BROWSER_HOME_URL)
   const [browserTitle, setBrowserTitle] = useState('PeerSky')
@@ -357,6 +360,7 @@ export default function App () {
         throw new Error(initResponse.error || 'Unable to initialize Hyper')
       }
 
+      setIdentityStoragePath(Paths.document?.uri ? toBareFsPath(Paths.document.uri) : storageDir)
       setStatus(`Hyper ready (${initResponse.storagePath || storageDir})`)
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error))
@@ -1498,7 +1502,9 @@ export default function App () {
           showFullAddress={browserPreferences.showFullAddress}
           theme={browserPreferences.theme}
           websiteTextScale={browserPreferences.websiteTextScale}
+          storagePath={identityStoragePath}
           onAddressBarPositionChange={setAddressBarPosition}
+          onCallRpc={(command, data = {}) => callRpc(command, data)}
           onClose={() => setBrowserSettingsVisible(false)}
           onClearBrowsingData={() => {
             const sessionSaved = onBrowserResetTabs()
@@ -1516,6 +1522,10 @@ export default function App () {
           onOpenUrl={(targetUrl) => {
             setBrowserSettingsVisible(false)
             void loadBrowserUrl(targetUrl)
+          }}
+          onIdentityRestored={() => {
+            browserSessionReadyRef.current = false
+            setBrowserSessionReady(false)
           }}
         />
       </SafeAreaView>

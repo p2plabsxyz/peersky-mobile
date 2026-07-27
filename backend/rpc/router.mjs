@@ -6,6 +6,9 @@ import {
   RPC_HYPER_CREATE_DRIVE,
   RPC_HYPER_FETCH,
   RPC_HYPER_INIT,
+  RPC_IDENTITY_GET_KEY,
+  RPC_IDENTITY_INSPECT_STORAGE,
+  RPC_IDENTITY_RESTORE_FROM_HYPER,
   RPC_P2PMD_ROOM_CREATE,
   RPC_P2PMD_ROOM_DISCONNECT,
   RPC_P2PMD_EDITOR_PAGE,
@@ -15,9 +18,17 @@ import {
   RPC_P2PMD_ROOM_PUBLISH,
   RPC_P2PMD_ROOM_STATUS
 } from './commands.mjs'
+import {
+  getDefaultIdentityStoragePath,
+  getDeviceKeys,
+  getEncryptionPublicKeyHex
+} from '../backup/device-keys.mjs'
+import { decryptIdentityTransfer } from '../backup/identity-transfer.mjs'
+import { restoreIdentityFromBackup } from '../backup/restore.mjs'
+import { inspectStorage } from '../backup/inspect.mjs'
 import { createDrive, publishMarkdownDocument, readHyperFile, uploadHyperFile } from '../hyper/drive.mjs'
-import { fetchHyper } from '../hyper/fetch.mjs'
-import { getHyperRuntime, getHyperStoragePath } from '../hyper/runtime.mjs'
+import { fetchHyper, fetchHyperBinary, resetHyperFetch } from '../hyper/fetch.mjs'
+import { closeHyperRuntime, getHyperRuntime, getHyperStoragePath } from '../hyper/runtime.mjs'
 import {
   connectHolesail,
   getHolesailStatus,
@@ -50,6 +61,61 @@ export async function routeRpcRequest (req) {
 
     if (req.command === RPC_HYPER_CREATE_DRIVE) {
       replyJson(req, await createDrive(parseJsonMessage(req.data)))
+      return
+    }
+
+    if (req.command === RPC_IDENTITY_GET_KEY) {
+      const keys = await getDeviceKeys(getDefaultIdentityStoragePath())
+      replyJson(req, {
+        ok: true,
+        encryptionPublicKey: getEncryptionPublicKeyHex(keys)
+      })
+      return
+    }
+
+    if (req.command === RPC_IDENTITY_RESTORE_FROM_HYPER) {
+      const body = parseJsonMessage(req.data)
+      const hyperUrl = typeof body.hyperUrl === 'string' ? body.hyperUrl.trim() : ''
+      if (!hyperUrl) {
+        replyJson(req, { ok: false, error: 'Missing hyper:// identity transfer URL' })
+        return
+      }
+
+      const storagePath = getDefaultIdentityStoragePath()
+      const keys = await getDeviceKeys(storagePath)
+      const downloaded = await fetchHyperBinary({ url: hyperUrl, method: 'GET' })
+
+      if (!downloaded.ok || !downloaded.bytes) {
+        replyJson(req, {
+          ok: false,
+          error: downloaded.error || `Unable to download identity transfer (${downloaded.status || 'unknown status'})`
+        })
+        return
+      }
+
+      const innerZipBytes = await decryptIdentityTransfer(downloaded.bytes, keys)
+
+      // Close Hyper runtime before overwriting storage to prevent DB corruption
+      await closeHyperRuntime()
+      resetHyperFetch()
+
+      const restoreResult = await restoreIdentityFromBackup(innerZipBytes, storagePath)
+
+      // Reinitialize Hyper with the restored identity
+      await getHyperRuntime()
+
+      replyJson(req, {
+        ok: true,
+        restoredFiles: restoreResult.restoredFiles,
+        requiresRestart: true
+      })
+      return
+    }
+
+    if (req.command === RPC_IDENTITY_INSPECT_STORAGE) {
+      const storagePath = getDefaultIdentityStoragePath()
+      const result = inspectStorage(storagePath)
+      replyJson(req, result)
       return
     }
 

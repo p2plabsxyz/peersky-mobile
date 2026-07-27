@@ -18,6 +18,10 @@ let hyperFetch = null
 
 export { stopHyperAssetServer } from './asset-server.mjs'
 
+export function resetHyperFetch () {
+  hyperFetch = null
+}
+
 export async function fetchHyper ({
   url,
   method = 'GET',
@@ -55,6 +59,45 @@ export async function fetchHyper ({
       url: response.url || url,
       headers,
       body
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      status: 502,
+      statusText: 'Bad Gateway',
+      url,
+      headers: { 'content-type': 'text/plain; charset=utf-8' },
+      error: error instanceof Error ? error.message : String(error)
+    }
+  }
+}
+
+export async function fetchHyperBinary ({
+  url,
+  method = 'GET'
+} = {}) {
+  if (method.toUpperCase() !== 'GET') {
+    return { ok: false, error: 'Only GET is currently supported' }
+  }
+
+  const target = parseHyperUrl(url)
+  if (target.error) return { ok: false, error: target.error }
+
+  const runtime = await getHyperRuntime()
+  const fetch = await getHyperFetch(runtime)
+
+  try {
+    const response = await fetch(url)
+    const headers = headersToObject(response.headers)
+    const bytes = chunkToUint8Array(await response.arrayBuffer())
+
+    return {
+      ok: response.ok,
+      status: response.status,
+      statusText: response.statusText,
+      url: response.url || url,
+      headers,
+      bytes
     }
   } catch (error) {
     return {

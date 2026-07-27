@@ -1,16 +1,28 @@
 import Constants from 'expo-constants'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { CameraView, useCameraPermissions } from 'expo-camera'
 import {
+  ActivityIndicator,
   Alert,
+  BackHandler,
+  Clipboard,
+  Modal,
   Pressable,
+  SafeAreaView,
   ScrollView,
   StyleSheet,
   Switch,
   Text,
+  TextInput,
   View
 } from 'react-native'
 import { SEARCH_ENGINES } from './browser-preferences.mjs'
 import { BROWSER_PALETTES } from '../browser-appearance.mjs'
+import {
+  RPC_IDENTITY_GET_KEY,
+  RPC_IDENTITY_INSPECT_STORAGE,
+  RPC_IDENTITY_RESTORE_FROM_HYPER
+} from '../../backend/rpc/commands.mjs'
 import { Appearance } from './Appearance'
 import { Accessibility } from './Accessibility'
 import { DataClearing } from './DataClearing'
@@ -37,7 +49,27 @@ type SettingsPage =
   | 'appearance'
   | 'data-clearing'
   | 'permissions'
+  | 'link-device'
   | 'about'
+  | 'test-tabs'
+  | 'storage-inspector'
+
+type StorageFileItem = {
+  name: string
+  type: 'file' | 'dir'
+  size: number
+  mtime: string | null
+  content?: string | null
+}
+
+type RpcResponse = {
+  ok: boolean
+  error?: string
+  encryptionPublicKey?: string
+  restoredFiles?: number
+  path?: string
+  files?: StorageFileItem[]
+}
 
 type SettingsScreenProps = {
   addressBarPosition: AddressBarPosition
@@ -50,7 +82,9 @@ type SettingsScreenProps = {
   showFullAddress: boolean
   theme: BrowserTheme
   websiteTextScale: WebsiteTextScale
+  storagePath: string
   onAddressBarPositionChange: (position: AddressBarPosition) => void
+  onCallRpc: (command: number, data?: object) => Promise<RpcResponse>
   onClose: () => void
   onClearBrowsingData: () => boolean
   onEnforceManualPageZoomChange: (enabled: boolean) => void
@@ -62,6 +96,7 @@ type SettingsScreenProps = {
   onWebsiteTextScaleChange: (scale: WebsiteTextScale) => void
   onResetTabs: () => void
   onOpenUrl: (url: string) => void
+  onIdentityRestored: () => void
 }
 
 const REPOSITORY_URL = 'https://github.com/p2plabsxyz/peersky-mobile'
@@ -98,9 +133,24 @@ const SETTINGS_PAGES: Array<{
     description: 'External app link handling'
   },
   {
+    id: 'link-device',
+    title: 'Link Device',
+    description: 'Restore identity from desktop'
+  },
+  {
     id: 'about',
     title: 'About',
     description: 'Version, source code, and licenses'
+  },
+  {
+    id: 'test-tabs',
+    title: 'Test Tabs',
+    description: 'View raw browser-tabs.json'
+  },
+  {
+    id: 'storage-inspector',
+    title: 'Storage Inspector',
+    description: 'View Hyper/IPFS cache and storage files'
   }
 ]
 
@@ -118,7 +168,10 @@ export function SettingsScreen (props: SettingsScreenProps) {
         {page === 'appearance' && <Appearance {...props} />}
         {page === 'data-clearing' && <DataClearing {...props} />}
         {page === 'permissions' && <Permissions {...props} />}
+        {page === 'link-device' && <LinkDeviceSettings {...props} />}
         {page === 'about' && <AboutSettings onOpenUrl={props.onOpenUrl} />}
+        {page === 'test-tabs' && <TestTabsSettings />}
+        {page === 'storage-inspector' && <StorageInspectorSettings onCallRpc={props.onCallRpc} />}
       </SettingsSubpage>
     )
   }
@@ -275,6 +328,246 @@ function GeneralSettings ({
   )
 }
 
+function LinkDeviceSettings ({
+  onCallRpc,
+  storagePath,
+  onIdentityRestored
+}: SettingsScreenProps) {
+  const isDark = useSettingsDarkMode()
+  const [encryptionPublicKey, setEncryptionPublicKey] = useState('')
+  const [hyperUrl, setHyperUrl] = useState('')
+  const [isLoadingKey, setIsLoadingKey] = useState(true)
+  const [isRestoring, setIsRestoring] = useState(false)
+  const [message, setMessage] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [isScanning, setIsScanning] = useState(false)
+  const [permission, requestPermission] = useCameraPermissions()
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadDeviceKey () {
+      setIsLoadingKey(true)
+      setError(null)
+
+      try {
+        const response = await onCallRpc(RPC_IDENTITY_GET_KEY, {})
+        if (cancelled) return
+
+        if (!response.ok || typeof response.encryptionPublicKey !== 'string') {
+          throw new Error(response.error || 'Unable to load mobile device key')
+        }
+
+        setEncryptionPublicKey(response.encryptionPublicKey)
+      } catch (loadError) {
+        if (!cancelled) {
+          setError(loadError instanceof Error ? loadError.message : String(loadError))
+        }
+      } finally {
+        if (!cancelled) setIsLoadingKey(false)
+      }
+    }
+
+    void loadDeviceKey()
+
+    return () => {
+      cancelled = true
+    }
+  }, [onCallRpc])
+
+  function copyDeviceKey () {
+    if (!encryptionPublicKey) return
+
+    try {
+      Clipboard.setString(encryptionPublicKey)
+      setMessage('Mobile device key copied.')
+      setError(null)
+    } catch (copyError) {
+      setError(copyError instanceof Error ? copyError.message : String(copyError))
+    }
+  }
+
+  async function openScanner () {
+    if (!permission?.granted) {
+      const response = await requestPermission()
+      if (!response.granted) {
+        setError('Camera permission is required to scan QR codes.')
+        return
+      }
+    }
+    setIsScanning(true)
+    setError(null)
+  }
+
+  function handleBarcodeScanned ({ data }: { data: string }) {
+    setIsScanning(false)
+    if (data && data.startsWith('hyper://')) {
+      setHyperUrl(data)
+    } else {
+      setError('Invalid QR code scanned. Must be a hyper:// URL.')
+    }
+  }
+
+  async function restoreIdentity () {
+    const trimmedUrl = hyperUrl.trim()
+    if (!trimmedUrl.startsWith('hyper://')) {
+      setError('Enter the hyper:// identity transfer URL from PeerSky Desktop.')
+      setMessage(null)
+      return
+    }
+
+    setIsRestoring(true)
+    setError(null)
+    setMessage(null)
+
+    try {
+      const response = await onCallRpc(RPC_IDENTITY_RESTORE_FROM_HYPER, {
+        hyperUrl: trimmedUrl
+      })
+
+      if (!response.ok) {
+        throw new Error(response.error || 'Identity restore failed')
+      }
+
+      setMessage(`Identity restored. Restarting PeerSky Mobile...`)
+      onIdentityRestored()
+      Alert.alert(
+        'Identity Restored',
+        `Restored ${response.restoredFiles || 0} files. PeerSky Mobile will restart now to load the new identity.`,
+        [
+          {
+            text: 'Restart Now',
+            onPress: () => {
+              BackHandler.exitApp()
+            }
+          }
+        ],
+        { cancelable: false }
+      )
+    } catch (restoreError) {
+      setError(restoreError instanceof Error ? restoreError.message : String(restoreError))
+    } finally {
+      setIsRestoring(false)
+    }
+  }
+
+  return (
+    <View style={[styles.pageContent, isDark ? darkStyles.page : null]}>
+      {error && (
+        <View style={styles.errorBanner}>
+          <Text style={styles.errorText}>{error}</Text>
+        </View>
+      )}
+      {message && (
+        <View style={[styles.successBanner, isDark ? darkStyles.successBanner : null]}>
+          <Text style={[styles.successText, isDark ? darkStyles.successText : null]}>{message}</Text>
+        </View>
+      )}
+
+      <SettingsSection title='Mobile device key'>
+        <View style={styles.linkDeviceBlock}>
+          <SettingCopy
+            title='Your Mobile Device Key'
+            description='Paste this into PeerSky Desktop > Backup > Identity Transfer.'
+          />
+          <View style={[styles.keyBox, isDark ? darkStyles.input : null]}>
+            {isLoadingKey
+              ? <ActivityIndicator size='small' />
+              : (
+                <Text
+                  selectable
+                  style={[styles.keyText, isDark ? darkStyles.primaryText : null]}
+                >
+                  {encryptionPublicKey || 'No key available'}
+                </Text>
+                )}
+          </View>
+          <Pressable
+            accessibilityRole='button'
+            disabled={!encryptionPublicKey}
+            style={({ pressed }) => [
+              styles.primaryButton,
+              !encryptionPublicKey ? styles.buttonDisabled : null,
+              pressed ? styles.rowPressed : null
+            ]}
+            onPress={copyDeviceKey}
+          >
+            <Text style={styles.primaryButtonText}>Copy Key</Text>
+          </Pressable>
+          <Text style={[styles.helperText, isDark ? darkStyles.secondaryText : null]}>
+            Identity key file location: {storagePath || 'app document storage'}
+          </Text>
+        </View>
+      </SettingsSection>
+
+      <SettingsSection title='Restore from desktop'>
+        <View style={styles.linkDeviceBlock}>
+          <SettingCopy
+            title='Identity transfer URL'
+            description='Paste the hyper:// URL shown by PeerSky Desktop after uploading the encrypted identity transfer.'
+          />
+          <TextInput
+            autoCapitalize='none'
+            autoCorrect={false}
+            editable={!isRestoring}
+            multiline
+            placeholder='hyper://...'
+            placeholderTextColor={isDark ? '#6f7b91' : '#8a96a8'}
+            style={[styles.urlInput, isDark ? darkStyles.input : null]}
+            value={hyperUrl}
+            onChangeText={setHyperUrl}
+          />
+          <Pressable
+            accessibilityRole='button'
+            disabled={isRestoring}
+            style={({ pressed }) => [
+              styles.primaryButton,
+              isRestoring ? styles.buttonDisabled : null,
+              pressed ? styles.rowPressed : null
+            ]}
+            onPress={restoreIdentity}
+          >
+            {isRestoring
+              ? <ActivityIndicator color='#ffffff' size='small' />
+              : <Text style={styles.primaryButtonText}>Restore Identity</Text>}
+          </Pressable>
+          <Pressable
+            accessibilityRole='button'
+            disabled={isRestoring}
+            style={({ pressed }) => [
+              styles.secondaryButton,
+              isRestoring ? styles.buttonDisabled : null,
+              pressed ? styles.rowPressed : null
+            ]}
+            onPress={openScanner}
+          >
+            <Text style={[styles.secondaryButtonText, isDark ? darkStyles.primaryText : null]}>Scan QR Code</Text>
+          </Pressable>
+        </View>
+      </SettingsSection>
+
+      <Modal visible={isScanning} animationType='slide' onRequestClose={() => setIsScanning(false)}>
+        <View style={styles.scannerContainer}>
+          {isScanning && (
+            <CameraView
+              style={StyleSheet.absoluteFillObject}
+              barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+              onBarcodeScanned={handleBarcodeScanned}
+            />
+          )}
+          <View style={styles.scannerOverlay}>
+            <View style={styles.scannerHeader}>
+              <Pressable style={styles.scannerCloseButton} onPress={() => setIsScanning(false)}>
+                <Text style={styles.scannerCloseText}>Cancel</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    </View>
+  )
+}
+
 function AboutSettings ({ onOpenUrl }: { onOpenUrl: (url: string) => void }) {
   const isDark = useSettingsDarkMode()
 
@@ -299,6 +592,162 @@ function AboutSettings ({ onOpenUrl }: { onOpenUrl: (url: string) => void }) {
     </View>
   )
 }
+
+import { Paths, File } from 'expo-file-system'
+
+function TestTabsSettings () {
+  const isDark = useSettingsDarkMode()
+  const [tabsJson, setTabsJson] = useState('Loading...')
+
+  useEffect(() => {
+    async function loadTabs () {
+      try {
+        const file = new File(Paths.document, 'browser-tabs.json')
+        if (file.exists) {
+          const content = await file.text()
+          setTabsJson(content)
+        } else {
+          setTabsJson('browser-tabs.json does not exist')
+        }
+      } catch (err) {
+        setTabsJson(err instanceof Error ? err.message : String(err))
+      }
+    }
+    loadTabs()
+  }, [])
+
+  return (
+    <View style={[styles.pageContent, isDark ? darkStyles.page : null]}>
+      <SettingsSection title='browser-tabs.json'>
+        <View style={styles.linkDeviceBlock}>
+          <Text style={[styles.keyText, isDark ? darkStyles.primaryText : null]} selectable>
+            {tabsJson}
+          </Text>
+        </View>
+      </SettingsSection>
+    </View>
+  )
+}
+
+function StorageInspectorSettings ({
+  onCallRpc
+}: {
+  onCallRpc: (command: number, data?: object) => Promise<RpcResponse>
+}) {
+  const isDark = useSettingsDarkMode()
+  const [loading, setLoading] = useState(true)
+  const [storagePath, setStoragePath] = useState('')
+  const [files, setFiles] = useState<StorageFileItem[]>([])
+  const [error, setError] = useState<string | null>(null)
+  const [selectedContent, setSelectedContent] = useState<string | null>(null)
+  const [selectedFileName, setSelectedFileName] = useState<string | null>(null)
+
+  useEffect(() => {
+    async function loadStorage () {
+      setLoading(true)
+      setError(null)
+      try {
+        const response = await onCallRpc(RPC_IDENTITY_INSPECT_STORAGE, {})
+        if (response.ok && Array.isArray(response.files)) {
+          setStoragePath(response.path || '')
+          setFiles(response.files)
+        } else {
+          setError(response.error || 'Failed to inspect storage')
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err))
+      } finally {
+        setLoading(false)
+      }
+    }
+    void loadStorage()
+  }, [onCallRpc])
+
+  return (
+    <View style={[styles.pageContent, isDark ? darkStyles.page : null]}>
+      {error && (
+        <View style={styles.errorBanner}>
+          <Text style={styles.errorText}>{error}</Text>
+        </View>
+      )}
+
+      <SettingsSection title='Storage Overview'>
+        <View style={styles.linkDeviceBlock}>
+          <SettingCopy
+            title='Identity Storage Directory'
+            description='Target directory where Hyper, IPFS, caches, and identity files are stored.'
+          />
+          <View style={[styles.keyBox, isDark ? darkStyles.input : null]}>
+            <Text style={[styles.keyText, isDark ? darkStyles.primaryText : null]} selectable>
+              {storagePath || 'Loading storage path...'}
+            </Text>
+          </View>
+        </View>
+      </SettingsSection>
+
+      <SettingsSection title={`Files & Cache (${files.length} items)`}>
+        <View style={styles.linkDeviceBlock}>
+          {loading && <ActivityIndicator size='small' color='#1f6fd1' />}
+          {!loading && files.length === 0 && (
+            <Text style={[styles.helperText, isDark ? darkStyles.secondaryText : null]}>
+              No files found in storage.
+            </Text>
+          )}
+          {files.map((file) => (
+            <Pressable
+              key={file.name}
+              style={({ pressed }) => [
+                styles.linkRow,
+                pressed ? styles.rowPressed : null
+              ]}
+              onPress={() => {
+                if (file.content) {
+                  setSelectedFileName(file.name)
+                  setSelectedContent(file.content)
+                }
+              }}
+            >
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.linkText, isDark ? darkStyles.primaryText : null]}>
+                  {file.type === 'dir' ? `[DIR] ${file.name}` : file.name}
+                </Text>
+                <Text style={[styles.helperText, isDark ? darkStyles.secondaryText : null]}>
+                  {file.type === 'dir' ? 'Directory' : `${file.size} bytes`}
+                  {file.mtime ? ` - ${file.mtime.slice(0, 19).replace('T', ' ')}` : ''}
+                </Text>
+              </View>
+              {file.content ? (
+                <Text style={[styles.chevron, isDark ? darkStyles.secondaryText : null]}>View</Text>
+              ) : null}
+            </Pressable>
+          ))}
+        </View>
+      </SettingsSection>
+
+      <Modal visible={Boolean(selectedContent)} animationType='slide' onRequestClose={() => setSelectedContent(null)}>
+        <SafeAreaView style={[{ flex: 1 }, isDark ? darkStyles.page : null]}>
+          <View style={[styles.scannerHeader, { paddingHorizontal: 16 }]}>
+            <Text style={[styles.placeholderTitle, isDark ? darkStyles.primaryText : null]}>
+              {selectedFileName}
+            </Text>
+            <Pressable
+              style={styles.scannerCloseButton}
+              onPress={() => setSelectedContent(null)}
+            >
+              <Text style={styles.scannerCloseText}>Close</Text>
+            </Pressable>
+          </View>
+          <ScrollView style={{ flex: 1, padding: 16 }}>
+            <Text style={[styles.keyText, isDark ? darkStyles.primaryText : null]} selectable>
+              {selectedContent}
+            </Text>
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
+    </View>
+  )
+}
+
 
 function SectionPlaceholder ({ description }: { description: string }) {
   const isDark = useSettingsDarkMode()
@@ -429,6 +878,71 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600'
   },
+  linkDeviceBlock: {
+    gap: 12,
+    padding: 16
+  },
+  keyBox: {
+    backgroundColor: '#f7f9fc',
+    borderColor: '#d8e0ec',
+    borderRadius: 12,
+    borderWidth: 1,
+    minHeight: 72,
+    padding: 12
+  },
+  keyText: {
+    color: '#1f2a44',
+    fontFamily: 'monospace',
+    fontSize: 12,
+    lineHeight: 18
+  },
+  urlInput: {
+    backgroundColor: '#f7f9fc',
+    borderColor: '#d8e0ec',
+    borderRadius: 12,
+    borderWidth: 1,
+    color: '#1f2a44',
+    fontSize: 14,
+    minHeight: 96,
+    padding: 12,
+    textAlignVertical: 'top'
+  },
+  primaryButton: {
+    alignItems: 'center',
+    backgroundColor: '#1f6fd1',
+    borderRadius: 12,
+    justifyContent: 'center',
+    minHeight: 46,
+    paddingHorizontal: 14
+  },
+  primaryButtonText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '800'
+  },
+  secondaryButton: {
+    alignItems: 'center',
+    backgroundColor: 'transparent',
+    borderColor: '#d8e0ec',
+    borderRadius: 12,
+    borderWidth: 1,
+    justifyContent: 'center',
+    minHeight: 46,
+    paddingHorizontal: 14
+  },
+  secondaryButtonText: {
+    color: '#1f2a44',
+    fontSize: 14,
+    fontWeight: '800'
+  },
+  buttonDisabled: {
+    opacity: 0.55
+  },
+  helperText: {
+    color: '#687086',
+    fontSize: 12,
+    lineHeight: 17
+  },
   placeholder: {
     backgroundColor: '#ffffff',
     borderBottomColor: '#e1e7f0',
@@ -458,6 +972,42 @@ const styles = StyleSheet.create({
     color: '#8f2940',
     fontSize: 13,
     lineHeight: 18
+  },
+  successBanner: {
+    backgroundColor: '#edf9f0',
+    borderBottomColor: '#a9d9b5',
+    borderBottomWidth: 1,
+    paddingHorizontal: 20,
+    paddingVertical: 12
+  },
+  successText: {
+    color: '#246a36',
+    fontSize: 13,
+    lineHeight: 18
+  },
+  scannerContainer: {
+    flex: 1,
+    backgroundColor: '#000000'
+  },
+  scannerOverlay: {
+    flex: 1,
+    justifyContent: 'space-between',
+    padding: 20
+  },
+  scannerHeader: {
+    alignItems: 'flex-end',
+    paddingTop: 40
+  },
+  scannerCloseButton: {
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 10
+  },
+  scannerCloseText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '600'
   }
 })
 
@@ -483,5 +1033,17 @@ const darkStyles = StyleSheet.create({
   },
   secondaryText: {
     color: BROWSER_PALETTES.dark.mutedText
+  },
+  input: {
+    backgroundColor: '#121927',
+    borderColor: BROWSER_PALETTES.dark.border,
+    color: BROWSER_PALETTES.dark.text
+  },
+  successBanner: {
+    backgroundColor: '#12301d',
+    borderBottomColor: '#2d7b45'
+  },
+  successText: {
+    color: '#bfeccb'
   }
 })
