@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   ActivityIndicator,
+  Animated,
   Pressable,
   Text,
   TextInput,
@@ -91,6 +92,28 @@ export function BrowserToolbar ({
 }: BrowserToolbarProps) {
   const [isAddressFocused, setIsAddressFocused] = useState(false)
   const [menuOffset, setMenuOffset] = useState(70)
+  const addressInputRef = useRef<TextInput>(null)
+  const addressFocusProgress = useRef(new Animated.Value(0)).current
+  const trailingControlsWidth = shareActionAvailable ? 182 : 137
+
+  useEffect(() => {
+    const animation = Animated.timing(addressFocusProgress, {
+      duration: 180,
+      toValue: isAddressFocused ? 1 : 0,
+      useNativeDriver: false
+    })
+    animation.start()
+
+    return () => animation.stop()
+  }, [addressFocusProgress, isAddressFocused])
+
+  const hiddenControlProps = isAddressFocused
+    ? {
+        accessibilityElementsHidden: true,
+        importantForAccessibility: 'no-hide-descendants' as const,
+        pointerEvents: 'none' as const
+      }
+    : {}
 
   return (
     <View style={[
@@ -100,13 +123,36 @@ export function BrowserToolbar ({
         borderBottomColor: palette.border
       },
       position === 'bottom'
-        ? {
-            borderBottomWidth: 0,
-            borderTopColor: palette.border,
-            borderTopWidth: 1
-          }
+          ? {
+              borderBottomWidth: 0,
+              borderTopColor: palette.border,
+              borderTopWidth: 1,
+              paddingBottom: 8
+            }
         : null
     ]} onLayout={(event) => setMenuOffset(event.nativeEvent.layout.height + 4)}>
+      <Animated.View
+        {...hiddenControlProps}
+        style={[
+          styles.browserToolbarControlGroup,
+          {
+            opacity: addressFocusProgress.interpolate({
+              inputRange: [0, 0.65, 1],
+              outputRange: [1, 0, 0]
+            }),
+            transform: [{
+              translateX: addressFocusProgress.interpolate({
+                inputRange: [0, 1],
+                outputRange: [0, -14]
+              })
+            }],
+            width: addressFocusProgress.interpolate({
+              inputRange: [0, 1],
+              outputRange: [82, 0]
+            })
+          }
+        ]}
+      >
       <Pressable
         accessibilityLabel='Go back'
         style={[
@@ -131,7 +177,9 @@ export function BrowserToolbar ({
       >
         <Text style={[styles.browserNavButtonText, { color: palette.text }]}>{'>'}</Text>
       </Pressable>
+      </Animated.View>
       <TextInput
+        ref={addressInputRef}
         accessibilityLabel='Browser address'
         style={[
           styles.browserAddress,
@@ -146,14 +194,44 @@ export function BrowserToolbar ({
         keyboardType='url'
         returnKeyType='go'
         maxLength={MAX_BROWSER_URL_LENGTH}
+        selection={isAddressFocused ? undefined : { start: 0, end: 0 }}
         value={isAddressFocused ? address : formatBrowserAddress(address, showFullAddress)}
-        onFocus={() => setIsAddressFocused(true)}
+        onFocus={() => {
+          onCloseMenu()
+          setIsAddressFocused(true)
+        }}
         onBlur={() => setIsAddressFocused(false)}
         onChangeText={onAddressChange}
-        onSubmitEditing={onSubmit}
+        onSubmitEditing={() => {
+          addressInputRef.current?.blur()
+          onSubmit()
+        }}
         placeholder='Search or type'
         placeholderTextColor={palette.mutedText}
       />
+      <Animated.View
+        {...hiddenControlProps}
+        style={[
+          styles.browserToolbarControlGroup,
+          styles.browserToolbarTrailingControls,
+          {
+            opacity: addressFocusProgress.interpolate({
+              inputRange: [0, 0.65, 1],
+              outputRange: [1, 0, 0]
+            }),
+            transform: [{
+              translateX: addressFocusProgress.interpolate({
+                inputRange: [0, 1],
+                outputRange: [0, 14]
+              })
+            }],
+            width: addressFocusProgress.interpolate({
+              inputRange: [0, 1],
+              outputRange: [trailingControlsWidth, 0]
+            })
+          }
+        ]}
+      >
       <Pressable
         accessibilityLabel={isLoading ? 'Page loading' : 'Reload page'}
         style={[styles.browserActionButton, { backgroundColor: palette.accent }]}
@@ -217,6 +295,7 @@ export function BrowserToolbar ({
         }}
         onToggleBookmark={onToggleBookmark}
       />
+      </Animated.View>
     </View>
   )
 }

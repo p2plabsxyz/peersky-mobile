@@ -4,6 +4,7 @@ import {
   Alert,
   AppState,
   Button,
+  Keyboard,
   KeyboardAvoidingView,
   Linking,
   Platform,
@@ -2050,7 +2051,7 @@ export default function App () {
           barStyle={browserIsDark ? 'light-content' : 'dark-content'}
         />
         <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          behavior='padding'
           enabled={browserPreferences.addressBarPosition === 'bottom'}
           style={styles.browserShellContent}
         >
@@ -2071,10 +2072,17 @@ export default function App () {
           onToggleView={onBrowserToggleTabView}
         />
 
-        <View style={[styles.browserContent, { backgroundColor: browserChrome.shell }]}>
+        <View
+          style={[styles.browserContent, { backgroundColor: browserChrome.shell }]}
+          onTouchStart={Keyboard.dismiss}
+        >
         {browserSource.kind === 'home'
           ? (
-            <ScrollView style={styles.browserContentPage} contentContainerStyle={styles.browserHome}>
+            <ScrollView
+              style={styles.browserContentPage}
+              contentContainerStyle={styles.browserHome}
+              keyboardDismissMode='on-drag'
+            >
               <View style={styles.browserShortcutGrid}>
                 <Pressable
                   style={styles.browserShortcut}
@@ -2122,6 +2130,7 @@ export default function App () {
                 styles.content,
                 activeTab === 'p2pmd' ? styles.p2pmdAppContent : null
                 ]}
+                keyboardDismissMode='on-drag'
               >
                 {activeTab !== 'p2pmd' && (
                   <View style={styles.runtimeHeader}>
@@ -2415,6 +2424,7 @@ export default function App () {
               }}
               scrollEventThrottle={200}
               onScroll={() => {
+                Keyboard.dismiss()
                 if (isCurrentBrowserTabEntry(browserTabsStateRef.current, tab.id, entry)) {
                   scheduleBrowserTabPreview(tab.id, entry)
                 }

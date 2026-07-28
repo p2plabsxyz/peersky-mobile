@@ -17,10 +17,18 @@ export const styles = StyleSheet.create({
     borderBottomColor: '#dbe6f6',
     borderBottomWidth: 1,
     flexDirection: 'row',
-    gap: 7,
     paddingHorizontal: 14,
     paddingTop: 12,
     paddingBottom: 16
+  },
+  browserToolbarControlGroup: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 7,
+    overflow: 'hidden'
+  },
+  browserToolbarTrailingControls: {
+    justifyContent: 'flex-end'
   },
   browserNavButton: {
     alignItems: 'center',

@@ -15,8 +15,8 @@ describe('browser appearance helpers', () => {
   })
 
   test('shows a site address without path details when requested', () => {
-    assert.equal(formatBrowserAddress('https://example.com/path?q=1', false), 'https://example.com')
-    assert.equal(formatBrowserAddress('hyper://akhilesh.art/posts/one', false), 'hyper://akhilesh.art')
+    assert.equal(formatBrowserAddress('https://example.com/path?q=1', false), 'example.com')
+    assert.equal(formatBrowserAddress('hyper://akhilesh.art/posts/one', false), 'akhilesh.art')
     assert.equal(formatBrowserAddress('https://example.com/path?q=1', true), 'https://example.com/path?q=1')
   })
 
