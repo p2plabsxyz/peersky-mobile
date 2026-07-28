@@ -1,12 +1,21 @@
 import Constants from 'expo-constants'
-import { useState } from 'react'
 import {
+  type ComponentType,
+  useEffect,
+  useRef,
+  useState
+} from 'react'
+import {
+  AccessibilityInfo,
+  Animated,
+  Easing,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View
 } from 'react-native'
+import type { SvgProps } from 'react-native-svg'
 import { BROWSER_PALETTES } from '../browser-appearance.mjs'
 import { Appearance } from './Appearance'
 import { Accessibility } from './Accessibility'
@@ -26,6 +35,14 @@ import type {
   SearchEngine,
   WebsiteTextScale
 } from './useBrowserPreferences'
+import ArrowLeftIcon from '../../assets/icons/bootstrap/arrow-left.svg'
+import ChevronRightIcon from '../../assets/icons/bootstrap/chevron-right.svg'
+import InfoIcon from '../../assets/icons/bootstrap/info-circle.svg'
+import PaletteIcon from '../../assets/icons/bootstrap/palette.svg'
+import ShieldLockIcon from '../../assets/icons/bootstrap/shield-lock.svg'
+import SlidersIcon from '../../assets/icons/bootstrap/sliders.svg'
+import TrashIcon from '../../assets/icons/bootstrap/trash.svg'
+import UniversalAccessIcon from '../../assets/icons/bootstrap/universal-access-circle.svg'
 
 type SettingsPage =
   | 'main'
@@ -71,48 +88,66 @@ const SETTINGS_PAGES: Array<{
   id: Exclude<SettingsPage, 'main'>
   title: string
   description: string
+  icon: ComponentType<SvgProps>
 }> = [
   {
     id: 'general',
     title: 'General',
-    description: 'Search and startup behavior'
+    description: 'Search and startup behavior',
+    icon: SlidersIcon
   },
   {
     id: 'accessibility',
     title: 'Accessibility',
-    description: 'Text size and page zoom'
+    description: 'Text size and page zoom',
+    icon: UniversalAccessIcon
   },
   {
     id: 'appearance',
     title: 'Appearance',
-    description: 'Theme and address bar layout'
+    description: 'Theme and address bar layout',
+    icon: PaletteIcon
   },
   {
     id: 'data-clearing',
     title: 'Data Clearing',
-    description: 'Tabs and browsing data'
+    description: 'Tabs and browsing data',
+    icon: TrashIcon
   },
   {
     id: 'permissions',
     title: 'Permissions',
-    description: 'External app link handling'
+    description: 'External app link handling',
+    icon: ShieldLockIcon
   },
   {
     id: 'about',
     title: 'About',
-    description: 'Version, source code, and licenses'
+    description: 'Version, source code, and licenses',
+    icon: InfoIcon
   }
 ]
 
 export function SettingsScreen (props: SettingsScreenProps) {
   const [page, setPage] = useState<SettingsPage>('main')
+  const [transitionDirection, setTransitionDirection] = useState(1)
+  const reduceMotion = useReducedMotion()
+  const transition = useRef(new Animated.Value(1)).current
   let content
 
   if (page === 'main') {
-    content = <SettingsHome onClose={props.onClose} onOpenPage={setPage} />
+    content = (
+      <SettingsHome
+        onClose={props.onClose}
+        onOpenPage={(nextPage) => changePage(nextPage, 1)}
+      />
+    )
   } else {
     content = (
-      <SettingsSubpage title={getSettingsPageTitle(page)} onBack={() => setPage('main')}>
+      <SettingsSubpage
+        title={getSettingsPageTitle(page)}
+        onBack={() => changePage('main', -1)}
+      >
         {page === 'general' && <General {...props} />}
         {page === 'accessibility' && <Accessibility {...props} />}
         {page === 'appearance' && <Appearance {...props} />}
@@ -123,9 +158,48 @@ export function SettingsScreen (props: SettingsScreenProps) {
     )
   }
 
+  useEffect(() => {
+    if (reduceMotion) {
+      transition.setValue(1)
+      return
+    }
+
+    const animation = Animated.timing(transition, {
+      duration: 180,
+      easing: Easing.out(Easing.cubic),
+      toValue: 1,
+      useNativeDriver: true
+    })
+    animation.start()
+    return () => animation.stop()
+  }, [page, reduceMotion, transition])
+
+  function changePage (nextPage: SettingsPage, direction: number) {
+    if (nextPage === page) return
+
+    transition.stopAnimation()
+    transition.setValue(reduceMotion ? 1 : 0)
+    setTransitionDirection(direction)
+    setPage(nextPage)
+  }
+
+  const transitionStyle = reduceMotion
+    ? null
+    : {
+        opacity: transition,
+        transform: [{
+          translateX: transition.interpolate({
+            inputRange: [0, 1],
+            outputRange: [12 * transitionDirection, 0]
+          })
+        }]
+      }
+
   return (
     <SettingsThemeProvider value={props.isDark}>
-      {content}
+      <Animated.View style={[styles.transition, transitionStyle]}>
+        {content}
+      </Animated.View>
     </SettingsThemeProvider>
   )
 }
@@ -149,29 +223,56 @@ function SettingsHome ({
           style={({ pressed }) => [styles.backButton, pressed ? styles.rowPressed : null]}
           onPress={onClose}
         >
-          <Text style={[styles.backButtonText, isDark ? darkStyles.primaryText : null]}>{'<'}</Text>
+          <ArrowLeftIcon
+            width={22}
+            height={22}
+            color={isDark ? BROWSER_PALETTES.dark.text : '#1f2a44'}
+          />
         </Pressable>
         <Text style={[styles.title, isDark ? darkStyles.primaryText : null]}>Settings</Text>
       </View>
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
         <View style={[styles.menu, isDark ? darkStyles.surface : null]}>
-          {SETTINGS_PAGES.map((page, index) => (
-            <Pressable
-              key={page.id}
-              accessibilityRole='button'
-              style={({ pressed }) => [
-                styles.menuRow,
-                index > 0 ? styles.rowDivider : null,
-                index > 0 && isDark ? darkStyles.divider : null,
-                pressed ? styles.rowPressed : null
-              ]}
-              onPress={() => onOpenPage(page.id)}
-            >
-              <SettingCopy title={page.title} description={page.description} />
-              <Text style={[styles.chevron, isDark ? darkStyles.secondaryText : null]}>{'>'}</Text>
-            </Pressable>
-          ))}
+          {SETTINGS_PAGES.map((page, index) => {
+            const Icon = page.icon
+
+            return (
+              <Pressable
+                key={page.id}
+                accessibilityLabel={`${page.title}. ${page.description}`}
+                accessibilityRole='button'
+                style={({ pressed }) => [
+                  styles.menuRow,
+                  index > 0 ? styles.rowDivider : null,
+                  index > 0 && isDark ? darkStyles.divider : null,
+                  pressed ? styles.rowPressed : null
+                ]}
+                onPress={() => onOpenPage(page.id)}
+              >
+                <View style={[
+                  styles.menuIcon,
+                  isDark ? darkStyles.menuIcon : null
+                ]}>
+                  <Icon
+                    width={22}
+                    height={22}
+                    color={isDark ? '#8fc1ff' : '#1f6fd1'}
+                  />
+                </View>
+                <SettingCopy
+                  title={page.title}
+                  description={page.description}
+                  prominent
+                />
+                <ChevronRightIcon
+                  width={16}
+                  height={16}
+                  color={isDark ? BROWSER_PALETTES.dark.mutedText : '#8190a7'}
+                />
+              </Pressable>
+            )
+          })}
         </View>
       </ScrollView>
     </View>
@@ -199,7 +300,11 @@ function SettingsSubpage ({
           style={({ pressed }) => [styles.backButton, pressed ? styles.rowPressed : null]}
           onPress={onBack}
         >
-          <Text style={[styles.backButtonText, isDark ? darkStyles.primaryText : null]}>{'<'}</Text>
+          <ArrowLeftIcon
+            width={22}
+            height={22}
+            color={isDark ? BROWSER_PALETTES.dark.text : '#1f2a44'}
+          />
         </Pressable>
         <Text style={[styles.subpageTitle, isDark ? darkStyles.primaryText : null]}>{title}</Text>
       </View>
@@ -224,24 +329,21 @@ function AboutSettings ({ onOpenUrl }: { onOpenUrl: (url: string) => void }) {
         </View>
         <Pressable style={styles.linkRow} onPress={() => onOpenUrl(REPOSITORY_URL)}>
           <Text style={[styles.linkText, isDark ? darkStyles.primaryText : null]}>Source code</Text>
-          <Text style={[styles.chevron, isDark ? darkStyles.secondaryText : null]}>{'>'}</Text>
+          <ChevronRightIcon
+            width={16}
+            height={16}
+            color={isDark ? BROWSER_PALETTES.dark.mutedText : '#8190a7'}
+          />
         </Pressable>
         <Pressable style={styles.linkRow} onPress={() => onOpenUrl(LICENSE_URL)}>
           <Text style={[styles.linkText, isDark ? darkStyles.primaryText : null]}>Open-source licenses</Text>
-          <Text style={[styles.chevron, isDark ? darkStyles.secondaryText : null]}>{'>'}</Text>
+          <ChevronRightIcon
+            width={16}
+            height={16}
+            color={isDark ? BROWSER_PALETTES.dark.mutedText : '#8190a7'}
+          />
         </Pressable>
       </SettingsSection>
-    </View>
-  )
-}
-
-function SectionPlaceholder ({ description }: { description: string }) {
-  const isDark = useSettingsDarkMode()
-
-  return (
-    <View style={[styles.placeholder, isDark ? darkStyles.surface : null]}>
-      <Text style={[styles.placeholderTitle, isDark ? darkStyles.primaryText : null]}>Coming in the next step</Text>
-      <Text style={[styles.placeholderDescription, isDark ? darkStyles.secondaryText : null]}>{description}</Text>
     </View>
   )
 }
@@ -250,7 +352,36 @@ function getSettingsPageTitle (page: Exclude<SettingsPage, 'main'>) {
   return SETTINGS_PAGES.find((entry) => entry.id === page)?.title || 'Settings'
 }
 
+function useReducedMotion () {
+  const [reduceMotion, setReduceMotion] = useState(true)
+
+  useEffect(() => {
+    let active = true
+    void AccessibilityInfo.isReduceMotionEnabled()
+      .then((enabled) => {
+        if (active) setReduceMotion(enabled)
+      })
+      .catch((error) => {
+        console.warn('Failed reading reduced-motion preference:', error)
+      })
+    const subscription = AccessibilityInfo.addEventListener(
+      'reduceMotionChanged',
+      setReduceMotion
+    )
+
+    return () => {
+      active = false
+      subscription.remove()
+    }
+  }, [])
+
+  return reduceMotion
+}
+
 const styles = StyleSheet.create({
+  transition: {
+    flex: 1
+  },
   screen: {
     backgroundColor: '#ffffff',
     flex: 1
@@ -267,12 +398,12 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     flexDirection: 'row',
     gap: 12,
-    paddingHorizontal: 20,
-    paddingVertical: 9
+    minHeight: 56,
+    paddingHorizontal: 12
   },
   title: {
     color: '#151821',
-    fontSize: 23,
+    fontSize: 20,
     fontWeight: '800'
   },
   menu: {
@@ -282,10 +413,18 @@ const styles = StyleSheet.create({
   menuRow: {
     alignItems: 'center',
     flexDirection: 'row',
-    gap: 12,
-    minHeight: 76,
-    paddingHorizontal: 20,
-    paddingVertical: 14
+    gap: 13,
+    minHeight: 74,
+    paddingHorizontal: 16,
+    paddingVertical: 11
+  },
+  menuIcon: {
+    alignItems: 'center',
+    backgroundColor: '#edf5ff',
+    borderRadius: 12,
+    height: 42,
+    justifyContent: 'center',
+    width: 42
   },
   rowDivider: {
     borderTopColor: '#e7ebf1',
@@ -294,18 +433,13 @@ const styles = StyleSheet.create({
   rowPressed: {
     opacity: 0.65
   },
-  chevron: {
-    color: '#8190a7',
-    fontSize: 19,
-    fontWeight: '700'
-  },
   subpageHeader: {
     alignItems: 'center',
     borderBottomColor: '#dbe3ef',
     borderBottomWidth: 1,
     flexDirection: 'row',
     gap: 12,
-    minHeight: 60,
+    minHeight: 56,
     paddingHorizontal: 12
   },
   backButton: {
@@ -315,15 +449,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     width: 42
   },
-  backButtonText: {
-    color: '#1f2a44',
-    fontSize: 28,
-    fontWeight: '600',
-    lineHeight: 30
-  },
   subpageTitle: {
     color: '#151821',
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '800'
   },
   pageContent: {
@@ -346,24 +474,6 @@ const styles = StyleSheet.create({
     color: '#1f2a44',
     fontSize: 14,
     fontWeight: '600'
-  },
-  placeholder: {
-    backgroundColor: '#ffffff',
-    borderBottomColor: '#e1e7f0',
-    borderBottomWidth: 1,
-    gap: 7,
-    paddingHorizontal: 20,
-    paddingVertical: 22
-  },
-  placeholderTitle: {
-    color: '#1f2a44',
-    fontSize: 16,
-    fontWeight: '800'
-  },
-  placeholderDescription: {
-    color: '#687086',
-    fontSize: 14,
-    lineHeight: 20
   }
 })
 
@@ -376,6 +486,9 @@ const darkStyles = StyleSheet.create({
   },
   surface: {
     backgroundColor: BROWSER_PALETTES.dark.surface
+  },
+  menuIcon: {
+    backgroundColor: BROWSER_PALETTES.dark.selectedBackground
   },
   header: {
     backgroundColor: BROWSER_PALETTES.dark.surface,
