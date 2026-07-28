@@ -5,6 +5,8 @@ import {
   DEFAULT_BROWSER_PAGE_ZOOM
 } from './browser-tabs.mjs'
 import { BROWSER_PALETTES } from './browser-appearance.mjs'
+import ZoomOutIcon from '../assets/icons/bootstrap/dash-lg.svg'
+import ZoomInIcon from '../assets/icons/bootstrap/plus-lg.svg'
 
 type BrowserZoomSheetProps = {
   isDark: boolean
@@ -28,6 +30,7 @@ export function BrowserZoomSheet ({
   const zoomIndex = BROWSER_PAGE_ZOOMS.indexOf(pageZoom)
   const canZoomOut = zoomIndex > 0
   const canZoomIn = zoomIndex >= 0 && zoomIndex < BROWSER_PAGE_ZOOMS.length - 1
+  const iconColor = isDark ? BROWSER_PALETTES.dark.text : '#1f2a44'
 
   return (
     <Modal
@@ -55,7 +58,7 @@ export function BrowserZoomSheet ({
               style={[styles.zoomButton, isDark ? darkStyles.zoomButton : null, !canZoomOut ? styles.disabled : null]}
               onPress={onZoomOut}
             >
-              <Text style={[styles.zoomButtonText, isDark ? darkStyles.primaryText : null]}>-</Text>
+              <ZoomOutIcon width={24} height={24} color={iconColor} />
             </Pressable>
             <Text style={[styles.zoomValue, isDark ? darkStyles.primaryText : null]}>{pageZoom}%</Text>
             <Pressable
@@ -66,7 +69,7 @@ export function BrowserZoomSheet ({
               style={[styles.zoomButton, isDark ? darkStyles.zoomButton : null, !canZoomIn ? styles.disabled : null]}
               onPress={onZoomIn}
             >
-              <Text style={[styles.zoomButtonText, isDark ? darkStyles.primaryText : null]}>+</Text>
+              <ZoomInIcon width={24} height={24} color={iconColor} />
             </Pressable>
           </View>
 
@@ -132,12 +135,6 @@ const styles = StyleSheet.create({
     height: 54,
     justifyContent: 'center',
     width: 68
-  },
-  zoomButtonText: {
-    color: '#1f2a44',
-    fontSize: 28,
-    fontWeight: '800',
-    lineHeight: 31
   },
   zoomValue: {
     color: '#1f2a44',

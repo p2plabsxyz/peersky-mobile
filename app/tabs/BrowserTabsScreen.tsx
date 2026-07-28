@@ -14,6 +14,8 @@ import { styles } from '../styles'
 import FireIcon from '../../assets/icons/bootstrap/fire.svg'
 import GridIcon from '../../assets/icons/bootstrap/grid.svg'
 import ListIcon from '../../assets/icons/bootstrap/list-ul.svg'
+import PlusIcon from '../../assets/icons/bootstrap/plus-lg.svg'
+import CloseIcon from '../../assets/icons/bootstrap/x-lg.svg'
 
 type BrowserTabManagerItem = {
   favicon: string | null
@@ -117,7 +119,7 @@ export function BrowserTabsScreen ({
               onPress={onNewTab}
               disabled={newTabDisabled}
             >
-              <Text style={styles.browserTabsNewButtonText}>+</Text>
+              <PlusIcon width={20} height={20} color='#ffffff' />
             </Pressable>
           </View>
         </View>
@@ -222,7 +224,7 @@ export function BrowserTabsScreen ({
                 style={[styles.browserTabCardClose, { backgroundColor: palette.button }]}
                 onPress={() => onCloseTab(item.id)}
               >
-                <Text style={[styles.browserTabCardCloseText, { color: palette.text }]}>X</Text>
+                <CloseIcon width={16} height={16} color={palette.text} />
               </Pressable>
             </View>
           )}

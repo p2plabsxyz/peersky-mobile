@@ -41,11 +41,6 @@ export const styles = StyleSheet.create({
   browserNavButtonDisabled: {
     opacity: 0.35
   },
-  browserNavButtonText: {
-    color: '#1f2a44',
-    fontSize: 18,
-    fontWeight: '800'
-  },
   browserAddress: {
     backgroundColor: '#ffffff',
     borderColor: '#d2dff1',
@@ -66,11 +61,6 @@ export const styles = StyleSheet.create({
     justifyContent: 'center',
     minWidth: 44,
     paddingHorizontal: 10
-  },
-  browserActionButtonText: {
-    color: '#ffffff',
-    fontSize: 22,
-    fontWeight: '800'
   },
   browserShareButton: {
     alignItems: 'center',
@@ -250,11 +240,6 @@ export const styles = StyleSheet.create({
     top: 8,
     width: 26
   },
-  browserTabCardCloseText: {
-    color: '#33415e',
-    fontSize: 12,
-    fontWeight: '900'
-  },
   browserTabsNewButton: {
     alignItems: 'center',
     backgroundColor: '#1f6fd1',
@@ -280,12 +265,6 @@ export const styles = StyleSheet.create({
   },
   browserTabsNewButtonDisabled: {
     opacity: 0.4
-  },
-  browserTabsNewButtonText: {
-    color: '#ffffff',
-    fontSize: 25,
-    fontWeight: '500',
-    lineHeight: 28
   },
   browserChip: {
     backgroundColor: '#e8f0fb',

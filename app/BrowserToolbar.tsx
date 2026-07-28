@@ -11,7 +11,12 @@ import { MAX_BROWSER_URL_LENGTH } from './browser-shell.mjs'
 import { formatBrowserAddress } from './browser-appearance.mjs'
 import { BrowserOverflowMenu } from './settings/BrowserOverflowMenu'
 import { styles } from './styles'
+import ReloadIcon from '../assets/icons/bootstrap/arrow-clockwise.svg'
+import BackIcon from '../assets/icons/bootstrap/chevron-left.svg'
+import ForwardIcon from '../assets/icons/bootstrap/chevron-right.svg'
 import ShareIcon from '../assets/icons/bootstrap/share.svg'
+
+const TOOLBAR_ICON_SIZE = 18
 
 type BrowserToolbarProps = {
   address: string
@@ -163,7 +168,11 @@ export function BrowserToolbar ({
         onPress={onBack}
         disabled={!canGoBack}
       >
-        <Text style={[styles.browserNavButtonText, { color: palette.text }]}>{'<'}</Text>
+        <BackIcon
+          width={TOOLBAR_ICON_SIZE}
+          height={TOOLBAR_ICON_SIZE}
+          color={palette.text}
+        />
       </Pressable>
       <Pressable
         accessibilityLabel='Go forward'
@@ -175,7 +184,11 @@ export function BrowserToolbar ({
         onPress={onForward}
         disabled={!canGoForward}
       >
-        <Text style={[styles.browserNavButtonText, { color: palette.text }]}>{'>'}</Text>
+        <ForwardIcon
+          width={TOOLBAR_ICON_SIZE}
+          height={TOOLBAR_ICON_SIZE}
+          color={palette.text}
+        />
       </Pressable>
       </Animated.View>
       <TextInput
@@ -239,7 +252,13 @@ export function BrowserToolbar ({
       >
         {isLoading
           ? <ActivityIndicator color='#ffffff' size='small' />
-          : <Text style={styles.browserActionButtonText}>↻</Text>}
+          : (
+            <ReloadIcon
+              width={TOOLBAR_ICON_SIZE}
+              height={TOOLBAR_ICON_SIZE}
+              color='#ffffff'
+            />
+            )}
       </Pressable>
       {shareActionAvailable && (
         <Pressable
@@ -248,7 +267,11 @@ export function BrowserToolbar ({
           style={[styles.browserShareButton, { backgroundColor: palette.button }]}
           onPress={onSharePage}
         >
-          <ShareIcon width={18} height={18} color={palette.text} />
+          <ShareIcon
+            width={TOOLBAR_ICON_SIZE}
+            height={TOOLBAR_ICON_SIZE}
+            color={palette.text}
+          />
         </Pressable>
       )}
       <Pressable
