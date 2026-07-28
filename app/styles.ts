@@ -118,11 +118,19 @@ export const styles = StyleSheet.create({
     fontSize: 13,
     marginTop: 2
   },
-  browserTabsGrid: {
+  browserTabsHeaderActions: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
+    gap: 10
+  },
+  browserTabsGrid: {
     gap: 14,
     padding: 16
+  },
+  browserTabsGridRow: {
+    gap: 14
+  },
+  browserTabsList: {
+    paddingBottom: 24
   },
   browserTabCard: {
     backgroundColor: '#ffffff',
@@ -142,6 +150,16 @@ export const styles = StyleSheet.create({
     flex: 1,
     padding: 10
   },
+  browserTabCardList: {
+    minHeight: 112,
+    width: '100%'
+  },
+  browserTabCardBodyList: {
+    alignItems: 'center',
+    flexDirection: 'row-reverse',
+    gap: 12,
+    paddingRight: 44
+  },
   browserTabCardPreview: {
     alignItems: 'center',
     backgroundColor: '#f5f8ff',
@@ -149,7 +167,17 @@ export const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     minHeight: 116,
+    overflow: 'hidden',
     padding: 12
+  },
+  browserTabCardPreviewWithThumbnail: {
+    padding: 0
+  },
+  browserTabCardPreviewList: {
+    flex: 0,
+    height: 82,
+    minHeight: 82,
+    width: 112
   },
   browserTabCardPreviewText: {
     color: '#52617a',
@@ -157,17 +185,51 @@ export const styles = StyleSheet.create({
     fontWeight: '800',
     textAlign: 'center'
   },
+  browserTabCardFavicon: {
+    height: 54,
+    resizeMode: 'contain',
+    width: 54
+  },
+  browserTabCardThumbnail: {
+    left: 0,
+    position: 'absolute',
+    resizeMode: 'cover',
+    top: 0,
+    width: '100%'
+  },
+  browserTabCardDetails: {
+    alignItems: 'center',
+    flex: 1,
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 9,
+    minWidth: 0
+  },
+  browserTabCardDetailsList: {
+    marginBottom: 0
+  },
+  browserTabCardHeaderFavicon: {
+    height: 22,
+    resizeMode: 'contain',
+    width: 22
+  },
+  browserTabCardHeaderFallback: {
+    alignItems: 'center',
+    borderRadius: 6,
+    height: 22,
+    justifyContent: 'center',
+    width: 22
+  },
+  browserTabCardHeaderFallbackText: {
+    fontSize: 11,
+    fontWeight: '900'
+  },
   browserTabCardTitle: {
     color: '#202b43',
+    flex: 1,
     fontSize: 13,
     fontWeight: '800',
-    marginTop: 9,
-    paddingRight: 26
-  },
-  browserTabCardUrl: {
-    color: '#7d879a',
-    fontSize: 10,
-    marginTop: 3
+    paddingRight: 30
   },
   browserTabCardClose: {
     alignItems: 'center',
@@ -188,6 +250,21 @@ export const styles = StyleSheet.create({
   browserTabsNewButton: {
     alignItems: 'center',
     backgroundColor: '#1f6fd1',
+    borderRadius: 10,
+    height: 42,
+    justifyContent: 'center',
+    width: 42
+  },
+  browserTabsViewButton: {
+    alignItems: 'center',
+    borderRadius: 10,
+    height: 42,
+    justifyContent: 'center',
+    width: 42
+  },
+  browserTabsBurnButton: {
+    alignItems: 'center',
+    backgroundColor: '#d44a3a',
     borderRadius: 10,
     height: 42,
     justifyContent: 'center',
@@ -299,6 +376,9 @@ export const styles = StyleSheet.create({
   },
   browserWebView: {
     backgroundColor: '#ffffff',
+    flex: 1
+  },
+  browserWebViewCapture: {
     flex: 1
   },
   browserRestorePage: {

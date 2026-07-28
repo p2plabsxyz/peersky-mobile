@@ -41,10 +41,35 @@ export function parseBrowserFaviconMessage (message, pageUrl) {
 export function createBrowserFaviconScript () {
   return `(() => {
     try {
-      const icon = document.querySelector(
-        'link[rel~="icon" i], link[rel="apple-touch-icon" i]'
-      )
-      let favicon = icon && icon.href ? icon.href : ''
+      const candidates = Array.from(document.querySelectorAll('link[rel]'))
+        .slice(0, 64)
+        .map((icon, index) => {
+          const rel = String(icon.rel || '').toLowerCase().split(/\\s+/)
+          const isAppleTouchIcon =
+            rel.includes('apple-touch-icon') ||
+            rel.includes('apple-touch-icon-precomposed')
+          if (!isAppleTouchIcon && !rel.includes('icon')) return null
+
+          const href = String(icon.href || '')
+          if (!href || href.length > ${MAX_BROWSER_FAVICON_DATA_LENGTH}) return null
+
+          const type = String(icon.type || '').toLowerCase()
+          const isRaster =
+            /^image\\/(?:gif|jpeg|png|webp)$/.test(type) ||
+            /[.](?:gif|jpe?g|png|webp)(?:[?#]|$)/i.test(href)
+          const isIco =
+            /(?:x-icon|vnd[.]microsoft[.]icon)/.test(type) ||
+            /[.]ico(?:[?#]|$)/i.test(href)
+
+          return {
+            href,
+            index,
+            score: (isAppleTouchIcon ? 100 : 0) + (isRaster ? 40 : 0) - (isIco ? 20 : 0)
+          }
+        })
+        .filter(Boolean)
+        .sort((left, right) => right.score - left.score || left.index - right.index)
+      let favicon = candidates[0] ? candidates[0].href : ''
 
       if (!favicon && /^https?:$/i.test(location.protocol)) {
         favicon = new URL('/favicon.ico', location.href).href

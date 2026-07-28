@@ -6,7 +6,6 @@ import {
   Button,
   KeyboardAvoidingView,
   Linking,
-  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -49,6 +48,7 @@ import {
   MAX_BROWSER_TABS,
   normalizeBrowserPageZoom,
   normalizeBrowserTabTitle,
+  setBrowserTabViewModeState,
   serializeBrowserTabsState,
   suspendInactiveBrowserTabsState,
   switchBrowserTabState,
@@ -93,6 +93,9 @@ import {
 import { useBrowserBookmarks } from './bookmarks/useBrowserBookmarks'
 import { DownloadsScreen } from './downloads/DownloadsScreen'
 import { useBrowserDownloads } from './downloads/useBrowserDownloads'
+import { BrowserTabsScreen } from './tabs/BrowserTabsScreen'
+import { useBrowserTabPreviews } from './tabs/useBrowserTabPreviews'
+import { isBrowserTabPreviewForPage } from './tabs/browser-tab-preview.mjs'
 import { styles } from './styles'
 import {
   RPC_HOLESAIL_CONNECT,
@@ -168,6 +171,7 @@ type BrowserTabsState = {
   tabs: BrowserTab[]
   activeTabId: string
   nextTabIndex: number
+  viewMode: 'grid' | 'list'
 }
 
 const DESKTOP_BROWSER_USER_AGENT = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 PeerSkyMobile/1.0'
@@ -267,6 +271,28 @@ export default function App () {
   const [p2pmdPublishUrl, setP2pmdPublishUrl] = useState<string | null>(null)
   const [isP2pmdPublishing, setIsP2pmdPublishing] = useState(false)
   const shouldShowRuntimeStatus = activeTab !== 'p2pmd'
+  const {
+    clearAllPreviews: clearAllBrowserTabPreviews,
+    clearCachedPreviews: clearCachedBrowserTabPreviews,
+    clearPreview: clearBrowserTabPreview,
+    previews: browserTabPreviews,
+    removePreview: removeBrowserTabPreview,
+    restorePreviews: restoreBrowserTabPreviews,
+    schedulePreview: scheduleBrowserTabPreview,
+    setCaptureLayout: setBrowserPreviewLayout,
+    setCaptureView: setBrowserPreviewView
+  } = useBrowserTabPreviews<BrowserHistoryEntry>({
+    getEntryKey: (entry) => entry.url,
+    isCurrentEntry: (tabId, entry) => {
+      const tab = browserTabsStateRef.current.tabs.find((item) => item.id === tabId)
+      const currentEntry = tab?.history[tab.historyIndex]
+      return Boolean(
+        currentEntry &&
+        currentEntry.source.kind === entry.source.kind &&
+        isBrowserTabPreviewForPage(currentEntry.url, entry.url)
+      )
+    }
+  })
 
   useEffect(() => {
     void startWorklet()
@@ -321,6 +347,15 @@ export default function App () {
     const timer = setTimeout(() => writeBrowserSession(browserTabsState), 200)
     return () => clearTimeout(timer)
   }, [browserSessionReady, browserTabsState])
+
+  useEffect(() => {
+    if (!browserSessionReady) return
+
+    restoreBrowserTabPreviews(browserTabsStateRef.current.tabs.flatMap((tab) => {
+      const entry = tab.history[tab.historyIndex]
+      return entry ? [{ entry, tabId: tab.id }] : []
+    }))
+  }, [browserSessionReady])
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextState) => {
@@ -1039,6 +1074,12 @@ export default function App () {
     updateBrowserTabsState(nextState)
     if (tab) applyBrowserTab(tab)
     setBrowserTabsVisible(false)
+    if (tab) {
+      const entry = tab.history[tab.historyIndex]
+      if (entry && isBrowserWebViewSource(entry.source)) {
+        scheduleBrowserTabPreview(tab.id, entry, 400)
+      }
+    }
     setStatus('Tab switched')
   }
 
@@ -1052,16 +1093,20 @@ export default function App () {
     const tab = nextState.tabs.find((item) => item.id === nextState.activeTabId)
 
     updateBrowserTabsState(nextState)
+    removeBrowserTabPreview(tabId)
     browserFaviconsRef.current.delete(tabId)
     setBrowserLiveTabIds((tabIds) => tabIds.filter((id) => id !== tabId))
     if (isClosingActive && tab) applyBrowserTab(tab)
     setStatus('Tab closed')
   }
 
-  function onBrowserResetTabs () {
+  function onBrowserResetTabs (clearPreviews = true) {
     browserUserInteractedRef.current = true
     cancelPendingBrowserLoad()
-    const reset = createBrowserResetSession(browserWebViewRefs.current) as {
+    const reset = createBrowserResetSession(
+      browserWebViewRefs.current,
+      browserTabsStateRef.current.viewMode
+    ) as {
       tabsState: BrowserTabsState
       liveTabIds: string[]
     }
@@ -1069,14 +1114,57 @@ export default function App () {
     const tab = nextState.tabs[0]
 
     updateBrowserTabsState(nextState)
+    const previewCacheCleared = clearPreviews
+      ? clearAllBrowserTabPreviews()
+      : true
     browserFaviconsRef.current.clear()
     setBrowserLiveTabIds(reset.liveTabIds)
     if (tab) applyBrowserTab(tab)
     const sessionSaved = writeBrowserSession(nextState)
-    setStatus(sessionSaved
-      ? 'Tab session reset'
-      : 'Tab session reset, but could not be saved')
-    return sessionSaved
+    setStatus(
+      !sessionSaved
+        ? 'Tab session reset, but could not be saved'
+        : !previewCacheCleared
+          ? 'Tab session reset, but preview cache could not be cleared'
+          : 'Tab session reset'
+    )
+    return { previewCacheCleared, sessionSaved }
+  }
+
+  function onBrowserBurnTabs () {
+    Alert.alert(
+      'Close all tabs?',
+      'This closes every open tab and starts a fresh tab.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Close all',
+          style: 'destructive',
+          onPress: () => {
+            const { previewCacheCleared, sessionSaved } = onBrowserResetTabs()
+            setBrowserTabsVisible(false)
+            setBrowserTitle('PeerSky')
+            setStatus(
+              !sessionSaved
+                ? 'All tabs closed, but the fresh session could not be saved'
+                : !previewCacheCleared
+                  ? 'All tabs closed, but preview cache could not be cleared'
+                  : 'All tabs closed'
+            )
+          }
+        }
+      ]
+    )
+  }
+
+  function onBrowserToggleTabView () {
+    const nextViewMode = browserTabsStateRef.current.viewMode === 'grid'
+      ? 'list'
+      : 'grid'
+    updateBrowserTabsState((state) =>
+      setBrowserTabViewModeState(state, nextViewMode) as BrowserTabsState
+    )
+    setStatus(`Tab ${nextViewMode} view enabled`)
   }
 
   function onBrowserShouldStartLoad (
@@ -1727,10 +1815,11 @@ export default function App () {
           onAddressBarPositionChange={setAddressBarPosition}
           onClose={() => setBrowserSettingsVisible(false)}
           onClearBrowsingData={() => {
-            const sessionSaved = onBrowserResetTabs()
+            const { sessionSaved } = onBrowserResetTabs(false)
             if (sessionSaved) setBrowserSettingsVisible(false)
             return sessionSaved
           }}
+          onClearCachedData={clearCachedBrowserTabPreviews}
           onCustomSearchSave={setCustomSearchEngine}
           onEnforceManualPageZoomChange={setEnforceManualPageZoom}
           onExternalLinkBehaviorChange={setExternalLinkBehavior}
@@ -1934,6 +2023,22 @@ export default function App () {
     borderColor: browserChrome.border,
     color: browserChrome.text
   }
+  const browserTabManagerItems = browserTabsState.tabs.map((tab) => {
+    const entry = tab.history[tab.historyIndex]
+    const storedPreview = browserTabPreviews.get(tab.id)
+    const preview = storedPreview && entry &&
+      isBrowserTabPreviewForPage(storedPreview.pageKey, entry.url)
+      ? storedPreview
+      : null
+
+    return {
+      favicon: browserFaviconsRef.current.get(tab.id) || null,
+      id: tab.id,
+      isActive: tab.id === browserTabsState.activeTabId,
+      label: getBrowserTabLabel(tab),
+      preview
+    }
+  })
 
   return (
     <SafeAreaView
@@ -1951,81 +2056,20 @@ export default function App () {
         >
         {browserPreferences.addressBarPosition === 'top' && browserToolbar}
 
-        <Modal
-          animationType='slide'
+        <BrowserTabsScreen
+          items={browserTabManagerItems}
+          newTabDisabled={browserTabsState.tabs.length >= MAX_BROWSER_TABS}
+          palette={browserChrome}
+          viewMode={browserTabsState.viewMode}
           visible={browserTabsVisible}
-          onRequestClose={() => setBrowserTabsVisible(false)}
-        >
-          <SafeAreaView
-            style={[styles.browserTabsScreen, { backgroundColor: browserChrome.shell }]}
-            edges={['top', 'left', 'right', 'bottom']}
-          >
-            <View style={[styles.browserTabsHeader, { borderBottomColor: browserChrome.border }]}>
-              <View>
-                <Text style={[styles.browserTabsTitle, { color: browserChrome.text }]}>Tabs</Text>
-                <Text style={[styles.browserTabsSubtitle, { color: browserChrome.mutedText }]}>
-                  {browserTabsState.tabs.length} open
-                </Text>
-              </View>
-              <Pressable
-                accessibilityLabel='Open new tab'
-                style={[
-                  styles.browserTabsNewButton,
-                  browserTabsState.tabs.length >= MAX_BROWSER_TABS ? styles.browserTabsNewButtonDisabled : null
-                ]}
-                onPress={onBrowserNewTab}
-                disabled={browserTabsState.tabs.length >= MAX_BROWSER_TABS}
-              >
-                <Text style={styles.browserTabsNewButtonText}>+</Text>
-              </Pressable>
-            </View>
-
-            <ScrollView contentContainerStyle={styles.browserTabsGrid}>
-              {browserTabsState.tabs.map((tab) => {
-                const entry = tab.history[tab.historyIndex]
-
-                return (
-                  <View
-                    key={tab.id}
-                    style={[
-                      styles.browserTabCard,
-                      {
-                        backgroundColor: browserChrome.address,
-                        borderColor: browserChrome.border
-                      },
-                      tab.id === browserTabsState.activeTabId ? styles.browserTabCardActive : null
-                    ]}
-                  >
-                    <Pressable style={styles.browserTabCardBody} onPress={() => onBrowserSwitchTab(tab.id)}>
-                      <View style={[styles.browserTabCardPreview, { backgroundColor: browserChrome.button }]}>
-                        <Text
-                          style={[styles.browserTabCardPreviewText, { color: browserChrome.mutedText }]}
-                          numberOfLines={2}
-                        >
-                          {getBrowserTabLabel(tab)}
-                        </Text>
-                      </View>
-                      <Text style={[styles.browserTabCardTitle, { color: browserChrome.text }]} numberOfLines={1}>
-                        {getBrowserTabLabel(tab)}
-                      </Text>
-                      <Text style={[styles.browserTabCardUrl, { color: browserChrome.mutedText }]} numberOfLines={1}>
-                        {entry?.url || BROWSER_HOME_URL}
-                      </Text>
-                    </Pressable>
-                    <Pressable
-                      accessibilityLabel={`Close ${getBrowserTabLabel(tab)}`}
-                      style={[styles.browserTabCardClose, { backgroundColor: browserChrome.button }]}
-                      onPress={() => onBrowserCloseTab(tab.id)}
-                    >
-                      <Text style={[styles.browserTabCardCloseText, { color: browserChrome.text }]}>x</Text>
-                    </Pressable>
-                  </View>
-                )
-              })}
-            </ScrollView>
-
-          </SafeAreaView>
-        </Modal>
+          onBurnTabs={onBrowserBurnTabs}
+          onClose={() => setBrowserTabsVisible(false)}
+          onCloseTab={onBrowserCloseTab}
+          onNewTab={onBrowserNewTab}
+          onPreviewError={clearBrowserTabPreview}
+          onSwitchTab={onBrowserSwitchTab}
+          onToggleView={onBrowserToggleTabView}
+        />
 
         <View style={[styles.browserContent, { backgroundColor: browserChrome.shell }]}>
         {browserSource.kind === 'home'
@@ -2328,6 +2372,17 @@ export default function App () {
               pointerEvents={isActive ? 'auto' : 'none'}
               style={[styles.browserWebViewLayer, !isActive ? styles.browserWebViewLayerHidden : null]}
             >
+            <View
+              ref={(ref) => {
+                setBrowserPreviewView(tab.id, ref)
+              }}
+              onLayout={(event) => {
+                const { height, width } = event.nativeEvent.layout
+                setBrowserPreviewLayout(tab.id, width, height)
+              }}
+              collapsable={false}
+              style={styles.browserWebViewCapture}
+            >
             <WebView
               key={`${getBrowserWebViewKey(tab.id, entry.source.kind)}:${tabDesktopView ? 'desktop' : 'mobile'}`}
               ref={(ref) => {
@@ -2358,6 +2413,12 @@ export default function App () {
               onFileDownload={(event) => {
                 void requestBrowserDownload(event.nativeEvent.downloadUrl)
               }}
+              scrollEventThrottle={200}
+              onScroll={() => {
+                if (isCurrentBrowserTabEntry(browserTabsStateRef.current, tab.id, entry)) {
+                  scheduleBrowserTabPreview(tab.id, entry)
+                }
+              }}
               onLoadStart={() => {
                 browserFaviconsRef.current.delete(tab.id)
                 if (
@@ -2374,6 +2435,7 @@ export default function App () {
                   isCurrentBrowserTabEntry(browserTabsStateRef.current, tab.id, entry)
                 ) {
                   setBrowserIsLoading(false)
+                  scheduleBrowserTabPreview(tab.id, entry)
                 }
               }}
               onNavigationStateChange={(navigationState) => {
@@ -2437,6 +2499,7 @@ export default function App () {
                 }
               }}
             />
+            </View>
             </View>
           )
         })}

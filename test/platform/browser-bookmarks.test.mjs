@@ -96,6 +96,42 @@ describe('browser bookmarks', () => {
     assert.match(script, new RegExp(String(MAX_BROWSER_FAVICON_DATA_LENGTH)))
   })
 
+  test('prefers a raster apple-touch icon over an ICO favicon', () => {
+    const messages = []
+    const script = createBrowserFaviconScript()
+    const links = [
+      {
+        href: 'https://example.com/favicon.ico',
+        rel: 'icon',
+        type: 'image/vnd.microsoft.icon'
+      },
+      {
+        href: 'https://example.com/apple-touch.png',
+        rel: 'apple-touch-icon',
+        type: 'image/png'
+      }
+    ]
+
+    vm.runInNewContext(script, {
+      document: {
+        querySelectorAll: () => links
+      },
+      location: {
+        href: 'https://example.com/',
+        protocol: 'https:'
+      },
+      URL,
+      window: {
+        ReactNativeWebView: {
+          postMessage: (message) => messages.push(JSON.parse(message))
+        }
+      }
+    })
+
+    assert.equal(messages.length, 1)
+    assert.equal(messages[0].favicon, 'https://example.com/apple-touch.png')
+  })
+
   test('separates injected scripts into valid JavaScript', () => {
     const script = combineBrowserInjectedScripts('(() => true)()', '(() => true)()')
 

@@ -51,6 +51,7 @@ type SettingsScreenProps = {
   onAddressBarPositionChange: (position: AddressBarPosition) => void
   onClose: () => void
   onClearBrowsingData: () => boolean
+  onClearCachedData: () => boolean
   onCustomSearchSave: (url: string) => boolean
   onEnforceManualPageZoomChange: (enabled: boolean) => void
   onExternalLinkBehaviorChange: (behavior: ExternalLinkBehavior) => void

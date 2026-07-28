@@ -9,6 +9,7 @@ export const MAX_LIVE_BROWSER_WEBVIEWS = 5
 export const MAX_BROWSER_TITLE_LENGTH = 256
 export const BROWSER_PAGE_ZOOMS = [80, 90, 100, 110, 125, 150]
 export const DEFAULT_BROWSER_PAGE_ZOOM = 100
+export const DEFAULT_BROWSER_TAB_VIEW_MODE = 'grid'
 const SESSION_VERSION = 1
 const INTERNAL_APP_URLS = {
   hyper: 'peersky://hyper/',
@@ -33,7 +34,8 @@ export function createBrowserTabsState () {
   return {
     tabs: [createBrowserTab('tab-1')],
     activeTabId: 'tab-1',
-    nextTabIndex: 2
+    nextTabIndex: 2,
+    viewMode: DEFAULT_BROWSER_TAB_VIEW_MODE
   }
 }
 
@@ -68,6 +70,7 @@ export function serializeBrowserTabsState (state) {
     version: SESSION_VERSION,
     activeTabId: state.activeTabId,
     nextTabIndex: state.nextTabIndex,
+    viewMode: normalizeBrowserTabViewMode(state.viewMode),
     tabs: state.tabs.map((tab) => {
       const entry = tab.history[tab.historyIndex] || tab.history[0]
       const url = normalizeBrowserTabUrl(entry?.url)
@@ -132,7 +135,8 @@ export function restoreBrowserTabsState (serialized) {
   return {
     tabs,
     activeTabId,
-    nextTabIndex
+    nextTabIndex,
+    viewMode: normalizeBrowserTabViewMode(value.viewMode)
   }
 }
 
@@ -204,6 +208,17 @@ export function switchBrowserTabState (state, tabId) {
   }
 }
 
+export function setBrowserTabViewModeState (state, viewMode) {
+  const normalizedViewMode = normalizeBrowserTabViewMode(viewMode)
+  return normalizedViewMode === state.viewMode
+    ? state
+    : { ...state, viewMode: normalizedViewMode }
+}
+
+export function normalizeBrowserTabViewMode (viewMode) {
+  return viewMode === 'list' ? 'list' : DEFAULT_BROWSER_TAB_VIEW_MODE
+}
+
 export function updateBrowserTabState (state, tabId, patch) {
   const normalizedPatch = {
     ...patch,
@@ -262,7 +277,8 @@ export function closeBrowserTabState (state, tabId) {
     return {
       tabs: [createBrowserTab(id)],
       activeTabId: id,
-      nextTabIndex: state.nextTabIndex + 1
+      nextTabIndex: state.nextTabIndex + 1,
+      viewMode: normalizeBrowserTabViewMode(state.viewMode)
     }
   }
 
