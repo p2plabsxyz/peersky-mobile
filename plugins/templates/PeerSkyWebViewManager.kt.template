@@ -1,0 +1,39 @@
+package __PACKAGE_NAME__
+
+import android.widget.Toast
+import com.facebook.react.uimanager.ThemedReactContext
+import com.reactnativecommunity.webview.RNCWebViewManager
+import com.reactnativecommunity.webview.RNCWebViewWrapper
+
+class PeerSkyWebViewManager : RNCWebViewManager() {
+  override fun getName() = "PeerSkyWebView"
+
+  public override fun createViewInstance(
+    context: ThemedReactContext
+  ): RNCWebViewWrapper {
+    val wrapper = super.createViewInstance(context)
+    wrapper.webView.setDownloadListener {
+        url,
+        userAgent,
+        contentDisposition,
+        mimeType,
+        _ ->
+      val downloads = context.getNativeModule(BrowserDownloadsModule::class.java)
+      if (downloads == null) {
+        Toast.makeText(
+          context,
+          "Download service is unavailable.",
+          Toast.LENGTH_LONG
+        ).show()
+        return@setDownloadListener
+      }
+      downloads.queueDownload(
+        url,
+        userAgent,
+        contentDisposition,
+        mimeType
+      )
+    }
+    return wrapper
+  }
+}

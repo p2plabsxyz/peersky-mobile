@@ -137,16 +137,95 @@ describe('browser downloads', () => {
   test('generates and registers the Android download bridge idempotently', () => {
     const mainApplication = 'PackageList(this).packages.apply {\n        }'
     const registered = downloadsPlugin.addPackageRegistration(mainApplication)
+    const moduleSource = downloadsPlugin.createDownloadsModule('xyz.test.browser')
+    const packageSource = downloadsPlugin.createDownloadsPackage('xyz.test.browser')
+    const webViewManagerSource = downloadsPlugin.createWebViewManager('xyz.test.browser')
+    const unitTestSource = downloadsPlugin.createDownloadsModuleTest('xyz.test.browser')
 
     assert.match(registered, /add\(BrowserDownloadsPackage\(\)\)/)
     assert.equal(downloadsPlugin.addPackageRegistration(registered), registered)
+    assert.match(moduleSource, /package xyz\.test\.browser/)
+    assert.match(moduleSource, /@ReactModule\(name = BrowserDownloadsModule[.]NAME\)/)
+    assert.match(moduleSource, /const val NAME = "BrowserDownloads"/)
+    assert.match(moduleSource, /fun openDownload\(id: String, promise: Promise\)/)
+    assert.doesNotMatch(moduleSource, /getDownloadAnalysis|recordDiagnostic/)
+    assert.match(moduleSource, /resolveDownloadMetadata/)
+    assert.match(moduleSource, /resolveMimeTypeFromFilename/)
+    assert.match(moduleSource, /takeUnless\(::isAmbiguousDownloadType\)/)
+    assert.match(moduleSource, /requestMethod = "HEAD"/)
+    assert.match(moduleSource, /status in 200[.][.]299/)
+    assert.match(moduleSource, /contentDisposition/)
+    assert.match(moduleSource, /ContentInfoUtil/)
+    assert.match(moduleSource, /MAX_ACTIVE_DOWNLOADS = 3/)
+    assert.match(moduleSource, /MAX_DOWNLOADS_PER_WINDOW = 10/)
+    assert.match(moduleSource, /MAX_RECONCILIATIONS_PER_REFRESH = 2/)
+    assert.match(moduleSource, /MAX_RECONCILE_ATTEMPTS = 3/)
+    assert.match(moduleSource, /DownloadManager[.]ACTION_DOWNLOAD_COMPLETE/)
+    assert.match(moduleSource, /DownloadManager[.]COLUMN_MEDIAPROVIDER_URI/)
+    assert.match(moduleSource, /fun hasDownloadCapacity\(\)/)
     assert.match(
-      downloadsPlugin.createDownloadsModule('xyz.test.browser'),
-      /package xyz\.test\.browser/
+      moduleSource,
+      /hasMeaningfulExtension\(initialName\) &&\s+!isAmbiguousDownloadType\(mimeType\)/
     )
     assert.match(
-      downloadsPlugin.createDownloadsModule('xyz.test.browser'),
-      /fun openDownload\(id: String, promise: Promise\)/
+      moduleSource,
+      /val mimeType = stored[?][.]mimeType\s+[?]: manager[.]getMimeTypeForDownloadedFile/
     )
+    assert.match(moduleSource, /MAX_SIGNATURE_BYTES = 131072/)
+    assert.match(moduleSource, /MAX_ARCHIVE_SCAN_BYTES = 8L [*] 1024L [*] 1024L/)
+    assert.match(moduleSource, /AndroidManifest[.]xml/)
+    assert.match(moduleSource, /hasManifest && hasPackageContent/)
+    assert.doesNotMatch(moduleSource, /startsWithMpegAudioFrame/)
+    assert.doesNotMatch(moduleSource, /stored[?][.]let \{ findPublicDownloadUri/)
+    assert.match(moduleSource, /com[.]reactnativecommunity[.]webview[.]URLUtil/)
+    assert.match(moduleSource, /setDestinationInExternalPublicDir/)
+    assert.match(moduleSource, /getSharedPreferences/)
+    assert.match(packageSource, /listOf\(PeerSkyWebViewManager\(\)\)/)
+    assert.match(webViewManagerSource, /setDownloadListener/)
+    assert.match(webViewManagerSource, /queueDownload/)
+    assert.match(webViewManagerSource, /Download service is unavailable[.]/)
+    assert.match(unitTestSource, /acceptsOnlyBoundedCredentialFreeHttpUrls/)
+    assert.match(unitTestSource, /requiresManifestAndPackageContentForApkDetection/)
+  })
+
+  test('adds the shared MIME detector dependency idempotently', () => {
+    const buildGradle = 'dependencies {\n}'
+    const configured = downloadsPlugin.addSimpleMagicDependency(buildGradle)
+
+    assert.match(
+      configured,
+      /implementation\("com[.]j256[.]simplemagic:simplemagic:1[.]17"\)/
+    )
+    assert.match(configured, /testImplementation\("junit:junit:4[.]13[.]2"\)/)
+    assert.equal(downloadsPlugin.addSimpleMagicDependency(configured), configured)
+  })
+
+  test('renders complete Android sources from the tracked templates', () => {
+    const packageName = 'xyz.p2plabs.peersky'
+    const sources = [
+      downloadsPlugin.createDownloadsModule(packageName),
+      downloadsPlugin.createDownloadsPackage(packageName),
+      downloadsPlugin.createWebViewManager(packageName),
+      downloadsPlugin.createDownloadsModuleTest(packageName)
+    ]
+
+    sources.forEach((source) => {
+      assert.match(source, /^package xyz[.]p2plabs[.]peersky/m)
+      assert.doesNotMatch(source, /__PACKAGE_NAME__/)
+    })
+  })
+
+  test('uses the PeerSky Android WebView download manager', () => {
+    const indexSource = readFileSync(new URL('../../app/index.tsx', import.meta.url), 'utf8')
+    const nativeConfigSource = readFileSync(
+      new URL('../../app/downloads/PeerSkyWebView.ts', import.meta.url),
+      'utf8'
+    )
+
+    assert.match(indexSource, /nativeConfig=\{peerSkyWebViewNativeConfig\}/)
+    assert.doesNotMatch(indexSource, /getBrowserDownloadAnalysis/)
+    assert.match(nativeConfigSource, /requireNativeComponent/)
+    assert.match(nativeConfigSource, /PeerSkyWebView/)
+    assert.match(nativeConfigSource, /hasViewManagerConfig/)
   })
 })

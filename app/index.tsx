@@ -93,6 +93,7 @@ import {
 } from './bookmarks/browser-favicon.mjs'
 import { useBrowserBookmarks } from './bookmarks/useBrowserBookmarks'
 import { DownloadsScreen } from './downloads/DownloadsScreen'
+import { peerSkyWebViewNativeConfig } from './downloads/PeerSkyWebView'
 import { useBrowserDownloads } from './downloads/useBrowserDownloads'
 import { BrowserTabsScreen } from './tabs/BrowserTabsScreen'
 import { useBrowserTabPreviews } from './tabs/useBrowserTabPreviews'
@@ -2408,6 +2409,7 @@ export default function App () {
                     baseUrl: entry.source.kind === 'hyper' ? entry.source.baseUrl : undefined
                   }}
               cacheEnabled={true}
+              nativeConfig={peerSkyWebViewNativeConfig}
               injectedJavaScript={browserInjectedScript}
               injectedJavaScriptBeforeContentLoaded={browserAccessibilityScript}
               originWhitelist={['*']}
