@@ -23,6 +23,7 @@ import {
   RPC_IDENTITY_INSPECT_STORAGE,
   RPC_IDENTITY_RESTORE_FROM_HYPER
 } from '../../backend/rpc/commands.mjs'
+import { QrCodeView } from './QrCodeView'
 import { Appearance } from './Appearance'
 import { Accessibility } from './Accessibility'
 import { DataClearing } from './DataClearing'
@@ -51,8 +52,6 @@ type SettingsPage =
   | 'permissions'
   | 'link-device'
   | 'about'
-  | 'test-tabs'
-  | 'storage-inspector'
 
 type StorageFileItem = {
   name: string
@@ -141,16 +140,6 @@ const SETTINGS_PAGES: Array<{
     id: 'about',
     title: 'About',
     description: 'Version, source code, and licenses'
-  },
-  {
-    id: 'test-tabs',
-    title: 'Test Tabs',
-    description: 'View raw browser-tabs.json'
-  },
-  {
-    id: 'storage-inspector',
-    title: 'Storage Inspector',
-    description: 'View Hyper/IPFS cache and storage files'
   }
 ]
 
@@ -170,8 +159,6 @@ export function SettingsScreen (props: SettingsScreenProps) {
         {page === 'permissions' && <Permissions {...props} />}
         {page === 'link-device' && <LinkDeviceSettings {...props} />}
         {page === 'about' && <AboutSettings onOpenUrl={props.onOpenUrl} />}
-        {page === 'test-tabs' && <TestTabsSettings />}
-        {page === 'storage-inspector' && <StorageInspectorSettings onCallRpc={props.onCallRpc} />}
       </SettingsSubpage>
     )
   }
@@ -468,8 +455,9 @@ function LinkDeviceSettings ({
         <View style={styles.linkDeviceBlock}>
           <SettingCopy
             title='Your Mobile Device Key'
-            description='Paste this into PeerSky Desktop > Backup > Identity Transfer.'
+            description='Scan this QR code with PeerSky Desktop or copy the key string below.'
           />
+          {encryptionPublicKey ? <QrCodeView value={encryptionPublicKey} size={200} /> : null}
           <View style={[styles.keyBox, isDark ? darkStyles.input : null]}>
             {isLoadingKey
               ? <ActivityIndicator size='small' />
@@ -592,162 +580,6 @@ function AboutSettings ({ onOpenUrl }: { onOpenUrl: (url: string) => void }) {
     </View>
   )
 }
-
-import { Paths, File } from 'expo-file-system'
-
-function TestTabsSettings () {
-  const isDark = useSettingsDarkMode()
-  const [tabsJson, setTabsJson] = useState('Loading...')
-
-  useEffect(() => {
-    async function loadTabs () {
-      try {
-        const file = new File(Paths.document, 'browser-tabs.json')
-        if (file.exists) {
-          const content = await file.text()
-          setTabsJson(content)
-        } else {
-          setTabsJson('browser-tabs.json does not exist')
-        }
-      } catch (err) {
-        setTabsJson(err instanceof Error ? err.message : String(err))
-      }
-    }
-    loadTabs()
-  }, [])
-
-  return (
-    <View style={[styles.pageContent, isDark ? darkStyles.page : null]}>
-      <SettingsSection title='browser-tabs.json'>
-        <View style={styles.linkDeviceBlock}>
-          <Text style={[styles.keyText, isDark ? darkStyles.primaryText : null]} selectable>
-            {tabsJson}
-          </Text>
-        </View>
-      </SettingsSection>
-    </View>
-  )
-}
-
-function StorageInspectorSettings ({
-  onCallRpc
-}: {
-  onCallRpc: (command: number, data?: object) => Promise<RpcResponse>
-}) {
-  const isDark = useSettingsDarkMode()
-  const [loading, setLoading] = useState(true)
-  const [storagePath, setStoragePath] = useState('')
-  const [files, setFiles] = useState<StorageFileItem[]>([])
-  const [error, setError] = useState<string | null>(null)
-  const [selectedContent, setSelectedContent] = useState<string | null>(null)
-  const [selectedFileName, setSelectedFileName] = useState<string | null>(null)
-
-  useEffect(() => {
-    async function loadStorage () {
-      setLoading(true)
-      setError(null)
-      try {
-        const response = await onCallRpc(RPC_IDENTITY_INSPECT_STORAGE, {})
-        if (response.ok && Array.isArray(response.files)) {
-          setStoragePath(response.path || '')
-          setFiles(response.files)
-        } else {
-          setError(response.error || 'Failed to inspect storage')
-        }
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err))
-      } finally {
-        setLoading(false)
-      }
-    }
-    void loadStorage()
-  }, [onCallRpc])
-
-  return (
-    <View style={[styles.pageContent, isDark ? darkStyles.page : null]}>
-      {error && (
-        <View style={styles.errorBanner}>
-          <Text style={styles.errorText}>{error}</Text>
-        </View>
-      )}
-
-      <SettingsSection title='Storage Overview'>
-        <View style={styles.linkDeviceBlock}>
-          <SettingCopy
-            title='Identity Storage Directory'
-            description='Target directory where Hyper, IPFS, caches, and identity files are stored.'
-          />
-          <View style={[styles.keyBox, isDark ? darkStyles.input : null]}>
-            <Text style={[styles.keyText, isDark ? darkStyles.primaryText : null]} selectable>
-              {storagePath || 'Loading storage path...'}
-            </Text>
-          </View>
-        </View>
-      </SettingsSection>
-
-      <SettingsSection title={`Files & Cache (${files.length} items)`}>
-        <View style={styles.linkDeviceBlock}>
-          {loading && <ActivityIndicator size='small' color='#1f6fd1' />}
-          {!loading && files.length === 0 && (
-            <Text style={[styles.helperText, isDark ? darkStyles.secondaryText : null]}>
-              No files found in storage.
-            </Text>
-          )}
-          {files.map((file) => (
-            <Pressable
-              key={file.name}
-              style={({ pressed }) => [
-                styles.linkRow,
-                pressed ? styles.rowPressed : null
-              ]}
-              onPress={() => {
-                if (file.content) {
-                  setSelectedFileName(file.name)
-                  setSelectedContent(file.content)
-                }
-              }}
-            >
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.linkText, isDark ? darkStyles.primaryText : null]}>
-                  {file.type === 'dir' ? `[DIR] ${file.name}` : file.name}
-                </Text>
-                <Text style={[styles.helperText, isDark ? darkStyles.secondaryText : null]}>
-                  {file.type === 'dir' ? 'Directory' : `${file.size} bytes`}
-                  {file.mtime ? ` - ${file.mtime.slice(0, 19).replace('T', ' ')}` : ''}
-                </Text>
-              </View>
-              {file.content ? (
-                <Text style={[styles.chevron, isDark ? darkStyles.secondaryText : null]}>View</Text>
-              ) : null}
-            </Pressable>
-          ))}
-        </View>
-      </SettingsSection>
-
-      <Modal visible={Boolean(selectedContent)} animationType='slide' onRequestClose={() => setSelectedContent(null)}>
-        <SafeAreaView style={[{ flex: 1 }, isDark ? darkStyles.page : null]}>
-          <View style={[styles.scannerHeader, { paddingHorizontal: 16 }]}>
-            <Text style={[styles.placeholderTitle, isDark ? darkStyles.primaryText : null]}>
-              {selectedFileName}
-            </Text>
-            <Pressable
-              style={styles.scannerCloseButton}
-              onPress={() => setSelectedContent(null)}
-            >
-              <Text style={styles.scannerCloseText}>Close</Text>
-            </Pressable>
-          </View>
-          <ScrollView style={{ flex: 1, padding: 16 }}>
-            <Text style={[styles.keyText, isDark ? darkStyles.primaryText : null]} selectable>
-              {selectedContent}
-            </Text>
-          </ScrollView>
-        </SafeAreaView>
-      </Modal>
-    </View>
-  )
-}
-
 
 function SectionPlaceholder ({ description }: { description: string }) {
   const isDark = useSettingsDarkMode()

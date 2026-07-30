@@ -1,5 +1,14 @@
-import { existsSync, readdirSync, readFileSync, statSync } from 'bare-fs'
+import * as nodeFs from 'node:fs'
 import b4a from 'b4a'
+
+let fs = nodeFs
+if (typeof globalThis.Bare !== 'undefined' && typeof globalThis.Bare.addon === 'function') {
+  try {
+    fs = await import('bare-fs')
+  } catch {}
+}
+
+const { existsSync, readdirSync, readFileSync, statSync } = fs
 
 export function inspectStorage (storagePath) {
   if (!existsSync(storagePath)) {
