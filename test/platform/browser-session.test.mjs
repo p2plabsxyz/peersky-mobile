@@ -62,7 +62,7 @@ describe('browser session lifecycle', () => {
       ['tab-1', {}],
       ['tab-2', {}]
     ])
-    const reset = createBrowserResetSession(webViewRefs)
+    const reset = createBrowserResetSession(webViewRefs, 'list')
     const restored = resolveBrowserStartupSession({
       restoreTabsOnStartup: true,
       serializedSession: reset.serializedSession,
@@ -73,7 +73,9 @@ describe('browser session lifecycle', () => {
     assert.equal(webViewRefs.size, 0)
     assert.deepEqual(reset.liveTabIds, [reset.tabsState.activeTabId])
     assert.equal(reset.tabsState.tabs[0].history[0].source.kind, 'home')
+    assert.equal(reset.tabsState.viewMode, 'list')
     assert.equal(restored.tabs.length, 1)
     assert.equal(restored.tabs[0].history[0].source.kind, 'home')
+    assert.equal(restored.viewMode, 'list')
   })
 })

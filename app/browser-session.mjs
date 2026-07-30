@@ -1,5 +1,6 @@
 import {
   createBrowserTabsState,
+  normalizeBrowserTabViewMode,
   restoreBrowserTabsState,
   serializeBrowserTabsState
 } from './browser-tabs.mjs'
@@ -13,9 +14,12 @@ export function resolveBrowserStartupSession ({
   return restoreBrowserTabsState(serializedSession)
 }
 
-export function createBrowserResetSession (webViewRefs) {
+export function createBrowserResetSession (webViewRefs, viewMode) {
   webViewRefs.clear()
-  const tabsState = createBrowserTabsState()
+  const tabsState = {
+    ...createBrowserTabsState(),
+    viewMode: normalizeBrowserTabViewMode(viewMode)
+  }
 
   return {
     tabsState,

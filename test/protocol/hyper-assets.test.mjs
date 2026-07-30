@@ -3,12 +3,16 @@ import { test } from 'node:test'
 import {
   MAX_INLINE_ASSET_BYTES,
   MAX_INLINE_STYLESHEET_BYTES,
+  createDownloadContentDisposition,
   createProxyAssetUrl,
   getContentTypeFromUrl,
   getInlineAssetByteLimit,
   headersToObject,
   isMalformedRangeHeader,
+  normalizeDownloadFilename,
   resolveHyperAssetUrl,
+  rewriteHyperAssetAttributes,
+  rewriteHyperDownloadAttributes,
   rewriteHyperMediaAttributes,
   shouldInlineAsset,
   shouldProxyMediaAsset
@@ -52,6 +56,61 @@ test('builds encoded proxy asset URLs', () => {
     createProxyAssetUrl('http://127.0.0.1:3000', 'hyper://example.com/video.mp4?x=1'),
     'http://127.0.0.1:3000/asset?url=hyper%3A%2F%2Fexample.com%2Fvideo.mp4%3Fx%3D1'
   )
+})
+
+test('rewrites explicit hyper downloads to the local streaming proxy', () => {
+  const html = '<a download="report.pdf" href="./files/report.pdf">Download</a><a download href=./plain.txt>Plain</a><a href="./page.html">Page</a>'
+  const rewritten = rewriteHyperDownloadAttributes(html, baseUrl, 'http://127.0.0.1:45123')
+
+  assert.match(rewritten, /href="http:\/\/127\.0\.0\.1:45123\/asset\?url=hyper%3A%2F%2Fexample\.com%2Fdocs%2Ffiles%2Freport\.pdf&download=1&name=report\.pdf"/)
+  assert.match(rewritten, /href=http:\/\/127\.0\.0\.1:45123\/asset\?url=hyper%3A%2F%2Fexample\.com%2Fdocs%2Fplain\.txt&download=1/)
+  assert.match(rewritten, /<a href="\.\/page\.html">Page<\/a>/)
+})
+
+test('does not mistake download text or prefixed attributes for download links', () => {
+  const html = [
+    '<a href="./download/report.pdf">Path</a>',
+    '<a data-download href="./data.pdf">Data attribute</a>',
+    '<a aria-label="download file" href="./label.pdf">Label</a>',
+    '<a title="please download file" href="./title.pdf">Title</a>'
+  ].join('')
+
+  assert.equal(
+    rewriteHyperDownloadAttributes(html, baseUrl, 'http://127.0.0.1:45123'),
+    html
+  )
+})
+
+test('preserves explicit image downloads before generic asset inlining', () => {
+  const downloadsRewritten = rewriteHyperDownloadAttributes(
+    '<a download="photo.png" href="./photo.png">Photo</a>',
+    baseUrl,
+    'http://127.0.0.1:45123'
+  )
+  const rewritten = rewriteHyperAssetAttributes(
+    downloadsRewritten,
+    baseUrl,
+    new Map([['./photo.png', 'data:image/png;base64,aW1hZ2U=']])
+  )
+
+  assert.match(rewritten, /href="http:\/\/127\.0\.0\.1:45123\/asset\?/)
+  assert.doesNotMatch(rewritten, /data:image/)
+})
+
+test('sanitizes proxied download filenames', () => {
+  assert.equal(normalizeDownloadFilename('../bad"name.txt', 'hyper://example.com/fallback.txt'), '.._bad_name.txt')
+  assert.equal(normalizeDownloadFilename('', 'hyper://example.com/report.pdf'), 'report.pdf')
+  assert.ok(Buffer.byteLength(normalizeDownloadFilename('\u{1F600}'.repeat(100), ''), 'utf8') <= 255)
+})
+
+test('builds ASCII-safe content disposition with an RFC 5987 Unicode name', () => {
+  const disposition = createDownloadContentDisposition('report-\u{1F600}.pdf')
+
+  assert.equal(
+    disposition,
+    'attachment; filename="report-_.pdf"; filename*=UTF-8\'\'report-%F0%9F%98%80.pdf'
+  )
+  assert.equal(/^[\x20-\x7e]+$/.test(disposition), true)
 })
 
 test('validates byte range headers before proxying media', () => {

@@ -18,11 +18,15 @@ import {
 
 type DataClearingProps = {
   onClearBrowsingData: () => boolean
+  onClearCachedData: () => boolean
 }
 
 const CLEAR_WEBVIEW_TIMEOUT_MS = 5000
 
-export function DataClearing ({ onClearBrowsingData }: DataClearingProps) {
+export function DataClearing ({
+  onClearBrowsingData,
+  onClearCachedData
+}: DataClearingProps) {
   const isDark = useSettingsDarkMode()
   const clearWebViewRef = useRef<ComponentRef<typeof WebView> | null>(null)
   const clearStartedRef = useRef(false)
@@ -80,19 +84,33 @@ export function DataClearing ({ onClearBrowsingData }: DataClearingProps) {
       return
     }
 
+    const previewCacheCleared = onClearCachedData()
+
     if (clearAction === 'all') {
       setClearAction(null)
-      if (!onClearBrowsingData()) {
+      const sessionSaved = onClearBrowsingData()
+      if (!previewCacheCleared || !sessionSaved) {
+        const failedParts = [
+          !previewCacheCleared ? 'some tab preview files could not be removed' : null,
+          !sessionSaved ? 'the fresh tab session could not be saved' : null
+        ].filter(Boolean)
         Alert.alert(
-          'Tabs cleared, but session was not saved',
-          'Your tabs were closed, but the updated session could not be saved. Please try again before restarting PeerSky.'
+          'Data clearing incomplete',
+          `Your tabs were closed, but ${failedParts.join(' and ')}. Please try again.`
         )
       }
       return
     }
 
     setClearAction(null)
-    Alert.alert('Cached website data cleared')
+    Alert.alert(
+      previewCacheCleared
+        ? 'Cached website data cleared'
+        : 'Unable to clear all cached data',
+      previewCacheCleared
+        ? undefined
+        : 'Some tab preview files could not be removed. Please try again.'
+    )
   }
 
   function failClearing (message: string) {

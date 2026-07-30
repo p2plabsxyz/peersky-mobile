@@ -81,17 +81,31 @@ export function SettingsSection ({
 
 export function SettingCopy ({
   title,
-  description
+  description,
+  prominent = false
 }: {
   title: string
   description: string
+  prominent?: boolean
 }) {
   const isDark = useSettingsDarkMode()
 
   return (
     <View style={styles.settingCopy}>
-      <Text style={[styles.settingTitle, isDark ? darkStyles.primaryText : null]}>{title}</Text>
-      <Text style={[styles.settingDescription, isDark ? darkStyles.secondaryText : null]}>{description}</Text>
+      <Text style={[
+        styles.settingTitle,
+        prominent ? styles.settingTitleProminent : null,
+        isDark ? darkStyles.primaryText : null
+      ]}>
+        {title}
+      </Text>
+      <Text style={[
+        styles.settingDescription,
+        prominent ? styles.settingDescriptionProminent : null,
+        isDark ? darkStyles.secondaryText : null
+      ]}>
+        {description}
+      </Text>
     </View>
   )
 }
@@ -103,12 +117,12 @@ const styles = StyleSheet.create({
   sectionTitle: {
     backgroundColor: '#f5f8fc',
     color: '#687086',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700',
     letterSpacing: 0.8,
-    paddingBottom: 9,
+    paddingBottom: 8,
     paddingHorizontal: 20,
-    paddingTop: 22,
+    paddingTop: 18,
     textTransform: 'uppercase'
   },
   sectionCard: {
@@ -125,11 +139,18 @@ const styles = StyleSheet.create({
   },
   settingTitle: {
     color: '#1f2a44',
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '700'
+  },
+  settingTitleProminent: {
+    fontSize: 15
   },
   settingDescription: {
     color: '#687086',
+    fontSize: 12,
+    lineHeight: 17
+  },
+  settingDescriptionProminent: {
     fontSize: 13,
     lineHeight: 18
   },
@@ -141,7 +162,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     flexDirection: 'row',
     justifyContent: 'space-between',
-    minHeight: 46,
+    minHeight: 44,
     paddingHorizontal: 12
   },
   choiceSelected: {

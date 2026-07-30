@@ -9,7 +9,9 @@ import {
   isCurrentBrowserTabEntry,
   MAX_BROWSER_TITLE_LENGTH,
   MAX_BROWSER_TABS,
+  normalizeBrowserPageZoom,
   restoreBrowserTabsState,
+  setBrowserTabViewModeState,
   serializeBrowserTabsState,
   suspendInactiveBrowserTabsState,
   switchBrowserTabState,
@@ -24,6 +26,7 @@ describe('browser tab state helpers', () => {
 
     assert.equal(state.tabs.length, 1)
     assert.equal(state.activeTabId, 'tab-1')
+    assert.equal(state.viewMode, 'grid')
     assert.equal(active.title, 'PeerSky')
     assert.deepEqual(active.history, [
       { url: BROWSER_HOME_URL, source: { kind: 'home' } }
@@ -159,6 +162,56 @@ describe('browser tab state helpers', () => {
     })
 
     assert.equal(state.tabs[0].title.length, MAX_BROWSER_TITLE_LENGTH)
+  })
+
+  test('normalizes and persists per-tab page zoom', () => {
+    let state = updateBrowserTabState(createBrowserTabsState(), 'tab-1', {
+      pageZoom: 125
+    })
+
+    assert.equal(state.tabs[0].pageZoom, 125)
+
+    state = restoreBrowserTabsState(serializeBrowserTabsState(state))
+
+    assert.equal(state.tabs[0].pageZoom, 125)
+    assert.equal(normalizeBrowserPageZoom(999), 100)
+  })
+
+  test('normalizes and persists per-tab desktop view', () => {
+    let state = updateBrowserTabState(createBrowserTabsState(), 'tab-1', {
+      desktopView: true
+    })
+
+    assert.equal(state.tabs[0].desktopView, true)
+
+    state = restoreBrowserTabsState(serializeBrowserTabsState(state))
+
+    assert.equal(state.tabs[0].desktopView, true)
+  })
+
+  test('normalizes and persists the tab manager view mode', () => {
+    let state = setBrowserTabViewModeState(createBrowserTabsState(), 'list')
+
+    assert.equal(state.viewMode, 'list')
+
+    state = restoreBrowserTabsState(serializeBrowserTabsState(state))
+
+    assert.equal(state.viewMode, 'list')
+    assert.equal(
+      restoreBrowserTabsState({
+        ...JSON.parse(serializeBrowserTabsState(state)),
+        viewMode: 'unsupported'
+      }).viewMode,
+      'grid'
+    )
+  })
+
+  test('preserves list view when closing the last tab', () => {
+    const listState = setBrowserTabViewModeState(createBrowserTabsState(), 'list')
+    const state = closeBrowserTabState(listState, 'tab-1')
+
+    assert.equal(state.tabs.length, 1)
+    assert.equal(state.viewMode, 'list')
   })
 
   test('accepts callbacks from the same synchronized native WebView only', () => {

@@ -14,6 +14,7 @@ import {
   MAX_BROWSER_HISTORY_ENTRIES,
   MAX_BROWSER_URL_LENGTH,
   normalizeBrowserAddress,
+  normalizeCustomSearchUrl,
   replaceBrowserEntryState,
   syncBrowserEntryState
 } from '../../app/browser-shell.mjs'
@@ -37,9 +38,28 @@ describe('browser shell navigation helpers', () => {
     assert.equal(normalizeBrowserAddress('akhilesh.art'), 'https://akhilesh.art')
     assert.equal(normalizeBrowserAddress('search words'), 'https://duckduckgo.com/?q=search%20words')
     assert.equal(normalizeBrowserAddress('peersky'), 'https://duckduckgo.com/?q=peersky')
-    assert.equal(normalizeBrowserAddress('search words', 'brave'), 'https://search.brave.com/search?q=search%20words')
-    assert.equal(normalizeBrowserAddress('search words', 'google'), 'https://www.google.com/search?q=search%20words')
+    assert.equal(
+      normalizeBrowserAddress('search words', 'custom', 'https://example.com/find?q=%s'),
+      'https://example.com/find?q=search%20words'
+    )
     assert.equal(getSearchUrl('unknown', 'fallback search'), 'https://duckduckgo.com/?q=fallback%20search')
+  })
+
+  test('validates custom search URLs and safely substitutes encoded queries', () => {
+    assert.equal(
+      normalizeCustomSearchUrl(' https://example.com/find?q=%s '),
+      'https://example.com/find?q=%s'
+    )
+    assert.equal(
+      getSearchUrl('custom', 'privacy & p2p', 'https://example.com/?q=%s'),
+      'https://example.com/?q=privacy%20%26%20p2p'
+    )
+    assert.equal(
+      getSearchUrl('custom', 'fallback', 'http://example.com/?q=%s'),
+      'https://duckduckgo.com/?q=fallback'
+    )
+    assert.equal(normalizeCustomSearchUrl('https://example.com/search'), null)
+    assert.equal(normalizeCustomSearchUrl('https://user:pass@example.com/?q=%s'), null)
   })
 
   test('detects supported web and hyper schemes only', () => {

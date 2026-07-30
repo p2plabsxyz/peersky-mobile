@@ -28,6 +28,7 @@
   },
   "homepage": "https://github.com/p2plabsxyz/peersky-mobile#readme",
   "dependencies": {
+    "@preeternal/react-native-cookie-manager": "^6.4.0",
     "b4a": "^1.6.7",
     "bare-crypto": "^1.14.0",
     "bare-http1": "^4.5.7",
@@ -41,6 +42,7 @@
     "expo-font": "~55.0.8",
     "expo-linking": "~55.0.15",
     "expo-router": "~55.0.14",
+    "expo-sharing": "~55.0.22",
     "expo-system-ui": "~55.0.17",
     "holesail": "^2.4.1",
     "hyper-sdk": "^6.2.2",
@@ -53,6 +55,8 @@
     "react-native-bare-kit": "^0.13.3",
     "react-native-safe-area-context": "~5.6.0",
     "react-native-screens": "~4.23.0",
+    "react-native-svg": "15.15.3",
+    "react-native-view-shot": "4.0.3",
     "react-native-webview": "13.16.0",
     "yjs": "^13.6.31"
   },
@@ -63,6 +67,7 @@
     "babel-preset-expo": "~55.0.8",
     "bare-pack": "^2.0.1",
     "esbuild": "^0.28.1",
+    "react-native-svg-transformer": "^1.5.3",
     "standard": "^17.1.0",
     "typescript": "^5.3.3"
   }

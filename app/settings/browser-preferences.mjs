@@ -1,7 +1,9 @@
 import { EXTERNAL_LINK_BEHAVIORS } from '../browser-permissions.mjs'
+import { normalizeCustomSearchUrl } from '../browser-shell.mjs'
 
 export const DEFAULT_BROWSER_PREFERENCES = {
   addressBarPosition: 'top',
+  customSearchUrl: '',
   enforceManualPageZoom: false,
   externalLinkBehavior: 'ask',
   restoreTabsOnStartup: true,
@@ -17,8 +19,7 @@ export const WEBSITE_TEXT_SCALES = [80, 100, 120, 150]
 
 export const SEARCH_ENGINES = /** @type {const} */ ([
   { id: 'duckduckgo', title: 'DuckDuckGo' },
-  { id: 'brave', title: 'Brave Search' },
-  { id: 'google', title: 'Google' }
+  { id: 'custom', title: 'Custom' }
 ])
 
 export function parseBrowserPreferences (serialized) {
@@ -34,6 +35,7 @@ export function parseBrowserPreferences (serialized) {
     addressBarPosition: ADDRESS_BAR_POSITIONS.includes(value?.addressBarPosition)
       ? value.addressBarPosition
       : DEFAULT_BROWSER_PREFERENCES.addressBarPosition,
+    customSearchUrl: normalizeCustomSearchUrl(value?.customSearchUrl) || '',
     enforceManualPageZoom: typeof value?.enforceManualPageZoom === 'boolean'
       ? value.enforceManualPageZoom
       : DEFAULT_BROWSER_PREFERENCES.enforceManualPageZoom,

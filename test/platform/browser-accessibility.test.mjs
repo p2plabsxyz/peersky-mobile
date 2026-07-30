@@ -7,18 +7,22 @@ describe('browser accessibility', () => {
     const script = createBrowserAccessibilityScript({
       applyTextScale: true,
       enforceManualPageZoom: true,
+      pageZoom: 125,
       websiteTextScale: 120
     })
 
-    assert.match(script, /-webkit-text-size-adjust', '120%'/)
+    assert.match(script, /-webkit-text-size-adjust', '150%'/)
     assert.match(script, /user-scalable=yes/)
     assert.match(script, /maximum-scale=5/)
+    assert.match(script, /\^\(user-scalable\|maximum-scale\)/)
+    assert.doesNotMatch(script, /\^\(width\|initial-scale/)
   })
 
   test('falls back to safe values for unsupported input', () => {
     const script = createBrowserAccessibilityScript({
       applyTextScale: 'yes',
       enforceManualPageZoom: 'yes',
+      pageZoom: 999,
       websiteTextScale: '100%); alert(1)'
     })
 
@@ -36,6 +40,22 @@ describe('browser accessibility', () => {
 
     assert.match(script, /viewport\.hasAttribute\(marker\)/)
     assert.match(script, /viewport\.setAttribute\('content', original\)/)
-    assert.match(script, /else viewport\.remove\(\)/)
+    assert.match(script, /width=device-width, initial-scale=1/)
+    assert.doesNotMatch(script, /viewport\.remove\(\)/)
+  })
+
+  test('can request a desktop-width viewport', () => {
+    const script = createBrowserAccessibilityScript({
+      applyTextScale: false,
+      desktopView: true,
+      enforceManualPageZoom: false,
+      websiteTextScale: 100
+    })
+
+    assert.match(script, /width=1024/)
+    assert.match(script, /initial-scale=/)
+    assert.match(script, /minimum-scale=/)
+    assert.match(script, /window\.screen/)
+    assert.match(script, /\^\(width\|initial-scale\|minimum-scale\|user-scalable\|maximum-scale\)/)
   })
 })

@@ -15,10 +15,11 @@ describe('browser preferences', () => {
   test('restores supported browser preferences', () => {
     const preferences = {
       addressBarPosition: 'bottom',
+      customSearchUrl: 'https://example.com/search?q=%s',
       enforceManualPageZoom: true,
       externalLinkBehavior: 'allow',
       restoreTabsOnStartup: false,
-      searchEngine: 'brave',
+      searchEngine: 'custom',
       showFullAddress: true,
       theme: 'dark',
       websiteTextScale: 150
@@ -33,10 +34,11 @@ describe('browser preferences', () => {
   test('rejects unsupported preference values independently', () => {
     assert.deepEqual(parseBrowserPreferences({
       addressBarPosition: 'side',
+      customSearchUrl: 'http://example.com/search?q=%s',
       enforceManualPageZoom: 'yes',
       externalLinkBehavior: 'always',
       restoreTabsOnStartup: 'yes',
-      searchEngine: 'custom',
+      searchEngine: 'brave',
       showFullAddress: 'yes',
       theme: 'sepia',
       websiteTextScale: 500
@@ -46,11 +48,24 @@ describe('browser preferences', () => {
   test('fills missing appearance preferences with defaults', () => {
     assert.deepEqual(parseBrowserPreferences({
       restoreTabsOnStartup: false,
-      searchEngine: 'google'
+      searchEngine: 'custom',
+      customSearchUrl: 'https://search.example/?query=%s'
     }), {
       ...DEFAULT_BROWSER_PREFERENCES,
       restoreTabsOnStartup: false,
-      searchEngine: 'google'
+      searchEngine: 'custom',
+      customSearchUrl: 'https://search.example/?query=%s'
     })
+  })
+
+  test('drops malformed and credentialed custom search URLs', () => {
+    for (const customSearchUrl of [
+      'https://example.com/search',
+      'http://example.com/?q=%s',
+      'https://user:password@example.com/?q=%s',
+      'not-a-url?q=%s'
+    ]) {
+      assert.equal(parseBrowserPreferences({ customSearchUrl }).customSearchUrl, '')
+    }
   })
 })

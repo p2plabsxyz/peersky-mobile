@@ -41,7 +41,9 @@
         }
       ],
       "expo-font",
-      "./plugins/with-android-loopback-cleartext"
+      "./plugins/with-android-loopback-cleartext",
+      "./plugins/with-browser-downloads",
+      "expo-sharing"
     ]
   }
 }

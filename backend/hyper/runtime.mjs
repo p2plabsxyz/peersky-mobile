@@ -3,15 +3,26 @@
 import { create as createSDK } from 'hyper-sdk'
 
 let sdk = null
+let sdkOpening = null
 let storagePath = null
 
 export async function getHyperRuntime () {
   if (sdk) return sdk
 
-  storagePath = getHyperSdkStoragePath()
-  sdk = await createSDK({ storage: storagePath })
+  if (!sdkOpening) {
+    storagePath = getHyperSdkStoragePath()
+    sdkOpening = createSDK({ storage: storagePath })
+      .then((runtime) => {
+        sdk = runtime
+        return runtime
+      })
+  }
 
-  return sdk
+  try {
+    return await sdkOpening
+  } finally {
+    sdkOpening = null
+  }
 }
 
 export function getHyperStoragePath () {
@@ -19,10 +30,11 @@ export function getHyperStoragePath () {
 }
 
 export async function closeHyperRuntime () {
-  if (!sdk) return
+  const runtime = sdk || (sdkOpening ? await sdkOpening : null)
+  if (!runtime) return
 
-  const runtime = sdk
   sdk = null
+  sdkOpening = null
 
   await runtime.close()
 }

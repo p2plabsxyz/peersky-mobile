@@ -16,7 +16,12 @@ A peer-to-peer mobile browser built with [Bare](https://github.com/holepunchto/b
 
 ## Features
 
-- Browser shell with address/search input, reload, and basic back/forward navigation.
+- Browser shell with address/search input, back/forward navigation, reload, and native page sharing.
+- Persistent multi-tab browsing with grid/list management, page previews, and close-all controls.
+- Local bookmarks with favicon support.
+- Per-tab zoom and Desktop View controls.
+- Browser download history and management.
+- Browser settings for search, appearance, accessibility, data clearing, and external app links.
 - `http://` and `https://` browsing through React Native WebView.
 - `hyper://` browsing through the Bare worklet and `hypercore-fetch`.
 - Hyper page asset support for CSS, images, scripts, audio, and video.

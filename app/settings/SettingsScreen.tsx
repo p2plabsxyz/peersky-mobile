@@ -1,22 +1,29 @@
 import Constants from 'expo-constants'
-import { useEffect, useState } from 'react'
+import {
+  type ComponentType,
+  useEffect,
+  useRef,
+  useState
+} from 'react'
 import { CameraView, useCameraPermissions } from 'expo-camera'
 import {
+  AccessibilityInfo,
   ActivityIndicator,
   Alert,
+  Animated,
   BackHandler,
   Clipboard,
+  Easing,
   Modal,
   Pressable,
   SafeAreaView,
   ScrollView,
   StyleSheet,
-  Switch,
   Text,
   TextInput,
   View
 } from 'react-native'
-import { SEARCH_ENGINES } from './browser-preferences.mjs'
+import type { SvgProps } from 'react-native-svg'
 import { BROWSER_PALETTES } from '../browser-appearance.mjs'
 import {
   RPC_IDENTITY_GET_KEY,
@@ -27,9 +34,9 @@ import { QrCodeView } from './QrCodeView'
 import { Appearance } from './Appearance'
 import { Accessibility } from './Accessibility'
 import { DataClearing } from './DataClearing'
+import { General } from './General'
 import { Permissions } from './Permissions'
 import {
-  ChoiceGroup,
   SettingCopy,
   SettingsSection,
   SettingsThemeProvider,
@@ -42,6 +49,15 @@ import type {
   SearchEngine,
   WebsiteTextScale
 } from './useBrowserPreferences'
+import ArrowLeftIcon from '../../assets/icons/bootstrap/arrow-left.svg'
+import ChevronRightIcon from '../../assets/icons/bootstrap/chevron-right.svg'
+import InfoIcon from '../../assets/icons/bootstrap/info-circle.svg'
+import PaletteIcon from '../../assets/icons/bootstrap/palette.svg'
+import ShieldLockIcon from '../../assets/icons/bootstrap/shield-lock.svg'
+import SlidersIcon from '../../assets/icons/bootstrap/sliders.svg'
+import TrashIcon from '../../assets/icons/bootstrap/trash.svg'
+import UniversalAccessIcon from '../../assets/icons/bootstrap/universal-access-circle.svg'
+import DisplayIcon from '../../assets/icons/bootstrap/display.svg'
 
 type SettingsPage =
   | 'main'
@@ -72,6 +88,7 @@ type RpcResponse = {
 
 type SettingsScreenProps = {
   addressBarPosition: AddressBarPosition
+  customSearchUrl: string
   enforceManualPageZoom: boolean
   externalLinkBehavior: ExternalLinkBehavior
   isDark: boolean
@@ -86,6 +103,8 @@ type SettingsScreenProps = {
   onCallRpc: (command: number, data?: object) => Promise<RpcResponse>
   onClose: () => void
   onClearBrowsingData: () => boolean
+  onClearCachedData: () => boolean
+  onCustomSearchSave: (url: string) => boolean
   onEnforceManualPageZoomChange: (enabled: boolean) => void
   onExternalLinkBehaviorChange: (behavior: ExternalLinkBehavior) => void
   onRestoreTabsOnStartupChange: (enabled: boolean) => void
@@ -105,54 +124,73 @@ const SETTINGS_PAGES: Array<{
   id: Exclude<SettingsPage, 'main'>
   title: string
   description: string
+  icon: ComponentType<SvgProps>
 }> = [
   {
     id: 'general',
     title: 'General',
-    description: 'Search and startup behavior'
+    description: 'Search and startup behavior',
+    icon: SlidersIcon
   },
   {
     id: 'accessibility',
     title: 'Accessibility',
-    description: 'Text size and page zoom'
+    description: 'Text size and page zoom',
+    icon: UniversalAccessIcon
   },
   {
     id: 'appearance',
     title: 'Appearance',
-    description: 'Theme and address bar layout'
+    description: 'Theme and address bar layout',
+    icon: PaletteIcon
   },
   {
     id: 'data-clearing',
     title: 'Data Clearing',
-    description: 'Tabs and browsing data'
+    description: 'Tabs and browsing data',
+    icon: TrashIcon
   },
   {
     id: 'permissions',
     title: 'Permissions',
-    description: 'External app link handling'
+    description: 'External app link handling',
+    icon: ShieldLockIcon
   },
   {
     id: 'link-device',
     title: 'Link Device',
-    description: 'Restore identity from desktop'
+    description: 'Restore identity from desktop',
+    icon: DisplayIcon
   },
   {
     id: 'about',
     title: 'About',
-    description: 'Version, source code, and licenses'
+    description: 'Version, source code, and licenses',
+    icon: InfoIcon
   }
 ]
 
 export function SettingsScreen (props: SettingsScreenProps) {
   const [page, setPage] = useState<SettingsPage>('main')
+  const [transitionDirection, setTransitionDirection] = useState(1)
+  const reduceMotion = useReducedMotion()
+  const transition = useRef(new Animated.Value(1)).current
   let content
 
   if (page === 'main') {
-    content = <SettingsHome onClose={props.onClose} onOpenPage={setPage} />
+    content = (
+      <SettingsHome
+        onClose={props.onClose}
+        onOpenPage={(nextPage) => changePage(nextPage, 1)}
+      />
+    )
   } else {
     content = (
-      <SettingsSubpage title={getSettingsPageTitle(page)} onBack={() => setPage('main')}>
-        {page === 'general' && <GeneralSettings {...props} />}
+      <SettingsSubpage
+        title={getSettingsPageTitle(page)}
+        onBack={() => changePage('main', -1)}
+      >
+        {page === 'general' && <General {...props} />}
         {page === 'accessibility' && <Accessibility {...props} />}
         {page === 'appearance' && <Appearance {...props} />}
         {page === 'data-clearing' && <DataClearing {...props} />}
@@ -163,9 +201,48 @@ export function SettingsScreen (props: SettingsScreenProps) {
     )
   }
 
+  useEffect(() => {
+    if (reduceMotion) {
+      transition.setValue(1)
+      return
+    }
+
+    const animation = Animated.timing(transition, {
+      duration: 180,
+      easing: Easing.out(Easing.cubic),
+      toValue: 1,
+      useNativeDriver: true
+    })
+    animation.start()
+    return () => animation.stop()
+  }, [page, reduceMotion, transition])
+
+  function changePage (nextPage: SettingsPage, direction: number) {
+    if (nextPage === page) return
+
+    transition.stopAnimation()
+    transition.setValue(reduceMotion ? 1 : 0)
+    setTransitionDirection(direction)
+    setPage(nextPage)
+  }
+
+  const transitionStyle = reduceMotion
+    ? null
+    : {
+        opacity: transition,
+        transform: [{
+          translateX: transition.interpolate({
+            inputRange: [0, 1],
+            outputRange: [12 * transitionDirection, 0]
+          })
+        }]
+      }
+
   return (
     <SettingsThemeProvider value={props.isDark}>
-      {content}
+      <Animated.View style={[styles.transition, transitionStyle]}>
+        {content}
+      </Animated.View>
     </SettingsThemeProvider>
   )
 }
@@ -189,29 +266,56 @@ function SettingsHome ({
           style={({ pressed }) => [styles.backButton, pressed ? styles.rowPressed : null]}
           onPress={onClose}
         >
-          <Text style={[styles.backButtonText, isDark ? darkStyles.primaryText : null]}>{'<'}</Text>
+          <ArrowLeftIcon
+            width={22}
+            height={22}
+            color={isDark ? BROWSER_PALETTES.dark.text : '#1f2a44'}
+          />
         </Pressable>
         <Text style={[styles.title, isDark ? darkStyles.primaryText : null]}>Settings</Text>
       </View>
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
         <View style={[styles.menu, isDark ? darkStyles.surface : null]}>
-          {SETTINGS_PAGES.map((page, index) => (
-            <Pressable
-              key={page.id}
-              accessibilityRole='button'
-              style={({ pressed }) => [
-                styles.menuRow,
-                index > 0 ? styles.rowDivider : null,
-                index > 0 && isDark ? darkStyles.divider : null,
-                pressed ? styles.rowPressed : null
-              ]}
-              onPress={() => onOpenPage(page.id)}
-            >
-              <SettingCopy title={page.title} description={page.description} />
-              <Text style={[styles.chevron, isDark ? darkStyles.secondaryText : null]}>{'>'}</Text>
-            </Pressable>
-          ))}
+          {SETTINGS_PAGES.map((page, index) => {
+            const Icon = page.icon
+
+            return (
+              <Pressable
+                key={page.id}
+                accessibilityLabel={`${page.title}. ${page.description}`}
+                accessibilityRole='button'
+                style={({ pressed }) => [
+                  styles.menuRow,
+                  index > 0 ? styles.rowDivider : null,
+                  index > 0 && isDark ? darkStyles.divider : null,
+                  pressed ? styles.rowPressed : null
+                ]}
+                onPress={() => onOpenPage(page.id)}
+              >
+                <View style={[
+                  styles.menuIcon,
+                  isDark ? darkStyles.menuIcon : null
+                ]}>
+                  <Icon
+                    width={22}
+                    height={22}
+                    color={isDark ? '#8fc1ff' : '#1f6fd1'}
+                  />
+                </View>
+                <SettingCopy
+                  title={page.title}
+                  description={page.description}
+                  prominent
+                />
+                <ChevronRightIcon
+                  width={16}
+                  height={16}
+                  color={isDark ? BROWSER_PALETTES.dark.mutedText : '#8190a7'}
+                />
+              </Pressable>
+            )
+          })}
         </View>
       </ScrollView>
     </View>
@@ -239,7 +343,11 @@ function SettingsSubpage ({
           style={({ pressed }) => [styles.backButton, pressed ? styles.rowPressed : null]}
           onPress={onBack}
         >
-          <Text style={[styles.backButtonText, isDark ? darkStyles.primaryText : null]}>{'<'}</Text>
+          <ArrowLeftIcon
+            width={22}
+            height={22}
+            color={isDark ? BROWSER_PALETTES.dark.text : '#1f2a44'}
+          />
         </Pressable>
         <Text style={[styles.subpageTitle, isDark ? darkStyles.primaryText : null]}>{title}</Text>
       </View>
@@ -250,70 +358,6 @@ function SettingsSubpage ({
   )
 }
 
-function GeneralSettings ({
-  persistenceError,
-  restoreTabsOnStartup,
-  searchEngine,
-  onRestoreTabsOnStartupChange,
-  onSearchEngineChange,
-  onResetTabs
-}: SettingsScreenProps) {
-  const isDark = useSettingsDarkMode()
-
-  function confirmResetTabs () {
-    Alert.alert(
-      'Reset tab session?',
-      'This will close every open tab and return to the home page.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Reset', style: 'destructive', onPress: onResetTabs }
-      ]
-    )
-  }
-
-  return (
-    <View style={[styles.pageContent, isDark ? darkStyles.page : null]}>
-      {persistenceError && (
-        <View style={styles.errorBanner}>
-          <Text style={styles.errorText}>{persistenceError}</Text>
-        </View>
-      )}
-      <SettingsSection title='Startup'>
-        <View style={styles.settingRow}>
-          <SettingCopy
-            title='Restore previous tabs'
-            description='Continue with your open tabs when PeerSky starts.'
-          />
-          <Switch
-            accessibilityLabel='Restore previous tabs on startup'
-            value={restoreTabsOnStartup}
-            onValueChange={onRestoreTabsOnStartupChange}
-            trackColor={{ false: '#bac3d2', true: '#7eb2ee' }}
-            thumbColor={restoreTabsOnStartup ? '#1f6fd1' : '#ffffff'}
-          />
-        </View>
-      </SettingsSection>
-
-      <SettingsSection title='Search engine'>
-        <ChoiceGroup
-          options={SEARCH_ENGINES}
-          selected={searchEngine}
-          onSelect={onSearchEngineChange}
-        />
-      </SettingsSection>
-
-      <SettingsSection title='Tabs'>
-        <Pressable style={styles.actionRow} onPress={confirmResetTabs}>
-          <SettingCopy
-            title='Reset tab session'
-            description='Close all saved tabs and open a fresh home tab.'
-          />
-          <Text style={styles.destructiveAction}>Reset</Text>
-        </Pressable>
-      </SettingsSection>
-    </View>
-  )
-}
 
 function LinkDeviceSettings ({
   onCallRpc,
@@ -556,6 +600,7 @@ function LinkDeviceSettings ({
   )
 }
 
+
 function AboutSettings ({ onOpenUrl }: { onOpenUrl: (url: string) => void }) {
   const isDark = useSettingsDarkMode()
 
@@ -570,24 +615,21 @@ function AboutSettings ({ onOpenUrl }: { onOpenUrl: (url: string) => void }) {
         </View>
         <Pressable style={styles.linkRow} onPress={() => onOpenUrl(REPOSITORY_URL)}>
           <Text style={[styles.linkText, isDark ? darkStyles.primaryText : null]}>Source code</Text>
-          <Text style={[styles.chevron, isDark ? darkStyles.secondaryText : null]}>{'>'}</Text>
+          <ChevronRightIcon
+            width={16}
+            height={16}
+            color={isDark ? BROWSER_PALETTES.dark.mutedText : '#8190a7'}
+          />
         </Pressable>
         <Pressable style={styles.linkRow} onPress={() => onOpenUrl(LICENSE_URL)}>
           <Text style={[styles.linkText, isDark ? darkStyles.primaryText : null]}>Open-source licenses</Text>
-          <Text style={[styles.chevron, isDark ? darkStyles.secondaryText : null]}>{'>'}</Text>
+          <ChevronRightIcon
+            width={16}
+            height={16}
+            color={isDark ? BROWSER_PALETTES.dark.mutedText : '#8190a7'}
+          />
         </Pressable>
       </SettingsSection>
-    </View>
-  )
-}
-
-function SectionPlaceholder ({ description }: { description: string }) {
-  const isDark = useSettingsDarkMode()
-
-  return (
-    <View style={[styles.placeholder, isDark ? darkStyles.surface : null]}>
-      <Text style={[styles.placeholderTitle, isDark ? darkStyles.primaryText : null]}>Coming in the next step</Text>
-      <Text style={[styles.placeholderDescription, isDark ? darkStyles.secondaryText : null]}>{description}</Text>
     </View>
   )
 }
@@ -596,7 +638,36 @@ function getSettingsPageTitle (page: Exclude<SettingsPage, 'main'>) {
   return SETTINGS_PAGES.find((entry) => entry.id === page)?.title || 'Settings'
 }
 
+function useReducedMotion () {
+  const [reduceMotion, setReduceMotion] = useState(true)
+
+  useEffect(() => {
+    let active = true
+    void AccessibilityInfo.isReduceMotionEnabled()
+      .then((enabled) => {
+        if (active) setReduceMotion(enabled)
+      })
+      .catch((error) => {
+        console.warn('Failed reading reduced-motion preference:', error)
+      })
+    const subscription = AccessibilityInfo.addEventListener(
+      'reduceMotionChanged',
+      setReduceMotion
+    )
+
+    return () => {
+      active = false
+      subscription.remove()
+    }
+  }, [])
+
+  return reduceMotion
+}
+
 const styles = StyleSheet.create({
+  transition: {
+    flex: 1
+  },
   screen: {
     backgroundColor: '#ffffff',
     flex: 1
@@ -613,12 +684,12 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     flexDirection: 'row',
     gap: 12,
-    paddingHorizontal: 20,
-    paddingVertical: 9
+    minHeight: 56,
+    paddingHorizontal: 12
   },
   title: {
     color: '#151821',
-    fontSize: 23,
+    fontSize: 20,
     fontWeight: '800'
   },
   menu: {
@@ -628,10 +699,18 @@ const styles = StyleSheet.create({
   menuRow: {
     alignItems: 'center',
     flexDirection: 'row',
-    gap: 12,
-    minHeight: 76,
-    paddingHorizontal: 20,
-    paddingVertical: 14
+    gap: 13,
+    minHeight: 74,
+    paddingHorizontal: 16,
+    paddingVertical: 11
+  },
+  menuIcon: {
+    alignItems: 'center',
+    backgroundColor: '#edf5ff',
+    borderRadius: 12,
+    height: 42,
+    justifyContent: 'center',
+    width: 42
   },
   rowDivider: {
     borderTopColor: '#e7ebf1',
@@ -640,18 +719,13 @@ const styles = StyleSheet.create({
   rowPressed: {
     opacity: 0.65
   },
-  chevron: {
-    color: '#8190a7',
-    fontSize: 19,
-    fontWeight: '700'
-  },
   subpageHeader: {
     alignItems: 'center',
     borderBottomColor: '#dbe3ef',
     borderBottomWidth: 1,
     flexDirection: 'row',
     gap: 12,
-    minHeight: 60,
+    minHeight: 56,
     paddingHorizontal: 12
   },
   backButton: {
@@ -661,37 +735,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     width: 42
   },
-  backButtonText: {
-    color: '#1f2a44',
-    fontSize: 28,
-    fontWeight: '600',
-    lineHeight: 30
-  },
   subpageTitle: {
     color: '#151821',
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '800'
   },
   pageContent: {
     backgroundColor: '#f5f8fc',
     flexGrow: 1
-  },
-  settingRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 12,
-    padding: 16
-  },
-  actionRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 12,
-    padding: 16
-  },
-  destructiveAction: {
-    color: '#a7354a',
-    fontSize: 14,
-    fontWeight: '800'
   },
   aboutRow: {
     padding: 16
@@ -840,6 +891,7 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 16,
     fontWeight: '600'
+
   }
 })
 
@@ -852,6 +904,9 @@ const darkStyles = StyleSheet.create({
   },
   surface: {
     backgroundColor: BROWSER_PALETTES.dark.surface
+  },
+  menuIcon: {
+    backgroundColor: BROWSER_PALETTES.dark.selectedBackground
   },
   header: {
     backgroundColor: BROWSER_PALETTES.dark.surface,

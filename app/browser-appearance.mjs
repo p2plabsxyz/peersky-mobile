@@ -44,7 +44,7 @@ export function formatBrowserAddress (address, showFullAddress) {
   try {
     const parsed = new URL(value)
     if (!parsed.host) return value
-    return `${parsed.protocol}//${parsed.host}`
+    return parsed.host
   } catch {
     return value
   }
