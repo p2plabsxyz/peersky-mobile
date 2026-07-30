@@ -111,7 +111,6 @@ export async function routeRpcRequest (req) {
       return
     }
 
-
     if (req.command === RPC_HOLESAIL_START_LIVE) {
       replyJson(req, await startHolesailLive(parseJsonMessage(req.data)))
       return

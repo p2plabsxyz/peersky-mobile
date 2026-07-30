@@ -18,4 +18,3 @@ export const RPC_P2PMD_IMAGE_UPLOAD = 27
 
 export const RPC_IDENTITY_GET_KEY = 30
 export const RPC_IDENTITY_RESTORE_FROM_HYPER = 31
-
