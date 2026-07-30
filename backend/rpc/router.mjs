@@ -7,7 +7,6 @@ import {
   RPC_HYPER_FETCH,
   RPC_HYPER_INIT,
   RPC_IDENTITY_GET_KEY,
-  RPC_IDENTITY_INSPECT_STORAGE,
   RPC_IDENTITY_RESTORE_FROM_HYPER,
   RPC_P2PMD_ROOM_CREATE,
   RPC_P2PMD_ROOM_DISCONNECT,
@@ -25,7 +24,7 @@ import {
 } from '../backup/device-keys.mjs'
 import { decryptIdentityTransfer } from '../backup/identity-transfer.mjs'
 import { restoreIdentityFromBackup } from '../backup/restore.mjs'
-import { inspectStorage } from '../backup/inspect.mjs'
+
 import { createDrive, publishMarkdownDocument, readHyperFile, uploadHyperFile } from '../hyper/drive.mjs'
 import { fetchHyper, fetchHyperBinary, resetHyperFetch } from '../hyper/fetch.mjs'
 import { closeHyperRuntime, getHyperRuntime, getHyperStoragePath } from '../hyper/runtime.mjs'
@@ -112,12 +111,6 @@ export async function routeRpcRequest (req) {
       return
     }
 
-    if (req.command === RPC_IDENTITY_INSPECT_STORAGE) {
-      const storagePath = getDefaultIdentityStoragePath()
-      const result = inspectStorage(storagePath)
-      replyJson(req, result)
-      return
-    }
 
     if (req.command === RPC_HOLESAIL_START_LIVE) {
       replyJson(req, await startHolesailLive(parseJsonMessage(req.data)))

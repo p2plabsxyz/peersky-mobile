@@ -27,7 +27,6 @@ import type { SvgProps } from 'react-native-svg'
 import { BROWSER_PALETTES } from '../browser-appearance.mjs'
 import {
   RPC_IDENTITY_GET_KEY,
-  RPC_IDENTITY_INSPECT_STORAGE,
   RPC_IDENTITY_RESTORE_FROM_HYPER
 } from '../../backend/rpc/commands.mjs'
 import { QrCodeView } from './QrCodeView'
@@ -126,51 +125,51 @@ const SETTINGS_PAGES: Array<{
   description: string
   icon: ComponentType<SvgProps>
 }> = [
-  {
-    id: 'general',
-    title: 'General',
-    description: 'Search and startup behavior',
-    icon: SlidersIcon
-  },
-  {
-    id: 'accessibility',
-    title: 'Accessibility',
-    description: 'Text size and page zoom',
-    icon: UniversalAccessIcon
-  },
-  {
-    id: 'appearance',
-    title: 'Appearance',
-    description: 'Theme and address bar layout',
-    icon: PaletteIcon
-  },
-  {
-    id: 'data-clearing',
-    title: 'Data Clearing',
-    description: 'Tabs and browsing data',
-    icon: TrashIcon
-  },
-  {
-    id: 'permissions',
-    title: 'Permissions',
-    description: 'External app link handling',
-    icon: ShieldLockIcon
-  },
-  {
-    id: 'link-device',
-    title: 'Link Device',
-    description: 'Restore identity from desktop',
-    icon: DisplayIcon
-  },
-  {
-    id: 'about',
-    title: 'About',
-    description: 'Version, source code, and licenses',
-    icon: InfoIcon
-  }
-]
+    {
+      id: 'general',
+      title: 'General',
+      description: 'Search and startup behavior',
+      icon: SlidersIcon
+    },
+    {
+      id: 'accessibility',
+      title: 'Accessibility',
+      description: 'Text size and page zoom',
+      icon: UniversalAccessIcon
+    },
+    {
+      id: 'appearance',
+      title: 'Appearance',
+      description: 'Theme and address bar layout',
+      icon: PaletteIcon
+    },
+    {
+      id: 'data-clearing',
+      title: 'Data Clearing',
+      description: 'Tabs and browsing data',
+      icon: TrashIcon
+    },
+    {
+      id: 'permissions',
+      title: 'Permissions',
+      description: 'External app link handling',
+      icon: ShieldLockIcon
+    },
+    {
+      id: 'link-device',
+      title: 'Link Device',
+      description: 'Restore identity from desktop',
+      icon: DisplayIcon
+    },
+    {
+      id: 'about',
+      title: 'About',
+      description: 'Version, source code, and licenses',
+      icon: InfoIcon
+    }
+  ]
 
-export function SettingsScreen (props: SettingsScreenProps) {
+export function SettingsScreen(props: SettingsScreenProps) {
   const [page, setPage] = useState<SettingsPage>('main')
   const [transitionDirection, setTransitionDirection] = useState(1)
   const reduceMotion = useReducedMotion()
@@ -217,7 +216,7 @@ export function SettingsScreen (props: SettingsScreenProps) {
     return () => animation.stop()
   }, [page, reduceMotion, transition])
 
-  function changePage (nextPage: SettingsPage, direction: number) {
+  function changePage(nextPage: SettingsPage, direction: number) {
     if (nextPage === page) return
 
     transition.stopAnimation()
@@ -229,14 +228,14 @@ export function SettingsScreen (props: SettingsScreenProps) {
   const transitionStyle = reduceMotion
     ? null
     : {
-        opacity: transition,
-        transform: [{
-          translateX: transition.interpolate({
-            inputRange: [0, 1],
-            outputRange: [12 * transitionDirection, 0]
-          })
-        }]
-      }
+      opacity: transition,
+      transform: [{
+        translateX: transition.interpolate({
+          inputRange: [0, 1],
+          outputRange: [12 * transitionDirection, 0]
+        })
+      }]
+    }
 
   return (
     <SettingsThemeProvider value={props.isDark}>
@@ -247,7 +246,7 @@ export function SettingsScreen (props: SettingsScreenProps) {
   )
 }
 
-function SettingsHome ({
+function SettingsHome({
   onClose,
   onOpenPage
 }: {
@@ -322,7 +321,7 @@ function SettingsHome ({
   )
 }
 
-function SettingsSubpage ({
+function SettingsSubpage({
   title,
   onBack,
   children
@@ -359,7 +358,7 @@ function SettingsSubpage ({
 }
 
 
-function LinkDeviceSettings ({
+function LinkDeviceSettings({
   onCallRpc,
   storagePath,
   onIdentityRestored
@@ -377,7 +376,7 @@ function LinkDeviceSettings ({
   useEffect(() => {
     let cancelled = false
 
-    async function loadDeviceKey () {
+    async function loadDeviceKey() {
       setIsLoadingKey(true)
       setError(null)
 
@@ -406,7 +405,7 @@ function LinkDeviceSettings ({
     }
   }, [onCallRpc])
 
-  function copyDeviceKey () {
+  function copyDeviceKey() {
     if (!encryptionPublicKey) return
 
     try {
@@ -418,7 +417,7 @@ function LinkDeviceSettings ({
     }
   }
 
-  async function openScanner () {
+  async function openScanner() {
     if (!permission?.granted) {
       const response = await requestPermission()
       if (!response.granted) {
@@ -430,7 +429,7 @@ function LinkDeviceSettings ({
     setError(null)
   }
 
-  function handleBarcodeScanned ({ data }: { data: string }) {
+  function handleBarcodeScanned({ data }: { data: string }) {
     setIsScanning(false)
     if (data && data.startsWith('hyper://')) {
       setHyperUrl(data)
@@ -439,7 +438,7 @@ function LinkDeviceSettings ({
     }
   }
 
-  async function restoreIdentity () {
+  async function restoreIdentity() {
     const trimmedUrl = hyperUrl.trim()
     if (!trimmedUrl.startsWith('hyper://')) {
       setError('Enter the hyper:// identity transfer URL from PeerSky Desktop.')
@@ -512,7 +511,7 @@ function LinkDeviceSettings ({
                 >
                   {encryptionPublicKey || 'No key available'}
                 </Text>
-                )}
+              )}
           </View>
           <Pressable
             accessibilityRole='button'
@@ -601,7 +600,7 @@ function LinkDeviceSettings ({
 }
 
 
-function AboutSettings ({ onOpenUrl }: { onOpenUrl: (url: string) => void }) {
+function AboutSettings({ onOpenUrl }: { onOpenUrl: (url: string) => void }) {
   const isDark = useSettingsDarkMode()
 
   return (
@@ -634,11 +633,11 @@ function AboutSettings ({ onOpenUrl }: { onOpenUrl: (url: string) => void }) {
   )
 }
 
-function getSettingsPageTitle (page: Exclude<SettingsPage, 'main'>) {
+function getSettingsPageTitle(page: Exclude<SettingsPage, 'main'>) {
   return SETTINGS_PAGES.find((entry) => entry.id === page)?.title || 'Settings'
 }
 
-function useReducedMotion () {
+function useReducedMotion() {
   const [reduceMotion, setReduceMotion] = useState(true)
 
   useEffect(() => {

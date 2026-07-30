@@ -34,7 +34,7 @@ The transfer uses a bidirectional dual-QR workflow without any manual typing:
 |---|---|---|
 | `RPC_IDENTITY_GET_KEY` | `{}` | `{ ok: true, encryptionPublicKey }` |
 | `RPC_IDENTITY_RESTORE_FROM_HYPER` | `{ hyperUrl: string }` | `{ ok: true, restoredFiles: number, requiresRestart: true }` |
-| `RPC_IDENTITY_INSPECT_STORAGE` | `{}` | `{ ok: true, path, files: Array<{ name, type, size, mtime, content }> }` |
+
 
 ## Verification and Testing
 
