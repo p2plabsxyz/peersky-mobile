@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
-import { View, StyleSheet } from 'react-native'
+import { View, StyleSheet, Text } from 'react-native'
+import Svg, { Path } from 'react-native-svg'
 import { createQrMatrix } from './qrcode-matrix.mjs'
 
 type QrCodeViewProps = {
@@ -8,14 +9,22 @@ type QrCodeViewProps = {
 }
 
 export function QrCodeView ({ value, size = 220 }: QrCodeViewProps) {
-  const matrix = useMemo(() => {
-    if (!value) return []
+  const { matrix, error } = useMemo(() => {
+    if (!value) return { matrix: [], error: null }
     try {
-      return createQrMatrix(value, 'M')
-    } catch {
-      return []
+      return { matrix: createQrMatrix(value, 'M'), error: null }
+    } catch (err) {
+      return { matrix: [], error: err instanceof Error ? err.message : String(err) }
     }
   }, [value])
+
+  if (error) {
+    return (
+      <View style={[styles.placeholder, { width: size, height: size, justifyContent: 'center', alignItems: 'center' }]}>
+        <Text style={{ color: 'red', textAlign: 'center', padding: 8 }}>QR Error: {error}</Text>
+      </View>
+    )
+  }
 
   if (!matrix || matrix.length === 0) {
     return <View style={[styles.placeholder, { width: size, height: size }]} />
@@ -25,24 +34,20 @@ export function QrCodeView ({ value, size = 220 }: QrCodeViewProps) {
   const cellSize = Math.floor(size / moduleCount)
   const actualSize = cellSize * moduleCount
 
+  let path = ''
+  for (let rIndex = 0; rIndex < moduleCount; rIndex++) {
+    for (let cIndex = 0; cIndex < moduleCount; cIndex++) {
+      if (matrix[rIndex][cIndex]) {
+        path += `M${cIndex * cellSize},${rIndex * cellSize}h${cellSize}v${cellSize}h-${cellSize}z `
+      }
+    }
+  }
+
   return (
     <View style={[styles.container, { width: actualSize + 16, height: actualSize + 16 }]}>
-      <View style={{ width: actualSize, height: actualSize }}>
-        {matrix.map((row: boolean[], rIndex: number) => (
-          <View key={`r-${rIndex}`} style={{ flexDirection: 'row', height: cellSize }}>
-            {row.map((isDark: boolean, cIndex: number) => (
-              <View
-                key={`c-${rIndex}-${cIndex}`}
-                style={{
-                  width: cellSize,
-                  height: cellSize,
-                  backgroundColor: isDark ? '#000000' : '#ffffff'
-                }}
-              />
-            ))}
-          </View>
-        ))}
-      </View>
+      <Svg width={actualSize} height={actualSize} viewBox={`0 0 ${actualSize} ${actualSize}`}>
+        <Path d={path} fill="#000000" />
+      </Svg>
     </View>
   )
 }

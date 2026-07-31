@@ -8,6 +8,7 @@ import {
   RPC_HYPER_INIT,
   RPC_IDENTITY_GET_KEY,
   RPC_IDENTITY_RESTORE_FROM_HYPER,
+  RPC_IDENTITY_CONFIRM_RESTORE,
   RPC_P2PMD_ROOM_CREATE,
   RPC_P2PMD_ROOM_DISCONNECT,
   RPC_P2PMD_EDITOR_PAGE,
@@ -23,11 +24,15 @@ import {
   getEncryptionPublicKeyHex
 } from '../backup/device-keys.mjs'
 import { decryptIdentityTransfer } from '../backup/identity-transfer.mjs'
+import { randomBytes } from 'node:crypto'
+import b4a from 'b4a'
+import { rmSync, renameSync } from 'bare-fs'
 import { restoreIdentityFromBackup } from '../backup/restore.mjs'
 
 import { createDrive, publishMarkdownDocument, readHyperFile, uploadHyperFile } from '../hyper/drive.mjs'
 import { fetchHyper, fetchHyperBinary, resetHyperFetch } from '../hyper/fetch.mjs'
 import { closeHyperRuntime, getHyperRuntime, getHyperStoragePath } from '../hyper/runtime.mjs'
+
 import {
   connectHolesail,
   getHolesailStatus,
@@ -44,6 +49,9 @@ import { getMaxDocumentLength } from '../p2pmd/document.mjs'
 import { inlineHyperPreviewImages, renderMarkdownPreview } from '../p2pmd/preview.mjs'
 import { getP2pmdEditorPage } from '../p2pmd/server.mjs'
 import { parseJsonMessage, replyJson } from './messages.mjs'
+
+let currentIdentityNonce = null
+let pendingRestorePath = null
 
 export async function routeRpcRequest (req) {
   try {
@@ -65,9 +73,11 @@ export async function routeRpcRequest (req) {
 
     if (req.command === RPC_IDENTITY_GET_KEY) {
       const keys = await getDeviceKeys(getDefaultIdentityStoragePath())
+      currentIdentityNonce = b4a.toString(randomBytes(16), 'hex')
       replyJson(req, {
         ok: true,
-        encryptionPublicKey: getEncryptionPublicKeyHex(keys)
+        encryptionPublicKey: getEncryptionPublicKeyHex(keys),
+        nonce: currentIdentityNonce
       })
       return
     }
@@ -80,7 +90,13 @@ export async function routeRpcRequest (req) {
         return
       }
 
+      if (!currentIdentityNonce) {
+        replyJson(req, { ok: false, error: 'Identity transfer nonce missing. Generate a new key first.' })
+        return
+      }
+
       const storagePath = getDefaultIdentityStoragePath()
+      const tempStoragePath = storagePath + '.tmp'
       const keys = await getDeviceKeys(storagePath)
       const downloaded = await fetchHyperBinary({ url: hyperUrl, method: 'GET' })
 
@@ -92,22 +108,45 @@ export async function routeRpcRequest (req) {
         return
       }
 
-      const innerZipBytes = await decryptIdentityTransfer(downloaded.bytes, keys)
+      const { sas, innerZipBytes } = await decryptIdentityTransfer(downloaded.bytes, keys, currentIdentityNonce)
 
-      // Close Hyper runtime before overwriting storage to prevent DB corruption
-      await closeHyperRuntime()
-      resetHyperFetch()
+      try { rmSync(tempStoragePath, { recursive: true }) } catch (e) {}
 
-      const restoreResult = await restoreIdentityFromBackup(innerZipBytes, storagePath)
-
-      // Reinitialize Hyper with the restored identity
-      await getHyperRuntime()
+      const restoreResult = await restoreIdentityFromBackup(innerZipBytes, tempStoragePath)
+      pendingRestorePath = tempStoragePath
 
       replyJson(req, {
         ok: true,
-        restoredFiles: restoreResult.restoredFiles,
-        requiresRestart: true
+        sas,
+        restoredFiles: restoreResult.restoredFiles
       })
+      return
+    }
+
+    if (req.command === RPC_IDENTITY_CONFIRM_RESTORE) {
+      if (!pendingRestorePath) {
+        replyJson(req, { ok: false, error: 'No pending identity restore to confirm' })
+        return
+      }
+
+      const storagePath = getDefaultIdentityStoragePath()
+      const backupPath = storagePath + '.backup'
+
+      await closeHyperRuntime()
+      resetHyperFetch()
+
+      try {
+        try { rmSync(backupPath, { recursive: true }) } catch (e) {}
+        try { renameSync(storagePath, backupPath) } catch (e) {}
+        renameSync(pendingRestorePath, storagePath)
+        pendingRestorePath = null
+      } catch (err) {
+        replyJson(req, { ok: false, error: `Atomic swap failed: ${err.message}` })
+        return
+      }
+
+      await getHyperRuntime()
+      replyJson(req, { ok: true, requiresRestart: true })
       return
     }
 

@@ -1,17 +1,28 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'bare-fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import sodium from 'sodium-native'
 import b4a from 'b4a'
 
 export const DEVICE_KEY_FILE = 'device-key.json'
 
-export async function getDeviceKeys (storagePath = getDefaultIdentityStoragePath()) {
+let initPromise = null
+
+export function getDeviceKeys (storagePath = getDefaultIdentityStoragePath()) {
+  if (initPromise) return initPromise
+  initPromise = _getDeviceKeys(storagePath).catch((err) => {
+    initPromise = null
+    throw err
+  })
+  return initPromise
+}
+
+async function _getDeviceKeys (storagePath) {
   const filePath = joinPath(storagePath, DEVICE_KEY_FILE)
 
   if (existsSync(filePath)) {
     const parsed = JSON.parse(b4a.toString(readFileSync(filePath), 'utf8'))
     return {
-      signing: deserializeKeyPair(parsed.signing, 'signing key'),
-      encryption: deserializeKeyPair(parsed.encryption, 'encryption key')
+      signing: deserializeKeyPair(parsed.signing, 'signing key', sodium.crypto_sign_PUBLICKEYBYTES, sodium.crypto_sign_SECRETKEYBYTES),
+      encryption: deserializeKeyPair(parsed.encryption, 'encryption key', sodium.crypto_box_PUBLICKEYBYTES, sodium.crypto_box_SECRETKEYBYTES)
     }
   }
 
@@ -36,12 +47,16 @@ export async function getDeviceKeys (storagePath = getDefaultIdentityStoragePath
     })
   }
 
+  // TRADEOFF: Both secret keys go to device-key.json as plain hex.
+  // The platforms have hardware-backed key storage (expo-secure-store, Keystore, Keychain)
+  // which would be appropriate for long-lived identity keys. We currently use plain JSON
+  // for simplicity and compatibility across desktop/mobile environments.
   mkdirSync(storagePath, { recursive: true })
   writeFileSync(filePath, JSON.stringify(serialized, null, 2))
 
   return {
-    signing: deserializeKeyPair(serialized.signing, 'signing key'),
-    encryption: deserializeKeyPair(serialized.encryption, 'encryption key')
+    signing: deserializeKeyPair(serialized.signing, 'signing key', sodium.crypto_sign_PUBLICKEYBYTES, sodium.crypto_sign_SECRETKEYBYTES),
+    encryption: deserializeKeyPair(serialized.encryption, 'encryption key', sodium.crypto_box_PUBLICKEYBYTES, sodium.crypto_box_SECRETKEYBYTES)
   }
 }
 
@@ -70,20 +85,24 @@ function serializeKeyPair (keyPair) {
   }
 }
 
-function deserializeKeyPair (keyPair, name) {
+function deserializeKeyPair (keyPair, name, expectedPublicKeyBytes, expectedSecretKeyBytes) {
   if (!keyPair || typeof keyPair !== 'object') {
     throw new Error(`Invalid ${name}`)
   }
 
   return {
-    publicKey: fromHex(keyPair.publicKey, `${name} public key`),
-    secretKey: fromHex(keyPair.secretKey, `${name} secret key`)
+    publicKey: fromHex(keyPair.publicKey, `${name} public key`, expectedPublicKeyBytes),
+    secretKey: fromHex(keyPair.secretKey, `${name} secret key`, expectedSecretKeyBytes)
   }
 }
 
-function fromHex (value, name) {
+function fromHex (value, name, expectedLength) {
   if (!value || typeof value !== 'string' || !/^[0-9a-f]+$/i.test(value) || value.length % 2 !== 0) {
     throw new Error(`Invalid ${name}`)
+  }
+
+  if (expectedLength !== undefined && value.length !== expectedLength * 2) {
+    throw new Error(`Invalid ${name} length`)
   }
 
   return b4a.from(value, 'hex')

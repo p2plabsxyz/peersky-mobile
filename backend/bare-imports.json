@@ -1,3 +1,4 @@
 {
-  "node:crypto": "bare-crypto"
+  "node:crypto": "bare-crypto",
+  "node:zlib": "bare-zlib"
 }

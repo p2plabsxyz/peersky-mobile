@@ -27,7 +27,8 @@ import type { SvgProps } from 'react-native-svg'
 import { BROWSER_PALETTES } from '../browser-appearance.mjs'
 import {
   RPC_IDENTITY_GET_KEY,
-  RPC_IDENTITY_RESTORE_FROM_HYPER
+  RPC_IDENTITY_RESTORE_FROM_HYPER,
+  RPC_IDENTITY_CONFIRM_RESTORE
 } from '../../backend/rpc/commands.mjs'
 import { QrCodeView } from './QrCodeView'
 import { Appearance } from './Appearance'
@@ -83,6 +84,8 @@ type RpcResponse = {
   restoredFiles?: number
   path?: string
   files?: StorageFileItem[]
+  nonce?: string
+  sas?: string
 }
 
 type SettingsScreenProps = {
@@ -365,6 +368,7 @@ function LinkDeviceSettings({
 }: SettingsScreenProps) {
   const isDark = useSettingsDarkMode()
   const [encryptionPublicKey, setEncryptionPublicKey] = useState('')
+  const [nonce, setNonce] = useState('')
   const [hyperUrl, setHyperUrl] = useState('')
   const [isLoadingKey, setIsLoadingKey] = useState(true)
   const [isRestoring, setIsRestoring] = useState(false)
@@ -389,6 +393,7 @@ function LinkDeviceSettings({
         }
 
         setEncryptionPublicKey(response.encryptionPublicKey)
+        setNonce(response.nonce || '')
       } catch (loadError) {
         if (!cancelled) {
           setError(loadError instanceof Error ? loadError.message : String(loadError))
@@ -459,20 +464,26 @@ function LinkDeviceSettings({
         throw new Error(response.error || 'Identity restore failed')
       }
 
-      setMessage(`Identity restored. Restarting PeerSky Mobile...`)
-      onIdentityRestored()
       Alert.alert(
-        'Identity Restored',
-        `Restored ${response.restoredFiles || 0} files. PeerSky Mobile will restart now to load the new identity.`,
+        'Confirm Identity Restore',
+        `Does this code match the desktop screen?\n\n${response.sas}\n\nRestoring will overwrite your identity and restart the app.`,
         [
+          { text: 'Cancel', style: 'cancel' },
           {
-            text: 'Restart Now',
-            onPress: () => {
-              BackHandler.exitApp()
+            text: 'Confirm & Restart',
+            style: 'destructive',
+            onPress: async () => {
+              try {
+                const confirmResponse = await onCallRpc(RPC_IDENTITY_CONFIRM_RESTORE, {})
+                if (!confirmResponse.ok) throw new Error(confirmResponse.error)
+                onIdentityRestored()
+                BackHandler.exitApp()
+              } catch (confirmError) {
+                Alert.alert('Restore Failed', confirmError instanceof Error ? confirmError.message : String(confirmError))
+              }
             }
           }
-        ],
-        { cancelable: false }
+        ]
       )
     } catch (restoreError) {
       setError(restoreError instanceof Error ? restoreError.message : String(restoreError))
@@ -500,7 +511,7 @@ function LinkDeviceSettings({
             title='Your Mobile Device Key'
             description='Scan this QR code with PeerSky Desktop or copy the key string below.'
           />
-          {encryptionPublicKey ? <QrCodeView value={encryptionPublicKey} size={200} /> : null}
+          {encryptionPublicKey && nonce ? <QrCodeView value={`peersky-identity:${encryptionPublicKey}?nonce=${nonce}`} size={200} /> : null}
           <View style={[styles.keyBox, isDark ? darkStyles.input : null]}>
             {isLoadingKey
               ? <ActivityIndicator size='small' />

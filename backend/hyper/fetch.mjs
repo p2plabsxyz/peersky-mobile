@@ -90,7 +90,38 @@ export async function fetchHyperBinary ({
   try {
     const response = await fetch(url)
     const headers = headersToObject(response.headers)
-    const bytes = chunkToUint8Array(await response.arrayBuffer())
+
+    const contentLength = Number(headers['content-length'] || 0)
+    if (contentLength > 50 * 1024 * 1024) {
+      throw new Error(`Response exceeds 50MB limit: ${contentLength} bytes`)
+    }
+
+    const chunks = []
+    let totalLength = 0
+    const body = response.body
+
+    if (body && typeof body.getReader === 'function') {
+      const reader = body.getReader()
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        totalLength += value.byteLength || value.length
+        if (totalLength > 50 * 1024 * 1024) throw new Error('Response exceeds 50MB limit')
+        chunks.push(chunkToUint8Array(value))
+      }
+    } else if (body && typeof body[Symbol.asyncIterator] === 'function') {
+      for await (const chunk of body) {
+        totalLength += chunk.byteLength || chunk.length
+        if (totalLength > 50 * 1024 * 1024) throw new Error('Response exceeds 50MB limit')
+        chunks.push(chunkToUint8Array(chunk))
+      }
+    } else {
+      const buf = chunkToUint8Array(await response.arrayBuffer())
+      if (buf.byteLength > 50 * 1024 * 1024) throw new Error('Response exceeds 50MB limit')
+      chunks.push(buf)
+    }
+
+    const bytes = b4a.concat(chunks)
 
     return {
       ok: response.ok,

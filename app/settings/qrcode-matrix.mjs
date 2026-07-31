@@ -1,3 +1,14 @@
+// ---------------------------------------------------------------------
+// qrcode-generator
+//
+// Copyright (c) 2009 Kazuhiko Arase
+//
+// URL: http://www.d-project.com/
+//
+// Licensed under the MIT license:
+//  http://www.opensource.org/licenses/mit-license.php
+// ---------------------------------------------------------------------
+
 export function createQrMatrix (text, errorCorrectionLevel = 'M') {
   const typeNumber = getBestTypeNumber(text, errorCorrectionLevel)
   const qr = new QRCodeModel(typeNumber, errorCorrectionLevel)
@@ -6,8 +17,20 @@ export function createQrMatrix (text, errorCorrectionLevel = 'M') {
   return qr.modules
 }
 
+function getUtf8Length (str) {
+  let len = 0
+  for (let i = 0; i < str.length; i++) {
+    const c = str.charCodeAt(i)
+    if (c < 0x80) len += 1
+    else if (c < 0x800) len += 2
+    else if (c < 0xd800 || c >= 0xe000) len += 3
+    else { len += 4; i++ }
+  }
+  return len
+}
+
 function getBestTypeNumber (text, errorCorrectionLevel) {
-  const len = text.length
+  const len = getUtf8Length(text)
   if (len <= 14) return 1
   if (len <= 26) return 2
   if (len <= 42) return 3

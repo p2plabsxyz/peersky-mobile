@@ -1,7 +1,14 @@
-import { mkdirSync, writeFileSync } from 'bare-fs'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { readZipEntries } from './zip.mjs'
 
 const SKIP_ENTRIES = new Set(['manifest.json', 'manifest.mjson'])
+const ALLOWED_FILES = new Set([
+  'tabs.json',
+  'browser-tabs.json',
+  'lastOpened.json',
+  'peersky-ports.json',
+  'peersky-chat-rooms.json'
+])
 
 export async function restoreIdentityFromBackup (innerZipBytes, storagePath) {
   const entries = readZipEntries(innerZipBytes)
@@ -12,6 +19,14 @@ export async function restoreIdentityFromBackup (innerZipBytes, storagePath) {
   for (const entry of entries) {
     let safeName = normalizeZipEntryName(entry.name)
     if (!safeName || SKIP_ENTRIES.has(safeName)) continue
+
+    if (safeName === 'device-key.json') {
+      throw new Error('Refusing to restore device-key.json from backup')
+    }
+
+    if (!ALLOWED_FILES.has(safeName) && !safeName.startsWith('hyper/')) {
+      throw new Error(`Refusing to restore unknown file: ${safeName}`)
+    }
 
     if (safeName === 'tabs.json') {
       safeName = 'browser-tabs.json'
