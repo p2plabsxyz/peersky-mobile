@@ -1,0 +1,68 @@
+package __PACKAGE_NAME__
+
+import android.net.Uri
+import com.facebook.react.bridge.Promise
+import com.facebook.react.bridge.ReactApplicationContext
+import com.facebook.react.bridge.ReactContextBaseJavaModule
+import com.facebook.react.bridge.ReactMethod
+import com.facebook.react.module.annotations.ReactModule
+import java.io.File
+import java.util.concurrent.Executors
+
+@ReactModule(name = BrowserContentBlockingModule.NAME)
+class BrowserContentBlockingModule(
+  reactContext: ReactApplicationContext
+) : ReactContextBaseJavaModule(reactContext) {
+  private val loader = Executors.newSingleThreadExecutor()
+
+  override fun getName() = NAME
+
+  @ReactMethod
+  fun loadFilterLists(easyListUri: String, easyPrivacyUri: String, promise: Promise) {
+    val easyList = resolveFilterFile(easyListUri)
+    val easyPrivacy = resolveFilterFile(easyPrivacyUri)
+    if (easyList == null || easyPrivacy == null) {
+      promise.reject("ERR_INVALID_FILTER_PATH", "Invalid filter-list path.")
+      return
+    }
+
+    loader.execute {
+      try {
+        PeerSkyAdBlockEngine.loadLists(easyList.path, easyPrivacy.path)
+        promise.resolve(true)
+      } catch (error: Exception) {
+        promise.reject("ERR_FILTER_LOAD", error.message, error)
+      }
+    }
+  }
+
+  @ReactMethod
+  fun setEnabled(enabled: Boolean) {
+    PeerSkyAdBlockEngine.enabled = enabled
+  }
+
+  override fun invalidate() {
+    loader.shutdownNow()
+    super.invalidate()
+  }
+
+  private fun resolveFilterFile(uri: String): File? {
+    return try {
+      val parsed = Uri.parse(uri)
+      if (parsed.scheme != "file") return null
+
+      val candidate = File(parsed.path ?: return null).canonicalFile
+      val allowedRoot = File(reactApplicationContext.filesDir, FILTER_DIRECTORY)
+        .canonicalFile
+      val allowedPrefix = allowedRoot.path + File.separator
+      if (!candidate.path.startsWith(allowedPrefix) || !candidate.isFile) null else candidate
+    } catch (_: Exception) {
+      null
+    }
+  }
+
+  companion object {
+    const val NAME = "BrowserContentBlocking"
+    private const val FILTER_DIRECTORY = "content-blocking"
+  }
+}

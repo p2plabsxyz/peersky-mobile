@@ -8,6 +8,13 @@ import com.reactnativecommunity.webview.RNCWebViewWrapper
 class PeerSkyWebViewManager : RNCWebViewManager() {
   override fun getName() = "PeerSkyWebView"
 
+  override fun addEventEmitters(
+    context: ThemedReactContext,
+    view: RNCWebViewWrapper
+  ) {
+    view.webView.webViewClient = PeerSkyWebViewClient()
+  }
+
   public override fun createViewInstance(
     context: ThemedReactContext
   ): RNCWebViewWrapper {

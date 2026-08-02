@@ -1,0 +1,45 @@
+package __PACKAGE_NAME__
+
+object PeerSkyAdBlockEngine {
+  @Volatile
+  var enabled = true
+
+  @Volatile
+  private var listsLoaded = false
+
+  private val nativeAvailable = try {
+    System.loadLibrary("peersky_adblock")
+    true
+  } catch (_: UnsatisfiedLinkError) {
+    false
+  }
+
+  fun loadLists(easyListPath: String, easyPrivacyPath: String) {
+    check(nativeAvailable) { "Native content blocker is unavailable." }
+    val error = nativeLoadLists(easyListPath, easyPrivacyPath)
+    check(error.isEmpty()) { error }
+    listsLoaded = true
+  }
+
+  fun shouldBlock(
+    requestUrl: String,
+    documentUrl: String,
+    resourceType: String,
+    method: String
+  ): Boolean {
+    if (!enabled || !nativeAvailable || !listsLoaded) return false
+    return nativeShouldBlock(requestUrl, documentUrl, resourceType, method)
+  }
+
+  private external fun nativeLoadLists(
+    easyListPath: String,
+    easyPrivacyPath: String
+  ): String
+
+  private external fun nativeShouldBlock(
+    requestUrl: String,
+    documentUrl: String,
+    resourceType: String,
+    method: String
+  ): Boolean
+}

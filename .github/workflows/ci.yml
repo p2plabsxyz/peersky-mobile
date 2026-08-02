@@ -52,3 +52,36 @@ jobs:
 
       - name: Run live Holesail integration test
         run: npm run test:holesail:live
+
+  android-content-blocking:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Rust Android tooling
+        run: npm run setup:content-blocking
+
+      - name: Generate Android project
+        run: npx expo prebuild --platform android --no-install
+
+      - name: Compile Android native integration
+        working-directory: android
+        run: ./gradlew :app:compileDebugKotlin

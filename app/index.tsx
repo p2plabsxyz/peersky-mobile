@@ -94,6 +94,7 @@ import {
 import { useBrowserBookmarks } from './bookmarks/useBrowserBookmarks'
 import { DownloadsScreen } from './downloads/DownloadsScreen'
 import { peerSkyWebViewNativeConfig } from './downloads/PeerSkyWebView'
+import { initializeContentBlocking } from './privacy/contentBlocking'
 import { useBrowserDownloads } from './downloads/useBrowserDownloads'
 import { BrowserTabsScreen } from './tabs/BrowserTabsScreen'
 import { useBrowserTabPreviews } from './tabs/useBrowserTabPreviews'
@@ -241,6 +242,9 @@ export default function App () {
   const browserSessionRestoreStartedRef = useRef(false)
   const browserUserInteractedRef = useRef(false)
   const [browserLiveTabIds, setBrowserLiveTabIds] = useState(['tab-1'])
+  const [contentBlockingAttempt, setContentBlockingAttempt] = useState(0)
+  const [contentBlockingError, setContentBlockingError] = useState<string | null>(null)
+  const [contentBlockingReady, setContentBlockingReady] = useState(Platform.OS !== 'android')
   const [browserSessionReady, setBrowserSessionReady] = useState(false)
   const [browserTabsVisible, setBrowserTabsVisible] = useState(false)
   const [browserMenuVisible, setBrowserMenuVisible] = useState(false)
@@ -306,7 +310,31 @@ export default function App () {
   }, [])
 
   useEffect(() => {
-    if (!browserPreferencesReady || browserSessionRestoreStartedRef.current) return
+    let cancelled = false
+    setContentBlockingError(null)
+
+    void initializeContentBlocking()
+      .then((initialized) => {
+        if (!initialized && Platform.OS === 'android') {
+          throw new Error('Native content blocker is unavailable.')
+        }
+        if (!cancelled) setContentBlockingReady(true)
+      })
+      .catch((error) => {
+        console.error('Unable to initialize content blocking:', error)
+        if (!cancelled) {
+          setContentBlockingError('Unable to initialize content blocking. Check your connection and try again.')
+          setStatus('Unable to initialize content blocking')
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [contentBlockingAttempt])
+
+  useEffect(() => {
+    if (!browserPreferencesReady || !contentBlockingReady || browserSessionRestoreStartedRef.current) return
     browserSessionRestoreStartedRef.current = true
     let cancelled = false
 
@@ -341,7 +369,7 @@ export default function App () {
     return () => {
       cancelled = true
     }
-  }, [browserPreferencesReady])
+  }, [browserPreferencesReady, contentBlockingReady])
 
   useEffect(() => {
     if (!browserSessionReady) return
@@ -2357,6 +2385,7 @@ export default function App () {
             : null}
 
         {browserTabsState.tabs.map((tab) => {
+          if (!contentBlockingReady) return null
           const entry = tab.history[tab.historyIndex]
           if (!entry || !isBrowserWebViewSource(entry.source)) return null
           if (!browserLiveTabIds.includes(tab.id)) return null
@@ -2515,6 +2544,16 @@ export default function App () {
             </View>
           )
         })}
+
+        {!contentBlockingReady && contentBlockingError && (
+          <View style={styles.browserRestorePage}>
+            <Text style={styles.browserRestoreText}>{contentBlockingError}</Text>
+            <Button
+              title='Retry'
+              onPress={() => setContentBlockingAttempt((attempt) => attempt + 1)}
+            />
+          </View>
+        )}
         </View>
 
         {browserPreferences.addressBarPosition === 'bottom' && browserToolbar}
@@ -2529,7 +2568,7 @@ export default function App () {
           onZoomOut={onBrowserZoomOut}
         />
 
-        {isBooting && (
+        {(isBooting || (!contentBlockingReady && !contentBlockingError)) && (
           <View style={styles.browserLoader}>
             <ActivityIndicator size='small' />
           </View>
