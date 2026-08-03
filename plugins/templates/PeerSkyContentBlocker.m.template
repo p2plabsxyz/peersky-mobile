@@ -1,0 +1,144 @@
+#import "PeerSkyContentBlocker.h"
+
+static NSString *const PeerSkyContentBlockerDomain = @"PeerSkyContentBlocker";
+static const unsigned long long MaxRuleFileBytes = 48ULL * 1024ULL * 1024ULL;
+
+@interface PeerSkyContentBlocker ()
+@property (nonatomic, copy) NSArray<WKContentRuleList *> *ruleLists;
+@property (nonatomic, assign) BOOL enabled;
+@end
+
+@implementation PeerSkyContentBlocker
+
++ (instancetype)shared
+{
+  static PeerSkyContentBlocker *instance;
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    instance = [PeerSkyContentBlocker new];
+    instance.ruleLists = @[];
+  });
+  return instance;
+}
+
+- (void)setEnabled:(BOOL)enabled
+{
+  @synchronized (self) {
+    _enabled = enabled;
+  }
+}
+
+- (void)loadRuleFiles:(NSArray<NSURL *> *)ruleFiles
+         snapshotName:(NSString *)snapshotName
+            completion:(void (^)(NSError * _Nullable error))completion
+{
+  if (ruleFiles.count != 2 || snapshotName.length == 0) {
+    completion([self error:@"Incomplete WebKit content-blocking snapshot."]);
+    return;
+  }
+
+  NSMutableArray<WKContentRuleList *> *compiled = [NSMutableArray arrayWithCapacity:ruleFiles.count];
+  [self loadRuleAtIndex:0
+                  files:ruleFiles
+           snapshotName:snapshotName
+                 result:compiled
+             completion:^(NSError *error) {
+    if (error) {
+      completion(error);
+      return;
+    }
+    @synchronized (self) {
+      self.ruleLists = [compiled copy];
+    }
+    [self removeStaleRuleListsKeepingSnapshot:snapshotName];
+    completion(nil);
+  }];
+}
+
+- (void)removeStaleRuleListsKeepingSnapshot:(NSString *)snapshotName
+{
+  NSString *activePrefix = [NSString stringWithFormat:@"peersky-%@-", snapshotName];
+  WKContentRuleListStore *store = [WKContentRuleListStore defaultStore];
+  [store getAvailableContentRuleListIdentifiers:^(NSArray<NSString *> *identifiers) {
+    for (NSString *identifier in identifiers) {
+      if ([identifier hasPrefix:@"peersky-"] && ![identifier hasPrefix:activePrefix]) {
+        [store removeContentRuleListForIdentifier:identifier completionHandler:nil];
+      }
+    }
+  }];
+}
+
+- (void)configureWebView:(WKWebViewConfiguration *)configuration
+{
+  NSArray<WKContentRuleList *> *ruleLists;
+  BOOL enabled;
+  @synchronized (self) {
+    ruleLists = self.ruleLists;
+    enabled = self.enabled;
+  }
+
+  if (!enabled) return;
+  for (WKContentRuleList *ruleList in ruleLists) {
+    [configuration.userContentController addContentRuleList:ruleList];
+  }
+}
+
+- (void)loadRuleAtIndex:(NSUInteger)index
+                  files:(NSArray<NSURL *> *)ruleFiles
+           snapshotName:(NSString *)snapshotName
+                 result:(NSMutableArray<WKContentRuleList *> *)result
+             completion:(void (^)(NSError * _Nullable error))completion
+{
+  if (index >= ruleFiles.count) {
+    completion(nil);
+    return;
+  }
+
+  NSString *identifier = [NSString stringWithFormat:@"peersky-%@-%lu", snapshotName, (unsigned long)index];
+  WKContentRuleListStore *store = [WKContentRuleListStore defaultStore];
+  [store lookUpContentRuleListForIdentifier:identifier completionHandler:^(WKContentRuleList *cached, NSError *lookupError) {
+    if (cached) {
+      [result addObject:cached];
+      [self loadRuleAtIndex:index + 1 files:ruleFiles snapshotName:snapshotName result:result completion:completion];
+      return;
+    }
+
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+      NSError *readError;
+      NSNumber *fileSize;
+      [ruleFiles[index] getResourceValue:&fileSize forKey:NSURLFileSizeKey error:&readError];
+      if (readError || fileSize.unsignedLongLongValue > MaxRuleFileBytes) {
+        completion(readError ?: [self error:@"WebKit content rules exceed the size limit."]);
+        return;
+      }
+
+      NSString *json = [NSString stringWithContentsOfURL:ruleFiles[index]
+                                                 encoding:NSUTF8StringEncoding
+                                                    error:&readError];
+      if (!json || readError) {
+        completion(readError ?: [self error:@"Unable to read WebKit content rules."]);
+        return;
+      }
+
+      [store compileContentRuleListForIdentifier:identifier
+                        encodedContentRuleList:json
+                             completionHandler:^(WKContentRuleList *ruleList, NSError *compileError) {
+        if (!ruleList || compileError) {
+          completion(compileError ?: [self error:@"Unable to compile WebKit content rules."]);
+          return;
+        }
+        [result addObject:ruleList];
+        [self loadRuleAtIndex:index + 1 files:ruleFiles snapshotName:snapshotName result:result completion:completion];
+      }];
+    });
+  }];
+}
+
+- (NSError *)error:(NSString *)message
+{
+  return [NSError errorWithDomain:PeerSkyContentBlockerDomain
+                             code:1
+                         userInfo:@{NSLocalizedDescriptionKey: message}];
+}
+
+@end

@@ -1,7 +1,9 @@
 const {
   withAppBuildGradle,
   withDangerousMod,
-  withMainApplication
+  withMainApplication,
+  withXcodeProject,
+  IOSConfig
 } = require('@expo/config-plugins')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -35,7 +37,7 @@ module.exports = function withBrowserDownloads (config) {
     return androidConfig
   })
 
-  return withDangerousMod(config, ['android', async (androidConfig) => {
+  config = withDangerousMod(config, ['android', async (androidConfig) => {
     const packageName = androidConfig.android?.package
     if (!packageName) throw new Error('Android package name is required for browser downloads.')
 
@@ -99,7 +101,53 @@ module.exports = function withBrowserDownloads (config) {
 
     return androidConfig
   }])
+
+  config = withDangerousMod(config, ['ios', async (iosConfig) => {
+    const sourceDirectory = path.join(
+      iosConfig.modRequest.platformProjectRoot,
+      'PeerSkyContentBlocking'
+    )
+    fs.mkdirSync(sourceDirectory, { recursive: true })
+    for (const filename of IOS_CONTENT_BLOCKING_SOURCES) {
+      fs.copyFileSync(
+        path.join(TEMPLATE_DIRECTORY, `${filename}.template`),
+        path.join(sourceDirectory, filename)
+      )
+    }
+    return iosConfig
+  }])
+
+  return withXcodeProject(config, (iosConfig) => {
+    const project = iosConfig.modResults
+    const groupName = 'PeerSkyContentBlocking'
+    IOSConfig.XcodeUtils.ensureGroupRecursively(project, groupName)
+    for (const filename of IOS_CONTENT_BLOCKING_SOURCES) {
+      const file = {
+        filepath: path.join(groupName, filename),
+        groupName,
+        project
+      }
+      if (filename.endsWith('.m')) {
+        IOSConfig.XcodeUtils.addBuildSourceFileToGroup(file)
+      } else {
+        IOSConfig.XcodeUtils.addFileToGroupAndLink({
+          ...file,
+          addFileToProject: ({ project, file }) => {
+            project.addToPbxFileReferenceSection(file)
+          }
+        })
+      }
+    }
+    return iosConfig
+  })
 }
+
+const IOS_CONTENT_BLOCKING_SOURCES = Object.freeze([
+  'PeerSkyContentBlocker.h',
+  'PeerSkyContentBlocker.m',
+  'BrowserContentBlockingModule.m',
+  'PeerSkyWebViewManager.m'
+])
 
 function addSimpleMagicDependency (contents) {
   const marker = 'dependencies {'
@@ -244,3 +292,4 @@ module.exports.createWebViewClient = createWebViewClient
 module.exports.addPackageRegistration = addPackageRegistration
 module.exports.addSimpleMagicDependency = addSimpleMagicDependency
 module.exports.addContentBlockingBuild = addContentBlockingBuild
+module.exports.IOS_CONTENT_BLOCKING_SOURCES = IOS_CONTENT_BLOCKING_SOURCES

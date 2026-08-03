@@ -244,7 +244,9 @@ export default function App () {
   const [browserLiveTabIds, setBrowserLiveTabIds] = useState(['tab-1'])
   const [contentBlockingAttempt, setContentBlockingAttempt] = useState(0)
   const [contentBlockingError, setContentBlockingError] = useState<string | null>(null)
-  const [contentBlockingReady, setContentBlockingReady] = useState(Platform.OS !== 'android')
+  const [contentBlockingReady, setContentBlockingReady] = useState(
+    !['android', 'ios'].includes(Platform.OS)
+  )
   const [browserSessionReady, setBrowserSessionReady] = useState(false)
   const [browserTabsVisible, setBrowserTabsVisible] = useState(false)
   const [browserMenuVisible, setBrowserMenuVisible] = useState(false)
@@ -315,7 +317,7 @@ export default function App () {
 
     void initializeContentBlocking()
       .then((initialized) => {
-        if (!initialized && Platform.OS === 'android') {
+        if (!initialized && ['android', 'ios'].includes(Platform.OS)) {
           throw new Error('Native content blocker is unavailable.')
         }
         if (!cancelled) setContentBlockingReady(true)

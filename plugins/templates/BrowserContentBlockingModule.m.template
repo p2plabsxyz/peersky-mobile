@@ -1,0 +1,71 @@
+#import <React/RCTBridgeModule.h>
+
+#import "PeerSkyContentBlocker.h"
+
+@interface BrowserContentBlocking : NSObject <RCTBridgeModule>
+@end
+
+@implementation BrowserContentBlocking
+
+RCT_EXPORT_MODULE(BrowserContentBlocking)
+
+RCT_EXPORT_METHOD(loadFilterLists:(NSString *)easyListUri
+                  easyPrivacyUri:(NSString *)easyPrivacyUri
+                  snapshotName:(NSString *)snapshotName
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+{
+  NSArray<NSURL *> *ruleFiles = [self validatedRuleFiles:@[easyListUri, easyPrivacyUri]
+                                             snapshotName:snapshotName];
+  if (!ruleFiles) {
+    reject(@"invalid_filter_files", @"Invalid WebKit content-blocking snapshot.", nil);
+    return;
+  }
+
+  [[PeerSkyContentBlocker shared] loadRuleFiles:ruleFiles
+                                   snapshotName:snapshotName
+                                      completion:^(NSError *error) {
+    if (error) reject(@"compile_failed", error.localizedDescription, error);
+    else resolve(@YES);
+  }];
+}
+
+RCT_EXPORT_METHOD(setEnabled:(BOOL)enabled)
+{
+  [[PeerSkyContentBlocker shared] setEnabled:enabled];
+}
+
++ (BOOL)requiresMainQueueSetup
+{
+  return NO;
+}
+
+- (NSArray<NSURL *> *)validatedRuleFiles:(NSArray<NSString *> *)uris
+                             snapshotName:(NSString *)snapshotName
+{
+  NSRegularExpression *snapshotPattern = [NSRegularExpression regularExpressionWithPattern:@"^snapshot-[0-9]+$"
+                                                                                    options:0
+                                                                                      error:nil];
+  if ([snapshotPattern numberOfMatchesInString:snapshotName options:0 range:NSMakeRange(0, snapshotName.length)] != 1) {
+    return nil;
+  }
+
+  NSURL *documents = [[[NSFileManager defaultManager] URLsForDirectory:NSDocumentDirectory
+                                                              inDomains:NSUserDomainMask] firstObject];
+  NSURL *allowedDirectory = [[documents URLByAppendingPathComponent:@"content-blocking" isDirectory:YES]
+    URLByAppendingPathComponent:snapshotName isDirectory:YES];
+  NSString *allowedPrefix = [allowedDirectory.URLByStandardizingPath.path stringByAppendingString:@"/"];
+  NSMutableArray<NSURL *> *files = [NSMutableArray arrayWithCapacity:uris.count];
+
+  for (NSString *uri in uris) {
+    NSURL *file = [NSURL URLWithString:uri];
+    NSString *path = file.URLByStandardizingPath.path;
+    if (!file.isFileURL || ![path hasPrefix:allowedPrefix] || ![path hasSuffix:@".webkit.json"]) {
+      return nil;
+    }
+    [files addObject:file];
+  }
+  return files;
+}
+
+@end

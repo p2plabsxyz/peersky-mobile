@@ -5,9 +5,9 @@ import { WebView } from 'react-native-webview'
 type NativeConfig = NonNullable<ComponentProps<typeof WebView>['nativeConfig']>
 type NativeWebViewComponent = NonNullable<NativeConfig['component']>
 
-function loadAndroidWebView (): NativeWebViewComponent | null {
+function loadPeerSkyWebView (): NativeWebViewComponent | null {
   if (
-    Platform.OS !== 'android' ||
+    !['android', 'ios'].includes(Platform.OS) ||
     !UIManager.hasViewManagerConfig('PeerSkyWebView')
   ) return null
 
@@ -19,8 +19,8 @@ function loadAndroidWebView (): NativeWebViewComponent | null {
   }
 }
 
-const androidWebView = loadAndroidWebView()
+const peerSkyWebView = loadPeerSkyWebView()
 
-export const peerSkyWebViewNativeConfig: NativeConfig | undefined = androidWebView
-  ? { component: androidWebView }
+export const peerSkyWebViewNativeConfig: NativeConfig | undefined = peerSkyWebView
+  ? { component: peerSkyWebView }
   : undefined

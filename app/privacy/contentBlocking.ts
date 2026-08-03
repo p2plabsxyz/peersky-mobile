@@ -7,13 +7,14 @@ import {
   updateFilterLists
 } from './filterListStore'
 import { initializeContentBlockingRuntime } from './content-blocking-runtime.mjs'
+import { getWebKitContentRuleFiles } from './webkitContentRules'
 
 type BrowserContentBlockingNativeModule = {
-  loadFilterLists: (easyListUri: string, easyPrivacyUri: string) => Promise<boolean>
+  loadFilterLists: (...args: string[]) => Promise<boolean>
   setEnabled: (enabled: boolean) => void
 }
 
-const androidContentBlocking = NativeModules.BrowserContentBlocking as
+const nativeContentBlocking = NativeModules.BrowserContentBlocking as
   BrowserContentBlockingNativeModule | undefined
 
 let initializationInFlight: Promise<boolean> | null = null
@@ -30,11 +31,11 @@ export function initializeContentBlocking (): Promise<boolean> {
 }
 
 async function performInitialization () {
-  if (Platform.OS !== 'android' || !androidContentBlocking) return false
+  if (!['android', 'ios'].includes(Platform.OS) || !nativeContentBlocking) return false
 
   return initializeContentBlockingRuntime({
     activateState: activateFilterListState,
-    blocker: androidContentBlocking,
+    blocker: nativeContentBlocking,
     discardState: discardFilterListState,
     loadActiveState: loadFilterListState,
     loadNativeState: loadNativeFilterLists,
@@ -45,6 +46,16 @@ async function performInitialization () {
 async function loadNativeFilterLists (state: NonNullable<Awaited<ReturnType<typeof loadFilterListState>>>) {
   const files = getFilterListFiles(state)
   if (files.length !== 2) throw new Error('Incomplete content-blocking snapshot.')
-  if (!androidContentBlocking) throw new Error('Native content blocker is unavailable.')
-  await androidContentBlocking.loadFilterLists(files[0].uri, files[1].uri)
+  if (!nativeContentBlocking) throw new Error('Native content blocker is unavailable.')
+
+  if (Platform.OS === 'ios') {
+    const ruleFiles = await getWebKitContentRuleFiles(state)
+    await nativeContentBlocking.loadFilterLists(
+      ...ruleFiles.map((file) => file.uri),
+      state.snapshotName
+    )
+    return
+  }
+
+  await nativeContentBlocking.loadFilterLists(files[0].uri, files[1].uri)
 }

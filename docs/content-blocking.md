@@ -1,6 +1,6 @@
 # Content blocking
 
-PeerSky Mobile blocks network-level advertising and tracking requests on Android before WebView sends them. The native WebView client evaluates HTTP and HTTPS subresource requests with Brave's Rust ad-blocking engine using EasyList and EasyPrivacy. Main-frame navigation and loopback traffic are not intercepted.
+PeerSky Mobile blocks network-level advertising and tracking requests before WebView sends them. Android evaluates HTTP and HTTPS subresource requests with Brave's Rust ad-blocking engine. iOS converts the supported EasyList and EasyPrivacy network-rule subset into native WebKit rules and attaches compiled `WKContentRuleList` instances before navigation. Main-frame navigation is not blocked.
 
 Filter lists are downloaded over HTTPS, size checked, validated, and stored as snapshots in the app document directory. A valid cached snapshot is enabled before a background refresh starts. New snapshots become active only after the native engine accepts them, so a failed update keeps the last known good rules.
 
@@ -21,6 +21,20 @@ npm run android
 ```
 
 The setup script accepts Cargo from `CARGO`, the standard Cargo home directory, or the system `PATH`.
+
+## iOS setup
+
+The Expo config plugin generates the iOS bridge and custom WebView during prebuild. WebKit rule JSON is generated once per immutable filter-list snapshot, bounded to 45,000 rules per list, and cached with that snapshot. `WKContentRuleListStore` then reuses compiled rules for subsequent launches.
+
+On macOS, generate and run the iOS project with:
+
+```sh
+npm run bundle:bare
+npx expo prebuild --platform ios --no-install
+npm run ios
+```
+
+Unsupported Adblock modifiers, cosmetic rules, and regular-expression filters are skipped rather than converted into broader rules. The previous compiled rules remain active if a new snapshot cannot be converted or compiled.
 
 ## Third-party components
 
