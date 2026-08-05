@@ -18,6 +18,7 @@ export const FILTER_LIST_SOURCES = Object.freeze([
 
 const SOURCE_BY_ID = new Map(FILTER_LIST_SOURCES.map((source) => [source.id, source]))
 const SNAPSHOT_NAME_PATTERN = /^snapshot-[0-9]+$/
+const MAX_FILTER_LIST_VERSION_LENGTH = 128
 
 export function shouldUpdateFilterLists (state, now = Date.now()) {
   const normalized = normalizeFilterListState(state)
@@ -101,6 +102,46 @@ export function serializeFilterListState (state) {
   return JSON.stringify(normalized)
 }
 
+export function createBundledFilterListState (manifest) {
+  const updatedAt = Date.parse(manifest?.generatedAt)
+  if (!Number.isSafeInteger(updatedAt) || updatedAt < 0) return null
+
+  return normalizeFilterListState({
+    schemaVersion: FILTER_LIST_SCHEMA_VERSION,
+    updatedAt,
+    snapshotName: `snapshot-${updatedAt}`,
+    lists: manifest?.lists
+  })
+}
+
+export function validateBundledFilterListRecord ({
+  record,
+  byteLength,
+  preamble
+}) {
+  if (!record || byteLength !== record.byteLength) {
+    return { ok: false, error: 'Bundled filter-list size does not match its manifest.' }
+  }
+
+  const validation = validateFilterListSnapshot({
+    id: record.id,
+    byteLength,
+    preamble
+  })
+  if (!validation.ok) return validation
+
+  if (readFilterListVersion(preamble) !== record.version) {
+    return { ok: false, error: 'Bundled filter-list version does not match its manifest.' }
+  }
+
+  return { ok: true }
+}
+
+export function readFilterListVersion (preamble) {
+  if (typeof preamble !== 'string') return 'unreported'
+  return /^!\s*(?:Version|Last modified):\s*(.+)$/im.exec(preamble)?.[1]?.trim() || 'unreported'
+}
+
 function normalizeFilterListState (value) {
   if (value?.schemaVersion !== FILTER_LIST_SCHEMA_VERSION) return null
   if (!Number.isSafeInteger(value.updatedAt) || value.updatedAt < 0) return null
@@ -115,12 +156,15 @@ function normalizeFilterListState (value) {
     if (record.filename !== `${source.id}.txt`) return null
     if (!Number.isSafeInteger(record.byteLength) || record.byteLength < MIN_FILTER_LIST_BYTES) return null
     if (record.byteLength > MAX_FILTER_LIST_BYTES) return null
+    const version = normalizeListVersion(record.version)
+    if (!version) return null
 
     records.set(source.id, {
       id: source.id,
       url: source.url,
       filename: record.filename,
-      byteLength: record.byteLength
+      byteLength: record.byteLength,
+      version
     })
   }
 
@@ -130,6 +174,18 @@ function normalizeFilterListState (value) {
     snapshotName: value.snapshotName,
     lists: FILTER_LIST_SOURCES.map((source) => records.get(source.id))
   }
+}
+
+function normalizeListVersion (value) {
+  if (value === undefined) return 'unreported'
+  if (typeof value !== 'string') return null
+  const version = value.trim()
+  if (!version || version.length > MAX_FILTER_LIST_VERSION_LENGTH) return null
+  for (const character of version) {
+    const codePoint = character.codePointAt(0)
+    if (codePoint <= 31 || (codePoint >= 127 && codePoint <= 159)) return null
+  }
+  return version
 }
 
 function parseUnsignedInteger (value) {

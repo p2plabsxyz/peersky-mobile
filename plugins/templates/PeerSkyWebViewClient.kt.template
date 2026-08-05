@@ -10,6 +10,14 @@ import java.io.ByteArrayInputStream
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicReference
 
+internal fun isRemoteHttpUrl(scheme: String?, host: String?): Boolean {
+  val normalizedScheme = scheme?.lowercase(Locale.ROOT)
+  val normalizedHost = host?.lowercase(Locale.ROOT) ?: return false
+  return (normalizedScheme == "http" || normalizedScheme == "https") &&
+    normalizedHost !in setOf("localhost", "::1", "10.0.2.2") &&
+    !normalizedHost.startsWith("127.")
+}
+
 class PeerSkyWebViewClient : RNCWebViewClient() {
   private val documentUrl = AtomicReference("")
 
@@ -35,6 +43,7 @@ class PeerSkyWebViewClient : RNCWebViewClient() {
     if (requestUrl.length > MAX_FILTER_URL_LENGTH) return false
     val pageUrl = documentUrl.get()
     if (pageUrl.isBlank() || pageUrl.length > MAX_FILTER_URL_LENGTH) return false
+    if (!isRemoteHttpUrl(Uri.parse(pageUrl))) return false
     return PeerSkyAdBlockEngine.shouldBlock(
       requestUrl,
       pageUrl,
@@ -45,12 +54,8 @@ class PeerSkyWebViewClient : RNCWebViewClient() {
 
   companion object {
     private const val MAX_FILTER_URL_LENGTH = 16 * 1024
-    private val LOCAL_HOSTS = setOf("localhost", "127.0.0.1", "::1", "10.0.2.2")
-
     private fun isRemoteHttpUrl(uri: Uri): Boolean {
-      val scheme = uri.scheme?.lowercase(Locale.ROOT)
-      val host = uri.host?.lowercase(Locale.ROOT) ?: return false
-      return (scheme == "http" || scheme == "https") && host !in LOCAL_HOSTS
+      return isRemoteHttpUrl(uri.scheme, uri.host)
     }
 
     private fun detectResourceType(request: WebResourceRequest): String {

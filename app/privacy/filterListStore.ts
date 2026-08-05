@@ -1,14 +1,18 @@
 import { fetch as expoFetch } from 'expo/fetch'
+import { Asset } from 'expo-asset'
 import { Directory, File, Paths } from 'expo-file-system'
 import {
+  createBundledFilterListState,
   FILTER_LIST_SCHEMA_VERSION,
   FILTER_LIST_SOURCES,
   getBoundedFilterListTransferLength,
   isSafeFilterListResponseUrl,
   MAX_FILTER_LIST_BYTES,
   parseFilterListState,
+  readFilterListVersion,
   serializeFilterListState,
   shouldUpdateFilterLists,
+  validateBundledFilterListRecord,
   validateFilterListSnapshot
 } from './filter-lists.mjs'
 import { createForcedUpdateCoordinator } from './content-blocking-runtime.mjs'
@@ -17,6 +21,13 @@ const FILTER_DIRECTORY_NAME = 'content-blocking'
 const ACTIVE_STATE_FILENAME = 'active.json'
 const UPDATE_TIMEOUT_MS = 30_000
 const PREAMBLE_BYTES = 512
+const VERSION_PREAMBLE_BYTES = 16 * 1024
+const bundledManifest = require('../../assets/content-blocking/manifest.json')
+const bundledAssets: Record<string, number> = {
+  easylist: require('../../assets/content-blocking/easylist.txt'),
+  easyprivacy: require('../../assets/content-blocking/easyprivacy.txt')
+}
+let bundledInstallInFlight: Promise<FilterListState | null> | null = null
 
 export type FilterListState = {
   schemaVersion: number
@@ -27,6 +38,7 @@ export type FilterListState = {
     url: string
     filename: string
     byteLength: number
+    version: string
   }>
 }
 
@@ -36,7 +48,7 @@ export async function loadFilterListState (): Promise<FilterListState | null> {
 
   const backupFile = getStateBackupFile()
   const backupState = await loadStateFile(backupFile)
-  if (!backupState) return null
+  if (!backupState) return installBundledFilterListState()
 
   try {
     const stateFile = getStateFile()
@@ -112,12 +124,13 @@ async function performFilterListUpdate ({
     const lists = []
     for (const source of FILTER_LIST_SOURCES) {
       const file = new File(snapshotDirectory, `${source.id}.txt`)
-      const byteLength = await downloadFilterList(source, file)
+      const { byteLength, version } = await downloadFilterList(source, file)
       lists.push({
         id: source.id,
         url: source.url,
         filename: `${source.id}.txt`,
-        byteLength
+        byteLength,
+        version
       })
     }
 
@@ -142,6 +155,8 @@ async function downloadFilterList (
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), UPDATE_TIMEOUT_MS)
   let handle: ReturnType<File['open']> | null = null
+  let reader: ReadableStreamDefaultReader<Uint8Array> | null = null
+  let readerComplete = false
 
   try {
     const response = await expoFetch(source.url, {
@@ -173,30 +188,119 @@ async function downloadFilterList (
       )
     }
 
-    const bytes = new Uint8Array(await response.arrayBuffer())
-    const byteLength = bytes.byteLength
-    // Content-Range bounds encoded transfer bytes; expo/fetch returns the decoded body.
-    if (byteLength > MAX_FILTER_LIST_BYTES) throw new Error(`${source.title} exceeds the size limit.`)
-
     destination.create({ overwrite: true })
     handle = destination.open()
-    handle.writeBytes(bytes)
+    reader = response.body?.getReader() || null
+    if (!reader) throw new Error(`${source.title} did not return a readable body.`)
+    const preamble = new Uint8Array(VERSION_PREAMBLE_BYTES)
+    let preambleLength = 0
+    let byteLength = 0
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) {
+        readerComplete = true
+        break
+      }
+      byteLength += value.byteLength
+      if (byteLength > MAX_FILTER_LIST_BYTES) {
+        throw new Error(`${source.title} exceeds the size limit.`)
+      }
+      handle.writeBytes(value)
+      const remaining = preamble.byteLength - preambleLength
+      if (remaining > 0) {
+        const chunk = value.subarray(0, remaining)
+        preamble.set(chunk, preambleLength)
+        preambleLength += chunk.byteLength
+      }
+    }
+
     handle.close()
     handle = null
+    const headerBytes = preamble.subarray(0, preambleLength)
     const validation = validateFilterListSnapshot({
       id: source.id,
       byteLength,
       preamble: Array.from(
-        bytes.subarray(0, PREAMBLE_BYTES),
+        headerBytes.subarray(0, PREAMBLE_BYTES),
         (byte) => String.fromCharCode(byte)
       ).join('')
     })
     if (!validation.ok) throw new Error(`${source.title}: ${validation.error}`)
-    return byteLength
+    return {
+      byteLength,
+      version: readFilterListVersion(bytesToLatin1(headerBytes))
+    }
   } finally {
     clearTimeout(timeout)
+    if (reader && !readerComplete) {
+      try {
+        await reader.cancel()
+      } catch (error) {
+        console.warn(`Unable to close the ${source.title} response stream:`, error)
+      }
+    }
     handle?.close()
   }
+}
+
+function installBundledFilterListState () {
+  if (bundledInstallInFlight) return bundledInstallInFlight
+  bundledInstallInFlight = performBundledInstall().finally(() => {
+    bundledInstallInFlight = null
+  })
+  return bundledInstallInFlight
+}
+
+async function performBundledInstall (): Promise<FilterListState | null> {
+  const state = createBundledFilterListState(bundledManifest) as FilterListState | null
+  if (!state) throw new Error('Invalid bundled content-blocking manifest.')
+
+  const filterDirectory = getFilterDirectory()
+  filterDirectory.create({ idempotent: true, intermediates: true })
+  const snapshotDirectory = new Directory(filterDirectory, state.snapshotName)
+  if (snapshotDirectory.exists) snapshotDirectory.delete()
+  snapshotDirectory.create()
+
+  try {
+    for (const record of state.lists) {
+      const moduleId = bundledAssets[record.id]
+      if (!moduleId) throw new Error(`Missing bundled ${record.id} asset.`)
+      const asset = await Asset.fromModule(moduleId).downloadAsync()
+      if (!asset.localUri) throw new Error(`Unable to load bundled ${record.id} asset.`)
+      const destination = new File(snapshotDirectory, record.filename)
+      new File(asset.localUri).copy(destination)
+      const handle = destination.open()
+      let preamble
+      try {
+        preamble = bytesToLatin1(handle.readBytes(VERSION_PREAMBLE_BYTES))
+      } finally {
+        handle.close()
+      }
+      const validation = validateBundledFilterListRecord({
+        record,
+        byteLength: destination.size,
+        preamble
+      })
+      if (!validation.ok) {
+        throw new Error(`Bundled ${record.id}: ${validation.error}`)
+      }
+    }
+
+    replaceStateFile(serializeFilterListState(state))
+    removeInactiveSnapshots(state.snapshotName)
+    return state
+  } catch (error) {
+    if (snapshotDirectory.exists) snapshotDirectory.delete()
+    throw error
+  }
+}
+
+function bytesToLatin1 (bytes: Uint8Array) {
+  return Array.from(
+    bytes,
+    (byte) => String.fromCharCode(byte)
+  ).join('')
 }
 
 function isSnapshotComplete (state: FilterListState) {

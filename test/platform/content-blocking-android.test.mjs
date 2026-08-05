@@ -34,12 +34,23 @@ describe('Android content blocking', () => {
 
     assert.match(clientSource, /class PeerSkyWebViewClient : RNCWebViewClient\(\)/)
     assert.match(clientSource, /if \(request[.]isForMainFrame\) return false/)
-    assert.match(clientSource, /LOCAL_HOSTS/)
+    assert.match(clientSource, /internal fun isRemoteHttpUrl/)
     assert.match(clientSource, /"10[.]0[.]2[.]2"/)
+    assert.match(clientSource, /isRemoteHttpUrl\(Uri[.]parse\(pageUrl\)\)/)
     assert.match(clientSource, /PeerSkyAdBlockEngine[.]shouldBlock/)
     assert.match(clientSource, /MAX_FILTER_URL_LENGTH = 16 [*] 1024/)
     assert.match(clientSource, /WebResourceResponse\(/)
     assert.match(managerSource, /webViewClient = PeerSkyWebViewClient\(\)/)
+  })
+
+  test('generates behavioral coverage for remote and loopback URL classification', () => {
+    const testSource = plugin.createWebViewClientTest('xyz.test.browser')
+
+    assert.match(testSource, /assertTrue\(isRemoteHttpUrl\("https", "example[.]com"\)\)/)
+    assert.match(testSource, /assertFalse\(isRemoteHttpUrl\("https", "localhost"\)\)/)
+    assert.match(testSource, /assertFalse\(isRemoteHttpUrl\("https", "127[.]0[.]0[.]1"\)\)/)
+    assert.match(testSource, /assertFalse\(isRemoteHttpUrl\("https", "10[.]0[.]2[.]2"\)\)/)
+    assert.match(testSource, /assertFalse\(isRemoteHttpUrl\("https", "::1"\)\)/)
   })
 
   test('generates an incremental, reproducible Rust Android build', () => {
@@ -56,6 +67,10 @@ describe('Android content blocking', () => {
     assert.match(configured, /build', '--release', '--locked'/)
     assert.match(configured, /peerSkyCargoHome[.]exists\(\)/)
     assert.match(manifest, /adblock = \{ version = "=0[.]13[.]2"/)
+    assert.match(
+      readFileSync(new URL('../../plugins/templates/content-blocker.lib.rs.template', import.meta.url), 'utf8'),
+      /http:\/\/ads[.]example\/banner[.]js/
+    )
   })
 
   test('wires the single-flight initializer to the runtime coordinator', () => {

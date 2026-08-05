@@ -1,0 +1,21 @@
+{
+  "generatedAt": "2026-08-05T00:11:45.761Z",
+  "lists": [
+    {
+      "id": "easylist",
+      "title": "EasyList",
+      "url": "https://easylist.to/easylist/easylist.txt",
+      "filename": "easylist.txt",
+      "byteLength": 2245634,
+      "version": "202608050002"
+    },
+    {
+      "id": "easyprivacy",
+      "title": "EasyPrivacy",
+      "url": "https://easylist.to/easylist/easyprivacy.txt",
+      "filename": "easyprivacy.txt",
+      "byteLength": 1492287,
+      "version": "202608050002"
+    }
+  ]
+}

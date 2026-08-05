@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { describe, test } from 'node:test'
 import {
   FILTER_LIST_SCHEMA_VERSION,
@@ -6,11 +7,13 @@ import {
   FILTER_LIST_UPDATE_INTERVAL_MS,
   MAX_FILTER_LIST_BYTES,
   MIN_FILTER_LIST_BYTES,
+  createBundledFilterListState,
   getBoundedFilterListTransferLength,
   isSafeFilterListResponseUrl,
   parseFilterListState,
   serializeFilterListState,
   shouldUpdateFilterLists,
+  validateBundledFilterListRecord,
   validateFilterListSnapshot
 } from '../../app/privacy/filter-lists.mjs'
 
@@ -29,6 +32,30 @@ function createState (updatedAt = 1_000) {
 }
 
 describe('content-blocking filter lists', () => {
+  test('ships a validated and reproducible first-launch snapshot', () => {
+    const manifest = JSON.parse(readFileSync(
+      new URL('../../assets/content-blocking/manifest.json', import.meta.url),
+      'utf8'
+    ))
+    const state = createBundledFilterListState(manifest)
+
+    assert.ok(state)
+    assert.deepEqual(state.lists.map(({ id }) => id), ['easylist', 'easyprivacy'])
+    for (const record of state.lists) {
+      const bytes = readFileSync(new URL(
+        `../../assets/content-blocking/${record.filename}`,
+        import.meta.url
+      ))
+      assert.equal(bytes.byteLength, record.byteLength)
+      assert.notEqual(record.version, 'unreported')
+      assert.deepEqual(validateBundledFilterListRecord({
+        record,
+        byteLength: bytes.byteLength,
+        preamble: bytes.subarray(0, 16 * 1024).toString('latin1')
+      }), { ok: true })
+    }
+  })
+
   test('uses only the maintained HTTPS EasyList sources', () => {
     assert.deepEqual(
       FILTER_LIST_SOURCES.map(({ id }) => id),
@@ -128,6 +155,46 @@ describe('content-blocking filter lists', () => {
     const parsed = parseFilterListState(serializeFilterListState(state))
 
     assert.deepEqual(parsed?.lists.map(({ id }) => id), ['easylist', 'easyprivacy'])
+    assert.equal(parsed?.lists.every(({ version }) => version === 'unreported'), true)
+  })
+
+  test('rejects invalid bundled metadata and oversized version values', () => {
+    assert.equal(createBundledFilterListState({ generatedAt: 'invalid', lists: [] }), null)
+    const state = createState()
+    state.lists[0].version = 'x'.repeat(129)
+    assert.equal(parseFilterListState(state), null)
+  })
+
+  test('rejects bundled files that do not match their manifest', () => {
+    const record = {
+      ...createState().lists[0],
+      version: '202608061200'
+    }
+    const preamble = '[Adblock Plus 2.0]\n! Version: 202608061200'
+
+    assert.equal(validateBundledFilterListRecord({
+      record,
+      byteLength: record.byteLength - 1,
+      preamble
+    }).ok, false)
+    assert.equal(validateBundledFilterListRecord({
+      record,
+      byteLength: record.byteLength,
+      preamble: '<html>error</html>'
+    }).ok, false)
+    assert.equal(validateBundledFilterListRecord({
+      record,
+      byteLength: record.byteLength,
+      preamble: '[Adblock Plus 2.0]\n! Version: other'
+    }).ok, false)
+  })
+
+  test('rejects DEL and C1 controls in stored list versions', () => {
+    for (const control of ['\u007F', '\u0085']) {
+      const state = createState()
+      state.lists[0].version = `2026${control}08`
+      assert.equal(parseFilterListState(state), null)
+    }
   })
 
   test('rejects stale schemas, unsafe paths, duplicate sources, and altered URLs', () => {

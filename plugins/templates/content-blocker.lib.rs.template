@@ -143,6 +143,13 @@ mod tests {
             "GET",
         )
         .unwrap();
+        let blocked_http = Request::new(
+            "http://ads.example/banner.js",
+            "http://site.example/",
+            "script",
+            "GET",
+        )
+        .unwrap();
         let allowed = Request::new(
             "https://ads.example/allowed.js",
             "https://site.example/",
@@ -152,6 +159,7 @@ mod tests {
         .unwrap();
 
         assert!(engine.check_network_request(&blocked).should_block());
+        assert!(engine.check_network_request(&blocked_http).should_block());
         assert!(!engine.check_network_request(&allowed).should_block());
     }
 }

@@ -113,6 +113,42 @@ describe('Content-blocking runtime', () => {
     assert.deepEqual(events, ['enabled:false', 'loaded:snapshot-1', 'enabled:true'])
   })
 
+  test('stays disabled when first-launch list download fails', async () => {
+    const events = []
+
+    await assert.rejects(initializeContentBlockingRuntime({
+      activateState: async () => {},
+      blocker: { setEnabled: (enabled) => events.push(`enabled:${enabled}`) },
+      discardState: async () => {},
+      loadActiveState: async () => null,
+      loadNativeState: async () => {},
+      updateState: async () => { throw new Error('offline') },
+      warn: () => {}
+    }), /offline/)
+
+    assert.deepEqual(events, ['enabled:false'])
+  })
+
+  test('disables blocking if rejected rules and cached rules both fail to load', async () => {
+    const events = []
+    let loadCount = 0
+
+    await assert.rejects(initializeContentBlockingRuntime({
+      activateState: async () => { throw new Error('state write failed') },
+      blocker: { setEnabled: (enabled) => events.push(`enabled:${enabled}`) },
+      discardState: async () => {},
+      loadActiveState: async () => cachedState,
+      loadNativeState: async () => {
+        loadCount += 1
+        if (loadCount === 3) throw new Error('rollback failed')
+      },
+      updateState: async () => updatedState,
+      warn: () => {}
+    }), /state write failed/)
+
+    assert.deepEqual(events, ['enabled:false', 'enabled:true', 'enabled:false'])
+  })
+
   test('queues a forced refresh behind a non-forced refresh', async () => {
     const first = deferred()
     const calls = []
@@ -131,6 +167,26 @@ describe('Content-blocking runtime', () => {
     assert.deepEqual(calls, [
       { force: false, now: 100 },
       { force: true, now: 200 }
+    ])
+  })
+
+  test('runs a forced refresh after a failed non-forced refresh', async () => {
+    const first = deferred()
+    const calls = []
+    const coordinate = createForcedUpdateCoordinator(({ force, now }) => {
+      calls.push({ force, now })
+      return calls.length === 1 ? first.promise : Promise.resolve(updatedState)
+    }, () => 300)
+
+    const normal = coordinate({ force: false, now: 100 })
+    const forced = coordinate({ force: true, now: 101 })
+    first.reject(new Error('network failed'))
+
+    await assert.rejects(normal, /network failed/)
+    assert.equal(await forced, updatedState)
+    assert.deepEqual(calls, [
+      { force: false, now: 100 },
+      { force: true, now: 300 }
     ])
   })
 })

@@ -98,6 +98,11 @@ module.exports = function withBrowserDownloads (config) {
       'BrowserDownloadsModuleTest.kt',
       createDownloadsModuleTest(packageName)
     )
+    writeAndroidSource(
+      testDirectory,
+      'PeerSkyWebViewClientTest.kt',
+      createWebViewClientTest(packageName)
+    )
 
     return androidConfig
   }])
@@ -248,6 +253,10 @@ function createDownloadsModuleTest (packageName) {
   return readAndroidTemplate('BrowserDownloadsModuleTest.kt.template', packageName)
 }
 
+function createWebViewClientTest (packageName) {
+  return readAndroidTemplate('PeerSkyWebViewClientTest.kt.template', packageName)
+}
+
 function readAndroidTemplate (filename, packageName) {
   return fs.readFileSync(path.join(TEMPLATE_DIRECTORY, filename), 'utf8')
     .replaceAll('__PACKAGE_NAME__', packageName)
@@ -285,6 +294,7 @@ module.exports.createDownloadsModule = createDownloadsModule
 module.exports.createDownloadsPackage = createDownloadsPackage
 module.exports.createWebViewManager = createWebViewManager
 module.exports.createDownloadsModuleTest = createDownloadsModuleTest
+module.exports.createWebViewClientTest = createWebViewClientTest
 module.exports.createContentBlockingModule = createContentBlockingModule
 module.exports.createContentBlockingPackage = createContentBlockingPackage
 module.exports.createAdBlockEngine = createAdBlockEngine
