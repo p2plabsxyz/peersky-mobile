@@ -6,7 +6,10 @@ import {
   loadFilterListState,
   updateFilterLists
 } from './filterListStore'
-import { initializeContentBlockingRuntime } from './content-blocking-runtime.mjs'
+import {
+  createForcedUpdateCoordinator,
+  initializeContentBlockingRuntime
+} from './content-blocking-runtime.mjs'
 import { getWebKitContentRuleFiles } from './webkitContentRules'
 
 type BrowserContentBlockingNativeModule = {
@@ -17,30 +20,60 @@ type BrowserContentBlockingNativeModule = {
 const nativeContentBlocking = NativeModules.BrowserContentBlocking as
   BrowserContentBlockingNativeModule | undefined
 
-let initializationInFlight: Promise<boolean> | null = null
+let desiredEnabled = true
+let rulesReady = false
 
-export function initializeContentBlocking (): Promise<boolean> {
-  if (initializationInFlight) return initializationInFlight
-
-  initializationInFlight = performInitialization()
-    .finally(() => {
-      initializationInFlight = null
-    })
-
-  return initializationInFlight
+const runtimeBlocker = {
+  setEnabled (ready: boolean) {
+    rulesReady = ready
+    applyEnabledState()
+  }
 }
 
-async function performInitialization () {
+const coordinateInitialization = createForcedUpdateCoordinator(
+  ({ force }: { force: boolean }) => performInitialization(force)
+)
+
+export function initializeContentBlocking ({ enabled = true } = {}): Promise<boolean> {
+  setContentBlockingEnabled(enabled)
+  return coordinateInitialization({ force: false })
+}
+
+export function updateContentBlockingLists (): Promise<boolean> {
+  return coordinateInitialization({ force: true })
+}
+
+export function setContentBlockingEnabled (enabled: boolean) {
+  desiredEnabled = enabled
+  applyEnabledState()
+}
+
+export async function getContentBlockingStatus () {
+  const state = await loadFilterListState()
+  return state
+    ? {
+        updatedAt: state.updatedAt,
+        lists: state.lists.map(({ id, byteLength }) => ({ id, byteLength }))
+      }
+    : null
+}
+
+async function performInitialization (forceUpdate: boolean) {
   if (!['android', 'ios'].includes(Platform.OS) || !nativeContentBlocking) return false
 
   return initializeContentBlockingRuntime({
     activateState: activateFilterListState,
-    blocker: nativeContentBlocking,
+    blocker: runtimeBlocker,
     discardState: discardFilterListState,
+    forceUpdate,
     loadActiveState: loadFilterListState,
     loadNativeState: loadNativeFilterLists,
     updateState: updateFilterLists
   })
+}
+
+function applyEnabledState () {
+  nativeContentBlocking?.setEnabled(rulesReady && desiredEnabled)
 }
 
 async function loadNativeFilterLists (state: NonNullable<Awaited<ReturnType<typeof loadFilterListState>>>) {

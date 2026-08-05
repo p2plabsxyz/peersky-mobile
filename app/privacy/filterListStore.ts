@@ -3,6 +3,7 @@ import { Directory, File, Paths } from 'expo-file-system'
 import {
   FILTER_LIST_SCHEMA_VERSION,
   FILTER_LIST_SOURCES,
+  getBoundedFilterListTransferLength,
   isSafeFilterListResponseUrl,
   MAX_FILTER_LIST_BYTES,
   parseFilterListState,
@@ -144,10 +145,13 @@ async function downloadFilterList (
 
   try {
     const response = await expoFetch(source.url, {
-      headers: { Accept: 'text/plain' },
+      headers: {
+        Accept: 'text/plain',
+        Range: `bytes=0-${MAX_FILTER_LIST_BYTES}`
+      },
       signal: controller.signal
     })
-    if (!response.ok || !response.body) {
+    if (!response.ok) {
       throw new Error(`Unable to download ${source.title} (${response.status}).`)
     }
 
@@ -155,48 +159,43 @@ async function downloadFilterList (
       throw new Error(`${source.title} redirected to an unsafe URL.`)
     }
 
-    const declaredLength = Number(response.headers.get('content-length'))
-    if (Number.isFinite(declaredLength) && declaredLength > MAX_FILTER_LIST_BYTES) {
-      throw new Error(`${source.title} exceeds the size limit.`)
+    const contentLength = response.headers.get('content-length')
+    const contentRange = response.headers.get('content-range')
+    const boundedTransferLength = getBoundedFilterListTransferLength({
+      status: response.status,
+      contentLength,
+      contentRange
+    })
+    if (boundedTransferLength === null) {
+      throw new Error(
+        `${source.title} returned an unbounded response ` +
+        `(status ${response.status}, length ${contentLength || 'missing'}, range ${contentRange || 'missing'}).`
+      )
     }
+
+    const bytes = new Uint8Array(await response.arrayBuffer())
+    const byteLength = bytes.byteLength
+    // Content-Range bounds encoded transfer bytes; expo/fetch returns the decoded body.
+    if (byteLength > MAX_FILTER_LIST_BYTES) throw new Error(`${source.title} exceeds the size limit.`)
 
     destination.create({ overwrite: true })
     handle = destination.open()
-    const reader = response.body.getReader()
-    let byteLength = 0
-
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      byteLength += value.byteLength
-      if (byteLength > MAX_FILTER_LIST_BYTES) {
-        await reader.cancel()
-        throw new Error(`${source.title} exceeds the size limit.`)
-      }
-      handle.writeBytes(value)
-    }
-
+    handle.writeBytes(bytes)
     handle.close()
     handle = null
     const validation = validateFilterListSnapshot({
       id: source.id,
       byteLength,
-      preamble: readAsciiPreamble(destination)
+      preamble: Array.from(
+        bytes.subarray(0, PREAMBLE_BYTES),
+        (byte) => String.fromCharCode(byte)
+      ).join('')
     })
     if (!validation.ok) throw new Error(`${source.title}: ${validation.error}`)
     return byteLength
   } finally {
     clearTimeout(timeout)
     handle?.close()
-  }
-}
-
-function readAsciiPreamble (file: File) {
-  const handle = file.open()
-  try {
-    return Array.from(handle.readBytes(PREAMBLE_BYTES), (byte) => String.fromCharCode(byte)).join('')
-  } finally {
-    handle.close()
   }
 }
 
@@ -235,11 +234,18 @@ function replaceStateFile (serialized: string) {
   if (stateFile.exists) stateFile.move(backup)
 
   try {
-    temporary.move(stateFile)
+    // Expo mutates the source File URI after move(), so resolve active.json again.
+    temporary.move(getStateFile())
+  } catch (error) {
+    const activeFile = getStateFile()
+    if (backup.exists && !activeFile.exists) backup.move(activeFile)
+    throw error
+  }
+
+  try {
     if (backup.exists) backup.delete()
   } catch (error) {
-    if (backup.exists && !stateFile.exists) backup.move(stateFile)
-    throw error
+    console.warn('Unable to remove the previous filter-list state:', error)
   }
 }
 

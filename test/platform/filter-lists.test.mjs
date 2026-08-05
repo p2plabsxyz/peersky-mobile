@@ -6,6 +6,7 @@ import {
   FILTER_LIST_UPDATE_INTERVAL_MS,
   MAX_FILTER_LIST_BYTES,
   MIN_FILTER_LIST_BYTES,
+  getBoundedFilterListTransferLength,
   isSafeFilterListResponseUrl,
   parseFilterListState,
   serializeFilterListState,
@@ -90,6 +91,34 @@ describe('content-blocking filter lists', () => {
     assert.equal(isSafeFilterListResponseUrl('http://cdn.example/list.txt', sourceUrl), false)
     assert.equal(isSafeFilterListResponseUrl('https://user:secret@cdn.example/list.txt', sourceUrl), false)
     assert.equal(isSafeFilterListResponseUrl('not a URL', sourceUrl), false)
+  })
+
+  test('accepts only bounded filter-list transfers', () => {
+    assert.equal(getBoundedFilterListTransferLength({
+      status: 200,
+      contentLength: '4096',
+      contentRange: null
+    }), 4096)
+    assert.equal(getBoundedFilterListTransferLength({
+      status: 206,
+      contentLength: null,
+      contentRange: 'bytes 0-4095/4096'
+    }), 4096)
+    assert.equal(getBoundedFilterListTransferLength({
+      status: 200,
+      contentLength: null,
+      contentRange: null
+    }), null)
+    assert.equal(getBoundedFilterListTransferLength({
+      status: 206,
+      contentLength: null,
+      contentRange: `bytes 0-${MAX_FILTER_LIST_BYTES}/${MAX_FILTER_LIST_BYTES + 1}`
+    }), null)
+    assert.equal(getBoundedFilterListTransferLength({
+      status: 206,
+      contentLength: '12',
+      contentRange: 'bytes 0-4095/4096'
+    }), null)
   })
 
   test('round trips valid state in canonical source order', () => {

@@ -68,7 +68,8 @@ describe('Android content blocking', () => {
       'utf8'
     )
 
-    assert.match(initializer, /initializationInFlight/)
+    assert.match(initializer, /createForcedUpdateCoordinator/)
+    assert.match(initializer, /rulesReady && desiredEnabled/)
     assert.match(initializer, /initializeContentBlockingRuntime/)
     assert.match(initializer, /loadActiveState: loadFilterListState/)
     assert.match(initializer, /updateState: updateFilterLists/)
@@ -76,5 +77,8 @@ describe('Android content blocking', () => {
     assert.match(initializer, /discardState: discardFilterListState/)
     assert.match(appSource, /!contentBlockingReady/)
     assert.match(appSource, /setContentBlockingAttempt/)
+    assert.match(appSource, /for \(const webView of browserWebViewRefs[.]current[.]values\(\)\)/)
+    assert.match(appSource, /await initializeContentBlocking\(\{ enabled: true \}\)/)
+    assert.match(appSource, /setContentBlockingPreference\(true\)/)
   })
 })

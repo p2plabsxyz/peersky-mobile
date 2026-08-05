@@ -56,6 +56,33 @@ export function isSafeFilterListResponseUrl (responseUrl, sourceUrl) {
   }
 }
 
+export function getBoundedFilterListTransferLength ({
+  status,
+  contentLength,
+  contentRange
+}) {
+  const declaredLength = parseUnsignedInteger(contentLength)
+
+  if (status === 200) {
+    return declaredLength !== null && declaredLength <= MAX_FILTER_LIST_BYTES
+      ? declaredLength
+      : null
+  }
+
+  if (status !== 206 || typeof contentRange !== 'string') return null
+  const match = /^bytes 0-([0-9]+)\/([0-9]+)$/.exec(contentRange.trim())
+  if (!match) return null
+
+  const end = parseUnsignedInteger(match[1])
+  const total = parseUnsignedInteger(match[2])
+  if (end === null || total === null) return null
+
+  const responseLength = end + 1
+  if (responseLength !== total || responseLength > MAX_FILTER_LIST_BYTES) return null
+  if (declaredLength !== null && declaredLength !== responseLength) return null
+  return responseLength
+}
+
 export function parseFilterListState (serialized) {
   let value
 
@@ -103,4 +130,10 @@ function normalizeFilterListState (value) {
     snapshotName: value.snapshotName,
     lists: FILTER_LIST_SOURCES.map((source) => records.get(source.id))
   }
+}
+
+function parseUnsignedInteger (value) {
+  if (!/^[0-9]+$/.test(String(value ?? ''))) return null
+  const parsed = Number(value)
+  return Number.isSafeInteger(parsed) ? parsed : null
 }

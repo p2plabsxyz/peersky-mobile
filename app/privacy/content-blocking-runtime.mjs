@@ -2,6 +2,7 @@ export async function initializeContentBlockingRuntime ({
   activateState,
   blocker,
   discardState,
+  forceUpdate = false,
   loadActiveState,
   loadNativeState,
   updateState,
@@ -22,10 +23,11 @@ export async function initializeContentBlockingRuntime ({
 
   let updatedState
   try {
-    updatedState = await updateState({ force: !activeState })
+    updatedState = await updateState({ force: forceUpdate || !activeState })
   } catch (error) {
     if (!activeState) throw error
     warn('Unable to update content-blocking lists; using cached rules:', error)
+    if (forceUpdate) throw error
     return true
   }
 
@@ -54,6 +56,7 @@ export async function initializeContentBlockingRuntime ({
     }
 
     warn('Unable to activate updated content-blocking lists; using cached rules:', error)
+    if (forceUpdate) throw error
   }
 
   return true

@@ -4,6 +4,8 @@ PeerSky Mobile blocks network-level advertising and tracking requests before Web
 
 Filter lists are downloaded over HTTPS, size checked, validated, and stored as snapshots in the app document directory. A valid cached snapshot is enabled before a background refresh starts. New snapshots become active only after the native engine accepts them, so a failed update keeps the last known good rules.
 
+The Privacy settings page provides a global protection switch, the active filter-list status, and a manual update action. Turning protection off is persisted across launches. Manual update failures leave the current validated snapshot active and report the failure in Settings.
+
 ## Android setup
 
 The native blocker is generated during Expo prebuild and compiled for Android with Rust and `cargo-ndk`. After installing Java, Android Studio/SDK, Node.js, and project dependencies, install the native prerequisites once:

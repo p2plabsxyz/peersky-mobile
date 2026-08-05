@@ -94,7 +94,10 @@ import {
 import { useBrowserBookmarks } from './bookmarks/useBrowserBookmarks'
 import { DownloadsScreen } from './downloads/DownloadsScreen'
 import { peerSkyWebViewNativeConfig } from './downloads/PeerSkyWebView'
-import { initializeContentBlocking } from './privacy/contentBlocking'
+import {
+  initializeContentBlocking,
+  setContentBlockingEnabled as applyContentBlockingEnabled
+} from './privacy/contentBlocking'
 import { useBrowserDownloads } from './downloads/useBrowserDownloads'
 import { BrowserTabsScreen } from './tabs/BrowserTabsScreen'
 import { useBrowserTabPreviews } from './tabs/useBrowserTabPreviews'
@@ -210,6 +213,7 @@ export default function App () {
     persistenceError: browserPreferencesError,
     preferences: browserPreferences,
     setAddressBarPosition,
+    setContentBlockingEnabled: setContentBlockingPreference,
     setCustomSearchEngine,
     setEnforceManualPageZoom,
     setExternalLinkBehavior,
@@ -244,6 +248,7 @@ export default function App () {
   const [browserLiveTabIds, setBrowserLiveTabIds] = useState(['tab-1'])
   const [contentBlockingAttempt, setContentBlockingAttempt] = useState(0)
   const [contentBlockingError, setContentBlockingError] = useState<string | null>(null)
+  const [contentBlockingGeneration, setContentBlockingGeneration] = useState(0)
   const [contentBlockingReady, setContentBlockingReady] = useState(
     !['android', 'ios'].includes(Platform.OS)
   )
@@ -312,10 +317,16 @@ export default function App () {
   }, [])
 
   useEffect(() => {
+    if (!browserPreferencesReady) return
+
     let cancelled = false
     setContentBlockingError(null)
+    const protectionEnabled = browserPreferences.contentBlockingEnabled
+    if (!protectionEnabled) setContentBlockingReady(true)
 
-    void initializeContentBlocking()
+    void initializeContentBlocking({
+      enabled: protectionEnabled
+    })
       .then((initialized) => {
         if (!initialized && ['android', 'ios'].includes(Platform.OS)) {
           throw new Error('Native content blocker is unavailable.')
@@ -324,6 +335,7 @@ export default function App () {
       })
       .catch((error) => {
         console.error('Unable to initialize content blocking:', error)
+        if (!protectionEnabled) return
         if (!cancelled) {
           setContentBlockingError('Unable to initialize content blocking. Check your connection and try again.')
           setStatus('Unable to initialize content blocking')
@@ -333,7 +345,7 @@ export default function App () {
     return () => {
       cancelled = true
     }
-  }, [contentBlockingAttempt])
+  }, [browserPreferencesReady, contentBlockingAttempt])
 
   useEffect(() => {
     if (!browserPreferencesReady || !contentBlockingReady || browserSessionRestoreStartedRef.current) return
@@ -939,6 +951,41 @@ export default function App () {
 
     if (browserSource.kind === 'app') {
       openInternalApp(browserSource.app, false)
+    }
+  }
+
+  async function onContentBlockingEnabledChange (enabled: boolean) {
+    const previousEnabled = browserPreferences.contentBlockingEnabled
+
+    if (enabled) {
+      try {
+        const initialized = await initializeContentBlocking({ enabled: true })
+        if (!initialized) throw new Error('Native content blocker is unavailable.')
+        if (!setContentBlockingPreference(true)) {
+          throw new Error('Unable to save the content-blocking preference.')
+        }
+      } catch (error) {
+        applyContentBlockingEnabled(previousEnabled)
+        throw error
+      }
+    } else {
+      if (!setContentBlockingPreference(false)) {
+        throw new Error('Unable to save the content-blocking preference.')
+      }
+      applyContentBlockingEnabled(false)
+    }
+
+    refreshContentBlockedPages()
+  }
+
+  function refreshContentBlockedPages () {
+    if (Platform.OS === 'ios') {
+      setContentBlockingGeneration((generation) => generation + 1)
+      return
+    }
+
+    for (const webView of browserWebViewRefs.current.values()) {
+      webView.reload()
     }
   }
 
@@ -1834,6 +1881,7 @@ export default function App () {
         />
         <SettingsScreen
           addressBarPosition={browserPreferences.addressBarPosition}
+          contentBlockingEnabled={browserPreferences.contentBlockingEnabled}
           customSearchUrl={browserPreferences.customSearchUrl}
           enforceManualPageZoom={browserPreferences.enforceManualPageZoom}
           externalLinkBehavior={browserPreferences.externalLinkBehavior}
@@ -1845,6 +1893,7 @@ export default function App () {
           theme={browserPreferences.theme}
           websiteTextScale={browserPreferences.websiteTextScale}
           onAddressBarPositionChange={setAddressBarPosition}
+          onContentBlockingEnabledChange={onContentBlockingEnabledChange}
           onClose={() => setBrowserSettingsVisible(false)}
           onClearBrowsingData={() => {
             const { sessionSaved } = onBrowserResetTabs(false)
@@ -1855,6 +1904,7 @@ export default function App () {
           onCustomSearchSave={setCustomSearchEngine}
           onEnforceManualPageZoomChange={setEnforceManualPageZoom}
           onExternalLinkBehaviorChange={setExternalLinkBehavior}
+          onFilterListsUpdated={refreshContentBlockedPages}
           onRestoreTabsOnStartupChange={setRestoreTabsOnStartup}
           onSearchEngineChange={setSearchEngine}
           onShowFullAddressChange={setShowFullAddress}
@@ -2425,7 +2475,7 @@ export default function App () {
               style={styles.browserWebViewCapture}
             >
             <WebView
-              key={`${getBrowserWebViewKey(tab.id, entry.source.kind)}:${tabDesktopView ? 'desktop' : 'mobile'}`}
+              key={`${getBrowserWebViewKey(tab.id, entry.source.kind)}:${tabDesktopView ? 'desktop' : 'mobile'}:${contentBlockingGeneration}`}
               ref={(ref) => {
                 if (ref) {
                   browserWebViewRefs.current.set(tab.id, ref)

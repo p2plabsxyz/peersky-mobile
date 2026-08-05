@@ -77,6 +77,42 @@ describe('Content-blocking runtime', () => {
     ])
   })
 
+  test('forces a filter-list refresh when requested', async () => {
+    const updateCalls = []
+
+    await initializeContentBlockingRuntime({
+      activateState: async () => {},
+      blocker: { setEnabled: () => {} },
+      discardState: async () => {},
+      forceUpdate: true,
+      loadActiveState: async () => cachedState,
+      loadNativeState: async () => {},
+      updateState: async (options) => {
+        updateCalls.push(options)
+        return cachedState
+      }
+    })
+
+    assert.deepEqual(updateCalls, [{ force: true }])
+  })
+
+  test('reports a failed forced refresh while retaining cached rules', async () => {
+    const events = []
+
+    await assert.rejects(initializeContentBlockingRuntime({
+      activateState: async () => {},
+      blocker: { setEnabled: (enabled) => events.push(`enabled:${enabled}`) },
+      discardState: async () => {},
+      forceUpdate: true,
+      loadActiveState: async () => cachedState,
+      loadNativeState: async (state) => events.push(`loaded:${state.snapshotName}`),
+      updateState: async () => { throw new Error('network unavailable') },
+      warn: () => {}
+    }), /network unavailable/)
+
+    assert.deepEqual(events, ['enabled:false', 'loaded:snapshot-1', 'enabled:true'])
+  })
+
   test('queues a forced refresh behind a non-forced refresh', async () => {
     const first = deferred()
     const calls = []

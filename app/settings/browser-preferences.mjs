@@ -3,6 +3,7 @@ import { normalizeCustomSearchUrl } from '../browser-shell.mjs'
 
 export const DEFAULT_BROWSER_PREFERENCES = {
   addressBarPosition: 'top',
+  contentBlockingEnabled: true,
   customSearchUrl: '',
   enforceManualPageZoom: false,
   externalLinkBehavior: 'ask',
@@ -35,6 +36,9 @@ export function parseBrowserPreferences (serialized) {
     addressBarPosition: ADDRESS_BAR_POSITIONS.includes(value?.addressBarPosition)
       ? value.addressBarPosition
       : DEFAULT_BROWSER_PREFERENCES.addressBarPosition,
+    contentBlockingEnabled: typeof value?.contentBlockingEnabled === 'boolean'
+      ? value.contentBlockingEnabled
+      : DEFAULT_BROWSER_PREFERENCES.contentBlockingEnabled,
     customSearchUrl: normalizeCustomSearchUrl(value?.customSearchUrl) || '',
     enforceManualPageZoom: typeof value?.enforceManualPageZoom === 'boolean'
       ? value.enforceManualPageZoom
