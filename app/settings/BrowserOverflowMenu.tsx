@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import CheckIcon from '../../assets/icons/bootstrap/check2.svg'
 import DisplayIcon from '../../assets/icons/bootstrap/display.svg'
 import DownloadIcon from '../../assets/icons/bootstrap/download.svg'
+import HistoryIcon from '../../assets/icons/bootstrap/clock-history.svg'
 import ReloadIcon from '../../assets/icons/bootstrap/arrow-clockwise.svg'
 import BookmarksIcon from '../../assets/icons/bootstrap/bookmarks.svg'
 import GearIcon from '../../assets/icons/bootstrap/gear.svg'
@@ -32,6 +33,7 @@ type BrowserOverflowMenuProps = {
   onNewTab: () => void
   onOpenBookmarks: () => void
   onOpenDownloads: () => void
+  onOpenHistory: () => void
   onOpenSettings: () => void
   onOpenZoom?: () => void
   onReload?: () => void
@@ -56,6 +58,7 @@ export function BrowserOverflowMenu ({
   onNewTab,
   onOpenBookmarks,
   onOpenDownloads,
+  onOpenHistory,
   onOpenSettings,
   onOpenZoom,
   onReload,
@@ -154,6 +157,12 @@ export function BrowserOverflowMenu ({
               isDark={isDark}
               label='Bookmarks'
               onPress={onOpenBookmarks}
+            />
+            <MenuItem
+              icon={<HistoryIcon width={MENU_ICON_SIZE} height={MENU_ICON_SIZE} color={iconColor} />}
+              isDark={isDark}
+              label='History'
+              onPress={onOpenHistory}
             />
             <MenuItem
               icon={<DownloadIcon width={MENU_ICON_SIZE} height={MENU_ICON_SIZE} color={iconColor} />}

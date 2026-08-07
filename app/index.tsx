@@ -92,6 +92,9 @@ import {
   parseBrowserFaviconMessage
 } from './bookmarks/browser-favicon.mjs'
 import { useBrowserBookmarks } from './bookmarks/useBrowserBookmarks'
+import { HistoryScreen } from './history/HistoryScreen'
+import { getBrowserHistoryDocumentTitle } from './history/browser-history.mjs'
+import { useBrowserHistory } from './history/useBrowserHistory'
 import { DownloadsScreen } from './downloads/DownloadsScreen'
 import { peerSkyWebViewNativeConfig } from './downloads/PeerSkyWebView'
 import { useBrowserDownloads } from './downloads/useBrowserDownloads'
@@ -226,6 +229,15 @@ export default function App () {
     removeBookmark: removeBrowserBookmark,
     toggleBookmark: toggleBrowserBookmark
   } = useBrowserBookmarks()
+  const {
+    clearHistory: clearBrowserHistory,
+    getSuggestions: getBrowserHistorySuggestions,
+    isReady: browserHistoryReady,
+    items: browserVisitHistory,
+    persistenceError: browserHistoryError,
+    recordVisit: recordBrowserVisit,
+    removeHistoryItem: removeBrowserHistoryItem
+  } = useBrowserHistory()
   const [browserDownloadsVisible, setBrowserDownloadsVisible] = useState(false)
   const {
     downloads: browserDownloads,
@@ -247,6 +259,7 @@ export default function App () {
   const [browserZoomVisible, setBrowserZoomVisible] = useState(false)
   const [browserSettingsVisible, setBrowserSettingsVisible] = useState(false)
   const [browserBookmarksVisible, setBrowserBookmarksVisible] = useState(false)
+  const [browserHistoryVisible, setBrowserHistoryVisible] = useState(false)
   const [pendingRestoredUrl, setPendingRestoredUrl] = useState<string | null>(null)
   const [browserCanGoBack, setBrowserCanGoBack] = useState(false)
   const [browserCanGoForward, setBrowserCanGoForward] = useState(false)
@@ -794,7 +807,10 @@ export default function App () {
         replaceBrowserEntry(responseUrl, source)
       }
 
-      setBrowserTitle(responseUrl)
+      const pageTitle = getBrowserHistoryDocumentTitle(response.body, responseUrl)
+      setBrowserTitle(pageTitle)
+      updateBrowserTabTitle(browserTabsStateRef.current.activeTabId, pageTitle)
+      recordBrowserVisit({ url: responseUrl, title: pageTitle })
       setStatus(`Loaded ${response.status || 200} ${response.statusText || 'OK'}`)
     } catch (error) {
       if (isStaleBrowserLoad(loadSeq, browserLoadSeqRef.current)) return
@@ -1060,6 +1076,11 @@ export default function App () {
   function onBrowserOpenDownloads () {
     setBrowserMenuVisible(false)
     setBrowserDownloadsVisible(true)
+  }
+
+  function onBrowserOpenHistory () {
+    setBrowserMenuVisible(false)
+    setBrowserHistoryVisible(true)
   }
 
   function onBrowserSwitchTab (tabId: string) {
@@ -1768,6 +1789,38 @@ export default function App () {
     )
   }
 
+  if (browserHistoryVisible) {
+    return (
+      <SafeAreaView
+        style={[styles.browserShell, { backgroundColor: browserChrome.shell }]}
+        edges={['top', 'left', 'right', 'bottom']}
+      >
+        <StatusBar
+          backgroundColor={browserChrome.shell}
+          barStyle={browserIsDark ? 'light-content' : 'dark-content'}
+        />
+        <HistoryScreen
+          error={browserHistoryError}
+          isDark={browserIsDark}
+          isReady={browserHistoryReady}
+          items={browserVisitHistory}
+          onClear={() => {
+            if (clearBrowserHistory()) setStatus('Browsing history cleared')
+          }}
+          onClose={() => setBrowserHistoryVisible(false)}
+          onOpen={(targetUrl) => {
+            setBrowserHistoryVisible(false)
+            setActiveTab('hyper')
+            void loadBrowserUrl(targetUrl)
+          }}
+          onRemove={(item) => {
+            if (removeBrowserHistoryItem(item)) setStatus('History entry removed')
+          }}
+        />
+      </SafeAreaView>
+    )
+  }
+
   if (browserDownloadsVisible) {
     return (
       <SafeAreaView
@@ -1818,8 +1871,9 @@ export default function App () {
           onClose={() => setBrowserSettingsVisible(false)}
           onClearBrowsingData={() => {
             const { sessionSaved } = onBrowserResetTabs(false)
-            if (sessionSaved) setBrowserSettingsVisible(false)
-            return sessionSaved
+            const historyCleared = clearBrowserHistory()
+            if (sessionSaved && historyCleared) setBrowserSettingsVisible(false)
+            return sessionSaved && historyCleared
           }}
           onClearCachedData={clearCachedBrowserTabPreviews}
           onCustomSearchSave={setCustomSearchEngine}
@@ -1892,6 +1946,7 @@ export default function App () {
             onNewTab={onBrowserNewTab}
             onOpenBookmarks={onBrowserOpenBookmarks}
             onOpenDownloads={onBrowserOpenDownloads}
+            onOpenHistory={onBrowserOpenHistory}
             onShow={() => setBrowserMenuVisible(true)}
             onOpenSettings={() => {
               setBrowserMenuVisible(false)
@@ -1986,6 +2041,7 @@ export default function App () {
       isBookmarked={browserPageIsBookmarked}
       isDark={browserIsDark}
       isLoading={browserIsLoading}
+      historySuggestions={getBrowserHistorySuggestions(browserAddress)}
       menuVisible={browserMenuVisible}
       newTabDisabled={browserTabsState.tabs.length >= MAX_BROWSER_TABS}
       palette={browserChrome}
@@ -2004,6 +2060,7 @@ export default function App () {
       onNewTab={onBrowserNewTab}
       onOpenBookmarks={onBrowserOpenBookmarks}
       onOpenDownloads={onBrowserOpenDownloads}
+      onOpenHistory={onBrowserOpenHistory}
       onOpenSettings={() => {
         setBrowserMenuVisible(false)
         setBrowserSettingsVisible(true)
@@ -2016,6 +2073,10 @@ export default function App () {
       onReload={onBrowserReload}
       onSharePage={() => void onBrowserSharePage()}
       onSubmit={() => void onBrowserSubmit()}
+      onSuggestionPress={(targetUrl) => {
+        setBrowserAddress(targetUrl)
+        void loadBrowserUrl(targetUrl)
+      }}
       onToggleDesktopView={onBrowserToggleDesktopView}
       onToggleBookmark={onBrowserToggleBookmark}
     />
@@ -2454,6 +2515,13 @@ export default function App () {
                 if (entry.source.kind !== 'web') return
                 if (!isCurrentBrowserTabEntry(browserTabsStateRef.current, tab.id, entry)) return
                 if (!isWebUrl(navigationState.url) || navigationState.url.length > MAX_BROWSER_URL_LENGTH) return
+
+                if (!navigationState.loading) {
+                  recordBrowserVisit({
+                    url: navigationState.url,
+                    title: navigationState.title || navigationState.url
+                  })
+                }
 
                 if (browserTabsStateRef.current.activeTabId === tab.id) {
                   syncBrowserEntry(navigationState.url, {

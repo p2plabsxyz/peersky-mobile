@@ -10,6 +10,8 @@ import {
 import { MAX_BROWSER_URL_LENGTH } from './browser-shell.mjs'
 import { formatBrowserAddress } from './browser-appearance.mjs'
 import { BrowserOverflowMenu } from './settings/BrowserOverflowMenu'
+import { HistorySuggestions } from './history/HistorySuggestions'
+import type { BrowserHistoryItem } from './history/useBrowserHistory'
 import { styles } from './styles'
 import ReloadIcon from '../assets/icons/bootstrap/arrow-clockwise.svg'
 import BackIcon from '../assets/icons/bootstrap/chevron-left.svg'
@@ -28,6 +30,7 @@ type BrowserToolbarProps = {
   isBookmarked: boolean
   isDark: boolean
   isLoading: boolean
+  historySuggestions: BrowserHistoryItem[]
   menuVisible: boolean
   newTabDisabled: boolean
   palette: {
@@ -37,6 +40,7 @@ type BrowserToolbarProps = {
     button: string
     mutedText: string
     shell: string
+    surface: string
     text: string
   }
   position: 'top' | 'bottom'
@@ -51,12 +55,14 @@ type BrowserToolbarProps = {
   onNewTab: () => void
   onOpenBookmarks: () => void
   onOpenDownloads: () => void
+  onOpenHistory: () => void
   onOpenSettings: () => void
   onOpenTabs: () => void
   onOpenZoom: () => void
   onReload: () => void
   onSharePage: () => void
   onSubmit: () => void
+  onSuggestionPress: (url: string) => void
   onToggleDesktopView: () => void
   onToggleBookmark: () => void
 }
@@ -71,6 +77,7 @@ export function BrowserToolbar ({
   isBookmarked,
   isDark,
   isLoading,
+  historySuggestions,
   menuVisible,
   newTabDisabled,
   palette,
@@ -86,12 +93,14 @@ export function BrowserToolbar ({
   onNewTab,
   onOpenBookmarks,
   onOpenDownloads,
+  onOpenHistory,
   onOpenSettings,
   onOpenTabs,
   onOpenZoom,
   onReload,
   onSharePage,
   onSubmit,
+  onSuggestionPress,
   onToggleDesktopView,
   onToggleBookmark
 }: BrowserToolbarProps) {
@@ -222,6 +231,18 @@ export function BrowserToolbar ({
         placeholder='Search or type'
         placeholderTextColor={palette.mutedText}
       />
+      {isAddressFocused && (
+        <HistorySuggestions
+          items={historySuggestions}
+          palette={palette}
+          position={position}
+          onOpen={(url) => {
+            addressInputRef.current?.blur()
+            setIsAddressFocused(false)
+            onSuggestionPress(url)
+          }}
+        />
+      )}
       <Animated.View
         {...hiddenControlProps}
         style={[
@@ -298,6 +319,7 @@ export function BrowserToolbar ({
         onNewTab={onNewTab}
         onOpenBookmarks={onOpenBookmarks}
         onOpenDownloads={onOpenDownloads}
+        onOpenHistory={onOpenHistory}
         onOpenZoom={() => {
           onCloseMenu()
           onOpenZoom()

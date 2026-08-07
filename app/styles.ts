@@ -19,7 +19,8 @@ export const styles = StyleSheet.create({
     flexDirection: 'row',
     paddingHorizontal: 14,
     paddingTop: 12,
-    paddingBottom: 16
+    paddingBottom: 16,
+    zIndex: 10
   },
   browserToolbarControlGroup: {
     alignItems: 'center',
