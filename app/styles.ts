@@ -311,12 +311,6 @@ export const styles = StyleSheet.create({
     justifyContent: 'center',
     width: 64
   },
-  browserShortcutIconAkhilesh: {
-    backgroundColor: '#4669a7'
-  },
-  browserShortcutIconPeerSky: {
-    backgroundColor: '#73e4d4'
-  },
   browserShortcutIconP2pmd: {
     backgroundColor: '#2f80ed'
   },

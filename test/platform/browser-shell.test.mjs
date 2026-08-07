@@ -238,6 +238,6 @@ describe('internal app route registry', () => {
   test('returns display titles for local runtime apps', () => {
     assert.equal(getRuntimeAppTitle('p2pmd'), 'P2PMD')
     assert.equal(getRuntimeAppTitle('holesail'), 'Holesail')
-    assert.equal(getRuntimeAppTitle('hyper'), 'Hyper Runtime')
+    assert.equal(getRuntimeAppTitle('hyper'), 'Hyperdrive')
   })
 })

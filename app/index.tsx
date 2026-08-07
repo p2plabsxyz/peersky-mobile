@@ -2146,25 +2146,7 @@ export default function App () {
               keyboardDismissMode='on-drag'
             >
               <View style={styles.browserShortcutGrid}>
-                <Pressable
-                  style={styles.browserShortcut}
-                  onPress={() => void loadBrowserUrl('hyper://peersky.p2plabs.xyz/')}
-                >
-                  <View style={[styles.browserShortcutIcon, styles.browserShortcutIconPeerSky]}>
-                    <Text style={styles.browserShortcutIconText}>P</Text>
-                  </View>
-                  <Text numberOfLines={2} style={[styles.browserShortcutTitle, { color: browserChrome.text }]}>PeerSky Browser</Text>
-                </Pressable>
-                <Pressable
-                  style={styles.browserShortcut}
-                  onPress={() => void loadBrowserUrl('hyper://akhilesh.art/')}
-                >
-                  <View style={[styles.browserShortcutIcon, styles.browserShortcutIconAkhilesh]}>
-                    <Text style={styles.browserShortcutIconText}>AT</Text>
-                  </View>
-                  <Text numberOfLines={2} style={[styles.browserShortcutTitle, { color: browserChrome.text }]}>Akhilesh Thite</Text>
-                </Pressable>
-                {INTERNAL_APPS.map((app) => (
+                {INTERNAL_APPS.filter((app) => app.id !== 'holesail').map((app) => (
                   <Pressable
                     key={app.id}
                     style={styles.browserShortcut}
