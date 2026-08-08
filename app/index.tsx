@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   AppState,
+  BackHandler,
   Button,
   Keyboard,
   KeyboardAvoidingView,
@@ -36,8 +37,8 @@ import {
   isWebUrl,
   MAX_BROWSER_URL_LENGTH,
   normalizeBrowserAddress,
-  replaceBrowserEntryState,
-  syncBrowserEntryState
+  recordBrowserWebNavigationState,
+  replaceBrowserEntryState
 } from './browser-shell.mjs'
 import {
   addBrowserTabState,
@@ -190,6 +191,7 @@ export default function App () {
   const p2pmdWebViewRef = useRef<ComponentRef<typeof WebView> | null>(null)
   const p2pmdPublishInFlightRef = useRef(false)
   const browserLoadSeqRef = useRef(0)
+  const browserWebNavigationDirectionsRef = useRef(new Map<string, 'back' | 'forward'>())
   const externalLinkPromptOpenRef = useRef(false)
   const lastExternalLinkPromptAtRef = useRef(0)
   const [isBooting, setIsBooting] = useState(false)
@@ -540,12 +542,23 @@ export default function App () {
     webNavigation?: { canGoBack: boolean, canGoForward: boolean },
     tabId?: string
   ) {
-    const nextState = syncBrowserEntryState(getBrowserState(), url, source)
+    const targetTabId = tabId || browserTabsStateRef.current.activeTabId
+    const direction = browserWebNavigationDirectionsRef.current.get(targetTabId)
+    browserWebNavigationDirectionsRef.current.delete(targetTabId)
+    const targetTab = browserTabsStateRef.current.tabs.find((tab) => tab.id === targetTabId)
+    const nextState = recordBrowserWebNavigationState(
+      targetTab
+        ? { history: targetTab.history, historyIndex: targetTab.historyIndex }
+        : getBrowserState(),
+      url,
+      source,
+      direction
+    )
     applyBrowserState({
       ...nextState,
       webCanGoBack: webNavigation?.canGoBack,
       webCanGoForward: webNavigation?.canGoForward
-    }, tabId)
+    }, targetTabId)
   }
 
   function getBrowserState () {
@@ -636,7 +649,7 @@ export default function App () {
       const tab = state.tabs.find((item) => item.id === tabId)
       if (!tab || !isCurrentBrowserTabEntry(state, tabId, expectedEntry)) return state
 
-      const nextState = syncBrowserEntryState(
+      const nextState = recordBrowserWebNavigationState(
         { history: tab.history, historyIndex: tab.historyIndex },
         navigationState.url,
         { kind: 'web', uri: navigationState.url }
@@ -873,6 +886,7 @@ export default function App () {
     cancelPendingBrowserLoad()
 
     if (browserSource.kind === 'web' && browserWebCanGoBack) {
+      browserWebNavigationDirectionsRef.current.set(browserTabsState.activeTabId, 'back')
       browserWebViewRefs.current.get(browserTabsState.activeTabId)?.goBack()
       return
     }
@@ -883,7 +897,7 @@ export default function App () {
     const entry = nextState.history[nextState.historyIndex]
     applyBrowserState(nextState)
     setBrowserTitle(getBrowserEntryTitle(entry))
-    if (entry.source.kind === 'app') setActiveTab(entry.source.app)
+    setActiveTab(entry.source.kind === 'app' ? entry.source.app : 'hyper')
   }
 
   function onBrowserForward () {
@@ -891,6 +905,7 @@ export default function App () {
     cancelPendingBrowserLoad()
 
     if (browserSource.kind === 'web' && browserWebCanGoForward) {
+      browserWebNavigationDirectionsRef.current.set(browserTabsState.activeTabId, 'forward')
       browserWebViewRefs.current.get(browserTabsState.activeTabId)?.goForward()
       return
     }
@@ -901,7 +916,7 @@ export default function App () {
     const entry = nextState.history[nextState.historyIndex]
     applyBrowserState(nextState)
     setBrowserTitle(getBrowserEntryTitle(entry))
-    if (entry.source.kind === 'app') setActiveTab(entry.source.app)
+    setActiveTab(entry.source.kind === 'app' ? entry.source.app : 'hyper')
   }
 
   function onBrowserReload () {
@@ -1761,6 +1776,40 @@ export default function App () {
   const activeBrowserDesktopView = browserTabsState.tabs
     .find((tab) => tab.id === browserTabsState.activeTabId)?.desktopView === true
 
+  useEffect(() => {
+    if (Platform.OS !== 'android') return
+
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (browserZoomVisible) setBrowserZoomVisible(false)
+      else if (browserMenuVisible) setBrowserMenuVisible(false)
+      else if (browserTabsVisible) setBrowserTabsVisible(false)
+      else if (browserBookmarksVisible) setBrowserBookmarksVisible(false)
+      else if (browserHistoryVisible) setBrowserHistoryVisible(false)
+      else if (browserDownloadsVisible) setBrowserDownloadsVisible(false)
+      else if (browserSettingsVisible) setBrowserSettingsVisible(false)
+      else if (canBrowserGoBack) onBrowserBack()
+      else return false
+
+      return true
+    })
+
+    return () => subscription.remove()
+  }, [
+    browserBookmarksVisible,
+    browserDownloadsVisible,
+    browserHistory,
+    browserHistoryIndex,
+    browserHistoryVisible,
+    browserMenuVisible,
+    browserSettingsVisible,
+    browserSource.kind,
+    browserTabsState.activeTabId,
+    browserTabsVisible,
+    browserWebCanGoBack,
+    browserZoomVisible,
+    canBrowserGoBack
+  ])
+
   if (browserBookmarksVisible) {
     return (
       <SafeAreaView
@@ -2485,6 +2534,7 @@ export default function App () {
                 }
               }}
               onLoadEnd={() => {
+                browserWebNavigationDirectionsRef.current.delete(tab.id)
                 if (
                   browserTabsStateRef.current.activeTabId === tab.id &&
                   isCurrentBrowserTabEntry(browserTabsStateRef.current, tab.id, entry)

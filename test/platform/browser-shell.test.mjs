@@ -14,6 +14,7 @@ import {
   MAX_BROWSER_HISTORY_ENTRIES,
   MAX_BROWSER_URL_LENGTH,
   normalizeBrowserAddress,
+  recordBrowserWebNavigationState,
   normalizeCustomSearchUrl,
   replaceBrowserEntryState,
   syncBrowserEntryState
@@ -148,6 +149,31 @@ describe('browser shell navigation helpers', () => {
 
     assert.equal(getBrowserBackState(initial), null)
     assert.equal(getBrowserForwardState(withWeb), null)
+  })
+
+  test('mirrors native web navigation into restorable browser history', () => {
+    const initial = {
+      history: [{ url: 'https://peersky.p2plabs.xyz/', source: { kind: 'web', uri: 'https://peersky.p2plabs.xyz/' } }],
+      historyIndex: 0
+    }
+    const pageOne = recordBrowserWebNavigationState(initial, 'https://peersky.p2plabs.xyz/#features', {
+      kind: 'web',
+      uri: 'https://peersky.p2plabs.xyz/#features'
+    })
+    const pageTwo = recordBrowserWebNavigationState(pageOne, 'https://peersky.p2plabs.xyz/#downloads', {
+      kind: 'web',
+      uri: 'https://peersky.p2plabs.xyz/#downloads'
+    })
+    const back = recordBrowserWebNavigationState(pageTwo, 'https://peersky.p2plabs.xyz/#features', {
+      kind: 'web',
+      uri: 'https://peersky.p2plabs.xyz/#features'
+    }, 'back')
+
+    assert.equal(pageTwo.history.length, 3)
+    assert.equal(pageTwo.historyIndex, 2)
+    assert.equal(back.history.length, 3)
+    assert.equal(back.historyIndex, 1)
+    assert.equal(back.canGoForward, true)
   })
 
   test('classifies WebView navigation requests from hyper-rendered pages', () => {

@@ -1,6 +1,7 @@
 import {
   BROWSER_HOME_URL,
   isWebUrl,
+  MAX_BROWSER_HISTORY_ENTRIES,
   MAX_BROWSER_URL_LENGTH
 } from './browser-shell.mjs'
 
@@ -72,23 +73,37 @@ export function serializeBrowserTabsState (state) {
     nextTabIndex: state.nextTabIndex,
     viewMode: normalizeBrowserTabViewMode(state.viewMode),
     tabs: state.tabs.map((tab) => {
-      const entry = tab.history[tab.historyIndex] || tab.history[0]
-      const url = normalizeBrowserTabUrl(entry?.url)
+      const history = tab.history.slice(-MAX_BROWSER_HISTORY_ENTRIES).map((entry) => {
+        const url = normalizeBrowserTabUrl(entry?.url)
+        return {
+          url,
+          source: getPersistedSource({ ...entry, url })
+        }
+      })
+      const historyIndex = Math.min(
+        Math.max(tab.historyIndex - Math.max(0, tab.history.length - history.length), 0),
+        history.length - 1
+      )
+      const entry = history[historyIndex]
+      const persistedHistory = history.length > 0
+        ? history
+        : [{
+            url: BROWSER_HOME_URL,
+            source: { kind: 'home' }
+          }]
 
       return {
         id: tab.id,
         desktopView: tab.desktopView === true,
         pageZoom: normalizeBrowserPageZoom(tab.pageZoom),
         title: normalizeBrowserTabTitle(tab.title),
-        entry: entry
-          ? {
-              url,
-              source: getPersistedSource({ ...entry, url })
-            }
-          : {
-              url: BROWSER_HOME_URL,
-              source: { kind: 'home' }
-            }
+        history: persistedHistory,
+        historyIndex: history.length > 0 ? historyIndex : 0,
+        // Keep the current entry for compatibility with older app versions.
+        entry: entry || {
+          url: BROWSER_HOME_URL,
+          source: { kind: 'home' }
+        }
       }
     })
   })
@@ -159,25 +174,49 @@ function restoreBrowserTab (tab) {
     !tab ||
     typeof tab.id !== 'string' ||
     tab.id.length < 1 ||
-    tab.id.length > 64 ||
-    typeof tab.entry?.url !== 'string' ||
-    tab.entry.url.length < 1 ||
-    tab.entry.url.length > MAX_BROWSER_URL_LENGTH
+    tab.id.length > 64
   ) {
     return null
   }
 
-  const source = restorePersistedSource(tab.entry.source, tab.entry.url)
+  const persistedHistory = Array.isArray(tab.history) && tab.history.length > 0
+    ? tab.history.slice(-MAX_BROWSER_HISTORY_ENTRIES)
+    : [tab.entry]
+  const history = persistedHistory
+    .map(restorePersistedEntry)
+    .filter(Boolean)
+
+  if (history.length === 0) return null
+
+  const historyIndex = Number.isInteger(tab.historyIndex)
+    ? Math.min(Math.max(tab.historyIndex, 0), history.length - 1)
+    : history.length - 1
+  const currentEntry = history[historyIndex]
 
   return {
     id: tab.id,
     desktopView: tab.desktopView === true,
     pageZoom: normalizeBrowserPageZoom(tab.pageZoom),
-    title: normalizeBrowserTabTitle(tab.title || tab.entry.url),
-    history: [{ url: tab.entry.url, source }],
-    historyIndex: 0,
+    title: normalizeBrowserTabTitle(tab.title || currentEntry.url),
+    history,
+    historyIndex,
     webCanGoBack: false,
     webCanGoForward: false
+  }
+}
+
+function restorePersistedEntry (entry) {
+  if (
+    typeof entry?.url !== 'string' ||
+    entry.url.length < 1 ||
+    entry.url.length > MAX_BROWSER_URL_LENGTH
+  ) {
+    return null
+  }
+
+  return {
+    url: entry.url,
+    source: restorePersistedSource(entry.source, entry.url)
   }
 }
 
