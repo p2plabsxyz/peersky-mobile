@@ -16,6 +16,7 @@ import { styles } from './styles'
 import ReloadIcon from '../assets/icons/bootstrap/arrow-clockwise.svg'
 import BackIcon from '../assets/icons/bootstrap/chevron-left.svg'
 import ForwardIcon from '../assets/icons/bootstrap/chevron-right.svg'
+import HomeIcon from '../assets/icons/bootstrap/house.svg'
 import ShareIcon from '../assets/icons/bootstrap/share.svg'
 
 const TOOLBAR_ICON_SIZE = 18
@@ -51,6 +52,7 @@ type BrowserToolbarProps = {
   onBack: () => void
   onCloseMenu: () => void
   onForward: () => void
+  onHome: () => void
   onOpenMenu: () => void
   onNewTab: () => void
   onOpenBookmarks: () => void
@@ -89,6 +91,7 @@ export function BrowserToolbar ({
   onBack,
   onCloseMenu,
   onForward,
+  onHome,
   onOpenMenu,
   onNewTab,
   onOpenBookmarks,
@@ -162,7 +165,7 @@ export function BrowserToolbar ({
             }],
             width: addressFocusProgress.interpolate({
               inputRange: [0, 1],
-              outputRange: [82, 0]
+              outputRange: [123, 0]
             })
           }
         ]}
@@ -194,6 +197,18 @@ export function BrowserToolbar ({
         disabled={!canGoForward}
       >
         <ForwardIcon
+          width={TOOLBAR_ICON_SIZE}
+          height={TOOLBAR_ICON_SIZE}
+          color={palette.text}
+        />
+      </Pressable>
+      <Pressable
+        accessibilityLabel='Go home'
+        accessibilityRole='button'
+        style={[styles.browserNavButton, { backgroundColor: palette.button }]}
+        onPress={onHome}
+      >
+        <HomeIcon
           width={TOOLBAR_ICON_SIZE}
           height={TOOLBAR_ICON_SIZE}
           color={palette.text}

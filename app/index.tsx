@@ -66,6 +66,7 @@ import {
   resolveBrowserDarkMode
 } from './browser-appearance.mjs'
 import { createBrowserAccessibilityScript } from './browser-accessibility.mjs'
+import { clearBrowserWebViewData } from './browser-data.mjs'
 import {
   canPromptExternalLink,
   formatExternalLinkForPrompt,
@@ -188,6 +189,7 @@ export default function App () {
   const rpcRef = useRef<RPC | null>(null)
   const browserWebViewRefs = useRef(new Map<string, ComponentRef<typeof WebView>>())
   const browserFaviconsRef = useRef(new Map<string, string>())
+  const browserLastRecordedUrlsRef = useRef(new Map<string, string>())
   const p2pmdWebViewRef = useRef<ComponentRef<typeof WebView> | null>(null)
   const p2pmdPublishInFlightRef = useRef(false)
   const browserLoadSeqRef = useRef(0)
@@ -823,7 +825,11 @@ export default function App () {
       const pageTitle = getBrowserHistoryDocumentTitle(response.body, responseUrl)
       setBrowserTitle(pageTitle)
       updateBrowserTabTitle(browserTabsStateRef.current.activeTabId, pageTitle)
-      recordBrowserVisit({ url: responseUrl, title: pageTitle })
+      recordCompletedBrowserVisit(
+        browserTabsStateRef.current.activeTabId,
+        responseUrl,
+        pageTitle
+      )
       setStatus(`Loaded ${response.status || 200} ${response.statusText || 'OK'}`)
     } catch (error) {
       if (isStaleBrowserLoad(loadSeq, browserLoadSeqRef.current)) return
@@ -1133,6 +1139,7 @@ export default function App () {
     updateBrowserTabsState(nextState)
     removeBrowserTabPreview(tabId)
     browserFaviconsRef.current.delete(tabId)
+    browserLastRecordedUrlsRef.current.delete(tabId)
     setBrowserLiveTabIds((tabIds) => tabIds.filter((id) => id !== tabId))
     if (isClosingActive && tab) applyBrowserTab(tab)
     setStatus('Tab closed')
@@ -1156,6 +1163,7 @@ export default function App () {
       ? clearAllBrowserTabPreviews()
       : true
     browserFaviconsRef.current.clear()
+    browserLastRecordedUrlsRef.current.clear()
     setBrowserLiveTabIds(reset.liveTabIds)
     if (tab) applyBrowserTab(tab)
     const sessionSaved = writeBrowserSession(nextState)
@@ -1171,8 +1179,37 @@ export default function App () {
 
   function onBrowserBurnTabs () {
     Alert.alert(
+      'Burn tabs and cached data?',
+      'This closes every open tab and clears cached website files.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Burn',
+          style: 'destructive',
+          onPress: () => {
+            for (const webView of browserWebViewRefs.current.values()) {
+              clearBrowserWebViewData(webView)
+            }
+            const { previewCacheCleared, sessionSaved } = onBrowserResetTabs()
+            setBrowserTabsVisible(false)
+            setBrowserTitle('PeerSky')
+            setStatus(
+              !sessionSaved
+                ? 'Tabs burned, but the fresh session could not be saved'
+                : !previewCacheCleared
+                  ? 'Tabs burned, but preview cache could not be cleared'
+                  : 'Tabs and cached data cleared'
+            )
+          }
+        }
+      ]
+    )
+  }
+
+  function onBrowserCloseAllTabs () {
+    Alert.alert(
       'Close all tabs?',
-      'This closes every open tab and starts a fresh tab.',
+      'This closes every open tab without clearing cached website data.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -1193,6 +1230,13 @@ export default function App () {
         }
       ]
     )
+  }
+
+  function recordCompletedBrowserVisit (tabId: string, url: string, title: string) {
+    if (browserLastRecordedUrlsRef.current.get(tabId) === url) return
+
+    browserLastRecordedUrlsRef.current.set(tabId, url)
+    recordBrowserVisit({ url, title })
   }
 
   function onBrowserToggleTabView () {
@@ -2105,6 +2149,7 @@ export default function App () {
       onBack={onBrowserBack}
       onCloseMenu={() => setBrowserMenuVisible(false)}
       onForward={onBrowserForward}
+      onHome={openBrowserHome}
       onOpenMenu={() => setBrowserMenuVisible(true)}
       onNewTab={onBrowserNewTab}
       onOpenBookmarks={onBrowserOpenBookmarks}
@@ -2175,6 +2220,7 @@ export default function App () {
           viewMode={browserTabsState.viewMode}
           visible={browserTabsVisible}
           onBurnTabs={onBrowserBurnTabs}
+          onCloseAllTabs={onBrowserCloseAllTabs}
           onClose={() => setBrowserTabsVisible(false)}
           onCloseTab={onBrowserCloseTab}
           onNewTab={onBrowserNewTab}
@@ -2549,10 +2595,11 @@ export default function App () {
                 if (!isWebUrl(navigationState.url) || navigationState.url.length > MAX_BROWSER_URL_LENGTH) return
 
                 if (!navigationState.loading) {
-                  recordBrowserVisit({
-                    url: navigationState.url,
-                    title: navigationState.title || navigationState.url
-                  })
+                  recordCompletedBrowserVisit(
+                    tab.id,
+                    navigationState.url,
+                    navigationState.title || navigationState.url
+                  )
                 }
 
                 if (browserTabsStateRef.current.activeTabId === tab.id) {
