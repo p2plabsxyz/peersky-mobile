@@ -41,6 +41,7 @@ import {
   replaceBrowserEntryState
 } from './browser-shell.mjs'
 import {
+  addBackgroundBrowserTabState,
   addBrowserTabState,
   BROWSER_PAGE_ZOOMS,
   closeBrowserTabState,
@@ -86,6 +87,15 @@ import { BrowserOverflowMenu } from './settings/BrowserOverflowMenu'
 import { useBrowserPreferences } from './settings/useBrowserPreferences'
 import { BrowserToolbar } from './BrowserToolbar'
 import { BrowserZoomSheet } from './BrowserZoomSheet'
+import {
+  BrowserMediaSheet,
+  type BrowserMediaTarget
+} from './BrowserMediaSheet'
+import {
+  createBrowserMediaToken,
+  createBrowserMediaLongPressScript,
+  parseBrowserMediaMessage
+} from './browser-media.mjs'
 import { BookmarksScreen } from './bookmarks/BookmarksScreen'
 import { canBookmarkBrowserPage } from './bookmarks/browser-bookmarks.mjs'
 import {
@@ -190,6 +200,7 @@ export default function App () {
   const browserWebViewRefs = useRef(new Map<string, ComponentRef<typeof WebView>>())
   const browserFaviconsRef = useRef(new Map<string, string>())
   const browserLastRecordedUrlsRef = useRef(new Map<string, string>())
+  const browserMediaTokensRef = useRef(new Map<string, string>())
   const p2pmdWebViewRef = useRef<ComponentRef<typeof WebView> | null>(null)
   const p2pmdPublishInFlightRef = useRef(false)
   const browserLoadSeqRef = useRef(0)
@@ -261,6 +272,7 @@ export default function App () {
   const [browserTabsVisible, setBrowserTabsVisible] = useState(false)
   const [browserMenuVisible, setBrowserMenuVisible] = useState(false)
   const [browserZoomVisible, setBrowserZoomVisible] = useState(false)
+  const [browserMediaTarget, setBrowserMediaTarget] = useState<(BrowserMediaTarget & { tabId: string }) | null>(null)
   const [browserSettingsVisible, setBrowserSettingsVisible] = useState(false)
   const [browserBookmarksVisible, setBrowserBookmarksVisible] = useState(false)
   const [browserHistoryVisible, setBrowserHistoryVisible] = useState(false)
@@ -980,10 +992,10 @@ export default function App () {
     )
   }
 
-  function onBrowserNewTab () {
+  function createBrowserTab (targetUrl: string | null = null) {
     if (browserTabsStateRef.current.tabs.length >= MAX_BROWSER_TABS) {
       setStatus('Maximum number of tabs reached')
-      return
+      return false
     }
 
     browserUserInteractedRef.current = true
@@ -993,9 +1005,16 @@ export default function App () {
 
     updateBrowserTabsState(nextState)
     if (tab) applyBrowserTab(tab)
+    if (targetUrl) setPendingRestoredUrl(targetUrl)
     setBrowserTabsVisible(false)
     setBrowserMenuVisible(false)
+    setBrowserMediaTarget(null)
     setBrowserTitle('PeerSky')
+    return true
+  }
+
+  function onBrowserNewTab () {
+    if (!createBrowserTab()) return
     setStatus('New tab')
   }
 
@@ -1027,6 +1046,49 @@ export default function App () {
         url: browserCurrentUrl
       })
       setStatus('Page shared')
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  function onBrowserMediaOpenInNewTab (targetUrl: string) {
+    if (!createBrowserTab(targetUrl)) return
+    setStatus('Opened in new tab')
+  }
+
+  function onBrowserMediaOpenInBackgroundTab (targetUrl: string, title: string) {
+    if (browserTabsStateRef.current.tabs.length >= MAX_BROWSER_TABS) {
+      setStatus('Maximum number of tabs reached')
+      return
+    }
+
+    browserUserInteractedRef.current = true
+    updateBrowserTabsState((state) => addBackgroundBrowserTabState(
+      state,
+      targetUrl,
+      title || 'Media'
+    ) as BrowserTabsState)
+    setBrowserMediaTarget(null)
+    setStatus('Opened in background tab')
+  }
+
+  async function onBrowserMediaDownload (targetUrl: string) {
+    const accepted = await requestBrowserDownload(targetUrl)
+    setStatus(
+      accepted
+        ? Platform.OS === 'ios' ? 'Download saved' : 'Download requested'
+        : 'Unable to start download'
+    )
+  }
+
+  async function onBrowserMediaShare (targetUrl: string, title: string) {
+    try {
+      await Share.share({
+        title: title || browserTitle,
+        message: targetUrl,
+        url: targetUrl
+      })
+      setStatus('Shared')
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error))
     }
@@ -1140,6 +1202,7 @@ export default function App () {
     removeBrowserTabPreview(tabId)
     browserFaviconsRef.current.delete(tabId)
     browserLastRecordedUrlsRef.current.delete(tabId)
+    browserMediaTokensRef.current.delete(tabId)
     setBrowserLiveTabIds((tabIds) => tabIds.filter((id) => id !== tabId))
     if (isClosingActive && tab) applyBrowserTab(tab)
     setStatus('Tab closed')
@@ -1164,6 +1227,7 @@ export default function App () {
       : true
     browserFaviconsRef.current.clear()
     browserLastRecordedUrlsRef.current.clear()
+    browserMediaTokensRef.current.clear()
     setBrowserLiveTabIds(reset.liveTabIds)
     if (tab) applyBrowserTab(tab)
     const sessionSaved = writeBrowserSession(nextState)
@@ -1824,7 +1888,8 @@ export default function App () {
     if (Platform.OS !== 'android') return
 
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
-      if (browserZoomVisible) setBrowserZoomVisible(false)
+      if (browserMediaTarget) setBrowserMediaTarget(null)
+      else if (browserZoomVisible) setBrowserZoomVisible(false)
       else if (browserMenuVisible) setBrowserMenuVisible(false)
       else if (browserTabsVisible) setBrowserTabsVisible(false)
       else if (browserBookmarksVisible) setBrowserBookmarksVisible(false)
@@ -1845,6 +1910,7 @@ export default function App () {
     browserHistoryIndex,
     browserHistoryVisible,
     browserMenuVisible,
+    browserMediaTarget,
     browserSettingsVisible,
     browserSource.kind,
     browserTabsState.activeTabId,
@@ -2125,6 +2191,7 @@ export default function App () {
 
   const browserToolbar = (
     <BrowserToolbar
+      activeTabId={browserTabsState.activeTabId}
       address={browserAddress}
       bookmarkActionAvailable={browserBookmarkActionAvailable}
       bookmarksDisabled={!browserBookmarksReady}
@@ -2502,6 +2569,19 @@ export default function App () {
           const isActive = tab.id === browserTabsState.activeTabId
           const tabPageZoom = normalizeBrowserPageZoom(tab.pageZoom)
           const tabDesktopView = tab.desktopView === true
+          let browserMediaToken = browserMediaTokensRef.current.get(tab.id)
+          if (!browserMediaToken) {
+            browserMediaToken = createBrowserMediaToken()
+            browserMediaTokensRef.current.set(tab.id, browserMediaToken)
+          }
+          const browserNativeConfig = peerSkyWebViewNativeConfig
+            ? {
+                ...peerSkyWebViewNativeConfig,
+                props: Object.assign({}, peerSkyWebViewNativeConfig.props, {
+                  mediaLongPressToken: browserMediaToken
+                })
+              }
+            : undefined
           const browserAccessibilityScript = createBrowserAccessibilityScript({
             applyTextScale: Platform.OS === 'ios',
             desktopView: tabDesktopView,
@@ -2511,7 +2591,11 @@ export default function App () {
           })
           const browserInjectedScript = combineBrowserInjectedScripts(
             browserAccessibilityScript,
-            createBrowserFaviconScript()
+            createBrowserFaviconScript(),
+            createBrowserMediaLongPressScript({
+              nativeHitTesting: Platform.OS === 'android' && Boolean(peerSkyWebViewNativeConfig),
+              token: browserMediaToken
+            })
           )
 
           return (
@@ -2547,7 +2631,7 @@ export default function App () {
                     baseUrl: entry.source.kind === 'hyper' ? entry.source.baseUrl : undefined
                   }}
               cacheEnabled={true}
-              nativeConfig={peerSkyWebViewNativeConfig}
+              nativeConfig={browserNativeConfig}
               injectedJavaScript={browserInjectedScript}
               injectedJavaScriptBeforeContentLoaded={browserAccessibilityScript}
               originWhitelist={['*']}
@@ -2571,6 +2655,7 @@ export default function App () {
               }}
               onLoadStart={() => {
                 browserFaviconsRef.current.delete(tab.id)
+                setBrowserMediaTarget((current) => current?.tabId === tab.id ? null : current)
                 if (
                   browserTabsStateRef.current.activeTabId === tab.id &&
                   isCurrentBrowserTabEntry(browserTabsStateRef.current, tab.id, entry)
@@ -2620,6 +2705,18 @@ export default function App () {
               }}
               onMessage={(event) => {
                 if (!isCurrentBrowserTabEntry(browserTabsStateRef.current, tab.id, entry)) return
+
+                const mediaTarget = parseBrowserMediaMessage(
+                  event.nativeEvent.data,
+                  event.nativeEvent.url || entry.url,
+                  browserMediaToken
+                ) as BrowserMediaTarget | null
+                if (mediaTarget) {
+                  if (browserTabsStateRef.current.activeTabId === tab.id) {
+                    setBrowserMediaTarget({ ...mediaTarget, tabId: tab.id })
+                  }
+                  return
+                }
 
                 const favicon = parseBrowserFaviconMessage(
                   event.nativeEvent.data,
@@ -2674,6 +2771,16 @@ export default function App () {
           onReset={onBrowserResetZoom}
           onZoomIn={onBrowserZoomIn}
           onZoomOut={onBrowserZoomOut}
+        />
+
+        <BrowserMediaSheet
+          isDark={browserIsDark}
+          target={browserMediaTarget}
+          onClose={() => setBrowserMediaTarget(null)}
+          onDownload={(targetUrl) => void onBrowserMediaDownload(targetUrl)}
+          onOpenInBackgroundTab={onBrowserMediaOpenInBackgroundTab}
+          onOpenInNewTab={onBrowserMediaOpenInNewTab}
+          onShare={(targetUrl, title) => void onBrowserMediaShare(targetUrl, title)}
         />
 
         {isBooting && (

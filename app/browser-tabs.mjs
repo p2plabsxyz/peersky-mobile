@@ -60,9 +60,32 @@ export function addBrowserTabState (state) {
   const tab = createBrowserTab(id)
 
   return {
+    ...state,
     tabs: [...state.tabs, tab],
     activeTabId: id,
     nextTabIndex: state.nextTabIndex + 1
+  }
+}
+
+export function addBackgroundBrowserTabState (state, url, title = 'PeerSky') {
+  const previousActiveTabId = state.activeTabId
+  const nextState = addBrowserTabState(state)
+  if (nextState === state) return state
+
+  const normalizedUrl = normalizeBrowserTabUrl(url)
+  const tabId = nextState.activeTabId
+  return {
+    ...updateBrowserTabState(nextState, tabId, {
+      title,
+      history: [{
+        url: normalizedUrl,
+        source: normalizedUrl === BROWSER_HOME_URL
+          ? { kind: 'home' }
+          : { kind: 'restore', url: normalizedUrl }
+      }],
+      historyIndex: 0
+    }),
+    activeTabId: previousActiveTabId
   }
 }
 

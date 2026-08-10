@@ -30,6 +30,7 @@ import java.io.FilterInputStream
 import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import java.security.MessageDigest
 import java.util.ArrayDeque
 import java.util.Locale
 import java.util.concurrent.ArrayBlockingQueue
@@ -102,14 +103,14 @@ class BrowserDownloadsModule(
     userAgent: String?,
     contentDisposition: String?,
     mimeType: String?
-  ) {
+  ): Boolean {
     if (!isHttpUrl(url)) {
       showToast("This download URL is not supported.")
-      return
+      return false
     }
     if (!admitDownloadRate()) {
       showToast("Too many downloads were requested. Try again shortly.")
-      return
+      return false
     }
 
     try {
@@ -137,9 +138,16 @@ class BrowserDownloadsModule(
           showToast("Unable to download this file.")
         }
       }
+      return true
     } catch (error: RejectedExecutionException) {
       showToast("Too many downloads are already starting.")
+      return false
     }
+  }
+
+  @ReactMethod
+  fun requestDownload(url: String, promise: Promise) {
+    promise.resolve(queueDownload(url, null, null, null))
   }
 
   @ReactMethod
@@ -749,7 +757,29 @@ class BrowserDownloadsModule(
     val filenameMimeType = normalizeMimeType(mimeType)
       ?.takeUnless(::isAmbiguousDownloadType)
     val guessedName = URLUtil.guessFileName(url, contentDisposition, filenameMimeType)
-    return ensureExpectedExtension(sanitizeFilename(guessedName), filenameMimeType)
+    val normalizedName = ensureExpectedExtension(sanitizeFilename(guessedName), filenameMimeType)
+    return addUrlFingerprintIfNeeded(normalizedName, url, contentDisposition)
+  }
+
+  private fun addUrlFingerprintIfNeeded(
+    name: String,
+    url: String,
+    contentDisposition: String?
+  ): String {
+    if (contentDisposition?.contains(CONTENT_DISPOSITION_FILENAME_PATTERN) == true) return name
+
+    return try {
+      val parsed = Uri.parse(url)
+      if (parsed.query.isNullOrBlank() || hasMeaningfulExtension(parsed.lastPathSegment.orEmpty())) {
+        name
+      } else {
+        val canonicalUrl = parsed.buildUpon().fragment(null).build().toString()
+        val digest = createUrlFingerprint(canonicalUrl)
+        addFilenameToken(name, digest)
+      }
+    } catch (_: Exception) {
+      name
+    }
   }
 
   private fun resolveMimeTypeFromFilename(name: String, mimeType: String?): String? {
@@ -802,6 +832,15 @@ class BrowserDownloadsModule(
     val stem = if (hasExtension) name.substring(0, dotIndex) else name
     val extension = if (hasExtension) name.substring(dotIndex) else ""
     val suffix = " (" + count + ")"
+    return truncateFilename(stem, suffix.length + extension.length) + suffix + extension
+  }
+
+  private fun addFilenameToken(name: String, token: String): String {
+    val dotIndex = name.lastIndexOf('.')
+    val hasExtension = dotIndex > 0 && dotIndex < name.length - 1
+    val stem = if (hasExtension) name.substring(0, dotIndex) else name
+    val extension = if (hasExtension) name.substring(dotIndex) else ""
+    val suffix = "-" + token
     return truncateFilename(stem, suffix.length + extension.length) + suffix + extension
   }
 
@@ -879,12 +918,22 @@ class BrowserDownloadsModule(
     private const val TAG = "PeerSkyDownloads"
     private val mimeDetector by lazy { ContentInfoUtil() }
     private val EXTENSION_PATTERN = Regex("^[a-z0-9]{1,16}$")
+    private val CONTENT_DISPOSITION_FILENAME_PATTERN = Regex(
+      "filename[*]?\\s*=",
+      RegexOption.IGNORE_CASE
+    )
     private val ANDROID_DEX_ENTRY_PATTERN = Regex("^classes(?:[0-9]+)?[.]dex$")
     private val REDIRECT_STATUS_CODES = setOf(301, 302, 303, 307, 308)
     private val AMBIGUOUS_MIME_TYPES = setOf(
       "application/octet-stream",
       "binary/octet-stream"
     )
+
+    internal fun createUrlFingerprint(url: String): String =
+      MessageDigest.getInstance("SHA-256")
+        .digest(url.toByteArray(Charsets.UTF_8))
+        .take(5)
+        .joinToString("") { byte -> "%02x".format(byte) }
 
     internal fun isHttpUrl(value: String): Boolean {
       if (value.length > MAX_DOWNLOAD_URL_LENGTH) return false

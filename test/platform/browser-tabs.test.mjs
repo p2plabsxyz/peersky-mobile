@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 import { BROWSER_HOME_URL } from '../../app/browser-shell.mjs'
 import {
+  addBackgroundBrowserTabState,
   addBrowserTabState,
   closeBrowserTabState,
   createBrowserTabsState,
@@ -159,6 +160,23 @@ describe('browser tab state helpers', () => {
 
     assert.equal(state.activeTabId, 'tab-2')
     assert.equal(state.tabs.length, 1)
+  })
+
+  test('adds a deferred background tab without changing the active tab', () => {
+    const initialState = setBrowserTabViewModeState(createBrowserTabsState(), 'list')
+    const state = addBackgroundBrowserTabState(
+      initialState,
+      'https://example.com/image.jpg',
+      'Image'
+    )
+
+    assert.equal(state.activeTabId, 'tab-1')
+    assert.equal(state.viewMode, 'list')
+    assert.equal(state.tabs.length, 2)
+    assert.deepEqual(state.tabs[1].history[0], {
+      url: 'https://example.com/image.jpg',
+      source: { kind: 'restore', url: 'https://example.com/image.jpg' }
+    })
   })
 
   test('bounds remote-controlled tab titles', () => {

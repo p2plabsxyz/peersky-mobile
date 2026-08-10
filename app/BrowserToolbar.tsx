@@ -22,6 +22,7 @@ import ShareIcon from '../assets/icons/bootstrap/share.svg'
 const TOOLBAR_ICON_SIZE = 18
 
 type BrowserToolbarProps = {
+  activeTabId: string
   address: string
   bookmarkActionAvailable: boolean
   bookmarksDisabled: boolean
@@ -70,6 +71,7 @@ type BrowserToolbarProps = {
 }
 
 export function BrowserToolbar ({
+  activeTabId,
   address,
   bookmarkActionAvailable,
   bookmarksDisabled,
@@ -123,6 +125,11 @@ export function BrowserToolbar ({
 
     return () => animation.stop()
   }, [addressFocusProgress, isAddressFocused])
+
+  useEffect(() => {
+    addressInputRef.current?.blur()
+    setIsAddressFocused(false)
+  }, [activeTabId])
 
   const hiddenControlProps = isAddressFocused
     ? {
