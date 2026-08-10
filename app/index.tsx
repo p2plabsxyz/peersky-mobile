@@ -1052,6 +1052,7 @@ export default function App () {
   }
 
   function onBrowserMediaOpenInNewTab (targetUrl: string) {
+    Keyboard.dismiss()
     if (!createBrowserTab(targetUrl)) return
     setStatus('Opened in new tab')
   }

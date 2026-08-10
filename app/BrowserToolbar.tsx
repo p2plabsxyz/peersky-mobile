@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Animated,
+  Keyboard,
   Pressable,
   Text,
   TextInput,
@@ -113,7 +114,7 @@ export function BrowserToolbar ({
   const [menuOffset, setMenuOffset] = useState(70)
   const addressInputRef = useRef<TextInput>(null)
   const addressFocusProgress = useRef(new Animated.Value(0)).current
-  const trailingControlsWidth = shareActionAvailable ? 182 : 137
+  const trailingControlsWidth = 79
 
   useEffect(() => {
     const animation = Animated.timing(addressFocusProgress, {
@@ -128,6 +129,7 @@ export function BrowserToolbar ({
 
   useEffect(() => {
     addressInputRef.current?.blur()
+    Keyboard.dismiss()
     setIsAddressFocused(false)
   }, [activeTabId])
 
@@ -181,7 +183,6 @@ export function BrowserToolbar ({
         accessibilityLabel='Go back'
         style={[
           styles.browserNavButton,
-          { backgroundColor: palette.button },
           !canGoBack ? styles.browserNavButtonDisabled : null
         ]}
         onPress={onBack}
@@ -197,7 +198,6 @@ export function BrowserToolbar ({
         accessibilityLabel='Go forward'
         style={[
           styles.browserNavButton,
-          { backgroundColor: palette.button },
           !canGoForward ? styles.browserNavButtonDisabled : null
         ]}
         onPress={onForward}
@@ -212,7 +212,7 @@ export function BrowserToolbar ({
       <Pressable
         accessibilityLabel='Go home'
         accessibilityRole='button'
-        style={[styles.browserNavButton, { backgroundColor: palette.button }]}
+        style={styles.browserNavButton}
         onPress={onHome}
       >
         <HomeIcon
@@ -222,37 +222,70 @@ export function BrowserToolbar ({
         />
       </Pressable>
       </Animated.View>
-      <TextInput
-        ref={addressInputRef}
-        accessibilityLabel='Browser address'
-        style={[
-          styles.browserAddress,
-          {
-            backgroundColor: palette.address,
-            borderColor: palette.border,
-            color: palette.text
-          }
-        ]}
-        autoCapitalize='none'
-        autoCorrect={false}
-        keyboardType='url'
-        returnKeyType='go'
-        maxLength={MAX_BROWSER_URL_LENGTH}
-        selection={isAddressFocused ? undefined : { start: 0, end: 0 }}
-        value={isAddressFocused ? address : formatBrowserAddress(address, showFullAddress)}
-        onFocus={() => {
-          onCloseMenu()
-          setIsAddressFocused(true)
-        }}
-        onBlur={() => setIsAddressFocused(false)}
-        onChangeText={onAddressChange}
-        onSubmitEditing={() => {
-          addressInputRef.current?.blur()
-          onSubmit()
-        }}
-        placeholder='Search or type'
-        placeholderTextColor={palette.mutedText}
-      />
+      <View style={[
+        styles.browserAddressContainer,
+        {
+          backgroundColor: palette.address,
+          borderColor: palette.border
+        }
+      ]}>
+        <TextInput
+          ref={addressInputRef}
+          accessibilityLabel='Browser address'
+          style={[styles.browserAddress, { color: palette.text }]}
+          autoCapitalize='none'
+          autoCorrect={false}
+          keyboardType='url'
+          returnKeyType='go'
+          maxLength={MAX_BROWSER_URL_LENGTH}
+          selection={isAddressFocused ? undefined : { start: 0, end: 0 }}
+          value={isAddressFocused ? address : formatBrowserAddress(address, showFullAddress)}
+          onFocus={() => {
+            onCloseMenu()
+            setIsAddressFocused(true)
+          }}
+          onBlur={() => setIsAddressFocused(false)}
+          onChangeText={onAddressChange}
+          onSubmitEditing={() => {
+            addressInputRef.current?.blur()
+            onSubmit()
+          }}
+          placeholder='Search or type'
+          placeholderTextColor={palette.mutedText}
+        />
+        {!isAddressFocused && shareActionAvailable && (
+          <View style={styles.browserAddressActions}>
+            <Pressable
+              accessibilityLabel={isLoading ? 'Stop loading page' : 'Reload page'}
+              accessibilityRole='button'
+              style={styles.browserAddressAction}
+              onPress={onReload}
+            >
+              {isLoading
+                ? <ActivityIndicator color={palette.accent} size='small' />
+                : (
+                  <ReloadIcon
+                    width={TOOLBAR_ICON_SIZE}
+                    height={TOOLBAR_ICON_SIZE}
+                    color={palette.text}
+                  />
+                  )}
+            </Pressable>
+            <Pressable
+              accessibilityLabel='Share page'
+              accessibilityRole='button'
+              style={styles.browserAddressAction}
+              onPress={onSharePage}
+            >
+              <ShareIcon
+                width={TOOLBAR_ICON_SIZE}
+                height={TOOLBAR_ICON_SIZE}
+                color={palette.text}
+              />
+            </Pressable>
+          </View>
+        )}
+      </View>
       {isAddressFocused && (
         <HistorySuggestions
           items={historySuggestions}
@@ -289,37 +322,8 @@ export function BrowserToolbar ({
         ]}
       >
       <Pressable
-        accessibilityLabel={isLoading ? 'Page loading' : 'Reload page'}
-        style={[styles.browserActionButton, { backgroundColor: palette.accent }]}
-        onPress={onReload}
-      >
-        {isLoading
-          ? <ActivityIndicator color='#ffffff' size='small' />
-          : (
-            <ReloadIcon
-              width={TOOLBAR_ICON_SIZE}
-              height={TOOLBAR_ICON_SIZE}
-              color='#ffffff'
-            />
-            )}
-      </Pressable>
-      {shareActionAvailable && (
-        <Pressable
-          accessibilityLabel='Share page'
-          accessibilityRole='button'
-          style={[styles.browserShareButton, { backgroundColor: palette.button }]}
-          onPress={onSharePage}
-        >
-          <ShareIcon
-            width={TOOLBAR_ICON_SIZE}
-            height={TOOLBAR_ICON_SIZE}
-            color={palette.text}
-          />
-        </Pressable>
-      )}
-      <Pressable
         accessibilityLabel={`Open tabs, ${tabCount} open`}
-        style={[styles.browserTabCountButton, { backgroundColor: palette.button }]}
+        style={styles.browserTabCountButton}
         onPress={onOpenTabs}
       >
         <View style={[styles.browserTabCountIcon, { borderColor: palette.text }]}>

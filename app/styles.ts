@@ -33,8 +33,6 @@ export const styles = StyleSheet.create({
   },
   browserNavButton: {
     alignItems: 'center',
-    backgroundColor: '#e8f0fb',
-    borderRadius: 10,
     height: 38,
     justifyContent: 'center',
     width: 34
@@ -42,39 +40,39 @@ export const styles = StyleSheet.create({
   browserNavButtonDisabled: {
     opacity: 0.35
   },
-  browserAddress: {
+  browserAddressContainer: {
+    alignItems: 'center',
     backgroundColor: '#ffffff',
     borderColor: '#d2dff1',
     borderRadius: 18,
     borderWidth: 1,
+    flex: 1,
+    flexDirection: 'row',
+    height: 38,
+    minWidth: 0,
+    overflow: 'hidden'
+  },
+  browserAddress: {
     color: '#151821',
     flex: 1,
     fontSize: 15,
     minWidth: 0,
-    paddingHorizontal: 16,
-    paddingVertical: 10
+    paddingHorizontal: 14,
+    paddingVertical: 8
   },
-  browserActionButton: {
+  browserAddressActions: {
     alignItems: 'center',
-    backgroundColor: '#1f6fd1',
-    borderRadius: 9,
-    height: 38,
-    justifyContent: 'center',
-    minWidth: 44,
-    paddingHorizontal: 10
+    flexDirection: 'row',
+    paddingRight: 3
   },
-  browserShareButton: {
+  browserAddressAction: {
     alignItems: 'center',
-    backgroundColor: '#e8f0fb',
-    borderRadius: 10,
-    height: 38,
+    height: 32,
     justifyContent: 'center',
-    width: 38
+    width: 32
   },
   browserTabCountButton: {
     alignItems: 'center',
-    backgroundColor: '#e8f0fb',
-    borderRadius: 10,
     height: 38,
     justifyContent: 'center',
     width: 38

@@ -74,7 +74,7 @@ export function BrowserOverflowMenu ({
       <Pressable
         accessibilityLabel='Open browser menu'
         accessibilityRole='button'
-        style={[styles.trigger, isDark ? darkStyles.trigger : null]}
+        style={styles.trigger}
         onPress={onShow}
       >
         <View style={styles.dots}>
@@ -258,8 +258,6 @@ function MenuItem ({
 const styles = StyleSheet.create({
   trigger: {
     alignItems: 'center',
-    backgroundColor: '#e8f0fb',
-    borderRadius: 10,
     height: 38,
     justifyContent: 'center',
     width: 34
@@ -340,9 +338,6 @@ const styles = StyleSheet.create({
 })
 
 const darkStyles = StyleSheet.create({
-  trigger: {
-    backgroundColor: BROWSER_PALETTES.dark.button
-  },
   menu: {
     backgroundColor: BROWSER_PALETTES.dark.surface,
     borderColor: BROWSER_PALETTES.dark.border

@@ -109,10 +109,7 @@ export function BrowserMediaSheet ({
               icon={<PlusIcon width={20} height={20} color={iconColor} />}
               isDark={isDark}
               label={`Open ${target.kind === 'link' ? 'link' : mediaLabel} in new tab`}
-              onPress={() => {
-                onClose()
-                onOpenInNewTab(primaryUrl)
-              }}
+              onPress={() => onOpenInNewTab(primaryUrl)}
             />
           )}
           {primaryUrl && (
@@ -120,10 +117,7 @@ export function BrowserMediaSheet ({
               icon={<PlusIcon width={20} height={20} color={iconColor} />}
               isDark={isDark}
               label={`Open ${target.kind === 'link' ? 'link' : mediaLabel} in background tab`}
-              onPress={() => {
-                onClose()
-                onOpenInBackgroundTab(primaryUrl, target.title)
-              }}
+              onPress={() => onOpenInBackgroundTab(primaryUrl, target.title)}
             />
           )}
           {target.mediaUrl && (
@@ -139,10 +133,7 @@ export function BrowserMediaSheet ({
               icon={<PlusIcon width={20} height={20} color={iconColor} />}
               isDark={isDark}
               label='Open link in new tab'
-              onPress={() => {
-                onClose()
-                onOpenInNewTab(target.linkUrl as string)
-              }}
+              onPress={() => onOpenInNewTab(target.linkUrl as string)}
             />
           )}
           {primaryUrl && isDownloadableBrowserMediaUrl(primaryUrl) && (
