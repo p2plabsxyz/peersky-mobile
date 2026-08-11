@@ -348,7 +348,11 @@ export default function App () {
 
     let cancelled = false
     const protectionEnabled = browserPreferences.contentBlockingEnabled
-    if (!protectionEnabled) setContentBlockingReady(true)
+    if (!protectionEnabled) {
+      applyContentBlockingEnabled(false)
+      setContentBlockingReady(true)
+      return
+    }
 
     void initializeContentBlocking({
       enabled: protectionEnabled,
@@ -1012,8 +1016,11 @@ export default function App () {
 
     if (enabled) {
       try {
-        const initialized = await initializeContentBlocking({ enabled: true })
-        if (!initialized) throw new Error('Native content blocker is unavailable.')
+        const rulesReady = applyContentBlockingEnabled(true)
+        if (!rulesReady) {
+          const initialized = await initializeContentBlocking({ enabled: true })
+          if (!initialized) throw new Error('Native content blocker is unavailable.')
+        }
         if (!setContentBlockingPreference(true)) {
           throw new Error('Unable to save the content-blocking preference.')
         }

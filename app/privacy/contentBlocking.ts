@@ -58,6 +58,7 @@ export function updateContentBlockingLists (): Promise<boolean> {
 export function setContentBlockingEnabled (enabled: boolean) {
   desiredEnabled = enabled
   applyEnabledState()
+  return rulesReady
 }
 
 export async function getContentBlockingStatus () {
