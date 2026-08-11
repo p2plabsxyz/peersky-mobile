@@ -29,6 +29,8 @@ describe('Android content blocking', () => {
     assert.match(moduleSource, /ERR_FILTER_LOAD_CANCELLED/)
     assert.match(moduleSource, /if \(removePendingLoad\(promise\)\) promise[.]resolve\(true\)/)
     assert.match(engineSource, /System[.]loadLibrary\("peersky_adblock"\)/)
+    assert.match(engineSource, /checkNotNull\(nativeLoadLists\(easyListPath, easyPrivacyPath\)\)/)
+    assert.match(engineSource, /\): String[?]/)
     assert.match(engineSource, /if \(!enabled \|\| !nativeAvailable \|\| !listsLoaded\) return false/)
   })
 

@@ -16,7 +16,9 @@ object PeerSkyAdBlockEngine {
 
   fun loadLists(easyListPath: String, easyPrivacyPath: String) {
     check(nativeAvailable) { "Native content blocker is unavailable." }
-    val error = nativeLoadLists(easyListPath, easyPrivacyPath)
+    val error = checkNotNull(nativeLoadLists(easyListPath, easyPrivacyPath)) {
+      "Native content blocker returned no result."
+    }
     check(error.isEmpty()) { error }
     listsLoaded = true
   }
@@ -34,7 +36,7 @@ object PeerSkyAdBlockEngine {
   private external fun nativeLoadLists(
     easyListPath: String,
     easyPrivacyPath: String
-  ): String
+  ): String?
 
   private external fun nativeShouldBlock(
     requestUrl: String,
