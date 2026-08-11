@@ -110,11 +110,13 @@ describe('content-blocking filter lists', () => {
     }).ok, true)
   })
 
-  test('rejects redirects outside credential-free HTTPS URLs', () => {
+  test('accepts only credential-free redirects on the configured source origin', () => {
     const sourceUrl = FILTER_LIST_SOURCES[0].url
 
     assert.equal(isSafeFilterListResponseUrl('', sourceUrl), true)
-    assert.equal(isSafeFilterListResponseUrl('https://cdn.example/list.txt', sourceUrl), true)
+    assert.equal(isSafeFilterListResponseUrl('https://easylist.to/updated/easylist.txt', sourceUrl), true)
+    assert.equal(isSafeFilterListResponseUrl('https://cdn.example/list.txt', sourceUrl), false)
+    assert.equal(isSafeFilterListResponseUrl('https://cdn.easylist.to/list.txt', sourceUrl), false)
     assert.equal(isSafeFilterListResponseUrl('http://cdn.example/list.txt', sourceUrl), false)
     assert.equal(isSafeFilterListResponseUrl('https://user:secret@cdn.example/list.txt', sourceUrl), false)
     assert.equal(isSafeFilterListResponseUrl('not a URL', sourceUrl), false)

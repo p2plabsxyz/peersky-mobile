@@ -50,8 +50,12 @@ export function validateFilterListSnapshot ({
 
 export function isSafeFilterListResponseUrl (responseUrl, sourceUrl) {
   try {
-    const parsed = new URL(responseUrl || sourceUrl)
-    return parsed.protocol === 'https:' && !parsed.username && !parsed.password
+    const source = new URL(sourceUrl)
+    const response = new URL(responseUrl || sourceUrl)
+    return source.protocol === 'https:' &&
+      response.origin === source.origin &&
+      !response.username &&
+      !response.password
   } catch {
     return false
   }
