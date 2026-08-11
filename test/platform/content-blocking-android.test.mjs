@@ -40,7 +40,10 @@ describe('Android content blocking', () => {
     assert.match(clientSource, /PeerSkyAdBlockEngine[.]shouldBlock/)
     assert.match(clientSource, /MAX_FILTER_URL_LENGTH = 16 [*] 1024/)
     assert.match(clientSource, /WebResourceResponse\(/)
-    assert.match(managerSource, /webViewClient = PeerSkyWebViewClient\(\)/)
+    assert.match(
+      managerSource,
+      /super[.]addEventEmitters\(context, view\)[\s\S]*webViewClient = PeerSkyWebViewClient\(\)/
+    )
   })
 
   test('generates behavioral coverage for remote and loopback URL classification', () => {
