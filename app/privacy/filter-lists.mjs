@@ -69,6 +69,7 @@ export function getBoundedFilterListTransferLength ({
   const declaredLength = parseUnsignedInteger(contentLength)
 
   if (status === 200) {
+    if (contentLength === null) return MAX_FILTER_LIST_BYTES
     return declaredLength !== null && declaredLength <= MAX_FILTER_LIST_BYTES
       ? declaredLength
       : null

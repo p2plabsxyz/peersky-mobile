@@ -137,6 +137,16 @@ describe('content-blocking filter lists', () => {
       status: 200,
       contentLength: null,
       contentRange: null
+    }), MAX_FILTER_LIST_BYTES)
+    assert.equal(getBoundedFilterListTransferLength({
+      status: 200,
+      contentLength: 'invalid',
+      contentRange: null
+    }), null)
+    assert.equal(getBoundedFilterListTransferLength({
+      status: 200,
+      contentLength: String(MAX_FILTER_LIST_BYTES + 1),
+      contentRange: null
     }), null)
     assert.equal(getBoundedFilterListTransferLength({
       status: 206,
