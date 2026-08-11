@@ -9,6 +9,7 @@ import {
   MIN_FILTER_LIST_BYTES,
   createBundledFilterListState,
   getBoundedFilterListTransferLength,
+  isFilterListVersionDowngrade,
   isSafeFilterListResponseUrl,
   parseFilterListState,
   serializeFilterListState,
@@ -168,6 +169,14 @@ describe('content-blocking filter lists', () => {
 
     assert.deepEqual(parsed?.lists.map(({ id }) => id), ['easylist', 'easyprivacy'])
     assert.equal(parsed?.lists.every(({ version }) => version === 'unreported'), true)
+  })
+
+  test('rejects older timestamped filter-list versions', () => {
+    assert.equal(isFilterListVersionDowngrade('202608050001', '202608050002'), true)
+    assert.equal(isFilterListVersionDowngrade('202608050002', '202608050002'), false)
+    assert.equal(isFilterListVersionDowngrade('202608050003', '202608050002'), false)
+    assert.equal(isFilterListVersionDowngrade('unreported', '202608050002'), false)
+    assert.equal(isFilterListVersionDowngrade('202608050001', 'unreported'), false)
   })
 
   test('rejects invalid bundled metadata and oversized version values', () => {

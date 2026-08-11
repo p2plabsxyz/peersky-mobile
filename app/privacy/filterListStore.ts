@@ -6,6 +6,7 @@ import {
   FILTER_LIST_SCHEMA_VERSION,
   FILTER_LIST_SOURCES,
   getBoundedFilterListTransferLength,
+  isFilterListVersionDowngrade,
   isSafeFilterListResponseUrl,
   MAX_FILTER_LIST_BYTES,
   parseFilterListState,
@@ -125,6 +126,10 @@ async function performFilterListUpdate ({
     for (const source of FILTER_LIST_SOURCES) {
       const file = new File(snapshotDirectory, `${source.id}.txt`)
       const { byteLength, version } = await downloadFilterList(source, file)
+      const activeVersion = currentState?.lists.find(({ id }) => id === source.id)?.version
+      if (isFilterListVersionDowngrade(version, activeVersion)) {
+        throw new Error(`${source.title} returned an older filter-list version.`)
+      }
       lists.push({
         id: source.id,
         url: source.url,

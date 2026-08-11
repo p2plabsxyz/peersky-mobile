@@ -18,6 +18,7 @@ export const FILTER_LIST_SOURCES = Object.freeze([
 
 const SOURCE_BY_ID = new Map(FILTER_LIST_SOURCES.map((source) => [source.id, source]))
 const SNAPSHOT_NAME_PATTERN = /^snapshot-[0-9]+$/
+const FILTER_LIST_TIMESTAMP_PATTERN = /^[0-9]{12}$/
 const MAX_FILTER_LIST_VERSION_LENGTH = 128
 
 export function shouldUpdateFilterLists (state, now = Date.now()) {
@@ -145,6 +146,12 @@ export function validateBundledFilterListRecord ({
 export function readFilterListVersion (preamble) {
   if (typeof preamble !== 'string') return 'unreported'
   return /^!\s*(?:Version|Last modified):\s*(.+)$/im.exec(preamble)?.[1]?.trim() || 'unreported'
+}
+
+export function isFilterListVersionDowngrade (candidateVersion, activeVersion) {
+  if (!FILTER_LIST_TIMESTAMP_PATTERN.test(candidateVersion)) return false
+  if (!FILTER_LIST_TIMESTAMP_PATTERN.test(activeVersion)) return false
+  return candidateVersion < activeVersion
 }
 
 function normalizeFilterListState (value) {
