@@ -1,4 +1,6 @@
-export const MAX_WEBKIT_RULES_PER_LIST = 45_000
+export const MAX_WEBKIT_RULES_PER_LIST = 150_000
+
+const DEFAULT_BATCH_SIZE = 500
 
 const DEFAULT_RESOURCE_TYPES = Object.freeze([
   'image',
@@ -52,6 +54,54 @@ export function convertFilterListToWebKitRules (
   const keptExceptions = exceptions.slice(0, maxRules)
   const keptBlocking = blocking.slice(0, maxRules - keptExceptions.length)
   return [...keptBlocking, ...keptExceptions]
+}
+
+export async function convertFilterListToWebKitRulesAsync (
+  contents,
+  {
+    maxRules = MAX_WEBKIT_RULES_PER_LIST,
+    batchSize = DEFAULT_BATCH_SIZE,
+    yieldControl = yieldToEventLoop
+  } = {}
+) {
+  if (typeof contents !== 'string') throw new TypeError('Filter list must be text.')
+  validateBatchOptions(maxRules, batchSize, yieldControl)
+
+  const blocking = []
+  const exceptions = []
+  const lines = contents.split(/\r?\n/)
+
+  for (let index = 0; index < lines.length; index++) {
+    if (blocking.length + exceptions.length >= maxRules * 2) break
+    const rule = convertLine(lines[index])
+    if (rule) {
+      ;(rule.action.type === 'ignore-previous-rules' ? exceptions : blocking).push(rule)
+    }
+    if ((index + 1) % batchSize === 0) await yieldControl()
+  }
+
+  const keptExceptions = exceptions.slice(0, maxRules)
+  const keptBlocking = blocking.slice(0, maxRules - keptExceptions.length)
+  return [...keptBlocking, ...keptExceptions]
+}
+
+export async function serializeWebKitContentRuleChunks (
+  rules,
+  {
+    batchSize = DEFAULT_BATCH_SIZE,
+    yieldControl = yieldToEventLoop
+  } = {}
+) {
+  if (!Array.isArray(rules)) throw new TypeError('WebKit rules must be an array.')
+  validateBatchOptions(1, batchSize, yieldControl)
+
+  const chunks = []
+  for (let index = 0; index < rules.length; index += batchSize) {
+    const batch = JSON.stringify(rules.slice(index, index + batchSize))
+    chunks.push(batch.slice(1, -1))
+    await yieldControl()
+  }
+  return chunks
 }
 
 export function serializeWebKitContentRules (contents, options) {
@@ -184,4 +234,20 @@ function createUrlFilter (pattern) {
 
 function escapeRegex (character) {
   return /[\\^$.*+?()[\]{}|/]/.test(character) ? `\\${character}` : character
+}
+
+function validateBatchOptions (maxRules, batchSize, yieldControl) {
+  if (!Number.isSafeInteger(maxRules) || maxRules < 1) {
+    throw new TypeError('Invalid WebKit rule limit.')
+  }
+  if (!Number.isSafeInteger(batchSize) || batchSize < 1) {
+    throw new TypeError('Invalid WebKit batch size.')
+  }
+  if (typeof yieldControl !== 'function') {
+    throw new TypeError('Invalid WebKit yield function.')
+  }
+}
+
+function yieldToEventLoop () {
+  return new Promise((resolve) => setTimeout(resolve, 0))
 }

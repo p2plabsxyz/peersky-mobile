@@ -2,7 +2,10 @@ import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import { describe, test } from 'node:test'
 import {
+  MAX_WEBKIT_RULES_PER_LIST,
   convertFilterListToWebKitRules,
+  convertFilterListToWebKitRulesAsync,
+  serializeWebKitContentRuleChunks,
   serializeWebKitContentRules
 } from '../../app/privacy/webkit-content-rules.mjs'
 
@@ -50,6 +53,29 @@ describe('iOS content blocking', () => {
     assert.equal(rules[0].action.type, 'block')
     assert.equal(rules[1].action.type, 'ignore-previous-rules')
     assert.doesNotThrow(() => JSON.parse(serializeWebKitContentRules('||ads.example^')))
+  })
+
+  test('converts and serializes up to the WebKit limit without monopolizing the event loop', async () => {
+    const yields = []
+    const contents = Array.from(
+      { length: 45_001 },
+      (_, index) => `||ads-${index}.example^`
+    ).join('\n')
+    const rules = await convertFilterListToWebKitRulesAsync(contents, {
+      batchSize: 10_000,
+      yieldControl: async () => yields.push('convert')
+    })
+
+    assert.equal(MAX_WEBKIT_RULES_PER_LIST, 150_000)
+    assert.equal(rules.length, 45_001)
+    assert.equal(yields.length, 4)
+
+    const chunks = await serializeWebKitContentRuleChunks(rules.slice(0, 3), {
+      batchSize: 2,
+      yieldControl: async () => yields.push('serialize')
+    })
+    assert.deepEqual(JSON.parse(`[${chunks.join(',')}]`), rules.slice(0, 3))
+    assert.equal(yields.filter((event) => event === 'serialize').length, 2)
   })
 
   test('generates tracked native sources for compilation and WebView attachment', () => {
