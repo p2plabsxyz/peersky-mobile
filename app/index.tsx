@@ -273,8 +273,6 @@ export default function App () {
   const browserSessionRestoreStartedRef = useRef(false)
   const browserUserInteractedRef = useRef(false)
   const [browserLiveTabIds, setBrowserLiveTabIds] = useState(['tab-1'])
-  const [contentBlockingAttempt, setContentBlockingAttempt] = useState(0)
-  const [contentBlockingError, setContentBlockingError] = useState<string | null>(null)
   const [contentBlockingGeneration, setContentBlockingGeneration] = useState(0)
   const [contentBlockingReady, setContentBlockingReady] = useState(
     !['android', 'ios'].includes(Platform.OS)
@@ -349,7 +347,6 @@ export default function App () {
     if (!browserPreferencesReady) return
 
     let cancelled = false
-    setContentBlockingError(null)
     const protectionEnabled = browserPreferences.contentBlockingEnabled
     if (!protectionEnabled) setContentBlockingReady(true)
 
@@ -361,23 +358,27 @@ export default function App () {
     })
       .then((initialized) => {
         if (!initialized && ['android', 'ios'].includes(Platform.OS)) {
-          throw new Error('Native content blocker is unavailable.')
+          console.warn('Native content blocker is unavailable; continuing without protection.')
+          if (protectionEnabled && !cancelled) {
+            setStatus('Browsing without ad and tracker protection')
+          }
         }
         if (!cancelled) setContentBlockingReady(true)
       })
       .catch((error) => {
         console.error('Unable to initialize content blocking:', error)
-        if (!protectionEnabled) return
         if (!cancelled) {
-          setContentBlockingError('Unable to initialize content blocking. Check your connection and try again.')
-          setStatus('Unable to initialize content blocking')
+          setContentBlockingReady(true)
+          if (protectionEnabled) {
+            setStatus('Browsing without ad and tracker protection')
+          }
         }
       })
 
     return () => {
       cancelled = true
     }
-  }, [browserPreferencesReady, contentBlockingAttempt])
+  }, [browserPreferencesReady])
 
   useEffect(() => {
     if (!browserPreferencesReady || !contentBlockingReady || browserSessionRestoreStartedRef.current) return
@@ -2845,15 +2846,6 @@ export default function App () {
           )
         })}
 
-        {!contentBlockingReady && contentBlockingError && (
-          <View style={styles.browserRestorePage}>
-            <Text style={styles.browserRestoreText}>{contentBlockingError}</Text>
-            <Button
-              title='Retry'
-              onPress={() => setContentBlockingAttempt((attempt) => attempt + 1)}
-            />
-          </View>
-        )}
         </View>
 
         {browserPreferences.addressBarPosition === 'bottom' && browserToolbar}
@@ -2878,7 +2870,7 @@ export default function App () {
           onShare={(targetUrl, title) => void onBrowserMediaShare(targetUrl, title)}
         />
 
-        {(isBooting || (!contentBlockingReady && !contentBlockingError)) && (
+        {(isBooting || !contentBlockingReady) && (
           <View style={styles.browserLoader}>
             <ActivityIndicator size='small' />
           </View>
