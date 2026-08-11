@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { describe, test } from 'node:test'
 import { createRequire } from 'node:module'
 import {
+  addDownloadUrlFingerprint,
   MAX_BROWSER_DOWNLOADS,
   createUniqueDownloadFilename,
   normalizeBrowserDownloads,
@@ -62,7 +63,8 @@ describe('browser downloads', () => {
   })
 
   test('does not split Unicode download names while bounding metadata', () => {
-    const name = `${'a'.repeat(254)}😀tail`
+    const emoji = '\u{1F600}'
+    const name = `${'a'.repeat(254)}${emoji}tail`
     const [download] = normalizeBrowserDownloads([{
       id: '1',
       name,
@@ -72,7 +74,7 @@ describe('browser downloads', () => {
     }])
 
     assert.equal(Array.from(download.name).length, 255)
-    assert.equal(download.name.endsWith('😀'), true)
+    assert.equal(download.name.endsWith(emoji), true)
   })
 
   test('disambiguates duplicate filenames while preserving extensions', () => {
@@ -85,6 +87,26 @@ describe('browser downloads', () => {
     assert.deepEqual(
       downloads.map((download) => download.name),
       ['report.pdf', 'report (1).pdf', 'report (2).pdf']
+    )
+  })
+
+  test('distinguishes query-addressed images while preserving repeat collision suffixes', () => {
+    const first = addDownloadUrlFingerprint('images.jpg', 'https://example.com/images?id=first')
+    const second = addDownloadUrlFingerprint('images.jpg', 'https://example.com/images?id=second')
+
+    assert.notEqual(first, second)
+    assert.equal(
+      addDownloadUrlFingerprint('images.jpg', 'https://example.com/images?id=first#preview'),
+      first
+    )
+    assert.match(first, /^images-[a-f0-9]{8}[.]jpg$/)
+    assert.equal(
+      createUniqueDownloadFilename(first, [first]),
+      first.replace('.jpg', ' (1).jpg')
+    )
+    assert.equal(
+      addDownloadUrlFingerprint('photo.jpg', 'https://example.com/photo.jpg?token=one'),
+      'photo.jpg'
     )
   })
 
@@ -147,9 +169,15 @@ describe('browser downloads', () => {
     assert.match(moduleSource, /package xyz\.test\.browser/)
     assert.match(moduleSource, /@ReactModule\(name = BrowserDownloadsModule[.]NAME\)/)
     assert.match(moduleSource, /const val NAME = "BrowserDownloads"/)
+    assert.match(moduleSource, /fun requestDownload\(url: String, promise: Promise\)/)
+    assert.match(moduleSource, /promise[.]resolve\(queueDownload\(url, null, null, null\)\)/)
     assert.match(moduleSource, /fun openDownload\(id: String, promise: Promise\)/)
     assert.doesNotMatch(moduleSource, /getDownloadAnalysis|recordDiagnostic/)
     assert.match(moduleSource, /resolveDownloadMetadata/)
+    assert.match(moduleSource, /addUrlFingerprintIfNeeded/)
+    assert.match(moduleSource, /fragment\(null\)/)
+    assert.match(moduleSource, /MessageDigest[.]getInstance\("SHA-256"\)/)
+    assert.match(moduleSource, /CONTENT_DISPOSITION_FILENAME_PATTERN/)
     assert.match(moduleSource, /resolveMimeTypeFromFilename/)
     assert.match(moduleSource, /takeUnless\(::isAmbiguousDownloadType\)/)
     assert.match(moduleSource, /requestMethod = "HEAD"/)
@@ -184,8 +212,21 @@ describe('browser downloads', () => {
     assert.match(webViewManagerSource, /setDownloadListener/)
     assert.match(webViewManagerSource, /queueDownload/)
     assert.match(webViewManagerSource, /Download service is unavailable[.]/)
+    assert.match(webViewManagerSource, /setOnLongClickListener/)
+    assert.match(webViewManagerSource, /HitTestResult[.]IMAGE_TYPE/)
+    assert.match(webViewManagerSource, /HitTestResult[.]SRC_IMAGE_ANCHOR_TYPE/)
+    assert.match(webViewManagerSource, /HitTestResult[.]SRC_ANCHOR_TYPE/)
+    assert.match(webViewManagerSource, /requestFocusNodeHref/)
+    assert.match(webViewManagerSource, /Handler\(Looper[.]getMainLooper\(\)\)/)
+    assert.match(webViewManagerSource, /mediaLongPressToken/)
+    assert.match(webViewManagerSource, /peersky-browser-media-long-press/)
+    assert.match(webViewManagerSource, /MAX_URL_LENGTH = 8192/)
+    assert.match(webViewManagerSource, /parsed[.]userInfo == null/)
+    assert.match(webViewManagerSource, /else -> false/)
     assert.match(unitTestSource, /acceptsOnlyBoundedCredentialFreeHttpUrls/)
     assert.match(unitTestSource, /requiresManifestAndPackageContentForApkDetection/)
+    assert.match(unitTestSource, /fingerprintsCanonicalQueryUrlsDeterministically/)
+    assert.match(unitTestSource, /validatesMediaBridgeTokens/)
   })
 
   test('adds the shared MIME detector dependency idempotently', () => {
@@ -222,7 +263,7 @@ describe('browser downloads', () => {
       'utf8'
     )
 
-    assert.match(indexSource, /nativeConfig=\{peerSkyWebViewNativeConfig\}/)
+    assert.match(indexSource, /nativeConfig=\{browserNativeConfig\}/)
     assert.doesNotMatch(indexSource, /getBrowserDownloadAnalysis/)
     assert.match(nativeConfigSource, /requireNativeComponent/)
     assert.match(nativeConfigSource, /PeerSkyWebView/)

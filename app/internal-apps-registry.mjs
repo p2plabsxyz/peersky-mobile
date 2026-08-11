@@ -13,7 +13,7 @@ export const INTERNAL_APPS = [
   },
   {
     id: 'hyper',
-    title: 'Hyper Runtime',
+    title: 'Hyperdrive',
     url: 'peersky://hyper/',
     icon: 'H'
   }

@@ -4,6 +4,7 @@ import { Directory, File, Paths } from 'expo-file-system'
 import * as Sharing from 'expo-sharing'
 import { NativeModules, Platform } from 'react-native'
 import {
+  addDownloadUrlFingerprint,
   createUniqueDownloadFilename,
   normalizeBrowserDownloads,
   normalizeBrowserDownloadUrl
@@ -21,6 +22,7 @@ type BrowserDownloadsNativeModule = {
   getDownloads: () => Promise<BrowserDownload[]>
   openDownload: (id: string) => Promise<boolean>
   removeDownload: (id: string) => Promise<boolean>
+  requestDownload: (url: string) => Promise<boolean>
 }
 
 const androidDownloads = NativeModules.BrowserDownloads as BrowserDownloadsNativeModule | undefined
@@ -76,17 +78,28 @@ export function useBrowserDownloads ({ enabled = false } = {}) {
   }, [enabled, refresh])
 
   async function requestDownload (url: string) {
-    if (Platform.OS === 'android') return
-
     const normalizedUrl = normalizeBrowserDownloadUrl(url)
     if (!normalizedUrl) {
       setError('This download URL is not supported.')
-      return
+      return false
     }
-    if (activeIosDownloads.current.has(normalizedUrl)) return
+
+    if (Platform.OS === 'android') {
+      try {
+        const accepted = await getAndroidDownloads().requestDownload(normalizedUrl)
+        setError(accepted ? null : 'Unable to start this download.')
+        return accepted
+      } catch (downloadError) {
+        console.error('Failed requesting Android download:', downloadError)
+        setError('Unable to start this download.')
+        return false
+      }
+    }
+
+    if (activeIosDownloads.current.has(normalizedUrl)) return false
     if (activeIosDownloads.current.size >= MAX_CONCURRENT_IOS_DOWNLOADS) {
       setError('Too many downloads are already running.')
-      return
+      return false
     }
 
     activeIosDownloads.current.add(normalizedUrl)
@@ -97,11 +110,13 @@ export function useBrowserDownloads ({ enabled = false } = {}) {
       const stagedFile = await File.downloadFileAsync(normalizedUrl, stagingDirectory, {
         headers: cookieHeader ? { Cookie: cookieHeader } : undefined
       })
-      moveIosDownloadIntoPlace(stagedFile)
+      moveIosDownloadIntoPlace(stagedFile, normalizedUrl)
       await refresh()
+      return true
     } catch (downloadError) {
       console.error('Failed downloading file:', downloadError)
       setError('Unable to download this file.')
+      return false
     } finally {
       if (stagingDirectory.exists) stagingDirectory.delete()
       activeIosDownloads.current.delete(normalizedUrl)
@@ -178,13 +193,14 @@ function getIosDownloadStagingDirectory () {
   )
 }
 
-function moveIosDownloadIntoPlace (stagedFile: File) {
+function moveIosDownloadIntoPlace (stagedFile: File, sourceUrl: string) {
   const directory = getIosDownloadsDirectory()
   if (!directory.exists) directory.create({ intermediates: true, idempotent: true })
   const existingNames = directory.list()
     .filter((entry): entry is File => entry instanceof File)
     .map((entry) => entry.name)
-  const destinationName = createUniqueDownloadFilename(stagedFile.name, existingNames)
+  const sourceName = addDownloadUrlFingerprint(stagedFile.name, sourceUrl)
+  const destinationName = createUniqueDownloadFilename(sourceName, existingNames)
   stagedFile.move(new File(directory, destinationName))
 }
 

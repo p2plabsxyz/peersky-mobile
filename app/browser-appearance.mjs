@@ -39,7 +39,12 @@ export function resolveBrowserDarkMode (theme, systemColorScheme) {
 
 export function formatBrowserAddress (address, showFullAddress) {
   const value = String(address || '')
-  if (showFullAddress || !value || value === BROWSER_HOME_URL) return value
+  if (
+    showFullAddress ||
+    !value ||
+    value === BROWSER_HOME_URL ||
+    value.toLowerCase().startsWith('peersky://')
+  ) return value
 
   try {
     const parsed = new URL(value)

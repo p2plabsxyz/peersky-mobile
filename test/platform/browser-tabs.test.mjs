@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 import { BROWSER_HOME_URL } from '../../app/browser-shell.mjs'
 import {
+  addBackgroundBrowserTabState,
   addBrowserTabState,
   closeBrowserTabState,
   createBrowserTabsState,
@@ -87,11 +88,16 @@ describe('browser tab state helpers', () => {
     assert.equal(addBrowserTabState(state), state)
   })
 
-  test('restores the current page of each tab', () => {
+  test('restores bounded page history for each tab', () => {
     let state = createBrowserTabsState()
     state = updateBrowserTabState(state, 'tab-1', {
       title: 'Example',
-      history: [{ url: 'https://example.com/', source: { kind: 'web', uri: 'https://example.com/' } }]
+      history: [
+        { url: 'https://peersky.p2plabs.xyz/', source: { kind: 'web', uri: 'https://peersky.p2plabs.xyz/' } },
+        { url: 'https://peersky.p2plabs.xyz/#features', source: { kind: 'web', uri: 'https://peersky.p2plabs.xyz/#features' } },
+        { url: 'https://peersky.p2plabs.xyz/#downloads', source: { kind: 'web', uri: 'https://peersky.p2plabs.xyz/#downloads' } }
+      ],
+      historyIndex: 2
     })
     state = addBrowserTabState(state)
 
@@ -99,10 +105,10 @@ describe('browser tab state helpers', () => {
 
     assert.equal(restored.tabs.length, 2)
     assert.equal(restored.activeTabId, 'tab-2')
-    assert.deepEqual(restored.tabs[0].history[0], {
-      url: 'https://example.com/',
-      source: { kind: 'web', uri: 'https://example.com/' }
-    })
+    assert.equal(restored.tabs[0].history.length, 3)
+    assert.equal(restored.tabs[0].historyIndex, 2)
+    assert.equal(restored.tabs[0].history[1].url, 'https://peersky.p2plabs.xyz/#features')
+    assert.equal(restored.tabs[0].history[2].url, 'https://peersky.p2plabs.xyz/#downloads')
   })
 
   test('falls back safely when persisted state is malformed', () => {
@@ -154,6 +160,23 @@ describe('browser tab state helpers', () => {
 
     assert.equal(state.activeTabId, 'tab-2')
     assert.equal(state.tabs.length, 1)
+  })
+
+  test('adds a deferred background tab without changing the active tab', () => {
+    const initialState = setBrowserTabViewModeState(createBrowserTabsState(), 'list')
+    const state = addBackgroundBrowserTabState(
+      initialState,
+      'https://example.com/image.jpg',
+      'Image'
+    )
+
+    assert.equal(state.activeTabId, 'tab-1')
+    assert.equal(state.viewMode, 'list')
+    assert.equal(state.tabs.length, 2)
+    assert.deepEqual(state.tabs[1].history[0], {
+      url: 'https://example.com/image.jpg',
+      source: { kind: 'restore', url: 'https://example.com/image.jpg' }
+    })
   })
 
   test('bounds remote-controlled tab titles', () => {

@@ -23,5 +23,7 @@ describe('browser appearance helpers', () => {
   test('preserves incomplete input and the home address', () => {
     assert.equal(formatBrowserAddress('example', false), 'example')
     assert.equal(formatBrowserAddress('peersky://home', false), 'peersky://home')
+    assert.equal(formatBrowserAddress('peersky://p2p/p2pmd/', false), 'peersky://p2p/p2pmd/')
+    assert.equal(formatBrowserAddress('peersky://hyper/', false), 'peersky://hyper/')
   })
 })
