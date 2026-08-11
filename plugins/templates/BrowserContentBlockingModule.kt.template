@@ -8,12 +8,15 @@ import com.facebook.react.bridge.ReactMethod
 import com.facebook.react.module.annotations.ReactModule
 import java.io.File
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 
 @ReactModule(name = BrowserContentBlockingModule.NAME)
 class BrowserContentBlockingModule(
   reactContext: ReactApplicationContext
 ) : ReactContextBaseJavaModule(reactContext) {
   private val loader = Executors.newSingleThreadExecutor()
+  private val pendingLock = Any()
+  private val pendingLoads = mutableSetOf<Promise>()
 
   override fun getName() = NAME
 
@@ -26,12 +29,24 @@ class BrowserContentBlockingModule(
       return
     }
 
-    loader.execute {
-      try {
-        PeerSkyAdBlockEngine.loadLists(easyList.path, easyPrivacy.path)
-        promise.resolve(true)
-      } catch (error: Exception) {
-        promise.reject("ERR_FILTER_LOAD", error.message, error)
+    synchronized(pendingLock) {
+      pendingLoads.add(promise)
+    }
+
+    try {
+      loader.execute {
+        try {
+          PeerSkyAdBlockEngine.loadLists(easyList.path, easyPrivacy.path)
+          if (removePendingLoad(promise)) promise.resolve(true)
+        } catch (error: Exception) {
+          if (removePendingLoad(promise)) {
+            promise.reject("ERR_FILTER_LOAD", error.message, error)
+          }
+        }
+      }
+    } catch (error: RejectedExecutionException) {
+      if (removePendingLoad(promise)) {
+        promise.reject("ERR_FILTER_LOAD_CANCELLED", "Content blocker is shutting down.", error)
       }
     }
   }
@@ -42,8 +57,20 @@ class BrowserContentBlockingModule(
   }
 
   override fun invalidate() {
+    val cancelledLoads = synchronized(pendingLock) {
+      pendingLoads.toList().also { pendingLoads.clear() }
+    }
     loader.shutdownNow()
+    cancelledLoads.forEach { promise ->
+      promise.reject("ERR_FILTER_LOAD_CANCELLED", "Content blocker was invalidated.")
+    }
     super.invalidate()
+  }
+
+  private fun removePendingLoad(promise: Promise): Boolean {
+    return synchronized(pendingLock) {
+      pendingLoads.remove(promise)
+    }
   }
 
   private fun resolveFilterFile(uri: String): File? {
