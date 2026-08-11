@@ -98,7 +98,14 @@ export async function routeRpcRequest (req) {
       const storagePath = getDefaultIdentityStoragePath()
       const tempStoragePath = storagePath + '.tmp'
       const keys = await getDeviceKeys(storagePath)
-      const downloaded = await fetchHyperBinary({ url: hyperUrl, method: 'GET' })
+      const downloaded = await fetchHyperBinary({
+        url: hyperUrl,
+        method: 'GET',
+        retries: 5,
+        retryDelay: 500,
+        maxRetryDelay: 4000,
+        backoffFactor: 2
+      })
 
       if (!downloaded.ok || !downloaded.bytes) {
         replyJson(req, {
