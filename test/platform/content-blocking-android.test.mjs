@@ -73,6 +73,30 @@ describe('Android content blocking', () => {
     )
   })
 
+  test('pins Rust and prepares only EAS Android builds', () => {
+    const toolchain = readFileSync(
+      new URL('../../rust-toolchain.toml', import.meta.url),
+      'utf8'
+    )
+    const setup = readFileSync(
+      new URL('../../scripts/setup-content-blocking.mjs', import.meta.url),
+      'utf8'
+    )
+    const packageJson = JSON.parse(readFileSync(
+      new URL('../../package.json', import.meta.url),
+      'utf8'
+    ))
+
+    assert.match(toolchain, /channel = "1[.]85[.]1"/)
+    assert.match(toolchain, /aarch64-linux-android/)
+    assert.match(toolchain, /x86_64-linux-android/)
+    assert.match(setup, /EAS_BUILD_PLATFORM !== 'android'/)
+    assert.equal(
+      packageJson.scripts['eas-build-pre-install'],
+      'node scripts/setup-content-blocking.mjs --eas'
+    )
+  })
+
   test('wires the single-flight initializer to the runtime coordinator', () => {
     const initializer = readFileSync(
       new URL('../../app/privacy/contentBlocking.ts', import.meta.url),

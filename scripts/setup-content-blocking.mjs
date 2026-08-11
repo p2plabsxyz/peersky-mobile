@@ -3,6 +3,11 @@ import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import path from 'node:path'
 
+if (process.argv.includes('--eas') && process.env.EAS_BUILD_PLATFORM !== 'android') {
+  console.log('Skipping Android content-blocking setup for this EAS platform.')
+  process.exit(0)
+}
+
 const targets = [
   'armv7-linux-androideabi',
   'aarch64-linux-android',

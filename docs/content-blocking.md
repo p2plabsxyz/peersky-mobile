@@ -32,6 +32,8 @@ npm run android
 
 The setup script accepts Cargo from `CARGO`, the standard Cargo home directory, or the system `PATH`. Android parses one shared native ruleset and reuses it across all WebViews. Filtering runs from WebView's request interception callback without a React Native bridge round trip for each request.
 
+The repository pins Rust 1.85.1 and the required Android targets in `rust-toolchain.toml`. EAS Android builds invoke the same setup through `eas-build-pre-install`; non-Android EAS builds skip it.
+
 ## iOS setup
 
 The Expo config plugin generates the iOS bridge and custom WebView during prebuild. WebKit rule JSON is generated once per immutable filter-list snapshot, bounded to 45,000 rules per list, and cached with that snapshot. `WKContentRuleListStore` then reuses compiled rules for subsequent launches.

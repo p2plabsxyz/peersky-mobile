@@ -77,6 +77,9 @@ Install the Rust Android build prerequisites once:
 npm run setup:content-blocking
 ```
 
+EAS Android builds run this setup automatically through the
+`eas-build-pre-install` hook. The hook is skipped for iOS builds.
+
 ```sh
 npm run android
 ```
