@@ -354,7 +354,10 @@ export default function App () {
     if (!protectionEnabled) setContentBlockingReady(true)
 
     void initializeContentBlocking({
-      enabled: protectionEnabled
+      enabled: protectionEnabled,
+      onReady: () => {
+        if (!cancelled) setContentBlockingReady(true)
+      }
     })
       .then((initialized) => {
         if (!initialized && ['android', 'ios'].includes(Platform.OS)) {

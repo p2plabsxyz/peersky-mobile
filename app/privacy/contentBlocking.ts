@@ -17,16 +17,23 @@ type BrowserContentBlockingNativeModule = {
   setEnabled: (enabled: boolean) => void
 }
 
+type ContentBlockingOptions = {
+  enabled?: boolean
+  onReady?: () => void
+}
+
 const nativeContentBlocking = NativeModules.BrowserContentBlocking as
   BrowserContentBlockingNativeModule | undefined
 
 let desiredEnabled = true
 let rulesReady = false
+const readyListeners = new Set<() => void>()
 
 const runtimeBlocker = {
   setEnabled (ready: boolean) {
     rulesReady = ready
     applyEnabledState()
+    if (ready) notifyReadyListeners()
   }
 }
 
@@ -34,9 +41,14 @@ const coordinateInitialization = createForcedUpdateCoordinator(
   ({ force }: { force: boolean }) => performInitialization(force)
 )
 
-export function initializeContentBlocking ({ enabled = true } = {}): Promise<boolean> {
+export function initializeContentBlocking ({
+  enabled = true,
+  onReady
+}: ContentBlockingOptions = {}): Promise<boolean> {
   setContentBlockingEnabled(enabled)
-  return coordinateInitialization({ force: false })
+  const unsubscribe = onReady ? subscribeToReady(onReady) : null
+  const initialization = coordinateInitialization({ force: false })
+  return unsubscribe ? initialization.finally(unsubscribe) : initialization
 }
 
 export function updateContentBlockingLists (): Promise<boolean> {
@@ -74,6 +86,27 @@ async function performInitialization (forceUpdate: boolean) {
 
 function applyEnabledState () {
   nativeContentBlocking?.setEnabled(rulesReady && desiredEnabled)
+}
+
+function subscribeToReady (listener: () => void) {
+  if (rulesReady) {
+    listener()
+    return () => {}
+  }
+
+  readyListeners.add(listener)
+  return () => readyListeners.delete(listener)
+}
+
+function notifyReadyListeners () {
+  for (const listener of readyListeners) {
+    readyListeners.delete(listener)
+    try {
+      listener()
+    } catch (error) {
+      console.error('Content-blocking readiness listener failed:', error)
+    }
+  }
 }
 
 async function loadNativeFilterLists (state: NonNullable<Awaited<ReturnType<typeof loadFilterListState>>>) {
