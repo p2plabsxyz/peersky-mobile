@@ -16,6 +16,9 @@
       "supportsTablet": true,
       "bundleIdentifier": "xyz.p2plabs.peersky",
       "infoPlist": {
+        "NSCameraUsageDescription": "PeerSky uses the camera only when a website you visit requests it and you allow access.",
+        "NSLocationWhenInUseUsageDescription": "PeerSky uses your location only when a website you visit requests it and you allow access.",
+        "NSMicrophoneUsageDescription": "PeerSky uses the microphone only when a website you visit requests it and you allow access.",
         "NSAppTransportSecurity": {
           "NSAllowsLocalNetworking": true
         }
@@ -26,7 +29,32 @@
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "package": "xyz.p2plabs.peersky"
+      "package": "xyz.p2plabs.peersky",
+      "permissions": [
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.CAMERA",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.RECORD_AUDIO"
+      ],
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": false,
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ],
+          "data": [
+            {
+              "scheme": "http"
+            },
+            {
+              "scheme": "https"
+            }
+          ]
+        }
+      ]
     },
     "plugins": [
       [

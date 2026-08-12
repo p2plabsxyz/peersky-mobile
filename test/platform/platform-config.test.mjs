@@ -37,6 +37,45 @@ describe('mobile platform runtime configuration', () => {
     assert.notEqual(ats?.NSAllowsArbitraryLoads, true)
   })
 
+  it('declares browser permissions and Android web-link handling', async () => {
+    const appJson = JSON.parse(await readFile(repoFile('app.json'), 'utf8'))
+    const android = appJson.expo?.android
+    const infoPlist = appJson.expo?.ios?.infoPlist
+
+    assert.deepEqual(android?.permissions, [
+      'android.permission.ACCESS_COARSE_LOCATION',
+      'android.permission.ACCESS_FINE_LOCATION',
+      'android.permission.CAMERA',
+      'android.permission.POST_NOTIFICATIONS',
+      'android.permission.RECORD_AUDIO'
+    ])
+    assert.equal(android?.intentFilters?.length, 1)
+    assert.deepEqual(android.intentFilters[0]?.category, ['BROWSABLE', 'DEFAULT'])
+    assert.deepEqual(
+      android.intentFilters[0]?.data?.map((entry) => entry.scheme),
+      ['http', 'https']
+    )
+    assert.match(infoPlist?.NSCameraUsageDescription, /website you visit/i)
+    assert.match(infoPlist?.NSLocationWhenInUseUsageDescription, /website you visit/i)
+    assert.match(infoPlist?.NSMicrophoneUsageDescription, /website you visit/i)
+  })
+
+  it('enables native WebView prompts for location and media capture', async () => {
+    const indexSource = await readFile(repoFile('app/index.tsx'), 'utf8')
+
+    assert.match(indexSource, /geolocationEnabled=\{true\}/)
+    assert.match(indexSource, /mediaCapturePermissionGrantType='prompt'/)
+  })
+
+  it('opens incoming Android web links after browser startup completes', async () => {
+    const indexSource = await readFile(repoFile('app/index.tsx'), 'utf8')
+
+    assert.match(indexSource, /Linking\.getInitialURL\(\)/)
+    assert.match(indexSource, /Linking\.addEventListener\('url'/)
+    assert.match(indexSource, /if \(!browserSessionReady \|\| !pendingIncomingUrl\) return/)
+    assert.match(indexSource, /void loadBrowserUrl\(incomingUrl\)/)
+  })
+
   it('bundles the Bare backend before native Android/iOS runs', async () => {
     const packageJson = JSON.parse(await readFile(repoFile('package.json'), 'utf8'))
     const scripts = packageJson.scripts || {}

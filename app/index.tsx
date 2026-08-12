@@ -286,6 +286,7 @@ export default function App () {
   const [browserBookmarksVisible, setBrowserBookmarksVisible] = useState(false)
   const [browserHistoryVisible, setBrowserHistoryVisible] = useState(false)
   const [pendingRestoredUrl, setPendingRestoredUrl] = useState<string | null>(null)
+  const [pendingIncomingUrl, setPendingIncomingUrl] = useState<string | null>(null)
   const [browserCanGoBack, setBrowserCanGoBack] = useState(false)
   const [browserCanGoForward, setBrowserCanGoForward] = useState(false)
   const [browserWebCanGoBack, setBrowserWebCanGoBack] = useState(false)
@@ -447,6 +448,41 @@ export default function App () {
 
     return () => subscription.remove()
   }, [])
+
+  useEffect(() => {
+    let active = true
+
+    function queueIncomingUrl (url: string | null) {
+      if (!active || !url || !isWebUrl(url) || url.length > MAX_BROWSER_URL_LENGTH) return
+
+      browserUserInteractedRef.current = true
+      setPendingIncomingUrl(url)
+    }
+
+    void Linking.getInitialURL()
+      .then(queueIncomingUrl)
+      .catch((error) => console.warn('Unable to read initial browser URL:', error))
+    const subscription = Linking.addEventListener('url', (event) => queueIncomingUrl(event.url))
+
+    return () => {
+      active = false
+      subscription.remove()
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!browserSessionReady || !pendingIncomingUrl) return
+
+    const incomingUrl = pendingIncomingUrl
+    setPendingIncomingUrl(null)
+    setBrowserBookmarksVisible(false)
+    setBrowserDownloadsVisible(false)
+    setBrowserHistoryVisible(false)
+    setBrowserMenuVisible(false)
+    setBrowserSettingsVisible(false)
+    setBrowserTabsVisible(false)
+    void loadBrowserUrl(incomingUrl)
+  }, [browserSessionReady, pendingIncomingUrl])
 
   useEffect(() => {
     if (!isBrowserWebViewSource(browserSource)) return
@@ -2724,6 +2760,8 @@ export default function App () {
                     baseUrl: entry.source.kind === 'hyper' ? entry.source.baseUrl : undefined
                   }}
               cacheEnabled={true}
+              geolocationEnabled={true}
+              mediaCapturePermissionGrantType='prompt'
               nativeConfig={browserNativeConfig}
               injectedJavaScript={browserInjectedScript}
               injectedJavaScriptBeforeContentLoaded={browserAccessibilityScript}

@@ -128,7 +128,7 @@ const SETTINGS_PAGES: Array<{
   {
     id: 'permissions',
     title: 'Permissions',
-    description: 'External app link handling',
+    description: 'Site access and device defaults',
     icon: ShieldLockIcon
   },
   {
