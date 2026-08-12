@@ -1,5 +1,5 @@
-#import <RNCWebView/RNCWebViewImpl.h>
-#import <RNCWebView/RNCWebViewManager.h>
+#import <react-native-webview/RNCWebViewImpl.h>
+#import <react-native-webview/RNCWebViewManager.h>
 #import <React/RCTViewManager.h>
 
 #import "PeerSkyContentBlocker.h"

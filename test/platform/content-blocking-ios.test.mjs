@@ -106,6 +106,8 @@ describe('iOS content blocking', () => {
     assert.match(blocker, /removeContentRuleListForIdentifier/)
     assert.match(blocker, /self[.]ruleLists = \[compiled copy\]/)
     assert.match(blocker, /if \(error\) \{\s*completion\(error\);\s*return;/)
+    assert.match(webView, /<react-native-webview\/RNCWebViewImpl[.]h>/)
+    assert.match(webView, /<react-native-webview\/RNCWebViewManager[.]h>/)
     assert.match(webView, /setUpWkWebViewConfig/)
     assert.match(webView, /RCT_EXPORT_MODULE\(PeerSkyWebView\)/)
     assert.match(module, /hasPrefix:allowedPrefix/)

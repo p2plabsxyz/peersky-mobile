@@ -90,7 +90,7 @@ jobs:
         run: ./gradlew :app:compileDebugKotlin
 
   ios-content-blocking:
-    runs-on: macos-14
+    runs-on: macos-26
     timeout-minutes: 45
 
     steps:
@@ -103,8 +103,8 @@ jobs:
           node-version: 22
           cache: npm
 
-      - name: Select default Xcode
-        run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+      - name: Select Xcode 26.2
+        run: sudo xcode-select -s /Applications/Xcode_26.2.app/Contents/Developer
 
       - name: Install dependencies
         run: npm ci
