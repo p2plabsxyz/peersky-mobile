@@ -4,6 +4,7 @@ const config = getDefaultConfig(__dirname)
 
 config.transformer.babelTransformerPath = require.resolve('react-native-svg-transformer/expo')
 config.resolver.assetExts = config.resolver.assetExts.filter((ext) => ext !== 'svg')
+config.resolver.assetExts.push('txt')
 config.resolver.sourceExts = [...config.resolver.sourceExts, 'svg']
 
 module.exports = config

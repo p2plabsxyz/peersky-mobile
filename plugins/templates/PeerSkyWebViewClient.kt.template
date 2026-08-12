@@ -1,0 +1,94 @@
+package __PACKAGE_NAME__
+
+import android.graphics.Bitmap
+import android.net.Uri
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
+import android.webkit.WebView
+import com.reactnativecommunity.webview.RNCWebViewClient
+import java.io.ByteArrayInputStream
+import java.util.Locale
+import java.util.concurrent.atomic.AtomicReference
+
+internal fun isRemoteHttpUrl(scheme: String?, host: String?): Boolean {
+  val normalizedScheme = scheme?.lowercase(Locale.ROOT)
+  val normalizedHost = host?.lowercase(Locale.ROOT) ?: return false
+  return (normalizedScheme == "http" || normalizedScheme == "https") &&
+    normalizedHost !in setOf("localhost", "::1", "10.0.2.2") &&
+    !normalizedHost.startsWith("127.")
+}
+
+class PeerSkyWebViewClient : RNCWebViewClient() {
+  private val documentUrl = AtomicReference("")
+
+  override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
+    documentUrl.set(url)
+    super.onPageStarted(view, url, favicon)
+  }
+
+  override fun shouldInterceptRequest(
+    view: WebView,
+    request: WebResourceRequest
+  ): WebResourceResponse? {
+    if (shouldBlock(request)) return emptyResponse()
+    return super.shouldInterceptRequest(view, request)
+  }
+
+  private fun shouldBlock(request: WebResourceRequest): Boolean {
+    if (request.isForMainFrame) return false
+    val requestUri = request.url ?: return false
+    if (!isRemoteHttpUrl(requestUri)) return false
+
+    val requestUrl = requestUri.toString()
+    if (requestUrl.length > MAX_FILTER_URL_LENGTH) return false
+    val pageUrl = documentUrl.get()
+    if (pageUrl.isBlank() || pageUrl.length > MAX_FILTER_URL_LENGTH) return false
+    if (!isRemoteHttpUrl(Uri.parse(pageUrl))) return false
+    return PeerSkyAdBlockEngine.shouldBlock(
+      requestUrl,
+      pageUrl,
+      detectResourceType(request),
+      request.method ?: "GET"
+    )
+  }
+
+  companion object {
+    private const val MAX_FILTER_URL_LENGTH = 16 * 1024
+    private fun isRemoteHttpUrl(uri: Uri): Boolean {
+      return isRemoteHttpUrl(uri.scheme, uri.host)
+    }
+
+    private fun detectResourceType(request: WebResourceRequest): String {
+      val headers = request.requestHeaders.entries.associate {
+        it.key.lowercase(Locale.ROOT) to it.value
+      }
+      val accept = headers["accept"]?.lowercase(Locale.ROOT).orEmpty()
+      if (accept.contains("javascript")) return "script"
+      if (accept.contains("text/css")) return "stylesheet"
+      if (accept.contains("image/")) return "image"
+      if (accept.contains("font/")) return "font"
+      if (accept.contains("audio/") || accept.contains("video/")) return "media"
+      if (headers["x-requested-with"] == "XMLHttpRequest") return "xhr"
+
+      return when (request.url.lastPathSegment
+        ?.substringAfterLast('.', "")
+        ?.lowercase(Locale.ROOT)) {
+        "js", "mjs" -> "script"
+        "css" -> "stylesheet"
+        "png", "jpg", "jpeg", "gif", "svg", "webp", "ico" -> "image"
+        "ttf", "otf", "woff", "woff2" -> "font"
+        "mp3", "mp4", "m4a", "ogg", "ogv", "webm", "wav" -> "media"
+        else -> "other"
+      }
+    }
+
+    private fun emptyResponse() = WebResourceResponse(
+      "text/plain",
+      "UTF-8",
+      204,
+      "No Content",
+      emptyMap(),
+      ByteArrayInputStream(ByteArray(0))
+    )
+  }
+}

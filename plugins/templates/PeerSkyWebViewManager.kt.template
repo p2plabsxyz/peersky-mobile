@@ -17,6 +17,14 @@ class PeerSkyWebViewManager : RNCWebViewManager() {
 
   override fun getName() = "PeerSkyWebView"
 
+  override fun addEventEmitters(
+    context: ThemedReactContext,
+    view: RNCWebViewWrapper
+  ) {
+    super.addEventEmitters(context, view)
+    view.webView.webViewClient = PeerSkyWebViewClient()
+  }
+
   @ReactProp(name = "mediaLongPressToken")
   fun setMediaLongPressToken(wrapper: RNCWebViewWrapper, token: String?) {
     val webView = wrapper.webView

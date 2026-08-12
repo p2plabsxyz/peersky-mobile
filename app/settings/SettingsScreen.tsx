@@ -22,6 +22,7 @@ import { Accessibility } from './Accessibility'
 import { DataClearing } from './DataClearing'
 import { General } from './General'
 import { Permissions } from './Permissions'
+import { Privacy } from './Privacy'
 import {
   SettingCopy,
   SettingsSection,
@@ -50,11 +51,13 @@ type SettingsPage =
   | 'accessibility'
   | 'appearance'
   | 'data-clearing'
+  | 'privacy'
   | 'permissions'
   | 'about'
 
 type SettingsScreenProps = {
   addressBarPosition: AddressBarPosition
+  contentBlockingEnabled: boolean
   customSearchUrl: string
   enforceManualPageZoom: boolean
   externalLinkBehavior: ExternalLinkBehavior
@@ -66,12 +69,14 @@ type SettingsScreenProps = {
   theme: BrowserTheme
   websiteTextScale: WebsiteTextScale
   onAddressBarPositionChange: (position: AddressBarPosition) => void
+  onContentBlockingEnabledChange: (enabled: boolean) => Promise<void>
   onClose: () => void
   onClearBrowsingData: () => boolean
   onClearCachedData: () => boolean
   onCustomSearchSave: (url: string) => boolean
   onEnforceManualPageZoomChange: (enabled: boolean) => void
   onExternalLinkBehaviorChange: (behavior: ExternalLinkBehavior) => void
+  onFilterListsUpdated: () => void
   onRestoreTabsOnStartupChange: (enabled: boolean) => void
   onSearchEngineChange: (searchEngine: SearchEngine) => void
   onShowFullAddressChange: (enabled: boolean) => void
@@ -115,6 +120,12 @@ const SETTINGS_PAGES: Array<{
     icon: TrashIcon
   },
   {
+    id: 'privacy',
+    title: 'Privacy',
+    description: 'Ad and tracker protection',
+    icon: ShieldLockIcon
+  },
+  {
     id: 'permissions',
     title: 'Permissions',
     description: 'External app link handling',
@@ -152,6 +163,7 @@ export function SettingsScreen (props: SettingsScreenProps) {
         {page === 'accessibility' && <Accessibility {...props} />}
         {page === 'appearance' && <Appearance {...props} />}
         {page === 'data-clearing' && <DataClearing {...props} />}
+        {page === 'privacy' && <Privacy {...props} />}
         {page === 'permissions' && <Permissions {...props} />}
         {page === 'about' && <AboutSettings onOpenUrl={props.onOpenUrl} />}
       </SettingsSubpage>

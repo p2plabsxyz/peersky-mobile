@@ -15,6 +15,7 @@ describe('browser preferences', () => {
   test('restores supported browser preferences', () => {
     const preferences = {
       addressBarPosition: 'bottom',
+      contentBlockingEnabled: false,
       customSearchUrl: 'https://example.com/search?q=%s',
       enforceManualPageZoom: true,
       externalLinkBehavior: 'allow',
@@ -34,6 +35,7 @@ describe('browser preferences', () => {
   test('rejects unsupported preference values independently', () => {
     assert.deepEqual(parseBrowserPreferences({
       addressBarPosition: 'side',
+      contentBlockingEnabled: 'yes',
       customSearchUrl: 'http://example.com/search?q=%s',
       enforceManualPageZoom: 'yes',
       externalLinkBehavior: 'always',

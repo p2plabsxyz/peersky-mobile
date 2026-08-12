@@ -1,0 +1,12 @@
+[package]
+name = "peersky-content-blocker"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "peersky_adblock"
+crate-type = ["cdylib"]
+
+[dependencies]
+adblock = { version = "=0.13.2", default-features = false, features = ["embedded-domain-resolver", "full-regex-handling"] }
+jni = "=0.21.1"

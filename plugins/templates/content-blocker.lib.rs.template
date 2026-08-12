@@ -1,0 +1,165 @@
+use adblock::{
+    Engine,
+    lists::{FilterSet, ParseOptions, RuleTypes},
+    request::Request,
+};
+use jni::{
+    JNIEnv, JavaVM, NativeMethod,
+    objects::{JClass, JString},
+    sys::{JNI_VERSION_1_6, jboolean, jint, jstring},
+};
+use std::{
+    fs,
+    panic::{AssertUnwindSafe, catch_unwind},
+    ptr,
+    sync::{OnceLock, RwLock},
+};
+
+const MAX_FILTER_LIST_BYTES: u64 = 12 * 1024 * 1024;
+static ENGINE: OnceLock<RwLock<Option<Engine>>> = OnceLock::new();
+
+fn engine() -> &'static RwLock<Option<Engine>> {
+    ENGINE.get_or_init(|| RwLock::new(None))
+}
+
+fn read_filter(path: &str) -> Result<String, String> {
+    let metadata = fs::metadata(path).map_err(|_| "Unable to read filter list.".to_string())?;
+    if !metadata.is_file() || metadata.len() > MAX_FILTER_LIST_BYTES {
+        return Err("Invalid filter-list file.".to_string());
+    }
+    fs::read_to_string(path).map_err(|_| "Filter list is not valid UTF-8.".to_string())
+}
+
+fn build_engine(easy_list: String, easy_privacy: String) -> Engine {
+    let options = ParseOptions {
+        rule_types: RuleTypes::NetworkOnly,
+        ..ParseOptions::default()
+    };
+    let mut filters = FilterSet::new(false);
+    filters.add_filter_list(easy_list, options);
+    filters.add_filter_list(easy_privacy, options);
+    Engine::new_with_filter_set(filters)
+}
+
+fn java_string(env: &mut JNIEnv, value: JString) -> Result<String, String> {
+    env.get_string(&value)
+        .map(|value| value.into())
+        .map_err(|_| "Invalid Java string.".to_string())
+}
+
+fn result_string(env: &mut JNIEnv, result: Result<(), String>) -> jstring {
+    let value = result.err().unwrap_or_default();
+    env.new_string(value)
+        .map(|value| value.into_raw())
+        .unwrap_or(ptr::null_mut())
+}
+
+extern "system" fn load_lists(
+    mut env: JNIEnv,
+    _class: JClass,
+    easy_list_path: JString,
+    easy_privacy_path: JString,
+) -> jstring {
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let easy_list = read_filter(&java_string(&mut env, easy_list_path)?)?;
+        let easy_privacy = read_filter(&java_string(&mut env, easy_privacy_path)?)?;
+        let next_engine = build_engine(easy_list, easy_privacy);
+        *engine().write().map_err(|_| "Content blocker lock failed.".to_string())? =
+            Some(next_engine);
+        Ok(())
+    }))
+    .unwrap_or_else(|_| Err("Content blocker initialization failed.".to_string()));
+
+    result_string(&mut env, result)
+}
+
+extern "system" fn should_block(
+    mut env: JNIEnv,
+    _class: JClass,
+    request_url: JString,
+    document_url: JString,
+    resource_type: JString,
+    method: JString,
+) -> jboolean {
+    catch_unwind(AssertUnwindSafe(|| {
+        let request_url = java_string(&mut env, request_url).ok()?;
+        let document_url = java_string(&mut env, document_url).ok()?;
+        let resource_type = java_string(&mut env, resource_type).ok()?;
+        let method = java_string(&mut env, method).ok()?;
+        let request = Request::new(&request_url, &document_url, &resource_type, &method).ok()?;
+        let guard = engine().read().ok()?;
+        guard
+            .as_ref()
+            .map(|engine| engine.check_network_request(&request).should_block())
+    }))
+    .ok()
+    .flatten()
+    .unwrap_or(false) as jboolean
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "system" fn JNI_OnLoad(vm: JavaVM, _reserved: *mut std::ffi::c_void) -> jint {
+    let mut env = match vm.get_env() {
+        Ok(env) => env,
+        Err(_) => return 0,
+    };
+    let class = match env.find_class("__PACKAGE_PATH__/PeerSkyAdBlockEngine") {
+        Ok(class) => class,
+        Err(_) => return 0,
+    };
+    let methods = [
+        NativeMethod {
+            name: "nativeLoadLists".into(),
+            sig: "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;".into(),
+            fn_ptr: load_lists as *mut std::ffi::c_void,
+        },
+        NativeMethod {
+            name: "nativeShouldBlock".into(),
+            sig: "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Z".into(),
+            fn_ptr: should_block as *mut std::ffi::c_void,
+        },
+    ];
+
+    if env.register_native_methods(class, &methods).is_err() {
+        return 0;
+    }
+    JNI_VERSION_1_6
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn blocks_matching_network_requests_and_respects_exceptions() {
+        let engine = build_engine(
+            "[Adblock Plus 2.0]\n||ads.example^".to_string(),
+            "[Adblock Plus 2.0]\n@@||ads.example/allowed.js".to_string(),
+        );
+        let blocked = Request::new(
+            "https://ads.example/banner.js",
+            "https://site.example/",
+            "script",
+            "GET",
+        )
+        .unwrap();
+        let blocked_http = Request::new(
+            "http://ads.example/banner.js",
+            "http://site.example/",
+            "script",
+            "GET",
+        )
+        .unwrap();
+        let allowed = Request::new(
+            "https://ads.example/allowed.js",
+            "https://site.example/",
+            "script",
+            "GET",
+        )
+        .unwrap();
+
+        assert!(engine.check_network_request(&blocked).should_block());
+        assert!(engine.check_network_request(&blocked_http).should_block());
+        assert!(!engine.check_network_request(&allowed).should_block());
+    }
+}

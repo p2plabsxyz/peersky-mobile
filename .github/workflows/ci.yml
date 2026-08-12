@@ -52,3 +52,76 @@ jobs:
 
       - name: Run live Holesail integration test
         run: npm run test:holesail:live
+
+  android-content-blocking:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Rust Android tooling
+        run: npm run setup:content-blocking
+
+      - name: Generate Android project
+        run: npx expo prebuild --platform android --no-install
+
+      - name: Compile Android native integration
+        working-directory: android
+        run: ./gradlew :app:compileDebugKotlin
+
+  ios-content-blocking:
+    runs-on: macos-15
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Bundle Bare runtime
+        run: npm run bundle:bare
+
+      - name: Generate iOS project
+        run: npx expo prebuild --platform ios --no-install
+
+      - name: Install iOS pods
+        working-directory: ios
+        run: pod install
+
+      - name: Compile iOS native integration
+        working-directory: ios
+        run: |
+          workspace=$(find . -maxdepth 1 -name '*.xcworkspace' -print -quit)
+          scheme=$(basename "$workspace" .xcworkspace)
+          xcodebuild \
+            -workspace "$workspace" \
+            -scheme "$scheme" \
+            -sdk iphonesimulator \
+            -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO \
+            build
