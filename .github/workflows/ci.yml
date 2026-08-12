@@ -87,7 +87,7 @@ jobs:
         run: ./gradlew :app:compileDebugKotlin
 
   ios-content-blocking:
-    runs-on: macos-26
+    runs-on: macos-14
     timeout-minutes: 45
 
     steps:
