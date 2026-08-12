@@ -36,6 +36,7 @@ import { Accessibility } from './Accessibility'
 import { DataClearing } from './DataClearing'
 import { General } from './General'
 import { Permissions } from './Permissions'
+import { Privacy } from './Privacy'
 import {
   SettingCopy,
   SettingsSection,
@@ -65,6 +66,7 @@ type SettingsPage =
   | 'accessibility'
   | 'appearance'
   | 'data-clearing'
+  | 'privacy'
   | 'permissions'
   | 'link-device'
   | 'about'
@@ -90,6 +92,7 @@ type RpcResponse = {
 
 type SettingsScreenProps = {
   addressBarPosition: AddressBarPosition
+  contentBlockingEnabled: boolean
   customSearchUrl: string
   enforceManualPageZoom: boolean
   externalLinkBehavior: ExternalLinkBehavior
@@ -103,12 +106,14 @@ type SettingsScreenProps = {
   storagePath: string
   onAddressBarPositionChange: (position: AddressBarPosition) => void
   onCallRpc: (command: number, data?: object) => Promise<RpcResponse>
+  onContentBlockingEnabledChange: (enabled: boolean) => Promise<void>
   onClose: () => void
   onClearBrowsingData: () => boolean
   onClearCachedData: () => boolean
   onCustomSearchSave: (url: string) => boolean
   onEnforceManualPageZoomChange: (enabled: boolean) => void
   onExternalLinkBehaviorChange: (behavior: ExternalLinkBehavior) => void
+  onFilterListsUpdated: () => void
   onRestoreTabsOnStartupChange: (enabled: boolean) => void
   onSearchEngineChange: (searchEngine: SearchEngine) => void
   onShowFullAddressChange: (enabled: boolean) => void
@@ -128,49 +133,55 @@ const SETTINGS_PAGES: Array<{
   description: string
   icon: ComponentType<SvgProps>
 }> = [
-    {
-      id: 'general',
-      title: 'General',
-      description: 'Search and startup behavior',
-      icon: SlidersIcon
-    },
-    {
-      id: 'accessibility',
-      title: 'Accessibility',
-      description: 'Text size and page zoom',
-      icon: UniversalAccessIcon
-    },
-    {
-      id: 'appearance',
-      title: 'Appearance',
-      description: 'Theme and address bar layout',
-      icon: PaletteIcon
-    },
-    {
-      id: 'data-clearing',
-      title: 'Data Clearing',
-      description: 'Tabs and browsing data',
-      icon: TrashIcon
-    },
-    {
-      id: 'permissions',
-      title: 'Permissions',
-      description: 'External app link handling',
-      icon: ShieldLockIcon
-    },
-    {
-      id: 'link-device',
-      title: 'Link Device',
-      description: 'Restore identity from desktop',
-      icon: DisplayIcon
-    },
-    {
-      id: 'about',
-      title: 'About',
-      description: 'Version, source code, and licenses',
-      icon: InfoIcon
-    }
-  ]
+  {
+    id: 'general',
+    title: 'General',
+    description: 'Search and startup behavior',
+    icon: SlidersIcon
+  },
+  {
+    id: 'accessibility',
+    title: 'Accessibility',
+    description: 'Text size and page zoom',
+    icon: UniversalAccessIcon
+  },
+  {
+    id: 'appearance',
+    title: 'Appearance',
+    description: 'Theme and address bar layout',
+    icon: PaletteIcon
+  },
+  {
+    id: 'data-clearing',
+    title: 'Data Clearing',
+    description: 'Tabs and browsing data',
+    icon: TrashIcon
+  },
+  {
+    id: 'privacy',
+    title: 'Privacy',
+    description: 'Ad and tracker protection',
+    icon: ShieldLockIcon
+  },
+  {
+    id: 'permissions',
+    title: 'Permissions',
+    description: 'External app link handling',
+    icon: ShieldLockIcon
+  },
+  {
+    id: 'link-device',
+    title: 'Link Device',
+    description: 'Restore identity from desktop',
+    icon: DisplayIcon
+  },
+  {
+    id: 'about',
+    title: 'About',
+    description: 'Version, source code, and licenses',
+    icon: InfoIcon
+  }
+]
 
 export function SettingsScreen(props: SettingsScreenProps) {
   const [page, setPage] = useState<SettingsPage>('main')
@@ -196,6 +207,7 @@ export function SettingsScreen(props: SettingsScreenProps) {
         {page === 'accessibility' && <Accessibility {...props} />}
         {page === 'appearance' && <Appearance {...props} />}
         {page === 'data-clearing' && <DataClearing {...props} />}
+        {page === 'privacy' && <Privacy {...props} />}
         {page === 'permissions' && <Permissions {...props} />}
         {page === 'link-device' && <LinkDeviceSettings {...props} />}
         {page === 'about' && <AboutSettings onOpenUrl={props.onOpenUrl} />}

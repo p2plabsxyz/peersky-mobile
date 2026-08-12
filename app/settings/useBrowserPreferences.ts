@@ -15,6 +15,7 @@ export type WebsiteTextScale = 80 | 100 | 120 | 150
 
 export type BrowserPreferences = {
   addressBarPosition: AddressBarPosition
+  contentBlockingEnabled: boolean
   customSearchUrl: string
   enforceManualPageZoom: boolean
   externalLinkBehavior: ExternalLinkBehavior
@@ -86,6 +87,9 @@ export function useBrowserPreferences () {
     preferences,
     setAddressBarPosition: (addressBarPosition: AddressBarPosition) => {
       return updatePreferences({ addressBarPosition })
+    },
+    setContentBlockingEnabled: (contentBlockingEnabled: boolean) => {
+      return updatePreferences({ contentBlockingEnabled })
     },
     setCustomSearchEngine: (customSearchUrl: string) => {
       const normalizedUrl = normalizeCustomSearchUrl(customSearchUrl)

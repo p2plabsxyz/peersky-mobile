@@ -7,6 +7,12 @@ const REPO_ROOT = new URL('../../', import.meta.url)
 const ANDROID_LOOPBACK_CLEARTEXT_PLUGIN_FILE = repoFile('plugins/with-android-loopback-cleartext.js')
 
 describe('mobile platform runtime configuration', () => {
+  it('allows browser rotation according to the device orientation setting', async () => {
+    const appJson = JSON.parse(await readFile(repoFile('app.json'), 'utf8'))
+
+    assert.equal(appJson.expo?.orientation, 'default')
+  })
+
   it('keeps Android cleartext scoped to loopback only', async () => {
     const appJson = JSON.parse(await readFile(repoFile('app.json'), 'utf8'))
     const plugins = appJson.expo?.plugins || []

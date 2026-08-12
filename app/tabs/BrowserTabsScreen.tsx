@@ -1,11 +1,18 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
 import {
+  Animated,
   FlatList,
   Image,
+  LayoutAnimation,
   Modal,
+  PanResponder,
   Platform,
   Pressable,
+  type StyleProp,
   Text,
+  UIManager,
+  type ViewStyle,
   View
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
@@ -16,6 +23,10 @@ import GridIcon from '../../assets/icons/bootstrap/grid.svg'
 import ListIcon from '../../assets/icons/bootstrap/list-ul.svg'
 import PlusIcon from '../../assets/icons/bootstrap/plus-lg.svg'
 import CloseIcon from '../../assets/icons/bootstrap/x-lg.svg'
+
+if (Platform.OS === 'android') {
+  UIManager.setLayoutAnimationEnabledExperimental?.(true)
+}
 
 type BrowserTabManagerItem = {
   favicon: string | null
@@ -49,6 +60,7 @@ type BrowserTabsScreenProps = {
   visible: boolean
   onBurnTabs: () => void
   onClose: () => void
+  onCloseAllTabs: () => void
   onCloseTab: (tabId: string) => void
   onNewTab: () => void
   onPreviewError: (tabId: string) => void
@@ -64,6 +76,7 @@ export function BrowserTabsScreen ({
   visible,
   onBurnTabs,
   onClose,
+  onCloseAllTabs,
   onCloseTab,
   onNewTab,
   onPreviewError,
@@ -71,6 +84,10 @@ export function BrowserTabsScreen ({
   onToggleView
 }: BrowserTabsScreenProps) {
   const isList = viewMode === 'list'
+  const closeTab = (tabId: string) => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut)
+    onCloseTab(tabId)
+  }
 
   return (
     <Modal
@@ -101,12 +118,20 @@ export function BrowserTabsScreen ({
                 : <ListIcon width={20} height={20} color={palette.text} />}
             </Pressable>
             <Pressable
-              accessibilityLabel='Close all tabs'
+              accessibilityLabel='Burn tabs and cached data'
               accessibilityRole='button'
               style={styles.browserTabsBurnButton}
               onPress={onBurnTabs}
             >
               <FireIcon width={20} height={20} color='#ffffff' />
+            </Pressable>
+            <Pressable
+              accessibilityLabel='Close all tabs'
+              accessibilityRole='button'
+              style={[styles.browserTabsViewButton, { backgroundColor: palette.button }]}
+              onPress={onCloseAllTabs}
+            >
+              <CloseIcon width={20} height={20} color={palette.text} />
             </Pressable>
             <Pressable
               accessibilityLabel='Open new tab'
@@ -139,7 +164,8 @@ export function BrowserTabsScreen ({
             isList ? styles.browserTabsList : null
           ]}
           renderItem={({ item }) => (
-            <View
+            <SwipeableTabCard
+              onClose={() => closeTab(item.id)}
               style={[
                 styles.browserTabCard,
                 {
@@ -222,15 +248,86 @@ export function BrowserTabsScreen ({
                 accessibilityRole='button'
                 hitSlop={8}
                 style={[styles.browserTabCardClose, { backgroundColor: palette.button }]}
-                onPress={() => onCloseTab(item.id)}
+                onPress={() => closeTab(item.id)}
               >
                 <CloseIcon width={16} height={16} color={palette.text} />
               </Pressable>
-            </View>
+            </SwipeableTabCard>
           )}
         />
       </SafeAreaView>
     </Modal>
+  )
+}
+
+function SwipeableTabCard ({
+  children,
+  onClose,
+  style
+}: {
+  children: ReactNode
+  onClose: () => void
+  style: StyleProp<ViewStyle>
+}) {
+  const translateX = useRef(new Animated.Value(0)).current
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
+
+  const panResponder = useRef(PanResponder.create({
+    onMoveShouldSetPanResponder: (_, gesture) => (
+      Math.abs(gesture.dx) > 10 && Math.abs(gesture.dx) > Math.abs(gesture.dy)
+    ),
+    onPanResponderMove: (_, gesture) => translateX.setValue(gesture.dx),
+    onPanResponderRelease: (_, gesture) => {
+      const shouldClose = Math.abs(gesture.dx) > 72 || (
+        Math.abs(gesture.dx) > 24 && Math.abs(gesture.vx) > 0.7
+      )
+
+      if (!shouldClose) {
+        Animated.spring(translateX, {
+          toValue: 0,
+          useNativeDriver: true
+        }).start()
+        return
+      }
+
+      Animated.timing(translateX, {
+        duration: 160,
+        toValue: gesture.dx < 0 ? -500 : 500,
+        useNativeDriver: true
+      }).start(({ finished }) => {
+        if (!finished) return
+
+        onCloseRef.current()
+        // FlatList may recycle this cell when the final tab is replaced by Home.
+        translateX.setValue(0)
+      })
+    },
+    onPanResponderTerminate: () => {
+      Animated.spring(translateX, {
+        toValue: 0,
+        useNativeDriver: true
+      }).start()
+    }
+  })).current
+
+  return (
+    <Animated.View
+      {...panResponder.panHandlers}
+      style={[
+        style,
+        {
+          opacity: translateX.interpolate({
+            inputRange: [-200, 0, 200],
+            outputRange: [0.25, 1, 0.25],
+            extrapolate: 'clamp'
+          }),
+          transform: [{ translateX }]
+        }
+      ]}
+    >
+      {children}
+    </Animated.View>
   )
 }
 

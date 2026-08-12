@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   AppState,
+  BackHandler,
   Button,
   Keyboard,
   KeyboardAvoidingView,
@@ -36,10 +37,11 @@ import {
   isWebUrl,
   MAX_BROWSER_URL_LENGTH,
   normalizeBrowserAddress,
-  replaceBrowserEntryState,
-  syncBrowserEntryState
+  recordBrowserWebNavigationState,
+  replaceBrowserEntryState
 } from './browser-shell.mjs'
 import {
+  addBackgroundBrowserTabState,
   addBrowserTabState,
   BROWSER_PAGE_ZOOMS,
   closeBrowserTabState,
@@ -65,6 +67,7 @@ import {
   resolveBrowserDarkMode
 } from './browser-appearance.mjs'
 import { createBrowserAccessibilityScript } from './browser-accessibility.mjs'
+import { clearBrowserWebViewData } from './browser-data.mjs'
 import {
   canPromptExternalLink,
   formatExternalLinkForPrompt,
@@ -84,6 +87,15 @@ import { BrowserOverflowMenu } from './settings/BrowserOverflowMenu'
 import { useBrowserPreferences } from './settings/useBrowserPreferences'
 import { BrowserToolbar } from './BrowserToolbar'
 import { BrowserZoomSheet } from './BrowserZoomSheet'
+import {
+  BrowserMediaSheet,
+  type BrowserMediaTarget
+} from './BrowserMediaSheet'
+import {
+  createBrowserMediaToken,
+  createBrowserMediaLongPressScript,
+  parseBrowserMediaMessage
+} from './browser-media.mjs'
 import { BookmarksScreen } from './bookmarks/BookmarksScreen'
 import { canBookmarkBrowserPage } from './bookmarks/browser-bookmarks.mjs'
 import {
@@ -92,8 +104,15 @@ import {
   parseBrowserFaviconMessage
 } from './bookmarks/browser-favicon.mjs'
 import { useBrowserBookmarks } from './bookmarks/useBrowserBookmarks'
+import { HistoryScreen } from './history/HistoryScreen'
+import { getBrowserHistoryDocumentTitle } from './history/browser-history.mjs'
+import { useBrowserHistory } from './history/useBrowserHistory'
 import { DownloadsScreen } from './downloads/DownloadsScreen'
 import { peerSkyWebViewNativeConfig } from './downloads/PeerSkyWebView'
+import {
+  initializeContentBlocking,
+  setContentBlockingEnabled as applyContentBlockingEnabled
+} from './privacy/contentBlocking'
 import { useBrowserDownloads } from './downloads/useBrowserDownloads'
 import { BrowserTabsScreen } from './tabs/BrowserTabsScreen'
 import { useBrowserTabPreviews } from './tabs/useBrowserTabPreviews'
@@ -186,9 +205,12 @@ export default function App () {
   const rpcRef = useRef<RPC | null>(null)
   const browserWebViewRefs = useRef(new Map<string, ComponentRef<typeof WebView>>())
   const browserFaviconsRef = useRef(new Map<string, string>())
+  const browserLastRecordedUrlsRef = useRef(new Map<string, string>())
+  const browserMediaTokensRef = useRef(new Map<string, string>())
   const p2pmdWebViewRef = useRef<ComponentRef<typeof WebView> | null>(null)
   const p2pmdPublishInFlightRef = useRef(false)
   const browserLoadSeqRef = useRef(0)
+  const browserWebNavigationDirectionsRef = useRef(new Map<string, 'back' | 'forward'>())
   const externalLinkPromptOpenRef = useRef(false)
   const lastExternalLinkPromptAtRef = useRef(0)
   const [isBooting, setIsBooting] = useState(false)
@@ -212,6 +234,7 @@ export default function App () {
     persistenceError: browserPreferencesError,
     preferences: browserPreferences,
     setAddressBarPosition,
+    setContentBlockingEnabled: setContentBlockingPreference,
     setCustomSearchEngine,
     setEnforceManualPageZoom,
     setExternalLinkBehavior,
@@ -229,6 +252,15 @@ export default function App () {
     removeBookmark: removeBrowserBookmark,
     toggleBookmark: toggleBrowserBookmark
   } = useBrowserBookmarks()
+  const {
+    clearHistory: clearBrowserHistory,
+    getSuggestions: getBrowserHistorySuggestions,
+    isReady: browserHistoryReady,
+    items: browserVisitHistory,
+    persistenceError: browserHistoryError,
+    recordVisit: recordBrowserVisit,
+    removeHistoryItem: removeBrowserHistoryItem
+  } = useBrowserHistory()
   const [browserDownloadsVisible, setBrowserDownloadsVisible] = useState(false)
   const {
     downloads: browserDownloads,
@@ -244,12 +276,18 @@ export default function App () {
   const browserSessionRestoreStartedRef = useRef(false)
   const browserUserInteractedRef = useRef(false)
   const [browserLiveTabIds, setBrowserLiveTabIds] = useState(['tab-1'])
+  const [contentBlockingGeneration, setContentBlockingGeneration] = useState(0)
+  const [contentBlockingReady, setContentBlockingReady] = useState(
+    !['android', 'ios'].includes(Platform.OS)
+  )
   const [browserSessionReady, setBrowserSessionReady] = useState(false)
   const [browserTabsVisible, setBrowserTabsVisible] = useState(false)
   const [browserMenuVisible, setBrowserMenuVisible] = useState(false)
   const [browserZoomVisible, setBrowserZoomVisible] = useState(false)
+  const [browserMediaTarget, setBrowserMediaTarget] = useState<(BrowserMediaTarget & { tabId: string }) | null>(null)
   const [browserSettingsVisible, setBrowserSettingsVisible] = useState(false)
   const [browserBookmarksVisible, setBrowserBookmarksVisible] = useState(false)
+  const [browserHistoryVisible, setBrowserHistoryVisible] = useState(false)
   const [pendingRestoredUrl, setPendingRestoredUrl] = useState<string | null>(null)
   const [browserCanGoBack, setBrowserCanGoBack] = useState(false)
   const [browserCanGoForward, setBrowserCanGoForward] = useState(false)
@@ -309,7 +347,48 @@ export default function App () {
   }, [])
 
   useEffect(() => {
-    if (!browserPreferencesReady || browserSessionRestoreStartedRef.current) return
+    if (!browserPreferencesReady) return
+
+    let cancelled = false
+    const protectionEnabled = browserPreferences.contentBlockingEnabled
+    if (!protectionEnabled) {
+      applyContentBlockingEnabled(false)
+      setContentBlockingReady(true)
+      return
+    }
+
+    void initializeContentBlocking({
+      enabled: protectionEnabled,
+      onReady: () => {
+        if (!cancelled) setContentBlockingReady(true)
+      }
+    })
+      .then((initialized) => {
+        if (!initialized && ['android', 'ios'].includes(Platform.OS)) {
+          console.warn('Native content blocker is unavailable; continuing without protection.')
+          if (protectionEnabled && !cancelled) {
+            setStatus('Browsing without ad and tracker protection')
+          }
+        }
+        if (!cancelled) setContentBlockingReady(true)
+      })
+      .catch((error) => {
+        console.error('Unable to initialize content blocking:', error)
+        if (!cancelled) {
+          setContentBlockingReady(true)
+          if (protectionEnabled) {
+            setStatus('Browsing without ad and tracker protection')
+          }
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [browserPreferencesReady])
+
+  useEffect(() => {
+    if (!browserPreferencesReady || !contentBlockingReady || browserSessionRestoreStartedRef.current) return
     browserSessionRestoreStartedRef.current = true
     let cancelled = false
 
@@ -344,7 +423,7 @@ export default function App () {
     return () => {
       cancelled = true
     }
-  }, [browserPreferencesReady])
+  }, [browserPreferencesReady, contentBlockingReady])
 
   useEffect(() => {
     if (!browserSessionReady) return
@@ -531,12 +610,23 @@ export default function App () {
     webNavigation?: { canGoBack: boolean, canGoForward: boolean },
     tabId?: string
   ) {
-    const nextState = syncBrowserEntryState(getBrowserState(), url, source)
+    const targetTabId = tabId || browserTabsStateRef.current.activeTabId
+    const direction = browserWebNavigationDirectionsRef.current.get(targetTabId)
+    browserWebNavigationDirectionsRef.current.delete(targetTabId)
+    const targetTab = browserTabsStateRef.current.tabs.find((tab) => tab.id === targetTabId)
+    const nextState = recordBrowserWebNavigationState(
+      targetTab
+        ? { history: targetTab.history, historyIndex: targetTab.historyIndex }
+        : getBrowserState(),
+      url,
+      source,
+      direction
+    )
     applyBrowserState({
       ...nextState,
       webCanGoBack: webNavigation?.canGoBack,
       webCanGoForward: webNavigation?.canGoForward
-    }, tabId)
+    }, targetTabId)
   }
 
   function getBrowserState () {
@@ -627,7 +717,7 @@ export default function App () {
       const tab = state.tabs.find((item) => item.id === tabId)
       if (!tab || !isCurrentBrowserTabEntry(state, tabId, expectedEntry)) return state
 
-      const nextState = syncBrowserEntryState(
+      const nextState = recordBrowserWebNavigationState(
         { history: tab.history, historyIndex: tab.historyIndex },
         navigationState.url,
         { kind: 'web', uri: navigationState.url }
@@ -798,7 +888,14 @@ export default function App () {
         replaceBrowserEntry(responseUrl, source)
       }
 
-      setBrowserTitle(responseUrl)
+      const pageTitle = getBrowserHistoryDocumentTitle(response.body, responseUrl)
+      setBrowserTitle(pageTitle)
+      updateBrowserTabTitle(browserTabsStateRef.current.activeTabId, pageTitle)
+      recordCompletedBrowserVisit(
+        browserTabsStateRef.current.activeTabId,
+        responseUrl,
+        pageTitle
+      )
       setStatus(`Loaded ${response.status || 200} ${response.statusText || 'OK'}`)
     } catch (error) {
       if (isStaleBrowserLoad(loadSeq, browserLoadSeqRef.current)) return
@@ -861,6 +958,7 @@ export default function App () {
     cancelPendingBrowserLoad()
 
     if (browserSource.kind === 'web' && browserWebCanGoBack) {
+      browserWebNavigationDirectionsRef.current.set(browserTabsState.activeTabId, 'back')
       browserWebViewRefs.current.get(browserTabsState.activeTabId)?.goBack()
       return
     }
@@ -871,7 +969,7 @@ export default function App () {
     const entry = nextState.history[nextState.historyIndex]
     applyBrowserState(nextState)
     setBrowserTitle(getBrowserEntryTitle(entry))
-    if (entry.source.kind === 'app') setActiveTab(entry.source.app)
+    setActiveTab(entry.source.kind === 'app' ? entry.source.app : 'hyper')
   }
 
   function onBrowserForward () {
@@ -879,6 +977,7 @@ export default function App () {
     cancelPendingBrowserLoad()
 
     if (browserSource.kind === 'web' && browserWebCanGoForward) {
+      browserWebNavigationDirectionsRef.current.set(browserTabsState.activeTabId, 'forward')
       browserWebViewRefs.current.get(browserTabsState.activeTabId)?.goForward()
       return
     }
@@ -889,7 +988,7 @@ export default function App () {
     const entry = nextState.history[nextState.historyIndex]
     applyBrowserState(nextState)
     setBrowserTitle(getBrowserEntryTitle(entry))
-    if (entry.source.kind === 'app') setActiveTab(entry.source.app)
+    setActiveTab(entry.source.kind === 'app' ? entry.source.app : 'hyper')
   }
 
   function onBrowserReload () {
@@ -913,6 +1012,44 @@ export default function App () {
 
     if (browserSource.kind === 'app') {
       openInternalApp(browserSource.app, false)
+    }
+  }
+
+  async function onContentBlockingEnabledChange (enabled: boolean) {
+    const previousEnabled = browserPreferences.contentBlockingEnabled
+
+    if (enabled) {
+      try {
+        const rulesReady = applyContentBlockingEnabled(true)
+        if (!rulesReady) {
+          const initialized = await initializeContentBlocking({ enabled: true })
+          if (!initialized) throw new Error('Native content blocker is unavailable.')
+        }
+        if (!setContentBlockingPreference(true)) {
+          throw new Error('Unable to save the content-blocking preference.')
+        }
+      } catch (error) {
+        applyContentBlockingEnabled(previousEnabled)
+        throw error
+      }
+    } else {
+      if (!setContentBlockingPreference(false)) {
+        throw new Error('Unable to save the content-blocking preference.')
+      }
+      applyContentBlockingEnabled(false)
+    }
+
+    refreshContentBlockedPages()
+  }
+
+  function refreshContentBlockedPages () {
+    if (Platform.OS === 'ios') {
+      setContentBlockingGeneration((generation) => generation + 1)
+      return
+    }
+
+    for (const webView of browserWebViewRefs.current.values()) {
+      webView.reload()
     }
   }
 
@@ -947,10 +1084,10 @@ export default function App () {
     )
   }
 
-  function onBrowserNewTab () {
+  function createBrowserTab (targetUrl: string | null = null) {
     if (browserTabsStateRef.current.tabs.length >= MAX_BROWSER_TABS) {
       setStatus('Maximum number of tabs reached')
-      return
+      return false
     }
 
     browserUserInteractedRef.current = true
@@ -960,9 +1097,16 @@ export default function App () {
 
     updateBrowserTabsState(nextState)
     if (tab) applyBrowserTab(tab)
+    if (targetUrl) setPendingRestoredUrl(targetUrl)
     setBrowserTabsVisible(false)
     setBrowserMenuVisible(false)
+    setBrowserMediaTarget(null)
     setBrowserTitle('PeerSky')
+    return true
+  }
+
+  function onBrowserNewTab () {
+    if (!createBrowserTab()) return
     setStatus('New tab')
   }
 
@@ -994,6 +1138,50 @@ export default function App () {
         url: browserCurrentUrl
       })
       setStatus('Page shared')
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  function onBrowserMediaOpenInNewTab (targetUrl: string) {
+    Keyboard.dismiss()
+    if (!createBrowserTab(targetUrl)) return
+    setStatus('Opened in new tab')
+  }
+
+  function onBrowserMediaOpenInBackgroundTab (targetUrl: string, title: string) {
+    if (browserTabsStateRef.current.tabs.length >= MAX_BROWSER_TABS) {
+      setStatus('Maximum number of tabs reached')
+      return
+    }
+
+    browserUserInteractedRef.current = true
+    updateBrowserTabsState((state) => addBackgroundBrowserTabState(
+      state,
+      targetUrl,
+      title || 'Media'
+    ) as BrowserTabsState)
+    setBrowserMediaTarget(null)
+    setStatus('Opened in background tab')
+  }
+
+  async function onBrowserMediaDownload (targetUrl: string) {
+    const accepted = await requestBrowserDownload(targetUrl)
+    setStatus(
+      accepted
+        ? Platform.OS === 'ios' ? 'Download saved' : 'Download requested'
+        : 'Unable to start download'
+    )
+  }
+
+  async function onBrowserMediaShare (targetUrl: string, title: string) {
+    try {
+      await Share.share({
+        title: title || browserTitle,
+        message: targetUrl,
+        url: targetUrl
+      })
+      setStatus('Shared')
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error))
     }
@@ -1066,6 +1254,11 @@ export default function App () {
     setBrowserDownloadsVisible(true)
   }
 
+  function onBrowserOpenHistory () {
+    setBrowserMenuVisible(false)
+    setBrowserHistoryVisible(true)
+  }
+
   function onBrowserSwitchTab (tabId: string) {
     if (tabId === browserTabsStateRef.current.activeTabId) {
       setBrowserTabsVisible(false)
@@ -1101,6 +1294,8 @@ export default function App () {
     updateBrowserTabsState(nextState)
     removeBrowserTabPreview(tabId)
     browserFaviconsRef.current.delete(tabId)
+    browserLastRecordedUrlsRef.current.delete(tabId)
+    browserMediaTokensRef.current.delete(tabId)
     setBrowserLiveTabIds((tabIds) => tabIds.filter((id) => id !== tabId))
     if (isClosingActive && tab) applyBrowserTab(tab)
     setStatus('Tab closed')
@@ -1124,6 +1319,8 @@ export default function App () {
       ? clearAllBrowserTabPreviews()
       : true
     browserFaviconsRef.current.clear()
+    browserLastRecordedUrlsRef.current.clear()
+    browserMediaTokensRef.current.clear()
     setBrowserLiveTabIds(reset.liveTabIds)
     if (tab) applyBrowserTab(tab)
     const sessionSaved = writeBrowserSession(nextState)
@@ -1139,8 +1336,37 @@ export default function App () {
 
   function onBrowserBurnTabs () {
     Alert.alert(
+      'Burn tabs and cached data?',
+      'This closes every open tab and clears cached website files.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Burn',
+          style: 'destructive',
+          onPress: () => {
+            for (const webView of browserWebViewRefs.current.values()) {
+              clearBrowserWebViewData(webView)
+            }
+            const { previewCacheCleared, sessionSaved } = onBrowserResetTabs()
+            setBrowserTabsVisible(false)
+            setBrowserTitle('PeerSky')
+            setStatus(
+              !sessionSaved
+                ? 'Tabs burned, but the fresh session could not be saved'
+                : !previewCacheCleared
+                  ? 'Tabs burned, but preview cache could not be cleared'
+                  : 'Tabs and cached data cleared'
+            )
+          }
+        }
+      ]
+    )
+  }
+
+  function onBrowserCloseAllTabs () {
+    Alert.alert(
       'Close all tabs?',
-      'This closes every open tab and starts a fresh tab.',
+      'This closes every open tab without clearing cached website data.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -1161,6 +1387,13 @@ export default function App () {
         }
       ]
     )
+  }
+
+  function recordCompletedBrowserVisit (tabId: string, url: string, title: string) {
+    if (browserLastRecordedUrlsRef.current.get(tabId) === url) return
+
+    browserLastRecordedUrlsRef.current.set(tabId, url)
+    recordBrowserVisit({ url, title })
   }
 
   function onBrowserToggleTabView () {
@@ -1744,6 +1977,42 @@ export default function App () {
   const activeBrowserDesktopView = browserTabsState.tabs
     .find((tab) => tab.id === browserTabsState.activeTabId)?.desktopView === true
 
+  useEffect(() => {
+    if (Platform.OS !== 'android') return
+
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (browserMediaTarget) setBrowserMediaTarget(null)
+      else if (browserZoomVisible) setBrowserZoomVisible(false)
+      else if (browserMenuVisible) setBrowserMenuVisible(false)
+      else if (browserTabsVisible) setBrowserTabsVisible(false)
+      else if (browserBookmarksVisible) setBrowserBookmarksVisible(false)
+      else if (browserHistoryVisible) setBrowserHistoryVisible(false)
+      else if (browserDownloadsVisible) setBrowserDownloadsVisible(false)
+      else if (browserSettingsVisible) setBrowserSettingsVisible(false)
+      else if (canBrowserGoBack) onBrowserBack()
+      else return false
+
+      return true
+    })
+
+    return () => subscription.remove()
+  }, [
+    browserBookmarksVisible,
+    browserDownloadsVisible,
+    browserHistory,
+    browserHistoryIndex,
+    browserHistoryVisible,
+    browserMenuVisible,
+    browserMediaTarget,
+    browserSettingsVisible,
+    browserSource.kind,
+    browserTabsState.activeTabId,
+    browserTabsVisible,
+    browserWebCanGoBack,
+    browserZoomVisible,
+    canBrowserGoBack
+  ])
+
   if (browserBookmarksVisible) {
     return (
       <SafeAreaView
@@ -1766,6 +2035,38 @@ export default function App () {
           }}
           onRemove={(targetUrl) => {
             if (removeBrowserBookmark(targetUrl)) setStatus('Bookmark removed')
+          }}
+        />
+      </SafeAreaView>
+    )
+  }
+
+  if (browserHistoryVisible) {
+    return (
+      <SafeAreaView
+        style={[styles.browserShell, { backgroundColor: browserChrome.shell }]}
+        edges={['top', 'left', 'right', 'bottom']}
+      >
+        <StatusBar
+          backgroundColor={browserChrome.shell}
+          barStyle={browserIsDark ? 'light-content' : 'dark-content'}
+        />
+        <HistoryScreen
+          error={browserHistoryError}
+          isDark={browserIsDark}
+          isReady={browserHistoryReady}
+          items={browserVisitHistory}
+          onClear={() => {
+            if (clearBrowserHistory()) setStatus('Browsing history cleared')
+          }}
+          onClose={() => setBrowserHistoryVisible(false)}
+          onOpen={(targetUrl) => {
+            setBrowserHistoryVisible(false)
+            setActiveTab('hyper')
+            void loadBrowserUrl(targetUrl)
+          }}
+          onRemove={(item) => {
+            if (removeBrowserHistoryItem(item)) setStatus('History entry removed')
           }}
         />
       </SafeAreaView>
@@ -1808,6 +2109,7 @@ export default function App () {
         />
         <SettingsScreen
           addressBarPosition={browserPreferences.addressBarPosition}
+          contentBlockingEnabled={browserPreferences.contentBlockingEnabled}
           customSearchUrl={browserPreferences.customSearchUrl}
           enforceManualPageZoom={browserPreferences.enforceManualPageZoom}
           externalLinkBehavior={browserPreferences.externalLinkBehavior}
@@ -1821,16 +2123,19 @@ export default function App () {
           storagePath={identityStoragePath}
           onAddressBarPositionChange={setAddressBarPosition}
           onCallRpc={(command, data = {}) => callRpc(command, data)}
+          onContentBlockingEnabledChange={onContentBlockingEnabledChange}
           onClose={() => setBrowserSettingsVisible(false)}
           onClearBrowsingData={() => {
             const { sessionSaved } = onBrowserResetTabs(false)
-            if (sessionSaved) setBrowserSettingsVisible(false)
-            return sessionSaved
+            const historyCleared = clearBrowserHistory()
+            if (sessionSaved && historyCleared) setBrowserSettingsVisible(false)
+            return sessionSaved && historyCleared
           }}
           onClearCachedData={clearCachedBrowserTabPreviews}
           onCustomSearchSave={setCustomSearchEngine}
           onEnforceManualPageZoomChange={setEnforceManualPageZoom}
           onExternalLinkBehaviorChange={setExternalLinkBehavior}
+          onFilterListsUpdated={refreshContentBlockedPages}
           onRestoreTabsOnStartupChange={setRestoreTabsOnStartup}
           onSearchEngineChange={setSearchEngine}
           onShowFullAddressChange={setShowFullAddress}
@@ -1902,6 +2207,7 @@ export default function App () {
             onNewTab={onBrowserNewTab}
             onOpenBookmarks={onBrowserOpenBookmarks}
             onOpenDownloads={onBrowserOpenDownloads}
+            onOpenHistory={onBrowserOpenHistory}
             onShow={() => setBrowserMenuVisible(true)}
             onOpenSettings={() => {
               setBrowserMenuVisible(false)
@@ -1987,6 +2293,7 @@ export default function App () {
 
   const browserToolbar = (
     <BrowserToolbar
+      activeTabId={browserTabsState.activeTabId}
       address={browserAddress}
       bookmarkActionAvailable={browserBookmarkActionAvailable}
       bookmarksDisabled={!browserBookmarksReady}
@@ -1996,6 +2303,7 @@ export default function App () {
       isBookmarked={browserPageIsBookmarked}
       isDark={browserIsDark}
       isLoading={browserIsLoading}
+      historySuggestions={getBrowserHistorySuggestions(browserAddress)}
       menuVisible={browserMenuVisible}
       newTabDisabled={browserTabsState.tabs.length >= MAX_BROWSER_TABS}
       palette={browserChrome}
@@ -2010,10 +2318,12 @@ export default function App () {
       onBack={onBrowserBack}
       onCloseMenu={() => setBrowserMenuVisible(false)}
       onForward={onBrowserForward}
+      onHome={openBrowserHome}
       onOpenMenu={() => setBrowserMenuVisible(true)}
       onNewTab={onBrowserNewTab}
       onOpenBookmarks={onBrowserOpenBookmarks}
       onOpenDownloads={onBrowserOpenDownloads}
+      onOpenHistory={onBrowserOpenHistory}
       onOpenSettings={() => {
         setBrowserMenuVisible(false)
         setBrowserSettingsVisible(true)
@@ -2026,6 +2336,10 @@ export default function App () {
       onReload={onBrowserReload}
       onSharePage={() => void onBrowserSharePage()}
       onSubmit={() => void onBrowserSubmit()}
+      onSuggestionPress={(targetUrl) => {
+        setBrowserAddress(targetUrl)
+        void loadBrowserUrl(targetUrl)
+      }}
       onToggleDesktopView={onBrowserToggleDesktopView}
       onToggleBookmark={onBrowserToggleBookmark}
     />
@@ -2075,6 +2389,7 @@ export default function App () {
           viewMode={browserTabsState.viewMode}
           visible={browserTabsVisible}
           onBurnTabs={onBrowserBurnTabs}
+          onCloseAllTabs={onBrowserCloseAllTabs}
           onClose={() => setBrowserTabsVisible(false)}
           onCloseTab={onBrowserCloseTab}
           onNewTab={onBrowserNewTab}
@@ -2095,25 +2410,7 @@ export default function App () {
               keyboardDismissMode='on-drag'
             >
               <View style={styles.browserShortcutGrid}>
-                <Pressable
-                  style={styles.browserShortcut}
-                  onPress={() => void loadBrowserUrl('hyper://peersky.p2plabs.xyz/')}
-                >
-                  <View style={[styles.browserShortcutIcon, styles.browserShortcutIconPeerSky]}>
-                    <Text style={styles.browserShortcutIconText}>P</Text>
-                  </View>
-                  <Text numberOfLines={2} style={[styles.browserShortcutTitle, { color: browserChrome.text }]}>PeerSky Browser</Text>
-                </Pressable>
-                <Pressable
-                  style={styles.browserShortcut}
-                  onPress={() => void loadBrowserUrl('hyper://akhilesh.art/')}
-                >
-                  <View style={[styles.browserShortcutIcon, styles.browserShortcutIconAkhilesh]}>
-                    <Text style={styles.browserShortcutIconText}>AT</Text>
-                  </View>
-                  <Text numberOfLines={2} style={[styles.browserShortcutTitle, { color: browserChrome.text }]}>Akhilesh Thite</Text>
-                </Pressable>
-                {INTERNAL_APPS.map((app) => (
+                {INTERNAL_APPS.filter((app) => app.id !== 'holesail').map((app) => (
                   <Pressable
                     key={app.id}
                     style={styles.browserShortcut}
@@ -2367,6 +2664,7 @@ export default function App () {
             : null}
 
         {browserTabsState.tabs.map((tab) => {
+          if (!contentBlockingReady) return null
           const entry = tab.history[tab.historyIndex]
           if (!entry || !isBrowserWebViewSource(entry.source)) return null
           if (!browserLiveTabIds.includes(tab.id)) return null
@@ -2374,6 +2672,19 @@ export default function App () {
           const isActive = tab.id === browserTabsState.activeTabId
           const tabPageZoom = normalizeBrowserPageZoom(tab.pageZoom)
           const tabDesktopView = tab.desktopView === true
+          let browserMediaToken = browserMediaTokensRef.current.get(tab.id)
+          if (!browserMediaToken) {
+            browserMediaToken = createBrowserMediaToken()
+            browserMediaTokensRef.current.set(tab.id, browserMediaToken)
+          }
+          const browserNativeConfig = peerSkyWebViewNativeConfig
+            ? {
+                ...peerSkyWebViewNativeConfig,
+                props: Object.assign({}, peerSkyWebViewNativeConfig.props, {
+                  mediaLongPressToken: browserMediaToken
+                })
+              }
+            : undefined
           const browserAccessibilityScript = createBrowserAccessibilityScript({
             applyTextScale: Platform.OS === 'ios',
             desktopView: tabDesktopView,
@@ -2383,7 +2694,11 @@ export default function App () {
           })
           const browserInjectedScript = combineBrowserInjectedScripts(
             browserAccessibilityScript,
-            createBrowserFaviconScript()
+            createBrowserFaviconScript(),
+            createBrowserMediaLongPressScript({
+              nativeHitTesting: Platform.OS === 'android' && Boolean(peerSkyWebViewNativeConfig),
+              token: browserMediaToken
+            })
           )
 
           return (
@@ -2404,7 +2719,7 @@ export default function App () {
               style={styles.browserWebViewCapture}
             >
             <WebView
-              key={`${getBrowserWebViewKey(tab.id, entry.source.kind)}:${tabDesktopView ? 'desktop' : 'mobile'}`}
+              key={`${getBrowserWebViewKey(tab.id, entry.source.kind)}:${tabDesktopView ? 'desktop' : 'mobile'}:${contentBlockingGeneration}`}
               ref={(ref) => {
                 if (ref) {
                   browserWebViewRefs.current.set(tab.id, ref)
@@ -2419,7 +2734,7 @@ export default function App () {
                     baseUrl: entry.source.kind === 'hyper' ? entry.source.baseUrl : undefined
                   }}
               cacheEnabled={true}
-              nativeConfig={peerSkyWebViewNativeConfig}
+              nativeConfig={browserNativeConfig}
               injectedJavaScript={browserInjectedScript}
               injectedJavaScriptBeforeContentLoaded={browserAccessibilityScript}
               originWhitelist={['*']}
@@ -2443,6 +2758,7 @@ export default function App () {
               }}
               onLoadStart={() => {
                 browserFaviconsRef.current.delete(tab.id)
+                setBrowserMediaTarget((current) => current?.tabId === tab.id ? null : current)
                 if (
                   browserTabsStateRef.current.activeTabId === tab.id &&
                   isCurrentBrowserTabEntry(browserTabsStateRef.current, tab.id, entry)
@@ -2452,6 +2768,7 @@ export default function App () {
                 }
               }}
               onLoadEnd={() => {
+                browserWebNavigationDirectionsRef.current.delete(tab.id)
                 if (
                   browserTabsStateRef.current.activeTabId === tab.id &&
                   isCurrentBrowserTabEntry(browserTabsStateRef.current, tab.id, entry)
@@ -2464,6 +2781,14 @@ export default function App () {
                 if (entry.source.kind !== 'web') return
                 if (!isCurrentBrowserTabEntry(browserTabsStateRef.current, tab.id, entry)) return
                 if (!isWebUrl(navigationState.url) || navigationState.url.length > MAX_BROWSER_URL_LENGTH) return
+
+                if (!navigationState.loading) {
+                  recordCompletedBrowserVisit(
+                    tab.id,
+                    navigationState.url,
+                    navigationState.title || navigationState.url
+                  )
+                }
 
                 if (browserTabsStateRef.current.activeTabId === tab.id) {
                   syncBrowserEntry(navigationState.url, {
@@ -2483,6 +2808,18 @@ export default function App () {
               }}
               onMessage={(event) => {
                 if (!isCurrentBrowserTabEntry(browserTabsStateRef.current, tab.id, entry)) return
+
+                const mediaTarget = parseBrowserMediaMessage(
+                  event.nativeEvent.data,
+                  event.nativeEvent.url || entry.url,
+                  browserMediaToken
+                ) as BrowserMediaTarget | null
+                if (mediaTarget) {
+                  if (browserTabsStateRef.current.activeTabId === tab.id) {
+                    setBrowserMediaTarget({ ...mediaTarget, tabId: tab.id })
+                  }
+                  return
+                }
 
                 const favicon = parseBrowserFaviconMessage(
                   event.nativeEvent.data,
@@ -2525,6 +2862,7 @@ export default function App () {
             </View>
           )
         })}
+
         </View>
 
         {browserPreferences.addressBarPosition === 'bottom' && browserToolbar}
@@ -2539,7 +2877,17 @@ export default function App () {
           onZoomOut={onBrowserZoomOut}
         />
 
-        {isBooting && (
+        <BrowserMediaSheet
+          isDark={browserIsDark}
+          target={browserMediaTarget}
+          onClose={() => setBrowserMediaTarget(null)}
+          onDownload={(targetUrl) => void onBrowserMediaDownload(targetUrl)}
+          onOpenInBackgroundTab={onBrowserMediaOpenInBackgroundTab}
+          onOpenInNewTab={onBrowserMediaOpenInNewTab}
+          onShare={(targetUrl, title) => void onBrowserMediaShare(targetUrl, title)}
+        />
+
+        {(isBooting || !contentBlockingReady) && (
           <View style={styles.browserLoader}>
             <ActivityIndicator size='small' />
           </View>

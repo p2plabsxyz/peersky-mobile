@@ -119,6 +119,31 @@ export function createUniqueDownloadFilename (name, existingNames) {
   return addFilenameSuffix(normalizedName, Date.now())
 }
 
+export function addDownloadUrlFingerprint (name, url) {
+  const normalizedName = normalizeLocalDownloadFilename(name)
+
+  try {
+    const parsed = new URL(url)
+    const pathSegment = parsed.pathname.split('/').pop() || ''
+    const pathName = safeDecodeURIComponent(pathSegment)
+    if (!parsed.search || hasFilenameExtension(pathName)) return normalizedName
+
+    parsed.hash = ''
+    const fingerprint = stableUrlFingerprint(parsed.href)
+    return addFilenameToken(normalizedName, fingerprint)
+  } catch {
+    return normalizedName
+  }
+}
+
+function safeDecodeURIComponent (value) {
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return value
+  }
+}
+
 function normalizeLocalDownloadFilename (name) {
   const normalized = Array.from(String(name || 'download'))
     .map((character) => {
@@ -141,6 +166,29 @@ function addFilenameSuffix (name, count) {
   const suffix = ` (${count})`
   const maximumStemLength = Math.max(1, 255 - Array.from(`${suffix}${extension}`).length)
   return `${truncateUnicode(stem, maximumStemLength)}${suffix}${extension}`
+}
+
+function addFilenameToken (name, token) {
+  const dotIndex = name.lastIndexOf('.')
+  const hasExtension = dotIndex > 0 && dotIndex < name.length - 1
+  const stem = hasExtension ? name.slice(0, dotIndex) : name
+  const extension = hasExtension ? name.slice(dotIndex) : ''
+  const suffix = `-${token}`
+  const maximumStemLength = Math.max(1, 255 - Array.from(`${suffix}${extension}`).length)
+  return `${truncateUnicode(stem, maximumStemLength)}${suffix}${extension}`
+}
+
+function hasFilenameExtension (name) {
+  return /[.][a-z0-9]{1,16}$/i.test(name)
+}
+
+function stableUrlFingerprint (value) {
+  let hash = 2166136261
+  for (const character of value) {
+    hash ^= character.codePointAt(0)
+    hash = Math.imul(hash, 16777619)
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0')
 }
 
 function compareNewest (left, right) {

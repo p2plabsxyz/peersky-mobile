@@ -22,6 +22,7 @@ A peer-to-peer mobile browser built with [Bare](https://github.com/holepunchto/b
 - Per-tab zoom and Desktop View controls.
 - Browser download history and management.
 - Browser settings for search, appearance, accessibility, data clearing, and external app links.
+- Native ad and tracker blocking with EasyList and EasyPrivacy.
 - `http://` and `https://` browsing through React Native WebView.
 - `hyper://` browsing through the Bare worklet and `hypercore-fetch`.
 - Hyper page asset support for CSS, images, scripts, audio, and video.
@@ -31,6 +32,12 @@ A peer-to-peer mobile browser built with [Bare](https://github.com/holepunchto/b
   - `peersky://hyper/`
 
 Hyper media is streamed through a local loopback proxy so WebView can play audio/video while the Bare runtime fetches the underlying `hyper://` asset.
+
+## Ad and Tracker Blocking
+
+PeerSky blocks matching ad and tracker requests at the WebView engine level. Android uses [`adblock-rust`](https://github.com/brave/adblock-rust), while iOS compiles supported rules with `WKContentRuleList`. A validated EasyList and EasyPrivacy snapshot is bundled so protection can initialize before the first network update.
+
+This initial implementation covers network requests, not cosmetic filtering or element hiding. See the [content-blocking documentation](docs/content-blocking.md) for platform setup, update behavior, safeguards, and current limitations.
 
 ## Usage
 
@@ -64,6 +71,15 @@ npm run ios
 
 ### Android
 
+Install the Rust Android build prerequisites once:
+
+```sh
+npm run setup:content-blocking
+```
+
+EAS Android builds run this setup automatically through the
+`eas-build-pre-install` hook. The hook is skipped for iOS builds.
+
 ```sh
 npm run android
 ```
@@ -74,6 +90,7 @@ npm run android
 - [Holesail runtime](docs/holesail.md)
 - [P2PMD](docs/p2pmd.md)
 - [Testing guide](docs/testing.md)
+- [Content blocking](docs/content-blocking.md)
 
 ## License
 

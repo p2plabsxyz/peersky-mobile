@@ -97,6 +97,26 @@ export function syncBrowserEntryState (state, url, source) {
   return replaceBrowserEntryState(state, url, source)
 }
 
+/** @param {'back' | 'forward' | null} [direction] */
+export function recordBrowserWebNavigationState (state, url, source, direction = null) {
+  const currentEntry = state.history[state.historyIndex]
+  if (currentEntry?.url === url) {
+    return replaceBrowserEntryState(state, url, source)
+  }
+
+  const adjacentIndex = direction === 'back'
+    ? state.historyIndex - 1
+    : direction === 'forward'
+      ? state.historyIndex + 1
+      : -1
+
+  if (state.history[adjacentIndex]?.url === url) {
+    return buildBrowserState(state.history, adjacentIndex)
+  }
+
+  return commitBrowserEntryState(state, url, source)
+}
+
 export function getBrowserBackState (state) {
   if (state.historyIndex <= 0) return null
   return buildBrowserState(state.history, state.historyIndex - 1)

@@ -46,6 +46,25 @@ class BrowserDownloadsModuleTest {
     )
   }
 
+  @Test
+  fun fingerprintsCanonicalQueryUrlsDeterministically() {
+    assertEquals(
+      BrowserDownloadsModule.createUrlFingerprint("https://example.com/image?id=1"),
+      BrowserDownloadsModule.createUrlFingerprint("https://example.com/image?id=1")
+    )
+    assertFalse(
+      BrowserDownloadsModule.createUrlFingerprint("https://example.com/image?id=1") ==
+        BrowserDownloadsModule.createUrlFingerprint("https://example.com/image?id=2")
+    )
+  }
+
+  @Test
+  fun validatesMediaBridgeTokens() {
+    assertTrue(PeerSkyWebViewManager.isValidToken("a".repeat(32)))
+    assertFalse(PeerSkyWebViewManager.isValidToken("a".repeat(31)))
+    assertFalse(PeerSkyWebViewManager.isValidToken("z".repeat(32)))
+  }
+
   private fun isAndroidPackage(vararg entries: String): Boolean {
     return BrowserDownloadsModule.isAndroidPackage(
       ByteArrayInputStream(archiveBytes(*entries))
