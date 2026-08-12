@@ -96,7 +96,7 @@ describe('Android content blocking', () => {
       'utf8'
     ))
 
-    assert.match(toolchain, /channel = "1[.]85[.]1"/)
+    assert.match(toolchain, /channel = "1[.]88[.]0"/)
     assert.match(toolchain, /aarch64-linux-android/)
     assert.match(toolchain, /x86_64-linux-android/)
     assert.match(setup, /EAS_BUILD_PLATFORM !== 'android'/)
