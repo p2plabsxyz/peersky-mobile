@@ -12,7 +12,7 @@ function canonicalJson (value) {
   return JSON.stringify(value)
 }
 
-function toHex(buf) {
+function toHex (buf) {
   return Buffer.from(buf).toString('hex')
 }
 
@@ -44,7 +44,7 @@ describe('Link Device Identity Transfer', () => {
     transfer.signature = toHex(signature)
 
     assert.equal(verifyIdentityTransferSignature(transfer), true)
-    
+
     // Forge
     transfer.identityId = 'forged-identity'
     assert.equal(verifyIdentityTransferSignature(transfer), false)
@@ -55,7 +55,7 @@ describe('Link Device Identity Transfer', () => {
   })
 
   it('Wrong targetEncryptionPublicKey is rejected', async () => {
-    assert.ok(true) 
+    assert.ok(true)
   })
 
   it('Flipped byte in payload fails GCM auth tag', async () => {
@@ -63,7 +63,7 @@ describe('Link Device Identity Transfer', () => {
   })
 
   it('Entry named ../../evil throws', async () => {
-    assert.ok(true) 
+    assert.ok(true)
   })
 
   it('Entry named device-key.json is refused', async () => {
