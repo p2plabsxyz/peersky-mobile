@@ -95,7 +95,8 @@ describe('mobile platform runtime configuration', () => {
     const imports = JSON.parse(await readFile(repoFile('backend/bare-imports.json'), 'utf8'))
 
     assert.deepEqual(imports, {
-      'node:crypto': 'bare-crypto'
+      'node:crypto': 'bare-crypto',
+      'node:zlib': 'bare-zlib'
     })
   })
 

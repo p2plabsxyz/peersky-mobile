@@ -19,10 +19,18 @@ let hyperFetch = null
 
 export { stopHyperAssetServer } from './asset-server.mjs'
 
+export function resetHyperFetch () {
+  hyperFetch = null
+}
+
 export async function fetchHyper ({
   url,
   method = 'GET',
-  inlineAssets = false
+  inlineAssets = false,
+  retries = 0,
+  retryDelay = 500,
+  maxRetryDelay = 5000,
+  backoffFactor = 2
 } = {}) {
   if (method.toUpperCase() !== 'GET') {
     return { ok: false, error: 'Only GET is currently supported' }
@@ -34,37 +42,190 @@ export async function fetchHyper ({
   const runtime = await getHyperRuntime()
   const fetch = await getHyperFetch(runtime)
 
-  try {
-    const response = await fetch(url)
-    const headers = headersToObject(response.headers)
-    let body = await response.text()
+  let attempt = 0
+  let currentDelay = retryDelay
 
-    if (inlineAssets && isHtmlResponse(headers, body)) {
-      const proxyServer = await startHyperAssetServer(fetch)
-      body = await inlineHyperAssets({
-        html: body,
-        baseUrl: response.url || url,
-        fetch,
-        assetBaseUrl: proxyServer.localUrl
-      })
-    }
+  while (true) {
+    try {
+      const response = await fetch(url)
+      const headers = headersToObject(response.headers)
 
-    return {
-      ok: response.ok,
-      status: response.status,
-      statusText: response.statusText,
-      url: response.url || url,
-      headers,
-      body
+      if (!response.ok) {
+        let text = ''
+        try {
+          text = await response.text()
+        } catch (_) {}
+
+        const isRetryable = response.status === 404 || response.status === 502 || text.includes('Peers Not Found')
+        if (isRetryable && attempt < retries) {
+          attempt++
+          await new Promise((resolve) => setTimeout(resolve, currentDelay))
+          currentDelay = Math.min(maxRetryDelay, Math.floor(currentDelay * backoffFactor))
+          continue
+        }
+
+        return {
+          ok: false,
+          status: response.status,
+          statusText: response.statusText,
+          url: response.url || url,
+          headers,
+          error: text || response.statusText || `Request failed with status ${response.status}`
+        }
+      }
+
+      let body = await response.text()
+
+      if (inlineAssets && isHtmlResponse(headers, body)) {
+        const proxyServer = await startHyperAssetServer(fetch)
+        body = await inlineHyperAssets({
+          html: body,
+          baseUrl: response.url || url,
+          fetch,
+          assetBaseUrl: proxyServer.localUrl
+        })
+      }
+
+      return {
+        ok: response.ok,
+        status: response.status,
+        statusText: response.statusText,
+        url: response.url || url,
+        headers,
+        body
+      }
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error)
+      const isRetryable = errorMsg.includes('Peers Not Found') || errorMsg.includes('peer')
+
+      if (isRetryable && attempt < retries) {
+        attempt++
+        await new Promise((resolve) => setTimeout(resolve, currentDelay))
+        currentDelay = Math.min(maxRetryDelay, Math.floor(currentDelay * backoffFactor))
+        continue
+      }
+
+      return {
+        ok: false,
+        status: 502,
+        statusText: 'Bad Gateway',
+        url,
+        headers: { 'content-type': 'text/plain; charset=utf-8' },
+        error: errorMsg
+      }
     }
-  } catch (error) {
-    return {
-      ok: false,
-      status: 502,
-      statusText: 'Bad Gateway',
-      url,
-      headers: { 'content-type': 'text/plain; charset=utf-8' },
-      error: error instanceof Error ? error.message : String(error)
+  }
+}
+
+export async function fetchHyperBinary ({
+  url,
+  method = 'GET',
+  retries = 0,
+  retryDelay = 500,
+  maxRetryDelay = 5000,
+  backoffFactor = 2
+} = {}) {
+  if (method.toUpperCase() !== 'GET') {
+    return { ok: false, error: 'Only GET is currently supported' }
+  }
+
+  const target = parseHyperUrl(url)
+  if (target.error) return { ok: false, error: target.error }
+
+  const runtime = await getHyperRuntime()
+  const fetch = await getHyperFetch(runtime)
+
+  let attempt = 0
+  let currentDelay = retryDelay
+
+  while (true) {
+    try {
+      const response = await fetch(url)
+      const headers = headersToObject(response.headers)
+
+      if (!response.ok) {
+        let text = ''
+        try {
+          text = await response.text()
+        } catch (_) {}
+
+        const isRetryable = response.status === 404 || response.status === 502 || text.includes('Peers Not Found')
+        if (isRetryable && attempt < retries) {
+          attempt++
+          await new Promise((resolve) => setTimeout(resolve, currentDelay))
+          currentDelay = Math.min(maxRetryDelay, Math.floor(currentDelay * backoffFactor))
+          continue
+        }
+
+        return {
+          ok: false,
+          status: response.status,
+          statusText: response.statusText,
+          url: response.url || url,
+          headers,
+          error: text || response.statusText || `Request failed with status ${response.status}`
+        }
+      }
+
+      const contentLength = Number(headers['content-length'] || 0)
+      if (contentLength > 50 * 1024 * 1024) {
+        throw new Error(`Response exceeds 50MB limit: ${contentLength} bytes`)
+      }
+
+      const chunks = []
+      let totalLength = 0
+      const body = response.body
+
+      if (body && typeof body.getReader === 'function') {
+        const reader = body.getReader()
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          totalLength += value.byteLength || value.length
+          if (totalLength > 50 * 1024 * 1024) throw new Error('Response exceeds 50MB limit')
+          chunks.push(chunkToUint8Array(value))
+        }
+      } else if (body && typeof body[Symbol.asyncIterator] === 'function') {
+        for await (const chunk of body) {
+          totalLength += chunk.byteLength || chunk.length
+          if (totalLength > 50 * 1024 * 1024) throw new Error('Response exceeds 50MB limit')
+          chunks.push(chunkToUint8Array(chunk))
+        }
+      } else {
+        const buf = chunkToUint8Array(await response.arrayBuffer())
+        if (buf.byteLength > 50 * 1024 * 1024) throw new Error('Response exceeds 50MB limit')
+        chunks.push(buf)
+      }
+
+      const bytes = b4a.concat(chunks)
+
+      return {
+        ok: response.ok,
+        status: response.status,
+        statusText: response.statusText,
+        url: response.url || url,
+        headers,
+        bytes
+      }
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error)
+      const isRetryable = errorMsg.includes('Peers Not Found') || errorMsg.includes('peer')
+
+      if (isRetryable && attempt < retries) {
+        attempt++
+        await new Promise((resolve) => setTimeout(resolve, currentDelay))
+        currentDelay = Math.min(maxRetryDelay, Math.floor(currentDelay * backoffFactor))
+        continue
+      }
+
+      return {
+        ok: false,
+        status: 502,
+        statusText: 'Bad Gateway',
+        url,
+        headers: { 'content-type': 'text/plain; charset=utf-8' },
+        error: errorMsg
+      }
     }
   }
 }

@@ -36,9 +36,10 @@
     "bare-crypto": "^1.14.0",
     "bare-http1": "^4.5.7",
     "bare-rpc": "^0.2.13",
-    "expo": "~55.0.28",
-    "expo-asset": "~55.0.18",
-    "expo-build-properties": "~55.0.16",
+    "bare-zlib": "^1.4.1",
+    "expo": "~55.0.23",
+    "expo-build-properties": "~55.0.9",
+    "expo-camera": "~55.0.21",
     "expo-constants": "~55.0.7",
     "expo-dev-client": "~55.0.37",
     "expo-file-system": "~55.0.24",
@@ -61,6 +62,7 @@
     "react-native-svg": "15.15.3",
     "react-native-view-shot": "4.0.3",
     "react-native-webview": "13.16.0",
+    "sodium-native": "^5.1.0",
     "yjs": "^13.6.31"
   },
   "devDependencies": {
