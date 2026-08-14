@@ -224,6 +224,25 @@ describe('hyper media proxy server', () => {
     })
   })
 
+  test('uses the media extension when upstream returns a generic content type', async () => {
+    const server = createHyperAssetServer({
+      httpImpl: http,
+      authToken: ASSET_AUTH_TOKEN,
+      fetch: async () => createStreamResponse({
+        body: ['image'],
+        headers: { 'content-type': 'text/plain' }
+      })
+    })
+
+    await withServer(server, async (localUrl) => {
+      const assetUrl = 'hyper://example.com/photo.jpg'
+      const response = await fetch(`${localUrl}/asset?token=${ASSET_AUTH_TOKEN}&url=${encodeURIComponent(assetUrl)}`)
+
+      assert.equal(response.headers.get('content-type'), 'image/jpeg')
+      assert.equal(await response.text(), 'image')
+    })
+  })
+
   test('rejects missing and incorrect asset tokens before calling hyper fetch', async () => {
     let calls = 0
     const server = createHyperAssetServer({

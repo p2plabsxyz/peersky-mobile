@@ -42,6 +42,32 @@ export function createBrowserErrorHtml (targetUrl, message) {
   )
 }
 
+export function createHyperMediaHtml ({ mediaName, mediaType, mediaUrl }) {
+  const name = escapeHtml(String(mediaName || 'Hyper media'))
+  const source = escapeHtmlAttribute(String(mediaUrl || ''))
+  const media = mediaType === 'image'
+    ? `<img src="${source}" alt="${name}" />`
+    : mediaType === 'audio'
+      ? `<audio src="${source}" controls preload="metadata"></audio>`
+      : `<video src="${source}" controls playsinline preload="metadata"></video>`
+
+  return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${name}</title>
+  <style>
+    html, body { background: #11151d; height: 100%; margin: 0; }
+    body { align-items: center; display: flex; justify-content: center; overflow: auto; }
+    img, video { display: block; max-height: 100%; max-width: 100%; object-fit: contain; }
+    audio { max-width: calc(100% - 32px); width: 520px; }
+  </style>
+</head>
+<body>${media}</body>
+</html>`
+}
+
 function createBrowserDocumentHtml (title, body) {
   return `<!doctype html>
 <meta charset="utf-8" />

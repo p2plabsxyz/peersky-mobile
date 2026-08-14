@@ -87,7 +87,15 @@ async function streamHyperAsset (fetch, assetUrl, req, res, downloadName) {
 
   const headers = headersToObject(response.headers)
   const status = rangeHeader && headers['content-range'] ? 206 : response.status
-  const contentType = headers['content-type'] || getContentTypeFromUrl(assetUrl)
+  const inferredContentType = getContentTypeFromUrl(assetUrl)
+  const upstreamContentType = String(headers['content-type'] || '')
+  const inferredIsMedia = /^(?:audio|image|video)\//i.test(inferredContentType)
+  const upstreamIsMedia = /^(?:audio|image|video)\//i.test(upstreamContentType)
+  const contentType = !upstreamContentType ||
+    /^application\/octet-stream(?:\s*;|$)/i.test(upstreamContentType) ||
+    (inferredIsMedia && !upstreamIsMedia)
+    ? inferredContentType
+    : upstreamContentType
 
   if (isStreamableBody(response.body)) {
     sendProxyAssetHeaders(res, {

@@ -6,6 +6,13 @@ export const MAX_INLINE_STYLESHEET_BYTES = 4 * 1024 * 1024
 export const MAX_INLINE_ASSET_TOTAL_BYTES = 8 * 1024 * 1024
 const INLINE_ASSET_CONCURRENCY = 4
 const MAX_DOWNLOAD_FILENAME_BYTES = 255
+const HYPER_DOWNLOAD_EXTENSION = /[.](?:7z|aab|apk|bin|bz2|deb|dmg|docx?|exe|gz|iso|jar|msi|pdf|rar|rpm|tar|tgz|xlsx?|zip)(?:$|[?#])/i
+const HYPER_DOWNLOAD_CONTENT_TYPE = /^(?:application\/(?:epub[+]zip|gzip|java-archive|msword|octet-stream|pdf|vnd[.]android[.]package-archive|vnd[.]ms-excel|vnd[.]openxmlformats-officedocument(?:[.][a-z0-9+_-]+)+|x-7z-compressed|x-bzip2|x-rar-compressed|x-tar|x-zip-compressed|zip)|application\/x-msdownload)$/i
+const HYPER_MEDIA_EXTENSION = {
+  image: /[.](?:avif|bmp|gif|ico|jpe?g|png|svg|webp)(?:$|[?#])/i,
+  audio: /[.](?:aac|amr|flac|m4a|mp3|oga|ogg|opus|wav|weba)(?:$|[?#])/i,
+  video: /[.](?:3g2|3gp|m4v|mkv|mov|mp4|mpeg|mpg|ogv|webm)(?:$|[?#])/i
+}
 
 export function headersToObject (headers) {
   const result = {}
@@ -155,6 +162,47 @@ export function createProxyAssetUrl (assetBaseUrl, assetUrl, authToken, download
   return `${assetBaseUrl}/asset?${params.join('&')}`
 }
 
+export function getHyperNavigationDownloadName (assetUrl, headers = {}) {
+  const contentDisposition = String(headers['content-disposition'] || '')
+  const contentType = String(headers['content-type'] || '')
+    .split(';', 1)[0]
+    .trim()
+
+  if (/\battachment\b/i.test(contentDisposition)) {
+    return normalizeDownloadFilename(
+      getContentDispositionFilename(contentDisposition),
+      assetUrl
+    )
+  }
+
+  if (
+    !HYPER_DOWNLOAD_EXTENSION.test(assetUrl) &&
+    !HYPER_DOWNLOAD_CONTENT_TYPE.test(contentType)
+  ) {
+    return null
+  }
+
+  return normalizeDownloadFilename(null, assetUrl)
+}
+
+export function getHyperNavigationMediaType (assetUrl, headers = {}) {
+  const contentDisposition = String(headers['content-disposition'] || '')
+  if (/\battachment\b/i.test(contentDisposition)) return null
+
+  const contentType = String(headers['content-type'] || '')
+    .split(';', 1)[0]
+    .trim()
+    .toLowerCase()
+
+  for (const [mediaType, pattern] of Object.entries(HYPER_MEDIA_EXTENSION)) {
+    if (pattern.test(assetUrl) || contentType.startsWith(`${mediaType}/`)) {
+      return mediaType
+    }
+  }
+
+  return null
+}
+
 export function normalizeDownloadFilename (name, assetUrl) {
   const fallback = (() => {
     try {
@@ -178,6 +226,19 @@ export function normalizeDownloadFilename (name, assetUrl) {
     .trim()
 
   return truncateUtf8(value || 'download', MAX_DOWNLOAD_FILENAME_BYTES)
+}
+
+function getContentDispositionFilename (contentDisposition) {
+  const encoded = contentDisposition.match(/filename[*]\s*=\s*(?:UTF-8'')?([^;]+)/i)
+  if (encoded) {
+    const value = encoded[1].trim().replace(/^['"]|['"]$/g, '')
+    try {
+      return decodeURIComponent(value)
+    } catch {}
+  }
+
+  const plain = contentDisposition.match(/filename\s*=\s*(?:"([^"]*)"|'([^']*)'|([^;]+))/i)
+  return plain ? (plain[1] ?? plain[2] ?? plain[3]).trim() : ''
 }
 
 export function createDownloadContentDisposition (name, assetUrl) {
@@ -210,22 +271,29 @@ export function getContentTypeFromUrl (url) {
   })()
 
   if (pathname.endsWith('.avif')) return 'image/avif'
+  if (pathname.endsWith('.aac')) return 'audio/aac'
+  if (pathname.endsWith('.amr')) return 'audio/amr'
   if (pathname.endsWith('.bmp')) return 'image/bmp'
   if (pathname.endsWith('.css')) return 'text/css; charset=utf-8'
   if (pathname.endsWith('.gif')) return 'image/gif'
+  if (pathname.endsWith('.flac')) return 'audio/flac'
   if (pathname.endsWith('.ico')) return 'image/x-icon'
   if (pathname.endsWith('.jpeg') || pathname.endsWith('.jpg')) return 'image/jpeg'
   if (pathname.endsWith('.js') || pathname.endsWith('.mjs')) return 'text/javascript; charset=utf-8'
   if (pathname.endsWith('.m4a')) return 'audio/mp4'
+  if (pathname.endsWith('.m4v')) return 'video/mp4'
   if (pathname.endsWith('.mov')) return 'video/quicktime'
+  if (pathname.endsWith('.mkv')) return 'video/x-matroska'
   if (pathname.endsWith('.mp3')) return 'audio/mpeg'
   if (pathname.endsWith('.mp4')) return 'video/mp4'
+  if (pathname.endsWith('.mpeg') || pathname.endsWith('.mpg')) return 'video/mpeg'
   if (pathname.endsWith('.oga') || pathname.endsWith('.ogg') || pathname.endsWith('.opus')) return 'audio/ogg'
   if (pathname.endsWith('.ogv')) return 'video/ogg'
   if (pathname.endsWith('.png')) return 'image/png'
   if (pathname.endsWith('.svg')) return 'image/svg+xml'
   if (pathname.endsWith('.wav')) return 'audio/wav'
   if (pathname.endsWith('.webm')) return 'video/webm'
+  if (pathname.endsWith('.weba')) return 'audio/webm'
   if (pathname.endsWith('.webp')) return 'image/webp'
   return 'application/octet-stream'
 }

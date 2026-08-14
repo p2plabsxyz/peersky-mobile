@@ -2,7 +2,8 @@ import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 import {
   createBrowserErrorHtml,
-  createHyperBrowserHtml
+  createHyperBrowserHtml,
+  createHyperMediaHtml
 } from '../../app/browser-html.mjs'
 
 describe('browser HTML helpers', () => {
@@ -63,5 +64,27 @@ describe('browser HTML helpers', () => {
 
     assert.match(rendered, /href="hyper:\/\/site\/folder\/file[.]txt"/)
     assert.match(rendered, /href="hyper:\/\/site\/root[.]txt"/)
+  })
+
+  test('renders streamed Hyper media with safe native controls', () => {
+    const image = createHyperMediaHtml({
+      mediaName: '<photo>.jpg',
+      mediaType: 'image',
+      mediaUrl: 'http://127.0.0.1:3000/asset?token=a&url=b'
+    })
+    const audio = createHyperMediaHtml({
+      mediaName: 'song.mp3',
+      mediaType: 'audio',
+      mediaUrl: 'http://127.0.0.1:3000/audio'
+    })
+    const video = createHyperMediaHtml({
+      mediaName: 'clip.mp4',
+      mediaType: 'video',
+      mediaUrl: 'http://127.0.0.1:3000/video'
+    })
+
+    assert.match(image, /<img src="http:\/\/127[.]0[.]0[.]1:3000\/asset[?]token=a&amp;url=b" alt="&lt;photo&gt;[.]jpg"/)
+    assert.match(audio, /<audio[^>]+controls[^>]+preload="metadata"/)
+    assert.match(video, /<video[^>]+controls[^>]+playsinline[^>]+preload="metadata"/)
   })
 })

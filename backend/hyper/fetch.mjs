@@ -1,6 +1,9 @@
 import b4a from 'b4a'
 import makeHyperFetch from 'hypercore-fetch'
 import {
+  createProxyAssetUrl,
+  getHyperNavigationDownloadName,
+  getHyperNavigationMediaType,
   headersToObject,
   inlineHyperAssets
 } from './assets.mjs'
@@ -43,6 +46,47 @@ export async function fetchHyper ({
     maxRetryDelay,
     backoffFactor,
     readResponse: async (response, headers) => {
+      const responseUrl = response.url || url
+      const mediaType = getHyperNavigationMediaType(responseUrl, headers)
+      const downloadName = getHyperNavigationDownloadName(responseUrl, headers)
+      if (downloadName && !mediaType) {
+        await cancelResponseBody(response.body)
+        const proxyServer = await startHyperAssetServer(fetch)
+        return {
+          ok: response.ok,
+          status: response.status,
+          statusText: response.statusText,
+          url: responseUrl,
+          headers,
+          downloadName,
+          downloadUrl: createProxyAssetUrl(
+            proxyServer.localUrl,
+            responseUrl,
+            proxyServer.authToken,
+            downloadName
+          )
+        }
+      }
+
+      if (mediaType) {
+        await cancelResponseBody(response.body)
+        const proxyServer = await startHyperAssetServer(fetch)
+        return {
+          ok: response.ok,
+          status: response.status,
+          statusText: response.statusText,
+          url: responseUrl,
+          headers,
+          mediaName: normalizeMediaName(responseUrl),
+          mediaType,
+          mediaUrl: createProxyAssetUrl(
+            proxyServer.localUrl,
+            responseUrl,
+            proxyServer.authToken
+          )
+        }
+      }
+
       let body = await response.text()
 
       if (inlineAssets && isHtmlResponse(headers, body)) {
@@ -66,6 +110,37 @@ export async function fetchHyper ({
       }
     }
   })
+}
+
+function normalizeMediaName (url) {
+  try {
+    return decodeURIComponent(new URL(url).pathname.split('/').pop() || 'Hyper media')
+  } catch {
+    return 'Hyper media'
+  }
+}
+
+async function cancelResponseBody (body) {
+  if (!body) return
+
+  try {
+    if (typeof body.getReader === 'function') {
+      const reader = body.getReader()
+      try {
+        await reader.cancel()
+      } finally {
+        if (reader.releaseLock) reader.releaseLock()
+      }
+      return
+    }
+
+    if (typeof body.destroy === 'function') {
+      body.destroy()
+      return
+    }
+
+    if (typeof body.return === 'function') await body.return()
+  } catch {}
 }
 
 export async function fetchHyperBinary ({

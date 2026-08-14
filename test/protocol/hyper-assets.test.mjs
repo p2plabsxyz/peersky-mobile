@@ -5,6 +5,8 @@ import {
   MAX_INLINE_STYLESHEET_BYTES,
   createDownloadContentDisposition,
   createProxyAssetUrl,
+  getHyperNavigationDownloadName,
+  getHyperNavigationMediaType,
   getContentTypeFromUrl,
   getInlineAssetByteLimit,
   headersToObject,
@@ -203,4 +205,59 @@ test('detects content types for common hyper assets', () => {
   assert.equal(getContentTypeFromUrl('hyper://example.com/app.js'), 'text/javascript; charset=utf-8')
   assert.equal(getContentTypeFromUrl('hyper://example.com/movie.mp4'), 'video/mp4')
   assert.equal(getContentTypeFromUrl('hyper://example.com/unknown.bin'), 'application/octet-stream')
+})
+
+test('detects direct Hyper downloads without treating web content as files', () => {
+  assert.equal(
+    getHyperNavigationDownloadName(
+      'hyper://example.com/releases/app-release.zip',
+      { 'content-type': 'application/octet-stream' }
+    ),
+    'app-release.zip'
+  )
+  assert.equal(
+    getHyperNavigationDownloadName(
+      'hyper://example.com/download',
+      { 'content-disposition': 'attachment; filename="PeerSky Mobile.apk"' }
+    ),
+    'PeerSky Mobile.apk'
+  )
+  assert.equal(
+    getHyperNavigationDownloadName(
+      'hyper://example.com/index.html',
+      { 'content-type': 'text/html; charset=utf-8' }
+    ),
+    null
+  )
+  assert.equal(
+    getHyperNavigationDownloadName(
+      'hyper://example.com/download',
+      { 'content-type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }
+    ),
+    'download'
+  )
+})
+
+test('classifies direct Hyper media by MIME or extension', () => {
+  assert.equal(
+    getHyperNavigationMediaType(
+      'hyper://example.com/photo.jpg',
+      { 'content-type': 'application/octet-stream' }
+    ),
+    'image'
+  )
+  assert.equal(
+    getHyperNavigationMediaType(
+      'hyper://example.com/media',
+      { 'content-type': 'audio/mpeg' }
+    ),
+    'audio'
+  )
+  assert.equal(
+    getHyperNavigationMediaType(
+      'hyper://example.com/movie.mp4',
+      { 'content-disposition': 'attachment; filename="movie.mp4"' }
+    ),
+    null
+  )
 })

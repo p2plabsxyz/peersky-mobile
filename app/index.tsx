@@ -66,7 +66,8 @@ import {
 } from './browser-session.mjs'
 import {
   createBrowserErrorHtml,
-  createHyperBrowserHtml
+  createHyperBrowserHtml,
+  createHyperMediaHtml
 } from './browser-html.mjs'
 import {
   getBrowserPalette,
@@ -160,6 +161,11 @@ type RpcResponse = {
   statusText?: string
   url?: string
   body?: string
+  downloadName?: string
+  downloadUrl?: string
+  mediaName?: string
+  mediaType?: 'image' | 'audio' | 'video'
+  mediaUrl?: string
   html?: string
   storagePath?: string
   encryptionPublicKey?: string
@@ -881,7 +887,7 @@ export default function App () {
     }
 
     if (isHyperUrl(url)) {
-      await loadHyperBrowserUrl(url, false)
+      await loadHyperBrowserUrl(url, false, false)
       return
     }
 
@@ -894,7 +900,11 @@ export default function App () {
     showBrowserError(url, 'Unsupported restored URL scheme')
   }
 
-  async function loadHyperBrowserUrl (nextUrl: string, shouldCommit = true) {
+  async function loadHyperBrowserUrl (
+    nextUrl: string,
+    shouldCommit = true,
+    allowDownload = true
+  ) {
     const loadSeq = ++browserLoadSeqRef.current
     setBrowserIsLoading(true)
     setBrowserTitle('Loading Hyper...')
@@ -913,6 +923,25 @@ export default function App () {
         throw new Error(response.error || response.statusText || 'Unable to load Hyper page')
       }
 
+      if (response.downloadUrl) {
+        if (!allowDownload) {
+          throw new Error('Open this Hyper file from the address bar to download it.')
+        }
+
+        const accepted = await requestBrowserDownload(response.downloadUrl)
+        if (isStaleBrowserLoad(loadSeq, browserLoadSeqRef.current)) return
+
+        const currentState = browserTabsStateRef.current
+        const currentTab = currentState.tabs.find(({ id }) => id === currentState.activeTabId)
+        if (currentTab) applyBrowserTab(currentTab)
+        setStatus(
+          accepted
+            ? `Downloading ${response.downloadName || 'Hyper file'}`
+            : 'Unable to start Hyper download'
+        )
+        return
+      }
+
       const responseUrl = response.url &&
         response.url.length <= MAX_BROWSER_URL_LENGTH &&
         isHyperUrl(response.url)
@@ -921,7 +950,9 @@ export default function App () {
 
       const source: BrowserSource = {
         kind: 'hyper',
-        html: createHyperBrowserHtml(response, nextUrl),
+        html: response.mediaType && response.mediaUrl
+          ? createHyperMediaHtml(response)
+          : createHyperBrowserHtml(response, nextUrl),
         baseUrl: nextUrl
       }
 
@@ -931,7 +962,7 @@ export default function App () {
         replaceBrowserEntry(responseUrl, source)
       }
 
-      const pageTitle = getBrowserHistoryDocumentTitle(response.body, responseUrl)
+      const pageTitle = response.mediaName || getBrowserHistoryDocumentTitle(response.body, responseUrl)
       setBrowserTitle(pageTitle)
       updateBrowserTabTitle(browserTabsStateRef.current.activeTabId, pageTitle)
       recordCompletedBrowserVisit(
