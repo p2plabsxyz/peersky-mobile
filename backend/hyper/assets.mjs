@@ -3,6 +3,8 @@ import b4a from 'b4a'
 export const MAX_INLINE_ASSETS = 32
 export const MAX_INLINE_ASSET_BYTES = 2 * 1024 * 1024
 export const MAX_INLINE_STYLESHEET_BYTES = 4 * 1024 * 1024
+export const MAX_INLINE_ASSET_TOTAL_BYTES = 8 * 1024 * 1024
+const INLINE_ASSET_CONCURRENCY = 4
 const MAX_DOWNLOAD_FILENAME_BYTES = 255
 
 export function headersToObject (headers) {
@@ -67,13 +69,46 @@ export function isStylesheetAsset (assetUrl, contentType) {
   }
 }
 
+export async function inlineHyperAssets ({
+  html,
+  baseUrl,
+  fetch,
+  assetBaseUrl,
+  assetAuthToken,
+  maxTotalBytes = MAX_INLINE_ASSET_TOTAL_BYTES,
+  concurrency = INLINE_ASSET_CONCURRENCY
+}) {
+  const rewrittenDownloads = rewriteHyperDownloadAttributes(html, baseUrl, assetBaseUrl, assetAuthToken)
+  const replacements = new Map()
+  let totalBytes = 0
+  const assetRefs = [...findHyperAssetRefs(rewrittenDownloads, baseUrl)]
+    .slice(0, MAX_INLINE_ASSETS)
+
+  await runConcurrent(assetRefs, concurrency, async ([source, assetUrl]) => {
+    const asset = await fetchAsDataUrl(fetch, assetUrl)
+    if (!asset || totalBytes + asset.byteLength > maxTotalBytes) return
+
+    totalBytes += asset.byteLength
+    replacements.set(source, asset.dataUrl)
+  })
+
+  return rewriteHyperMediaAttributes(
+    rewriteHyperAssetAttributes(rewrittenDownloads, baseUrl, replacements),
+    baseUrl,
+    assetBaseUrl,
+    assetAuthToken
+  )
+}
+
 export function rewriteHyperAssetAttributes (html, baseUrl, replacements) {
   return html.replace(
-    /\b(src|href|poster)(\s*=\s*)(["'])([^"']+)\3/gi,
-    (match, name, separator, quote, source) => {
+    /\b(src|href|poster)(\s*=\s*)(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/gi,
+    (match, name, separator, doubleQuoted, singleQuoted, unquoted) => {
+      const source = doubleQuoted ?? singleQuoted ?? unquoted
       const assetUrl = resolveHyperAssetUrl(source, baseUrl)
       const dataUrl = assetUrl ? replacements.get(source) : null
       if (!dataUrl) return match
+      const quote = singleQuoted !== undefined ? "'" : '"'
       return `${name}${separator}${quote}${dataUrl}${quote}`
     }
   )
@@ -207,6 +242,69 @@ function truncateUtf8 (value, limit) {
   }
 
   return result || 'download'
+}
+
+function findHyperAssetRefs (html, baseUrl) {
+  const refs = new Map()
+  const attributes = /\b(?:src|href|poster)\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s"'=<>`]+))/gi
+  let match = attributes.exec(html)
+
+  while (match) {
+    const original = match[1] ?? match[2] ?? match[3]
+    const assetUrl = resolveHyperAssetUrl(original, baseUrl)
+
+    if (assetUrl && shouldInlineAsset(original, assetUrl)) {
+      refs.set(original, assetUrl)
+    }
+
+    match = attributes.exec(html)
+  }
+
+  return refs
+}
+
+async function fetchAsDataUrl (fetch, assetUrl) {
+  try {
+    const response = await fetch(assetUrl)
+    if (!response.ok) return null
+
+    const headers = headersToObject(response.headers)
+    const contentType = headers['content-type'] || getContentTypeFromUrl(assetUrl)
+    const byteLimit = getInlineAssetByteLimit(assetUrl, contentType)
+    const contentLength = Number(headers['content-length'])
+    if (Number.isFinite(contentLength) && contentLength > byteLimit) return null
+
+    const bytes = toAssetBytes(await response.arrayBuffer())
+    if (bytes.byteLength > byteLimit) return null
+
+    return {
+      dataUrl: `data:${contentType};base64,${b4a.toString(bytes, 'base64')}`,
+      byteLength: bytes.byteLength
+    }
+  } catch {
+    return null
+  }
+}
+
+async function runConcurrent (items, concurrency, task) {
+  let nextIndex = 0
+  const boundedConcurrency = Math.max(1, Math.floor(Number(concurrency) || 1))
+  const workerCount = Math.min(boundedConcurrency, items.length)
+  const workers = Array.from({ length: workerCount }, async () => {
+    while (nextIndex < items.length) {
+      const item = items[nextIndex]
+      nextIndex += 1
+      await task(item)
+    }
+  })
+
+  await Promise.all(workers)
+}
+
+function toAssetBytes (bytes) {
+  if (bytes instanceof Uint8Array) return bytes
+  if (bytes instanceof ArrayBuffer) return new Uint8Array(bytes)
+  return b4a.from(bytes)
 }
 
 function parseHtmlTagAttributes (tag) {

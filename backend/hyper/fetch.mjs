@@ -1,15 +1,8 @@
 import b4a from 'b4a'
 import makeHyperFetch from 'hypercore-fetch'
 import {
-  MAX_INLINE_ASSETS,
-  getContentTypeFromUrl,
-  getInlineAssetByteLimit,
   headersToObject,
-  rewriteHyperAssetAttributes,
-  rewriteHyperDownloadAttributes,
-  rewriteHyperMediaAttributes,
-  resolveHyperAssetUrl,
-  shouldInlineAsset
+  inlineHyperAssets
 } from './assets.mjs'
 import { startHyperAssetServer } from './asset-server.mjs'
 import { getHyperRuntime } from './runtime.mjs'
@@ -261,78 +254,6 @@ function ensureFetchGlobals () {
 function isHtmlResponse (headers, body) {
   const contentType = headers['content-type'] || ''
   return contentType.includes('text/html') || /^\s*<(?:!doctype|html|head|body|main|section|article|div|h1|p)\b/i.test(body)
-}
-
-async function inlineHyperAssets ({
-  html,
-  baseUrl,
-  fetch,
-  assetBaseUrl,
-  assetAuthToken
-}) {
-  const rewrittenDownloads = rewriteHyperDownloadAttributes(html, baseUrl, assetBaseUrl, assetAuthToken)
-  const replacements = new Map()
-  let assetCount = 0
-
-  const assetRefs = findHyperAssetRefs(rewrittenDownloads, baseUrl)
-
-  for (const [source, assetUrl] of assetRefs) {
-    if (assetCount >= MAX_INLINE_ASSETS) break
-    if (replacements.has(source)) continue
-
-    assetCount += 1
-    const dataUrl = await fetchAsDataUrl(fetch, assetUrl)
-    if (!dataUrl) continue
-
-    replacements.set(source, dataUrl)
-  }
-
-  const rewrittenAssets = rewriteHyperMediaAttributes(
-    rewriteHyperAssetAttributes(rewrittenDownloads, baseUrl, replacements),
-    baseUrl,
-    assetBaseUrl,
-    assetAuthToken
-  )
-  return rewrittenAssets
-}
-
-function findHyperAssetRefs (html, baseUrl) {
-  const refs = new Map()
-  const attributes = /\b(?:src|href|poster)\s*=\s*(["'])([^"']+)\1/gi
-  let match = attributes.exec(html)
-
-  while (match) {
-    const original = match[2]
-    const assetUrl = resolveHyperAssetUrl(original, baseUrl)
-
-    if (assetUrl && shouldInlineAsset(original, assetUrl)) {
-      refs.set(original, assetUrl)
-    }
-
-    match = attributes.exec(html)
-  }
-
-  return refs
-}
-
-async function fetchAsDataUrl (fetch, assetUrl) {
-  try {
-    const response = await fetch(assetUrl)
-    if (!response.ok) return null
-
-    const headers = headersToObject(response.headers)
-    const contentType = headers['content-type'] || getContentTypeFromUrl(assetUrl)
-    const byteLimit = getInlineAssetByteLimit(assetUrl, contentType)
-    const contentLength = Number(headers['content-length'])
-    if (Number.isFinite(contentLength) && contentLength > byteLimit) return null
-
-    const bytes = chunkToUint8Array(await response.arrayBuffer())
-    if (bytes.byteLength > byteLimit) return null
-
-    return `data:${contentType};base64,${b4a.toString(bytes, 'base64')}`
-  } catch {
-    return null
-  }
 }
 
 class BareHeaders {

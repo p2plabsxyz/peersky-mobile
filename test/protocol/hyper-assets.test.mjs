@@ -8,6 +8,7 @@ import {
   getContentTypeFromUrl,
   getInlineAssetByteLimit,
   headersToObject,
+  inlineHyperAssets,
   isMalformedRangeHeader,
   normalizeDownloadFilename,
   resolveHyperAssetUrl,
@@ -99,6 +100,25 @@ test('preserves explicit image downloads before generic asset inlining', () => {
   assert.doesNotMatch(rewritten, /data:image/)
 })
 
+test('discovers and rewrites quoted and unquoted inline asset attributes', async () => {
+  const html = await inlineHyperAssets({
+    html: '<img src="./double.png"><img src=./plain.png><link href=\'hyper://example.com/theme.css\'>',
+    baseUrl,
+    fetch: async () => ({
+      ok: true,
+      headers: new Map([['content-type', 'image/png']]),
+      async arrayBuffer () {
+        return Uint8Array.of(1).buffer
+      }
+    }),
+    assetBaseUrl: 'http://127.0.0.1:45123',
+    assetAuthToken
+  })
+
+  assert.equal(html.match(/data:image\/png;base64,AQ==/g)?.length, 3)
+  assert.doesNotMatch(html, /(?:src|href)=data:/)
+})
+
 test('sanitizes proxied download filenames', () => {
   assert.equal(normalizeDownloadFilename('../bad"name.txt', 'hyper://example.com/fallback.txt'), '.._bad_name.txt')
   assert.equal(normalizeDownloadFilename('', 'hyper://example.com/report.pdf'), 'report.pdf')
@@ -131,6 +151,38 @@ test('uses larger inline limit for stylesheets only', () => {
   assert.equal(getInlineAssetByteLimit('hyper://example.com/app.css', ''), MAX_INLINE_STYLESHEET_BYTES)
   assert.equal(getInlineAssetByteLimit('hyper://example.com/app.bin', 'text/css'), MAX_INLINE_STYLESHEET_BYTES)
   assert.equal(getInlineAssetByteLimit('hyper://example.com/logo.png', 'image/png'), MAX_INLINE_ASSET_BYTES)
+})
+
+test('bounds total inlined bytes while fetching assets concurrently', async () => {
+  let activeFetches = 0
+  let maxActiveFetches = 0
+  const fetch = async () => {
+    activeFetches += 1
+    maxActiveFetches = Math.max(maxActiveFetches, activeFetches)
+
+    return {
+      ok: true,
+      headers: new Map([['content-type', 'image/png']]),
+      async arrayBuffer () {
+        await new Promise((resolve) => setTimeout(resolve, 5))
+        activeFetches -= 1
+        return Uint8Array.of(1).buffer
+      }
+    }
+  }
+
+  const html = await inlineHyperAssets({
+    html: [1, 2, 3, 4].map((index) => `<img src="./${index}.png">`).join(''),
+    baseUrl,
+    fetch,
+    assetBaseUrl: 'http://127.0.0.1:45123',
+    assetAuthToken,
+    maxTotalBytes: 2,
+    concurrency: 2
+  })
+
+  assert.equal(html.match(/data:image\/png;base64,AQ==/g)?.length, 2)
+  assert.equal(maxActiveFetches, 2)
 })
 
 test('normalizes iterable headers to lower-case object keys', () => {
