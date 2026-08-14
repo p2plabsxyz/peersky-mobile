@@ -16,16 +16,20 @@ A peer-to-peer mobile browser built with [Bare](https://github.com/holepunchto/b
 
 ## Features
 
-- Browser shell with address/search input, back/forward navigation, reload, and native page sharing.
-- Persistent multi-tab browsing with grid/list management, page previews, and close-all controls.
+- Browser shell with address/search input, history suggestions, home/back/forward navigation, reload, and native page sharing.
+- Persistent multi-tab browsing with grid/list management, page previews, swipe-to-close, and close-all/burn controls.
 - Local bookmarks with favicon support.
 - Per-tab zoom and Desktop View controls.
 - Browser download history and management.
+- Long-press actions for opening, previewing, sharing, and downloading web media.
 - Browser settings for search, appearance, accessibility, data clearing, and external app links.
+- Native camera, microphone, location, and notification permission handling.
+- Android system-back navigation, incoming web-link handling, and default-browser setup.
 - Native ad and tracker blocking with EasyList and EasyPrivacy.
 - `http://` and `https://` browsing through React Native WebView.
 - `hyper://` browsing through the Bare worklet and `hypercore-fetch`.
 - Hyper page asset support for CSS, images, scripts, audio, and video.
+- Encrypted identity transfer from PeerSky Desktop through Hyper.
 - Local app routes for bundled peer-to-peer tools:
   - `peersky://p2p/p2pmd/`
   - `peersky://holesail/`
@@ -94,6 +98,7 @@ npm run android
 - [Hyper protocol](docs/hyper.md)
 - [Holesail runtime](docs/holesail.md)
 - [P2PMD](docs/p2pmd.md)
+- [Link Device](docs/link-device.md)
 - [Testing guide](docs/testing.md)
 - [Content blocking](docs/content-blocking.md)
 
