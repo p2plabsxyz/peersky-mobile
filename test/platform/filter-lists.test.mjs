@@ -34,12 +34,19 @@ function createState (updatedAt = 1_000) {
 
 describe('content-blocking filter lists', () => {
   test('ships a validated and reproducible first-launch snapshot', () => {
+    const license = readFileSync(
+      new URL('../../assets/content-blocking/LICENSE', import.meta.url),
+      'utf8'
+    )
     const manifest = JSON.parse(readFileSync(
       new URL('../../assets/content-blocking/manifest.json', import.meta.url),
       'utf8'
     ))
     const state = createBundledFilterListState(manifest)
 
+    assert.match(license, /The EasyList authors/)
+    assert.match(license, /GNU General Public License version 3/)
+    assert.match(license, /Creative Commons Attribution-ShareAlike 3[.]0/)
     assert.ok(state)
     assert.deepEqual(state.lists.map(({ id }) => id), ['easylist', 'easyprivacy'])
     for (const record of state.lists) {

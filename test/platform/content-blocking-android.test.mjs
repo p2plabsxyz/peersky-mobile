@@ -102,7 +102,7 @@ describe('Android content blocking', () => {
     assert.match(setup, /EAS_BUILD_PLATFORM !== 'android'/)
     assert.equal(
       packageJson.scripts['eas-build-pre-install'],
-      'node scripts/setup-content-blocking.mjs --eas'
+      'node scripts/setup-content-blocking.mjs --eas && node scripts/update-content-blocking-snapshot.mjs'
     )
   })
 

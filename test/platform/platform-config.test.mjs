@@ -83,6 +83,7 @@ describe('mobile platform runtime configuration', () => {
     assert.equal(scripts.preandroid, 'npm run bundle:bare')
     assert.equal(scripts.preios, 'npm run bundle:bare')
     assert.match(scripts['bundle:bare'], /bare-pack/)
+    assert.match(scripts['bundle:bare'], /update:content-blocking-snapshot/)
     assert.match(scripts['bundle:bare'], /--host android-arm64/)
     assert.match(scripts['bundle:bare'], /--host android-x64/)
     assert.match(scripts['bundle:bare'], /--host ios-arm64/)

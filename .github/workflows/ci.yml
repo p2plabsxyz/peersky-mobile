@@ -47,11 +47,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Typecheck
-        run: npx tsc --noEmit
-
       - name: Run runtime and bundle tests
         run: npm test
+
+      - name: Typecheck
+        run: npx tsc --noEmit
 
       - name: Run live Holesail integration test
         run: npm run test:holesail:live
@@ -81,6 +81,9 @@ jobs:
 
       - name: Install Rust Android tooling
         run: npm run setup:content-blocking
+
+      - name: Fetch content-blocking snapshot
+        run: npm run update:content-blocking-snapshot
 
       - name: Generate Android project
         run: npx expo prebuild --platform android --no-install

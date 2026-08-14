@@ -1,4 +1,4 @@
-import { mkdir, rename, rm, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, rename, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -20,6 +20,10 @@ await mkdir(temporaryDirectory, { recursive: true })
 
 let previousSnapshotMoved = false
 try {
+  await copyFile(
+    path.join(outputDirectory, 'LICENSE'),
+    path.join(temporaryDirectory, 'LICENSE')
+  )
   const lists = []
   for (const source of FILTER_LIST_SOURCES) {
     const bytes = await downloadBoundedList(source)

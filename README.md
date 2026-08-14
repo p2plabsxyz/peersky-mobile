@@ -80,6 +80,11 @@ npm run setup:content-blocking
 EAS Android builds run this setup automatically through the
 `eas-build-pre-install` hook. The hook is skipped for iOS builds.
 
+Builds fetch and validate the current EasyList and EasyPrivacy snapshots before
+bundling them into the app. The generated files are not stored in Git, so the
+first build requires network access; the resulting app can initialize protection
+offline.
+
 ```sh
 npm run android
 ```

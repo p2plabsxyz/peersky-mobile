@@ -15,4 +15,6 @@ npm-debug.*
 web-build/
 .DS_Store
 app/app.bundle.mjs
+assets/content-blocking/*.txt
+assets/content-blocking/manifest.json
 .idea

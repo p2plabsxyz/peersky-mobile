@@ -2,17 +2,17 @@
 
 PeerSky Mobile blocks network-level advertising and tracking requests before WebView sends them. Android evaluates HTTP and HTTPS subresource requests with Brave's Rust ad-blocking engine. iOS converts the supported EasyList and EasyPrivacy network-rule subset into native WebKit rules and attaches compiled `WKContentRuleList` instances before navigation. Main-frame navigation is not blocked.
 
-PeerSky packages a validated EasyList and EasyPrivacy snapshot so protection can initialize on a first launch without network access. The packaged files are copied into the app document directory, loaded natively, and checked automatically for refresh when older than seven days. Updates use only the fixed HTTPS sources below, enforce a 30-second timeout and a 12 MB decoded-size limit per list, and validate the Adblock header before activation. New snapshots become active only after the native engine accepts them, so malformed, partial, unavailable, or rejected updates keep the last known good rules.
+PeerSky fetches and validates EasyList and EasyPrivacy at build time, then packages that snapshot so protection can initialize on a first launch without network access. The packaged files are copied into the app document directory, loaded natively, and checked automatically for refresh when older than seven days. Updates use only the fixed HTTPS sources below, enforce a 30-second timeout and a 12 MB decoded-size limit per list, and validate the Adblock header before activation. New snapshots become active only after the native engine accepts them, so malformed, partial, unavailable, or rejected updates keep the last known good rules.
 
 The Privacy settings page provides a global protection switch, the active filter-list status, and a manual update action. Turning protection off is persisted across launches. Manual update failures leave the current validated snapshot active and report the failure in Settings.
 
-The active metadata records the immutable snapshot identifier, update timestamp, source URL, upstream list version, filename, and byte size. Maintainers can reproducibly refresh the packaged first-launch snapshot with:
+The active metadata records the immutable snapshot identifier, update timestamp, source URL, upstream list version, filename, and byte size. Builds generate the packaged first-launch snapshot with:
 
 ```sh
 npm run update:content-blocking-snapshot
 ```
 
-The generated files and manifest live in `assets/content-blocking/`. They must be reviewed together when updated.
+The generated list files and manifest live in `assets/content-blocking/` but are ignored by Git because upstream data changes frequently. The tracked `assets/content-blocking/LICENSE` file records the upstream terms and is preserved whenever the snapshot is regenerated. `npm run bundle:bare`, `npm test`, and EAS builds generate the snapshot automatically; direct native prebuilds must run the update command first.
 
 ## Android setup
 
@@ -66,4 +66,4 @@ Automated tests cover source and state validation, expiry, bounded transfers, pa
 - [`brave/adblock-rust`](https://github.com/brave/adblock-rust), licensed under Mozilla Public License 2.0.
 - [EasyList and EasyPrivacy](https://easylist.to/pages/licence.html), maintained by the EasyList authors and dual-licensed under GPL-3.0-or-later or CC BY-SA 3.0-or-later.
 
-The packaged snapshots retain their upstream headers and licence notices. Their exact source URLs, versions, generation time, and byte sizes are recorded in `assets/content-blocking/manifest.json`.
+The packaged snapshots retain their upstream headers and licence notices. A local copy of their attribution and licence choices is stored in `assets/content-blocking/LICENSE`; their exact source URLs, versions, generation time, and byte sizes are recorded in `assets/content-blocking/manifest.json`.
