@@ -79,18 +79,18 @@ export function rewriteHyperAssetAttributes (html, baseUrl, replacements) {
   )
 }
 
-export function rewriteHyperMediaAttributes (html, baseUrl, assetBaseUrl) {
+export function rewriteHyperMediaAttributes (html, baseUrl, assetBaseUrl, authToken) {
   return html.replace(
     /\b(src|href)(\s*=\s*)(["'])([^"']+)\3/gi,
     (match, name, separator, quote, source) => {
       const assetUrl = resolveHyperAssetUrl(source, baseUrl)
       if (!assetUrl || !shouldProxyMediaAsset(source, assetUrl)) return match
-      return `${name}${separator}${quote}${createProxyAssetUrl(assetBaseUrl, assetUrl)}${quote}`
+      return `${name}${separator}${quote}${createProxyAssetUrl(assetBaseUrl, assetUrl, authToken)}${quote}`
     }
   )
 }
 
-export function rewriteHyperDownloadAttributes (html, baseUrl, assetBaseUrl) {
+export function rewriteHyperDownloadAttributes (html, baseUrl, assetBaseUrl, authToken) {
   return html.replace(/<a\b(?:[^"'<>]|"[^"]*"|'[^']*')*>/gi, (tag) => {
     const attributes = parseHtmlTagAttributes(tag)
     const download = attributes.find(({ name }) => name === 'download')
@@ -102,13 +102,17 @@ export function rewriteHyperDownloadAttributes (html, baseUrl, assetBaseUrl) {
     const assetUrl = resolveHyperAssetUrl(href.value, baseUrl)
     if (!assetUrl) return tag
 
-    const proxyUrl = createProxyAssetUrl(assetBaseUrl, assetUrl, download.value)
+    const proxyUrl = createProxyAssetUrl(assetBaseUrl, assetUrl, authToken, download.value)
     return `${tag.slice(0, href.valueStart)}${proxyUrl}${tag.slice(href.valueEnd)}`
   })
 }
 
-export function createProxyAssetUrl (assetBaseUrl, assetUrl, downloadName) {
-  const params = [`url=${encodeURIComponent(assetUrl)}`]
+export function createProxyAssetUrl (assetBaseUrl, assetUrl, authToken, downloadName) {
+  if (!authToken) throw new Error('Missing Hyper asset proxy token')
+  const params = [
+    `token=${encodeURIComponent(authToken)}`,
+    `url=${encodeURIComponent(assetUrl)}`
+  ]
   if (downloadName !== undefined) {
     params.push('download=1')
     if (downloadName) params.push(`name=${encodeURIComponent(downloadName)}`)

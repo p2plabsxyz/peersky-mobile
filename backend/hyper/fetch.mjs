@@ -82,7 +82,8 @@ export async function fetchHyper ({
           html: body,
           baseUrl: response.url || url,
           fetch,
-          assetBaseUrl: proxyServer.localUrl
+          assetBaseUrl: proxyServer.localUrl,
+          assetAuthToken: proxyServer.authToken
         })
       }
 
@@ -266,9 +267,10 @@ async function inlineHyperAssets ({
   html,
   baseUrl,
   fetch,
-  assetBaseUrl
+  assetBaseUrl,
+  assetAuthToken
 }) {
-  const rewrittenDownloads = rewriteHyperDownloadAttributes(html, baseUrl, assetBaseUrl)
+  const rewrittenDownloads = rewriteHyperDownloadAttributes(html, baseUrl, assetBaseUrl, assetAuthToken)
   const replacements = new Map()
   let assetCount = 0
 
@@ -288,7 +290,8 @@ async function inlineHyperAssets ({
   const rewrittenAssets = rewriteHyperMediaAttributes(
     rewriteHyperAssetAttributes(rewrittenDownloads, baseUrl, replacements),
     baseUrl,
-    assetBaseUrl
+    assetBaseUrl,
+    assetAuthToken
   )
   return rewrittenAssets
 }

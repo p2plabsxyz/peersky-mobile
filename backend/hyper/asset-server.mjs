@@ -1,4 +1,6 @@
 import http from 'bare-http1'
+import b4a from 'b4a'
+import { randomBytes } from 'node:crypto'
 import { createHyperAssetServer } from './asset-server-core.mjs'
 
 let assetServer = null
@@ -12,7 +14,8 @@ export async function startHyperAssetServer (fetch) {
   return withAssetServerTransition(async () => {
     if (assetServer && assetServerInfo) return assetServerInfo
 
-    const instance = createHyperAssetServer({ fetch, httpImpl: http })
+    const authToken = b4a.toString(randomBytes(32), 'hex')
+    const instance = createHyperAssetServer({ fetch, httpImpl: http, authToken })
 
     try {
       const address = await listen(instance)
@@ -26,7 +29,8 @@ export async function startHyperAssetServer (fetch) {
       assetServerInfo = {
         host: HYPER_ASSET_HOST,
         port,
-        localUrl: `http://${HYPER_ASSET_HOST}:${port}`
+        localUrl: `http://${HYPER_ASSET_HOST}:${port}`,
+        authToken
       }
 
       return assetServerInfo

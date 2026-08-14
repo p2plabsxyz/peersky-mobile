@@ -12,18 +12,32 @@ const HYPER_ASSET_HOST = '127.0.0.1'
 
 export function createHyperAssetServer ({
   fetch,
-  httpImpl
+  httpImpl,
+  authToken
 }) {
   if (!httpImpl || typeof httpImpl.createServer !== 'function') {
     throw new Error('Missing HTTP implementation for Hyper asset server')
   }
+  if (typeof authToken !== 'string' || authToken.length < 32) {
+    throw new Error('Missing auth token for Hyper asset server')
+  }
 
   return httpImpl.createServer((req, res) => {
-    handleHyperAssetRequest(req, res, fetch)
+    handleHyperAssetRequest(req, res, fetch, authToken)
   })
 }
 
-function handleHyperAssetRequest (req, res, fetch) {
+function handleHyperAssetRequest (req, res, fetch, authToken) {
+  const requestUrl = new URL(String(req.url || '/'), `http://${HYPER_ASSET_HOST}`)
+  if (requestUrl.pathname !== '/asset') {
+    sendAssetText(res, 404, 'Not found')
+    return
+  }
+  if (requestUrl.searchParams.get('token') !== authToken) {
+    sendAssetText(res, 401, 'Unauthorized')
+    return
+  }
+
   if (req.method === 'OPTIONS') {
     sendAssetEmpty(res, 204)
     return
@@ -31,12 +45,6 @@ function handleHyperAssetRequest (req, res, fetch) {
 
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     sendAssetText(res, 405, 'Method not allowed')
-    return
-  }
-
-  const requestUrl = new URL(String(req.url || '/'), `http://${HYPER_ASSET_HOST}`)
-  if (requestUrl.pathname !== '/asset') {
-    sendAssetText(res, 404, 'Not found')
     return
   }
 
