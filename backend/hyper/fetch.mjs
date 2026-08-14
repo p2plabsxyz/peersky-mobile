@@ -238,7 +238,7 @@ async function getHyperFetch (runtime) {
 
   hyperFetch = await makeHyperFetch({
     sdk: runtime,
-    writable: true
+    writable: false
   })
 
   return hyperFetch
