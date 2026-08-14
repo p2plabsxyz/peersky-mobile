@@ -1,4 +1,4 @@
-import { readHyperFile, uploadHyperFile } from '../hyper/drive.mjs'
+import { readHyperFile } from '../hyper/drive.mjs'
 import {
   applyDocumentUpdate,
   getEncodedDocumentState,
@@ -286,21 +286,6 @@ function handleRequest (req, res) {
           ok: true,
           html: renderMarkdownPreview(body.content)
         })
-      })
-      .catch((error) => {
-        sendJson(res, error.statusCode || 400, {
-          ok: false,
-          error: error.message
-        })
-      })
-    return
-  }
-
-  if (req.method === 'POST' && pathname === '/hyper/image') {
-    readJsonBody(req)
-      .then(async (body) => {
-        const result = await uploadHyperFile(body)
-        sendJson(res, result.ok ? 200 : 400, result)
       })
       .catch((error) => {
         sendJson(res, error.statusCode || 400, {
