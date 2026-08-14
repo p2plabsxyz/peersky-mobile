@@ -28,7 +28,7 @@ describe('browser tab state helpers', () => {
     assert.equal(state.tabs.length, 1)
     assert.equal(state.activeTabId, 'tab-1')
     assert.equal(state.viewMode, 'grid')
-    assert.equal(active.title, 'PeerSky')
+    assert.equal(active.title, 'New tab')
     assert.deepEqual(active.history, [
       { url: BROWSER_HOME_URL, source: { kind: 'home' } }
     ])

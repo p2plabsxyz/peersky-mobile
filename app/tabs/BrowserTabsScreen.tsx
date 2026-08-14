@@ -4,6 +4,7 @@ import {
   Animated,
   FlatList,
   Image,
+  type ImageSourcePropType,
   LayoutAnimation,
   Modal,
   PanResponder,
@@ -22,14 +23,17 @@ import FireIcon from '../../assets/icons/bootstrap/fire.svg'
 import GridIcon from '../../assets/icons/bootstrap/grid.svg'
 import ListIcon from '../../assets/icons/bootstrap/list-ul.svg'
 import PlusIcon from '../../assets/icons/bootstrap/plus-lg.svg'
-import CloseIcon from '../../assets/icons/bootstrap/x-lg.svg'
+import CloseIcon from '../../assets/icons/bootstrap/x-circle.svg'
+
+const TAB_ACTION_ICON_SIZE = 21
+const TAB_ACTION_ICON_STROKE_WIDTH = 0.35
 
 if (Platform.OS === 'android') {
   UIManager.setLayoutAnimationEnabledExperimental?.(true)
 }
 
 type BrowserTabManagerItem = {
-  favicon: string | null
+  favicon: ImageSourcePropType | string | null
   id: string
   isActive: boolean
   label: string
@@ -46,7 +50,7 @@ type BrowserTabsPalette = {
 }
 
 type TabFaviconProps = {
-  favicon: string | null
+  favicon: ImageSourcePropType | string | null
   label: string
   palette: BrowserTabsPalette
   size: 'header' | 'preview'
@@ -84,6 +88,18 @@ export function BrowserTabsScreen ({
   onToggleView
 }: BrowserTabsScreenProps) {
   const isList = viewMode === 'list'
+  const actionIconProps = {
+    color: palette.text,
+    height: TAB_ACTION_ICON_SIZE,
+    stroke: palette.text,
+    strokeWidth: TAB_ACTION_ICON_STROKE_WIDTH,
+    width: TAB_ACTION_ICON_SIZE
+  }
+  const primaryActionIconProps = {
+    ...actionIconProps,
+    color: '#ffffff',
+    stroke: '#ffffff'
+  }
   const closeTab = (tabId: string) => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut)
     onCloseTab(tabId)
@@ -114,8 +130,8 @@ export function BrowserTabsScreen ({
               onPress={onToggleView}
             >
               {isList
-                ? <GridIcon width={20} height={20} color={palette.text} />
-                : <ListIcon width={20} height={20} color={palette.text} />}
+                ? <GridIcon {...actionIconProps} />
+                : <ListIcon {...actionIconProps} />}
             </Pressable>
             <Pressable
               accessibilityLabel='Burn tabs and cached data'
@@ -123,7 +139,7 @@ export function BrowserTabsScreen ({
               style={styles.browserTabsBurnButton}
               onPress={onBurnTabs}
             >
-              <FireIcon width={20} height={20} color='#ffffff' />
+              <FireIcon {...primaryActionIconProps} />
             </Pressable>
             <Pressable
               accessibilityLabel='Close all tabs'
@@ -131,7 +147,7 @@ export function BrowserTabsScreen ({
               style={[styles.browserTabsViewButton, { backgroundColor: palette.button }]}
               onPress={onCloseAllTabs}
             >
-              <CloseIcon width={20} height={20} color={palette.text} />
+              <CloseIcon {...actionIconProps} />
             </Pressable>
             <Pressable
               accessibilityLabel='Open new tab'
@@ -144,7 +160,7 @@ export function BrowserTabsScreen ({
               onPress={onNewTab}
               disabled={newTabDisabled}
             >
-              <PlusIcon width={20} height={20} color='#ffffff' />
+              <PlusIcon {...primaryActionIconProps} />
             </Pressable>
           </View>
         </View>
@@ -250,7 +266,7 @@ export function BrowserTabsScreen ({
                 style={[styles.browserTabCardClose, { backgroundColor: palette.button }]}
                 onPress={() => closeTab(item.id)}
               >
-                <CloseIcon width={16} height={16} color={palette.text} />
+                <CloseIcon {...actionIconProps} width={17} height={17} />
               </Pressable>
             </SwipeableTabCard>
           )}
@@ -338,7 +354,10 @@ function TabFavicon ({
   size
 }: TabFaviconProps) {
   const [failedUri, setFailedUri] = useState<string | null>(null)
-  const canRenderFavicon = Boolean(favicon && favicon !== failedUri)
+  const faviconUri = typeof favicon === 'string' ? favicon : null
+  const canRenderFavicon = Boolean(
+    favicon && (faviconUri === null || faviconUri !== failedUri)
+  )
 
   useEffect(() => {
     setFailedUri(null)
@@ -348,11 +367,11 @@ function TabFavicon ({
     return (
       <Image
         accessibilityIgnoresInvertColors
-        source={{ uri: favicon as string }}
+        source={faviconUri ? { uri: faviconUri } : favicon as ImageSourcePropType}
         style={size === 'header'
           ? styles.browserTabCardHeaderFavicon
           : styles.browserTabCardFavicon}
-        onError={() => setFailedUri(favicon)}
+        onError={() => setFailedUri(faviconUri)}
       />
     )
   }

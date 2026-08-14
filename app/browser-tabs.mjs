@@ -18,7 +18,7 @@ const INTERNAL_APP_URLS = {
   p2pmd: 'peersky://p2p/p2pmd/'
 }
 
-export function createBrowserTab (id, title = 'PeerSky') {
+export function createBrowserTab (id, title = 'New tab') {
   return {
     id,
     title,
@@ -67,7 +67,7 @@ export function addBrowserTabState (state) {
   }
 }
 
-export function addBackgroundBrowserTabState (state, url, title = 'PeerSky') {
+export function addBackgroundBrowserTabState (state, url, title = 'New tab') {
   const previousActiveTabId = state.activeTabId
   const nextState = addBrowserTabState(state)
   if (nextState === state) return state

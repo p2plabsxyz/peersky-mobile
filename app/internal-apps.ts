@@ -14,6 +14,8 @@ const INTERNAL_APP_ICONS: Partial<Record<RuntimeTab, ImageSourcePropType>> = {
   p2pmd: require('../assets/images/p2pmd.png')
 }
 
+export const BROWSER_HOME_ICON: ImageSourcePropType = require('../assets/images/icon.png')
+
 export const INTERNAL_APPS = (INTERNAL_APP_REGISTRY as Array<{
   id: RuntimeTab
   title: string
@@ -34,4 +36,8 @@ export function getRuntimeAppFromUrl (targetUrl: string) {
 
 export function getRuntimeAppTitle (app: RuntimeTab) {
   return getRuntimeAppRegistryTitle(app)
+}
+
+export function getRuntimeAppIconSource (app: RuntimeTab) {
+  return INTERNAL_APP_ICONS[app] || null
 }

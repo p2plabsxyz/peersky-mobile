@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native'
+import { Modal, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import CheckIcon from '../../assets/icons/bootstrap/check2.svg'
 import DisplayIcon from '../../assets/icons/bootstrap/display.svg'
@@ -9,7 +9,7 @@ import ReloadIcon from '../../assets/icons/bootstrap/arrow-clockwise.svg'
 import BookmarksIcon from '../../assets/icons/bootstrap/bookmarks.svg'
 import GearIcon from '../../assets/icons/bootstrap/gear.svg'
 import PlusIcon from '../../assets/icons/bootstrap/plus-lg.svg'
-import ShareIcon from '../../assets/icons/bootstrap/share.svg'
+import ShareIcon from '../../assets/icons/bootstrap/arrow-bar-up.svg'
 import StarFillIcon from '../../assets/icons/bootstrap/star-fill.svg'
 import StarIcon from '../../assets/icons/bootstrap/star.svg'
 import ZoomIcon from '../../assets/icons/bootstrap/zoom-in.svg'
@@ -17,6 +17,7 @@ import { BROWSER_PALETTES } from '../browser-appearance.mjs'
 
 const MENU_ICON_SIZE = 18
 const QUICK_ACTION_ICON_SIZE = 22
+const MENU_ICON_STROKE_WIDTH = 0.35
 
 type BrowserOverflowMenuProps = {
   bookmarkActionAvailable?: boolean
@@ -67,7 +68,22 @@ export function BrowserOverflowMenu ({
   onToggleDesktopView,
   onToggleBookmark
 }: BrowserOverflowMenuProps) {
+  const { height: windowHeight } = useWindowDimensions()
   const iconColor = isDark ? BROWSER_PALETTES.dark.text : BROWSER_PALETTES.light.text
+  const menuIconProps = {
+    color: iconColor,
+    height: MENU_ICON_SIZE,
+    stroke: iconColor,
+    strokeWidth: MENU_ICON_STROKE_WIDTH,
+    width: MENU_ICON_SIZE
+  }
+  const quickActionIconProps = {
+    color: iconColor,
+    height: QUICK_ACTION_ICON_SIZE,
+    stroke: iconColor,
+    strokeWidth: MENU_ICON_STROKE_WIDTH,
+    width: QUICK_ACTION_ICON_SIZE
+  }
 
   return (
     <>
@@ -92,26 +108,30 @@ export function BrowserOverflowMenu ({
       >
         <SafeAreaView style={styles.overlay} edges={['top', 'left', 'right', 'bottom']}>
           <Pressable accessibilityLabel='Close browser menu' style={styles.backdrop} onPress={onClose} />
-          <View style={[
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            style={[
             styles.menu,
             position === 'bottom' ? { bottom: offset } : { top: offset },
+            { maxHeight: Math.max(180, windowHeight - offset - 20) },
             isDark ? darkStyles.menu : null
-          ]}>
+          ]}
+          >
             {bookmarkActionAvailable && onToggleBookmark && onReload && (
               <View style={[styles.quickActions, isDark ? darkStyles.divider : null]}>
                 <QuickAction
                   accessibilityLabel={isBookmarked ? 'Remove Bookmark' : 'Add Bookmark'}
                   disabled={bookmarksDisabled}
                   icon={isBookmarked
-                    ? <StarFillIcon width={QUICK_ACTION_ICON_SIZE} height={QUICK_ACTION_ICON_SIZE} color={iconColor} />
-                    : <StarIcon width={QUICK_ACTION_ICON_SIZE} height={QUICK_ACTION_ICON_SIZE} color={iconColor} />}
+                    ? <StarFillIcon {...quickActionIconProps} />
+                    : <StarIcon {...quickActionIconProps} />}
                   isDark={isDark}
                   onPress={onToggleBookmark}
                   selected={isBookmarked}
                 />
                 <QuickAction
                   accessibilityLabel='Reload page'
-                  icon={<ReloadIcon width={QUICK_ACTION_ICON_SIZE} height={QUICK_ACTION_ICON_SIZE} color={iconColor} />}
+                  icon={<ReloadIcon {...quickActionIconProps} />}
                   isDark={isDark}
                   onPress={onReload}
               />
@@ -120,14 +140,14 @@ export function BrowserOverflowMenu ({
             {shareActionAvailable && onSharePage && (
               <>
                 <MenuItem
-                  icon={<ShareIcon width={MENU_ICON_SIZE} height={MENU_ICON_SIZE} color={iconColor} />}
+                  icon={<ShareIcon {...menuIconProps} />}
                   isDark={isDark}
                   label='Share'
                   onPress={onSharePage}
                 />
                 {onOpenZoom && (
                   <MenuItem
-                    icon={<ZoomIcon width={MENU_ICON_SIZE} height={MENU_ICON_SIZE} color={iconColor} />}
+                    icon={<ZoomIcon {...menuIconProps} />}
                     isDark={isDark}
                     label='Zoom'
                     onPress={onOpenZoom}
@@ -135,7 +155,7 @@ export function BrowserOverflowMenu ({
                 )}
                 {onToggleDesktopView && (
                   <MenuItem
-                    icon={<DisplayIcon width={MENU_ICON_SIZE} height={MENU_ICON_SIZE} color={iconColor} />}
+                    icon={<DisplayIcon {...menuIconProps} />}
                     isDark={isDark}
                     label='Desktop View'
                     onPress={onToggleDesktopView}
@@ -146,37 +166,37 @@ export function BrowserOverflowMenu ({
             )}
             <MenuItem
               disabled={newTabDisabled}
-              icon={<PlusIcon width={MENU_ICON_SIZE} height={MENU_ICON_SIZE} color={iconColor} />}
+              icon={<PlusIcon {...menuIconProps} />}
               isDark={isDark}
               label='New Tab'
               onPress={onNewTab}
             />
             <MenuItem
               disabled={bookmarksDisabled}
-              icon={<BookmarksIcon width={MENU_ICON_SIZE} height={MENU_ICON_SIZE} color={iconColor} />}
+              icon={<BookmarksIcon {...menuIconProps} />}
               isDark={isDark}
               label='Bookmarks'
               onPress={onOpenBookmarks}
             />
             <MenuItem
-              icon={<HistoryIcon width={MENU_ICON_SIZE} height={MENU_ICON_SIZE} color={iconColor} />}
+              icon={<HistoryIcon {...menuIconProps} />}
               isDark={isDark}
               label='History'
               onPress={onOpenHistory}
             />
             <MenuItem
-              icon={<DownloadIcon width={MENU_ICON_SIZE} height={MENU_ICON_SIZE} color={iconColor} />}
+              icon={<DownloadIcon {...menuIconProps} />}
               isDark={isDark}
               label='Downloads'
               onPress={onOpenDownloads}
             />
             <MenuItem
-              icon={<GearIcon width={MENU_ICON_SIZE} height={MENU_ICON_SIZE} color={iconColor} />}
+              icon={<GearIcon {...menuIconProps} />}
               isDark={isDark}
               label='Settings'
               onPress={onOpenSettings}
             />
-          </View>
+          </ScrollView>
         </SafeAreaView>
       </Modal>
     </>
@@ -249,7 +269,13 @@ function MenuItem ({
       <View style={styles.menuItemIcon}>{icon}</View>
       <Text style={[styles.menuItemText, isDark ? darkStyles.menuItemText : null]}>{label}</Text>
       {selected && (
-        <CheckIcon width={MENU_ICON_SIZE} height={MENU_ICON_SIZE} color={isDark ? BROWSER_PALETTES.dark.text : BROWSER_PALETTES.light.text} />
+        <CheckIcon
+          width={MENU_ICON_SIZE}
+          height={MENU_ICON_SIZE}
+          color={isDark ? BROWSER_PALETTES.dark.text : BROWSER_PALETTES.light.text}
+          stroke={isDark ? BROWSER_PALETTES.dark.text : BROWSER_PALETTES.light.text}
+          strokeWidth={MENU_ICON_STROKE_WIDTH}
+        />
       )}
     </Pressable>
   )

@@ -305,13 +305,14 @@ export const styles = StyleSheet.create({
   browserShortcutIcon: {
     alignItems: 'center',
     borderRadius: 18,
-    height: 64,
+    height: 72,
     justifyContent: 'center',
-    width: 64
+    overflow: 'hidden',
+    width: 72
   },
   browserShortcutIconImage: {
-    height: 64,
-    width: 64
+    height: 90,
+    width: 90
   },
   browserShortcutIconP2pmd: {
     backgroundColor: '#2f80ed'
@@ -329,9 +330,9 @@ export const styles = StyleSheet.create({
   },
   browserShortcutTitle: {
     color: '#1d2943',
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: '700',
-    lineHeight: 16,
+    lineHeight: 18,
     textAlign: 'center'
   },
   browserShortcutUrl: {

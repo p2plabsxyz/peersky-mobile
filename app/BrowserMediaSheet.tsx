@@ -5,10 +5,12 @@ import { WebView } from 'react-native-webview'
 import DisplayIcon from '../assets/icons/bootstrap/display.svg'
 import DownloadIcon from '../assets/icons/bootstrap/download.svg'
 import PlusIcon from '../assets/icons/bootstrap/plus-lg.svg'
-import ShareIcon from '../assets/icons/bootstrap/share.svg'
-import XIcon from '../assets/icons/bootstrap/x-lg.svg'
+import ShareIcon from '../assets/icons/bootstrap/arrow-bar-up.svg'
+import XIcon from '../assets/icons/bootstrap/x-circle.svg'
 import { BROWSER_PALETTES } from './browser-appearance.mjs'
 import { isDownloadableBrowserMediaUrl } from './browser-media.mjs'
+
+const MEDIA_ACTION_ICON_STROKE_WIDTH = 0.35
 
 export type BrowserMediaTarget = {
   kind: 'image' | 'video' | 'link'
@@ -66,7 +68,7 @@ export function BrowserMediaSheet ({
               hitSlop={10}
               onPress={() => setPreviewVisible(false)}
             >
-              <XIcon width={22} height={22} color={iconColor} />
+              <XIcon width={22} height={22} color={iconColor} stroke={iconColor} strokeWidth={MEDIA_ACTION_ICON_STROKE_WIDTH} />
             </Pressable>
           </View>
           <WebView
@@ -100,7 +102,7 @@ export function BrowserMediaSheet ({
               </Text>
             </View>
             <Pressable accessibilityLabel='Close media actions' accessibilityRole='button' hitSlop={10} onPress={onClose}>
-              <XIcon width={20} height={20} color={iconColor} />
+              <XIcon width={20} height={20} color={iconColor} stroke={iconColor} strokeWidth={MEDIA_ACTION_ICON_STROKE_WIDTH} />
             </Pressable>
           </View>
 
@@ -149,7 +151,7 @@ export function BrowserMediaSheet ({
           )}
           {primaryUrl && (
             <Action
-              icon={<ShareIcon width={20} height={20} color={iconColor} />}
+              icon={<ShareIcon width={20} height={20} color={iconColor} stroke={iconColor} strokeWidth={MEDIA_ACTION_ICON_STROKE_WIDTH} />}
               isDark={isDark}
               label={`Share ${target.kind === 'link' ? 'link' : `${mediaLabel} link`}`}
               onPress={() => {

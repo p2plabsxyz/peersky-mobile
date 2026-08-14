@@ -66,8 +66,8 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
     zIndex: 20
   },
-  above: { bottom: '100%' },
-  below: { top: '100%' },
+  above: { bottom: '100%', marginBottom: 8 },
+  below: { marginTop: 8, top: '100%' },
   row: { alignItems: 'center', flexDirection: 'row', gap: 12, minHeight: 54, paddingHorizontal: 14 },
   copy: { flex: 1 },
   title: { fontSize: 14, fontWeight: '600' },

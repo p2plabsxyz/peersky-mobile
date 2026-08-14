@@ -8,6 +8,7 @@ import {
   TextInput,
   View
 } from 'react-native'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { MAX_BROWSER_URL_LENGTH } from './browser-shell.mjs'
 import { formatBrowserAddress } from './browser-appearance.mjs'
 import { BrowserOverflowMenu } from './settings/BrowserOverflowMenu'
@@ -15,12 +16,13 @@ import { HistorySuggestions } from './history/HistorySuggestions'
 import type { BrowserHistoryItem } from './history/useBrowserHistory'
 import { styles } from './styles'
 import ReloadIcon from '../assets/icons/bootstrap/arrow-clockwise.svg'
-import BackIcon from '../assets/icons/bootstrap/chevron-left.svg'
-import ForwardIcon from '../assets/icons/bootstrap/chevron-right.svg'
+import BackIcon from '../assets/icons/bootstrap/arrow-left.svg'
+import ForwardIcon from '../assets/icons/bootstrap/arrow-right.svg'
 import HomeIcon from '../assets/icons/bootstrap/house.svg'
-import ShareIcon from '../assets/icons/bootstrap/share.svg'
+import ShareIcon from '../assets/icons/bootstrap/arrow-bar-up.svg'
 
-const TOOLBAR_ICON_SIZE = 18
+const TOOLBAR_ICON_SIZE = 20
+const TOOLBAR_ICON_STROKE_WIDTH = 0.35
 
 type BrowserToolbarProps = {
   activeTabId: string
@@ -110,6 +112,7 @@ export function BrowserToolbar ({
   onToggleDesktopView,
   onToggleBookmark
 }: BrowserToolbarProps) {
+  const insets = useSafeAreaInsets()
   const [isAddressFocused, setIsAddressFocused] = useState(false)
   const [menuOffset, setMenuOffset] = useState(70)
   const addressInputRef = useRef<TextInput>(null)
@@ -146,7 +149,9 @@ export function BrowserToolbar ({
       styles.browserToolbar,
       {
         backgroundColor: palette.shell,
-        borderBottomColor: palette.border
+        borderBottomColor: palette.border,
+        paddingLeft: 14 + insets.left,
+        paddingRight: 14 + insets.right
       },
       position === 'bottom'
           ? {
@@ -192,6 +197,8 @@ export function BrowserToolbar ({
           width={TOOLBAR_ICON_SIZE}
           height={TOOLBAR_ICON_SIZE}
           color={palette.text}
+          stroke={palette.text}
+          strokeWidth={TOOLBAR_ICON_STROKE_WIDTH}
         />
       </Pressable>
       <Pressable
@@ -207,6 +214,8 @@ export function BrowserToolbar ({
           width={TOOLBAR_ICON_SIZE}
           height={TOOLBAR_ICON_SIZE}
           color={palette.text}
+          stroke={palette.text}
+          strokeWidth={TOOLBAR_ICON_STROKE_WIDTH}
         />
       </Pressable>
       <Pressable
@@ -219,6 +228,8 @@ export function BrowserToolbar ({
           width={TOOLBAR_ICON_SIZE}
           height={TOOLBAR_ICON_SIZE}
           color={palette.text}
+          stroke={palette.text}
+          strokeWidth={TOOLBAR_ICON_STROKE_WIDTH}
         />
       </Pressable>
       </Animated.View>
@@ -268,6 +279,8 @@ export function BrowserToolbar ({
                     width={TOOLBAR_ICON_SIZE}
                     height={TOOLBAR_ICON_SIZE}
                     color={palette.text}
+                    stroke={palette.text}
+                    strokeWidth={TOOLBAR_ICON_STROKE_WIDTH}
                   />
                   )}
             </Pressable>
@@ -281,6 +294,8 @@ export function BrowserToolbar ({
                 width={TOOLBAR_ICON_SIZE}
                 height={TOOLBAR_ICON_SIZE}
                 color={palette.text}
+                stroke={palette.text}
+                strokeWidth={TOOLBAR_ICON_STROKE_WIDTH}
               />
             </Pressable>
           </View>

@@ -83,9 +83,11 @@ import {
   parseExternalAppLink
 } from './browser-permissions.mjs'
 import {
+  BROWSER_HOME_ICON,
   INTERNAL_APPS,
   type RuntimeTab,
   getRuntimeAppFromUrl,
+  getRuntimeAppIconSource,
   getRuntimeAppTitle,
   getRuntimeAppUrl
 } from './internal-apps'
@@ -232,7 +234,7 @@ export default function App () {
   const [identityStoragePath, setIdentityStoragePath] = useState('')
   const [browserAddress, setBrowserAddress] = useState('')
   const [browserCurrentUrl, setBrowserCurrentUrl] = useState(BROWSER_HOME_URL)
-  const [browserTitle, setBrowserTitle] = useState('PeerSky')
+  const [browserTitle, setBrowserTitle] = useState('New tab')
   const [browserFavicon, setBrowserFavicon] = useState<string | null>(null)
   const [browserSource, setBrowserSource] = useState<BrowserSource>({ kind: 'home' })
   const [browserHistory, setBrowserHistory] = useState<BrowserHistoryEntry[]>([
@@ -877,7 +879,7 @@ export default function App () {
 
     if (url === BROWSER_HOME_URL) {
       replaceBrowserEntry(BROWSER_HOME_URL, { kind: 'home' })
-      setBrowserTitle('PeerSky')
+      setBrowserTitle('New tab')
       return
     }
 
@@ -997,7 +999,7 @@ export default function App () {
 
   function openBrowserHome () {
     commitBrowserEntry(BROWSER_HOME_URL, { kind: 'home' })
-    setBrowserTitle('PeerSky')
+    setBrowserTitle('New tab')
     setStatus('Browser home')
   }
 
@@ -1175,7 +1177,7 @@ export default function App () {
     setBrowserTabsVisible(false)
     setBrowserMenuVisible(false)
     setBrowserMediaTarget(null)
-    setBrowserTitle('PeerSky')
+    setBrowserTitle('New tab')
     return true
   }
 
@@ -1423,7 +1425,7 @@ export default function App () {
             }
             const { previewCacheCleared, sessionSaved } = onBrowserResetTabs()
             setBrowserTabsVisible(false)
-            setBrowserTitle('PeerSky')
+            setBrowserTitle('New tab')
             setStatus(
               !sessionSaved
                 ? 'Tabs burned, but the fresh session could not be saved'
@@ -1449,7 +1451,7 @@ export default function App () {
           onPress: () => {
             const { previewCacheCleared, sessionSaved } = onBrowserResetTabs()
             setBrowserTabsVisible(false)
-            setBrowserTitle('PeerSky')
+            setBrowserTitle('New tab')
             setStatus(
               !sessionSaved
                 ? 'All tabs closed, but the fresh session could not be saved'
@@ -2432,7 +2434,13 @@ export default function App () {
       : null
 
     return {
-      favicon: browserFaviconsRef.current.get(tab.id) || null,
+      favicon: browserFaviconsRef.current.get(tab.id) || (
+        entry?.source.kind === 'app'
+          ? getRuntimeAppIconSource(entry.source.app)
+          : entry?.source.kind === 'home'
+            ? BROWSER_HOME_ICON
+            : null
+      ),
       id: tab.id,
       isActive: tab.id === browserTabsState.activeTabId,
       label: getBrowserTabLabel(tab),
@@ -2443,7 +2451,7 @@ export default function App () {
   return (
     <SafeAreaView
       style={[styles.browserShell, { backgroundColor: browserChrome.shell }]}
-      edges={['top', 'left', 'right', 'bottom']}
+      edges={['top', 'bottom']}
     >
         <StatusBar
           backgroundColor={browserChrome.shell}
@@ -3012,14 +3020,15 @@ function isBrowserWebViewSource (
 
 function getBrowserEntryTitle (entry: BrowserHistoryEntry) {
   if (entry.source.kind === 'app') return getRuntimeAppTitle(entry.source.app)
-  return entry.url === BROWSER_HOME_URL ? 'PeerSky' : entry.url
+  return entry.url === BROWSER_HOME_URL ? 'New tab' : entry.url
 }
 
 function getBrowserTabLabel (tab: BrowserTab) {
+  const entry = tab.history[tab.historyIndex]
+  if (entry?.url === BROWSER_HOME_URL) return 'New tab'
   if (tab.title && tab.title !== BROWSER_HOME_URL) return tab.title
 
-  const entry = tab.history[tab.historyIndex]
-  if (!entry) return 'New Tab'
+  if (!entry) return 'New tab'
 
   return getBrowserEntryTitle(entry)
 }
