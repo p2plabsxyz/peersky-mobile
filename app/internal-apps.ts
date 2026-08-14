@@ -1,3 +1,5 @@
+import type { ImageSourcePropType } from 'react-native'
+
 import {
   INTERNAL_APPS as INTERNAL_APP_REGISTRY,
   getRuntimeAppFromUrl as getRuntimeAppFromRegistryUrl,
@@ -7,12 +9,20 @@ import {
 
 export type RuntimeTab = 'hyper' | 'holesail' | 'p2pmd'
 
-export const INTERNAL_APPS = INTERNAL_APP_REGISTRY as Array<{
+const INTERNAL_APP_ICONS: Partial<Record<RuntimeTab, ImageSourcePropType>> = {
+  hyper: require('../assets/images/hyperdrive.png'),
+  p2pmd: require('../assets/images/p2pmd.png')
+}
+
+export const INTERNAL_APPS = (INTERNAL_APP_REGISTRY as Array<{
   id: RuntimeTab
   title: string
   url: string
   icon: string
-}>
+}>).map((app) => ({
+  ...app,
+  iconSource: INTERNAL_APP_ICONS[app.id]
+}))
 
 export function getRuntimeAppUrl (app: RuntimeTab) {
   return getRuntimeAppRegistryUrl(app)

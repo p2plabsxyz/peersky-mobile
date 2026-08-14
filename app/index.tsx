@@ -5,6 +5,7 @@ import {
   AppState,
   BackHandler,
   Button,
+  Image,
   Keyboard,
   KeyboardAvoidingView,
   Linking,
@@ -2458,8 +2459,13 @@ export default function App () {
                     style={styles.browserShortcut}
                     onPress={() => void loadBrowserUrl(app.url)}
                   >
-                    <View style={[styles.browserShortcutIcon, getRuntimeAppIconStyle(app.id)]}>
-                      <Text style={styles.browserShortcutIconText}>{app.icon}</Text>
+                    <View style={[
+                      styles.browserShortcutIcon,
+                      app.iconSource ? null : getRuntimeAppIconStyle(app.id)
+                    ]}>
+                      {app.iconSource
+                        ? <Image source={app.iconSource} style={styles.browserShortcutIconImage} />
+                        : <Text style={styles.browserShortcutIconText}>{app.icon}</Text>}
                     </View>
                     <Text numberOfLines={2} style={[styles.browserShortcutTitle, { color: browserChrome.text }]}>
                       {app.title}

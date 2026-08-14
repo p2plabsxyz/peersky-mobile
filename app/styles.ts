@@ -309,6 +309,10 @@ export const styles = StyleSheet.create({
     justifyContent: 'center',
     width: 64
   },
+  browserShortcutIconImage: {
+    height: 64,
+    width: 64
+  },
   browserShortcutIconP2pmd: {
     backgroundColor: '#2f80ed'
   },
