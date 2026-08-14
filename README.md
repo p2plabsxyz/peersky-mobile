@@ -95,6 +95,7 @@ npm run android
 
 ## Docs
 
+- [Browser shell](docs/browser-shell.md)
 - [Hyper protocol](docs/hyper.md)
 - [Holesail runtime](docs/holesail.md)
 - [P2PMD](docs/p2pmd.md)
