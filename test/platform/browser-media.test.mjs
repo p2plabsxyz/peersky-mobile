@@ -98,10 +98,11 @@ describe('browser media long press', () => {
   })
 
   test('creates bounded lowercase hexadecimal authorization tokens', () => {
-    const token = createBrowserMediaToken()
+    const token = createBrowserMediaToken(Uint8Array.from({ length: 16 }, (_, index) => index))
 
     assert.equal(token.length, BROWSER_MEDIA_TOKEN_LENGTH)
     assert.match(token, /^[a-f0-9]+$/)
+    assert.equal(token, '000102030405060708090a0b0c0d0e0f')
   })
 
   test('uses the native Android path without disabling normal text selection', () => {

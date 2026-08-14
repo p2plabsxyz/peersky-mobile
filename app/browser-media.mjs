@@ -9,11 +9,12 @@ const MEDIA_KINDS = new Set(['image', 'video', 'link'])
 const MEDIA_PROTOCOLS = new Set(['http:', 'https:'])
 const LINK_PROTOCOLS = new Set(['http:', 'https:', 'hyper:', 'peersky:'])
 
-export function createBrowserMediaToken () {
-  return Array.from({ length: 4 }, () => Math.floor(Math.random() * 0x100000000)
-    .toString(16)
-    .padStart(8, '0'))
-    .join('')
+export function createBrowserMediaToken (bytes) {
+  if (!(bytes instanceof Uint8Array) || bytes.byteLength !== BROWSER_MEDIA_TOKEN_LENGTH / 2) {
+    throw new TypeError('Browser media token requires 16 random bytes')
+  }
+
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
 export function parseBrowserMediaMessage (message, pageUrl = '', expectedToken = '') {

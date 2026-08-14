@@ -19,6 +19,7 @@ import {
   View
 } from 'react-native'
 import { Worklet } from 'react-native-bare-kit'
+import * as Crypto from 'expo-crypto'
 import { File, Paths } from 'expo-file-system'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import b4a from 'b4a'
@@ -92,6 +93,7 @@ import {
   type BrowserMediaTarget
 } from './BrowserMediaSheet'
 import {
+  BROWSER_MEDIA_TOKEN_LENGTH,
   createBrowserMediaToken,
   createBrowserMediaLongPressScript,
   parseBrowserMediaMessage
@@ -2710,7 +2712,8 @@ export default function App () {
           const tabDesktopView = tab.desktopView === true
           let browserMediaToken = browserMediaTokensRef.current.get(tab.id)
           if (!browserMediaToken) {
-            browserMediaToken = createBrowserMediaToken()
+            const tokenBytes = Crypto.getRandomValues(new Uint8Array(BROWSER_MEDIA_TOKEN_LENGTH / 2))
+            browserMediaToken = createBrowserMediaToken(tokenBytes)
             browserMediaTokensRef.current.set(tab.id, browserMediaToken)
           }
           const browserNativeConfig = peerSkyWebViewNativeConfig
@@ -2728,13 +2731,17 @@ export default function App () {
             pageZoom: tabPageZoom,
             websiteTextScale: browserPreferences.websiteTextScale
           })
+          const browserMediaScript = createBrowserMediaLongPressScript({
+            nativeHitTesting: Platform.OS === 'android' && Boolean(peerSkyWebViewNativeConfig),
+            token: browserMediaToken
+          })
           const browserInjectedScript = combineBrowserInjectedScripts(
             browserAccessibilityScript,
-            createBrowserFaviconScript(),
-            createBrowserMediaLongPressScript({
-              nativeHitTesting: Platform.OS === 'android' && Boolean(peerSkyWebViewNativeConfig),
-              token: browserMediaToken
-            })
+            createBrowserFaviconScript()
+          )
+          const browserBeforeContentScript = combineBrowserInjectedScripts(
+            browserAccessibilityScript,
+            browserMediaScript
           )
 
           return (
@@ -2774,7 +2781,7 @@ export default function App () {
               mediaCapturePermissionGrantType='prompt'
               nativeConfig={browserNativeConfig}
               injectedJavaScript={browserInjectedScript}
-              injectedJavaScriptBeforeContentLoaded={browserAccessibilityScript}
+              injectedJavaScriptBeforeContentLoaded={browserBeforeContentScript}
               originWhitelist={['*']}
               scalesPageToFit={true}
               setBuiltInZoomControls={true}
