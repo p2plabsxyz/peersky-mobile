@@ -35,38 +35,14 @@ export async function fetchHyper ({
   const runtime = await getHyperRuntime()
   const fetch = await getHyperFetch(runtime)
 
-  let attempt = 0
-  let currentDelay = retryDelay
-
-  while (true) {
-    try {
-      const response = await fetch(url)
-      const headers = headersToObject(response.headers)
-
-      if (!response.ok) {
-        let text = ''
-        try {
-          text = await response.text()
-        } catch (_) {}
-
-        const isRetryable = response.status === 404 || response.status === 502 || text.includes('Peers Not Found')
-        if (isRetryable && attempt < retries) {
-          attempt++
-          await new Promise((resolve) => setTimeout(resolve, currentDelay))
-          currentDelay = Math.min(maxRetryDelay, Math.floor(currentDelay * backoffFactor))
-          continue
-        }
-
-        return {
-          ok: false,
-          status: response.status,
-          statusText: response.statusText,
-          url: response.url || url,
-          headers,
-          error: text || response.statusText || `Request failed with status ${response.status}`
-        }
-      }
-
+  return withHyperRetry({
+    fetch,
+    url,
+    retries,
+    retryDelay,
+    maxRetryDelay,
+    backoffFactor,
+    readResponse: async (response, headers) => {
       let body = await response.text()
 
       if (inlineAssets && isHtmlResponse(headers, body)) {
@@ -88,27 +64,8 @@ export async function fetchHyper ({
         headers,
         body
       }
-    } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : String(error)
-      const isRetryable = errorMsg.includes('Peers Not Found') || errorMsg.includes('peer')
-
-      if (isRetryable && attempt < retries) {
-        attempt++
-        await new Promise((resolve) => setTimeout(resolve, currentDelay))
-        currentDelay = Math.min(maxRetryDelay, Math.floor(currentDelay * backoffFactor))
-        continue
-      }
-
-      return {
-        ok: false,
-        status: 502,
-        statusText: 'Bad Gateway',
-        url,
-        headers: { 'content-type': 'text/plain; charset=utf-8' },
-        error: errorMsg
-      }
     }
-  }
+  })
 }
 
 export async function fetchHyperBinary ({
@@ -129,38 +86,14 @@ export async function fetchHyperBinary ({
   const runtime = await getHyperRuntime()
   const fetch = await getHyperFetch(runtime)
 
-  let attempt = 0
-  let currentDelay = retryDelay
-
-  while (true) {
-    try {
-      const response = await fetch(url)
-      const headers = headersToObject(response.headers)
-
-      if (!response.ok) {
-        let text = ''
-        try {
-          text = await response.text()
-        } catch (_) {}
-
-        const isRetryable = response.status === 404 || response.status === 502 || text.includes('Peers Not Found')
-        if (isRetryable && attempt < retries) {
-          attempt++
-          await new Promise((resolve) => setTimeout(resolve, currentDelay))
-          currentDelay = Math.min(maxRetryDelay, Math.floor(currentDelay * backoffFactor))
-          continue
-        }
-
-        return {
-          ok: false,
-          status: response.status,
-          statusText: response.statusText,
-          url: response.url || url,
-          headers,
-          error: text || response.statusText || `Request failed with status ${response.status}`
-        }
-      }
-
+  return withHyperRetry({
+    fetch,
+    url,
+    retries,
+    retryDelay,
+    maxRetryDelay,
+    backoffFactor,
+    readResponse: async (response, headers) => {
       const contentLength = Number(headers['content-length'] || 0)
       if (contentLength > 50 * 1024 * 1024) {
         throw new Error(`Response exceeds 50MB limit: ${contentLength} bytes`)
@@ -201,6 +134,52 @@ export async function fetchHyperBinary ({
         headers,
         bytes
       }
+    }
+  })
+}
+
+async function withHyperRetry ({
+  fetch,
+  url,
+  retries,
+  retryDelay,
+  maxRetryDelay,
+  backoffFactor,
+  readResponse
+}) {
+  let attempt = 0
+  let currentDelay = retryDelay
+
+  while (true) {
+    try {
+      const response = await fetch(url)
+      const headers = headersToObject(response.headers)
+
+      if (!response.ok) {
+        let text = ''
+        try {
+          text = await response.text()
+        } catch (_) {}
+
+        const isRetryable = response.status === 404 || response.status === 502 || text.includes('Peers Not Found')
+        if (isRetryable && attempt < retries) {
+          attempt++
+          await new Promise((resolve) => setTimeout(resolve, currentDelay))
+          currentDelay = Math.min(maxRetryDelay, Math.floor(currentDelay * backoffFactor))
+          continue
+        }
+
+        return {
+          ok: false,
+          status: response.status,
+          statusText: response.statusText,
+          url: response.url || url,
+          headers,
+          error: text || response.statusText || `Request failed with status ${response.status}`
+        }
+      }
+
+      return await readResponse(response, headers)
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error)
       const isRetryable = errorMsg.includes('Peers Not Found') || errorMsg.includes('peer')
