@@ -161,7 +161,7 @@ async function withHyperRetry ({
           text = await response.text()
         } catch (_) {}
 
-        const isRetryable = response.status === 404 || response.status === 502 || text.includes('Peers Not Found')
+        const isRetryable = response.status === 404 || response.status === 502 || isPeerDiscoveryError(text)
         if (isRetryable && attempt < retries) {
           attempt++
           await new Promise((resolve) => setTimeout(resolve, currentDelay))
@@ -182,7 +182,7 @@ async function withHyperRetry ({
       return await readResponse(response, headers)
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error)
-      const isRetryable = errorMsg.includes('Peers Not Found') || errorMsg.includes('peer')
+      const isRetryable = isPeerDiscoveryError(errorMsg)
 
       if (isRetryable && attempt < retries) {
         attempt++
@@ -201,6 +201,10 @@ async function withHyperRetry ({
       }
     }
   }
+}
+
+function isPeerDiscoveryError (message) {
+  return /\bpeers?\s+not\s+found\b/i.test(message)
 }
 
 async function getHyperFetch (runtime) {

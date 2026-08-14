@@ -16,7 +16,7 @@ async function fetchWithRetry (fetchFn, {
       const response = await fetchFn(url)
       if (!response.ok) {
         const text = typeof response.text === 'function' ? await response.text() : ''
-        const isRetryable = response.status === 404 || response.status === 502 || text.includes('Peers Not Found')
+        const isRetryable = response.status === 404 || response.status === 502 || isPeerDiscoveryError(text)
         if (isRetryable && attempt < retries) {
           attempt++
           await new Promise((resolve) => setTimeout(resolve, currentDelay))
@@ -28,7 +28,7 @@ async function fetchWithRetry (fetchFn, {
       return { ok: true, status: response.status, bytes: await response.bytes() }
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error)
-      const isRetryable = errorMsg.includes('Peers Not Found') || errorMsg.includes('peer')
+      const isRetryable = isPeerDiscoveryError(errorMsg)
       if (isRetryable && attempt < retries) {
         attempt++
         await new Promise((resolve) => setTimeout(resolve, currentDelay))
@@ -38,6 +38,10 @@ async function fetchWithRetry (fetchFn, {
       return { ok: false, status: 502, error: errorMsg }
     }
   }
+}
+
+function isPeerDiscoveryError (message) {
+  return /\bpeers?\s+not\s+found\b/i.test(message)
 }
 
 describe('hyper fetch exponential backoff retries', () => {
@@ -98,5 +102,21 @@ describe('hyper fetch exponential backoff retries', () => {
     assert.equal(result.ok, false)
     assert.equal(result.status, 404)
     assert.equal(result.error, 'Peers Not Found')
+  })
+
+  it('does not retry unrelated errors containing peer', async () => {
+    let attempts = 0
+    const result = await fetchWithRetry(async () => {
+      attempts++
+      throw new Error('PeerSky request configuration failed')
+    }, {
+      url: 'hyper://test-hash/file.txt',
+      retries: 2,
+      retryDelay: 1
+    })
+
+    assert.equal(attempts, 1)
+    assert.equal(result.ok, false)
+    assert.equal(result.error, 'PeerSky request configuration failed')
   })
 })
