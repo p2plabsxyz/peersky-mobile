@@ -52,8 +52,10 @@ export async function restoreIdentityFromBackup (innerZipBytes, storagePath) {
 }
 
 function normalizeZipEntryName (name) {
-  const normalized = String(name || '').replace(/\\/g, '/').replace(/^\/+/, '')
-  if (!normalized || normalized.endsWith('/')) return normalized.replace(/\/+$/, '')
+  const slashNormalized = String(name || '').replace(/\\/g, '/')
+  const isDirectory = slashNormalized.endsWith('/')
+  const normalized = slashNormalized.replace(/^\/+/, '').replace(/\/+$/, '')
+  if (!normalized) return ''
 
   const parts = []
   for (const part of normalized.split('/')) {
@@ -62,7 +64,8 @@ function normalizeZipEntryName (name) {
     parts.push(part)
   }
 
-  return parts.join('/')
+  const safeName = parts.join('/')
+  return isDirectory ? `${safeName}/` : safeName
 }
 
 function joinPath (base, relativePath) {

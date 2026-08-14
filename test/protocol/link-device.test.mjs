@@ -1,8 +1,12 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import crypto from 'node:crypto'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import sodium from 'sodium-native'
 import { verifyIdentityTransferSignature } from '../../backend/backup/identity-transfer.mjs'
+import { restoreIdentityFromBackup } from '../../backend/backup/restore.mjs'
 
 function canonicalJson (value) {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
@@ -14,6 +18,22 @@ function canonicalJson (value) {
 
 function toHex (buf) {
   return Buffer.from(buf).toString('hex')
+}
+
+function createDirectoryZip (name) {
+  const nameBytes = Buffer.from(name)
+  const centralDirectory = Buffer.alloc(46 + nameBytes.length)
+  centralDirectory.writeUInt32LE(0x02014b50, 0)
+  centralDirectory.writeUInt16LE(nameBytes.length, 28)
+  nameBytes.copy(centralDirectory, 46)
+
+  const endOfCentralDirectory = Buffer.alloc(22)
+  endOfCentralDirectory.writeUInt32LE(0x06054b50, 0)
+  endOfCentralDirectory.writeUInt16LE(1, 8)
+  endOfCentralDirectory.writeUInt16LE(1, 10)
+  endOfCentralDirectory.writeUInt32LE(centralDirectory.length, 12)
+
+  return Buffer.concat([centralDirectory, endOfCentralDirectory])
 }
 
 describe('Link Device Identity Transfer', () => {
@@ -63,7 +83,16 @@ describe('Link Device Identity Transfer', () => {
   })
 
   it('Entry named ../../evil throws', async () => {
-    assert.ok(true)
+    const storagePath = mkdtempSync(join(tmpdir(), 'peersky-restore-'))
+
+    try {
+      await assert.rejects(
+        restoreIdentityFromBackup(createDirectoryZip('hyper/../../evil/'), storagePath),
+        /illegal path traversal/
+      )
+    } finally {
+      rmSync(storagePath, { recursive: true, force: true })
+    }
   })
 
   it('Entry named device-key.json is refused', async () => {
