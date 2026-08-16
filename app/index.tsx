@@ -157,6 +157,8 @@ type P2pmdRoom = {
   udp: boolean
 }
 
+type P2pmdViewMode = 'edit' | 'preview' | 'slides'
+
 type RpcResponse = {
   ok: boolean
   error?: string
@@ -326,7 +328,8 @@ export default function App () {
   const [p2pmdEditorHtml, setP2pmdEditorHtml] = useState<string | null>(null)
   const [p2pmdJoinKey, setP2pmdJoinKey] = useState('')
   const [p2pmdParticipants, setP2pmdParticipants] = useState<number | null>(null)
-  const [p2pmdIsPreviewMode, setP2pmdIsPreviewMode] = useState(false)
+  const [p2pmdViewMode, setP2pmdViewMode] = useState<P2pmdViewMode>('edit')
+  const isP2pmdLandscapeSlides = p2pmdViewMode === 'slides' && browserWindowWidth > browserWindowHeight
   const [p2pmdSyncStatus, setP2pmdSyncStatus] = useState('Ready')
   const [p2pmdSetupError, setP2pmdSetupError] = useState<string | null>(null)
   const [p2pmdPublishUrl, setP2pmdPublishUrl] = useState<string | null>(null)
@@ -1732,7 +1735,7 @@ export default function App () {
     setP2pmdRoom(null)
     setP2pmdUrl(null)
     setP2pmdParticipants(null)
-    setP2pmdIsPreviewMode(false)
+    setP2pmdViewMode('edit')
     setP2pmdPublishUrl(null)
     setP2pmdEditorHtml(null)
     setP2pmdSetupError(null)
@@ -1775,7 +1778,7 @@ export default function App () {
     setP2pmdRoom(null)
     setP2pmdUrl(null)
     setP2pmdParticipants(null)
-    setP2pmdIsPreviewMode(false)
+    setP2pmdViewMode('edit')
     setP2pmdPublishUrl(null)
     setP2pmdEditorHtml(null)
     setP2pmdSetupError(null)
@@ -1826,7 +1829,7 @@ export default function App () {
         setP2pmdRoom(response.room)
         setP2pmdUrl(response.room.localUrl)
         setP2pmdParticipants(null)
-        setP2pmdIsPreviewMode(false)
+        setP2pmdViewMode('edit')
         setP2pmdPublishUrl(null)
         setP2pmdSetupError(null)
         setP2pmdSyncStatus('Ready')
@@ -1834,7 +1837,7 @@ export default function App () {
         setP2pmdRoom(null)
         setP2pmdUrl(null)
         setP2pmdParticipants(null)
-        setP2pmdIsPreviewMode(false)
+        setP2pmdViewMode('edit')
         setP2pmdPublishUrl(null)
         setP2pmdEditorHtml(null)
         setP2pmdSetupError(null)
@@ -1860,7 +1863,7 @@ export default function App () {
       setP2pmdUrl(null)
       setP2pmdRoom(null)
       setP2pmdParticipants(null)
-      setP2pmdIsPreviewMode(false)
+      setP2pmdViewMode('edit')
       setP2pmdPublishUrl(null)
       setP2pmdEditorHtml(null)
       setP2pmdSetupError(null)
@@ -1909,12 +1912,12 @@ export default function App () {
     )
   }
 
-  async function publishP2pmdContentToHyper (content: unknown) {
+  async function publishP2pmdContentToHyper (content: unknown, mode: unknown) {
     if (p2pmdPublishInFlightRef.current) return
 
     if (typeof content !== 'string') {
       setP2pmdSyncStatus('Publish failed')
-      setStatus('Unable to publish P2PMD note: invalid document content')
+      setStatus('Unable to publish P2PMD document: invalid document content')
       return
     }
 
@@ -1923,12 +1926,13 @@ export default function App () {
 
     try {
       const response = await callRpc(RPC_P2PMD_ROOM_PUBLISH, {
-        content
+        content,
+        mode: mode === 'slides' ? 'slides' : 'note'
       })
       setLastResult(response)
 
       if (!response.ok || typeof response.url !== 'string') {
-        throw new Error(response.error || 'Unable to publish note to Hyper')
+        throw new Error(response.error || 'Unable to publish document to Hyper')
       }
 
       setP2pmdPublishUrl(response.url)
@@ -1936,7 +1940,7 @@ export default function App () {
       setStatus(`P2PMD published: ${response.url}`)
       try {
         await Share.share({
-          title: 'Published P2PMD note',
+          title: mode === 'slides' ? 'Published P2PMD presentation' : 'Published P2PMD note',
           message: response.url
         })
       } catch {}
@@ -2017,15 +2021,17 @@ export default function App () {
           setP2pmdSyncStatus(parsed.error ? `Error: ${parsed.error}` : 'Sync error')
           setStatus(parsed.error || 'P2PMD document request failed')
           break
-        case 'p2pmd-preview-mode':
-          setP2pmdIsPreviewMode(Boolean(parsed.preview))
-          setStatus(parsed.preview ? 'P2PMD preview mode' : 'P2PMD write mode')
+        case 'p2pmd-view-mode':
+          if (parsed.mode === 'edit' || parsed.mode === 'preview' || parsed.mode === 'slides') {
+            setP2pmdViewMode(parsed.mode)
+            setStatus(`P2PMD ${parsed.mode} mode`)
+          }
           break
         case 'p2pmd-image-uploaded':
           setP2pmdSyncStatus('Image uploaded')
           break
         case 'p2pmd-publish-requested':
-          void publishP2pmdContentToHyper(parsed.content)
+          void publishP2pmdContentToHyper(parsed.content, parsed.mode)
           break
         default:
           setStatus('P2PMD editor connected')
@@ -2250,8 +2256,8 @@ export default function App () {
 
     return (
       <SafeAreaView style={styles.p2pmdWorkspace} edges={['top', 'left', 'right', 'bottom']}>
-        <StatusBar backgroundColor='#1f2027' barStyle='light-content' />
-        <View style={styles.p2pmdWorkspaceHeader}>
+        <StatusBar hidden={isP2pmdLandscapeSlides} backgroundColor='#1f2027' barStyle='light-content' />
+        {!isP2pmdLandscapeSlides && <View style={styles.p2pmdWorkspaceHeader}>
           <Text style={styles.p2pmdWorkspaceTitle}>P2PMD</Text>
           <Text style={[styles.p2pmdWorkspaceRole, p2pmdRoom.role === 'host' ? styles.p2pmdWorkspaceRoleHost : null]}>
             {p2pmdRoom.role}
@@ -2265,7 +2271,7 @@ export default function App () {
             disabled={isBooting || isLoading}
           >
             <View style={styles.p2pmdPreviewButtonContent}>
-              {p2pmdIsPreviewMode
+              {p2pmdViewMode !== 'edit'
                 ? (
                   <View style={styles.p2pmdPencilIcon}>
                     <View style={styles.p2pmdPencilBody} />
@@ -2278,7 +2284,7 @@ export default function App () {
                   </View>
                   )}
               <Text style={styles.p2pmdPreviewButtonText}>
-                {p2pmdIsPreviewMode ? 'Edit' : 'Preview'}
+                {p2pmdViewMode === 'edit' ? 'Preview' : 'Edit'}
               </Text>
             </View>
           </Pressable>
@@ -2299,9 +2305,9 @@ export default function App () {
               setBrowserSettingsVisible(true)
             }}
           />
-        </View>
+        </View>}
 
-        <View style={styles.p2pmdWorkspaceMeta}>
+        {!isP2pmdLandscapeSlides && <View style={styles.p2pmdWorkspaceMeta}>
           <View style={styles.p2pmdRoomIdentity}>
             <View style={styles.p2pmdWorkspaceKeyRow}>
               <Text style={styles.p2pmdWorkspaceKeyLabel}>Key</Text>
@@ -2345,7 +2351,7 @@ export default function App () {
           >
             <Text style={styles.p2pmdMetaButtonText}>Leave</Text>
           </Pressable>
-        </View>
+        </View>}
         <WebView
           key={`${p2pmdRoom.role}:${p2pmdEditorBaseUrl}:${p2pmdEditorHtml.length}`}
           ref={p2pmdWebViewRef}

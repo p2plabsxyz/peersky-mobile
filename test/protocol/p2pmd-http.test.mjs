@@ -113,6 +113,20 @@ describe('p2pmd HTTP endpoints with injectable Node server', () => {
     assert.equal(invalidBody.error, 'Invalid Markdown content. Expected a string.')
   })
 
+  it('renders desktop-compatible presentation slides', async () => {
+    const response = await postJson(`${localUrl}/preview`, {
+      content: '# First\n\n---\n\n# Second',
+      mode: 'slides'
+    })
+    const body = await response.json()
+
+    assert.equal(response.status, 200)
+    assert.equal(body.ok, true)
+    assert.equal(body.count, 2)
+    assert.match(body.html, /data-slide-index="0"/)
+    assert.match(body.html, /data-slide-index="1"/)
+  })
+
   it('tracks SSE peers and presence through real HTTP endpoints', async () => {
     const host = await openEventStream(`${localUrl}/events?clientId=host-1&role=host&name=Host&color=%23f2d35b`)
     const client = await openEventStream(`${localUrl}/events?clientId=client-1&role=client&name=Client&color=%2359a6ff`)

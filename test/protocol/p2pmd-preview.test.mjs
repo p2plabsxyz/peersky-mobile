@@ -1,7 +1,13 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import b4a from 'b4a'
-import { inlineHyperPreviewImages, renderMarkdownPreview } from '../../backend/p2pmd/preview.mjs'
+import { createPublishedSlidesHtml } from '../../backend/hyper/drive.mjs'
+import {
+  inlineHyperPreviewImages,
+  renderMarkdownPreview,
+  renderMarkdownSlides,
+  splitMarkdownSlides
+} from '../../backend/p2pmd/preview.mjs'
 
 describe('p2pmd Markdown preview rendering', () => {
   it('escapes raw HTML because preview output is injected with innerHTML', () => {
@@ -107,5 +113,67 @@ describe('p2pmd Markdown preview rendering', () => {
 
     assert.match(html, /<h1>Title<\/h1>/)
     assert.match(html, /href="https:\/\/peersky.p2plabs.xyz\//)
+  })
+
+  it('splits slides using the desktop delimiters and normalizes line endings', () => {
+    const slides = splitMarkdownSlides('# One\r\n\r\n---\r\n\r\n# Two\r\n<!-- slide -->\r\n# Three')
+
+    assert.deepEqual(slides, ['# One', '# Two', '# Three'])
+  })
+
+  it('does not split slide-like lines inside fenced code blocks', () => {
+    const slides = splitMarkdownSlides('# Code\n\n```md\n---\n<!-- slide -->\n```\n\n---\n\n# Next')
+
+    assert.equal(slides.length, 2)
+    assert.match(slides[0], /```md\n---\n<!-- slide -->\n```/)
+    assert.equal(slides[1], '# Next')
+  })
+
+  it('preserves Setext headings and indented code that use dashes', () => {
+    const setextSlides = splitMarkdownSlides('Title\n---\n\nBody')
+    const indentedSlides = splitMarkdownSlides('# Code\n\n    ---\n\nText')
+
+    assert.deepEqual(setextSlides, ['Title\n---\n\nBody'])
+    assert.deepEqual(indentedSlides, ['# Code\n\n    ---\n\nText'])
+  })
+
+  it('requires blank boundaries around horizontal slide separators', () => {
+    const slides = splitMarkdownSlides('# First\n\n---\n\n# Second')
+    const notSlides = splitMarkdownSlides('---\n# Heading\n\nText')
+
+    assert.deepEqual(slides, ['# First', '# Second'])
+    assert.deepEqual(notSlides, ['---\n# Heading\n\nText'])
+  })
+
+  it('renders safe slide HTML and hides speaker notes', () => {
+    const result = renderMarkdownSlides('# Welcome\n\n<!-- Speaker notes: private -->\n\n---\n\n<script>alert(1)</script>')
+
+    assert.equal(result.count, 2)
+    assert.match(result.html, /<section class="slide active" data-slide-index="0"><h1>Welcome<\/h1>/)
+    assert.match(result.html, /<section class="slide" data-slide-index="1">/)
+    assert.doesNotMatch(result.html, /Speaker notes: private/)
+    assert.match(result.html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/)
+    assert.doesNotMatch(result.html, /<script>alert\(1\)<\/script>/)
+  })
+
+  it('renders a document without delimiters as one slide', () => {
+    const result = renderMarkdownSlides('## A single slide')
+
+    assert.equal(result.count, 1)
+    assert.match(result.html, /<h2>A single slide<\/h2>/)
+  })
+
+  it('builds a self-contained interactive Hyper slide deck', () => {
+    const html = createPublishedSlidesHtml('# First\n\n<!-- private note -->\n\n---\n\n# Second')
+
+    assert.equal((html.match(/<section class="slide/g) || []).length, 2)
+    assert.doesNotMatch(html, /private note/)
+    assert.match(html, /<meta http-equiv="Content-Security-Policy"/)
+    assert.match(html, /document\.addEventListener\('keydown'/)
+    assert.match(html, /addEventListener\('touchstart'/)
+    assert.match(html, /aria-label="Previous slide"/)
+    assert.match(html, /function fitActiveSlide\(\)/)
+    assert.match(html, /window\.matchMedia\('\(orientation: landscape\)'\)/)
+    assert.match(html, /window\.addEventListener\('resize', scheduleFit\)/)
   })
 })

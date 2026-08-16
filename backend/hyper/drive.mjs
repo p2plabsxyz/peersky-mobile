@@ -2,6 +2,7 @@ import b4a from 'b4a'
 import MarkdownIt from 'markdown-it'
 import { getHyperRuntime } from './runtime.mjs'
 import { parseHyperUrl } from './url.mjs'
+import { splitMarkdownSlides } from '../p2pmd/preview.mjs'
 
 const MAX_HYPER_FILE_BYTES = 10 * 1024 * 1024
 const MAX_HYPER_IMAGE_BYTES = 5 * 1024 * 1024
@@ -94,7 +95,7 @@ export async function uploadHyperFile ({
   }
 }
 
-export async function publishMarkdownDocument ({ content } = {}) {
+export async function publishMarkdownDocument ({ content, mode } = {}) {
   if (typeof content !== 'string') {
     return {
       ok: false,
@@ -114,7 +115,11 @@ export async function publishMarkdownDocument ({ content } = {}) {
     const runtime = await getHyperRuntime()
     const drive = await runtime.getDrive(P2PMD_DRIVE_NAME)
 
-    await drive.put('/index.html', b4a.from(createPublishedNoteHtml(content)))
+    const html = mode === 'slides'
+      ? createPublishedSlidesHtml(content)
+      : createPublishedNoteHtml(content)
+
+    await drive.put('/index.html', b4a.from(html))
 
     return {
       ok: true,
@@ -337,6 +342,178 @@ function createPublishedNoteHtml (content) {
 </style>
 ${rendered}
 `
+}
+
+export function createPublishedSlidesHtml (content) {
+  const slideContents = splitMarkdownSlides(content)
+  const slides = (slideContents.length > 0 ? slideContents : [''])
+    .map((slide, index) => {
+      const rendered = markdownRenderer.render(slide.replace(/<!--[\s\S]*?-->/g, ''))
+      return `<section class="slide${index === 0 ? ' active' : ''}" aria-hidden="${index !== 0}">${rendered}</section>`
+    })
+    .join('')
+
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src hyper: data:; media-src hyper: data:;" />
+  <title>P2PMD Slides</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+    body { background: #f7f7f5; color: #202124; font-family: sans-serif; }
+    #deck { width: 100%; height: 100%; touch-action: pan-y; }
+    .slide {
+      display: none;
+      width: 100%;
+      height: 100%;
+      padding: clamp(28px, 7vw, 72px) clamp(56px, 11vw, 110px);
+      overflow: auto;
+      text-align: center;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      animation: enter 180ms ease-out;
+    }
+    .slide.active { display: flex; }
+    .slide > * { max-width: min(100%, 1000px); }
+    .slide > :first-child { margin-top: auto; }
+    .slide > :last-child { margin-bottom: auto; }
+    h1 { margin: 0 0 .65em; font-size: clamp(2rem, 8vw, 4.5rem); line-height: 1.08; }
+    h2 { margin: 0 0 .65em; font-size: clamp(1.65rem, 6.5vw, 3.5rem); line-height: 1.12; }
+    h3 { font-size: clamp(1.35rem, 5vw, 2.5rem); }
+    p, ul, ol { font-size: clamp(1rem, 3.7vw, 1.6rem); line-height: 1.55; }
+    ul, ol, blockquote, pre { text-align: left; }
+    pre { width: min(100%, 920px); padding: 14px; border-radius: 9px; background: #202128; color: #f1f2f7; overflow: auto; }
+    code { font-family: ui-monospace, monospace; }
+    :not(pre) > code { padding: .12em .32em; border-radius: 5px; background: #e4e7ec; }
+    blockquote { padding-left: 14px; border-left: 4px solid #2f80ed; }
+    img, video { display: block; max-width: 100%; max-height: 54vh; margin: .75rem auto; object-fit: contain; }
+    .nav {
+      position: fixed;
+      top: 50%;
+      z-index: 2;
+      display: grid;
+      width: 44px;
+      height: 44px;
+      padding: 0;
+      border: 0;
+      border-radius: 50%;
+      background: rgba(32, 33, 36, .12);
+      color: #202124;
+      font-size: 28px;
+      place-items: center;
+      transform: translateY(-50%);
+    }
+    .nav:disabled { opacity: .28; }
+    #prev { left: 6px; }
+    #next { right: 6px; }
+    #counter { position: fixed; right: 10px; bottom: 12px; padding: 5px 9px; border-radius: 999px; background: rgba(32, 33, 36, .1); font-size: 12px; font-weight: 700; }
+    #progress { position: fixed; right: 0; bottom: 0; left: 0; height: 4px; background: rgba(32, 33, 36, .12); }
+    #progress-value { display: block; width: 0; height: 100%; background: #2f80ed; transition: width 180ms ease-out; }
+    @keyframes enter { from { opacity: 0; transform: translateX(12px); } to { opacity: 1; transform: translateX(0); } }
+    @media (orientation: landscape) {
+      .slide { overflow: visible; transform-origin: top center; animation: none; }
+    }
+    @media (orientation: landscape) and (max-height: 520px) {
+      .slide { padding-top: 20px; padding-bottom: 24px; }
+      img, video { max-height: 46vh; }
+    }
+    @media (prefers-reduced-motion: reduce) { .slide { animation: none; } #progress-value { transition: none; } }
+  </style>
+</head>
+<body>
+  <main id="deck">${slides}</main>
+  <button id="prev" class="nav" type="button" aria-label="Previous slide">&#8249;</button>
+  <button id="next" class="nav" type="button" aria-label="Next slide">&#8250;</button>
+  <div id="counter" role="status" aria-live="polite"></div>
+  <div id="progress" aria-hidden="true"><span id="progress-value"></span></div>
+  <script>
+    const slides = Array.from(document.querySelectorAll('.slide'))
+    const previous = document.getElementById('prev')
+    const next = document.getElementById('next')
+    const counter = document.getElementById('counter')
+    const progress = document.getElementById('progress-value')
+    let current = 0
+    let touchStart = null
+    let fitFrame = null
+
+    function show(index) {
+      if (index < 0 || index >= slides.length) return
+      current = index
+      slides.forEach((slide, slideIndex) => {
+        const active = slideIndex === current
+        slide.classList.toggle('active', active)
+        slide.setAttribute('aria-hidden', String(!active))
+        slide.style.transform = ''
+        if (active) slide.scrollTop = 0
+      })
+      previous.disabled = current === 0
+      next.disabled = current === slides.length - 1
+      counter.textContent = (current + 1) + ' / ' + slides.length
+      progress.style.width = (((current + 1) / slides.length) * 100) + '%'
+      scheduleFit()
+    }
+
+    function scheduleFit() {
+      if (fitFrame) cancelAnimationFrame(fitFrame)
+      fitFrame = requestAnimationFrame(() => {
+        fitFrame = null
+        fitActiveSlide()
+      })
+    }
+
+    function fitActiveSlide() {
+      const slide = slides[current]
+      if (!slide) return
+
+      slide.style.transform = ''
+      if (!window.matchMedia('(orientation: landscape)').matches) return
+
+      const availableWidth = document.documentElement.clientWidth
+      const availableHeight = document.documentElement.clientHeight
+      const contentWidth = Math.max(slide.clientWidth, slide.scrollWidth)
+      const contentHeight = Math.max(slide.clientHeight, slide.scrollHeight)
+      if (!availableWidth || !availableHeight || !contentWidth || !contentHeight) return
+
+      const scale = Math.min(1, availableWidth / contentWidth, availableHeight / contentHeight)
+      if (scale < 1) slide.style.transform = 'scale(' + scale + ')'
+    }
+
+    previous.addEventListener('click', () => show(current - 1))
+    next.addEventListener('click', () => show(current + 1))
+    window.addEventListener('resize', scheduleFit)
+    document.getElementById('deck').addEventListener('load', scheduleFit, true)
+    document.getElementById('deck').addEventListener('loadedmetadata', scheduleFit, true)
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') show(current - 1)
+      else if (event.key === 'ArrowRight' || event.key === 'ArrowDown' || event.key === ' ') {
+        event.preventDefault()
+        show(current + 1)
+      } else if (event.key === 'Home') show(0)
+      else if (event.key === 'End') show(slides.length - 1)
+    })
+    document.getElementById('deck').addEventListener('touchstart', (event) => {
+      const touch = event.touches[0]
+      if (touch) touchStart = { x: touch.clientX, y: touch.clientY }
+    }, { passive: true })
+    document.getElementById('deck').addEventListener('touchend', (event) => {
+      const touch = event.changedTouches[0]
+      const start = touchStart
+      touchStart = null
+      if (!touch || !start) return
+      const deltaX = touch.clientX - start.x
+      const deltaY = touch.clientY - start.y
+      if (Math.abs(deltaX) >= 48 && Math.abs(deltaX) > Math.abs(deltaY) * 1.2) {
+        show(current + (deltaX < 0 ? 1 : -1))
+      }
+    }, { passive: true })
+    show(0)
+  </script>
+</body>
+</html>`
 }
 
 async function withPublishTransition (operation) {

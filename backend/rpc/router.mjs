@@ -46,7 +46,11 @@ import {
   joinP2pmdRoom
 } from '../p2pmd/room.mjs'
 import { getMaxDocumentLength } from '../p2pmd/document.mjs'
-import { inlineHyperPreviewImages, renderMarkdownPreview } from '../p2pmd/preview.mjs'
+import {
+  inlineHyperPreviewImages,
+  renderMarkdownPreview,
+  renderMarkdownSlides
+} from '../p2pmd/preview.mjs'
 import { getP2pmdEditorPage } from '../p2pmd/server.mjs'
 import { parseJsonMessage, replyJson } from './messages.mjs'
 
@@ -218,9 +222,14 @@ export async function routeRpcRequest (req) {
         return
       }
 
+      const rendered = body.mode === 'slides'
+        ? renderMarkdownSlides(body.content)
+        : { html: renderMarkdownPreview(body.content) }
+
       replyJson(req, {
         ok: true,
-        html: await inlineHyperPreviewImages(renderMarkdownPreview(body.content), readHyperFile)
+        ...rendered,
+        html: await inlineHyperPreviewImages(rendered.html, readHyperFile)
       })
       return
     }

@@ -9,7 +9,7 @@ import {
 } from './document.mjs'
 import { P2PMD_LOOPBACK_HOST } from './constants.mjs'
 import { createPeerPresenceStore } from './peers.mjs'
-import { renderMarkdownPreview } from './preview.mjs'
+import { renderMarkdownPreview, renderMarkdownSlides } from './preview.mjs'
 import yjsBrowserScript from './yjs-runtime.mjs'
 
 let server = null
@@ -282,9 +282,13 @@ function handleRequest (req, res) {
           return
         }
 
+        const rendered = body.mode === 'slides'
+          ? renderMarkdownSlides(body.content)
+          : { html: renderMarkdownPreview(body.content) }
+
         sendJson(res, 200, {
           ok: true,
-          html: renderMarkdownPreview(body.content)
+          ...rendered
         })
       })
       .catch((error) => {
@@ -755,6 +759,184 @@ export function getP2pmdEditorPage () {
       #preview img {
         max-width: 100%;
       }
+      #slides-preview {
+        position: relative;
+        box-sizing: border-box;
+        flex: 1;
+        min-height: 0;
+        background: #f7f7f5;
+        color: #202124;
+        overflow: hidden;
+        touch-action: pan-y;
+        -webkit-user-select: text;
+        user-select: text;
+      }
+      #slides-content {
+        width: 100%;
+        height: 100%;
+      }
+      #slides-preview .slide {
+        box-sizing: border-box;
+        display: none;
+        width: 100%;
+        height: 100%;
+        padding: clamp(26px, 7vw, 68px) clamp(54px, 11vw, 100px);
+        overflow: auto;
+        color: #202124;
+        text-align: center;
+        flex-direction: column;
+        align-items: center;
+        justify-content: flex-start;
+        animation: slide-enter 180ms ease-out;
+        -webkit-overflow-scrolling: touch;
+      }
+      #slides-preview .slide.active { display: flex; }
+      #slides-preview .slide > * { max-width: min(100%, 920px); }
+      #slides-preview .slide > :first-child { margin-top: auto; }
+      #slides-preview .slide > :last-child { margin-bottom: auto; }
+      #slides-preview h1 {
+        margin: 0 0 0.65em;
+        font-size: clamp(2rem, 8vw, 4.25rem);
+        line-height: 1.08;
+        letter-spacing: -0.035em;
+      }
+      #slides-preview h2 {
+        margin: 0 0 0.65em;
+        font-size: clamp(1.65rem, 6.5vw, 3.35rem);
+        line-height: 1.12;
+      }
+      #slides-preview h3 {
+        font-size: clamp(1.35rem, 5vw, 2.5rem);
+        line-height: 1.18;
+      }
+      #slides-preview p,
+      #slides-preview ul,
+      #slides-preview ol {
+        margin-top: 0.55em;
+        margin-bottom: 0.55em;
+        font-size: clamp(1rem, 3.7vw, 1.55rem);
+        line-height: 1.55;
+      }
+      #slides-preview ul,
+      #slides-preview ol { text-align: left; }
+      #slides-preview pre {
+        box-sizing: border-box;
+        width: min(100%, 920px);
+        padding: 14px;
+        border-radius: 9px;
+        background: #202128;
+        color: #f1f2f7;
+        overflow: auto;
+        text-align: left;
+      }
+      #slides-preview code { font-family: var(--editor-font); }
+      #slides-preview :not(pre) > code {
+        padding: 0.12em 0.32em;
+        border-radius: 5px;
+        background: #e4e7ec;
+      }
+      #slides-preview blockquote {
+        margin-right: auto;
+        margin-left: auto;
+        padding-left: 14px;
+        border-left: 4px solid var(--accent);
+        text-align: left;
+      }
+      #slides-preview img,
+      #slides-preview video {
+        display: block;
+        max-width: 100%;
+        max-height: 54vh;
+        margin: 0.75rem auto;
+        object-fit: contain;
+      }
+      .slides-nav {
+        position: absolute;
+        top: 50%;
+        z-index: 2;
+        display: grid;
+        width: 44px;
+        height: 44px;
+        padding: 0;
+        border: 0;
+        border-radius: 50%;
+        background: rgba(32, 33, 36, 0.12);
+        color: #202124;
+        font: 700 28px/1 var(--ui-font);
+        place-items: center;
+        transform: translateY(-50%);
+        touch-action: manipulation;
+      }
+      .slides-nav:disabled { opacity: 0.28; }
+      #slides-prev { left: 6px; }
+      #slides-next { right: 6px; }
+      #slides-progress {
+        position: absolute;
+        right: 0;
+        bottom: 0;
+        left: 0;
+        z-index: 2;
+        height: 4px;
+        background: rgba(32, 33, 36, 0.12);
+      }
+      #slides-progress-value {
+        display: block;
+        width: 0;
+        height: 100%;
+        background: var(--accent);
+        transition: width 180ms ease-out;
+      }
+      #slides-counter {
+        position: absolute;
+        right: 10px;
+        bottom: 12px;
+        z-index: 2;
+        padding: 5px 9px;
+        border-radius: 999px;
+        background: rgba(32, 33, 36, 0.1);
+        color: #3c4043;
+        font: 700 12px/1 var(--ui-font);
+      }
+      #slides-exit {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        z-index: 3;
+        display: none;
+        width: 38px;
+        height: 38px;
+        padding: 0;
+        border: 0;
+        border-radius: 50%;
+        background: rgba(32, 33, 36, 0.12);
+        color: #202124;
+        font: 600 24px/1 var(--ui-font);
+        place-items: center;
+      }
+      @keyframes slide-enter {
+        from { opacity: 0; transform: translateX(12px); }
+        to { opacity: 1; transform: translateX(0); }
+      }
+      @media (orientation: landscape) {
+        #slides-exit { display: grid; }
+        #slides-preview .slide {
+          overflow: visible;
+          transform-origin: top center;
+          animation: none;
+        }
+      }
+      @media (orientation: landscape) and (max-height: 520px) {
+        #slides-preview .slide {
+          padding-top: 20px;
+          padding-bottom: 24px;
+        }
+        #slides-preview img,
+        #slides-preview video { max-height: 46vh; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #slides-preview .slide { animation: none; }
+        #slides-progress-value { transition: none; }
+      }
       #formatting-toolbar {
         display: flex;
         align-items: center;
@@ -851,6 +1033,10 @@ export function getP2pmdEditorPage () {
           <button type="button" data-format="quote" title="Quote" aria-label="Quote">
             <svg class="toolbar-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M12 12a1 1 0 0 0 1-1V8.558a1 1 0 0 0-1-1h-1.388q0-.527.062-1.054.093-.558.31-.992t.559-.683q.34-.279.868-.279V3q-.868 0-1.52.372a3.3 3.3 0 0 0-1.085.992 4.9 4.9 0 0 0-.62 1.458A7.7 7.7 0 0 0 9 7.558V11a1 1 0 0 0 1 1zm-6 0a1 1 0 0 0 1-1V8.558a1 1 0 0 0-1-1H4.612q0-.527.062-1.054.094-.558.31-.992.217-.434.559-.683.34-.279.868-.279V3q-.868 0-1.52.372a3.3 3.3 0 0 0-1.085.992 4.9 4.9 0 0 0-.62 1.458A7.7 7.7 0 0 0 3 7.558V11a1 1 0 0 0 1 1z"/></svg>
           </button>
+          <div class="toolbar-divider" aria-hidden="true"></div>
+          <button type="button" data-format="slides" title="View as slides" aria-label="View as slides">
+            <svg class="toolbar-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V4a1 1 0 0 0-1-1zm0-1h10a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/><path d="M2 6h12v1H2zm0 3h12v1H2z"/><circle cx="5" cy="4.5" r=".8"/><circle cx="8" cy="4.5" r=".8"/><circle cx="11" cy="4.5" r=".8"/></svg>
+          </button>
         </div>
         <input id="image-upload-input" type="file" accept="image/*" hidden />
         <div class="editor-frame">
@@ -860,23 +1046,43 @@ export function getP2pmdEditorPage () {
           <textarea id="document-input" aria-label="Markdown document" placeholder="Write Markdown here..." wrap="off"></textarea>
         </div>
         <article id="preview" aria-label="Markdown preview" hidden></article>
+        <section id="slides-preview" aria-label="Presentation slides" hidden>
+          <div id="slides-content"></div>
+          <button id="slides-exit" type="button" aria-label="Exit presentation">&times;</button>
+          <button id="slides-prev" class="slides-nav" type="button" aria-label="Previous slide">&#8249;</button>
+          <button id="slides-next" class="slides-nav" type="button" aria-label="Next slide">&#8250;</button>
+          <div id="slides-counter" role="status" aria-live="polite"></div>
+          <div id="slides-progress" aria-hidden="true"><span id="slides-progress-value"></span></div>
+        </section>
       </main>
     </div>
     <script>
       const input = document.getElementById('document-input')
       const preview = document.getElementById('preview')
+      const slidesPreview = document.getElementById('slides-preview')
+      const slidesContent = document.getElementById('slides-content')
+      const slidesExit = document.getElementById('slides-exit')
+      const slidesPrevious = document.getElementById('slides-prev')
+      const slidesNext = document.getElementById('slides-next')
+      const slidesCounter = document.getElementById('slides-counter')
+      const slidesProgress = document.getElementById('slides-progress-value')
       const formattingToolbar = document.getElementById('formatting-toolbar')
       const imageUploadInput = document.getElementById('image-upload-input')
       const lineGutter = document.getElementById('line-gutter')
       const TOOLBAR_TAP_MOVEMENT_LIMIT = 8
       const REMOTE_UPDATE_BATCH_MS = 80
+      const ACTIVE_VIEW_RENDER_DELAY_MS = 120
       const INITIAL_ROOM_RETRY_ATTEMPTS = 20
       const INITIAL_ROOM_RETRY_DELAY_MS = 750
       const MAX_PENDING_UPDATE_BYTES = 2 * 1024 * 1024
       const Y_ORIGIN_REMOTE = 'remote-sse'
       const Y_ORIGIN_LOCAL_INPUT = 'local-input'
-      let isPreviewMode = false
+      let viewMode = 'edit'
       let previewRequestId = 0
+      let currentSlideIndex = 0
+      let slideTouchStart = null
+      let slideFitFrame = null
+      let activeViewRenderTimer = null
       let bridgeRequestId = 0
       const bridgeRequests = new Map()
       let saveTimer = null
@@ -1470,6 +1676,7 @@ export function getP2pmdEditorPage () {
         else if (format === 'ul' || format === 'ol') replaceSelectedLines(format)
         else if (format === 'link') insertLink()
         else if (format === 'image') insertImage()
+        else if (format === 'slides') setViewMode('slides')
         else if (format === 'inline-code') wrapSelection(codeMarker, codeMarker)
         else if (format === 'code-block') {
           wrapSelection(codeMarker.repeat(3) + newline, newline + codeMarker.repeat(3))
@@ -1484,7 +1691,7 @@ export function getP2pmdEditorPage () {
 
       function handleToolbarFormat(event) {
         const button = getToolbarButton(event)
-        if (!button || isPreviewMode) return false
+        if (!button || viewMode !== 'edit') return false
 
         applyFormatting(button.dataset.format)
         return true
@@ -1498,7 +1705,7 @@ export function getP2pmdEditorPage () {
 
       function handleToolbarPointerDown(event) {
         const button = getToolbarButton(event)
-        if (!button || isPreviewMode) {
+        if (!button || viewMode !== 'edit') {
           toolbarPointerState = null
           return
         }
@@ -1518,7 +1725,7 @@ export function getP2pmdEditorPage () {
       function handleToolbarPointerUp(event) {
         const state = toolbarPointerState
         toolbarPointerState = null
-        if (!state || state.pointerId !== event.pointerId || isPreviewMode) return
+        if (!state || state.pointerId !== event.pointerId || viewMode !== 'edit') return
 
         const movedX = Math.abs(event.clientX - state.x)
         const movedY = Math.abs(event.clientY - state.y)
@@ -1944,7 +2151,7 @@ export function getP2pmdEditorPage () {
           )
           mergeLineAttributionsFromPeerList(latestPeerList, false)
           renderLineGutter()
-          if (isPreviewMode) renderPreview()
+          scheduleActiveViewRender()
           notifyNative('p2pmd-document-updated', {
             contentLength: newContent.length
           })
@@ -1964,11 +2171,11 @@ export function getP2pmdEditorPage () {
             throw new Error(result.error || 'Unable to render Markdown preview')
           }
 
-          if (requestId !== previewRequestId || !isPreviewMode) return
+          if (requestId !== previewRequestId || viewMode !== 'preview') return
 
           preview.innerHTML = result.html
         } catch (error) {
-          if (requestId !== previewRequestId || !isPreviewMode) return
+          if (requestId !== previewRequestId || viewMode !== 'preview') return
           notifyDocumentError(error, 'editor-error')
         } finally {
           if (requestId === previewRequestId) {
@@ -1977,28 +2184,147 @@ export function getP2pmdEditorPage () {
         }
       }
 
-      function togglePreview() {
-        isPreviewMode = !isPreviewMode
-        document.body.classList.toggle('preview-mode', isPreviewMode)
-        input.hidden = isPreviewMode
-        input.parentElement.hidden = isPreviewMode
-        preview.hidden = !isPreviewMode
-        formattingToolbar.hidden = isPreviewMode
-        notifyNative('p2pmd-preview-mode', {
-          preview: isPreviewMode
+      async function renderSlides() {
+        const requestId = ++previewRequestId
+        slidesPreview.setAttribute('aria-busy', 'true')
+
+        try {
+          const result = await callNativeBridge('preview', {
+            content: input.value,
+            mode: 'slides'
+          })
+
+          if (typeof result.html !== 'string' || !Number.isInteger(result.count) || result.count < 1) {
+            throw new Error(result.error || 'Unable to render presentation slides')
+          }
+
+          if (requestId !== previewRequestId || viewMode !== 'slides') return
+
+          const previousSlideIndex = currentSlideIndex
+          const activeSlide = slidesContent.querySelector('.slide.active')
+          const previousScrollTop = activeSlide ? activeSlide.scrollTop : 0
+          slidesContent.innerHTML = result.html
+          currentSlideIndex = clampSlideIndex(currentSlideIndex, result.count)
+          showSlide(
+            currentSlideIndex,
+            currentSlideIndex === previousSlideIndex ? previousScrollTop : 0
+          )
+        } catch (error) {
+          if (requestId !== previewRequestId || viewMode !== 'slides') return
+          notifyDocumentError(error, 'editor-error')
+        } finally {
+          if (requestId === previewRequestId) {
+            slidesPreview.removeAttribute('aria-busy')
+          }
+        }
+      }
+
+      function clampSlideIndex(index, totalSlides) {
+        if (!Number.isFinite(index) || totalSlides < 1) return 0
+        return Math.max(0, Math.min(Math.floor(index), totalSlides - 1))
+      }
+
+      function showSlide(index, scrollTop = 0) {
+        const slides = Array.from(slidesContent.querySelectorAll('.slide'))
+        if (slides.length === 0) return
+
+        currentSlideIndex = clampSlideIndex(index, slides.length)
+        slides.forEach((slide, slideIndex) => {
+          const active = slideIndex === currentSlideIndex
+          slide.classList.toggle('active', active)
+          slide.setAttribute('aria-hidden', String(!active))
+          slide.style.transform = ''
+          if (active) slide.scrollTop = scrollTop
         })
 
-        if (isPreviewMode) {
-          renderPreview()
-        } else {
-          previewRequestId += 1
-          input.focus()
+        const atStart = currentSlideIndex === 0
+        const atEnd = currentSlideIndex === slides.length - 1
+        slidesPrevious.disabled = atStart
+        slidesNext.disabled = atEnd
+        slidesCounter.textContent = (currentSlideIndex + 1) + ' / ' + slides.length
+        slidesProgress.style.width = (((currentSlideIndex + 1) / slides.length) * 100) + '%'
+        scheduleSlideFit()
+      }
+
+      function scheduleSlideFit() {
+        if (slideFitFrame) cancelAnimationFrame(slideFitFrame)
+        slideFitFrame = requestAnimationFrame(() => {
+          slideFitFrame = null
+          fitActiveSlide()
+        })
+      }
+
+      function fitActiveSlide() {
+        const slide = slidesContent.querySelector('.slide.active')
+        if (!slide) return
+
+        slide.style.transform = ''
+        if (!window.matchMedia('(orientation: landscape)').matches) return
+
+        const availableWidth = slidesPreview.clientWidth
+        const availableHeight = slidesPreview.clientHeight
+        const contentWidth = Math.max(slide.clientWidth, slide.scrollWidth)
+        const contentHeight = Math.max(slide.clientHeight, slide.scrollHeight)
+        if (!availableWidth || !availableHeight || !contentWidth || !contentHeight) return
+
+        const scale = Math.min(1, availableWidth / contentWidth, availableHeight / contentHeight)
+        if (scale < 1) slide.style.transform = 'scale(' + scale + ')'
+      }
+
+      function moveSlide(direction) {
+        const nextSlideIndex = currentSlideIndex + direction
+        const slideCount = slidesContent.querySelectorAll('.slide').length
+        if (nextSlideIndex < 0 || nextSlideIndex >= slideCount) return
+        showSlide(nextSlideIndex)
+      }
+
+      function renderActiveView() {
+        if (viewMode === 'preview') renderPreview()
+        else if (viewMode === 'slides') renderSlides()
+      }
+
+      function scheduleActiveViewRender() {
+        if (viewMode === 'edit') return
+        if (activeViewRenderTimer) clearTimeout(activeViewRenderTimer)
+        activeViewRenderTimer = setTimeout(() => {
+          activeViewRenderTimer = null
+          renderActiveView()
+        }, ACTIVE_VIEW_RENDER_DELAY_MS)
+      }
+
+      function setViewMode(nextMode) {
+        if (!['edit', 'preview', 'slides'].includes(nextMode)) return
+
+        if (activeViewRenderTimer) {
+          clearTimeout(activeViewRenderTimer)
+          activeViewRenderTimer = null
         }
+        viewMode = nextMode
+        previewRequestId += 1
+        document.body.classList.toggle('preview-mode', viewMode === 'preview')
+        document.body.classList.toggle('slide-mode', viewMode === 'slides')
+        input.hidden = viewMode !== 'edit'
+        input.parentElement.hidden = viewMode !== 'edit'
+        preview.hidden = viewMode !== 'preview'
+        slidesPreview.hidden = viewMode !== 'slides'
+        formattingToolbar.hidden = viewMode !== 'edit'
+        notifyNative('p2pmd-view-mode', { mode: viewMode })
+
+        if (viewMode === 'edit') {
+          input.focus()
+        } else {
+          renderActiveView()
+        }
+      }
+
+      function togglePreview() {
+        setViewMode(viewMode === 'edit' ? 'preview' : 'edit')
       }
 
       function publishToHyper() {
         notifyNative('p2pmd-publish-requested', {
-          content: input.value
+          content: input.value,
+          mode: viewMode
         })
       }
 
@@ -2070,7 +2396,7 @@ export function getP2pmdEditorPage () {
             lastSyncedContent = documentState.content
             lastInputContent = documentState.content
             applyLineAttributionsFromDocument(documentState)
-            if (isPreviewMode) renderPreview()
+            scheduleActiveViewRender()
             notifyNative('p2pmd-document-updated', {
               updatedAt: documentState.updatedAt,
               contentLength: documentState.content.length
@@ -2121,6 +2447,42 @@ export function getP2pmdEditorPage () {
         }
 
         handleToolbarFormat(event)
+      })
+      slidesPrevious.addEventListener('click', () => moveSlide(-1))
+      slidesNext.addEventListener('click', () => moveSlide(1))
+      slidesExit.addEventListener('click', () => setViewMode('edit'))
+      window.addEventListener('resize', scheduleSlideFit)
+      slidesContent.addEventListener('load', scheduleSlideFit, true)
+      slidesContent.addEventListener('loadedmetadata', scheduleSlideFit, true)
+      slidesPreview.addEventListener('touchstart', (event) => {
+        const touch = event.touches[0]
+        if (!touch) return
+        slideTouchStart = { x: touch.clientX, y: touch.clientY }
+      }, { passive: true })
+      slidesPreview.addEventListener('touchend', (event) => {
+        const touch = event.changedTouches[0]
+        const start = slideTouchStart
+        slideTouchStart = null
+        if (!touch || !start) return
+
+        const deltaX = touch.clientX - start.x
+        const deltaY = touch.clientY - start.y
+        if (Math.abs(deltaX) < 48 || Math.abs(deltaX) <= Math.abs(deltaY) * 1.2) return
+        moveSlide(deltaX < 0 ? 1 : -1)
+      }, { passive: true })
+      slidesPreview.addEventListener('touchcancel', () => {
+        slideTouchStart = null
+      }, { passive: true })
+      window.addEventListener('keydown', (event) => {
+        if (viewMode !== 'slides') return
+        if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') moveSlide(-1)
+        else if (event.key === 'ArrowRight' || event.key === 'ArrowDown' || event.key === ' ') {
+          event.preventDefault()
+          moveSlide(1)
+        } else if (event.key === 'Home') showSlide(0)
+        else if (event.key === 'End') {
+          showSlide(slidesContent.querySelectorAll('.slide').length - 1)
+        } else if (event.key === 'Escape') setViewMode('edit')
       })
       window.__p2pmdTogglePreview = togglePreview
       window.__p2pmdPublishToHyper = publishToHyper

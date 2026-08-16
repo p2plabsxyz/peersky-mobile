@@ -5,6 +5,7 @@ const P2PMD_PREVIEW_IMAGE_SRC_PATTERN = /src="\/hyper\/file\?url=([^"]+)"/g
 const MAX_INLINE_PREVIEW_IMAGES = 5
 const MAX_INLINE_PREVIEW_IMAGE_BYTES = 5 * 1024 * 1024
 const MAX_INLINE_PREVIEW_IMAGE_TOTAL_BYTES = 10 * 1024 * 1024
+const SLIDE_DELIMITER = '<!-- slide -->'
 const markdownRenderer = new MarkdownIt({
   // Security-critical: preview output is injected with innerHTML in the WebView.
   // Keep raw HTML disabled unless the preview path is sanitized first.
@@ -30,6 +31,73 @@ markdownRenderer.renderer.rules.image = function (tokens, idx, options, env, sel
 
 export function renderMarkdownPreview (content) {
   return markdownRenderer.render(content)
+}
+
+export function splitMarkdownSlides (content) {
+  const slides = []
+  let currentSlide = []
+  let fence = null
+  const lines = String(content).replace(/\r\n?/g, '\n').split('\n')
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]
+    const fenceMatch = line.match(/^\s{0,3}(`{3,}|~{3,})/)
+
+    if (fenceMatch) {
+      const marker = fenceMatch[1]
+      if (!fence) {
+        fence = { character: marker[0], length: marker.length }
+      } else if (
+        marker[0] === fence.character &&
+        marker.length >= fence.length &&
+        new RegExp(`^\\s{0,3}${fence.character}{${fence.length},}\\s*$`).test(line)
+      ) {
+        fence = null
+      }
+    }
+
+    const trimmedLine = line.trim()
+    const previousLine = currentSlide[currentSlide.length - 1]
+    const nextLine = lines[index + 1]
+    const hasBlankBefore = currentSlide.length === 0 || !String(previousLine).trim()
+    const hasBlankAfter = nextLine === undefined || !nextLine.trim()
+    const isHorizontalSlideBreak = line === '---' && hasBlankBefore && hasBlankAfter
+    const isCommentSlideBreak = trimmedLine.toLowerCase() === SLIDE_DELIMITER
+
+    if (!fence && (isHorizontalSlideBreak || isCommentSlideBreak)) {
+      appendSlide(slides, currentSlide)
+      currentSlide = []
+      continue
+    }
+
+    currentSlide.push(line)
+  }
+
+  appendSlide(slides, currentSlide)
+  return slides
+}
+
+export function renderMarkdownSlides (content) {
+  const slides = splitMarkdownSlides(content)
+  const renderedSlides = (slides.length > 0 ? slides : [''])
+    .map((slide, index) => {
+      const rendered = markdownRenderer.render(stripSpeakerNotes(slide))
+      return `<section class="slide${index === 0 ? ' active' : ''}" data-slide-index="${index}">${rendered}</section>`
+    })
+
+  return {
+    count: renderedSlides.length,
+    html: renderedSlides.join('')
+  }
+}
+
+function appendSlide (slides, lines) {
+  const slide = lines.join('\n').trim()
+  if (slide) slides.push(slide)
+}
+
+function stripSpeakerNotes (content) {
+  return content.replace(/<!--[\s\S]*?-->/g, '')
 }
 
 export async function inlineHyperPreviewImages (html, readFile) {
