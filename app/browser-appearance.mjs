@@ -2,16 +2,16 @@ import { BROWSER_HOME_URL } from './browser-shell.mjs'
 
 export const BROWSER_PALETTES = {
   dark: {
-    accent: '#4b91ed',
-    address: '#252a35',
-    border: '#394152',
-    button: '#2a3140',
-    mutedText: '#aeb8ca',
-    selectedBackground: '#263d5e',
-    selectedControl: '#8fc1ff',
-    shell: '#171a22',
-    surface: '#20242e',
-    text: '#f3f6fb'
+    accent: '#3b82f6',
+    address: '#18181b',
+    border: '#6b7280',
+    button: '#27272a',
+    mutedText: '#9ca3af',
+    selectedBackground: '#3f3f46',
+    selectedControl: '#e5e7eb',
+    shell: '#18181b',
+    surface: '#27272a',
+    text: '#ffffff'
   },
   light: {
     accent: '#1f6fd1',

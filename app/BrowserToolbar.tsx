@@ -8,7 +8,6 @@ import {
   TextInput,
   View
 } from 'react-native'
-import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { MAX_BROWSER_URL_LENGTH } from './browser-shell.mjs'
 import { formatBrowserAddress } from './browser-appearance.mjs'
 import { BrowserOverflowMenu } from './settings/BrowserOverflowMenu'
@@ -18,10 +17,11 @@ import { styles } from './styles'
 import ReloadIcon from '../assets/icons/bootstrap/arrow-clockwise.svg'
 import BackIcon from '../assets/icons/bootstrap/arrow-left.svg'
 import ForwardIcon from '../assets/icons/bootstrap/arrow-right.svg'
-import HomeIcon from '../assets/icons/bootstrap/house.svg'
 import ShareIcon from '../assets/icons/bootstrap/arrow-bar-up.svg'
+import ClearIcon from '../assets/icons/bootstrap/x-circle.svg'
 
-const TOOLBAR_ICON_SIZE = 20
+const TOOLBAR_ICON_SIZE = 22
+const ADDRESS_CLEAR_ICON_SIZE = 20
 const TOOLBAR_ICON_STROKE_WIDTH = 0.35
 
 type BrowserToolbarProps = {
@@ -56,7 +56,6 @@ type BrowserToolbarProps = {
   onBack: () => void
   onCloseMenu: () => void
   onForward: () => void
-  onHome: () => void
   onOpenMenu: () => void
   onNewTab: () => void
   onOpenBookmarks: () => void
@@ -96,7 +95,6 @@ export function BrowserToolbar ({
   onBack,
   onCloseMenu,
   onForward,
-  onHome,
   onOpenMenu,
   onNewTab,
   onOpenBookmarks,
@@ -112,12 +110,11 @@ export function BrowserToolbar ({
   onToggleDesktopView,
   onToggleBookmark
 }: BrowserToolbarProps) {
-  const insets = useSafeAreaInsets()
   const [isAddressFocused, setIsAddressFocused] = useState(false)
   const [menuOffset, setMenuOffset] = useState(70)
   const addressInputRef = useRef<TextInput>(null)
   const addressFocusProgress = useRef(new Animated.Value(0)).current
-  const trailingControlsWidth = 79
+  const toolbarControlsWidth = 80
 
   useEffect(() => {
     const animation = Animated.timing(addressFocusProgress, {
@@ -148,10 +145,8 @@ export function BrowserToolbar ({
     <View style={[
       styles.browserToolbar,
       {
-        backgroundColor: palette.shell,
-        borderBottomColor: palette.border,
-        paddingLeft: 14 + insets.left,
-        paddingRight: 14 + insets.right
+        backgroundColor: isDark ? palette.surface : palette.shell,
+        borderBottomColor: palette.border
       },
       position === 'bottom'
           ? {
@@ -179,7 +174,7 @@ export function BrowserToolbar ({
             }],
             width: addressFocusProgress.interpolate({
               inputRange: [0, 1],
-              outputRange: [123, 0]
+              outputRange: [toolbarControlsWidth, 0]
             })
           }
         ]}
@@ -196,8 +191,8 @@ export function BrowserToolbar ({
         <BackIcon
           width={TOOLBAR_ICON_SIZE}
           height={TOOLBAR_ICON_SIZE}
-          color={palette.text}
-          stroke={palette.text}
+          color={palette.mutedText}
+          stroke={palette.mutedText}
           strokeWidth={TOOLBAR_ICON_STROKE_WIDTH}
         />
       </Pressable>
@@ -213,22 +208,8 @@ export function BrowserToolbar ({
         <ForwardIcon
           width={TOOLBAR_ICON_SIZE}
           height={TOOLBAR_ICON_SIZE}
-          color={palette.text}
-          stroke={palette.text}
-          strokeWidth={TOOLBAR_ICON_STROKE_WIDTH}
-        />
-      </Pressable>
-      <Pressable
-        accessibilityLabel='Go home'
-        accessibilityRole='button'
-        style={styles.browserNavButton}
-        onPress={onHome}
-      >
-        <HomeIcon
-          width={TOOLBAR_ICON_SIZE}
-          height={TOOLBAR_ICON_SIZE}
-          color={palette.text}
-          stroke={palette.text}
+          color={palette.mutedText}
+          stroke={palette.mutedText}
           strokeWidth={TOOLBAR_ICON_STROKE_WIDTH}
         />
       </Pressable>
@@ -236,8 +217,7 @@ export function BrowserToolbar ({
       <View style={[
         styles.browserAddressContainer,
         {
-          backgroundColor: palette.address,
-          borderColor: palette.border
+          backgroundColor: palette.address
         }
       ]}>
         <TextInput
@@ -264,6 +244,26 @@ export function BrowserToolbar ({
           placeholder='Search or type'
           placeholderTextColor={palette.mutedText}
         />
+        {isAddressFocused && address.length > 0 && (
+          <Pressable
+            accessibilityLabel='Clear address'
+            accessibilityRole='button'
+            hitSlop={4}
+            style={[styles.browserAddressAction, styles.browserAddressClearAction]}
+            onPress={() => {
+              onAddressChange('')
+              addressInputRef.current?.focus()
+            }}
+          >
+            <ClearIcon
+              width={ADDRESS_CLEAR_ICON_SIZE}
+              height={ADDRESS_CLEAR_ICON_SIZE}
+              color={palette.mutedText}
+              stroke={palette.mutedText}
+              strokeWidth={TOOLBAR_ICON_STROKE_WIDTH}
+            />
+          </Pressable>
+        )}
         {!isAddressFocused && shareActionAvailable && (
           <View style={styles.browserAddressActions}>
             <Pressable
@@ -278,8 +278,8 @@ export function BrowserToolbar ({
                   <ReloadIcon
                     width={TOOLBAR_ICON_SIZE}
                     height={TOOLBAR_ICON_SIZE}
-                    color={palette.text}
-                    stroke={palette.text}
+                    color={palette.mutedText}
+                    stroke={palette.mutedText}
                     strokeWidth={TOOLBAR_ICON_STROKE_WIDTH}
                   />
                   )}
@@ -293,8 +293,8 @@ export function BrowserToolbar ({
               <ShareIcon
                 width={TOOLBAR_ICON_SIZE}
                 height={TOOLBAR_ICON_SIZE}
-                color={palette.text}
-                stroke={palette.text}
+                color={palette.mutedText}
+                stroke={palette.mutedText}
                 strokeWidth={TOOLBAR_ICON_STROKE_WIDTH}
               />
             </Pressable>
@@ -331,7 +331,7 @@ export function BrowserToolbar ({
             }],
             width: addressFocusProgress.interpolate({
               inputRange: [0, 1],
-              outputRange: [trailingControlsWidth, 0]
+              outputRange: [toolbarControlsWidth, 0]
             })
           }
         ]}
@@ -341,8 +341,8 @@ export function BrowserToolbar ({
         style={styles.browserTabCountButton}
         onPress={onOpenTabs}
       >
-        <View style={[styles.browserTabCountIcon, { borderColor: palette.text }]}>
-          <Text style={[styles.browserTabCountText, { color: palette.text }]}>{tabCount}</Text>
+        <View style={[styles.browserTabCountIcon, { borderColor: palette.mutedText }]}>
+          <Text style={[styles.browserTabCountText, { color: palette.mutedText }]}>{tabCount}</Text>
         </View>
       </Pressable>
       <BrowserOverflowMenu

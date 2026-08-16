@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { Modal, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native'
-import { SafeAreaView } from 'react-native-safe-area-context'
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import CheckIcon from '../../assets/icons/bootstrap/check2.svg'
 import DisplayIcon from '../../assets/icons/bootstrap/display.svg'
 import DownloadIcon from '../../assets/icons/bootstrap/download.svg'
@@ -69,7 +69,16 @@ export function BrowserOverflowMenu ({
   onToggleBookmark
 }: BrowserOverflowMenuProps) {
   const { height: windowHeight } = useWindowDimensions()
-  const iconColor = isDark ? BROWSER_PALETTES.dark.text : BROWSER_PALETTES.light.text
+  const insets = useSafeAreaInsets()
+  const iconColor = isDark ? BROWSER_PALETTES.dark.mutedText : BROWSER_PALETTES.light.text
+  const menuEdge = 12 + insets.right
+  const menuPosition = position === 'bottom'
+    ? { bottom: offset + insets.bottom }
+    : { top: offset + insets.top }
+  const menuMaxHeight = Math.max(
+    180,
+    windowHeight - offset - insets.top - insets.bottom - 20
+  )
   const menuIconProps = {
     color: iconColor,
     height: MENU_ICON_SIZE,
@@ -112,8 +121,8 @@ export function BrowserOverflowMenu ({
             showsVerticalScrollIndicator={false}
             style={[
             styles.menu,
-            position === 'bottom' ? { bottom: offset } : { top: offset },
-            { maxHeight: Math.max(180, windowHeight - offset - 20) },
+            menuPosition,
+            { maxHeight: menuMaxHeight, right: menuEdge },
             isDark ? darkStyles.menu : null
           ]}
           >
@@ -272,8 +281,8 @@ function MenuItem ({
         <CheckIcon
           width={MENU_ICON_SIZE}
           height={MENU_ICON_SIZE}
-          color={isDark ? BROWSER_PALETTES.dark.text : BROWSER_PALETTES.light.text}
-          stroke={isDark ? BROWSER_PALETTES.dark.text : BROWSER_PALETTES.light.text}
+          color={isDark ? BROWSER_PALETTES.dark.selectedControl : BROWSER_PALETTES.light.text}
+          stroke={isDark ? BROWSER_PALETTES.dark.selectedControl : BROWSER_PALETTES.light.text}
           strokeWidth={MENU_ICON_STROKE_WIDTH}
         />
       )}
@@ -286,7 +295,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     height: 38,
     justifyContent: 'center',
-    width: 34
+    width: 38
   },
   dots: {
     gap: 3
@@ -375,7 +384,7 @@ const darkStyles = StyleSheet.create({
     borderBottomColor: BROWSER_PALETTES.dark.border
   },
   dot: {
-    backgroundColor: BROWSER_PALETTES.dark.text
+    backgroundColor: BROWSER_PALETTES.dark.mutedText
   },
   pressed: {
     backgroundColor: BROWSER_PALETTES.dark.selectedBackground

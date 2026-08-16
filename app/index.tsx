@@ -17,6 +17,7 @@ import {
   Text,
   TextInput,
   useColorScheme,
+  useWindowDimensions,
   View
 } from 'react-native'
 import { Worklet } from 'react-native-bare-kit'
@@ -216,6 +217,7 @@ const DESKTOP_BROWSER_USER_AGENT = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/
 
 export default function App () {
   const systemColorScheme = useColorScheme()
+  const { height: browserWindowHeight, width: browserWindowWidth } = useWindowDimensions()
   const workletRef = useRef<Worklet | null>(null)
   const rpcRef = useRef<RPC | null>(null)
   const browserWebViewRefs = useRef(new Map<string, ComponentRef<typeof WebView>>())
@@ -2177,11 +2179,18 @@ export default function App () {
     return (
       <SafeAreaView
         style={[styles.browserShell, { backgroundColor: browserChrome.shell }]}
-        edges={['top', 'left', 'right', 'bottom']}
+        edges={['left', 'right', 'bottom']}
       >
         <StatusBar
-          backgroundColor={browserChrome.shell}
+          backgroundColor={browserIsDark ? browserChrome.surface : browserChrome.shell}
           barStyle={browserIsDark ? 'light-content' : 'dark-content'}
+        />
+        <SafeAreaView
+          edges={['top']}
+          style={[
+            styles.browserSystemInset,
+            { backgroundColor: browserIsDark ? browserChrome.surface : browserChrome.shell }
+          ]}
         />
         <SettingsScreen
           addressBarPosition={browserPreferences.addressBarPosition}
@@ -2394,7 +2403,6 @@ export default function App () {
       onBack={onBrowserBack}
       onCloseMenu={() => setBrowserMenuVisible(false)}
       onForward={onBrowserForward}
-      onHome={openBrowserHome}
       onOpenMenu={() => setBrowserMenuVisible(true)}
       onNewTab={onBrowserNewTab}
       onOpenBookmarks={onBrowserOpenBookmarks}
@@ -2448,14 +2456,27 @@ export default function App () {
     }
   })
 
+  const browserToolbarColor = browserIsDark ? browserChrome.surface : browserChrome.shell
+  const browserIsPortrait = browserWindowHeight >= browserWindowWidth
+  const browserTopInsetColor = browserIsPortrait && browserPreferences.addressBarPosition === 'top'
+    ? browserToolbarColor
+    : browserChrome.shell
+  const browserBottomInsetColor = browserIsPortrait && browserPreferences.addressBarPosition === 'bottom'
+    ? browserToolbarColor
+    : browserChrome.shell
+
   return (
     <SafeAreaView
       style={[styles.browserShell, { backgroundColor: browserChrome.shell }]}
-      edges={['top', 'bottom']}
+      edges={['left', 'right']}
     >
         <StatusBar
-          backgroundColor={browserChrome.shell}
+          backgroundColor={browserTopInsetColor}
           barStyle={browserIsDark ? 'light-content' : 'dark-content'}
+        />
+        <SafeAreaView
+          edges={['top']}
+          style={[styles.browserSystemInset, { backgroundColor: browserTopInsetColor }]}
         />
         <KeyboardAvoidingView
           behavior='padding'
@@ -2987,6 +3008,10 @@ export default function App () {
           </View>
         )}
         </KeyboardAvoidingView>
+        <SafeAreaView
+          edges={['bottom']}
+          style={[styles.browserSystemInset, { backgroundColor: browserBottomInsetColor }]}
+        />
     </SafeAreaView>
   )
 }

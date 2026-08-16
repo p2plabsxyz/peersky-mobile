@@ -11,21 +11,24 @@ export const styles = StyleSheet.create({
   browserShellContent: {
     flex: 1
   },
+  browserSystemInset: {
+    width: '100%'
+  },
   browserToolbar: {
     alignItems: 'center',
     backgroundColor: '#f5f8ff',
     borderBottomColor: '#dbe6f6',
     borderBottomWidth: 1,
+    columnGap: 4,
     flexDirection: 'row',
-    paddingHorizontal: 14,
-    paddingTop: 12,
-    paddingBottom: 16,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
     zIndex: 10
   },
   browserToolbarControlGroup: {
     alignItems: 'center',
     flexDirection: 'row',
-    gap: 7,
+    gap: 4,
     overflow: 'hidden'
   },
   browserToolbarTrailingControls: {
@@ -35,7 +38,7 @@ export const styles = StyleSheet.create({
     alignItems: 'center',
     height: 38,
     justifyContent: 'center',
-    width: 34
+    width: 38
   },
   browserNavButtonDisabled: {
     opacity: 0.35
@@ -43,21 +46,23 @@ export const styles = StyleSheet.create({
   browserAddressContainer: {
     alignItems: 'center',
     backgroundColor: '#ffffff',
-    borderColor: '#d2dff1',
-    borderRadius: 18,
-    borderWidth: 1,
+    borderRadius: 8,
+    elevation: 2,
     flex: 1,
     flexDirection: 'row',
     height: 38,
     minWidth: 0,
-    overflow: 'hidden'
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.16,
+    shadowRadius: 3
   },
   browserAddress: {
     color: '#151821',
     flex: 1,
     fontSize: 15,
     minWidth: 0,
-    paddingHorizontal: 14,
+    paddingHorizontal: 12,
     paddingVertical: 8
   },
   browserAddressActions: {
@@ -70,6 +75,9 @@ export const styles = StyleSheet.create({
     height: 32,
     justifyContent: 'center',
     width: 32
+  },
+  browserAddressClearAction: {
+    marginRight: 2
   },
   browserTabCountButton: {
     alignItems: 'center',
@@ -278,7 +286,7 @@ export const styles = StyleSheet.create({
   },
   browserHome: {
     paddingHorizontal: 18,
-    paddingTop: 28,
+    paddingTop: 32,
     paddingBottom: 36
   },
   browserHomeTitle: {
@@ -295,7 +303,9 @@ export const styles = StyleSheet.create({
   browserShortcutGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    rowGap: 28
+    maxWidth: 480,
+    rowGap: 28,
+    width: '100%'
   },
   browserShortcut: {
     alignItems: 'center',
@@ -304,15 +314,15 @@ export const styles = StyleSheet.create({
   },
   browserShortcutIcon: {
     alignItems: 'center',
-    borderRadius: 18,
-    height: 72,
+    borderRadius: 16,
+    height: 64,
     justifyContent: 'center',
     overflow: 'hidden',
-    width: 72
+    width: 64
   },
   browserShortcutIconImage: {
-    height: 90,
-    width: 90
+    height: 80,
+    width: 80
   },
   browserShortcutIconP2pmd: {
     backgroundColor: '#2f80ed'
