@@ -1912,7 +1912,11 @@ export default function App () {
     )
   }
 
-  async function publishP2pmdContentToHyper (content: unknown, mode: unknown) {
+  async function publishP2pmdContentToHyper (
+    content: unknown,
+    mode: unknown,
+    latexModeEnabled: unknown
+  ) {
     if (p2pmdPublishInFlightRef.current) return
 
     if (typeof content !== 'string') {
@@ -1927,7 +1931,8 @@ export default function App () {
     try {
       const response = await callRpc(RPC_P2PMD_ROOM_PUBLISH, {
         content,
-        mode: mode === 'slides' ? 'slides' : 'note'
+        mode: mode === 'slides' ? 'slides' : 'note',
+        latexModeEnabled: latexModeEnabled === true
       })
       setLastResult(response)
 
@@ -2031,7 +2036,11 @@ export default function App () {
           setP2pmdSyncStatus('Image uploaded')
           break
         case 'p2pmd-publish-requested':
-          void publishP2pmdContentToHyper(parsed.content, parsed.mode)
+          void publishP2pmdContentToHyper(
+            parsed.content,
+            parsed.mode,
+            parsed.latexModeEnabled
+          )
           break
         default:
           setStatus('P2PMD editor connected')

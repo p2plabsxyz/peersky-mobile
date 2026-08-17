@@ -52,6 +52,7 @@ import {
   renderMarkdownSlides
 } from '../p2pmd/preview.mjs'
 import { getP2pmdEditorPage } from '../p2pmd/server.mjs'
+import { hasIeeeMarker } from '../p2pmd/templates.mjs'
 import { parseJsonMessage, replyJson } from './messages.mjs'
 
 let currentIdentityNonce = null
@@ -224,7 +225,10 @@ export async function routeRpcRequest (req) {
 
       const rendered = body.mode === 'slides'
         ? renderMarkdownSlides(body.content)
-        : { html: renderMarkdownPreview(body.content) }
+        : {
+            html: renderMarkdownPreview(body.content),
+            ieee: body.latexModeEnabled === true && hasIeeeMarker(body.content)
+          }
 
       replyJson(req, {
         ok: true,

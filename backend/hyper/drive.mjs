@@ -1,8 +1,15 @@
 import b4a from 'b4a'
-import MarkdownIt from 'markdown-it'
 import { getHyperRuntime } from './runtime.mjs'
 import { parseHyperUrl } from './url.mjs'
 import { splitMarkdownSlides } from '../p2pmd/preview.mjs'
+import ieeeBrowserScript from '../p2pmd/ieee-runtime.mjs'
+import katexCss from '../p2pmd/katex-runtime.mjs'
+import {
+  createP2pmdMarkdownRenderer,
+  P2PMD_SCIENTIFIC_STYLES,
+  renderP2pmdMarkdown
+} from '../p2pmd/scientific.mjs'
+import { hasIeeeMarker } from '../p2pmd/templates.mjs'
 
 const MAX_HYPER_FILE_BYTES = 10 * 1024 * 1024
 const MAX_HYPER_IMAGE_BYTES = 5 * 1024 * 1024
@@ -17,11 +24,7 @@ const IMAGE_EXTENSIONS = {
   'image/png': '.png',
   'image/webp': '.webp'
 }
-const markdownRenderer = new MarkdownIt({
-  html: false,
-  linkify: true,
-  breaks: true
-})
+const markdownRenderer = createP2pmdMarkdownRenderer()
 let nextAssetId = 0
 let publishTransition = Promise.resolve()
 let imageUploadWindowStartedAt = 0
@@ -95,7 +98,7 @@ export async function uploadHyperFile ({
   }
 }
 
-export async function publishMarkdownDocument ({ content, mode } = {}) {
+export async function publishMarkdownDocument ({ content, mode, latexModeEnabled } = {}) {
   if (typeof content !== 'string') {
     return {
       ok: false,
@@ -112,14 +115,30 @@ export async function publishMarkdownDocument ({ content, mode } = {}) {
   }
 
   return withPublishTransition(async () => {
+    let html
+    try {
+      html = mode === 'slides'
+        ? createPublishedSlidesHtml(content)
+        : createPublishedNoteHtml(content, latexModeEnabled === true)
+    } catch (error) {
+      return {
+        ok: false,
+        error: error instanceof Error ? error.message : String(error)
+      }
+    }
+
+    const published = b4a.from(html)
+    if (published.byteLength > MAX_HYPER_FILE_BYTES) {
+      return {
+        ok: false,
+        error: 'Published document is too large. Maximum size is 10 MB.'
+      }
+    }
+
     const runtime = await getHyperRuntime()
     const drive = await runtime.getDrive(P2PMD_DRIVE_NAME)
 
-    const html = mode === 'slides'
-      ? createPublishedSlidesHtml(content)
-      : createPublishedNoteHtml(content)
-
-    await drive.put('/index.html', b4a.from(html))
+    await drive.put('/index.html', published)
 
     return {
       ok: true,
@@ -301,15 +320,25 @@ function hasAscii (bytes, offset, expected) {
   return true
 }
 
-function createPublishedNoteHtml (content) {
-  const rendered = markdownRenderer.render(content)
+export function createPublishedNoteHtml (content, latexModeEnabled) {
+  const rendered = renderP2pmdMarkdown(markdownRenderer, content)
+  const ieee = latexModeEnabled && hasIeeeMarker(content)
+  const ieeeScript = ieee
+    ? `<script>${ieeeBrowserScript}
+const note = document.getElementById('note')
+window.P2pmdIeee.render(note, note.innerHTML)
+</script>`
+    : ''
+  const scriptPolicy = ieee ? " script-src 'unsafe-inline';" : ''
 
   return `<!doctype html>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src hyper: data:;" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; font-src data:; img-src hyper: https: data:;${scriptPolicy}" />
 <title>P2PMD Note</title>
 <style>
+  ${katexCss}
+  ${P2PMD_SCIENTIFIC_STYLES}
   body {
     background: #ffffff;
     color: #111111;
@@ -340,7 +369,8 @@ function createPublishedNoteHtml (content) {
     padding: 0;
   }
 </style>
-${rendered}
+<main id="note">${rendered}</main>
+${ieeeScript}
 `
 }
 
@@ -348,7 +378,7 @@ export function createPublishedSlidesHtml (content) {
   const slideContents = splitMarkdownSlides(content)
   const slides = (slideContents.length > 0 ? slideContents : [''])
     .map((slide, index) => {
-      const rendered = markdownRenderer.render(slide.replace(/<!--[\s\S]*?-->/g, ''))
+      const rendered = renderP2pmdMarkdown(markdownRenderer, slide)
       return `<section class="slide${index === 0 ? ' active' : ''}" aria-hidden="${index !== 0}">${rendered}</section>`
     })
     .join('')
@@ -361,6 +391,8 @@ export function createPublishedSlidesHtml (content) {
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src hyper: data:; media-src hyper: data:;" />
   <title>P2PMD Slides</title>
   <style>
+    ${katexCss}
+    ${P2PMD_SCIENTIFIC_STYLES}
     * { box-sizing: border-box; }
     html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
     body { background: #f7f7f5; color: #202124; font-family: sans-serif; }

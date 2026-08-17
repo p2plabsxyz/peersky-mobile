@@ -1,18 +1,16 @@
 import b4a from 'b4a'
-import MarkdownIt from 'markdown-it'
+import {
+  assertRenderedMarkdownSize,
+  createP2pmdMarkdownRenderer,
+  renderP2pmdMarkdown
+} from './scientific.mjs'
 
 const P2PMD_PREVIEW_IMAGE_SRC_PATTERN = /src="\/hyper\/file\?url=([^"]+)"/g
 const MAX_INLINE_PREVIEW_IMAGES = 5
 const MAX_INLINE_PREVIEW_IMAGE_BYTES = 5 * 1024 * 1024
 const MAX_INLINE_PREVIEW_IMAGE_TOTAL_BYTES = 10 * 1024 * 1024
 const SLIDE_DELIMITER = '<!-- slide -->'
-const markdownRenderer = new MarkdownIt({
-  // Security-critical: preview output is injected with innerHTML in the WebView.
-  // Keep raw HTML disabled unless the preview path is sanitized first.
-  html: false,
-  linkify: true,
-  breaks: true
-})
+const markdownRenderer = createP2pmdMarkdownRenderer()
 const defaultImageRenderer = markdownRenderer.renderer.rules.image || function (tokens, idx, options, env, self) {
   return self.renderToken(tokens, idx, options)
 }
@@ -30,7 +28,7 @@ markdownRenderer.renderer.rules.image = function (tokens, idx, options, env, sel
 }
 
 export function renderMarkdownPreview (content) {
-  return markdownRenderer.render(content)
+  return renderP2pmdMarkdown(markdownRenderer, content)
 }
 
 export function splitMarkdownSlides (content) {
@@ -81,13 +79,16 @@ export function renderMarkdownSlides (content) {
   const slides = splitMarkdownSlides(content)
   const renderedSlides = (slides.length > 0 ? slides : [''])
     .map((slide, index) => {
-      const rendered = markdownRenderer.render(stripSpeakerNotes(slide))
+      const rendered = renderP2pmdMarkdown(markdownRenderer, stripSpeakerNotes(slide))
       return `<section class="slide${index === 0 ? ' active' : ''}" data-slide-index="${index}">${rendered}</section>`
     })
 
+  const html = renderedSlides.join('')
+  assertRenderedMarkdownSize(html)
+
   return {
     count: renderedSlides.length,
-    html: renderedSlides.join('')
+    html
   }
 }
 

@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import http from 'node:http'
+import b4a from 'b4a'
+import * as Y from 'yjs'
 import { buildLineReplaceUpdate } from '../fixtures/yjs-helpers.mjs'
 import { resetDocumentState } from '../../backend/p2pmd/document.mjs'
 import { createP2pmdHttpServer } from '../../backend/p2pmd/server.mjs'
@@ -94,6 +96,41 @@ describe('p2pmd HTTP endpoints with injectable Node server', () => {
     })
   })
 
+  it('synchronizes the desktop-compatible LaTeX setting through Yjs state', async () => {
+    const state = await getJson(`${localUrl}/doc/yjsstate`)
+    const ydoc = new Y.Doc()
+    Y.applyUpdate(ydoc, b4a.from(state.yjsState, 'base64'))
+    ydoc.getMap('settings').set('latexModeEnabled', true)
+
+    const updateResponse = await postJson(`${localUrl}/doc/update`, {
+      clientId: 'host-device',
+      role: 'host',
+      update: b4a.toString(Y.encodeStateAsUpdate(ydoc), 'base64')
+    })
+    assert.equal(updateResponse.status, 200)
+
+    const synced = await getJson(`${localUrl}/doc/yjsstate`)
+    const remoteDoc = new Y.Doc()
+    Y.applyUpdate(remoteDoc, b4a.from(synced.yjsState, 'base64'))
+    assert.equal(remoteDoc.getMap('settings').get('latexModeEnabled'), true)
+
+    const clientDoc = new Y.Doc()
+    Y.applyUpdate(clientDoc, b4a.from(synced.yjsState, 'base64'))
+    clientDoc.getText('content').insert(0, 'Client edit\n')
+    const clientUpdate = await postJson(`${localUrl}/doc/update`, {
+      clientId: 'client-device',
+      role: 'client',
+      update: b4a.toString(Y.encodeStateAsUpdate(clientDoc), 'base64')
+    })
+    assert.equal(clientUpdate.status, 200)
+
+    const afterClientEdit = await getJson(`${localUrl}/doc/yjsstate`)
+    const verifiedDoc = new Y.Doc()
+    Y.applyUpdate(verifiedDoc, b4a.from(afterClientEdit.yjsState, 'base64'))
+    assert.equal(verifiedDoc.getMap('settings').get('latexModeEnabled'), true)
+    assert.match(verifiedDoc.getText('content').toString(), /Client edit/)
+  })
+
   it('renders preview HTML and rejects invalid preview input', async () => {
     const response = await postJson(`${localUrl}/preview`, {
       content: '<script>alert(1)</script>\n\n![pic](hyper://example.com/pic.png)'
@@ -111,6 +148,15 @@ describe('p2pmd HTTP endpoints with injectable Node server', () => {
     assert.equal(invalidResponse.status, 400)
     assert.equal(invalidBody.ok, false)
     assert.equal(invalidBody.error, 'Invalid Markdown content. Expected a string.')
+
+    const excessiveLatexResponse = await postJson(`${localUrl}/preview`, {
+      content: Array.from({ length: 2001 }, () => '$x$').join(' ')
+    })
+    const excessiveLatexBody = await excessiveLatexResponse.json()
+
+    assert.equal(excessiveLatexResponse.status, 400)
+    assert.equal(excessiveLatexBody.ok, false)
+    assert.match(excessiveLatexBody.error, /too much LaTeX/)
   })
 
   it('renders desktop-compatible presentation slides', async () => {
@@ -127,8 +173,26 @@ describe('p2pmd HTTP endpoints with injectable Node server', () => {
     assert.match(body.html, /data-slide-index="1"/)
   })
 
+  it('activates IEEE preview only for LaTeX-enabled marked documents', async () => {
+    const content = '<!-- ieee -->\n\n## Paper\n\n### Abstract\n\n$E = mc^2$'
+    const enabled = await postJson(`${localUrl}/preview`, {
+      content,
+      latexModeEnabled: true
+    })
+    const enabledBody = await enabled.json()
+    const disabled = await postJson(`${localUrl}/preview`, {
+      content,
+      latexModeEnabled: false
+    })
+    const disabledBody = await disabled.json()
+
+    assert.equal(enabledBody.ieee, true)
+    assert.equal(disabledBody.ieee, false)
+    assert.match(enabledBody.html, /class="katex"/)
+  })
+
   it('tracks SSE peers and presence through real HTTP endpoints', async () => {
-    const host = await openEventStream(`${localUrl}/events?clientId=host-1&role=host&name=Host&color=%23f2d35b`)
+    const host = await openEventStream(`${localUrl}/events?clientId=host-1&role=host&name=Host&color=%23f2d35b&latexModeEnabled=true`)
     const client = await openEventStream(`${localUrl}/events?clientId=client-1&role=client&name=Client&color=%2359a6ff`)
     activeStreams.add(host)
     activeStreams.add(client)
@@ -142,6 +206,8 @@ describe('p2pmd HTTP endpoints with injectable Node server', () => {
     assert.equal(typeof clientYjsState, 'string')
     assert.equal(typeof clientDocument.content, 'string')
     assert.equal(clientPeerList.some((peer) => peer.clientId === 'client-1'), true)
+    assert.equal(clientPeerList.find((peer) => peer.clientId === 'host-1')?.latexModeEnabled, true)
+    assert.equal(clientPeerList.find((peer) => peer.clientId === 'client-1')?.latexModeEnabled, null)
 
     let status = await waitForStatus(localUrl, (status) => {
       return status.peers === 1 && status.peerList.length === 2

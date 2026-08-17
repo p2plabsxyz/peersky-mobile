@@ -1,7 +1,10 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import b4a from 'b4a'
-import { createPublishedSlidesHtml } from '../../backend/hyper/drive.mjs'
+import {
+  createPublishedNoteHtml,
+  createPublishedSlidesHtml
+} from '../../backend/hyper/drive.mjs'
 import {
   inlineHyperPreviewImages,
   renderMarkdownPreview,
@@ -115,6 +118,34 @@ describe('p2pmd Markdown preview rendering', () => {
     assert.match(html, /href="https:\/\/peersky.p2plabs.xyz\//)
   })
 
+  it('renders inline and display LaTeX without allowing raw HTML', () => {
+    const html = renderMarkdownPreview('Inline $E = mc^2$\n\n$$\\sum_{i=1}^{n} i$$\n\n<script>alert(1)</script>')
+
+    assert.match(html, /class="katex"/)
+    assert.match(html, /class="katex-display"/)
+    assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/)
+    assert.doesNotMatch(html, /<script>alert\(1\)<\/script>/)
+  })
+
+  it('bounds pathological LaTeX expressions', () => {
+    const html = renderMarkdownPreview(`$${'x'.repeat(10001)}$`)
+
+    assert.match(html, /Math expression is too long/)
+  })
+
+  it('publishes scientific notes with self-contained KaTeX and optional IEEE layout', () => {
+    const source = '<!-- ieee -->\n\n## Paper\n\n### Abstract\n\nEquation $x^2$.'
+    const ieeeHtml = createPublishedNoteHtml(source, true)
+    const regularHtml = createPublishedNoteHtml(source, false)
+
+    assert.match(ieeeHtml, /class="katex"/)
+    assert.match(ieeeHtml, /window\.P2pmdIeee\.render/)
+    assert.match(ieeeHtml, /font-src data:/)
+    assert.match(ieeeHtml, /script-src 'unsafe-inline'/)
+    assert.doesNotMatch(regularHtml, /window\.P2pmdIeee\.render/)
+    assert.doesNotMatch(regularHtml, /script-src/)
+  })
+
   it('splits slides using the desktop delimiters and normalizes line endings', () => {
     const slides = splitMarkdownSlides('# One\r\n\r\n---\r\n\r\n# Two\r\n<!-- slide -->\r\n# Three')
 
@@ -175,5 +206,12 @@ describe('p2pmd Markdown preview rendering', () => {
     assert.match(html, /function fitActiveSlide\(\)/)
     assert.match(html, /window\.matchMedia\('\(orientation: landscape\)'\)/)
     assert.match(html, /window\.addEventListener\('resize', scheduleFit\)/)
+  })
+
+  it('includes LaTeX rendering in presentation slides', () => {
+    const html = createPublishedSlidesHtml('# Formula\n\n$$x^2$$')
+
+    assert.match(html, /class="katex-display"/)
+    assert.match(html, /font-family:KaTeX_Main/)
   })
 })

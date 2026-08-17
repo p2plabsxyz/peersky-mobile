@@ -44,12 +44,50 @@ describe('p2pmd mobile editor page routing', () => {
     assert.match(html, /function fitActiveSlide\(\)/)
     assert.match(html, /window\.matchMedia\('\(orientation: landscape\)'\)/)
     assert.match(html, /Math\.min\(1, availableWidth \/ contentWidth, availableHeight \/ contentHeight\)/)
-    assert.match(html, /window\.addEventListener\('resize', scheduleSlideFit\)/)
+    assert.match(html, /window\.addEventListener\('resize', \(\) =>/)
     assert.match(html, /event\.key === 'Escape'\) setViewMode\('edit'\)/)
     assert.match(html, /aria-label="Previous slide"/)
     assert.match(html, /aria-label="Exit presentation"/)
     assert.match(html, /slidesExit\.addEventListener\('click', \(\) => setViewMode\('edit'\)\)/)
     assert.match(html, /id="slides-progress-value"/)
     assert.match(html, /mode: viewMode/)
+  })
+
+  it('provides synchronized LaTeX mode and scientific templates', () => {
+    const html = getP2pmdEditorPage()
+
+    assert.match(html, /data-format="latex"/)
+    assert.match(html, /data-format="inline-math"/)
+    assert.match(html, /data-format="block-math"/)
+    assert.match(html, /id="latex-template-menu"/)
+    assert.match(html, /Research Paper/)
+    assert.match(html, /Technical Documentation/)
+    assert.match(html, /ydoc\.getMap\('settings'\)/)
+    assert.match(html, /LATEX_MODE_YJS_KEY = 'latexModeEnabled'/)
+    assert.match(html, /roomRole === 'host'/)
+    assert.match(html, /latexModeEnabled/)
+    assert.match(html, /window\.P2pmdIeee/)
+    assert.doesNotMatch(html, /roomUrl\('\/lib\/ieee\.min\.js'\)/)
+    assert.match(html, /window\.P2pmdIeee\.render\(preview, result\.html\)/)
+    assert.match(html, /closeTemplateMenuOnOutsideClick/)
+    assert.match(html, /event\.key === 'Escape'/)
+  })
+
+  it('keeps LaTeX mode host-controlled while clients consume shared state', () => {
+    const html = getP2pmdEditorPage()
+
+    assert.match(html, /latexModeButton\.disabled = roomRole !== 'host'/)
+    assert.match(html, /if \(roomRole !== 'host' && !fromSharedState\) return false/)
+    assert.match(html, /roomRole === 'host' && loadPersistedLatexMode\(\)/)
+    assert.match(html, /persist: false, sync: false, fromSharedState: true/)
+    assert.match(html, /if \(roomRole === 'host'\) setLatexMode\(true\)/)
+  })
+
+  it('serializes native preview rendering and coalesces newer requests', () => {
+    const html = getP2pmdEditorPage()
+
+    assert.match(html, /if \(activeViewRenderInFlight\) \{\s+activeViewRenderPending = true/)
+    assert.match(html, /if \(viewMode === 'preview'\) await renderPreview\(\)/)
+    assert.match(html, /if \(activeViewRenderPending\) \{/)
   })
 })

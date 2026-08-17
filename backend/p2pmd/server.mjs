@@ -10,6 +10,10 @@ import {
 import { P2PMD_LOOPBACK_HOST } from './constants.mjs'
 import { createPeerPresenceStore } from './peers.mjs'
 import { renderMarkdownPreview, renderMarkdownSlides } from './preview.mjs'
+import ieeeBrowserScript from './ieee-runtime.mjs'
+import katexCss from './katex-runtime.mjs'
+import { P2PMD_SCIENTIFIC_STYLES } from './scientific.mjs'
+import { P2PMD_TEMPLATES, hasIeeeMarker } from './templates.mjs'
 import yjsBrowserScript from './yjs-runtime.mjs'
 
 let server = null
@@ -284,7 +288,10 @@ function handleRequest (req, res) {
 
         const rendered = body.mode === 'slides'
           ? renderMarkdownSlides(body.content)
-          : { html: renderMarkdownPreview(body.content) }
+          : {
+              html: renderMarkdownPreview(body.content),
+              ieee: body.latexModeEnabled === true && hasIeeeMarker(body.content)
+            }
 
         sendJson(res, 200, {
           ok: true,
@@ -510,11 +517,14 @@ function readPeerFromEventRequest (req) {
     params = new URLSearchParams()
   }
 
+  const latexMode = params.get('latexModeEnabled')
+
   return {
     clientId: params.get('clientId') || undefined,
     role: params.get('role') || undefined,
     name: params.get('name') || undefined,
-    color: params.get('color') || undefined
+    color: params.get('color') || undefined,
+    latexModeEnabled: latexMode === 'true' ? true : latexMode === 'false' ? false : undefined
   }
 }
 
@@ -574,6 +584,9 @@ function getQueryParam (rawUrl, key) {
 }
 
 export function getP2pmdEditorPage () {
+  const serializedTemplates = JSON.stringify(P2PMD_TEMPLATES).replace(/</g, '\\u003c')
+  const embeddedIeeeBrowserScript = ieeeBrowserScript.replace(/<\/script/gi, '<\\/script')
+
   return `<!doctype html>
 <html lang="en">
   <head>
@@ -976,6 +989,38 @@ export function getP2pmdEditorPage () {
         background: #343744;
         color: #ffffff;
       }
+      #formatting-toolbar button[aria-pressed="true"] {
+        border-color: rgba(89, 166, 255, .5);
+        background: #263d5e;
+        color: #8fc1ff;
+      }
+      #latex-toolbar-group { display: contents; }
+      #latex-template-menu {
+        position: absolute;
+        z-index: 8;
+        top: 50px;
+        right: 8px;
+        left: 8px;
+        padding: 6px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: #292b35;
+        box-shadow: 0 10px 28px rgba(0, 0, 0, .38);
+      }
+      #latex-template-menu button {
+        display: block;
+        width: 100%;
+        padding: 10px 12px;
+        border: 0;
+        border-radius: 7px;
+        background: transparent;
+        color: var(--ink);
+        text-align: left;
+      }
+      #latex-template-menu button:active { background: #353844; }
+      .template-label { display: block; font: 700 14px/1.3 var(--ui-font); }
+      .template-description { display: block; margin-top: 2px; color: #aeb3c3; font: 12px/1.35 var(--ui-font); }
+      .latex-mode-symbol { font-size: 20px; font-weight: 500; }
       .toolbar-icon {
         display: block;
         width: 16px;
@@ -990,7 +1035,10 @@ export function getP2pmdEditorPage () {
         background: var(--line);
       }
       [hidden] { display: none !important; }
+      ${katexCss}
+      ${P2PMD_SCIENTIFIC_STYLES}
     </style>
+    <script>${embeddedIeeeBrowserScript}</script>
   </head>
   <body>
     <div class="app-shell">
@@ -1034,10 +1082,20 @@ export function getP2pmdEditorPage () {
             <svg class="toolbar-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M12 12a1 1 0 0 0 1-1V8.558a1 1 0 0 0-1-1h-1.388q0-.527.062-1.054.093-.558.31-.992t.559-.683q.34-.279.868-.279V3q-.868 0-1.52.372a3.3 3.3 0 0 0-1.085.992 4.9 4.9 0 0 0-.62 1.458A7.7 7.7 0 0 0 9 7.558V11a1 1 0 0 0 1 1zm-6 0a1 1 0 0 0 1-1V8.558a1 1 0 0 0-1-1H4.612q0-.527.062-1.054.094-.558.31-.992.217-.434.559-.683.34-.279.868-.279V3q-.868 0-1.52.372a3.3 3.3 0 0 0-1.085.992 4.9 4.9 0 0 0-.62 1.458A7.7 7.7 0 0 0 3 7.558V11a1 1 0 0 0 1 1z"/></svg>
           </button>
           <div class="toolbar-divider" aria-hidden="true"></div>
+          <button type="button" data-format="latex" title="LaTeX mode" aria-label="LaTeX mode" aria-pressed="false">
+            <span class="latex-mode-symbol" aria-hidden="true">&#8734;</span>
+          </button>
+          <span id="latex-toolbar-group" hidden>
+            <button type="button" data-format="inline-math" title="Inline math" aria-label="Inline math">$x$</button>
+            <button type="button" data-format="block-math" title="Block math" aria-label="Block math">$$</button>
+            <button type="button" data-format="template" title="Scientific templates" aria-label="Scientific templates">T</button>
+          </span>
+          <div class="toolbar-divider" aria-hidden="true"></div>
           <button type="button" data-format="slides" title="View as slides" aria-label="View as slides">
             <svg class="toolbar-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V4a1 1 0 0 0-1-1zm0-1h10a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/><path d="M2 6h12v1H2zm0 3h12v1H2z"/><circle cx="5" cy="4.5" r=".8"/><circle cx="8" cy="4.5" r=".8"/><circle cx="11" cy="4.5" r=".8"/></svg>
           </button>
         </div>
+        <div id="latex-template-menu" role="menu" aria-label="Scientific templates" hidden></div>
         <input id="image-upload-input" type="file" accept="image/*" hidden />
         <div class="editor-frame">
           <div id="line-gutter-wrap" aria-hidden="true">
@@ -1067,6 +1125,9 @@ export function getP2pmdEditorPage () {
       const slidesCounter = document.getElementById('slides-counter')
       const slidesProgress = document.getElementById('slides-progress-value')
       const formattingToolbar = document.getElementById('formatting-toolbar')
+      const latexModeButton = formattingToolbar.querySelector('[data-format="latex"]')
+      const latexToolbarGroup = document.getElementById('latex-toolbar-group')
+      const latexTemplateMenu = document.getElementById('latex-template-menu')
       const imageUploadInput = document.getElementById('image-upload-input')
       const lineGutter = document.getElementById('line-gutter')
       const TOOLBAR_TAP_MOVEMENT_LIMIT = 8
@@ -1077,12 +1138,18 @@ export function getP2pmdEditorPage () {
       const MAX_PENDING_UPDATE_BYTES = 2 * 1024 * 1024
       const Y_ORIGIN_REMOTE = 'remote-sse'
       const Y_ORIGIN_LOCAL_INPUT = 'local-input'
+      const Y_ORIGIN_LOCAL_SETTINGS = 'local-settings'
+      const LATEX_MODE_STORAGE_KEY = 'p2pmd-latex-mode-enabled'
+      const LATEX_MODE_YJS_KEY = 'latexModeEnabled'
+      const templates = ${serializedTemplates}
       let viewMode = 'edit'
       let previewRequestId = 0
       let currentSlideIndex = 0
       let slideTouchStart = null
       let slideFitFrame = null
       let activeViewRenderTimer = null
+      let activeViewRenderInFlight = false
+      let activeViewRenderPending = false
       let bridgeRequestId = 0
       const bridgeRequests = new Map()
       let saveTimer = null
@@ -1090,6 +1157,7 @@ export function getP2pmdEditorPage () {
       let saveInFlight = false
       let ydoc = null
       let ytext = null
+      let ysettings = null
       let pendingUpdate = null
       let sendUpdateTimer = null
       let flushRetryTimer = null
@@ -1110,6 +1178,8 @@ export function getP2pmdEditorPage () {
       const CLIENT_ID_KEY = 'p2pmd-mobile-client-id'
       const clientId = getClientId()
       const roomRole = getRoomRole()
+      let latexModeEnabled = roomRole === 'host' && loadPersistedLatexMode()
+      let hasSyncedHostLatexMode = false
       const localAuthor = {
         clientId,
         color: colorFromClientId(clientId),
@@ -1197,6 +1267,55 @@ export function getP2pmdEditorPage () {
         }
       }
 
+      function loadPersistedLatexMode() {
+        try {
+          return window.localStorage.getItem(LATEX_MODE_STORAGE_KEY) === 'true'
+        } catch {
+          return false
+        }
+      }
+
+      function persistLatexMode(enabled) {
+        try {
+          window.localStorage.setItem(LATEX_MODE_STORAGE_KEY, String(enabled))
+        } catch {}
+      }
+
+      function updateLatexControls() {
+        latexModeButton?.setAttribute('aria-pressed', String(latexModeEnabled))
+        if (latexModeButton) {
+          latexModeButton.disabled = roomRole !== 'host'
+          latexModeButton.title = roomRole === 'host'
+            ? 'LaTeX mode'
+            : 'LaTeX mode is controlled by the host'
+        }
+        if (latexToolbarGroup) latexToolbarGroup.hidden = !latexModeEnabled
+        if (!latexModeEnabled && latexTemplateMenu) latexTemplateMenu.hidden = true
+      }
+
+      function setLatexMode(enabled, { persist = true, sync = true, fromSharedState = false } = {}) {
+        if (roomRole !== 'host' && !fromSharedState) return false
+
+        const nextEnabled = enabled === true
+        latexModeEnabled = nextEnabled
+        updateLatexControls()
+        if (persist && roomRole === 'host') persistLatexMode(nextEnabled)
+
+        if (
+          sync &&
+          roomRole === 'host' &&
+          ysettings &&
+          ysettings.get(LATEX_MODE_YJS_KEY) !== nextEnabled
+        ) {
+          ydoc.transact(() => {
+            ysettings.set(LATEX_MODE_YJS_KEY, nextEnabled)
+          }, Y_ORIGIN_LOCAL_SETTINGS)
+        }
+
+        scheduleActiveViewRender()
+        return true
+      }
+
       function colorFromClientId(value) {
         let hash = 0
         for (let index = 0; index < value.length; index++) {
@@ -1272,7 +1391,8 @@ export function getP2pmdEditorPage () {
           clientId,
           role: roomRole,
           name: localAuthor.name,
-          color: localAuthor.color
+          color: localAuthor.color,
+          latexModeEnabled
         }
       }
 
@@ -1666,6 +1786,54 @@ export function getP2pmdEditorPage () {
         return text || 'image'
       }
 
+      function toggleTemplateMenu() {
+        if (!latexModeEnabled || !latexTemplateMenu) return
+        latexTemplateMenu.hidden = !latexTemplateMenu.hidden
+      }
+
+      function closeTemplateMenuOnOutsideClick(event) {
+        if (!latexTemplateMenu || latexTemplateMenu.hidden) return
+        const target = event.target
+        if (latexTemplateMenu.contains(target) || target?.closest?.('[data-format="template"]')) return
+        latexTemplateMenu.hidden = true
+      }
+
+      function renderTemplateMenu() {
+        if (!latexTemplateMenu) return
+
+        for (const template of templates) {
+          const button = document.createElement('button')
+          button.type = 'button'
+          button.dataset.templateId = template.id
+          button.setAttribute('role', 'menuitem')
+
+          const label = document.createElement('span')
+          label.className = 'template-label'
+          label.textContent = template.label
+
+          const description = document.createElement('span')
+          description.className = 'template-description'
+          description.textContent = template.description
+
+          button.append(label, description)
+          latexTemplateMenu.append(button)
+        }
+      }
+
+      function applyTemplate(templateId) {
+        const template = templates.find((entry) => entry.id === templateId)
+        if (!template) return
+        if (roomRole !== 'host' && !latexModeEnabled) return
+
+        if (input.value.trim() && !window.confirm('Replace the current document with this template?')) {
+          return
+        }
+
+        if (roomRole === 'host') setLatexMode(true)
+        latexTemplateMenu.hidden = true
+        replaceDocumentRange(0, input.value.length, template.content, 0, 0)
+      }
+
       function applyFormatting(format) {
         const codeMarker = String.fromCharCode(96)
 
@@ -1676,6 +1844,10 @@ export function getP2pmdEditorPage () {
         else if (format === 'ul' || format === 'ol') replaceSelectedLines(format)
         else if (format === 'link') insertLink()
         else if (format === 'image') insertImage()
+        else if (format === 'latex') setLatexMode(!latexModeEnabled)
+        else if (format === 'inline-math') wrapSelection('$', '$')
+        else if (format === 'block-math') wrapSelection('$$' + newline, newline + '$$')
+        else if (format === 'template') toggleTemplateMenu()
         else if (format === 'slides') setViewMode('slides')
         else if (format === 'inline-code') wrapSelection(codeMarker, codeMarker)
         else if (format === 'code-block') {
@@ -2074,6 +2246,7 @@ export function getP2pmdEditorPage () {
 
         ydoc = new window.Y.Doc()
         ytext = ydoc.getText('content')
+        ysettings = ydoc.getMap('settings')
 
         try {
           const result = await withInitialRoomRetry(async () => {
@@ -2116,6 +2289,23 @@ export function getP2pmdEditorPage () {
             sendUpdateTimer = null
             flushYjsUpdate()
           }, 100)
+        })
+
+        const sharedLatexMode = ysettings.get(LATEX_MODE_YJS_KEY)
+        if (typeof sharedLatexMode === 'boolean') {
+          hasSyncedHostLatexMode = true
+          setLatexMode(sharedLatexMode, { persist: false, sync: false, fromSharedState: true })
+        } else if (roomRole === 'host') {
+          setLatexMode(latexModeEnabled)
+        }
+
+        ysettings.observe((event) => {
+          if (!event.keysChanged.has(LATEX_MODE_YJS_KEY)) return
+          const enabled = ysettings.get(LATEX_MODE_YJS_KEY)
+          if (typeof enabled !== 'boolean') return
+
+          hasSyncedHostLatexMode = true
+          setLatexMode(enabled, { persist: false, sync: false, fromSharedState: true })
         })
 
         ytext.observe((event) => {
@@ -2164,7 +2354,8 @@ export function getP2pmdEditorPage () {
 
         try {
           const result = await callNativeBridge('preview', {
-            content: input.value
+            content: input.value,
+            latexModeEnabled
           })
 
           if (typeof result.html !== 'string') {
@@ -2173,7 +2364,11 @@ export function getP2pmdEditorPage () {
 
           if (requestId !== previewRequestId || viewMode !== 'preview') return
 
+          window.P2pmdIeee?.clear(preview)
           preview.innerHTML = result.html
+          if (result.ieee === true) {
+            await window.P2pmdIeee.render(preview, result.html)
+          }
         } catch (error) {
           if (requestId !== previewRequestId || viewMode !== 'preview') return
           notifyDocumentError(error, 'editor-error')
@@ -2191,7 +2386,8 @@ export function getP2pmdEditorPage () {
         try {
           const result = await callNativeBridge('preview', {
             content: input.value,
-            mode: 'slides'
+            mode: 'slides',
+            latexModeEnabled
           })
 
           if (typeof result.html !== 'string' || !Number.isInteger(result.count) || result.count < 1) {
@@ -2278,9 +2474,23 @@ export function getP2pmdEditorPage () {
         showSlide(nextSlideIndex)
       }
 
-      function renderActiveView() {
-        if (viewMode === 'preview') renderPreview()
-        else if (viewMode === 'slides') renderSlides()
+      async function renderActiveView() {
+        if (activeViewRenderInFlight) {
+          activeViewRenderPending = true
+          return
+        }
+
+        activeViewRenderInFlight = true
+        try {
+          if (viewMode === 'preview') await renderPreview()
+          else if (viewMode === 'slides') await renderSlides()
+        } finally {
+          activeViewRenderInFlight = false
+          if (activeViewRenderPending) {
+            activeViewRenderPending = false
+            if (viewMode !== 'edit') renderActiveView()
+          }
+        }
       }
 
       function scheduleActiveViewRender() {
@@ -2300,6 +2510,7 @@ export function getP2pmdEditorPage () {
           activeViewRenderTimer = null
         }
         viewMode = nextMode
+        if (viewMode === 'edit') activeViewRenderPending = false
         previewRequestId += 1
         document.body.classList.toggle('preview-mode', viewMode === 'preview')
         document.body.classList.toggle('slide-mode', viewMode === 'slides')
@@ -2324,7 +2535,8 @@ export function getP2pmdEditorPage () {
       function publishToHyper() {
         notifyNative('p2pmd-publish-requested', {
           content: input.value,
-          mode: viewMode
+          mode: viewMode,
+          latexModeEnabled
         })
       }
 
@@ -2363,6 +2575,14 @@ export function getP2pmdEditorPage () {
 
             latestPeerList = peerList
             mergeLineAttributionsFromPeerList(peerList)
+
+            if (roomRole === 'client' && !hasSyncedHostLatexMode) {
+              const host = peerList.find((peer) => peer?.role === 'host')
+              if (typeof host?.latexModeEnabled === 'boolean') {
+                hasSyncedHostLatexMode = true
+                setLatexMode(host.latexModeEnabled, { persist: false, sync: false, fromSharedState: true })
+              }
+            }
           } catch {}
         })
 
@@ -2420,6 +2640,8 @@ export function getP2pmdEditorPage () {
       }
 
       async function initializeEditor() {
+        renderTemplateMenu()
+        updateLatexControls()
         await loadDocument()
         try {
           await loadYjsRuntime()
@@ -2448,10 +2670,21 @@ export function getP2pmdEditorPage () {
 
         handleToolbarFormat(event)
       })
+      latexTemplateMenu?.addEventListener('click', (event) => {
+        const button = event.target?.closest?.('button[data-template-id]')
+        if (button) applyTemplate(button.dataset.templateId)
+      })
+      document.addEventListener('click', closeTemplateMenuOnOutsideClick)
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && latexTemplateMenu) latexTemplateMenu.hidden = true
+      })
       slidesPrevious.addEventListener('click', () => moveSlide(-1))
       slidesNext.addEventListener('click', () => moveSlide(1))
       slidesExit.addEventListener('click', () => setViewMode('edit'))
-      window.addEventListener('resize', scheduleSlideFit)
+      window.addEventListener('resize', () => {
+        scheduleSlideFit()
+        if (viewMode === 'preview') window.P2pmdIeee?.fitPages(preview)
+      })
       slidesContent.addEventListener('load', scheduleSlideFit, true)
       slidesContent.addEventListener('loadedmetadata', scheduleSlideFit, true)
       slidesPreview.addEventListener('touchstart', (event) => {
