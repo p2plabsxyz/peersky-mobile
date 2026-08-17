@@ -8,7 +8,7 @@ import {
   updateDocumentState
 } from './document.mjs'
 import { P2PMD_LOOPBACK_HOST } from './constants.mjs'
-import { createPeerPresenceStore } from './peers.mjs'
+import { createPeerActivityStore, createPeerPresenceStore } from './peers.mjs'
 import { renderMarkdownPreview, renderMarkdownSlides } from './preview.mjs'
 import ieeeBrowserScript from './ieee-runtime.mjs'
 import katexCss from './katex-runtime.mjs'
@@ -22,7 +22,10 @@ let serverTransition = Promise.resolve()
 let bareHttp = null
 const eventClients = new Set()
 const peerPresence = createPeerPresenceStore()
+const peerActivity = createPeerActivityStore()
+const editActivityTimers = new Map()
 let keepaliveInterval = null
+const EDIT_ACTIVITY_DEBOUNCE_MS = 1200
 
 subscribeToDocumentUpdates(({ document, origin, update }) => {
   if (origin !== 'line-attribution-update') {
@@ -78,6 +81,7 @@ export function createP2pmdHttpServer ({ httpImpl } = {}) {
     throw new Error('P2PMD HTTP server requires an HTTP implementation.')
   }
 
+  if (eventClients.size === 0) resetPeerState()
   return httpImpl.createServer(handleRequest)
 }
 
@@ -152,7 +156,7 @@ function handleRequest (req, res) {
       running: true,
       peers: getPeerCount(),
       peerList: getPeerList(),
-      activityCount: 0
+      activityCount: getPeerActivity().length
     })
     return
   }
@@ -179,7 +183,7 @@ function handleRequest (req, res) {
   if (req.method === 'GET' && pathname === '/activity') {
     sendJson(res, 200, {
       ok: true,
-      activity: []
+      activity: getPeerActivity(150)
     })
     return
   }
@@ -234,8 +238,9 @@ function handleRequest (req, res) {
       .then((body) => {
         const result = applyDocumentUpdate(body.update, body.lineAttributions ?? body.lineAuthors)
         if (result.ok) {
-          upsertPeerPresence(body)
+          const peerKey = upsertPeerPresence(body)
           broadcastPeerState()
+          scheduleEditActivity(peerKey, body)
         }
         sendJson(res, result.ok ? 200 : 400, result)
       })
@@ -253,8 +258,9 @@ function handleRequest (req, res) {
       .then((body) => {
         const result = updateDocumentState(body.content, body.lineAttributions ?? body.lineAuthors)
         if (result.ok) {
-          upsertPeerPresence(body)
+          const peerKey = upsertPeerPresence(body)
           broadcastPeerState()
+          scheduleEditActivity(peerKey, body)
         }
         sendJson(res, result.ok ? 200 : 400, result)
       })
@@ -406,7 +412,13 @@ function openEventStream (req, res) {
   writeEvent(res, 'yjsupdate', getEncodedDocumentState())
   writeEvent(res, 'update', JSON.stringify(getDocumentState()))
   writeEvent(res, 'peerlist', JSON.stringify(getPeerList()))
+  writeEvent(res, 'activity', JSON.stringify(getPeerActivity(100)))
+  const joinActivity = peerActivity.add({
+    ...peerPayload,
+    type: 'join'
+  })
   broadcastPeerState()
+  broadcastActivity(joinActivity)
 
   res.on('close', () => {
     removeEventClient(client)
@@ -456,22 +468,33 @@ function closeEventClients () {
   for (const client of [...eventClients]) {
     removeEventClient(client, false)
   }
-  peerPresence.clear()
+  resetPeerState()
 }
 
 function removeEventClient (client, shouldBroadcast = true) {
+  const departingPeer = getPeerByKey(client.peerKey)
   const deleted = eventClients.delete(client)
 
   try {
     client.res.end()
   } catch {}
 
-  if (deleted) {
-    prunePeerPresence(client.peerKey)
+  const peerRemoved = deleted && prunePeerPresence(client.peerKey)
+
+  if (peerRemoved) {
+    const editTimer = editActivityTimers.get(client.peerKey)
+    if (editTimer) clearTimeout(editTimer)
+    editActivityTimers.delete(client.peerKey)
   }
 
   if (deleted && shouldBroadcast) {
     broadcastPeerState()
+    if (peerRemoved && departingPeer) {
+      broadcastActivity(peerActivity.add({
+        ...departingPeer,
+        type: 'leave'
+      }))
+    }
   }
 
   if (eventClients.size === 0 && keepaliveInterval) {
@@ -483,7 +506,7 @@ function removeEventClient (client, shouldBroadcast = true) {
 }
 
 function prunePeerPresence (peerKey) {
-  peerPresence.prune(peerKey, getActivePeerKeys())
+  return peerPresence.prune(peerKey, getActivePeerKeys())
 }
 
 function broadcastPeerState () {
@@ -491,8 +514,22 @@ function broadcastPeerState () {
   broadcastEvent('peerlist', JSON.stringify(getPeerList()))
 }
 
+function broadcastActivity (activity) {
+  if (!activity) return
+  broadcastEvent('activity', JSON.stringify(activity))
+}
+
 function getPeerList () {
   return peerPresence.getPeerList(getActivePeerKeys())
+}
+
+function getPeerByKey (peerKey) {
+  if (!peerKey) return null
+  return peerPresence.getPeerList(new Set([peerKey]))[0] || null
+}
+
+function getPeerActivity (limit) {
+  return peerActivity.getActivity(limit)
 }
 
 function getPeerCount () {
@@ -530,6 +567,36 @@ function readPeerFromEventRequest (req) {
 
 function upsertPeerPresence (payload) {
   return peerPresence.upsert(payload)
+}
+
+function scheduleEditActivity (peerKey, payload = {}) {
+  if (!peerKey) return
+  const existing = editActivityTimers.get(peerKey)
+  if (existing) clearTimeout(existing)
+
+  const timer = setTimeout(() => {
+    editActivityTimers.delete(peerKey)
+    const activePeer = getPeerByKey(peerKey)
+    const peer = activePeer || payload
+    broadcastActivity(peerActivity.add({
+      ...peer,
+      cursorLine: payload.cursorLine ?? peer?.cursorLine,
+      cursorColumn: payload.cursorColumn ?? peer?.cursorColumn,
+      type: 'edit'
+    }))
+    if (activePeer) {
+      upsertPeerPresence({ ...activePeer, isTyping: false })
+      broadcastPeerState()
+    }
+  }, EDIT_ACTIVITY_DEBOUNCE_MS)
+  editActivityTimers.set(peerKey, timer)
+}
+
+function resetPeerState () {
+  for (const timer of editActivityTimers.values()) clearTimeout(timer)
+  editActivityTimers.clear()
+  peerPresence.clear()
+  peerActivity.clear()
 }
 
 function readJsonBody (req) {
@@ -926,6 +993,207 @@ export function getP2pmdEditorPage () {
         font: 600 24px/1 var(--ui-font);
         place-items: center;
       }
+      #peer-dashboard-backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: 20;
+        display: flex;
+        align-items: flex-end;
+        background: rgba(8, 9, 13, .62);
+      }
+      #peer-dashboard-backdrop[hidden] { display: none; }
+      #peer-dashboard {
+        box-sizing: border-box;
+        width: 100%;
+        max-height: min(86dvh, 760px);
+        border: 1px solid #444857;
+        border-bottom: 0;
+        border-radius: 20px 20px 0 0;
+        background: #24262f;
+        color: var(--ink);
+        box-shadow: 0 -18px 48px rgba(0, 0, 0, .42);
+        overflow: hidden;
+      }
+      .peer-dashboard-handle {
+        width: 38px;
+        height: 4px;
+        margin: 8px auto 2px;
+        border-radius: 999px;
+        background: #626777;
+      }
+      .peer-dashboard-header {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 14px 12px;
+        border-bottom: 1px solid var(--line);
+      }
+      .peer-dashboard-header h2 {
+        margin: 0;
+        font: 800 18px/1.25 var(--ui-font);
+      }
+      #peer-dashboard-close {
+        width: 38px;
+        height: 38px;
+        margin-left: auto;
+        padding: 0;
+        border: 0;
+        border-radius: 50%;
+        background: #30333e;
+        color: var(--ink);
+        font: 500 26px/1 var(--ui-font);
+      }
+      .peer-dashboard-body {
+        max-height: calc(min(86dvh, 760px) - 72px);
+        padding: 14px;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        -webkit-overflow-scrolling: touch;
+      }
+      .peer-dashboard-room {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+        margin-bottom: 12px;
+      }
+      #peer-dashboard-room-key {
+        min-width: 0;
+        color: #aeb3c3;
+        font: 12px/1.4 var(--editor-font);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .peer-role-badge {
+        flex: 0 0 auto;
+        padding: 3px 8px;
+        border-radius: 999px;
+        background: #454a58;
+        color: #f4f5f8;
+        font: 800 10px/1.2 var(--ui-font);
+        letter-spacing: .04em;
+        text-transform: uppercase;
+      }
+      .peer-role-badge.host { background: #1d6045; color: #d4f8e8; }
+      .peer-role-badge.client { background: #5b421e; color: #ffe0a3; }
+      .peer-profile-editor {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 8px;
+        margin-bottom: 12px;
+      }
+      #peer-display-name {
+        min-width: 0;
+        height: 42px;
+        padding: 0 12px;
+        border: 1px solid #464b5a;
+        border-radius: 10px;
+        background: #1f2027;
+        color: var(--ink);
+        font: 15px/1 var(--ui-font);
+      }
+      #peer-display-name-save {
+        min-width: 72px;
+        border: 0;
+        border-radius: 10px;
+        background: var(--accent);
+        color: #ffffff;
+        font: 800 13px/1 var(--ui-font);
+      }
+      #peer-profile-hint {
+        grid-column: 1 / -1;
+        min-height: 16px;
+        color: #aeb3c3;
+        font: 12px/1.3 var(--ui-font);
+      }
+      #peer-dashboard-stats {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 6px;
+        margin-bottom: 18px;
+      }
+      .peer-stat {
+        padding: 9px 4px;
+        border-radius: 10px;
+        background: #2d303a;
+        text-align: center;
+      }
+      .peer-stat strong,
+      .peer-stat span { display: block; }
+      .peer-stat strong { font: 800 17px/1.1 var(--ui-font); }
+      .peer-stat span { margin-top: 3px; color: #aeb3c3; font: 10px/1.2 var(--ui-font); }
+      .peer-dashboard-section { margin-top: 18px; }
+      .peer-dashboard-section h3 {
+        margin: 0 0 9px;
+        font: 800 14px/1.3 var(--ui-font);
+      }
+      .peer-dashboard-list {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 8px;
+      }
+      .peer-card {
+        display: grid;
+        grid-template-columns: 36px minmax(0, 1fr) auto;
+        gap: 0 10px;
+        align-items: center;
+        padding: 10px;
+        border: 1px solid #3e4250;
+        border-radius: 12px;
+        background: #292b34;
+      }
+      .peer-avatar {
+        grid-row: 1 / 3;
+        display: grid;
+        width: 36px;
+        height: 36px;
+        border-radius: 50%;
+        color: #ffffff;
+        font: 800 14px/1 var(--ui-font);
+        place-items: center;
+      }
+      .peer-name {
+        min-width: 0;
+        font: 800 14px/1.3 var(--ui-font);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .peer-position,
+      .peer-updated {
+        color: #aeb3c3;
+        font: 11px/1.35 var(--ui-font);
+      }
+      .peer-updated { grid-column: 3; grid-row: 2; text-align: right; }
+      .peer-empty {
+        padding: 14px;
+        border: 1px dashed #454a58;
+        border-radius: 12px;
+        color: #aeb3c3;
+        font: 13px/1.4 var(--ui-font);
+        text-align: center;
+      }
+      #peer-activity-list {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+      .peer-activity-item {
+        padding: 10px 11px;
+        border-left: 3px solid #596174;
+        border-radius: 0 10px 10px 0;
+        background: #292b34;
+      }
+      .peer-activity-message { font: 600 13px/1.35 var(--ui-font); }
+      .peer-activity-meta { margin-top: 4px; color: #aeb3c3; font: 11px/1.3 var(--ui-font); }
+      @media (min-width: 680px) {
+        #peer-dashboard { max-width: 680px; margin: 0 auto; border-radius: 20px 20px 0 0; }
+        .peer-dashboard-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      }
       @keyframes slide-enter {
         from { opacity: 0; transform: translateX(12px); }
         to { opacity: 1; transform: translateX(0); }
@@ -1114,6 +1382,39 @@ export function getP2pmdEditorPage () {
         </section>
       </main>
     </div>
+    <div id="peer-dashboard-backdrop" hidden>
+      <section id="peer-dashboard" role="dialog" aria-modal="true" aria-labelledby="peer-dashboard-title">
+        <div class="peer-dashboard-handle" aria-hidden="true"></div>
+        <header class="peer-dashboard-header">
+          <h2 id="peer-dashboard-title">Room peers</h2>
+          <button id="peer-dashboard-close" type="button" aria-label="Close peer dashboard">&times;</button>
+        </header>
+        <div class="peer-dashboard-body">
+          <div class="peer-dashboard-room">
+            <span id="peer-dashboard-role" class="peer-role-badge"></span>
+            <code id="peer-dashboard-room-key"></code>
+          </div>
+          <div class="peer-profile-editor">
+            <input id="peer-display-name" type="text" maxlength="32" aria-label="Username" placeholder="Username" />
+            <button id="peer-display-name-save" type="button">Update</button>
+            <span id="peer-profile-hint" role="status" aria-live="polite"></span>
+          </div>
+          <div id="peer-dashboard-stats"></div>
+          <section class="peer-dashboard-section">
+            <h3>Connected peers</h3>
+            <div id="peer-connected-list" class="peer-dashboard-list"></div>
+          </section>
+          <section class="peer-dashboard-section">
+            <h3>Currently editing</h3>
+            <div id="peer-editing-list" class="peer-dashboard-list"></div>
+          </section>
+          <section class="peer-dashboard-section">
+            <h3>Edit history</h3>
+            <ul id="peer-activity-list"></ul>
+          </section>
+        </div>
+      </section>
+    </div>
     <script>
       const input = document.getElementById('document-input')
       const preview = document.getElementById('preview')
@@ -1130,6 +1431,17 @@ export function getP2pmdEditorPage () {
       const latexTemplateMenu = document.getElementById('latex-template-menu')
       const imageUploadInput = document.getElementById('image-upload-input')
       const lineGutter = document.getElementById('line-gutter')
+      const peerDashboardBackdrop = document.getElementById('peer-dashboard-backdrop')
+      const peerDashboardClose = document.getElementById('peer-dashboard-close')
+      const peerDashboardRole = document.getElementById('peer-dashboard-role')
+      const peerDashboardRoomKey = document.getElementById('peer-dashboard-room-key')
+      const peerDisplayName = document.getElementById('peer-display-name')
+      const peerDisplayNameSave = document.getElementById('peer-display-name-save')
+      const peerProfileHint = document.getElementById('peer-profile-hint')
+      const peerDashboardStats = document.getElementById('peer-dashboard-stats')
+      const peerConnectedList = document.getElementById('peer-connected-list')
+      const peerEditingList = document.getElementById('peer-editing-list')
+      const peerActivityList = document.getElementById('peer-activity-list')
       const TOOLBAR_TAP_MOVEMENT_LIMIT = 8
       const REMOTE_UPDATE_BATCH_MS = 80
       const ACTIVE_VIEW_RENDER_DELAY_MS = 120
@@ -1141,6 +1453,10 @@ export function getP2pmdEditorPage () {
       const Y_ORIGIN_LOCAL_SETTINGS = 'local-settings'
       const LATEX_MODE_STORAGE_KEY = 'p2pmd-latex-mode-enabled'
       const LATEX_MODE_YJS_KEY = 'latexModeEnabled'
+      const PEER_DISPLAY_NAME_KEY = 'p2pmd-display-name'
+      const MAX_PEER_ACTIVITY_ITEMS = 150
+      const MAX_PEER_DASHBOARD_ITEMS = 100
+      const PEER_TYPING_IDLE_MS = ${EDIT_ACTIVITY_DEBOUNCE_MS}
       const templates = ${serializedTemplates}
       let viewMode = 'edit'
       let previewRequestId = 0
@@ -1171,6 +1487,11 @@ export function getP2pmdEditorPage () {
       let lineAttributions = {}
       let localLineAttributions = {}
       let latestPeerList = []
+      let peerActivityLog = []
+      let peerActivityLoadError = ''
+      let peerDashboardDirty = true
+      let localPeerIsTyping = false
+      let localTypingResetTimer = null
       let toolbarPointerState = null
       let suppressToolbarClick = false
       let pendingImageSelection = null
@@ -1183,9 +1504,15 @@ export function getP2pmdEditorPage () {
       const localAuthor = {
         clientId,
         color: colorFromClientId(clientId),
-        name: 'Mobile peer'
+        name: loadPeerDisplayName() || 'Mobile peer'
       }
       const roomBaseUrl = getRoomBaseUrl()
+
+      function getRoomKey() {
+        return typeof window.__P2PMD_ROOM_KEY__ === 'string'
+          ? window.__P2PMD_ROOM_KEY__.trim()
+          : ''
+      }
 
       function getRoomBaseUrl() {
         try {
@@ -1267,6 +1594,27 @@ export function getP2pmdEditorPage () {
         }
       }
 
+      function normalizeDisplayName(value) {
+        if (typeof value !== 'string') return ''
+        return Array.from(value.trim().replace(/\\s+/g, ' ')).slice(0, 32).join('')
+      }
+
+      function loadPeerDisplayName() {
+        const injectedName = normalizeDisplayName(window.__P2PMD_DISPLAY_NAME__)
+        if (injectedName) return injectedName
+        try {
+          return normalizeDisplayName(window.localStorage.getItem(PEER_DISPLAY_NAME_KEY) || '')
+        } catch {
+          return ''
+        }
+      }
+
+      function persistPeerDisplayName(value) {
+        try {
+          window.localStorage.setItem(PEER_DISPLAY_NAME_KEY, value)
+        } catch {}
+      }
+
       function loadPersistedLatexMode() {
         try {
           return window.localStorage.getItem(LATEX_MODE_STORAGE_KEY) === 'true'
@@ -1325,6 +1673,290 @@ export function getP2pmdEditorPage () {
 
         const hue = Math.abs(hash) % 360
         return 'hsl(' + hue + ' 74% 58%)'
+      }
+
+      function normalizeDashboardPeer(peer) {
+        if (!peer || typeof peer !== 'object') return null
+        const role = peer.role === 'host' ? 'host' : peer.role === 'client' ? 'client' : 'viewer'
+        const clientIdValue = typeof peer.clientId === 'string' ? peer.clientId.slice(0, 120) : ''
+        const id = Number.isFinite(Number(peer.id)) ? Number(peer.id) : null
+        const name = normalizeDisplayName(peer.name) || (id ? 'Peer #' + id : 'Peer')
+
+        return {
+          id,
+          role,
+          clientId: clientIdValue,
+          name,
+          color: typeof peer.color === 'string' && peer.color.length <= 64 ? peer.color : '#64748b',
+          isTyping: peer.isTyping === true,
+          cursorLine: Number.isFinite(Number(peer.cursorLine)) ? Number(peer.cursorLine) : null,
+          cursorColumn: Number.isFinite(Number(peer.cursorColumn)) ? Number(peer.cursorColumn) : null,
+          updatedAt: Number.isFinite(Number(peer.updatedAt)) ? Number(peer.updatedAt) : Date.now()
+        }
+      }
+
+      function normalizeDashboardActivity(activity) {
+        if (!activity || typeof activity !== 'object') return null
+        return {
+          id: Number.isFinite(Number(activity.id)) ? Number(activity.id) : null,
+          type: typeof activity.type === 'string' ? activity.type.slice(0, 24) : 'event',
+          name: normalizeDisplayName(activity.name) || 'Peer',
+          clientId: typeof activity.clientId === 'string' ? activity.clientId.slice(0, 120) : '',
+          message: typeof activity.message === 'string' && activity.message.trim()
+            ? activity.message.trim().slice(0, 240)
+            : 'Activity updated',
+          timestamp: Number.isFinite(Number(activity.timestamp)) ? Number(activity.timestamp) : Date.now()
+        }
+      }
+
+      function formatPeerTime(timestamp) {
+        try {
+          return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        } catch {
+          return ''
+        }
+      }
+
+      function clearPeerDashboardNode(node) {
+        while (node?.firstChild) node.removeChild(node.firstChild)
+      }
+
+      function appendPeerDashboardEmpty(container, message) {
+        const empty = document.createElement(container.tagName === 'UL' ? 'li' : 'div')
+        empty.className = 'peer-empty'
+        empty.textContent = message
+        container.appendChild(empty)
+      }
+
+      function createPeerRoleBadge(role) {
+        const badge = document.createElement('span')
+        badge.className = 'peer-role-badge ' + role
+        badge.textContent = role
+        return badge
+      }
+
+      function createPeerCard(peer) {
+        const card = document.createElement('article')
+        card.className = 'peer-card'
+
+        const avatar = document.createElement('span')
+        avatar.className = 'peer-avatar'
+        avatar.style.backgroundColor = peer.color
+        avatar.textContent = peer.name.charAt(0).toUpperCase()
+
+        const name = document.createElement('strong')
+        name.className = 'peer-name'
+        name.textContent = peer.clientId && peer.clientId === clientId
+          ? peer.name + ' (You)'
+          : peer.name
+
+        const position = document.createElement('span')
+        position.className = 'peer-position'
+        if (peer.cursorLine && peer.cursorColumn) {
+          position.textContent = peer.isTyping
+            ? 'Editing line ' + peer.cursorLine + ', col ' + peer.cursorColumn
+            : 'Cursor at line ' + peer.cursorLine + ', col ' + peer.cursorColumn
+        } else {
+          position.textContent = peer.isTyping ? 'Editing...' : 'Idle'
+        }
+
+        const updated = document.createElement('span')
+        updated.className = 'peer-updated'
+        updated.textContent = formatPeerTime(peer.updatedAt)
+
+        card.appendChild(avatar)
+        card.appendChild(name)
+        card.appendChild(createPeerRoleBadge(peer.role))
+        card.appendChild(position)
+        card.appendChild(updated)
+        return card
+      }
+
+      function renderPeerCards(container, peers, emptyMessage) {
+        clearPeerDashboardNode(container)
+        if (peers.length === 0) {
+          appendPeerDashboardEmpty(container, emptyMessage)
+          return
+        }
+        peers.forEach((peer) => container.appendChild(createPeerCard(peer)))
+      }
+
+      function renderPeerDashboard() {
+        peerDashboardDirty = true
+        if (peerDashboardBackdrop.hidden) return
+
+        peerDashboardDirty = false
+        const peers = []
+        const editingPeers = []
+        let totalPeers = 0
+        let hostPeers = 0
+        let clientPeers = 0
+        let totalEditingPeers = 0
+        latestPeerList.forEach((value) => {
+          const peer = normalizeDashboardPeer(value)
+          if (!peer) return
+          totalPeers += 1
+          if (peer.role === 'host') hostPeers += 1
+          if (peer.role === 'client') clientPeers += 1
+          if (peers.length < MAX_PEER_DASHBOARD_ITEMS) peers.push(peer)
+          if (peer.isTyping) {
+            totalEditingPeers += 1
+            if (editingPeers.length < MAX_PEER_DASHBOARD_ITEMS) editingPeers.push(peer)
+          }
+        })
+        const stats = [
+          ['Total', totalPeers],
+          ['Hosts', hostPeers],
+          ['Clients', clientPeers],
+          ['Editing', totalEditingPeers]
+        ]
+
+        peerDashboardRole.textContent = roomRole
+        peerDashboardRole.className = 'peer-role-badge ' + roomRole
+        peerDashboardRoomKey.textContent = getRoomKey() || roomBaseUrl || 'Room connected'
+        clearPeerDashboardNode(peerDashboardStats)
+        stats.forEach(([label, value]) => {
+          const item = document.createElement('div')
+          item.className = 'peer-stat'
+          const count = document.createElement('strong')
+          count.textContent = String(value)
+          const caption = document.createElement('span')
+          caption.textContent = label
+          item.appendChild(count)
+          item.appendChild(caption)
+          peerDashboardStats.appendChild(item)
+        })
+
+        renderPeerCards(peerConnectedList, peers, 'No connected peers yet.')
+        renderPeerCards(peerEditingList, editingPeers, 'Nobody is actively editing right now.')
+        if (totalPeers > peers.length) {
+          appendPeerDashboardEmpty(peerConnectedList, 'Showing the first ' + peers.length + ' connected peers.')
+        }
+        if (totalEditingPeers > editingPeers.length) {
+          appendPeerDashboardEmpty(peerEditingList, 'Showing the first ' + editingPeers.length + ' active editors.')
+        }
+        clearPeerDashboardNode(peerActivityList)
+        if (peerActivityLog.length === 0) {
+          appendPeerDashboardEmpty(peerActivityList, peerActivityLoadError || 'No activity yet.')
+          return
+        }
+
+        const peerNameByClientId = new Map(
+          peers.filter((peer) => peer.clientId).map((peer) => [peer.clientId, peer.name])
+        )
+        peerActivityLog.slice(0, MAX_PEER_ACTIVITY_ITEMS).forEach((activity) => {
+          const item = document.createElement('li')
+          item.className = 'peer-activity-item'
+          const message = document.createElement('div')
+          message.className = 'peer-activity-message'
+          const currentName = peerNameByClientId.get(activity.clientId) || activity.name
+          message.textContent = activity.name !== currentName && activity.message.startsWith(activity.name + ' ')
+            ? currentName + activity.message.slice(activity.name.length)
+            : activity.message
+          const meta = document.createElement('div')
+          meta.className = 'peer-activity-meta'
+          meta.textContent = currentName + ' | ' + activity.type + ' | ' + formatPeerTime(activity.timestamp)
+          item.appendChild(message)
+          item.appendChild(meta)
+          peerActivityList.appendChild(item)
+        })
+        if (peerActivityLoadError) appendPeerDashboardEmpty(peerActivityList, peerActivityLoadError)
+      }
+
+      function mergePeerActivity(activity) {
+        const isSnapshot = Array.isArray(activity)
+        const incoming = (Array.isArray(activity) ? activity : [activity])
+          .map(normalizeDashboardActivity)
+          .filter(Boolean)
+        if (isSnapshot) {
+          peerActivityLog = incoming
+            .sort((left, right) => right.timestamp - left.timestamp)
+            .slice(0, MAX_PEER_ACTIVITY_ITEMS)
+          peerActivityLoadError = ''
+          renderPeerDashboard()
+          return
+        }
+        if (incoming.length === 0) return
+
+        const keys = new Set(incoming.map((item) => String(item.id) + ':' + item.timestamp))
+        peerActivityLog = incoming.concat(
+          peerActivityLog.filter((item) => !keys.has(String(item.id) + ':' + item.timestamp))
+        )
+          .sort((left, right) => right.timestamp - left.timestamp)
+          .slice(0, MAX_PEER_ACTIVITY_ITEMS)
+        renderPeerDashboard()
+      }
+
+      async function refreshPeerActivity() {
+        try {
+          const response = await fetch(roomUrl('/activity'))
+          const body = await response.json()
+          if (!response.ok || !Array.isArray(body.activity)) {
+            throw new Error('Unable to refresh room activity')
+          }
+          peerActivityLog = body.activity
+            .map(normalizeDashboardActivity)
+            .filter(Boolean)
+            .slice(0, MAX_PEER_ACTIVITY_ITEMS)
+          peerActivityLoadError = ''
+          renderPeerDashboard()
+        } catch {
+          peerActivityLoadError = 'Unable to refresh room activity.'
+          renderPeerDashboard()
+        }
+      }
+
+      function setPeerDashboardVisible(visible) {
+        const shouldShow = visible === true
+        peerDashboardBackdrop.hidden = !shouldShow
+        peerDashboardBackdrop.setAttribute('aria-hidden', String(!shouldShow))
+        if (!shouldShow) {
+          peerProfileHint.textContent = ''
+          return
+        }
+
+        input.blur()
+        peerDisplayName.value = localAuthor.name
+        if (peerDashboardDirty) renderPeerDashboard()
+        refreshPeerActivity()
+        peerDashboardClose.focus()
+      }
+
+      async function updatePeerDisplayName() {
+        const nextName = normalizeDisplayName(peerDisplayName.value)
+        if (!nextName) {
+          peerProfileHint.textContent = 'Username cannot be empty.'
+          return
+        }
+
+        peerDisplayNameSave.disabled = true
+        peerProfileHint.textContent = 'Updating...'
+
+        try {
+          const response = await fetch(roomUrl('/presence'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...getPeerPayload(), name: nextName })
+          })
+          if (!response.ok) throw new Error('Unable to update username')
+          localAuthor.name = nextName
+          persistPeerDisplayName(nextName)
+          latestPeerList = latestPeerList.map((peer) => {
+            return peer?.clientId === clientId ? { ...peer, name: nextName } : peer
+          })
+          renderPeerDashboard()
+
+          try {
+            await requestNativeBridge('peer-profile', { name: nextName })
+            peerProfileHint.textContent = 'Saved'
+          } catch {
+            peerProfileHint.textContent = 'Updated for this room, but could not save for future rooms.'
+          }
+        } catch (error) {
+          peerProfileHint.textContent = error?.message || 'Unable to update username'
+        } finally {
+          peerDisplayNameSave.disabled = false
+        }
       }
 
       function notifyNative(type, details) {
@@ -1387,13 +2019,36 @@ export function getP2pmdEditorPage () {
       }
 
       function getPeerPayload() {
+        const cursor = getEditorCursorPosition()
         return {
           clientId,
           role: roomRole,
           name: localAuthor.name,
           color: localAuthor.color,
-          latexModeEnabled
+          latexModeEnabled,
+          isTyping: localPeerIsTyping,
+          cursorLine: cursor.line,
+          cursorColumn: cursor.column
         }
+      }
+
+      function getEditorCursorPosition() {
+        const offset = Number.isFinite(input.selectionStart) ? input.selectionStart : 0
+        const beforeCursor = input.value.slice(0, offset)
+        const lineStart = beforeCursor.lastIndexOf(newline) + 1
+        return {
+          line: beforeCursor.split(newline).length,
+          column: offset - lineStart + 1
+        }
+      }
+
+      function markLocalPeerTyping() {
+        localPeerIsTyping = true
+        if (localTypingResetTimer) clearTimeout(localTypingResetTimer)
+        localTypingResetTimer = setTimeout(() => {
+          localTypingResetTimer = null
+          localPeerIsTyping = false
+        }, PEER_TYPING_IDLE_MS)
       }
 
       function bytesToBase64(bytes) {
@@ -1503,6 +2158,7 @@ export function getP2pmdEditorPage () {
 
       function scheduleDocumentSave() {
         if (saveTimer) clearTimeout(saveTimer)
+        markLocalPeerTyping()
         markEditedLines(lastInputContent, input.value)
         lastInputContent = input.value
         renderLineGutter()
@@ -2575,6 +3231,7 @@ export function getP2pmdEditorPage () {
 
             latestPeerList = peerList
             mergeLineAttributionsFromPeerList(peerList)
+            renderPeerDashboard()
 
             if (roomRole === 'client' && !hasSyncedHostLatexMode) {
               const host = peerList.find((peer) => peer?.role === 'host')
@@ -2583,6 +3240,12 @@ export function getP2pmdEditorPage () {
                 setLatexMode(host.latexModeEnabled, { persist: false, sync: false, fromSharedState: true })
               }
             }
+          } catch {}
+        })
+
+        source.addEventListener('activity', (event) => {
+          try {
+            mergePeerActivity(JSON.parse(event.data || 'null'))
           } catch {}
         })
 
@@ -2642,6 +3305,8 @@ export function getP2pmdEditorPage () {
       async function initializeEditor() {
         renderTemplateMenu()
         updateLatexControls()
+        peerDisplayName.value = localAuthor.name
+        renderPeerDashboard()
         await loadDocument()
         try {
           await loadYjsRuntime()
@@ -2677,6 +3342,17 @@ export function getP2pmdEditorPage () {
       document.addEventListener('click', closeTemplateMenuOnOutsideClick)
       document.addEventListener('keydown', (event) => {
         if (event.key === 'Escape' && latexTemplateMenu) latexTemplateMenu.hidden = true
+        if (event.key === 'Escape' && !peerDashboardBackdrop.hidden) {
+          setPeerDashboardVisible(false)
+        }
+      })
+      peerDashboardClose.addEventListener('click', () => setPeerDashboardVisible(false))
+      peerDashboardBackdrop.addEventListener('click', (event) => {
+        if (event.target === peerDashboardBackdrop) setPeerDashboardVisible(false)
+      })
+      peerDisplayNameSave.addEventListener('click', updatePeerDisplayName)
+      peerDisplayName.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') updatePeerDisplayName()
       })
       slidesPrevious.addEventListener('click', () => moveSlide(-1))
       slidesNext.addEventListener('click', () => moveSlide(1))
@@ -2719,6 +3395,9 @@ export function getP2pmdEditorPage () {
       })
       window.__p2pmdTogglePreview = togglePreview
       window.__p2pmdPublishToHyper = publishToHyper
+      window.__p2pmdTogglePeerDashboard = (force) => {
+        setPeerDashboardVisible(typeof force === 'boolean' ? force : peerDashboardBackdrop.hidden)
+      }
       initializeEditor()
     </script>
   </body>

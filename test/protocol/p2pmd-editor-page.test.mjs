@@ -90,4 +90,35 @@ describe('p2pmd mobile editor page routing', () => {
     assert.match(html, /if \(viewMode === 'preview'\) await renderPreview\(\)/)
     assert.match(html, /if \(activeViewRenderPending\) \{/)
   })
+
+  it('provides a mobile peer dashboard backed by shared room endpoints', () => {
+    const html = getP2pmdEditorPage()
+
+    assert.match(html, /id="peer-dashboard"/)
+    assert.match(html, /id="peer-connected-list"/)
+    assert.match(html, /id="peer-editing-list"/)
+    assert.match(html, /id="peer-activity-list"/)
+    assert.match(html, /window\.__p2pmdTogglePeerDashboard/)
+    assert.match(html, /fetch\(roomUrl\('\/activity'\)\)/)
+    assert.match(html, /fetch\(roomUrl\('\/presence'\)/)
+    assert.match(html, /source\.addEventListener\('activity'/)
+    assert.match(html, /const isSnapshot = Array\.isArray\(activity\)/)
+    assert.match(html, /peerActivityLog = incoming/)
+    assert.match(html, /MAX_PEER_ACTIVITY_ITEMS = 150/)
+    assert.match(html, /MAX_PEER_DASHBOARD_ITEMS = 100/)
+    assert.match(html, /if \(peerDashboardBackdrop\.hidden\) return/)
+    assert.match(html, /\.slice\(0, MAX_PEER_ACTIVITY_ITEMS\)/)
+    assert.match(html, /message\.textContent =/)
+    assert.doesNotMatch(html, /peerActivityList\.innerHTML/)
+  })
+
+  it('sends editor presence with updates and persists peer profile changes natively', () => {
+    const html = getP2pmdEditorPage()
+
+    assert.match(html, /isTyping: localPeerIsTyping/)
+    assert.match(html, /cursorLine: cursor\.line/)
+    assert.match(html, /cursorColumn: cursor\.column/)
+    assert.match(html, /markLocalPeerTyping\(\)/)
+    assert.match(html, /requestNativeBridge\('peer-profile', \{ name: nextName \}\)/)
+  })
 })

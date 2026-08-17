@@ -24,12 +24,12 @@ export function createPeerPresenceStore ({ now = Date.now } = {}) {
       clientId,
       color: normalizePeerColor(payload.color) || previous?.color || '',
       name: normalizePeerName(payload.name) || previous?.name || `Peer ${clientId.slice(0, 6)}`,
-      cursorLine: normalizeOptionalNumber(payload.cursorLine),
-      cursorColumn: normalizeOptionalNumber(payload.cursorColumn),
-      selectionStart: normalizeOptionalNumber(payload.selectionStart),
-      selectionEnd: normalizeOptionalNumber(payload.selectionEnd),
+      cursorLine: normalizeOptionalNumber(payload.cursorLine, previous?.cursorLine),
+      cursorColumn: normalizeOptionalNumber(payload.cursorColumn, previous?.cursorColumn),
+      selectionStart: normalizeOptionalNumber(payload.selectionStart, previous?.selectionStart),
+      selectionEnd: normalizeOptionalNumber(payload.selectionEnd, previous?.selectionEnd),
       latexModeEnabled: typeof payload.latexModeEnabled === 'boolean' ? payload.latexModeEnabled : null,
-      isTyping: payload.isTyping === true,
+      isTyping: typeof payload.isTyping === 'boolean' ? payload.isTyping : previous?.isTyping === true,
       lineAttributions: lineAttributions || previous?.lineAttributions || null,
       joinedAt: previous?.joinedAt || timestamp,
       updatedAt: timestamp
@@ -91,6 +91,66 @@ export function createPeerPresenceStore ({ now = Date.now } = {}) {
   }
 }
 
+export function createPeerActivityStore ({ now = Date.now, maxItems = 200 } = {}) {
+  const capacity = Number.isInteger(maxItems) && maxItems > 0 ? maxItems : 200
+  const activity = []
+  let sequence = 0
+
+  function add (entry = {}) {
+    sequence += 1
+    const role = normalizePeerRole(entry.role)
+    const name = normalizePeerName(entry.name) || 'Peer'
+    const cursorLine = normalizeOptionalNumber(entry.cursorLine)
+    const cursorColumn = normalizeOptionalNumber(entry.cursorColumn)
+    const position = cursorLine && cursorColumn
+      ? ` (line ${cursorLine}, col ${cursorColumn})`
+      : cursorLine
+        ? ` (line ${cursorLine})`
+        : ''
+    const type = entry.type === 'join' || entry.type === 'leave' || entry.type === 'edit'
+      ? entry.type
+      : 'event'
+    const message = type === 'join'
+      ? `${name} joined as ${role}`
+      : type === 'leave'
+        ? `${name} left the room`
+        : type === 'edit'
+          ? `${name} edited the document${position}`
+          : `${name} updated their activity`
+    const item = {
+      id: sequence,
+      type,
+      role,
+      name,
+      clientId: normalizeClientId(entry.clientId),
+      message,
+      timestamp: now()
+    }
+
+    activity.unshift(item)
+    if (activity.length > capacity) activity.length = capacity
+    return item
+  }
+
+  function getActivity (limit = capacity) {
+    const safeLimit = Number.isInteger(limit) && limit > 0
+      ? Math.min(limit, capacity)
+      : capacity
+    return activity.slice(0, safeLimit)
+  }
+
+  function clear () {
+    activity.length = 0
+    sequence = 0
+  }
+
+  return {
+    add,
+    getActivity,
+    clear
+  }
+}
+
 function normalizePeerRole (role) {
   if (role === 'host') return 'host'
   if (role === 'client') return 'client'
@@ -102,6 +162,12 @@ function normalizePeerName (name) {
   return name.trim().slice(0, 80)
 }
 
+function normalizeClientId (clientId) {
+  if (typeof clientId !== 'string') return null
+  const value = clientId.trim()
+  return value ? value.slice(0, 120) : null
+}
+
 function normalizePeerColor (color) {
   if (typeof color !== 'string') return ''
   const value = color.trim()
@@ -109,7 +175,9 @@ function normalizePeerColor (color) {
   return value
 }
 
-function normalizeOptionalNumber (value) {
+function normalizeOptionalNumber (value, fallback = null) {
+  if (value === undefined) return fallback ?? null
+  if (value === null) return null
   const number = Number(value)
   return Number.isFinite(number) ? number : null
 }

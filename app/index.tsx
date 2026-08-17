@@ -329,6 +329,7 @@ export default function App () {
   const [p2pmdJoinKey, setP2pmdJoinKey] = useState('')
   const [p2pmdParticipants, setP2pmdParticipants] = useState<number | null>(null)
   const [p2pmdViewMode, setP2pmdViewMode] = useState<P2pmdViewMode>('edit')
+  const [p2pmdPeerDisplayName, setP2pmdPeerDisplayName] = useState<string | null>(loadP2pmdPeerDisplayName)
   const isP2pmdLandscapeSlides = p2pmdViewMode === 'slides' && browserWindowWidth > browserWindowHeight
   const [p2pmdSyncStatus, setP2pmdSyncStatus] = useState('Ready')
   const [p2pmdSetupError, setP2pmdSetupError] = useState<string | null>(null)
@@ -1758,6 +1759,7 @@ export default function App () {
 
       setP2pmdSetupError(null)
       await loadP2pmdEditorHtml()
+      setP2pmdPeerDisplayName(loadP2pmdPeerDisplayName())
       setP2pmdRoom(response.room)
       setP2pmdUrl(response.room.localUrl)
       setStatus('P2PMD room created')
@@ -1801,6 +1803,7 @@ export default function App () {
 
       setP2pmdSetupError(null)
       await loadP2pmdEditorHtml()
+      setP2pmdPeerDisplayName(loadP2pmdPeerDisplayName())
       setP2pmdRoom(response.room)
       setP2pmdUrl(response.room.localUrl)
       setP2pmdSyncStatus(response.warning || 'Joining room page...')
@@ -1826,6 +1829,7 @@ export default function App () {
 
       if (response.running && response.room) {
         await loadP2pmdEditorHtml()
+        setP2pmdPeerDisplayName(loadP2pmdPeerDisplayName())
         setP2pmdRoom(response.room)
         setP2pmdUrl(response.room.localUrl)
         setP2pmdParticipants(null)
@@ -1904,6 +1908,12 @@ export default function App () {
     )
   }
 
+  function onP2pmdOpenPeerDashboard () {
+    p2pmdWebViewRef.current?.injectJavaScript(
+      'window.__p2pmdTogglePeerDashboard && window.__p2pmdTogglePeerDashboard(true); true;'
+    )
+  }
+
   function onP2pmdPublishToHyper () {
     if (p2pmdPublishInFlightRef.current) return
     setP2pmdSyncStatus('Publishing to Hyper...')
@@ -1965,6 +1975,7 @@ export default function App () {
     const payload = request.payload && typeof request.payload === 'object'
       ? request.payload
       : {}
+    const peerProfileName = (payload as Record<string, unknown>).name
 
     if (!requestId) return
 
@@ -1973,6 +1984,8 @@ export default function App () {
         ? await callRpc(RPC_P2PMD_PREVIEW, payload)
         : action === 'hyper-image'
           ? await callRpc(RPC_P2PMD_IMAGE_UPLOAD, payload)
+          : action === 'peer-profile'
+            ? saveP2pmdPeerDisplayName(peerProfileName)
           : { ok: false, error: `Unsupported P2PMD bridge action: ${action}` }
 
       setLastResult(response)
@@ -2260,7 +2273,7 @@ export default function App () {
     const p2pmdEditorBaseUrl = `${p2pmdEditorRoomBaseUrl}/?role=${encodeURIComponent(p2pmdRoom.role)}`
     const p2pmdEditorHtmlWithRoomBase = p2pmdEditorHtml.replace(
       '<head>',
-      `<head><script>window.__P2PMD_ROOM_BASE_URL__=${JSON.stringify(p2pmdEditorRoomBaseUrl)};</script>`
+      `<head><script>window.__P2PMD_ROOM_BASE_URL__=${serializeInlineScriptValue(p2pmdEditorRoomBaseUrl)};window.__P2PMD_ROOM_KEY__=${serializeInlineScriptValue(p2pmdRoom.key)};window.__P2PMD_DISPLAY_NAME__=${serializeInlineScriptValue(p2pmdPeerDisplayName)};</script>`
     )
 
     return (
@@ -2271,9 +2284,17 @@ export default function App () {
           <Text style={[styles.p2pmdWorkspaceRole, p2pmdRoom.role === 'host' ? styles.p2pmdWorkspaceRoleHost : null]}>
             {p2pmdRoom.role}
           </Text>
-          <Text style={styles.p2pmdWorkspaceParticipants}>
-            Peers: {p2pmdParticipants ?? '-'}
-          </Text>
+          <Pressable
+            accessibilityRole='button'
+            accessibilityLabel={`Peers: ${p2pmdParticipants ?? 'unknown'}`}
+            accessibilityHint='Open the room peer dashboard'
+            style={styles.p2pmdWorkspaceParticipants}
+            onPress={onP2pmdOpenPeerDashboard}
+          >
+            <Text style={styles.p2pmdWorkspaceParticipantsText}>
+              Peers: {p2pmdParticipants ?? '-'}
+            </Text>
+          </Pressable>
           <Pressable
             style={styles.p2pmdPreviewButton}
             onPress={onP2pmdTogglePreview}
@@ -3034,6 +3055,46 @@ export default function App () {
 function toBareFsPath (uri: string) {
   if (!uri.startsWith('file://')) return uri
   return decodeURIComponent(new URL(uri).pathname).replace(/\/$/, '')
+}
+
+function getP2pmdProfileFile () {
+  return new File(Paths.document, 'p2pmd-profile.json')
+}
+
+function normalizeP2pmdPeerDisplayName (value: unknown) {
+  if (typeof value !== 'string') return ''
+  return Array.from(value.trim().replace(/\s+/g, ' ')).slice(0, 32).join('')
+}
+
+function loadP2pmdPeerDisplayName () {
+  try {
+    const file = getP2pmdProfileFile()
+    if (!file.exists) return null
+    const parsed = JSON.parse(file.textSync())
+    return normalizeP2pmdPeerDisplayName(parsed?.name) || null
+  } catch (error) {
+    console.error('Failed loading P2PMD profile:', error)
+    return null
+  }
+}
+
+function saveP2pmdPeerDisplayName (value: unknown): RpcResponse {
+  const name = normalizeP2pmdPeerDisplayName(value)
+  if (!name) return { ok: false, error: 'Invalid P2PMD peer name.' }
+
+  try {
+    const file = getP2pmdProfileFile()
+    if (!file.exists) file.create({ intermediates: true })
+    file.write(JSON.stringify({ name }))
+    return { ok: true }
+  } catch (error) {
+    console.error('Failed saving P2PMD profile:', error)
+    return { ok: false, error: 'Unable to save the P2PMD peer name.' }
+  }
+}
+
+function serializeInlineScriptValue (value: string | null) {
+  return JSON.stringify(value).replace(/</g, '\\u003c')
 }
 
 function getBrowserSessionFile () {

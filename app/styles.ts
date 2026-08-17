@@ -414,13 +414,15 @@ export const styles = StyleSheet.create({
   p2pmdWorkspaceParticipants: {
     backgroundColor: '#30364a',
     borderRadius: 999,
-    color: '#cdd6ff',
     flexShrink: 1,
-    fontSize: 12,
-    fontWeight: '700',
     overflow: 'hidden',
     paddingHorizontal: 9,
     paddingVertical: 5
+  },
+  p2pmdWorkspaceParticipantsText: {
+    color: '#cdd6ff',
+    fontSize: 12,
+    fontWeight: '700'
   },
   p2pmdWorkspaceRole: {
     backgroundColor: '#3a3020',

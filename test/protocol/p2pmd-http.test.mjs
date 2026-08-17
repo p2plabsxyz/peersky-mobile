@@ -246,6 +246,59 @@ describe('p2pmd HTTP endpoints with injectable Node server', () => {
     })
     assert.equal(status.peers, 0)
     assert.equal(status.peerList.some((peer) => peer.clientId === 'client-1'), false)
+
+    const activity = await getJson(`${localUrl}/activity`)
+    assert.equal(activity.ok, true)
+    assert.equal(activity.activity.some((entry) => {
+      return entry.type === 'join' && entry.clientId === 'client-1'
+    }), true)
+    assert.equal(activity.activity.some((entry) => {
+      return entry.type === 'leave' && entry.clientId === 'client-1'
+    }), true)
+  })
+
+  it('debounces edit activity and exposes it through HTTP and SSE', async () => {
+    const host = await openEventStream(`${localUrl}/events?clientId=typing-host&role=host&name=Host&color=%23f2d35b`)
+    activeStreams.add(host)
+
+    const initialActivity = JSON.parse(await readEvent(host, 'activity'))
+    assert.equal(Array.isArray(initialActivity), true)
+
+    const response = await postJson(`${localUrl}/doc`, {
+      content: 'Edited from phone',
+      clientId: 'typing-host',
+      role: 'host',
+      name: 'Host',
+      isTyping: true,
+      cursorLine: 1,
+      cursorColumn: 18
+    })
+    assert.equal(response.status, 200)
+
+    let status = await getJson(`${localUrl}/status`)
+    let hostPeer = status.peerList.find((peer) => peer.clientId === 'typing-host')
+    assert.equal(hostPeer.isTyping, true)
+    assert.equal(hostPeer.cursorLine, 1)
+    assert.equal(hostPeer.cursorColumn, 18)
+
+    const activity = await waitForActivity(localUrl, (entries) => {
+      return entries.some((entry) => entry.type === 'edit' && entry.clientId === 'typing-host')
+    })
+    const edit = activity.find((entry) => entry.type === 'edit' && entry.clientId === 'typing-host')
+    assert.match(edit.message, /line 1, col 18/)
+
+    const event = await waitForSseEvent(host, 'activity', (data) => {
+      const entries = Array.isArray(data) ? data : [data]
+      return entries.some((entry) => entry.type === 'edit')
+    })
+    assert.equal(event.type, 'edit')
+
+    status = await waitForStatus(localUrl, (status) => {
+      return status.peerList.find((peer) => peer.clientId === 'typing-host')?.isTyping === false
+    })
+    hostPeer = status.peerList.find((peer) => peer.clientId === 'typing-host')
+    assert.equal(hostPeer.cursorLine, 1)
+    assert.equal(hostPeer.cursorColumn, 18)
   })
 
   it('keeps client edits when the host event stream disconnects and reconnects', async () => {
@@ -547,6 +600,44 @@ async function waitForStatus (localUrl, predicate, timeoutMs = 2000) {
   }
 
   assert.fail(`Timed out waiting for P2PMD status. Latest: ${JSON.stringify(latest)}`)
+}
+
+async function waitForActivity (localUrl, predicate, timeoutMs = 3000) {
+  const deadline = Date.now() + timeoutMs
+  let latest = []
+
+  while (Date.now() < deadline) {
+    const result = await getJson(`${localUrl}/activity`)
+    latest = result.activity
+    if (predicate(latest)) return latest
+    await delay(25)
+  }
+
+  assert.fail(`Timed out waiting for P2PMD activity. Latest: ${JSON.stringify(latest)}`)
+}
+
+async function waitForSseEvent (stream, eventName, predicate, timeoutMs = 3000) {
+  assert.ok(stream.reader)
+  const decoder = new TextDecoder()
+  const deadline = Date.now() + timeoutMs
+
+  while (Date.now() < deadline) {
+    for (const event of parseSseEvents(stream.buffer)) {
+      if (event.event !== eventName) continue
+      const data = JSON.parse(event.data)
+      if (predicate(data)) return Array.isArray(data) ? data.find((item) => predicate(item)) : data
+    }
+
+    const remaining = deadline - Date.now()
+    const read = await Promise.race([
+      stream.reader.read(),
+      delay(remaining).then(() => ({ timeout: true }))
+    ])
+    if (read.timeout || read.done) break
+    stream.buffer += decoder.decode(read.value, { stream: true })
+  }
+
+  throw new Error(`Timed out waiting for matching SSE event: ${eventName}`)
 }
 
 function parseSseEvents (payload) {
