@@ -303,13 +303,13 @@ export const styles = StyleSheet.create({
   browserShortcutGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    maxWidth: 480,
     rowGap: 28,
     width: '100%'
   },
   browserShortcut: {
     alignItems: 'center',
     gap: 9,
+    paddingHorizontal: 6,
     width: '25%'
   },
   browserShortcutIcon: {

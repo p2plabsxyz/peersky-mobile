@@ -23,6 +23,7 @@ import ClearIcon from '../assets/icons/bootstrap/x-circle.svg'
 const TOOLBAR_ICON_SIZE = 22
 const ADDRESS_CLEAR_ICON_SIZE = 20
 const TOOLBAR_ICON_STROKE_WIDTH = 0.35
+const ADDRESS_ACTION_ICON_STROKE_WIDTH = 0.2
 
 type BrowserToolbarProps = {
   activeTabId: string
@@ -115,6 +116,7 @@ export function BrowserToolbar ({
   const addressInputRef = useRef<TextInput>(null)
   const addressFocusProgress = useRef(new Animated.Value(0)).current
   const toolbarControlsWidth = 80
+  const addressActionIconColor = isDark ? '#8d96a8' : palette.mutedText
 
   useEffect(() => {
     const animation = Animated.timing(addressFocusProgress, {
@@ -278,9 +280,9 @@ export function BrowserToolbar ({
                   <ReloadIcon
                     width={TOOLBAR_ICON_SIZE}
                     height={TOOLBAR_ICON_SIZE}
-                    color={palette.mutedText}
-                    stroke={palette.mutedText}
-                    strokeWidth={TOOLBAR_ICON_STROKE_WIDTH}
+                    color={addressActionIconColor}
+                    stroke={addressActionIconColor}
+                    strokeWidth={ADDRESS_ACTION_ICON_STROKE_WIDTH}
                   />
                   )}
             </Pressable>
@@ -293,9 +295,9 @@ export function BrowserToolbar ({
               <ShareIcon
                 width={TOOLBAR_ICON_SIZE}
                 height={TOOLBAR_ICON_SIZE}
-                color={palette.mutedText}
-                stroke={palette.mutedText}
-                strokeWidth={TOOLBAR_ICON_STROKE_WIDTH}
+                color={addressActionIconColor}
+                stroke={addressActionIconColor}
+                strokeWidth={ADDRESS_ACTION_ICON_STROKE_WIDTH}
               />
             </Pressable>
           </View>
