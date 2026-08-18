@@ -7,6 +7,12 @@ const REPO_ROOT = new URL('../../', import.meta.url)
 const ANDROID_LOOPBACK_CLEARTEXT_PLUGIN_FILE = repoFile('plugins/with-android-loopback-cleartext.js')
 
 describe('mobile platform runtime configuration', () => {
+  it('allows browser rotation according to the device orientation setting', async () => {
+    const appJson = JSON.parse(await readFile(repoFile('app.json'), 'utf8'))
+
+    assert.equal(appJson.expo?.orientation, 'default')
+  })
+
   it('keeps Android cleartext scoped to loopback only', async () => {
     const appJson = JSON.parse(await readFile(repoFile('app.json'), 'utf8'))
     const plugins = appJson.expo?.plugins || []
@@ -31,6 +37,45 @@ describe('mobile platform runtime configuration', () => {
     assert.notEqual(ats?.NSAllowsArbitraryLoads, true)
   })
 
+  it('declares browser permissions and Android web-link handling', async () => {
+    const appJson = JSON.parse(await readFile(repoFile('app.json'), 'utf8'))
+    const android = appJson.expo?.android
+    const infoPlist = appJson.expo?.ios?.infoPlist
+
+    assert.deepEqual(android?.permissions, [
+      'android.permission.ACCESS_COARSE_LOCATION',
+      'android.permission.ACCESS_FINE_LOCATION',
+      'android.permission.CAMERA',
+      'android.permission.POST_NOTIFICATIONS',
+      'android.permission.RECORD_AUDIO'
+    ])
+    assert.equal(android?.intentFilters?.length, 1)
+    assert.deepEqual(android.intentFilters[0]?.category, ['BROWSABLE', 'DEFAULT'])
+    assert.deepEqual(
+      android.intentFilters[0]?.data?.map((entry) => entry.scheme),
+      ['http', 'https']
+    )
+    assert.match(infoPlist?.NSCameraUsageDescription, /website you visit/i)
+    assert.match(infoPlist?.NSLocationWhenInUseUsageDescription, /website you visit/i)
+    assert.match(infoPlist?.NSMicrophoneUsageDescription, /website you visit/i)
+  })
+
+  it('enables native WebView prompts for location and media capture', async () => {
+    const indexSource = await readFile(repoFile('app/index.tsx'), 'utf8')
+
+    assert.match(indexSource, /geolocationEnabled=\{true\}/)
+    assert.match(indexSource, /mediaCapturePermissionGrantType='prompt'/)
+  })
+
+  it('opens incoming Android web links after browser startup completes', async () => {
+    const indexSource = await readFile(repoFile('app/index.tsx'), 'utf8')
+
+    assert.match(indexSource, /Linking\.getInitialURL\(\)/)
+    assert.match(indexSource, /Linking\.addEventListener\('url'/)
+    assert.match(indexSource, /if \(!browserSessionReady \|\| !pendingIncomingUrl\) return/)
+    assert.match(indexSource, /void loadBrowserUrl\(incomingUrl\)/)
+  })
+
   it('bundles the Bare backend before native Android/iOS runs', async () => {
     const packageJson = JSON.parse(await readFile(repoFile('package.json'), 'utf8'))
     const scripts = packageJson.scripts || {}
@@ -38,6 +83,7 @@ describe('mobile platform runtime configuration', () => {
     assert.equal(scripts.preandroid, 'npm run bundle:bare')
     assert.equal(scripts.preios, 'npm run bundle:bare')
     assert.match(scripts['bundle:bare'], /bare-pack/)
+    assert.match(scripts['bundle:bare'], /update:content-blocking-snapshot/)
     assert.match(scripts['bundle:bare'], /--host android-arm64/)
     assert.match(scripts['bundle:bare'], /--host android-x64/)
     assert.match(scripts['bundle:bare'], /--host ios-arm64/)
@@ -50,7 +96,8 @@ describe('mobile platform runtime configuration', () => {
     const imports = JSON.parse(await readFile(repoFile('backend/bare-imports.json'), 'utf8'))
 
     assert.deepEqual(imports, {
-      'node:crypto': 'bare-crypto'
+      'node:crypto': 'bare-crypto',
+      'node:zlib': 'bare-zlib'
     })
   })
 

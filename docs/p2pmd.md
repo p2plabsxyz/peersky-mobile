@@ -31,7 +31,6 @@ This mirrors the desktop direction at the protocol level: local HTTP endpoints e
 | `/events` | `GET` | SSE stream for peers, document updates, and peer list |
 | `/preview` | `POST` | Markdown-to-HTML preview rendering |
 | `/hyper/file` | `GET` | Read Hyper file content for preview assets |
-| `/hyper/image` | `POST` | Upload image content to Hyper |
 
 ## Runtime flow
 
@@ -62,4 +61,3 @@ P2PMD coverage lives under `test/protocol/`:
 - `p2pmd-preview.test.mjs` covers Markdown rendering and Hyper image URL rewriting.
 
 The endpoint tests include desktop-inspired collaboration flows where peers disconnect, continue editing, and reconnect while document state is preserved.
-

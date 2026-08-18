@@ -7,6 +7,9 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -44,11 +47,104 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Typecheck
-        run: npx tsc --noEmit
-
       - name: Run runtime and bundle tests
         run: npm test
 
+      - name: Typecheck
+        run: npx tsc --noEmit
+
       - name: Run live Holesail integration test
         run: npm run test:holesail:live
+
+  android-content-blocking:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Rust Android tooling
+        run: npm run setup:content-blocking
+
+      - name: Fetch content-blocking snapshot
+        run: npm run update:content-blocking-snapshot
+
+      - name: Generate Android project
+        run: npx expo prebuild --platform android --no-install
+
+      - name: Compile Android native integration
+        working-directory: android
+        run: ./gradlew :app:compileDebugKotlin
+
+  ios-content-blocking:
+    runs-on: macos-26
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Select Xcode 26.2
+        run: sudo xcode-select -s /Applications/Xcode_26.2.app/Contents/Developer
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Bundle Bare runtime
+        run: npm run bundle:bare
+
+      - name: Generate iOS project
+        run: npx expo prebuild --platform ios --no-install
+
+      - name: Install iOS pods
+        working-directory: ios
+        run: pod install
+
+      - name: Compile iOS native integration
+        working-directory: ios
+        run: |
+          workspace=$(find . -maxdepth 1 -name '*.xcworkspace' -print -quit)
+          scheme=$(basename "$workspace" .xcworkspace)
+          set +e
+          xcodebuild \
+            -workspace "$workspace" \
+            -scheme "$scheme" \
+            -sdk iphonesimulator \
+            -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO \
+            build 2>&1 | tee xcodebuild.log
+          status=${PIPESTATUS[0]}
+          set -e
+          if [ "$status" -ne 0 ]; then
+            grep -E '(^|[[:space:]])error:|The following build commands failed' xcodebuild.log \
+              | tail -n 20 \
+              | while IFS= read -r line; do
+                  line=${line//'%'/'%25'}
+                  line=${line//$'\r'/'%0D'}
+                  line=${line//$'\n'/'%0A'}
+                  echo "::error::$line"
+                done
+          fi
+          exit "$status"

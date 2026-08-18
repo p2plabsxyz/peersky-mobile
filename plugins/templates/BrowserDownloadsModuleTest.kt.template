@@ -1,0 +1,86 @@
+package __PACKAGE_NAME__
+
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class BrowserDownloadsModuleTest {
+  @Test
+  fun acceptsOnlyBoundedCredentialFreeHttpUrls() {
+    assertTrue(BrowserDownloadsModule.isHttpUrl("https://example.com/file.pdf"))
+    assertFalse(BrowserDownloadsModule.isHttpUrl("file:///private.txt"))
+    assertFalse(BrowserDownloadsModule.isHttpUrl("https://user:secret@example.com/file"))
+    assertFalse(BrowserDownloadsModule.isHttpUrl("https://example.com/" + "a".repeat(8192)))
+  }
+
+  @Test
+  fun requiresManifestAndPackageContentForApkDetection() {
+    assertTrue(isAndroidPackage("AndroidManifest.xml", "classes.dex"))
+    assertTrue(isAndroidPackage("AndroidManifest.xml", "resources.arsc"))
+    assertFalse(isAndroidPackage("AndroidManifest.xml", "README.md"))
+    assertFalse(isAndroidPackage("classes.dex"))
+  }
+
+  @Test
+  fun detectsCommonAmbiguousDownloadTypesFromContent() {
+    val pdf = "%PDF-1.7\n".toByteArray()
+    val apk = archiveBytes("AndroidManifest.xml", "classes.dex")
+    val zip = archiveBytes("README.md")
+
+    assertEquals(
+      "application/pdf",
+      BrowserDownloadsModule.detectDownloadedMimeType(ByteArrayInputStream(pdf))
+    )
+    assertEquals(
+      "application/vnd.android.package-archive",
+      BrowserDownloadsModule.detectDownloadedMimeType(ByteArrayInputStream(apk))
+    )
+    assertEquals(
+      "application/zip",
+      BrowserDownloadsModule.detectDownloadedMimeType(ByteArrayInputStream(zip))
+    )
+  }
+
+  @Test
+  fun fingerprintsCanonicalQueryUrlsDeterministically() {
+    assertEquals(
+      BrowserDownloadsModule.createUrlFingerprint("https://example.com/image?id=1"),
+      BrowserDownloadsModule.createUrlFingerprint("https://example.com/image?id=1")
+    )
+    assertFalse(
+      BrowserDownloadsModule.createUrlFingerprint("https://example.com/image?id=1") ==
+        BrowserDownloadsModule.createUrlFingerprint("https://example.com/image?id=2")
+    )
+  }
+
+  @Test
+  fun validatesMediaBridgeTokens() {
+    assertTrue(PeerSkyWebViewManager.isValidToken("a".repeat(32)))
+    assertFalse(PeerSkyWebViewManager.isValidToken("a".repeat(31)))
+    assertFalse(PeerSkyWebViewManager.isValidToken("z".repeat(32)))
+  }
+
+  private fun isAndroidPackage(vararg entries: String): Boolean {
+    return BrowserDownloadsModule.isAndroidPackage(
+      ByteArrayInputStream(archiveBytes(*entries))
+    )
+  }
+
+  private fun archiveBytes(vararg entries: String): ByteArray {
+    return ByteArrayOutputStream().use { output ->
+      ZipOutputStream(output).use { archive ->
+        entries.forEach { name ->
+          archive.putNextEntry(ZipEntry(name))
+          archive.write(byteArrayOf(1))
+          archive.closeEntry()
+        }
+      }
+      output.toByteArray()
+    }
+  }
+}

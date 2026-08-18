@@ -1,0 +1,19 @@
+package __PACKAGE_NAME__
+
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class PeerSkyWebViewClientTest {
+  @Test
+  fun identifiesOnlyRemoteHttpUrls() {
+    assertTrue(isRemoteHttpUrl("https", "example.com"))
+    assertTrue(isRemoteHttpUrl("HTTP", "EXAMPLE.COM"))
+    assertFalse(isRemoteHttpUrl("file", "example.com"))
+    assertFalse(isRemoteHttpUrl("https", null))
+    assertFalse(isRemoteHttpUrl("https", "localhost"))
+    assertFalse(isRemoteHttpUrl("https", "127.0.0.1"))
+    assertFalse(isRemoteHttpUrl("https", "10.0.2.2"))
+    assertFalse(isRemoteHttpUrl("https", "::1"))
+  }
+}

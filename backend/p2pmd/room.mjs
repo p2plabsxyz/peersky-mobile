@@ -16,9 +16,9 @@ import {
 } from './server.mjs'
 import { resetDocumentState } from './document.mjs'
 
-const JOIN_READY_ATTEMPTS = 24
+const JOIN_READY_ATTEMPTS = 12
 const JOIN_READY_DELAY_MS = 500
-const JOIN_READY_REQUEST_TIMEOUT_MS = 1000
+const JOIN_READY_REQUEST_TIMEOUT_MS = 3000
 
 let room = null
 let roomTransition = Promise.resolve()
@@ -92,6 +92,7 @@ export async function joinP2pmdRoom ({
     await disconnectRoomInternal()
 
     const port = await getAvailableLoopbackPort()
+
     const holesailResult = await connectHolesail({
       key,
       host: P2PMD_LOOPBACK_HOST,
@@ -120,7 +121,12 @@ export async function joinP2pmdRoom ({
       }
     }
 
-    await waitForJoinedRoomReady(boundPort)
+    let warning = null
+    try {
+      await waitForJoinedRoomReady(boundPort)
+    } catch (error) {
+      warning = `Holesail proxy is listening, but the room did not answer readiness checks yet. The editor will keep retrying. (${getErrorMessage(error)})`
+    }
 
     room = {
       key: roomKey,
@@ -135,7 +141,8 @@ export async function joinP2pmdRoom ({
     return {
       ok: true,
       running: true,
-      room: { ...room }
+      room: { ...room },
+      warning
     }
   })
 }
@@ -235,10 +242,6 @@ function requestP2pmdStatus (port) {
       else resolve(value)
     }
 
-    const timeout = setTimeout(() => {
-      settle(new Error('Timed out probing joined P2PMD room.'))
-    }, JOIN_READY_REQUEST_TIMEOUT_MS)
-
     const req = http.request({
       host: P2PMD_LOOPBACK_HOST,
       port,
@@ -251,7 +254,7 @@ function requestP2pmdStatus (port) {
       res.on('end', () => {
         try {
           const payload = JSON.parse(body || '{}')
-          settle(null, res.statusCode === 200 && payload.ok === true)
+          settle(null, isReadyStatusResponse(res.statusCode, payload))
         } catch {
           settle(null, false)
         }
@@ -260,10 +263,32 @@ function requestP2pmdStatus (port) {
     })
 
     req.on('error', settle)
+    const timeout = setTimeout(() => {
+      try {
+        req.destroy()
+      } catch {}
+      settle(new Error('Timed out probing joined P2PMD room.'))
+    }, JOIN_READY_REQUEST_TIMEOUT_MS)
     req.end()
   })
 }
 
 function delay (ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function isReadyStatusResponse (statusCode, payload) {
+  if (statusCode < 200 || statusCode >= 300) return false
+
+  // Mobile returns { ok: true, service: 'p2pmd', ... } while desktop returns
+  // { peers, peerList, activityCount }. so Accept both valid P2PMD status shapes.
+  if (payload?.ok === true) return true
+  if (Number.isFinite(Number(payload?.peers))) return true
+  if (Array.isArray(payload?.peerList)) return true
+
+  return false
+}
+
+function getErrorMessage (error) {
+  return error instanceof Error ? error.message : String(error)
 }

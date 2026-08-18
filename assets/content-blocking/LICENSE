@@ -1,0 +1,23 @@
+EasyList and EasyPrivacy filter-list snapshots
+
+The EasyList and EasyPrivacy files in this directory are sourced from:
+
+  The EasyList authors
+  https://easylist.to/
+  https://github.com/easylist/easylist
+
+They are available under either of the following licences, at your option:
+
+  GNU General Public License version 3 or any later version
+  https://www.gnu.org/licenses/gpl-3.0.html
+
+  Creative Commons Attribution-ShareAlike 3.0 Unported or any later version
+  https://creativecommons.org/licenses/by-sa/3.0/legalcode
+
+The upstream licensing statement is available at:
+
+  https://easylist.to/pages/licence.html
+
+This notice applies to the EasyList and EasyPrivacy snapshots in this
+directory. PeerSky Mobile's own source code remains licensed under the
+repository's MIT licence.

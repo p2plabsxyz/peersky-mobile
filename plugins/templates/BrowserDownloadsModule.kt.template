@@ -1,0 +1,992 @@
+package __PACKAGE_NAME__
+
+import android.app.DownloadManager
+import android.content.ActivityNotFoundException
+import android.content.BroadcastReceiver
+import android.content.ContentValues
+import android.content.ContentUris
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.net.Uri
+import android.os.Environment
+import android.provider.MediaStore
+import android.util.Log
+import android.webkit.CookieManager
+import android.webkit.MimeTypeMap
+import android.widget.Toast
+import com.facebook.react.bridge.Arguments
+import com.facebook.react.bridge.Promise
+import com.facebook.react.bridge.ReactApplicationContext
+import com.facebook.react.bridge.ReactContextBaseJavaModule
+import com.facebook.react.bridge.ReactMethod
+import com.facebook.react.module.annotations.ReactModule
+import com.reactnativecommunity.webview.URLUtil
+import com.j256.simplemagic.ContentInfoUtil
+import androidx.core.content.ContextCompat
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.FilterInputStream
+import java.io.InputStream
+import java.net.HttpURLConnection
+import java.net.URL
+import java.security.MessageDigest
+import java.util.ArrayDeque
+import java.util.Locale
+import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
+import java.util.zip.ZipInputStream
+
+@ReactModule(name = BrowserDownloadsModule.NAME)
+class BrowserDownloadsModule(
+  reactContext: ReactApplicationContext
+) : ReactContextBaseJavaModule(reactContext) {
+  private val downloadResolver = ThreadPoolExecutor(
+    RESOLVER_THREADS,
+    RESOLVER_THREADS,
+    30L,
+    TimeUnit.SECONDS,
+    ArrayBlockingQueue(MAX_QUEUED_DOWNLOADS)
+  )
+  private val downloadReader = ThreadPoolExecutor(
+    1,
+    1,
+    30L,
+    TimeUnit.SECONDS,
+    ArrayBlockingQueue(1)
+  )
+  private val admissionLock = Any()
+  private val downloadRequestTimes = ArrayDeque<Long>()
+  private val recordsLock = Any()
+  private val downloadCompleteReceiver = object : BroadcastReceiver() {
+    override fun onReceive(context: Context?, intent: Intent?) {
+      if (intent?.action != DownloadManager.ACTION_DOWNLOAD_COMPLETE) return
+      val downloadId = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1)
+      if (downloadId < 1) return
+
+      try {
+        downloadResolver.execute {
+          reconcileDownloadById(downloadId)
+        }
+      } catch (error: RejectedExecutionException) {
+        Log.w(TAG, "Download completion reconciliation queue is full", error)
+      }
+    }
+  }
+
+  init {
+    ContextCompat.registerReceiver(
+      reactContext,
+      downloadCompleteReceiver,
+      IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE),
+      ContextCompat.RECEIVER_EXPORTED
+    )
+  }
+
+  override fun getName() = NAME
+
+  override fun invalidate() {
+    try {
+      reactApplicationContext.unregisterReceiver(downloadCompleteReceiver)
+    } catch (error: IllegalArgumentException) {
+      Log.w(TAG, "Download completion receiver was already unregistered", error)
+    }
+    downloadResolver.shutdownNow()
+    downloadReader.shutdownNow()
+    super.invalidate()
+  }
+
+  fun queueDownload(
+    url: String,
+    userAgent: String?,
+    contentDisposition: String?,
+    mimeType: String?
+  ): Boolean {
+    if (!isHttpUrl(url)) {
+      showToast("This download URL is not supported.")
+      return false
+    }
+    if (!admitDownloadRate()) {
+      showToast("Too many downloads were requested. Try again shortly.")
+      return false
+    }
+
+    try {
+      downloadResolver.execute {
+        try {
+          val metadata = resolveDownloadMetadata(
+            url,
+            userAgent,
+            contentDisposition,
+            mimeType
+          )
+          val enqueued = synchronized(admissionLock) {
+            if (!hasDownloadCapacity()) {
+              false
+            } else {
+              enqueueDownload(url, userAgent, metadata)
+              true
+            }
+          }
+          if (!enqueued) {
+            showToast("Too many downloads are already running.")
+          }
+        } catch (error: Exception) {
+          Log.w(TAG, "Unable to start browser download", error)
+          showToast("Unable to download this file.")
+        }
+      }
+      return true
+    } catch (error: RejectedExecutionException) {
+      showToast("Too many downloads are already starting.")
+      return false
+    }
+  }
+
+  @ReactMethod
+  fun requestDownload(url: String, promise: Promise) {
+    promise.resolve(queueDownload(url, null, null, null))
+  }
+
+  @ReactMethod
+  fun getDownloads(promise: Promise) {
+    try {
+      downloadReader.execute {
+        try {
+          val manager = getDownloadManager()
+          val downloads = synchronized(recordsLock) {
+            val records = loadStoredDownloads().associateByTo(linkedMapOf()) { it.id }
+
+            manager.query(DownloadManager.Query()).use { cursor ->
+              val idIndex = cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_ID)
+              val titleIndex = cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_TITLE)
+              val statusIndex = cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS)
+              val sizeIndex = cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES)
+              val createdAtIndex = cursor.getColumnIndexOrThrow(
+                DownloadManager.COLUMN_LAST_MODIFIED_TIMESTAMP
+              )
+              val mimeTypeIndex = cursor.getColumnIndex(DownloadManager.COLUMN_MEDIA_TYPE)
+              var inspected = 0
+
+              while (cursor.moveToNext() && inspected < MAX_INSPECTED_DOWNLOADS) {
+                inspected += 1
+                val id = cursor.getLong(idIndex)
+                val existing = records[id]
+                records[id] = StoredDownload(
+                  id = id,
+                  name = existing?.name
+                    ?: sanitizeFilename(cursor.getString(titleIndex) ?: "download"),
+                  status = getStatus(cursor.getInt(statusIndex)),
+                  size = cursor.getLong(sizeIndex).coerceAtLeast(0),
+                  createdAt = cursor.getLong(createdAtIndex).coerceAtLeast(0),
+                  mimeType = existing?.mimeType
+                    ?: if (mimeTypeIndex >= 0) cursor.getString(mimeTypeIndex) else null,
+                  typeResolved = existing?.typeResolved ?: false,
+                  resolutionAttempts = existing?.resolutionAttempts ?: 0
+                )
+              }
+            }
+
+            var reconciled = 0
+            val merged = records.values
+              .map { download ->
+                if (
+                  reconciled < MAX_RECONCILIATIONS_PER_REFRESH &&
+                  download.status == "complete" &&
+                  !download.typeResolved
+                ) {
+                  reconciled += 1
+                  reconcileCompletedDownload(manager, download)
+                } else {
+                  download
+                }
+              }
+              .sortedByDescending { it.createdAt }
+              .take(MAX_DOWNLOADS)
+            saveStoredDownloads(merged)
+            merged
+          }
+
+          val result = Arguments.createArray()
+          downloads.forEach { download ->
+            val record = Arguments.createMap()
+            record.putString("id", download.id.toString())
+            record.putString("name", download.name)
+            record.putString("status", download.status)
+            record.putDouble("size", download.size.toDouble())
+            record.putDouble("createdAt", download.createdAt.toDouble())
+            result.pushMap(record)
+          }
+          promise.resolve(result)
+        } catch (error: Exception) {
+          promise.reject("DOWNLOADS_QUERY_FAILED", "Unable to load downloads.", error)
+        }
+      }
+    } catch (error: RejectedExecutionException) {
+      promise.reject("DOWNLOADS_QUERY_BUSY", "Downloads are still being refreshed.", error)
+    }
+  }
+
+  @ReactMethod
+  fun openDownload(id: String, promise: Promise) {
+    val downloadId = id.toLongOrNull()
+    if (downloadId == null || downloadId < 1) {
+      promise.reject("INVALID_DOWNLOAD_ID", "Invalid download identifier.")
+      return
+    }
+
+    try {
+      val manager = getDownloadManager()
+      val stored = synchronized(recordsLock) {
+        loadStoredDownloads().firstOrNull { it.id == downloadId }
+      }
+      val uri = manager.getUriForDownloadedFile(downloadId)
+      if (uri == null) {
+        promise.resolve(false)
+        return
+      }
+
+      val mimeType = stored?.mimeType
+        ?: manager.getMimeTypeForDownloadedFile(downloadId)
+        ?: reactApplicationContext.contentResolver.getType(uri)
+        ?: "*/*"
+      val intent = Intent(Intent.ACTION_VIEW).apply {
+        setDataAndType(uri, mimeType)
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+      }
+      try {
+        reactApplicationContext.startActivity(intent)
+        promise.resolve(true)
+      } catch (error: ActivityNotFoundException) {
+        Log.w(TAG, "No activity can open this download", error)
+        promise.resolve(false)
+      }
+    } catch (error: Exception) {
+      promise.reject("DOWNLOAD_OPEN_FAILED", "Unable to open download.", error)
+    }
+  }
+
+  @ReactMethod
+  fun removeDownload(id: String, promise: Promise) {
+    val downloadId = id.toLongOrNull()
+    if (downloadId == null || downloadId < 1) {
+      promise.reject("INVALID_DOWNLOAD_ID", "Invalid download identifier.")
+      return
+    }
+
+    try {
+      val removedNative = getDownloadManager().remove(downloadId) > 0
+      val removedStored = synchronized(recordsLock) {
+        val records = loadStoredDownloads()
+        val remaining = records.filterNot { it.id == downloadId }
+        if (remaining.size == records.size) {
+          false
+        } else {
+          saveStoredDownloads(remaining)
+          true
+        }
+      }
+      promise.resolve(removedNative || removedStored)
+    } catch (error: Exception) {
+      promise.reject("DOWNLOAD_REMOVE_FAILED", "Unable to remove download.", error)
+    }
+  }
+
+  private fun resolveDownloadMetadata(
+    initialUrl: String,
+    userAgent: String?,
+    initialContentDisposition: String?,
+    initialMimeType: String?
+  ): DownloadMetadata {
+    var currentUrl = initialUrl
+    var contentDisposition = initialContentDisposition
+    var mimeType = normalizeMimeType(initialMimeType)
+    val initialName = resolveFilename(currentUrl, contentDisposition, mimeType)
+    if (
+      hasMeaningfulExtension(initialName) &&
+      !isAmbiguousDownloadType(mimeType)
+    ) {
+      return DownloadMetadata(
+        name = initialName,
+        mimeType = mimeType
+      )
+    }
+
+    for (attempt in 0..MAX_REDIRECTS) {
+      var connection: HttpURLConnection? = null
+      try {
+        connection = URL(currentUrl).openConnection() as HttpURLConnection
+        connection.instanceFollowRedirects = false
+        connection.connectTimeout = METADATA_TIMEOUT_MS
+        connection.readTimeout = METADATA_TIMEOUT_MS
+        connection.requestMethod = "HEAD"
+        connection.setRequestProperty("Accept-Encoding", "identity")
+        if (!userAgent.isNullOrBlank()) {
+          connection.setRequestProperty("User-Agent", userAgent)
+        }
+        CookieManager.getInstance().getCookie(currentUrl)
+          ?.takeIf { it.isNotBlank() }
+          ?.let { connection.setRequestProperty("Cookie", it) }
+
+        val status = connection.responseCode
+        val location = connection.getHeaderField("Location")
+        if (status in REDIRECT_STATUS_CODES && !location.isNullOrBlank()) {
+          val redirectedUrl = URL(URL(currentUrl), location).toString()
+          if (!isHttpUrl(redirectedUrl)) break
+          currentUrl = redirectedUrl
+          continue
+        }
+
+        if (status in 200..299) {
+          contentDisposition = connection.getHeaderField("Content-Disposition")
+            ?: contentDisposition
+          mimeType = normalizeMimeType(connection.contentType) ?: mimeType
+        }
+        break
+      } catch (error: Exception) {
+        Log.w(TAG, "Unable to resolve browser download metadata", error)
+        break
+      } finally {
+        connection?.disconnect()
+      }
+    }
+
+    val name = resolveFilename(currentUrl, contentDisposition, mimeType)
+    return DownloadMetadata(
+      name = name,
+      mimeType = resolveMimeTypeFromFilename(name, mimeType)
+    )
+  }
+
+  @Suppress("DEPRECATION")
+  private fun enqueueDownload(
+    url: String,
+    userAgent: String?,
+    metadata: DownloadMetadata
+  ) {
+    val destinationName = synchronized(recordsLock) {
+      val uniqueName = createUniquePublicFilename(metadata.name)
+      val request = DownloadManager.Request(Uri.parse(url))
+      CookieManager.getInstance().getCookie(url)
+        ?.takeIf { it.isNotBlank() }
+        ?.let { request.addRequestHeader("Cookie", it) }
+      if (!userAgent.isNullOrBlank()) {
+        request.addRequestHeader("User-Agent", userAgent)
+      }
+      metadata.mimeType?.let(request::setMimeType)
+      request.setTitle(uniqueName)
+      request.setDescription("Downloading " + uniqueName)
+      request.setNotificationVisibility(
+        DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED
+      )
+      request.setDestinationInExternalPublicDir(
+        Environment.DIRECTORY_DOWNLOADS,
+        uniqueName
+      )
+
+      val id = getDownloadManager().enqueue(request)
+      val records = loadStoredDownloads()
+        .filterNot { it.id == id }
+        .toMutableList()
+      records.add(
+        StoredDownload(
+          id = id,
+          name = uniqueName,
+          status = "pending",
+          size = 0,
+          createdAt = System.currentTimeMillis(),
+          mimeType = metadata.mimeType,
+          typeResolved = !isAmbiguousDownloadType(metadata.mimeType) &&
+            metadata.mimeType != "application/zip"
+        )
+      )
+      saveStoredDownloads(records)
+      uniqueName
+    }
+    showToast("Downloading " + destinationName)
+  }
+
+  private fun createUniquePublicFilename(name: String): String {
+    val existingNames = mutableSetOf<String>()
+    loadStoredDownloads().forEach {
+      existingNames.add(it.name.lowercase(Locale.ROOT))
+    }
+
+    try {
+      reactApplicationContext.contentResolver.query(
+        MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+        arrayOf(MediaStore.MediaColumns.DISPLAY_NAME),
+        null,
+        null,
+        null
+      )?.use { cursor ->
+        val nameIndex = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
+        var inspected = 0
+        while (cursor.moveToNext() && inspected < MAX_INSPECTED_DOWNLOADS) {
+          inspected += 1
+          cursor.getString(nameIndex)?.let {
+            existingNames.add(it.lowercase(Locale.ROOT))
+          }
+        }
+      }
+    } catch (error: Exception) {
+      Log.w(TAG, "Unable to inspect existing download names", error)
+    }
+
+    if (!existingNames.contains(name.lowercase(Locale.ROOT))) return name
+    for (count in 1..MAX_DOWNLOADS) {
+      val candidate = addFilenameSuffix(name, count.toLong())
+      if (!existingNames.contains(candidate.lowercase(Locale.ROOT))) return candidate
+    }
+    return addFilenameSuffix(name, System.currentTimeMillis())
+  }
+
+  private fun findOwnedPublicDownloadUri(download: StoredDownload): Uri? {
+    return try {
+      reactApplicationContext.contentResolver.query(
+        MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+        arrayOf(MediaStore.MediaColumns._ID),
+        MediaStore.MediaColumns.DISPLAY_NAME + " = ? AND " +
+          MediaStore.MediaColumns.SIZE + " = ?",
+        arrayOf(download.name, download.size.toString()),
+        MediaStore.MediaColumns.DATE_ADDED + " DESC"
+      )?.use { cursor ->
+        if (!cursor.moveToFirst()) return@use null
+        ContentUris.withAppendedId(
+          MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+          cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID))
+        )
+      }
+    } catch (error: Exception) {
+      Log.w(TAG, "Unable to locate completed browser download", error)
+      null
+    }
+  }
+
+  private fun loadStoredDownloads(): List<StoredDownload> {
+    val serialized = preferences().getString(DOWNLOADS_KEY, null) ?: return emptyList()
+    return try {
+      val json = JSONArray(serialized)
+      val records = mutableListOf<StoredDownload>()
+      val count = minOf(json.length(), MAX_DOWNLOADS)
+      for (index in 0 until count) {
+        val item = json.optJSONObject(index) ?: continue
+        val id = item.optLong("id", -1)
+        val name = sanitizeFilename(item.optString("name", ""))
+        if (id < 1 || name.isBlank()) continue
+        records.add(
+          StoredDownload(
+            id = id,
+            name = name,
+            status = normalizeStatus(item.optString("status", "failed")),
+            size = item.optLong("size", 0).coerceAtLeast(0),
+            createdAt = item.optLong("createdAt", 0).coerceAtLeast(0),
+            mimeType = if (item.has("mimeType") && !item.isNull("mimeType")) {
+              normalizeMimeType(item.optString("mimeType"))
+            } else {
+              null
+            },
+            typeResolved = item.optBoolean("typeResolved", false),
+            resolutionAttempts = item.optInt("resolutionAttempts", 0)
+              .coerceIn(0, MAX_RECONCILE_ATTEMPTS)
+          )
+        )
+      }
+      records
+    } catch (error: Exception) {
+      Log.w(TAG, "Unable to restore browser download records", error)
+      emptyList()
+    }
+  }
+
+  private fun saveStoredDownloads(downloads: List<StoredDownload>) {
+    val json = JSONArray()
+    downloads
+      .sortedByDescending { it.createdAt }
+      .take(MAX_DOWNLOADS)
+      .forEach { download ->
+        json.put(
+          JSONObject()
+            .put("id", download.id)
+            .put("name", download.name)
+            .put("status", download.status)
+            .put("size", download.size)
+            .put("createdAt", download.createdAt)
+            .put("mimeType", download.mimeType)
+            .put("typeResolved", download.typeResolved)
+            .put("resolutionAttempts", download.resolutionAttempts)
+        )
+      }
+    preferences().edit().putString(DOWNLOADS_KEY, json.toString()).apply()
+  }
+
+  private fun preferences() = reactApplicationContext.getSharedPreferences(
+    DOWNLOADS_PREFERENCES,
+    Context.MODE_PRIVATE
+  )
+
+  private fun getDownloadManager() =
+    reactApplicationContext.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+
+  private fun admitDownloadRate(): Boolean {
+    val now = System.currentTimeMillis()
+    synchronized(admissionLock) {
+      while (
+        downloadRequestTimes.isNotEmpty() &&
+        downloadRequestTimes.first() <= now - DOWNLOAD_RATE_WINDOW_MS
+      ) {
+        downloadRequestTimes.removeFirst()
+      }
+      if (downloadRequestTimes.size >= MAX_DOWNLOADS_PER_WINDOW) return false
+
+      downloadRequestTimes.addLast(now)
+      return true
+    }
+  }
+
+  private fun hasDownloadCapacity(): Boolean {
+    val activeStatuses = DownloadManager.STATUS_PENDING or
+      DownloadManager.STATUS_RUNNING or
+      DownloadManager.STATUS_PAUSED
+    return try {
+      getDownloadManager().query(
+        DownloadManager.Query().setFilterByStatus(activeStatuses)
+      ).use { it.count < MAX_ACTIVE_DOWNLOADS }
+    } catch (error: Exception) {
+      Log.w(TAG, "Unable to count active browser downloads", error)
+      false
+    }
+  }
+
+  private fun showToast(message: String) {
+    reactApplicationContext.runOnUiQueueThread {
+      Toast.makeText(reactApplicationContext, message, Toast.LENGTH_LONG).show()
+    }
+  }
+
+  private fun getStatus(status: Int) = when (status) {
+    DownloadManager.STATUS_PENDING -> "pending"
+    DownloadManager.STATUS_RUNNING -> "running"
+    DownloadManager.STATUS_PAUSED -> "paused"
+    DownloadManager.STATUS_SUCCESSFUL -> "complete"
+    else -> "failed"
+  }
+
+  private fun normalizeStatus(status: String) = when (status) {
+    "pending", "running", "paused", "complete", "failed" -> status
+    else -> "failed"
+  }
+
+  private fun normalizeMimeType(mimeType: String?): String? {
+    return mimeType
+      ?.substringBefore(';')
+      ?.trim()
+      ?.lowercase(Locale.ROOT)
+      ?.takeIf { it.contains('/') && it.length <= MAX_MIME_TYPE_LENGTH }
+  }
+
+  private fun ensureExpectedExtension(name: String, mimeType: String?): String {
+    val expectedExtension = when (mimeType) {
+      "application/pdf" -> "pdf"
+      "application/vnd.android.package-archive" -> "apk"
+      "application/x-dosexec",
+      "application/x-msdownload",
+      "application/x-msdos-program",
+      "application/vnd.microsoft.portable-executable" -> "exe"
+      else -> mimeType?.let(MimeTypeMap.getSingleton()::getExtensionFromMimeType)
+    }?.lowercase(Locale.ROOT)?.takeIf { it.matches(EXTENSION_PATTERN) }
+      ?: return name
+
+    val dotIndex = name.lastIndexOf('.')
+    val currentExtension = if (dotIndex > 0 && dotIndex < name.length - 1) {
+      name.substring(dotIndex + 1).lowercase(Locale.ROOT)
+    } else {
+      ""
+    }
+    if (currentExtension == expectedExtension) return name
+    val replaceableExtension = currentExtension == "bin" ||
+      (currentExtension == "zip" && expectedExtension == "apk")
+    if (currentExtension.isNotEmpty() && !replaceableExtension) return name
+
+    val stem = if (replaceableExtension) name.substring(0, dotIndex) else name
+    return truncateFilename(stem, expectedExtension.length + 1) + "." + expectedExtension
+  }
+
+  private fun isAmbiguousDownloadType(mimeType: String?): Boolean {
+    return mimeType == null || mimeType in AMBIGUOUS_MIME_TYPES
+  }
+
+  private fun reconcileCompletedDownload(
+    manager: DownloadManager,
+    download: StoredDownload
+  ): StoredDownload {
+    if (download.status != "complete" || download.typeResolved) return download
+    val uri = manager.getUriForDownloadedFile(download.id)
+    if (uri == null) {
+      return markResolutionFailure(download)
+    }
+
+    return try {
+      val detectedMimeType = reactApplicationContext.contentResolver
+        .openInputStream(uri)
+        ?.use(::detectDownloadedMimeType)
+      val resolvedMimeType = normalizeMimeType(detectedMimeType) ?: download.mimeType
+      val candidateName = ensureExpectedExtension(download.name, resolvedMimeType)
+      val resolvedName = if (candidateName == download.name) {
+        candidateName
+      } else {
+        createUniquePublicFilename(candidateName)
+      }
+      if (resolvedName != download.name || resolvedMimeType != download.mimeType) {
+        val values = ContentValues().apply {
+          put(MediaStore.MediaColumns.DISPLAY_NAME, resolvedName)
+          resolvedMimeType?.let { put(MediaStore.MediaColumns.MIME_TYPE, it) }
+        }
+        val mediaStoreUri = findDownloadMediaStoreUri(manager, download.id)
+        var updated = mediaStoreUri?.let { mediaUri ->
+          try {
+            reactApplicationContext.contentResolver.update(mediaUri, values, null, null)
+          } catch (error: Exception) {
+            Log.w(TAG, "Unable to update exact MediaStore download", error)
+            0
+          }
+        } ?: 0
+        if (updated < 1) {
+          val publicUri = findOwnedPublicDownloadUri(download)
+          if (publicUri != null) {
+            updated = reactApplicationContext.contentResolver.update(
+              publicUri,
+              values,
+              null,
+              null
+            )
+          }
+        }
+        if (updated < 1) throw IllegalStateException("Unable to rename downloaded file")
+      }
+      download.copy(
+        name = resolvedName,
+        mimeType = resolvedMimeType,
+        typeResolved = true,
+        resolutionAttempts = 0
+      )
+    } catch (error: Exception) {
+      Log.w(TAG, "Unable to reconcile completed browser download", error)
+      markResolutionFailure(download)
+    }
+  }
+
+  private fun reconcileDownloadById(downloadId: Long) {
+    val manager = getDownloadManager()
+    synchronized(recordsLock) {
+      val records = loadStoredDownloads().toMutableList()
+      val recordIndex = records.indexOfFirst { it.id == downloadId }
+      if (recordIndex < 0) {
+        return
+      }
+
+      val refreshed = refreshStoredDownload(manager, records[recordIndex]) ?: return
+      records[recordIndex] = if (
+        refreshed.status == "complete" &&
+        !refreshed.typeResolved
+      ) {
+        reconcileCompletedDownload(manager, refreshed)
+      } else {
+        refreshed
+      }
+      saveStoredDownloads(records)
+    }
+  }
+
+  private fun refreshStoredDownload(
+    manager: DownloadManager,
+    download: StoredDownload
+  ): StoredDownload? {
+    return manager.query(
+      DownloadManager.Query().setFilterById(download.id)
+    ).use { cursor ->
+      if (!cursor.moveToFirst()) return@use null
+      val mimeTypeIndex = cursor.getColumnIndex(DownloadManager.COLUMN_MEDIA_TYPE)
+      download.copy(
+        status = getStatus(
+          cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
+        ),
+        size = cursor.getLong(
+          cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES)
+        ).coerceAtLeast(0),
+        mimeType = download.mimeType
+          ?: if (mimeTypeIndex >= 0) cursor.getString(mimeTypeIndex) else null
+      )
+    }
+  }
+
+  private fun findDownloadMediaStoreUri(
+    manager: DownloadManager,
+    downloadId: Long
+  ): Uri? {
+    return try {
+      manager.query(
+        DownloadManager.Query().setFilterById(downloadId)
+      ).use { cursor ->
+        if (!cursor.moveToFirst()) return@use null
+        val uriIndex = cursor.getColumnIndex(DownloadManager.COLUMN_MEDIAPROVIDER_URI)
+        if (uriIndex < 0) return@use null
+        cursor.getString(uriIndex)?.takeIf { it.isNotBlank() }?.let(Uri::parse)
+      }
+    } catch (error: Exception) {
+      Log.w(TAG, "Unable to locate exact MediaStore download", error)
+      null
+    }
+  }
+
+  private fun markResolutionFailure(download: StoredDownload): StoredDownload {
+    val attempts = download.resolutionAttempts + 1
+    return download.copy(
+      typeResolved = attempts >= MAX_RECONCILE_ATTEMPTS,
+      resolutionAttempts = attempts
+    )
+  }
+
+  private fun resolveFilename(
+    url: String,
+    contentDisposition: String?,
+    mimeType: String?
+  ): String {
+    val filenameMimeType = normalizeMimeType(mimeType)
+      ?.takeUnless(::isAmbiguousDownloadType)
+    val guessedName = URLUtil.guessFileName(url, contentDisposition, filenameMimeType)
+    val normalizedName = ensureExpectedExtension(sanitizeFilename(guessedName), filenameMimeType)
+    return addUrlFingerprintIfNeeded(normalizedName, url, contentDisposition)
+  }
+
+  private fun addUrlFingerprintIfNeeded(
+    name: String,
+    url: String,
+    contentDisposition: String?
+  ): String {
+    if (contentDisposition?.contains(CONTENT_DISPOSITION_FILENAME_PATTERN) == true) return name
+
+    return try {
+      val parsed = Uri.parse(url)
+      if (parsed.query.isNullOrBlank() || hasMeaningfulExtension(parsed.lastPathSegment.orEmpty())) {
+        name
+      } else {
+        val canonicalUrl = parsed.buildUpon().fragment(null).build().toString()
+        val digest = createUrlFingerprint(canonicalUrl)
+        addFilenameToken(name, digest)
+      }
+    } catch (_: Exception) {
+      name
+    }
+  }
+
+  private fun resolveMimeTypeFromFilename(name: String, mimeType: String?): String? {
+    val normalizedMimeType = normalizeMimeType(mimeType)
+    val extension = name.substringAfterLast('.', "")
+      .lowercase(Locale.ROOT)
+      .takeIf { it.matches(EXTENSION_PATTERN) }
+      ?: return normalizedMimeType
+    if (
+      !isAmbiguousDownloadType(normalizedMimeType) &&
+      !(normalizedMimeType == "application/zip" && extension == "apk")
+    ) return normalizedMimeType
+
+    return when (extension) {
+      "apk" -> "application/vnd.android.package-archive"
+      "exe" -> "application/x-msdownload"
+      "pdf" -> "application/pdf"
+      else -> MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension)
+    } ?: normalizedMimeType
+  }
+
+  private fun hasMeaningfulExtension(name: String): Boolean {
+    val dotIndex = name.lastIndexOf('.')
+    if (dotIndex <= 0 || dotIndex == name.length - 1) return false
+    return name.substring(dotIndex + 1).lowercase(Locale.ROOT) != "bin"
+  }
+
+  private fun sanitizeFilename(value: String): String {
+    val sanitized = value
+      .map { character ->
+        if (
+          character.code < 32 ||
+          character.code == 127 ||
+          character in INVALID_FILENAME_CHARACTERS
+        ) {
+          '_'
+        } else {
+          character
+        }
+      }
+      .joinToString("")
+      .trim()
+      .trim('.')
+    return truncateFilename(sanitized.ifBlank { "download" })
+  }
+
+  private fun addFilenameSuffix(name: String, count: Long): String {
+    val dotIndex = name.lastIndexOf('.')
+    val hasExtension = dotIndex > 0 && dotIndex < name.length - 1
+    val stem = if (hasExtension) name.substring(0, dotIndex) else name
+    val extension = if (hasExtension) name.substring(dotIndex) else ""
+    val suffix = " (" + count + ")"
+    return truncateFilename(stem, suffix.length + extension.length) + suffix + extension
+  }
+
+  private fun addFilenameToken(name: String, token: String): String {
+    val dotIndex = name.lastIndexOf('.')
+    val hasExtension = dotIndex > 0 && dotIndex < name.length - 1
+    val stem = if (hasExtension) name.substring(0, dotIndex) else name
+    val extension = if (hasExtension) name.substring(dotIndex) else ""
+    val suffix = "-" + token
+    return truncateFilename(stem, suffix.length + extension.length) + suffix + extension
+  }
+
+  private fun truncateFilename(value: String, reservedCharacters: Int = 0): String {
+    val maximumCodePoints = (MAX_FILENAME_LENGTH - reservedCharacters).coerceAtLeast(1)
+    val codePointCount = value.codePointCount(0, value.length)
+    if (codePointCount <= maximumCodePoints) return value
+    return value.substring(0, value.offsetByCodePoints(0, maximumCodePoints))
+  }
+
+  private data class DownloadMetadata(
+    val name: String,
+    val mimeType: String?
+  )
+
+  private data class StoredDownload(
+    val id: Long,
+    val name: String,
+    val status: String,
+    val size: Long,
+    val createdAt: Long,
+    val mimeType: String?,
+    val typeResolved: Boolean = false,
+    val resolutionAttempts: Int = 0
+  )
+
+  private class BoundedInputStream(
+    input: InputStream,
+    private val limit: Long
+  ) : FilterInputStream(input) {
+    private var bytesRead = 0L
+
+    override fun read(): Int {
+      if (bytesRead >= limit) return -1
+      return super.read().also { if (it >= 0) bytesRead += 1 }
+    }
+
+    override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
+      val remaining = limit - bytesRead
+      if (remaining <= 0) return -1
+      return super.read(buffer, offset, minOf(length.toLong(), remaining).toInt()).also {
+        if (it > 0) bytesRead += it
+      }
+    }
+
+    override fun skip(count: Long): Long {
+      val remaining = limit - bytesRead
+      if (remaining <= 0) return 0
+      return super.skip(minOf(count, remaining)).also { bytesRead += it }
+    }
+  }
+
+  companion object {
+    const val NAME = "BrowserDownloads"
+    private const val MAX_DOWNLOADS = 200
+    private const val MAX_DOWNLOAD_URL_LENGTH = 8192
+    private const val MAX_INSPECTED_DOWNLOADS = 1000
+    private const val MAX_FILENAME_LENGTH = 255
+    private const val MAX_MIME_TYPE_LENGTH = 255
+    private const val MAX_REDIRECTS = 5
+    private const val METADATA_TIMEOUT_MS = 8000
+    private const val RESOLVER_THREADS = 2
+    private const val MAX_QUEUED_DOWNLOADS = 8
+    private const val MAX_ACTIVE_DOWNLOADS = 3
+    private const val MAX_DOWNLOADS_PER_WINDOW = 10
+    private const val DOWNLOAD_RATE_WINDOW_MS = 60_000L
+    private const val MAX_RECONCILIATIONS_PER_REFRESH = 2
+    private const val MAX_RECONCILE_ATTEMPTS = 3
+    private const val DOWNLOADS_PREFERENCES = "browser_downloads"
+    private const val DOWNLOADS_KEY = "records"
+    private const val MAX_SIGNATURE_BYTES = 131072
+    private const val MAX_ARCHIVE_ENTRIES = 256
+    private const val MAX_ARCHIVE_SCAN_BYTES = 8L * 1024L * 1024L
+    private const val INVALID_FILENAME_CHARACTERS = "\\/:*?\"<>|"
+    private const val TAG = "PeerSkyDownloads"
+    private val mimeDetector by lazy { ContentInfoUtil() }
+    private val EXTENSION_PATTERN = Regex("^[a-z0-9]{1,16}$")
+    private val CONTENT_DISPOSITION_FILENAME_PATTERN = Regex(
+      "filename[*]?\\s*=",
+      RegexOption.IGNORE_CASE
+    )
+    private val ANDROID_DEX_ENTRY_PATTERN = Regex("^classes(?:[0-9]+)?[.]dex$")
+    private val REDIRECT_STATUS_CODES = setOf(301, 302, 303, 307, 308)
+    private val AMBIGUOUS_MIME_TYPES = setOf(
+      "application/octet-stream",
+      "binary/octet-stream"
+    )
+
+    internal fun createUrlFingerprint(url: String): String =
+      MessageDigest.getInstance("SHA-256")
+        .digest(url.toByteArray(Charsets.UTF_8))
+        .take(5)
+        .joinToString("") { byte -> "%02x".format(byte) }
+
+    internal fun isHttpUrl(value: String): Boolean {
+      if (value.length > MAX_DOWNLOAD_URL_LENGTH) return false
+      return try {
+        val parsed = URL(value)
+        parsed.protocol.lowercase(Locale.ROOT) in setOf("http", "https") &&
+          parsed.host.isNotBlank() &&
+          parsed.userInfo == null
+      } catch (_: Exception) {
+        false
+      }
+    }
+
+    internal fun detectDownloadedMimeType(input: InputStream): String? {
+      val buffered = input.buffered()
+      buffered.mark(MAX_SIGNATURE_BYTES)
+      val detectedMimeType = synchronized(mimeDetector) {
+        mimeDetector.findMatch(
+          BoundedInputStream(buffered, MAX_SIGNATURE_BYTES.toLong())
+        )?.mimeType
+          ?.substringBefore(';')
+          ?.trim()
+          ?.lowercase(Locale.ROOT)
+          ?.takeIf { it.contains('/') && it.length <= MAX_MIME_TYPE_LENGTH }
+      }
+      buffered.reset()
+      if (detectedMimeType != "application/zip") return detectedMimeType
+      return if (isAndroidPackage(buffered)) {
+        "application/vnd.android.package-archive"
+      } else {
+        detectedMimeType
+      }
+    }
+
+    internal fun isAndroidPackage(input: InputStream): Boolean {
+      val bounded = BoundedInputStream(input, MAX_ARCHIVE_SCAN_BYTES)
+      ZipInputStream(bounded).use { archive ->
+        var entries = 0
+        var hasManifest = false
+        var hasPackageContent = false
+        while (entries < MAX_ARCHIVE_ENTRIES) {
+          val entry = archive.nextEntry ?: break
+          entries += 1
+          if (entry.name == "AndroidManifest.xml") hasManifest = true
+          if (
+            entry.name == "resources.arsc" ||
+            entry.name.matches(ANDROID_DEX_ENTRY_PATTERN)
+          ) hasPackageContent = true
+          if (hasManifest && hasPackageContent) return true
+          archive.closeEntry()
+        }
+      }
+      return false
+    }
+  }
+}

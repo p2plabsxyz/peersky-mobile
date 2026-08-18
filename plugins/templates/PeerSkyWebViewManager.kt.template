@@ -1,0 +1,169 @@
+package __PACKAGE_NAME__
+
+import android.os.Handler
+import android.os.Looper
+import android.webkit.WebView
+import android.widget.Toast
+import com.facebook.react.uimanager.annotations.ReactProp
+import com.facebook.react.uimanager.ThemedReactContext
+import com.reactnativecommunity.webview.RNCWebViewManager
+import com.reactnativecommunity.webview.RNCWebViewWrapper
+import org.json.JSONObject
+import java.net.URI
+import java.util.WeakHashMap
+
+class PeerSkyWebViewManager : RNCWebViewManager() {
+  private val mediaLongPressTokens = WeakHashMap<WebView, String>()
+
+  override fun getName() = "PeerSkyWebView"
+
+  override fun addEventEmitters(
+    context: ThemedReactContext,
+    view: RNCWebViewWrapper
+  ) {
+    super.addEventEmitters(context, view)
+    view.webView.webViewClient = PeerSkyWebViewClient()
+  }
+
+  @ReactProp(name = "mediaLongPressToken")
+  fun setMediaLongPressToken(wrapper: RNCWebViewWrapper, token: String?) {
+    val webView = wrapper.webView
+    if (isValidToken(token)) {
+      mediaLongPressTokens[webView] = token!!
+    } else {
+      mediaLongPressTokens.remove(webView)
+    }
+  }
+
+  public override fun createViewInstance(
+    context: ThemedReactContext
+  ): RNCWebViewWrapper {
+    val wrapper = super.createViewInstance(context)
+    wrapper.webView.setDownloadListener {
+        url,
+        userAgent,
+        contentDisposition,
+        mimeType,
+        _ ->
+      val downloads = context.getNativeModule(BrowserDownloadsModule::class.java)
+      if (downloads == null) {
+        Toast.makeText(
+          context,
+          "Download service is unavailable.",
+          Toast.LENGTH_LONG
+        ).show()
+        return@setDownloadListener
+      }
+      downloads.queueDownload(
+        url,
+        userAgent,
+        contentDisposition,
+        mimeType
+      )
+    }
+    wrapper.webView.setOnLongClickListener {
+      handleLongPress(wrapper.webView)
+    }
+    return wrapper
+  }
+
+  private fun handleLongPress(webView: WebView): Boolean {
+    val result = webView.hitTestResult ?: return false
+
+    return when (result.type) {
+      WebView.HitTestResult.IMAGE_TYPE -> dispatchTarget(
+        webView = webView,
+        kind = "image",
+        mediaUrl = result.extra
+      )
+      WebView.HitTestResult.SRC_IMAGE_ANCHOR_TYPE -> {
+        val message = Handler(Looper.getMainLooper()) { response ->
+          dispatchTarget(
+            webView = webView,
+            kind = "image",
+            mediaUrl = response.data.getString("src"),
+            linkUrl = response.data.getString("url"),
+            title = response.data.getString("title")
+          )
+          true
+        }.obtainMessage()
+        webView.requestFocusNodeHref(message)
+        true
+      }
+      WebView.HitTestResult.SRC_ANCHOR_TYPE -> dispatchTarget(
+        webView = webView,
+        kind = "link",
+        linkUrl = result.extra
+      )
+      else -> false
+    }
+  }
+
+  private fun dispatchTarget(
+    webView: WebView,
+    kind: String,
+    mediaUrl: String? = null,
+    linkUrl: String? = null,
+    title: String? = null
+  ): Boolean {
+    val token = mediaLongPressTokens[webView] ?: return false
+    val normalizedMediaUrl = normalizeTargetUrl(mediaUrl, MEDIA_SCHEMES)
+    val normalizedLinkUrl = normalizeTargetUrl(linkUrl, LINK_SCHEMES)
+
+    if (kind == "image" && normalizedMediaUrl == null) return false
+    if (kind == "link" && normalizedLinkUrl == null) return false
+
+    val payload = JSONObject()
+      .put("type", MESSAGE_TYPE)
+      .put("token", token)
+      .put("kind", kind)
+      .put("mediaUrl", normalizedMediaUrl)
+      .put("linkUrl", normalizedLinkUrl)
+      .put("title", normalizeTitle(title))
+
+    val javascript = "if (window.ReactNativeWebView) { " +
+      "window.ReactNativeWebView.postMessage(" +
+      JSONObject.quote(payload.toString()) + "); }"
+    webView.evaluateJavascript(javascript, null)
+    return true
+  }
+
+  private fun normalizeTargetUrl(value: String?, schemes: Set<String>): String? {
+    val candidate = value?.trim()?.takeIf {
+      it.isNotEmpty() &&
+        it.length <= MAX_URL_LENGTH &&
+        it.none { character -> character.code < 32 || character.code in 127..159 }
+    } ?: return null
+
+    return try {
+      val parsed = URI(candidate)
+      candidate.takeIf {
+        parsed.scheme?.lowercase() in schemes &&
+          !parsed.host.isNullOrBlank() &&
+          parsed.userInfo == null
+      }
+    } catch (_: Exception) {
+      null
+    }
+  }
+
+  private fun normalizeTitle(value: String?): String {
+    return value
+      ?.filter { it.code >= 32 && it.code !in 127..159 }
+      ?.trim()
+      ?.take(MAX_TITLE_LENGTH)
+      .orEmpty()
+  }
+
+  companion object {
+    private const val MESSAGE_TYPE = "peersky-browser-media-long-press"
+    private const val MAX_URL_LENGTH = 8192
+    private const val MAX_TITLE_LENGTH = 256
+    private const val TOKEN_LENGTH = 32
+    private val MEDIA_SCHEMES = setOf("http", "https")
+    private val LINK_SCHEMES = setOf("http", "https", "hyper", "peersky")
+
+    internal fun isValidToken(value: String?): Boolean =
+      value?.length == TOKEN_LENGTH && value.all { it in '0'..'9' || it in 'a'..'f' }
+  }
+}
