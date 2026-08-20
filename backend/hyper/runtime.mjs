@@ -1,10 +1,20 @@
 /* global Bare */
 
 import { create as createSDK } from 'hyper-sdk'
+import { createRuntimeCoordinator } from './runtime-coordinator.mjs'
 
 let sdk = null
 let sdkOpening = null
 let storagePath = null
+const runtimeCoordinator = createRuntimeCoordinator()
+
+export function withHyperRuntimeOperation (task) {
+  return runtimeCoordinator.runOperation(async () => task(await getHyperRuntime()))
+}
+
+export function withHyperRuntimeMaintenance (task) {
+  return runtimeCoordinator.runMaintenance(task)
+}
 
 export async function getHyperRuntime () {
   if (sdk) return sdk

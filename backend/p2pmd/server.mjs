@@ -718,7 +718,7 @@ export function getP2pmdEditorPage () {
       }
       .editor-frame {
         display: grid;
-        grid-template-columns: 56px minmax(0, 1fr);
+        grid-template-columns: 44px minmax(0, 1fr);
         flex: 1;
         align-items: stretch;
         border: 0;
@@ -745,7 +745,7 @@ export function getP2pmdEditorPage () {
       .gutter-line {
         box-sizing: border-box;
         min-height: 23.25px;
-        padding: 0 10px 0 4px;
+        padding: 0 6px 0 3px;
         border-right: 3px solid transparent;
       }
       .gutter-line.local {
@@ -763,7 +763,7 @@ export function getP2pmdEditorPage () {
         width: 100%;
         height: 100%;
         min-height: 0;
-        padding: 14px 12px;
+        padding: 14px 8px;
         border: 0;
         border-radius: 0;
         background: var(--panel-deep);

@@ -8,7 +8,7 @@ import {
   inlineHyperAssets
 } from './assets.mjs'
 import { startHyperAssetServer } from './asset-server.mjs'
-import { getHyperRuntime } from './runtime.mjs'
+import { withHyperRuntimeOperation } from './runtime.mjs'
 import { parseHyperUrl } from './url.mjs'
 
 let hyperFetch = null
@@ -35,10 +35,10 @@ export async function fetchHyper ({
   const target = parseHyperUrl(url)
   if (target.error) return { ok: false, error: target.error }
 
-  const runtime = await getHyperRuntime()
-  const fetch = await getHyperFetch(runtime)
+  return withHyperRuntimeOperation(async (runtime) => {
+    const fetch = await getHyperFetch(runtime)
 
-  return withHyperRetry({
+    return withHyperRetry({
     fetch,
     url,
     retries,
@@ -109,6 +109,7 @@ export async function fetchHyper ({
         body
       }
     }
+    })
   })
 }
 
@@ -158,10 +159,10 @@ export async function fetchHyperBinary ({
   const target = parseHyperUrl(url)
   if (target.error) return { ok: false, error: target.error }
 
-  const runtime = await getHyperRuntime()
-  const fetch = await getHyperFetch(runtime)
+  return withHyperRuntimeOperation(async (runtime) => {
+    const fetch = await getHyperFetch(runtime)
 
-  return withHyperRetry({
+    return withHyperRetry({
     fetch,
     url,
     retries,
@@ -210,6 +211,7 @@ export async function fetchHyperBinary ({
         bytes
       }
     }
+    })
   })
 }
 

@@ -37,6 +37,7 @@ import { DataClearing } from './DataClearing'
 import { General } from './General'
 import { Permissions } from './Permissions'
 import { Privacy } from './Privacy'
+import { P2PStorage } from './P2PStorage'
 import {
   SettingCopy,
   SettingsSection,
@@ -59,6 +60,7 @@ import SlidersIcon from '../../assets/icons/bootstrap/sliders.svg'
 import TrashIcon from '../../assets/icons/bootstrap/trash.svg'
 import UniversalAccessIcon from '../../assets/icons/bootstrap/universal-access-circle.svg'
 import DisplayIcon from '../../assets/icons/bootstrap/display.svg'
+import DatabaseIcon from '../../assets/icons/bootstrap/database.svg'
 
 type SettingsPage =
   | 'main'
@@ -67,6 +69,7 @@ type SettingsPage =
   | 'appearance'
   | 'data-clearing'
   | 'privacy'
+  | 'p2p-storage'
   | 'permissions'
   | 'link-device'
   | 'about'
@@ -88,6 +91,19 @@ type RpcResponse = {
   files?: StorageFileItem[]
   nonce?: string
   sas?: string
+  items?: Array<{
+    id: string
+    title: string
+    url: string
+    fileCount: number
+    byteLength: number
+    exists?: boolean
+    truncated?: boolean
+  }>
+  page?: number
+  total?: number
+  totalPages?: number
+  clearedCores?: number
 }
 
 type SettingsScreenProps = {
@@ -164,6 +180,12 @@ const SETTINGS_PAGES: Array<{
     icon: ShieldLockIcon
   },
   {
+    id: 'p2p-storage',
+    title: 'P2P Data',
+    description: 'App storage and downloaded cache',
+    icon: DatabaseIcon
+  },
+  {
     id: 'permissions',
     title: 'Permissions',
     description: 'Site access and device defaults',
@@ -208,6 +230,7 @@ export function SettingsScreen(props: SettingsScreenProps) {
         {page === 'appearance' && <Appearance {...props} />}
         {page === 'data-clearing' && <DataClearing {...props} />}
         {page === 'privacy' && <Privacy {...props} />}
+        {page === 'p2p-storage' && <P2PStorage onCallRpc={props.onCallRpc} />}
         {page === 'permissions' && <Permissions {...props} />}
         {page === 'link-device' && <LinkDeviceSettings {...props} />}
         {page === 'about' && <AboutSettings onOpenUrl={props.onOpenUrl} />}

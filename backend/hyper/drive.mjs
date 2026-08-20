@@ -1,5 +1,5 @@
 import b4a from 'b4a'
-import { getHyperRuntime } from './runtime.mjs'
+import { withHyperRuntimeOperation } from './runtime.mjs'
 import { parseHyperUrl } from './url.mjs'
 import { splitMarkdownSlides } from '../p2pmd/preview.mjs'
 import ieeeBrowserScript from '../p2pmd/ieee-runtime.mjs'
@@ -10,6 +10,7 @@ import {
   renderP2pmdMarkdown
 } from '../p2pmd/scientific.mjs'
 import { hasIeeeMarker } from '../p2pmd/templates.mjs'
+import { resolveHyperdriveAppDriveName } from './storage-core.mjs'
 
 const MAX_HYPER_FILE_BYTES = 10 * 1024 * 1024
 const MAX_HYPER_IMAGE_BYTES = 5 * 1024 * 1024
@@ -32,31 +33,30 @@ let imageUploadCount = 0
 let imageUploadBytes = 0
 
 export async function createDrive ({ name } = {}) {
-  const runtime = await getHyperRuntime()
-  const trimmedName = typeof name === 'string' ? name.trim() : ''
-  const isValidName = /^[A-Za-z0-9_-]+$/.test(trimmedName)
-  const driveName = isValidName ? trimmedName : `drive-${Date.now()}`
+  return withHyperRuntimeOperation(async (runtime) => {
+    const driveName = resolveHyperdriveAppDriveName(name)
 
-  const drive = await runtime.getDrive(driveName)
-  const indexPath = '/index.html'
-  const hasIndex = await drive.exists(indexPath)
+    const drive = await runtime.getDrive(driveName)
+    const indexPath = '/index.html'
+    const hasIndex = await drive.exists(indexPath)
 
-  if (!hasIndex) {
-    const html = `<!doctype html>
+    if (!hasIndex) {
+      const html = `<!doctype html>
 <meta charset="utf-8" />
 <title>PeerSky Mobile Hyperdrive</title>
 <h1>PeerSky Mobile Hyperdrive</h1>
 <p>This drive was created from the mobile Bare worklet.</p>
 `
-    await drive.put(indexPath, b4a.from(html))
-  }
+      await drive.put(indexPath, b4a.from(html))
+    }
 
-  return {
-    ok: true,
-    status: 200,
-    statusText: 'OK',
-    url: `hyper://${drive.id}/`
-  }
+    return {
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      url: `hyper://${drive.id}/`
+    }
+  })
 }
 
 export async function uploadHyperFile ({
@@ -85,17 +85,18 @@ export async function uploadHyperFile ({
   if (!budget.ok) return budget
 
   const filename = normalizeImageFilename(name, contentType)
-  const runtime = await getHyperRuntime()
-  const drive = await runtime.getDrive(P2PMD_DRIVE_NAME)
-  const pathname = createAssetPath(filename)
+  return withHyperRuntimeOperation(async (runtime) => {
+    const drive = await runtime.getDrive(P2PMD_DRIVE_NAME)
+    const pathname = createAssetPath(filename)
 
-  await drive.put(pathname, content.bytes)
+    await drive.put(pathname, content.bytes)
 
-  return {
-    ok: true,
-    url: `hyper://${drive.id}${pathname}`,
-    name: filename
-  }
+    return {
+      ok: true,
+      url: `hyper://${drive.id}${pathname}`,
+      name: filename
+    }
+  })
 }
 
 export async function publishMarkdownDocument ({ content, mode, latexModeEnabled } = {}) {
@@ -135,15 +136,16 @@ export async function publishMarkdownDocument ({ content, mode, latexModeEnabled
       }
     }
 
-    const runtime = await getHyperRuntime()
-    const drive = await runtime.getDrive(P2PMD_DRIVE_NAME)
+    return withHyperRuntimeOperation(async (runtime) => {
+      const drive = await runtime.getDrive(P2PMD_DRIVE_NAME)
 
-    await drive.put('/index.html', published)
+      await drive.put('/index.html', published)
 
-    return {
-      ok: true,
-      url: `hyper://${drive.id}/`
-    }
+      return {
+        ok: true,
+        url: `hyper://${drive.id}/`
+      }
+    })
   })
 }
 
@@ -160,9 +162,9 @@ export async function readHyperFile ({ url } = {}) {
   }
 
   try {
-    const runtime = await getHyperRuntime()
-    const drive = await runtime.getDrive(P2PMD_DRIVE_NAME)
-    const driveAddress = 'hyper://' + drive.id + '/'
+    return await withHyperRuntimeOperation(async (runtime) => {
+      const drive = await runtime.getDrive(P2PMD_DRIVE_NAME)
+      const driveAddress = 'hyper://' + drive.id + '/'
 
     if (target.driveAddress !== driveAddress) {
       return {
@@ -208,12 +210,13 @@ export async function readHyperFile ({ url } = {}) {
       }
     }
 
-    return {
-      ok: true,
-      status: 200,
-      bytes: file,
-      contentType
-    }
+      return {
+        ok: true,
+        status: 200,
+        bytes: file,
+        contentType
+      }
+    })
   } catch (error) {
     return {
       ok: false,
