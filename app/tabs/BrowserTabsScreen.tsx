@@ -23,7 +23,7 @@ import FireIcon from '../../assets/icons/bootstrap/fire.svg'
 import GridIcon from '../../assets/icons/bootstrap/grid.svg'
 import ListIcon from '../../assets/icons/bootstrap/list-ul.svg'
 import PlusIcon from '../../assets/icons/bootstrap/plus-lg.svg'
-import CloseIcon from '../../assets/icons/bootstrap/x-circle.svg'
+import CloseIcon from '../../assets/icons/bootstrap/x-lg.svg'
 
 const TAB_ACTION_ICON_SIZE = 21
 const TAB_ACTION_ICON_STROKE_WIDTH = 0.35

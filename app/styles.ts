@@ -303,13 +303,13 @@ export const styles = StyleSheet.create({
   browserShortcutGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    maxWidth: 480,
     rowGap: 28,
     width: '100%'
   },
   browserShortcut: {
     alignItems: 'center',
     gap: 9,
+    paddingHorizontal: 6,
     width: '25%'
   },
   browserShortcutIcon: {
@@ -794,6 +794,36 @@ export const styles = StyleSheet.create({
   p2pmdJoinActionText: {
     color: '#c6f6df',
     fontSize: 14,
+    fontWeight: '800'
+  },
+  p2pmdRecentRooms: {
+    gap: 8
+  },
+  p2pmdRecentRoom: {
+    alignItems: 'center',
+    backgroundColor: '#262832',
+    borderColor: '#383b46',
+    borderRadius: 10,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 12,
+    justifyContent: 'space-between',
+    minHeight: 44,
+    paddingHorizontal: 12,
+    paddingVertical: 10
+  },
+  p2pmdRecentRoomPressed: {
+    backgroundColor: '#30333f'
+  },
+  p2pmdRecentRoomKey: {
+    color: '#d8dbea',
+    flex: 1,
+    fontFamily: 'monospace',
+    fontSize: 13
+  },
+  p2pmdRecentRoomAction: {
+    color: '#9ec5ff',
+    fontSize: 12,
     fontWeight: '800'
   },
   roomPill: {

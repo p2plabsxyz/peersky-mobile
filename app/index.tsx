@@ -128,6 +128,12 @@ import { useBrowserDownloads } from './downloads/useBrowserDownloads'
 import { BrowserTabsScreen } from './tabs/BrowserTabsScreen'
 import { useBrowserTabPreviews } from './tabs/useBrowserTabPreviews'
 import { isBrowserTabPreviewForPage } from './tabs/browser-tab-preview.mjs'
+import {
+  formatP2pmdRoomHistoryKey,
+  readP2pmdRoomHistoryFile,
+  recordP2pmdRoom,
+  writeP2pmdRoomHistoryFile
+} from './p2pmd-room-history.mjs'
 import { styles } from './styles'
 import {
   RPC_HOLESAIL_CONNECT,
@@ -158,6 +164,11 @@ type P2pmdRoom = {
 }
 
 type P2pmdViewMode = 'edit' | 'preview' | 'slides'
+
+type P2pmdRoomHistoryEntry = {
+  key: string
+  lastOpenedAt: number
+}
 
 type RpcResponse = {
   ok: boolean
@@ -327,6 +338,8 @@ export default function App () {
   const [p2pmdRoom, setP2pmdRoom] = useState<P2pmdRoom | null>(null)
   const [p2pmdEditorHtml, setP2pmdEditorHtml] = useState<string | null>(null)
   const [p2pmdJoinKey, setP2pmdJoinKey] = useState('')
+  const [p2pmdRoomHistory, setP2pmdRoomHistory] = useState<P2pmdRoomHistoryEntry[]>(loadP2pmdRoomHistory)
+  const p2pmdRoomHistoryRef = useRef(p2pmdRoomHistory)
   const [p2pmdParticipants, setP2pmdParticipants] = useState<number | null>(null)
   const [p2pmdViewMode, setP2pmdViewMode] = useState<P2pmdViewMode>('edit')
   const [p2pmdPeerDisplayName, setP2pmdPeerDisplayName] = useState<string | null>(loadP2pmdPeerDisplayName)
@@ -1568,8 +1581,16 @@ export default function App () {
       return
     }
 
-    if (isWebUrl(targetUrl) || isHyperUrl(targetUrl)) {
-      void loadBrowserUrl(targetUrl)
+    if (
+      (action.action === 'load-hyper' || action.action === 'commit-web') &&
+      action.url
+    ) {
+      if (createBrowserTab(action.url)) setStatus('Popup opened in new tab')
+      return
+    }
+
+    if (action.action === 'allow' && (isWebUrl(targetUrl) || isHyperUrl(targetUrl))) {
+      if (createBrowserTab(targetUrl)) setStatus('Popup opened in new tab')
     }
   }
 
@@ -1762,6 +1783,7 @@ export default function App () {
       setP2pmdPeerDisplayName(loadP2pmdPeerDisplayName())
       setP2pmdRoom(response.room)
       setP2pmdUrl(response.room.localUrl)
+      rememberP2pmdRoom(response.room.key)
       setStatus('P2PMD room created')
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
@@ -1773,7 +1795,9 @@ export default function App () {
     }
   }
 
-  async function onP2pmdRoomJoin () {
+  async function onP2pmdRoomJoin (roomKey = p2pmdJoinKey) {
+    const requestedKey = roomKey.trim()
+    setP2pmdJoinKey(requestedKey)
     setIsLoading(true)
     setStatus('Joining P2PMD room...')
     setLastResult(null)
@@ -1788,7 +1812,7 @@ export default function App () {
 
     try {
       const response = await callRpc(RPC_P2PMD_ROOM_JOIN, {
-        key: p2pmdJoinKey.trim(),
+        key: requestedKey,
         udp: false
       })
       setLastResult(response)
@@ -1806,6 +1830,7 @@ export default function App () {
       setP2pmdPeerDisplayName(loadP2pmdPeerDisplayName())
       setP2pmdRoom(response.room)
       setP2pmdUrl(response.room.localUrl)
+      rememberP2pmdRoom(response.room.key)
       setP2pmdSyncStatus(response.warning || 'Joining room page...')
       setStatus('P2PMD room joined')
     } catch (error) {
@@ -1816,6 +1841,15 @@ export default function App () {
     } finally {
       setIsLoading(false)
     }
+  }
+
+  function rememberP2pmdRoom (key: string) {
+    const rooms = recordP2pmdRoom(p2pmdRoomHistoryRef.current, { key }) as P2pmdRoomHistoryEntry[]
+    if (rooms === p2pmdRoomHistoryRef.current) return
+
+    if (!saveP2pmdRoomHistory(rooms)) return
+    p2pmdRoomHistoryRef.current = rooms
+    setP2pmdRoomHistory(rooms)
   }
 
   async function onP2pmdRoomRefresh () {
@@ -2785,6 +2819,31 @@ export default function App () {
                         <Text style={styles.p2pmdJoinActionText}>Join Room</Text>
                       </Pressable>
                     </View>
+
+                    {p2pmdRoomHistory.length > 0 && (
+                      <View style={styles.p2pmdRecentRooms}>
+                        <Text style={styles.fieldLabel}>Recent rooms</Text>
+                        {p2pmdRoomHistory.map((room) => (
+                          <Pressable
+                            key={room.key}
+                            accessibilityLabel={`Rejoin P2PMD room ${formatP2pmdRoomHistoryKey(room.key)}`}
+                            accessibilityRole='button'
+                            disabled={isBooting || isLoading}
+                            onPress={() => void onP2pmdRoomJoin(room.key)}
+                            style={({ pressed }) => [
+                              styles.p2pmdRecentRoom,
+                              pressed ? styles.p2pmdRecentRoomPressed : null,
+                              isBooting || isLoading ? styles.p2pmdActionDisabled : null
+                            ]}
+                          >
+                            <Text numberOfLines={1} style={styles.p2pmdRecentRoomKey}>
+                              {formatP2pmdRoomHistoryKey(room.key)}
+                            </Text>
+                            <Text style={styles.p2pmdRecentRoomAction}>Join</Text>
+                          </Pressable>
+                        ))}
+                      </View>
+                    )}
                   </View>
                 )}
                 {(isBooting || isLoading) && <ActivityIndicator size='small' />}
@@ -3059,6 +3118,31 @@ function toBareFsPath (uri: string) {
 
 function getP2pmdProfileFile () {
   return new File(Paths.document, 'p2pmd-profile.json')
+}
+
+function getP2pmdRoomHistoryFile () {
+  return new File(Paths.document, 'p2pmd-room-history.json')
+}
+
+function loadP2pmdRoomHistory (): P2pmdRoomHistoryEntry[] {
+  try {
+    const file = getP2pmdRoomHistoryFile()
+    return readP2pmdRoomHistoryFile(file) as P2pmdRoomHistoryEntry[]
+  } catch (error) {
+    console.error('Failed loading P2PMD room history:', error)
+    return []
+  }
+}
+
+function saveP2pmdRoomHistory (rooms: P2pmdRoomHistoryEntry[]) {
+  try {
+    const file = getP2pmdRoomHistoryFile()
+    writeP2pmdRoomHistoryFile(file, rooms)
+    return true
+  } catch (error) {
+    console.error('Failed saving P2PMD room history:', error)
+    return false
+  }
 }
 
 function normalizeP2pmdPeerDisplayName (value: unknown) {
