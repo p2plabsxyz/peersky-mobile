@@ -31,6 +31,7 @@ import {
   RPC_IDENTITY_CONFIRM_RESTORE
 } from '../../backend/rpc/commands.mjs'
 import { QrCodeView } from './QrCodeView'
+import { createMobilePairingCode } from './identity-pairing.mjs'
 import { Appearance } from './Appearance'
 import { Accessibility } from './Accessibility'
 import { DataClearing } from './DataClearing'
@@ -388,6 +389,7 @@ function LinkDeviceSettings({
   const [error, setError] = useState<string | null>(null)
   const [isScanning, setIsScanning] = useState(false)
   const [permission, requestPermission] = useCameraPermissions()
+  const pairingCode = createMobilePairingCode(encryptionPublicKey, nonce)
 
   useEffect(() => {
     let cancelled = false
@@ -423,11 +425,11 @@ function LinkDeviceSettings({
   }, [onCallRpc])
 
   function copyDeviceKey() {
-    if (!encryptionPublicKey) return
+    if (!pairingCode) return
 
     try {
-      Clipboard.setString(encryptionPublicKey)
-      setMessage('Mobile device key copied.')
+      Clipboard.setString(pairingCode)
+      setMessage('Device pairing code copied.')
       setError(null)
     } catch (copyError) {
       setError(copyError instanceof Error ? copyError.message : String(copyError))
@@ -517,13 +519,13 @@ function LinkDeviceSettings({
         </View>
       )}
 
-      <SettingsSection title='Mobile device key'>
+      <SettingsSection title='Device pairing code'>
         <View style={styles.linkDeviceBlock}>
           <SettingCopy
-            title='Your Mobile Device Key'
-            description='Scan this QR code with PeerSky Desktop or copy the key string below.'
+            title='This device pairing code'
+            description='Scan this QR code with PeerSky Desktop or copy the pairing code below.'
           />
-          {encryptionPublicKey && nonce ? <QrCodeView value={`peersky-identity:${encryptionPublicKey}?nonce=${nonce}`} size={200} /> : null}
+          {pairingCode ? <QrCodeView value={pairingCode} size={200} /> : null}
           <View style={[styles.keyBox, isDark ? darkStyles.input : null]}>
             {isLoadingKey
               ? <ActivityIndicator size='small' />
@@ -532,21 +534,21 @@ function LinkDeviceSettings({
                   selectable
                   style={[styles.keyText, isDark ? darkStyles.primaryText : null]}
                 >
-                  {encryptionPublicKey || 'No key available'}
+                  {pairingCode || 'No pairing code available'}
                 </Text>
               )}
           </View>
           <Pressable
             accessibilityRole='button'
-            disabled={!encryptionPublicKey}
+            disabled={!pairingCode}
             style={({ pressed }) => [
               styles.primaryButton,
-              !encryptionPublicKey ? styles.buttonDisabled : null,
+              !pairingCode ? styles.buttonDisabled : null,
               pressed ? styles.rowPressed : null
             ]}
             onPress={copyDeviceKey}
           >
-            <Text style={styles.primaryButtonText}>Copy Key</Text>
+            <Text style={styles.primaryButtonText}>Copy Code</Text>
           </Pressable>
           <Text style={[styles.helperText, isDark ? darkStyles.secondaryText : null]}>
             Identity key file location: {storagePath || 'app document storage'}
