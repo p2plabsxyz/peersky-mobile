@@ -7,7 +7,8 @@ const ALLOWED_FILES = new Set([
   'browser-tabs.json',
   'lastOpened.json',
   'peersky-ports.json',
-  'peersky-chat-rooms.json'
+  'peersky-chat-rooms.json',
+  'peersky-identity.json'
 ])
 
 export async function restoreIdentityFromBackup (innerZipBytes, storagePath) {
