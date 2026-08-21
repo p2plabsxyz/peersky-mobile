@@ -2423,6 +2423,7 @@ export default function App () {
             html: p2pmdEditorHtmlWithRoomBase,
             baseUrl: p2pmdEditorBaseUrl
           }}
+          allowsFullscreenVideo={true}
           cacheEnabled={false}
           textZoom={100}
           style={styles.p2pmdWorkspaceWebView}
@@ -2941,6 +2942,7 @@ export default function App () {
                     html: entry.source.html,
                     baseUrl: entry.source.kind === 'hyper' ? entry.source.baseUrl : undefined
                   }}
+              allowsFullscreenVideo={true}
               cacheEnabled={true}
               geolocationEnabled={true}
               mediaCapturePermissionGrantType='prompt'

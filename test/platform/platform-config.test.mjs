@@ -67,6 +67,12 @@ describe('mobile platform runtime configuration', () => {
     assert.match(indexSource, /mediaCapturePermissionGrantType='prompt'/)
   })
 
+  it('enables native fullscreen video in user-facing WebViews', async () => {
+    const indexSource = await readFile(repoFile('app/index.tsx'), 'utf8')
+
+    assert.equal(indexSource.match(/allowsFullscreenVideo=\{true\}/g)?.length, 2)
+  })
+
   it('stores P2PMD peer names outside the room WebView origin', async () => {
     const indexSource = await readFile(repoFile('app/index.tsx'), 'utf8')
 
