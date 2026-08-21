@@ -2674,11 +2674,14 @@ export function getP2pmdEditorPage () {
         const color = typeof attribution.color === 'string' ? attribution.color.trim() : ''
         if (!color) return null
 
-        return {
+        const normalized = {
           clientId: typeof attribution.clientId === 'string' ? attribution.clientId : '',
           color,
           name: typeof attribution.name === 'string' ? attribution.name : ''
         }
+        const updatedAt = Number(attribution.updatedAt)
+        if (Number.isFinite(updatedAt) && updatedAt >= 0) normalized.updatedAt = updatedAt
+        return normalized
       }
 
       function getLineCount(content) {
@@ -2723,9 +2726,10 @@ export function getP2pmdEditorPage () {
           nextSuffix -= 1
         }
 
+        const editedAttribution = { ...localAuthor, updatedAt: Date.now() }
         for (let index = prefix; index <= nextSuffix; index++) {
-          nextAttributions[String(index + 1)] = localAuthor
-          nextLocalAttributions[String(index + 1)] = localAuthor
+          nextAttributions[String(index + 1)] = editedAttribution
+          nextLocalAttributions[String(index + 1)] = editedAttribution
         }
 
         lineAttributions = nextAttributions

@@ -195,10 +195,17 @@ function normalizePeerLineAttributions (lineAttributions) {
     const color = normalizePeerColor(attribution.color)
     if (!color) continue
 
-    normalized[String(lineNumber)] = {
+    const normalizedAttribution = {
       color,
       name: normalizePeerName(attribution.name)
     }
+    const clientId = typeof attribution.clientId === 'string'
+      ? attribution.clientId.trim().slice(0, 120)
+      : ''
+    const updatedAt = Number(attribution.updatedAt)
+    if (clientId) normalizedAttribution.clientId = clientId
+    if (Number.isFinite(updatedAt) && updatedAt >= 0) normalizedAttribution.updatedAt = updatedAt
+    normalized[String(lineNumber)] = normalizedAttribution
   }
 
   return Object.keys(normalized).length > 0 ? normalized : null

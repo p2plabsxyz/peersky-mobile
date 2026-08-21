@@ -131,4 +131,11 @@ describe('p2pmd mobile editor page routing', () => {
     assert.match(html, /[.]gutter-line[\s\S]*min-height: var\(--editor-line-height\)/)
     assert.match(html, /textarea[\s\S]*font: var\(--editor-font-size\)\/var\(--editor-line-height\)/)
   })
+
+  it('timestamps mobile line ownership for desktop conflict resolution', () => {
+    const html = getP2pmdEditorPage()
+
+    assert.match(html, /const editedAttribution = \{ [.]{3}localAuthor, updatedAt: Date[.]now\(\) \}/)
+    assert.match(html, /normalized[.]updatedAt = updatedAt/)
+  })
 })

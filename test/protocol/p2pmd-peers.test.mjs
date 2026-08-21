@@ -55,7 +55,7 @@ describe('p2pmd peer presence simulation', () => {
       cursorLine: 1,
       cursorColumn: 8,
       lineAttributions: {
-        1: { name: 'Desktop', color: '#59a6ff' }
+        1: { name: 'Desktop', color: '#59a6ff', clientId: 'desktop-peer', updatedAt: 1234 }
       }
     })
 
@@ -65,7 +65,7 @@ describe('p2pmd peer presence simulation', () => {
 
     assert.equal(host.lineAttributions, null)
     assert.deepEqual(client.lineAttributions, {
-      1: { color: '#59a6ff', name: 'Desktop' }
+      1: { color: '#59a6ff', name: 'Desktop', clientId: 'desktop-peer', updatedAt: 1234 }
     })
     assert.equal(client.cursorLine, 1)
     assert.equal(client.cursorColumn, 8)
