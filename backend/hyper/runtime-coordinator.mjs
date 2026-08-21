@@ -5,7 +5,13 @@ export function createRuntimeCoordinator () {
   let resolveIdle = null
 
   async function runOperation (task) {
-    while (maintenanceQueued > 0) await maintenanceTail
+    if (maintenanceQueued > 0) {
+      let pendingMaintenance
+      do {
+        pendingMaintenance = maintenanceTail
+        await pendingMaintenance
+      } while (pendingMaintenance !== maintenanceTail)
+    }
 
     activeOperations += 1
     try {

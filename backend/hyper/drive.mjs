@@ -166,49 +166,49 @@ export async function readHyperFile ({ url } = {}) {
       const drive = await runtime.getDrive(P2PMD_DRIVE_NAME)
       const driveAddress = 'hyper://' + drive.id + '/'
 
-    if (target.driveAddress !== driveAddress) {
-      return {
-        ok: false,
-        status: 403,
-        error: 'Only P2PMD drive images can be proxied.'
+      if (target.driveAddress !== driveAddress) {
+        return {
+          ok: false,
+          status: 403,
+          error: 'Only P2PMD drive images can be proxied.'
+        }
       }
-    }
 
-    const entry = await drive.entry(target.pathname, { timeout: HYPER_READ_TIMEOUT_MS })
+      const entry = await drive.entry(target.pathname, { timeout: HYPER_READ_TIMEOUT_MS })
 
-    if (!entry?.value.blob) {
-      return {
-        ok: false,
-        status: 404,
-        error: `No file found at ${target.pathname}`
+      if (!entry?.value.blob) {
+        return {
+          ok: false,
+          status: 404,
+          error: `No file found at ${target.pathname}`
+        }
       }
-    }
 
-    if (entry.value.blob.byteLength < 1 || entry.value.blob.byteLength > MAX_HYPER_FILE_BYTES) {
-      return {
-        ok: false,
-        status: 413,
-        error: 'Invalid image size. Maximum size is 10 MB.'
+      if (entry.value.blob.byteLength < 1 || entry.value.blob.byteLength > MAX_HYPER_FILE_BYTES) {
+        return {
+          ok: false,
+          status: 413,
+          error: 'Invalid image size. Maximum size is 10 MB.'
+        }
       }
-    }
 
-    const file = await drive.get(target.pathname, { timeout: HYPER_READ_TIMEOUT_MS })
-    if (!file) {
-      return {
-        ok: false,
-        status: 404,
-        error: `No file found at ${target.pathname}`
+      const file = await drive.get(target.pathname, { timeout: HYPER_READ_TIMEOUT_MS })
+      if (!file) {
+        return {
+          ok: false,
+          status: 404,
+          error: `No file found at ${target.pathname}`
+        }
       }
-    }
 
-    const contentType = detectImageContentType(file)
-    if (!contentType) {
-      return {
-        ok: false,
-        status: 415,
-        error: 'Unsupported image format.'
+      const contentType = detectImageContentType(file)
+      if (!contentType) {
+        return {
+          ok: false,
+          status: 415,
+          error: 'Unsupported image format.'
+        }
       }
-    }
 
       return {
         ok: true,

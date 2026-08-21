@@ -235,6 +235,9 @@ function createStore (cores) {
 
 async function countStoredCores (store) {
   let count = 0
-  for await (const _entry of store.storage.createCoreStream()) count += 1
+  for await (const entry of store.storage.createCoreStream()) {
+    assert.ok(entry)
+    count += 1
+  }
   return count
 }
