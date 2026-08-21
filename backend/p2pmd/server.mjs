@@ -671,6 +671,8 @@ export function getP2pmdEditorPage () {
         --remote: #59a6ff;
         --ui-font: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         --editor-font: "FontWithASyntaxHighlighter", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        --editor-font-size: 16px;
+        --editor-line-height: 24.8px;
       }
       body {
         box-sizing: border-box;
@@ -739,12 +741,12 @@ export function getP2pmdEditorPage () {
         right: 0;
         left: 0;
         color: #6f7484;
-        font: 15px/1.55 var(--editor-font);
+        font: var(--editor-font-size)/var(--editor-line-height) var(--editor-font);
         text-align: right;
       }
       .gutter-line {
         box-sizing: border-box;
-        min-height: 23.25px;
+        min-height: var(--editor-line-height);
         padding: 0 6px 0 3px;
         border-right: 3px solid transparent;
       }
@@ -769,7 +771,7 @@ export function getP2pmdEditorPage () {
         background: var(--panel-deep);
         color: var(--ink);
         caret-color: var(--remote);
-        font: 16px/1.55 var(--editor-font);
+        font: var(--editor-font-size)/var(--editor-line-height) var(--editor-font);
         white-space: pre;
         overflow-wrap: normal;
         resize: none;
@@ -1222,7 +1224,7 @@ export function getP2pmdEditorPage () {
         display: flex;
         align-items: center;
         gap: 2px;
-        padding: 6px 8px;
+        padding: 4px 8px;
         border-bottom: 1px solid var(--line);
         background: #24262f;
         overflow-x: auto;
@@ -1266,7 +1268,7 @@ export function getP2pmdEditorPage () {
       #latex-template-menu {
         position: absolute;
         z-index: 8;
-        top: 50px;
+        top: 46px;
         right: 8px;
         left: 8px;
         padding: 6px;

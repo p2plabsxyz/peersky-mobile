@@ -121,4 +121,14 @@ describe('p2pmd mobile editor page routing', () => {
     assert.match(html, /markLocalPeerTyping\(\)/)
     assert.match(html, /requestNativeBridge\('peer-profile', \{ name: nextName \}\)/)
   })
+
+  it('keeps gutter rows aligned with editor lines', () => {
+    const html = getP2pmdEditorPage()
+
+    assert.match(html, /--editor-font-size: 16px/)
+    assert.match(html, /--editor-line-height: 24[.]8px/)
+    assert.match(html, /#line-gutter[\s\S]*font: var\(--editor-font-size\)\/var\(--editor-line-height\)/)
+    assert.match(html, /[.]gutter-line[\s\S]*min-height: var\(--editor-line-height\)/)
+    assert.match(html, /textarea[\s\S]*font: var\(--editor-font-size\)\/var\(--editor-line-height\)/)
+  })
 })

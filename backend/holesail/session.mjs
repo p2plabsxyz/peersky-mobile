@@ -74,6 +74,7 @@ export async function connectHolesail ({
   key,
   port,
   host,
+  preferRemotePort = false,
   udp = false,
   log = false
 } = {}) {
@@ -81,7 +82,9 @@ export async function connectHolesail ({
     const targetKey = normalizeHolesailKey(key, false)
     if (!targetKey.ok) return targetKey
 
-    const targetPort = resolvePort(port, 8989)
+    const targetPort = preferRemotePort && port === undefined
+      ? { ok: true, port: null }
+      : resolvePort(port, 8989)
     if (!targetPort.ok) return targetPort
 
     const targetHost = normalizeHost(host, '127.0.0.1')
@@ -95,14 +98,16 @@ export async function connectHolesail ({
 
     await stopSessionInternal()
 
-    const instance = new Holesail({
+    const options = {
       client: true,
       key: targetKey.key,
       udp: Boolean(udp),
       log: Boolean(log),
-      port: targetPort.port,
       host: targetHost.host
-    })
+    }
+    if (targetPort.port !== null) options.port = targetPort.port
+
+    const instance = new Holesail(options)
 
     session = instance
 
