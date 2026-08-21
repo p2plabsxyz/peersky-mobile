@@ -1,9 +1,10 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import crypto from 'node:crypto'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { deflateRawSync } from 'node:zlib'
 import sodium from 'sodium-native'
 import { createMobilePairingCode } from '../../app/settings/identity-pairing.mjs'
 import { verifyIdentityTransferSignature } from '../../backend/backup/identity-transfer.mjs'
@@ -62,6 +63,36 @@ function createFileZip (name, contents) {
   endOfCentralDirectory.writeUInt32LE(localHeader.length + contentBytes.length, 16)
 
   return Buffer.concat([localHeader, contentBytes, centralDirectory, endOfCentralDirectory])
+}
+
+function createDeflatedFileZip (name, contents) {
+  const nameBytes = Buffer.from(name)
+  const contentBytes = Buffer.from(contents)
+  const compressedBytes = deflateRawSync(contentBytes)
+  const localHeader = Buffer.alloc(30 + nameBytes.length)
+  localHeader.writeUInt32LE(0x04034b50, 0)
+  localHeader.writeUInt16LE(8, 8)
+  localHeader.writeUInt32LE(compressedBytes.length, 18)
+  localHeader.writeUInt32LE(contentBytes.length, 22)
+  localHeader.writeUInt16LE(nameBytes.length, 26)
+  nameBytes.copy(localHeader, 30)
+
+  const centralDirectory = Buffer.alloc(46 + nameBytes.length)
+  centralDirectory.writeUInt32LE(0x02014b50, 0)
+  centralDirectory.writeUInt16LE(8, 10)
+  centralDirectory.writeUInt32LE(compressedBytes.length, 20)
+  centralDirectory.writeUInt32LE(contentBytes.length, 24)
+  centralDirectory.writeUInt16LE(nameBytes.length, 28)
+  nameBytes.copy(centralDirectory, 46)
+
+  const endOfCentralDirectory = Buffer.alloc(22)
+  endOfCentralDirectory.writeUInt32LE(0x06054b50, 0)
+  endOfCentralDirectory.writeUInt16LE(1, 8)
+  endOfCentralDirectory.writeUInt16LE(1, 10)
+  endOfCentralDirectory.writeUInt32LE(centralDirectory.length, 12)
+  endOfCentralDirectory.writeUInt32LE(localHeader.length + compressedBytes.length, 16)
+
+  return Buffer.concat([localHeader, compressedBytes, centralDirectory, endOfCentralDirectory])
 }
 
 describe('Link Device Identity Transfer', () => {
@@ -156,7 +187,20 @@ describe('Link Device Identity Transfer', () => {
     assert.ok(true)
   })
 
-  it('Highly-compressible entry hits size cap', async () => {
-    assert.ok(true)
+  it('restores an identity backup larger than 50 MB', async () => {
+    const storagePath = mkdtempSync(join(tmpdir(), 'peersky-large-restore-'))
+    const size = 50 * 1024 * 1024 + 1
+
+    try {
+      const result = await restoreIdentityFromBackup(
+        createDeflatedFileZip('hyper/large-core', Buffer.alloc(size)),
+        storagePath
+      )
+
+      assert.equal(result.restoredFiles, 1)
+      assert.equal(statSync(join(storagePath, 'hyper/large-core')).size, size)
+    } finally {
+      rmSync(storagePath, { recursive: true, force: true })
+    }
   })
 })

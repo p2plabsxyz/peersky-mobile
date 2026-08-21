@@ -23,7 +23,6 @@ export function readZipEntries (zipBytes) {
   const entries = []
   let offset = centralDirectoryOffset
 
-  let totalUncompressed = 0
   for (let index = 0; index < entryCount; index += 1) {
     if (readUInt32LE(bytes, offset) !== CENTRAL_DIRECTORY_SIGNATURE) {
       throw new Error('ZIP central directory entry is invalid')
@@ -33,14 +32,6 @@ export function readZipEntries (zipBytes) {
     const method = readUInt16LE(bytes, offset + 10)
     const compressedSize = readUInt32LE(bytes, offset + 20)
     const uncompressedSize = readUInt32LE(bytes, offset + 24)
-
-    if (uncompressedSize > 50 * 1024 * 1024) {
-      throw new Error('ZIP entry exceeds maximum uncompressed size')
-    }
-    totalUncompressed += uncompressedSize
-    if (totalUncompressed > 50 * 1024 * 1024) {
-      throw new Error('ZIP archive exceeds maximum total uncompressed size')
-    }
 
     const filenameLength = readUInt16LE(bytes, offset + 28)
     const extraLength = readUInt16LE(bytes, offset + 30)
@@ -100,9 +91,6 @@ function readEntryData (zipBytes, entry) {
   }
 
   if (entry.method === ZIP_METHOD_DEFLATE) {
-    if (entry.uncompressedSize > 50 * 1024 * 1024) {
-      throw new Error(`ZIP entry is too large: ${entry.name}`)
-    }
     const inflated = inflateRawSync(compressed, { maxOutputLength: entry.uncompressedSize })
     if (inflated.byteLength !== entry.uncompressedSize) {
       throw new Error(`ZIP entry size mismatch: ${entry.name}`)
