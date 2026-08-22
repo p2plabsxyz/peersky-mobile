@@ -122,9 +122,11 @@ import { DownloadsScreen } from './downloads/DownloadsScreen'
 import { peerSkyWebViewNativeConfig } from './downloads/PeerSkyWebView'
 import {
   initializeContentBlocking,
-  setContentBlockingEnabled as applyContentBlockingEnabled
+  setContentBlockingEnabled as applyContentBlockingEnabled,
+  setYoutubeAdBlockingEnabled as applyYoutubeAdBlockingEnabled
 } from './privacy/contentBlocking'
 import { createBrowserContentBlockingScript } from './privacy/browserContentBlockingScript.mjs'
+import { createYoutubeAdBlockingScript } from './privacy/youtube-ad-blocking.mjs'
 import { useBrowserDownloads } from './downloads/useBrowserDownloads'
 import { BrowserTabsScreen } from './tabs/BrowserTabsScreen'
 import { useBrowserTabPreviews } from './tabs/useBrowserTabPreviews'
@@ -273,7 +275,8 @@ export default function App () {
     setSearchEngine,
     setShowFullAddress,
     setTheme,
-    setWebsiteTextScale
+    setWebsiteTextScale,
+    setYoutubeAdBlockingEnabled
   } = useBrowserPreferences()
   const {
     bookmarks: browserBookmarks,
@@ -460,6 +463,11 @@ export default function App () {
       cancelled = true
     }
   }, [browserPreferencesReady, contentBlockingReady])
+
+  useEffect(() => {
+    if (!browserPreferencesReady) return
+    applyYoutubeAdBlockingEnabled(browserPreferences.youtubeAdBlockingEnabled)
+  }, [browserPreferencesReady, browserPreferences.youtubeAdBlockingEnabled])
 
   useEffect(() => {
     if (!browserSessionReady) return
@@ -1135,6 +1143,12 @@ export default function App () {
       applyContentBlockingEnabled(false)
     }
 
+    refreshContentBlockedPages()
+  }
+
+  function onYoutubeAdBlockingEnabledChange (enabled: boolean) {
+    if (!setYoutubeAdBlockingEnabled(enabled)) return
+    applyYoutubeAdBlockingEnabled(enabled)
     refreshContentBlockedPages()
   }
 
@@ -2268,6 +2282,7 @@ export default function App () {
           showFullAddress={browserPreferences.showFullAddress}
           theme={browserPreferences.theme}
           websiteTextScale={browserPreferences.websiteTextScale}
+          youtubeAdBlockingEnabled={browserPreferences.youtubeAdBlockingEnabled}
           storagePath={identityStoragePath}
           onAddressBarPositionChange={setAddressBarPosition}
           onCallRpc={(command, data = {}) => callRpc(command, data)}
@@ -2289,6 +2304,7 @@ export default function App () {
           onShowFullAddressChange={setShowFullAddress}
           onThemeChange={setTheme}
           onWebsiteTextScaleChange={setWebsiteTextScale}
+          onYoutubeAdBlockingEnabledChange={onYoutubeAdBlockingEnabledChange}
           onResetTabs={onBrowserResetTabs}
           onOpenUrl={(targetUrl) => {
             setBrowserSettingsVisible(false)
@@ -2901,7 +2917,12 @@ export default function App () {
           const browserContentBlockingScript = createBrowserContentBlockingScript({
             enabled: Platform.OS === 'android' &&
               Boolean(peerSkyWebViewNativeConfig) &&
-              browserPreferences.contentBlockingEnabled
+              browserPreferences.contentBlockingEnabled,
+            youtubeAdBlockingEnabled: browserPreferences.youtubeAdBlockingEnabled
+          })
+          const youtubeAdBlockingScript = createYoutubeAdBlockingScript({
+            enabled: browserPreferences.youtubeAdBlockingEnabled,
+            url: entry.url
           })
           const browserMediaScript = createBrowserMediaLongPressScript({
             nativeHitTesting: Platform.OS === 'android' && Boolean(peerSkyWebViewNativeConfig),
@@ -2913,6 +2934,7 @@ export default function App () {
             createBrowserFaviconScript()
           )
           const browserBeforeContentScript = combineBrowserInjectedScripts(
+            youtubeAdBlockingScript,
             browserAccessibilityScript,
             browserContentBlockingScript,
             browserMediaScript

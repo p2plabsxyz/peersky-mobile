@@ -16,4 +16,36 @@ class PeerSkyWebViewClientTest {
     assertFalse(isRemoteHttpUrl("https", "10.0.2.2"))
     assertFalse(isRemoteHttpUrl("https", "::1"))
   }
+
+  @Test
+  fun identifiesOnlyThePinnedYoutubeAdBreakRequest() {
+    assertTrue(isYoutubeAdBreakRequest(
+      "https",
+      "www.youtube.com",
+      "/youtubei/v1/player/ad_break",
+      "https",
+      "m.youtube.com"
+    ))
+    assertFalse(isYoutubeAdBreakRequest(
+      "https",
+      "youtube.com.evil.test",
+      "/youtubei/v1/player/ad_break",
+      "https",
+      "youtube.com"
+    ))
+    assertFalse(isYoutubeAdBreakRequest(
+      "https",
+      "youtube.com",
+      "/watch",
+      "https",
+      "youtube.com"
+    ))
+    assertFalse(isYoutubeAdBreakRequest(
+      "http",
+      "youtube.com",
+      "/youtubei/v1/player/ad_break",
+      "https",
+      "youtube.com"
+    ))
+  }
 }

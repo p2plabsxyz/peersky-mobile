@@ -8,6 +8,7 @@
     "generate:ieee-runtime": "node scripts/generate-ieee-runtime.mjs",
     "generate:yjs-runtime": "node scripts/generate-yjs-runtime.mjs",
     "setup:content-blocking": "node scripts/setup-content-blocking.mjs",
+    "update:youtube-ad-blocking-snapshot": "node scripts/update-youtube-ad-blocking-snapshot.mjs",
     "eas-build-pre-install": "node scripts/setup-content-blocking.mjs --eas && node scripts/update-content-blocking-snapshot.mjs",
     "update:content-blocking-snapshot": "node scripts/update-content-blocking-snapshot.mjs",
     "bundle:bare": "npm run update:content-blocking-snapshot && npm run generate:yjs-runtime && npm run generate:katex-runtime && npm run generate:ieee-runtime && bare-pack --host android-arm64 --host android-arm --host android-ia32 --host android-x64 --host ios-arm64 --host ios-arm64-simulator --host ios-x64-simulator --imports backend/bare-imports.json --linked --out app/app.bundle.mjs backend/backend.mjs",
@@ -84,7 +85,8 @@
     "ignore": [
       "app/app.bundle.mjs",
       "backend/p2pmd/ieee-runtime.mjs",
-      "backend/p2pmd/katex-runtime.mjs"
+      "backend/p2pmd/katex-runtime.mjs",
+      "app/privacy/generated/*.mjs"
     ]
   }
 }

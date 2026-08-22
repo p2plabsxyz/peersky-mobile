@@ -19,6 +19,25 @@ internal fun isRemoteHttpUrl(scheme: String?, host: String?): Boolean {
     !normalizedHost.startsWith("127.")
 }
 
+internal fun isYoutubeAdBreakRequest(
+  requestScheme: String?,
+  requestHost: String?,
+  requestPath: String?,
+  documentScheme: String?,
+  documentHost: String?
+): Boolean {
+  fun isYoutubeHost(value: String?): Boolean {
+    val host = value?.lowercase(Locale.ROOT) ?: return false
+    return host == "youtube.com" || host.endsWith(".youtube.com")
+  }
+
+  return requestScheme.equals("https", ignoreCase = true) &&
+    documentScheme.equals("https", ignoreCase = true) &&
+    isYoutubeHost(requestHost) &&
+    isYoutubeHost(documentHost) &&
+    requestPath == "/youtubei/v1/player/ad_break"
+}
+
 class PeerSkyWebViewClient : RNCWebViewClient() {
   private val documentUrl = AtomicReference("")
 
@@ -45,6 +64,7 @@ class PeerSkyWebViewClient : RNCWebViewClient() {
     val pageUrl = documentUrl.get()
     if (pageUrl.isBlank() || pageUrl.length > MAX_FILTER_URL_LENGTH) return false
     if (!isRemoteHttpUrl(Uri.parse(pageUrl))) return false
+    if (PeerSkyYoutubeAdBlocker.shouldBlock(requestUri, Uri.parse(pageUrl))) return true
     return PeerSkyAdBlockEngine.shouldBlock(
       requestUrl,
       pageUrl,
@@ -90,6 +110,22 @@ class PeerSkyWebViewClient : RNCWebViewClient() {
       "No Content",
       emptyMap(),
       ByteArrayInputStream(ByteArray(0))
+    )
+  }
+}
+
+object PeerSkyYoutubeAdBlocker {
+  @Volatile
+  var enabled = true
+
+  fun shouldBlock(request: Uri, document: Uri): Boolean {
+    if (!enabled) return false
+    return isYoutubeAdBreakRequest(
+      request.scheme,
+      request.host,
+      request.path,
+      document.scheme,
+      document.host
     )
   }
 }

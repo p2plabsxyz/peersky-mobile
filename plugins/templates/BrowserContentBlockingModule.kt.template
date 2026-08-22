@@ -56,6 +56,11 @@ class BrowserContentBlockingModule(
     PeerSkyAdBlockEngine.enabled = enabled
   }
 
+  @ReactMethod
+  fun setYoutubeAdBlockingEnabled(enabled: Boolean) {
+    PeerSkyYoutubeAdBlocker.enabled = enabled
+  }
+
   override fun invalidate() {
     val cancelledLoads = synchronized(pendingLock) {
       pendingLoads.toList().also { pendingLoads.clear() }

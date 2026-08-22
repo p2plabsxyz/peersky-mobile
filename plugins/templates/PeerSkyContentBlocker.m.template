@@ -1,11 +1,14 @@
 #import "PeerSkyContentBlocker.h"
 
 static NSString *const PeerSkyContentBlockerDomain = @"PeerSkyContentBlocker";
+static NSString *const PeerSkyYoutubeRuleIdentifier = @"peersky-youtube-ad-break-v1";
 static const unsigned long long MaxRuleFileBytes = 48ULL * 1024ULL * 1024ULL;
 
 @interface PeerSkyContentBlocker ()
 @property (nonatomic, copy) NSArray<WKContentRuleList *> *ruleLists;
 @property (nonatomic, assign) BOOL enabled;
+@property (nonatomic, assign) BOOL youtubeAdBlockingEnabled;
+@property (nonatomic, strong, nullable) WKContentRuleList *youtubeRuleList;
 @end
 
 @implementation PeerSkyContentBlocker
@@ -17,8 +20,16 @@ static const unsigned long long MaxRuleFileBytes = 48ULL * 1024ULL * 1024ULL;
   dispatch_once(&onceToken, ^{
     instance = [PeerSkyContentBlocker new];
     instance.ruleLists = @[];
+    instance.youtubeAdBlockingEnabled = YES;
   });
   return instance;
+}
+
+- (void)setYoutubeAdBlockingEnabled:(BOOL)enabled
+{
+  @synchronized (self) {
+    _youtubeAdBlockingEnabled = enabled;
+  }
 }
 
 - (void)setEnabled:(BOOL)enabled
@@ -47,11 +58,18 @@ static const unsigned long long MaxRuleFileBytes = 48ULL * 1024ULL * 1024ULL;
       completion(error);
       return;
     }
-    @synchronized (self) {
-      self.ruleLists = [compiled copy];
-    }
-    [self removeStaleRuleListsKeepingSnapshot:snapshotName];
-    completion(nil);
+    [self loadYoutubeRule:^(WKContentRuleList *youtubeRule, NSError *youtubeError) {
+      if (!youtubeRule || youtubeError) {
+        completion(youtubeError ?: [self error:@"Unable to compile YouTube content rules."]);
+        return;
+      }
+      @synchronized (self) {
+        self.ruleLists = [compiled copy];
+        self.youtubeRuleList = youtubeRule;
+      }
+      [self removeStaleRuleListsKeepingSnapshot:snapshotName];
+      completion(nil);
+    }];
   }];
 }
 
@@ -61,7 +79,9 @@ static const unsigned long long MaxRuleFileBytes = 48ULL * 1024ULL * 1024ULL;
   WKContentRuleListStore *store = [WKContentRuleListStore defaultStore];
   [store getAvailableContentRuleListIdentifiers:^(NSArray<NSString *> *identifiers) {
     for (NSString *identifier in identifiers) {
-      if ([identifier hasPrefix:@"peersky-"] && ![identifier hasPrefix:activePrefix]) {
+      if ([identifier hasPrefix:@"peersky-"] &&
+          ![identifier hasPrefix:activePrefix] &&
+          ![identifier isEqualToString:PeerSkyYoutubeRuleIdentifier]) {
         [store removeContentRuleListForIdentifier:identifier completionHandler:nil];
       }
     }
@@ -72,15 +92,39 @@ static const unsigned long long MaxRuleFileBytes = 48ULL * 1024ULL * 1024ULL;
 {
   NSArray<WKContentRuleList *> *ruleLists;
   BOOL enabled;
+  BOOL youtubeAdBlockingEnabled;
+  WKContentRuleList *youtubeRuleList;
   @synchronized (self) {
     ruleLists = self.ruleLists;
     enabled = self.enabled;
+    youtubeAdBlockingEnabled = self.youtubeAdBlockingEnabled;
+    youtubeRuleList = self.youtubeRuleList;
   }
 
-  if (!enabled) return;
-  for (WKContentRuleList *ruleList in ruleLists) {
-    [configuration.userContentController addContentRuleList:ruleList];
+  if (enabled) {
+    for (WKContentRuleList *ruleList in ruleLists) {
+      [configuration.userContentController addContentRuleList:ruleList];
+    }
   }
+  if (youtubeAdBlockingEnabled && youtubeRuleList) {
+    [configuration.userContentController addContentRuleList:youtubeRuleList];
+  }
+}
+
+- (void)loadYoutubeRule:(void (^)(WKContentRuleList * _Nullable ruleList, NSError * _Nullable error))completion
+{
+  WKContentRuleListStore *store = [WKContentRuleListStore defaultStore];
+  NSString *identifier = PeerSkyYoutubeRuleIdentifier;
+  [store lookUpContentRuleListForIdentifier:identifier completionHandler:^(WKContentRuleList *cached, NSError *lookupError) {
+    if (cached) {
+      completion(cached, nil);
+      return;
+    }
+    NSString *json = @"[{\"trigger\":{\"url-filter\":\"^https://([a-z0-9-]+\\\\.)*youtube\\\\.com/youtubei/v1/player/ad_break(?:[/?#]|$)\",\"resource-type\":[\"raw\"],\"if-domain\":[\"*youtube.com\"]},\"action\":{\"type\":\"block\"}}]";
+    [store compileContentRuleListForIdentifier:identifier
+                        encodedContentRuleList:json
+                             completionHandler:completion];
+  }];
 }
 
 - (void)loadRuleAtIndex:(NSUInteger)index

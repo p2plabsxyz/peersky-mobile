@@ -1,14 +1,17 @@
 import { MAX_BROWSER_URL_LENGTH } from '../browser-shell.mjs'
+import { YOUTUBE_AD_BREAK_PATH } from './youtube-ad-blocking.mjs'
 
-export function createBrowserContentBlockingScript ({ enabled = false } = {}) {
-  if (!enabled) return 'true'
+export function createBrowserContentBlockingScript ({
+  enabled = false,
+  youtubeAdBlockingEnabled = false
+} = {}) {
+  if (!enabled && !youtubeAdBlockingEnabled) return 'true'
 
   return `
     (() => {
       if (window.__peerskyContentBlockingInstalled) return true;
 
       const bridge = window.PeerSkyContentBlocker;
-      if (!bridge || typeof bridge.shouldBlock !== 'function') return true;
       window.__peerskyContentBlockingInstalled = true;
 
       const maxUrlLength = ${MAX_BROWSER_URL_LENGTH};
@@ -42,7 +45,22 @@ export function createBrowserContentBlockingScript ({ enabled = false } = {}) {
           const documentUrl = normalizeUrl(location.href);
           if (!requestUrl || !documentUrl) return false;
 
-          return Boolean(bridge.shouldBlock(requestUrl, documentUrl, 'xhr', method));
+          const request = new URL(requestUrl);
+          const document = new URL(documentUrl);
+          const youtubeHost = (host) => host === 'youtube.com' || host.endsWith('.youtube.com');
+          if (
+            ${youtubeAdBlockingEnabled} &&
+            youtubeHost(document.hostname) &&
+            youtubeHost(request.hostname) &&
+            request.pathname === ${JSON.stringify(YOUTUBE_AD_BREAK_PATH)}
+          ) return true;
+
+          return Boolean(
+            ${enabled} &&
+            bridge &&
+            typeof bridge.shouldBlock === 'function' &&
+            bridge.shouldBlock(requestUrl, documentUrl, 'xhr', method)
+          );
         } catch {
           return false;
         }

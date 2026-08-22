@@ -27,6 +27,7 @@ describe('Android content blocking', () => {
     assert.match(moduleSource, /catch \(error: RejectedExecutionException\)/)
     assert.match(moduleSource, /pendingLoads[.]toList\(\)[.]also \{ pendingLoads[.]clear\(\) \}/)
     assert.match(moduleSource, /ERR_FILTER_LOAD_CANCELLED/)
+    assert.match(moduleSource, /setYoutubeAdBlockingEnabled/)
     assert.match(moduleSource, /if \(removePendingLoad\(promise\)\) promise[.]resolve\(true\)/)
     assert.match(engineSource, /System[.]loadLibrary\("peersky_adblock"\)/)
     assert.match(engineSource, /checkNotNull\(nativeLoadLists\(easyListPath, easyPrivacyPath\)\)/)
@@ -44,6 +45,11 @@ describe('Android content blocking', () => {
     assert.match(clientSource, /"10[.]0[.]2[.]2"/)
     assert.match(clientSource, /isRemoteHttpUrl\(Uri[.]parse\(pageUrl\)\)/)
     assert.match(clientSource, /PeerSkyAdBlockEngine[.]shouldBlock/)
+    assert.match(clientSource, /object PeerSkyYoutubeAdBlocker/)
+    assert.doesNotMatch(clientSource, /!enabled \|\| !PeerSkyAdBlockEngine[.]enabled/)
+    assert.match(clientSource, /isYoutubeAdBreakRequest/)
+    assert.match(clientSource, /requestPath == "\/youtubei\/v1\/player\/ad_break"/)
+    assert.match(clientSource, /host == "youtube[.]com" \|\| host[.]endsWith\("[.]youtube[.]com"\)/)
     assert.match(clientSource, /MAX_FILTER_URL_LENGTH = 16 [*] 1024/)
     assert.match(clientSource, /if \(shouldBlock\(request\)\) return blockedResponse\(\)/)
     assert.match(clientSource, /class PeerSkyContentBlockerBridge/)
@@ -69,6 +75,8 @@ describe('Android content blocking', () => {
     assert.match(testSource, /assertFalse\(isRemoteHttpUrl\("https", "127[.]0[.]0[.]1"\)\)/)
     assert.match(testSource, /assertFalse\(isRemoteHttpUrl\("https", "10[.]0[.]2[.]2"\)\)/)
     assert.match(testSource, /assertFalse\(isRemoteHttpUrl\("https", "::1"\)\)/)
+    assert.match(testSource, /identifiesOnlyThePinnedYoutubeAdBreakRequest/)
+    assert.match(testSource, /"youtube[.]com[.]evil[.]test"/)
   })
 
   test('generates an incremental, reproducible Rust Android build', () => {
@@ -155,8 +163,8 @@ describe('Android content blocking', () => {
     )
 
     assert.match(scriptSource, /window[.]PeerSkyContentBlocker/)
-    assert.match(scriptSource, /if \(!bridge \|\| typeof bridge[.]shouldBlock !== 'function'\) return true/)
     assert.match(scriptSource, /bridge[.]shouldBlock\(requestUrl, documentUrl, 'xhr', method\)/)
+    assert.match(scriptSource, /YOUTUBE_AD_BREAK_PATH/)
     assert.match(scriptSource, /Promise[.]reject\(new TypeError\('Failed to fetch'\)\)/)
     assert.match(scriptSource, /XMLHttpRequest[.]prototype[.]send/)
     assert.match(scriptSource, /dispatchEvent\(new ProgressEvent\('error'\)\)/)

@@ -1,0 +1,19 @@
+{
+  "license": "GPL-3.0-or-later",
+  "repository": "https://github.com/duckduckgo/content-blocker-extension",
+  "sourceCommit": "817e88ffa3e8d80b75ddf8e478c38ce8a57004be",
+  "files": [
+    {
+      "path": "src/scriptlets/main/ublock-filters.js",
+      "sha256": "fbf5a76ad0f0febee778c80b0b9bab89bdc7aa29907a15c13f609f5ca531ef3d"
+    },
+    {
+      "path": "src/scriptlets/isolated/ublock-filters.js",
+      "sha256": "99ecade91c2ac5bfc11707f75cf9c0d56ae365d87b1b062c57935852372cb473"
+    },
+    {
+      "path": "src/rules/youtube.json",
+      "sha256": "2337db6aa7466667595226f780b6590779db3007ac0a65ef3833f89610c92824"
+    }
+  ]
+}
