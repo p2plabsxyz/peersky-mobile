@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { createPeerPresenceStore } from '../../backend/p2pmd/peers.mjs'
+import { createPeerActivityStore, createPeerPresenceStore } from '../../backend/p2pmd/peers.mjs'
 
 describe('p2pmd peer presence simulation', () => {
   it('tracks host/client joins and counts only non-host peers', () => {
@@ -55,7 +55,7 @@ describe('p2pmd peer presence simulation', () => {
       cursorLine: 1,
       cursorColumn: 8,
       lineAttributions: {
-        1: { name: 'Desktop', color: '#59a6ff' }
+        1: { name: 'Desktop', color: '#59a6ff', clientId: 'desktop-peer', updatedAt: 1234 }
       }
     })
 
@@ -65,7 +65,7 @@ describe('p2pmd peer presence simulation', () => {
 
     assert.equal(host.lineAttributions, null)
     assert.deepEqual(client.lineAttributions, {
-      1: { color: '#59a6ff', name: 'Desktop' }
+      1: { color: '#59a6ff', name: 'Desktop', clientId: 'desktop-peer', updatedAt: 1234 }
     })
     assert.equal(client.cursorLine, 1)
     assert.equal(client.cursorColumn, 8)
@@ -81,6 +81,33 @@ describe('p2pmd peer presence simulation', () => {
     assert.deepEqual(store.getPeerList(new Set([hostKey])).map((peer) => peer.clientId), [
       'phone-host'
     ])
+  })
+
+  it('preserves active editor state when document updates omit presence fields', () => {
+    const store = createPeerPresenceStore({ now: createClock() })
+    const peerKey = store.upsert({
+      clientId: 'phone-peer',
+      role: 'client',
+      isTyping: true,
+      cursorLine: 7,
+      cursorColumn: 12,
+      selectionStart: 42,
+      selectionEnd: 45
+    })
+
+    store.upsert({ clientId: 'phone-peer', role: 'client', name: 'Phone' })
+    let [peer] = store.getPeerList(new Set([peerKey]))
+
+    assert.equal(peer.isTyping, true)
+    assert.equal(peer.cursorLine, 7)
+    assert.equal(peer.cursorColumn, 12)
+    assert.equal(peer.selectionStart, 42)
+    assert.equal(peer.selectionEnd, 45)
+
+    store.upsert({ clientId: 'phone-peer', role: 'client', isTyping: false, cursorLine: null })
+    ;[peer] = store.getPeerList(new Set([peerKey]))
+    assert.equal(peer.isTyping, false)
+    assert.equal(peer.cursorLine, null)
   })
 
   it('keeps peer defaults bounded and sanitized', () => {
@@ -105,6 +132,42 @@ describe('p2pmd peer presence simulation', () => {
     assert.deepEqual(peer.lineAttributions, {
       1: { color: '#123456', name: 'Valid' }
     })
+  })
+})
+
+describe('p2pmd peer activity', () => {
+  it('records desktop-compatible join, edit, and leave messages', () => {
+    const store = createPeerActivityStore({ now: createClock() })
+
+    const joined = store.add({ type: 'join', role: 'host', name: 'Harshal', clientId: 'host-1' })
+    const edited = store.add({
+      type: 'edit',
+      role: 'client',
+      name: 'Phone',
+      clientId: 'client-1',
+      cursorLine: 4,
+      cursorColumn: 8
+    })
+    const left = store.add({ type: 'leave', role: 'client', name: 'Phone', clientId: 'client-1' })
+
+    assert.equal(joined.message, 'Harshal joined as host')
+    assert.equal(edited.message, 'Phone edited the document (line 4, col 8)')
+    assert.equal(left.message, 'Phone left the room')
+    assert.deepEqual(store.getActivity().map((entry) => entry.type), ['leave', 'edit', 'join'])
+  })
+
+  it('bounds retained activity and sanitizes remote fields', () => {
+    const store = createPeerActivityStore({ now: createClock(), maxItems: 2 })
+
+    store.add({ type: 'join', name: 'First' })
+    store.add({ type: 'edit', name: 'x'.repeat(100), clientId: 'y'.repeat(140) })
+    store.add({ type: 'leave', name: 'Last' })
+
+    const activity = store.getActivity(50)
+    assert.equal(activity.length, 2)
+    assert.equal(activity[0].name, 'Last')
+    assert.equal(activity[1].name.length, 80)
+    assert.equal(activity[1].clientId.length, 120)
   })
 })
 

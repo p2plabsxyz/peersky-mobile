@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import http from 'node:http'
+import b4a from 'b4a'
+import * as Y from 'yjs'
 import { buildLineReplaceUpdate } from '../fixtures/yjs-helpers.mjs'
 import { resetDocumentState } from '../../backend/p2pmd/document.mjs'
 import { createP2pmdHttpServer } from '../../backend/p2pmd/server.mjs'
@@ -94,6 +96,41 @@ describe('p2pmd HTTP endpoints with injectable Node server', () => {
     })
   })
 
+  it('synchronizes the desktop-compatible LaTeX setting through Yjs state', async () => {
+    const state = await getJson(`${localUrl}/doc/yjsstate`)
+    const ydoc = new Y.Doc()
+    Y.applyUpdate(ydoc, b4a.from(state.yjsState, 'base64'))
+    ydoc.getMap('settings').set('latexModeEnabled', true)
+
+    const updateResponse = await postJson(`${localUrl}/doc/update`, {
+      clientId: 'host-device',
+      role: 'host',
+      update: b4a.toString(Y.encodeStateAsUpdate(ydoc), 'base64')
+    })
+    assert.equal(updateResponse.status, 200)
+
+    const synced = await getJson(`${localUrl}/doc/yjsstate`)
+    const remoteDoc = new Y.Doc()
+    Y.applyUpdate(remoteDoc, b4a.from(synced.yjsState, 'base64'))
+    assert.equal(remoteDoc.getMap('settings').get('latexModeEnabled'), true)
+
+    const clientDoc = new Y.Doc()
+    Y.applyUpdate(clientDoc, b4a.from(synced.yjsState, 'base64'))
+    clientDoc.getText('content').insert(0, 'Client edit\n')
+    const clientUpdate = await postJson(`${localUrl}/doc/update`, {
+      clientId: 'client-device',
+      role: 'client',
+      update: b4a.toString(Y.encodeStateAsUpdate(clientDoc), 'base64')
+    })
+    assert.equal(clientUpdate.status, 200)
+
+    const afterClientEdit = await getJson(`${localUrl}/doc/yjsstate`)
+    const verifiedDoc = new Y.Doc()
+    Y.applyUpdate(verifiedDoc, b4a.from(afterClientEdit.yjsState, 'base64'))
+    assert.equal(verifiedDoc.getMap('settings').get('latexModeEnabled'), true)
+    assert.match(verifiedDoc.getText('content').toString(), /Client edit/)
+  })
+
   it('renders preview HTML and rejects invalid preview input', async () => {
     const response = await postJson(`${localUrl}/preview`, {
       content: '<script>alert(1)</script>\n\n![pic](hyper://example.com/pic.png)'
@@ -111,10 +148,51 @@ describe('p2pmd HTTP endpoints with injectable Node server', () => {
     assert.equal(invalidResponse.status, 400)
     assert.equal(invalidBody.ok, false)
     assert.equal(invalidBody.error, 'Invalid Markdown content. Expected a string.')
+
+    const excessiveLatexResponse = await postJson(`${localUrl}/preview`, {
+      content: Array.from({ length: 2001 }, () => '$x$').join(' ')
+    })
+    const excessiveLatexBody = await excessiveLatexResponse.json()
+
+    assert.equal(excessiveLatexResponse.status, 400)
+    assert.equal(excessiveLatexBody.ok, false)
+    assert.match(excessiveLatexBody.error, /too much LaTeX/)
+  })
+
+  it('renders desktop-compatible presentation slides', async () => {
+    const response = await postJson(`${localUrl}/preview`, {
+      content: '# First\n\n---\n\n# Second',
+      mode: 'slides'
+    })
+    const body = await response.json()
+
+    assert.equal(response.status, 200)
+    assert.equal(body.ok, true)
+    assert.equal(body.count, 2)
+    assert.match(body.html, /data-slide-index="0"/)
+    assert.match(body.html, /data-slide-index="1"/)
+  })
+
+  it('activates IEEE preview only for LaTeX-enabled marked documents', async () => {
+    const content = '<!-- ieee -->\n\n## Paper\n\n### Abstract\n\n$E = mc^2$'
+    const enabled = await postJson(`${localUrl}/preview`, {
+      content,
+      latexModeEnabled: true
+    })
+    const enabledBody = await enabled.json()
+    const disabled = await postJson(`${localUrl}/preview`, {
+      content,
+      latexModeEnabled: false
+    })
+    const disabledBody = await disabled.json()
+
+    assert.equal(enabledBody.ieee, true)
+    assert.equal(disabledBody.ieee, false)
+    assert.match(enabledBody.html, /class="katex"/)
   })
 
   it('tracks SSE peers and presence through real HTTP endpoints', async () => {
-    const host = await openEventStream(`${localUrl}/events?clientId=host-1&role=host&name=Host&color=%23f2d35b`)
+    const host = await openEventStream(`${localUrl}/events?clientId=host-1&role=host&name=Host&color=%23f2d35b&latexModeEnabled=true`)
     const client = await openEventStream(`${localUrl}/events?clientId=client-1&role=client&name=Client&color=%2359a6ff`)
     activeStreams.add(host)
     activeStreams.add(client)
@@ -128,6 +206,8 @@ describe('p2pmd HTTP endpoints with injectable Node server', () => {
     assert.equal(typeof clientYjsState, 'string')
     assert.equal(typeof clientDocument.content, 'string')
     assert.equal(clientPeerList.some((peer) => peer.clientId === 'client-1'), true)
+    assert.equal(clientPeerList.find((peer) => peer.clientId === 'host-1')?.latexModeEnabled, true)
+    assert.equal(clientPeerList.find((peer) => peer.clientId === 'client-1')?.latexModeEnabled, null)
 
     let status = await waitForStatus(localUrl, (status) => {
       return status.peers === 1 && status.peerList.length === 2
@@ -166,6 +246,59 @@ describe('p2pmd HTTP endpoints with injectable Node server', () => {
     })
     assert.equal(status.peers, 0)
     assert.equal(status.peerList.some((peer) => peer.clientId === 'client-1'), false)
+
+    const activity = await getJson(`${localUrl}/activity`)
+    assert.equal(activity.ok, true)
+    assert.equal(activity.activity.some((entry) => {
+      return entry.type === 'join' && entry.clientId === 'client-1'
+    }), true)
+    assert.equal(activity.activity.some((entry) => {
+      return entry.type === 'leave' && entry.clientId === 'client-1'
+    }), true)
+  })
+
+  it('debounces edit activity and exposes it through HTTP and SSE', async () => {
+    const host = await openEventStream(`${localUrl}/events?clientId=typing-host&role=host&name=Host&color=%23f2d35b`)
+    activeStreams.add(host)
+
+    const initialActivity = JSON.parse(await readEvent(host, 'activity'))
+    assert.equal(Array.isArray(initialActivity), true)
+
+    const response = await postJson(`${localUrl}/doc`, {
+      content: 'Edited from phone',
+      clientId: 'typing-host',
+      role: 'host',
+      name: 'Host',
+      isTyping: true,
+      cursorLine: 1,
+      cursorColumn: 18
+    })
+    assert.equal(response.status, 200)
+
+    let status = await getJson(`${localUrl}/status`)
+    let hostPeer = status.peerList.find((peer) => peer.clientId === 'typing-host')
+    assert.equal(hostPeer.isTyping, true)
+    assert.equal(hostPeer.cursorLine, 1)
+    assert.equal(hostPeer.cursorColumn, 18)
+
+    const activity = await waitForActivity(localUrl, (entries) => {
+      return entries.some((entry) => entry.type === 'edit' && entry.clientId === 'typing-host')
+    })
+    const edit = activity.find((entry) => entry.type === 'edit' && entry.clientId === 'typing-host')
+    assert.match(edit.message, /line 1, col 18/)
+
+    const event = await waitForSseEvent(host, 'activity', (data) => {
+      const entries = Array.isArray(data) ? data : [data]
+      return entries.some((entry) => entry.type === 'edit')
+    })
+    assert.equal(event.type, 'edit')
+
+    status = await waitForStatus(localUrl, (status) => {
+      return status.peerList.find((peer) => peer.clientId === 'typing-host')?.isTyping === false
+    })
+    hostPeer = status.peerList.find((peer) => peer.clientId === 'typing-host')
+    assert.equal(hostPeer.cursorLine, 1)
+    assert.equal(hostPeer.cursorColumn, 18)
   })
 
   it('keeps client edits when the host event stream disconnects and reconnects', async () => {
@@ -467,6 +600,44 @@ async function waitForStatus (localUrl, predicate, timeoutMs = 2000) {
   }
 
   assert.fail(`Timed out waiting for P2PMD status. Latest: ${JSON.stringify(latest)}`)
+}
+
+async function waitForActivity (localUrl, predicate, timeoutMs = 3000) {
+  const deadline = Date.now() + timeoutMs
+  let latest = []
+
+  while (Date.now() < deadline) {
+    const result = await getJson(`${localUrl}/activity`)
+    latest = result.activity
+    if (predicate(latest)) return latest
+    await delay(25)
+  }
+
+  assert.fail(`Timed out waiting for P2PMD activity. Latest: ${JSON.stringify(latest)}`)
+}
+
+async function waitForSseEvent (stream, eventName, predicate, timeoutMs = 3000) {
+  assert.ok(stream.reader)
+  const decoder = new TextDecoder()
+  const deadline = Date.now() + timeoutMs
+
+  while (Date.now() < deadline) {
+    for (const event of parseSseEvents(stream.buffer)) {
+      if (event.event !== eventName) continue
+      const data = JSON.parse(event.data)
+      if (predicate(data)) return Array.isArray(data) ? data.find((item) => predicate(item)) : data
+    }
+
+    const remaining = deadline - Date.now()
+    const read = await Promise.race([
+      stream.reader.read(),
+      delay(remaining).then(() => ({ timeout: true }))
+    ])
+    if (read.timeout || read.done) break
+    stream.buffer += decoder.decode(read.value, { stream: true })
+  }
+
+  throw new Error(`Timed out waiting for matching SSE event: ${eventName}`)
 }
 
 function parseSseEvents (payload) {

@@ -9,6 +9,7 @@ import {
   getAvailableLoopbackPort,
   P2PMD_LOOPBACK_HOST
 } from './network.mjs'
+import { connectWithPreferredLoopbackPort } from './connect.mjs'
 import {
   getP2pmdServerStatus,
   startP2pmdServer,
@@ -91,12 +92,10 @@ export async function joinP2pmdRoom ({
   return withRoomTransition(async () => {
     await disconnectRoomInternal()
 
-    const port = await getAvailableLoopbackPort()
-
-    const holesailResult = await connectHolesail({
+    const holesailResult = await connectWithPreferredLoopbackPort({
+      connect: connectHolesail,
+      getAvailablePort: getAvailableLoopbackPort,
       key,
-      host: P2PMD_LOOPBACK_HOST,
-      port,
       udp,
       log
     })
