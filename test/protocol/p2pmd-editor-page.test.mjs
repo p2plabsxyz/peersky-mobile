@@ -31,6 +31,10 @@ describe('p2pmd mobile editor page routing', () => {
     const html = getP2pmdEditorPage()
 
     assert.match(html, /data-format="slides"/)
+    assert.match(html, /# Welcome to Your Presentation/)
+    assert.match(html, /This will clear your notes and give you a slides template[.] Continue[?]/)
+    assert.match(html, /replaceDocumentRange\(0, input[.]value[.]length, slidesTemplate, 0, 0\)/)
+    assert.match(html, /else if \(format === 'slides'\) viewAsSlides\(\)/)
     assert.match(html, /callNativeBridge\('preview', \{\s+content: input\.value,\s+mode: 'slides'/)
     assert.match(html, /notifyNative\('p2pmd-view-mode', \{ mode: viewMode \}\)/)
     assert.match(html, /slidesPreview\.addEventListener\('touchstart'/)

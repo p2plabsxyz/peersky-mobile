@@ -26,6 +26,38 @@ const peerActivity = createPeerActivityStore()
 const editActivityTimers = new Map()
 let keepaliveInterval = null
 const EDIT_ACTIVITY_DEBOUNCE_MS = 1200
+const P2PMD_SLIDE_BREAK_PATTERN = /(?:\r?\n\r?\n---\r?\n\r?\n|^---\r?\n\r?\n|\r?\n\r?\n---$|^<!-- slide -->$)/m
+const P2PMD_SLIDES_TEMPLATE = `# Welcome to Your Presentation
+
+Your first slide content goes here
+
+<!-- Speaker notes: Introduce yourself and the topic -->
+
+---
+
+# Slide 2: Key Points
+
+- Point 1
+- Point 2
+- Point 3
+
+<!-- Speaker notes: Elaborate on each point -->
+
+---
+
+# Slide 3: More Content
+
+Add your content here
+
+<!-- Speaker notes: Add additional context -->
+
+---
+
+# Thank You!
+
+Any questions?
+
+<!-- Speaker notes: Open floor for Q&A -->`
 
 subscribeToDocumentUpdates(({ document, origin, update }) => {
   if (origin !== 'line-attribution-update') {
@@ -652,6 +684,8 @@ function getQueryParam (rawUrl, key) {
 
 export function getP2pmdEditorPage () {
   const serializedTemplates = JSON.stringify(P2PMD_TEMPLATES).replace(/</g, '\\u003c')
+  const serializedSlideBreakPattern = JSON.stringify(P2PMD_SLIDE_BREAK_PATTERN.source).replace(/</g, '\\u003c')
+  const serializedSlidesTemplate = JSON.stringify(P2PMD_SLIDES_TEMPLATE).replace(/</g, '\\u003c')
   const embeddedIeeeBrowserScript = ieeeBrowserScript.replace(/<\/script/gi, '<\\/script')
 
   return `<!doctype html>
@@ -1460,6 +1494,7 @@ export function getP2pmdEditorPage () {
       const MAX_PEER_DASHBOARD_ITEMS = 100
       const PEER_TYPING_IDLE_MS = ${EDIT_ACTIVITY_DEBOUNCE_MS}
       const templates = ${serializedTemplates}
+      const slidesTemplate = ${serializedSlidesTemplate}
       let viewMode = 'edit'
       let previewRequestId = 0
       let currentSlideIndex = 0
@@ -2492,6 +2527,19 @@ export function getP2pmdEditorPage () {
         replaceDocumentRange(0, input.value.length, template.content, 0, 0)
       }
 
+      function viewAsSlides() {
+        const hasSlideBreak = new RegExp(${serializedSlideBreakPattern}, 'im').test(input.value)
+
+        if (!hasSlideBreak) {
+          if (input.value.trim() && !window.confirm('This will clear your notes and give you a slides template. Continue?')) {
+            return
+          }
+          replaceDocumentRange(0, input.value.length, slidesTemplate, 0, 0)
+        }
+
+        setViewMode('slides')
+      }
+
       function applyFormatting(format) {
         const codeMarker = String.fromCharCode(96)
 
@@ -2506,7 +2554,7 @@ export function getP2pmdEditorPage () {
         else if (format === 'inline-math') wrapSelection('$', '$')
         else if (format === 'block-math') wrapSelection('$$' + newline, newline + '$$')
         else if (format === 'template') toggleTemplateMenu()
-        else if (format === 'slides') setViewMode('slides')
+        else if (format === 'slides') viewAsSlides()
         else if (format === 'inline-code') wrapSelection(codeMarker, codeMarker)
         else if (format === 'code-block') {
           wrapSelection(codeMarker.repeat(3) + newline, newline + codeMarker.repeat(3))
