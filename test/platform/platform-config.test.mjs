@@ -67,6 +67,21 @@ describe('mobile platform runtime configuration', () => {
     assert.match(indexSource, /mediaCapturePermissionGrantType='prompt'/)
   })
 
+  it('enables native fullscreen video in user-facing WebViews', async () => {
+    const indexSource = await readFile(repoFile('app/index.tsx'), 'utf8')
+
+    assert.equal(indexSource.match(/allowsFullscreenVideo=\{true\}/g)?.length, 2)
+  })
+
+  it('stores P2PMD peer names outside the room WebView origin', async () => {
+    const indexSource = await readFile(repoFile('app/index.tsx'), 'utf8')
+
+    assert.match(indexSource, /new File\(Paths\.document, 'p2pmd-profile\.json'\)/)
+    assert.match(indexSource, /action === 'peer-profile'/)
+    assert.match(indexSource, /window\.__P2PMD_DISPLAY_NAME__/)
+    assert.match(indexSource, /replace\(\/<\/g, '\\\\u003c'\)/)
+  })
+
   it('opens incoming Android web links after browser startup completes', async () => {
     const indexSource = await readFile(repoFile('app/index.tsx'), 'utf8')
 

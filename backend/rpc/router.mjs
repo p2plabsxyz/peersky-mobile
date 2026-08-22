@@ -6,6 +6,9 @@ import {
   RPC_HYPER_CREATE_DRIVE,
   RPC_HYPER_FETCH,
   RPC_HYPER_INIT,
+  RPC_HYPER_STORAGE_CLEAR_CACHE,
+  RPC_HYPER_STORAGE_DELETE_APP,
+  RPC_HYPER_STORAGE_LIST,
   RPC_IDENTITY_GET_KEY,
   RPC_IDENTITY_RESTORE_FROM_HYPER,
   RPC_IDENTITY_CONFIRM_RESTORE,
@@ -31,7 +34,14 @@ import { restoreIdentityFromBackup } from '../backup/restore.mjs'
 
 import { createDrive, publishMarkdownDocument, readHyperFile, uploadHyperFile } from '../hyper/drive.mjs'
 import { fetchHyper, fetchHyperBinary, resetHyperFetch } from '../hyper/fetch.mjs'
-import { closeHyperRuntime, getHyperRuntime, getHyperStoragePath } from '../hyper/runtime.mjs'
+import {
+  closeHyperRuntime,
+  getHyperRuntime,
+  getHyperStoragePath,
+  withHyperRuntimeMaintenance,
+  withHyperRuntimeOperation
+} from '../hyper/runtime.mjs'
+import { clearP2pCache, deleteP2pAppData, listP2pAppData } from '../hyper/storage.mjs'
 
 import {
   connectHolesail,
@@ -46,8 +56,13 @@ import {
   joinP2pmdRoom
 } from '../p2pmd/room.mjs'
 import { getMaxDocumentLength } from '../p2pmd/document.mjs'
-import { inlineHyperPreviewImages, renderMarkdownPreview } from '../p2pmd/preview.mjs'
+import {
+  inlineHyperPreviewImages,
+  renderMarkdownPreview,
+  renderMarkdownSlides
+} from '../p2pmd/preview.mjs'
 import { getP2pmdEditorPage } from '../p2pmd/server.mjs'
+import { hasIeeeMarker } from '../p2pmd/templates.mjs'
 import { parseJsonMessage, replyJson } from './messages.mjs'
 
 let currentIdentityNonce = null
@@ -56,7 +71,7 @@ let pendingRestorePath = null
 export async function routeRpcRequest (req) {
   try {
     if (req.command === RPC_HYPER_INIT) {
-      await getHyperRuntime()
+      await withHyperRuntimeOperation(() => {})
       replyJson(req, { ok: true, storagePath: getHyperStoragePath() })
       return
     }
@@ -68,6 +83,21 @@ export async function routeRpcRequest (req) {
 
     if (req.command === RPC_HYPER_CREATE_DRIVE) {
       replyJson(req, await createDrive(parseJsonMessage(req.data)))
+      return
+    }
+
+    if (req.command === RPC_HYPER_STORAGE_LIST) {
+      replyJson(req, await listP2pAppData(parseJsonMessage(req.data)))
+      return
+    }
+
+    if (req.command === RPC_HYPER_STORAGE_DELETE_APP) {
+      replyJson(req, await deleteP2pAppData(parseJsonMessage(req.data)))
+      return
+    }
+
+    if (req.command === RPC_HYPER_STORAGE_CLEAR_CACHE) {
+      replyJson(req, await clearP2pCache())
       return
     }
 
@@ -136,24 +166,26 @@ export async function routeRpcRequest (req) {
         return
       }
 
-      const storagePath = getDefaultIdentityStoragePath()
-      const backupPath = storagePath + '.backup'
+      const result = await withHyperRuntimeMaintenance(async () => {
+        const storagePath = getDefaultIdentityStoragePath()
+        const backupPath = storagePath + '.backup'
 
-      await closeHyperRuntime()
-      resetHyperFetch()
+        await closeHyperRuntime()
+        resetHyperFetch()
 
-      try {
-        try { rmSync(backupPath, { recursive: true }) } catch (e) {}
-        try { renameSync(storagePath, backupPath) } catch (e) {}
-        renameSync(pendingRestorePath, storagePath)
-        pendingRestorePath = null
-      } catch (err) {
-        replyJson(req, { ok: false, error: `Atomic swap failed: ${err.message}` })
-        return
-      }
+        try {
+          try { rmSync(backupPath, { recursive: true }) } catch (e) {}
+          try { renameSync(storagePath, backupPath) } catch (e) {}
+          renameSync(pendingRestorePath, storagePath)
+          pendingRestorePath = null
+        } catch (err) {
+          return { ok: false, error: `Atomic swap failed: ${err.message}` }
+        }
 
-      await getHyperRuntime()
-      replyJson(req, { ok: true, requiresRestart: true })
+        await getHyperRuntime()
+        return { ok: true, requiresRestart: true }
+      })
+      replyJson(req, result)
       return
     }
 
@@ -218,9 +250,17 @@ export async function routeRpcRequest (req) {
         return
       }
 
+      const rendered = body.mode === 'slides'
+        ? renderMarkdownSlides(body.content)
+        : {
+            html: renderMarkdownPreview(body.content),
+            ieee: body.latexModeEnabled === true && hasIeeeMarker(body.content)
+          }
+
       replyJson(req, {
         ok: true,
-        html: await inlineHyperPreviewImages(renderMarkdownPreview(body.content), readHyperFile)
+        ...rendered,
+        html: await inlineHyperPreviewImages(rendered.html, readHyperFile)
       })
       return
     }

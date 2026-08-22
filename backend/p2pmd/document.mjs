@@ -327,11 +327,14 @@ function normalizeLineAttribution (value) {
   const name = typeof value.name === 'string' ? value.name.trim().slice(0, 80) : ''
   const clientId = typeof value.clientId === 'string' ? value.clientId.trim().slice(0, 120) : ''
 
-  return {
+  const normalized = {
     color,
     name,
     clientId
   }
+  const updatedAt = Number(value.updatedAt)
+  if (Number.isFinite(updatedAt) && updatedAt >= 0) normalized.updatedAt = updatedAt
+  return normalized
 }
 
 function getLineCount (content) {

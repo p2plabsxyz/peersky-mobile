@@ -26,4 +26,141 @@ describe('p2pmd mobile editor page routing', () => {
     assert.doesNotMatch(html, /fetch\(roomUrl\('\/hyper\/image'/)
     assert.doesNotMatch(html, /await .*\.arrayBuffer\(\)/)
   })
+
+  it('provides mobile slide controls through the shared editor page', () => {
+    const html = getP2pmdEditorPage()
+
+    assert.match(html, /data-format="slides"/)
+    assert.match(html, /# Welcome to Your Presentation/)
+    assert.match(html, /This will clear your notes and give you a slides template[.] Continue[?]/)
+    assert.match(html, /replaceDocumentRange\(0, input[.]value[.]length, slidesTemplate, 0, 0\)/)
+    assert.match(html, /else if \(format === 'slides'\) viewAsSlides\(\)/)
+    assert.match(html, /callNativeBridge\('preview', \{\s+content: input\.value,\s+mode: 'slides'/)
+    assert.match(html, /notifyNative\('p2pmd-view-mode', \{ mode: viewMode \}\)/)
+    assert.match(html, /slidesPreview\.addEventListener\('touchstart'/)
+    assert.match(html, /Math\.abs\(deltaX\) < 48/)
+    assert.match(html, /event\.key === 'ArrowRight'/)
+    assert.match(html, /renderActiveView\(\)/)
+    assert.match(html, /scheduleActiveViewRender\(\)/)
+    assert.match(html, /ACTIVE_VIEW_RENDER_DELAY_MS = 120/)
+    assert.match(html, /currentSlideIndex === previousSlideIndex \? previousScrollTop : 0/)
+    assert.match(html, /if \(nextSlideIndex < 0 \|\| nextSlideIndex >= slideCount\) return/)
+    assert.match(html, /function fitActiveSlide\(\)/)
+    assert.match(html, /window\.matchMedia\('\(orientation: landscape\)'\)/)
+    assert.match(html, /Math\.min\(1, availableWidth \/ contentWidth, availableHeight \/ contentHeight\)/)
+    assert.match(html, /window\.addEventListener\('resize', \(\) =>/)
+    assert.match(html, /event\.key === 'Escape'\) setViewMode\('edit'\)/)
+    assert.match(html, /aria-label="Previous slide"/)
+    assert.match(html, /aria-label="Exit presentation"/)
+    assert.match(html, /slidesExit\.addEventListener\('click', \(\) => setViewMode\('edit'\)\)/)
+    assert.match(html, /id="slides-progress-value"/)
+    assert.match(html, /mode: viewMode/)
+  })
+
+  it('provides synchronized LaTeX mode and scientific templates', () => {
+    const html = getP2pmdEditorPage()
+
+    assert.match(html, /data-format="latex"/)
+    assert.match(html, /data-format="inline-math"/)
+    assert.match(html, /data-format="block-math"/)
+    assert.match(html, /id="latex-template-menu"/)
+    assert.match(html, /Research Paper/)
+    assert.match(html, /Technical Documentation/)
+    assert.match(html, /ydoc\.getMap\('settings'\)/)
+    assert.match(html, /LATEX_MODE_YJS_KEY = 'latexModeEnabled'/)
+    assert.match(html, /roomRole === 'host'/)
+    assert.match(html, /latexModeEnabled/)
+    assert.match(html, /window\.P2pmdIeee/)
+    assert.doesNotMatch(html, /roomUrl\('\/lib\/ieee\.min\.js'\)/)
+    assert.match(html, /window\.P2pmdIeee\.render\(preview, result\.html\)/)
+    assert.match(html, /closeTemplateMenuOnOutsideClick/)
+    assert.match(html, /event\.key === 'Escape'/)
+  })
+
+  it('keeps LaTeX mode host-controlled while clients consume shared state', () => {
+    const html = getP2pmdEditorPage()
+
+    assert.match(html, /latexModeButton\.disabled = roomRole !== 'host'/)
+    assert.match(html, /if \(roomRole !== 'host' && !fromSharedState\) return false/)
+    assert.match(html, /roomRole === 'host' && loadPersistedLatexMode\(\)/)
+    assert.match(html, /persist: false, sync: false, fromSharedState: true/)
+    assert.match(html, /if \(roomRole === 'host'\) setLatexMode\(true\)/)
+  })
+
+  it('serializes native preview rendering and coalesces newer requests', () => {
+    const html = getP2pmdEditorPage()
+
+    assert.match(html, /if \(activeViewRenderInFlight\) \{\s+activeViewRenderPending = true/)
+    assert.match(html, /if \(viewMode === 'preview'\) await renderPreview\(\)/)
+    assert.match(html, /if \(activeViewRenderPending\) \{/)
+  })
+
+  it('provides a mobile peer dashboard backed by shared room endpoints', () => {
+    const html = getP2pmdEditorPage()
+
+    assert.match(html, /id="peer-dashboard"/)
+    assert.match(html, /id="peer-connected-list"/)
+    assert.match(html, /id="peer-editing-list"/)
+    assert.match(html, /id="peer-activity-list"/)
+    assert.match(html, /window\.__p2pmdTogglePeerDashboard/)
+    assert.match(html, /fetch\(roomUrl\('\/activity'\)\)/)
+    assert.match(html, /fetch\(roomUrl\('\/presence'\)/)
+    assert.match(html, /source\.addEventListener\('activity'/)
+    assert.match(html, /const isSnapshot = Array\.isArray\(activity\)/)
+    assert.match(html, /peerActivityLog = incoming/)
+    assert.match(html, /MAX_PEER_ACTIVITY_ITEMS = 150/)
+    assert.match(html, /MAX_PEER_DASHBOARD_ITEMS = 100/)
+    assert.match(html, /if \(peerDashboardBackdrop\.hidden\) return/)
+    assert.match(html, /\.slice\(0, MAX_PEER_ACTIVITY_ITEMS\)/)
+    assert.match(html, /message\.textContent =/)
+    assert.doesNotMatch(html, /peerActivityList\.innerHTML/)
+  })
+
+  it('sends editor presence with updates and persists peer profile changes natively', () => {
+    const html = getP2pmdEditorPage()
+
+    assert.match(html, /isTyping: localPeerIsTyping/)
+    assert.match(html, /cursorLine: cursor\.line/)
+    assert.match(html, /cursorColumn: cursor\.column/)
+    assert.match(html, /markLocalPeerTyping\(\)/)
+    assert.match(html, /requestNativeBridge\('peer-profile', \{ name: nextName \}\)/)
+  })
+
+  it('keeps gutter rows aligned with editor lines', () => {
+    const html = getP2pmdEditorPage()
+
+    assert.match(html, /--editor-font-size: 16px/)
+    assert.match(html, /--editor-line-height: 24[.]8px/)
+    assert.match(html, /#line-gutter[\s\S]*font: var\(--editor-font-size\)\/var\(--editor-line-height\)/)
+    assert.match(html, /[.]gutter-line[\s\S]*min-height: var\(--editor-line-height\)/)
+    assert.match(html, /textarea[\s\S]*font: var\(--editor-font-size\)\/var\(--editor-line-height\)/)
+    assert.match(html, /const oldText = ydoc && ytext [^\n]+ getYTextSnapshot\(\) : lastInputContent/)
+    assert.match(html, /const change = diffTextChange\(oldText, newText\)/)
+    assert.match(html, /const gutterUpdate = markEditedLines\(oldText, newText\)/)
+    assert.match(html, /applyTextDiff\(ytext, oldText, newText, Y_ORIGIN_LOCAL_INPUT, change\)/)
+    assert.match(html, /if \(gutterUpdate\) renderLineGutter\(gutterUpdate\)/)
+    assert.match(html, /while \(lineGutter[.]childElementCount > count\)/)
+    assert.match(html, /const startIndex = update [^\n]+ update[.]startLine - 1/)
+    assert.doesNotMatch(html, /lineGutter[.]replaceChildren\(\)/)
+    assert.doesNotMatch(html, /const previousLines = String\(previousContent/)
+    assert.doesNotMatch(html, /const nextLines = String\(nextContent/)
+    assert.match(html, /function countMatchingPrefixLines\(previousValue, nextValue\)/)
+    assert.match(html, /function countMatchingSuffixLines\(previousValue, nextValue, availablePrevious, availableNext\)/)
+  })
+
+  it('timestamps mobile line ownership for desktop conflict resolution', () => {
+    const html = getP2pmdEditorPage()
+
+    assert.match(html, /const editedAttribution = \{ [.]{3}localAuthor, updatedAt: Date[.]now\(\) \}/)
+    assert.match(html, /normalized[.]updatedAt = updatedAt/)
+  })
+
+  it('uses a cached CRDT snapshot and safe peer avatar fallback', () => {
+    const html = getP2pmdEditorPage()
+
+    assert.match(html, /function getYTextSnapshot\(\)/)
+    assert.match(html, /ytextSnapshot[.]length === ytext[.]length/)
+    assert.match(html, /ytextSnapshot = ytext[.]toString\(\)/)
+    assert.match(html, /String\(peer[.]name \|\| ''\)[.]trim\(\)[.]charAt\(0\) \|\| '[?]'/)
+  })
 })
