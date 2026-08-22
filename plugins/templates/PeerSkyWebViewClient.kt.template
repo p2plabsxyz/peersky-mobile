@@ -2,6 +2,7 @@ package __PACKAGE_NAME__
 
 import android.graphics.Bitmap
 import android.net.Uri
+import android.webkit.JavascriptInterface
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
@@ -30,7 +31,7 @@ class PeerSkyWebViewClient : RNCWebViewClient() {
     view: WebView,
     request: WebResourceRequest
   ): WebResourceResponse? {
-    if (shouldBlock(request)) return emptyResponse()
+    if (shouldBlock(request)) return blockedResponse()
     return super.shouldInterceptRequest(view, request)
   }
 
@@ -82,7 +83,7 @@ class PeerSkyWebViewClient : RNCWebViewClient() {
       }
     }
 
-    private fun emptyResponse() = WebResourceResponse(
+    private fun blockedResponse() = WebResourceResponse(
       "text/plain",
       "UTF-8",
       204,
@@ -90,5 +91,66 @@ class PeerSkyWebViewClient : RNCWebViewClient() {
       emptyMap(),
       ByteArrayInputStream(ByteArray(0))
     )
+  }
+}
+
+class PeerSkyContentBlockerBridge {
+  @JavascriptInterface
+  fun shouldBlock(
+    requestUrl: String?,
+    documentUrl: String?,
+    resourceType: String?,
+    method: String?
+  ): Boolean {
+    val normalizedRequestUrl = normalizeRemoteHttpUrl(requestUrl) ?: return false
+    val normalizedDocumentUrl = normalizeRemoteHttpUrl(documentUrl) ?: return false
+    return PeerSkyAdBlockEngine.shouldBlock(
+      normalizedRequestUrl,
+      normalizedDocumentUrl,
+      normalizeResourceType(resourceType),
+      normalizeMethod(method)
+    )
+  }
+
+  private fun normalizeRemoteHttpUrl(value: String?): String? {
+    val candidate = value
+      ?.trim()
+      ?.takeIf {
+        it.isNotBlank() &&
+          it.length <= MAX_FILTER_URL_LENGTH &&
+          it.none { character -> character.code < 32 || character.code in 127..159 }
+      } ?: return null
+
+    return try {
+      val parsed = Uri.parse(candidate)
+      candidate.takeIf { isRemoteHttpUrl(parsed) }
+    } catch (_: Exception) {
+      null
+    }
+  }
+
+  private fun normalizeResourceType(value: String?): String {
+    return when (value?.lowercase(Locale.ROOT)) {
+      "xhr", "xmlhttprequest", "fetch" -> "xhr"
+      "script" -> "script"
+      "stylesheet" -> "stylesheet"
+      "image" -> "image"
+      "font" -> "font"
+      "media" -> "media"
+      else -> "other"
+    }
+  }
+
+  private fun normalizeMethod(value: String?): String {
+    val method = value?.uppercase(Locale.ROOT).orEmpty()
+    return method.takeIf { it.matches(Regex("[A-Z]{1,16}")) } ?: "GET"
+  }
+
+  companion object {
+    private const val MAX_FILTER_URL_LENGTH = 16 * 1024
+
+    private fun isRemoteHttpUrl(uri: Uri): Boolean {
+      return isRemoteHttpUrl(uri.scheme, uri.host)
+    }
   }
 }

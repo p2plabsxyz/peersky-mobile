@@ -45,7 +45,16 @@ describe('Android content blocking', () => {
     assert.match(clientSource, /isRemoteHttpUrl\(Uri[.]parse\(pageUrl\)\)/)
     assert.match(clientSource, /PeerSkyAdBlockEngine[.]shouldBlock/)
     assert.match(clientSource, /MAX_FILTER_URL_LENGTH = 16 [*] 1024/)
-    assert.match(clientSource, /WebResourceResponse\(/)
+    assert.match(clientSource, /if \(shouldBlock\(request\)\) return blockedResponse\(\)/)
+    assert.match(clientSource, /class PeerSkyContentBlockerBridge/)
+    assert.match(clientSource, /@JavascriptInterface/)
+    assert.match(clientSource, /fun shouldBlock\(/)
+    assert.match(clientSource, /"xhr", "xmlhttprequest", "fetch" -> "xhr"/)
+    assert.match(clientSource, /204/)
+    assert.match(clientSource, /No Content/)
+    assert.match(clientSource, /ByteArrayInputStream\(ByteArray\(0\)\)/)
+    assert.match(managerSource, /addJavascriptInterface\(/)
+    assert.match(managerSource, /PeerSkyContentBlocker/)
     assert.match(
       managerSource,
       /super[.]addEventEmitters\(context, view\)[\s\S]*webViewClient = PeerSkyWebViewClient\(\)/
@@ -133,5 +142,26 @@ describe('Android content blocking', () => {
     assert.match(appSource, /const rulesReady = applyContentBlockingEnabled\(true\)/)
     assert.match(appSource, /if \(!rulesReady\) \{\s+const initialized = await initializeContentBlocking\(\{ enabled: true \}\)/)
     assert.match(appSource, /setContentBlockingPreference\(true\)/)
+  })
+
+  test('injects native-backed fetch and XHR cancellation on Android', () => {
+    const scriptSource = readFileSync(
+      new URL('../../app/privacy/browserContentBlockingScript.mjs', import.meta.url),
+      'utf8'
+    )
+    const appSource = readFileSync(
+      new URL('../../app/index.tsx', import.meta.url),
+      'utf8'
+    )
+
+    assert.match(scriptSource, /window[.]PeerSkyContentBlocker/)
+    assert.match(scriptSource, /if \(!bridge \|\| typeof bridge[.]shouldBlock !== 'function'\) return true/)
+    assert.match(scriptSource, /bridge[.]shouldBlock\(requestUrl, documentUrl, 'xhr', method\)/)
+    assert.match(scriptSource, /Promise[.]reject\(new TypeError\('Failed to fetch'\)\)/)
+    assert.match(scriptSource, /XMLHttpRequest[.]prototype[.]send/)
+    assert.match(scriptSource, /dispatchEvent\(new ProgressEvent\('error'\)\)/)
+    assert.match(scriptSource, /MAX_BROWSER_URL_LENGTH/)
+    assert.match(appSource, /createBrowserContentBlockingScript/)
+    assert.match(appSource, /injectedJavaScriptBeforeContentLoaded=\{browserBeforeContentScript\}/)
   })
 })

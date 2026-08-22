@@ -124,6 +124,7 @@ import {
   initializeContentBlocking,
   setContentBlockingEnabled as applyContentBlockingEnabled
 } from './privacy/contentBlocking'
+import { createBrowserContentBlockingScript } from './privacy/browserContentBlockingScript.mjs'
 import { useBrowserDownloads } from './downloads/useBrowserDownloads'
 import { BrowserTabsScreen } from './tabs/BrowserTabsScreen'
 import { useBrowserTabPreviews } from './tabs/useBrowserTabPreviews'
@@ -2897,16 +2898,23 @@ export default function App () {
             pageZoom: tabPageZoom,
             websiteTextScale: browserPreferences.websiteTextScale
           })
+          const browserContentBlockingScript = createBrowserContentBlockingScript({
+            enabled: Platform.OS === 'android' &&
+              Boolean(peerSkyWebViewNativeConfig) &&
+              browserPreferences.contentBlockingEnabled
+          })
           const browserMediaScript = createBrowserMediaLongPressScript({
             nativeHitTesting: Platform.OS === 'android' && Boolean(peerSkyWebViewNativeConfig),
             token: browserMediaToken
           })
           const browserInjectedScript = combineBrowserInjectedScripts(
             browserAccessibilityScript,
+            browserContentBlockingScript,
             createBrowserFaviconScript()
           )
           const browserBeforeContentScript = combineBrowserInjectedScripts(
             browserAccessibilityScript,
+            browserContentBlockingScript,
             browserMediaScript
           )
 

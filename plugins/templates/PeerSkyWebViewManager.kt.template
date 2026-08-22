@@ -39,6 +39,10 @@ class PeerSkyWebViewManager : RNCWebViewManager() {
     context: ThemedReactContext
   ): RNCWebViewWrapper {
     val wrapper = super.createViewInstance(context)
+    wrapper.webView.addJavascriptInterface(
+      PeerSkyContentBlockerBridge(),
+      "PeerSkyContentBlocker"
+    )
     wrapper.webView.setDownloadListener {
         url,
         userAgent,
