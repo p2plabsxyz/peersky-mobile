@@ -2196,9 +2196,9 @@ export function getP2pmdEditorPage () {
       function scheduleDocumentSave() {
         if (saveTimer) clearTimeout(saveTimer)
         markLocalPeerTyping()
-        markEditedLines(lastInputContent, input.value)
+        const gutterUpdate = markEditedLines(lastInputContent, input.value)
         lastInputContent = input.value
-        renderLineGutter()
+        if (gutterUpdate) renderLineGutter(gutterUpdate)
         notifyNative('p2pmd-document-pending', {})
 
         if (ydoc && ytext) {
@@ -2737,6 +2737,8 @@ export function getP2pmdEditorPage () {
       }
 
       function markEditedLines(previousContent, nextContent) {
+        if (previousContent === nextContent) return null
+
         const previousLines = String(previousContent || '').split(newline)
         const nextLines = String(nextContent || '').split(newline)
         const nextAttributions = {}
@@ -2782,30 +2784,42 @@ export function getP2pmdEditorPage () {
 
         lineAttributions = nextAttributions
         localLineAttributions = nextLocalAttributions
+
+        const startLine = prefix + 1
+        return {
+          startLine,
+          endLine: previousLines.length === nextLines.length
+            ? Math.max(startLine, nextSuffix + 1)
+            : nextLines.length,
+          lineCount: nextLines.length
+        }
       }
 
-      function renderLineGutter() {
-        const lines = input.value.split(newline)
-        const count = Math.max(lines.length, 1)
+      function renderLineGutter(update = null) {
+        const count = Math.max(update?.lineCount || getLineCount(input.value), 1)
 
-        lineGutter.replaceChildren()
+        while (lineGutter.childElementCount > count) {
+          lineGutter.lastElementChild.remove()
+        }
+        while (lineGutter.childElementCount < count) {
+          lineGutter.appendChild(document.createElement('div'))
+        }
 
-        for (let index = 0; index < count; index++) {
-          const line = document.createElement('div')
+        const startIndex = update ? Math.max(0, update.startLine - 1) : 0
+        const endIndex = update ? Math.min(count - 1, update.endLine - 1) : count - 1
+        for (let index = startIndex; index <= endIndex; index++) {
+          const line = lineGutter.children[index]
           const attribution = lineAttributions[String(index + 1)] || null
           const isLocal = attribution && attribution.clientId === clientId
           const lineOrigin = attribution ? (isLocal ? 'local' : 'remote') : 'loaded'
           line.className = 'gutter-line ' + lineOrigin
-          if (attribution) {
-            line.style.borderRightColor = attribution.color
-          }
+          line.style.borderRightColor = attribution ? attribution.color : ''
           line.title = lineOrigin === 'remote'
             ? 'Edited by ' + (attribution.name || 'remote peer')
             : lineOrigin === 'local'
               ? 'Edited on this device'
               : 'Loaded document line'
           line.textContent = String(index + 1)
-          lineGutter.appendChild(line)
         }
 
         syncLineGutterScroll()

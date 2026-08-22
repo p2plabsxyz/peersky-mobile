@@ -134,6 +134,11 @@ describe('p2pmd mobile editor page routing', () => {
     assert.match(html, /#line-gutter[\s\S]*font: var\(--editor-font-size\)\/var\(--editor-line-height\)/)
     assert.match(html, /[.]gutter-line[\s\S]*min-height: var\(--editor-line-height\)/)
     assert.match(html, /textarea[\s\S]*font: var\(--editor-font-size\)\/var\(--editor-line-height\)/)
+    assert.match(html, /const gutterUpdate = markEditedLines\(lastInputContent, input[.]value\)/)
+    assert.match(html, /if \(gutterUpdate\) renderLineGutter\(gutterUpdate\)/)
+    assert.match(html, /while \(lineGutter[.]childElementCount > count\)/)
+    assert.match(html, /const startIndex = update [^\n]+ update[.]startLine - 1/)
+    assert.doesNotMatch(html, /lineGutter[.]replaceChildren\(\)/)
   })
 
   it('timestamps mobile line ownership for desktop conflict resolution', () => {
