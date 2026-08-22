@@ -64,7 +64,7 @@ describe('backup input size limits', () => {
         { 'content-length': String(MAX_BACKUP_SIZE_BYTES + 1) },
         response.url
       ),
-      /Response exceeds 2147483648 byte limit/
+      /Response exceeds 2GB limit/
     )
     assert.equal(bodyRead, false)
   })

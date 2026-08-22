@@ -9,17 +9,17 @@ export async function readHyperBinaryResponse (
 ) {
   const contentLength = Number(headers['content-length'] || 0)
   if (contentLength > maxBytes) {
-    throw new Error(`Response exceeds ${maxBytes} byte limit: ${contentLength} bytes`)
+    throw new Error(`Response exceeds ${formatSizeLimit(maxBytes)} limit: ${contentLength} bytes`)
   }
 
   const chunks = []
   let totalLength = 0
   const appendChunk = (chunk) => {
     const bytes = toBytes(chunk)
-    totalLength += bytes.byteLength
-    if (totalLength > maxBytes) {
-      throw new Error(`Response exceeds ${maxBytes} byte limit`)
+    if (bytes.byteLength > maxBytes - totalLength) {
+      throw new Error(`Response exceeds ${formatSizeLimit(maxBytes)} limit`)
     }
+    totalLength += bytes.byteLength
     chunks.push(bytes)
   }
   const body = response.body
@@ -58,4 +58,8 @@ function toBytes (chunk) {
   if (chunk instanceof Uint8Array) return chunk
   if (chunk instanceof ArrayBuffer) return new Uint8Array(chunk)
   return b4a.from(String(chunk))
+}
+
+function formatSizeLimit (maxBytes) {
+  return maxBytes === MAX_BACKUP_SIZE_BYTES ? '2GB' : `${maxBytes} byte`
 }

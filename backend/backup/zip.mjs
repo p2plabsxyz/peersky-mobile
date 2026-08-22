@@ -112,7 +112,7 @@ function readEntryData (zipBytes, entry) {
   }
 
   if (entry.method === ZIP_METHOD_DEFLATE) {
-    const maxOutputLength = Math.min(entry.uncompressedSize, MAX_BACKUP_SIZE_BYTES)
+    const maxOutputLength = Math.max(1, Math.min(entry.uncompressedSize, MAX_BACKUP_SIZE_BYTES))
     const inflated = inflateRawSync(compressed, { maxOutputLength })
     if (inflated.byteLength !== entry.uncompressedSize) {
       throw new Error(`ZIP entry size mismatch: ${entry.name}`)
