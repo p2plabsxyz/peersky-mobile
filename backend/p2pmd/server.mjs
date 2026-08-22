@@ -1521,6 +1521,7 @@ export function getP2pmdEditorPage () {
       let remoteUpdateTimer = null
       let lastSyncedContent = ''
       let lastInputContent = ''
+      let ytextSnapshot = ''
       let lineAttributions = {}
       let localLineAttributions = {}
       let latestPeerList = []
@@ -1779,7 +1780,7 @@ export function getP2pmdEditorPage () {
         const avatar = document.createElement('span')
         avatar.className = 'peer-avatar'
         avatar.style.backgroundColor = peer.color
-        avatar.textContent = peer.name.charAt(0).toUpperCase()
+        avatar.textContent = (String(peer.name || '').trim().charAt(0) || '?').toUpperCase()
 
         const name = document.createElement('strong')
         name.className = 'peer-name'
@@ -2141,9 +2142,7 @@ export function getP2pmdEditorPage () {
         }
       }
 
-      function applyTextDiff(ytextRef, oldText, newText, origin) {
-        if (!ytextRef || oldText === newText) return
-
+      function diffTextChange(oldText, newText) {
         let prefix = 0
         const minLength = Math.min(oldText.length, newText.length)
         while (prefix < minLength && oldText[prefix] === newText[prefix]) prefix += 1
@@ -2159,6 +2158,14 @@ export function getP2pmdEditorPage () {
           newSuffix -= 1
         }
 
+        return { prefix, oldSuffix, newSuffix }
+      }
+
+      function applyTextDiff(ytextRef, oldText, newText, origin, change = null) {
+        if (!ytextRef || oldText === newText) return
+
+        const { prefix, oldSuffix, newSuffix } = change || diffTextChange(oldText, newText)
+
         const deleteLength = oldSuffix - prefix
         const insertedText = newText.slice(prefix, newSuffix)
 
@@ -2166,6 +2173,15 @@ export function getP2pmdEditorPage () {
           if (deleteLength > 0) ytextRef.delete(prefix, deleteLength)
           if (insertedText) ytextRef.insert(prefix, insertedText)
         }, origin)
+      }
+
+      function getYTextSnapshot() {
+        if (!ytext) return ytextSnapshot
+        if (typeof ytextSnapshot === 'string' && ytextSnapshot.length === ytext.length) {
+          return ytextSnapshot
+        }
+        ytextSnapshot = ytext.toString()
+        return ytextSnapshot
       }
 
       async function loadDocument() {
@@ -2196,16 +2212,17 @@ export function getP2pmdEditorPage () {
       function scheduleDocumentSave() {
         if (saveTimer) clearTimeout(saveTimer)
         markLocalPeerTyping()
-        const gutterUpdate = markEditedLines(lastInputContent, input.value)
-        lastInputContent = input.value
+        const newText = input.value
+        const oldText = ydoc && ytext ? getYTextSnapshot() : lastInputContent
+        const change = diffTextChange(oldText, newText)
+        const gutterUpdate = markEditedLines(oldText, newText)
+        lastInputContent = newText
         if (gutterUpdate) renderLineGutter(gutterUpdate)
         notifyNative('p2pmd-document-pending', {})
 
         if (ydoc && ytext) {
-          const newText = input.value
-          const oldText = ytext.toString()
           if (newText !== oldText) {
-            applyTextDiff(ytext, oldText, newText, Y_ORIGIN_LOCAL_INPUT)
+            applyTextDiff(ytext, oldText, newText, Y_ORIGIN_LOCAL_INPUT, change)
           }
           return
         }
@@ -2736,62 +2753,107 @@ export function getP2pmdEditorPage () {
         return Math.max(String(content || '').split(newline).length, 1)
       }
 
+      function countLineBreaks(text, start = 0, end = text.length) {
+        let count = 0
+        for (let index = start; index < end; index++) {
+          if (text[index] === newline) count += 1
+        }
+        return count
+      }
+
+      function linesMatch(textA, startA, endA, textB, startB, endB) {
+        const length = endA - startA
+        if (length !== endB - startB) return false
+        for (let offset = 0; offset < length; offset++) {
+          if (textA[startA + offset] !== textB[startB + offset]) return false
+        }
+        return true
+      }
+
+      function countMatchingPrefixLines(previousValue, nextValue) {
+        let previousStart = 0
+        let nextStart = 0
+        let count = 0
+        while (previousStart <= previousValue.length && nextStart <= nextValue.length) {
+          const previousBreak = previousValue.indexOf(newline, previousStart)
+          const nextBreak = nextValue.indexOf(newline, nextStart)
+          const previousEnd = previousBreak === -1 ? previousValue.length : previousBreak
+          const nextEnd = nextBreak === -1 ? nextValue.length : nextBreak
+          if (!linesMatch(previousValue, previousStart, previousEnd, nextValue, nextStart, nextEnd)) break
+
+          count += 1
+          previousStart = previousBreak === -1 ? previousValue.length + 1 : previousBreak + 1
+          nextStart = nextBreak === -1 ? nextValue.length + 1 : nextBreak + 1
+        }
+        return count
+      }
+
+      function countMatchingSuffixLines(previousValue, nextValue, availablePrevious, availableNext) {
+        let previousEnd = previousValue.length
+        let nextEnd = nextValue.length
+        let count = 0
+        while (count < availablePrevious && count < availableNext) {
+          const previousStart = previousValue.lastIndexOf(newline, previousEnd - 1) + 1
+          const nextStart = nextValue.lastIndexOf(newline, nextEnd - 1) + 1
+          if (!linesMatch(previousValue, previousStart, previousEnd, nextValue, nextStart, nextEnd)) break
+
+          count += 1
+          previousEnd = previousStart - 1
+          nextEnd = nextStart - 1
+        }
+        return count
+      }
+
       function markEditedLines(previousContent, nextContent) {
         if (previousContent === nextContent) return null
 
-        const previousLines = String(previousContent || '').split(newline)
-        const nextLines = String(nextContent || '').split(newline)
+        const previousValue = String(previousContent || '')
+        const nextValue = String(nextContent || '')
+        const previousLineCount = countLineBreaks(previousValue) + 1
+        const nextLineCount = countLineBreaks(nextValue) + 1
+        const prefixLineCount = countMatchingPrefixLines(previousValue, nextValue)
+        const suffixLineCount = countMatchingSuffixLines(
+          previousValue,
+          nextValue,
+          previousLineCount - prefixLineCount,
+          nextLineCount - prefixLineCount
+        )
         const nextAttributions = {}
         const nextLocalAttributions = {}
-        let prefix = 0
 
-        function carryLineAttribution(previousLine, nextLine) {
-          const existing = lineAttributions[String(previousLine)]
-          if (!existing) return
+        for (const [line, attribution] of Object.entries(lineAttributions)) {
+          const previousLine = Number(line)
+          let nextLine = null
+          if (previousLine <= prefixLineCount) {
+            nextLine = previousLine
+          } else if (previousLine > previousLineCount - suffixLineCount) {
+            nextLine = previousLine + nextLineCount - previousLineCount
+          }
+          if (!nextLine || nextLine < 1 || nextLine > nextLineCount) continue
 
-          nextAttributions[String(nextLine)] = existing
-          if (existing.clientId === clientId) {
-            nextLocalAttributions[String(nextLine)] = existing
+          nextAttributions[String(nextLine)] = attribution
+          if (attribution.clientId === clientId) {
+            nextLocalAttributions[String(nextLine)] = attribution
           }
         }
 
-        while (
-          prefix < previousLines.length &&
-          prefix < nextLines.length &&
-          previousLines[prefix] === nextLines[prefix]
-        ) {
-          carryLineAttribution(prefix + 1, prefix + 1)
-          prefix += 1
-        }
-
-        let previousSuffix = previousLines.length - 1
-        let nextSuffix = nextLines.length - 1
-        while (
-          previousSuffix >= prefix &&
-          nextSuffix >= prefix &&
-          previousLines[previousSuffix] === nextLines[nextSuffix]
-        ) {
-          carryLineAttribution(previousSuffix + 1, nextSuffix + 1)
-          previousSuffix -= 1
-          nextSuffix -= 1
-        }
-
         const editedAttribution = { ...localAuthor, updatedAt: Date.now() }
-        for (let index = prefix; index <= nextSuffix; index++) {
-          nextAttributions[String(index + 1)] = editedAttribution
-          nextLocalAttributions[String(index + 1)] = editedAttribution
+        const startLine = prefixLineCount + 1
+        const editedEndLine = nextLineCount - suffixLineCount
+        for (let line = startLine; line <= editedEndLine; line++) {
+          nextAttributions[String(line)] = editedAttribution
+          nextLocalAttributions[String(line)] = editedAttribution
         }
 
         lineAttributions = nextAttributions
         localLineAttributions = nextLocalAttributions
 
-        const startLine = prefix + 1
         return {
           startLine,
-          endLine: previousLines.length === nextLines.length
-            ? Math.max(startLine, nextSuffix + 1)
-            : nextLines.length,
-          lineCount: nextLines.length
+          endLine: previousLineCount === nextLineCount
+            ? Math.max(startLine, editedEndLine)
+            : nextLineCount,
+          lineCount: nextLineCount
         }
       }
 
@@ -2925,7 +2987,7 @@ export function getP2pmdEditorPage () {
             throw new Error(result.error || 'Unable to sync document update')
           }
 
-          const syncedDocument = getSyncedDocumentFromResponse(result, ytext ? ytext.toString() : input.value)
+          const syncedDocument = getSyncedDocumentFromResponse(result, ytext ? getYTextSnapshot() : input.value)
           notifyNative('p2pmd-document-saved', {
             updatedAt: syncedDocument.updatedAt,
             contentLength: syncedDocument.content.length
@@ -2986,6 +3048,7 @@ export function getP2pmdEditorPage () {
           if (typeof result.yjsState === 'string') {
             window.Y.applyUpdate(ydoc, base64ToBytes(result.yjsState), Y_ORIGIN_REMOTE)
             const yjsContent = ytext.toString()
+            ytextSnapshot = yjsContent
             if (yjsContent || !input.value) {
               input.value = yjsContent
               lastSyncedContent = yjsContent
@@ -2995,10 +3058,11 @@ export function getP2pmdEditorPage () {
           }
         } catch {}
 
-        if (!ytext.toString() && input.value) {
+        if (!getYTextSnapshot() && input.value) {
           ydoc.transact(() => {
             ytext.insert(0, input.value)
           }, Y_ORIGIN_REMOTE)
+          ytextSnapshot = input.value
         }
 
         ydoc.on('update', (update, origin) => {
@@ -3034,6 +3098,7 @@ export function getP2pmdEditorPage () {
 
         ytext.observe((event) => {
           const newContent = ytext.toString()
+          ytextSnapshot = newContent
           lastSyncedContent = newContent
           lastInputContent = newContent
 
@@ -3327,7 +3392,7 @@ export function getP2pmdEditorPage () {
             if (typeof documentState.content !== 'string') return
 
             if (ydoc && ytext) {
-              lastSyncedContent = ytext.toString()
+              lastSyncedContent = getYTextSnapshot()
               lastInputContent = lastSyncedContent
               applyLineAttributionsFromDocument({
                 ...documentState,

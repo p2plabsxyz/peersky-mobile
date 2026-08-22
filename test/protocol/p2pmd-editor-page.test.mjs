@@ -134,11 +134,18 @@ describe('p2pmd mobile editor page routing', () => {
     assert.match(html, /#line-gutter[\s\S]*font: var\(--editor-font-size\)\/var\(--editor-line-height\)/)
     assert.match(html, /[.]gutter-line[\s\S]*min-height: var\(--editor-line-height\)/)
     assert.match(html, /textarea[\s\S]*font: var\(--editor-font-size\)\/var\(--editor-line-height\)/)
-    assert.match(html, /const gutterUpdate = markEditedLines\(lastInputContent, input[.]value\)/)
+    assert.match(html, /const oldText = ydoc && ytext [^\n]+ getYTextSnapshot\(\) : lastInputContent/)
+    assert.match(html, /const change = diffTextChange\(oldText, newText\)/)
+    assert.match(html, /const gutterUpdate = markEditedLines\(oldText, newText\)/)
+    assert.match(html, /applyTextDiff\(ytext, oldText, newText, Y_ORIGIN_LOCAL_INPUT, change\)/)
     assert.match(html, /if \(gutterUpdate\) renderLineGutter\(gutterUpdate\)/)
     assert.match(html, /while \(lineGutter[.]childElementCount > count\)/)
     assert.match(html, /const startIndex = update [^\n]+ update[.]startLine - 1/)
     assert.doesNotMatch(html, /lineGutter[.]replaceChildren\(\)/)
+    assert.doesNotMatch(html, /const previousLines = String\(previousContent/)
+    assert.doesNotMatch(html, /const nextLines = String\(nextContent/)
+    assert.match(html, /function countMatchingPrefixLines\(previousValue, nextValue\)/)
+    assert.match(html, /function countMatchingSuffixLines\(previousValue, nextValue, availablePrevious, availableNext\)/)
   })
 
   it('timestamps mobile line ownership for desktop conflict resolution', () => {
@@ -146,5 +153,14 @@ describe('p2pmd mobile editor page routing', () => {
 
     assert.match(html, /const editedAttribution = \{ [.]{3}localAuthor, updatedAt: Date[.]now\(\) \}/)
     assert.match(html, /normalized[.]updatedAt = updatedAt/)
+  })
+
+  it('uses a cached CRDT snapshot and safe peer avatar fallback', () => {
+    const html = getP2pmdEditorPage()
+
+    assert.match(html, /function getYTextSnapshot\(\)/)
+    assert.match(html, /ytextSnapshot[.]length === ytext[.]length/)
+    assert.match(html, /ytextSnapshot = ytext[.]toString\(\)/)
+    assert.match(html, /String\(peer[.]name \|\| ''\)[.]trim\(\)[.]charAt\(0\) \|\| '[?]'/)
   })
 })
