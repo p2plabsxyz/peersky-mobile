@@ -1,5 +1,6 @@
 import b4a from 'b4a'
 import { inflateRawSync } from 'node:zlib'
+import { MAX_BACKUP_SIZE_BYTES } from './limits.mjs'
 
 const EOCD_SIGNATURE = 0x06054b50
 const CENTRAL_DIRECTORY_SIGNATURE = 0x02014b50
@@ -10,6 +11,10 @@ const ZIP_METHOD_DEFLATE = 8
 
 export function readZipEntries (zipBytes) {
   const bytes = toBuffer(zipBytes)
+  if (bytes.byteLength > MAX_BACKUP_SIZE_BYTES) {
+    throw new Error('ZIP archive exceeds 2GB limit')
+  }
+
   const eocdOffset = findEndOfCentralDirectory(bytes)
   const entryCount = readUInt16LE(bytes, eocdOffset + 10)
   const centralDirectorySize = readUInt32LE(bytes, eocdOffset + 12)
@@ -22,6 +27,7 @@ export function readZipEntries (zipBytes) {
 
   const entries = []
   let offset = centralDirectoryOffset
+  let totalUncompressedSize = 0
 
   for (let index = 0; index < entryCount; index += 1) {
     if (readUInt32LE(bytes, offset) !== CENTRAL_DIRECTORY_SIGNATURE) {
@@ -40,6 +46,18 @@ export function readZipEntries (zipBytes) {
     const nameStart = offset + 46
     const nameEnd = nameStart + filenameLength
     const name = b4a.toString(bytes.subarray(nameStart, nameEnd), 'utf8')
+    const isDirectory = name.endsWith('/')
+
+    if (!isDirectory) {
+      if (uncompressedSize > MAX_BACKUP_SIZE_BYTES) {
+        throw new Error(`ZIP entry exceeds 2GB limit: ${name}`)
+      }
+
+      totalUncompressedSize += uncompressedSize
+      if (totalUncompressedSize > MAX_BACKUP_SIZE_BYTES) {
+        throw new Error('ZIP contents exceed 2GB limit')
+      }
+    }
 
     entries.push({
       name,
@@ -48,7 +66,7 @@ export function readZipEntries (zipBytes) {
       compressedSize,
       uncompressedSize,
       localHeaderOffset,
-      isDirectory: name.endsWith('/'),
+      isDirectory,
       get bytes () {
         if (this.isDirectory) return new Uint8Array()
         return readEntryData(bytes, this)
@@ -87,11 +105,15 @@ function readEntryData (zipBytes, entry) {
   const compressed = zipBytes.subarray(dataStart, dataEnd)
 
   if (entry.method === ZIP_METHOD_STORE) {
+    if (compressed.byteLength !== entry.uncompressedSize) {
+      throw new Error(`ZIP entry size mismatch: ${entry.name}`)
+    }
     return copyBytes(compressed)
   }
 
   if (entry.method === ZIP_METHOD_DEFLATE) {
-    const inflated = inflateRawSync(compressed, { maxOutputLength: entry.uncompressedSize })
+    const maxOutputLength = Math.min(entry.uncompressedSize, MAX_BACKUP_SIZE_BYTES)
+    const inflated = inflateRawSync(compressed, { maxOutputLength })
     if (inflated.byteLength !== entry.uncompressedSize) {
       throw new Error(`ZIP entry size mismatch: ${entry.name}`)
     }
