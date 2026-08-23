@@ -6,6 +6,7 @@ import {
   RPC_HYPER_CREATE_DRIVE,
   RPC_HYPER_FETCH,
   RPC_HYPER_INIT,
+  RPC_HYPER_LAN_STATUS,
   RPC_IDENTITY_GET_KEY,
   RPC_IDENTITY_RESTORE_FROM_HYPER,
   RPC_IDENTITY_CONFIRM_RESTORE,
@@ -33,6 +34,7 @@ import { createDrive, publishMarkdownDocument, readHyperFile, uploadHyperFile } 
 import { fetchHyper, fetchHyperBinary, resetHyperFetch } from '../hyper/fetch.mjs'
 import {
   closeHyperRuntime,
+  ensureLANDiscovery,
   getHyperRuntime,
   getHyperStoragePath,
   getLANDiscoveryStatus
@@ -77,6 +79,15 @@ export async function routeRpcRequest (req) {
 
     if (req.command === RPC_HYPER_CREATE_DRIVE) {
       replyJson(req, await createDrive(parseJsonMessage(req.data)))
+      return
+    }
+
+    if (req.command === RPC_HYPER_LAN_STATUS) {
+      await ensureLANDiscovery()
+      replyJson(req, {
+        ok: true,
+        lan: getLANDiscoveryStatus()
+      })
       return
     }
 

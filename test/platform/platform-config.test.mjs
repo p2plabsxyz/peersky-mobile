@@ -94,11 +94,12 @@ describe('mobile platform runtime configuration', () => {
     assert.match(indexSource, /mediaCapturePermissionGrantType='prompt'/)
   })
 
-  it('opens incoming Android web links after browser startup completes', async () => {
+  it('opens incoming Android web and Hyper links after browser startup completes', async () => {
     const indexSource = await readFile(repoFile('app/index.tsx'), 'utf8')
 
     assert.match(indexSource, /Linking\.getInitialURL\(\)/)
     assert.match(indexSource, /Linking\.addEventListener\('url'/)
+    assert.match(indexSource, /!isWebUrl\(url\) && !isHyperUrl\(url\)/)
     assert.match(indexSource, /if \(!browserSessionReady \|\| !pendingIncomingUrl\) return/)
     assert.match(indexSource, /void loadBrowserUrl\(incomingUrl\)/)
   })
@@ -142,10 +143,30 @@ describe('mobile platform runtime configuration', () => {
     assert.equal(typeof packageJson.dependencies?.['bare-dgram'], 'string')
     assert.equal(typeof packageJson.dependencies?.['bare-net'], 'string')
     assert.equal(typeof packageJson.dependencies?.['bare-os'], 'string')
+    assert.equal(typeof packageJson.dependencies?.['bare-process'], 'string')
+  })
+
+  it('installs Bare globals before loading Node-oriented dependencies', async () => {
+    const backend = await readFile(repoFile('backend/backend.mjs'), 'utf8')
+    const globals = await readFile(repoFile('backend/bare-globals.mjs'), 'utf8')
+
+    assert.match(backend, /^import '\.\/bare-globals\.mjs'/)
+    assert.match(backend, /import\('\.\/main\.mjs'\)/)
+    assert.doesNotMatch(backend, /from '\.\/hyper\/runtime\.mjs'/)
+    assert.match(globals, /import 'bare-process\/global'/)
+  })
+
+  it('does not reopen Hyper storage during a React effect remount', async () => {
+    const indexSource = await readFile(repoFile('app/index.tsx'), 'utf8')
+
+    assert.match(indexSource, /const generation = \+\+workletGenerationRef\.current/)
+    assert.match(indexSource, /setTimeout\(\(\) => \{/)
+    assert.match(indexSource, /workletGenerationRef\.current !== generation/)
+    assert.match(indexSource, /worklet\?\.terminate\(\)/)
   })
 
   it('logs backend cleanup failures during Bare shutdown', async () => {
-    const backend = await readFile(repoFile('backend/backend.mjs'), 'utf8')
+    const backend = await readFile(repoFile('backend/main.mjs'), 'utf8')
 
     assert.match(backend, /Bare\.on\('beforeExit'/)
     assert.match(backend, /disconnectP2pmdRoom\(\)/)
