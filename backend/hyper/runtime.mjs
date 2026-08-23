@@ -1,6 +1,11 @@
 /* global Bare */
 
 import { create as createSDK } from 'hyper-sdk'
+import {
+  getLANDiscoveryStatus,
+  resetLANDiscovery,
+  startLANDiscovery
+} from './lan-discovery.mjs'
 
 let sdk = null
 let sdkOpening = null
@@ -12,7 +17,8 @@ export async function getHyperRuntime () {
   if (!sdkOpening) {
     storagePath = getHyperSdkStoragePath()
     sdkOpening = createSDK({ storage: storagePath })
-      .then((runtime) => {
+      .then(async (runtime) => {
+        await startLANDiscovery(runtime)
         sdk = runtime
         return runtime
       })
@@ -29,6 +35,8 @@ export function getHyperStoragePath () {
   return storagePath
 }
 
+export { getLANDiscoveryStatus }
+
 export async function closeHyperRuntime () {
   const runtime = sdk || (sdkOpening ? await sdkOpening : null)
   if (!runtime) return
@@ -36,7 +44,11 @@ export async function closeHyperRuntime () {
   sdk = null
   sdkOpening = null
 
-  await runtime.close()
+  try {
+    await runtime.close()
+  } finally {
+    resetLANDiscovery()
+  }
 }
 
 function getHyperSdkStoragePath () {

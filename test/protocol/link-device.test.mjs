@@ -5,6 +5,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import sodium from 'sodium-native'
+import { createMobilePairingCode } from '../../app/settings/identity-pairing.mjs'
 import { verifyIdentityTransferSignature } from '../../backend/backup/identity-transfer.mjs'
 import { restoreIdentityFromBackup } from '../../backend/backup/restore.mjs'
 
@@ -37,6 +38,18 @@ function createDirectoryZip (name) {
 }
 
 describe('Link Device Identity Transfer', () => {
+  it('creates a complete mobile pairing code for QR and clipboard use', () => {
+    const publicKey = 'AA'.repeat(32)
+    const nonce = 'BB'.repeat(16)
+
+    assert.equal(
+      createMobilePairingCode(publicKey, nonce),
+      `peersky-identity:${'aa'.repeat(32)}?nonce=${'bb'.repeat(16)}&deviceType=mobile`
+    )
+    assert.equal(createMobilePairingCode('invalid', nonce), '')
+    assert.equal(createMobilePairingCode(publicKey, 'invalid'), '')
+  })
+
   it('Forged signature is rejected', () => {
     const keys = { publicKey: Buffer.alloc(32), secretKey: Buffer.alloc(64) }
     sodium.crypto_sign_keypair(keys.publicKey, keys.secretKey)

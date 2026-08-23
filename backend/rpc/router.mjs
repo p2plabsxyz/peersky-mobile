@@ -31,7 +31,12 @@ import { restoreIdentityFromBackup } from '../backup/restore.mjs'
 
 import { createDrive, publishMarkdownDocument, readHyperFile, uploadHyperFile } from '../hyper/drive.mjs'
 import { fetchHyper, fetchHyperBinary, resetHyperFetch } from '../hyper/fetch.mjs'
-import { closeHyperRuntime, getHyperRuntime, getHyperStoragePath } from '../hyper/runtime.mjs'
+import {
+  closeHyperRuntime,
+  getHyperRuntime,
+  getHyperStoragePath,
+  getLANDiscoveryStatus
+} from '../hyper/runtime.mjs'
 
 import {
   connectHolesail,
@@ -57,7 +62,11 @@ export async function routeRpcRequest (req) {
   try {
     if (req.command === RPC_HYPER_INIT) {
       await getHyperRuntime()
-      replyJson(req, { ok: true, storagePath: getHyperStoragePath() })
+      replyJson(req, {
+        ok: true,
+        storagePath: getHyperStoragePath(),
+        lan: getLANDiscoveryStatus()
+      })
       return
     }
 

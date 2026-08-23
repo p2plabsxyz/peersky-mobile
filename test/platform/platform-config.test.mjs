@@ -3,8 +3,10 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 
 const ANDROID_LOOPBACK_CLEARTEXT_PLUGIN = './plugins/with-android-loopback-cleartext'
+const LAN_DISCOVERY_PLUGIN = './plugins/with-lan-discovery'
 const REPO_ROOT = new URL('../../', import.meta.url)
 const ANDROID_LOOPBACK_CLEARTEXT_PLUGIN_FILE = repoFile('plugins/with-android-loopback-cleartext.js')
+const LAN_DISCOVERY_PLUGIN_FILE = repoFile('plugins/with-lan-discovery.js')
 
 describe('mobile platform runtime configuration', () => {
   it('allows browser rotation according to the device orientation setting', async () => {
@@ -45,7 +47,9 @@ describe('mobile platform runtime configuration', () => {
     assert.deepEqual(android?.permissions, [
       'android.permission.ACCESS_COARSE_LOCATION',
       'android.permission.ACCESS_FINE_LOCATION',
+      'android.permission.ACCESS_WIFI_STATE',
       'android.permission.CAMERA',
+      'android.permission.CHANGE_WIFI_MULTICAST_STATE',
       'android.permission.POST_NOTIFICATIONS',
       'android.permission.RECORD_AUDIO'
     ])
@@ -58,6 +62,29 @@ describe('mobile platform runtime configuration', () => {
     assert.match(infoPlist?.NSCameraUsageDescription, /website you visit/i)
     assert.match(infoPlist?.NSLocationWhenInUseUsageDescription, /website you visit/i)
     assert.match(infoPlist?.NSMicrophoneUsageDescription, /website you visit/i)
+  })
+
+  it('configures local discovery on Android and iOS', async () => {
+    const appJson = JSON.parse(await readFile(repoFile('app.json'), 'utf8'))
+    const plugins = appJson.expo?.plugins || []
+    const infoPlist = appJson.expo?.ios?.infoPlist
+    const plugin = await readFile(LAN_DISCOVERY_PLUGIN_FILE, 'utf8')
+    const mainApplication = await readFile(
+      repoFile('android/app/src/main/java/xyz/p2plabs/peersky/MainApplication.kt'),
+      'utf8'
+    )
+
+    assert.equal(hasExpoPlugin(plugins, LAN_DISCOVERY_PLUGIN), true)
+    assert.equal(
+      appJson.expo?.ios?.entitlements?.['com.apple.developer.networking.multicast'],
+      true
+    )
+    assert.deepEqual(infoPlist?.NSBonjourServices, ['_hyperdht-mdns._udp'])
+    assert.match(infoPlist?.NSLocalNetworkUsageDescription, /nearby PeerSky devices/)
+    assert.match(plugin, /android\.permission\.CHANGE_WIFI_MULTICAST_STATE/)
+    assert.match(plugin, /createMulticastLock\("peersky-hyperdht-mdns"\)/)
+    assert.match(mainApplication, /createMulticastLock\("peersky-hyperdht-mdns"\)/)
+    assert.match(mainApplication, /acquire\(\)/)
   })
 
   it('enables native WebView prompts for location and media capture', async () => {
@@ -96,9 +123,25 @@ describe('mobile platform runtime configuration', () => {
     const imports = JSON.parse(await readFile(repoFile('backend/bare-imports.json'), 'utf8'))
 
     assert.deepEqual(imports, {
+      buffer: 'bare-buffer',
+      crypto: 'bare-crypto',
+      dgram: 'bare-dgram',
+      events: 'bare-events',
+      net: 'bare-net',
       'node:crypto': 'bare-crypto',
-      'node:zlib': 'bare-zlib'
+      'node:zlib': 'bare-zlib',
+      os: 'bare-os'
     })
+  })
+
+  it('includes the LAN discovery runtime dependency', async () => {
+    const packageJson = JSON.parse(await readFile(repoFile('package.json'), 'utf8'))
+
+    assert.equal(packageJson.dependencies?.['@p2plabs/hyperdht-mdns'], '^1.0.0')
+    assert.equal(typeof packageJson.dependencies?.['bare-buffer'], 'string')
+    assert.equal(typeof packageJson.dependencies?.['bare-dgram'], 'string')
+    assert.equal(typeof packageJson.dependencies?.['bare-net'], 'string')
+    assert.equal(typeof packageJson.dependencies?.['bare-os'], 'string')
   })
 
   it('logs backend cleanup failures during Bare shutdown', async () => {

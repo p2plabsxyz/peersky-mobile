@@ -571,7 +571,10 @@ export default function App () {
       }
 
       setIdentityStoragePath(Paths.document?.uri ? toBareFsPath(Paths.document.uri) : storageDir)
-      setStatus(`Hyper ready (${initResponse.storagePath || storageDir})`)
+      const lanStatus = initResponse.lan?.available
+        ? `; LAN ${initResponse.lan.host}:${initResponse.lan.port}`
+        : '; LAN unavailable'
+      setStatus(`Hyper ready (${initResponse.storagePath || storageDir})${lanStatus}`)
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error))
     } finally {

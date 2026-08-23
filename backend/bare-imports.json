@@ -1,4 +1,10 @@
 {
+  "buffer": "bare-buffer",
+  "crypto": "bare-crypto",
+  "dgram": "bare-dgram",
+  "events": "bare-events",
+  "net": "bare-net",
   "node:crypto": "bare-crypto",
-  "node:zlib": "bare-zlib"
+  "node:zlib": "bare-zlib",
+  "os": "bare-os"
 }
