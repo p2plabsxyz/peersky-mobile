@@ -22,13 +22,13 @@ describe('p2pmd document protocol state', () => {
 
   it('stores document content and valid line attributions', () => {
     const result = updateDocumentState('hello\nmobile', {
-      1: { color: '#58a6ff', name: 'Phone', clientId: 'phone-1' },
+      1: { color: '#58a6ff', name: 'Phone', clientId: 'phone-1', updatedAt: 1234 },
       3: { color: '#ff00ff', name: 'Out of range', clientId: 'ignored' }
     })
 
     assert.equal(result.ok, true)
     assert.deepEqual(result.document.lineAttributions, {
-      1: { color: '#58a6ff', name: 'Phone', clientId: 'phone-1' }
+      1: { color: '#58a6ff', name: 'Phone', clientId: 'phone-1', updatedAt: 1234 }
     })
     assert.equal(getDocumentState().content, 'hello\nmobile')
   })

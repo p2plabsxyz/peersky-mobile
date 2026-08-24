@@ -414,13 +414,15 @@ export const styles = StyleSheet.create({
   p2pmdWorkspaceParticipants: {
     backgroundColor: '#30364a',
     borderRadius: 999,
-    color: '#cdd6ff',
     flexShrink: 1,
-    fontSize: 12,
-    fontWeight: '700',
     overflow: 'hidden',
     paddingHorizontal: 9,
     paddingVertical: 5
+  },
+  p2pmdWorkspaceParticipantsText: {
+    color: '#cdd6ff',
+    fontSize: 12,
+    fontWeight: '700'
   },
   p2pmdWorkspaceRole: {
     backgroundColor: '#3a3020',
@@ -792,6 +794,36 @@ export const styles = StyleSheet.create({
   p2pmdJoinActionText: {
     color: '#c6f6df',
     fontSize: 14,
+    fontWeight: '800'
+  },
+  p2pmdRecentRooms: {
+    gap: 8
+  },
+  p2pmdRecentRoom: {
+    alignItems: 'center',
+    backgroundColor: '#262832',
+    borderColor: '#383b46',
+    borderRadius: 10,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 12,
+    justifyContent: 'space-between',
+    minHeight: 44,
+    paddingHorizontal: 12,
+    paddingVertical: 10
+  },
+  p2pmdRecentRoomPressed: {
+    backgroundColor: '#30333f'
+  },
+  p2pmdRecentRoomKey: {
+    color: '#d8dbea',
+    flex: 1,
+    fontFamily: 'monospace',
+    fontSize: 13
+  },
+  p2pmdRecentRoomAction: {
+    color: '#9ec5ff',
+    fontSize: 12,
     fontWeight: '800'
   },
   roomPill: {

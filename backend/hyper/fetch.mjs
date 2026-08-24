@@ -13,8 +13,9 @@ import {
   DEFAULT_HYPER_DISCOVERY_RETRY_DELAY,
   withHyperRetry
 } from './fetch-retry.mjs'
-import { getHyperRuntime } from './runtime.mjs'
+import { withHyperRuntimeOperation } from './runtime.mjs'
 import { parseHyperUrl } from './url.mjs'
+import { readHyperBinaryResponse } from './binary-response.mjs'
 
 let hyperFetch = null
 
@@ -47,80 +48,81 @@ export async function fetchHyper ({
   const target = parseHyperUrl(url)
   if (target.error) return { ok: false, error: target.error }
 
-  const runtime = await getHyperRuntime()
-  const fetch = await getHyperFetch(runtime)
+  return withHyperRuntimeOperation(async (runtime) => {
+    const fetch = await getHyperFetch(runtime)
 
-  return withHyperRetry({
-    fetch,
-    url,
-    retries,
-    retryDelay,
-    maxRetryDelay,
-    backoffFactor,
-    readResponse: async (response, headers) => {
-      const responseUrl = response.url || url
-      const mediaType = getHyperNavigationMediaType(responseUrl, headers)
-      const downloadName = getHyperNavigationDownloadName(responseUrl, headers)
-      if (downloadName && !mediaType) {
-        await cancelResponseBody(response.body)
-        const proxyServer = await startHyperAssetServer(fetch)
+    return withHyperRetry({
+      fetch,
+      url,
+      retries,
+      retryDelay,
+      maxRetryDelay,
+      backoffFactor,
+      readResponse: async (response, headers) => {
+        const responseUrl = response.url || url
+        const mediaType = getHyperNavigationMediaType(responseUrl, headers)
+        const downloadName = getHyperNavigationDownloadName(responseUrl, headers)
+        if (downloadName && !mediaType) {
+          await cancelResponseBody(response.body)
+          const proxyServer = await startHyperAssetServer(fetch)
+          return {
+            ok: response.ok,
+            status: response.status,
+            statusText: response.statusText,
+            url: responseUrl,
+            headers,
+            downloadName,
+            downloadUrl: createProxyAssetUrl(
+              proxyServer.localUrl,
+              responseUrl,
+              proxyServer.authToken,
+              downloadName
+            )
+          }
+        }
+
+        if (mediaType) {
+          await cancelResponseBody(response.body)
+          const proxyServer = await startHyperAssetServer(fetch)
+          return {
+            ok: response.ok,
+            status: response.status,
+            statusText: response.statusText,
+            url: responseUrl,
+            headers,
+            mediaName: normalizeMediaName(responseUrl),
+            mediaType,
+            mediaUrl: createProxyAssetUrl(
+              proxyServer.localUrl,
+              responseUrl,
+              proxyServer.authToken
+            )
+          }
+        }
+
+        let body = await response.text()
+
+        if (inlineAssets && isHtmlResponse(headers, body)) {
+          const proxyServer = await startHyperAssetServer(fetch)
+          body = await inlineHyperAssets({
+            html: body,
+            baseUrl: response.url || url,
+            fetch,
+            assetBaseUrl: proxyServer.localUrl,
+            assetAuthToken: proxyServer.authToken
+          })
+        }
+
         return {
           ok: response.ok,
           status: response.status,
           statusText: response.statusText,
-          url: responseUrl,
+          url: response.url || url,
           headers,
-          downloadName,
-          downloadUrl: createProxyAssetUrl(
-            proxyServer.localUrl,
-            responseUrl,
-            proxyServer.authToken,
-            downloadName
-          )
+          body
         }
       }
-
-      if (mediaType) {
-        await cancelResponseBody(response.body)
-        const proxyServer = await startHyperAssetServer(fetch)
-        return {
-          ok: response.ok,
-          status: response.status,
-          statusText: response.statusText,
-          url: responseUrl,
-          headers,
-          mediaName: normalizeMediaName(responseUrl),
-          mediaType,
-          mediaUrl: createProxyAssetUrl(
-            proxyServer.localUrl,
-            responseUrl,
-            proxyServer.authToken
-          )
-        }
-      }
-
-      let body = await response.text()
-
-      if (inlineAssets && isHtmlResponse(headers, body)) {
-        const proxyServer = await startHyperAssetServer(fetch)
-        body = await inlineHyperAssets({
-          html: body,
-          baseUrl: response.url || url,
-          fetch,
-          assetBaseUrl: proxyServer.localUrl,
-          assetAuthToken: proxyServer.authToken
-        })
-      }
-
-      return {
-        ok: response.ok,
-        status: response.status,
-        statusText: response.statusText,
-        url: response.url || url,
-        headers,
-        body
-      }
-    }
+    })
   })
 }
 
@@ -170,58 +172,18 @@ export async function fetchHyperBinary ({
   const target = parseHyperUrl(url)
   if (target.error) return { ok: false, error: target.error }
 
-  const runtime = await getHyperRuntime()
-  const fetch = await getHyperFetch(runtime)
+  return withHyperRuntimeOperation(async (runtime) => {
+    const fetch = await getHyperFetch(runtime)
 
-  return withHyperRetry({
-    fetch,
-    url,
-    retries,
-    retryDelay,
-    maxRetryDelay,
-    backoffFactor,
-    readResponse: async (response, headers) => {
-      const contentLength = Number(headers['content-length'] || 0)
-      if (contentLength > 50 * 1024 * 1024) {
-        throw new Error(`Response exceeds 50MB limit: ${contentLength} bytes`)
-      }
-
-      const chunks = []
-      let totalLength = 0
-      const body = response.body
-
-      if (body && typeof body.getReader === 'function') {
-        const reader = body.getReader()
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
-          totalLength += value.byteLength || value.length
-          if (totalLength > 50 * 1024 * 1024) throw new Error('Response exceeds 50MB limit')
-          chunks.push(chunkToUint8Array(value))
-        }
-      } else if (body && typeof body[Symbol.asyncIterator] === 'function') {
-        for await (const chunk of body) {
-          totalLength += chunk.byteLength || chunk.length
-          if (totalLength > 50 * 1024 * 1024) throw new Error('Response exceeds 50MB limit')
-          chunks.push(chunkToUint8Array(chunk))
-        }
-      } else {
-        const buf = chunkToUint8Array(await response.arrayBuffer())
-        if (buf.byteLength > 50 * 1024 * 1024) throw new Error('Response exceeds 50MB limit')
-        chunks.push(buf)
-      }
-
-      const bytes = b4a.concat(chunks)
-
-      return {
-        ok: response.ok,
-        status: response.status,
-        statusText: response.statusText,
-        url: response.url || url,
-        headers,
-        bytes
-      }
-    }
+    return withHyperRetry({
+      fetch,
+      url,
+      retries,
+      retryDelay,
+      maxRetryDelay,
+      backoffFactor,
+      readResponse: (response, headers) => readHyperBinaryResponse(response, headers, url)
+    })
   })
 }
 

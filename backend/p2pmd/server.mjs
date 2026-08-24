@@ -8,8 +8,12 @@ import {
   updateDocumentState
 } from './document.mjs'
 import { P2PMD_LOOPBACK_HOST } from './constants.mjs'
-import { createPeerPresenceStore } from './peers.mjs'
-import { renderMarkdownPreview } from './preview.mjs'
+import { createPeerActivityStore, createPeerPresenceStore } from './peers.mjs'
+import { renderMarkdownPreview, renderMarkdownSlides } from './preview.mjs'
+import ieeeBrowserScript from './ieee-runtime.mjs'
+import katexCss from './katex-runtime.mjs'
+import { P2PMD_SCIENTIFIC_STYLES } from './scientific.mjs'
+import { P2PMD_TEMPLATES, hasIeeeMarker } from './templates.mjs'
 import yjsBrowserScript from './yjs-runtime.mjs'
 
 let server = null
@@ -18,7 +22,42 @@ let serverTransition = Promise.resolve()
 let bareHttp = null
 const eventClients = new Set()
 const peerPresence = createPeerPresenceStore()
+const peerActivity = createPeerActivityStore()
+const editActivityTimers = new Map()
 let keepaliveInterval = null
+const EDIT_ACTIVITY_DEBOUNCE_MS = 1200
+const P2PMD_SLIDE_BREAK_PATTERN = /(?:\r?\n\r?\n---\r?\n\r?\n|^---\r?\n\r?\n|\r?\n\r?\n---$|^<!-- slide -->$)/m
+const P2PMD_SLIDES_TEMPLATE = `# Welcome to Your Presentation
+
+Your first slide content goes here
+
+<!-- Speaker notes: Introduce yourself and the topic -->
+
+---
+
+# Slide 2: Key Points
+
+- Point 1
+- Point 2
+- Point 3
+
+<!-- Speaker notes: Elaborate on each point -->
+
+---
+
+# Slide 3: More Content
+
+Add your content here
+
+<!-- Speaker notes: Add additional context -->
+
+---
+
+# Thank You!
+
+Any questions?
+
+<!-- Speaker notes: Open floor for Q&A -->`
 
 subscribeToDocumentUpdates(({ document, origin, update }) => {
   if (origin !== 'line-attribution-update') {
@@ -74,6 +113,7 @@ export function createP2pmdHttpServer ({ httpImpl } = {}) {
     throw new Error('P2PMD HTTP server requires an HTTP implementation.')
   }
 
+  if (eventClients.size === 0) resetPeerState()
   return httpImpl.createServer(handleRequest)
 }
 
@@ -148,7 +188,7 @@ function handleRequest (req, res) {
       running: true,
       peers: getPeerCount(),
       peerList: getPeerList(),
-      activityCount: 0
+      activityCount: getPeerActivity().length
     })
     return
   }
@@ -175,7 +215,7 @@ function handleRequest (req, res) {
   if (req.method === 'GET' && pathname === '/activity') {
     sendJson(res, 200, {
       ok: true,
-      activity: []
+      activity: getPeerActivity(150)
     })
     return
   }
@@ -230,8 +270,9 @@ function handleRequest (req, res) {
       .then((body) => {
         const result = applyDocumentUpdate(body.update, body.lineAttributions ?? body.lineAuthors)
         if (result.ok) {
-          upsertPeerPresence(body)
+          const peerKey = upsertPeerPresence(body)
           broadcastPeerState()
+          scheduleEditActivity(peerKey, body)
         }
         sendJson(res, result.ok ? 200 : 400, result)
       })
@@ -249,8 +290,9 @@ function handleRequest (req, res) {
       .then((body) => {
         const result = updateDocumentState(body.content, body.lineAttributions ?? body.lineAuthors)
         if (result.ok) {
-          upsertPeerPresence(body)
+          const peerKey = upsertPeerPresence(body)
           broadcastPeerState()
+          scheduleEditActivity(peerKey, body)
         }
         sendJson(res, result.ok ? 200 : 400, result)
       })
@@ -282,9 +324,16 @@ function handleRequest (req, res) {
           return
         }
 
+        const rendered = body.mode === 'slides'
+          ? renderMarkdownSlides(body.content)
+          : {
+              html: renderMarkdownPreview(body.content),
+              ieee: body.latexModeEnabled === true && hasIeeeMarker(body.content)
+            }
+
         sendJson(res, 200, {
           ok: true,
-          html: renderMarkdownPreview(body.content)
+          ...rendered
         })
       })
       .catch((error) => {
@@ -395,7 +444,13 @@ function openEventStream (req, res) {
   writeEvent(res, 'yjsupdate', getEncodedDocumentState())
   writeEvent(res, 'update', JSON.stringify(getDocumentState()))
   writeEvent(res, 'peerlist', JSON.stringify(getPeerList()))
+  writeEvent(res, 'activity', JSON.stringify(getPeerActivity(100)))
+  const joinActivity = peerActivity.add({
+    ...peerPayload,
+    type: 'join'
+  })
   broadcastPeerState()
+  broadcastActivity(joinActivity)
 
   res.on('close', () => {
     removeEventClient(client)
@@ -445,22 +500,33 @@ function closeEventClients () {
   for (const client of [...eventClients]) {
     removeEventClient(client, false)
   }
-  peerPresence.clear()
+  resetPeerState()
 }
 
 function removeEventClient (client, shouldBroadcast = true) {
+  const departingPeer = getPeerByKey(client.peerKey)
   const deleted = eventClients.delete(client)
 
   try {
     client.res.end()
   } catch {}
 
-  if (deleted) {
-    prunePeerPresence(client.peerKey)
+  const peerRemoved = deleted && prunePeerPresence(client.peerKey)
+
+  if (peerRemoved) {
+    const editTimer = editActivityTimers.get(client.peerKey)
+    if (editTimer) clearTimeout(editTimer)
+    editActivityTimers.delete(client.peerKey)
   }
 
   if (deleted && shouldBroadcast) {
     broadcastPeerState()
+    if (peerRemoved && departingPeer) {
+      broadcastActivity(peerActivity.add({
+        ...departingPeer,
+        type: 'leave'
+      }))
+    }
   }
 
   if (eventClients.size === 0 && keepaliveInterval) {
@@ -472,7 +538,7 @@ function removeEventClient (client, shouldBroadcast = true) {
 }
 
 function prunePeerPresence (peerKey) {
-  peerPresence.prune(peerKey, getActivePeerKeys())
+  return peerPresence.prune(peerKey, getActivePeerKeys())
 }
 
 function broadcastPeerState () {
@@ -480,8 +546,22 @@ function broadcastPeerState () {
   broadcastEvent('peerlist', JSON.stringify(getPeerList()))
 }
 
+function broadcastActivity (activity) {
+  if (!activity) return
+  broadcastEvent('activity', JSON.stringify(activity))
+}
+
 function getPeerList () {
   return peerPresence.getPeerList(getActivePeerKeys())
+}
+
+function getPeerByKey (peerKey) {
+  if (!peerKey) return null
+  return peerPresence.getPeerList(new Set([peerKey]))[0] || null
+}
+
+function getPeerActivity (limit) {
+  return peerActivity.getActivity(limit)
 }
 
 function getPeerCount () {
@@ -506,16 +586,49 @@ function readPeerFromEventRequest (req) {
     params = new URLSearchParams()
   }
 
+  const latexMode = params.get('latexModeEnabled')
+
   return {
     clientId: params.get('clientId') || undefined,
     role: params.get('role') || undefined,
     name: params.get('name') || undefined,
-    color: params.get('color') || undefined
+    color: params.get('color') || undefined,
+    latexModeEnabled: latexMode === 'true' ? true : latexMode === 'false' ? false : undefined
   }
 }
 
 function upsertPeerPresence (payload) {
   return peerPresence.upsert(payload)
+}
+
+function scheduleEditActivity (peerKey, payload = {}) {
+  if (!peerKey) return
+  const existing = editActivityTimers.get(peerKey)
+  if (existing) clearTimeout(existing)
+
+  const timer = setTimeout(() => {
+    editActivityTimers.delete(peerKey)
+    const activePeer = getPeerByKey(peerKey)
+    const peer = activePeer || payload
+    broadcastActivity(peerActivity.add({
+      ...peer,
+      cursorLine: payload.cursorLine ?? peer?.cursorLine,
+      cursorColumn: payload.cursorColumn ?? peer?.cursorColumn,
+      type: 'edit'
+    }))
+    if (activePeer) {
+      upsertPeerPresence({ ...activePeer, isTyping: false })
+      broadcastPeerState()
+    }
+  }, EDIT_ACTIVITY_DEBOUNCE_MS)
+  editActivityTimers.set(peerKey, timer)
+}
+
+function resetPeerState () {
+  for (const timer of editActivityTimers.values()) clearTimeout(timer)
+  editActivityTimers.clear()
+  peerPresence.clear()
+  peerActivity.clear()
 }
 
 function readJsonBody (req) {
@@ -570,6 +683,11 @@ function getQueryParam (rawUrl, key) {
 }
 
 export function getP2pmdEditorPage () {
+  const serializedTemplates = JSON.stringify(P2PMD_TEMPLATES).replace(/</g, '\\u003c')
+  const serializedSlideBreakPattern = JSON.stringify(P2PMD_SLIDE_BREAK_PATTERN.source).replace(/</g, '\\u003c')
+  const serializedSlidesTemplate = JSON.stringify(P2PMD_SLIDES_TEMPLATE).replace(/</g, '\\u003c')
+  const embeddedIeeeBrowserScript = ieeeBrowserScript.replace(/<\/script/gi, '<\\/script')
+
   return `<!doctype html>
 <html lang="en">
   <head>
@@ -587,6 +705,8 @@ export function getP2pmdEditorPage () {
         --remote: #59a6ff;
         --ui-font: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         --editor-font: "FontWithASyntaxHighlighter", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        --editor-font-size: 16px;
+        --editor-line-height: 24.8px;
       }
       body {
         box-sizing: border-box;
@@ -634,7 +754,7 @@ export function getP2pmdEditorPage () {
       }
       .editor-frame {
         display: grid;
-        grid-template-columns: 56px minmax(0, 1fr);
+        grid-template-columns: 44px minmax(0, 1fr);
         flex: 1;
         align-items: stretch;
         border: 0;
@@ -655,13 +775,13 @@ export function getP2pmdEditorPage () {
         right: 0;
         left: 0;
         color: #6f7484;
-        font: 15px/1.55 var(--editor-font);
+        font: var(--editor-font-size)/var(--editor-line-height) var(--editor-font);
         text-align: right;
       }
       .gutter-line {
         box-sizing: border-box;
-        min-height: 23.25px;
-        padding: 0 10px 0 4px;
+        min-height: var(--editor-line-height);
+        padding: 0 6px 0 3px;
         border-right: 3px solid transparent;
       }
       .gutter-line.local {
@@ -679,13 +799,13 @@ export function getP2pmdEditorPage () {
         width: 100%;
         height: 100%;
         min-height: 0;
-        padding: 14px 12px;
+        padding: 14px 8px;
         border: 0;
         border-radius: 0;
         background: var(--panel-deep);
         color: var(--ink);
         caret-color: var(--remote);
-        font: 16px/1.55 var(--editor-font);
+        font: var(--editor-font-size)/var(--editor-line-height) var(--editor-font);
         white-space: pre;
         overflow-wrap: normal;
         resize: none;
@@ -755,11 +875,390 @@ export function getP2pmdEditorPage () {
       #preview img {
         max-width: 100%;
       }
+      #slides-preview {
+        position: relative;
+        box-sizing: border-box;
+        flex: 1;
+        min-height: 0;
+        background: #f7f7f5;
+        color: #202124;
+        overflow: hidden;
+        touch-action: pan-y;
+        -webkit-user-select: text;
+        user-select: text;
+      }
+      #slides-content {
+        width: 100%;
+        height: 100%;
+      }
+      #slides-preview .slide {
+        box-sizing: border-box;
+        display: none;
+        width: 100%;
+        height: 100%;
+        padding: clamp(26px, 7vw, 68px) clamp(54px, 11vw, 100px);
+        overflow: auto;
+        color: #202124;
+        text-align: center;
+        flex-direction: column;
+        align-items: center;
+        justify-content: flex-start;
+        animation: slide-enter 180ms ease-out;
+        -webkit-overflow-scrolling: touch;
+      }
+      #slides-preview .slide.active { display: flex; }
+      #slides-preview .slide > * { max-width: min(100%, 920px); }
+      #slides-preview .slide > :first-child { margin-top: auto; }
+      #slides-preview .slide > :last-child { margin-bottom: auto; }
+      #slides-preview h1 {
+        margin: 0 0 0.65em;
+        font-size: clamp(2rem, 8vw, 4.25rem);
+        line-height: 1.08;
+        letter-spacing: -0.035em;
+      }
+      #slides-preview h2 {
+        margin: 0 0 0.65em;
+        font-size: clamp(1.65rem, 6.5vw, 3.35rem);
+        line-height: 1.12;
+      }
+      #slides-preview h3 {
+        font-size: clamp(1.35rem, 5vw, 2.5rem);
+        line-height: 1.18;
+      }
+      #slides-preview p,
+      #slides-preview ul,
+      #slides-preview ol {
+        margin-top: 0.55em;
+        margin-bottom: 0.55em;
+        font-size: clamp(1rem, 3.7vw, 1.55rem);
+        line-height: 1.55;
+      }
+      #slides-preview ul,
+      #slides-preview ol { text-align: left; }
+      #slides-preview pre {
+        box-sizing: border-box;
+        width: min(100%, 920px);
+        padding: 14px;
+        border-radius: 9px;
+        background: #202128;
+        color: #f1f2f7;
+        overflow: auto;
+        text-align: left;
+      }
+      #slides-preview code { font-family: var(--editor-font); }
+      #slides-preview :not(pre) > code {
+        padding: 0.12em 0.32em;
+        border-radius: 5px;
+        background: #e4e7ec;
+      }
+      #slides-preview blockquote {
+        margin-right: auto;
+        margin-left: auto;
+        padding-left: 14px;
+        border-left: 4px solid var(--accent);
+        text-align: left;
+      }
+      #slides-preview img,
+      #slides-preview video {
+        display: block;
+        max-width: 100%;
+        max-height: 54vh;
+        margin: 0.75rem auto;
+        object-fit: contain;
+      }
+      .slides-nav {
+        position: absolute;
+        top: 50%;
+        z-index: 2;
+        display: grid;
+        width: 44px;
+        height: 44px;
+        padding: 0;
+        border: 0;
+        border-radius: 50%;
+        background: rgba(32, 33, 36, 0.12);
+        color: #202124;
+        font: 700 28px/1 var(--ui-font);
+        place-items: center;
+        transform: translateY(-50%);
+        touch-action: manipulation;
+      }
+      .slides-nav:disabled { opacity: 0.28; }
+      #slides-prev { left: 6px; }
+      #slides-next { right: 6px; }
+      #slides-progress {
+        position: absolute;
+        right: 0;
+        bottom: 0;
+        left: 0;
+        z-index: 2;
+        height: 4px;
+        background: rgba(32, 33, 36, 0.12);
+      }
+      #slides-progress-value {
+        display: block;
+        width: 0;
+        height: 100%;
+        background: var(--accent);
+        transition: width 180ms ease-out;
+      }
+      #slides-counter {
+        position: absolute;
+        right: 10px;
+        bottom: 12px;
+        z-index: 2;
+        padding: 5px 9px;
+        border-radius: 999px;
+        background: rgba(32, 33, 36, 0.1);
+        color: #3c4043;
+        font: 700 12px/1 var(--ui-font);
+      }
+      #slides-exit {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        z-index: 3;
+        display: none;
+        width: 38px;
+        height: 38px;
+        padding: 0;
+        border: 0;
+        border-radius: 50%;
+        background: rgba(32, 33, 36, 0.12);
+        color: #202124;
+        font: 600 24px/1 var(--ui-font);
+        place-items: center;
+      }
+      #peer-dashboard-backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: 20;
+        display: flex;
+        align-items: flex-end;
+        background: rgba(8, 9, 13, .62);
+      }
+      #peer-dashboard-backdrop[hidden] { display: none; }
+      #peer-dashboard {
+        box-sizing: border-box;
+        width: 100%;
+        max-height: min(86dvh, 760px);
+        border: 1px solid #444857;
+        border-bottom: 0;
+        border-radius: 20px 20px 0 0;
+        background: #24262f;
+        color: var(--ink);
+        box-shadow: 0 -18px 48px rgba(0, 0, 0, .42);
+        overflow: hidden;
+      }
+      .peer-dashboard-handle {
+        width: 38px;
+        height: 4px;
+        margin: 8px auto 2px;
+        border-radius: 999px;
+        background: #626777;
+      }
+      .peer-dashboard-header {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 14px 12px;
+        border-bottom: 1px solid var(--line);
+      }
+      .peer-dashboard-header h2 {
+        margin: 0;
+        font: 800 18px/1.25 var(--ui-font);
+      }
+      #peer-dashboard-close {
+        width: 38px;
+        height: 38px;
+        margin-left: auto;
+        padding: 0;
+        border: 0;
+        border-radius: 50%;
+        background: #30333e;
+        color: var(--ink);
+        font: 500 26px/1 var(--ui-font);
+      }
+      .peer-dashboard-body {
+        max-height: calc(min(86dvh, 760px) - 72px);
+        padding: 14px;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        -webkit-overflow-scrolling: touch;
+      }
+      .peer-dashboard-room {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+        margin-bottom: 12px;
+      }
+      #peer-dashboard-room-key {
+        min-width: 0;
+        color: #aeb3c3;
+        font: 12px/1.4 var(--editor-font);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .peer-role-badge {
+        flex: 0 0 auto;
+        padding: 3px 8px;
+        border-radius: 999px;
+        background: #454a58;
+        color: #f4f5f8;
+        font: 800 10px/1.2 var(--ui-font);
+        letter-spacing: .04em;
+        text-transform: uppercase;
+      }
+      .peer-role-badge.host { background: #1d6045; color: #d4f8e8; }
+      .peer-role-badge.client { background: #5b421e; color: #ffe0a3; }
+      .peer-profile-editor {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 8px;
+        margin-bottom: 12px;
+      }
+      #peer-display-name {
+        min-width: 0;
+        height: 42px;
+        padding: 0 12px;
+        border: 1px solid #464b5a;
+        border-radius: 10px;
+        background: #1f2027;
+        color: var(--ink);
+        font: 15px/1 var(--ui-font);
+      }
+      #peer-display-name-save {
+        min-width: 72px;
+        border: 0;
+        border-radius: 10px;
+        background: var(--accent);
+        color: #ffffff;
+        font: 800 13px/1 var(--ui-font);
+      }
+      #peer-profile-hint {
+        grid-column: 1 / -1;
+        min-height: 16px;
+        color: #aeb3c3;
+        font: 12px/1.3 var(--ui-font);
+      }
+      #peer-dashboard-stats {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 6px;
+        margin-bottom: 18px;
+      }
+      .peer-stat {
+        padding: 9px 4px;
+        border-radius: 10px;
+        background: #2d303a;
+        text-align: center;
+      }
+      .peer-stat strong,
+      .peer-stat span { display: block; }
+      .peer-stat strong { font: 800 17px/1.1 var(--ui-font); }
+      .peer-stat span { margin-top: 3px; color: #aeb3c3; font: 10px/1.2 var(--ui-font); }
+      .peer-dashboard-section { margin-top: 18px; }
+      .peer-dashboard-section h3 {
+        margin: 0 0 9px;
+        font: 800 14px/1.3 var(--ui-font);
+      }
+      .peer-dashboard-list {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 8px;
+      }
+      .peer-card {
+        display: grid;
+        grid-template-columns: 36px minmax(0, 1fr) auto;
+        gap: 0 10px;
+        align-items: center;
+        padding: 10px;
+        border: 1px solid #3e4250;
+        border-radius: 12px;
+        background: #292b34;
+      }
+      .peer-avatar {
+        grid-row: 1 / 3;
+        display: grid;
+        width: 36px;
+        height: 36px;
+        border-radius: 50%;
+        color: #ffffff;
+        font: 800 14px/1 var(--ui-font);
+        place-items: center;
+      }
+      .peer-name {
+        min-width: 0;
+        font: 800 14px/1.3 var(--ui-font);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .peer-position,
+      .peer-updated {
+        color: #aeb3c3;
+        font: 11px/1.35 var(--ui-font);
+      }
+      .peer-updated { grid-column: 3; grid-row: 2; text-align: right; }
+      .peer-empty {
+        padding: 14px;
+        border: 1px dashed #454a58;
+        border-radius: 12px;
+        color: #aeb3c3;
+        font: 13px/1.4 var(--ui-font);
+        text-align: center;
+      }
+      #peer-activity-list {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+      .peer-activity-item {
+        padding: 10px 11px;
+        border-left: 3px solid #596174;
+        border-radius: 0 10px 10px 0;
+        background: #292b34;
+      }
+      .peer-activity-message { font: 600 13px/1.35 var(--ui-font); }
+      .peer-activity-meta { margin-top: 4px; color: #aeb3c3; font: 11px/1.3 var(--ui-font); }
+      @media (min-width: 680px) {
+        #peer-dashboard { max-width: 680px; margin: 0 auto; border-radius: 20px 20px 0 0; }
+        .peer-dashboard-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      }
+      @keyframes slide-enter {
+        from { opacity: 0; transform: translateX(12px); }
+        to { opacity: 1; transform: translateX(0); }
+      }
+      @media (orientation: landscape) {
+        #slides-exit { display: grid; }
+        #slides-preview .slide {
+          overflow: visible;
+          transform-origin: top center;
+          animation: none;
+        }
+      }
+      @media (orientation: landscape) and (max-height: 520px) {
+        #slides-preview .slide {
+          padding-top: 20px;
+          padding-bottom: 24px;
+        }
+        #slides-preview img,
+        #slides-preview video { max-height: 46vh; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #slides-preview .slide { animation: none; }
+        #slides-progress-value { transition: none; }
+      }
       #formatting-toolbar {
         display: flex;
         align-items: center;
         gap: 2px;
-        padding: 6px 8px;
+        padding: 4px 8px;
         border-bottom: 1px solid var(--line);
         background: #24262f;
         overflow-x: auto;
@@ -794,6 +1293,38 @@ export function getP2pmdEditorPage () {
         background: #343744;
         color: #ffffff;
       }
+      #formatting-toolbar button[aria-pressed="true"] {
+        border-color: rgba(89, 166, 255, .5);
+        background: #263d5e;
+        color: #8fc1ff;
+      }
+      #latex-toolbar-group { display: contents; }
+      #latex-template-menu {
+        position: absolute;
+        z-index: 8;
+        top: 46px;
+        right: 8px;
+        left: 8px;
+        padding: 6px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: #292b35;
+        box-shadow: 0 10px 28px rgba(0, 0, 0, .38);
+      }
+      #latex-template-menu button {
+        display: block;
+        width: 100%;
+        padding: 10px 12px;
+        border: 0;
+        border-radius: 7px;
+        background: transparent;
+        color: var(--ink);
+        text-align: left;
+      }
+      #latex-template-menu button:active { background: #353844; }
+      .template-label { display: block; font: 700 14px/1.3 var(--ui-font); }
+      .template-description { display: block; margin-top: 2px; color: #aeb3c3; font: 12px/1.35 var(--ui-font); }
+      .latex-mode-symbol { font-size: 20px; font-weight: 500; }
       .toolbar-icon {
         display: block;
         width: 16px;
@@ -808,7 +1339,10 @@ export function getP2pmdEditorPage () {
         background: var(--line);
       }
       [hidden] { display: none !important; }
+      ${katexCss}
+      ${P2PMD_SCIENTIFIC_STYLES}
     </style>
+    <script>${embeddedIeeeBrowserScript}</script>
   </head>
   <body>
     <div class="app-shell">
@@ -851,7 +1385,21 @@ export function getP2pmdEditorPage () {
           <button type="button" data-format="quote" title="Quote" aria-label="Quote">
             <svg class="toolbar-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M12 12a1 1 0 0 0 1-1V8.558a1 1 0 0 0-1-1h-1.388q0-.527.062-1.054.093-.558.31-.992t.559-.683q.34-.279.868-.279V3q-.868 0-1.52.372a3.3 3.3 0 0 0-1.085.992 4.9 4.9 0 0 0-.62 1.458A7.7 7.7 0 0 0 9 7.558V11a1 1 0 0 0 1 1zm-6 0a1 1 0 0 0 1-1V8.558a1 1 0 0 0-1-1H4.612q0-.527.062-1.054.094-.558.31-.992.217-.434.559-.683.34-.279.868-.279V3q-.868 0-1.52.372a3.3 3.3 0 0 0-1.085.992 4.9 4.9 0 0 0-.62 1.458A7.7 7.7 0 0 0 3 7.558V11a1 1 0 0 0 1 1z"/></svg>
           </button>
+          <div class="toolbar-divider" aria-hidden="true"></div>
+          <button type="button" data-format="latex" title="LaTeX mode" aria-label="LaTeX mode" aria-pressed="false">
+            <span class="latex-mode-symbol" aria-hidden="true">&#8734;</span>
+          </button>
+          <span id="latex-toolbar-group" hidden>
+            <button type="button" data-format="inline-math" title="Inline math" aria-label="Inline math">$x$</button>
+            <button type="button" data-format="block-math" title="Block math" aria-label="Block math">$$</button>
+            <button type="button" data-format="template" title="Scientific templates" aria-label="Scientific templates">T</button>
+          </span>
+          <div class="toolbar-divider" aria-hidden="true"></div>
+          <button type="button" data-format="slides" title="View as slides" aria-label="View as slides">
+            <svg class="toolbar-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V4a1 1 0 0 0-1-1zm0-1h10a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/><path d="M2 6h12v1H2zm0 3h12v1H2z"/><circle cx="5" cy="4.5" r=".8"/><circle cx="8" cy="4.5" r=".8"/><circle cx="11" cy="4.5" r=".8"/></svg>
+          </button>
         </div>
+        <div id="latex-template-menu" role="menu" aria-label="Scientific templates" hidden></div>
         <input id="image-upload-input" type="file" accept="image/*" hidden />
         <div class="editor-frame">
           <div id="line-gutter-wrap" aria-hidden="true">
@@ -860,23 +1408,101 @@ export function getP2pmdEditorPage () {
           <textarea id="document-input" aria-label="Markdown document" placeholder="Write Markdown here..." wrap="off"></textarea>
         </div>
         <article id="preview" aria-label="Markdown preview" hidden></article>
+        <section id="slides-preview" aria-label="Presentation slides" hidden>
+          <div id="slides-content"></div>
+          <button id="slides-exit" type="button" aria-label="Exit presentation">&times;</button>
+          <button id="slides-prev" class="slides-nav" type="button" aria-label="Previous slide">&#8249;</button>
+          <button id="slides-next" class="slides-nav" type="button" aria-label="Next slide">&#8250;</button>
+          <div id="slides-counter" role="status" aria-live="polite"></div>
+          <div id="slides-progress" aria-hidden="true"><span id="slides-progress-value"></span></div>
+        </section>
       </main>
+    </div>
+    <div id="peer-dashboard-backdrop" hidden>
+      <section id="peer-dashboard" role="dialog" aria-modal="true" aria-labelledby="peer-dashboard-title">
+        <div class="peer-dashboard-handle" aria-hidden="true"></div>
+        <header class="peer-dashboard-header">
+          <h2 id="peer-dashboard-title">Room peers</h2>
+          <button id="peer-dashboard-close" type="button" aria-label="Close peer dashboard">&times;</button>
+        </header>
+        <div class="peer-dashboard-body">
+          <div class="peer-dashboard-room">
+            <span id="peer-dashboard-role" class="peer-role-badge"></span>
+            <code id="peer-dashboard-room-key"></code>
+          </div>
+          <div class="peer-profile-editor">
+            <input id="peer-display-name" type="text" maxlength="32" aria-label="Username" placeholder="Username" />
+            <button id="peer-display-name-save" type="button">Update</button>
+            <span id="peer-profile-hint" role="status" aria-live="polite"></span>
+          </div>
+          <div id="peer-dashboard-stats"></div>
+          <section class="peer-dashboard-section">
+            <h3>Connected peers</h3>
+            <div id="peer-connected-list" class="peer-dashboard-list"></div>
+          </section>
+          <section class="peer-dashboard-section">
+            <h3>Currently editing</h3>
+            <div id="peer-editing-list" class="peer-dashboard-list"></div>
+          </section>
+          <section class="peer-dashboard-section">
+            <h3>Edit history</h3>
+            <ul id="peer-activity-list"></ul>
+          </section>
+        </div>
+      </section>
     </div>
     <script>
       const input = document.getElementById('document-input')
       const preview = document.getElementById('preview')
+      const slidesPreview = document.getElementById('slides-preview')
+      const slidesContent = document.getElementById('slides-content')
+      const slidesExit = document.getElementById('slides-exit')
+      const slidesPrevious = document.getElementById('slides-prev')
+      const slidesNext = document.getElementById('slides-next')
+      const slidesCounter = document.getElementById('slides-counter')
+      const slidesProgress = document.getElementById('slides-progress-value')
       const formattingToolbar = document.getElementById('formatting-toolbar')
+      const latexModeButton = formattingToolbar.querySelector('[data-format="latex"]')
+      const latexToolbarGroup = document.getElementById('latex-toolbar-group')
+      const latexTemplateMenu = document.getElementById('latex-template-menu')
       const imageUploadInput = document.getElementById('image-upload-input')
       const lineGutter = document.getElementById('line-gutter')
+      const peerDashboardBackdrop = document.getElementById('peer-dashboard-backdrop')
+      const peerDashboardClose = document.getElementById('peer-dashboard-close')
+      const peerDashboardRole = document.getElementById('peer-dashboard-role')
+      const peerDashboardRoomKey = document.getElementById('peer-dashboard-room-key')
+      const peerDisplayName = document.getElementById('peer-display-name')
+      const peerDisplayNameSave = document.getElementById('peer-display-name-save')
+      const peerProfileHint = document.getElementById('peer-profile-hint')
+      const peerDashboardStats = document.getElementById('peer-dashboard-stats')
+      const peerConnectedList = document.getElementById('peer-connected-list')
+      const peerEditingList = document.getElementById('peer-editing-list')
+      const peerActivityList = document.getElementById('peer-activity-list')
       const TOOLBAR_TAP_MOVEMENT_LIMIT = 8
       const REMOTE_UPDATE_BATCH_MS = 80
+      const ACTIVE_VIEW_RENDER_DELAY_MS = 120
       const INITIAL_ROOM_RETRY_ATTEMPTS = 20
       const INITIAL_ROOM_RETRY_DELAY_MS = 750
       const MAX_PENDING_UPDATE_BYTES = 2 * 1024 * 1024
       const Y_ORIGIN_REMOTE = 'remote-sse'
       const Y_ORIGIN_LOCAL_INPUT = 'local-input'
-      let isPreviewMode = false
+      const Y_ORIGIN_LOCAL_SETTINGS = 'local-settings'
+      const LATEX_MODE_STORAGE_KEY = 'p2pmd-latex-mode-enabled'
+      const LATEX_MODE_YJS_KEY = 'latexModeEnabled'
+      const PEER_DISPLAY_NAME_KEY = 'p2pmd-display-name'
+      const MAX_PEER_ACTIVITY_ITEMS = 150
+      const MAX_PEER_DASHBOARD_ITEMS = 100
+      const PEER_TYPING_IDLE_MS = ${EDIT_ACTIVITY_DEBOUNCE_MS}
+      const templates = ${serializedTemplates}
+      const slidesTemplate = ${serializedSlidesTemplate}
+      let viewMode = 'edit'
       let previewRequestId = 0
+      let currentSlideIndex = 0
+      let slideTouchStart = null
+      let slideFitFrame = null
+      let activeViewRenderTimer = null
+      let activeViewRenderInFlight = false
+      let activeViewRenderPending = false
       let bridgeRequestId = 0
       const bridgeRequests = new Map()
       let saveTimer = null
@@ -884,6 +1510,7 @@ export function getP2pmdEditorPage () {
       let saveInFlight = false
       let ydoc = null
       let ytext = null
+      let ysettings = null
       let pendingUpdate = null
       let sendUpdateTimer = null
       let flushRetryTimer = null
@@ -894,9 +1521,15 @@ export function getP2pmdEditorPage () {
       let remoteUpdateTimer = null
       let lastSyncedContent = ''
       let lastInputContent = ''
+      let ytextSnapshot = ''
       let lineAttributions = {}
       let localLineAttributions = {}
       let latestPeerList = []
+      let peerActivityLog = []
+      let peerActivityLoadError = ''
+      let peerDashboardDirty = true
+      let localPeerIsTyping = false
+      let localTypingResetTimer = null
       let toolbarPointerState = null
       let suppressToolbarClick = false
       let pendingImageSelection = null
@@ -904,12 +1537,20 @@ export function getP2pmdEditorPage () {
       const CLIENT_ID_KEY = 'p2pmd-mobile-client-id'
       const clientId = getClientId()
       const roomRole = getRoomRole()
+      let latexModeEnabled = roomRole === 'host' && loadPersistedLatexMode()
+      let hasSyncedHostLatexMode = false
       const localAuthor = {
         clientId,
         color: colorFromClientId(clientId),
-        name: 'Mobile peer'
+        name: loadPeerDisplayName() || 'Mobile peer'
       }
       const roomBaseUrl = getRoomBaseUrl()
+
+      function getRoomKey() {
+        return typeof window.__P2PMD_ROOM_KEY__ === 'string'
+          ? window.__P2PMD_ROOM_KEY__.trim()
+          : ''
+      }
 
       function getRoomBaseUrl() {
         try {
@@ -991,6 +1632,76 @@ export function getP2pmdEditorPage () {
         }
       }
 
+      function normalizeDisplayName(value) {
+        if (typeof value !== 'string') return ''
+        return Array.from(value.trim().replace(/\\s+/g, ' ')).slice(0, 32).join('')
+      }
+
+      function loadPeerDisplayName() {
+        const injectedName = normalizeDisplayName(window.__P2PMD_DISPLAY_NAME__)
+        if (injectedName) return injectedName
+        try {
+          return normalizeDisplayName(window.localStorage.getItem(PEER_DISPLAY_NAME_KEY) || '')
+        } catch {
+          return ''
+        }
+      }
+
+      function persistPeerDisplayName(value) {
+        try {
+          window.localStorage.setItem(PEER_DISPLAY_NAME_KEY, value)
+        } catch {}
+      }
+
+      function loadPersistedLatexMode() {
+        try {
+          return window.localStorage.getItem(LATEX_MODE_STORAGE_KEY) === 'true'
+        } catch {
+          return false
+        }
+      }
+
+      function persistLatexMode(enabled) {
+        try {
+          window.localStorage.setItem(LATEX_MODE_STORAGE_KEY, String(enabled))
+        } catch {}
+      }
+
+      function updateLatexControls() {
+        latexModeButton?.setAttribute('aria-pressed', String(latexModeEnabled))
+        if (latexModeButton) {
+          latexModeButton.disabled = roomRole !== 'host'
+          latexModeButton.title = roomRole === 'host'
+            ? 'LaTeX mode'
+            : 'LaTeX mode is controlled by the host'
+        }
+        if (latexToolbarGroup) latexToolbarGroup.hidden = !latexModeEnabled
+        if (!latexModeEnabled && latexTemplateMenu) latexTemplateMenu.hidden = true
+      }
+
+      function setLatexMode(enabled, { persist = true, sync = true, fromSharedState = false } = {}) {
+        if (roomRole !== 'host' && !fromSharedState) return false
+
+        const nextEnabled = enabled === true
+        latexModeEnabled = nextEnabled
+        updateLatexControls()
+        if (persist && roomRole === 'host') persistLatexMode(nextEnabled)
+
+        if (
+          sync &&
+          roomRole === 'host' &&
+          ysettings &&
+          ysettings.get(LATEX_MODE_YJS_KEY) !== nextEnabled
+        ) {
+          ydoc.transact(() => {
+            ysettings.set(LATEX_MODE_YJS_KEY, nextEnabled)
+          }, Y_ORIGIN_LOCAL_SETTINGS)
+        }
+
+        scheduleActiveViewRender()
+        return true
+      }
+
       function colorFromClientId(value) {
         let hash = 0
         for (let index = 0; index < value.length; index++) {
@@ -1000,6 +1711,290 @@ export function getP2pmdEditorPage () {
 
         const hue = Math.abs(hash) % 360
         return 'hsl(' + hue + ' 74% 58%)'
+      }
+
+      function normalizeDashboardPeer(peer) {
+        if (!peer || typeof peer !== 'object') return null
+        const role = peer.role === 'host' ? 'host' : peer.role === 'client' ? 'client' : 'viewer'
+        const clientIdValue = typeof peer.clientId === 'string' ? peer.clientId.slice(0, 120) : ''
+        const id = Number.isFinite(Number(peer.id)) ? Number(peer.id) : null
+        const name = normalizeDisplayName(peer.name) || (id ? 'Peer #' + id : 'Peer')
+
+        return {
+          id,
+          role,
+          clientId: clientIdValue,
+          name,
+          color: typeof peer.color === 'string' && peer.color.length <= 64 ? peer.color : '#64748b',
+          isTyping: peer.isTyping === true,
+          cursorLine: Number.isFinite(Number(peer.cursorLine)) ? Number(peer.cursorLine) : null,
+          cursorColumn: Number.isFinite(Number(peer.cursorColumn)) ? Number(peer.cursorColumn) : null,
+          updatedAt: Number.isFinite(Number(peer.updatedAt)) ? Number(peer.updatedAt) : Date.now()
+        }
+      }
+
+      function normalizeDashboardActivity(activity) {
+        if (!activity || typeof activity !== 'object') return null
+        return {
+          id: Number.isFinite(Number(activity.id)) ? Number(activity.id) : null,
+          type: typeof activity.type === 'string' ? activity.type.slice(0, 24) : 'event',
+          name: normalizeDisplayName(activity.name) || 'Peer',
+          clientId: typeof activity.clientId === 'string' ? activity.clientId.slice(0, 120) : '',
+          message: typeof activity.message === 'string' && activity.message.trim()
+            ? activity.message.trim().slice(0, 240)
+            : 'Activity updated',
+          timestamp: Number.isFinite(Number(activity.timestamp)) ? Number(activity.timestamp) : Date.now()
+        }
+      }
+
+      function formatPeerTime(timestamp) {
+        try {
+          return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        } catch {
+          return ''
+        }
+      }
+
+      function clearPeerDashboardNode(node) {
+        while (node?.firstChild) node.removeChild(node.firstChild)
+      }
+
+      function appendPeerDashboardEmpty(container, message) {
+        const empty = document.createElement(container.tagName === 'UL' ? 'li' : 'div')
+        empty.className = 'peer-empty'
+        empty.textContent = message
+        container.appendChild(empty)
+      }
+
+      function createPeerRoleBadge(role) {
+        const badge = document.createElement('span')
+        badge.className = 'peer-role-badge ' + role
+        badge.textContent = role
+        return badge
+      }
+
+      function createPeerCard(peer) {
+        const card = document.createElement('article')
+        card.className = 'peer-card'
+
+        const avatar = document.createElement('span')
+        avatar.className = 'peer-avatar'
+        avatar.style.backgroundColor = peer.color
+        avatar.textContent = (String(peer.name || '').trim().charAt(0) || '?').toUpperCase()
+
+        const name = document.createElement('strong')
+        name.className = 'peer-name'
+        name.textContent = peer.clientId && peer.clientId === clientId
+          ? peer.name + ' (You)'
+          : peer.name
+
+        const position = document.createElement('span')
+        position.className = 'peer-position'
+        if (peer.cursorLine && peer.cursorColumn) {
+          position.textContent = peer.isTyping
+            ? 'Editing line ' + peer.cursorLine + ', col ' + peer.cursorColumn
+            : 'Cursor at line ' + peer.cursorLine + ', col ' + peer.cursorColumn
+        } else {
+          position.textContent = peer.isTyping ? 'Editing...' : 'Idle'
+        }
+
+        const updated = document.createElement('span')
+        updated.className = 'peer-updated'
+        updated.textContent = formatPeerTime(peer.updatedAt)
+
+        card.appendChild(avatar)
+        card.appendChild(name)
+        card.appendChild(createPeerRoleBadge(peer.role))
+        card.appendChild(position)
+        card.appendChild(updated)
+        return card
+      }
+
+      function renderPeerCards(container, peers, emptyMessage) {
+        clearPeerDashboardNode(container)
+        if (peers.length === 0) {
+          appendPeerDashboardEmpty(container, emptyMessage)
+          return
+        }
+        peers.forEach((peer) => container.appendChild(createPeerCard(peer)))
+      }
+
+      function renderPeerDashboard() {
+        peerDashboardDirty = true
+        if (peerDashboardBackdrop.hidden) return
+
+        peerDashboardDirty = false
+        const peers = []
+        const editingPeers = []
+        let totalPeers = 0
+        let hostPeers = 0
+        let clientPeers = 0
+        let totalEditingPeers = 0
+        latestPeerList.forEach((value) => {
+          const peer = normalizeDashboardPeer(value)
+          if (!peer) return
+          totalPeers += 1
+          if (peer.role === 'host') hostPeers += 1
+          if (peer.role === 'client') clientPeers += 1
+          if (peers.length < MAX_PEER_DASHBOARD_ITEMS) peers.push(peer)
+          if (peer.isTyping) {
+            totalEditingPeers += 1
+            if (editingPeers.length < MAX_PEER_DASHBOARD_ITEMS) editingPeers.push(peer)
+          }
+        })
+        const stats = [
+          ['Total', totalPeers],
+          ['Hosts', hostPeers],
+          ['Clients', clientPeers],
+          ['Editing', totalEditingPeers]
+        ]
+
+        peerDashboardRole.textContent = roomRole
+        peerDashboardRole.className = 'peer-role-badge ' + roomRole
+        peerDashboardRoomKey.textContent = getRoomKey() || roomBaseUrl || 'Room connected'
+        clearPeerDashboardNode(peerDashboardStats)
+        stats.forEach(([label, value]) => {
+          const item = document.createElement('div')
+          item.className = 'peer-stat'
+          const count = document.createElement('strong')
+          count.textContent = String(value)
+          const caption = document.createElement('span')
+          caption.textContent = label
+          item.appendChild(count)
+          item.appendChild(caption)
+          peerDashboardStats.appendChild(item)
+        })
+
+        renderPeerCards(peerConnectedList, peers, 'No connected peers yet.')
+        renderPeerCards(peerEditingList, editingPeers, 'Nobody is actively editing right now.')
+        if (totalPeers > peers.length) {
+          appendPeerDashboardEmpty(peerConnectedList, 'Showing the first ' + peers.length + ' connected peers.')
+        }
+        if (totalEditingPeers > editingPeers.length) {
+          appendPeerDashboardEmpty(peerEditingList, 'Showing the first ' + editingPeers.length + ' active editors.')
+        }
+        clearPeerDashboardNode(peerActivityList)
+        if (peerActivityLog.length === 0) {
+          appendPeerDashboardEmpty(peerActivityList, peerActivityLoadError || 'No activity yet.')
+          return
+        }
+
+        const peerNameByClientId = new Map(
+          peers.filter((peer) => peer.clientId).map((peer) => [peer.clientId, peer.name])
+        )
+        peerActivityLog.slice(0, MAX_PEER_ACTIVITY_ITEMS).forEach((activity) => {
+          const item = document.createElement('li')
+          item.className = 'peer-activity-item'
+          const message = document.createElement('div')
+          message.className = 'peer-activity-message'
+          const currentName = peerNameByClientId.get(activity.clientId) || activity.name
+          message.textContent = activity.name !== currentName && activity.message.startsWith(activity.name + ' ')
+            ? currentName + activity.message.slice(activity.name.length)
+            : activity.message
+          const meta = document.createElement('div')
+          meta.className = 'peer-activity-meta'
+          meta.textContent = currentName + ' | ' + activity.type + ' | ' + formatPeerTime(activity.timestamp)
+          item.appendChild(message)
+          item.appendChild(meta)
+          peerActivityList.appendChild(item)
+        })
+        if (peerActivityLoadError) appendPeerDashboardEmpty(peerActivityList, peerActivityLoadError)
+      }
+
+      function mergePeerActivity(activity) {
+        const isSnapshot = Array.isArray(activity)
+        const incoming = (Array.isArray(activity) ? activity : [activity])
+          .map(normalizeDashboardActivity)
+          .filter(Boolean)
+        if (isSnapshot) {
+          peerActivityLog = incoming
+            .sort((left, right) => right.timestamp - left.timestamp)
+            .slice(0, MAX_PEER_ACTIVITY_ITEMS)
+          peerActivityLoadError = ''
+          renderPeerDashboard()
+          return
+        }
+        if (incoming.length === 0) return
+
+        const keys = new Set(incoming.map((item) => String(item.id) + ':' + item.timestamp))
+        peerActivityLog = incoming.concat(
+          peerActivityLog.filter((item) => !keys.has(String(item.id) + ':' + item.timestamp))
+        )
+          .sort((left, right) => right.timestamp - left.timestamp)
+          .slice(0, MAX_PEER_ACTIVITY_ITEMS)
+        renderPeerDashboard()
+      }
+
+      async function refreshPeerActivity() {
+        try {
+          const response = await fetch(roomUrl('/activity'))
+          const body = await response.json()
+          if (!response.ok || !Array.isArray(body.activity)) {
+            throw new Error('Unable to refresh room activity')
+          }
+          peerActivityLog = body.activity
+            .map(normalizeDashboardActivity)
+            .filter(Boolean)
+            .slice(0, MAX_PEER_ACTIVITY_ITEMS)
+          peerActivityLoadError = ''
+          renderPeerDashboard()
+        } catch {
+          peerActivityLoadError = 'Unable to refresh room activity.'
+          renderPeerDashboard()
+        }
+      }
+
+      function setPeerDashboardVisible(visible) {
+        const shouldShow = visible === true
+        peerDashboardBackdrop.hidden = !shouldShow
+        peerDashboardBackdrop.setAttribute('aria-hidden', String(!shouldShow))
+        if (!shouldShow) {
+          peerProfileHint.textContent = ''
+          return
+        }
+
+        input.blur()
+        peerDisplayName.value = localAuthor.name
+        if (peerDashboardDirty) renderPeerDashboard()
+        refreshPeerActivity()
+        peerDashboardClose.focus()
+      }
+
+      async function updatePeerDisplayName() {
+        const nextName = normalizeDisplayName(peerDisplayName.value)
+        if (!nextName) {
+          peerProfileHint.textContent = 'Username cannot be empty.'
+          return
+        }
+
+        peerDisplayNameSave.disabled = true
+        peerProfileHint.textContent = 'Updating...'
+
+        try {
+          const response = await fetch(roomUrl('/presence'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...getPeerPayload(), name: nextName })
+          })
+          if (!response.ok) throw new Error('Unable to update username')
+          localAuthor.name = nextName
+          persistPeerDisplayName(nextName)
+          latestPeerList = latestPeerList.map((peer) => {
+            return peer?.clientId === clientId ? { ...peer, name: nextName } : peer
+          })
+          renderPeerDashboard()
+
+          try {
+            await requestNativeBridge('peer-profile', { name: nextName })
+            peerProfileHint.textContent = 'Saved'
+          } catch {
+            peerProfileHint.textContent = 'Updated for this room, but could not save for future rooms.'
+          }
+        } catch (error) {
+          peerProfileHint.textContent = error?.message || 'Unable to update username'
+        } finally {
+          peerDisplayNameSave.disabled = false
+        }
       }
 
       function notifyNative(type, details) {
@@ -1062,12 +2057,36 @@ export function getP2pmdEditorPage () {
       }
 
       function getPeerPayload() {
+        const cursor = getEditorCursorPosition()
         return {
           clientId,
           role: roomRole,
           name: localAuthor.name,
-          color: localAuthor.color
+          color: localAuthor.color,
+          latexModeEnabled,
+          isTyping: localPeerIsTyping,
+          cursorLine: cursor.line,
+          cursorColumn: cursor.column
         }
+      }
+
+      function getEditorCursorPosition() {
+        const offset = Number.isFinite(input.selectionStart) ? input.selectionStart : 0
+        const beforeCursor = input.value.slice(0, offset)
+        const lineStart = beforeCursor.lastIndexOf(newline) + 1
+        return {
+          line: beforeCursor.split(newline).length,
+          column: offset - lineStart + 1
+        }
+      }
+
+      function markLocalPeerTyping() {
+        localPeerIsTyping = true
+        if (localTypingResetTimer) clearTimeout(localTypingResetTimer)
+        localTypingResetTimer = setTimeout(() => {
+          localTypingResetTimer = null
+          localPeerIsTyping = false
+        }, PEER_TYPING_IDLE_MS)
       }
 
       function bytesToBase64(bytes) {
@@ -1123,9 +2142,7 @@ export function getP2pmdEditorPage () {
         }
       }
 
-      function applyTextDiff(ytextRef, oldText, newText, origin) {
-        if (!ytextRef || oldText === newText) return
-
+      function diffTextChange(oldText, newText) {
         let prefix = 0
         const minLength = Math.min(oldText.length, newText.length)
         while (prefix < minLength && oldText[prefix] === newText[prefix]) prefix += 1
@@ -1141,6 +2158,14 @@ export function getP2pmdEditorPage () {
           newSuffix -= 1
         }
 
+        return { prefix, oldSuffix, newSuffix }
+      }
+
+      function applyTextDiff(ytextRef, oldText, newText, origin, change = null) {
+        if (!ytextRef || oldText === newText) return
+
+        const { prefix, oldSuffix, newSuffix } = change || diffTextChange(oldText, newText)
+
         const deleteLength = oldSuffix - prefix
         const insertedText = newText.slice(prefix, newSuffix)
 
@@ -1148,6 +2173,15 @@ export function getP2pmdEditorPage () {
           if (deleteLength > 0) ytextRef.delete(prefix, deleteLength)
           if (insertedText) ytextRef.insert(prefix, insertedText)
         }, origin)
+      }
+
+      function getYTextSnapshot() {
+        if (!ytext) return ytextSnapshot
+        if (typeof ytextSnapshot === 'string' && ytextSnapshot.length === ytext.length) {
+          return ytextSnapshot
+        }
+        ytextSnapshot = ytext.toString()
+        return ytextSnapshot
       }
 
       async function loadDocument() {
@@ -1177,16 +2211,18 @@ export function getP2pmdEditorPage () {
 
       function scheduleDocumentSave() {
         if (saveTimer) clearTimeout(saveTimer)
-        markEditedLines(lastInputContent, input.value)
-        lastInputContent = input.value
-        renderLineGutter()
+        markLocalPeerTyping()
+        const newText = input.value
+        const oldText = ydoc && ytext ? getYTextSnapshot() : lastInputContent
+        const change = diffTextChange(oldText, newText)
+        const gutterUpdate = markEditedLines(oldText, newText)
+        lastInputContent = newText
+        if (gutterUpdate) renderLineGutter(gutterUpdate)
         notifyNative('p2pmd-document-pending', {})
 
         if (ydoc && ytext) {
-          const newText = input.value
-          const oldText = ytext.toString()
           if (newText !== oldText) {
-            applyTextDiff(ytext, oldText, newText, Y_ORIGIN_LOCAL_INPUT)
+            applyTextDiff(ytext, oldText, newText, Y_ORIGIN_LOCAL_INPUT, change)
           }
           return
         }
@@ -1460,6 +2496,67 @@ export function getP2pmdEditorPage () {
         return text || 'image'
       }
 
+      function toggleTemplateMenu() {
+        if (!latexModeEnabled || !latexTemplateMenu) return
+        latexTemplateMenu.hidden = !latexTemplateMenu.hidden
+      }
+
+      function closeTemplateMenuOnOutsideClick(event) {
+        if (!latexTemplateMenu || latexTemplateMenu.hidden) return
+        const target = event.target
+        if (latexTemplateMenu.contains(target) || target?.closest?.('[data-format="template"]')) return
+        latexTemplateMenu.hidden = true
+      }
+
+      function renderTemplateMenu() {
+        if (!latexTemplateMenu) return
+
+        for (const template of templates) {
+          const button = document.createElement('button')
+          button.type = 'button'
+          button.dataset.templateId = template.id
+          button.setAttribute('role', 'menuitem')
+
+          const label = document.createElement('span')
+          label.className = 'template-label'
+          label.textContent = template.label
+
+          const description = document.createElement('span')
+          description.className = 'template-description'
+          description.textContent = template.description
+
+          button.append(label, description)
+          latexTemplateMenu.append(button)
+        }
+      }
+
+      function applyTemplate(templateId) {
+        const template = templates.find((entry) => entry.id === templateId)
+        if (!template) return
+        if (roomRole !== 'host' && !latexModeEnabled) return
+
+        if (input.value.trim() && !window.confirm('Replace the current document with this template?')) {
+          return
+        }
+
+        if (roomRole === 'host') setLatexMode(true)
+        latexTemplateMenu.hidden = true
+        replaceDocumentRange(0, input.value.length, template.content, 0, 0)
+      }
+
+      function viewAsSlides() {
+        const hasSlideBreak = new RegExp(${serializedSlideBreakPattern}, 'im').test(input.value)
+
+        if (!hasSlideBreak) {
+          if (input.value.trim() && !window.confirm('This will clear your notes and give you a slides template. Continue?')) {
+            return
+          }
+          replaceDocumentRange(0, input.value.length, slidesTemplate, 0, 0)
+        }
+
+        setViewMode('slides')
+      }
+
       function applyFormatting(format) {
         const codeMarker = String.fromCharCode(96)
 
@@ -1470,6 +2567,11 @@ export function getP2pmdEditorPage () {
         else if (format === 'ul' || format === 'ol') replaceSelectedLines(format)
         else if (format === 'link') insertLink()
         else if (format === 'image') insertImage()
+        else if (format === 'latex') setLatexMode(!latexModeEnabled)
+        else if (format === 'inline-math') wrapSelection('$', '$')
+        else if (format === 'block-math') wrapSelection('$$' + newline, newline + '$$')
+        else if (format === 'template') toggleTemplateMenu()
+        else if (format === 'slides') viewAsSlides()
         else if (format === 'inline-code') wrapSelection(codeMarker, codeMarker)
         else if (format === 'code-block') {
           wrapSelection(codeMarker.repeat(3) + newline, newline + codeMarker.repeat(3))
@@ -1484,7 +2586,7 @@ export function getP2pmdEditorPage () {
 
       function handleToolbarFormat(event) {
         const button = getToolbarButton(event)
-        if (!button || isPreviewMode) return false
+        if (!button || viewMode !== 'edit') return false
 
         applyFormatting(button.dataset.format)
         return true
@@ -1498,7 +2600,7 @@ export function getP2pmdEditorPage () {
 
       function handleToolbarPointerDown(event) {
         const button = getToolbarButton(event)
-        if (!button || isPreviewMode) {
+        if (!button || viewMode !== 'edit') {
           toolbarPointerState = null
           return
         }
@@ -1518,7 +2620,7 @@ export function getP2pmdEditorPage () {
       function handleToolbarPointerUp(event) {
         const state = toolbarPointerState
         toolbarPointerState = null
-        if (!state || state.pointerId !== event.pointerId || isPreviewMode) return
+        if (!state || state.pointerId !== event.pointerId || viewMode !== 'edit') return
 
         const movedX = Math.abs(event.clientX - state.x)
         const movedY = Math.abs(event.clientY - state.y)
@@ -1637,86 +2739,149 @@ export function getP2pmdEditorPage () {
         const color = typeof attribution.color === 'string' ? attribution.color.trim() : ''
         if (!color) return null
 
-        return {
+        const normalized = {
           clientId: typeof attribution.clientId === 'string' ? attribution.clientId : '',
           color,
           name: typeof attribution.name === 'string' ? attribution.name : ''
         }
+        const updatedAt = Number(attribution.updatedAt)
+        if (Number.isFinite(updatedAt) && updatedAt >= 0) normalized.updatedAt = updatedAt
+        return normalized
       }
 
       function getLineCount(content) {
         return Math.max(String(content || '').split(newline).length, 1)
       }
 
+      function countLineBreaks(text, start = 0, end = text.length) {
+        let count = 0
+        for (let index = start; index < end; index++) {
+          if (text[index] === newline) count += 1
+        }
+        return count
+      }
+
+      function linesMatch(textA, startA, endA, textB, startB, endB) {
+        const length = endA - startA
+        if (length !== endB - startB) return false
+        for (let offset = 0; offset < length; offset++) {
+          if (textA[startA + offset] !== textB[startB + offset]) return false
+        }
+        return true
+      }
+
+      function countMatchingPrefixLines(previousValue, nextValue) {
+        let previousStart = 0
+        let nextStart = 0
+        let count = 0
+        while (previousStart <= previousValue.length && nextStart <= nextValue.length) {
+          const previousBreak = previousValue.indexOf(newline, previousStart)
+          const nextBreak = nextValue.indexOf(newline, nextStart)
+          const previousEnd = previousBreak === -1 ? previousValue.length : previousBreak
+          const nextEnd = nextBreak === -1 ? nextValue.length : nextBreak
+          if (!linesMatch(previousValue, previousStart, previousEnd, nextValue, nextStart, nextEnd)) break
+
+          count += 1
+          previousStart = previousBreak === -1 ? previousValue.length + 1 : previousBreak + 1
+          nextStart = nextBreak === -1 ? nextValue.length + 1 : nextBreak + 1
+        }
+        return count
+      }
+
+      function countMatchingSuffixLines(previousValue, nextValue, availablePrevious, availableNext) {
+        let previousEnd = previousValue.length
+        let nextEnd = nextValue.length
+        let count = 0
+        while (count < availablePrevious && count < availableNext) {
+          const previousStart = previousValue.lastIndexOf(newline, previousEnd - 1) + 1
+          const nextStart = nextValue.lastIndexOf(newline, nextEnd - 1) + 1
+          if (!linesMatch(previousValue, previousStart, previousEnd, nextValue, nextStart, nextEnd)) break
+
+          count += 1
+          previousEnd = previousStart - 1
+          nextEnd = nextStart - 1
+        }
+        return count
+      }
+
       function markEditedLines(previousContent, nextContent) {
-        const previousLines = String(previousContent || '').split(newline)
-        const nextLines = String(nextContent || '').split(newline)
+        if (previousContent === nextContent) return null
+
+        const previousValue = String(previousContent || '')
+        const nextValue = String(nextContent || '')
+        const previousLineCount = countLineBreaks(previousValue) + 1
+        const nextLineCount = countLineBreaks(nextValue) + 1
+        const prefixLineCount = countMatchingPrefixLines(previousValue, nextValue)
+        const suffixLineCount = countMatchingSuffixLines(
+          previousValue,
+          nextValue,
+          previousLineCount - prefixLineCount,
+          nextLineCount - prefixLineCount
+        )
         const nextAttributions = {}
         const nextLocalAttributions = {}
-        let prefix = 0
 
-        function carryLineAttribution(previousLine, nextLine) {
-          const existing = lineAttributions[String(previousLine)]
-          if (!existing) return
+        for (const [line, attribution] of Object.entries(lineAttributions)) {
+          const previousLine = Number(line)
+          let nextLine = null
+          if (previousLine <= prefixLineCount) {
+            nextLine = previousLine
+          } else if (previousLine > previousLineCount - suffixLineCount) {
+            nextLine = previousLine + nextLineCount - previousLineCount
+          }
+          if (!nextLine || nextLine < 1 || nextLine > nextLineCount) continue
 
-          nextAttributions[String(nextLine)] = existing
-          if (existing.clientId === clientId) {
-            nextLocalAttributions[String(nextLine)] = existing
+          nextAttributions[String(nextLine)] = attribution
+          if (attribution.clientId === clientId) {
+            nextLocalAttributions[String(nextLine)] = attribution
           }
         }
 
-        while (
-          prefix < previousLines.length &&
-          prefix < nextLines.length &&
-          previousLines[prefix] === nextLines[prefix]
-        ) {
-          carryLineAttribution(prefix + 1, prefix + 1)
-          prefix += 1
-        }
-
-        let previousSuffix = previousLines.length - 1
-        let nextSuffix = nextLines.length - 1
-        while (
-          previousSuffix >= prefix &&
-          nextSuffix >= prefix &&
-          previousLines[previousSuffix] === nextLines[nextSuffix]
-        ) {
-          carryLineAttribution(previousSuffix + 1, nextSuffix + 1)
-          previousSuffix -= 1
-          nextSuffix -= 1
-        }
-
-        for (let index = prefix; index <= nextSuffix; index++) {
-          nextAttributions[String(index + 1)] = localAuthor
-          nextLocalAttributions[String(index + 1)] = localAuthor
+        const editedAttribution = { ...localAuthor, updatedAt: Date.now() }
+        const startLine = prefixLineCount + 1
+        const editedEndLine = nextLineCount - suffixLineCount
+        for (let line = startLine; line <= editedEndLine; line++) {
+          nextAttributions[String(line)] = editedAttribution
+          nextLocalAttributions[String(line)] = editedAttribution
         }
 
         lineAttributions = nextAttributions
         localLineAttributions = nextLocalAttributions
+
+        return {
+          startLine,
+          endLine: previousLineCount === nextLineCount
+            ? Math.max(startLine, editedEndLine)
+            : nextLineCount,
+          lineCount: nextLineCount
+        }
       }
 
-      function renderLineGutter() {
-        const lines = input.value.split(newline)
-        const count = Math.max(lines.length, 1)
+      function renderLineGutter(update = null) {
+        const count = Math.max(update?.lineCount || getLineCount(input.value), 1)
 
-        lineGutter.replaceChildren()
+        while (lineGutter.childElementCount > count) {
+          lineGutter.lastElementChild.remove()
+        }
+        while (lineGutter.childElementCount < count) {
+          lineGutter.appendChild(document.createElement('div'))
+        }
 
-        for (let index = 0; index < count; index++) {
-          const line = document.createElement('div')
+        const startIndex = update ? Math.max(0, update.startLine - 1) : 0
+        const endIndex = update ? Math.min(count - 1, update.endLine - 1) : count - 1
+        for (let index = startIndex; index <= endIndex; index++) {
+          const line = lineGutter.children[index]
           const attribution = lineAttributions[String(index + 1)] || null
           const isLocal = attribution && attribution.clientId === clientId
           const lineOrigin = attribution ? (isLocal ? 'local' : 'remote') : 'loaded'
           line.className = 'gutter-line ' + lineOrigin
-          if (attribution) {
-            line.style.borderRightColor = attribution.color
-          }
+          line.style.borderRightColor = attribution ? attribution.color : ''
           line.title = lineOrigin === 'remote'
             ? 'Edited by ' + (attribution.name || 'remote peer')
             : lineOrigin === 'local'
               ? 'Edited on this device'
               : 'Loaded document line'
           line.textContent = String(index + 1)
-          lineGutter.appendChild(line)
         }
 
         syncLineGutterScroll()
@@ -1822,7 +2987,7 @@ export function getP2pmdEditorPage () {
             throw new Error(result.error || 'Unable to sync document update')
           }
 
-          const syncedDocument = getSyncedDocumentFromResponse(result, ytext ? ytext.toString() : input.value)
+          const syncedDocument = getSyncedDocumentFromResponse(result, ytext ? getYTextSnapshot() : input.value)
           notifyNative('p2pmd-document-saved', {
             updatedAt: syncedDocument.updatedAt,
             contentLength: syncedDocument.content.length
@@ -1867,6 +3032,7 @@ export function getP2pmdEditorPage () {
 
         ydoc = new window.Y.Doc()
         ytext = ydoc.getText('content')
+        ysettings = ydoc.getMap('settings')
 
         try {
           const result = await withInitialRoomRetry(async () => {
@@ -1882,6 +3048,7 @@ export function getP2pmdEditorPage () {
           if (typeof result.yjsState === 'string') {
             window.Y.applyUpdate(ydoc, base64ToBytes(result.yjsState), Y_ORIGIN_REMOTE)
             const yjsContent = ytext.toString()
+            ytextSnapshot = yjsContent
             if (yjsContent || !input.value) {
               input.value = yjsContent
               lastSyncedContent = yjsContent
@@ -1891,10 +3058,11 @@ export function getP2pmdEditorPage () {
           }
         } catch {}
 
-        if (!ytext.toString() && input.value) {
+        if (!getYTextSnapshot() && input.value) {
           ydoc.transact(() => {
             ytext.insert(0, input.value)
           }, Y_ORIGIN_REMOTE)
+          ytextSnapshot = input.value
         }
 
         ydoc.on('update', (update, origin) => {
@@ -1911,8 +3079,26 @@ export function getP2pmdEditorPage () {
           }, 100)
         })
 
+        const sharedLatexMode = ysettings.get(LATEX_MODE_YJS_KEY)
+        if (typeof sharedLatexMode === 'boolean') {
+          hasSyncedHostLatexMode = true
+          setLatexMode(sharedLatexMode, { persist: false, sync: false, fromSharedState: true })
+        } else if (roomRole === 'host') {
+          setLatexMode(latexModeEnabled)
+        }
+
+        ysettings.observe((event) => {
+          if (!event.keysChanged.has(LATEX_MODE_YJS_KEY)) return
+          const enabled = ysettings.get(LATEX_MODE_YJS_KEY)
+          if (typeof enabled !== 'boolean') return
+
+          hasSyncedHostLatexMode = true
+          setLatexMode(enabled, { persist: false, sync: false, fromSharedState: true })
+        })
+
         ytext.observe((event) => {
           const newContent = ytext.toString()
+          ytextSnapshot = newContent
           lastSyncedContent = newContent
           lastInputContent = newContent
 
@@ -1944,7 +3130,7 @@ export function getP2pmdEditorPage () {
           )
           mergeLineAttributionsFromPeerList(latestPeerList, false)
           renderLineGutter()
-          if (isPreviewMode) renderPreview()
+          scheduleActiveViewRender()
           notifyNative('p2pmd-document-updated', {
             contentLength: newContent.length
           })
@@ -1957,18 +3143,23 @@ export function getP2pmdEditorPage () {
 
         try {
           const result = await callNativeBridge('preview', {
-            content: input.value
+            content: input.value,
+            latexModeEnabled
           })
 
           if (typeof result.html !== 'string') {
             throw new Error(result.error || 'Unable to render Markdown preview')
           }
 
-          if (requestId !== previewRequestId || !isPreviewMode) return
+          if (requestId !== previewRequestId || viewMode !== 'preview') return
 
+          window.P2pmdIeee?.clear(preview)
           preview.innerHTML = result.html
+          if (result.ieee === true) {
+            await window.P2pmdIeee.render(preview, result.html)
+          }
         } catch (error) {
-          if (requestId !== previewRequestId || !isPreviewMode) return
+          if (requestId !== previewRequestId || viewMode !== 'preview') return
           notifyDocumentError(error, 'editor-error')
         } finally {
           if (requestId === previewRequestId) {
@@ -1977,28 +3168,164 @@ export function getP2pmdEditorPage () {
         }
       }
 
-      function togglePreview() {
-        isPreviewMode = !isPreviewMode
-        document.body.classList.toggle('preview-mode', isPreviewMode)
-        input.hidden = isPreviewMode
-        input.parentElement.hidden = isPreviewMode
-        preview.hidden = !isPreviewMode
-        formattingToolbar.hidden = isPreviewMode
-        notifyNative('p2pmd-preview-mode', {
-          preview: isPreviewMode
+      async function renderSlides() {
+        const requestId = ++previewRequestId
+        slidesPreview.setAttribute('aria-busy', 'true')
+
+        try {
+          const result = await callNativeBridge('preview', {
+            content: input.value,
+            mode: 'slides',
+            latexModeEnabled
+          })
+
+          if (typeof result.html !== 'string' || !Number.isInteger(result.count) || result.count < 1) {
+            throw new Error(result.error || 'Unable to render presentation slides')
+          }
+
+          if (requestId !== previewRequestId || viewMode !== 'slides') return
+
+          const previousSlideIndex = currentSlideIndex
+          const activeSlide = slidesContent.querySelector('.slide.active')
+          const previousScrollTop = activeSlide ? activeSlide.scrollTop : 0
+          slidesContent.innerHTML = result.html
+          currentSlideIndex = clampSlideIndex(currentSlideIndex, result.count)
+          showSlide(
+            currentSlideIndex,
+            currentSlideIndex === previousSlideIndex ? previousScrollTop : 0
+          )
+        } catch (error) {
+          if (requestId !== previewRequestId || viewMode !== 'slides') return
+          notifyDocumentError(error, 'editor-error')
+        } finally {
+          if (requestId === previewRequestId) {
+            slidesPreview.removeAttribute('aria-busy')
+          }
+        }
+      }
+
+      function clampSlideIndex(index, totalSlides) {
+        if (!Number.isFinite(index) || totalSlides < 1) return 0
+        return Math.max(0, Math.min(Math.floor(index), totalSlides - 1))
+      }
+
+      function showSlide(index, scrollTop = 0) {
+        const slides = Array.from(slidesContent.querySelectorAll('.slide'))
+        if (slides.length === 0) return
+
+        currentSlideIndex = clampSlideIndex(index, slides.length)
+        slides.forEach((slide, slideIndex) => {
+          const active = slideIndex === currentSlideIndex
+          slide.classList.toggle('active', active)
+          slide.setAttribute('aria-hidden', String(!active))
+          slide.style.transform = ''
+          if (active) slide.scrollTop = scrollTop
         })
 
-        if (isPreviewMode) {
-          renderPreview()
-        } else {
-          previewRequestId += 1
-          input.focus()
+        const atStart = currentSlideIndex === 0
+        const atEnd = currentSlideIndex === slides.length - 1
+        slidesPrevious.disabled = atStart
+        slidesNext.disabled = atEnd
+        slidesCounter.textContent = (currentSlideIndex + 1) + ' / ' + slides.length
+        slidesProgress.style.width = (((currentSlideIndex + 1) / slides.length) * 100) + '%'
+        scheduleSlideFit()
+      }
+
+      function scheduleSlideFit() {
+        if (slideFitFrame) cancelAnimationFrame(slideFitFrame)
+        slideFitFrame = requestAnimationFrame(() => {
+          slideFitFrame = null
+          fitActiveSlide()
+        })
+      }
+
+      function fitActiveSlide() {
+        const slide = slidesContent.querySelector('.slide.active')
+        if (!slide) return
+
+        slide.style.transform = ''
+        if (!window.matchMedia('(orientation: landscape)').matches) return
+
+        const availableWidth = slidesPreview.clientWidth
+        const availableHeight = slidesPreview.clientHeight
+        const contentWidth = Math.max(slide.clientWidth, slide.scrollWidth)
+        const contentHeight = Math.max(slide.clientHeight, slide.scrollHeight)
+        if (!availableWidth || !availableHeight || !contentWidth || !contentHeight) return
+
+        const scale = Math.min(1, availableWidth / contentWidth, availableHeight / contentHeight)
+        if (scale < 1) slide.style.transform = 'scale(' + scale + ')'
+      }
+
+      function moveSlide(direction) {
+        const nextSlideIndex = currentSlideIndex + direction
+        const slideCount = slidesContent.querySelectorAll('.slide').length
+        if (nextSlideIndex < 0 || nextSlideIndex >= slideCount) return
+        showSlide(nextSlideIndex)
+      }
+
+      async function renderActiveView() {
+        if (activeViewRenderInFlight) {
+          activeViewRenderPending = true
+          return
         }
+
+        activeViewRenderInFlight = true
+        try {
+          if (viewMode === 'preview') await renderPreview()
+          else if (viewMode === 'slides') await renderSlides()
+        } finally {
+          activeViewRenderInFlight = false
+          if (activeViewRenderPending) {
+            activeViewRenderPending = false
+            if (viewMode !== 'edit') renderActiveView()
+          }
+        }
+      }
+
+      function scheduleActiveViewRender() {
+        if (viewMode === 'edit') return
+        if (activeViewRenderTimer) clearTimeout(activeViewRenderTimer)
+        activeViewRenderTimer = setTimeout(() => {
+          activeViewRenderTimer = null
+          renderActiveView()
+        }, ACTIVE_VIEW_RENDER_DELAY_MS)
+      }
+
+      function setViewMode(nextMode) {
+        if (!['edit', 'preview', 'slides'].includes(nextMode)) return
+
+        if (activeViewRenderTimer) {
+          clearTimeout(activeViewRenderTimer)
+          activeViewRenderTimer = null
+        }
+        viewMode = nextMode
+        if (viewMode === 'edit') activeViewRenderPending = false
+        previewRequestId += 1
+        document.body.classList.toggle('preview-mode', viewMode === 'preview')
+        document.body.classList.toggle('slide-mode', viewMode === 'slides')
+        input.hidden = viewMode !== 'edit'
+        input.parentElement.hidden = viewMode !== 'edit'
+        preview.hidden = viewMode !== 'preview'
+        slidesPreview.hidden = viewMode !== 'slides'
+        formattingToolbar.hidden = viewMode !== 'edit'
+        notifyNative('p2pmd-view-mode', { mode: viewMode })
+
+        if (viewMode === 'edit') {
+          input.focus()
+        } else {
+          renderActiveView()
+        }
+      }
+
+      function togglePreview() {
+        setViewMode(viewMode === 'edit' ? 'preview' : 'edit')
       }
 
       function publishToHyper() {
         notifyNative('p2pmd-publish-requested', {
-          content: input.value
+          content: input.value,
+          mode: viewMode,
+          latexModeEnabled
         })
       }
 
@@ -2037,6 +3364,21 @@ export function getP2pmdEditorPage () {
 
             latestPeerList = peerList
             mergeLineAttributionsFromPeerList(peerList)
+            renderPeerDashboard()
+
+            if (roomRole === 'client' && !hasSyncedHostLatexMode) {
+              const host = peerList.find((peer) => peer?.role === 'host')
+              if (typeof host?.latexModeEnabled === 'boolean') {
+                hasSyncedHostLatexMode = true
+                setLatexMode(host.latexModeEnabled, { persist: false, sync: false, fromSharedState: true })
+              }
+            }
+          } catch {}
+        })
+
+        source.addEventListener('activity', (event) => {
+          try {
+            mergePeerActivity(JSON.parse(event.data || 'null'))
           } catch {}
         })
 
@@ -2050,7 +3392,7 @@ export function getP2pmdEditorPage () {
             if (typeof documentState.content !== 'string') return
 
             if (ydoc && ytext) {
-              lastSyncedContent = ytext.toString()
+              lastSyncedContent = getYTextSnapshot()
               lastInputContent = lastSyncedContent
               applyLineAttributionsFromDocument({
                 ...documentState,
@@ -2070,7 +3412,7 @@ export function getP2pmdEditorPage () {
             lastSyncedContent = documentState.content
             lastInputContent = documentState.content
             applyLineAttributionsFromDocument(documentState)
-            if (isPreviewMode) renderPreview()
+            scheduleActiveViewRender()
             notifyNative('p2pmd-document-updated', {
               updatedAt: documentState.updatedAt,
               contentLength: documentState.content.length
@@ -2094,6 +3436,10 @@ export function getP2pmdEditorPage () {
       }
 
       async function initializeEditor() {
+        renderTemplateMenu()
+        updateLatexControls()
+        peerDisplayName.value = localAuthor.name
+        renderPeerDashboard()
         await loadDocument()
         try {
           await loadYjsRuntime()
@@ -2122,8 +3468,69 @@ export function getP2pmdEditorPage () {
 
         handleToolbarFormat(event)
       })
+      latexTemplateMenu?.addEventListener('click', (event) => {
+        const button = event.target?.closest?.('button[data-template-id]')
+        if (button) applyTemplate(button.dataset.templateId)
+      })
+      document.addEventListener('click', closeTemplateMenuOnOutsideClick)
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && latexTemplateMenu) latexTemplateMenu.hidden = true
+        if (event.key === 'Escape' && !peerDashboardBackdrop.hidden) {
+          setPeerDashboardVisible(false)
+        }
+      })
+      peerDashboardClose.addEventListener('click', () => setPeerDashboardVisible(false))
+      peerDashboardBackdrop.addEventListener('click', (event) => {
+        if (event.target === peerDashboardBackdrop) setPeerDashboardVisible(false)
+      })
+      peerDisplayNameSave.addEventListener('click', updatePeerDisplayName)
+      peerDisplayName.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') updatePeerDisplayName()
+      })
+      slidesPrevious.addEventListener('click', () => moveSlide(-1))
+      slidesNext.addEventListener('click', () => moveSlide(1))
+      slidesExit.addEventListener('click', () => setViewMode('edit'))
+      window.addEventListener('resize', () => {
+        scheduleSlideFit()
+        if (viewMode === 'preview') window.P2pmdIeee?.fitPages(preview)
+      })
+      slidesContent.addEventListener('load', scheduleSlideFit, true)
+      slidesContent.addEventListener('loadedmetadata', scheduleSlideFit, true)
+      slidesPreview.addEventListener('touchstart', (event) => {
+        const touch = event.touches[0]
+        if (!touch) return
+        slideTouchStart = { x: touch.clientX, y: touch.clientY }
+      }, { passive: true })
+      slidesPreview.addEventListener('touchend', (event) => {
+        const touch = event.changedTouches[0]
+        const start = slideTouchStart
+        slideTouchStart = null
+        if (!touch || !start) return
+
+        const deltaX = touch.clientX - start.x
+        const deltaY = touch.clientY - start.y
+        if (Math.abs(deltaX) < 48 || Math.abs(deltaX) <= Math.abs(deltaY) * 1.2) return
+        moveSlide(deltaX < 0 ? 1 : -1)
+      }, { passive: true })
+      slidesPreview.addEventListener('touchcancel', () => {
+        slideTouchStart = null
+      }, { passive: true })
+      window.addEventListener('keydown', (event) => {
+        if (viewMode !== 'slides') return
+        if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') moveSlide(-1)
+        else if (event.key === 'ArrowRight' || event.key === 'ArrowDown' || event.key === ' ') {
+          event.preventDefault()
+          moveSlide(1)
+        } else if (event.key === 'Home') showSlide(0)
+        else if (event.key === 'End') {
+          showSlide(slidesContent.querySelectorAll('.slide').length - 1)
+        } else if (event.key === 'Escape') setViewMode('edit')
+      })
       window.__p2pmdTogglePreview = togglePreview
       window.__p2pmdPublishToHyper = publishToHyper
+      window.__p2pmdTogglePeerDashboard = (force) => {
+        setPeerDashboardVisible(typeof force === 'boolean' ? force : peerDashboardBackdrop.hidden)
+      }
       initializeEditor()
     </script>
   </body>
