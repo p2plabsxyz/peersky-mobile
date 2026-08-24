@@ -14,10 +14,14 @@ export const INTERNAL_APPS = [
   {
     id: 'hyper',
     title: 'Hyperdrive',
-    url: 'peersky://hyper/',
+    url: 'peersky://hyperdrive/',
     icon: 'H'
   }
 ]
+
+const LEGACY_INTERNAL_APP_ROUTES = new Map([
+  ['peersky://hyper', 'hyper']
+])
 
 export function getRuntimeAppUrl (app) {
   const match = INTERNAL_APPS.find((item) => item.id === app)
@@ -26,7 +30,8 @@ export function getRuntimeAppUrl (app) {
 
 export function getRuntimeAppFromUrl (targetUrl) {
   const normalizedUrl = normalizeInternalAppUrl(targetUrl)
-  return INTERNAL_APPS.find((app) => normalizeInternalAppUrl(app.url) === normalizedUrl)?.id || null
+  return INTERNAL_APPS.find((app) => normalizeInternalAppUrl(app.url) === normalizedUrl)?.id ||
+    LEGACY_INTERNAL_APP_ROUTES.get(normalizedUrl) || null
 }
 
 export function getRuntimeAppTitle (app) {

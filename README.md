@@ -34,7 +34,7 @@ A peer-to-peer mobile browser built with [Bare](https://github.com/holepunchto/b
 - Local app routes for bundled peer-to-peer tools:
   - `peersky://p2p/p2pmd/`
   - `peersky://holesail/`
-  - `peersky://hyper/`
+  - `peersky://hyperdrive/`
 
 Hyper media is streamed through a local loopback proxy so WebView can play audio/video while the Bare runtime fetches the underlying `hyper://` asset.
 
