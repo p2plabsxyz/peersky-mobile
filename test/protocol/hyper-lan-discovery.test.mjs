@@ -3,6 +3,7 @@ import { beforeEach, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
+  addLANReadinessBarrier,
   getLANDiscoveryStatus,
   resetLANDiscovery,
   startLANDiscovery
@@ -39,6 +40,8 @@ describe('Hyper LAN discovery', () => {
       host: '192.168.1.25',
       port: 49799,
       publicKey: '',
+      joinedTopics: 0,
+      activeConnections: 0,
       peers: []
     })
     assert.deepEqual(getLANDiscoveryStatus(), status)
@@ -167,6 +170,71 @@ describe('Hyper LAN discovery', () => {
     assert.deepEqual(getLANDiscoveryStatus().peers, [])
   })
 
+  it('distinguishes a reachable peer from an active replication connection', async () => {
+    const runtime = { swarm: { keyPair: {} } }
+    const instance = new FakeLAN('10.0.0.5', 49799)
+    const publicKey = Buffer.alloc(32, 8)
+    const socket = new EventEmitter()
+
+    await startLANDiscovery(runtime, {
+      createLAN: () => instance,
+      attach: async () => instance
+    })
+
+    instance.emit('peer-reachable', {
+      host: '10.0.0.9',
+      port: 49799,
+      publicKey,
+      reachable: true,
+      topics: [Buffer.alloc(32)]
+    })
+
+    assert.equal(getLANDiscoveryStatus().peers[0].connected, false)
+
+    instance.emit('connection', socket, {
+      publicKey,
+      topics: [Buffer.alloc(32)],
+      lan: true
+    })
+
+    let connectionStatus = getLANDiscoveryStatus()
+    assert.equal(connectionStatus.activeConnections, 1)
+    assert.equal(connectionStatus.peers[0].connected, true)
+    assert.equal(connectionStatus.peers[0].activeConnections, 1)
+    assert.equal(typeof connectionStatus.peers[0].lastConnected, 'number')
+
+    socket.emit('close')
+    connectionStatus = getLANDiscoveryStatus()
+    assert.equal(connectionStatus.activeConnections, 0)
+    assert.equal(connectionStatus.peers[0].connected, false)
+  })
+
+  it('waits for the queued topic advertisement before flushing discovery', async () => {
+    let publishTopic
+    let flushed = false
+    const instance = {
+      _advertisementQueue: new Promise((resolve) => { publishTopic = resolve }),
+      flush: async () => { flushed = true },
+      join: () => ({
+        flushed: async () => { flushed = true }
+      })
+    }
+
+    addLANReadinessBarrier(instance, { settleMs: 0 })
+
+    const instanceFlush = instance.flush()
+    await Promise.resolve()
+    assert.equal(flushed, false)
+    publishTopic()
+    await instanceFlush
+    assert.equal(flushed, true)
+
+    flushed = false
+    instance._advertisementQueue = Promise.resolve()
+    await instance.join(Buffer.alloc(32)).flushed()
+    assert.equal(flushed, true)
+  })
+
   it('keeps Hyper available and cleans up when multicast startup fails', async () => {
     const runtime = { swarm: { keyPair: {} } }
     const instance = new FakeLAN('', null, new Error('Wi-Fi multicast unavailable'))
@@ -189,6 +257,8 @@ describe('Hyper LAN discovery', () => {
     assert.deepEqual(status, {
       available: false,
       error: 'Wi-Fi multicast unavailable',
+      joinedTopics: 0,
+      activeConnections: 0,
       peers: []
     })
     assert.equal(instance.destroyed, true)

@@ -36,7 +36,8 @@ export function getHyperStoragePath () {
 }
 
 export async function ensureLANDiscovery () {
-  return startLANDiscovery()
+  const runtime = await getHyperRuntime()
+  return startLANDiscovery(runtime)
 }
 
 export { getLANDiscoveryStatus }

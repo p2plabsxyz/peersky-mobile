@@ -100,7 +100,10 @@ type LANDiscoveryPeer = {
   host: string
   port: number | null
   reachable: boolean
+  connected: boolean
+  activeConnections: number
   sharedTopics: number
+  lastConnected: number | null
   lastSeen: number
 }
 
@@ -110,6 +113,8 @@ type LANDiscoveryStatus = {
   host?: string
   port?: number | null
   publicKey?: string
+  joinedTopics: number
+  activeConnections: number
   peers: LANDiscoveryPeer[]
 }
 
@@ -715,7 +720,7 @@ function LANDiscoveryTest({
             <SettingCopy
               title={lanStatus?.available ? 'mDNS is active' : 'mDNS is unavailable'}
               description={lanStatus?.available
-                ? `Listening at ${lanStatus.host || 'unknown'}:${lanStatus.port || 'unknown'}`
+                ? `Listening at ${lanStatus.host || 'unknown'}:${lanStatus.port || 'unknown'} · ${lanStatus.joinedTopics} joined topics · ${lanStatus.activeConnections} active connections`
                 : lanStatus?.error || 'Waiting for LAN discovery to start'}
             />
             {isRefreshing && <ActivityIndicator size='small' />}
@@ -766,15 +771,15 @@ function LANDiscoveryTest({
               <Text style={[styles.lanPeerTitle, isDark ? darkStyles.primaryText : null]}>
                 {peer.host}:{peer.port || 'unknown'}
               </Text>
-              <Text style={peer.reachable ? styles.lanReachable : styles.lanDiscovered}>
-                {peer.reachable ? 'Reachable' : 'Discovered'}
+              <Text style={peer.connected || peer.reachable ? styles.lanReachable : styles.lanDiscovered}>
+                {peer.connected ? 'Connected' : peer.reachable ? 'Reachable' : 'Discovered'}
               </Text>
             </View>
             <Text style={[styles.keyText, isDark ? darkStyles.primaryText : null]}>
               {peer.publicKey}
             </Text>
             <Text style={[styles.helperText, isDark ? darkStyles.secondaryText : null]}>
-              Shared topics: {peer.sharedTopics} | Last seen: {new Date(peer.lastSeen).toLocaleTimeString()}
+              Shared topics: {peer.sharedTopics} | Connections: {peer.activeConnections} | Last seen: {new Date(peer.lastSeen).toLocaleTimeString()}
             </Text>
           </View>
         ))}
