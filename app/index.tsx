@@ -2556,7 +2556,17 @@ export default function App () {
             </ScrollView>
             )
           : browserSource.kind === 'app'
-            ? (
+            ? activeTab === 'hyper'
+              ? (
+                <HyperdriveScreen
+                  isDark={browserIsDark}
+                  isLandscape={!browserIsPortrait}
+                  onCallRpc={(command, data = {}) => callRpc(command, data)}
+                  onOpenUrl={(targetUrl) => void loadBrowserUrl(targetUrl)}
+                  onStatus={setStatus}
+                />
+                )
+              : (
               <ScrollView
                 style={[
                   styles.browserContentPage,
@@ -2579,14 +2589,6 @@ export default function App () {
                   <Text style={[styles.status, { color: browserChrome.text }]}>{status}</Text>
                 )}
 
-                {activeTab === 'hyper' && (
-                  <HyperdriveScreen
-                    isDark={browserIsDark}
-                    onCallRpc={(command, data = {}) => callRpc(command, data)}
-                    onOpenUrl={(targetUrl) => void loadBrowserUrl(targetUrl)}
-                    onStatus={setStatus}
-                  />
-                )}
                 {activeTab === 'holesail' && (
                   <View style={[styles.section, { borderColor: browserChrome.border }]}>
                     <Text style={[styles.sectionTitle, { color: browserChrome.text }]}>Holesail Runtime Check</Text>
