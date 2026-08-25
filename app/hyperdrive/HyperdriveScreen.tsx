@@ -15,7 +15,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { CameraView, useCameraPermissions } from 'expo-camera'
 import * as DocumentPicker from 'expo-document-picker'
-import { File, Paths } from 'expo-file-system'
+import { File } from 'expo-file-system'
 import ArrowLeftIcon from '../../assets/icons/bootstrap/arrow-left.svg'
 import ChevronRightIcon from '../../assets/icons/bootstrap/chevron-right.svg'
 import CopyIcon from '../../assets/icons/bootstrap/copy.svg'
@@ -27,14 +27,15 @@ import {
   RPC_HYPER_LIBRARY_UPLOAD
 } from '../../backend/rpc/commands.mjs'
 import {
-  parseHyperdriveRecents,
   recordHyperdriveRecent,
-  removeHyperdriveRecent,
-  serializeHyperdriveRecents
+  removeHyperdriveRecent
 } from './recents.mjs'
+import {
+  loadHyperdriveRecents,
+  persistHyperdriveRecents
+} from './recents-store'
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024
-const RECENTS_FILE = new File(Paths.document, 'hyperdrive-recents.json')
 const hyperdriveIcon = require('../../assets/images/hyperdrive.png')
 
 type RecentSource = 'fetched' | 'uploaded'
@@ -68,7 +69,7 @@ const RECENT_FILTERS: Array<{ id: RecentFilter, label: string }> = [
 ]
 
 export function HyperdriveScreen ({ isDark, isLandscape, onCallRpc, onOpenUrl, onStatus }: Props) {
-  const [recents, setRecents] = useState<HyperdriveItem[]>(loadRecents)
+  const [recents, setRecents] = useState<HyperdriveItem[]>(loadHyperdriveRecents)
   const [items, setItems] = useState<HyperdriveItem[] | null>(null)
   const [location, setLocation] = useState<HyperdriveItem | null>(null)
   const [listingTruncated, setListingTruncated] = useState(false)
@@ -178,7 +179,7 @@ export function HyperdriveScreen ({ isDark, isLandscape, onCallRpc, onOpenUrl, o
   function remember (item: HyperdriveItem, source: RecentSource) {
     setRecents((current) => {
       const next = recordHyperdriveRecent(current, { ...item, source }) as HyperdriveItem[]
-      if (!persistRecents(next)) reportPersistenceFailure()
+      if (!persistHyperdriveRecents(next)) reportPersistenceFailure()
       return next
     })
   }
@@ -192,7 +193,7 @@ export function HyperdriveScreen ({ isDark, isLandscape, onCallRpc, onOpenUrl, o
         style: 'destructive',
         onPress: () => setRecents((current) => {
           const next = removeHyperdriveRecent(current, item.url) as HyperdriveItem[]
-          if (!persistRecents(next)) reportPersistenceFailure()
+          if (!persistHyperdriveRecents(next)) reportPersistenceFailure()
           return next
         })
       }
@@ -457,24 +458,6 @@ function FilePreview ({ item, palette }: { item: HyperdriveItem, palette: Palett
       <Text style={[styles.fileExtension, { color: palette.text }]}>{extension}</Text>
     </View>
   )
-}
-
-function loadRecents (): HyperdriveItem[] {
-  try {
-    return RECENTS_FILE.exists ? parseHyperdriveRecents(RECENTS_FILE.textSync()) as HyperdriveItem[] : []
-  } catch {
-    return []
-  }
-}
-
-function persistRecents (recents: HyperdriveItem[]) {
-  try {
-    if (!RECENTS_FILE.exists) RECENTS_FILE.create({ intermediates: true })
-    RECENTS_FILE.write(serializeHyperdriveRecents(recents))
-    return true
-  } catch {
-    return false
-  }
 }
 
 function formatItemMeta (item: HyperdriveItem) {

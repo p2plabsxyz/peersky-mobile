@@ -104,6 +104,20 @@ type RpcResponse = {
   total?: number
   totalPages?: number
   clearedCores?: number
+  cleared?: boolean
+  archive?: {
+    items: Array<{
+      url: string
+      driveUrl: string
+      name: string
+      source: 'published' | 'fetched'
+      appId?: string
+      updatedAt: number
+    }>
+    page: number
+    total: number
+    totalPages: number
+  }
 }
 
 type SettingsScreenProps = {
@@ -230,7 +244,7 @@ export function SettingsScreen(props: SettingsScreenProps) {
         {page === 'appearance' && <Appearance {...props} />}
         {page === 'data-clearing' && <DataClearing {...props} />}
         {page === 'privacy' && <Privacy {...props} />}
-        {page === 'p2p-storage' && <P2PStorage onCallRpc={props.onCallRpc} />}
+        {page === 'p2p-storage' && <P2PStorage onCallRpc={props.onCallRpc} onOpenUrl={props.onOpenUrl} />}
         {page === 'permissions' && <Permissions {...props} />}
         {page === 'link-device' && <LinkDeviceSettings {...props} />}
         {page === 'about' && <AboutSettings onOpenUrl={props.onOpenUrl} />}

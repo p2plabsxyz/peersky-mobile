@@ -9,6 +9,7 @@ import {
 const DRIVE_URL = `hyper://${'a'.repeat(64)}/`
 
 test('lists only immediate directory children and folders first', async () => {
+  const archiveEntries = []
   const drive = createDrive({
     '/cover.png': { blob: { byteLength: 12 } },
     '/docs/readme.md': { blob: { byteLength: 24 } },
@@ -16,7 +17,8 @@ test('lists only immediate directory children and folders first', async () => {
   })
 
   const response = await listHyperdriveLocation({ url: DRIVE_URL }, {
-    runtime: { getDrive: async () => drive }
+    runtime: { getDrive: async () => drive },
+    recordArchive: async (entry) => { archiveEntries.push(entry) }
   })
 
   assert.equal(response.ok, true)
@@ -24,6 +26,11 @@ test('lists only immediate directory children and folders first', async () => {
     { type: 'directory', name: 'docs' },
     { type: 'file', name: 'cover.png' }
   ])
+  assert.deepEqual(archiveEntries, [{
+    url: DRIVE_URL,
+    name: 'aaaaaaaa...aaaaaa',
+    source: 'fetched'
+  }])
 })
 
 test('returns a fetched file with bounded metadata', async () => {
@@ -54,17 +61,25 @@ test('rejects a missing non-root path instead of displaying an empty folder', as
 })
 
 test('uploads with a safe unique filename', async () => {
+  const archiveEntries = []
   const drive = createDrive({ '/report.pdf': { blob: { byteLength: 1 } } })
   const response = await uploadHyperdriveFile({
     name: '../report.pdf',
     contentBase64: Buffer.from('new report').toString('base64')
   }, {
-    runtime: { getDrive: async () => drive }
+    runtime: { getDrive: async () => drive },
+    recordArchive: async (entry) => { archiveEntries.push(entry) }
   })
 
   assert.equal(response.ok, true)
   assert.equal(response.item.name, 'report (1).pdf')
   assert.equal(drive.writes[0].path, '/report (1).pdf')
+  assert.deepEqual(archiveEntries, [{
+    url: `${DRIVE_URL}report (1).pdf`,
+    name: 'report (1).pdf',
+    source: 'published',
+    appId: 'hyperdrive'
+  }])
 })
 
 test('serializes simultaneous uploads before selecting duplicate names', async () => {

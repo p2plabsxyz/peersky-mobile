@@ -8,6 +8,7 @@ import {
   inlineHyperAssets
 } from './assets.mjs'
 import { startHyperAssetServer } from './asset-server.mjs'
+import { recordHyperArchive } from './archive.mjs'
 import { withHyperRuntimeOperation } from './runtime.mjs'
 import { parseHyperUrl } from './url.mjs'
 
@@ -38,7 +39,7 @@ export async function fetchHyper ({
   return withHyperRuntimeOperation(async (runtime) => {
     const fetch = await getHyperFetch(runtime)
 
-    return withHyperRetry({
+    const result = await withHyperRetry({
       fetch,
       url,
       retries,
@@ -110,6 +111,15 @@ export async function fetchHyper ({
         }
       }
     })
+
+    if (result.ok) {
+      await recordHyperArchive({
+        url: result.url || url,
+        source: 'fetched'
+      })
+    }
+
+    return result
   })
 }
 

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { runP2pCacheClear } from '../../backend/hyper/storage-lifecycle.mjs'
+import { runP2pCacheClear, runP2pDataClear } from '../../backend/hyper/storage-lifecycle.mjs'
 
 test('cache clear closes storage and reopens the runtime in order', async () => {
   const events = []
@@ -45,6 +45,47 @@ test('cache clear still reopens the runtime after a storage failure', async () =
     }),
     clearStore: async () => ({ ok: true })
   }), /storage failed/)
+
+  assert.equal(runtimeCalls, 2)
+})
+
+test('full P2P clear removes storage and archive before reopening the runtime', async () => {
+  const events = []
+  let runtimeCalls = 0
+  const result = await runP2pDataClear({
+    getRuntime: async () => { events.push(`runtime-${++runtimeCalls}`) },
+    getStoragePath: () => '/test/storage',
+    stopAssetServer: async () => { events.push('asset-stop') },
+    closeRuntime: async () => { events.push('runtime-close') },
+    resetFetch: () => { events.push('fetch-reset') },
+    removeStorage: (path) => { events.push(`storage-remove:${path}`) },
+    clearArchive: async (path) => { events.push(`archive-clear:${path}`) }
+  })
+
+  assert.deepEqual(result, { ok: true, cleared: true })
+  assert.deepEqual(events, [
+    'runtime-1',
+    'asset-stop',
+    'runtime-close',
+    'fetch-reset',
+    'storage-remove:/test/storage',
+    'archive-clear:/test/storage',
+    'runtime-2'
+  ])
+})
+
+test('full P2P clear still reopens the runtime after deletion fails', async () => {
+  let runtimeCalls = 0
+
+  await assert.rejects(runP2pDataClear({
+    getRuntime: async () => { runtimeCalls += 1 },
+    getStoragePath: () => '/test/storage',
+    stopAssetServer: async () => {},
+    closeRuntime: async () => {},
+    resetFetch: () => {},
+    removeStorage: () => { throw new Error('delete failed') },
+    clearArchive: async () => {}
+  }), /delete failed/)
 
   assert.equal(runtimeCalls, 2)
 })

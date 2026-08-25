@@ -31,3 +31,29 @@ export async function runP2pCacheClear ({
 
   return result
 }
+
+export async function runP2pDataClear ({
+  getRuntime,
+  getStoragePath,
+  stopAssetServer,
+  closeRuntime,
+  resetFetch,
+  removeStorage,
+  clearArchive
+}) {
+  await getRuntime()
+  const storagePath = getStoragePath()
+  if (!storagePath) return { ok: false, error: 'Hyper storage is unavailable.' }
+
+  try {
+    await stopAssetServer()
+    await closeRuntime()
+    resetFetch()
+    removeStorage(storagePath)
+    await clearArchive(storagePath)
+  } finally {
+    await getRuntime()
+  }
+
+  return { ok: true, cleared: true }
+}

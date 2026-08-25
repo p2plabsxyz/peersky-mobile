@@ -2,6 +2,7 @@ import b4a from 'b4a'
 import { withHyperRuntimeOperation } from './runtime.mjs'
 import { parseHyperUrl } from './url.mjs'
 import { resolveHyperdriveAppDriveName } from './storage-core.mjs'
+import { recordHyperArchive } from './archive.mjs'
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 const MAX_LIST_ITEMS = 100
@@ -23,10 +24,16 @@ export async function listHyperdriveLocation ({ url } = {}, options = {}) {
         : await drive.entry(target.pathname, { timeout: MAX_LIST_TIME_MS })
 
       if (entry?.value?.blob) {
-        return {
+        const response = {
           ok: true,
           location: createFileItem(target.driveAddress, target.pathname, entry.value)
         }
+        await (options.recordArchive || recordHyperArchive)({
+          url: response.location.url,
+          name: response.location.name,
+          source: 'fetched'
+        })
+        return response
       }
 
       const directory = normalizeDirectoryPath(target.pathname)
@@ -34,7 +41,7 @@ export async function listHyperdriveLocation ({ url } = {}, options = {}) {
       if (directory !== '/' && items.length === 0) {
         return { ok: false, error: 'No file or directory was found at this Hyper URL.' }
       }
-      return {
+      const response = {
         ok: true,
         location: {
           type: 'directory',
@@ -45,6 +52,12 @@ export async function listHyperdriveLocation ({ url } = {}, options = {}) {
         items,
         truncated
       }
+      await (options.recordArchive || recordHyperArchive)({
+        url: response.location.url,
+        name: response.location.name,
+        source: 'fetched'
+      })
+      return response
     })
   } catch (error) {
     return {
@@ -77,12 +90,20 @@ export async function uploadHyperdriveFile ({ name, contentBase64 } = {}, option
     const pathname = await uniquePath(drive, `/${filename}`)
     await drive.put(pathname, bytes)
 
+    const item = createFileItem(`hyper://${drive.id}/`, pathname, {
+      blob: { byteLength: bytes.byteLength }
+    })
+    await (options.recordArchive || recordHyperArchive)({
+      url: item.url,
+      name: item.name,
+      source: 'published',
+      appId: 'hyperdrive'
+    })
+
     return {
       ok: true,
       driveUrl: `hyper://${drive.id}/`,
-      item: createFileItem(`hyper://${drive.id}/`, pathname, {
-        blob: { byteLength: bytes.byteLength }
-      })
+      item
     }
   }))
 }
