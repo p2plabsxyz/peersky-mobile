@@ -42,19 +42,18 @@ describe('Mobile mDNS socket compatibility', () => {
     assert.equal(publishedRecord.probe, false)
   })
 
-  it('forwards multicast operations to the underlying UDX socket', () => {
+  it('forwards membership without mapping multicast TTL to unicast TTL', () => {
     const calls = []
     const socket = fakeSocket(calls)
 
     addMulticastSupport(socket)
     socket.addMembership('224.0.0.251', '10.0.0.8')
     socket.dropMembership('224.0.0.251', '10.0.0.8')
-    socket.setMulticastTTL(255)
+    assert.equal(socket.setMulticastTTL(255), socket)
 
     assert.deepEqual(calls, [
       ['add', '224.0.0.251', '10.0.0.8'],
-      ['drop', '224.0.0.251', '10.0.0.8'],
-      ['ttl', 255]
+      ['drop', '224.0.0.251', '10.0.0.8']
     ])
     assert.equal(socket.setMulticastLoopback(true), socket)
     assert.equal(socket.setMulticastInterface('10.0.0.8'), socket)

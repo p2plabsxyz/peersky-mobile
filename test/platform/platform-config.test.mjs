@@ -1,6 +1,10 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
+import { createRequire } from 'node:module'
+
+const require = createRequire(import.meta.url)
+const { addMulticastLock } = require('../../plugins/with-lan-discovery.js')
 
 const ANDROID_LOOPBACK_CLEARTEXT_PLUGIN = './plugins/with-android-loopback-cleartext'
 const LAN_DISCOVERY_PLUGIN = './plugins/with-lan-discovery'
@@ -69,10 +73,7 @@ describe('mobile platform runtime configuration', () => {
     const plugins = appJson.expo?.plugins || []
     const infoPlist = appJson.expo?.ios?.infoPlist
     const plugin = await readFile(LAN_DISCOVERY_PLUGIN_FILE, 'utf8')
-    const mainApplication = await readFile(
-      repoFile('android/app/src/main/java/xyz/p2plabs/peersky/MainApplication.kt'),
-      'utf8'
-    )
+    const mainApplication = addMulticastLock(MAIN_APPLICATION_FIXTURE)
 
     assert.equal(hasExpoPlugin(plugins, LAN_DISCOVERY_PLUGIN), true)
     assert.equal(
@@ -83,8 +84,12 @@ describe('mobile platform runtime configuration', () => {
     assert.match(infoPlist?.NSLocalNetworkUsageDescription, /nearby PeerSky devices/)
     assert.match(plugin, /android\.permission\.CHANGE_WIFI_MULTICAST_STATE/)
     assert.match(plugin, /createMulticastLock\("peersky-hyperdht-mdns"\)/)
+    assert.match(mainApplication, /import android\.content\.Context/)
+    assert.match(mainApplication, /import android\.net\.wifi\.WifiManager/)
+    assert.match(mainApplication, /private var lanMulticastLock: WifiManager\.MulticastLock\? = null/)
     assert.match(mainApplication, /createMulticastLock\("peersky-hyperdht-mdns"\)/)
     assert.match(mainApplication, /acquire\(\)/)
+    assert.equal(addMulticastLock(mainApplication), mainApplication)
   })
 
   it('enables native WebView prompts for location and media capture', async () => {
@@ -203,3 +208,15 @@ function hasExpoPlugin (plugins, pluginName) {
 function repoFile (relativePath) {
   return new URL(relativePath, REPO_ROOT)
 }
+
+const MAIN_APPLICATION_FIXTURE = `package xyz.p2plabs.peersky
+
+import android.app.Application
+import com.facebook.react.ReactApplication
+
+class MainApplication : Application(), ReactApplication {
+  override fun onCreate() {
+    super.onCreate()
+  }
+}
+`

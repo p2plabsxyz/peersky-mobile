@@ -77,3 +77,5 @@ function addMulticastLock (contents) {
 
   return result
 }
+
+module.exports.addMulticastLock = addMulticastLock

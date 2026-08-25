@@ -38,10 +38,15 @@ export function addMulticastSupport (socket) {
     nativeSocket.dropMembership(group, interfaceAddress)
     return socket
   }
-  socket.setMulticastTTL = (ttl) => {
-    nativeSocket.setTTL(ttl)
-    return socket
-  }
+
+  // udx-native exposes only unicast IP_TTL, not IP_MULTICAST_TTL. Keep the
+  // multicast-dns API shim without calling setTTL: mobile mDNS therefore uses
+  // the OS multicast default (normally 1), which is same-link only and may be
+  // rejected by RFC 6762 responders that enforce a received TTL of 255.
+  socket.setMulticastTTL = () => socket
+
+  // bare-dgram/udx-native do not expose these multicast controls. Loopback is
+  // left at the OS default and interface selection relies on Bonjour's bind.
   socket.setMulticastLoopback = () => socket
   socket.setMulticastInterface = () => socket
 
