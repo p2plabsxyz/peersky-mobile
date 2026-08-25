@@ -1,76 +1,27 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 
-async function fetchWithRetry (fetchFn, {
-  url,
-  retries = 0,
-  retryDelay = 500,
-  maxRetryDelay = 5000,
-  backoffFactor = 2
-} = {}) {
-  let attempt = 0
-  let currentDelay = retryDelay
+import {
+  DEFAULT_HYPER_DISCOVERY_RETRIES,
+  isPeerDiscoveryError,
+  withHyperRetry
+} from '../../backend/hyper/fetch-retry.mjs'
 
-  while (true) {
-    try {
-      const response = await fetchFn(url)
-      if (!response.ok) {
-        const text = typeof response.text === 'function' ? await response.text() : ''
-        const isRetryable = response.status === 404 || response.status === 502 || isPeerDiscoveryError(text)
-        if (isRetryable && attempt < retries) {
-          attempt++
-          await new Promise((resolve) => setTimeout(resolve, currentDelay))
-          currentDelay = Math.min(maxRetryDelay, Math.floor(currentDelay * backoffFactor))
-          continue
-        }
-        return { ok: false, status: response.status, error: text || response.statusText }
-      }
-      return { ok: true, status: response.status, bytes: await response.bytes() }
-    } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : String(error)
-      const isRetryable = isPeerDiscoveryError(errorMsg)
-      if (isRetryable && attempt < retries) {
-        attempt++
-        await new Promise((resolve) => setTimeout(resolve, currentDelay))
-        currentDelay = Math.min(maxRetryDelay, Math.floor(currentDelay * backoffFactor))
-        continue
-      }
-      return { ok: false, status: 502, error: errorMsg }
-    }
-  }
-}
+describe('production Hyper fetch discovery retries', () => {
+  it('enables bounded discovery retries by default', () => {
+    assert.equal(DEFAULT_HYPER_DISCOVERY_RETRIES, 5)
+  })
 
-function isPeerDiscoveryError (message) {
-  return /\bpeers?\s+not\s+found\b/i.test(message)
-}
-
-describe('hyper fetch exponential backoff retries', () => {
-  it('retries on discovery error until success', async () => {
+  it('retries a delayed peer until the Hyperdrive is available', async () => {
     let attempts = 0
-    const mockFetch = async () => {
+    const result = await runWithRetry(async () => {
       attempts++
-      if (attempts < 3) {
-        return {
-          ok: false,
-          status: 404,
-          statusText: 'Not Found',
-          text: async () => 'Peers Not Found'
-        }
-      }
-      return {
-        ok: true,
-        status: 200,
-        statusText: 'OK',
-        bytes: async () => new Uint8Array([104, 101, 108, 108, 111])
-      }
-    }
-
-    const result = await fetchWithRetry(mockFetch, {
-      url: 'hyper://test-hash/backup.zip',
+      if (attempts < 3) return errorResponse(404, 'Peers Not Found')
+      return successResponse(new Uint8Array([104, 101, 108, 108, 111]))
+    }, {
       retries: 4,
-      retryDelay: 10,
-      maxRetryDelay: 50,
-      backoffFactor: 2
+      retryDelay: 0,
+      maxRetryDelay: 0
     })
 
     assert.equal(attempts, 3)
@@ -78,24 +29,15 @@ describe('hyper fetch exponential backoff retries', () => {
     assert.equal(result.bytes.byteLength, 5)
   })
 
-  it('stops retrying when max retries exceeded', async () => {
+  it('stops retrying when the discovery budget is exhausted', async () => {
     let attempts = 0
-    const mockFetch = async () => {
+    const result = await runWithRetry(async () => {
       attempts++
-      return {
-        ok: false,
-        status: 404,
-        statusText: 'Not Found',
-        text: async () => 'Peers Not Found'
-      }
-    }
-
-    const result = await fetchWithRetry(mockFetch, {
-      url: 'hyper://test-hash/backup.zip',
+      return errorResponse(404, 'Peers Not Found')
+    }, {
       retries: 2,
-      retryDelay: 10,
-      maxRetryDelay: 50,
-      backoffFactor: 2
+      retryDelay: 0,
+      maxRetryDelay: 0
     })
 
     assert.equal(attempts, 3)
@@ -104,15 +46,39 @@ describe('hyper fetch exponential backoff retries', () => {
     assert.equal(result.error, 'Peers Not Found')
   })
 
-  it('does not retry unrelated errors containing peer', async () => {
+  it('does not retry a genuine missing-file response', async () => {
     let attempts = 0
-    const result = await fetchWithRetry(async () => {
+    const result = await runWithRetry(async () => {
+      attempts++
+      return errorResponse(404, 'File not found: /missing.html')
+    }, {
+      retries: 4,
+      retryDelay: 0,
+      maxRetryDelay: 0
+    })
+
+    assert.equal(attempts, 1)
+    assert.equal(result.ok, false)
+    assert.equal(result.status, 404)
+  })
+
+  it('recognizes both Hyper fetch peer-discovery messages', () => {
+    assert.equal(isPeerDiscoveryError('Peers Not Found'), true)
+    assert.equal(isPeerDiscoveryError(
+      'Could not find data in drive, make sure your key is correct and that there are peers online to load data from'
+    ), true)
+    assert.equal(isPeerDiscoveryError('PeerSky request configuration failed'), false)
+  })
+
+  it('does not retry unrelated thrown errors containing peer', async () => {
+    let attempts = 0
+    const result = await runWithRetry(async () => {
       attempts++
       throw new Error('PeerSky request configuration failed')
     }, {
-      url: 'hyper://test-hash/file.txt',
       retries: 2,
-      retryDelay: 1
+      retryDelay: 0,
+      maxRetryDelay: 0
     })
 
     assert.equal(attempts, 1)
@@ -120,3 +86,39 @@ describe('hyper fetch exponential backoff retries', () => {
     assert.equal(result.error, 'PeerSky request configuration failed')
   })
 })
+
+function runWithRetry (fetch, options) {
+  return withHyperRetry({
+    fetch,
+    url: 'hyper://test-drive/index.html',
+    backoffFactor: 2,
+    readResponse: async (response) => ({
+      ok: true,
+      status: response.status,
+      bytes: await response.bytes()
+    }),
+    ...options
+  })
+}
+
+function errorResponse (status, body) {
+  return {
+    ok: false,
+    status,
+    statusText: status === 404 ? 'Not Found' : 'Bad Gateway',
+    url: 'hyper://test-drive/index.html',
+    headers: new Map(),
+    text: async () => body
+  }
+}
+
+function successResponse (bytes) {
+  return {
+    ok: true,
+    status: 200,
+    statusText: 'OK',
+    url: 'hyper://test-drive/index.html',
+    headers: new Map(),
+    bytes: async () => bytes
+  }
+}

@@ -4,6 +4,7 @@ export const RPC_HYPER_CREATE_DRIVE = 3
 export const RPC_HYPER_STORAGE_LIST = 4
 export const RPC_HYPER_STORAGE_DELETE_APP = 5
 export const RPC_HYPER_STORAGE_CLEAR_CACHE = 6
+export const RPC_HYPER_LAN_STATUS = 7
 
 export const RPC_HOLESAIL_START_LIVE = 10
 export const RPC_HOLESAIL_CONNECT = 11
