@@ -31,6 +31,7 @@ type P2pAppData = {
 type P2pStorageResponse = {
   ok: boolean
   error?: string
+  warning?: string
   items?: P2pAppData[]
   page?: number
   total?: number
@@ -67,6 +68,7 @@ export function P2PStorage ({ onCallRpc, onOpenUrl }: P2PStorageProps) {
   const isDark = useSettingsDarkMode()
   const requestSequence = useRef(0)
   const activeActionRef = useRef<string | null>(null)
+  const appDataLoadedRef = useRef(false)
   const mountedRef = useRef(true)
   const [items, setItems] = useState<P2pAppData[]>([])
   const [archiveItems, setArchiveItems] = useState<HyperArchiveItem[]>([])
@@ -88,7 +90,11 @@ export function P2PStorage ({ onCallRpc, onOpenUrl }: P2PStorageProps) {
     return () => { mountedRef.current = false }
   }, [])
 
-  async function loadPage (nextPage: number, nextSource = archiveSource) {
+  async function loadPage (
+    nextPage: number,
+    nextSource = archiveSource,
+    includeAppData = !appDataLoadedRef.current
+  ) {
     const sequence = ++requestSequence.current
     setIsLoading(true)
     setError(null)
@@ -99,12 +105,16 @@ export function P2PStorage ({ onCallRpc, onOpenUrl }: P2PStorageProps) {
         pageSize: 10,
         archivePage: nextPage,
         archivePageSize: PAGE_SIZE,
-        archiveSource: nextSource
+        archiveSource: nextSource,
+        includeAppData
       })
       if (sequence !== requestSequence.current) return
       if (!response.ok) throw new Error(response.error || 'Unable to read P2P data.')
 
-      setItems(response.items || [])
+      if (response.items) {
+        setItems(response.items)
+        appDataLoadedRef.current = true
+      }
       setArchiveItems(response.archive?.items || [])
       setArchivePage(response.archive?.page || nextPage)
       setArchiveTotalPages(Math.max(1, response.archive?.totalPages || 1))
@@ -141,10 +151,13 @@ export function P2PStorage ({ onCallRpc, onOpenUrl }: P2PStorageProps) {
     try {
       const response = await onCallRpc(RPC_HYPER_STORAGE_DELETE_APP, { appId: item.id })
       if (!response.ok) throw new Error(response.error || `Unable to delete ${item.title} data.`)
-      if (item.id === 'hyperdrive' && !clearHyperdriveRecents('uploaded')) {
-        setNotice('App data was deleted, but Hyperdrive Recent could not be updated.')
+      const recentWarning = item.id === 'hyperdrive' && !clearHyperdriveRecents('uploaded')
+        ? 'App data was deleted, but Hyperdrive Recent could not be updated.'
+        : null
+      if (mountedRef.current) {
+        setNotice(joinNotices(response.warning, recentWarning))
+        await refreshArchive()
       }
-      await refreshArchive()
     } catch (deleteError) {
       if (mountedRef.current) {
         setError(deleteError instanceof Error ? deleteError.message : String(deleteError))
@@ -176,13 +189,14 @@ export function P2PStorage ({ onCallRpc, onOpenUrl }: P2PStorageProps) {
     try {
       const response = await onCallRpc(RPC_HYPER_STORAGE_CLEAR_CACHE)
       if (!response.ok) throw new Error(response.error || 'Unable to clear downloaded P2P cache.')
-      if (!clearHyperdriveRecents('fetched')) {
-        setNotice('Downloaded data was cleared, but Hyperdrive Recent could not be updated.')
-      }
+      const recentWarning = !clearHyperdriveRecents('fetched')
+        ? 'Downloaded data was cleared, but Hyperdrive Recent could not be updated.'
+        : null
       if (mountedRef.current) {
+        setNotice(joinNotices(response.warning, recentWarning))
         Alert.alert('P2P cache cleared', `${response.clearedCores || 0} cached data stores removed.`)
+        await refreshArchive()
       }
-      await refreshArchive()
     } catch (clearError) {
       if (mountedRef.current) {
         setError(clearError instanceof Error ? clearError.message : String(clearError))
@@ -214,11 +228,14 @@ export function P2PStorage ({ onCallRpc, onOpenUrl }: P2PStorageProps) {
     try {
       const response = await onCallRpc(RPC_HYPER_STORAGE_CLEAR_ALL)
       if (!response.ok || !response.cleared) throw new Error(response.error || 'Unable to clear P2P data.')
-      if (!clearHyperdriveRecents()) {
-        setNotice('P2P data was cleared, but Hyperdrive Recent could not be updated.')
+      const recentWarning = !clearHyperdriveRecents()
+        ? 'P2P data was cleared, but Hyperdrive Recent could not be updated.'
+        : null
+      if (mountedRef.current) {
+        setNotice(joinNotices(response.warning, recentWarning))
+        Alert.alert('P2P data cleared', 'All local Hyper data was removed from this device.')
+        await refreshArchive()
       }
-      await refreshArchive()
-      if (mountedRef.current) Alert.alert('P2P data cleared', 'All local Hyper data was removed from this device.')
     } catch (clearError) {
       if (mountedRef.current) {
         setError(clearError instanceof Error ? clearError.message : String(clearError))
@@ -230,8 +247,10 @@ export function P2PStorage ({ onCallRpc, onOpenUrl }: P2PStorageProps) {
   }
 
   async function refreshArchive () {
+    if (!mountedRef.current) return
+    appDataLoadedRef.current = false
     if (archivePage === 1) {
-      await loadPage(1)
+      await loadPage(1, archiveSource, true)
     } else {
       setArchivePage(1)
     }
@@ -354,11 +373,21 @@ export function P2PStorage ({ onCallRpc, onOpenUrl }: P2PStorageProps) {
                   <Text style={[styles.timestamp, isDark ? darkStyles.secondaryText : null]}>{formatTimestamp(item.updatedAt)}</Text>
                 </View>
                 <View style={styles.archiveActions}>
-                  <Pressable accessibilityRole='button' onPress={() => copyArchiveUrl(item)} style={styles.archiveAction}>
-                    <Text style={styles.pageButtonText}>Copy</Text>
+                  <Pressable
+                    accessibilityLabel={`Copy ${item.name} Hyper URL`}
+                    accessibilityRole='button'
+                    onPress={() => copyArchiveUrl(item)}
+                    style={styles.archiveAction}
+                  >
+                    <Text style={[styles.pageButtonText, isDark ? darkStyles.actionText : null]}>Copy</Text>
                   </Pressable>
-                  <Pressable accessibilityRole='button' onPress={() => onOpenUrl(item.url)} style={styles.archiveAction}>
-                    <Text style={styles.pageButtonText}>Open</Text>
+                  <Pressable
+                    accessibilityLabel={`Open ${item.name}`}
+                    accessibilityRole='button'
+                    onPress={() => onOpenUrl(item.url)}
+                    style={styles.archiveAction}
+                  >
+                    <Text style={[styles.pageButtonText, isDark ? darkStyles.actionText : null]}>Open</Text>
                   </Pressable>
                 </View>
               </View>
@@ -366,11 +395,11 @@ export function P2PStorage ({ onCallRpc, onOpenUrl }: P2PStorageProps) {
 
         {archiveTotalPages > 1 && (
           <View style={[styles.pagination, isDark ? darkStyles.divider : null]}>
-            <PageButton title='Previous' disabled={archivePage <= 1 || isLoading} onPress={() => setArchivePage((value) => value - 1)} />
+            <PageButton isDark={isDark} title='Previous' disabled={archivePage <= 1 || isLoading} onPress={() => setArchivePage((value) => value - 1)} />
             <Text style={[styles.pageText, isDark ? darkStyles.secondaryText : null]}>
               {archivePage} of {archiveTotalPages}
             </Text>
-            <PageButton title='Next' disabled={archivePage >= archiveTotalPages || isLoading} onPress={() => setArchivePage((value) => value + 1)} />
+            <PageButton isDark={isDark} title='Next' disabled={archivePage >= archiveTotalPages || isLoading} onPress={() => setArchivePage((value) => value + 1)} />
           </View>
         )}
       </SettingsSection>
@@ -394,7 +423,7 @@ export function P2PStorage ({ onCallRpc, onOpenUrl }: P2PStorageProps) {
               activeAction !== null ? styles.disabled : null
             ]}
           >
-            <Text style={styles.clearText}>{activeAction === 'cache' ? 'Clearing...' : 'Clear'}</Text>
+            <Text style={[styles.clearText, isDark ? darkStyles.actionText : null]}>{activeAction === 'cache' ? 'Clearing...' : 'Clear'}</Text>
           </Pressable>
         </View>
       </SettingsSection>
@@ -429,7 +458,17 @@ export function P2PStorage ({ onCallRpc, onOpenUrl }: P2PStorageProps) {
   )
 }
 
-function PageButton ({ title, disabled, onPress }: { title: string, disabled: boolean, onPress: () => void }) {
+function PageButton ({
+  title,
+  disabled,
+  isDark,
+  onPress
+}: {
+  title: string
+  disabled: boolean
+  isDark: boolean
+  onPress: () => void
+}) {
   return (
     <Pressable
       accessibilityRole='button'
@@ -438,7 +477,7 @@ function PageButton ({ title, disabled, onPress }: { title: string, disabled: bo
       onPress={onPress}
       style={[styles.pageButton, disabled ? styles.disabled : null]}
     >
-      <Text style={styles.pageButtonText}>{title}</Text>
+      <Text style={[styles.pageButtonText, isDark ? darkStyles.actionText : null]}>{title}</Text>
     </Pressable>
   )
 }
@@ -458,6 +497,10 @@ function formatFileCount (count: number, truncated?: boolean) {
 function formatTimestamp (timestamp: number) {
   if (!Number.isSafeInteger(timestamp) || timestamp <= 0) return ''
   return new Date(timestamp).toLocaleString()
+}
+
+function joinNotices (...notices: Array<string | null | undefined>) {
+  return notices.filter(Boolean).join(' ') || null
 }
 
 const styles = StyleSheet.create({
@@ -653,5 +696,8 @@ const darkStyles = StyleSheet.create({
   },
   filterTextSelected: {
     color: BROWSER_PALETTES.dark.text
+  },
+  actionText: {
+    color: BROWSER_PALETTES.dark.selectedControl
   }
 })

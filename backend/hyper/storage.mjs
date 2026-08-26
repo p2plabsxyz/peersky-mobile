@@ -18,7 +18,11 @@ import {
   deleteRegisteredP2pAppData,
   listRegisteredP2pAppData
 } from './storage-core.mjs'
-import { runP2pCacheClear, runP2pDataClear } from './storage-lifecycle.mjs'
+import {
+  runP2pAppDataDelete,
+  runP2pCacheClear,
+  runP2pDataClear
+} from './storage-lifecycle.mjs'
 
 let storageTransition = Promise.resolve()
 
@@ -27,14 +31,17 @@ export async function listP2pAppData ({
   pageSize = 5,
   archivePage = 1,
   archivePageSize = 5,
-  archiveSource = 'all'
+  archiveSource = 'all',
+  includeAppData = true
 } = {}, options = {}) {
   return withStorageTransition(async () => {
-    const appData = options.getRuntime
-      ? await listRegisteredP2pAppData(await options.getRuntime(), { page, pageSize })
-      : await withHyperRuntimeOperation((runtime) => (
-        listRegisteredP2pAppData(runtime, { page, pageSize })
-      ))
+    const appData = includeAppData
+      ? options.getRuntime
+        ? await listRegisteredP2pAppData(await options.getRuntime(), { page, pageSize })
+        : await withHyperRuntimeOperation((runtime) => (
+          listRegisteredP2pAppData(runtime, { page, pageSize })
+        ))
+      : { ok: true }
     const archive = await (options.listArchive || listHyperArchive)({
       page: archivePage,
       pageSize: archivePageSize,
@@ -46,34 +53,23 @@ export async function listP2pAppData ({
 }
 
 export async function deleteP2pAppData ({ appId } = {}, options = {}) {
-  return withStorageTransition(async () => {
-    const result = options.getRuntime
-      ? await deleteRegisteredP2pAppData(await options.getRuntime(), { appId })
-      : await withHyperRuntimeOperation((runtime) => (
-        deleteRegisteredP2pAppData(runtime, { appId })
-      ))
-
-    if (result.ok && result.deleted) {
-      await (options.removeArchive || removeHyperArchive)({ appId })
-    }
-
-    return result
-  })
+  return withStorageTransition(() => runP2pAppDataDelete({
+    runExclusive: options.runExclusive || (options.getRuntime
+      ? async (task) => task()
+      : withHyperRuntimeMaintenance),
+    getRuntime: options.getRuntime || getHyperRuntime,
+    deleteAppData: options.deleteAppData || deleteRegisteredP2pAppData,
+    removeArchive: options.removeArchive || removeHyperArchive,
+    appId
+  }))
 }
 
 export async function clearP2pCache (options = {}) {
-  return withStorageTransition(async () => {
-    const result = await (options.getRuntime
+  return withStorageTransition(() => (
+    options.getRuntime
       ? performP2pCacheClear(options)
       : withHyperRuntimeMaintenance(() => performP2pCacheClear(options))
-    )
-
-    if (result.ok) {
-      await (options.removeArchive || removeHyperArchive)({ source: 'fetched' })
-    }
-
-    return result
-  })
+  ))
 }
 
 export async function clearAllP2pData (options = {}) {
@@ -99,7 +95,8 @@ async function performP2pCacheClear (options) {
     closeRuntime,
     resetFetch,
     createStore,
-    clearStore: clearDownloadedP2pCores
+    clearStore: clearDownloadedP2pCores,
+    removeArchive: () => (options.removeArchive || removeHyperArchive)({ source: 'fetched' })
   })
 }
 
