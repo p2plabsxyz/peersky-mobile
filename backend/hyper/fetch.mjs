@@ -7,7 +7,6 @@ import {
   inlineHyperAssets
 } from './assets.mjs'
 import { startHyperAssetServer } from './asset-server.mjs'
-import { recordHyperArchive } from './archive.mjs'
 import {
   DEFAULT_HYPER_DISCOVERY_MAX_RETRY_DELAY,
   DEFAULT_HYPER_DISCOVERY_RETRIES,
@@ -124,13 +123,6 @@ export async function fetchHyper ({
         }
       }
     })
-
-    if (result.ok) {
-      await recordHyperArchive({
-        url: result.url || url,
-        source: 'fetched'
-      })
-    }
 
     return result
   })

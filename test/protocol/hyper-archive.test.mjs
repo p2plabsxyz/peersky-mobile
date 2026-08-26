@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
@@ -20,6 +20,15 @@ import {
 
 const DRIVE_A = `hyper://${'a'.repeat(64)}/`
 const DRIVE_B = `hyper://${'b'.repeat(64)}/`
+
+test('keeps general Hyper browsing out of the P2P app archive', async () => {
+  const fetchSource = await readFile(
+    new URL('../../backend/hyper/fetch.mjs', import.meta.url),
+    'utf8'
+  )
+
+  assert.doesNotMatch(fetchSource, /recordHyperArchive/)
+})
 
 test('normalizes, deduplicates, and preserves published ownership', () => {
   let items = recordHyperArchiveItem([], {
