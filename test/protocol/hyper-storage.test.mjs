@@ -9,7 +9,8 @@ import {
   clearDownloadedP2pCores,
   deleteRegisteredP2pAppData,
   listRegisteredP2pAppData,
-  resolveHyperdriveAppDriveName
+  resolveHyperdriveAppDriveName,
+  resolveHyperdriveUploadTarget
 } from '../../backend/hyper/storage-core.mjs'
 
 describe('Hyper app storage', () => {
@@ -104,6 +105,42 @@ describe('Hyper app storage', () => {
     assert.equal(resolveHyperdriveAppDriveName(''), 'hyperdrive')
     assert.equal(resolveHyperdriveAppDriveName('custom-drive'), 'custom-drive')
     assert.equal(resolveHyperdriveAppDriveName('../unsafe'), 'hyperdrive')
+  })
+
+  test('resolves public and private Hyperdrive upload targets', () => {
+    assert.deepEqual(resolveHyperdriveUploadTarget('public'), {
+      driveName: 'hyperdrive-public',
+      autoJoin: true
+    })
+    assert.deepEqual(resolveHyperdriveUploadTarget('private'), {
+      driveName: 'hyperdrive-private',
+      autoJoin: false
+    })
+    assert.equal(resolveHyperdriveUploadTarget('shared'), null)
+  })
+
+  test('aggregates and deletes legacy, public, and private Hyperdrive data', async () => {
+    const runtime = createRuntime({
+      hyperdrive: [createEntry('/legacy.txt', 10)],
+      'hyperdrive-public': [createEntry('/public.txt', 20)],
+      'hyperdrive-private': [createEntry('/private.txt', 30)]
+    })
+
+    const listed = await listRegisteredP2pAppData(runtime)
+    const hyperdrive = listed.items.find((item) => item.id === 'hyperdrive')
+    assert.equal(hyperdrive.fileCount, 3)
+    assert.equal(hyperdrive.byteLength, 60)
+
+    assert.deepEqual(await deleteRegisteredP2pAppData(runtime, { appId: 'hyperdrive' }), {
+      ok: true,
+      appId: 'hyperdrive',
+      deleted: true
+    })
+    assert.deepEqual(runtime.purged, new Set([
+      'hyperdrive-public',
+      'hyperdrive-private',
+      'hyperdrive'
+    ]))
   })
 
   test('clears downloaded cores while retaining writable app data', async () => {

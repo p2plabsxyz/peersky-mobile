@@ -111,3 +111,25 @@ test('truncates recent names without splitting Unicode characters', () => {
   assert.equal(recents[0].name, expectedName)
   assert.equal(recents[0].children[0].name, expectedName)
 })
+
+test('persists valid upload visibility while keeping legacy recents compatible', () => {
+  const recents = [
+    recordHyperdriveRecent([], {
+      type: 'file',
+      name: 'Private',
+      url: `${DRIVE_URL}private.txt`,
+      source: 'uploaded',
+      visibility: 'private'
+    }, 10)[0],
+    recordHyperdriveRecent([], {
+      type: 'file',
+      name: 'Legacy',
+      url: `${DRIVE_URL}legacy.txt`,
+      source: 'uploaded'
+    }, 20)[0]
+  ]
+
+  const parsed = parseHyperdriveRecents(serializeHyperdriveRecents(recents))
+  assert.equal(parsed[0].visibility, 'private')
+  assert.equal(parsed[1].visibility, undefined)
+})

@@ -38,6 +38,7 @@ const hyperdriveIcon = require('../../assets/images/hyperdrive.png')
 
 type RecentSource = 'fetched' | 'uploaded'
 type RecentFilter = 'all' | RecentSource
+type UploadVisibility = 'public' | 'private'
 
 type HyperdriveItem = {
   type: 'directory' | 'file'
@@ -47,6 +48,7 @@ type HyperdriveItem = {
   byteLength?: number
   openedAt?: number
   source?: RecentSource
+  visibility?: UploadVisibility
   children?: HyperdriveItem[]
 }
 
@@ -91,7 +93,20 @@ export function HyperdriveScreen ({ isDark, isLandscape, onCallRpc, onOpenUrl, o
     }
   }, [recents])
 
-  async function uploadFile () {
+  function chooseUploadVisibility () {
+    if (busyAction) return
+    Alert.alert(
+      'Choose upload visibility',
+      'Public files can be shared, and anyone with one public link may browse other files in your public drive. Private files stay on this device.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Private', onPress: () => void uploadFile('private') },
+        { text: 'Public', onPress: () => void uploadFile('public') }
+      ]
+    )
+  }
+
+  async function uploadFile (visibility: UploadVisibility) {
     if (busyAction) return
     const selection = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true, multiple: false })
     if (selection.canceled || !selection.assets[0]) return
@@ -109,11 +124,18 @@ export function HyperdriveScreen ({ isDark, isLandscape, onCallRpc, onOpenUrl, o
     setNotice(null)
     try {
       const contentBase64 = await file.base64()
-      const response = await onCallRpc(RPC_HYPER_LIBRARY_UPLOAD, { name: asset.name, contentBase64 })
+      const response = await onCallRpc(RPC_HYPER_LIBRARY_UPLOAD, {
+        name: asset.name,
+        contentBase64,
+        visibility
+      })
       if (!response.ok || !response.item) throw new Error(response.error || 'Upload failed.')
       remember(response.item, 'uploaded')
       onStatus(`Uploaded ${response.item.name}`)
-      Alert.alert('Uploaded to Hyperdrive', response.item.url, [
+      const uploadMessage = visibility === 'private'
+        ? 'Stored privately on this device.'
+        : response.item.url
+      Alert.alert('Uploaded to Hyperdrive', uploadMessage, [
         { text: 'Done' },
         { text: 'Open', onPress: () => onOpenUrl(response.item.url) }
       ])
@@ -247,15 +269,17 @@ export function HyperdriveScreen ({ isDark, isLandscape, onCallRpc, onOpenUrl, o
           </View>
           <ChevronRightIcon width={18} height={18} color={palette.muted} />
         </Pressable>
-        <Pressable
-          accessibilityLabel={`Copy ${item.name} Hyper URL`}
-          accessibilityRole='button'
-          hitSlop={6}
-          onPress={() => copyItemUrl(item)}
-          style={({ pressed }) => [styles.copyButton, pressed ? styles.pressed : null]}
-        >
-          <CopyIcon width={18} height={18} color={palette.secondaryText} />
-        </Pressable>
+        {item.visibility !== 'private' && (
+          <Pressable
+            accessibilityLabel={`Copy ${item.name} Hyper URL`}
+            accessibilityRole='button'
+            hitSlop={6}
+            onPress={() => copyItemUrl(item)}
+            style={({ pressed }) => [styles.copyButton, pressed ? styles.pressed : null]}
+          >
+            <CopyIcon width={18} height={18} color={palette.secondaryText} />
+          </Pressable>
+        )}
       </View>
     ))
     : (
@@ -283,7 +307,7 @@ export function HyperdriveScreen ({ isDark, isLandscape, onCallRpc, onOpenUrl, o
         <Pressable
           accessibilityRole='button'
           disabled={Boolean(busyAction)}
-          onPress={() => void uploadFile()}
+          onPress={chooseUploadVisibility}
           style={({ pressed }) => [styles.primaryAction, { backgroundColor: palette.accent }, pressed ? styles.pressed : null, busyAction ? styles.disabled : null]}
         >
           {busyAction === 'upload' ? <ActivityIndicator color='#ffffff' /> : <UploadIcon width={20} height={20} color='#ffffff' />}
@@ -493,8 +517,12 @@ function formatItemMeta (item: HyperdriveItem) {
 
 function formatRecentMeta (item: HyperdriveItem) {
   const source = item.source === 'uploaded' ? 'Uploaded' : 'Fetched'
-  if (!item.openedAt) return source
-  return `${source} - ${new Date(item.openedAt).toLocaleDateString()}`
+  const visibility = item.visibility === 'private'
+    ? 'Private'
+    : item.visibility === 'public' ? 'Public' : null
+  const details = visibility ? `${source} - ${visibility}` : source
+  if (!item.openedAt) return details
+  return `${details} - ${new Date(item.openedAt).toLocaleDateString()}`
 }
 
 function formatBytes (bytes: number) {

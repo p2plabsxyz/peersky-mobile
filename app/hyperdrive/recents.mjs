@@ -58,6 +58,9 @@ function normalizeRecent (value) {
     name: name || (type === 'directory' ? 'Hyperdrive' : 'Hyper file'),
     url,
     source: value.source === 'uploaded' ? 'uploaded' : 'fetched',
+    visibility: value.visibility === 'public' || value.visibility === 'private'
+      ? value.visibility
+      : undefined,
     openedAt: Number.isSafeInteger(openedAt) && openedAt > 0 ? openedAt : Date.now(),
     byteLength: type === 'file' && Number.isSafeInteger(value.byteLength) && value.byteLength >= 0
       ? value.byteLength

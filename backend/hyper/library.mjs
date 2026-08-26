@@ -1,7 +1,7 @@
 import b4a from 'b4a'
 import { withHyperRuntimeOperation } from './runtime.mjs'
 import { parseHyperUrl } from './url.mjs'
-import { resolveHyperdriveAppDriveName } from './storage-core.mjs'
+import { resolveHyperdriveUploadTarget } from './storage-core.mjs'
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 const MAX_UPLOAD_BASE64_LENGTH = Math.ceil(MAX_UPLOAD_BYTES / 3) * 4
@@ -60,9 +60,11 @@ export async function listHyperdriveLocation ({ url } = {}, options = {}) {
   }
 }
 
-export async function uploadHyperdriveFile ({ name, contentBase64 } = {}, options = {}) {
+export async function uploadHyperdriveFile ({ name, contentBase64, visibility } = {}, options = {}) {
   const filename = normalizeFilename(name)
   if (!filename) return { ok: false, error: 'Invalid file name.' }
+  const uploadTarget = resolveHyperdriveUploadTarget(visibility)
+  if (!uploadTarget) return { ok: false, error: 'Choose public or private upload visibility.' }
   if (typeof contentBase64 !== 'string' || !contentBase64) {
     return { ok: false, error: 'Missing file content.' }
   }
@@ -91,16 +93,21 @@ export async function uploadHyperdriveFile ({ name, contentBase64 } = {}, option
   }
 
   return withUploadTransition(() => runWithRuntime(options, async (runtime) => {
-    const drive = await runtime.getDrive(resolveHyperdriveAppDriveName())
+    const drive = await runtime.getDrive(uploadTarget.driveName, {
+      autoJoin: uploadTarget.autoJoin
+    })
     const pathname = await uniquePath(drive, `/${filename}`)
     await drive.put(pathname, bytes)
 
     return {
       ok: true,
       driveUrl: `hyper://${drive.id}/`,
-      item: createFileItem(`hyper://${drive.id}/`, pathname, {
-        blob: { byteLength: bytes.byteLength }
-      })
+      item: {
+        ...createFileItem(`hyper://${drive.id}/`, pathname, {
+          blob: { byteLength: bytes.byteLength }
+        }),
+        visibility
+      }
     }
   }))
 }
