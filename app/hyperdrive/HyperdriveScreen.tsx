@@ -34,7 +34,6 @@ import {
 } from './recents.mjs'
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024
-const RECENTS_FILE = new File(Paths.document, 'hyperdrive-recents.json')
 const hyperdriveIcon = require('../../assets/images/hyperdrive.png')
 
 type RecentSource = 'fetched' | 'uploaded'
@@ -466,7 +465,8 @@ function FilePreview ({ item, palette }: { item: HyperdriveItem, palette: Palett
 
 function loadRecents (): HyperdriveItem[] {
   try {
-    return RECENTS_FILE.exists ? parseHyperdriveRecents(RECENTS_FILE.textSync()) as HyperdriveItem[] : []
+    const file = getRecentsFile()
+    return file.exists ? parseHyperdriveRecents(file.textSync()) as HyperdriveItem[] : []
   } catch {
     return []
   }
@@ -474,12 +474,17 @@ function loadRecents (): HyperdriveItem[] {
 
 function persistRecents (recents: HyperdriveItem[]) {
   try {
-    if (!RECENTS_FILE.exists) RECENTS_FILE.create({ intermediates: true })
-    RECENTS_FILE.write(serializeHyperdriveRecents(recents))
+    const file = getRecentsFile()
+    if (!file.exists) file.create({ intermediates: true })
+    file.write(serializeHyperdriveRecents(recents))
     return true
   } catch {
     return false
   }
+}
+
+function getRecentsFile () {
+  return new File(Paths.document, 'hyperdrive-recents.json')
 }
 
 function formatItemMeta (item: HyperdriveItem) {
