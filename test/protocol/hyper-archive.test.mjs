@@ -45,6 +45,27 @@ test('normalizes, deduplicates, and preserves published ownership', () => {
   }])
 })
 
+test('preserves encoded filename characters in archived Hyper URLs', () => {
+  const items = [
+    ['report%232%3F.pdf', 'report%232%3F.pdf'],
+    ['space%20name.txt', 'space%20name.txt'],
+    ['caf%C3%A9.txt', 'caf%C3%A9.txt']
+  ].map(([input, expected], index) => {
+    const [item] = recordHyperArchiveItem([], {
+      url: `${DRIVE_A}${input}`,
+      source: 'fetched'
+    }, index + 1)
+    assert.equal(item.url, `${DRIVE_A}${expected}`)
+    return item
+  })
+
+  assert.deepEqual(items.map((item) => item.name), [
+    'report#2?.pdf',
+    'space name.txt',
+    'café.txt'
+  ])
+})
+
 test('rejects malformed entries and bounds archive growth', () => {
   assert.deepEqual(parseHyperArchive(JSON.stringify({
     items: [

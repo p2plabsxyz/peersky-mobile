@@ -88,7 +88,7 @@ function normalizeHyperArchiveEntry (value) {
   if (!source) return null
 
   const updatedAt = Number(value.updatedAt)
-  const url = `${target.driveAddress.slice(0, -1)}${target.pathname}`
+  const url = createHyperUrl(target.driveAddress, target.pathname)
 
   return {
     url,
@@ -98,6 +98,14 @@ function normalizeHyperArchiveEntry (value) {
     appId: normalizeAppId(value.appId),
     updatedAt: Number.isSafeInteger(updatedAt) && updatedAt > 0 ? updatedAt : Date.now()
   }
+}
+
+function createHyperUrl (driveAddress, pathname) {
+  const encodedPath = pathname
+    .split('/')
+    .map((segment) => encodeURIComponent(segment))
+    .join('/')
+  return `${driveAddress.slice(0, -1)}${encodedPath}`
 }
 
 function normalizeName (value) {
