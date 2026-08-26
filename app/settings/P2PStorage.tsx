@@ -15,6 +15,7 @@ import {
   RPC_HYPER_STORAGE_LIST
 } from '../../backend/rpc/commands.mjs'
 import { BROWSER_PALETTES } from '../browser-appearance.mjs'
+import CopyIcon from '../../assets/icons/bootstrap/copy.svg'
 import { clearHyperdriveRecents } from '../hyperdrive/recents-store'
 import { SettingsSection, useSettingsDarkMode } from './SettingsUI'
 
@@ -59,12 +60,12 @@ type HyperArchiveItem = {
 
 type P2PStorageProps = {
   onCallRpc: (command: number, data?: object) => Promise<P2pStorageResponse>
-  onOpenUrl: (url: string) => void
+  onOpenItem: (item: { name: string, source: 'fetched' | 'published', url: string }) => void
 }
 
 const PAGE_SIZE = 5
 
-export function P2PStorage ({ onCallRpc, onOpenUrl }: P2PStorageProps) {
+export function P2PStorage ({ onCallRpc, onOpenItem }: P2PStorageProps) {
   const isDark = useSettingsDarkMode()
   const requestSequence = useRef(0)
   const activeActionRef = useRef<string | null>(null)
@@ -318,6 +319,8 @@ export function P2PStorage ({ onCallRpc, onOpenUrl }: P2PStorageProps) {
 
       </SettingsSection>
 
+      {notice && <Text accessibilityRole='alert' style={styles.notice}>{notice}</Text>}
+
       <SettingsSection title='Hyper archive'>
         <View style={[styles.filters, isDark ? darkStyles.divider : null]}>
           {(['all', 'published', 'fetched'] as HyperArchiveSource[]).map((source) => (
@@ -357,7 +360,12 @@ export function P2PStorage ({ onCallRpc, onOpenUrl }: P2PStorageProps) {
                   index > 0 && isDark ? darkStyles.divider : null
                 ]}
               >
-                <View style={styles.copy}>
+                <Pressable
+                  accessibilityLabel={`Open ${item.name}`}
+                  accessibilityRole='button'
+                  onPress={() => onOpenItem(item)}
+                  style={({ pressed }) => [styles.copy, pressed ? styles.buttonPressed : null]}
+                >
                   <View style={styles.archiveTitleRow}>
                     <Text numberOfLines={1} style={[styles.title, styles.archiveTitle, isDark ? darkStyles.primaryText : null]}>
                       {item.name}
@@ -371,25 +379,16 @@ export function P2PStorage ({ onCallRpc, onOpenUrl }: P2PStorageProps) {
                   </View>
                   <Text numberOfLines={1} style={[styles.url, isDark ? darkStyles.secondaryText : null]}>{item.url}</Text>
                   <Text style={[styles.timestamp, isDark ? darkStyles.secondaryText : null]}>{formatTimestamp(item.updatedAt)}</Text>
-                </View>
-                <View style={styles.archiveActions}>
-                  <Pressable
-                    accessibilityLabel={`Copy ${item.name} Hyper URL`}
-                    accessibilityRole='button'
-                    onPress={() => copyArchiveUrl(item)}
-                    style={styles.archiveAction}
-                  >
-                    <Text style={[styles.pageButtonText, isDark ? darkStyles.actionText : null]}>Copy</Text>
-                  </Pressable>
-                  <Pressable
-                    accessibilityLabel={`Open ${item.name}`}
-                    accessibilityRole='button'
-                    onPress={() => onOpenUrl(item.url)}
-                    style={styles.archiveAction}
-                  >
-                    <Text style={[styles.pageButtonText, isDark ? darkStyles.actionText : null]}>Open</Text>
-                  </Pressable>
-                </View>
+                </Pressable>
+                <Pressable
+                  accessibilityLabel={`Copy ${item.name} Hyper URL`}
+                  accessibilityRole='button'
+                  hitSlop={6}
+                  onPress={() => copyArchiveUrl(item)}
+                  style={({ pressed }) => [styles.archiveAction, pressed ? styles.buttonPressed : null]}
+                >
+                  <CopyIcon width={18} height={18} color={isDark ? BROWSER_PALETTES.dark.selectedControl : BROWSER_PALETTES.light.selectedControl} />
+                </Pressable>
               </View>
             ))}
 
@@ -452,7 +451,6 @@ export function P2PStorage ({ onCallRpc, onOpenUrl }: P2PStorageProps) {
         </View>
       </SettingsSection>
 
-      {notice && <Text accessibilityRole='alert' style={styles.notice}>{notice}</Text>}
       {error && <Text accessibilityRole='alert' style={styles.error}>{error}</Text>}
     </>
   )
@@ -536,13 +534,11 @@ const styles = StyleSheet.create({
   archiveTitle: {
     flexShrink: 1
   },
-  archiveActions: {
-    alignItems: 'flex-end',
-    gap: 2
-  },
   archiveAction: {
-    paddingHorizontal: 4,
-    paddingVertical: 5
+    alignItems: 'center',
+    height: 42,
+    justifyContent: 'center',
+    width: 42
   },
   copy: {
     flex: 1,

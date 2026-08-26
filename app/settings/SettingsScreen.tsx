@@ -151,6 +151,7 @@ type SettingsScreenProps = {
   onWebsiteTextScaleChange: (scale: WebsiteTextScale) => void
   onResetTabs: () => void
   onOpenUrl: (url: string) => void
+  onOpenHyperItem: (item: { name: string, source: 'fetched' | 'published', url: string }) => void
   onIdentityRestored: () => void
 }
 
@@ -244,7 +245,7 @@ export function SettingsScreen(props: SettingsScreenProps) {
         {page === 'appearance' && <Appearance {...props} />}
         {page === 'data-clearing' && <DataClearing {...props} />}
         {page === 'privacy' && <Privacy {...props} />}
-        {page === 'p2p-storage' && <P2PStorage onCallRpc={props.onCallRpc} onOpenUrl={props.onOpenUrl} />}
+        {page === 'p2p-storage' && <P2PStorage onCallRpc={props.onCallRpc} onOpenItem={props.onOpenHyperItem} />}
         {page === 'permissions' && <Permissions {...props} />}
         {page === 'link-device' && <LinkDeviceSettings {...props} />}
         {page === 'about' && <AboutSettings onOpenUrl={props.onOpenUrl} />}

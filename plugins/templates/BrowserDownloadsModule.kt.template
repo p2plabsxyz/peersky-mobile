@@ -181,6 +181,7 @@ class BrowserDownloadsModule(
                   status = getStatus(cursor.getInt(statusIndex)),
                   size = cursor.getLong(sizeIndex).coerceAtLeast(0),
                   createdAt = cursor.getLong(createdAtIndex).coerceAtLeast(0),
+                  sourceUrl = existing?.sourceUrl,
                   mimeType = existing?.mimeType
                     ?: if (mimeTypeIndex >= 0) cursor.getString(mimeTypeIndex) else null,
                   typeResolved = existing?.typeResolved ?: false,
@@ -217,6 +218,7 @@ class BrowserDownloadsModule(
             record.putString("status", download.status)
             record.putDouble("size", download.size.toDouble())
             record.putDouble("createdAt", download.createdAt.toDouble())
+            download.sourceUrl?.let { record.putString("sourceUrl", it) }
             result.pushMap(record)
           }
           promise.resolve(result)
@@ -397,6 +399,7 @@ class BrowserDownloadsModule(
           status = "pending",
           size = 0,
           createdAt = System.currentTimeMillis(),
+          sourceUrl = url,
           mimeType = metadata.mimeType,
           typeResolved = !isAmbiguousDownloadType(metadata.mimeType) &&
             metadata.mimeType != "application/zip"
@@ -483,6 +486,8 @@ class BrowserDownloadsModule(
             status = normalizeStatus(item.optString("status", "failed")),
             size = item.optLong("size", 0).coerceAtLeast(0),
             createdAt = item.optLong("createdAt", 0).coerceAtLeast(0),
+            sourceUrl = item.optString("sourceUrl", "")
+              .takeIf { isHttpUrl(it) },
             mimeType = if (item.has("mimeType") && !item.isNull("mimeType")) {
               normalizeMimeType(item.optString("mimeType"))
             } else {
@@ -514,6 +519,7 @@ class BrowserDownloadsModule(
             .put("status", download.status)
             .put("size", download.size)
             .put("createdAt", download.createdAt)
+            .put("sourceUrl", download.sourceUrl)
             .put("mimeType", download.mimeType)
             .put("typeResolved", download.typeResolved)
             .put("resolutionAttempts", download.resolutionAttempts)
@@ -862,6 +868,7 @@ class BrowserDownloadsModule(
     val status: String,
     val size: Long,
     val createdAt: Long,
+    val sourceUrl: String?,
     val mimeType: String?,
     val typeResolved: Boolean = false,
     val resolutionAttempts: Int = 0

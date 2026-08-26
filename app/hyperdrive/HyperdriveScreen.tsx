@@ -56,6 +56,7 @@ type Props = {
   isDark: boolean
   isLandscape: boolean
   onCallRpc: (command: number, data?: Record<string, unknown>) => Promise<any>
+  onOpenItem: (item: HyperdriveItem) => void
   onOpenUrl: (url: string) => void
   onStatus: (message: string) => void
 }
@@ -68,7 +69,7 @@ const RECENT_FILTERS: Array<{ id: RecentFilter, label: string }> = [
   { id: 'fetched', label: 'Fetched' }
 ]
 
-export function HyperdriveScreen ({ isDark, isLandscape, onCallRpc, onOpenUrl, onStatus }: Props) {
+export function HyperdriveScreen ({ isDark, isLandscape, onCallRpc, onOpenItem, onOpenUrl, onStatus }: Props) {
   const [recents, setRecents] = useState<HyperdriveItem[]>(loadHyperdriveRecents)
   const [items, setItems] = useState<HyperdriveItem[] | null>(null)
   const [location, setLocation] = useState<HyperdriveItem | null>(null)
@@ -164,7 +165,7 @@ export function HyperdriveScreen ({ isDark, isLandscape, onCallRpc, onOpenUrl, o
         setListingTruncated(false)
         return
       }
-      onOpenUrl(item.url)
+      onOpenItem(item)
       return
     }
 
@@ -173,7 +174,7 @@ export function HyperdriveScreen ({ isDark, isLandscape, onCallRpc, onOpenUrl, o
       return
     }
     remember(item, 'fetched')
-    onOpenUrl(item.url)
+    onOpenItem(item)
   }
 
   function remember (item: HyperdriveItem, source: RecentSource) {
