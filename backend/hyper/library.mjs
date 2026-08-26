@@ -221,7 +221,7 @@ async function uniquePath (drive, pathname) {
 
 function normalizeFilename (value) {
   if (typeof value !== 'string') return null
-  const filename = Array.from(value.trim())
+  const sanitized = Array.from(value.trim())
     .filter((character) => {
       const code = character.charCodeAt(0)
       return code >= 32 && (code < 127 || code > 159)
@@ -229,7 +229,7 @@ function normalizeFilename (value) {
     .join('')
     .replace(/[/\\?#]/g, '-')
     .replace(/^[. -]+|[. ]+$/g, '')
-    .slice(0, 160)
+  const filename = Array.from(sanitized).slice(0, 160).join('')
   return filename && filename !== '.' && filename !== '..' ? filename : null
 }
 

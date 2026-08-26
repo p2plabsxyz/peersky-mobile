@@ -48,8 +48,8 @@ function normalizeRecent (value) {
         const code = character.charCodeAt(0)
         return code >= 32 && (code < 127 || code > 159)
       })
-      .join('')
       .slice(0, 160)
+      .join('')
     : ''
   const openedAt = Number(value.openedAt)
 
@@ -80,8 +80,8 @@ function normalizeChild (value) {
         const code = character.charCodeAt(0)
         return code >= 32 && (code < 127 || code > 159)
       })
-      .join('')
       .slice(0, 160)
+      .join('')
     : ''
 
   return {

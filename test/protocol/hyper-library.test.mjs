@@ -108,6 +108,21 @@ test('sanitizes URL delimiters and encodes uploaded file URLs', async () => {
   assert.equal(response.item.url, `${DRIVE_URL}report%20-2-.pdf`)
 })
 
+test('truncates uploaded filenames without splitting Unicode characters', async () => {
+  const drive = createDrive({})
+  const expectedName = `${'a'.repeat(159)}😀`
+  const response = await uploadHyperdriveFile({
+    name: `${expectedName}ignored`,
+    contentBase64: Buffer.from('report').toString('base64')
+  }, {
+    runtime: { getDrive: async () => drive }
+  })
+
+  assert.equal(response.ok, true)
+  assert.equal(response.item.name, expectedName)
+  assert.equal(drive.writes[0].path, `/${expectedName}`)
+})
+
 test('serializes simultaneous uploads before selecting duplicate names', async () => {
   const drive = createDrive({})
   const runtime = { getDrive: async () => drive }

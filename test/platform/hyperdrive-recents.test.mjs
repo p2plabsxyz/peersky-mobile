@@ -94,3 +94,20 @@ test('preserves filenames containing URL query and fragment characters', () => {
   assert.equal(parseHyperdriveRecents(serializeHyperdriveRecents(recents))[0].url,
     `${DRIVE_URL}report%232%3F.pdf`)
 })
+
+test('truncates recent names without splitting Unicode characters', () => {
+  const expectedName = `${'a'.repeat(159)}😀`
+  const recents = recordHyperdriveRecent([], {
+    type: 'directory',
+    name: `${expectedName}ignored`,
+    url: `${DRIVE_URL}unicode/`,
+    children: [{
+      type: 'file',
+      name: `${expectedName}ignored`,
+      url: `${DRIVE_URL}unicode/file.txt`
+    }]
+  }, 10)
+
+  assert.equal(recents[0].name, expectedName)
+  assert.equal(recents[0].children[0].name, expectedName)
+})
