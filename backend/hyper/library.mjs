@@ -31,8 +31,13 @@ export async function listHyperdriveLocation ({ url } = {}, options = {}) {
       }
 
       const directory = normalizeDirectoryPath(target.pathname)
-      const { items, truncated } = await listDirectory(drive, target.driveAddress, directory)
-      if (directory !== '/' && items.length === 0) {
+      const { items, truncated, timedOut } = await listDirectory(
+        drive,
+        target.driveAddress,
+        directory,
+        resolveListTimeMs(options.listTimeMs)
+      )
+      if (directory !== '/' && items.length === 0 && !timedOut) {
         return { ok: false, error: 'No file or directory was found at this Hyper URL.' }
       }
       return {
@@ -100,23 +105,33 @@ export async function uploadHyperdriveFile ({ name, contentBase64 } = {}, option
   }))
 }
 
-async function listDirectory (drive, driveAddress, directory) {
+async function listDirectory (drive, driveAddress, directory, maxListTimeMs) {
   const prefix = directory === '/' ? '/' : `${directory.replace(/\/$/, '')}/`
   const children = new Map()
   const startedAt = Date.now()
   let scanned = 0
   let truncated = false
+  let timedOut = false
   const iterator = drive.list(prefix)[Symbol.asyncIterator]()
 
   try {
     while (true) {
-      const remainingTime = MAX_LIST_TIME_MS - (Date.now() - startedAt)
+      const remainingTime = maxListTimeMs - (Date.now() - startedAt)
       if (remainingTime <= 0 || scanned >= MAX_SCANNED_ENTRIES) {
         truncated = true
         break
       }
 
-      const { done, value: entry } = await nextEntry(iterator, remainingTime)
+      let result
+      try {
+        result = await nextEntry(iterator, remainingTime)
+      } catch (error) {
+        if (!(error instanceof HyperdriveListTimeoutError)) throw error
+        truncated = true
+        timedOut = true
+        break
+      }
+      const { done, value: entry } = result
       if (done) break
       scanned += 1
       if (!entry?.key || !entry.value) continue
@@ -150,13 +165,16 @@ async function listDirectory (drive, driveAddress, directory) {
       if (left.type !== right.type) return left.type === 'directory' ? -1 : 1
       return left.name.localeCompare(right.name)
     }),
-    truncated
+    truncated,
+    timedOut
   }
 }
 
+class HyperdriveListTimeoutError extends Error {}
+
 function nextEntry (iterator, timeoutMs) {
   return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error('Hyperdrive listing timed out.')), timeoutMs)
+    const timeout = setTimeout(() => reject(new HyperdriveListTimeoutError('Hyperdrive listing timed out.')), timeoutMs)
     iterator.next().then(
       (result) => {
         clearTimeout(timeout)
@@ -168,6 +186,12 @@ function nextEntry (iterator, timeoutMs) {
       }
     )
   })
+}
+
+function resolveListTimeMs (value) {
+  return Number.isSafeInteger(value) && value > 0 && value <= MAX_LIST_TIME_MS
+    ? value
+    : MAX_LIST_TIME_MS
 }
 
 function createFileItem (driveAddress, pathname, value) {

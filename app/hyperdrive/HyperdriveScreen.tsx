@@ -379,7 +379,7 @@ export function HyperdriveScreen ({ isDark, isLandscape, onCallRpc, onOpenUrl, o
           </View>
         )}
       </View>
-      {listingTruncated && <Text style={[styles.limitNote, { color: palette.muted }]}>Showing the first 100 items.</Text>}
+      {listingTruncated && <Text style={[styles.limitNote, { color: palette.muted }]}>Showing a partial directory listing.</Text>}
 
       {isLandscape
         ? <View style={styles.listContent}>{libraryItems}</View>

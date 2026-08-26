@@ -53,6 +53,33 @@ test('rejects a missing non-root path instead of displaying an empty folder', as
   })
 })
 
+test('returns collected directory entries when listing times out', async () => {
+  const drive = createStallingDrive({
+    '/docs/readme.md': { blob: { byteLength: 24 } }
+  }, 1)
+  const response = await listHyperdriveLocation({ url: `${DRIVE_URL}docs/` }, {
+    runtime: { getDrive: async () => drive },
+    listTimeMs: 5
+  })
+
+  assert.equal(response.ok, true)
+  assert.equal(response.truncated, true)
+  assert.deepEqual(response.items.map(({ name }) => name), ['readme.md'])
+})
+
+test('does not report a slow directory as missing when listing times out', async () => {
+  const drive = createStallingDrive({}, 0)
+  const response = await listHyperdriveLocation({ url: `${DRIVE_URL}slow/` }, {
+    runtime: { getDrive: async () => drive },
+    listTimeMs: 5
+  })
+
+  assert.equal(response.ok, true)
+  assert.equal(response.truncated, true)
+  assert.deepEqual(response.items, [])
+  assert.equal(response.location.path, '/slow/')
+})
+
 test('uploads with a safe unique filename', async () => {
   const drive = createDrive({ '/report.pdf': { blob: { byteLength: 1 } } })
   const response = await uploadHyperdriveFile({
@@ -132,4 +159,32 @@ function createDrive (entries) {
       }
     }
   }
+}
+
+function createStallingDrive (entries, entriesBeforeStall) {
+  const drive = createDrive(entries)
+  drive.list = (prefix) => {
+    const matchingEntries = Object.entries(entries)
+      .filter(([key]) => key.startsWith(prefix))
+      .slice(0, entriesBeforeStall)
+    let index = 0
+
+    return {
+      [Symbol.asyncIterator] () {
+        return {
+          next () {
+            if (index < matchingEntries.length) {
+              const [key, value] = matchingEntries[index++]
+              return Promise.resolve({ done: false, value: { key, value } })
+            }
+            return new Promise(() => {})
+          },
+          return () {
+            return Promise.resolve({ done: true })
+          }
+        }
+      }
+    }
+  }
+  return drive
 }
