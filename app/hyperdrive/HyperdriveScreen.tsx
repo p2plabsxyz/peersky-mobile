@@ -162,13 +162,18 @@ export function HyperdriveScreen ({ isDark, isLandscape, onCallRpc, onOpenUrl, o
 
   async function openItem (item: HyperdriveItem) {
     if (!items) {
-      remember(item, item.source || 'fetched')
-      if (item.type === 'directory' && item.children) {
-        setLocation(item)
-        setItems(item.children)
-        setListingTruncated(false)
+      if (item.type === 'directory') {
+        if (item.children) {
+          remember(item, item.source || 'fetched')
+          setLocation(item)
+          setItems(item.children)
+          setListingTruncated(false)
+        } else {
+          await fetchLocation(item.url)
+        }
         return
       }
+      remember(item, item.source || 'fetched')
       onOpenUrl(item.url)
       return
     }
