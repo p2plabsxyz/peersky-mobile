@@ -15,10 +15,17 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "xyz.p2plabs.peersky",
+      "entitlements": {
+        "com.apple.developer.networking.multicast": true
+      },
       "infoPlist": {
         "NSCameraUsageDescription": "PeerSky uses the camera only when a website you visit requests it and you allow access.",
         "NSLocationWhenInUseUsageDescription": "PeerSky uses your location only when a website you visit requests it and you allow access.",
         "NSMicrophoneUsageDescription": "PeerSky uses the microphone only when a website you visit requests it and you allow access.",
+        "NSLocalNetworkUsageDescription": "PeerSky uses your local network to discover and connect to nearby PeerSky devices.",
+        "NSBonjourServices": [
+          "_hyperdht-mdns._udp"
+        ],
         "NSAppTransportSecurity": {
           "NSAllowsLocalNetworking": true
         }
@@ -33,7 +40,9 @@
       "permissions": [
         "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_WIFI_STATE",
         "android.permission.CAMERA",
+        "android.permission.CHANGE_WIFI_MULTICAST_STATE",
         "android.permission.POST_NOTIFICATIONS",
         "android.permission.RECORD_AUDIO"
       ],
@@ -71,6 +80,7 @@
       "expo-font",
       "./plugins/with-android-loopback-cleartext",
       "./plugins/with-browser-downloads",
+      "./plugins/with-lan-discovery",
       "expo-sharing"
     ]
   }

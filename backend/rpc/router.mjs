@@ -8,6 +8,7 @@ import {
   RPC_HYPER_INIT,
   RPC_HYPER_LIBRARY_LIST,
   RPC_HYPER_LIBRARY_UPLOAD,
+  RPC_HYPER_LAN_STATUS,
   RPC_HYPER_STORAGE_CLEAR_CACHE,
   RPC_HYPER_STORAGE_DELETE_APP,
   RPC_HYPER_STORAGE_LIST,
@@ -39,8 +40,10 @@ import { listHyperdriveLocation, uploadHyperdriveFile } from '../hyper/library.m
 import { fetchHyper, fetchHyperBinary, resetHyperFetch } from '../hyper/fetch.mjs'
 import {
   closeHyperRuntime,
+  ensureLANDiscovery,
   getHyperRuntime,
   getHyperStoragePath,
+  getLANDiscoveryStatus,
   withHyperRuntimeMaintenance,
   withHyperRuntimeOperation
 } from '../hyper/runtime.mjs'
@@ -75,7 +78,11 @@ export async function routeRpcRequest (req) {
   try {
     if (req.command === RPC_HYPER_INIT) {
       await withHyperRuntimeOperation(() => {})
-      replyJson(req, { ok: true, storagePath: getHyperStoragePath() })
+      replyJson(req, {
+        ok: true,
+        storagePath: getHyperStoragePath(),
+        lan: getLANDiscoveryStatus()
+      })
       return
     }
 
@@ -96,6 +103,15 @@ export async function routeRpcRequest (req) {
 
     if (req.command === RPC_HYPER_LIBRARY_UPLOAD) {
       replyJson(req, await uploadHyperdriveFile(parseJsonMessage(req.data)))
+      return
+    }
+
+    if (req.command === RPC_HYPER_LAN_STATUS) {
+      await ensureLANDiscovery()
+      replyJson(req, {
+        ok: true,
+        lan: getLANDiscoveryStatus()
+      })
       return
     }
 
