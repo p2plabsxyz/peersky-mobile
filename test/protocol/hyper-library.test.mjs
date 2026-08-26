@@ -99,6 +99,10 @@ test('rejects invalid and oversized uploads before opening the runtime', async (
   const runtime = { getDrive: async () => { opened = true } }
 
   assert.equal((await uploadHyperdriveFile({ name: '..', contentBase64: 'YQ==' }, { runtime })).ok, false)
+  for (const contentBase64 of ['SGVsbG8@@@=', '!!!!', 'YQ=', 'YQ===']) {
+    const response = await uploadHyperdriveFile({ name: 'invalid.bin', contentBase64 }, { runtime })
+    assert.deepEqual(response, { ok: false, error: 'Invalid file content encoding.' })
+  }
   assert.equal((await uploadHyperdriveFile({
     name: 'large.bin',
     contentBase64: Buffer.alloc(10 * 1024 * 1024 + 1).toString('base64')

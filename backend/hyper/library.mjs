@@ -4,6 +4,7 @@ import { parseHyperUrl } from './url.mjs'
 import { resolveHyperdriveAppDriveName } from './storage-core.mjs'
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+const MAX_UPLOAD_BASE64_LENGTH = Math.ceil(MAX_UPLOAD_BYTES / 3) * 4
 const MAX_LIST_ITEMS = 100
 const MAX_SCANNED_ENTRIES = 500
 const MAX_LIST_TIME_MS = 5000
@@ -60,11 +61,23 @@ export async function uploadHyperdriveFile ({ name, contentBase64 } = {}, option
   if (typeof contentBase64 !== 'string' || !contentBase64) {
     return { ok: false, error: 'Missing file content.' }
   }
+  if (contentBase64.length > MAX_UPLOAD_BASE64_LENGTH) {
+    return { ok: false, error: 'File size must be between 1 byte and 10 MB.' }
+  }
+  if (!isValidBase64(contentBase64)) {
+    return { ok: false, error: 'Invalid file content encoding.' }
+  }
 
   let bytes
   try {
     bytes = b4a.from(contentBase64, 'base64')
   } catch {
+    return { ok: false, error: 'Invalid file content encoding.' }
+  }
+
+  const paddingLength = contentBase64.endsWith('==') ? 2 : contentBase64.endsWith('=') ? 1 : 0
+  const expectedByteLength = (contentBase64.length / 4) * 3 - paddingLength
+  if (bytes.byteLength !== expectedByteLength) {
     return { ok: false, error: 'Invalid file content encoding.' }
   }
 
@@ -194,6 +207,26 @@ function normalizeFilename (value) {
     .replace(/^[. -]+|[. ]+$/g, '')
     .slice(0, 160)
   return filename && filename !== '.' && filename !== '..' ? filename : null
+}
+
+function isValidBase64 (value) {
+  if (value.length % 4 !== 0) return false
+
+  const paddingLength = value.endsWith('==') ? 2 : value.endsWith('=') ? 1 : 0
+  const contentLength = value.length - paddingLength
+  for (let index = 0; index < contentLength; index++) {
+    const code = value.charCodeAt(index)
+    const isAlphaNumeric =
+      (code >= 48 && code <= 57) ||
+      (code >= 65 && code <= 90) ||
+      (code >= 97 && code <= 122)
+    if (!isAlphaNumeric && code !== 43 && code !== 47) return false
+  }
+
+  for (let index = contentLength; index < value.length; index++) {
+    if (value.charCodeAt(index) !== 61) return false
+  }
+  return true
 }
 
 function normalizeDirectoryPath (pathname) {
