@@ -41,7 +41,7 @@ Hyper media is streamed through a local loopback proxy so WebView can play audio
 
 PeerSky blocks matching ad and tracker requests at the WebView engine level. Android uses [`adblock-rust`](https://github.com/brave/adblock-rust), while iOS compiles supported rules with `WKContentRuleList`. A validated EasyList and EasyPrivacy snapshot is bundled so protection can initialize before the first network update.
 
-YouTube protection uses an independent, domain-limited snapshot of DuckDuckGo's GPLv3 Content Blocker scriptlets plus its `player/ad_break` network rule. Its source commit, hashes, and license are retained in `assets/youtube-ad-blocking/`.
+YouTube protection independently blocks the narrowly scoped `youtubei/v1/player/ad_break` network request on YouTube and YouTube nocookie pages.
 
 This initial implementation covers network requests, not cosmetic filtering or element hiding. See the [content-blocking documentation](docs/content-blocking.md) for platform setup, update behavior, safeguards, and current limitations.
 

@@ -6,7 +6,7 @@ PeerSky fetches and validates EasyList and EasyPrivacy at build time, then packa
 
 The Privacy settings page provides a global protection switch, the active filter-list status, and a manual update action. Turning protection off is persisted across launches. Manual update failures leave the current validated snapshot active and report the failure in Settings.
 
-The page also provides an independent YouTube-specific switch. When enabled, PeerSky injects DuckDuckGo Content Blocker scriptlets only into HTTPS pages on `youtube.com`, `youtube-nocookie.com`, and their subdomains, and blocks the extension's narrowly scoped `youtubei/v1/player/ad_break` request. EasyList/EasyPrivacy protection and YouTube protection can be enabled or disabled separately.
+The page also provides an independent YouTube-specific switch. When enabled, PeerSky blocks the narrowly scoped `youtubei/v1/player/ad_break` request on HTTPS pages from `youtube.com`, `youtube-nocookie.com`, and their subdomains. EasyList/EasyPrivacy protection and YouTube protection can be enabled or disabled separately.
 
 The active metadata records the immutable snapshot identifier, update timestamp, source URL, upstream list version, filename, and byte size. Builds generate the packaged first-launch snapshot with:
 
@@ -57,7 +57,6 @@ Unsupported Adblock modifiers, cosmetic rules, and regular-expression filters ar
 - Android uses the network-rule support provided by the pinned `adblock-rust` engine.
 - iOS converts the supported network-rule subset to WebKit JSON. Unsupported modifiers and regex filters are skipped safely.
 - Cosmetic filtering, element hiding, cookie banners, scriptlets, and anti-adblock circumvention are outside this initial implementation. A synthetic blocked response may therefore score differently from browser extensions on visual ad-block test pages.
-- The only scriptlet-based exception is the separately controlled YouTube protection described above.
 - Filter-list updates do not accept custom URLs. This keeps the native parser boundary limited to the reviewed EasyList sources.
 
 ## Validation
@@ -68,6 +67,5 @@ Automated tests cover source and state validation, expiry, bounded transfers, pa
 
 - [`brave/adblock-rust`](https://github.com/brave/adblock-rust), licensed under Mozilla Public License 2.0.
 - [EasyList and EasyPrivacy](https://easylist.to/pages/licence.html), maintained by the EasyList authors and dual-licensed under GPL-3.0-or-later or CC BY-SA 3.0-or-later.
-- [DuckDuckGo Content Blocker Extension](https://github.com/duckduckgo/content-blocker-extension), licensed under GPL-3.0-or-later. The pinned source commit, SHA-256 hashes, and license are stored in `assets/youtube-ad-blocking/`; regenerate the isolated payload with `npm run update:youtube-ad-blocking-snapshot`.
 
 The packaged snapshots retain their upstream headers and licence notices. A local copy of their attribution and licence choices is stored in `assets/content-blocking/LICENSE`; their exact source URLs, versions, generation time, and byte sizes are recorded in `assets/content-blocking/manifest.json`.

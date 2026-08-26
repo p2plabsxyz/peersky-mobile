@@ -126,7 +126,6 @@ import {
   setYoutubeAdBlockingEnabled as applyYoutubeAdBlockingEnabled
 } from './privacy/contentBlocking'
 import { createBrowserContentBlockingScript } from './privacy/browserContentBlockingScript.mjs'
-import { createYoutubeAdBlockingScript } from './privacy/youtube-ad-blocking.mjs'
 import { useBrowserDownloads } from './downloads/useBrowserDownloads'
 import { BrowserTabsScreen } from './tabs/BrowserTabsScreen'
 import { useBrowserTabPreviews } from './tabs/useBrowserTabPreviews'
@@ -2924,10 +2923,6 @@ export default function App () {
               browserPreferences.contentBlockingEnabled,
             youtubeAdBlockingEnabled: browserPreferences.youtubeAdBlockingEnabled
           })
-          const youtubeAdBlockingScript = createYoutubeAdBlockingScript({
-            enabled: browserPreferences.youtubeAdBlockingEnabled,
-            url: entry.url
-          })
           const browserMediaScript = createBrowserMediaLongPressScript({
             nativeHitTesting: Platform.OS === 'android' && Boolean(peerSkyWebViewNativeConfig),
             token: browserMediaToken
@@ -2938,7 +2933,6 @@ export default function App () {
             createBrowserFaviconScript()
           )
           const browserBeforeContentScript = combineBrowserInjectedScripts(
-            youtubeAdBlockingScript,
             browserAccessibilityScript,
             browserContentBlockingScript,
             browserMediaScript
