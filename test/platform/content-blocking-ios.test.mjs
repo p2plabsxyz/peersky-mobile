@@ -111,6 +111,12 @@ describe('iOS content blocking', () => {
     assert.match(blocker, /if \(enabled\) \{\s*for \(WKContentRuleList \*ruleList in ruleLists\)/)
     assert.doesNotMatch(blocker, /if \(!enabled\) return;/)
     assert.match(blocker, /if \(error\) \{\s*completion\(error\);\s*return;/)
+    assert.match(blocker, /instance[.]youtubeAdBlockingEnabled = YES;\s*\[instance ensureYoutubeRuleLoaded\]/)
+    assert.match(blocker, /if \(enabled\) \[self ensureYoutubeRuleLoaded\]/)
+    assert.doesNotMatch(
+      blocker,
+      /loadRuleAtIndex:[\s\S]*loadYoutubeRule:[\s\S]*removeStaleRuleListsKeepingSnapshot/
+    )
     assert.match(webView, /<react-native-webview\/RNCWebViewImpl[.]h>/)
     assert.match(webView, /<react-native-webview\/RNCWebViewManager[.]h>/)
     assert.match(webView, /setUpWkWebViewConfig/)

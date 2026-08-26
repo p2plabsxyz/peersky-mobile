@@ -21,6 +21,7 @@ static const unsigned long long MaxRuleFileBytes = 48ULL * 1024ULL * 1024ULL;
     instance = [PeerSkyContentBlocker new];
     instance.ruleLists = @[];
     instance.youtubeAdBlockingEnabled = YES;
+    [instance ensureYoutubeRuleLoaded];
   });
   return instance;
 }
@@ -30,6 +31,7 @@ static const unsigned long long MaxRuleFileBytes = 48ULL * 1024ULL * 1024ULL;
   @synchronized (self) {
     _youtubeAdBlockingEnabled = enabled;
   }
+  if (enabled) [self ensureYoutubeRuleLoaded];
 }
 
 - (void)setEnabled:(BOOL)enabled
@@ -58,18 +60,11 @@ static const unsigned long long MaxRuleFileBytes = 48ULL * 1024ULL * 1024ULL;
       completion(error);
       return;
     }
-    [self loadYoutubeRule:^(WKContentRuleList *youtubeRule, NSError *youtubeError) {
-      if (!youtubeRule || youtubeError) {
-        completion(youtubeError ?: [self error:@"Unable to compile YouTube content rules."]);
-        return;
-      }
-      @synchronized (self) {
-        self.ruleLists = [compiled copy];
-        self.youtubeRuleList = youtubeRule;
-      }
-      [self removeStaleRuleListsKeepingSnapshot:snapshotName];
-      completion(nil);
-    }];
+    @synchronized (self) {
+      self.ruleLists = [compiled copy];
+    }
+    [self removeStaleRuleListsKeepingSnapshot:snapshotName];
+    completion(nil);
   }];
 }
 
@@ -124,6 +119,19 @@ static const unsigned long long MaxRuleFileBytes = 48ULL * 1024ULL * 1024ULL;
     [store compileContentRuleListForIdentifier:identifier
                         encodedContentRuleList:json
                              completionHandler:completion];
+  }];
+}
+
+- (void)ensureYoutubeRuleLoaded
+{
+  @synchronized (self) {
+    if (self.youtubeRuleList) return;
+  }
+  [self loadYoutubeRule:^(WKContentRuleList *youtubeRule, NSError *error) {
+    if (!youtubeRule || error) return;
+    @synchronized (self) {
+      self.youtubeRuleList = youtubeRule;
+    }
   }];
 }
 
