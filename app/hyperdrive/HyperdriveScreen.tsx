@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import {
   ActivityIndicator,
   Alert,
@@ -85,6 +85,12 @@ export function HyperdriveScreen ({ isDark, isLandscape, onCallRpc, onOpenUrl, o
   const visibleItems = items ?? recents.filter((item) => recentFilter === 'all' || item.source === recentFilter)
   const heading = items ? location?.name || 'Files' : 'Recent'
   const filterLabel = RECENT_FILTERS.find((filter) => filter.id === recentFilter)?.label || 'All'
+
+  useEffect(() => {
+    if (!persistRecents(recents)) {
+      setError('Recent items could not be saved on this device.')
+    }
+  }, [recents])
 
   async function uploadFile () {
     if (busyAction) return
@@ -176,11 +182,10 @@ export function HyperdriveScreen ({ isDark, isLandscape, onCallRpc, onOpenUrl, o
   }
 
   function remember (item: HyperdriveItem, source: RecentSource) {
-    setRecents((current) => {
-      const next = recordHyperdriveRecent(current, { ...item, source }) as HyperdriveItem[]
-      if (!persistRecents(next)) reportPersistenceFailure()
-      return next
-    })
+    setRecents((current) => recordHyperdriveRecent(
+      current,
+      { ...item, source }
+    ) as HyperdriveItem[])
   }
 
   function removeRecent (item: HyperdriveItem) {
@@ -190,11 +195,10 @@ export function HyperdriveScreen ({ isDark, isLandscape, onCallRpc, onOpenUrl, o
       {
         text: 'Remove',
         style: 'destructive',
-        onPress: () => setRecents((current) => {
-          const next = removeHyperdriveRecent(current, item.url) as HyperdriveItem[]
-          if (!persistRecents(next)) reportPersistenceFailure()
-          return next
-        })
+        onPress: () => setRecents((current) => removeHyperdriveRecent(
+          current,
+          item.url
+        ) as HyperdriveItem[])
       }
     ])
   }
@@ -207,10 +211,6 @@ export function HyperdriveScreen ({ isDark, isLandscape, onCallRpc, onOpenUrl, o
     }
     scanHandledRef.current = false
     setIsScanning(true)
-  }
-
-  function reportPersistenceFailure () {
-    setTimeout(() => setError('Recent items could not be saved on this device.'), 0)
   }
 
   function copyItemUrl (item: HyperdriveItem) {
