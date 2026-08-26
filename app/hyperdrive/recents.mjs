@@ -110,9 +110,11 @@ function normalizeHyperUrl (value) {
   try {
     const parsed = new URL(value.trim())
     if (parsed.protocol !== 'hyper:' || !parsed.hostname || parsed.username || parsed.password) return null
-    parsed.search = ''
-    parsed.hash = ''
-    return parsed.href
+    const encodedPath = `${parsed.pathname}${parsed.search}${parsed.hash}`
+      .split('/')
+      .map((segment) => encodeURIComponent(decodeURIComponent(segment)))
+      .join('/')
+    return `hyper://${parsed.host}${encodedPath}`
   } catch {
     return null
   }

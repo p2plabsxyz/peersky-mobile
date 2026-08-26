@@ -82,3 +82,15 @@ test('rejects malformed records and bounds persisted recent entries', () => {
   assert.equal(parsed.length, MAX_HYPERDRIVE_RECENTS)
   assert.deepEqual(parseHyperdriveRecents('[{"type":"file","url":"https://example.com"}]'), [])
 })
+
+test('preserves filenames containing URL query and fragment characters', () => {
+  const recents = recordHyperdriveRecent([], {
+    type: 'file',
+    name: 'report#2?.pdf',
+    url: `${DRIVE_URL}report#2?.pdf`
+  }, 10)
+
+  assert.equal(recents[0].url, `${DRIVE_URL}report%232%3F.pdf`)
+  assert.equal(parseHyperdriveRecents(serializeHyperdriveRecents(recents))[0].url,
+    `${DRIVE_URL}report%232%3F.pdf`)
+})

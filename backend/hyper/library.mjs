@@ -39,7 +39,7 @@ export async function listHyperdriveLocation ({ url } = {}, options = {}) {
         location: {
           type: 'directory',
           name: directory === '/' ? shortDriveName(target.driveAddress) : basename(directory),
-          url: `${target.driveAddress.slice(0, -1)}${directory}`,
+          url: createHyperUrl(target.driveAddress, directory),
           path: directory
         },
         items,
@@ -119,7 +119,7 @@ async function listDirectory (drive, driveAddress, directory) {
             type: 'directory',
             name: childName,
             path: `${childPath}/`,
-            url: `${driveAddress.slice(0, -1)}${childPath}/`
+            url: createHyperUrl(driveAddress, `${childPath}/`)
           }
         : createFileItem(driveAddress, childPath, entry.value))
 
@@ -162,7 +162,7 @@ function createFileItem (driveAddress, pathname, value) {
     type: 'file',
     name: basename(pathname),
     path: pathname,
-    url: `${driveAddress.slice(0, -1)}${pathname}`,
+    url: createHyperUrl(driveAddress, pathname),
     byteLength: Number.isSafeInteger(value?.blob?.byteLength)
       ? value.blob.byteLength
       : 0
@@ -190,7 +190,7 @@ function normalizeFilename (value) {
       return code >= 32 && (code < 127 || code > 159)
     })
     .join('')
-    .replace(/[/\\]/g, '-')
+    .replace(/[/\\?#]/g, '-')
     .replace(/^[. -]+|[. ]+$/g, '')
     .slice(0, 160)
   return filename && filename !== '.' && filename !== '..' ? filename : null
@@ -198,6 +198,14 @@ function normalizeFilename (value) {
 
 function normalizeDirectoryPath (pathname) {
   return pathname === '/' ? '/' : `${pathname.replace(/\/$/, '')}/`
+}
+
+function createHyperUrl (driveAddress, pathname) {
+  const encodedPath = pathname
+    .split('/')
+    .map((segment) => encodeURIComponent(segment))
+    .join('/')
+  return `${driveAddress.slice(0, -1)}${encodedPath}`
 }
 
 function basename (pathname) {

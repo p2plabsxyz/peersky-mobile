@@ -67,6 +67,20 @@ test('uploads with a safe unique filename', async () => {
   assert.equal(drive.writes[0].path, '/report (1).pdf')
 })
 
+test('sanitizes URL delimiters and encodes uploaded file URLs', async () => {
+  const drive = createDrive({})
+  const response = await uploadHyperdriveFile({
+    name: 'report #2?.pdf',
+    contentBase64: Buffer.from('report').toString('base64')
+  }, {
+    runtime: { getDrive: async () => drive }
+  })
+
+  assert.equal(response.ok, true)
+  assert.equal(drive.writes[0].path, '/report -2-.pdf')
+  assert.equal(response.item.url, `${DRIVE_URL}report%20-2-.pdf`)
+})
+
 test('serializes simultaneous uploads before selecting duplicate names', async () => {
   const drive = createDrive({})
   const runtime = { getDrive: async () => drive }
