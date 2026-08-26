@@ -2,6 +2,7 @@ import { MAX_BROWSER_URL_LENGTH } from '../browser-shell.mjs'
 import { YOUTUBE_AD_BREAK_PATH } from './youtube-ad-blocking.mjs'
 
 export function createBrowserContentBlockingScript ({
+  bridgeToken = '',
   enabled = false,
   youtubeAdBlockingEnabled = false
 } = {}) {
@@ -59,7 +60,7 @@ export function createBrowserContentBlockingScript ({
             ${enabled} &&
             bridge &&
             typeof bridge.shouldBlock === 'function' &&
-            bridge.shouldBlock(requestUrl, documentUrl, 'xhr', method)
+            bridge.shouldBlock(${JSON.stringify(bridgeToken)}, requestUrl, documentUrl, 'xhr', method)
           );
         } catch {
           return false;

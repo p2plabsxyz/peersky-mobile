@@ -2903,6 +2903,9 @@ export default function App () {
             ? {
                 ...peerSkyWebViewNativeConfig,
                 props: Object.assign({}, peerSkyWebViewNativeConfig.props, {
+                  contentBlockingToken: browserPreferences.contentBlockingEnabled
+                    ? browserMediaToken
+                    : null,
                   mediaLongPressToken: browserMediaToken
                 })
               }
@@ -2915,6 +2918,7 @@ export default function App () {
             websiteTextScale: browserPreferences.websiteTextScale
           })
           const browserContentBlockingScript = createBrowserContentBlockingScript({
+            bridgeToken: browserMediaToken,
             enabled: Platform.OS === 'android' &&
               Boolean(peerSkyWebViewNativeConfig) &&
               browserPreferences.contentBlockingEnabled,

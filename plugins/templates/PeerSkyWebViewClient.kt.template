@@ -131,13 +131,21 @@ object PeerSkyYoutubeAdBlocker {
 }
 
 class PeerSkyContentBlockerBridge {
+  private val expectedToken = AtomicReference<String?>(null)
+
+  fun setToken(token: String?) {
+    expectedToken.set(token)
+  }
+
   @JavascriptInterface
   fun shouldBlock(
+    token: String?,
     requestUrl: String?,
     documentUrl: String?,
     resourceType: String?,
     method: String?
   ): Boolean {
+    if (!isAuthorizedToken(expectedToken.get(), token)) return false
     val normalizedRequestUrl = normalizeRemoteHttpUrl(requestUrl) ?: return false
     val normalizedDocumentUrl = normalizeRemoteHttpUrl(documentUrl) ?: return false
     return PeerSkyAdBlockEngine.shouldBlock(
@@ -184,6 +192,9 @@ class PeerSkyContentBlockerBridge {
 
   companion object {
     private const val MAX_FILTER_URL_LENGTH = 16 * 1024
+
+    internal fun isAuthorizedToken(expected: String?, supplied: String?): Boolean =
+      PeerSkyWebViewManager.isValidToken(expected) && expected == supplied
 
     private fun isRemoteHttpUrl(uri: Uri): Boolean {
       return isRemoteHttpUrl(uri.scheme, uri.host)

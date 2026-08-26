@@ -54,13 +54,15 @@ describe('Android content blocking', () => {
     assert.match(clientSource, /if \(shouldBlock\(request\)\) return blockedResponse\(\)/)
     assert.match(clientSource, /class PeerSkyContentBlockerBridge/)
     assert.match(clientSource, /@JavascriptInterface/)
-    assert.match(clientSource, /fun shouldBlock\(/)
+    assert.match(clientSource, /if \(!isAuthorizedToken\(expectedToken[.]get\(\), token\)\) return false/)
     assert.match(clientSource, /"xhr", "xmlhttprequest", "fetch" -> "xhr"/)
     assert.match(clientSource, /204/)
     assert.match(clientSource, /No Content/)
     assert.match(clientSource, /ByteArrayInputStream\(ByteArray\(0\)\)/)
     assert.match(managerSource, /addJavascriptInterface\(/)
     assert.match(managerSource, /PeerSkyContentBlocker/)
+    assert.match(managerSource, /@ReactProp\(name = "contentBlockingToken"\)/)
+    assert.match(managerSource, /setToken\(token[?][.]takeIf\(::isValidToken\)\)/)
     assert.match(
       managerSource,
       /super[.]addEventEmitters\(context, view\)[\s\S]*webViewClient = PeerSkyWebViewClient\(\)/
@@ -163,13 +165,14 @@ describe('Android content blocking', () => {
     )
 
     assert.match(scriptSource, /window[.]PeerSkyContentBlocker/)
-    assert.match(scriptSource, /bridge[.]shouldBlock\(requestUrl, documentUrl, 'xhr', method\)/)
+    assert.match(scriptSource, /bridge[.]shouldBlock\([^,]+, requestUrl, documentUrl, 'xhr', method\)/)
     assert.match(scriptSource, /YOUTUBE_AD_BREAK_PATH/)
     assert.match(scriptSource, /Promise[.]reject\(new TypeError\('Failed to fetch'\)\)/)
     assert.match(scriptSource, /XMLHttpRequest[.]prototype[.]send/)
     assert.match(scriptSource, /dispatchEvent\(new ProgressEvent\('error'\)\)/)
     assert.match(scriptSource, /MAX_BROWSER_URL_LENGTH/)
     assert.match(appSource, /createBrowserContentBlockingScript/)
+    assert.match(appSource, /contentBlockingToken: browserPreferences[.]contentBlockingEnabled/)
     assert.match(appSource, /injectedJavaScriptBeforeContentLoaded=\{browserBeforeContentScript\}/)
   })
 })
