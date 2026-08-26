@@ -48,7 +48,11 @@ export function createBrowserContentBlockingScript ({
 
           const request = new URL(requestUrl);
           const document = new URL(documentUrl);
-          const youtubeHost = (host) => host === 'youtube.com' || host.endsWith('.youtube.com');
+          const youtubeHost = (host) =>
+            host === 'youtube.com' ||
+            host.endsWith('.youtube.com') ||
+            host === 'youtube-nocookie.com' ||
+            host.endsWith('.youtube-nocookie.com');
           if (
             ${youtubeAdBlockingEnabled} &&
             youtubeHost(document.hostname) &&

@@ -28,7 +28,10 @@ internal fun isYoutubeAdBreakRequest(
 ): Boolean {
   fun isYoutubeHost(value: String?): Boolean {
     val host = value?.lowercase(Locale.ROOT) ?: return false
-    return host == "youtube.com" || host.endsWith(".youtube.com")
+    return host == "youtube.com" ||
+      host.endsWith(".youtube.com") ||
+      host == "youtube-nocookie.com" ||
+      host.endsWith(".youtube-nocookie.com")
   }
 
   return requestScheme.equals("https", ignoreCase = true) &&

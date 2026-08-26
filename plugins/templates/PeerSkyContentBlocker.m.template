@@ -1,7 +1,7 @@
 #import "PeerSkyContentBlocker.h"
 
 static NSString *const PeerSkyContentBlockerDomain = @"PeerSkyContentBlocker";
-static NSString *const PeerSkyYoutubeRuleIdentifier = @"peersky-youtube-ad-break-v1";
+static NSString *const PeerSkyYoutubeRuleIdentifier = @"peersky-youtube-ad-break-v2";
 static const unsigned long long MaxRuleFileBytes = 48ULL * 1024ULL * 1024ULL;
 
 @interface PeerSkyContentBlocker ()
@@ -115,7 +115,7 @@ static const unsigned long long MaxRuleFileBytes = 48ULL * 1024ULL * 1024ULL;
       completion(cached, nil);
       return;
     }
-    NSString *json = @"[{\"trigger\":{\"url-filter\":\"^https://([a-z0-9-]+\\\\.)*youtube\\\\.com/youtubei/v1/player/ad_break(?:[/?#]|$)\",\"resource-type\":[\"raw\"],\"if-domain\":[\"*youtube.com\"]},\"action\":{\"type\":\"block\"}}]";
+    NSString *json = @"[{\"trigger\":{\"url-filter\":\"^https://([a-z0-9-]+\\\\.)*youtube\\\\.com/youtubei/v1/player/ad_break(?:[/?#]|$)\",\"resource-type\":[\"raw\"],\"if-domain\":[\"*youtube.com\"]},\"action\":{\"type\":\"block\"}},{\"trigger\":{\"url-filter\":\"^https://([a-z0-9-]+\\\\.)*youtube-nocookie\\\\.com/youtubei/v1/player/ad_break(?:[/?#]|$)\",\"resource-type\":[\"raw\"],\"if-domain\":[\"*youtube-nocookie.com\"]},\"action\":{\"type\":\"block\"}}]";
     [store compileContentRuleListForIdentifier:identifier
                         encodedContentRuleList:json
                              completionHandler:completion];

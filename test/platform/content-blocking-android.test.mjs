@@ -49,7 +49,8 @@ describe('Android content blocking', () => {
     assert.doesNotMatch(clientSource, /!enabled \|\| !PeerSkyAdBlockEngine[.]enabled/)
     assert.match(clientSource, /isYoutubeAdBreakRequest/)
     assert.match(clientSource, /requestPath == "\/youtubei\/v1\/player\/ad_break"/)
-    assert.match(clientSource, /host == "youtube[.]com" \|\| host[.]endsWith\("[.]youtube[.]com"\)/)
+    assert.match(clientSource, /host == "youtube[.]com"/)
+    assert.match(clientSource, /host == "youtube-nocookie[.]com"/)
     assert.match(clientSource, /MAX_FILTER_URL_LENGTH = 16 [*] 1024/)
     assert.match(clientSource, /if \(shouldBlock\(request\)\) return blockedResponse\(\)/)
     assert.match(clientSource, /class PeerSkyContentBlockerBridge/)
@@ -78,6 +79,7 @@ describe('Android content blocking', () => {
     assert.match(testSource, /assertFalse\(isRemoteHttpUrl\("https", "10[.]0[.]2[.]2"\)\)/)
     assert.match(testSource, /assertFalse\(isRemoteHttpUrl\("https", "::1"\)\)/)
     assert.match(testSource, /identifiesOnlyThePinnedYoutubeAdBreakRequest/)
+    assert.match(testSource, /"www[.]youtube-nocookie[.]com"/)
     assert.match(testSource, /"youtube[.]com[.]evil[.]test"/)
   })
 
