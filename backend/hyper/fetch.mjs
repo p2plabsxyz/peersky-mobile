@@ -4,17 +4,30 @@ import {
   createProxyAssetUrl,
   getHyperNavigationDownloadName,
   getHyperNavigationMediaType,
-  headersToObject,
   inlineHyperAssets
 } from './assets.mjs'
 import { startHyperAssetServer } from './asset-server.mjs'
 import { recordHyperArchive } from './archive.mjs'
+import {
+  DEFAULT_HYPER_DISCOVERY_MAX_RETRY_DELAY,
+  DEFAULT_HYPER_DISCOVERY_RETRIES,
+  DEFAULT_HYPER_DISCOVERY_RETRY_DELAY,
+  withHyperRetry
+} from './fetch-retry.mjs'
 import { withHyperRuntimeOperation } from './runtime.mjs'
 import { parseHyperUrl } from './url.mjs'
+import { readHyperBinaryResponse } from './binary-response.mjs'
 
 let hyperFetch = null
 
 export { stopHyperAssetServer } from './asset-server.mjs'
+export {
+  DEFAULT_HYPER_DISCOVERY_MAX_RETRY_DELAY,
+  DEFAULT_HYPER_DISCOVERY_RETRIES,
+  DEFAULT_HYPER_DISCOVERY_RETRY_DELAY,
+  isPeerDiscoveryError,
+  withHyperRetry
+} from './fetch-retry.mjs'
 
 export function resetHyperFetch () {
   hyperFetch = null
@@ -24,9 +37,9 @@ export async function fetchHyper ({
   url,
   method = 'GET',
   inlineAssets = false,
-  retries = 0,
-  retryDelay = 500,
-  maxRetryDelay = 5000,
+  retries = DEFAULT_HYPER_DISCOVERY_RETRIES,
+  retryDelay = DEFAULT_HYPER_DISCOVERY_RETRY_DELAY,
+  maxRetryDelay = DEFAULT_HYPER_DISCOVERY_MAX_RETRY_DELAY,
   backoffFactor = 2
 } = {}) {
   if (method.toUpperCase() !== 'GET') {
@@ -157,9 +170,9 @@ async function cancelResponseBody (body) {
 export async function fetchHyperBinary ({
   url,
   method = 'GET',
-  retries = 0,
-  retryDelay = 500,
-  maxRetryDelay = 5000,
+  retries = DEFAULT_HYPER_DISCOVERY_RETRIES,
+  retryDelay = DEFAULT_HYPER_DISCOVERY_RETRY_DELAY,
+  maxRetryDelay = DEFAULT_HYPER_DISCOVERY_MAX_RETRY_DELAY,
   backoffFactor = 2
 } = {}) {
   if (method.toUpperCase() !== 'GET') {
@@ -179,119 +192,9 @@ export async function fetchHyperBinary ({
       retryDelay,
       maxRetryDelay,
       backoffFactor,
-      readResponse: async (response, headers) => {
-        const contentLength = Number(headers['content-length'] || 0)
-        if (contentLength > 50 * 1024 * 1024) {
-          throw new Error(`Response exceeds 50MB limit: ${contentLength} bytes`)
-        }
-
-        const chunks = []
-        let totalLength = 0
-        const body = response.body
-
-        if (body && typeof body.getReader === 'function') {
-          const reader = body.getReader()
-          while (true) {
-            const { done, value } = await reader.read()
-            if (done) break
-            totalLength += value.byteLength || value.length
-            if (totalLength > 50 * 1024 * 1024) throw new Error('Response exceeds 50MB limit')
-            chunks.push(chunkToUint8Array(value))
-          }
-        } else if (body && typeof body[Symbol.asyncIterator] === 'function') {
-          for await (const chunk of body) {
-            totalLength += chunk.byteLength || chunk.length
-            if (totalLength > 50 * 1024 * 1024) throw new Error('Response exceeds 50MB limit')
-            chunks.push(chunkToUint8Array(chunk))
-          }
-        } else {
-          const buf = chunkToUint8Array(await response.arrayBuffer())
-          if (buf.byteLength > 50 * 1024 * 1024) throw new Error('Response exceeds 50MB limit')
-          chunks.push(buf)
-        }
-
-        const bytes = b4a.concat(chunks)
-
-        return {
-          ok: response.ok,
-          status: response.status,
-          statusText: response.statusText,
-          url: response.url || url,
-          headers,
-          bytes
-        }
-      }
+      readResponse: (response, headers) => readHyperBinaryResponse(response, headers, url)
     })
   })
-}
-
-async function withHyperRetry ({
-  fetch,
-  url,
-  retries,
-  retryDelay,
-  maxRetryDelay,
-  backoffFactor,
-  readResponse
-}) {
-  let attempt = 0
-  let currentDelay = retryDelay
-
-  while (true) {
-    try {
-      const response = await fetch(url)
-      const headers = headersToObject(response.headers)
-
-      if (!response.ok) {
-        let text = ''
-        try {
-          text = await response.text()
-        } catch (_) {}
-
-        const isRetryable = response.status === 404 || response.status === 502 || isPeerDiscoveryError(text)
-        if (isRetryable && attempt < retries) {
-          attempt++
-          await new Promise((resolve) => setTimeout(resolve, currentDelay))
-          currentDelay = Math.min(maxRetryDelay, Math.floor(currentDelay * backoffFactor))
-          continue
-        }
-
-        return {
-          ok: false,
-          status: response.status,
-          statusText: response.statusText,
-          url: response.url || url,
-          headers,
-          error: text || response.statusText || `Request failed with status ${response.status}`
-        }
-      }
-
-      return await readResponse(response, headers)
-    } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : String(error)
-      const isRetryable = isPeerDiscoveryError(errorMsg)
-
-      if (isRetryable && attempt < retries) {
-        attempt++
-        await new Promise((resolve) => setTimeout(resolve, currentDelay))
-        currentDelay = Math.min(maxRetryDelay, Math.floor(currentDelay * backoffFactor))
-        continue
-      }
-
-      return {
-        ok: false,
-        status: 502,
-        statusText: 'Bad Gateway',
-        url,
-        headers: { 'content-type': 'text/plain; charset=utf-8' },
-        error: errorMsg
-      }
-    }
-  }
-}
-
-function isPeerDiscoveryError (message) {
-  return /\bpeers?\s+not\s+found\b/i.test(message)
 }
 
 async function getHyperFetch (runtime) {

@@ -48,8 +48,8 @@ function normalizeRecent (value) {
         const code = character.charCodeAt(0)
         return code >= 32 && (code < 127 || code > 159)
       })
-      .join('')
       .slice(0, 160)
+      .join('')
     : ''
   const openedAt = Number(value.openedAt)
 
@@ -58,6 +58,9 @@ function normalizeRecent (value) {
     name: name || (type === 'directory' ? 'Hyperdrive' : 'Hyper file'),
     url,
     source: value.source === 'uploaded' ? 'uploaded' : 'fetched',
+    visibility: value.visibility === 'public' || value.visibility === 'private'
+      ? value.visibility
+      : undefined,
     openedAt: Number.isSafeInteger(openedAt) && openedAt > 0 ? openedAt : Date.now(),
     byteLength: type === 'file' && Number.isSafeInteger(value.byteLength) && value.byteLength >= 0
       ? value.byteLength
@@ -80,8 +83,8 @@ function normalizeChild (value) {
         const code = character.charCodeAt(0)
         return code >= 32 && (code < 127 || code > 159)
       })
-      .join('')
       .slice(0, 160)
+      .join('')
     : ''
 
   return {
@@ -110,9 +113,11 @@ function normalizeHyperUrl (value) {
   try {
     const parsed = new URL(value.trim())
     if (parsed.protocol !== 'hyper:' || !parsed.hostname || parsed.username || parsed.password) return null
-    parsed.search = ''
-    parsed.hash = ''
-    return parsed.href
+    const encodedPath = `${parsed.pathname}${parsed.search}${parsed.hash}`
+      .split('/')
+      .map((segment) => encodeURIComponent(decodeURIComponent(segment)))
+      .join('/')
+    return `hyper://${parsed.host}${encodedPath}`
   } catch {
     return null
   }

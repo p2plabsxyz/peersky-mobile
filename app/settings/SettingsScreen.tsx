@@ -1,6 +1,7 @@
 import Constants from 'expo-constants'
 import {
   type ComponentType,
+  useCallback,
   useEffect,
   useRef,
   useState
@@ -26,11 +27,13 @@ import {
 import type { SvgProps } from 'react-native-svg'
 import { BROWSER_PALETTES } from '../browser-appearance.mjs'
 import {
+  RPC_HYPER_LAN_STATUS,
   RPC_IDENTITY_GET_KEY,
   RPC_IDENTITY_RESTORE_FROM_HYPER,
   RPC_IDENTITY_CONFIRM_RESTORE
 } from '../../backend/rpc/commands.mjs'
 import { QrCodeView } from './QrCodeView'
+import { createMobilePairingCode } from './identity-pairing.mjs'
 import { Appearance } from './Appearance'
 import { Accessibility } from './Accessibility'
 import { DataClearing } from './DataClearing'
@@ -72,6 +75,7 @@ type SettingsPage =
   | 'p2p-storage'
   | 'permissions'
   | 'link-device'
+  | 'lan-discovery'
   | 'about'
 
 type StorageFileItem = {
@@ -91,6 +95,7 @@ type RpcResponse = {
   files?: StorageFileItem[]
   nonce?: string
   sas?: string
+  lan?: LANDiscoveryStatus
   items?: Array<{
     id: string
     title: string
@@ -118,6 +123,29 @@ type RpcResponse = {
     total: number
     totalPages: number
   }
+}
+
+type LANDiscoveryPeer = {
+  publicKey: string
+  host: string
+  port: number | null
+  reachable: boolean
+  connected: boolean
+  activeConnections: number
+  sharedTopics: number
+  lastConnected: number | null
+  lastSeen: number
+}
+
+type LANDiscoveryStatus = {
+  available: boolean
+  error?: string
+  host?: string
+  port?: number | null
+  publicKey?: string
+  joinedTopics: number
+  activeConnections: number
+  peers: LANDiscoveryPeer[]
 }
 
 type SettingsScreenProps = {
@@ -213,6 +241,12 @@ const SETTINGS_PAGES: Array<{
     icon: DisplayIcon
   },
   {
+    id: 'lan-discovery',
+    title: 'LAN Discovery Test',
+    description: 'View peers discovered on local Wi-Fi',
+    icon: DisplayIcon
+  },
+  {
     id: 'about',
     title: 'About',
     description: 'Version, source code, and licenses',
@@ -248,6 +282,7 @@ export function SettingsScreen(props: SettingsScreenProps) {
         {page === 'p2p-storage' && <P2PStorage onCallRpc={props.onCallRpc} onOpenItem={props.onOpenHyperItem} />}
         {page === 'permissions' && <Permissions {...props} />}
         {page === 'link-device' && <LinkDeviceSettings {...props} />}
+        {page === 'lan-discovery' && <LANDiscoveryTest onCallRpc={props.onCallRpc} />}
         {page === 'about' && <AboutSettings onOpenUrl={props.onOpenUrl} />}
       </SettingsSubpage>
     )
@@ -426,6 +461,7 @@ function LinkDeviceSettings({
   const [error, setError] = useState<string | null>(null)
   const [isScanning, setIsScanning] = useState(false)
   const [permission, requestPermission] = useCameraPermissions()
+  const pairingCode = createMobilePairingCode(encryptionPublicKey, nonce)
 
   useEffect(() => {
     let cancelled = false
@@ -461,11 +497,11 @@ function LinkDeviceSettings({
   }, [onCallRpc])
 
   function copyDeviceKey() {
-    if (!encryptionPublicKey) return
+    if (!pairingCode) return
 
     try {
-      Clipboard.setString(encryptionPublicKey)
-      setMessage('Mobile device key copied.')
+      Clipboard.setString(pairingCode)
+      setMessage('Device pairing code copied.')
       setError(null)
     } catch (copyError) {
       setError(copyError instanceof Error ? copyError.message : String(copyError))
@@ -555,13 +591,13 @@ function LinkDeviceSettings({
         </View>
       )}
 
-      <SettingsSection title='Mobile device key'>
+      <SettingsSection title='Device pairing code'>
         <View style={styles.linkDeviceBlock}>
           <SettingCopy
-            title='Your Mobile Device Key'
-            description='Scan this QR code with PeerSky Desktop or copy the key string below.'
+            title='This device pairing code'
+            description='Scan this QR code with PeerSky Desktop or copy the pairing code below.'
           />
-          {encryptionPublicKey && nonce ? <QrCodeView value={`peersky-identity:${encryptionPublicKey}?nonce=${nonce}`} size={200} /> : null}
+          {pairingCode ? <QrCodeView value={pairingCode} size={200} /> : null}
           <View style={[styles.keyBox, isDark ? darkStyles.input : null]}>
             {isLoadingKey
               ? <ActivityIndicator size='small' />
@@ -570,21 +606,21 @@ function LinkDeviceSettings({
                   selectable
                   style={[styles.keyText, isDark ? darkStyles.primaryText : null]}
                 >
-                  {encryptionPublicKey || 'No key available'}
+                  {pairingCode || 'No pairing code available'}
                 </Text>
               )}
           </View>
           <Pressable
             accessibilityRole='button'
-            disabled={!encryptionPublicKey}
+            disabled={!pairingCode}
             style={({ pressed }) => [
               styles.primaryButton,
-              !encryptionPublicKey ? styles.buttonDisabled : null,
+              !pairingCode ? styles.buttonDisabled : null,
               pressed ? styles.rowPressed : null
             ]}
             onPress={copyDeviceKey}
           >
-            <Text style={styles.primaryButtonText}>Copy Key</Text>
+            <Text style={styles.primaryButtonText}>Copy Code</Text>
           </Pressable>
           <Text style={[styles.helperText, isDark ? darkStyles.secondaryText : null]}>
             Identity key file location: {storagePath || 'app document storage'}
@@ -658,6 +694,152 @@ function LinkDeviceSettings({
       </Modal>
     </View>
   )
+}
+
+
+function LANDiscoveryTest({
+  onCallRpc
+}: {
+  onCallRpc: SettingsScreenProps['onCallRpc']
+}) {
+  const isDark = useSettingsDarkMode()
+  const [lanStatus, setLANStatus] = useState<LANDiscoveryStatus | null>(null)
+  const [isRefreshing, setIsRefreshing] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const onCallRpcRef = useRef(onCallRpc)
+  const refreshInFlightRef = useRef(false)
+
+  useEffect(() => {
+    onCallRpcRef.current = onCallRpc
+  }, [onCallRpc])
+
+  const refreshStatus = useCallback(async () => {
+    if (refreshInFlightRef.current) return
+    refreshInFlightRef.current = true
+    setIsRefreshing(true)
+
+    try {
+      const response = await withTimeout(
+        onCallRpcRef.current(RPC_HYPER_LAN_STATUS, {}),
+        5000
+      )
+      if (!response.ok || !response.lan) {
+        throw new Error(response.error || 'Unable to read LAN discovery status')
+      }
+
+      setLANStatus(response.lan)
+      setError(null)
+    } catch (refreshError) {
+      setError(refreshError instanceof Error ? refreshError.message : String(refreshError))
+    } finally {
+      refreshInFlightRef.current = false
+      setIsRefreshing(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    void refreshStatus()
+    const timer = setInterval(() => void refreshStatus(), 2000)
+    return () => clearInterval(timer)
+  }, [refreshStatus])
+
+  const peers = lanStatus?.peers || []
+
+  return (
+    <View style={[styles.pageContent, isDark ? darkStyles.page : null]}>
+      {error && (
+        <View style={styles.errorBanner}>
+          <Text style={styles.errorText}>{error}</Text>
+        </View>
+      )}
+      <SettingsSection title='Local discovery'>
+        <View style={styles.lanSummary}>
+          <View style={styles.lanTitleRow}>
+            <SettingCopy
+              title={lanStatus?.available ? 'mDNS is active' : 'mDNS is unavailable'}
+              description={lanStatus?.available
+                ? `Listening at ${lanStatus.host || 'unknown'}:${lanStatus.port || 'unknown'} · ${lanStatus.joinedTopics} joined topics · ${lanStatus.activeConnections} active connections`
+                : lanStatus?.error || 'Waiting for LAN discovery to start'}
+            />
+            {isRefreshing && <ActivityIndicator size='small' />}
+          </View>
+          {lanStatus?.publicKey && (
+            <Text style={[styles.keyText, isDark ? darkStyles.primaryText : null]}>
+              Local peer: {lanStatus.publicKey}
+            </Text>
+          )}
+          <Pressable
+            accessibilityRole='button'
+            style={({ pressed }) => [
+              styles.secondaryButton,
+              pressed ? styles.rowPressed : null
+            ]}
+            onPress={() => void refreshStatus()}
+          >
+            <Text style={[
+              styles.secondaryButtonText,
+              isDark ? darkStyles.primaryText : null
+            ]}>
+              Refresh peers
+            </Text>
+          </Pressable>
+        </View>
+      </SettingsSection>
+
+      <SettingsSection title={`Discoverable peers (${peers.length})`}>
+        {peers.length === 0 ? (
+          <View style={styles.lanEmptyState}>
+            <Text style={[styles.placeholderTitle, isDark ? darkStyles.primaryText : null]}>
+              No peers discovered yet
+            </Text>
+            <Text style={[styles.helperText, isDark ? darkStyles.secondaryText : null]}>
+              Open PeerSky on another phone connected to the same Wi-Fi network. Both phones can remain offline.
+            </Text>
+          </View>
+        ) : peers.map((peer, index) => (
+          <View
+            key={peer.publicKey}
+            style={[
+              styles.lanPeer,
+              index > 0 ? styles.rowDivider : null,
+              index > 0 && isDark ? darkStyles.divider : null
+            ]}
+          >
+            <View style={styles.lanTitleRow}>
+              <Text style={[styles.lanPeerTitle, isDark ? darkStyles.primaryText : null]}>
+                {peer.host}:{peer.port || 'unknown'}
+              </Text>
+              <Text style={peer.connected || peer.reachable ? styles.lanReachable : styles.lanDiscovered}>
+                {peer.connected ? 'Connected' : peer.reachable ? 'Reachable' : 'Discovered'}
+              </Text>
+            </View>
+            <Text style={[styles.keyText, isDark ? darkStyles.primaryText : null]}>
+              {peer.publicKey}
+            </Text>
+            <Text style={[styles.helperText, isDark ? darkStyles.secondaryText : null]}>
+              Shared topics: {peer.sharedTopics} | Connections: {peer.activeConnections} | Last seen: {new Date(peer.lastSeen).toLocaleTimeString()}
+            </Text>
+          </View>
+        ))}
+      </SettingsSection>
+    </View>
+  )
+}
+
+
+async function withTimeout<T> (promise: Promise<T>, timeoutMs: number) {
+  let timer: ReturnType<typeof setTimeout> | null = null
+
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((resolve, reject) => {
+        timer = setTimeout(() => reject(new Error('LAN status request timed out')), timeoutMs)
+      })
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
 }
 
 
@@ -885,6 +1067,39 @@ const styles = StyleSheet.create({
     color: '#687086',
     fontSize: 12,
     lineHeight: 17
+  },
+  lanSummary: {
+    gap: 12,
+    padding: 16
+  },
+  lanTitleRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 12,
+    justifyContent: 'space-between'
+  },
+  lanEmptyState: {
+    gap: 7,
+    padding: 20
+  },
+  lanPeer: {
+    gap: 8,
+    padding: 16
+  },
+  lanPeerTitle: {
+    color: '#1f2a44',
+    fontSize: 15,
+    fontWeight: '800'
+  },
+  lanReachable: {
+    color: '#24713a',
+    fontSize: 12,
+    fontWeight: '800'
+  },
+  lanDiscovered: {
+    color: '#9a6200',
+    fontSize: 12,
+    fontWeight: '800'
   },
   placeholder: {
     backgroundColor: '#ffffff',

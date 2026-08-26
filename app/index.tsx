@@ -234,6 +234,7 @@ export default function App () {
   const { height: browserWindowHeight, width: browserWindowWidth } = useWindowDimensions()
   const workletRef = useRef<Worklet | null>(null)
   const rpcRef = useRef<RPC | null>(null)
+  const workletGenerationRef = useRef(0)
   const browserWebViewRefs = useRef(new Map<string, ComponentRef<typeof WebView>>())
   const browserFaviconsRef = useRef(new Map<string, string>())
   const browserLastRecordedUrlsRef = useRef(new Map<string, string>())
@@ -373,11 +374,19 @@ export default function App () {
   })
 
   useEffect(() => {
+    const generation = ++workletGenerationRef.current
     void startWorklet()
+
     return () => {
-      workletRef.current?.terminate()
-      workletRef.current = null
-      rpcRef.current = null
+      const worklet = workletRef.current
+      const rpc = rpcRef.current
+
+      setTimeout(() => {
+        if (workletGenerationRef.current !== generation) return
+        if (workletRef.current === worklet) workletRef.current = null
+        if (rpcRef.current === rpc) rpcRef.current = null
+        worklet?.terminate()
+      }, 0)
     }
   }, [])
 
@@ -490,7 +499,12 @@ export default function App () {
     let active = true
 
     function queueIncomingUrl (url: string | null) {
-      if (!active || !url || !isWebUrl(url) || url.length > MAX_BROWSER_URL_LENGTH) return
+      if (
+        !active ||
+        !url ||
+        (!isWebUrl(url) && !isHyperUrl(url)) ||
+        url.length > MAX_BROWSER_URL_LENGTH
+      ) return
 
       browserUserInteractedRef.current = true
       setPendingIncomingUrl(url)
@@ -588,7 +602,10 @@ export default function App () {
       }
 
       setIdentityStoragePath(Paths.document?.uri ? toBareFsPath(Paths.document.uri) : storageDir)
-      setStatus(`Hyper ready (${initResponse.storagePath || storageDir})`)
+      const lanStatus = initResponse.lan?.available
+        ? `; LAN ${initResponse.lan.host}:${initResponse.lan.port}`
+        : '; LAN unavailable'
+      setStatus(`Hyper ready (${initResponse.storagePath || storageDir})${lanStatus}`)
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error))
     } finally {

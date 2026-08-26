@@ -82,3 +82,54 @@ test('rejects malformed records and bounds persisted recent entries', () => {
   assert.equal(parsed.length, MAX_HYPERDRIVE_RECENTS)
   assert.deepEqual(parseHyperdriveRecents('[{"type":"file","url":"https://example.com"}]'), [])
 })
+
+test('preserves filenames containing URL query and fragment characters', () => {
+  const recents = recordHyperdriveRecent([], {
+    type: 'file',
+    name: 'report#2?.pdf',
+    url: `${DRIVE_URL}report#2?.pdf`
+  }, 10)
+
+  assert.equal(recents[0].url, `${DRIVE_URL}report%232%3F.pdf`)
+  assert.equal(parseHyperdriveRecents(serializeHyperdriveRecents(recents))[0].url,
+    `${DRIVE_URL}report%232%3F.pdf`)
+})
+
+test('truncates recent names without splitting Unicode characters', () => {
+  const expectedName = `${'a'.repeat(159)}😀`
+  const recents = recordHyperdriveRecent([], {
+    type: 'directory',
+    name: `${expectedName}ignored`,
+    url: `${DRIVE_URL}unicode/`,
+    children: [{
+      type: 'file',
+      name: `${expectedName}ignored`,
+      url: `${DRIVE_URL}unicode/file.txt`
+    }]
+  }, 10)
+
+  assert.equal(recents[0].name, expectedName)
+  assert.equal(recents[0].children[0].name, expectedName)
+})
+
+test('persists valid upload visibility while keeping legacy recents compatible', () => {
+  const recents = [
+    recordHyperdriveRecent([], {
+      type: 'file',
+      name: 'Private',
+      url: `${DRIVE_URL}private.txt`,
+      source: 'uploaded',
+      visibility: 'private'
+    }, 10)[0],
+    recordHyperdriveRecent([], {
+      type: 'file',
+      name: 'Legacy',
+      url: `${DRIVE_URL}legacy.txt`,
+      source: 'uploaded'
+    }, 20)[0]
+  ]
+
+  const parsed = parseHyperdriveRecents(serializeHyperdriveRecents(recents))
+  assert.equal(parsed[0].visibility, 'private')
+  assert.equal(parsed[1].visibility, undefined)
+})
