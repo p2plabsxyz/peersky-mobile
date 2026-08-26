@@ -147,6 +147,7 @@ type SettingsScreenProps = {
   showFullAddress: boolean
   theme: BrowserTheme
   websiteTextScale: WebsiteTextScale
+  youtubeAdBlockingEnabled: boolean
   storagePath: string
   onAddressBarPositionChange: (position: AddressBarPosition) => void
   onCallRpc: (command: number, data?: object) => Promise<RpcResponse>
@@ -163,6 +164,7 @@ type SettingsScreenProps = {
   onShowFullAddressChange: (enabled: boolean) => void
   onThemeChange: (theme: BrowserTheme) => void
   onWebsiteTextScaleChange: (scale: WebsiteTextScale) => void
+  onYoutubeAdBlockingEnabledChange: (enabled: boolean) => void
   onResetTabs: () => void
   onOpenUrl: (url: string) => void
   onIdentityRestored: () => void

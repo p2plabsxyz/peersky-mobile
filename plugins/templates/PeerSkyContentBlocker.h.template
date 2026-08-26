@@ -7,6 +7,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 + (instancetype)shared;
 - (void)setEnabled:(BOOL)enabled;
+- (void)setYoutubeAdBlockingEnabled:(BOOL)enabled;
 - (void)loadRuleFiles:(NSArray<NSURL *> *)ruleFiles
          snapshotName:(NSString *)snapshotName
             completion:(void (^)(NSError * _Nullable error))completion;

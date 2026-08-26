@@ -65,6 +65,14 @@ class BrowserDownloadsModuleTest {
     assertFalse(PeerSkyWebViewManager.isValidToken("z".repeat(32)))
   }
 
+  @Test
+  fun authorizesContentBlockingBridgeTokens() {
+    val token = "a".repeat(32)
+    assertTrue(PeerSkyContentBlockerBridge.isAuthorizedToken(token, token))
+    assertFalse(PeerSkyContentBlockerBridge.isAuthorizedToken(token, "b".repeat(32)))
+    assertFalse(PeerSkyContentBlockerBridge.isAuthorizedToken(null, null))
+  }
+
   private fun isAndroidPackage(vararg entries: String): Boolean {
     return BrowserDownloadsModule.isAndroidPackage(
       ByteArrayInputStream(archiveBytes(*entries))

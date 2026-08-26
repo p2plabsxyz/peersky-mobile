@@ -6,6 +6,8 @@ PeerSky fetches and validates EasyList and EasyPrivacy at build time, then packa
 
 The Privacy settings page provides a global protection switch, the active filter-list status, and a manual update action. Turning protection off is persisted across launches. Manual update failures leave the current validated snapshot active and report the failure in Settings.
 
+The page also provides an independent YouTube-specific switch. When enabled, PeerSky blocks the narrowly scoped `youtubei/v1/player/ad_break` request on HTTPS pages from `youtube.com`, `youtube-nocookie.com`, and their subdomains. EasyList/EasyPrivacy protection and YouTube protection can be enabled or disabled separately.
+
 The active metadata records the immutable snapshot identifier, update timestamp, source URL, upstream list version, filename, and byte size. Builds generate the packaged first-launch snapshot with:
 
 ```sh

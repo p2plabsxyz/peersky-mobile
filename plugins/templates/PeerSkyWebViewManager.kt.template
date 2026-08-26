@@ -14,6 +14,7 @@ import java.util.WeakHashMap
 
 class PeerSkyWebViewManager : RNCWebViewManager() {
   private val mediaLongPressTokens = WeakHashMap<WebView, String>()
+  private val contentBlockerBridges = WeakHashMap<WebView, PeerSkyContentBlockerBridge>()
 
   override fun getName() = "PeerSkyWebView"
 
@@ -35,10 +36,21 @@ class PeerSkyWebViewManager : RNCWebViewManager() {
     }
   }
 
+  @ReactProp(name = "contentBlockingToken")
+  fun setContentBlockingToken(wrapper: RNCWebViewWrapper, token: String?) {
+    contentBlockerBridges[wrapper.webView]?.setToken(token?.takeIf(::isValidToken))
+  }
+
   public override fun createViewInstance(
     context: ThemedReactContext
   ): RNCWebViewWrapper {
     val wrapper = super.createViewInstance(context)
+    val contentBlockerBridge = PeerSkyContentBlockerBridge()
+    contentBlockerBridges[wrapper.webView] = contentBlockerBridge
+    wrapper.webView.addJavascriptInterface(
+      contentBlockerBridge,
+      "PeerSkyContentBlocker"
+    )
     wrapper.webView.setDownloadListener {
         url,
         userAgent,

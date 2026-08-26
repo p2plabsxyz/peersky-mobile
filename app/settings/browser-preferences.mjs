@@ -11,7 +11,8 @@ export const DEFAULT_BROWSER_PREFERENCES = {
   searchEngine: 'duckduckgo',
   showFullAddress: false,
   theme: 'system',
-  websiteTextScale: 100
+  websiteTextScale: 100,
+  youtubeAdBlockingEnabled: true
 }
 
 export const ADDRESS_BAR_POSITIONS = ['top', 'bottom']
@@ -60,7 +61,10 @@ export function parseBrowserPreferences (serialized) {
       : DEFAULT_BROWSER_PREFERENCES.theme,
     websiteTextScale: WEBSITE_TEXT_SCALES.includes(value?.websiteTextScale)
       ? value.websiteTextScale
-      : DEFAULT_BROWSER_PREFERENCES.websiteTextScale
+      : DEFAULT_BROWSER_PREFERENCES.websiteTextScale,
+    youtubeAdBlockingEnabled: typeof value?.youtubeAdBlockingEnabled === 'boolean'
+      ? value.youtubeAdBlockingEnabled
+      : DEFAULT_BROWSER_PREFERENCES.youtubeAdBlockingEnabled
   }
 }
 

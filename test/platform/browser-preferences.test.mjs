@@ -23,7 +23,8 @@ describe('browser preferences', () => {
       searchEngine: 'custom',
       showFullAddress: true,
       theme: 'dark',
-      websiteTextScale: 150
+      websiteTextScale: 150,
+      youtubeAdBlockingEnabled: false
     }
 
     assert.deepEqual(
@@ -43,7 +44,8 @@ describe('browser preferences', () => {
       searchEngine: 'brave',
       showFullAddress: 'yes',
       theme: 'sepia',
-      websiteTextScale: 500
+      websiteTextScale: 500,
+      youtubeAdBlockingEnabled: 'yes'
     }), DEFAULT_BROWSER_PREFERENCES)
   })
 

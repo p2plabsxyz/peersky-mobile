@@ -25,7 +25,7 @@ A peer-to-peer mobile browser built with [Bare](https://github.com/holepunchto/b
 - Browser settings for search, appearance, accessibility, data clearing, and external app links.
 - Native camera, microphone, location, and notification permission handling.
 - Android system-back navigation, incoming web-link handling, and default-browser setup.
-- Native ad and tracker blocking with EasyList and EasyPrivacy.
+- Native ad and tracker blocking with EasyList, EasyPrivacy, and optional YouTube-specific protection.
 - `http://` and `https://` browsing through React Native WebView.
 - `hyper://` browsing through the Bare worklet and `hypercore-fetch`.
 - Hyper page asset support for CSS, images, scripts, audio, and video.
@@ -40,6 +40,8 @@ Hyper media is streamed through a local loopback proxy so WebView can play audio
 ## Ad and Tracker Blocking
 
 PeerSky blocks matching ad and tracker requests at the WebView engine level. Android uses [`adblock-rust`](https://github.com/brave/adblock-rust), while iOS compiles supported rules with `WKContentRuleList`. A validated EasyList and EasyPrivacy snapshot is bundled so protection can initialize before the first network update.
+
+YouTube protection independently blocks the narrowly scoped `youtubei/v1/player/ad_break` network request on YouTube and YouTube nocookie pages.
 
 This initial implementation covers network requests, not cosmetic filtering or element hiding. See the [content-blocking documentation](docs/content-blocking.md) for platform setup, update behavior, safeguards, and current limitations.
 

@@ -35,6 +35,11 @@ RCT_EXPORT_METHOD(setEnabled:(BOOL)enabled)
   [[PeerSkyContentBlocker shared] setEnabled:enabled];
 }
 
+RCT_EXPORT_METHOD(setYoutubeAdBlockingEnabled:(BOOL)enabled)
+{
+  [[PeerSkyContentBlocker shared] setYoutubeAdBlockingEnabled:enabled];
+}
+
 + (BOOL)requiresMainQueueSetup
 {
   return NO;
