@@ -171,6 +171,8 @@ describe('Android content blocking', () => {
     assert.match(scriptSource, /YOUTUBE_AD_BREAK_PATH/)
     assert.match(scriptSource, /Promise[.]reject\(new TypeError\('Failed to fetch'\)\)/)
     assert.match(scriptSource, /XMLHttpRequest[.]prototype[.]send/)
+    assert.match(scriptSource, /window[.]XMLHttpRequest[.]DONE/)
+    assert.match(scriptSource, /dispatchEvent\(new Event\('readystatechange'\)\)/)
     assert.match(scriptSource, /dispatchEvent\(new ProgressEvent\('error'\)\)/)
     assert.match(scriptSource, /MAX_BROWSER_URL_LENGTH/)
     assert.match(appSource, /createBrowserContentBlockingScript/)

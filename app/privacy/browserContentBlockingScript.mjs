@@ -95,6 +95,11 @@ export function createBrowserContentBlockingScript ({
           if (shouldBlock(this.__peerskyRequestUrl, this.__peerskyRequestMethod)) {
             setTimeout(() => {
               try {
+                Object.defineProperty(this, 'readyState', {
+                  configurable: true,
+                  value: window.XMLHttpRequest.DONE || 4
+                });
+                this.dispatchEvent(new Event('readystatechange'));
                 this.dispatchEvent(new ProgressEvent('error'));
                 this.dispatchEvent(new ProgressEvent('loadend'));
               } catch {}
