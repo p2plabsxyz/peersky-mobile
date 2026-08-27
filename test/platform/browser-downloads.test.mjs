@@ -55,7 +55,7 @@ describe('browser downloads', () => {
       { id: '2', name: 'manual.pdf', status: 'running', size: 0, createdAt: 3, sourceUrl }
     ])
 
-    assert.equal(findCompletedHyperDownload(downloads, { name: 'manual.pdf', url: hyperUrl })?.id, '1')
+    assert.equal(findCompletedHyperDownload(downloads, { url: hyperUrl })?.id, '1')
     assert.equal(findCompletedHyperDownload(downloads, {
       name: 'other.pdf',
       url: 'hyper://example.test/other.pdf'

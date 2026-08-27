@@ -64,8 +64,8 @@ export function normalizeBrowserDownloads (downloads) {
   return disambiguateBrowserDownloadNames(normalized)
 }
 
-export function findCompletedHyperDownload (downloads, { name, url } = {}) {
-  if (!Array.isArray(downloads) || typeof name !== 'string' || typeof url !== 'string') return null
+export function findCompletedHyperDownload (downloads, { url } = {}) {
+  if (!Array.isArray(downloads) || typeof url !== 'string') return null
 
   const normalizedUrl = normalizeHyperUrl(url)
   if (!normalizedUrl) return null
