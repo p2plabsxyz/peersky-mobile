@@ -7,6 +7,10 @@ import {
   startLANDiscovery
 } from './lan-discovery.mjs'
 import { createRuntimeCoordinator } from './runtime-coordinator.mjs'
+import {
+  getExistingNamedDrive,
+  HYPERDRIVE_PRIVATE_DRIVE_NAME
+} from './storage-core.mjs'
 
 let sdk = null
 let sdkOpening = null
@@ -28,6 +32,10 @@ export async function getHyperRuntime () {
     storagePath = getHyperSdkStoragePath()
     sdkOpening = createSDK({ storage: storagePath })
       .then(async (runtime) => {
+        await getExistingNamedDrive(runtime, {
+          driveName: HYPERDRIVE_PRIVATE_DRIVE_NAME,
+          autoJoin: false
+        })
         await startLANDiscovery(runtime)
         sdk = runtime
         return runtime

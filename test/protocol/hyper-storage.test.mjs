@@ -8,6 +8,7 @@ import Hyperdrive from 'hyperdrive'
 import {
   clearDownloadedP2pCores,
   deleteRegisteredP2pAppData,
+  getExistingNamedDrive,
   listRegisteredP2pAppData,
   resolveHyperdriveAppDriveName,
   resolveHyperdriveUploadTarget
@@ -117,6 +118,33 @@ describe('Hyper app storage', () => {
       autoJoin: false
     })
     assert.equal(resolveHyperdriveUploadTarget('shared'), null)
+  })
+
+  test('opens an existing private drive without announcing it', async () => {
+    const requests = []
+    const namespace = {
+      ns: Buffer.from('private'),
+      storage: {
+        getAlias: async () => Buffer.from('discovery-key'),
+        hasCore: async () => true
+      }
+    }
+    const runtime = {
+      namespace: () => namespace,
+      getDrive: async (name, options) => {
+        requests.push({ name, options })
+        return { name }
+      }
+    }
+
+    assert.deepEqual(await getExistingNamedDrive(runtime, {
+      driveName: 'hyperdrive-private',
+      autoJoin: false
+    }), { name: 'hyperdrive-private' })
+    assert.deepEqual(requests, [{
+      name: 'hyperdrive-private',
+      options: { autoJoin: false }
+    }])
   })
 
   test('aggregates and deletes legacy, public, and private Hyperdrive data', async () => {

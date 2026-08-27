@@ -180,7 +180,7 @@ function getDescriptorDrives (descriptor) {
   return descriptor.drives || [{ driveName: descriptor.driveName }]
 }
 
-async function getExistingNamedDrive (runtime, { driveName, autoJoin = true }) {
+export async function getExistingNamedDrive (runtime, { driveName, autoJoin = true }) {
   if (typeof runtime.getExistingDrive === 'function') {
     return runtime.getExistingDrive(driveName)
   }
