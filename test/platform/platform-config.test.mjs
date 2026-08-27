@@ -158,7 +158,7 @@ describe('mobile platform runtime configuration', () => {
   it('includes the LAN discovery runtime dependency', async () => {
     const packageJson = JSON.parse(await readFile(repoFile('package.json'), 'utf8'))
 
-    assert.equal(packageJson.dependencies?.['@p2plabs/hyperdht-mdns'], '^1.0.0')
+    assert.equal(packageJson.dependencies?.['@p2plabs/hyperdht-mdns'], '^1.1.0')
     assert.equal(typeof packageJson.dependencies?.['bare-buffer'], 'string')
     assert.equal(typeof packageJson.dependencies?.['bare-dgram'], 'string')
     assert.equal(typeof packageJson.dependencies?.['bare-net'], 'string')
