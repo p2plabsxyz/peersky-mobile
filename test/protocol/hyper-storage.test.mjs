@@ -147,6 +147,31 @@ describe('Hyper app storage', () => {
     }])
   })
 
+  test('does not announce existing drives unless explicitly requested', async () => {
+    const requests = []
+    const namespace = {
+      ns: Buffer.from('existing'),
+      storage: {
+        getAlias: async () => Buffer.from('discovery-key'),
+        hasCore: async () => true
+      }
+    }
+    const runtime = {
+      namespace: () => namespace,
+      getDrive: async (name, options) => {
+        requests.push({ name, options })
+        return { name }
+      }
+    }
+
+    await getExistingNamedDrive(runtime, { driveName: 'future-private-drive' })
+
+    assert.deepEqual(requests, [{
+      name: 'future-private-drive',
+      options: { autoJoin: false }
+    }])
+  })
+
   test('aggregates and deletes legacy, public, and private Hyperdrive data', async () => {
     const runtime = createRuntime({
       hyperdrive: [createEntry('/legacy.txt', 10)],

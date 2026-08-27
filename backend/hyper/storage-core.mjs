@@ -1,12 +1,12 @@
 export const P2P_APP_DRIVES = [
-  { id: 'p2pmd', title: 'P2PMD', driveName: 'p2pmd' },
+  { id: 'p2pmd', title: 'P2PMD', driveName: 'p2pmd', autoJoin: true },
   {
     id: 'hyperdrive',
     title: 'Hyperdrive',
     drives: [
-      { driveName: 'hyperdrive-public', title: 'Public' },
+      { driveName: 'hyperdrive-public', title: 'Public', autoJoin: true },
       { driveName: 'hyperdrive-private', title: 'Private', autoJoin: false },
-      { driveName: 'hyperdrive', title: 'Legacy' }
+      { driveName: 'hyperdrive', title: 'Legacy', autoJoin: true }
     ]
   }
 ]
@@ -200,7 +200,7 @@ function getDescriptorDrives (descriptor) {
   return descriptor.drives || [{ driveName: descriptor.driveName }]
 }
 
-export async function getExistingNamedDrive (runtime, { driveName, autoJoin = true }) {
+export async function getExistingNamedDrive (runtime, { driveName, autoJoin = false }) {
   if (typeof runtime.getExistingDrive === 'function') {
     return runtime.getExistingDrive(driveName)
   }
