@@ -148,3 +148,56 @@ test('persists archive changes atomically and clears its metadata file', async (
     await rm(directory, { recursive: true, force: true })
   }
 })
+
+test('prunes the oldest archive metadata until the snapshot fits', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'peersky-hyper-archive-prune-'))
+  const storagePath = join(directory, 'hyper-sdk')
+  const longPath = 'a'.repeat(270 * 1024)
+
+  try {
+    assert.equal(await recordHyperArchive({
+      url: `${DRIVE_A}${longPath}`,
+      name: 'Old',
+      source: 'fetched'
+    }, storagePath), true)
+    assert.equal(await recordHyperArchive({
+      url: `${DRIVE_B}${longPath}`,
+      name: 'New',
+      source: 'published'
+    }, storagePath), true)
+
+    const listed = await listHyperArchive({ pageSize: 10 }, storagePath)
+    assert.equal(listed.total, 1)
+    assert.equal(listed.items[0].name, 'New')
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+test('warns and preserves the archive when one entry exceeds the size limit', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'peersky-hyper-archive-oversized-'))
+  const storagePath = join(directory, 'hyper-sdk')
+  const warnings = []
+  const originalWarn = console.warn
+  console.warn = (...values) => warnings.push(values.join(' '))
+
+  try {
+    assert.equal(await recordHyperArchive({
+      url: `${DRIVE_B}kept.txt`,
+      name: 'Kept',
+      source: 'published'
+    }, storagePath), true)
+    assert.equal(await recordHyperArchive({
+      url: `${DRIVE_A}${'a'.repeat(520 * 1024)}`,
+      name: 'Too large',
+      source: 'fetched'
+    }, storagePath), false)
+    assert.match(warnings.join('\n'), /metadata size limit/)
+    const listed = await listHyperArchive({}, storagePath)
+    assert.equal(listed.total, 1)
+    assert.equal(listed.items[0].name, 'Kept')
+  } finally {
+    console.warn = originalWarn
+    await rm(directory, { recursive: true, force: true })
+  }
+})

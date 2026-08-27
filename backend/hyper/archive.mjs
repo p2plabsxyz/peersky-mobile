@@ -74,8 +74,18 @@ function readArchive (storagePath) {
 function writeArchive (storagePath, items) {
   const file = getArchiveFile(storagePath)
   const temporary = file + ARCHIVE_TEMP_SUFFIX
-  const serialized = serializeHyperArchive(items)
-  if (b4a.byteLength(serialized) > MAX_ARCHIVE_FILE_BYTES) return false
+  const retainedItems = [...items]
+  let serialized = serializeHyperArchive(retainedItems)
+
+  while (b4a.byteLength(serialized) > MAX_ARCHIVE_FILE_BYTES && retainedItems.length > 1) {
+    retainedItems.pop()
+    serialized = serializeHyperArchive(retainedItems)
+  }
+
+  if (b4a.byteLength(serialized) > MAX_ARCHIVE_FILE_BYTES) {
+    console.warn('[hyper] Archive entry exceeds the metadata size limit.')
+    return false
+  }
 
   mkdirSync(getDirName(file), { recursive: true })
   writeFileSync(temporary, serialized)
