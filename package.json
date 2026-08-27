@@ -33,7 +33,7 @@
   },
   "homepage": "https://github.com/p2plabsxyz/peersky-mobile#readme",
   "dependencies": {
-    "@p2plabs/hyperdht-mdns": "^1.0.0",
+    "@p2plabs/hyperdht-mdns": "^1.1.0",
     "@preeternal/react-native-cookie-manager": "^6.4.0",
     "@vscode/markdown-it-katex": "^1.1.2",
     "b4a": "^1.6.7",
