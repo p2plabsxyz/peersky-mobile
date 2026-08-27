@@ -1,10 +1,18 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import {
   runP2pAppDataDelete,
   runP2pCacheClear,
   runP2pDataClear
 } from '../../backend/hyper/storage-lifecycle.mjs'
+
+test('warns that clearing all P2P data permanently loses signing keys', () => {
+  const source = readFileSync(new URL('../../app/settings/P2PStorage.tsx', import.meta.url), 'utf8')
+  assert.match(source, /permanently removes[\s\S]*signing keys/)
+  assert.match(source, /permanently lose the ability to update previously shared Hyper URLs/)
+  assert.match(source, /leaving them frozen/)
+})
 
 test('cache clear closes storage and reopens the runtime in order', async () => {
   const events = []

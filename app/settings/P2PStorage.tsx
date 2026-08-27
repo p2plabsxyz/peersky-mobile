@@ -211,7 +211,7 @@ export function P2PStorage ({ onCallRpc, onOpenItem }: P2PStorageProps) {
   function confirmClearAllData () {
     Alert.alert(
       'Clear all P2P data?',
-      'This permanently removes locally owned P2PMD and Hyperdrive files, plus all downloaded Hyper data on this device. Published copies may remain available from other peers.',
+      'This permanently removes locally owned P2PMD and Hyperdrive files, downloaded Hyper data, and signing keys from this device. You will permanently lose the ability to update previously shared Hyper URLs, leaving them frozen unless another peer retains their signing keys.',
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Clear all', style: 'destructive', onPress: () => void clearAllData() }
