@@ -115,6 +115,17 @@ test('filters, paginates, clamps stale pages, and removes matching entries', () 
   assert.equal(fetched.items[0].name, 'Three')
   assert.deepEqual(removeHyperArchiveItems(items, { appId: 'p2pmd' }).map((item) => item.name), ['One', 'Three'])
   assert.deepEqual(removeHyperArchiveItems(items, { source: 'fetched' }).map((item) => item.name), ['Two'])
+
+  const combined = parseHyperArchive(serializeHyperArchive([
+    { url: `${DRIVE_A}published`, name: 'P2PMD published', source: 'published', appId: 'p2pmd', updatedAt: 3 },
+    { url: `${DRIVE_A}fetched`, name: 'P2PMD fetched', source: 'fetched', appId: 'p2pmd', updatedAt: 2 },
+    { url: `${DRIVE_B}fetched`, name: 'Hyperdrive fetched', source: 'fetched', appId: 'hyperdrive', updatedAt: 1 }
+  ]))
+  assert.deepEqual(
+    removeHyperArchiveItems(combined, { appId: 'p2pmd', source: 'fetched' }).map((item) => item.name),
+    ['P2PMD published', 'Hyperdrive fetched']
+  )
+  assert.deepEqual(removeHyperArchiveItems(combined), combined)
 })
 
 test('persists archive changes atomically and clears its metadata file', async () => {

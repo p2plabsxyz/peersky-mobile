@@ -68,10 +68,12 @@ export function listHyperArchiveItems (
 }
 
 export function removeHyperArchiveItems (items, { appId, source } = {}) {
+  if (!appId && !source) return items
+
   return items.filter((item) => {
-    if (appId && item.appId === appId) return false
-    if (source && item.source === source) return false
-    return true
+    const matchesApp = !appId || item.appId === appId
+    const matchesSource = !source || item.source === source
+    return !(matchesApp && matchesSource)
   })
 }
 
