@@ -7,6 +7,7 @@ export const RPC_HYPER_STORAGE_CLEAR_CACHE = 6
 export const RPC_HYPER_LIBRARY_LIST = 7
 export const RPC_HYPER_LIBRARY_UPLOAD = 8
 export const RPC_HYPER_LAN_STATUS = 9
+export const RPC_HYPER_STORAGE_CLEAR_ALL = 14
 
 export const RPC_HOLESAIL_START_LIVE = 10
 export const RPC_HOLESAIL_CONNECT = 11

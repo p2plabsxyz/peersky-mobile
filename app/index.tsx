@@ -119,6 +119,7 @@ import { HistoryScreen } from './history/HistoryScreen'
 import { getBrowserHistoryDocumentTitle } from './history/browser-history.mjs'
 import { useBrowserHistory } from './history/useBrowserHistory'
 import { DownloadsScreen } from './downloads/DownloadsScreen'
+import { findCompletedHyperDownload } from './downloads/browser-downloads.mjs'
 import { HyperdriveScreen } from './hyperdrive/HyperdriveScreen'
 import { peerSkyWebViewNativeConfig } from './downloads/PeerSkyWebView'
 import {
@@ -1235,6 +1236,26 @@ export default function App () {
     )
   }
 
+  async function openHyperdriveItem (item: {
+    name: string
+    source?: 'fetched' | 'published' | 'uploaded'
+    type?: 'directory' | 'file'
+    url: string
+  }) {
+    if (item.type !== 'directory' && item.source === 'fetched') {
+      const downloads = await refreshBrowserDownloads()
+      const existing = findCompletedHyperDownload(downloads, item)
+      if (existing) {
+        const opened = await openBrowserDownload(existing.id)
+        setStatus(opened ? `Opened ${existing.name}` : 'No app is available to open this download')
+        return false
+      }
+    }
+
+    await loadBrowserUrl(item.url)
+    return true
+  }
+
   async function onBrowserMediaShare (targetUrl: string, title: string) {
     try {
       await Share.share({
@@ -2259,6 +2280,11 @@ export default function App () {
             setBrowserSettingsVisible(false)
             void loadBrowserUrl(targetUrl)
           }}
+          onOpenHyperItem={(item) => {
+            void openHyperdriveItem(item).then((didNavigate) => {
+              if (didNavigate) setBrowserSettingsVisible(false)
+            })
+          }}
           onIdentityRestored={() => {
             browserSessionReadyRef.current = false
             setBrowserSessionReady(false)
@@ -2579,6 +2605,7 @@ export default function App () {
                   isDark={browserIsDark}
                   isLandscape={!browserIsPortrait}
                   onCallRpc={(command, data = {}) => callRpc(command, data)}
+                  onOpenItem={(item) => void openHyperdriveItem(item)}
                   onOpenUrl={(targetUrl) => void loadBrowserUrl(targetUrl)}
                   onStatus={setStatus}
                 />

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 
 import {
@@ -10,6 +11,12 @@ import {
 } from '../../app/hyperdrive/recents.mjs'
 
 const DRIVE_URL = `hyper://${'b'.repeat(64)}/`
+
+test('constructs the recents file lazily inside protected storage operations', () => {
+  const source = readFileSync(new URL('../../app/hyperdrive/recents-store.ts', import.meta.url), 'utf8')
+  assert.match(source, /function getRecentsFile \(\)/)
+  assert.doesNotMatch(source, /const RECENTS_FILE = new File/)
+})
 
 test('normalizes, deduplicates, and removes recent Hyper entries', () => {
   const first = recordHyperdriveRecent([], {

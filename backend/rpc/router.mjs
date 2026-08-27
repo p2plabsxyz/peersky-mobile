@@ -10,6 +10,7 @@ import {
   RPC_HYPER_LIBRARY_UPLOAD,
   RPC_HYPER_LAN_STATUS,
   RPC_HYPER_STORAGE_CLEAR_CACHE,
+  RPC_HYPER_STORAGE_CLEAR_ALL,
   RPC_HYPER_STORAGE_DELETE_APP,
   RPC_HYPER_STORAGE_LIST,
   RPC_IDENTITY_GET_KEY,
@@ -47,7 +48,7 @@ import {
   withHyperRuntimeMaintenance,
   withHyperRuntimeOperation
 } from '../hyper/runtime.mjs'
-import { clearP2pCache, deleteP2pAppData, listP2pAppData } from '../hyper/storage.mjs'
+import { clearAllP2pData, clearP2pCache, deleteP2pAppData, listP2pAppData } from '../hyper/storage.mjs'
 
 import {
   connectHolesail,
@@ -127,6 +128,11 @@ export async function routeRpcRequest (req) {
 
     if (req.command === RPC_HYPER_STORAGE_CLEAR_CACHE) {
       replyJson(req, await clearP2pCache())
+      return
+    }
+
+    if (req.command === RPC_HYPER_STORAGE_CLEAR_ALL) {
+      replyJson(req, await clearAllP2pData())
       return
     }
 

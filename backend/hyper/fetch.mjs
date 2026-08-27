@@ -51,7 +51,7 @@ export async function fetchHyper ({
   return withHyperRuntimeOperation(async (runtime) => {
     const fetch = await getHyperFetch(runtime)
 
-    return withHyperRetry({
+    const result = await withHyperRetry({
       fetch,
       url,
       retries,
@@ -123,6 +123,8 @@ export async function fetchHyper ({
         }
       }
     })
+
+    return result
   })
 }
 

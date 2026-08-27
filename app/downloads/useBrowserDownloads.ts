@@ -16,6 +16,7 @@ export type BrowserDownload = {
   status: 'pending' | 'running' | 'paused' | 'complete' | 'failed'
   size: number
   createdAt: number
+  sourceUrl?: string
 }
 
 type BrowserDownloadsNativeModule = {
@@ -110,7 +111,8 @@ export function useBrowserDownloads ({ enabled = false } = {}) {
       const stagedFile = await File.downloadFileAsync(normalizedUrl, stagingDirectory, {
         headers: cookieHeader ? { Cookie: cookieHeader } : undefined
       })
-      moveIosDownloadIntoPlace(stagedFile, normalizedUrl)
+      const savedFile = moveIosDownloadIntoPlace(stagedFile, normalizedUrl)
+      persistIosDownloadSource(savedFile.uri, normalizedUrl)
       await refresh()
       return true
     } catch (downloadError) {
@@ -132,6 +134,7 @@ export function useBrowserDownloads ({ enabled = false } = {}) {
       } else {
         const file = new File(id)
         if (file.exists) file.delete()
+        removeIosDownloadSource(id)
       }
       await refresh()
       return true
@@ -201,12 +204,15 @@ function moveIosDownloadIntoPlace (stagedFile: File, sourceUrl: string) {
     .map((entry) => entry.name)
   const sourceName = addDownloadUrlFingerprint(stagedFile.name, sourceUrl)
   const destinationName = createUniqueDownloadFilename(sourceName, existingNames)
-  stagedFile.move(new File(directory, destinationName))
+  const destination = new File(directory, destinationName)
+  stagedFile.move(destination)
+  return destination
 }
 
 function listIosDownloads (): BrowserDownload[] {
   const directory = getIosDownloadsDirectory()
   if (!directory.exists) return []
+  const sources = loadIosDownloadSources()
 
   return directory.list().flatMap((entry) => {
     if (!(entry instanceof File)) return []
@@ -216,9 +222,54 @@ function listIosDownloads (): BrowserDownload[] {
       name: entry.name,
       status: 'complete' as const,
       size: entry.size,
-      createdAt: entry.creationTime || entry.modificationTime || 0
+      createdAt: entry.creationTime || entry.modificationTime || 0,
+      sourceUrl: sources[entry.uri]
     }]
   })
+}
+
+const IOS_DOWNLOAD_SOURCES_FILE = new File(Paths.document, 'browser-download-sources.json')
+const MAX_IOS_DOWNLOAD_SOURCES_BYTES = 128 * 1024
+
+function loadIosDownloadSources (): Record<string, string> {
+  try {
+    if (!IOS_DOWNLOAD_SOURCES_FILE.exists || IOS_DOWNLOAD_SOURCES_FILE.size > MAX_IOS_DOWNLOAD_SOURCES_BYTES) return {}
+    const parsed = JSON.parse(IOS_DOWNLOAD_SOURCES_FILE.textSync())
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+
+    return Object.fromEntries(Object.entries(parsed).flatMap(([uri, sourceUrl]) => {
+      const normalizedUrl = normalizeBrowserDownloadUrl(sourceUrl)
+      return uri.startsWith(getIosDownloadsDirectory().uri) && normalizedUrl
+        ? [[uri, normalizedUrl]]
+        : []
+    }).slice(0, 200))
+  } catch {
+    return {}
+  }
+}
+
+function persistIosDownloadSource (uri: string, sourceUrl: string) {
+  try {
+    const sources = Object.fromEntries([
+      [uri, sourceUrl],
+      ...Object.entries(loadIosDownloadSources()).filter(([storedUri]) => storedUri !== uri)
+    ].slice(0, 200))
+    if (!IOS_DOWNLOAD_SOURCES_FILE.exists) IOS_DOWNLOAD_SOURCES_FILE.create({ intermediates: true })
+    IOS_DOWNLOAD_SOURCES_FILE.write(JSON.stringify(sources))
+  } catch (error) {
+    console.warn('Unable to persist iOS download source:', error)
+  }
+}
+
+function removeIosDownloadSource (uri: string) {
+  try {
+    const sources = loadIosDownloadSources()
+    delete sources[uri]
+    if (!IOS_DOWNLOAD_SOURCES_FILE.exists) return
+    IOS_DOWNLOAD_SOURCES_FILE.write(JSON.stringify(sources))
+  } catch (error) {
+    console.warn('Unable to update iOS download sources:', error)
+  }
 }
 
 function hasActiveDownload (downloads: BrowserDownload[]) {

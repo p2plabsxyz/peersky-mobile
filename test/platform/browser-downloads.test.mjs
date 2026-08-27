@@ -4,6 +4,7 @@ import { describe, test } from 'node:test'
 import { createRequire } from 'node:module'
 import {
   addDownloadUrlFingerprint,
+  findCompletedHyperDownload,
   MAX_BROWSER_DOWNLOADS,
   createUniqueDownloadFilename,
   normalizeBrowserDownloads,
@@ -44,6 +45,32 @@ describe('browser downloads', () => {
       { id: '', name: 'missing-id' },
       { id: '1', name: '' }
     ]), [])
+  })
+
+  test('reopens a completed download for the same proxied Hyper file', () => {
+    const hyperUrl = 'hyper://example.test/manual.pdf'
+    const sourceUrl = `http://127.0.0.1:1234/asset?url=${encodeURIComponent(hyperUrl)}&download=1`
+    const downloads = normalizeBrowserDownloads([
+      { id: '1', name: 'manual.pdf', status: 'complete', size: 42, createdAt: 2, sourceUrl },
+      { id: '2', name: 'manual.pdf', status: 'running', size: 0, createdAt: 3, sourceUrl }
+    ])
+
+    assert.equal(findCompletedHyperDownload(downloads, { url: hyperUrl })?.id, '1')
+    assert.equal(findCompletedHyperDownload(downloads, {
+      name: 'other.pdf',
+      url: 'hyper://example.test/other.pdf'
+    }), null)
+  })
+
+  test('does not open an unrelated legacy download with the same filename', () => {
+    const downloads = normalizeBrowserDownloads([
+      { id: 'legacy', name: 'manual.pdf', status: 'complete', size: 42, createdAt: 1 }
+    ])
+
+    assert.equal(findCompletedHyperDownload(downloads, {
+      name: 'manual.pdf',
+      url: 'hyper://example.test/manual.pdf'
+    }), null)
   })
 
   test('validates records before retaining the newest 200', () => {
@@ -170,6 +197,8 @@ describe('browser downloads', () => {
     assert.match(moduleSource, /@ReactModule\(name = BrowserDownloadsModule[.]NAME\)/)
     assert.match(moduleSource, /const val NAME = "BrowserDownloads"/)
     assert.match(moduleSource, /fun requestDownload\(url: String, promise: Promise\)/)
+    assert.match(moduleSource, /sourceUrl = url/)
+    assert.match(moduleSource, /record[.]putString\("sourceUrl", it\)/)
     assert.match(moduleSource, /promise[.]resolve\(queueDownload\(url, null, null, null\)\)/)
     assert.match(moduleSource, /fun openDownload\(id: String, promise: Promise\)/)
     assert.doesNotMatch(moduleSource, /getDownloadAnalysis|recordDiagnostic/)

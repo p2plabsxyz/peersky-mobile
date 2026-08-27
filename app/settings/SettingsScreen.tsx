@@ -109,6 +109,20 @@ type RpcResponse = {
   total?: number
   totalPages?: number
   clearedCores?: number
+  cleared?: boolean
+  archive?: {
+    items: Array<{
+      url: string
+      driveUrl: string
+      name: string
+      source: 'published' | 'fetched'
+      appId?: string
+      updatedAt: number
+    }>
+    page: number
+    total: number
+    totalPages: number
+  }
 }
 
 type LANDiscoveryPeer = {
@@ -165,6 +179,7 @@ type SettingsScreenProps = {
   onWebsiteTextScaleChange: (scale: WebsiteTextScale) => void
   onResetTabs: () => void
   onOpenUrl: (url: string) => void
+  onOpenHyperItem: (item: { name: string, source: 'fetched' | 'published', url: string }) => void
   onIdentityRestored: () => void
 }
 
@@ -264,7 +279,7 @@ export function SettingsScreen(props: SettingsScreenProps) {
         {page === 'appearance' && <Appearance {...props} />}
         {page === 'data-clearing' && <DataClearing {...props} />}
         {page === 'privacy' && <Privacy {...props} />}
-        {page === 'p2p-storage' && <P2PStorage onCallRpc={props.onCallRpc} />}
+        {page === 'p2p-storage' && <P2PStorage onCallRpc={props.onCallRpc} onOpenItem={props.onOpenHyperItem} />}
         {page === 'permissions' && <Permissions {...props} />}
         {page === 'link-device' && <LinkDeviceSettings {...props} />}
         {page === 'lan-discovery' && <LANDiscoveryTest onCallRpc={props.onCallRpc} />}
