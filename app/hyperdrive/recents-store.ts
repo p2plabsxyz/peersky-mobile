@@ -8,12 +8,15 @@ import {
 type RecentSource = 'fetched' | 'uploaded'
 type StoredRecent = { source?: RecentSource }
 
-const RECENTS_FILE = new File(Paths.document, 'hyperdrive-recents.json')
+function getRecentsFile () {
+  return new File(Paths.document, 'hyperdrive-recents.json')
+}
 
 export function loadHyperdriveRecents<T> (): T[] {
   try {
-    return RECENTS_FILE.exists
-      ? parseHyperdriveRecents(RECENTS_FILE.textSync()) as T[]
+    const recentsFile = getRecentsFile()
+    return recentsFile.exists
+      ? parseHyperdriveRecents(recentsFile.textSync()) as T[]
       : []
   } catch {
     return []
@@ -22,8 +25,9 @@ export function loadHyperdriveRecents<T> (): T[] {
 
 export function persistHyperdriveRecents (recents: unknown[]) {
   try {
-    if (!RECENTS_FILE.exists) RECENTS_FILE.create({ intermediates: true })
-    RECENTS_FILE.write(serializeHyperdriveRecents(recents))
+    const recentsFile = getRecentsFile()
+    if (!recentsFile.exists) recentsFile.create({ intermediates: true })
+    recentsFile.write(serializeHyperdriveRecents(recents))
     return true
   } catch {
     return false
@@ -33,7 +37,8 @@ export function persistHyperdriveRecents (recents: unknown[]) {
 export function clearHyperdriveRecents (source?: RecentSource) {
   if (!source) {
     try {
-      if (RECENTS_FILE.exists) RECENTS_FILE.delete()
+      const recentsFile = getRecentsFile()
+      if (recentsFile.exists) recentsFile.delete()
       return true
     } catch {
       return false
