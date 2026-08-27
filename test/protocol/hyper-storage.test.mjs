@@ -172,6 +172,33 @@ describe('Hyper app storage', () => {
     }])
   })
 
+  test('keeps P2PMD announced when app data is summarized', async () => {
+    const requests = []
+    const runtime = {
+      namespace: (name) => ({
+        ns: Buffer.from(name),
+        storage: {
+          getAlias: async () => name === 'p2pmd' ? Buffer.from('discovery-key') : null,
+          hasCore: async () => true
+        }
+      }),
+      getDrive: async (name, options) => {
+        requests.push({ name, options })
+        return {
+          id: `${name}-id`,
+          list: async function * () {}
+        }
+      }
+    }
+
+    await listRegisteredP2pAppData(runtime)
+
+    assert.deepEqual(requests, [{
+      name: 'p2pmd',
+      options: { autoJoin: true }
+    }])
+  })
+
   test('aggregates and deletes legacy, public, and private Hyperdrive data', async () => {
     const runtime = createRuntime({
       hyperdrive: [createEntry('/legacy.txt', 10)],

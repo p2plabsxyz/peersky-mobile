@@ -197,7 +197,10 @@ async function summarizeAppDrive (runtime, descriptor) {
 }
 
 function getDescriptorDrives (descriptor) {
-  return descriptor.drives || [{ driveName: descriptor.driveName }]
+  return descriptor.drives || [{
+    driveName: descriptor.driveName,
+    autoJoin: descriptor.autoJoin
+  }]
 }
 
 export async function getExistingNamedDrive (runtime, { driveName, autoJoin = false }) {
