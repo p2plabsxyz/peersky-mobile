@@ -27,6 +27,14 @@ type P2pAppData = {
   byteLength: number
   exists?: boolean
   truncated?: boolean
+  drives?: Array<{
+    id: string
+    title: string
+    url: string
+    fileCount: number
+    byteLength: number
+    truncated?: boolean
+  }>
 }
 
 type P2pStorageResponse = {
@@ -294,11 +302,26 @@ export function P2PStorage ({ onCallRpc, onOpenItem }: P2PStorageProps) {
                     ? `${formatFileCount(item.fileCount, item.truncated)} - ${formatBytes(item.byteLength)} file content`
                     : 'No local data'}
                 </Text>
-                {item.exists && (
+                {item.exists && item.url && (
                   <Text numberOfLines={1} style={[styles.url, isDark ? darkStyles.secondaryText : null]}>
                     {item.url}
                   </Text>
                 )}
+                {item.drives?.map((drive) => (
+                  <View key={drive.id} style={styles.driveRow}>
+                    <Text style={[styles.driveTitle, isDark ? darkStyles.primaryText : null]}>
+                      {drive.title}
+                    </Text>
+                    <View style={styles.driveDetails}>
+                      <Text style={[styles.driveSize, isDark ? darkStyles.secondaryText : null]}>
+                        {formatFileCount(drive.fileCount, drive.truncated)} - {formatBytes(drive.byteLength)}
+                      </Text>
+                      <Text numberOfLines={1} style={[styles.driveUrl, isDark ? darkStyles.secondaryText : null]}>
+                        {drive.url}
+                      </Text>
+                    </View>
+                  </View>
+                ))}
               </View>
               <Pressable
                 accessibilityLabel={`Delete ${item.title} P2P data`}
@@ -553,6 +576,29 @@ const styles = StyleSheet.create({
     color: '#687086',
     fontSize: 12,
     lineHeight: 17
+  },
+  driveRow: {
+    alignItems: 'flex-start',
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 4
+  },
+  driveTitle: {
+    fontSize: 11,
+    fontWeight: '700',
+    width: 44
+  },
+  driveDetails: {
+    flex: 1
+  },
+  driveSize: {
+    color: '#687086',
+    fontSize: 10
+  },
+  driveUrl: {
+    color: '#687086',
+    fontFamily: 'monospace',
+    fontSize: 9
   },
   url: {
     color: '#687086',

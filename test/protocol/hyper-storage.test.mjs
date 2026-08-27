@@ -158,6 +158,33 @@ describe('Hyper app storage', () => {
     const hyperdrive = listed.items.find((item) => item.id === 'hyperdrive')
     assert.equal(hyperdrive.fileCount, 3)
     assert.equal(hyperdrive.byteLength, 60)
+    assert.equal(hyperdrive.url, '')
+    assert.deepEqual(hyperdrive.drives, [
+      {
+        id: 'hyperdrive-public',
+        title: 'Public',
+        url: 'hyper://hyperdrive-public-id/',
+        fileCount: 1,
+        byteLength: 20,
+        truncated: false
+      },
+      {
+        id: 'hyperdrive-private',
+        title: 'Private',
+        url: 'hyper://hyperdrive-private-id/',
+        fileCount: 1,
+        byteLength: 30,
+        truncated: false
+      },
+      {
+        id: 'hyperdrive',
+        title: 'Legacy',
+        url: 'hyper://hyperdrive-id/',
+        fileCount: 1,
+        byteLength: 10,
+        truncated: false
+      }
+    ])
 
     assert.deepEqual(await deleteRegisteredP2pAppData(runtime, { appId: 'hyperdrive' }), {
       ok: true,

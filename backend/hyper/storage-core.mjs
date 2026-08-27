@@ -4,9 +4,9 @@ export const P2P_APP_DRIVES = [
     id: 'hyperdrive',
     title: 'Hyperdrive',
     drives: [
-      { driveName: 'hyperdrive-public' },
-      { driveName: 'hyperdrive-private', autoJoin: false },
-      { driveName: 'hyperdrive' }
+      { driveName: 'hyperdrive-public', title: 'Public' },
+      { driveName: 'hyperdrive-private', title: 'Private', autoJoin: false },
+      { driveName: 'hyperdrive', title: 'Legacy' }
     ]
   }
 ]
@@ -130,7 +130,7 @@ async function summarizeAppDrive (runtime, descriptor) {
   const drives = []
   for (const target of getDescriptorDrives(descriptor)) {
     const drive = await getExistingNamedDrive(runtime, target)
-    if (drive) drives.push(drive)
+    if (drive) drives.push({ drive, target })
   }
   if (drives.length === 0) {
     return {
@@ -148,31 +148,51 @@ async function summarizeAppDrive (runtime, descriptor) {
   let byteLength = 0
   let truncated = false
   const startedAt = Date.now()
+  const driveSummaries = []
 
-  for (const drive of drives) {
+  for (const { drive, target } of drives) {
+    let driveFileCount = 0
+    let driveByteLength = 0
+    let driveTruncated = false
+
     for await (const entry of drive.list('/')) {
       if (!entry?.value || entry.value.linkname) continue
       fileCount += 1
+      driveFileCount += 1
 
       const size = Number(entry.value.blob?.byteLength)
-      if (Number.isSafeInteger(size) && size > 0) byteLength += size
+      if (Number.isSafeInteger(size) && size > 0) {
+        byteLength += size
+        driveByteLength += size
+      }
 
       if (fileCount >= MAX_FILES_PER_APP || Date.now() - startedAt >= MAX_APP_SCAN_MS) {
         truncated = true
+        driveTruncated = true
         break
       }
     }
+
+    driveSummaries.push({
+      id: target.driveName,
+      title: target.title || descriptor.title,
+      url: `hyper://${drive.id}/`,
+      fileCount: driveFileCount,
+      byteLength: driveByteLength,
+      truncated: driveTruncated
+    })
     if (truncated) break
   }
 
   return {
     id: descriptor.id,
     title: descriptor.title,
-    url: `hyper://${drives[0].id}/`,
+    url: descriptor.drives ? '' : driveSummaries[0].url,
     exists: true,
     fileCount,
     byteLength,
-    truncated
+    truncated,
+    ...(descriptor.drives ? { drives: driveSummaries } : {})
   }
 }
 
