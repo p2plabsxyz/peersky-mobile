@@ -4,6 +4,8 @@ import {
   closeHyperRuntime,
   getHyperRuntime,
   getHyperStoragePath,
+  getPrivateHyperRuntime,
+  getPrivateHyperStoragePath,
   withHyperRuntimeMaintenance,
   withHyperRuntimeOperation
 } from './runtime.mjs'
@@ -15,10 +17,12 @@ import {
 } from './archive.mjs'
 import {
   clearDownloadedP2pCores,
+  createRoutedP2pStorageRuntime,
   deleteRegisteredP2pAppData,
   listRegisteredP2pAppData
 } from './storage-core.mjs'
 import {
+  removeHyperStoragePaths,
   runP2pAppDataDelete,
   runP2pCacheClear,
   runP2pDataClear
@@ -38,8 +42,11 @@ export async function listP2pAppData ({
     const appData = includeAppData
       ? options.getRuntime
         ? await listRegisteredP2pAppData(await options.getRuntime(), { page, pageSize })
-        : await withHyperRuntimeOperation((runtime) => (
-          listRegisteredP2pAppData(runtime, { page, pageSize })
+        : await withHyperRuntimeOperation(async (runtime) => (
+          listRegisteredP2pAppData(
+            await createP2pStorageRuntime(runtime),
+            { page, pageSize }
+          )
         ))
       : { ok: true }
     const archive = await (options.listArchive || listHyperArchive)({
@@ -57,7 +64,7 @@ export async function deleteP2pAppData ({ appId } = {}, options = {}) {
     runExclusive: options.runExclusive || (options.getRuntime
       ? async (task) => task()
       : withHyperRuntimeMaintenance),
-    getRuntime: options.getRuntime || getHyperRuntime,
+    getRuntime: options.getRuntime || createP2pStorageRuntime,
     deleteAppData: options.deleteAppData || deleteRegisteredP2pAppData,
     removeArchive: options.removeArchive || removeHyperArchive,
     appId
@@ -107,11 +114,18 @@ function performAllP2pDataClear (options) {
     stopAssetServer: options.stopAssetServer || stopHyperAssetServer,
     closeRuntime: options.closeRuntime || closeHyperRuntime,
     resetFetch: options.resetFetch || resetHyperFetch,
-    removeStorage: options.removeStorage || ((storagePath) => {
-      rmSync(storagePath, { recursive: true, force: true })
-    }),
+    removeStorage: options.removeStorage || ((storagePath) => removeHyperStoragePaths({
+      storagePath,
+      privateStoragePath: getPrivateHyperStoragePath(),
+      removeStorage: (target) => rmSync(target, { recursive: true, force: true })
+    })),
     clearArchive: options.clearArchive || clearHyperArchive
   })
+}
+
+async function createP2pStorageRuntime (mainRuntime = null) {
+  const networkedRuntime = mainRuntime || await getHyperRuntime()
+  return createRoutedP2pStorageRuntime(networkedRuntime, getPrivateHyperRuntime)
 }
 
 function withStorageTransition (task) {

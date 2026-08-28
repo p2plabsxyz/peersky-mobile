@@ -7,6 +7,7 @@ import Corestore from 'corestore'
 import Hyperdrive from 'hyperdrive'
 import {
   clearDownloadedP2pCores,
+  createRoutedP2pStorageRuntime,
   deleteRegisteredP2pAppData,
   getExistingNamedDrive,
   listRegisteredP2pAppData,
@@ -248,6 +249,58 @@ describe('Hyper app storage', () => {
       'hyperdrive-private',
       'hyperdrive'
     ]))
+  })
+
+  test('opens the isolated runtime only for private Hyperdrive data', async () => {
+    const networkedRuntime = createRuntime({
+      p2pmd: [createEntry('/note.md', 10)],
+      'hyperdrive-public': [createEntry('/public.txt', 20)]
+    })
+    const privateRuntime = createRuntime({
+      'hyperdrive-private': [createEntry('/private.txt', 30)]
+    })
+    let privateRuntimeCalls = 0
+    const runtime = createRoutedP2pStorageRuntime(
+      networkedRuntime,
+      async () => {
+        privateRuntimeCalls += 1
+        return privateRuntime
+      }
+    )
+
+    assert.ok(await runtime.getExistingDrive('p2pmd'))
+    assert.equal(privateRuntimeCalls, 0)
+    assert.ok(await runtime.getExistingDrive('hyperdrive-private'))
+    assert.equal(privateRuntimeCalls, 1)
+    assert.deepEqual(networkedRuntime.opened, new Set(['p2pmd']))
+    assert.deepEqual(privateRuntime.opened, new Set(['hyperdrive-private']))
+  })
+
+  test('deletes public and private Hyperdrive data from separate runtimes', async () => {
+    const networkedRuntime = createRuntime({
+      'hyperdrive-public': [createEntry('/public.txt', 20)],
+      hyperdrive: [createEntry('/legacy.txt', 10)]
+    })
+    const privateRuntime = createRuntime({
+      'hyperdrive-private': [createEntry('/private.txt', 30)]
+    })
+    const runtime = createRoutedP2pStorageRuntime(
+      networkedRuntime,
+      async () => privateRuntime
+    )
+
+    assert.deepEqual(await deleteRegisteredP2pAppData(runtime, {
+      appId: 'hyperdrive'
+    }), {
+      ok: true,
+      appId: 'hyperdrive',
+      deleted: true
+    })
+    assert.deepEqual(networkedRuntime.purged, new Set([
+      'hyperdrive-public',
+      'hyperdrive'
+    ]))
+    assert.deepEqual(privateRuntime.purged, new Set(['hyperdrive-private']))
   })
 
   test('clears downloaded cores while retaining writable app data', async () => {

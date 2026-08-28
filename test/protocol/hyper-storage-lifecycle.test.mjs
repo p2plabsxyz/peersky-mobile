@@ -2,10 +2,26 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import {
+  removeHyperStoragePaths,
   runP2pAppDataDelete,
   runP2pCacheClear,
   runP2pDataClear
 } from '../../backend/hyper/storage-lifecycle.mjs'
+
+test('full P2P storage removal deletes public and private runtime paths', () => {
+  const removed = []
+
+  removeHyperStoragePaths({
+    storagePath: '/test/hyper-sdk',
+    privateStoragePath: '/test/hyper-sdk-private',
+    removeStorage: (path) => { removed.push(path) }
+  })
+
+  assert.deepEqual(removed, [
+    '/test/hyper-sdk',
+    '/test/hyper-sdk-private'
+  ])
+})
 
 test('warns that clearing all P2P data permanently loses signing keys', () => {
   const source = readFileSync(new URL('../../app/settings/P2PStorage.tsx', import.meta.url), 'utf8')

@@ -172,16 +172,19 @@ test('rejects invalid and oversized uploads before opening the runtime', async (
   assert.equal(opened, false)
 })
 
-test('routes public and private uploads to separate drives', async () => {
-  const requests = []
-  const drives = {
-    'hyperdrive-public': createDrive({}),
-    'hyperdrive-private': createDrive({})
-  }
+test('routes public and private uploads to separate runtimes', async () => {
+  const publicRequests = []
+  const privateRequests = []
   const runtime = {
     getDrive: async (name, options) => {
-      requests.push({ name, options })
-      return drives[name]
+      publicRequests.push({ name, options })
+      return createDrive({})
+    }
+  }
+  const privateRuntime = {
+    getDrive: async (name, options) => {
+      privateRequests.push({ name, options })
+      return createDrive({})
     }
   }
 
@@ -189,15 +192,17 @@ test('routes public and private uploads to separate drives', async () => {
     name: 'public.txt',
     contentBase64: Buffer.from('public').toString('base64'),
     visibility: 'public'
-  }, { runtime })
+  }, { runtime, privateRuntime })
   const privateUpload = await uploadHyperdriveFile({
     name: 'private.txt',
     contentBase64: Buffer.from('private').toString('base64'),
     visibility: 'private'
-  }, { runtime })
+  }, { runtime, privateRuntime })
 
-  assert.deepEqual(requests, [
-    { name: 'hyperdrive-public', options: { autoJoin: true } },
+  assert.deepEqual(publicRequests, [
+    { name: 'hyperdrive-public', options: { autoJoin: true } }
+  ])
+  assert.deepEqual(privateRequests, [
     { name: 'hyperdrive-private', options: { autoJoin: false } }
   ])
   assert.equal(publicUpload.item.visibility, 'public')

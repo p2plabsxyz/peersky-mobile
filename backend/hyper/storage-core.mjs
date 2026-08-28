@@ -37,6 +37,23 @@ export function resolveHyperdriveUploadTarget (visibility) {
   return null
 }
 
+export function createRoutedP2pStorageRuntime (
+  networkedRuntime,
+  getPrivateRuntime
+) {
+  return {
+    async getExistingDrive (driveName) {
+      const runtime = driveName === HYPERDRIVE_PRIVATE_DRIVE_NAME
+        ? await getPrivateRuntime()
+        : networkedRuntime
+      return getExistingNamedDrive(runtime, {
+        driveName,
+        autoJoin: driveName !== HYPERDRIVE_PRIVATE_DRIVE_NAME
+      })
+    }
+  }
+}
+
 export async function listRegisteredP2pAppData (
   runtime,
   { page = 1, pageSize = DEFAULT_PAGE_SIZE } = {}

@@ -1,5 +1,10 @@
 import b4a from 'b4a'
-import { withHyperRuntimeOperation } from './runtime.mjs'
+import {
+  rememberPrivateHyperdrive,
+  withHyperRuntimeForAddress,
+  withHyperRuntimeOperation,
+  withPrivateHyperRuntimeOperation
+} from './runtime.mjs'
 import { parseHyperUrl } from './url.mjs'
 import { recordHyperArchive } from './archive.mjs'
 import { resolveHyperdriveUploadTarget } from './storage-core.mjs'
@@ -64,7 +69,7 @@ export async function listHyperdriveLocation ({ url } = {}, options = {}) {
         source: 'fetched'
       })
       return response
-    })
+    }, { address: target.driveAddress })
   } catch (error) {
     return {
       ok: false,
@@ -109,6 +114,7 @@ export async function uploadHyperdriveFile ({ name, contentBase64, visibility } 
     const drive = await runtime.getDrive(uploadTarget.driveName, {
       autoJoin: uploadTarget.autoJoin
     })
+    if (visibility === 'private') rememberPrivateHyperdrive(drive)
     const pathname = await uniquePath(drive, `/${filename}`)
     await drive.put(pathname, bytes)
 
@@ -130,7 +136,7 @@ export async function uploadHyperdriveFile ({ name, contentBase64, visibility } 
         visibility
       }
     }
-  }))
+  }, { privateRuntime: visibility === 'private' }))
 }
 
 async function listDirectory (drive, driveAddress, directory, maxListTimeMs) {
@@ -303,8 +309,12 @@ function shortDriveName (driveAddress) {
   return `${key.slice(0, 8)}...${key.slice(-6)}`
 }
 
-function runWithRuntime (options, operation) {
-  return options.runtime ? operation(options.runtime) : withHyperRuntimeOperation(operation)
+function runWithRuntime (options, operation, { address, privateRuntime = false } = {}) {
+  if (privateRuntime && options.privateRuntime) return operation(options.privateRuntime)
+  if (options.runtime) return operation(options.runtime)
+  if (privateRuntime) return withPrivateHyperRuntimeOperation(operation)
+  if (address) return withHyperRuntimeForAddress(address, operation)
+  return withHyperRuntimeOperation(operation)
 }
 
 async function withUploadTransition (operation) {

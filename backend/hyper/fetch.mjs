@@ -13,11 +13,11 @@ import {
   DEFAULT_HYPER_DISCOVERY_RETRY_DELAY,
   withHyperRetry
 } from './fetch-retry.mjs'
-import { withHyperRuntimeOperation } from './runtime.mjs'
+import { withHyperRuntimeForAddress } from './runtime.mjs'
 import { parseHyperUrl } from './url.mjs'
 import { readHyperBinaryResponse } from './binary-response.mjs'
 
-let hyperFetch = null
+let hyperFetches = new WeakMap()
 
 export { stopHyperAssetServer } from './asset-server.mjs'
 export {
@@ -29,7 +29,7 @@ export {
 } from './fetch-retry.mjs'
 
 export function resetHyperFetch () {
-  hyperFetch = null
+  hyperFetches = new WeakMap()
 }
 
 export async function fetchHyper ({
@@ -48,7 +48,7 @@ export async function fetchHyper ({
   const target = parseHyperUrl(url)
   if (target.error) return { ok: false, error: target.error }
 
-  return withHyperRuntimeOperation(async (runtime) => {
+  return withHyperRuntimeForAddress(target.driveAddress, async (runtime) => {
     const fetch = await getHyperFetch(runtime)
 
     const result = await withHyperRetry({
@@ -64,7 +64,7 @@ export async function fetchHyper ({
         const downloadName = getHyperNavigationDownloadName(responseUrl, headers)
         if (downloadName && !mediaType) {
           await cancelResponseBody(response.body)
-          const proxyServer = await startHyperAssetServer(fetch)
+          const proxyServer = await startHyperAssetServer(routedHyperFetch)
           return {
             ok: response.ok,
             status: response.status,
@@ -83,7 +83,7 @@ export async function fetchHyper ({
 
         if (mediaType) {
           await cancelResponseBody(response.body)
-          const proxyServer = await startHyperAssetServer(fetch)
+          const proxyServer = await startHyperAssetServer(routedHyperFetch)
           return {
             ok: response.ok,
             status: response.status,
@@ -103,7 +103,7 @@ export async function fetchHyper ({
         let body = await response.text()
 
         if (inlineAssets && isHtmlResponse(headers, body)) {
-          const proxyServer = await startHyperAssetServer(fetch)
+          const proxyServer = await startHyperAssetServer(routedHyperFetch)
           body = await inlineHyperAssets({
             html: body,
             baseUrl: response.url || url,
@@ -174,7 +174,7 @@ export async function fetchHyperBinary ({
   const target = parseHyperUrl(url)
   if (target.error) return { ok: false, error: target.error }
 
-  return withHyperRuntimeOperation(async (runtime) => {
+  return withHyperRuntimeForAddress(target.driveAddress, async (runtime) => {
     const fetch = await getHyperFetch(runtime)
 
     return withHyperRetry({
@@ -190,16 +190,25 @@ export async function fetchHyperBinary ({
 }
 
 async function getHyperFetch (runtime) {
-  if (hyperFetch) return hyperFetch
+  const existing = hyperFetches.get(runtime)
+  if (existing) return existing
 
   ensureFetchGlobals()
 
-  hyperFetch = await makeHyperFetch({
+  const fetch = await makeHyperFetch({
     sdk: runtime,
     writable: false
   })
 
-  return hyperFetch
+  hyperFetches.set(runtime, fetch)
+  return fetch
+}
+
+function routedHyperFetch (url, options) {
+  return withHyperRuntimeForAddress(url, async (runtime) => {
+    const fetch = await getHyperFetch(runtime)
+    return fetch(url, options)
+  })
 }
 
 function ensureFetchGlobals () {

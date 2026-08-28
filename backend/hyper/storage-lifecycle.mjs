@@ -91,6 +91,17 @@ export function runP2pAppDataDelete ({
   })
 }
 
+export function removeHyperStoragePaths ({
+  storagePath,
+  privateStoragePath,
+  removeStorage
+}) {
+  removeStorage(storagePath)
+  if (privateStoragePath && privateStoragePath !== storagePath) {
+    removeStorage(privateStoragePath)
+  }
+}
+
 async function appendCleanupWarning (result, cleanup, message) {
   try {
     const cleaned = await cleanup()
