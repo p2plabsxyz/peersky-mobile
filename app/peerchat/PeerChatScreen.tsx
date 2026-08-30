@@ -5,6 +5,7 @@ import {
   AppState,
   BackHandler,
   FlatList,
+  Image,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -75,6 +76,9 @@ type PeerChatScreenProps = {
 
 const POLL_INTERVAL_MS = 1500
 const ROOM_LIST_POLL_INTERVAL_MS = 3000
+const PEERCHAT_ICON = require('../../assets/images/peerchat.png')
+
+type LandingAction = 'create' | 'join' | null
 
 export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenProps) {
   const colors = isDark ? darkColors : lightColors
@@ -97,6 +101,7 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
   const [activeRoom, setActiveRoom] = useState<PeerChatRoom | null>(null)
   const [messages, setMessages] = useState<PeerChatMessage[]>([])
   const [composer, setComposer] = useState('')
+  const [landingAction, setLandingAction] = useState<LandingAction>(null)
 
   useEffect(() => {
     callRpcRef.current = onCallRpc
@@ -495,88 +500,111 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
       ListHeaderComponent={(
         <View style={styles.landingHeader}>
           <View style={styles.titleRow}>
-            <View style={[styles.logo, { backgroundColor: colors.accentSoft }]}>
-              <Text style={[styles.logoText, { color: colors.accent }]}>PC</Text>
-            </View>
-            <View>
+            <Image source={PEERCHAT_ICON} style={styles.logo} />
+            <View style={styles.titleCopy}>
               <Text style={[styles.title, { color: colors.text }]}>PeerChat</Text>
-              <Text style={[styles.helper, { color: colors.muted }]}>Private peer-to-peer rooms</Text>
+              <Text style={[styles.helper, { color: colors.muted }]}>Private peer-to-peer conversations</Text>
             </View>
           </View>
 
-          <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}> 
-            <Text style={[styles.label, { color: colors.text }]}>Your name</Text>
+          <View style={styles.profileRow}>
             <TextInput
               value={profileName}
               onChangeText={setProfileName}
               autoCapitalize='words'
               autoCorrect={false}
               maxLength={50}
-              placeholder='Letters, numbers, and spaces'
+              placeholder='Your display name'
               placeholderTextColor={colors.muted}
-              style={[styles.input, { backgroundColor: colors.input, borderColor: colors.border, color: colors.text }]}
+              style={[styles.input, styles.profileInput, { backgroundColor: colors.input, color: colors.text }]}
             />
             {profile?.username !== profileName.trim() && (
               <Pressable
                 accessibilityRole='button'
                 disabled={!profileName.trim() || isBusy}
                 onPress={() => void runAction(saveProfile)}
-                style={[styles.secondaryButton, { borderColor: colors.border }]}
+                style={[styles.profileSaveButton, { backgroundColor: colors.accent }, !profileName.trim() || isBusy ? styles.disabled : null]}
               >
-                <Text style={[styles.secondaryButtonText, { color: colors.text }]}>Save name</Text>
+                <Text style={styles.profileSaveText}>Save</Text>
               </Pressable>
             )}
           </View>
 
-          <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}> 
-            <Text style={[styles.cardTitle, { color: colors.text }]}>Create a room</Text>
-            <TextInput
-              value={roomName}
-              onChangeText={setRoomName}
-              maxLength={80}
-              placeholder='Room name'
-              placeholderTextColor={colors.muted}
-              style={[styles.input, { backgroundColor: colors.input, borderColor: colors.border, color: colors.text }]}
-            />
+          <View style={styles.quickActions}>
             <Pressable
               accessibilityRole='button'
-              disabled={!profileName.trim() || isBusy}
-              onPress={createRoom}
-              style={[styles.primaryButton, { backgroundColor: colors.accent }, !profileName.trim() || isBusy ? styles.disabled : null]}
+              onPress={() => setLandingAction((current) => current === 'create' ? null : 'create')}
+              style={[
+                styles.quickAction,
+                { backgroundColor: landingAction === 'create' ? colors.accent : colors.surface }
+              ]}
             >
-              <Text style={styles.primaryButtonText}>Create room</Text>
+              <Text style={[styles.quickActionSymbol, { color: landingAction === 'create' ? '#ffffff' : colors.accent }]}>+</Text>
+              <Text style={[styles.quickActionText, { color: landingAction === 'create' ? '#ffffff' : colors.text }]}>Create group</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole='button'
+              onPress={() => setLandingAction((current) => current === 'join' ? null : 'join')}
+              style={[
+                styles.quickAction,
+                { backgroundColor: landingAction === 'join' ? colors.accent : colors.surface }
+              ]}
+            >
+              <Text style={[styles.quickActionSymbol, { color: landingAction === 'join' ? '#ffffff' : colors.accent }]}>#</Text>
+              <Text style={[styles.quickActionText, { color: landingAction === 'join' ? '#ffffff' : colors.text }]}>Join group</Text>
             </Pressable>
           </View>
 
-          <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}> 
-            <Text style={[styles.cardTitle, { color: colors.text }]}>Join a room</Text>
-            <TextInput
-              value={joinKey}
-              onChangeText={setJoinKey}
-              autoCapitalize='none'
-              autoCorrect={false}
-              maxLength={64}
-              placeholder='64-character room key'
-              placeholderTextColor={colors.muted}
-              style={[styles.input, styles.roomKeyInput, { backgroundColor: colors.input, borderColor: colors.border, color: colors.text }]}
-            />
-            <Pressable
-              accessibilityRole='button'
-              disabled={!profileName.trim() || joinKey.trim().length !== 64 || isBusy}
-              onPress={joinRoom}
-              style={[
-                styles.secondaryButton,
-                { borderColor: colors.accent },
-                !profileName.trim() || joinKey.trim().length !== 64 || isBusy ? styles.disabled : null
-              ]}
-            >
-              <Text style={[styles.secondaryButtonText, { color: colors.accent }]}>Join room</Text>
-            </Pressable>
-          </View>
+          {landingAction === 'create' && (
+            <View style={[styles.actionPanel, { backgroundColor: colors.surface }]}>
+              <TextInput
+                value={roomName}
+                onChangeText={setRoomName}
+                maxLength={80}
+                placeholder='Group name'
+                placeholderTextColor={colors.muted}
+                style={[styles.input, styles.actionInput, { backgroundColor: colors.input, color: colors.text }]}
+              />
+              <Pressable
+                accessibilityRole='button'
+                disabled={!profileName.trim() || isBusy}
+                onPress={createRoom}
+                style={[styles.actionSubmit, { backgroundColor: colors.accent }, !profileName.trim() || isBusy ? styles.disabled : null]}
+              >
+                <Text style={styles.actionSubmitText}>Create</Text>
+              </Pressable>
+            </View>
+          )}
+
+          {landingAction === 'join' && (
+            <View style={[styles.actionPanel, { backgroundColor: colors.surface }]}>
+              <TextInput
+                value={joinKey}
+                onChangeText={setJoinKey}
+                autoCapitalize='none'
+                autoCorrect={false}
+                maxLength={64}
+                placeholder='64-character room key'
+                placeholderTextColor={colors.muted}
+                style={[styles.input, styles.actionInput, styles.roomKeyInput, { backgroundColor: colors.input, color: colors.text }]}
+              />
+              <Pressable
+                accessibilityRole='button'
+                disabled={!profileName.trim() || joinKey.trim().length !== 64 || isBusy}
+                onPress={joinRoom}
+                style={[styles.actionSubmit, { backgroundColor: colors.accent }, !profileName.trim() || joinKey.trim().length !== 64 || isBusy ? styles.disabled : null]}
+              >
+                <Text style={styles.actionSubmitText}>Join</Text>
+              </Pressable>
+            </View>
+          )}
 
           {error && <Text style={[styles.error, { color: colors.danger }]}>{error}</Text>}
           {isBusy && <ActivityIndicator color={colors.accent} />}
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>Recent rooms</Text>
+          <View style={styles.sectionHeading}>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>Recent chats</Text>
+            {rooms.length > 0 && <Text style={[styles.roomCount, { color: colors.muted }]}>{rooms.length}</Text>}
+          </View>
         </View>
       )}
       renderItem={({ item }) => (
@@ -585,7 +613,7 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
           onPress={() => openRoom(item)}
           style={({ pressed }) => [
             styles.roomRow,
-            { backgroundColor: colors.surface, borderColor: colors.border },
+            { borderBottomColor: colors.border },
             pressed ? { backgroundColor: colors.input } : null
           ]}
         >
@@ -600,9 +628,12 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
                 : `${item.roomKey.slice(0, 10)}...`}
             </Text>
           </View>
-          <Text style={[styles.roomPeerCount, { color: item.peerCount > 0 ? colors.success : colors.muted }]}>
-            {item.peerCount > 0 ? `${item.peerCount} online` : 'Offline'}
-          </Text>
+          <View style={styles.roomMeta}>
+            <Text style={[styles.roomTime, { color: colors.muted }]}>{formatRoomTime(item)}</Text>
+            <Text style={[styles.roomPeerCount, { color: item.peerCount > 0 ? colors.success : colors.muted }]}>
+              {item.peerCount > 0 ? `${item.peerCount} online` : 'Offline'}
+            </Text>
+          </View>
         </Pressable>
       )}
       ListEmptyComponent={(
@@ -622,6 +653,17 @@ function getRoomInitials (name: string) {
 function formatMessageTime (timestamp: number) {
   if (!Number.isFinite(timestamp)) return ''
   return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+}
+
+function formatRoomTime (room: PeerChatRoom) {
+  const timestamp = room.lastMessage?.timestamp || room.createdAt
+  if (!Number.isFinite(timestamp)) return ''
+  const date = new Date(timestamp)
+  const today = new Date()
+  if (date.toDateString() === today.toDateString()) {
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  }
+  return date.toLocaleDateString([], { day: '2-digit', month: 'short' })
 }
 
 const darkColors = {
@@ -657,31 +699,40 @@ const lightColors = {
 const styles = StyleSheet.create({
   screen: { flex: 1 },
   centered: { alignItems: 'center', flex: 1, gap: 12, justifyContent: 'center' },
-  landingContent: { padding: 18, paddingBottom: 36 },
-  landingHeader: { gap: 14 },
-  titleRow: { alignItems: 'center', flexDirection: 'row', gap: 12, marginBottom: 2 },
-  logo: { alignItems: 'center', borderRadius: 14, height: 48, justifyContent: 'center', width: 48 },
-  logoText: { fontSize: 17, fontWeight: '900' },
-  title: { fontSize: 26, fontWeight: '900' },
+  landingContent: { paddingBottom: 28 },
+  landingHeader: { gap: 12, paddingHorizontal: 16, paddingTop: 14 },
+  titleRow: { alignItems: 'center', flexDirection: 'row', gap: 10 },
+  logo: { borderRadius: 10, height: 38, width: 38 },
+  titleCopy: { flex: 1 },
+  title: { fontSize: 21, fontWeight: '900' },
   helper: { fontSize: 13, lineHeight: 19 },
-  card: { borderRadius: 14, borderWidth: 1, gap: 10, padding: 14 },
-  cardTitle: { fontSize: 16, fontWeight: '800' },
-  label: { fontSize: 13, fontWeight: '700' },
-  input: { borderRadius: 10, borderWidth: 1, fontSize: 15, minHeight: 46, paddingHorizontal: 12, paddingVertical: 10 },
+  profileRow: { alignItems: 'center', flexDirection: 'row', gap: 8 },
+  profileInput: { flex: 1 },
+  profileSaveButton: { alignItems: 'center', borderRadius: 10, justifyContent: 'center', minHeight: 42, paddingHorizontal: 14 },
+  profileSaveText: { color: '#ffffff', fontSize: 13, fontWeight: '800' },
+  input: { borderRadius: 10, borderWidth: 0, fontSize: 14, minHeight: 42, paddingHorizontal: 12, paddingVertical: 9 },
   roomKeyInput: { fontFamily: 'monospace', fontSize: 13 },
-  primaryButton: { alignItems: 'center', borderRadius: 10, minHeight: 44, justifyContent: 'center', paddingHorizontal: 14 },
-  primaryButtonText: { color: '#ffffff', fontSize: 14, fontWeight: '800' },
-  secondaryButton: { alignItems: 'center', borderRadius: 10, borderWidth: 1, minHeight: 42, justifyContent: 'center', paddingHorizontal: 14 },
-  secondaryButtonText: { fontSize: 14, fontWeight: '800' },
+  quickActions: { flexDirection: 'row', gap: 10 },
+  quickAction: { alignItems: 'center', borderRadius: 12, flex: 1, flexDirection: 'row', gap: 8, justifyContent: 'center', minHeight: 48, paddingHorizontal: 10 },
+  quickActionSymbol: { fontSize: 20, fontWeight: '500' },
+  quickActionText: { fontSize: 14, fontWeight: '800' },
+  actionPanel: { alignItems: 'center', borderRadius: 12, flexDirection: 'row', gap: 8, padding: 8 },
+  actionInput: { flex: 1 },
+  actionSubmit: { alignItems: 'center', borderRadius: 9, justifyContent: 'center', minHeight: 42, minWidth: 72, paddingHorizontal: 14 },
+  actionSubmitText: { color: '#ffffff', fontSize: 13, fontWeight: '800' },
   disabled: { opacity: 0.45 },
   error: { fontSize: 13, lineHeight: 18, textAlign: 'center' },
-  sectionTitle: { fontSize: 15, fontWeight: '800', marginBottom: 2, marginTop: 5 },
-  roomRow: { alignItems: 'center', borderRadius: 13, borderWidth: 1, flexDirection: 'row', gap: 11, marginTop: 9, minHeight: 68, padding: 11 },
-  roomAvatar: { alignItems: 'center', borderRadius: 12, height: 44, justifyContent: 'center', width: 44 },
+  sectionHeading: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between', marginTop: 5 },
+  sectionTitle: { fontSize: 16, fontWeight: '900' },
+  roomCount: { fontSize: 12, fontWeight: '700' },
+  roomRow: { alignItems: 'center', borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: 'row', gap: 11, minHeight: 72, paddingHorizontal: 16, paddingVertical: 10 },
+  roomAvatar: { alignItems: 'center', borderRadius: 22, height: 44, justifyContent: 'center', width: 44 },
   roomAvatarText: { fontSize: 14, fontWeight: '900' },
   roomCopy: { flex: 1, gap: 4 },
   roomTitle: { fontSize: 15, fontWeight: '800' },
   roomPreview: { fontSize: 12 },
+  roomMeta: { alignItems: 'flex-end', gap: 5 },
+  roomTime: { fontSize: 10 },
   roomPeerCount: { fontSize: 11, fontWeight: '700' },
   emptyState: { alignItems: 'center', gap: 5, justifyContent: 'center', paddingHorizontal: 28, paddingVertical: 36 },
   emptyTitle: { fontSize: 16, fontWeight: '800' },
