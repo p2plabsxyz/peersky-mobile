@@ -7,9 +7,12 @@ import Corestore from 'corestore'
 import Hyperdrive from 'hyperdrive'
 import {
   clearDownloadedP2pCores,
+  createRoutedP2pStorageRuntime,
   deleteRegisteredP2pAppData,
+  getExistingNamedDrive,
   listRegisteredP2pAppData,
-  resolveHyperdriveAppDriveName
+  resolveHyperdriveAppDriveName,
+  resolveHyperdriveUploadTarget
 } from '../../backend/hyper/storage-core.mjs'
 
 describe('Hyper app storage', () => {
@@ -104,6 +107,200 @@ describe('Hyper app storage', () => {
     assert.equal(resolveHyperdriveAppDriveName(''), 'hyperdrive')
     assert.equal(resolveHyperdriveAppDriveName('custom-drive'), 'custom-drive')
     assert.equal(resolveHyperdriveAppDriveName('../unsafe'), 'hyperdrive')
+  })
+
+  test('resolves public and private Hyperdrive upload targets', () => {
+    assert.deepEqual(resolveHyperdriveUploadTarget('public'), {
+      driveName: 'hyperdrive-public',
+      autoJoin: true
+    })
+    assert.deepEqual(resolveHyperdriveUploadTarget('private'), {
+      driveName: 'hyperdrive-private',
+      autoJoin: false
+    })
+    assert.equal(resolveHyperdriveUploadTarget('shared'), null)
+  })
+
+  test('opens an existing private drive without announcing it', async () => {
+    const requests = []
+    const namespace = {
+      ns: Buffer.from('private'),
+      storage: {
+        getAlias: async () => Buffer.from('discovery-key'),
+        hasCore: async () => true
+      }
+    }
+    const runtime = {
+      namespace: () => namespace,
+      getDrive: async (name, options) => {
+        requests.push({ name, options })
+        return { name }
+      }
+    }
+
+    assert.deepEqual(await getExistingNamedDrive(runtime, {
+      driveName: 'hyperdrive-private',
+      autoJoin: false
+    }), { name: 'hyperdrive-private' })
+    assert.deepEqual(requests, [{
+      name: 'hyperdrive-private',
+      options: { autoJoin: false }
+    }])
+  })
+
+  test('does not announce existing drives unless explicitly requested', async () => {
+    const requests = []
+    const namespace = {
+      ns: Buffer.from('existing'),
+      storage: {
+        getAlias: async () => Buffer.from('discovery-key'),
+        hasCore: async () => true
+      }
+    }
+    const runtime = {
+      namespace: () => namespace,
+      getDrive: async (name, options) => {
+        requests.push({ name, options })
+        return { name }
+      }
+    }
+
+    await getExistingNamedDrive(runtime, { driveName: 'future-private-drive' })
+
+    assert.deepEqual(requests, [{
+      name: 'future-private-drive',
+      options: { autoJoin: false }
+    }])
+  })
+
+  test('keeps P2PMD announced when app data is summarized', async () => {
+    const requests = []
+    const runtime = {
+      namespace: (name) => ({
+        ns: Buffer.from(name),
+        storage: {
+          getAlias: async () => name === 'p2pmd' ? Buffer.from('discovery-key') : null,
+          hasCore: async () => true
+        }
+      }),
+      getDrive: async (name, options) => {
+        requests.push({ name, options })
+        return {
+          id: `${name}-id`,
+          list: async function * () {}
+        }
+      }
+    }
+
+    await listRegisteredP2pAppData(runtime)
+
+    assert.deepEqual(requests, [{
+      name: 'p2pmd',
+      options: { autoJoin: true }
+    }])
+  })
+
+  test('aggregates and deletes legacy, public, and private Hyperdrive data', async () => {
+    const runtime = createRuntime({
+      hyperdrive: [createEntry('/legacy.txt', 10)],
+      'hyperdrive-public': [createEntry('/public.txt', 20)],
+      'hyperdrive-private': [createEntry('/private.txt', 30)]
+    })
+
+    const listed = await listRegisteredP2pAppData(runtime)
+    const hyperdrive = listed.items.find((item) => item.id === 'hyperdrive')
+    assert.equal(hyperdrive.fileCount, 3)
+    assert.equal(hyperdrive.byteLength, 60)
+    assert.equal(hyperdrive.url, '')
+    assert.deepEqual(hyperdrive.drives, [
+      {
+        id: 'hyperdrive-public',
+        title: 'Public',
+        url: 'hyper://hyperdrive-public-id/',
+        fileCount: 1,
+        byteLength: 20,
+        truncated: false
+      },
+      {
+        id: 'hyperdrive-private',
+        title: 'Private',
+        url: 'hyper://hyperdrive-private-id/',
+        fileCount: 1,
+        byteLength: 30,
+        truncated: false
+      },
+      {
+        id: 'hyperdrive',
+        title: 'Legacy',
+        url: 'hyper://hyperdrive-id/',
+        fileCount: 1,
+        byteLength: 10,
+        truncated: false
+      }
+    ])
+
+    assert.deepEqual(await deleteRegisteredP2pAppData(runtime, { appId: 'hyperdrive' }), {
+      ok: true,
+      appId: 'hyperdrive',
+      deleted: true
+    })
+    assert.deepEqual(runtime.purged, new Set([
+      'hyperdrive-public',
+      'hyperdrive-private',
+      'hyperdrive'
+    ]))
+  })
+
+  test('opens the isolated runtime only for private Hyperdrive data', async () => {
+    const networkedRuntime = createRuntime({
+      p2pmd: [createEntry('/note.md', 10)],
+      'hyperdrive-public': [createEntry('/public.txt', 20)]
+    })
+    const privateRuntime = createRuntime({
+      'hyperdrive-private': [createEntry('/private.txt', 30)]
+    })
+    let privateRuntimeCalls = 0
+    const runtime = createRoutedP2pStorageRuntime(
+      networkedRuntime,
+      async () => {
+        privateRuntimeCalls += 1
+        return privateRuntime
+      }
+    )
+
+    assert.ok(await runtime.getExistingDrive('p2pmd'))
+    assert.equal(privateRuntimeCalls, 0)
+    assert.ok(await runtime.getExistingDrive('hyperdrive-private'))
+    assert.equal(privateRuntimeCalls, 1)
+    assert.deepEqual(networkedRuntime.opened, new Set(['p2pmd']))
+    assert.deepEqual(privateRuntime.opened, new Set(['hyperdrive-private']))
+  })
+
+  test('deletes public and private Hyperdrive data from separate runtimes', async () => {
+    const networkedRuntime = createRuntime({
+      'hyperdrive-public': [createEntry('/public.txt', 20)],
+      hyperdrive: [createEntry('/legacy.txt', 10)]
+    })
+    const privateRuntime = createRuntime({
+      'hyperdrive-private': [createEntry('/private.txt', 30)]
+    })
+    const runtime = createRoutedP2pStorageRuntime(
+      networkedRuntime,
+      async () => privateRuntime
+    )
+
+    assert.deepEqual(await deleteRegisteredP2pAppData(runtime, {
+      appId: 'hyperdrive'
+    }), {
+      ok: true,
+      appId: 'hyperdrive',
+      deleted: true
+    })
+    assert.deepEqual(networkedRuntime.purged, new Set([
+      'hyperdrive-public',
+      'hyperdrive'
+    ]))
+    assert.deepEqual(privateRuntime.purged, new Set(['hyperdrive-private']))
   })
 
   test('clears downloaded cores while retaining writable app data', async () => {

@@ -41,3 +41,29 @@ export function createRuntimeCoordinator () {
 
   return { runMaintenance, runOperation }
 }
+
+export async function closeRuntimeCandidates (candidates) {
+  const openings = await Promise.allSettled(candidates.filter(Boolean))
+  const runtimes = [...new Set(
+    openings
+      .filter((result) => result.status === 'fulfilled' && result.value)
+      .map((result) => result.value)
+  )]
+  const closings = await Promise.allSettled(
+    runtimes.map((runtime) => runtime.close())
+  )
+  const failure = openings.find((result) => result.status === 'rejected') ||
+    closings.find((result) => result.status === 'rejected')
+  if (failure) throw failure.reason
+}
+
+export async function initializeRuntimeCandidate (createRuntime, configure) {
+  const runtime = await createRuntime()
+  try {
+    await configure(runtime)
+    return runtime
+  } catch (error) {
+    try { await runtime.close() } catch {}
+    throw error
+  }
+}

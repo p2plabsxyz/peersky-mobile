@@ -1,8 +1,18 @@
 export const P2P_APP_DRIVES = [
-  { id: 'p2pmd', title: 'P2PMD', driveName: 'p2pmd' },
-  { id: 'hyperdrive', title: 'Hyperdrive', driveName: 'hyperdrive' }
+  { id: 'p2pmd', title: 'P2PMD', driveName: 'p2pmd', autoJoin: true },
+  {
+    id: 'hyperdrive',
+    title: 'Hyperdrive',
+    drives: [
+      { driveName: 'hyperdrive-public', title: 'Public', autoJoin: true },
+      { driveName: 'hyperdrive-private', title: 'Private', autoJoin: false },
+      { driveName: 'hyperdrive', title: 'Legacy', autoJoin: true }
+    ]
+  }
 ]
 export const HYPERDRIVE_APP_DRIVE_NAME = 'hyperdrive'
+export const HYPERDRIVE_PUBLIC_DRIVE_NAME = 'hyperdrive-public'
+export const HYPERDRIVE_PRIVATE_DRIVE_NAME = 'hyperdrive-private'
 
 const DEFAULT_PAGE_SIZE = 5
 const MAX_PAGE_SIZE = 10
@@ -15,6 +25,33 @@ export function resolveHyperdriveAppDriveName (name) {
   return /^[A-Za-z0-9_-]+$/.test(trimmedName)
     ? trimmedName
     : HYPERDRIVE_APP_DRIVE_NAME
+}
+
+export function resolveHyperdriveUploadTarget (visibility) {
+  if (visibility === 'public') {
+    return { driveName: HYPERDRIVE_PUBLIC_DRIVE_NAME, autoJoin: true }
+  }
+  if (visibility === 'private') {
+    return { driveName: HYPERDRIVE_PRIVATE_DRIVE_NAME, autoJoin: false }
+  }
+  return null
+}
+
+export function createRoutedP2pStorageRuntime (
+  networkedRuntime,
+  getPrivateRuntime
+) {
+  return {
+    async getExistingDrive (driveName) {
+      const runtime = driveName === HYPERDRIVE_PRIVATE_DRIVE_NAME
+        ? await getPrivateRuntime()
+        : networkedRuntime
+      return getExistingNamedDrive(runtime, {
+        driveName,
+        autoJoin: driveName !== HYPERDRIVE_PRIVATE_DRIVE_NAME
+      })
+    }
+  }
 }
 
 export async function listRegisteredP2pAppData (
@@ -49,11 +86,15 @@ export async function deleteRegisteredP2pAppData (runtime, { appId } = {}) {
   const descriptor = P2P_APP_DRIVES.find((app) => app.id === appId)
   if (!descriptor) return { ok: false, error: 'Unknown P2P app.' }
 
-  const drive = await getExistingNamedDrive(runtime, descriptor.driveName)
-  if (!drive) return { ok: true, appId: descriptor.id, deleted: false }
-  await deleteDriveStorage(drive)
+  let deleted = false
+  for (const target of getDescriptorDrives(descriptor)) {
+    const drive = await getExistingNamedDrive(runtime, target)
+    if (!drive) continue
+    await deleteDriveStorage(drive)
+    deleted = true
+  }
 
-  return { ok: true, appId: descriptor.id, deleted: true }
+  return { ok: true, appId: descriptor.id, deleted }
 }
 
 export async function clearDownloadedP2pCores (store) {
@@ -103,8 +144,12 @@ export async function clearDownloadedP2pCores (store) {
 }
 
 async function summarizeAppDrive (runtime, descriptor) {
-  const drive = await getExistingNamedDrive(runtime, descriptor.driveName)
-  if (!drive) {
+  const drives = []
+  for (const target of getDescriptorDrives(descriptor)) {
+    const drive = await getExistingNamedDrive(runtime, target)
+    if (drive) drives.push({ drive, target })
+  }
+  if (drives.length === 0) {
     return {
       id: descriptor.id,
       title: descriptor.title,
@@ -120,32 +165,62 @@ async function summarizeAppDrive (runtime, descriptor) {
   let byteLength = 0
   let truncated = false
   const startedAt = Date.now()
+  const driveSummaries = []
 
-  for await (const entry of drive.list('/')) {
-    if (!entry?.value || entry.value.linkname) continue
-    fileCount += 1
+  for (const { drive, target } of drives) {
+    let driveFileCount = 0
+    let driveByteLength = 0
+    let driveTruncated = false
 
-    const size = Number(entry.value.blob?.byteLength)
-    if (Number.isSafeInteger(size) && size > 0) byteLength += size
+    for await (const entry of drive.list('/')) {
+      if (!entry?.value || entry.value.linkname) continue
+      fileCount += 1
+      driveFileCount += 1
 
-    if (fileCount >= MAX_FILES_PER_APP || Date.now() - startedAt >= MAX_APP_SCAN_MS) {
-      truncated = true
-      break
+      const size = Number(entry.value.blob?.byteLength)
+      if (Number.isSafeInteger(size) && size > 0) {
+        byteLength += size
+        driveByteLength += size
+      }
+
+      if (fileCount >= MAX_FILES_PER_APP || Date.now() - startedAt >= MAX_APP_SCAN_MS) {
+        truncated = true
+        driveTruncated = true
+        break
+      }
     }
+
+    driveSummaries.push({
+      id: target.driveName,
+      title: target.title || descriptor.title,
+      url: `hyper://${drive.id}/`,
+      fileCount: driveFileCount,
+      byteLength: driveByteLength,
+      truncated: driveTruncated
+    })
+    if (truncated) break
   }
 
   return {
     id: descriptor.id,
     title: descriptor.title,
-    url: `hyper://${drive.id}/`,
+    url: descriptor.drives ? '' : driveSummaries[0].url,
     exists: true,
     fileCount,
     byteLength,
-    truncated
+    truncated,
+    ...(descriptor.drives ? { drives: driveSummaries } : {})
   }
 }
 
-async function getExistingNamedDrive (runtime, driveName) {
+function getDescriptorDrives (descriptor) {
+  return descriptor.drives || [{
+    driveName: descriptor.driveName,
+    autoJoin: descriptor.autoJoin
+  }]
+}
+
+export async function getExistingNamedDrive (runtime, { driveName, autoJoin = false }) {
   if (typeof runtime.getExistingDrive === 'function') {
     return runtime.getExistingDrive(driveName)
   }
@@ -156,7 +231,7 @@ async function getExistingNamedDrive (runtime, driveName) {
     namespace: namespace.ns
   })
   if (!discoveryKey || !await namespace.storage.hasCore(discoveryKey)) return null
-  return runtime.getDrive(driveName)
+  return runtime.getDrive(driveName, { autoJoin })
 }
 
 async function deleteDriveStorage (drive) {

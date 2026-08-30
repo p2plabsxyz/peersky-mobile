@@ -11,6 +11,7 @@ import {
 } from '../p2pmd/scientific.mjs'
 import { hasIeeeMarker } from '../p2pmd/templates.mjs'
 import { resolveHyperdriveAppDriveName } from './storage-core.mjs'
+import { recordHyperArchive } from './archive.mjs'
 
 const MAX_HYPER_FILE_BYTES = 10 * 1024 * 1024
 const MAX_HYPER_IMAGE_BYTES = 5 * 1024 * 1024
@@ -140,6 +141,13 @@ export async function publishMarkdownDocument ({ content, mode, latexModeEnabled
       const drive = await runtime.getDrive(P2PMD_DRIVE_NAME)
 
       await drive.put('/index.html', published)
+
+      await recordHyperArchive({
+        url: `hyper://${drive.id}/`,
+        name: 'P2PMD',
+        source: 'published',
+        appId: 'p2pmd'
+      })
 
       return {
         ok: true,

@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { createRuntimeCoordinator } from '../../backend/hyper/runtime-coordinator.mjs'
+import {
+  closeRuntimeCandidates,
+  createRuntimeCoordinator,
+  initializeRuntimeCandidate
+} from '../../backend/hyper/runtime-coordinator.mjs'
 
 test('runtime maintenance waits for active work and blocks new operations', async () => {
   const coordinator = createRuntimeCoordinator()
@@ -39,4 +43,40 @@ test('runtime maintenance waits for active work and blocks new operations', asyn
     'maintenance-end',
     'second'
   ])
+})
+
+test('runtime shutdown closes fulfilled runtimes when another opening fails', async () => {
+  let closed = 0
+  const runtime = { close: async () => { closed += 1 } }
+
+  await assert.rejects(closeRuntimeCandidates([
+    Promise.reject(new Error('opening failed')),
+    Promise.resolve(runtime),
+    runtime
+  ]), /opening failed/)
+
+  assert.equal(closed, 1)
+})
+
+test('runtime shutdown attempts every close before reporting failure', async () => {
+  const events = []
+
+  await assert.rejects(closeRuntimeCandidates([
+    { close: async () => { events.push('first'); throw new Error('close failed') } },
+    { close: async () => { events.push('second') } }
+  ]), /close failed/)
+
+  assert.deepEqual(events, ['first', 'second'])
+})
+
+test('failed runtime configuration closes the partially opened runtime', async () => {
+  let closed = 0
+  const runtime = { close: async () => { closed += 1 } }
+
+  await assert.rejects(initializeRuntimeCandidate(
+    async () => runtime,
+    async () => { throw new Error('configuration failed') }
+  ), /configuration failed/)
+
+  assert.equal(closed, 1)
 })

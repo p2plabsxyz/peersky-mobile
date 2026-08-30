@@ -33,7 +33,7 @@
   },
   "homepage": "https://github.com/p2plabsxyz/peersky-mobile#readme",
   "dependencies": {
-    "@p2plabs/hyperdht-mdns": "^1.0.0",
+    "@p2plabs/hyperdht-mdns": "^1.2.0",
     "@preeternal/react-native-cookie-manager": "^6.4.0",
     "@vscode/markdown-it-katex": "^1.1.2",
     "b4a": "^1.6.7",
@@ -54,6 +54,7 @@
     "expo-constants": "~55.0.7",
     "expo-crypto": "~55.0.17",
     "expo-dev-client": "~55.0.37",
+    "expo-document-picker": "~55.0.16",
     "expo-file-system": "~55.0.24",
     "expo-font": "~55.0.8",
     "expo-linking": "~55.0.16",

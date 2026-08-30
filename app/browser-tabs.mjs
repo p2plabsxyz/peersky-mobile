@@ -13,7 +13,7 @@ export const DEFAULT_BROWSER_PAGE_ZOOM = 100
 export const DEFAULT_BROWSER_TAB_VIEW_MODE = 'grid'
 const SESSION_VERSION = 1
 const INTERNAL_APP_URLS = {
-  hyper: 'peersky://hyper/',
+  hyper: 'peersky://hyperdrive/',
   holesail: 'peersky://holesail/',
   p2pmd: 'peersky://p2p/p2pmd/'
 }

@@ -40,6 +40,6 @@ describe('browser appearance helpers', () => {
     assert.equal(formatBrowserAddress('example', false), 'example')
     assert.equal(formatBrowserAddress('peersky://home', false), 'peersky://home')
     assert.equal(formatBrowserAddress('peersky://p2p/p2pmd/', false), 'peersky://p2p/p2pmd/')
-    assert.equal(formatBrowserAddress('peersky://hyper/', false), 'peersky://hyper/')
+    assert.equal(formatBrowserAddress('peersky://hyperdrive/', false), 'peersky://hyperdrive/')
   })
 })

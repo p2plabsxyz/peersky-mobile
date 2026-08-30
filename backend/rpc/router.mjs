@@ -6,8 +6,11 @@ import {
   RPC_HYPER_CREATE_DRIVE,
   RPC_HYPER_FETCH,
   RPC_HYPER_INIT,
+  RPC_HYPER_LIBRARY_LIST,
+  RPC_HYPER_LIBRARY_UPLOAD,
   RPC_HYPER_LAN_STATUS,
   RPC_HYPER_STORAGE_CLEAR_CACHE,
+  RPC_HYPER_STORAGE_CLEAR_ALL,
   RPC_HYPER_STORAGE_DELETE_APP,
   RPC_HYPER_STORAGE_LIST,
   RPC_IDENTITY_GET_KEY,
@@ -34,6 +37,7 @@ import { rmSync, renameSync } from 'bare-fs'
 import { restoreIdentityFromBackup } from '../backup/restore.mjs'
 
 import { createDrive, publishMarkdownDocument, readHyperFile, uploadHyperFile } from '../hyper/drive.mjs'
+import { listHyperdriveLocation, uploadHyperdriveFile } from '../hyper/library.mjs'
 import { fetchHyper, fetchHyperBinary, resetHyperFetch } from '../hyper/fetch.mjs'
 import {
   closeHyperRuntime,
@@ -44,7 +48,7 @@ import {
   withHyperRuntimeMaintenance,
   withHyperRuntimeOperation
 } from '../hyper/runtime.mjs'
-import { clearP2pCache, deleteP2pAppData, listP2pAppData } from '../hyper/storage.mjs'
+import { clearAllP2pData, clearP2pCache, deleteP2pAppData, listP2pAppData } from '../hyper/storage.mjs'
 
 import {
   connectHolesail,
@@ -93,6 +97,16 @@ export async function routeRpcRequest (req) {
       return
     }
 
+    if (req.command === RPC_HYPER_LIBRARY_LIST) {
+      replyJson(req, await listHyperdriveLocation(parseJsonMessage(req.data)))
+      return
+    }
+
+    if (req.command === RPC_HYPER_LIBRARY_UPLOAD) {
+      replyJson(req, await uploadHyperdriveFile(parseJsonMessage(req.data)))
+      return
+    }
+
     if (req.command === RPC_HYPER_LAN_STATUS) {
       await ensureLANDiscovery()
       replyJson(req, {
@@ -114,6 +128,11 @@ export async function routeRpcRequest (req) {
 
     if (req.command === RPC_HYPER_STORAGE_CLEAR_CACHE) {
       replyJson(req, await clearP2pCache())
+      return
+    }
+
+    if (req.command === RPC_HYPER_STORAGE_CLEAR_ALL) {
+      replyJson(req, await clearAllP2pData())
       return
     }
 

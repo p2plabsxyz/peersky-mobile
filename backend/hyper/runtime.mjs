@@ -6,15 +6,43 @@ import {
   resetLANDiscovery,
   startLANDiscovery
 } from './lan-discovery.mjs'
-import { createRuntimeCoordinator } from './runtime-coordinator.mjs'
+import {
+  closeRuntimeCandidates,
+  createRuntimeCoordinator,
+  initializeRuntimeCandidate
+} from './runtime-coordinator.mjs'
+import {
+  createPrivateHyperRuntimeOptions,
+  matchesHyperdriveAddress
+} from './runtime-routing.mjs'
+import {
+  getExistingNamedDrive,
+  HYPERDRIVE_PRIVATE_DRIVE_NAME
+} from './storage-core.mjs'
 
 let sdk = null
 let sdkOpening = null
 let storagePath = null
+let privateSdk = null
+let privateSdkOpening = null
+let privateStoragePath = null
+let privateDriveId = null
 const runtimeCoordinator = createRuntimeCoordinator()
 
 export function withHyperRuntimeOperation (task) {
   return runtimeCoordinator.runOperation(async () => task(await getHyperRuntime()))
+}
+
+export function withPrivateHyperRuntimeOperation (task) {
+  return runtimeCoordinator.runOperation(async () => task(await getPrivateHyperRuntime()))
+}
+
+export function withHyperRuntimeForAddress (address, task) {
+  return runtimeCoordinator.runOperation(async () => {
+    const isolatedRuntime = await getPrivateHyperRuntime()
+    if (isPrivateHyperdriveAddress(address)) return task(isolatedRuntime)
+    return task(await getHyperRuntime())
+  })
 }
 
 export function withHyperRuntimeMaintenance (task) {
@@ -41,8 +69,45 @@ export async function getHyperRuntime () {
   }
 }
 
+export async function getPrivateHyperRuntime () {
+  if (privateSdk) return privateSdk
+
+  if (!privateSdkOpening) {
+    privateStoragePath = getPrivateHyperSdkStoragePath()
+    privateSdkOpening = initializeRuntimeCandidate(
+      () => createSDK(createPrivateHyperRuntimeOptions(privateStoragePath)),
+      async (runtime) => {
+        const drive = await getExistingNamedDrive(runtime, {
+          driveName: HYPERDRIVE_PRIVATE_DRIVE_NAME,
+          autoJoin: false
+        })
+        rememberPrivateHyperdrive(drive)
+        privateSdk = runtime
+      }
+    )
+  }
+
+  try {
+    return await privateSdkOpening
+  } finally {
+    privateSdkOpening = null
+  }
+}
+
+export function rememberPrivateHyperdrive (drive) {
+  if (drive?.id) privateDriveId = String(drive.id).toLowerCase()
+}
+
 export function getHyperStoragePath () {
+  if (!storagePath && typeof Bare !== 'undefined') storagePath = getHyperSdkStoragePath()
   return storagePath
+}
+
+export function getPrivateHyperStoragePath () {
+  if (!privateStoragePath && typeof Bare !== 'undefined') {
+    privateStoragePath = getPrivateHyperSdkStoragePath()
+  }
+  return privateStoragePath
 }
 
 export function ensureLANDiscovery () {
@@ -52,15 +117,17 @@ export function ensureLANDiscovery () {
 export { getLANDiscoveryStatus }
 
 export async function closeHyperRuntime () {
-  const runtime = sdk || (sdkOpening ? await sdkOpening : null)
-  if (!runtime) return
-
-  sdk = null
-  sdkOpening = null
-
   try {
-    await runtime.close()
+    await closeRuntimeCandidates([
+      sdk || sdkOpening,
+      privateSdk || privateSdkOpening
+    ])
   } finally {
+    sdk = null
+    sdkOpening = null
+    privateSdk = null
+    privateSdkOpening = null
+    privateDriveId = null
     resetLANDiscovery()
   }
 }
@@ -72,6 +139,16 @@ function getHyperSdkStoragePath () {
   // Hyper SDK needs an app-owned storage directory. Bare.argv[0] can point at
   // the mutable device file used by Bare itself, so keep Hyper data beside it.
   return joinSiblingPath(workletStoragePath, 'hyper-sdk')
+}
+
+function getPrivateHyperSdkStoragePath () {
+  const workletStoragePath = Bare.argv[0]
+  if (!workletStoragePath) return 'hyper-storage-private'
+  return joinSiblingPath(workletStoragePath, 'hyper-sdk-private')
+}
+
+function isPrivateHyperdriveAddress (address) {
+  return matchesHyperdriveAddress(address, privateDriveId)
 }
 
 function joinSiblingPath (filepath, siblingName) {

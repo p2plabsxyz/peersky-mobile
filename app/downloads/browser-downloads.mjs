@@ -45,6 +45,7 @@ export function normalizeBrowserDownloads (downloads) {
     const createdAt = Number.isFinite(download.createdAt) && download.createdAt >= 0
       ? download.createdAt
       : 0
+    const sourceUrl = normalizeBrowserDownloadUrl(download.sourceUrl)
 
     if (!id || !name) continue
 
@@ -53,13 +54,24 @@ export function normalizeBrowserDownloads (downloads) {
       name,
       status,
       size,
-      createdAt
+      createdAt,
+      sourceUrl: sourceUrl || undefined
     })
     normalized.sort(compareNewest)
     if (normalized.length > MAX_BROWSER_DOWNLOADS) normalized.pop()
   }
 
   return disambiguateBrowserDownloadNames(normalized)
+}
+
+export function findCompletedHyperDownload (downloads, { url } = {}) {
+  if (!Array.isArray(downloads) || typeof url !== 'string') return null
+
+  const normalizedUrl = normalizeHyperUrl(url)
+  if (!normalizedUrl) return null
+
+  const completed = downloads.filter((download) => download?.status === 'complete')
+  return completed.find((download) => getProxiedHyperUrl(download.sourceUrl) === normalizedUrl) || null
 }
 
 export function sortBrowserDownloads (downloads, sort = 'newest') {
@@ -86,6 +98,29 @@ export function sortBrowserDownloads (downloads, sort = 'newest') {
 
 function truncateUnicode (value, limit) {
   return Array.from(value).slice(0, limit).join('')
+}
+
+function getProxiedHyperUrl (value) {
+  const sourceUrl = normalizeBrowserDownloadUrl(value)
+  if (!sourceUrl) return null
+
+  try {
+    return normalizeHyperUrl(new URL(sourceUrl).searchParams.get('url'))
+  } catch {
+    return null
+  }
+}
+
+function normalizeHyperUrl (value) {
+  if (typeof value !== 'string' || value.length > 4096) return null
+  try {
+    const parsed = new URL(value)
+    if (parsed.protocol !== 'hyper:' || !parsed.hostname || parsed.username || parsed.password) return null
+    parsed.hash = ''
+    return parsed.href
+  } catch {
+    return null
+  }
 }
 
 export function disambiguateBrowserDownloadNames (downloads) {

@@ -119,6 +119,8 @@ import { HistoryScreen } from './history/HistoryScreen'
 import { getBrowserHistoryDocumentTitle } from './history/browser-history.mjs'
 import { useBrowserHistory } from './history/useBrowserHistory'
 import { DownloadsScreen } from './downloads/DownloadsScreen'
+import { findCompletedHyperDownload } from './downloads/browser-downloads.mjs'
+import { HyperdriveScreen } from './hyperdrive/HyperdriveScreen'
 import { peerSkyWebViewNativeConfig } from './downloads/PeerSkyWebView'
 import {
   initializeContentBlocking,
@@ -142,7 +144,6 @@ import {
   RPC_HOLESAIL_START_LIVE,
   RPC_HOLESAIL_STATUS,
   RPC_HOLESAIL_STOP,
-  RPC_HYPER_CREATE_DRIVE,
   RPC_HYPER_FETCH,
   RPC_HYPER_INIT,
   RPC_P2PMD_ROOM_CREATE,
@@ -329,7 +330,6 @@ export default function App () {
   const [browserWebCanGoBack, setBrowserWebCanGoBack] = useState(false)
   const [browserWebCanGoForward, setBrowserWebCanGoForward] = useState(false)
   const [browserIsLoading, setBrowserIsLoading] = useState(false)
-  const [url, setUrl] = useState('hyper://localhost/')
   const [activeTab, setActiveTab] = useState<RuntimeTab>('hyper')
   const [lastResult, setLastResult] = useState<RpcResponse | null>(null)
   const [hsLivePort, setHsLivePort] = useState('8989')
@@ -352,7 +352,7 @@ export default function App () {
   const [p2pmdSetupError, setP2pmdSetupError] = useState<string | null>(null)
   const [p2pmdPublishUrl, setP2pmdPublishUrl] = useState<string | null>(null)
   const [isP2pmdPublishing, setIsP2pmdPublishing] = useState(false)
-  const shouldShowRuntimeStatus = activeTab !== 'p2pmd'
+  const shouldShowRuntimeStatus = activeTab === 'holesail'
   const {
     clearAllPreviews: clearAllBrowserTabPreviews,
     clearCachedPreviews: clearCachedBrowserTabPreviews,
@@ -639,56 +639,6 @@ export default function App () {
     }
 
     return JSON.parse(b4a.toString(reply as Uint8Array))
-  }
-
-  async function onFetch () {
-    setIsLoading(true)
-    setStatus('Fetching from Hyper...')
-    setLastResult(null)
-
-    try {
-      const response = await callRpc(RPC_HYPER_FETCH, {
-        url: url.trim(),
-        method: 'GET'
-      })
-
-      setLastResult(response)
-
-      if (!response.ok) {
-        setStatus(response.error || 'Hyper fetch failed')
-      } else {
-        setStatus(`Fetch complete (${response.status} ${response.statusText})`)
-      }
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : String(error))
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  async function onCreateDrive () {
-    setIsLoading(true)
-    setStatus('Creating writable Hyperdrive...')
-    setLastResult(null)
-
-    try {
-      const response = await callRpc(RPC_HYPER_CREATE_DRIVE, {})
-      setLastResult(response)
-
-      if (!response.ok) {
-        setStatus(response.error || 'Failed creating Hyperdrive')
-        return
-      }
-
-      if (response.url) {
-        setUrl(response.url)
-      }
-      setStatus(`Drive created (${response.status} ${response.statusText})`)
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : String(error))
-    } finally {
-      setIsLoading(false)
-    }
   }
 
   function commitBrowserEntry (url: string, source: BrowserSource) {
@@ -1298,6 +1248,26 @@ export default function App () {
         ? Platform.OS === 'ios' ? 'Download saved' : 'Download requested'
         : 'Unable to start download'
     )
+  }
+
+  async function openHyperdriveItem (item: {
+    name: string
+    source?: 'fetched' | 'published' | 'uploaded'
+    type?: 'directory' | 'file'
+    url: string
+  }) {
+    if (item.type !== 'directory' && item.source === 'fetched') {
+      const downloads = await refreshBrowserDownloads()
+      const existing = findCompletedHyperDownload(downloads, item)
+      if (existing) {
+        const opened = await openBrowserDownload(existing.id)
+        setStatus(opened ? `Opened ${existing.name}` : 'No app is available to open this download')
+        return false
+      }
+    }
+
+    await loadBrowserUrl(item.url)
+    return true
   }
 
   async function onBrowserMediaShare (targetUrl: string, title: string) {
@@ -2326,6 +2296,11 @@ export default function App () {
             setBrowserSettingsVisible(false)
             void loadBrowserUrl(targetUrl)
           }}
+          onOpenHyperItem={(item) => {
+            void openHyperdriveItem(item).then((didNavigate) => {
+              if (didNavigate) setBrowserSettingsVisible(false)
+            })
+          }}
           onIdentityRestored={() => {
             browserSessionReadyRef.current = false
             setBrowserSessionReady(false)
@@ -2640,7 +2615,18 @@ export default function App () {
             </ScrollView>
             )
           : browserSource.kind === 'app'
-            ? (
+            ? activeTab === 'hyper'
+              ? (
+                <HyperdriveScreen
+                  isDark={browserIsDark}
+                  isLandscape={!browserIsPortrait}
+                  onCallRpc={(command, data = {}) => callRpc(command, data)}
+                  onOpenItem={(item) => void openHyperdriveItem(item)}
+                  onOpenUrl={(targetUrl) => void loadBrowserUrl(targetUrl)}
+                  onStatus={setStatus}
+                />
+                )
+              : (
               <ScrollView
                 style={[
                   styles.browserContentPage,
@@ -2663,33 +2649,6 @@ export default function App () {
                   <Text style={[styles.status, { color: browserChrome.text }]}>{status}</Text>
                 )}
 
-                {activeTab === 'hyper' && (
-                  <View style={[styles.section, { borderColor: browserChrome.border }]}>
-                    <Text style={[styles.sectionTitle, { color: browserChrome.text }]}>Hyper Runtime Check</Text>
-                    <TextInput
-                      style={[styles.input, runtimeInputTheme]}
-                      autoCapitalize='none'
-                      autoCorrect={false}
-                      value={url}
-                      onChangeText={setUrl}
-                      placeholder='hyper://...'
-                      placeholderTextColor={browserChrome.mutedText}
-                    />
-
-                    <View style={styles.buttons}>
-                      <Button
-                        title='Create Drive'
-                        onPress={() => void onCreateDrive()}
-                        disabled={isBooting || isLoading}
-                      />
-                      <Button
-                        title='Fetch URL'
-                        onPress={() => void onFetch()}
-                        disabled={isBooting || isLoading}
-                      />
-                    </View>
-                  </View>
-                )}
                 {activeTab === 'holesail' && (
                   <View style={[styles.section, { borderColor: browserChrome.border }]}>
                     <Text style={[styles.sectionTitle, { color: browserChrome.text }]}>Holesail Runtime Check</Text>
