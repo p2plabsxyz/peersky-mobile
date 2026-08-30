@@ -23,7 +23,15 @@ import {
   RPC_P2PMD_PREVIEW,
   RPC_P2PMD_ROOM_JOIN,
   RPC_P2PMD_ROOM_PUBLISH,
-  RPC_P2PMD_ROOM_STATUS
+  RPC_P2PMD_ROOM_STATUS,
+  RPC_PEERCHAT_INIT,
+  RPC_PEERCHAT_PROFILE_SET,
+  RPC_PEERCHAT_ROOM_CREATE,
+  RPC_PEERCHAT_ROOM_JOIN,
+  RPC_PEERCHAT_ROOMS,
+  RPC_PEERCHAT_SNAPSHOT,
+  RPC_PEERCHAT_SEND,
+  RPC_PEERCHAT_ROOM_LEAVE
 } from './commands.mjs'
 import {
   getDefaultIdentityStoragePath,
@@ -71,6 +79,7 @@ import {
 import { getP2pmdEditorPage } from '../p2pmd/server.mjs'
 import { hasIeeeMarker } from '../p2pmd/templates.mjs'
 import { parseJsonMessage, replyJson } from './messages.mjs'
+import { closePeerChatService, getPeerChatService } from '../peerchat/runtime.mjs'
 
 let currentIdentityNonce = null
 let pendingRestorePath = null
@@ -205,6 +214,7 @@ export async function routeRpcRequest (req) {
         const storagePath = getDefaultIdentityStoragePath()
         const backupPath = storagePath + '.backup'
 
+        await closePeerChatService()
         await closeHyperRuntime()
         resetHyperFetch()
 
@@ -312,6 +322,80 @@ export async function routeRpcRequest (req) {
 
     if (req.command === RPC_P2PMD_ROOM_DISCONNECT) {
       replyJson(req, await disconnectP2pmdRoom())
+      return
+    }
+
+    if (req.command === RPC_PEERCHAT_INIT) {
+      const peerChat = await getPeerChatService()
+      replyJson(req, {
+        ok: true,
+        profile: peerChat.getProfile(),
+        rooms: peerChat.listRooms(),
+        version: peerChat.version
+      })
+      return
+    }
+
+    if (req.command === RPC_PEERCHAT_PROFILE_SET) {
+      const peerChat = await getPeerChatService()
+      replyJson(req, {
+        ok: true,
+        profile: peerChat.setProfile(parseJsonMessage(req.data))
+      })
+      return
+    }
+
+    if (req.command === RPC_PEERCHAT_ROOM_CREATE) {
+      const peerChat = await getPeerChatService()
+      replyJson(req, {
+        ok: true,
+        room: await peerChat.createRoom(parseJsonMessage(req.data))
+      })
+      return
+    }
+
+    if (req.command === RPC_PEERCHAT_ROOM_JOIN) {
+      const peerChat = await getPeerChatService()
+      replyJson(req, {
+        ok: true,
+        room: await peerChat.joinRoom(parseJsonMessage(req.data))
+      })
+      return
+    }
+
+    if (req.command === RPC_PEERCHAT_ROOMS) {
+      const peerChat = await getPeerChatService()
+      replyJson(req, {
+        ok: true,
+        profile: peerChat.getProfile(),
+        rooms: peerChat.listRooms(),
+        version: peerChat.version
+      })
+      return
+    }
+
+    if (req.command === RPC_PEERCHAT_SNAPSHOT) {
+      const peerChat = await getPeerChatService()
+      replyJson(req, {
+        ok: true,
+        ...await peerChat.getSnapshot(parseJsonMessage(req.data))
+      })
+      return
+    }
+
+    if (req.command === RPC_PEERCHAT_SEND) {
+      const peerChat = await getPeerChatService()
+      replyJson(req, {
+        ok: true,
+        sent: await peerChat.sendMessage(parseJsonMessage(req.data)),
+        version: peerChat.version
+      })
+      return
+    }
+
+    if (req.command === RPC_PEERCHAT_ROOM_LEAVE) {
+      const peerChat = await getPeerChatService()
+      replyJson(req, await peerChat.leaveRoom(parseJsonMessage(req.data)))
       return
     }
 

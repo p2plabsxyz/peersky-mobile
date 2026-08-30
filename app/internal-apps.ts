@@ -7,7 +7,7 @@ import {
   getRuntimeAppUrl as getRuntimeAppRegistryUrl
 } from './internal-apps-registry.mjs'
 
-export type RuntimeTab = 'hyper' | 'holesail' | 'p2pmd'
+export type RuntimeTab = 'hyper' | 'holesail' | 'p2pmd' | 'peerchat'
 
 const INTERNAL_APP_ICONS: Partial<Record<RuntimeTab, ImageSourcePropType>> = {
   hyper: require('../assets/images/hyperdrive.png'),

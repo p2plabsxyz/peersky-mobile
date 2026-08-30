@@ -6,6 +6,12 @@ export const INTERNAL_APPS = [
     icon: 'MD'
   },
   {
+    id: 'peerchat',
+    title: 'PeerChat',
+    url: 'peersky://p2p/peerchat/',
+    icon: 'PC'
+  },
+  {
     id: 'holesail',
     title: 'Holesail',
     url: 'peersky://holesail/',

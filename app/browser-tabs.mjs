@@ -15,7 +15,8 @@ const SESSION_VERSION = 1
 const INTERNAL_APP_URLS = {
   hyper: 'peersky://hyperdrive/',
   holesail: 'peersky://holesail/',
-  p2pmd: 'peersky://p2p/p2pmd/'
+  p2pmd: 'peersky://p2p/p2pmd/',
+  peerchat: 'peersky://p2p/peerchat/'
 }
 
 export function createBrowserTab (id, title = 'New tab') {

@@ -121,6 +121,7 @@ import { useBrowserHistory } from './history/useBrowserHistory'
 import { DownloadsScreen } from './downloads/DownloadsScreen'
 import { findCompletedHyperDownload } from './downloads/browser-downloads.mjs'
 import { HyperdriveScreen } from './hyperdrive/HyperdriveScreen'
+import { PeerChatScreen, type PeerChatResponse } from './peerchat/PeerChatScreen'
 import { peerSkyWebViewNativeConfig } from './downloads/PeerSkyWebView'
 import {
   initializeContentBlocking,
@@ -2610,6 +2611,14 @@ export default function App () {
                   onStatus={setStatus}
                 />
                 )
+              : activeTab === 'peerchat'
+              ? (
+                <PeerChatScreen
+                  isDark={browserIsDark}
+                  onCallRpc={(command, data = {}) => callRpc(command, data) as Promise<PeerChatResponse>}
+                  onStatus={setStatus}
+                />
+                )
               : (
               <ScrollView
                 style={[
@@ -3199,5 +3208,6 @@ function getBrowserTabLabel (tab: BrowserTab) {
 function getRuntimeAppIconStyle (app: RuntimeTab) {
   if (app === 'hyper') return styles.browserShortcutIconHyper
   if (app === 'holesail') return styles.browserShortcutIconHolesail
+  if (app === 'peerchat') return styles.browserShortcutIconPeerchat
   return styles.browserShortcutIconP2pmd
 }

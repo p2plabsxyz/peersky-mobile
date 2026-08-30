@@ -333,6 +333,9 @@ export const styles = StyleSheet.create({
   browserShortcutIconHyper: {
     backgroundColor: '#273b65'
   },
+  browserShortcutIconPeerchat: {
+    backgroundColor: '#1d513d'
+  },
   browserShortcutIconText: {
     color: '#ffffff',
     fontSize: 22,
