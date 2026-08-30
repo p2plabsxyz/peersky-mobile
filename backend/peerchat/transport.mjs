@@ -1,7 +1,27 @@
 import compactEncoding from 'compact-encoding'
+import b4a from 'b4a'
 import Protomux from 'protomux'
 
-import { PEERCHAT_PROTOCOL } from './protocol.mjs'
+import { MAX_PEERCHAT_FRAME_BYTES, PEERCHAT_PROTOCOL } from './protocol.mjs'
+
+const boundedStringEncoding = {
+  preencode (state, value) {
+    assertFrameSize(value)
+    compactEncoding.string.preencode(state, value)
+  },
+  encode (state, value) {
+    assertFrameSize(value)
+    compactEncoding.string.encode(state, value)
+  },
+  decode (state) {
+    const length = compactEncoding.uint.decode(state)
+    if (length > MAX_PEERCHAT_FRAME_BYTES) throw new Error('PeerChat frame is too large')
+    if (state.end - state.start < length) throw new Error('PeerChat frame is incomplete')
+    const start = state.start
+    state.start += length
+    return b4a.toString(state.buffer, 'utf8', start, state.start)
+  }
+}
 
 export function attachPeerChatTransport (connection, onMessage, options = {}) {
   const mux = Protomux.from(connection)
@@ -13,7 +33,7 @@ export function attachPeerChatTransport (connection, onMessage, options = {}) {
   if (!channel) return null
 
   const message = channel.addMessage({
-    encoding: compactEncoding.string,
+    encoding: boundedStringEncoding,
     onmessage: onMessage
   })
 
@@ -27,5 +47,11 @@ export function attachPeerChatTransport (connection, onMessage, options = {}) {
     close () {
       if (!channel.closed) channel.close()
     }
+  }
+}
+
+function assertFrameSize (value) {
+  if (b4a.byteLength(String(value), 'utf8') > MAX_PEERCHAT_FRAME_BYTES) {
+    throw new Error('PeerChat frame is too large')
   }
 }

@@ -2,6 +2,8 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  renameSync,
+  rmSync,
   writeFileSync
 } from 'node:fs'
 import b4a from 'b4a'
@@ -11,12 +13,15 @@ import {
   createPeerChatRoomKey,
   decryptPeerChatMessage,
   encryptPeerChatMessage,
+  getPeerChatMessageByteLength,
   getSharedPeerChatRooms,
-  MAX_PEERCHAT_MESSAGE_LENGTH,
+  MAX_PEERCHAT_FRAME_BYTES,
+  MAX_PEERCHAT_MESSAGE_BYTES,
   normalizePeerChatMessage,
   normalizePeerChatProfileName,
   normalizePeerChatRoomKey,
   normalizePeerChatRoomName,
+  normalizePeerChatTimestamp,
   peerChatTopicHex
 } from './protocol.mjs'
 import { attachPeerChatTransport } from './transport.mjs'
@@ -25,10 +30,15 @@ const MAX_ROOMS = 50
 const MAX_RETURNED_MESSAGES = 200
 const MAX_SYNC_MESSAGES = 200
 const MAX_SEEN_MESSAGE_IDS = 10_000
-const MAX_FRAME_LENGTH = MAX_PEERCHAT_MESSAGE_LENGTH * 4
+const MAX_FRAME_LENGTH = MAX_PEERCHAT_FRAME_BYTES
+export const MAX_PEERCHAT_STORED_MESSAGES_PER_ROOM = 5000
+export const MAX_PEERCHAT_ROOM_STORAGE_BYTES = 16 * 1024 * 1024
+export const MAX_PEERCHAT_TOTAL_STORAGE_BYTES = 128 * 1024 * 1024
 const LIVE_RATE_WINDOW_MS = 60_000
 const MAX_LIVE_MESSAGES_PER_WINDOW = 120
+const MAX_CONTROL_MESSAGES_PER_WINDOW = 60
 const MAX_INITIAL_SYNC_MESSAGES_PER_CONNECTION = 500
+const MAX_PENDING_MESSAGES_PER_CONNECTION = 256
 const PERSIST_DELAY_MS = 500
 const PING_INTERVAL_MS = 25_000
 
@@ -43,6 +53,10 @@ export class PeerChatService {
     this.profile = { username: '' }
     this.rooms = new Map()
     this.feeds = new Map()
+    this.feedListeners = new Map()
+    this.pendingJoins = new Map()
+    this.roomStorageBytes = new Map()
+    this.totalStoredBytes = 0
     this.joinedRooms = new Set()
     this.discoveryKeys = new Map()
     this.peers = new Map()
@@ -189,7 +203,12 @@ export class PeerChatService {
     if (!this.feeds.has(normalizedRoomKey)) await this.joinRoomNetwork(normalizedRoomKey)
 
     const normalizedMessage = normalizePeerChatMessage(message)
-    if (!normalizedMessage) throw new Error('Enter a message to send.')
+    if (!normalizedMessage) {
+      if (typeof message === 'string' && getPeerChatMessageByteLength(message.trim()) > MAX_PEERCHAT_MESSAGE_BYTES) {
+        throw new Error(`PeerChat messages must be at most ${MAX_PEERCHAT_MESSAGE_BYTES} UTF-8 bytes.`)
+      }
+      throw new Error('Enter a message to send.')
+    }
 
     const encrypted = encryptPeerChatMessage(normalizedMessage, normalizedRoomKey)
     const entry = {
@@ -220,12 +239,15 @@ export class PeerChatService {
       ts: Date.now()
     })
 
+    const pendingJoin = this.pendingJoins.get(normalized)
+    if (pendingJoin) await pendingJoin.catch(() => {})
+
     try {
       await this.sdk.leave(b4a.from(normalized, 'hex'))
     } catch {}
 
     this.rooms.delete(normalized)
-    this.feeds.delete(normalized)
+    await this.releaseFeed(normalized)
     this.joinedRooms.delete(normalized)
     this.discoveryKeys.delete(normalized)
     this.persistNow()
@@ -238,7 +260,6 @@ export class PeerChatService {
     this.closed = true
     if (this.persistTimer) clearTimeout(this.persistTimer)
     this.persistTimer = null
-    this.persistNow()
 
     this.sdk.swarm.off?.('connection', this.onConnection)
     this.sdk.localSwarm?.off?.('topics-change', this.onTopicsChange)
@@ -247,6 +268,20 @@ export class PeerChatService {
       peer.transport?.close()
     }
     this.peers.clear()
+
+    const pendingJoins = [...this.pendingJoins.values()]
+    if (pendingJoins.length > 0) await Promise.allSettled(pendingJoins)
+    this.pendingJoins.clear()
+
+    for (const roomKey of [...this.feeds.keys()]) await this.releaseFeed(roomKey)
+    for (const roomKey of this.joinedRooms) {
+      try {
+        await this.sdk.leave(b4a.from(roomKey, 'hex'))
+      } catch {}
+    }
+    this.joinedRooms.clear()
+    this.discoveryKeys.clear()
+    this.persistNow()
   }
 
   ensureProfile (username) {
@@ -255,6 +290,18 @@ export class PeerChatService {
   }
 
   async joinRoomNetwork (roomKey) {
+    if (this.closed) throw new Error('PeerChat service is closed.')
+    const pending = this.pendingJoins.get(roomKey)
+    if (pending) return pending
+
+    const join = this.openRoomNetwork(roomKey).finally(() => {
+      if (this.pendingJoins.get(roomKey) === join) this.pendingJoins.delete(roomKey)
+    })
+    this.pendingJoins.set(roomKey, join)
+    return join
+  }
+
+  async openRoomNetwork (roomKey) {
     if (!this.joinedRooms.has(roomKey)) {
       const topic = b4a.from(roomKey, 'hex')
       const discoveryKey = peerChatTopicHex(topic)
@@ -271,6 +318,7 @@ export class PeerChatService {
       }
     }
 
+    if (this.closed) throw new Error('PeerChat service is closed.')
     if (this.feeds.has(roomKey)) return
 
     const feed = this.sdk.corestore.get({
@@ -278,9 +326,14 @@ export class PeerChatService {
       valueEncoding: 'json'
     })
     await feed.ready()
+    if (this.closed) {
+      if (feed.close) await feed.close().catch(() => {})
+      throw new Error('PeerChat service is closed.')
+    }
     this.feeds.set(roomKey, feed)
+    this.registerFeedStorage(roomKey, feed)
 
-    const firstIndex = Math.max(0, feed.length - MAX_SEEN_MESSAGE_IDS)
+    const firstIndex = Math.max(0, feed.length - MAX_SYNC_MESSAGES)
     for (let index = firstIndex; index < feed.length; index += 1) {
       try {
         const entry = await feed.get(index)
@@ -288,10 +341,12 @@ export class PeerChatService {
       } catch {}
     }
 
-    feed.on('append', () => {
+    const onAppend = () => {
       this.updateLastMessage(roomKey).catch(() => {})
       this.bumpVersion()
-    })
+    }
+    this.feedListeners.set(roomKey, onAppend)
+    feed.on('append', onAppend)
   }
 
   handleConnection (connection, info = {}) {
@@ -308,9 +363,12 @@ export class PeerChatService {
       active: false,
       initialSyncCount: 0,
       liveRate: { count: 0, resetsAt: Date.now() + LIVE_RATE_WINDOW_MS },
+      controlRate: { count: 0, resetsAt: Date.now() + LIVE_RATE_WINDOW_MS },
       pendingMessages: 0,
       processing: Promise.resolve(),
       pingTimer: null,
+      syncedRooms: new Set(),
+      syncingRooms: new Map(),
       transport: null
     }
 
@@ -379,7 +437,7 @@ export class PeerChatService {
       if (!line || line.length > MAX_FRAME_LENGTH) continue
       try {
         const message = JSON.parse(line)
-        if (peer.pendingMessages >= MAX_INITIAL_SYNC_MESSAGES_PER_CONNECTION * 2) continue
+        if (peer.pendingMessages >= MAX_PENDING_MESSAGES_PER_CONNECTION) continue
         peer.pendingMessages += 1
         peer.processing = peer.processing
           .then(() => this.handlePeerMessage(peer, message))
@@ -394,12 +452,14 @@ export class PeerChatService {
   async handlePeerMessage (peer, message) {
     if (!message || typeof message !== 'object') return
     if (message.type === 'ping') {
+      if (!this.consumeControlRate(peer)) return
       this.sendToPeer(peer, { type: 'pong' })
       return
     }
     if (message.type === 'pong' || message.type === 'sync-done') return
 
     if (message.type === 'profile') {
+      if (!this.consumeControlRate(peer)) return
       const name = normalizePeerChatProfileName(message.username)
       if (name) peer.username = name
       return
@@ -409,11 +469,13 @@ export class PeerChatService {
     if (!roomKey || !peer.rooms.includes(roomKey) || !this.rooms.has(roomKey)) return
 
     if (message.type === 'request-room-meta') {
+      if (!this.consumeControlRate(peer)) return
       this.sendRoomMeta(peer, roomKey)
       return
     }
 
     if (message.type === 'room-meta') {
+      if (!this.consumeControlRate(peer)) return
       const room = this.rooms.get(roomKey)
       if (!room?.isHost) {
         const placeholder = `${roomKey.slice(0, 8)}...`
@@ -443,9 +505,10 @@ export class PeerChatService {
     }
 
     if (message.type === 'join') {
+      if (!this.consumeControlRate(peer)) return
       if (message.username) peer.username = normalizePeerChatProfileName(message.username) || peer.username
       this.sendRoomMeta(peer, roomKey)
-      await this.syncHistoryToPeer(peer, roomKey)
+      await this.syncHistoryToPeerOnce(peer, roomKey)
       this.bumpVersion()
       return
     }
@@ -490,7 +553,7 @@ export class PeerChatService {
       ct: message.ct,
       iv: message.iv,
       tag: message.tag,
-      ts: Number.isFinite(message.ts) ? Math.floor(message.ts) : Date.now()
+      ts: normalizePeerChatTimestamp(message.ts)
     }
     await this.appendEntry(roomKey, entry)
   }
@@ -506,6 +569,17 @@ export class PeerChatService {
     return true
   }
 
+  consumeControlRate (peer) {
+    const now = Date.now()
+    if (now >= peer.controlRate.resetsAt) {
+      peer.controlRate = { count: 1, resetsAt: now + LIVE_RATE_WINDOW_MS }
+      return true
+    }
+    if (peer.controlRate.count >= MAX_CONTROL_MESSAGES_PER_WINDOW) return false
+    peer.controlRate.count += 1
+    return true
+  }
+
   shareRoom (peer, roomKey) {
     this.sendRoomMeta(peer, roomKey)
     this.sendToPeer(peer, {
@@ -518,7 +592,7 @@ export class PeerChatService {
       id: `${roomKey}-${this.localId}-join-${Date.now()}`,
       ts: Date.now()
     })
-    this.syncHistoryToPeer(peer, roomKey).catch(() => {})
+    this.syncHistoryToPeerOnce(peer, roomKey).catch(() => {})
   }
 
   announceRoom (roomKey) {
@@ -571,6 +645,21 @@ export class PeerChatService {
     this.sendToPeer(peer, { type: 'sync-done' })
   }
 
+  async syncHistoryToPeerOnce (peer, roomKey) {
+    peer.syncedRooms ||= new Set()
+    peer.syncingRooms ||= new Map()
+    if (peer.syncedRooms.has(roomKey)) return
+    const pending = peer.syncingRooms.get(roomKey)
+    if (pending) return pending
+
+    peer.syncedRooms.add(roomKey)
+    const sync = this.syncHistoryToPeer(peer, roomKey).finally(() => {
+      peer.syncingRooms.delete(roomKey)
+    })
+    peer.syncingRooms.set(roomKey, sync)
+    return sync
+  }
+
   relayToRoom (roomKey, message) {
     for (const peer of this.peers.values()) {
       if (peer.rooms.includes(roomKey)) this.sendToPeer(peer, { ...message, roomKey })
@@ -589,7 +678,22 @@ export class PeerChatService {
   async appendEntry (roomKey, entry) {
     const feed = this.feeds.get(roomKey)
     if (!feed) throw new Error('PeerChat room is not ready.')
+    const entryBytes = getPeerChatMessageByteLength(JSON.stringify(entry))
+    const roomBytes = this.roomStorageBytes.get(roomKey) || 0
+    const projectedRoomBytes = roomBytes + entryBytes + 1
+    if (
+      feed.length >= MAX_PEERCHAT_STORED_MESSAGES_PER_ROOM ||
+      projectedRoomBytes > MAX_PEERCHAT_ROOM_STORAGE_BYTES ||
+      this.totalStoredBytes + entryBytes + 1 > MAX_PEERCHAT_TOTAL_STORAGE_BYTES
+    ) {
+      throw new Error('PeerChat storage limit reached. Leave unused rooms or clear P2P data.')
+    }
     await feed.append(entry)
+    const measuredRoomBytes = Number.isSafeInteger(feed.byteLength) && feed.byteLength >= roomBytes
+      ? feed.byteLength
+      : projectedRoomBytes
+    this.roomStorageBytes.set(roomKey, measuredRoomBytes)
+    this.totalStoredBytes += measuredRoomBytes - roomBytes
     await this.updateLastMessage(roomKey, entry)
     this.bumpVersion()
   }
@@ -630,13 +734,14 @@ export class PeerChatService {
   }
 
   entryToMessage (entry, roomKey) {
+    const sender = String(entry.sender || '').slice(0, 200)
     return {
       id: String(entry.id || ''),
-      sender: String(entry.sender || ''),
-      senderName: normalizePeerChatProfileName(entry.sn) || String(entry.sender || ''),
+      sender,
+      senderName: normalizePeerChatProfileName(entry.sn) || normalizePeerChatRoomName(sender, 'Peer'),
       message: decryptPeerChatMessage(entry, roomKey),
-      timestamp: Number.isFinite(entry.ts) ? entry.ts : Date.now(),
-      self: String(entry.sender || '').toLowerCase() === this.localId
+      timestamp: normalizePeerChatTimestamp(entry.ts),
+      self: sender.toLowerCase() === this.localId
     }
   }
 
@@ -708,16 +813,37 @@ export class PeerChatService {
   }
 
   persistNow () {
+    const temporaryPath = `${this.stateFilePath}.tmp`
     try {
       mkdirSync(this.storagePath, { recursive: true })
-      writeFileSync(this.stateFilePath, JSON.stringify({
+      writeFileSync(temporaryPath, JSON.stringify({
         version: 1,
         profile: this.profile,
         rooms: [...this.rooms.values()]
-      }))
+      }), { mode: 0o600 })
+      renameSync(temporaryPath, this.stateFilePath)
     } catch (error) {
+      try { rmSync(temporaryPath, { force: true }) } catch {}
       console.error('[peerchat] Unable to save local state:', error)
     }
+  }
+
+  registerFeedStorage (roomKey, feed) {
+    if (this.roomStorageBytes.has(roomKey)) return
+    const byteLength = Number.isSafeInteger(feed.byteLength) && feed.byteLength > 0
+      ? feed.byteLength
+      : 0
+    this.roomStorageBytes.set(roomKey, byteLength)
+    this.totalStoredBytes += byteLength
+  }
+
+  async releaseFeed (roomKey) {
+    const feed = this.feeds.get(roomKey)
+    const listener = this.feedListeners.get(roomKey)
+    if (feed && listener) feed.off?.('append', listener)
+    this.feedListeners.delete(roomKey)
+    this.feeds.delete(roomKey)
+    if (feed?.close) await feed.close().catch(() => {})
   }
 }
 

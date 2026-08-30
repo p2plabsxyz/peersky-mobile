@@ -21,6 +21,7 @@ import {
   RPC_PEERCHAT_ROOM_CREATE,
   RPC_PEERCHAT_ROOM_JOIN,
   RPC_PEERCHAT_ROOM_LEAVE,
+  RPC_PEERCHAT_ROOMS,
   RPC_PEERCHAT_SEND,
   RPC_PEERCHAT_SNAPSHOT
 } from '../../backend/rpc/commands.mjs'
@@ -73,6 +74,7 @@ type PeerChatScreenProps = {
 }
 
 const POLL_INTERVAL_MS = 1500
+const ROOM_LIST_POLL_INTERVAL_MS = 3000
 
 export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenProps) {
   const colors = isDark ? darkColors : lightColors
@@ -81,6 +83,9 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
   const versionRef = useRef(-1)
   const activeRoomRef = useRef<PeerChatRoom | null>(null)
   const pollInFlightRef = useRef(false)
+  const roomListPollInFlightRef = useRef(false)
+  const actionInFlightRef = useRef(false)
+  const mountedRef = useRef(true)
   const [isReady, setIsReady] = useState(false)
   const [isBusy, setIsBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -96,6 +101,14 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
   useEffect(() => {
     callRpcRef.current = onCallRpc
   }, [onCallRpc])
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      activeRoomRef.current = null
+    }
+  }, [])
 
   const callRpc = useCallback((command: number, data: object = {}) => {
     return callRpcRef.current(command, data)
@@ -150,7 +163,7 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
         version: force ? -1 : versionRef.current
       })
       if (!response.ok) throw new Error(response.error || 'Unable to refresh PeerChat room.')
-      if (activeRoomRef.current?.roomKey !== room.roomKey) return
+      if (!mountedRef.current || activeRoomRef.current?.roomKey !== room.roomKey) return
 
       if (response.room) setActiveRoom(response.room)
       if (response.rooms) setRooms(response.rooms)
@@ -158,7 +171,7 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
       if (Number.isSafeInteger(response.version)) versionRef.current = response.version as number
       setError(null)
     } catch (cause) {
-      if (activeRoomRef.current?.roomKey === room.roomKey) {
+      if (mountedRef.current && activeRoomRef.current?.roomKey === room.roomKey) {
         setError(cause instanceof Error ? cause.message : String(cause))
       }
     } finally {
@@ -190,27 +203,76 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
     }
   }, [activeRoom?.roomKey, refreshRoom])
 
+  useEffect(() => {
+    if (!isReady || activeRoom) return
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout> | null = null
+
+    const refreshRooms = async () => {
+      if (cancelled || roomListPollInFlightRef.current || AppState.currentState !== 'active') return
+      roomListPollInFlightRef.current = true
+      try {
+        const response = await callRpc(RPC_PEERCHAT_ROOMS, {})
+        if (!response.ok) throw new Error(response.error || 'Unable to refresh PeerChat rooms.')
+        if (cancelled || !mountedRef.current) return
+        if (response.profile) {
+          setProfile(response.profile)
+        }
+        setRooms(response.rooms || [])
+        if (Number.isSafeInteger(response.version)) versionRef.current = response.version as number
+      } catch (cause) {
+        if (!cancelled && mountedRef.current) {
+          setError(cause instanceof Error ? cause.message : String(cause))
+        }
+      } finally {
+        roomListPollInFlightRef.current = false
+      }
+    }
+
+    const schedule = () => {
+      if (!cancelled) timer = setTimeout(async () => {
+        await refreshRooms()
+        schedule()
+      }, ROOM_LIST_POLL_INTERVAL_MS)
+    }
+    const appStateSubscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void refreshRooms()
+    })
+    schedule()
+
+    return () => {
+      cancelled = true
+      if (timer) clearTimeout(timer)
+      appStateSubscription.remove()
+    }
+  }, [activeRoom, callRpc, isReady])
+
   async function saveProfile () {
     const response = await callRpc(RPC_PEERCHAT_PROFILE_SET, { username: profileName })
     if (!response.ok || !response.profile) {
       throw new Error(response.error || 'Unable to save PeerChat name.')
     }
+    if (!mountedRef.current) return
     setProfile(response.profile)
     setProfileName(response.profile.username)
   }
 
   async function runAction (action: () => Promise<void>) {
-    if (isBusy) return
+    if (actionInFlightRef.current) return
+    actionInFlightRef.current = true
     setIsBusy(true)
     setError(null)
     try {
       await action()
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause)
-      setError(message)
-      onStatus(message)
+      if (mountedRef.current) {
+        setError(message)
+        onStatus(message)
+      }
     } finally {
-      setIsBusy(false)
+      actionInFlightRef.current = false
+      if (mountedRef.current) setIsBusy(false)
     }
   }
 
@@ -226,12 +288,12 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
     void runAction(async () => {
       await saveProfile()
       const response = await callRpc(RPC_PEERCHAT_ROOM_CREATE, {
-        name: roomName,
-        username: profileName
+        name: roomName
       })
       if (!response.ok || !response.room) {
         throw new Error(response.error || 'Unable to create PeerChat room.')
       }
+      if (!mountedRef.current) return
       setRooms((current) => [response.room as PeerChatRoom, ...current])
       setRoomName('')
       openRoom(response.room)
@@ -243,12 +305,12 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
     void runAction(async () => {
       await saveProfile()
       const response = await callRpc(RPC_PEERCHAT_ROOM_JOIN, {
-        roomKey: joinKey,
-        username: profileName
+        roomKey: joinKey
       })
       if (!response.ok || !response.room) {
         throw new Error(response.error || 'Unable to join PeerChat room.')
       }
+      if (!mountedRef.current) return
       setRooms((current) => [
         response.room as PeerChatRoom,
         ...current.filter((room) => room.roomKey !== response.room?.roomKey)
@@ -269,6 +331,7 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
         message
       })
       if (!response.ok) throw new Error(response.error || 'Unable to send PeerChat message.')
+      if (!mountedRef.current) return
       setComposer('')
       if (response.sent) {
         setMessages((current) => current.some((item) => item.id === response.sent?.id)
@@ -296,6 +359,7 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
               roomKey: activeRoom.roomKey
             })
             if (!response.ok) throw new Error(response.error || 'Unable to leave PeerChat room.')
+            if (!mountedRef.current) return
             setRooms((current) => current.filter((room) => room.roomKey !== activeRoom.roomKey))
             setActiveRoom(null)
             setMessages([])
@@ -304,6 +368,21 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
         }
       ]
     )
+  }
+
+  async function shareRoom () {
+    if (!activeRoom) return
+    try {
+      await Share.share({
+        title: `Join ${activeRoom.name} on PeerChat`,
+        message: activeRoom.roomKey
+      })
+    } catch (cause) {
+      if (!mountedRef.current) return
+      const message = cause instanceof Error ? cause.message : String(cause)
+      setError(message)
+      onStatus(message)
+    }
   }
 
   if (!isReady) {
@@ -335,10 +414,7 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
           </View>
           <Pressable
             accessibilityRole='button'
-            onPress={() => void Share.share({
-              title: `Join ${activeRoom.name} on PeerChat`,
-              message: activeRoom.roomKey
-            })}
+            onPress={() => void shareRoom()}
             style={styles.headerAction}
           >
             <Text style={[styles.headerActionText, { color: colors.accent }]}>Share</Text>

@@ -8,9 +8,12 @@ import {
   decryptPeerChatMessage,
   encryptPeerChatMessage,
   getSharedPeerChatRooms,
+  MAX_PEERCHAT_MESSAGE_BYTES,
   normalizePeerChatMessage,
   normalizePeerChatProfileName,
   normalizePeerChatRoomKey,
+  normalizePeerChatRoomName,
+  normalizePeerChatTimestamp,
   peerChatTopicHex,
   PEERCHAT_PROTOCOL
 } from '../../backend/peerchat/protocol.mjs'
@@ -24,6 +27,10 @@ test('PeerChat uses the desktop transport protocol and validates public inputs',
   assert.equal(normalizePeerChatProfileName('  Alice   Mobile  '), 'Alice Mobile')
   assert.equal(normalizePeerChatProfileName('Alice_'), '')
   assert.equal(normalizePeerChatMessage('  hello  '), 'hello')
+  assert.equal(normalizePeerChatMessage('a'.repeat(MAX_PEERCHAT_MESSAGE_BYTES)).length, MAX_PEERCHAT_MESSAGE_BYTES)
+  assert.equal(normalizePeerChatMessage('😀'.repeat(MAX_PEERCHAT_MESSAGE_BYTES / 2)), '')
+  assert.equal(normalizePeerChatRoomName('Safe\u0000\u202E Room'), 'Safe Room')
+  assert.equal(normalizePeerChatTimestamp(Number.MAX_VALUE, 1000), 1000)
 })
 
 test('PeerChat AES-GCM payloads use the desktop room-key derivation', () => {

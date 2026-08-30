@@ -7,12 +7,14 @@ import {
 import b4a from 'b4a'
 
 export const PEERCHAT_PROTOCOL = 'peersky-chat/1'
-export const MAX_PEERCHAT_MESSAGE_LENGTH = 64 * 1024
+export const MAX_PEERCHAT_MESSAGE_BYTES = 64 * 1024
+export const MAX_PEERCHAT_FRAME_BYTES = 256 * 1024
 export const MAX_PEERCHAT_PROFILE_NAME_LENGTH = 50
 export const MAX_PEERCHAT_ROOM_NAME_LENGTH = 80
 
 const ROOM_KEY_PATTERN = /^[a-f0-9]{64}$/i
 const PROFILE_NAME_PATTERN = /^[A-Za-z0-9]+(?: [A-Za-z0-9]+)*$/
+const MAX_CLOCK_SKEW_MS = 5 * 60 * 1000
 
 export function normalizePeerChatRoomKey (value) {
   const roomKey = typeof value === 'string' ? value.trim() : ''
@@ -36,13 +38,25 @@ export function normalizePeerChatProfileName (value) {
 
 export function normalizePeerChatRoomName (value, fallback = 'New Room') {
   if (typeof value !== 'string') return fallback
-  const name = value.trim().replace(/\s+/g, ' ').slice(0, MAX_PEERCHAT_ROOM_NAME_LENGTH)
-  return name || fallback
+  const name = stripMetadataControls(value)
+    .trim()
+    .replace(/\s+/g, ' ')
+  return Array.from(name).slice(0, MAX_PEERCHAT_ROOM_NAME_LENGTH).join('') || fallback
 }
 
 export function normalizePeerChatMessage (value) {
   if (typeof value !== 'string') return ''
-  return value.trim().slice(0, MAX_PEERCHAT_MESSAGE_LENGTH)
+  const message = value.trim()
+  return getPeerChatMessageByteLength(message) <= MAX_PEERCHAT_MESSAGE_BYTES ? message : ''
+}
+
+export function getPeerChatMessageByteLength (value) {
+  return typeof value === 'string' ? b4a.byteLength(value, 'utf8') : 0
+}
+
+export function normalizePeerChatTimestamp (value, now = Date.now()) {
+  if (!Number.isSafeInteger(value) || value < 0 || value > now + MAX_CLOCK_SKEW_MS) return now
+  return value
 }
 
 export function createPeerChatRoomKey () {
@@ -72,7 +86,7 @@ export function decryptPeerChatMessage (payload, roomKey) {
     typeof payload?.ct !== 'string' ||
     typeof payload?.iv !== 'string' ||
     typeof payload?.tag !== 'string' ||
-    payload.ct.length > MAX_PEERCHAT_MESSAGE_LENGTH * 2 + 64 ||
+    payload.ct.length > MAX_PEERCHAT_MESSAGE_BYTES * 2 ||
     !/^[a-f0-9]*$/i.test(payload.ct) ||
     !/^[a-f0-9]{24}$/i.test(payload.iv) ||
     !/^[a-f0-9]{32}$/i.test(payload.tag)
@@ -89,7 +103,7 @@ export function decryptPeerChatMessage (payload, roomKey) {
   let plaintext = decipher.update(payload.ct, 'hex', 'utf8')
   plaintext += decipher.final('utf8')
 
-  if (plaintext.length > MAX_PEERCHAT_MESSAGE_LENGTH) {
+  if (getPeerChatMessageByteLength(plaintext) > MAX_PEERCHAT_MESSAGE_BYTES) {
     throw new Error('PeerChat message is too large')
   }
 
@@ -145,4 +159,16 @@ function bytesToHex (bytes) {
   let encoded = ''
   for (const byte of bytes) encoded += byte.toString(16).padStart(2, '0')
   return encoded
+}
+
+function stripMetadataControls (value) {
+  return Array.from(value).filter((character) => {
+    const codePoint = character.codePointAt(0)
+    return !(
+      codePoint <= 0x1f ||
+      (codePoint >= 0x7f && codePoint <= 0x9f) ||
+      (codePoint >= 0x202a && codePoint <= 0x202e) ||
+      (codePoint >= 0x2066 && codePoint <= 0x2069)
+    )
+  }).join('')
 }
