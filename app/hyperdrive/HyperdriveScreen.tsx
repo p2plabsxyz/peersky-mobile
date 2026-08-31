@@ -35,7 +35,6 @@ import {
   persistHyperdriveRecents
 } from './recents-store'
 
-const MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 const hyperdriveIcon = require('../../assets/images/hyperdrive.png')
 
 type RecentSource = 'fetched' | 'uploaded'
@@ -111,8 +110,8 @@ export function HyperdriveScreen ({ isDark, isLandscape, onCallRpc, onOpenItem, 
     const asset = selection.assets[0]
     const file = new File(asset.uri)
     const fileSize = asset.size ?? file.size
-    if (!Number.isSafeInteger(fileSize) || !fileSize || fileSize > MAX_UPLOAD_BYTES) {
-      setError('Choose a file up to 10 MB.')
+    if (!Number.isSafeInteger(fileSize) || !fileSize) {
+      setError('Choose a non-empty file.')
       return
     }
 
@@ -120,10 +119,10 @@ export function HyperdriveScreen ({ isDark, isLandscape, onCallRpc, onOpenItem, 
     setError(null)
     setNotice(null)
     try {
-      const contentBase64 = await file.base64()
       const response = await onCallRpc(RPC_HYPER_LIBRARY_UPLOAD, {
         name: asset.name,
-        contentBase64,
+        fileUri: file.uri,
+        byteLength: fileSize,
         visibility
       })
       if (!response.ok || !response.item) throw new Error(response.error || 'Upload failed.')
@@ -270,7 +269,12 @@ export function HyperdriveScreen ({ isDark, isLandscape, onCallRpc, onOpenItem, 
               {items ? formatItemMeta(item) : formatRecentMeta(item)}
             </Text>
           </View>
-          <ChevronRightIcon width={18} height={18} color={palette.muted} />
+          <ChevronRightIcon
+            width={18}
+            height={18}
+            color={palette.muted}
+            style={item.visibility === 'private' ? styles.privateItemChevron : undefined}
+          />
         </Pressable>
         {item.visibility !== 'private' && (
           <Pressable
@@ -306,7 +310,7 @@ export function HyperdriveScreen ({ isDark, isLandscape, onCallRpc, onOpenItem, 
 
       <View style={styles.setupBlock}>
         <Text style={[styles.setupTitle, { color: palette.text }]}>Upload a file</Text>
-        <Text style={[styles.helperText, { color: palette.muted }]}>Publish a file up to 10 MB from this device.</Text>
+        <Text style={[styles.helperText, { color: palette.muted }]}>Publish a file from this device.</Text>
         <Pressable
           accessibilityRole='button'
           disabled={Boolean(busyAction)}
@@ -562,6 +566,7 @@ const styles = StyleSheet.create({
   itemCopy: { flex: 1, gap: 4, marginHorizontal: 13 },
   itemName: { fontSize: 15, fontWeight: '600' },
   itemMeta: { fontSize: 12 },
+  privateItemChevron: { marginRight: 16 },
   copyButton: { alignItems: 'center', height: 44, justifyContent: 'center', width: 44 },
   folderWrap: { height: 34, justifyContent: 'flex-end', width: 42 },
   folderTab: { borderTopLeftRadius: 4, borderTopRightRadius: 4, height: 8, left: 3, position: 'absolute', top: 1, width: 19 },

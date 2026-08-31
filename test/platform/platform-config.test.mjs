@@ -148,8 +148,11 @@ describe('mobile platform runtime configuration', () => {
       crypto: 'bare-crypto',
       dgram: 'bare-dgram',
       events: 'bare-events',
+      fs: 'bare-fs',
       net: 'bare-net',
       'node:crypto': 'bare-crypto',
+      'node:fs': 'bare-fs',
+      'node:stream/promises': 'bare-stream/promises',
       'node:zlib': 'bare-zlib',
       os: 'bare-os'
     })

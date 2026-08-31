@@ -155,6 +155,41 @@ test('serializes simultaneous uploads before selecting duplicate names', async (
   assert.equal(second.item.name, 'photo (1).jpg')
 })
 
+test('streams picker-owned files without an application size limit', async () => {
+  const drive = createDrive({})
+  const byteLength = 512 * 1024 * 1024
+  let streamedUpload = null
+  const response = await uploadHyperdriveFile({
+    name: 'large-video.mp4',
+    fileUri: 'file:///data/user/0/xyz.p2plabs.peersky/cache/DocumentPicker/large-video.mp4',
+    byteLength,
+    visibility: 'public'
+  }, {
+    runtime: { getDrive: async () => drive },
+    uploadLocalFile: async (upload) => { streamedUpload = upload }
+  })
+
+  assert.equal(response.ok, true)
+  assert.equal(response.item.byteLength, byteLength)
+  assert.equal(streamedUpload.pathname, '/large-video.mp4')
+  assert.equal(streamedUpload.byteLength, byteLength)
+})
+
+test('rejects file URIs outside the picker cache', async () => {
+  let opened = false
+  const response = await uploadHyperdriveFile({
+    name: 'private.txt',
+    fileUri: 'file:///data/user/0/xyz.p2plabs.peersky/files/private.txt',
+    byteLength: 10,
+    visibility: 'public'
+  }, {
+    runtime: { getDrive: async () => { opened = true } }
+  })
+
+  assert.equal(response.ok, false)
+  assert.equal(opened, false)
+})
+
 test('rejects invalid and oversized uploads before opening the runtime', async () => {
   let opened = false
   const runtime = { getDrive: async () => { opened = true } }
