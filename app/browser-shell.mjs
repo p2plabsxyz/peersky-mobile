@@ -98,9 +98,21 @@ export function syncBrowserEntryState (state, url, source) {
 }
 
 /** @param {'back' | 'forward' | null} [direction] */
-export function recordBrowserWebNavigationState (state, url, source, direction = null) {
+export function recordBrowserWebNavigationState (
+  state,
+  url,
+  source,
+  direction = null,
+  hasNativeBackEntry = true
+) {
   const currentEntry = state.history[state.historyIndex]
   if (currentEntry?.url === url) {
+    return replaceBrowserEntryState(state, url, source)
+  }
+
+  // A WebView with no native back entry has replaced or redirected its first
+  // page. Keep that transition out of browser history so Back can reach Home.
+  if (!direction && !hasNativeBackEntry) {
     return replaceBrowserEntryState(state, url, source)
   }
 

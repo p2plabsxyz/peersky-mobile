@@ -5,6 +5,7 @@ import { createRequire } from 'node:module'
 import {
   addDownloadUrlFingerprint,
   findCompletedHyperDownload,
+  getProxiedHyperUrl,
   MAX_BROWSER_DOWNLOADS,
   createUniqueDownloadFilename,
   normalizeBrowserDownloads,
@@ -60,6 +61,13 @@ describe('browser downloads', () => {
       name: 'other.pdf',
       url: 'hyper://example.test/other.pdf'
     }), null)
+  })
+
+  test('identifies a Hyper source behind the authenticated download proxy', () => {
+    const hyperUrl = 'hyper://example.com/archive.zip'
+    const sourceUrl = `http://127.0.0.1:1234/asset?token=test&url=${encodeURIComponent(hyperUrl)}&download=1`
+    assert.equal(getProxiedHyperUrl(sourceUrl), hyperUrl)
+    assert.equal(getProxiedHyperUrl('https://example.com/archive.zip'), null)
   })
 
   test('does not open an unrelated legacy download with the same filename', () => {

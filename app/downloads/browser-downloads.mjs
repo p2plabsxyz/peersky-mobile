@@ -100,7 +100,7 @@ function truncateUnicode (value, limit) {
   return Array.from(value).slice(0, limit).join('')
 }
 
-function getProxiedHyperUrl (value) {
+export function getProxiedHyperUrl (value) {
   const sourceUrl = normalizeBrowserDownloadUrl(value)
   if (!sourceUrl) return null
 

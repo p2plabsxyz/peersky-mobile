@@ -166,6 +166,21 @@ export function useBrowserDownloads ({ enabled = false } = {}) {
     }
   }
 
+  async function retryDownload (download: BrowserDownload, sourceUrl = download.sourceUrl) {
+    const normalizedUrl = normalizeBrowserDownloadUrl(sourceUrl)
+    if (download.status !== 'failed' || !normalizedUrl) {
+      setError('This download cannot be retried.')
+      return false
+    }
+
+    const accepted = await requestDownload(normalizedUrl)
+    if (!accepted) return false
+
+    await removeDownload(download.id)
+    setError(null)
+    return true
+  }
+
   return {
     downloads,
     error,
@@ -173,7 +188,8 @@ export function useBrowserDownloads ({ enabled = false } = {}) {
     openDownload,
     refresh,
     removeDownload,
-    requestDownload
+    requestDownload,
+    retryDownload
   }
 }
 

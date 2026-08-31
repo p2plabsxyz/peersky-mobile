@@ -15,7 +15,7 @@ import DownloadIcon from '../../assets/icons/bootstrap/download.svg'
 import ReloadIcon from '../../assets/icons/bootstrap/arrow-clockwise.svg'
 import TrashIcon from '../../assets/icons/bootstrap/trash.svg'
 import { BROWSER_PALETTES } from '../browser-appearance.mjs'
-import { sortBrowserDownloads } from './browser-downloads.mjs'
+import { getProxiedHyperUrl, sortBrowserDownloads } from './browser-downloads.mjs'
 import type { BrowserDownload } from './useBrowserDownloads'
 
 type DownloadSort = 'newest' | 'oldest' | 'name' | 'size'
@@ -36,6 +36,7 @@ type DownloadsScreenProps = {
   onOpen: (id: string) => void
   onRefresh: () => void
   onRemove: (id: string) => void
+  onRetry: (download: BrowserDownload) => Promise<unknown>
 }
 
 export function DownloadsScreen ({
@@ -46,11 +47,13 @@ export function DownloadsScreen ({
   onClose,
   onOpen,
   onRefresh,
-  onRemove
+  onRemove,
+  onRetry
 }: DownloadsScreenProps) {
   const palette = isDark ? BROWSER_PALETTES.dark : BROWSER_PALETTES.light
   const [sort, setSort] = useState<DownloadSort>('newest')
   const [isSortOpen, setIsSortOpen] = useState(false)
+  const [retryingDownloadId, setRetryingDownloadId] = useState<string | null>(null)
   const sortedDownloads = useMemo(
     () => sortBrowserDownloads(downloads, sort) as BrowserDownload[],
     [downloads, sort]
@@ -144,8 +147,36 @@ export function DownloadsScreen ({
                     <Text style={[styles.rowMeta, { color: palette.mutedText }]} numberOfLines={1}>
                       {formatDownloadMeta(download)}
                     </Text>
+                    {getDownloadFailureMessage(download) && (
+                      <Text style={styles.rowError} numberOfLines={2}>
+                        {getDownloadFailureMessage(download)}
+                      </Text>
+                    )}
                   </View>
                 </Pressable>
+                {download.status === 'failed' && download.sourceUrl && (
+                  <Pressable
+                    accessibilityLabel={`Retry ${download.name}`}
+                    accessibilityRole='button'
+                    accessibilityState={{ disabled: retryingDownloadId === download.id }}
+                    disabled={retryingDownloadId === download.id}
+                    hitSlop={8}
+                    style={({ pressed }) => [styles.iconButton, pressed ? styles.pressed : null]}
+                    onPress={async () => {
+                      if (retryingDownloadId) return
+                      setRetryingDownloadId(download.id)
+                      try {
+                        await onRetry(download)
+                      } finally {
+                        setRetryingDownloadId(null)
+                      }
+                    }}
+                  >
+                    {retryingDownloadId === download.id
+                      ? <ActivityIndicator size='small' color={palette.accent} />
+                      : <ReloadIcon width={19} height={19} color={palette.accent} />}
+                  </Pressable>
+                )}
                 <Pressable
                   accessibilityLabel={`Remove ${download.name}`}
                   accessibilityRole='button'
@@ -229,13 +260,22 @@ export function DownloadsScreen ({
 }
 
 function formatDownloadMeta (download: BrowserDownload) {
-  const status = download.status.charAt(0).toUpperCase() + download.status.slice(1)
+  const status = download.status === 'paused'
+    ? 'Paused - resumes automatically'
+    : download.status.charAt(0).toUpperCase() + download.status.slice(1)
   if (download.size < 1) return status
 
   const units = ['B', 'KB', 'MB', 'GB']
   const unitIndex = Math.min(Math.floor(Math.log(download.size) / Math.log(1024)), units.length - 1)
   const size = download.size / Math.pow(1024, unitIndex)
   return `${status} · ${size.toFixed(unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`
+}
+
+function getDownloadFailureMessage (download: BrowserDownload) {
+  if (download.status !== 'failed') return null
+  return getProxiedHyperUrl(download.sourceUrl)
+    ? 'The peer may be offline. Please try again.'
+    : 'Download failed. Please try again.'
 }
 
 const styles = StyleSheet.create({
@@ -336,6 +376,12 @@ const styles = StyleSheet.create({
   rowMeta: {
     fontSize: 12,
     marginTop: 4
+  },
+  rowError: {
+    color: '#a7354a',
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 3
   },
   pressed: {
     opacity: 0.6

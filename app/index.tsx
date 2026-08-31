@@ -119,7 +119,10 @@ import { HistoryScreen } from './history/HistoryScreen'
 import { getBrowserHistoryDocumentTitle } from './history/browser-history.mjs'
 import { useBrowserHistory } from './history/useBrowserHistory'
 import { DownloadsScreen } from './downloads/DownloadsScreen'
-import { findCompletedHyperDownload } from './downloads/browser-downloads.mjs'
+import {
+  findCompletedHyperDownload,
+  getProxiedHyperUrl
+} from './downloads/browser-downloads.mjs'
 import { HyperdriveScreen } from './hyperdrive/HyperdriveScreen'
 import { PeerChatScreen, type PeerChatResponse } from './peerchat/PeerChatScreen'
 import { peerSkyWebViewNativeConfig } from './downloads/PeerSkyWebView'
@@ -127,7 +130,10 @@ import {
   initializeContentBlocking,
   setContentBlockingEnabled as applyContentBlockingEnabled
 } from './privacy/contentBlocking'
-import { useBrowserDownloads } from './downloads/useBrowserDownloads'
+import {
+  useBrowserDownloads,
+  type BrowserDownload
+} from './downloads/useBrowserDownloads'
 import { BrowserTabsScreen } from './tabs/BrowserTabsScreen'
 import { useBrowserTabPreviews } from './tabs/useBrowserTabPreviews'
 import { isBrowserTabPreviewForPage } from './tabs/browser-tab-preview.mjs'
@@ -302,7 +308,8 @@ export default function App () {
     openDownload: openBrowserDownload,
     refresh: refreshBrowserDownloads,
     removeDownload: removeBrowserDownload,
-    requestDownload: requestBrowserDownload
+    requestDownload: requestBrowserDownload,
+    retryDownload: retryBrowserDownloadFromSource
   } = useBrowserDownloads({ enabled: browserDownloadsVisible })
   const browserTabsStateRef = useRef(browserTabsState)
   const browserSessionReadyRef = useRef(false)
@@ -658,7 +665,8 @@ export default function App () {
         : getBrowserState(),
       url,
       source,
-      direction
+      direction,
+      webNavigation?.canGoBack
     )
     applyBrowserState({
       ...nextState,
@@ -1235,6 +1243,33 @@ export default function App () {
         ? Platform.OS === 'ios' ? 'Download saved' : 'Download requested'
         : 'Unable to start download'
     )
+  }
+
+  async function retryBrowserDownload (download: BrowserDownload) {
+    let retryUrl = download.sourceUrl
+    const hyperUrl = getProxiedHyperUrl(retryUrl)
+
+    if (hyperUrl) {
+      try {
+        const response = await callRpc(RPC_HYPER_FETCH, {
+          url: hyperUrl,
+          method: 'GET'
+        })
+        const proxyUrl = response.downloadUrl || response.mediaUrl
+        if (!response.ok || !proxyUrl) {
+          throw new Error(response.error || response.statusText || 'Hyper peer is unavailable')
+        }
+        retryUrl = proxyUrl
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        setStatus(message)
+        return false
+      }
+    }
+
+    const retried = await retryBrowserDownloadFromSource(download, retryUrl)
+    setStatus(retried ? `Retrying ${download.name}` : `Unable to retry ${download.name}`)
+    return retried
   }
 
   async function openHyperdriveItem (item: {
@@ -2220,6 +2255,7 @@ export default function App () {
           onOpen={(downloadId) => void openBrowserDownload(downloadId)}
           onRefresh={() => void refreshBrowserDownloads()}
           onRemove={(downloadId) => void removeBrowserDownload(downloadId)}
+          onRetry={retryBrowserDownload}
         />
       </SafeAreaView>
     )

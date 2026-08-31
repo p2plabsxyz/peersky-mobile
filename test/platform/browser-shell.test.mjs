@@ -176,6 +176,27 @@ describe('browser shell navigation helpers', () => {
     assert.equal(back.canGoForward, true)
   })
 
+  test('replaces a first-load redirect so Back returns to Home', () => {
+    const initial = commitBrowserEntryState({
+      history: [{ url: BROWSER_HOME_URL, source: { kind: 'home' } }],
+      historyIndex: 0
+    }, 'http://peersky.p2plabs.xyz/', {
+      kind: 'web',
+      uri: 'http://peersky.p2plabs.xyz/'
+    })
+
+    const redirected = recordBrowserWebNavigationState(
+      initial,
+      'https://peersky.p2plabs.xyz/',
+      { kind: 'web', uri: 'https://peersky.p2plabs.xyz/' },
+      null,
+      false
+    )
+
+    assert.equal(redirected.history.length, 2)
+    assert.equal(getBrowserBackState(redirected).currentUrl, BROWSER_HOME_URL)
+  })
+
   test('classifies WebView navigation requests from hyper-rendered pages', () => {
     assert.deepEqual(getBrowserRequestAction({ requestUrl: 'about:blank', currentSourceKind: 'hyper' }), { action: 'allow' })
     assert.deepEqual(getBrowserRequestAction({ requestUrl: 'data:text/html,ok', currentSourceKind: 'hyper' }), { action: 'block' })
