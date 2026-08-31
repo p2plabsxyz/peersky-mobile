@@ -5,15 +5,18 @@ import {
   AppState,
   BackHandler,
   Button,
+  Clipboard,
   Image,
   Keyboard,
   KeyboardAvoidingView,
   Linking,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
   Share,
   StatusBar,
+  StyleSheet,
   Text,
   TextInput,
   useColorScheme,
@@ -22,6 +25,7 @@ import {
 } from 'react-native'
 import { Worklet } from 'react-native-bare-kit'
 import * as Crypto from 'expo-crypto'
+import { CameraView, useCameraPermissions } from 'expo-camera'
 import { File, Paths } from 'expo-file-system'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import b4a from 'b4a'
@@ -139,6 +143,7 @@ import { useBrowserTabPreviews } from './tabs/useBrowserTabPreviews'
 import { isBrowserTabPreviewForPage } from './tabs/browser-tab-preview.mjs'
 import {
   formatP2pmdRoomHistoryKey,
+  normalizeP2pmdRoomKey,
   readP2pmdRoomHistoryFile,
   recordP2pmdRoom,
   writeP2pmdRoomHistoryFile
@@ -175,6 +180,7 @@ type P2pmdViewMode = 'edit' | 'preview' | 'slides'
 
 type P2pmdRoomHistoryEntry = {
   key: string
+  role: 'host' | 'client'
   lastOpenedAt: number
 }
 
@@ -347,6 +353,9 @@ export default function App () {
   const [p2pmdRoom, setP2pmdRoom] = useState<P2pmdRoom | null>(null)
   const [p2pmdEditorHtml, setP2pmdEditorHtml] = useState<string | null>(null)
   const [p2pmdJoinKey, setP2pmdJoinKey] = useState('')
+  const [isP2pmdScanning, setIsP2pmdScanning] = useState(false)
+  const [p2pmdCameraPermission, requestP2pmdCameraPermission] = useCameraPermissions()
+  const p2pmdScanHandledRef = useRef(false)
   const [p2pmdRoomHistory, setP2pmdRoomHistory] = useState<P2pmdRoomHistoryEntry[]>(loadP2pmdRoomHistory)
   const p2pmdRoomHistoryRef = useRef(p2pmdRoomHistory)
   const [p2pmdParticipants, setP2pmdParticipants] = useState<number | null>(null)
@@ -1773,9 +1782,55 @@ export default function App () {
     }
   }
 
-  async function onP2pmdRoomCreate () {
+  function applyP2pmdJoinKey (value: string) {
+    const roomKey = normalizeP2pmdRoomKey(value)
+    if (!roomKey) {
+      setP2pmdSetupError('Invalid room key. Use an hs:// room key.')
+      return false
+    }
+
+    setP2pmdJoinKey(roomKey)
+    setP2pmdSetupError(null)
+    return true
+  }
+
+  async function onP2pmdPasteRoomKey () {
+    try {
+      const clipboardValue = await Clipboard.getString()
+      if (!clipboardValue.trim()) {
+        setP2pmdSetupError('The clipboard does not contain a room key.')
+        return
+      }
+      applyP2pmdJoinKey(clipboardValue)
+    } catch (error) {
+      setP2pmdSetupError(error instanceof Error ? error.message : 'Unable to read the clipboard.')
+    }
+  }
+
+  async function onP2pmdOpenScanner () {
+    const permission = p2pmdCameraPermission?.granted
+      ? p2pmdCameraPermission
+      : await requestP2pmdCameraPermission()
+    if (!permission.granted) {
+      setP2pmdSetupError('Camera permission is required to scan a room key.')
+      return
+    }
+
+    p2pmdScanHandledRef.current = false
+    setIsP2pmdScanning(true)
+  }
+
+  function onP2pmdRoomKeyScanned (value: string) {
+    if (p2pmdScanHandledRef.current) return
+    p2pmdScanHandledRef.current = true
+    setIsP2pmdScanning(false)
+    applyP2pmdJoinKey(value)
+  }
+
+  async function onP2pmdRoomCreate (roomKey: string | null = null) {
+    const isReopening = Boolean(roomKey)
     setIsLoading(true)
-    setStatus('Creating P2PMD room...')
+    setStatus(isReopening ? 'Reopening P2PMD room...' : 'Creating P2PMD room...')
     setLastResult(null)
     setP2pmdRoom(null)
     setP2pmdUrl(null)
@@ -1784,10 +1839,11 @@ export default function App () {
     setP2pmdPublishUrl(null)
     setP2pmdEditorHtml(null)
     setP2pmdSetupError(null)
-    setP2pmdSyncStatus('Creating room...')
+    setP2pmdSyncStatus(isReopening ? 'Restoring room...' : 'Creating room...')
 
     try {
       const response = await callRpc(RPC_P2PMD_ROOM_CREATE, {
+        ...(roomKey ? { connector: roomKey } : {}),
         secure: true,
         udp: false
       })
@@ -1806,8 +1862,8 @@ export default function App () {
       setP2pmdPeerDisplayName(loadP2pmdPeerDisplayName())
       setP2pmdRoom(response.room)
       setP2pmdUrl(response.room.localUrl)
-      rememberP2pmdRoom(response.room.key)
-      setStatus('P2PMD room created')
+      rememberP2pmdRoom(response.room.key, 'host')
+      setStatus(isReopening ? 'P2PMD room reopened' : 'P2PMD room created')
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       setP2pmdSetupError(message)
@@ -1853,7 +1909,7 @@ export default function App () {
       setP2pmdPeerDisplayName(loadP2pmdPeerDisplayName())
       setP2pmdRoom(response.room)
       setP2pmdUrl(response.room.localUrl)
-      rememberP2pmdRoom(response.room.key)
+      rememberP2pmdRoom(response.room.key, 'client')
       setP2pmdSyncStatus(response.warning || 'Joining room page...')
       setStatus('P2PMD room joined')
     } catch (error) {
@@ -1866,8 +1922,8 @@ export default function App () {
     }
   }
 
-  function rememberP2pmdRoom (key: string) {
-    const rooms = recordP2pmdRoom(p2pmdRoomHistoryRef.current, { key }) as P2pmdRoomHistoryEntry[]
+  function rememberP2pmdRoom (key: string, role: P2pmdRoomHistoryEntry['role']) {
+    const rooms = recordP2pmdRoom(p2pmdRoomHistoryRef.current, { key, role }) as P2pmdRoomHistoryEntry[]
     if (rooms === p2pmdRoomHistoryRef.current) return
 
     if (!saveP2pmdRoomHistory(rooms)) return
@@ -2770,7 +2826,7 @@ export default function App () {
                       <View style={styles.p2pmdHeaderCopy}>
                         <Text style={[styles.sectionTitle, styles.p2pmdTitle]}>P2PMD</Text>
                         <Text style={styles.helperText}>
-                          Create or join a Holesail-backed Markdown room, then edit together in the embedded mobile editor.
+                          A real-time peer-to-peer Markdown editor for writing notes and collaboration.
                         </Text>
                       </View>
                       <Text style={[styles.roomPill, p2pmdRoom ? styles.roomPillLive : null]}>
@@ -2810,9 +2866,6 @@ export default function App () {
 
                     <View style={styles.p2pmdSetupBlock}>
                       <Text style={styles.fieldLabel}>Join existing room</Text>
-                      <Text style={styles.helperText}>
-                        Paste a room key shared by another peer to connect through Holesail.
-                      </Text>
                       <TextInput
                         style={[styles.input, styles.p2pmdInput]}
                         autoCapitalize='none'
@@ -2825,6 +2878,32 @@ export default function App () {
                         placeholderTextColor='#6f7484'
                         placeholder='hs://... room key'
                       />
+                      <View style={styles.p2pmdJoinTools}>
+                        <Pressable
+                          accessibilityRole='button'
+                          disabled={isBooting || isLoading}
+                          onPress={() => void onP2pmdPasteRoomKey()}
+                          style={({ pressed }) => [
+                            styles.p2pmdJoinTool,
+                            pressed ? styles.p2pmdRecentRoomPressed : null,
+                            isBooting || isLoading ? styles.p2pmdActionDisabled : null
+                          ]}
+                        >
+                          <Text style={styles.p2pmdTextActionText}>Paste</Text>
+                        </Pressable>
+                        <Pressable
+                          accessibilityRole='button'
+                          disabled={isBooting || isLoading}
+                          onPress={() => void onP2pmdOpenScanner()}
+                          style={({ pressed }) => [
+                            styles.p2pmdJoinTool,
+                            pressed ? styles.p2pmdRecentRoomPressed : null,
+                            isBooting || isLoading ? styles.p2pmdActionDisabled : null
+                          ]}
+                        >
+                          <Text style={styles.p2pmdTextActionText}>Scan QR</Text>
+                        </Pressable>
+                      </View>
                       {p2pmdSetupError && (
                         <Text selectable={true} style={styles.p2pmdSetupError}>
                           {p2pmdSetupError}
@@ -2851,7 +2930,9 @@ export default function App () {
                             accessibilityLabel={`Rejoin P2PMD room ${formatP2pmdRoomHistoryKey(room.key)}`}
                             accessibilityRole='button'
                             disabled={isBooting || isLoading}
-                            onPress={() => void onP2pmdRoomJoin(room.key)}
+                            onPress={() => void (room.role === 'host'
+                              ? onP2pmdRoomCreate(room.key)
+                              : onP2pmdRoomJoin(room.key))}
                             style={({ pressed }) => [
                               styles.p2pmdRecentRoom,
                               pressed ? styles.p2pmdRecentRoomPressed : null,
@@ -2861,11 +2942,45 @@ export default function App () {
                             <Text numberOfLines={1} style={styles.p2pmdRecentRoomKey}>
                               {formatP2pmdRoomHistoryKey(room.key)}
                             </Text>
-                            <Text style={styles.p2pmdRecentRoomAction}>Join</Text>
+                            <Text style={styles.p2pmdRecentRoomAction}>
+                              {room.role === 'host' ? 'Reopen' : 'Join'}
+                            </Text>
                           </Pressable>
                         ))}
                       </View>
                     )}
+                    <Modal
+                      animationType='fade'
+                      onRequestClose={() => setIsP2pmdScanning(false)}
+                      visible={isP2pmdScanning}
+                    >
+                      <View style={styles.p2pmdScanner}>
+                        <CameraView
+                          barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+                          onBarcodeScanned={({ data }) => onP2pmdRoomKeyScanned(data)}
+                          style={StyleSheet.absoluteFill}
+                        />
+                        <SafeAreaView
+                          edges={['top', 'right', 'bottom', 'left']}
+                          style={styles.p2pmdScannerOverlay}
+                        >
+                          <View pointerEvents='none' style={styles.p2pmdScanGuide}>
+                            <View style={[styles.p2pmdScanCorner, styles.p2pmdScanTopLeft]} />
+                            <View style={[styles.p2pmdScanCorner, styles.p2pmdScanTopRight]} />
+                            <View style={[styles.p2pmdScanCorner, styles.p2pmdScanBottomLeft]} />
+                            <View style={[styles.p2pmdScanCorner, styles.p2pmdScanBottomRight]} />
+                          </View>
+                          <Text style={styles.p2pmdScanHint}>Align the P2PMD room QR code inside the frame</Text>
+                          <Pressable
+                            accessibilityRole='button'
+                            onPress={() => setIsP2pmdScanning(false)}
+                            style={styles.p2pmdScannerClose}
+                          >
+                            <Text style={styles.p2pmdScannerCloseText}>Cancel</Text>
+                          </Pressable>
+                        </SafeAreaView>
+                      </View>
+                    </Modal>
                   </View>
                 )}
                 {(isBooting || isLoading) && <ActivityIndicator size='small' />}

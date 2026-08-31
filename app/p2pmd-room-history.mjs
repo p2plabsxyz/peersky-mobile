@@ -66,9 +66,10 @@ export function writeP2pmdRoomHistoryFile (file, rooms) {
 
 export function recordP2pmdRoom (rooms, {
   key,
+  role = 'client',
   lastOpenedAt = Date.now()
 }) {
-  const room = normalizeP2pmdRoomHistoryEntry({ key, lastOpenedAt })
+  const room = normalizeP2pmdRoomHistoryEntry({ key, role, lastOpenedAt })
   if (!room) return rooms
 
   return parseP2pmdRoomHistory({
@@ -103,11 +104,12 @@ export function normalizeP2pmdRoomKey (key) {
 
 function normalizeP2pmdRoomHistoryEntry (value) {
   const key = normalizeP2pmdRoomKey(value?.key)
+  const role = value?.role === 'host' ? 'host' : 'client'
   const lastOpenedAt = Number(value?.lastOpenedAt)
 
   if (!key || !Number.isSafeInteger(lastOpenedAt) || lastOpenedAt < 0) {
     return null
   }
 
-  return { key, lastOpenedAt }
+  return { key, role, lastOpenedAt }
 }
