@@ -263,10 +263,10 @@ describe('browser shell navigation helpers', () => {
 describe('internal app route registry', () => {
   test('keeps local apps on stable peersky routes', () => {
     assert.deepEqual(INTERNAL_APPS.map((app) => app.url), [
+      'peersky://hyperdrive/',
       'peersky://p2p/p2pmd/',
       'peersky://p2p/peerchat/',
-      'peersky://holesail/',
-      'peersky://hyperdrive/'
+      'peersky://holesail/'
     ])
 
     assert.equal(getRuntimeAppUrl('p2pmd'), 'peersky://p2p/p2pmd/')

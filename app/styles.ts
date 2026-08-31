@@ -68,6 +68,7 @@ export const styles = StyleSheet.create({
   browserAddressActions: {
     alignItems: 'center',
     flexDirection: 'row',
+    height: '100%',
     paddingRight: 3
   },
   browserAddressAction: {
@@ -78,6 +79,12 @@ export const styles = StyleSheet.create({
   },
   browserAddressClearAction: {
     marginRight: 2
+  },
+  browserAddressReloadIcon: {
+    transform: [{ translateY: 1 }]
+  },
+  browserAddressShareIcon: {
+    transform: [{ translateY: 0.5 }]
   },
   browserTabCountButton: {
     alignItems: 'center',

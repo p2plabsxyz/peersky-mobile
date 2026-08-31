@@ -1,5 +1,11 @@
 export const INTERNAL_APPS = [
   {
+    id: 'hyper',
+    title: 'Hyperdrive',
+    url: 'peersky://hyperdrive/',
+    icon: 'H'
+  },
+  {
     id: 'p2pmd',
     title: 'P2PMD',
     url: 'peersky://p2p/p2pmd/',
@@ -16,12 +22,6 @@ export const INTERNAL_APPS = [
     title: 'Holesail',
     url: 'peersky://holesail/',
     icon: 'HS'
-  },
-  {
-    id: 'hyper',
-    title: 'Hyperdrive',
-    url: 'peersky://hyperdrive/',
-    icon: 'H'
   }
 ]
 

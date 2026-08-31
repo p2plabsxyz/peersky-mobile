@@ -21,9 +21,9 @@ import ShareIcon from '../assets/icons/bootstrap/arrow-bar-up.svg'
 import ClearIcon from '../assets/icons/bootstrap/x-circle.svg'
 
 const TOOLBAR_ICON_SIZE = 22
+const ADDRESS_ACTION_ICON_SIZE = 20
 const ADDRESS_CLEAR_ICON_SIZE = 20
 const TOOLBAR_ICON_STROKE_WIDTH = 0.35
-const ADDRESS_ACTION_ICON_STROKE_WIDTH = 0.2
 
 type BrowserToolbarProps = {
   activeTabId: string
@@ -116,7 +116,7 @@ export function BrowserToolbar ({
   const addressInputRef = useRef<TextInput>(null)
   const addressFocusProgress = useRef(new Animated.Value(0)).current
   const toolbarControlsWidth = 80
-  const addressActionIconColor = isDark ? '#8d96a8' : palette.mutedText
+  const addressActionIconColor = palette.mutedText
 
   useEffect(() => {
     const animation = Animated.timing(addressFocusProgress, {
@@ -278,11 +278,11 @@ export function BrowserToolbar ({
                 ? <ActivityIndicator color={palette.accent} size='small' />
                 : (
                   <ReloadIcon
-                    width={TOOLBAR_ICON_SIZE}
-                    height={TOOLBAR_ICON_SIZE}
+                    width={ADDRESS_ACTION_ICON_SIZE}
+                    height={ADDRESS_ACTION_ICON_SIZE}
                     color={addressActionIconColor}
-                    stroke={addressActionIconColor}
-                    strokeWidth={ADDRESS_ACTION_ICON_STROKE_WIDTH}
+                    opacity={0.76}
+                    style={styles.browserAddressReloadIcon}
                   />
                   )}
             </Pressable>
@@ -293,11 +293,11 @@ export function BrowserToolbar ({
               onPress={onSharePage}
             >
               <ShareIcon
-                width={TOOLBAR_ICON_SIZE}
-                height={TOOLBAR_ICON_SIZE}
+                width={ADDRESS_ACTION_ICON_SIZE}
+                height={ADDRESS_ACTION_ICON_SIZE}
                 color={addressActionIconColor}
-                stroke={addressActionIconColor}
-                strokeWidth={ADDRESS_ACTION_ICON_STROKE_WIDTH}
+                opacity={0.76}
+                style={styles.browserAddressShareIcon}
               />
             </Pressable>
           </View>
@@ -369,10 +369,6 @@ export function BrowserToolbar ({
         }}
         onShow={onOpenMenu}
         onOpenSettings={onOpenSettings}
-        onReload={() => {
-          onCloseMenu()
-          onReload()
-        }}
         onSharePage={() => {
           onCloseMenu()
           onSharePage()
