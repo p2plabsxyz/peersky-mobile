@@ -161,7 +161,7 @@ export function HyperdriveScreen ({ isDark, isLandscape, onCallRpc, onOpenItem, 
     }
   }
 
-  async function fetchLocation (targetUrl = fetchUrl) {
+  async function fetchLocation (targetUrl = fetchUrl, recordRecent = true) {
     if (busyAction) return
     const normalizedUrl = targetUrl.trim()
     if (!normalizedUrl.toLowerCase().startsWith('hyper://')) {
@@ -184,10 +184,12 @@ export function HyperdriveScreen ({ isDark, isLandscape, onCallRpc, onOpenItem, 
       })
       if (!response.ok || !response.location) throw new Error(response.error || 'Unable to fetch Hyper data.')
       const fetchedItems = Array.isArray(response.items) ? response.items : []
-      remember({
-        ...response.location,
-        children: response.location.type === 'directory' ? fetchedItems : undefined
-      }, 'fetched')
+      if (recordRecent) {
+        remember({
+          ...response.location,
+          children: response.location.type === 'directory' ? fetchedItems : undefined
+        }, 'fetched')
+      }
       setFetchUrl(response.location.url)
       if (response.location.type === 'directory') {
         setLocation(response.location)
@@ -231,10 +233,9 @@ export function HyperdriveScreen ({ isDark, isLandscape, onCallRpc, onOpenItem, 
     }
 
     if (item.type === 'directory') {
-      await fetchLocation(item.url)
+      await fetchLocation(item.url, false)
       return
     }
-    remember(item, 'fetched')
     onOpenItem(item)
   }
 

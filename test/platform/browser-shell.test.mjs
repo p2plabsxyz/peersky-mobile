@@ -318,7 +318,7 @@ describe('browser shell navigation helpers', () => {
 describe('internal app route registry', () => {
   test('keeps local apps on stable peersky routes', () => {
     assert.deepEqual(INTERNAL_APPS.map((app) => app.url), [
-      'peersky://hyperdrive/',
+      'peersky://p2p/hyperdrive/',
       'peersky://p2p/p2pmd/',
       'peersky://p2p/peerchat/',
       'peersky://holesail/'
@@ -327,7 +327,7 @@ describe('internal app route registry', () => {
     assert.equal(getRuntimeAppUrl('p2pmd'), 'peersky://p2p/p2pmd/')
     assert.equal(getRuntimeAppUrl('peerchat'), 'peersky://p2p/peerchat/')
     assert.equal(getRuntimeAppUrl('holesail'), 'peersky://holesail/')
-    assert.equal(getRuntimeAppUrl('hyper'), 'peersky://hyperdrive/')
+    assert.equal(getRuntimeAppUrl('hyper'), 'peersky://p2p/hyperdrive/')
     assert.equal(getRuntimeAppUrl('unknown'), 'peersky://p2p/p2pmd/')
   })
 
@@ -336,6 +336,7 @@ describe('internal app route registry', () => {
     assert.equal(getRuntimeAppFromUrl('peersky://p2p/p2pmd/'), 'p2pmd')
     assert.equal(getRuntimeAppFromUrl('PEERSKY://P2P/PEERCHAT////'), 'peerchat')
     assert.equal(getRuntimeAppFromUrl('PEERSKY://HOLESAIL////'), 'holesail')
+    assert.equal(getRuntimeAppFromUrl('peersky://p2p/hyperdrive'), 'hyper')
     assert.equal(getRuntimeAppFromUrl('peersky://hyperdrive'), 'hyper')
     assert.equal(getRuntimeAppFromUrl('peersky://hyper'), 'hyper')
     assert.equal(getRuntimeAppFromUrl('peersky://unknown'), null)
