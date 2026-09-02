@@ -9,8 +9,10 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.net.Uri
+import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
+import android.provider.Settings
 import android.util.Log
 import android.webkit.CookieManager
 import android.webkit.MimeTypeMap
@@ -24,16 +26,20 @@ import com.facebook.react.module.annotations.ReactModule
 import com.reactnativecommunity.webview.URLUtil
 import com.j256.simplemagic.ContentInfoUtil
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.FilterInputStream
+import java.io.File
 import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
 import java.util.ArrayDeque
 import java.util.Locale
+import java.util.UUID
 import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
@@ -57,9 +63,17 @@ class BrowserDownloadsModule(
     TimeUnit.SECONDS,
     ArrayBlockingQueue(1)
   )
+  private val downloadTransfer = ThreadPoolExecutor(
+    MAX_ACTIVE_DOWNLOADS,
+    MAX_ACTIVE_DOWNLOADS,
+    30L,
+    TimeUnit.SECONDS,
+    ArrayBlockingQueue(MAX_QUEUED_DOWNLOADS)
+  )
   private val admissionLock = Any()
   private val downloadRequestTimes = ArrayDeque<Long>()
   private val recordsLock = Any()
+  private val transferControls = ConcurrentHashMap<String, TransferControl>()
   private val downloadCompleteReceiver = object : BroadcastReceiver() {
     override fun onReceive(context: Context?, intent: Intent?) {
       if (intent?.action != DownloadManager.ACTION_DOWNLOAD_COMPLETE) return
@@ -77,6 +91,7 @@ class BrowserDownloadsModule(
   }
 
   init {
+    markInterruptedResumableDownloads()
     ContextCompat.registerReceiver(
       reactContext,
       downloadCompleteReceiver,
@@ -95,6 +110,12 @@ class BrowserDownloadsModule(
     }
     downloadResolver.shutdownNow()
     downloadReader.shutdownNow()
+    transferControls.values.forEach { control ->
+      control.paused = true
+      control.connection?.disconnect()
+    }
+    transferControls.clear()
+    downloadTransfer.shutdownNow()
     super.invalidate()
   }
 
@@ -163,7 +184,11 @@ class BrowserDownloadsModule(
               val idIndex = cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_ID)
               val titleIndex = cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_TITLE)
               val statusIndex = cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS)
+              val reasonIndex = cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_REASON)
               val sizeIndex = cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES)
+              val downloadedIndex = cursor.getColumnIndexOrThrow(
+                DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR
+              )
               val createdAtIndex = cursor.getColumnIndexOrThrow(
                 DownloadManager.COLUMN_LAST_MODIFIED_TIMESTAMP
               )
@@ -174,12 +199,15 @@ class BrowserDownloadsModule(
                 inspected += 1
                 val id = cursor.getLong(idIndex)
                 val existing = records[id]
+                val nativeStatus = cursor.getInt(statusIndex)
                 records[id] = StoredDownload(
                   id = id,
                   name = existing?.name
                     ?: sanitizeFilename(cursor.getString(titleIndex) ?: "download"),
-                  status = getStatus(cursor.getInt(statusIndex)),
+                  status = getStatus(nativeStatus),
+                  reason = getReason(nativeStatus, cursor.getInt(reasonIndex)),
                   size = cursor.getLong(sizeIndex).coerceAtLeast(0),
+                  downloadedBytes = cursor.getLong(downloadedIndex).coerceAtLeast(0),
                   createdAt = cursor.getLong(createdAtIndex).coerceAtLeast(0),
                   sourceUrl = existing?.sourceUrl,
                   mimeType = existing?.mimeType
@@ -217,8 +245,24 @@ class BrowserDownloadsModule(
             record.putString("name", download.name)
             record.putString("status", download.status)
             record.putDouble("size", download.size.toDouble())
+            record.putDouble("downloadedBytes", download.downloadedBytes.toDouble())
+            record.putDouble("totalBytes", download.size.toDouble())
             record.putDouble("createdAt", download.createdAt.toDouble())
             download.sourceUrl?.let { record.putString("sourceUrl", it) }
+            download.reason?.let { record.putString("reason", it) }
+            result.pushMap(record)
+          }
+          synchronized(recordsLock) { loadResumableDownloads() }.forEach { download ->
+            val record = Arguments.createMap()
+            record.putString("id", download.id)
+            record.putString("name", download.name)
+            record.putString("status", download.status)
+            record.putDouble("size", download.totalBytes.coerceAtLeast(download.downloadedBytes).toDouble())
+            record.putDouble("downloadedBytes", download.downloadedBytes.toDouble())
+            record.putDouble("totalBytes", download.totalBytes.toDouble())
+            record.putDouble("createdAt", download.createdAt.toDouble())
+            record.putString("sourceUrl", download.sourceUrl)
+            download.reason?.let { record.putString("reason", it) }
             result.pushMap(record)
           }
           promise.resolve(result)
@@ -233,6 +277,10 @@ class BrowserDownloadsModule(
 
   @ReactMethod
   fun openDownload(id: String, promise: Promise) {
+    if (id.startsWith(RESUMABLE_ID_PREFIX)) {
+      openResumableDownload(id, promise)
+      return
+    }
     val downloadId = id.toLongOrNull()
     if (downloadId == null || downloadId < 1) {
       promise.reject("INVALID_DOWNLOAD_ID", "Invalid download identifier.")
@@ -254,24 +302,62 @@ class BrowserDownloadsModule(
         ?: manager.getMimeTypeForDownloadedFile(downloadId)
         ?: reactApplicationContext.contentResolver.getType(uri)
         ?: "*/*"
-      val intent = Intent(Intent.ACTION_VIEW).apply {
-        setDataAndType(uri, mimeType)
-        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
-      }
-      try {
-        reactApplicationContext.startActivity(intent)
-        promise.resolve(true)
-      } catch (error: ActivityNotFoundException) {
-        Log.w(TAG, "No activity can open this download", error)
-        promise.resolve(false)
-      }
+      openContentUri(uri, mimeType, promise)
     } catch (error: Exception) {
       promise.reject("DOWNLOAD_OPEN_FAILED", "Unable to open download.", error)
     }
   }
 
   @ReactMethod
+  fun openLocalFile(uriValue: String, displayName: String?, promise: Promise) {
+    try {
+      val uri = Uri.parse(uriValue)
+      val path = uri.path
+      if (uri.scheme != "file" || path.isNullOrBlank()) {
+        promise.reject("INVALID_LOCAL_FILE", "Only app-local files can be opened.")
+        return
+      }
+
+      val file = File(path).canonicalFile
+      if (!isAppOwnedFile(file) || !file.isFile) {
+        promise.resolve(false)
+        return
+      }
+
+      val contentUri = FileProvider.getUriForFile(
+        reactApplicationContext,
+        reactApplicationContext.packageName + ".SharingFileProvider",
+        file
+      )
+      val mimeType = resolveMimeTypeFromFilename(
+        displayName?.takeIf { it.isNotBlank() } ?: file.name,
+        null
+      ) ?: "*/*"
+      openContentUri(contentUri, mimeType, promise)
+    } catch (error: Exception) {
+      promise.reject("LOCAL_FILE_OPEN_FAILED", "Unable to open local file.", error)
+    }
+  }
+
+  private fun isAppOwnedFile(file: File): Boolean {
+    val roots = listOfNotNull(
+      reactApplicationContext.cacheDir,
+      reactApplicationContext.filesDir,
+      reactApplicationContext.externalCacheDir,
+      reactApplicationContext.getExternalFilesDir(null)
+    )
+    return roots.any { root ->
+      val canonicalRoot = root.canonicalFile
+      file.path == canonicalRoot.path || file.path.startsWith(canonicalRoot.path + File.separator)
+    }
+  }
+
+  @ReactMethod
   fun removeDownload(id: String, promise: Promise) {
+    if (id.startsWith(RESUMABLE_ID_PREFIX)) {
+      removeResumableDownload(id, promise)
+      return
+    }
     val downloadId = id.toLongOrNull()
     if (downloadId == null || downloadId < 1) {
       promise.reject("INVALID_DOWNLOAD_ID", "Invalid download identifier.")
@@ -294,6 +380,75 @@ class BrowserDownloadsModule(
     } catch (error: Exception) {
       promise.reject("DOWNLOAD_REMOVE_FAILED", "Unable to remove download.", error)
     }
+  }
+
+  @ReactMethod
+  fun pauseDownload(id: String, promise: Promise) {
+    if (id.startsWith(RESUMABLE_ID_PREFIX)) {
+      val control = transferControls[id]
+      val paused = synchronized(recordsLock) {
+        updateResumableDownload(id) { download ->
+          if (download.status !in setOf("pending", "running")) return@updateResumableDownload null
+          download.copy(status = "paused", reason = "user-paused")
+        } != null
+      }
+      if (paused) {
+        control?.paused = true
+        control?.connection?.disconnect()
+      }
+      promise.resolve(paused)
+      return
+    }
+    val downloadId = id.toLongOrNull()
+    if (downloadId == null || downloadId < 1) {
+      promise.reject("INVALID_DOWNLOAD_ID", "Invalid download identifier.")
+      return
+    }
+
+    try {
+      val paused = synchronized(recordsLock) {
+        val manager = getDownloadManager()
+        val records = loadStoredDownloads().toMutableList()
+        val index = records.indexOfFirst { it.id == downloadId }
+        if (index < 0 || records[index].status !in setOf("pending", "running")) {
+          false
+        } else {
+          val refreshed = refreshStoredDownload(manager, records[index]) ?: records[index]
+          if (refreshed.status !in setOf("pending", "running")) {
+            records[index] = refreshed
+            saveStoredDownloads(records)
+            false
+          } else false
+        }
+      }
+      promise.resolve(paused)
+    } catch (error: Exception) {
+      promise.reject("DOWNLOAD_PAUSE_FAILED", "Unable to pause download.", error)
+    }
+  }
+
+  @ReactMethod
+  fun resumeDownload(id: String, url: String, promise: Promise) {
+    if (!id.startsWith(RESUMABLE_ID_PREFIX) || !isHttpUrl(url)) {
+      promise.reject("INVALID_DOWNLOAD_RESUME", "This download cannot be resumed.")
+      return
+    }
+
+    val resumed = synchronized(recordsLock) {
+      updateResumableDownload(id) { download ->
+        val canResumePaused = download.status == "paused" &&
+          download.reason in setOf("user-paused", "interrupted")
+        val canResumeFailed = download.status == "failed" &&
+          download.downloadedBytes > 0 &&
+          download.reason in setOf("network-error", "incomplete-response")
+        if (!canResumePaused && !canResumeFailed) {
+          return@updateResumableDownload null
+        }
+        download.copy(sourceUrl = url, status = "pending", reason = null)
+      } != null
+    }
+    if (resumed) startResumableDownload(id)
+    promise.resolve(resumed)
   }
 
   private fun resolveDownloadMetadata(
@@ -362,53 +517,342 @@ class BrowserDownloadsModule(
     )
   }
 
-  @Suppress("DEPRECATION")
   private fun enqueueDownload(
     url: String,
     userAgent: String?,
     metadata: DownloadMetadata
   ) {
-    val destinationName = synchronized(recordsLock) {
+    val download = synchronized(recordsLock) {
       val uniqueName = createUniquePublicFilename(metadata.name)
-      val request = DownloadManager.Request(Uri.parse(url))
-      CookieManager.getInstance().getCookie(url)
-        ?.takeIf { it.isNotBlank() }
-        ?.let { request.addRequestHeader("Cookie", it) }
-      if (!userAgent.isNullOrBlank()) {
-        request.addRequestHeader("User-Agent", userAgent)
-      }
-      metadata.mimeType?.let(request::setMimeType)
-      request.setTitle(uniqueName)
-      request.setDescription("Downloading " + uniqueName)
-      request.setNotificationVisibility(
-        DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED
+      val contentUri = createPendingDownloadFile(uniqueName, metadata.mimeType)
+      val record = ResumableDownload(
+        id = RESUMABLE_ID_PREFIX + UUID.randomUUID().toString(),
+        name = uniqueName,
+        status = "pending",
+        downloadedBytes = 0,
+        totalBytes = 0,
+        createdAt = System.currentTimeMillis(),
+        sourceUrl = url,
+        mimeType = metadata.mimeType,
+        contentUri = contentUri.toString(),
+        userAgent = userAgent
       )
-      request.setDestinationInExternalPublicDir(
-        Environment.DIRECTORY_DOWNLOADS,
-        uniqueName
-      )
-
-      val id = getDownloadManager().enqueue(request)
-      val records = loadStoredDownloads()
-        .filterNot { it.id == id }
-        .toMutableList()
-      records.add(
-        StoredDownload(
-          id = id,
-          name = uniqueName,
-          status = "pending",
-          size = 0,
-          createdAt = System.currentTimeMillis(),
-          sourceUrl = url,
-          mimeType = metadata.mimeType,
-          typeResolved = !isAmbiguousDownloadType(metadata.mimeType) &&
-            metadata.mimeType != "application/zip"
-        )
-      )
-      saveStoredDownloads(records)
-      uniqueName
+      saveResumableDownloads(loadResumableDownloads() + record)
+      record
     }
-    showToast("Downloading " + destinationName)
+    startResumableDownload(download.id)
+    showToast("Downloading " + download.name)
+  }
+
+  private fun createPendingDownloadFile(name: String, mimeType: String?): Uri {
+    val values = ContentValues().apply {
+      put(MediaStore.MediaColumns.DISPLAY_NAME, name)
+      put(MediaStore.MediaColumns.MIME_TYPE, mimeType ?: "application/octet-stream")
+      put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+      put(MediaStore.MediaColumns.IS_PENDING, 1)
+    }
+    return reactApplicationContext.contentResolver.insert(
+      MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+      values
+    ) ?: throw IllegalStateException("Unable to create the download destination")
+  }
+
+  private fun startResumableDownload(id: String) {
+    val control = TransferControl()
+    if (transferControls.putIfAbsent(id, control) != null) return
+
+    try {
+      downloadTransfer.execute { transferResumableDownload(id, control) }
+    } catch (error: RejectedExecutionException) {
+      transferControls.remove(id, control)
+      synchronized(recordsLock) {
+        updateResumableDownload(id) { download ->
+          download.copy(status = "paused", reason = "waiting-to-retry")
+        }
+      }
+    }
+  }
+
+  private fun transferResumableDownload(id: String, control: TransferControl) {
+    var connection: HttpURLConnection? = null
+    try {
+      var initial = synchronized(recordsLock) {
+        updateResumableDownload(id) { download ->
+          if (download.status != "pending") return@updateResumableDownload null
+          download.copy(status = "running", reason = null)
+        }
+      } ?: return
+      val destinationBytes = getDownloadDestinationSize(initial.contentUri)
+      if (destinationBytes >= 0 && destinationBytes != initial.downloadedBytes) {
+        initial = synchronized(recordsLock) {
+          updateResumableDownload(id) { download ->
+            download.copy(downloadedBytes = destinationBytes)
+          }
+        } ?: return
+      }
+      val offset = initial.downloadedBytes
+      connection = openDownloadConnection(initial.sourceUrl, offset, initial.userAgent, control)
+      control.connection = connection
+
+      val status = connection.responseCode
+      if (offset > 0 && status != HttpURLConnection.HTTP_PARTIAL) {
+        failResumableDownload(id, "cannot-resume")
+        return
+      }
+      if (offset == 0L && status !in 200..299) {
+        failResumableDownload(id, "http-error")
+        return
+      }
+
+      val responseRange = connection.getHeaderField("Content-Range")
+      if (offset > 0 && parseContentRangeStart(responseRange) != offset) {
+        failResumableDownload(id, "cannot-resume")
+        return
+      }
+      val totalBytes = parseContentRangeTotal(responseRange)
+        ?: connection.contentLengthLong.takeIf { it >= 0 }?.plus(offset)
+        ?: initial.totalBytes
+      val contentUri = Uri.parse(initial.contentUri)
+      val outputMode = if (offset > 0) "wa" else "w"
+      val output = reactApplicationContext.contentResolver.openOutputStream(contentUri, outputMode)
+        ?: throw IllegalStateException("Unable to open the download destination")
+
+      var downloadedBytes = offset
+      var lastPersistedBytes = offset
+      var lastPersistedAt = System.currentTimeMillis()
+      connection.inputStream.use { input ->
+        output.use { destination ->
+          val buffer = ByteArray(DOWNLOAD_BUFFER_BYTES)
+          while (!control.paused && !control.cancelled && !Thread.currentThread().isInterrupted) {
+            val count = input.read(buffer)
+            if (count < 0) break
+            destination.write(buffer, 0, count)
+            downloadedBytes += count
+            val now = System.currentTimeMillis()
+            if (
+              downloadedBytes - lastPersistedBytes >= DOWNLOAD_PROGRESS_BYTES ||
+              now - lastPersistedAt >= DOWNLOAD_PROGRESS_INTERVAL_MS
+            ) {
+              persistResumableProgress(id, downloadedBytes, totalBytes)
+              lastPersistedBytes = downloadedBytes
+              lastPersistedAt = now
+            }
+          }
+          destination.flush()
+        }
+      }
+
+      persistResumableProgress(id, downloadedBytes, totalBytes)
+      if (control.cancelled || control.paused || Thread.currentThread().isInterrupted) return
+      if (totalBytes > 0 && downloadedBytes != totalBytes) {
+        failResumableDownload(id, "incomplete-response")
+        return
+      }
+
+      val responseMimeType = resolveMimeTypeFromFilename(
+        initial.name,
+        normalizeMimeType(connection.contentType) ?: initial.mimeType
+      )
+      val values = ContentValues().apply {
+        put(MediaStore.MediaColumns.IS_PENDING, 0)
+        put(MediaStore.MediaColumns.SIZE, downloadedBytes)
+        responseMimeType?.let { put(MediaStore.MediaColumns.MIME_TYPE, it) }
+      }
+      reactApplicationContext.contentResolver.update(contentUri, values, null, null)
+      synchronized(recordsLock) {
+        updateResumableDownload(id) { download ->
+          download.copy(
+            status = "complete",
+            reason = null,
+            downloadedBytes = downloadedBytes,
+            totalBytes = if (totalBytes > 0) totalBytes else downloadedBytes,
+            mimeType = responseMimeType
+          )
+        }
+      }
+    } catch (error: Exception) {
+      val wasPausedOrRemoved = control.paused || control.cancelled || synchronized(recordsLock) {
+        loadResumableDownloads().firstOrNull { it.id == id }?.status == "paused"
+      }
+      if (!wasPausedOrRemoved) {
+        Log.w(TAG, "Browser download transfer failed", error)
+        failResumableDownload(id, "network-error")
+      }
+    } finally {
+      control.connection = null
+      connection?.disconnect()
+      reconcileResumableDestinationSize(id)
+      transferControls.remove(id, control)
+      val shouldRestart = synchronized(recordsLock) {
+        loadResumableDownloads().firstOrNull { it.id == id }?.status == "pending"
+      }
+      if (shouldRestart) startResumableDownload(id)
+    }
+  }
+
+  private fun reconcileResumableDestinationSize(id: String) {
+    synchronized(recordsLock) {
+      val download = loadResumableDownloads().firstOrNull { it.id == id } ?: return
+      val actualBytes = getDownloadDestinationSize(download.contentUri)
+      if (actualBytes < 0 || actualBytes == download.downloadedBytes) return
+      updateResumableDownload(id) { current ->
+        current.copy(downloadedBytes = actualBytes)
+      }
+    }
+  }
+
+  private fun getDownloadDestinationSize(contentUri: String): Long {
+    return try {
+      reactApplicationContext.contentResolver.openFileDescriptor(Uri.parse(contentUri), "r")
+        ?.use { descriptor -> descriptor.statSize }
+        ?: -1
+    } catch (error: Exception) {
+      Log.w(TAG, "Unable to inspect partial download size", error)
+      -1
+    }
+  }
+
+  private fun openDownloadConnection(
+    initialUrl: String,
+    offset: Long,
+    userAgent: String?,
+    control: TransferControl
+  ): HttpURLConnection {
+    var currentUrl = initialUrl
+    for (attempt in 0..MAX_REDIRECTS) {
+      val connection = URL(currentUrl).openConnection() as HttpURLConnection
+      control.connection = connection
+      connection.instanceFollowRedirects = false
+      connection.connectTimeout = DOWNLOAD_CONNECT_TIMEOUT_MS
+      connection.readTimeout = DOWNLOAD_READ_TIMEOUT_MS
+      connection.requestMethod = "GET"
+      connection.setRequestProperty("Accept-Encoding", "identity")
+      userAgent?.takeIf { it.isNotBlank() }
+        ?.let { connection.setRequestProperty("User-Agent", it) }
+      CookieManager.getInstance().getCookie(currentUrl)
+        ?.takeIf { it.isNotBlank() }
+        ?.let { connection.setRequestProperty("Cookie", it) }
+      if (offset > 0) connection.setRequestProperty("Range", "bytes=" + offset + "-")
+
+      val status = connection.responseCode
+      val location = connection.getHeaderField("Location")
+      if (status !in REDIRECT_STATUS_CODES || location.isNullOrBlank()) return connection
+      val redirectedUrl = URL(URL(currentUrl), location).toString()
+      connection.disconnect()
+      if (!isHttpUrl(redirectedUrl)) throw IllegalStateException("Unsafe download redirect")
+      currentUrl = redirectedUrl
+    }
+    throw IllegalStateException("Too many download redirects")
+  }
+
+  private fun persistResumableProgress(id: String, downloadedBytes: Long, totalBytes: Long) {
+    synchronized(recordsLock) {
+      updateResumableDownload(id) { download ->
+        if (download.status !in setOf("pending", "running")) return@updateResumableDownload null
+        download.copy(
+          status = "running",
+          downloadedBytes = downloadedBytes.coerceAtLeast(download.downloadedBytes),
+          totalBytes = totalBytes.coerceAtLeast(download.totalBytes)
+        )
+      }
+    }
+  }
+
+  private fun failResumableDownload(id: String, reason: String) {
+    synchronized(recordsLock) {
+      updateResumableDownload(id) { download ->
+        if (download.status == "paused") return@updateResumableDownload null
+        download.copy(status = "failed", reason = reason)
+      }
+    }
+  }
+
+  private fun openResumableDownload(id: String, promise: Promise) {
+    try {
+      val download = synchronized(recordsLock) {
+        loadResumableDownloads().firstOrNull { it.id == id }
+      }
+      if (download == null || download.status != "complete") {
+        promise.resolve(false)
+        return
+      }
+      val uri = Uri.parse(download.contentUri)
+      val mimeType = resolveMimeTypeFromFilename(download.name, download.mimeType) ?: "*/*"
+      openContentUri(uri, mimeType, promise)
+    } catch (error: Exception) {
+      promise.reject("DOWNLOAD_OPEN_FAILED", "Unable to open download.", error)
+    }
+  }
+
+  private fun openContentUri(uri: Uri, mimeType: String, promise: Promise) {
+    if (mimeType == APK_MIME_TYPE && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+      !reactApplicationContext.packageManager.canRequestPackageInstalls()
+    ) {
+      try {
+        reactApplicationContext.startActivity(Intent(
+          Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+          Uri.parse("package:" + reactApplicationContext.packageName)
+        ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) })
+        Toast.makeText(
+          reactApplicationContext,
+          "Allow app installs, then tap the APK again.",
+          Toast.LENGTH_LONG
+        ).show()
+        promise.resolve(true)
+      } catch (error: ActivityNotFoundException) {
+        Log.w(TAG, "Unable to open app install settings", error)
+        promise.resolve(false)
+      }
+      return
+    }
+
+    val viewIntent = Intent(Intent.ACTION_VIEW).apply {
+      setDataAndType(uri, mimeType)
+      addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    val launchIntent = if (mimeType == APK_MIME_TYPE) {
+      viewIntent
+    } else {
+      Intent.createChooser(viewIntent, "Open with").apply {
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+      }
+    }
+    try {
+      reactApplicationContext.startActivity(launchIntent)
+      promise.resolve(true)
+    } catch (error: ActivityNotFoundException) {
+      Log.w(TAG, "No activity can open this download", error)
+      promise.resolve(false)
+    }
+  }
+
+  private fun removeResumableDownload(id: String, promise: Promise) {
+    try {
+      transferControls[id]?.let { control ->
+        control.cancelled = true
+        control.connection?.disconnect()
+      }
+      val removed = synchronized(recordsLock) {
+        val records = loadResumableDownloads()
+        val download = records.firstOrNull { it.id == id } ?: return@synchronized false
+        reactApplicationContext.contentResolver.delete(Uri.parse(download.contentUri), null, null)
+        saveResumableDownloads(records.filterNot { it.id == id })
+        true
+      }
+      promise.resolve(removed)
+    } catch (error: Exception) {
+      promise.reject("DOWNLOAD_REMOVE_FAILED", "Unable to remove download.", error)
+    }
+  }
+
+  private fun parseContentRangeStart(value: String?): Long? {
+    return value?.let(CONTENT_RANGE_PATTERN::matchEntire)?.groupValues?.get(1)?.toLongOrNull()
+  }
+
+  private fun parseContentRangeTotal(value: String?): Long? {
+    return value?.let(CONTENT_RANGE_PATTERN::matchEntire)?.groupValues?.get(3)
+      ?.takeUnless { it == "*" }
+      ?.toLongOrNull()
   }
 
   private fun createUniquePublicFilename(name: String): String {
@@ -484,7 +928,9 @@ class BrowserDownloadsModule(
             id = id,
             name = name,
             status = normalizeStatus(item.optString("status", "failed")),
+            reason = normalizeReason(item.optString("reason", "")),
             size = item.optLong("size", 0).coerceAtLeast(0),
+            downloadedBytes = item.optLong("downloadedBytes", 0).coerceAtLeast(0),
             createdAt = item.optLong("createdAt", 0).coerceAtLeast(0),
             sourceUrl = item.optString("sourceUrl", "")
               .takeIf { isHttpUrl(it) },
@@ -517,7 +963,9 @@ class BrowserDownloadsModule(
             .put("id", download.id)
             .put("name", download.name)
             .put("status", download.status)
+            .put("reason", download.reason)
             .put("size", download.size)
+            .put("downloadedBytes", download.downloadedBytes)
             .put("createdAt", download.createdAt)
             .put("sourceUrl", download.sourceUrl)
             .put("mimeType", download.mimeType)
@@ -526,6 +974,102 @@ class BrowserDownloadsModule(
         )
       }
     preferences().edit().putString(DOWNLOADS_KEY, json.toString()).apply()
+  }
+
+  private fun loadResumableDownloads(): List<ResumableDownload> {
+    val serialized = preferences().getString(RESUMABLE_DOWNLOADS_KEY, null) ?: return emptyList()
+    return try {
+      val json = JSONArray(serialized)
+      val records = mutableListOf<ResumableDownload>()
+      val count = minOf(json.length(), MAX_DOWNLOADS)
+      for (index in 0 until count) {
+        val item = json.optJSONObject(index) ?: continue
+        val id = item.optString("id", "")
+        val name = sanitizeFilename(item.optString("name", ""))
+        val sourceUrl = item.optString("sourceUrl", "")
+        val contentUri = item.optString("contentUri", "")
+        if (
+          !id.startsWith(RESUMABLE_ID_PREFIX) || name.isBlank() ||
+          !isHttpUrl(sourceUrl) || !isOwnedDownloadUri(contentUri)
+        ) continue
+        records.add(
+          ResumableDownload(
+            id = id,
+            name = name,
+            status = normalizeStatus(item.optString("status", "failed")),
+            reason = normalizeReason(item.optString("reason", "")),
+            downloadedBytes = item.optLong("downloadedBytes", 0).coerceAtLeast(0),
+            totalBytes = item.optLong("totalBytes", 0).coerceAtLeast(0),
+            createdAt = item.optLong("createdAt", 0).coerceAtLeast(0),
+            sourceUrl = sourceUrl,
+            mimeType = normalizeMimeType(item.optString("mimeType", "")),
+            contentUri = contentUri,
+            userAgent = item.optString("userAgent", "").takeIf { it.length <= MAX_USER_AGENT_LENGTH }
+          )
+        )
+      }
+      records
+    } catch (error: Exception) {
+      Log.w(TAG, "Unable to restore resumable download records", error)
+      emptyList()
+    }
+  }
+
+  private fun saveResumableDownloads(downloads: List<ResumableDownload>) {
+    val json = JSONArray()
+    downloads.sortedByDescending { it.createdAt }.take(MAX_DOWNLOADS).forEach { download ->
+      json.put(
+        JSONObject()
+          .put("id", download.id)
+          .put("name", download.name)
+          .put("status", download.status)
+          .put("reason", download.reason)
+          .put("downloadedBytes", download.downloadedBytes)
+          .put("totalBytes", download.totalBytes)
+          .put("createdAt", download.createdAt)
+          .put("sourceUrl", download.sourceUrl)
+          .put("mimeType", download.mimeType)
+          .put("contentUri", download.contentUri)
+          .put("userAgent", download.userAgent)
+      )
+    }
+    preferences().edit().putString(RESUMABLE_DOWNLOADS_KEY, json.toString()).apply()
+  }
+
+  private fun updateResumableDownload(
+    id: String,
+    update: (ResumableDownload) -> ResumableDownload?
+  ): ResumableDownload? {
+    val records = loadResumableDownloads().toMutableList()
+    val index = records.indexOfFirst { it.id == id }
+    if (index < 0) return null
+    val updated = update(records[index]) ?: return null
+    records[index] = updated
+    saveResumableDownloads(records)
+    return updated
+  }
+
+  private fun markInterruptedResumableDownloads() {
+    synchronized(recordsLock) {
+      val records = loadResumableDownloads()
+      val restored = records.map { download ->
+        if (download.status in setOf("pending", "running")) {
+          download.copy(status = "paused", reason = "interrupted")
+        } else {
+          download
+        }
+      }
+      if (restored != records) saveResumableDownloads(restored)
+    }
+  }
+
+  private fun isOwnedDownloadUri(value: String): Boolean {
+    return try {
+      val uri = Uri.parse(value)
+      uri.scheme == "content" && uri.authority == MediaStore.AUTHORITY
+    } catch (_: Exception) {
+      false
+    }
   }
 
   private fun preferences() = reactApplicationContext.getSharedPreferences(
@@ -553,13 +1097,17 @@ class BrowserDownloadsModule(
   }
 
   private fun hasDownloadCapacity(): Boolean {
+    val resumableActive = synchronized(recordsLock) {
+      loadResumableDownloads().count { it.status in setOf("pending", "running") }
+    }
+    if (resumableActive >= MAX_ACTIVE_DOWNLOADS) return false
     val activeStatuses = DownloadManager.STATUS_PENDING or
       DownloadManager.STATUS_RUNNING or
       DownloadManager.STATUS_PAUSED
     return try {
       getDownloadManager().query(
         DownloadManager.Query().setFilterByStatus(activeStatuses)
-      ).use { it.count < MAX_ACTIVE_DOWNLOADS }
+      ).use { it.count + resumableActive < MAX_ACTIVE_DOWNLOADS }
     } catch (error: Exception) {
       Log.w(TAG, "Unable to count active browser downloads", error)
       false
@@ -580,9 +1128,39 @@ class BrowserDownloadsModule(
     else -> "failed"
   }
 
+  private fun getReason(status: Int, reason: Int): String? = when (status) {
+    DownloadManager.STATUS_PAUSED -> when (reason) {
+      DownloadManager.PAUSED_WAITING_TO_RETRY -> "waiting-to-retry"
+      DownloadManager.PAUSED_WAITING_FOR_NETWORK -> "waiting-for-network"
+      DownloadManager.PAUSED_QUEUED_FOR_WIFI -> "queued-for-wifi"
+      else -> "paused-unknown"
+    }
+    DownloadManager.STATUS_FAILED -> when (reason) {
+      DownloadManager.ERROR_CANNOT_RESUME -> "cannot-resume"
+      DownloadManager.ERROR_DEVICE_NOT_FOUND -> "device-unavailable"
+      DownloadManager.ERROR_FILE_ALREADY_EXISTS -> "file-exists"
+      DownloadManager.ERROR_FILE_ERROR -> "file-error"
+      DownloadManager.ERROR_HTTP_DATA_ERROR -> "http-data-error"
+      DownloadManager.ERROR_INSUFFICIENT_SPACE -> "insufficient-space"
+      DownloadManager.ERROR_TOO_MANY_REDIRECTS -> "too-many-redirects"
+      DownloadManager.ERROR_UNHANDLED_HTTP_CODE -> "unhandled-http"
+      else -> "unknown-error"
+    }
+    else -> null
+  }
+
   private fun normalizeStatus(status: String) = when (status) {
     "pending", "running", "paused", "complete", "failed" -> status
     else -> "failed"
+  }
+
+  private fun normalizeReason(reason: String): String? = reason.takeIf {
+    it in setOf(
+      "waiting-to-retry", "waiting-for-network", "queued-for-wifi", "paused-unknown",
+      "user-paused", "interrupted", "cannot-resume", "device-unavailable", "file-exists", "file-error",
+      "http-data-error", "insufficient-space", "too-many-redirects", "unhandled-http",
+      "unknown-error", "network-error", "http-error", "incomplete-response"
+    )
   }
 
   private fun normalizeMimeType(mimeType: String?): String? {
@@ -716,11 +1294,16 @@ class BrowserDownloadsModule(
       if (!cursor.moveToFirst()) return@use null
       val mimeTypeIndex = cursor.getColumnIndex(DownloadManager.COLUMN_MEDIA_TYPE)
       download.copy(
-        status = getStatus(
-          cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
+        status = getStatus(cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))),
+        reason = getReason(
+          cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS)),
+          cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_REASON))
         ),
         size = cursor.getLong(
           cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES)
+        ).coerceAtLeast(0),
+        downloadedBytes = cursor.getLong(
+          cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR)
         ).coerceAtLeast(0),
         mimeType = download.mimeType
           ?: if (mimeTypeIndex >= 0) cursor.getString(mimeTypeIndex) else null
@@ -866,13 +1449,35 @@ class BrowserDownloadsModule(
     val id: Long,
     val name: String,
     val status: String,
+    val reason: String? = null,
     val size: Long,
+    val downloadedBytes: Long = 0,
     val createdAt: Long,
     val sourceUrl: String?,
     val mimeType: String?,
     val typeResolved: Boolean = false,
     val resolutionAttempts: Int = 0
   )
+
+  private data class ResumableDownload(
+    val id: String,
+    val name: String,
+    val status: String,
+    val reason: String? = null,
+    val downloadedBytes: Long,
+    val totalBytes: Long,
+    val createdAt: Long,
+    val sourceUrl: String,
+    val mimeType: String?,
+    val contentUri: String,
+    val userAgent: String?
+  )
+
+  private class TransferControl {
+    @Volatile var paused = false
+    @Volatile var cancelled = false
+    @Volatile var connection: HttpURLConnection? = null
+  }
 
   private class BoundedInputStream(
     input: InputStream,
@@ -907,6 +1512,7 @@ class BrowserDownloadsModule(
     private const val MAX_INSPECTED_DOWNLOADS = 1000
     private const val MAX_FILENAME_LENGTH = 255
     private const val MAX_MIME_TYPE_LENGTH = 255
+    private const val MAX_USER_AGENT_LENGTH = 2048
     private const val MAX_REDIRECTS = 5
     private const val METADATA_TIMEOUT_MS = 8000
     private const val RESOLVER_THREADS = 2
@@ -918,6 +1524,14 @@ class BrowserDownloadsModule(
     private const val MAX_RECONCILE_ATTEMPTS = 3
     private const val DOWNLOADS_PREFERENCES = "browser_downloads"
     private const val DOWNLOADS_KEY = "records"
+    private const val RESUMABLE_DOWNLOADS_KEY = "resumable_records_v1"
+    private const val RESUMABLE_ID_PREFIX = "r:"
+    private const val APK_MIME_TYPE = "application/vnd.android.package-archive"
+    private const val DOWNLOAD_CONNECT_TIMEOUT_MS = 15_000
+    private const val DOWNLOAD_READ_TIMEOUT_MS = 30_000
+    private const val DOWNLOAD_BUFFER_BYTES = 64 * 1024
+    private const val DOWNLOAD_PROGRESS_BYTES = 512L * 1024L
+    private const val DOWNLOAD_PROGRESS_INTERVAL_MS = 500L
     private const val MAX_SIGNATURE_BYTES = 131072
     private const val MAX_ARCHIVE_ENTRIES = 256
     private const val MAX_ARCHIVE_SCAN_BYTES = 8L * 1024L * 1024L
@@ -929,6 +1543,7 @@ class BrowserDownloadsModule(
       "filename[*]?\\s*=",
       RegexOption.IGNORE_CASE
     )
+    private val CONTENT_RANGE_PATTERN = Regex("^bytes ([0-9]+)-([0-9]+)/([0-9]+|[*])$", RegexOption.IGNORE_CASE)
     private val ANDROID_DEX_ENTRY_PATTERN = Regex("^classes(?:[0-9]+)?[.]dex$")
     private val REDIRECT_STATUS_CODES = setOf(301, 302, 303, 307, 308)
     private val AMBIGUOUS_MIME_TYPES = setOf(

@@ -128,6 +128,7 @@ import {
   getProxiedHyperUrl
 } from './downloads/browser-downloads.mjs'
 import { HyperdriveScreen } from './hyperdrive/HyperdriveScreen'
+import { createBrowserAnalysis, recordBrowserDiagnostic } from './browser-diagnostics.mjs'
 import { PeerChatScreen, type PeerChatResponse } from './peerchat/PeerChatScreen'
 import { peerSkyWebViewNativeConfig } from './downloads/PeerSkyWebView'
 import {
@@ -241,7 +242,6 @@ type BrowserTabsState = {
 }
 
 const DESKTOP_BROWSER_USER_AGENT = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 PeerSkyMobile/1.0'
-
 export default function App () {
   const systemColorScheme = useColorScheme()
   const { height: browserWindowHeight, width: browserWindowWidth } = useWindowDimensions()
@@ -255,7 +255,7 @@ export default function App () {
   const p2pmdWebViewRef = useRef<ComponentRef<typeof WebView> | null>(null)
   const p2pmdPublishInFlightRef = useRef(false)
   const browserLoadSeqRef = useRef(0)
-  const browserWebNavigationDirectionsRef = useRef(new Map<string, 'back' | 'forward'>())
+  const browserWebViewGenerationsRef = useRef(new Map<string, number>())
   const externalLinkPromptOpenRef = useRef(false)
   const lastExternalLinkPromptAtRef = useRef(0)
   const [isBooting, setIsBooting] = useState(false)
@@ -274,6 +274,7 @@ export default function App () {
   const [browserTabsState, setBrowserTabsState] = useState<BrowserTabsState>(
     () => createBrowserTabsState() as BrowserTabsState
   )
+  const [browserWebViewGenerations, setBrowserWebViewGenerations] = useState<Record<string, number>>({})
   const {
     isReady: browserPreferencesReady,
     persistenceError: browserPreferencesError,
@@ -312,6 +313,8 @@ export default function App () {
     error: browserDownloadsError,
     isReady: browserDownloadsReady,
     openDownload: openBrowserDownload,
+    openLocalFile: openBrowserLocalFile,
+    pauseDownload: pauseBrowserDownload,
     refresh: refreshBrowserDownloads,
     removeDownload: removeBrowserDownload,
     requestDownload: requestBrowserDownload,
@@ -397,7 +400,6 @@ export default function App () {
     return () => {
       const worklet = workletRef.current
       const rpc = rpcRef.current
-
       setTimeout(() => {
         if (workletGenerationRef.current !== generation) return
         if (workletRef.current === worklet) workletRef.current = null
@@ -580,17 +582,11 @@ export default function App () {
   function updateBrowserTabsState (
     update: BrowserTabsState | ((state: BrowserTabsState) => BrowserTabsState)
   ) {
-    if (typeof update !== 'function') {
-      browserTabsStateRef.current = update
-      setBrowserTabsState(update)
-      return
-    }
-
-    setBrowserTabsState((state) => {
-      const nextState = update(state)
-      browserTabsStateRef.current = nextState
-      return nextState
-    })
+    const nextState = typeof update === 'function'
+      ? update(browserTabsStateRef.current)
+      : update
+    browserTabsStateRef.current = nextState
+    setBrowserTabsState(nextState)
   }
 
   async function startWorklet () {
@@ -665,8 +661,6 @@ export default function App () {
     tabId?: string
   ) {
     const targetTabId = tabId || browserTabsStateRef.current.activeTabId
-    const direction = browserWebNavigationDirectionsRef.current.get(targetTabId)
-    browserWebNavigationDirectionsRef.current.delete(targetTabId)
     const targetTab = browserTabsStateRef.current.tabs.find((tab) => tab.id === targetTabId)
     const nextState = recordBrowserWebNavigationState(
       targetTab
@@ -674,7 +668,7 @@ export default function App () {
         : getBrowserState(),
       url,
       source,
-      direction,
+      null,
       webNavigation?.canGoBack
     )
     applyBrowserState({
@@ -922,6 +916,18 @@ export default function App () {
         method: 'GET',
         inlineAssets: true
       })
+      recordBrowserDiagnostic('hyperdrive', 'navigation-fetch-response', {
+        url: nextUrl,
+        ok: response.ok,
+        status: response.status,
+        statusText: response.statusText,
+        error: response.error,
+        downloadName: response.downloadName,
+        hasDownloadUrl: Boolean(response.downloadUrl),
+        mediaName: response.mediaName,
+        mediaType: response.mediaType,
+        hasMediaUrl: Boolean(response.mediaUrl)
+      })
 
       if (isStaleBrowserLoad(loadSeq, browserLoadSeqRef.current)) return
 
@@ -981,6 +987,10 @@ export default function App () {
       if (isStaleBrowserLoad(loadSeq, browserLoadSeqRef.current)) return
 
       const message = error instanceof Error ? error.message : String(error)
+      recordBrowserDiagnostic('hyperdrive', 'navigation-fetch-error', {
+        url: nextUrl,
+        error: message
+      })
       const source: BrowserSource = {
         kind: 'error',
         html: createBrowserErrorHtml(nextUrl, message)
@@ -1036,36 +1046,59 @@ export default function App () {
   function onBrowserBack () {
     browserUserInteractedRef.current = true
     cancelPendingBrowserLoad()
+    Keyboard.dismiss()
 
-    if (browserSource.kind === 'web' && browserWebCanGoBack) {
-      browserWebNavigationDirectionsRef.current.set(browserTabsState.activeTabId, 'back')
-      browserWebViewRefs.current.get(browserTabsState.activeTabId)?.goBack()
-      return
-    }
+    const tabsState = browserTabsStateRef.current
+    const tabId = tabsState.activeTabId
+    const activeBrowserTab = tabsState.tabs.find((tab) => tab.id === tabId)
+    const currentEntry = activeBrowserTab?.history[activeBrowserTab.historyIndex]
+    if (!activeBrowserTab || !currentEntry) return
 
-    const nextState = getBrowserBackState(getBrowserState())
+    const nextState = getBrowserBackState({
+      history: activeBrowserTab.history,
+      historyIndex: activeBrowserTab.historyIndex
+    })
     if (!nextState) return
 
+    recordBrowserDiagnostic('navigation', 'shell-back', {
+      fromUrl: currentEntry.url,
+      toUrl: nextState.currentUrl,
+      historyIndex: nextState.historyIndex,
+      historyLength: nextState.history.length
+    })
+
     const entry = nextState.history[nextState.historyIndex]
+    remountBrowserWebView(tabId)
     applyBrowserState(nextState)
     setBrowserTitle(getBrowserEntryTitle(entry))
     setActiveTab(entry.source.kind === 'app' ? entry.source.app : 'hyper')
   }
 
+  function remountBrowserWebView (tabId: string) {
+    const generation = (browserWebViewGenerationsRef.current.get(tabId) || 0) + 1
+    browserWebViewGenerationsRef.current.set(tabId, generation)
+    setBrowserWebViewGenerations((current) => ({ ...current, [tabId]: generation }))
+  }
+
   function onBrowserForward () {
     browserUserInteractedRef.current = true
     cancelPendingBrowserLoad()
+    Keyboard.dismiss()
 
-    if (browserSource.kind === 'web' && browserWebCanGoForward) {
-      browserWebNavigationDirectionsRef.current.set(browserTabsState.activeTabId, 'forward')
-      browserWebViewRefs.current.get(browserTabsState.activeTabId)?.goForward()
-      return
-    }
+    const tabsState = browserTabsStateRef.current
+    const tabId = tabsState.activeTabId
+    const activeBrowserTab = tabsState.tabs.find((tab) => tab.id === tabId)
+    const currentEntry = activeBrowserTab?.history[activeBrowserTab.historyIndex]
+    if (!activeBrowserTab || !currentEntry) return
 
-    const nextState = getBrowserForwardState(getBrowserState())
+    const nextState = getBrowserForwardState({
+      history: activeBrowserTab.history,
+      historyIndex: activeBrowserTab.historyIndex
+    })
     if (!nextState) return
 
     const entry = nextState.history[nextState.historyIndex]
+    remountBrowserWebView(tabId)
     applyBrowserState(nextState)
     setBrowserTitle(getBrowserEntryTitle(entry))
     setActiveTab(entry.source.kind === 'app' ? entry.source.app : 'hyper')
@@ -1093,6 +1126,32 @@ export default function App () {
     if (browserSource.kind === 'app') {
       openInternalApp(browserSource.app, false)
     }
+  }
+
+  async function shareBrowserNavigationAnalysis () {
+    const tabsState = browserTabsStateRef.current
+    const activeBrowserTab = tabsState.tabs.find((tab) => tab.id === tabsState.activeTabId)
+    const analysis = createBrowserAnalysis({
+      platform: Platform.OS,
+      screen: 'browser-navigation',
+      activeTab: activeBrowserTab
+        ? {
+            id: activeBrowserTab.id,
+            historyIndex: activeBrowserTab.historyIndex,
+            history: activeBrowserTab.history.map((entry) => ({
+              url: entry.url,
+              sourceKind: entry.source.kind
+            })),
+            webCanGoBack: activeBrowserTab.webCanGoBack,
+            webCanGoForward: activeBrowserTab.webCanGoForward
+          }
+        : null,
+      navigationMode: 'shell-history'
+    })
+    await Share.share({
+      title: 'PeerSky navigation analysis',
+      message: JSON.stringify(analysis, null, 2)
+    })
   }
 
   async function onContentBlockingEnabledChange (enabled: boolean) {
@@ -1286,13 +1345,36 @@ export default function App () {
     source?: 'fetched' | 'published' | 'uploaded'
     type?: 'directory' | 'file'
     url: string
+    localUri?: string
   }) {
-    if (item.type !== 'directory' && item.source === 'fetched') {
+    if (item.type !== 'directory') {
+      if (item.localUri) {
+        const opened = await openBrowserLocalFile(item.localUri, item.name)
+        if (opened) {
+          setStatus(`Opened ${item.name}`)
+          return false
+        }
+      }
+
       const downloads = await refreshBrowserDownloads()
       const existing = findCompletedHyperDownload(downloads, item)
+      recordBrowserDiagnostic('hyperdrive', 'local-download-match', {
+        item,
+        matchedDownload: existing || null,
+        downloadCount: downloads.length
+      })
       if (existing) {
         const opened = await openBrowserDownload(existing.id)
-        setStatus(opened ? `Opened ${existing.name}` : 'No app is available to open this download')
+        if (opened) {
+          setStatus(`Opened ${existing.name}`)
+          return false
+        }
+
+        recordBrowserDiagnostic('hyperdrive', 'local-download-open-failed', {
+          item,
+          downloadId: existing.id
+        })
+        setStatus('No app is available to open this downloaded file')
         return false
       }
     }
@@ -1423,6 +1505,13 @@ export default function App () {
     browserFaviconsRef.current.delete(tabId)
     browserLastRecordedUrlsRef.current.delete(tabId)
     browserMediaTokensRef.current.delete(tabId)
+    browserWebViewGenerationsRef.current.delete(tabId)
+    setBrowserWebViewGenerations((current) => {
+      if (!(tabId in current)) return current
+      const next = { ...current }
+      delete next[tabId]
+      return next
+    })
     setBrowserLiveTabIds((tabIds) => tabIds.filter((id) => id !== tabId))
     if (isClosingActive && tab) applyBrowserTab(tab)
     setStatus('Tab closed')
@@ -1441,6 +1530,8 @@ export default function App () {
     const nextState = reset.tabsState
     const tab = nextState.tabs[0]
 
+    browserWebViewGenerationsRef.current.clear()
+    setBrowserWebViewGenerations({})
     updateBrowserTabsState(nextState)
     const previewCacheCleared = clearPreviews
       ? clearAllBrowserTabPreviews()
@@ -2176,12 +2267,8 @@ export default function App () {
     }
   }
 
-  const canBrowserGoBack = browserSource.kind === 'web'
-    ? browserWebCanGoBack || browserCanGoBack
-    : browserCanGoBack
-  const canBrowserGoForward = browserSource.kind === 'web'
-    ? browserWebCanGoForward || browserCanGoForward
-    : browserCanGoForward
+  const canBrowserGoBack = browserCanGoBack
+  const canBrowserGoForward = browserCanGoForward
   const browserIsDark = resolveBrowserDarkMode(browserPreferences.theme, systemColorScheme)
   const browserChrome = getBrowserPalette(browserIsDark)
   const browserBookmarkActionAvailable = canBookmarkBrowserPage(
@@ -2227,7 +2314,6 @@ export default function App () {
     browserSource.kind,
     browserTabsState.activeTabId,
     browserTabsVisible,
-    browserWebCanGoBack,
     browserZoomVisible,
     canBrowserGoBack
   ])
@@ -2309,6 +2395,7 @@ export default function App () {
           isReady={browserDownloadsReady}
           onClose={() => setBrowserDownloadsVisible(false)}
           onOpen={(downloadId) => void openBrowserDownload(downloadId)}
+          onPause={(download) => pauseBrowserDownload(download)}
           onRefresh={() => void refreshBrowserDownloads()}
           onRemove={(downloadId) => void removeBrowserDownload(downloadId)}
           onRetry={retryBrowserDownload}
@@ -2546,6 +2633,7 @@ export default function App () {
       isLoading={browserIsLoading}
       historySuggestions={getBrowserHistorySuggestions(browserAddress)}
       menuVisible={browserMenuVisible}
+      navigationKey={`${browserTabsState.activeTabId}:${browserHistoryIndex}`}
       newTabDisabled={browserTabsState.tabs.length >= MAX_BROWSER_TABS}
       palette={browserChrome}
       position={browserPreferences.addressBarPosition}
@@ -2564,6 +2652,10 @@ export default function App () {
       onOpenBookmarks={onBrowserOpenBookmarks}
       onOpenDownloads={onBrowserOpenDownloads}
       onOpenHistory={onBrowserOpenHistory}
+      onShareAnalysis={() => {
+        setBrowserMenuVisible(false)
+        void shareBrowserNavigationAnalysis()
+      }}
       onOpenSettings={() => {
         setBrowserMenuVisible(false)
         setBrowserSettingsVisible(true)
@@ -3046,6 +3138,8 @@ export default function App () {
             browserMediaScript
           )
 
+          const webViewGeneration = browserWebViewGenerations[tab.id] || 0
+
           return (
             <View
               key={tab.id}
@@ -3064,7 +3158,7 @@ export default function App () {
               style={styles.browserWebViewCapture}
             >
             <WebView
-              key={`${getBrowserWebViewKey(tab.id, entry.source.kind)}:${tabDesktopView ? 'desktop' : 'mobile'}:${contentBlockingGeneration}`}
+              key={`${getBrowserWebViewKey(tab.id, entry.source.kind)}:${tabDesktopView ? 'desktop' : 'mobile'}:${contentBlockingGeneration}:${webViewGeneration}`}
               ref={(ref) => {
                 if (ref) {
                   browserWebViewRefs.current.set(tab.id, ref)
@@ -3116,7 +3210,6 @@ export default function App () {
                 }
               }}
               onLoadEnd={() => {
-                browserWebNavigationDirectionsRef.current.delete(tab.id)
                 if (
                   browserTabsStateRef.current.activeTabId === tab.id &&
                   isCurrentBrowserTabEntry(browserTabsStateRef.current, tab.id, entry)
@@ -3126,6 +3219,7 @@ export default function App () {
                 }
               }}
               onNavigationStateChange={(navigationState) => {
+                if ((browserWebViewGenerationsRef.current.get(tab.id) || 0) !== webViewGeneration) return
                 if (entry.source.kind !== 'web') return
                 if (!isCurrentBrowserTabEntry(browserTabsStateRef.current, tab.id, entry)) return
                 if (!isWebUrl(navigationState.url) || navigationState.url.length > MAX_BROWSER_URL_LENGTH) return
@@ -3155,6 +3249,7 @@ export default function App () {
                 }
               }}
               onMessage={(event) => {
+                if ((browserWebViewGenerationsRef.current.get(tab.id) || 0) !== webViewGeneration) return
                 if (!isCurrentBrowserTabEntry(browserTabsStateRef.current, tab.id, entry)) return
 
                 const mediaTarget = parseBrowserMediaMessage(

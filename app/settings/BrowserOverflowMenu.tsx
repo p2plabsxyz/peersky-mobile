@@ -12,6 +12,7 @@ import ShareIcon from '../../assets/icons/bootstrap/share.svg'
 import StarFillIcon from '../../assets/icons/bootstrap/star-fill.svg'
 import StarIcon from '../../assets/icons/bootstrap/star.svg'
 import ZoomIcon from '../../assets/icons/bootstrap/zoom-in.svg'
+import InfoIcon from '../../assets/icons/bootstrap/info-circle.svg'
 import { BROWSER_PALETTES } from '../browser-appearance.mjs'
 
 const MENU_ICON_SIZE = 18
@@ -34,6 +35,7 @@ type BrowserOverflowMenuProps = {
   onOpenBookmarks: () => void
   onOpenDownloads: () => void
   onOpenHistory: () => void
+  onShareAnalysis?: () => void
   onOpenSettings: () => void
   onOpenZoom?: () => void
   onSharePage?: () => void
@@ -58,6 +60,7 @@ export function BrowserOverflowMenu ({
   onOpenBookmarks,
   onOpenDownloads,
   onOpenHistory,
+  onShareAnalysis,
   onOpenSettings,
   onOpenZoom,
   onSharePage,
@@ -199,6 +202,14 @@ export function BrowserOverflowMenu ({
               label='Downloads'
               onPress={onOpenDownloads}
             />
+            {onShareAnalysis && (
+              <MenuItem
+                icon={<InfoIcon {...menuIconProps} />}
+                isDark={isDark}
+                label='Analysis'
+                onPress={onShareAnalysis}
+              />
+            )}
             <MenuItem
               icon={<GearIcon {...menuIconProps} />}
               isDark={isDark}

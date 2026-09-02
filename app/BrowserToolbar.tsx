@@ -38,6 +38,7 @@ type BrowserToolbarProps = {
   isLoading: boolean
   historySuggestions: BrowserHistoryItem[]
   menuVisible: boolean
+  navigationKey: string
   newTabDisabled: boolean
   palette: {
     accent: string
@@ -62,6 +63,7 @@ type BrowserToolbarProps = {
   onOpenBookmarks: () => void
   onOpenDownloads: () => void
   onOpenHistory: () => void
+  onShareAnalysis: () => void
   onOpenSettings: () => void
   onOpenTabs: () => void
   onOpenZoom: () => void
@@ -86,6 +88,7 @@ export function BrowserToolbar ({
   isLoading,
   historySuggestions,
   menuVisible,
+  navigationKey,
   newTabDisabled,
   palette,
   position,
@@ -101,6 +104,7 @@ export function BrowserToolbar ({
   onOpenBookmarks,
   onOpenDownloads,
   onOpenHistory,
+  onShareAnalysis,
   onOpenSettings,
   onOpenTabs,
   onOpenZoom,
@@ -133,7 +137,13 @@ export function BrowserToolbar ({
     addressInputRef.current?.blur()
     Keyboard.dismiss()
     setIsAddressFocused(false)
-  }, [activeTabId])
+  }, [activeTabId, navigationKey])
+
+  function finishAddressEditing () {
+    addressInputRef.current?.blur()
+    Keyboard.dismiss()
+    setIsAddressFocused(false)
+  }
 
   const hiddenControlProps = isAddressFocused
     ? {
@@ -187,7 +197,10 @@ export function BrowserToolbar ({
           styles.browserNavButton,
           !canGoBack ? styles.browserNavButtonDisabled : null
         ]}
-        onPress={onBack}
+        onPress={() => {
+          finishAddressEditing()
+          onBack()
+        }}
         disabled={!canGoBack}
       >
         <BackIcon
@@ -204,7 +217,10 @@ export function BrowserToolbar ({
           styles.browserNavButton,
           !canGoForward ? styles.browserNavButtonDisabled : null
         ]}
-        onPress={onForward}
+        onPress={() => {
+          finishAddressEditing()
+          onForward()
+        }}
         disabled={!canGoForward}
       >
         <ForwardIcon
@@ -363,6 +379,7 @@ export function BrowserToolbar ({
         onOpenBookmarks={onOpenBookmarks}
         onOpenDownloads={onOpenDownloads}
         onOpenHistory={onOpenHistory}
+        onShareAnalysis={onShareAnalysis}
         onOpenZoom={() => {
           onCloseMenu()
           onOpenZoom()

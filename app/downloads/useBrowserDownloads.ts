@@ -3,6 +3,7 @@ import CookieManager from '@preeternal/react-native-cookie-manager'
 import { Directory, File, Paths } from 'expo-file-system'
 import * as Sharing from 'expo-sharing'
 import { NativeModules, Platform } from 'react-native'
+import { recordBrowserDiagnostic } from '../browser-diagnostics.mjs'
 import {
   addDownloadUrlFingerprint,
   createUniqueDownloadFilename,
@@ -15,14 +16,20 @@ export type BrowserDownload = {
   name: string
   status: 'pending' | 'running' | 'paused' | 'complete' | 'failed'
   size: number
+  downloadedBytes?: number
+  totalBytes?: number
   createdAt: number
+  reason?: string
   sourceUrl?: string
 }
 
 type BrowserDownloadsNativeModule = {
   getDownloads: () => Promise<BrowserDownload[]>
   openDownload: (id: string) => Promise<boolean>
+  openLocalFile: (uri: string, name?: string) => Promise<boolean>
   removeDownload: (id: string) => Promise<boolean>
+  pauseDownload: (id: string) => Promise<boolean>
+  resumeDownload: (id: string, url: string) => Promise<boolean>
   requestDownload: (url: string) => Promise<boolean>
 }
 
@@ -36,6 +43,7 @@ export function useBrowserDownloads ({ enabled = false } = {}) {
   const [error, setError] = useState<string | null>(null)
   const activeIosDownloads = useRef(new Set<string>())
   const refreshSequence = useRef(0)
+  const lastDiagnosticState = useRef('')
 
   const refresh = useCallback(async () => {
     const sequence = ++refreshSequence.current
@@ -47,6 +55,20 @@ export function useBrowserDownloads ({ enabled = false } = {}) {
       if (sequence !== refreshSequence.current) return normalized
 
       setDownloads(normalized)
+      const diagnosticState = normalized.map(({ id, status, reason }) => `${id}:${status}:${reason || ''}`).join('|')
+      if (diagnosticState !== lastDiagnosticState.current) {
+        lastDiagnosticState.current = diagnosticState
+        recordBrowserDiagnostic('downloads', 'status-change', {
+          downloads: normalized.map(({ id, name, status, size, reason, sourceUrl }) => ({
+            id,
+            name,
+            status,
+            size,
+            reason,
+            sourceUrl
+          }))
+        })
+      }
       setError(null)
       return normalized
     } catch (refreshError) {
@@ -145,6 +167,29 @@ export function useBrowserDownloads ({ enabled = false } = {}) {
     }
   }
 
+  async function pauseDownload (download: BrowserDownload) {
+    if (
+      Platform.OS !== 'android' ||
+      !download.id.startsWith('r:') ||
+      !['pending', 'running'].includes(download.status)
+    ) {
+      setError('This download cannot be paused.')
+      return false
+    }
+
+    try {
+      const paused = await getAndroidDownloads().pauseDownload(download.id)
+      if (!paused) throw new Error('Download was not paused')
+      recordBrowserDiagnostic('downloads', 'user-paused', { id: download.id, name: download.name })
+      await refresh()
+      return true
+    } catch (pauseError) {
+      console.error('Failed pausing browser download:', pauseError)
+      setError('Unable to pause this download.')
+      return false
+    }
+  }
+
   async function openDownload (id: string) {
     try {
       if (Platform.OS === 'android') {
@@ -166,11 +211,59 @@ export function useBrowserDownloads ({ enabled = false } = {}) {
     }
   }
 
+  async function openLocalFile (uri: string, name?: string) {
+    if (Platform.OS !== 'android') {
+      if (!await Sharing.isAvailableAsync()) return false
+      await Sharing.shareAsync(uri)
+      return true
+    }
+
+    try {
+      const opened = await getAndroidDownloads().openLocalFile(uri, name)
+      setError(opened ? null : 'No app is available to open this file.')
+      return opened
+    } catch (openError) {
+      console.error('Failed opening local file:', openError)
+      setError('No app is available to open this file.')
+      return false
+    }
+  }
+
   async function retryDownload (download: BrowserDownload, sourceUrl = download.sourceUrl) {
     const normalizedUrl = normalizeBrowserDownloadUrl(sourceUrl)
-    if (download.status !== 'failed' || !normalizedUrl) {
+    if (!['failed', 'paused'].includes(download.status) || !normalizedUrl) {
       setError('This download cannot be retried.')
       return false
+    }
+
+    if (
+      Platform.OS === 'android' &&
+      download.id.startsWith('r:') &&
+      (
+        download.status === 'paused' ||
+        (
+          download.status === 'failed' &&
+          (download.downloadedBytes || 0) > 0 &&
+          ['network-error', 'incomplete-response'].includes(download.reason || '')
+        )
+      )
+    ) {
+      try {
+        const resumed = await getAndroidDownloads().resumeDownload(download.id, normalizedUrl)
+        if (!resumed) throw new Error('Download was not resumed')
+        recordBrowserDiagnostic('downloads', 'user-resumed', {
+          id: download.id,
+          name: download.name,
+          downloadedBytes: download.downloadedBytes || 0
+        })
+        await refresh()
+        setError(null)
+        return true
+      } catch (resumeError) {
+        console.error('Failed resuming browser download:', resumeError)
+        setError('Unable to resume this download.')
+        return false
+      }
     }
 
     const accepted = await requestDownload(normalizedUrl)
@@ -185,7 +278,9 @@ export function useBrowserDownloads ({ enabled = false } = {}) {
     downloads,
     error,
     isReady,
+    openLocalFile,
     openDownload,
+    pauseDownload,
     refresh,
     removeDownload,
     requestDownload,
@@ -289,5 +384,7 @@ function removeIosDownloadSource (uri: string) {
 }
 
 function hasActiveDownload (downloads: BrowserDownload[]) {
-  return downloads.some(({ status }) => status === 'pending' || status === 'running')
+  return downloads.some(({ status, reason }) =>
+    status === 'pending' || status === 'running' || (status === 'paused' && reason !== 'user-paused')
+  )
 }

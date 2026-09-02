@@ -102,6 +102,16 @@ test('preserves filenames containing URL query and fragment characters', () => {
     `${DRIVE_URL}report%232%3F.pdf`)
 })
 
+test('keeps path-safe delimiters literal for hypercore-fetch lookups', () => {
+  const recents = recordHyperdriveRecent([], {
+    type: 'file',
+    name: 'one, two.mp4',
+    url: `${DRIVE_URL}one%2C%20two.mp4`
+  }, 10)
+
+  assert.equal(recents[0].url, `${DRIVE_URL}one,%20two.mp4`)
+})
+
 test('truncates recent names without splitting Unicode characters', () => {
   const expectedName = `${'a'.repeat(159)}😀`
   const recents = recordHyperdriveRecent([], {
@@ -139,4 +149,32 @@ test('persists valid upload visibility while keeping legacy recents compatible',
   const parsed = parseHyperdriveRecents(serializeHyperdriveRecents(recents))
   assert.equal(parsed[0].visibility, 'private')
   assert.equal(parsed[1].visibility, undefined)
+})
+
+test('preserves only app-local file URIs for uploaded recents', () => {
+  const localUri = 'file:///data/user/0/xyz.p2plabs.peersky/cache/DocumentPicker/report.pdf'
+  const uploaded = recordHyperdriveRecent([], {
+    type: 'file',
+    name: 'Report',
+    url: `${DRIVE_URL}report.pdf`,
+    source: 'uploaded',
+    localUri
+  }, 10)
+  const fetched = recordHyperdriveRecent([], {
+    type: 'file',
+    name: 'Remote',
+    url: `${DRIVE_URL}remote.pdf`,
+    source: 'fetched',
+    localUri
+  }, 10)
+
+  assert.equal(parseHyperdriveRecents(serializeHyperdriveRecents(uploaded))[0].localUri, localUri)
+  assert.equal(fetched[0].localUri, undefined)
+  assert.equal(recordHyperdriveRecent([], {
+    type: 'file',
+    name: 'Unsafe',
+    url: `${DRIVE_URL}unsafe.pdf`,
+    source: 'uploaded',
+    localUri: 'https://example.com/report.pdf'
+  }, 10)[0].localUri, undefined)
 })

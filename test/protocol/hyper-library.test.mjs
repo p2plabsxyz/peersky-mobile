@@ -125,6 +125,21 @@ test('sanitizes URL delimiters and encodes uploaded file URLs', async () => {
   assert.equal(response.item.url, `${DRIVE_URL}report%20-2-.pdf`)
 })
 
+test('keeps path-safe delimiters resolvable in uploaded file URLs', async () => {
+  const drive = createDrive({})
+  const response = await uploadHyperdriveFile({
+    name: 'one, two.mp4',
+    contentBase64: Buffer.from('video').toString('base64'),
+    visibility: 'public'
+  }, {
+    runtime: { getDrive: async () => drive }
+  })
+
+  assert.equal(response.ok, true)
+  assert.equal(response.item.url, `${DRIVE_URL}one,%20two.mp4`)
+  assert.equal(await drive.entry('/one, two.mp4') !== null, true)
+})
+
 test('truncates uploaded filenames without splitting Unicode characters', async () => {
   const drive = createDrive({})
   const expectedName = `${'a'.repeat(159)}😀`
@@ -166,7 +181,10 @@ test('streams picker-owned files without an application size limit', async () =>
     visibility: 'public'
   }, {
     runtime: { getDrive: async () => drive },
-    uploadLocalFile: async (upload) => { streamedUpload = upload }
+    uploadLocalFile: async (upload) => {
+      streamedUpload = upload
+      drive.setEntry(upload.pathname, upload.byteLength)
+    }
   })
 
   assert.equal(response.ok, true)
@@ -265,6 +283,9 @@ function createDrive (entries) {
   return {
     id: 'a'.repeat(64),
     writes,
+    setEntry (pathname, byteLength) {
+      entries[pathname] = { blob: { byteLength } }
+    },
     async entry (pathname) {
       const value = entries[pathname]
       return value ? { key: pathname, value } : null

@@ -55,7 +55,8 @@ describe('mobile platform runtime configuration', () => {
       'android.permission.CAMERA',
       'android.permission.CHANGE_WIFI_MULTICAST_STATE',
       'android.permission.POST_NOTIFICATIONS',
-      'android.permission.RECORD_AUDIO'
+      'android.permission.RECORD_AUDIO',
+      'android.permission.REQUEST_INSTALL_PACKAGES'
     ])
     assert.equal(android?.intentFilters?.length, 1)
     assert.deepEqual(android.intentFilters[0]?.category, ['BROWSABLE', 'DEFAULT'])

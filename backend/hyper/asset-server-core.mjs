@@ -106,6 +106,7 @@ async function streamHyperAsset (fetch, assetUrl, req, res, downloadName) {
     })
 
     if (req.method === 'HEAD') {
+      await cancelResponseBody(response.body)
       res.end()
       return
     }
@@ -115,6 +116,27 @@ async function streamHyperAsset (fetch, assetUrl, req, res, downloadName) {
   }
 
   throw createHttpError(502, 'Hyper asset response is not streamable')
+}
+
+async function cancelResponseBody (body) {
+  if (!body) return
+
+  if (typeof body.getReader === 'function') {
+    const reader = body.getReader()
+    try {
+      await reader.cancel()
+    } finally {
+      if (reader.releaseLock) reader.releaseLock()
+    }
+    return
+  }
+
+  if (typeof body.destroy === 'function') {
+    body.destroy()
+    return
+  }
+
+  if (typeof body.return === 'function') await body.return()
 }
 
 function getRequestHeader (req, name) {

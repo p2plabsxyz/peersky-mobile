@@ -1,5 +1,6 @@
 import {
   BROWSER_HOME_URL,
+  boundBrowserHistory,
   isWebUrl,
   MAX_BROWSER_HISTORY_ENTRIES,
   MAX_BROWSER_URL_LENGTH
@@ -97,17 +98,17 @@ export function serializeBrowserTabsState (state) {
     nextTabIndex: state.nextTabIndex,
     viewMode: normalizeBrowserTabViewMode(state.viewMode),
     tabs: state.tabs.map((tab) => {
-      const history = tab.history.slice(-MAX_BROWSER_HISTORY_ENTRIES).map((entry) => {
+      const retainedHistory = boundBrowserHistory(tab.history)
+      const history = retainedHistory.map((entry) => {
         const url = normalizeBrowserTabUrl(entry?.url)
         return {
           url,
           source: getPersistedSource({ ...entry, url })
         }
       })
-      const historyIndex = Math.min(
-        Math.max(tab.historyIndex - Math.max(0, tab.history.length - history.length), 0),
-        history.length - 1
-      )
+      const currentEntry = tab.history[tab.historyIndex]
+      const retainedIndex = retainedHistory.indexOf(currentEntry)
+      const historyIndex = retainedIndex >= 0 ? retainedIndex : history.length - 1
       const entry = history[historyIndex]
       const persistedHistory = history.length > 0
         ? history

@@ -1,8 +1,15 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { parseHyperUrl } from '../../backend/hyper/url.mjs'
+import { createHyperUrl, parseHyperUrl } from '../../backend/hyper/url.mjs'
 
 describe('hyper url parsing', () => {
+  it('formats exact drive paths for hypercore-fetch', () => {
+    const drive = `hyper://${'a'.repeat(64)}/`
+    assert.equal(
+      createHyperUrl(drive, '/one, two#three?.mp4'),
+      `${drive}one,%20two%23three%3F.mp4`
+    )
+  })
   it('requires a string url', () => {
     assert.deepEqual(parseHyperUrl(), { error: 'Missing required "url"' })
     assert.deepEqual(parseHyperUrl(42), { error: 'Missing required "url"' })

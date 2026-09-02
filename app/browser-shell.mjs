@@ -77,14 +77,26 @@ export function getBrowserAddressForUrl (url) {
 }
 
 export function commitBrowserEntryState (state, url, source) {
-  const nextHistory = state.history
+  const nextHistory = boundBrowserHistory(state.history
     .slice(0, state.historyIndex + 1)
     .map(getRestorableHistoryEntry)
-    .concat({ url, source })
-    .slice(-MAX_BROWSER_HISTORY_ENTRIES)
+    .concat({ url, source }))
   return buildBrowserState(nextHistory, nextHistory.length - 1, {
     resetWebNavigation: true
   })
+}
+
+export function boundBrowserHistory (history) {
+  if (!Array.isArray(history) || history.length <= MAX_BROWSER_HISTORY_ENTRIES) return history
+
+  const recentEntries = history.slice(-(MAX_BROWSER_HISTORY_ENTRIES - 1))
+  const homeEntry = history.find((entry) =>
+    entry?.url === BROWSER_HOME_URL && entry?.source?.kind === 'home'
+  )
+  if (!homeEntry || recentEntries.includes(homeEntry)) {
+    return history.slice(-MAX_BROWSER_HISTORY_ENTRIES)
+  }
+  return [homeEntry, ...recentEntries]
 }
 
 export function replaceBrowserEntryState (state, url, source) {
@@ -124,6 +136,13 @@ export function recordBrowserWebNavigationState (
 
   if (state.history[adjacentIndex]?.url === url) {
     return buildBrowserState(state.history, adjacentIndex)
+  }
+
+  // Native WebView history can be deeper than our bounded restorable history.
+  // Do not append an older native target as a new forward entry: doing that
+  // makes repeated Back alternate between pages once the bound is crossed.
+  if (direction) {
+    return replaceBrowserEntryState(state, url, source)
   }
 
   return commitBrowserEntryState(state, url, source)

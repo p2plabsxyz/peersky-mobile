@@ -7,7 +7,7 @@ import {
   withHyperRuntimeOperation,
   withPrivateHyperRuntimeOperation
 } from './runtime.mjs'
-import { parseHyperUrl } from './url.mjs'
+import { createHyperUrl, parseHyperUrl } from './url.mjs'
 import { recordHyperArchive } from './archive.mjs'
 import { resolveHyperdriveUploadTarget } from './storage-core.mjs'
 
@@ -121,8 +121,17 @@ export async function uploadHyperdriveFile ({
       await drive.put(pathname, bytes)
     }
 
+    const storedEntry = await drive.entry(pathname)
+    const expectedByteLength = localFile?.byteLength || bytes.byteLength
+    if (
+      !storedEntry?.value?.blob ||
+      storedEntry.value.blob.byteLength !== expectedByteLength
+    ) {
+      throw new Error('The uploaded file could not be verified in Hyperdrive.')
+    }
+
     const item = createFileItem(`hyper://${drive.id}/`, pathname, {
-      blob: { byteLength: localFile?.byteLength || bytes.byteLength }
+      blob: { byteLength: expectedByteLength }
     })
     await (options.recordArchive || recordHyperArchive)({
       url: item.url,
@@ -346,14 +355,6 @@ function isValidBase64 (value) {
 
 function normalizeDirectoryPath (pathname) {
   return pathname === '/' ? '/' : `${pathname.replace(/\/$/, '')}/`
-}
-
-function createHyperUrl (driveAddress, pathname) {
-  const encodedPath = pathname
-    .split('/')
-    .map((segment) => encodeURIComponent(segment))
-    .join('/')
-  return `${driveAddress.slice(0, -1)}${encodedPath}`
 }
 
 function basename (pathname) {

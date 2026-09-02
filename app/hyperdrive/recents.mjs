@@ -61,6 +61,7 @@ function normalizeRecent (value) {
     visibility: value.visibility === 'public' || value.visibility === 'private'
       ? value.visibility
       : undefined,
+    localUri: value.source === 'uploaded' ? normalizeLocalFileUri(value.localUri) : undefined,
     openedAt: Number.isSafeInteger(openedAt) && openedAt > 0 ? openedAt : Date.now(),
     byteLength: type === 'file' && Number.isSafeInteger(value.byteLength) && value.byteLength >= 0
       ? value.byteLength
@@ -68,6 +69,17 @@ function normalizeRecent (value) {
     children: type === 'directory' && Array.isArray(value.children)
       ? value.children.map(normalizeChild).filter(Boolean).slice(0, MAX_HYPERDRIVE_RECENT_CHILDREN)
       : undefined
+  }
+}
+
+function normalizeLocalFileUri (value) {
+  if (typeof value !== 'string' || value.length > 4096) return undefined
+
+  try {
+    const parsed = new URL(value)
+    return parsed.protocol === 'file:' && !parsed.hostname ? parsed.href : undefined
+  } catch {
+    return undefined
   }
 }
 
@@ -115,7 +127,7 @@ function normalizeHyperUrl (value) {
     if (parsed.protocol !== 'hyper:' || !parsed.hostname || parsed.username || parsed.password) return null
     const encodedPath = `${parsed.pathname}${parsed.search}${parsed.hash}`
       .split('/')
-      .map((segment) => encodeURIComponent(decodeURIComponent(segment)))
+      .map((segment) => encodeURI(decodeURIComponent(segment)).replace(/[?#]/g, encodeURIComponent))
       .join('/')
     return `hyper://${parsed.host}${encodedPath}`
   } catch {

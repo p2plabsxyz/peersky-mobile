@@ -40,6 +40,32 @@ describe('browser downloads', () => {
     assert.equal(downloads.every(({ status }) => status === 'failed'), true)
   })
 
+  test('keeps only known native pause and failure reasons', () => {
+    const downloads = normalizeBrowserDownloads([
+      { id: '1', name: 'waiting.zip', status: 'paused', reason: 'waiting-for-network', size: 0, createdAt: 2 },
+      { id: '2', name: 'unsafe.zip', status: 'failed', reason: 'arbitrary text', size: 0, createdAt: 1 }
+    ])
+
+    assert.equal(downloads[0].reason, 'waiting-for-network')
+    assert.equal(downloads[1].reason, undefined)
+  })
+
+  test('normalizes persisted resumable progress', () => {
+    const [download] = normalizeBrowserDownloads([{
+      id: 'r:test',
+      name: 'large-video.mp4',
+      status: 'paused',
+      reason: 'user-paused',
+      size: 1_000,
+      downloadedBytes: 400,
+      totalBytes: 1_000,
+      createdAt: 1
+    }])
+
+    assert.equal(download.downloadedBytes, 400)
+    assert.equal(download.totalBytes, 1_000)
+  })
+
   test('drops malformed records', () => {
     assert.deepEqual(normalizeBrowserDownloads([
       null,
@@ -68,6 +94,22 @@ describe('browser downloads', () => {
     const sourceUrl = `http://127.0.0.1:1234/asset?token=test&url=${encodeURIComponent(hyperUrl)}&download=1`
     assert.equal(getProxiedHyperUrl(sourceUrl), hyperUrl)
     assert.equal(getProxiedHyperUrl('https://example.com/archive.zip'), null)
+  })
+
+  test('matches equivalent literal and escaped Hyper path delimiters', () => {
+    const downloadedUrl = 'hyper://example.com/video%20one%2C%20two.mp4'
+    const recentUrl = 'hyper://example.com/video%20one,%20two.mp4'
+    const sourceUrl = `http://127.0.0.1:1234/asset?url=${encodeURIComponent(downloadedUrl)}`
+    const downloads = normalizeBrowserDownloads([{
+      id: 'video',
+      name: 'video one, two.mp4',
+      status: 'complete',
+      size: 42,
+      createdAt: 1,
+      sourceUrl
+    }])
+
+    assert.equal(findCompletedHyperDownload(downloads, { url: recentUrl })?.id, 'video')
   })
 
   test('does not open an unrelated legacy download with the same filename', () => {
@@ -209,6 +251,8 @@ describe('browser downloads', () => {
     assert.match(moduleSource, /record[.]putString\("sourceUrl", it\)/)
     assert.match(moduleSource, /promise[.]resolve\(queueDownload\(url, null, null, null\)\)/)
     assert.match(moduleSource, /fun openDownload\(id: String, promise: Promise\)/)
+    assert.match(moduleSource, /fun pauseDownload\(id: String, promise: Promise\)/)
+    assert.match(moduleSource, /DownloadManager[.]COLUMN_REASON/)
     assert.doesNotMatch(moduleSource, /getDownloadAnalysis|recordDiagnostic/)
     assert.match(moduleSource, /resolveDownloadMetadata/)
     assert.match(moduleSource, /addUrlFingerprintIfNeeded/)
@@ -243,7 +287,15 @@ describe('browser downloads', () => {
     assert.doesNotMatch(moduleSource, /startsWithMpegAudioFrame/)
     assert.doesNotMatch(moduleSource, /stored[?][.]let \{ findPublicDownloadUri/)
     assert.match(moduleSource, /com[.]reactnativecommunity[.]webview[.]URLUtil/)
-    assert.match(moduleSource, /setDestinationInExternalPublicDir/)
+    assert.match(moduleSource, /MediaStore[.]MediaColumns[.]IS_PENDING/)
+    assert.match(moduleSource, /setRequestProperty\("Range", "bytes=" [+ ] offset [+] "-"\)/)
+    assert.match(moduleSource, /status != HttpURLConnection[.]HTTP_PARTIAL/)
+    assert.match(moduleSource, /parseContentRangeStart\(responseRange\) != offset/)
+    assert.match(moduleSource, /fun resumeDownload\(id: String, url: String, promise: Promise\)/)
+    assert.match(moduleSource, /packageManager[.]canRequestPackageInstalls\(\)/)
+    assert.match(moduleSource, /Settings[.]ACTION_MANAGE_UNKNOWN_APP_SOURCES/)
+    assert.match(moduleSource, /resolveMimeTypeFromFilename\(download[.]name, download[.]mimeType\)/)
+    assert.doesNotMatch(moduleSource, /manager[.]remove\(downloadId\).*user-paused/s)
     assert.match(moduleSource, /getSharedPreferences/)
     assert.match(packageSource, /listOf\(PeerSkyWebViewManager\(\)\)/)
     assert.match(webViewManagerSource, /setDownloadListener/)
