@@ -1,0 +1,43 @@
+name: Report harmful content
+description: Report abusive, illegal, or otherwise harmful content accessible through PeerSky.
+title: "[Content report]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include private keys, passwords, personal addresses, or illegal media in this report. For sensitive reports, email contact@p2plabs.xyz instead.
+  - type: input
+    id: url
+    attributes:
+      label: Content URL
+      description: Provide the public HTTP, HTTPS, or Hyper URL where the content is available.
+      placeholder: hyper://...
+    validations:
+      required: true
+  - type: dropdown
+    id: reason
+    attributes:
+      label: Reason for reporting
+      options:
+        - Harassment or abuse
+        - Illegal content
+        - Malware or phishing
+        - Personal information
+        - Sexual or violent content
+        - Other harmful content
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: Details
+      description: Explain what should be reviewed without reproducing the harmful content.
+    validations:
+      required: true
+  - type: checkboxes
+    id: confirmation
+    attributes:
+      label: Confirmation
+      options:
+        - label: I have not included private credentials or illegal media in this report.
+          required: true
