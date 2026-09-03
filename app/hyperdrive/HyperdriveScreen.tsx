@@ -35,7 +35,6 @@ import {
   persistHyperdriveRecents
 } from './recents-store'
 
-const MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 const hyperdriveIcon = require('../../assets/images/hyperdrive.png')
 
 type RecentSource = 'fetched' | 'uploaded'
@@ -51,6 +50,7 @@ type HyperdriveItem = {
   openedAt?: number
   source?: RecentSource
   visibility?: UploadVisibility
+  localUri?: string
   children?: HyperdriveItem[]
 }
 
@@ -111,8 +111,8 @@ export function HyperdriveScreen ({ isDark, isLandscape, onCallRpc, onOpenItem, 
     const asset = selection.assets[0]
     const file = new File(asset.uri)
     const fileSize = asset.size ?? file.size
-    if (!Number.isSafeInteger(fileSize) || !fileSize || fileSize > MAX_UPLOAD_BYTES) {
-      setError('Choose a file up to 10 MB.')
+    if (!Number.isSafeInteger(fileSize) || !fileSize) {
+      setError('Choose a non-empty file.')
       return
     }
 
@@ -120,21 +120,22 @@ export function HyperdriveScreen ({ isDark, isLandscape, onCallRpc, onOpenItem, 
     setError(null)
     setNotice(null)
     try {
-      const contentBase64 = await file.base64()
       const response = await onCallRpc(RPC_HYPER_LIBRARY_UPLOAD, {
         name: asset.name,
-        contentBase64,
+        fileUri: file.uri,
+        byteLength: fileSize,
         visibility
       })
       if (!response.ok || !response.item) throw new Error(response.error || 'Upload failed.')
-      remember(response.item, 'uploaded')
+      const uploadedItem = { ...response.item, localUri: file.uri }
+      remember(uploadedItem, 'uploaded')
       onStatus(`Uploaded ${response.item.name}`)
       const uploadMessage = visibility === 'private'
         ? 'Stored privately on this device.'
         : response.item.url
       Alert.alert('Uploaded to Hyperdrive', uploadMessage, [
         { text: 'Done' },
-        { text: 'Open', onPress: () => onOpenUrl(response.item.url) }
+        { text: 'Open', onPress: () => onOpenItem(uploadedItem) }
       ])
     } catch (uploadError) {
       setError(uploadError instanceof Error ? uploadError.message : String(uploadError))
@@ -143,7 +144,7 @@ export function HyperdriveScreen ({ isDark, isLandscape, onCallRpc, onOpenItem, 
     }
   }
 
-  async function fetchLocation (targetUrl = fetchUrl) {
+  async function fetchLocation (targetUrl = fetchUrl, recordRecent = true) {
     if (busyAction) return
     const normalizedUrl = targetUrl.trim()
     if (!normalizedUrl.toLowerCase().startsWith('hyper://')) {
@@ -158,10 +159,12 @@ export function HyperdriveScreen ({ isDark, isLandscape, onCallRpc, onOpenItem, 
       const response = await onCallRpc(RPC_HYPER_LIBRARY_LIST, { url: normalizedUrl })
       if (!response.ok || !response.location) throw new Error(response.error || 'Unable to fetch Hyper data.')
       const fetchedItems = Array.isArray(response.items) ? response.items : []
-      remember({
-        ...response.location,
-        children: response.location.type === 'directory' ? fetchedItems : undefined
-      }, 'fetched')
+      if (recordRecent) {
+        remember({
+          ...response.location,
+          children: response.location.type === 'directory' ? fetchedItems : undefined
+        }, 'fetched')
+      }
       setFetchUrl(response.location.url)
       if (response.location.type === 'directory') {
         setLocation(response.location)
@@ -197,10 +200,9 @@ export function HyperdriveScreen ({ isDark, isLandscape, onCallRpc, onOpenItem, 
     }
 
     if (item.type === 'directory') {
-      await fetchLocation(item.url)
+      await fetchLocation(item.url, false)
       return
     }
-    remember(item, 'fetched')
     onOpenItem(item)
   }
 
@@ -270,7 +272,12 @@ export function HyperdriveScreen ({ isDark, isLandscape, onCallRpc, onOpenItem, 
               {items ? formatItemMeta(item) : formatRecentMeta(item)}
             </Text>
           </View>
-          <ChevronRightIcon width={18} height={18} color={palette.muted} />
+          <ChevronRightIcon
+            width={18}
+            height={18}
+            color={palette.muted}
+            style={item.visibility === 'private' ? styles.privateItemChevron : undefined}
+          />
         </Pressable>
         {item.visibility !== 'private' && (
           <Pressable
@@ -306,7 +313,7 @@ export function HyperdriveScreen ({ isDark, isLandscape, onCallRpc, onOpenItem, 
 
       <View style={styles.setupBlock}>
         <Text style={[styles.setupTitle, { color: palette.text }]}>Upload a file</Text>
-        <Text style={[styles.helperText, { color: palette.muted }]}>Publish a file up to 10 MB from this device.</Text>
+        <Text style={[styles.helperText, { color: palette.muted }]}>Publish a file from this device.</Text>
         <Pressable
           accessibilityRole='button'
           disabled={Boolean(busyAction)}
@@ -562,6 +569,7 @@ const styles = StyleSheet.create({
   itemCopy: { flex: 1, gap: 4, marginHorizontal: 13 },
   itemName: { fontSize: 15, fontWeight: '600' },
   itemMeta: { fontSize: 12 },
+  privateItemChevron: { marginRight: 16 },
   copyButton: { alignItems: 'center', height: 44, justifyContent: 'center', width: 44 },
   folderWrap: { height: 34, justifyContent: 'flex-end', width: 42 },
   folderTab: { borderTopLeftRadius: 4, borderTopRightRadius: 4, height: 8, left: 3, position: 'absolute', top: 1, width: 19 },

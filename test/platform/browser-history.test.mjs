@@ -33,8 +33,7 @@ describe('browser history', () => {
         { url: 'https://example.com/', title: 'Duplicate', visitedAt: 5 }
       ]
     }), [
-      { url: 'https://example.com/', title: 'Valid', visitedAt: 4 },
-      { url: 'https://example.com/', title: 'Duplicate', visitedAt: 5 }
+      { url: 'https://example.com/', title: 'Valid', visitedAt: 4 }
     ])
     assert.deepEqual(parseBrowserHistory('{invalid'), [])
     assert.equal(parseBrowserHistoryResult('{invalid').ok, false)
@@ -80,7 +79,8 @@ describe('browser history', () => {
       title: 'Example',
       visitedAt: 2500
     })
-    assert.equal(revisited.length, 2)
+    assert.equal(revisited.length, 1)
+    assert.equal(revisited[0].visitedAt, 2500)
   })
 
   test('matches suggestions by title or URL and respects the suggestion cap', () => {

@@ -1,8 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import {
-  AppState,
   Linking,
-  PermissionsAndroid,
   Platform,
   Pressable,
   StyleSheet,
@@ -31,38 +29,6 @@ export function Permissions ({
 }: PermissionsProps) {
   const isDark = useSettingsDarkMode()
   const [actionError, setActionError] = useState<string | null>(null)
-  const [isRequestingNotifications, setIsRequestingNotifications] = useState(false)
-  const [notificationsAllowed, setNotificationsAllowed] = useState<boolean | null>(null)
-  const hasRuntimeNotificationPermission = Number(Platform.Version) >= 33
-
-  useEffect(() => {
-    if (Platform.OS !== 'android' || !hasRuntimeNotificationPermission) return
-
-    let active = true
-    const refreshPermission = async () => {
-      try {
-        const allowed = await PermissionsAndroid.check(
-          PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS
-        )
-        if (active) setNotificationsAllowed(allowed)
-      } catch (error) {
-        if (active) {
-          setActionError(getActionError(error, 'Unable to read notification permission.'))
-          setNotificationsAllowed(false)
-        }
-      }
-    }
-
-    void refreshPermission()
-    const subscription = AppState.addEventListener('change', (state) => {
-      if (state === 'active') void refreshPermission()
-    })
-
-    return () => {
-      active = false
-      subscription.remove()
-    }
-  }, [hasRuntimeNotificationPermission])
 
   async function openAppSettings () {
     setActionError(null)
@@ -70,34 +36,6 @@ export function Permissions ({
       await Linking.openSettings()
     } catch (error) {
       setActionError(getActionError(error, 'Unable to open device settings.'))
-    }
-  }
-
-  async function requestNotifications () {
-    if (Platform.OS !== 'android' || !hasRuntimeNotificationPermission) {
-      await openAppSettings()
-      return
-    }
-
-    if (notificationsAllowed) {
-      await openAppSettings()
-      return
-    }
-
-    setActionError(null)
-    setIsRequestingNotifications(true)
-    try {
-      const result = await PermissionsAndroid.request(
-        PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS
-      )
-      setNotificationsAllowed(result === PermissionsAndroid.RESULTS.GRANTED)
-      if (result === PermissionsAndroid.RESULTS.NEVER_ASK_AGAIN) {
-        await Linking.openSettings()
-      }
-    } catch (error) {
-      setActionError(getActionError(error, 'Unable to request notification permission.'))
-    } finally {
-      setIsRequestingNotifications(false)
     }
   }
 
@@ -132,26 +70,6 @@ export function Permissions ({
         />
         {Platform.OS === 'android' && (
           <>
-            <PermissionRow
-              title='Notifications'
-              description={!hasRuntimeNotificationPermission
-                ? 'Manage PeerSky notifications in device settings.'
-                : notificationsAllowed
-                ? 'Notifications are allowed. Tap Allowed to manage or disable them in device settings.'
-                : 'Allow PeerSky to display notifications. You can change this later in device settings.'}
-              action={isRequestingNotifications
-                ? 'Requesting...'
-                : !hasRuntimeNotificationPermission
-                  ? 'Manage'
-                : notificationsAllowed
-                  ? 'Allowed'
-                  : 'Allow'}
-              disabled={isRequestingNotifications || (
-                hasRuntimeNotificationPermission && notificationsAllowed === null
-              )}
-              isDark={isDark}
-              onPress={() => void requestNotifications()}
-            />
             <PermissionRow
               title='Default browser'
               description='Choose PeerSky as the app that opens web links.'

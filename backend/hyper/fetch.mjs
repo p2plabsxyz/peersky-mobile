@@ -14,7 +14,7 @@ import {
   withHyperRetry
 } from './fetch-retry.mjs'
 import { withHyperRuntimeForAddress } from './runtime.mjs'
-import { parseHyperUrl } from './url.mjs'
+import { createHyperUrl, parseHyperUrl } from './url.mjs'
 import { readHyperBinaryResponse } from './binary-response.mjs'
 
 let hyperFetches = new WeakMap()
@@ -47,19 +47,20 @@ export async function fetchHyper ({
 
   const target = parseHyperUrl(url)
   if (target.error) return { ok: false, error: target.error }
+  const requestUrl = createHyperUrl(target.driveAddress, target.pathname)
 
   return withHyperRuntimeForAddress(target.driveAddress, async (runtime) => {
     const fetch = await getHyperFetch(runtime)
 
     const result = await withHyperRetry({
       fetch,
-      url,
+      url: requestUrl,
       retries,
       retryDelay,
       maxRetryDelay,
       backoffFactor,
       readResponse: async (response, headers) => {
-        const responseUrl = response.url || url
+        const responseUrl = response.url || requestUrl
         const mediaType = getHyperNavigationMediaType(responseUrl, headers)
         const downloadName = getHyperNavigationDownloadName(responseUrl, headers)
         if (downloadName && !mediaType) {
@@ -106,7 +107,7 @@ export async function fetchHyper ({
           const proxyServer = await startHyperAssetServer(routedHyperFetch)
           body = await inlineHyperAssets({
             html: body,
-            baseUrl: response.url || url,
+            baseUrl: response.url || requestUrl,
             fetch,
             assetBaseUrl: proxyServer.localUrl,
             assetAuthToken: proxyServer.authToken
@@ -117,7 +118,7 @@ export async function fetchHyper ({
           ok: response.ok,
           status: response.status,
           statusText: response.statusText,
-          url: response.url || url,
+          url: response.url || requestUrl,
           headers,
           body
         }
@@ -173,18 +174,19 @@ export async function fetchHyperBinary ({
 
   const target = parseHyperUrl(url)
   if (target.error) return { ok: false, error: target.error }
+  const requestUrl = createHyperUrl(target.driveAddress, target.pathname)
 
   return withHyperRuntimeForAddress(target.driveAddress, async (runtime) => {
     const fetch = await getHyperFetch(runtime)
 
     return withHyperRetry({
       fetch,
-      url,
+      url: requestUrl,
       retries,
       retryDelay,
       maxRetryDelay,
       backoffFactor,
-      readResponse: (response, headers) => readHyperBinaryResponse(response, headers, url)
+      readResponse: (response, headers) => readHyperBinaryResponse(response, headers, requestUrl)
     })
   })
 }

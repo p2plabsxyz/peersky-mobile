@@ -14,6 +14,7 @@ import ieeeBrowserScript from './ieee-runtime.mjs'
 import katexCss from './katex-runtime.mjs'
 import { P2PMD_SCIENTIFIC_STYLES } from './scientific.mjs'
 import { P2PMD_TEMPLATES, hasIeeeMarker } from './templates.mjs'
+import { scheduleP2pmdRoomSnapshot } from './snapshots.mjs'
 import yjsBrowserScript from './yjs-runtime.mjs'
 
 let server = null
@@ -60,6 +61,7 @@ Any questions?
 <!-- Speaker notes: Open floor for Q&A -->`
 
 subscribeToDocumentUpdates(({ document, origin, update }) => {
+  scheduleP2pmdRoomSnapshot(document)
   if (origin !== 'line-attribution-update') {
     broadcastEvent('yjsupdate', update)
   }

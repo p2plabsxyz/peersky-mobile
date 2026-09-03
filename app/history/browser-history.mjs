@@ -25,11 +25,13 @@ export function parseBrowserHistoryResult (serialized) {
   if (!value || !Array.isArray(value.items)) return { ok: false, items: [] }
 
   const items = []
+  const seenUrls = new Set()
 
   for (const valueItem of value.items.slice(0, MAX_BROWSER_HISTORY_ITEMS)) {
     const item = normalizeBrowserHistoryItem(valueItem)
-    if (!item) continue
+    if (!item || seenUrls.has(item.url)) continue
 
+    seenUrls.add(item.url)
     items.push(item)
     if (items.length >= MAX_BROWSER_HISTORY_ITEMS) break
   }
@@ -54,7 +56,7 @@ export function addBrowserHistoryItem (items, value) {
 
   return [
     item,
-    ...items
+    ...items.filter((existing) => existing.url !== item.url)
   ].slice(0, MAX_BROWSER_HISTORY_ITEMS)
 }
 

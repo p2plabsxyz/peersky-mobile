@@ -1,5 +1,11 @@
 export const INTERNAL_APPS = [
   {
+    id: 'hyper',
+    title: 'Hyperdrive',
+    url: 'peersky://p2p/hyperdrive/',
+    icon: 'H'
+  },
+  {
     id: 'p2pmd',
     title: 'P2PMD',
     url: 'peersky://p2p/p2pmd/',
@@ -16,17 +22,12 @@ export const INTERNAL_APPS = [
     title: 'Holesail',
     url: 'peersky://holesail/',
     icon: 'HS'
-  },
-  {
-    id: 'hyper',
-    title: 'Hyperdrive',
-    url: 'peersky://hyperdrive/',
-    icon: 'H'
   }
 ]
 
 const LEGACY_INTERNAL_APP_ROUTES = new Map([
-  ['peersky://hyper', 'hyper']
+  ['peersky://hyper', 'hyper'],
+  ['peersky://hyperdrive', 'hyper']
 ])
 
 export function getRuntimeAppUrl (app) {

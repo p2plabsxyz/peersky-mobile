@@ -54,8 +54,8 @@ describe('mobile platform runtime configuration', () => {
       'android.permission.ACCESS_WIFI_STATE',
       'android.permission.CAMERA',
       'android.permission.CHANGE_WIFI_MULTICAST_STATE',
-      'android.permission.POST_NOTIFICATIONS',
-      'android.permission.RECORD_AUDIO'
+      'android.permission.RECORD_AUDIO',
+      'android.permission.REQUEST_INSTALL_PACKAGES'
     ])
     assert.equal(android?.intentFilters?.length, 1)
     assert.deepEqual(android.intentFilters[0]?.category, ['BROWSABLE', 'DEFAULT'])
@@ -66,6 +66,25 @@ describe('mobile platform runtime configuration', () => {
     assert.match(infoPlist?.NSCameraUsageDescription, /website you visit/i)
     assert.match(infoPlist?.NSLocationWhenInUseUsageDescription, /website you visit/i)
     assert.match(infoPlist?.NSMicrophoneUsageDescription, /website you visit/i)
+    assert.equal(android.permissions.includes('android.permission.POST_NOTIFICATIONS'), false)
+    assert.deepEqual(android.blockedPermissions, ['android.permission.POST_NOTIFICATIONS'])
+    assert.equal(infoPlist?.ITSAppUsesNonExemptEncryption, true)
+  })
+
+  it('includes store build profiles and user-facing policy links', async () => {
+    const easJson = JSON.parse(await readFile(repoFile('eas.json'), 'utf8'))
+    const settings = await readFile(repoFile('app/settings/SettingsScreen.tsx'), 'utf8')
+    const privacyPolicy = await readFile(repoFile('PRIVACY.md'), 'utf8')
+    const contentReport = await readFile(repoFile('.github/ISSUE_TEMPLATE/content-report.yml'), 'utf8')
+
+    assert.equal(easJson.cli?.appVersionSource, 'remote')
+    assert.equal(easJson.build?.production?.autoIncrement, true)
+    assert.deepEqual(easJson.submit?.production, {})
+    assert.match(settings, /blob\/main\/PRIVACY[.]md/)
+    assert.match(settings, /issues\/new[?]template=content-report[.]yml/)
+    assert.match(privacyPolicy, /contact@p2plabs[.]xyz/)
+    assert.match(privacyPolicy, /issues\/new[?]template=content-report[.]yml/)
+    assert.match(contentReport, /name: Report harmful content/)
   })
 
   it('configures local discovery on Android and iOS', async () => {
@@ -148,8 +167,11 @@ describe('mobile platform runtime configuration', () => {
       crypto: 'bare-crypto',
       dgram: 'bare-dgram',
       events: 'bare-events',
+      fs: 'bare-fs',
       net: 'bare-net',
       'node:crypto': 'bare-crypto',
+      'node:fs': 'bare-fs',
+      'node:stream/promises': 'bare-stream/promises',
       'node:zlib': 'bare-zlib',
       os: 'bare-os'
     })
