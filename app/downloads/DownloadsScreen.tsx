@@ -358,7 +358,7 @@ function getDownloadFailureMessage (download: BrowserDownload) {
   const nativeReason = getFailureReason(download.reason)
   if (nativeReason) return nativeReason
   return getProxiedHyperUrl(download.sourceUrl)
-    ? 'The peer may be offline. Please try again.'
+    ? 'Peer went offline, please try again.'
     : 'Download failed. Please try again.'
 }
 

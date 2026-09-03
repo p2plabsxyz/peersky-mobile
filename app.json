@@ -19,7 +19,7 @@
         "com.apple.developer.networking.multicast": true
       },
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false,
+        "ITSAppUsesNonExemptEncryption": true,
         "NSCameraUsageDescription": "PeerSky uses the camera only when a website you visit requests it and you allow access.",
         "NSLocationWhenInUseUsageDescription": "PeerSky uses your location only when a website you visit requests it and you allow access.",
         "NSMicrophoneUsageDescription": "PeerSky uses the microphone only when a website you visit requests it and you allow access.",

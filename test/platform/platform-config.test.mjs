@@ -68,7 +68,7 @@ describe('mobile platform runtime configuration', () => {
     assert.match(infoPlist?.NSMicrophoneUsageDescription, /website you visit/i)
     assert.equal(android.permissions.includes('android.permission.POST_NOTIFICATIONS'), false)
     assert.deepEqual(android.blockedPermissions, ['android.permission.POST_NOTIFICATIONS'])
-    assert.equal(infoPlist?.ITSAppUsesNonExemptEncryption, false)
+    assert.equal(infoPlist?.ITSAppUsesNonExemptEncryption, true)
   })
 
   it('includes store build profiles and user-facing policy links', async () => {
@@ -83,6 +83,7 @@ describe('mobile platform runtime configuration', () => {
     assert.match(settings, /blob\/main\/PRIVACY[.]md/)
     assert.match(settings, /issues\/new[?]template=content-report[.]yml/)
     assert.match(privacyPolicy, /contact@p2plabs[.]xyz/)
+    assert.match(privacyPolicy, /issues\/new[?]template=content-report[.]yml/)
     assert.match(contentReport, /name: Report harmful content/)
   })
 
