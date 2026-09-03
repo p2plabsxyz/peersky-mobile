@@ -31,6 +31,7 @@ import {
 } from './ui-state.mjs'
 import {
   filterPeerChatMessages,
+  filterPeerChatRooms,
   PEERCHAT_SEARCH_QUERY_MAX_CHARACTERS
 } from './message-search.mjs'
 
@@ -175,6 +176,7 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
   const [reactionTargetId, setReactionTargetId] = useState<string | null>(null)
   const [isSearching, setIsSearching] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  const [roomSearchQuery, setRoomSearchQuery] = useState('')
   const [landingAction, setLandingAction] = useState<LandingAction>(null)
   const [restoredUiState, setRestoredUiState] = useState<PeerChatUiState | null>(null)
   const mentionCandidates = getMentionCandidates(
@@ -184,6 +186,7 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
     profile?.id || ''
   )
   const visibleMessages = filterPeerChatMessages(messages, isSearching ? searchQuery : '') as PeerChatMessage[]
+  const visibleRooms = filterPeerChatRooms(rooms, roomSearchQuery) as PeerChatRoom[]
 
   useEffect(() => {
     callRpcRef.current = onCallRpc
@@ -975,7 +978,7 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
     <FlatList
       style={[styles.screen, { backgroundColor: colors.background }]}
       contentContainerStyle={styles.landingContent}
-      data={rooms}
+      data={visibleRooms}
       keyExtractor={(item) => item.roomKey}
       ListHeaderComponent={(
         <View style={styles.landingHeader}>
@@ -1085,6 +1088,19 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
             <Text style={[styles.sectionTitle, { color: colors.text }]}>Recent chats</Text>
             {rooms.length > 0 && <Text style={[styles.roomCount, { color: colors.muted }]}>{rooms.length}</Text>}
           </View>
+          {rooms.length > 0 && (
+            <TextInput
+              autoCapitalize='none'
+              autoCorrect={false}
+              maxLength={PEERCHAT_SEARCH_QUERY_MAX_CHARACTERS}
+              onChangeText={setRoomSearchQuery}
+              placeholder='Search chats'
+              placeholderTextColor={colors.muted}
+              returnKeyType='search'
+              style={[styles.roomSearchInput, { backgroundColor: colors.input, color: colors.text }]}
+              value={roomSearchQuery}
+            />
+          )}
         </View>
       )}
       renderItem={({ item }) => (
@@ -1132,8 +1148,14 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
       )}
       ListEmptyComponent={(
         <View style={styles.emptyState}>
-          <Text style={[styles.emptyTitle, { color: colors.text }]}>No rooms yet</Text>
-          <Text style={[styles.helper, { color: colors.muted }]}>Create a room or join one shared from PeerSky Desktop.</Text>
+          <Text style={[styles.emptyTitle, { color: colors.text }]}>
+            {roomSearchQuery.trim() ? 'No matching chats' : 'No rooms yet'}
+          </Text>
+          <Text style={[styles.helper, { color: colors.muted }]}>
+            {roomSearchQuery.trim()
+              ? 'Try another room name, key, or message.'
+              : 'Create a room or join one shared from PeerSky Desktop.'}
+          </Text>
         </View>
       )}
     />
@@ -1303,6 +1325,7 @@ const styles = StyleSheet.create({
   error: { fontSize: 13, lineHeight: 18, textAlign: 'center' },
   sectionHeading: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between', marginTop: 5 },
   sectionTitle: { fontSize: 16, fontWeight: '900' },
+  roomSearchInput: { borderRadius: 16, fontSize: 14, minHeight: 38, paddingHorizontal: 12, paddingVertical: 8 },
   roomCount: { fontSize: 12, fontWeight: '700' },
   roomRow: { alignItems: 'center', borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: 'row', gap: 11, minHeight: 72, paddingHorizontal: 16, paddingVertical: 10 },
   roomAvatar: { alignItems: 'center', borderRadius: 22, height: 44, justifyContent: 'center', width: 44 },

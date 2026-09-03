@@ -13,6 +13,19 @@ export function filterPeerChatMessages (messages, query) {
   ].some((value) => typeof value === 'string' && value.toLocaleLowerCase().includes(normalizedQuery)))
 }
 
+export function filterPeerChatRooms (rooms, query) {
+  if (!Array.isArray(rooms)) return []
+  const normalizedQuery = normalizeSearchQuery(query)
+  if (!normalizedQuery) return rooms
+
+  return rooms.filter((room) => [
+    room?.name,
+    room?.roomKey,
+    room?.lastMessage?.message,
+    room?.lastMessage?.senderName
+  ].some((value) => typeof value === 'string' && value.toLocaleLowerCase().includes(normalizedQuery)))
+}
+
 function normalizeSearchQuery (query) {
   if (typeof query !== 'string') return ''
   return Array.from(query.trim())
