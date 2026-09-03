@@ -5,6 +5,7 @@ import {
   Alert,
   AppState,
   BackHandler,
+  Clipboard,
   FlatList,
   Image,
   KeyboardAvoidingView,
@@ -534,9 +535,16 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
   function showRoomActions (room: PeerChatRoom) {
     Alert.alert(
       room.name,
-      room.isPinned ? 'This chat is pinned.' : 'Keep this chat at the top of recents?',
+      'Manage this chat on this device.',
       [
         { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Copy key',
+          onPress: () => {
+            Clipboard.setString(room.roomKey)
+            onStatus('PeerChat room key copied')
+          }
+        },
         {
           text: room.isPinned ? 'Unpin' : 'Pin',
           onPress: () => void runAction(async () => {
