@@ -36,6 +36,7 @@ import {
   RPC_PEERCHAT_ROOM_CREATE,
   RPC_PEERCHAT_ROOM_JOIN,
   RPC_PEERCHAT_ROOM_LEAVE,
+  RPC_PEERCHAT_ROOM_PIN,
   RPC_PEERCHAT_ROOMS,
   RPC_PEERCHAT_REACT,
   RPC_PEERCHAT_SET_ACTIVE,
@@ -78,6 +79,7 @@ type PeerChatRoom = {
   roomKey: string
   name: string
   isHost: boolean
+  isPinned: boolean
   createdAt: number
   lastMessage: PeerChatLastMessage | null
   peerCount: number
@@ -513,6 +515,31 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
       openRoom(response.room)
       onStatus('PeerChat room joined')
     })
+  }
+
+  function showRoomActions (room: PeerChatRoom) {
+    Alert.alert(
+      room.name,
+      room.isPinned ? 'This chat is pinned.' : 'Keep this chat at the top of recents?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: room.isPinned ? 'Unpin' : 'Pin',
+          onPress: () => void runAction(async () => {
+            const response = await callRpc(RPC_PEERCHAT_ROOM_PIN, {
+              roomKey: room.roomKey,
+              pinned: !room.isPinned
+            })
+            if (!response.ok || !response.rooms) {
+              throw new Error(response.error || 'Unable to update the pinned chat.')
+            }
+            if (!mountedRef.current) return
+            setRooms(response.rooms)
+            onStatus(room.isPinned ? 'PeerChat room unpinned' : 'PeerChat room pinned')
+          })
+        }
+      ]
+    )
   }
 
   function sendMessage () {
@@ -1009,7 +1036,9 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
       )}
       renderItem={({ item }) => (
         <Pressable
+          accessibilityHint='Long press to pin or unpin this chat'
           accessibilityRole='button'
+          onLongPress={() => showRoomActions(item)}
           onPress={() => openRoom(item)}
           style={({ pressed }) => [
             styles.roomRow,
@@ -1021,7 +1050,12 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
             <Text style={[styles.roomAvatarText, { color: colors.accent }]}>{getRoomInitials(item.name)}</Text>
           </View>
           <View style={styles.roomCopy}>
-            <Text numberOfLines={1} style={[styles.roomTitle, { color: colors.text }]}>{item.name}</Text>
+            <View style={styles.roomTitleRow}>
+              <Text numberOfLines={1} style={[styles.roomTitle, { color: colors.text }]}>{item.name}</Text>
+              {item.isPinned && (
+                <Text style={[styles.pinnedLabel, { color: colors.accent, backgroundColor: colors.accentSoft }]}>PINNED</Text>
+              )}
+            </View>
             <Text numberOfLines={1} style={[styles.roomPreview, { color: colors.muted }]}>
               {item.lastMessage
                 ? `${item.lastMessage.senderName}: ${item.lastMessage.message}`
@@ -1221,7 +1255,9 @@ const styles = StyleSheet.create({
   roomAvatar: { alignItems: 'center', borderRadius: 22, height: 44, justifyContent: 'center', width: 44 },
   roomAvatarText: { fontSize: 14, fontWeight: '900' },
   roomCopy: { flex: 1, gap: 4 },
-  roomTitle: { fontSize: 15, fontWeight: '800' },
+  roomTitleRow: { alignItems: 'center', flexDirection: 'row', gap: 6 },
+  roomTitle: { flexShrink: 1, fontSize: 15, fontWeight: '800' },
+  pinnedLabel: { borderRadius: 5, fontSize: 8, fontWeight: '900', overflow: 'hidden', paddingHorizontal: 5, paddingVertical: 2 },
   roomPreview: { fontSize: 12 },
   roomMeta: { alignItems: 'flex-end', gap: 5 },
   roomTime: { fontSize: 10 },

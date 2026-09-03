@@ -267,6 +267,30 @@ test('PeerChat exposes bounded participant names from desktop profile frames', a
   await service.close()
 })
 
+test('PeerChat persists pinned rooms and sorts them before newer chats', async (t) => {
+  const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-pins-'))
+  t.after(() => rm(storagePath, { recursive: true, force: true }))
+  const feeds = new Map()
+  const service = await new PeerChatService({ sdk: createFakeSdk(feeds), storagePath }).start()
+  const pinned = await service.createRoom({ name: 'Pinned', username: 'Alice' })
+  const newer = await service.createRoom({ name: 'Newer', username: 'Alice' })
+
+  const result = service.setRoomPinned({ roomKey: pinned.roomKey, pinned: true })
+  assert.equal(result.rooms[0].roomKey, pinned.roomKey)
+  assert.equal(result.rooms[0].isPinned, true)
+  assert.equal(result.rooms[1].roomKey, newer.roomKey)
+  assert.throws(
+    () => service.setRoomPinned({ roomKey: pinned.roomKey, pinned: 'yes' }),
+    /Invalid PeerChat pin state/
+  )
+  await service.close()
+
+  const restarted = await new PeerChatService({ sdk: createFakeSdk(cloneFeeds(feeds)), storagePath }).start()
+  assert.equal(restarted.listRooms()[0].roomKey, pinned.roomKey)
+  assert.equal(restarted.listRooms()[0].isPinned, true)
+  await restarted.close()
+})
+
 test('PeerChat serializes concurrent room joins and removes feed listeners', async (t) => {
   const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-joins-'))
   t.after(() => rm(storagePath, { recursive: true, force: true }))

@@ -20,7 +20,8 @@ import {
   RPC_PEERCHAT_SEND,
   RPC_PEERCHAT_ROOM_LEAVE,
   RPC_PEERCHAT_REACT,
-  RPC_PEERCHAT_SET_ACTIVE
+  RPC_PEERCHAT_SET_ACTIVE,
+  RPC_PEERCHAT_ROOM_PIN
 } from '../../backend/rpc/commands.mjs'
 
 test('Hyper storage and LAN discovery use distinct RPC command IDs', () => {
@@ -52,9 +53,10 @@ test('PeerChat RPC commands use a dedicated command range', () => {
     RPC_PEERCHAT_SEND,
     RPC_PEERCHAT_ROOM_LEAVE,
     RPC_PEERCHAT_REACT,
-    RPC_PEERCHAT_SET_ACTIVE
+    RPC_PEERCHAT_SET_ACTIVE,
+    RPC_PEERCHAT_ROOM_PIN
   ]
 
-  assert.deepEqual(commands, [40, 41, 42, 43, 44, 45, 46, 47, 48, 49])
+  assert.deepEqual(commands, [40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50])
   assert.equal(new Set(commands).size, commands.length)
 })

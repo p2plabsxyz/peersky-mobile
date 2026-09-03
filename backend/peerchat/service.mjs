@@ -184,10 +184,23 @@ export class PeerChatService {
     return [...this.rooms.values()]
       .map((room) => this.publicRoom(room))
       .sort((left, right) => {
+        if (left.isPinned !== right.isPinned) return left.isPinned ? -1 : 1
         const leftTime = left.lastMessage?.timestamp || left.createdAt
         const rightTime = right.lastMessage?.timestamp || right.createdAt
         return rightTime - leftTime
       })
+  }
+
+  setRoomPinned ({ roomKey, pinned } = {}) {
+    const normalized = normalizePeerChatRoomKey(roomKey)
+    const room = this.rooms.get(normalized)
+    if (!room) throw new Error('PeerChat room not found.')
+    if (typeof pinned !== 'boolean') throw new Error('Invalid PeerChat pin state.')
+
+    room.isPinned = pinned
+    this.schedulePersist()
+    this.bumpVersion()
+    return { room: this.publicRoom(room), rooms: this.listRooms(), version: this.version }
   }
 
   setActiveRoom ({ roomKey } = {}) {
@@ -916,6 +929,7 @@ export class PeerChatService {
       roomKey: room.roomKey,
       name: room.name,
       isHost: room.isHost === true,
+      isPinned: room.isPinned === true,
       createdAt: room.createdAt || 0,
       lastMessage: room.lastMessage || null,
       unreadCount: room.unreadCount || 0,
@@ -987,6 +1001,7 @@ export class PeerChatService {
           roomKey,
           name: normalizePeerChatRoomName(value?.name, `${roomKey.slice(0, 8)}...`),
           isHost: value?.isHost === true,
+          isPinned: value?.isPinned === true,
           createdAt: Number.isFinite(value?.createdAt) ? value.createdAt : Date.now(),
           joinedAt: Number.isFinite(value?.joinedAt) ? value.joinedAt : Date.now(),
           createdBy: typeof value?.createdBy === 'string' ? value.createdBy.slice(0, 200) : '',
