@@ -1,0 +1,22 @@
+export const PEERCHAT_SEARCH_QUERY_MAX_CHARACTERS = 100
+
+export function filterPeerChatMessages (messages, query) {
+  if (!Array.isArray(messages)) return []
+  const normalizedQuery = normalizeSearchQuery(query)
+  if (!normalizedQuery) return messages
+
+  return messages.filter((message) => [
+    message?.message,
+    message?.senderName,
+    message?.replyTo?.text,
+    message?.replyTo?.sn
+  ].some((value) => typeof value === 'string' && value.toLocaleLowerCase().includes(normalizedQuery)))
+}
+
+function normalizeSearchQuery (query) {
+  if (typeof query !== 'string') return ''
+  return Array.from(query.trim())
+    .slice(0, PEERCHAT_SEARCH_QUERY_MAX_CHARACTERS)
+    .join('')
+    .toLocaleLowerCase()
+}

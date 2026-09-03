@@ -29,6 +29,10 @@ import {
   PEERCHAT_UI_STATE_MAX_BYTES,
   serializePeerChatUiState
 } from './ui-state.mjs'
+import {
+  filterPeerChatMessages,
+  PEERCHAT_SEARCH_QUERY_MAX_CHARACTERS
+} from './message-search.mjs'
 
 import {
   RPC_PEERCHAT_INIT,
@@ -169,6 +173,8 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
   const [composer, setComposer] = useState('')
   const [replyTarget, setReplyTarget] = useState<PeerChatReply | null>(null)
   const [reactionTargetId, setReactionTargetId] = useState<string | null>(null)
+  const [isSearching, setIsSearching] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
   const [landingAction, setLandingAction] = useState<LandingAction>(null)
   const [restoredUiState, setRestoredUiState] = useState<PeerChatUiState | null>(null)
   const mentionCandidates = getMentionCandidates(
@@ -177,6 +183,7 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
     messages,
     profile?.id || ''
   )
+  const visibleMessages = filterPeerChatMessages(messages, isSearching ? searchQuery : '') as PeerChatMessage[]
 
   useEffect(() => {
     callRpcRef.current = onCallRpc
@@ -284,6 +291,8 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
     if (!activeRoom) return
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
       setActiveRoom(null)
+      setIsSearching(false)
+      setSearchQuery('')
       return true
     })
     return () => subscription.remove()
@@ -472,6 +481,8 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
     setMessages([])
     setReplyTarget(null)
     setReactionTargetId(null)
+    setIsSearching(false)
+    setSearchQuery('')
     setActiveRoom(room)
     setRooms((current) => current.map((item) => item.roomKey === room.roomKey
       ? { ...item, unreadCount: 0, unreadMentions: 0 }
@@ -593,6 +604,8 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
             setMessages([])
             setReplyTarget(null)
             setReactionTargetId(null)
+            setIsSearching(false)
+            setSearchQuery('')
             onStatus('PeerChat room removed')
           })
         }
@@ -724,6 +737,8 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
             onPress={() => {
               setReplyTarget(null)
               setReactionTargetId(null)
+              setIsSearching(false)
+              setSearchQuery('')
               setActiveRoom(null)
             }}
             style={styles.headerAction}
@@ -739,21 +754,53 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
               {formatRoomConnection(activeRoom)}
             </Text>
           </View>
-          <Pressable
-            accessibilityRole='button'
-            onPress={() => void shareRoom()}
-            style={styles.headerAction}
-          >
-            <Text style={[styles.headerActionText, { color: colors.accent }]}>Share</Text>
-          </Pressable>
+          <View style={styles.chatHeaderActions}>
+            <Pressable
+              accessibilityRole='button'
+              onPress={() => {
+                setIsSearching((current) => !current)
+                if (isSearching) setSearchQuery('')
+              }}
+              style={styles.headerAction}
+            >
+              <Text style={[styles.headerActionText, { color: colors.accent }]}>{isSearching ? 'Close' : 'Find'}</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole='button'
+              onPress={() => void shareRoom()}
+              style={styles.headerAction}
+            >
+              <Text style={[styles.headerActionText, { color: colors.accent }]}>Share</Text>
+            </Pressable>
+          </View>
         </View>
+
+        {isSearching && (
+          <View style={[styles.searchRow, { borderBottomColor: colors.border }]}>
+            <TextInput
+              autoFocus
+              maxLength={PEERCHAT_SEARCH_QUERY_MAX_CHARACTERS}
+              onChangeText={setSearchQuery}
+              placeholder='Search messages'
+              placeholderTextColor={colors.muted}
+              returnKeyType='search'
+              style={[styles.searchInput, { backgroundColor: colors.input, color: colors.text }]}
+              value={searchQuery}
+            />
+            <Text style={[styles.searchCount, { color: colors.muted }]}>
+              {searchQuery.trim() ? visibleMessages.length : messages.length}
+            </Text>
+          </View>
+        )}
 
         <FlatList
           ref={messageListRef}
-          data={messages}
+          data={visibleMessages}
           keyExtractor={(item) => item.id}
-          contentContainerStyle={messages.length > 0 ? styles.messageList : styles.emptyMessageList}
-          onContentSizeChange={() => messageListRef.current?.scrollToEnd({ animated: false })}
+          contentContainerStyle={visibleMessages.length > 0 ? styles.messageList : styles.emptyMessageList}
+          onContentSizeChange={() => {
+            if (!isSearching) messageListRef.current?.scrollToEnd({ animated: false })
+          }}
           renderItem={({ item }) => (
             <View style={[styles.messageRow, item.self ? styles.messageRowSelf : null]}>
               <Pressable
@@ -812,8 +859,14 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
           )}
           ListEmptyComponent={(
             <View style={styles.emptyState}>
-              <Text style={[styles.emptyTitle, { color: colors.text }]}>No messages yet</Text>
-              <Text style={[styles.helper, { color: colors.muted }]}>Share the room key, then start the conversation.</Text>
+              <Text style={[styles.emptyTitle, { color: colors.text }]}>
+                {isSearching && searchQuery.trim() ? 'No matching messages' : 'No messages yet'}
+              </Text>
+              <Text style={[styles.helper, { color: colors.muted }]}>
+                {isSearching && searchQuery.trim()
+                  ? 'Try another search term.'
+                  : 'Share the room key, then start the conversation.'}
+              </Text>
             </View>
           )}
         />
@@ -1268,10 +1321,14 @@ const styles = StyleSheet.create({
   emptyTitle: { fontSize: 16, fontWeight: '800' },
   chatHeader: { alignItems: 'center', borderBottomWidth: 1, flexDirection: 'row', minHeight: 62, paddingHorizontal: 8 },
   chatHeaderCopy: { alignItems: 'center', flex: 1, paddingHorizontal: 5 },
+  chatHeaderActions: { flexDirection: 'row' },
   chatTitle: { fontSize: 16, fontWeight: '800', maxWidth: '100%' },
   connectionText: { fontSize: 11, fontWeight: '600', marginTop: 2 },
-  headerAction: { alignItems: 'center', minWidth: 58, paddingHorizontal: 7, paddingVertical: 11 },
+  headerAction: { alignItems: 'center', minWidth: 52, paddingHorizontal: 5, paddingVertical: 11 },
   headerActionText: { fontSize: 13, fontWeight: '800' },
+  searchRow: { alignItems: 'center', borderBottomWidth: 1, flexDirection: 'row', gap: 8, paddingHorizontal: 10, paddingVertical: 7 },
+  searchInput: { borderRadius: 16, flex: 1, fontSize: 14, minHeight: 36, paddingHorizontal: 12, paddingVertical: 7 },
+  searchCount: { fontSize: 11, minWidth: 24, textAlign: 'center' },
   messageList: { padding: 14, paddingBottom: 8 },
   emptyMessageList: { flexGrow: 1, justifyContent: 'center' },
   messageRow: { alignItems: 'flex-start', marginBottom: 9 },
