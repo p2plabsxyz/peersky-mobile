@@ -6,7 +6,6 @@ import {
   Modal,
   Platform,
   Pressable,
-  Share,
   StyleSheet,
   Text,
   View
@@ -22,7 +21,6 @@ import TrashIcon from '../../assets/icons/bootstrap/trash.svg'
 import { BROWSER_PALETTES } from '../browser-appearance.mjs'
 import { getProxiedHyperUrl, sortBrowserDownloads } from './browser-downloads.mjs'
 import type { BrowserDownload } from './useBrowserDownloads'
-import { createBrowserAnalysis, recordBrowserDiagnostic } from '../browser-diagnostics.mjs'
 
 type DownloadSort = 'newest' | 'oldest' | 'name' | 'size'
 
@@ -81,17 +79,6 @@ export function DownloadsScreen ({
           <ArrowLeftIcon width={22} height={22} color={palette.text} />
         </Pressable>
         <Text style={[styles.title, { color: palette.text }]}>Downloads</Text>
-        <Pressable
-          accessibilityLabel='Share download analysis'
-          accessibilityRole='button'
-          hitSlop={8}
-          style={({ pressed }) => [styles.sortButton, pressed ? styles.pressed : null]}
-          onPress={() => void shareDownloadAnalysis(downloads).catch((shareError) => {
-            console.warn('Unable to share download analysis:', shareError)
-          })}
-        >
-          <Text style={[styles.sortButtonText, { color: palette.accent }]}>Analysis</Text>
-        </Pressable>
         {isReady && downloads.length > 0 && (
           <Pressable
             accessibilityLabel={`Sort downloads, currently ${sort}`}
@@ -417,19 +404,6 @@ function getFailureReason (reason?: string) {
   if (reason === 'http-error') return 'The server returned an error response.'
   if (reason === 'incomplete-response') return 'The server stopped before the file was complete.'
   return null
-}
-
-async function shareDownloadAnalysis (downloads: BrowserDownload[]) {
-  recordBrowserDiagnostic('downloads', 'analysis-requested', { count: downloads.length })
-  const analysis = createBrowserAnalysis({
-    platform: Platform.OS,
-    screen: 'downloads',
-    downloads
-  })
-  await Share.share({
-    title: 'PeerSky download analysis',
-    message: JSON.stringify(analysis, null, 2)
-  })
 }
 
 const styles = StyleSheet.create({

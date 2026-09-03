@@ -71,7 +71,6 @@ test('retries an empty directory while initial metadata is still being discovere
   })
 
   assert.equal(response.ok, true)
-  assert.equal(response.diagnostics.listAttempts, 2)
   assert.deepEqual(response.items.map(({ name }) => name), ['peer-bird.png'])
 })
 
@@ -98,7 +97,6 @@ test('rejects a missing non-root path instead of displaying an empty folder', as
 
   assert.equal(response.ok, false)
   assert.equal(response.error, 'No file or directory was found at this Hyper URL.')
-  assert.equal(response.diagnostics.stage, 'list-directory')
 })
 
 test('returns collected directory entries when listing times out', async () => {

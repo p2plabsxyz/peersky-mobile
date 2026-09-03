@@ -109,7 +109,6 @@ import {
   BROWSER_MEDIA_TOKEN_LENGTH,
   createBrowserMediaToken,
   createBrowserMediaLongPressScript,
-  parseBrowserMediaDiagnosticMessage,
   parseBrowserMediaMessage
 } from './browser-media.mjs'
 import { BookmarksScreen } from './bookmarks/BookmarksScreen'
@@ -129,7 +128,6 @@ import {
   getProxiedHyperUrl
 } from './downloads/browser-downloads.mjs'
 import { HyperdriveScreen } from './hyperdrive/HyperdriveScreen'
-import { createBrowserAnalysis, recordBrowserDiagnostic } from './browser-diagnostics.mjs'
 import { PeerChatScreen, type PeerChatResponse } from './peerchat/PeerChatScreen'
 import { peerSkyWebViewNativeConfig } from './downloads/PeerSkyWebView'
 import {
@@ -917,19 +915,6 @@ export default function App () {
         method: 'GET',
         inlineAssets: true
       })
-      recordBrowserDiagnostic('hyperdrive', 'navigation-fetch-response', {
-        url: nextUrl,
-        ok: response.ok,
-        status: response.status,
-        statusText: response.statusText,
-        error: response.error,
-        downloadName: response.downloadName,
-        hasDownloadUrl: Boolean(response.downloadUrl),
-        mediaName: response.mediaName,
-        mediaType: response.mediaType,
-        hasMediaUrl: Boolean(response.mediaUrl)
-      })
-
       if (isStaleBrowserLoad(loadSeq, browserLoadSeqRef.current)) return
 
       if (!response.ok) {
@@ -988,10 +973,6 @@ export default function App () {
       if (isStaleBrowserLoad(loadSeq, browserLoadSeqRef.current)) return
 
       const message = error instanceof Error ? error.message : String(error)
-      recordBrowserDiagnostic('hyperdrive', 'navigation-fetch-error', {
-        url: nextUrl,
-        error: message
-      })
       const source: BrowserSource = {
         kind: 'error',
         html: createBrowserErrorHtml(nextUrl, message)
@@ -1061,13 +1042,6 @@ export default function App () {
     })
     if (!nextState) return
 
-    recordBrowserDiagnostic('navigation', 'shell-back', {
-      fromUrl: currentEntry.url,
-      toUrl: nextState.currentUrl,
-      historyIndex: nextState.historyIndex,
-      historyLength: nextState.history.length
-    })
-
     const entry = nextState.history[nextState.historyIndex]
     remountBrowserWebView(tabId)
     applyBrowserState(nextState)
@@ -1127,32 +1101,6 @@ export default function App () {
     if (browserSource.kind === 'app') {
       openInternalApp(browserSource.app, false)
     }
-  }
-
-  async function shareBrowserNavigationAnalysis () {
-    const tabsState = browserTabsStateRef.current
-    const activeBrowserTab = tabsState.tabs.find((tab) => tab.id === tabsState.activeTabId)
-    const analysis = createBrowserAnalysis({
-      platform: Platform.OS,
-      screen: 'browser-navigation',
-      activeTab: activeBrowserTab
-        ? {
-            id: activeBrowserTab.id,
-            historyIndex: activeBrowserTab.historyIndex,
-            history: activeBrowserTab.history.map((entry) => ({
-              url: entry.url,
-              sourceKind: entry.source.kind
-            })),
-            webCanGoBack: activeBrowserTab.webCanGoBack,
-            webCanGoForward: activeBrowserTab.webCanGoForward
-          }
-        : null,
-      navigationMode: 'shell-history'
-    })
-    await Share.share({
-      title: 'PeerSky navigation analysis',
-      message: JSON.stringify(analysis, null, 2)
-    })
   }
 
   async function onContentBlockingEnabledChange (enabled: boolean) {
@@ -1359,11 +1307,6 @@ export default function App () {
 
       const downloads = await refreshBrowserDownloads()
       const existing = findCompletedHyperDownload(downloads, item)
-      recordBrowserDiagnostic('hyperdrive', 'local-download-match', {
-        item,
-        matchedDownload: existing || null,
-        downloadCount: downloads.length
-      })
       if (existing) {
         const opened = await openBrowserDownload(existing.id)
         if (opened) {
@@ -1371,10 +1314,6 @@ export default function App () {
           return false
         }
 
-        recordBrowserDiagnostic('hyperdrive', 'local-download-open-failed', {
-          item,
-          downloadId: existing.id
-        })
         setStatus('No app is available to open this downloaded file')
         return false
       }
@@ -2653,10 +2592,6 @@ export default function App () {
       onOpenBookmarks={onBrowserOpenBookmarks}
       onOpenDownloads={onBrowserOpenDownloads}
       onOpenHistory={onBrowserOpenHistory}
-      onShareAnalysis={() => {
-        setBrowserMenuVisible(false)
-        void shareBrowserNavigationAnalysis()
-      }}
       onOpenSettings={() => {
         setBrowserMenuVisible(false)
         setBrowserSettingsVisible(true)
@@ -3262,19 +3197,6 @@ export default function App () {
                   if (browserTabsStateRef.current.activeTabId === tab.id) {
                     setBrowserMediaTarget({ ...mediaTarget, tabId: tab.id })
                   }
-                  return
-                }
-
-                const mediaDiagnostic = parseBrowserMediaDiagnosticMessage(
-                  event.nativeEvent.data,
-                  browserMediaToken
-                )
-                if (mediaDiagnostic) {
-                  recordBrowserDiagnostic('media-long-press', mediaDiagnostic.stage, {
-                    ...mediaDiagnostic.details,
-                    activeTab: browserTabsStateRef.current.activeTabId === tab.id,
-                    sourceKind: entry.source.kind
-                  })
                   return
                 }
 

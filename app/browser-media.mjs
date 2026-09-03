@@ -1,7 +1,6 @@
 import { MAX_BROWSER_URL_LENGTH } from './browser-shell.mjs'
 
 export const BROWSER_MEDIA_MESSAGE_TYPE = 'peersky-browser-media-long-press'
-export const BROWSER_MEDIA_DIAGNOSTIC_MESSAGE_TYPE = 'peersky-browser-media-diagnostic'
 export const MAX_BROWSER_MEDIA_MESSAGE_LENGTH = 24 * 1024
 export const MAX_BROWSER_MEDIA_TEXT_LENGTH = 256
 export const BROWSER_MEDIA_TOKEN_LENGTH = 32
@@ -52,32 +51,6 @@ export function parseBrowserMediaMessage (message, pageUrl = '', expectedToken =
   }
 }
 
-export function parseBrowserMediaDiagnosticMessage (message, expectedToken = '') {
-  if (typeof message !== 'string' || message.length > MAX_BROWSER_MEDIA_MESSAGE_LENGTH) return null
-
-  try {
-    const parsed = JSON.parse(message)
-    if (
-      parsed?.type !== BROWSER_MEDIA_DIAGNOSTIC_MESSAGE_TYPE ||
-      !isBrowserMediaToken(expectedToken) ||
-      parsed.token !== expectedToken ||
-      typeof parsed.stage !== 'string' ||
-      !/^[a-z0-9-]{1,80}$/.test(parsed.stage)
-    ) return null
-
-    const details = parsed.details && typeof parsed.details === 'object' && !Array.isArray(parsed.details)
-      ? Object.fromEntries(Object.entries(parsed.details).slice(0, 16).map(([key, value]) => [
-        Array.from(key).slice(0, 40).join(''),
-        normalizeDiagnosticScalar(value)
-      ]))
-      : {}
-
-    return { stage: parsed.stage, details }
-  } catch {
-    return null
-  }
-}
-
 export function createBrowserMediaLongPressScript ({ token = '' } = {}) {
   return `
     (() => {
@@ -85,20 +58,9 @@ export function createBrowserMediaLongPressScript ({ token = '' } = {}) {
       window.__peerskyMediaLongPressInstalled = true;
 
       const messageType = ${JSON.stringify(BROWSER_MEDIA_MESSAGE_TYPE)};
-      const diagnosticType = ${JSON.stringify(BROWSER_MEDIA_DIAGNOSTIC_MESSAGE_TYPE)};
       const messageToken = ${JSON.stringify(isBrowserMediaToken(token) ? token : '')};
       const maxUrlLength = ${MAX_BROWSER_URL_LENGTH};
       const maxTextLength = ${MAX_BROWSER_MEDIA_TEXT_LENGTH};
-
-      function postDiagnostic(stage, details) {
-        if (!messageToken) return;
-        window.ReactNativeWebView?.postMessage(JSON.stringify({
-          type: diagnosticType,
-          token: messageToken,
-          stage,
-          details
-        }));
-      }
 
       function closestElement(candidates, selector) {
         for (const candidate of candidates) {
@@ -165,15 +127,7 @@ export function createBrowserMediaLongPressScript ({ token = '' } = {}) {
           }
         }
 
-        if (!kind) {
-          postDiagnostic('dom-target-missed', {
-            candidateCount: candidates.length,
-            hasImage: Boolean(image),
-            hasLink: Boolean(link),
-            hasVideo: Boolean(video)
-          });
-          return false;
-        }
+        if (!kind) return false;
 
         window.ReactNativeWebView?.postMessage(JSON.stringify({
           type: messageType,
@@ -183,7 +137,6 @@ export function createBrowserMediaLongPressScript ({ token = '' } = {}) {
           linkUrl,
           title
         }));
-        postDiagnostic('dom-target-dispatched', { kind });
         return true;
       }
 
@@ -198,34 +151,21 @@ export function createBrowserMediaLongPressScript ({ token = '' } = {}) {
             !Number.isFinite(yRatio) ||
             xRatio < 0 || xRatio > 1 ||
             yRatio < 0 || yRatio > 1
-          ) {
-            postDiagnostic('dom-resolver-rejected', {
-              tokenMatched: providedToken === messageToken,
-              validCoordinates: Number.isFinite(xRatio) && Number.isFinite(yRatio)
-            });
-            return false;
-          }
+          ) return false;
 
           const x = xRatio * window.innerWidth;
           const y = yRatio * window.innerHeight;
           const candidates = typeof document.elementsFromPoint === 'function'
             ? document.elementsFromPoint(x, y)
             : [document.elementFromPoint(x, y)].filter(Boolean);
-          const handled = dispatchTarget(candidates);
-          postDiagnostic('dom-resolver-finished', { candidateCount: candidates.length, handled });
-          return handled;
+          return dispatchTarget(candidates);
         }
-      });
-
-      postDiagnostic('script-installed', {
-        hasElementsFromPoint: typeof document.elementsFromPoint === 'function'
       });
 
       document.addEventListener('contextmenu', (event) => {
         if (!event.isTrusted || !messageToken) return;
         const path = typeof event.composedPath === 'function' ? event.composedPath() : [event.target];
         const handled = dispatchTarget(path);
-        postDiagnostic('context-menu', { candidateCount: path.length, handled });
         if (handled) event.preventDefault();
       }, true);
 
@@ -282,13 +222,6 @@ function normalizeTargetText (value) {
   return Array.from(normalized)
     .slice(0, MAX_BROWSER_MEDIA_TEXT_LENGTH)
     .join('')
-}
-
-function normalizeDiagnosticScalar (value) {
-  if (typeof value === 'boolean') return value
-  if (typeof value === 'number') return Number.isFinite(value) ? value : String(value)
-  if (typeof value === 'string') return Array.from(value).slice(0, 128).join('')
-  return String(value).slice(0, 128)
 }
 
 function hasControlCharacters (value) {

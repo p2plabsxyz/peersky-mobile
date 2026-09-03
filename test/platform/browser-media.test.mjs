@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 import {
-  BROWSER_MEDIA_DIAGNOSTIC_MESSAGE_TYPE,
   BROWSER_MEDIA_TOKEN_LENGTH,
   BROWSER_MEDIA_MESSAGE_TYPE,
   MAX_BROWSER_MEDIA_MESSAGE_LENGTH,
@@ -9,7 +8,6 @@ import {
   createBrowserMediaToken,
   createBrowserMediaLongPressScript,
   isDownloadableBrowserMediaUrl,
-  parseBrowserMediaDiagnosticMessage,
   parseBrowserMediaMessage
 } from '../../app/browser-media.mjs'
 
@@ -107,34 +105,12 @@ describe('browser media long press', () => {
     assert.equal(token, '000102030405060708090a0b0c0d0e0f')
   })
 
-  test('accepts only authenticated bounded media diagnostics', () => {
-    const message = JSON.stringify({
-      type: BROWSER_MEDIA_DIAGNOSTIC_MESSAGE_TYPE,
-      token: MEDIA_TOKEN,
-      stage: 'native-long-click',
-      details: { hitType: 5, hasTouchPoint: true }
-    })
-
-    assert.deepEqual(parseBrowserMediaDiagnosticMessage(message, MEDIA_TOKEN), {
-      stage: 'native-long-click',
-      details: { hitType: 5, hasTouchPoint: true }
-    })
-    assert.equal(parseBrowserMediaDiagnosticMessage(message, 'b'.repeat(BROWSER_MEDIA_TOKEN_LENGTH)), null)
-    assert.equal(parseBrowserMediaDiagnosticMessage(JSON.stringify({
-      type: BROWSER_MEDIA_DIAGNOSTIC_MESSAGE_TYPE,
-      token: MEDIA_TOKEN,
-      stage: '../unsafe',
-      details: {}
-    }), MEDIA_TOKEN), null)
-  })
-
   test('keeps a DOM fallback for native hit-test misses without disabling text selection', () => {
     const script = createBrowserMediaLongPressScript({ token: MEDIA_TOKEN })
 
     assert.match(script, /document[.]addEventListener\('contextmenu'/)
     assert.match(script, /event[.]isTrusted/)
     assert.match(script, /token: messageToken/)
-    assert.match(script, /postDiagnostic\('dom-target-missed'/)
     assert.match(script, /return false;/)
     assert.match(script, /event[.]preventDefault\(\)/)
     assert.match(script, /video[.]currentSrc/)

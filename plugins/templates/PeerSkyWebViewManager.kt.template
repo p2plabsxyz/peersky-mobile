@@ -113,15 +113,6 @@ class PeerSkyWebViewManager : RNCWebViewManager() {
 
   private fun handleLongPress(webView: WebView): Boolean {
     val result = webView.hitTestResult
-    dispatchDiagnostic(
-      webView,
-      "native-long-click",
-      JSONObject()
-        .put("hasTouchPoint", mediaLongPressPoints.containsKey(webView))
-        .put("hitType", result.type)
-        .put("hasHitExtra", !result.extra.isNullOrBlank())
-    )
-
     return when (result.type) {
       WebView.HitTestResult.IMAGE_TYPE -> {
         val handled = dispatchTarget(
@@ -164,32 +155,11 @@ class PeerSkyWebViewManager : RNCWebViewManager() {
     touchPoint: TouchPoint? = mediaLongPressPoints[webView]
   ): Boolean {
     val token = mediaLongPressTokens[webView] ?: return false
-    dispatchDiagnostic(
-      webView,
-      "native-dom-fallback",
-      JSONObject().put("hasTouchPoint", touchPoint != null)
-    )
     val point = touchPoint ?: return false
     val javascript = "window.__peerskyResolveMediaLongPressAt?.(" +
       JSONObject.quote(token) + "," + point.xRatio + "," + point.yRatio + ");"
     webView.evaluateJavascript(javascript, null)
     return true
-  }
-
-  private fun dispatchDiagnostic(
-    webView: WebView,
-    stage: String,
-    details: JSONObject
-  ) {
-    val token = mediaLongPressTokens[webView] ?: return
-    val payload = JSONObject()
-      .put("type", DIAGNOSTIC_MESSAGE_TYPE)
-      .put("token", token)
-      .put("stage", stage)
-      .put("details", details)
-    val javascript = "window.ReactNativeWebView?.postMessage(" +
-      JSONObject.quote(payload.toString()) + ");"
-    webView.evaluateJavascript(javascript, null)
   }
 
   private fun dispatchTarget(
@@ -213,12 +183,6 @@ class PeerSkyWebViewManager : RNCWebViewManager() {
       .put("mediaUrl", normalizedMediaUrl)
       .put("linkUrl", normalizedLinkUrl)
       .put("title", normalizeTitle(title))
-
-    dispatchDiagnostic(
-      webView,
-      "native-target-dispatched",
-      JSONObject().put("kind", kind)
-    )
 
     val javascript = "if (window.ReactNativeWebView) { " +
       "window.ReactNativeWebView.postMessage(" +
@@ -256,7 +220,6 @@ class PeerSkyWebViewManager : RNCWebViewManager() {
 
   companion object {
     private const val MESSAGE_TYPE = "peersky-browser-media-long-press"
-    private const val DIAGNOSTIC_MESSAGE_TYPE = "peersky-browser-media-diagnostic"
     private const val MAX_URL_LENGTH = 8192
     private const val MAX_TITLE_LENGTH = 256
     private const val TOKEN_LENGTH = 32

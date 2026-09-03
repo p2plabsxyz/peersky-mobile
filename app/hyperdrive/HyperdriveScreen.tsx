@@ -5,10 +5,8 @@ import {
   Clipboard,
   Image,
   Modal,
-  Platform,
   Pressable,
   ScrollView,
-  Share,
   StyleSheet,
   Text,
   TextInput,
@@ -36,7 +34,6 @@ import {
   loadHyperdriveRecents,
   persistHyperdriveRecents
 } from './recents-store'
-import { createBrowserAnalysis, recordBrowserDiagnostic } from '../browser-diagnostics.mjs'
 
 const hyperdriveIcon = require('../../assets/images/hyperdrive.png')
 
@@ -129,14 +126,6 @@ export function HyperdriveScreen ({ isDark, isLandscape, onCallRpc, onOpenItem, 
         byteLength: fileSize,
         visibility
       })
-      recordBrowserDiagnostic('hyperdrive', 'upload-response', {
-        name: asset.name,
-        byteLength: fileSize,
-        visibility,
-        ok: response.ok,
-        error: response.error,
-        item: response.item
-      })
       if (!response.ok || !response.item) throw new Error(response.error || 'Upload failed.')
       const uploadedItem = { ...response.item, localUri: file.uri }
       remember(uploadedItem, 'uploaded')
@@ -149,12 +138,6 @@ export function HyperdriveScreen ({ isDark, isLandscape, onCallRpc, onOpenItem, 
         { text: 'Open', onPress: () => onOpenItem(uploadedItem) }
       ])
     } catch (uploadError) {
-      recordBrowserDiagnostic('hyperdrive', 'upload-error', {
-        name: asset.name,
-        byteLength: fileSize,
-        visibility,
-        error: uploadError instanceof Error ? uploadError.message : String(uploadError)
-      })
       setError(uploadError instanceof Error ? uploadError.message : String(uploadError))
     } finally {
       setBusyAction(null)
@@ -174,15 +157,6 @@ export function HyperdriveScreen ({ isDark, isLandscape, onCallRpc, onOpenItem, 
     setNotice(null)
     try {
       const response = await onCallRpc(RPC_HYPER_LIBRARY_LIST, { url: normalizedUrl })
-      recordBrowserDiagnostic('hyperdrive', 'fetch-response', {
-        url: normalizedUrl,
-        ok: response.ok,
-        error: response.error,
-        location: response.location,
-        itemCount: Array.isArray(response.items) ? response.items.length : 0,
-        truncated: response.truncated === true,
-        backend: response.diagnostics
-      })
       if (!response.ok || !response.location) throw new Error(response.error || 'Unable to fetch Hyper data.')
       const fetchedItems = Array.isArray(response.items) ? response.items : []
       if (recordRecent) {
@@ -201,10 +175,6 @@ export function HyperdriveScreen ({ isDark, isLandscape, onCallRpc, onOpenItem, 
       }
       onStatus(`Fetched ${response.location.name}`)
     } catch (fetchError) {
-      recordBrowserDiagnostic('hyperdrive', 'fetch-error', {
-        url: normalizedUrl,
-        error: fetchError instanceof Error ? fetchError.message : String(fetchError)
-      })
       setError(fetchError instanceof Error ? fetchError.message : String(fetchError))
     } finally {
       setBusyAction(null)
@@ -212,10 +182,6 @@ export function HyperdriveScreen ({ isDark, isLandscape, onCallRpc, onOpenItem, 
   }
 
   async function openItem (item: HyperdriveItem) {
-    recordBrowserDiagnostic('hyperdrive', 'open-item', {
-      ...item,
-      localUri: item.localUri ? '<app-local-file>' : undefined
-    })
     if (!items) {
       if (item.type === 'directory') {
         if (item.children) {
@@ -289,27 +255,6 @@ export function HyperdriveScreen ({ isDark, isLandscape, onCallRpc, onOpenItem, 
     }
   }
 
-  async function shareAnalysis () {
-    try {
-      recordBrowserDiagnostic('hyperdrive', 'analysis-requested', {
-        recentCount: recents.length,
-        currentLocation: location?.url || null
-      })
-      await Share.share({
-        title: 'PeerSky Hyperdrive analysis',
-        message: JSON.stringify(createBrowserAnalysis({
-          platform: Platform.OS,
-          screen: 'hyperdrive',
-          currentLocation: location,
-          recentFilter,
-          recents
-        }), null, 2)
-      })
-    } catch (shareError) {
-      setError(shareError instanceof Error ? shareError.message : 'Unable to share analysis.')
-    }
-  }
-
   const libraryItems = visibleItems.length > 0
     ? visibleItems.map((item) => (
       <View key={item.url} style={[styles.item, { backgroundColor: palette.surface, borderColor: palette.border }]}>
@@ -364,15 +309,6 @@ export function HyperdriveScreen ({ isDark, isLandscape, onCallRpc, onOpenItem, 
           <Text style={[styles.helperText, { color: palette.muted }]}>Upload and fetch files over Hyper.</Text>
         </View>
         <Text style={[styles.readyPill, { color: palette.pillText, backgroundColor: palette.pill }]}>ready</Text>
-        <Pressable
-          accessibilityLabel='Share Hyperdrive analysis'
-          accessibilityRole='button'
-          hitSlop={8}
-          onPress={() => void shareAnalysis()}
-          style={({ pressed }) => [styles.analysisButton, pressed ? styles.pressed : null]}
-        >
-          <Text style={[styles.analysisButtonText, { color: palette.accent }]}>Analysis</Text>
-        </Pressable>
       </View>
 
       <View style={styles.setupBlock}>
@@ -598,8 +534,6 @@ const styles = StyleSheet.create({
   appHeaderCopy: { flex: 1, gap: 3 },
   appTitle: { fontSize: 18, fontWeight: '700' },
   readyPill: { borderRadius: 999, fontSize: 12, fontWeight: '700', overflow: 'hidden', paddingHorizontal: 10, paddingVertical: 4 },
-  analysisButton: { alignItems: 'center', justifyContent: 'center', minHeight: 28, paddingHorizontal: 4 },
-  analysisButtonText: { fontSize: 12, fontWeight: '800' },
   helperText: { fontSize: 13, lineHeight: 19 },
   setupBlock: { gap: 10 },
   setupTitle: { fontSize: 15, fontWeight: '700' },

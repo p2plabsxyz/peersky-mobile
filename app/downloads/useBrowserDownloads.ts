@@ -3,7 +3,6 @@ import CookieManager from '@preeternal/react-native-cookie-manager'
 import { Directory, File, Paths } from 'expo-file-system'
 import * as Sharing from 'expo-sharing'
 import { NativeModules, Platform } from 'react-native'
-import { recordBrowserDiagnostic } from '../browser-diagnostics.mjs'
 import {
   addDownloadUrlFingerprint,
   createUniqueDownloadFilename,
@@ -43,7 +42,6 @@ export function useBrowserDownloads ({ enabled = false } = {}) {
   const [error, setError] = useState<string | null>(null)
   const activeIosDownloads = useRef(new Set<string>())
   const refreshSequence = useRef(0)
-  const lastDiagnosticState = useRef('')
 
   const refresh = useCallback(async () => {
     const sequence = ++refreshSequence.current
@@ -55,20 +53,6 @@ export function useBrowserDownloads ({ enabled = false } = {}) {
       if (sequence !== refreshSequence.current) return normalized
 
       setDownloads(normalized)
-      const diagnosticState = normalized.map(({ id, status, reason }) => `${id}:${status}:${reason || ''}`).join('|')
-      if (diagnosticState !== lastDiagnosticState.current) {
-        lastDiagnosticState.current = diagnosticState
-        recordBrowserDiagnostic('downloads', 'status-change', {
-          downloads: normalized.map(({ id, name, status, size, reason, sourceUrl }) => ({
-            id,
-            name,
-            status,
-            size,
-            reason,
-            sourceUrl
-          }))
-        })
-      }
       setError(null)
       return normalized
     } catch (refreshError) {
@@ -180,7 +164,6 @@ export function useBrowserDownloads ({ enabled = false } = {}) {
     try {
       const paused = await getAndroidDownloads().pauseDownload(download.id)
       if (!paused) throw new Error('Download was not paused')
-      recordBrowserDiagnostic('downloads', 'user-paused', { id: download.id, name: download.name })
       await refresh()
       return true
     } catch (pauseError) {
@@ -251,11 +234,6 @@ export function useBrowserDownloads ({ enabled = false } = {}) {
       try {
         const resumed = await getAndroidDownloads().resumeDownload(download.id, normalizedUrl)
         if (!resumed) throw new Error('Download was not resumed')
-        recordBrowserDiagnostic('downloads', 'user-resumed', {
-          id: download.id,
-          name: download.name,
-          downloadedBytes: download.downloadedBytes || 0
-        })
         await refresh()
         setError(null)
         return true
