@@ -9,7 +9,10 @@ import {
   MAX_PEERCHAT_ROOM_STORAGE_BYTES,
   PeerChatService
 } from '../../backend/peerchat/service.mjs'
-import { encryptPeerChatMessage } from '../../backend/peerchat/protocol.mjs'
+import {
+  derivePeerChatTopic,
+  encryptPeerChatMessage
+} from '../../backend/peerchat/protocol.mjs'
 
 const ROOM_KEY = 'ab'.repeat(32)
 
@@ -31,6 +34,8 @@ test('PeerChat persists basic rooms and returns version-aware message snapshots'
   const snapshot = await service.getSnapshot({ roomKey: room.roomKey, version: -1 })
 
   assert.equal(firstSdk.joined.length, 1)
+  assert.equal(firstSdk.joined[0], derivePeerChatTopic(room.roomKey).toString('hex'))
+  assert.notEqual(firstSdk.joined[0], room.roomKey)
   assert.equal(snapshot.profile.username, 'Alice Mobile')
   assert.equal(snapshot.room.name, 'Mobile Room')
   assert.equal(snapshot.messages.length, 1)

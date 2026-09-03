@@ -19,6 +19,9 @@ export const MAX_PEERCHAT_REACTION_EMOJI_LENGTH = 10
 const ROOM_KEY_PATTERN = /^[a-f0-9]{64}$/i
 const PROFILE_NAME_PATTERN = /^[A-Za-z0-9]+(?: [A-Za-z0-9]+)*$/
 const MAX_CLOCK_SKEW_MS = 5 * 60 * 1000
+const TOPIC_CONTEXT = 'peersky-chat:topic:'
+const MESSAGE_KEY_CONTEXT = 'peersky-chat:key:'
+const LEGACY_MESSAGE_KEY_CONTEXT = 'peersky-chat:'
 
 export function normalizePeerChatRoomKey (value) {
   const roomKey = typeof value === 'string' ? value.trim() : ''
@@ -104,8 +107,12 @@ export function createPeerChatMessageId () {
   return b4a.toString(randomBytes(16), 'hex')
 }
 
+export function derivePeerChatTopic (roomKey) {
+  return derivePeerChatKey(roomKey, TOPIC_CONTEXT)
+}
+
 export function encryptPeerChatMessage (message, roomKey) {
-  const key = deriveRoomEncryptionKey(roomKey)
+  const key = derivePeerChatKey(roomKey, MESSAGE_KEY_CONTEXT)
   const iv = randomBytes(12)
   const cipher = createCipheriv('aes-256-gcm', key, iv)
   let ciphertext = cipher.update(message, 'utf8', 'hex')
@@ -131,14 +138,22 @@ export function decryptPeerChatMessage (payload, roomKey) {
     throw new Error('Invalid encrypted PeerChat payload')
   }
 
-  const decipher = createDecipheriv(
-    'aes-256-gcm',
-    deriveRoomEncryptionKey(roomKey),
-    b4a.from(payload.iv, 'hex')
-  )
-  decipher.setAuthTag(b4a.from(payload.tag, 'hex'))
-  let plaintext = decipher.update(payload.ct, 'hex', 'utf8')
-  plaintext += decipher.final('utf8')
+  let plaintext
+  try {
+    plaintext = decryptPeerChatPayload(
+      payload,
+      derivePeerChatKey(roomKey, MESSAGE_KEY_CONTEXT)
+    )
+  } catch (error) {
+    try {
+      plaintext = decryptPeerChatPayload(
+        payload,
+        derivePeerChatKey(roomKey, LEGACY_MESSAGE_KEY_CONTEXT)
+      )
+    } catch {
+      throw error
+    }
+  }
 
   if (getPeerChatMessageByteLength(plaintext) > MAX_PEERCHAT_MESSAGE_BYTES) {
     throw new Error('PeerChat message is too large')
@@ -186,10 +201,22 @@ export function getSharedPeerChatRooms (topics, discoveryKeys) {
   return sharedRooms
 }
 
-function deriveRoomEncryptionKey (roomKey) {
+function derivePeerChatKey (roomKey, context) {
   const normalized = normalizePeerChatRoomKey(roomKey)
   if (!normalized) throw new Error('Invalid PeerChat room key')
-  return createHash('sha256').update(`peersky-chat:${normalized}`).digest()
+  return createHash('sha256').update(`${context}${normalized}`).digest()
+}
+
+function decryptPeerChatPayload (payload, key) {
+  const decipher = createDecipheriv(
+    'aes-256-gcm',
+    key,
+    b4a.from(payload.iv, 'hex')
+  )
+  decipher.setAuthTag(b4a.from(payload.tag, 'hex'))
+  let plaintext = decipher.update(payload.ct, 'hex', 'utf8')
+  plaintext += decipher.final('utf8')
+  return plaintext
 }
 
 function bytesToHex (bytes) {

@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict'
-import { createDecipheriv, createHash } from 'node:crypto'
+import { createCipheriv, createDecipheriv, createHash } from 'node:crypto'
 import test from 'node:test'
 
 import b4a from 'b4a'
 
 import {
   decryptPeerChatMessage,
+  derivePeerChatTopic,
   encryptPeerChatMessage,
   getSharedPeerChatRooms,
   MAX_PEERCHAT_MESSAGE_BYTES,
@@ -83,9 +84,9 @@ test('PeerChat bounds desktop-compatible reaction events and preserves removals'
   }), null)
 })
 
-test('PeerChat AES-GCM payloads use the desktop room-key derivation', () => {
+test('PeerChat AES-GCM payloads use the separated desktop message-key derivation', () => {
   const encrypted = encryptPeerChatMessage('hello desktop', ROOM_KEY)
-  const derivedKey = createHash('sha256').update(`peersky-chat:${ROOM_KEY}`).digest()
+  const derivedKey = createHash('sha256').update(`peersky-chat:key:${ROOM_KEY}`).digest()
   const decipher = createDecipheriv(
     'aes-256-gcm',
     derivedKey,
@@ -102,18 +103,38 @@ test('PeerChat AES-GCM payloads use the desktop room-key derivation', () => {
   )
 })
 
+test('PeerChat decrypts history written with the legacy message key', () => {
+  const legacyKey = createHash('sha256').update(`peersky-chat:${ROOM_KEY}`).digest()
+  const iv = Buffer.alloc(12, 7)
+  const cipher = createCipheriv('aes-256-gcm', legacyKey, iv)
+  const ct = cipher.update('legacy history', 'utf8', 'hex') + cipher.final('hex')
+
+  assert.equal(decryptPeerChatMessage({
+    ct,
+    iv: iv.toString('hex'),
+    tag: cipher.getAuthTag().toString('hex')
+  }, ROOM_KEY), 'legacy history')
+})
+
 test('PeerChat routes connections only through locally joined room topics', () => {
   const otherRoom = 'cd'.repeat(32)
+  const roomTopic = derivePeerChatTopic(ROOM_KEY)
+  const otherTopic = derivePeerChatTopic(otherRoom)
+  const roomTopicHex = peerChatTopicHex(roomTopic)
   const discoveryKeys = new Map([
-    [ROOM_KEY, ROOM_KEY]
+    [roomTopicHex, ROOM_KEY]
   ])
 
-  assert.equal(peerChatTopicHex(b4a.from(ROOM_KEY, 'hex')), ROOM_KEY)
+  assert.equal(
+    roomTopicHex,
+    createHash('sha256').update(`peersky-chat:topic:${ROOM_KEY}`).digest('hex')
+  )
+  assert.notEqual(roomTopicHex, ROOM_KEY)
   assert.deepEqual(
     getSharedPeerChatRooms([
-      b4a.from(ROOM_KEY, 'hex'),
-      b4a.from(otherRoom, 'hex'),
-      b4a.from(ROOM_KEY, 'hex')
+      roomTopic,
+      otherTopic,
+      roomTopic
     ], discoveryKeys),
     [ROOM_KEY]
   )

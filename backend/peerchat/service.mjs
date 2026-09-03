@@ -12,6 +12,7 @@ import {
   createPeerChatMessageId,
   createPeerChatRoomKey,
   decryptPeerChatMessage,
+  derivePeerChatTopic,
   encryptPeerChatMessage,
   getPeerChatMessageByteLength,
   getSharedPeerChatRooms,
@@ -321,14 +322,14 @@ export class PeerChatService {
     if (pendingJoin) await pendingJoin.catch(() => {})
 
     try {
-      await this.sdk.leave(b4a.from(normalized, 'hex'))
+      await this.sdk.leave(derivePeerChatTopic(normalized))
     } catch {}
 
     this.rooms.delete(normalized)
     if (this.activeRoomKey === normalized) this.activeRoomKey = null
     await this.releaseFeed(normalized)
     this.joinedRooms.delete(normalized)
-    this.discoveryKeys.delete(normalized)
+    this.discoveryKeys.delete(peerChatTopicHex(derivePeerChatTopic(normalized)))
     this.persistNow()
     this.bumpVersion()
     return { ok: true }
@@ -355,7 +356,7 @@ export class PeerChatService {
     for (const roomKey of [...this.feeds.keys()]) await this.releaseFeed(roomKey)
     for (const roomKey of this.joinedRooms) {
       try {
-        await this.sdk.leave(b4a.from(roomKey, 'hex'))
+        await this.sdk.leave(derivePeerChatTopic(roomKey))
       } catch {}
     }
     this.joinedRooms.clear()
@@ -382,7 +383,7 @@ export class PeerChatService {
 
   async openRoomNetwork (roomKey) {
     if (!this.joinedRooms.has(roomKey)) {
-      const topic = b4a.from(roomKey, 'hex')
+      const topic = derivePeerChatTopic(roomKey)
       const discoveryKey = peerChatTopicHex(topic)
       this.discoveryKeys.set(discoveryKey, roomKey)
 
