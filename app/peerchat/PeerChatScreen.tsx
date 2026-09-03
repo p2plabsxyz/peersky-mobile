@@ -42,6 +42,7 @@ import {
   RPC_PEERCHAT_ROOM_CREATE,
   RPC_PEERCHAT_ROOM_JOIN,
   RPC_PEERCHAT_ROOM_LEAVE,
+  RPC_PEERCHAT_ROOM_MUTE,
   RPC_PEERCHAT_ROOM_PIN,
   RPC_PEERCHAT_ROOMS,
   RPC_PEERCHAT_REACT,
@@ -86,6 +87,7 @@ type PeerChatRoom = {
   name: string
   isHost: boolean
   isPinned: boolean
+  isMuted: boolean
   createdAt: number
   lastMessage: PeerChatLastMessage | null
   peerCount: number
@@ -546,22 +548,46 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
           }
         },
         {
-          text: room.isPinned ? 'Unpin' : 'Pin',
-          onPress: () => void runAction(async () => {
-            const response = await callRpc(RPC_PEERCHAT_ROOM_PIN, {
-              roomKey: room.roomKey,
-              pinned: !room.isPinned
-            })
-            if (!response.ok || !response.rooms) {
-              throw new Error(response.error || 'Unable to update the pinned chat.')
-            }
-            if (!mountedRef.current) return
-            setRooms(response.rooms)
-            onStatus(room.isPinned ? 'PeerChat room unpinned' : 'PeerChat room pinned')
-          })
+          text: 'Options',
+          onPress: () => showRoomPreferences(room)
         }
       ]
     )
+  }
+
+  function showRoomPreferences (room: PeerChatRoom) {
+    Alert.alert(
+      'Chat options',
+      'These preferences apply on this device.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: room.isMuted ? 'Unmute' : 'Mute',
+          onPress: () => void updateRoomPreference(room, 'muted')
+        },
+        {
+          text: room.isPinned ? 'Unpin' : 'Pin',
+          onPress: () => void updateRoomPreference(room, 'pinned')
+        }
+      ]
+    )
+  }
+
+  async function updateRoomPreference (room: PeerChatRoom, preference: 'muted' | 'pinned') {
+    await runAction(async () => {
+      const isMuted = preference === 'muted'
+      const response = await callRpc(isMuted ? RPC_PEERCHAT_ROOM_MUTE : RPC_PEERCHAT_ROOM_PIN, {
+        roomKey: room.roomKey,
+        [preference]: isMuted ? !room.isMuted : !room.isPinned
+      })
+      if (!response.ok || !response.rooms) {
+        throw new Error(response.error || 'Unable to update the chat preference.')
+      }
+      if (!mountedRef.current) return
+      setRooms(response.rooms)
+      const enabled = isMuted ? !room.isMuted : !room.isPinned
+      onStatus(`PeerChat room ${enabled ? '' : 'un'}${preference}`)
+    })
   }
 
   function sendMessage () {
@@ -1113,7 +1139,7 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
       )}
       renderItem={({ item }) => (
         <Pressable
-          accessibilityHint='Long press to pin or unpin this chat'
+          accessibilityHint='Long press for chat options'
           accessibilityRole='button'
           onLongPress={() => showRoomActions(item)}
           onPress={() => openRoom(item)}
@@ -1131,6 +1157,9 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
               <Text numberOfLines={1} style={[styles.roomTitle, { color: colors.text }]}>{item.name}</Text>
               {item.isPinned && (
                 <Text style={[styles.pinnedLabel, { color: colors.accent, backgroundColor: colors.accentSoft }]}>PINNED</Text>
+              )}
+              {item.isMuted && (
+                <Text style={[styles.pinnedLabel, { color: colors.muted, backgroundColor: colors.input }]}>MUTED</Text>
               )}
             </View>
             <Text numberOfLines={1} style={[styles.roomPreview, { color: colors.muted }]}>

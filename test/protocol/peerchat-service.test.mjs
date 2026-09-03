@@ -291,6 +291,26 @@ test('PeerChat persists pinned rooms and sorts them before newer chats', async (
   await restarted.close()
 })
 
+test('PeerChat persists local room mute preferences', async (t) => {
+  const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-mute-'))
+  t.after(() => rm(storagePath, { recursive: true, force: true }))
+  const feeds = new Map()
+  const service = await new PeerChatService({ sdk: createFakeSdk(feeds), storagePath }).start()
+  const room = await service.createRoom({ name: 'Quiet Room', username: 'Alice' })
+
+  const result = service.setRoomMuted({ roomKey: room.roomKey, muted: true })
+  assert.equal(result.room.isMuted, true)
+  assert.throws(
+    () => service.setRoomMuted({ roomKey: room.roomKey, muted: 'yes' }),
+    /Invalid PeerChat mute state/
+  )
+  await service.close()
+
+  const restarted = await new PeerChatService({ sdk: createFakeSdk(cloneFeeds(feeds)), storagePath }).start()
+  assert.equal(restarted.listRooms()[0].isMuted, true)
+  await restarted.close()
+})
+
 test('PeerChat serializes concurrent room joins and removes feed listeners', async (t) => {
   const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-joins-'))
   t.after(() => rm(storagePath, { recursive: true, force: true }))

@@ -203,6 +203,18 @@ export class PeerChatService {
     return { room: this.publicRoom(room), rooms: this.listRooms(), version: this.version }
   }
 
+  setRoomMuted ({ roomKey, muted } = {}) {
+    const normalized = normalizePeerChatRoomKey(roomKey)
+    const room = this.rooms.get(normalized)
+    if (!room) throw new Error('PeerChat room not found.')
+    if (typeof muted !== 'boolean') throw new Error('Invalid PeerChat mute state.')
+
+    room.isMuted = muted
+    this.schedulePersist()
+    this.bumpVersion()
+    return { room: this.publicRoom(room), rooms: this.listRooms(), version: this.version }
+  }
+
   setActiveRoom ({ roomKey } = {}) {
     const normalized = roomKey == null || roomKey === '' ? null : normalizePeerChatRoomKey(roomKey)
     if (roomKey != null && roomKey !== '' && !normalized) throw new Error('Invalid PeerChat room key.')
@@ -930,6 +942,7 @@ export class PeerChatService {
       name: room.name,
       isHost: room.isHost === true,
       isPinned: room.isPinned === true,
+      isMuted: room.isMuted === true,
       createdAt: room.createdAt || 0,
       lastMessage: room.lastMessage || null,
       unreadCount: room.unreadCount || 0,
@@ -1002,6 +1015,7 @@ export class PeerChatService {
           name: normalizePeerChatRoomName(value?.name, `${roomKey.slice(0, 8)}...`),
           isHost: value?.isHost === true,
           isPinned: value?.isPinned === true,
+          isMuted: value?.isMuted === true,
           createdAt: Number.isFinite(value?.createdAt) ? value.createdAt : Date.now(),
           joinedAt: Number.isFinite(value?.joinedAt) ? value.joinedAt : Date.now(),
           createdBy: typeof value?.createdBy === 'string' ? value.createdBy.slice(0, 200) : '',

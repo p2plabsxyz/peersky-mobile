@@ -38,3 +38,4 @@ export const RPC_PEERCHAT_ROOM_LEAVE = 47
 export const RPC_PEERCHAT_REACT = 48
 export const RPC_PEERCHAT_SET_ACTIVE = 49
 export const RPC_PEERCHAT_ROOM_PIN = 50
+export const RPC_PEERCHAT_ROOM_MUTE = 51
