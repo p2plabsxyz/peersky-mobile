@@ -11,6 +11,7 @@ import {
   MAX_PEERCHAT_MESSAGE_BYTES,
   normalizePeerChatMessage,
   normalizePeerChatProfileName,
+  normalizePeerChatReply,
   normalizePeerChatRoomKey,
   normalizePeerChatRoomName,
   normalizePeerChatTimestamp,
@@ -31,6 +32,22 @@ test('PeerChat uses the desktop transport protocol and validates public inputs',
   assert.equal(normalizePeerChatMessage('😀'.repeat(MAX_PEERCHAT_MESSAGE_BYTES / 2)), '')
   assert.equal(normalizePeerChatRoomName('Safe\u0000\u202E Room'), 'Safe Room')
   assert.equal(normalizePeerChatTimestamp(Number.MAX_VALUE, 1000), 1000)
+})
+
+test('PeerChat bounds and sanitizes desktop-compatible reply metadata', () => {
+  assert.deepEqual(normalizePeerChatReply({
+    id: ` ${'a'.repeat(70)} `,
+    sender: 'desktop\u202E-peer',
+    sn: 'Alice Desktop',
+    text: ` ${'😀'.repeat(205)} `
+  }), {
+    id: 'a'.repeat(64),
+    sender: 'desktop-peer',
+    sn: 'Alice Desktop',
+    text: '😀'.repeat(200)
+  })
+  assert.equal(normalizePeerChatReply({ id: '', sender: 'desktop', text: 'hello' }), null)
+  assert.equal(normalizePeerChatReply('not-an-object'), null)
 })
 
 test('PeerChat AES-GCM payloads use the desktop room-key derivation', () => {

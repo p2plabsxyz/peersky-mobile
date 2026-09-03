@@ -9,6 +9,7 @@ import {
   MAX_PEERCHAT_ROOM_STORAGE_BYTES,
   PeerChatService
 } from '../../backend/peerchat/service.mjs'
+import { encryptPeerChatMessage } from '../../backend/peerchat/protocol.mjs'
 
 const ROOM_KEY = 'ab'.repeat(32)
 
@@ -20,7 +21,13 @@ test('PeerChat persists basic rooms and returns version-aware message snapshots'
   const firstSdk = createFakeSdk(feeds)
   const service = await new PeerChatService({ sdk: firstSdk, storagePath }).start()
   const room = await service.createRoom({ name: 'Mobile Room', username: 'Alice Mobile' })
-  const sent = await service.sendMessage({ roomKey: room.roomKey, message: 'Hello desktop' })
+  const replyTo = {
+    id: 'desktop-message',
+    sender: 'desktop-peer',
+    sn: 'Desktop',
+    text: 'Original message'
+  }
+  const sent = await service.sendMessage({ roomKey: room.roomKey, message: 'Hello desktop', replyTo })
   const snapshot = await service.getSnapshot({ roomKey: room.roomKey, version: -1 })
 
   assert.equal(firstSdk.joined.length, 1)
@@ -30,6 +37,7 @@ test('PeerChat persists basic rooms and returns version-aware message snapshots'
   assert.equal(snapshot.messages[0].id, sent.id)
   assert.equal(snapshot.messages[0].message, 'Hello desktop')
   assert.equal(snapshot.messages[0].self, true)
+  assert.deepEqual(snapshot.messages[0].replyTo, replyTo)
 
   const unchanged = await service.getSnapshot({
     roomKey: room.roomKey,
@@ -50,6 +58,7 @@ test('PeerChat persists basic rooms and returns version-aware message snapshots'
   assert.equal(secondSdk.joined.length, 1)
   assert.equal(restoredRooms[0].name, 'Mobile Room')
   assert.equal(restored.messages[0].message, 'Hello desktop')
+  assert.deepEqual(restored.messages[0].replyTo, replyTo)
   await restarted.close()
 })
 
@@ -73,6 +82,44 @@ test('PeerChat rejects invalid identities, rooms, and empty messages', async (t)
     /UTF-8 bytes/
   )
   assert.equal(service.feeds.get(room.roomKey).length, 0)
+  await service.close()
+})
+
+test('PeerChat preserves sanitized reply metadata from desktop peers', async (t) => {
+  const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-reply-'))
+  t.after(() => rm(storagePath, { recursive: true, force: true }))
+  const service = await new PeerChatService({ sdk: createFakeSdk(), storagePath }).start()
+  await service.joinRoom({ roomKey: ROOM_KEY, username: 'Alice' })
+  const peer = {
+    id: 'desktop-peer',
+    username: 'Desktop',
+    rooms: [ROOM_KEY],
+    initialSyncCount: 0,
+    liveRate: { count: 0, resetsAt: Date.now() + 60_000 }
+  }
+
+  await service.handlePeerMessage(peer, {
+    id: 'desktop-message',
+    roomKey: ROOM_KEY,
+    sender: 'ignored-live-sender',
+    sn: 'Desktop',
+    ...encryptPeerChatMessage('Reply from desktop', ROOM_KEY),
+    replyTo: {
+      id: 'mobile-message',
+      sender: 'mobile-peer\u202E',
+      sn: 'Alice',
+      text: 'Original mobile message'
+    },
+    ts: Date.now()
+  })
+
+  const snapshot = await service.getSnapshot({ roomKey: ROOM_KEY, version: -1 })
+  assert.deepEqual(snapshot.messages[0].replyTo, {
+    id: 'mobile-message',
+    sender: 'mobile-peer',
+    sn: 'Alice',
+    text: 'Original mobile message'
+  })
   await service.close()
 })
 

@@ -11,6 +11,9 @@ export const MAX_PEERCHAT_MESSAGE_BYTES = 64 * 1024
 export const MAX_PEERCHAT_FRAME_BYTES = 256 * 1024
 export const MAX_PEERCHAT_PROFILE_NAME_LENGTH = 50
 export const MAX_PEERCHAT_ROOM_NAME_LENGTH = 80
+export const MAX_PEERCHAT_REPLY_ID_LENGTH = 64
+export const MAX_PEERCHAT_REPLY_SENDER_LENGTH = 200
+export const MAX_PEERCHAT_REPLY_TEXT_LENGTH = 200
 
 const ROOM_KEY_PATTERN = /^[a-f0-9]{64}$/i
 const PROFILE_NAME_PATTERN = /^[A-Za-z0-9]+(?: [A-Za-z0-9]+)*$/
@@ -48,6 +51,18 @@ export function normalizePeerChatMessage (value) {
   if (typeof value !== 'string') return ''
   const message = value.trim()
   return getPeerChatMessageByteLength(message) <= MAX_PEERCHAT_MESSAGE_BYTES ? message : ''
+}
+
+export function normalizePeerChatReply (value) {
+  if (!value || typeof value !== 'object') return null
+
+  const id = normalizeReplyField(value.id, MAX_PEERCHAT_REPLY_ID_LENGTH)
+  const sender = normalizeReplyField(value.sender, MAX_PEERCHAT_REPLY_SENDER_LENGTH)
+  const sn = normalizeReplyField(value.sn, MAX_PEERCHAT_PROFILE_NAME_LENGTH)
+  const text = normalizeReplyField(value.text, MAX_PEERCHAT_REPLY_TEXT_LENGTH)
+  if (!id || !sender || !text) return null
+
+  return { id, sender, sn: sn || sender, text }
 }
 
 export function getPeerChatMessageByteLength (value) {
@@ -171,4 +186,9 @@ function stripMetadataControls (value) {
       (codePoint >= 0x2066 && codePoint <= 0x2069)
     )
   }).join('')
+}
+
+function normalizeReplyField (value, maxLength) {
+  if (typeof value !== 'string') return ''
+  return Array.from(stripMetadataControls(value).trim()).slice(0, maxLength).join('')
 }

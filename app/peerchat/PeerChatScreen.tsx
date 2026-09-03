@@ -48,6 +48,14 @@ type PeerChatMessage = {
   message: string
   timestamp: number
   self: boolean
+  replyTo?: PeerChatReply | null
+}
+
+type PeerChatReply = {
+  id: string
+  sender: string
+  sn: string
+  text: string
 }
 
 type PeerChatLastMessage = {
@@ -138,6 +146,7 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
   const [activeRoom, setActiveRoom] = useState<PeerChatRoom | null>(null)
   const [messages, setMessages] = useState<PeerChatMessage[]>([])
   const [composer, setComposer] = useState('')
+  const [replyTarget, setReplyTarget] = useState<PeerChatReply | null>(null)
   const [landingAction, setLandingAction] = useState<LandingAction>(null)
   const [restoredUiState, setRestoredUiState] = useState<PeerChatUiState | null>(null)
 
@@ -420,6 +429,7 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
     composerRoomKeyRef.current = room.roomKey
     versionRef.current = -1
     setMessages([])
+    setReplyTarget(null)
     setActiveRoom(room)
     setError(null)
     onStatus(`Opened PeerChat room ${room.name}`)
@@ -465,15 +475,18 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
   function sendMessage () {
     const message = composer.trim()
     if (!activeRoom || !message || isBusy) return
+    const selectedReply = replyTarget
 
     void runAction(async () => {
       const response = await callRpc(RPC_PEERCHAT_SEND, {
         roomKey: activeRoom.roomKey,
-        message
+        message,
+        replyTo: selectedReply
       })
       if (!response.ok) throw new Error(response.error || 'Unable to send PeerChat message.')
       if (!mountedRef.current) return
       setComposer('')
+      setReplyTarget(null)
       if (response.sent) {
         setMessages((current) => current.some((item) => item.id === response.sent?.id)
           ? current
@@ -508,6 +521,7 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
             }
             setActiveRoom(null)
             setMessages([])
+            setReplyTarget(null)
             onStatus('PeerChat room removed')
           })
         }
@@ -528,6 +542,25 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
       setError(message)
       onStatus(message)
     }
+  }
+
+  function selectReply (message: PeerChatMessage) {
+    Alert.alert(
+      `Reply to ${message.senderName}`,
+      message.message.slice(0, 200),
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Reply',
+          onPress: () => setReplyTarget({
+            id: message.id,
+            sender: message.sender,
+            sn: message.senderName,
+            text: message.message
+          })
+        }
+      ]
+    )
   }
 
   function continueFromIntro () {
@@ -585,7 +618,14 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
         style={[styles.screen, { backgroundColor: colors.background }]}
       >
         <View style={[styles.chatHeader, { borderBottomColor: colors.border }]}> 
-          <Pressable accessibilityRole='button' onPress={() => setActiveRoom(null)} style={styles.headerAction}>
+          <Pressable
+            accessibilityRole='button'
+            onPress={() => {
+              setReplyTarget(null)
+              setActiveRoom(null)
+            }}
+            style={styles.headerAction}
+          >
             <Text style={[styles.headerActionText, { color: colors.accent }]}>Back</Text>
           </Pressable>
           <View style={styles.chatHeaderCopy}>
@@ -614,18 +654,33 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
           onContentSizeChange={() => messageListRef.current?.scrollToEnd({ animated: false })}
           renderItem={({ item }) => (
             <View style={[styles.messageRow, item.self ? styles.messageRowSelf : null]}>
-              <View style={[
-                styles.messageBubble,
-                { backgroundColor: item.self ? colors.selfBubble : colors.peerBubble }
-              ]}>
+              <Pressable
+                accessibilityHint='Long press to reply'
+                accessibilityRole='button'
+                onLongPress={() => selectReply(item)}
+                style={[
+                  styles.messageBubble,
+                  { backgroundColor: item.self ? colors.selfBubble : colors.peerBubble }
+                ]}
+              >
                 {!item.self && (
                   <Text style={[styles.senderName, { color: colors.accent }]}>{item.senderName}</Text>
+                )}
+                {item.replyTo && (
+                  <View style={[styles.quotedReply, { borderLeftColor: colors.accent, backgroundColor: colors.input }]}>
+                    <Text numberOfLines={1} style={[styles.quotedReplySender, { color: colors.accent }]}>
+                      {item.replyTo.sn || item.replyTo.sender}
+                    </Text>
+                    <Text numberOfLines={2} style={[styles.quotedReplyText, { color: colors.muted }]}>
+                      {item.replyTo.text}
+                    </Text>
+                  </View>
                 )}
                 <Text selectable style={[styles.messageText, { color: colors.text }]}>{item.message}</Text>
                 <Text style={[styles.messageTime, { color: colors.muted }]}>
                   {formatMessageTime(item.timestamp)}
                 </Text>
-              </View>
+              </Pressable>
             </View>
           )}
           ListEmptyComponent={(
@@ -638,6 +693,27 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
 
         {error && <Text style={[styles.inlineError, { color: colors.danger }]}>{error}</Text>}
 
+        {replyTarget && (
+          <View style={[styles.replyComposer, { borderTopColor: colors.border, backgroundColor: colors.input }]}>
+            <View style={styles.replyComposerCopy}>
+              <Text numberOfLines={1} style={[styles.quotedReplySender, { color: colors.accent }]}>
+                Replying to {replyTarget.sn || replyTarget.sender}
+              </Text>
+              <Text numberOfLines={1} style={[styles.quotedReplyText, { color: colors.muted }]}>
+                {replyTarget.text}
+              </Text>
+            </View>
+            <Pressable
+              accessibilityLabel='Cancel reply'
+              accessibilityRole='button'
+              hitSlop={8}
+              onPress={() => setReplyTarget(null)}
+              style={styles.cancelReply}
+            >
+              <Text style={[styles.cancelReplyText, { color: colors.muted }]}>x</Text>
+            </Pressable>
+          </View>
+        )}
         <View style={[styles.composer, { borderTopColor: colors.border }]}> 
           <TextInput
             value={composer}
@@ -958,10 +1034,17 @@ const styles = StyleSheet.create({
   messageRow: { alignItems: 'flex-start', marginBottom: 9 },
   messageRowSelf: { alignItems: 'flex-end' },
   messageBubble: { borderRadius: 15, maxWidth: '84%', minWidth: 84, paddingHorizontal: 12, paddingVertical: 8 },
+  quotedReply: { borderLeftWidth: 3, borderRadius: 7, marginBottom: 6, paddingHorizontal: 8, paddingVertical: 5 },
+  quotedReplySender: { fontSize: 11, fontWeight: '800' },
+  quotedReplyText: { fontSize: 11, lineHeight: 15 },
   senderName: { fontSize: 11, fontWeight: '800', marginBottom: 3 },
   messageText: { fontSize: 15, lineHeight: 20 },
   messageTime: { alignSelf: 'flex-end', fontSize: 10, marginTop: 4 },
   inlineError: { fontSize: 12, paddingHorizontal: 14, paddingVertical: 5, textAlign: 'center' },
+  replyComposer: { alignItems: 'center', borderTopWidth: 1, flexDirection: 'row', gap: 8, paddingHorizontal: 14, paddingVertical: 7 },
+  replyComposerCopy: { flex: 1 },
+  cancelReply: { alignItems: 'center', height: 28, justifyContent: 'center', width: 28 },
+  cancelReplyText: { fontSize: 18, fontWeight: '700' },
   composer: { alignItems: 'flex-end', borderTopWidth: 1, flexDirection: 'row', gap: 8, padding: 10 },
   composerInput: { borderRadius: 18, borderWidth: 1, flex: 1, fontSize: 15, maxHeight: 112, minHeight: 42, paddingHorizontal: 13, paddingVertical: 9 },
   sendButton: { alignItems: 'center', borderRadius: 20, height: 42, justifyContent: 'center', paddingHorizontal: 16 },

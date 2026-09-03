@@ -19,6 +19,7 @@ import {
   MAX_PEERCHAT_MESSAGE_BYTES,
   normalizePeerChatMessage,
   normalizePeerChatProfileName,
+  normalizePeerChatReply,
   normalizePeerChatRoomKey,
   normalizePeerChatRoomName,
   normalizePeerChatTimestamp,
@@ -195,7 +196,7 @@ export class PeerChatService {
     }
   }
 
-  async sendMessage ({ roomKey, message }) {
+  async sendMessage ({ roomKey, message, replyTo }) {
     const normalizedRoomKey = normalizePeerChatRoomKey(roomKey)
     const room = this.rooms.get(normalizedRoomKey)
     if (!room) throw new Error('PeerChat room not found.')
@@ -211,11 +212,13 @@ export class PeerChatService {
     }
 
     const encrypted = encryptPeerChatMessage(normalizedMessage, normalizedRoomKey)
+    const normalizedReply = normalizePeerChatReply(replyTo)
     const entry = {
       id: createPeerChatMessageId(),
       sender: this.localId,
       sn: this.profile.username,
       ...encrypted,
+      ...(normalizedReply && { replyTo: normalizedReply }),
       ts: Date.now()
     }
 
@@ -544,6 +547,7 @@ export class PeerChatService {
     }
     if (!plaintext) return
 
+    const normalizedReply = normalizePeerChatReply(message.replyTo)
     const entry = {
       id: message.id,
       sender: isSync && typeof message.sender === 'string'
@@ -553,6 +557,7 @@ export class PeerChatService {
       ct: message.ct,
       iv: message.iv,
       tag: message.tag,
+      ...(normalizedReply && { replyTo: normalizedReply }),
       ts: normalizePeerChatTimestamp(message.ts)
     }
     await this.appendEntry(roomKey, entry)
@@ -746,6 +751,7 @@ export class PeerChatService {
       sender,
       senderName: normalizePeerChatProfileName(entry.sn) || normalizePeerChatRoomName(sender, 'Peer'),
       message: decryptPeerChatMessage(entry, roomKey),
+      replyTo: normalizePeerChatReply(entry.replyTo),
       timestamp: normalizePeerChatTimestamp(entry.ts),
       self: sender.toLowerCase() === this.localId
     }
