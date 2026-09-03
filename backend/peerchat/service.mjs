@@ -42,6 +42,7 @@ const MAX_LIVE_MESSAGES_PER_WINDOW = 120
 const MAX_CONTROL_MESSAGES_PER_WINDOW = 60
 const MAX_INITIAL_SYNC_MESSAGES_PER_CONNECTION = 500
 const MAX_PENDING_MESSAGES_PER_CONNECTION = 256
+const MAX_RETURNED_ROOM_MEMBERS = 100
 const PERSIST_DELAY_MS = 500
 const PING_INTERVAL_MS = 25_000
 
@@ -514,7 +515,10 @@ export class PeerChatService {
     if (message.type === 'profile') {
       if (!this.consumeControlRate(peer)) return
       const name = normalizePeerChatProfileName(message.username)
-      if (name) peer.username = name
+      if (name && name !== peer.username) {
+        peer.username = name
+        this.bumpVersion()
+      }
       return
     }
 
@@ -916,6 +920,7 @@ export class PeerChatService {
       lastMessage: room.lastMessage || null,
       unreadCount: room.unreadCount || 0,
       unreadMentions: room.unreadMentions || 0,
+      members: this.listRoomMembers(room.roomKey),
       peerCount,
       connectionState: this.getRoomConnectionState(room.roomKey, peerCount)
     }
@@ -937,6 +942,21 @@ export class PeerChatService {
       if (peer.rooms.includes(roomKey)) peerIds.add(peer.id)
     }
     return peerIds.size
+  }
+
+  listRoomMembers (roomKey) {
+    const members = new Map()
+    if (this.profile.username) {
+      members.set(this.localId, { id: this.localId, username: this.profile.username, self: true })
+    }
+    for (const peer of this.peers.values()) {
+      if (!peer.rooms.includes(roomKey) || members.has(peer.id)) continue
+      const username = normalizePeerChatProfileName(peer.username)
+      if (!username) continue
+      members.set(peer.id, { id: peer.id, username, self: false })
+      if (members.size >= MAX_RETURNED_ROOM_MEMBERS) break
+    }
+    return [...members.values()]
   }
 
   trackMessageId (id) {

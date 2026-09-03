@@ -243,6 +243,30 @@ test('PeerChat persists bounded unread and mention counts and clears them for ac
   await restarted.close()
 })
 
+test('PeerChat exposes bounded participant names from desktop profile frames', async (t) => {
+  const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-members-'))
+  t.after(() => rm(storagePath, { recursive: true, force: true }))
+  const service = await new PeerChatService({ sdk: createFakeSdk(), storagePath }).start()
+  const room = await service.createRoom({ name: 'Members', username: 'Alice Mobile' })
+  const peer = {
+    id: 'desktop-peer',
+    username: '',
+    rooms: [room.roomKey],
+    controlRate: { count: 0, resetsAt: Date.now() + 60_000 }
+  }
+  service.peers.set({}, peer)
+
+  await service.handlePeerMessage(peer, { type: 'profile', username: 'Desktop User' })
+  assert.deepEqual(service.listRooms()[0].members, [
+    { id: service.localId, username: 'Alice Mobile', self: true },
+    { id: 'desktop-peer', username: 'Desktop User', self: false }
+  ])
+
+  await service.handlePeerMessage(peer, { type: 'profile', username: '<invalid>' })
+  assert.equal(service.listRooms()[0].members[1].username, 'Desktop User')
+  await service.close()
+})
+
 test('PeerChat serializes concurrent room joins and removes feed listeners', async (t) => {
   const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-joins-'))
   t.after(() => rm(storagePath, { recursive: true, force: true }))

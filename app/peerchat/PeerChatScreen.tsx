@@ -83,7 +83,14 @@ type PeerChatRoom = {
   peerCount: number
   unreadCount: number
   unreadMentions: number
+  members: PeerChatMember[]
   connectionState: 'connecting' | 'syncing' | 'connected' | 'waiting'
+}
+
+type PeerChatMember = {
+  id: string
+  username: string
+  self: boolean
 }
 
 type PeerChatProfile = {
@@ -162,6 +169,12 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
   const [reactionTargetId, setReactionTargetId] = useState<string | null>(null)
   const [landingAction, setLandingAction] = useState<LandingAction>(null)
   const [restoredUiState, setRestoredUiState] = useState<PeerChatUiState | null>(null)
+  const mentionCandidates = getMentionCandidates(
+    composer,
+    activeRoom?.members || [],
+    messages,
+    profile?.id || ''
+  )
 
   useEffect(() => {
     callRpcRef.current = onCallRpc
@@ -826,6 +839,25 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
             </Pressable>
           </View>
         )}
+        {mentionCandidates.length > 0 && (
+          <View style={[styles.mentionSuggestions, { borderTopColor: colors.border, backgroundColor: colors.surface }]}>
+            <ScrollView horizontal keyboardShouldPersistTaps='handled' showsHorizontalScrollIndicator={false}>
+              <View style={styles.mentionSuggestionRow}>
+                {mentionCandidates.map((member) => (
+                  <Pressable
+                    accessibilityLabel={`Mention ${member.username}`}
+                    accessibilityRole='button'
+                    key={member.id}
+                    onPress={() => setComposer((current) => insertMention(current, member.username))}
+                    style={[styles.mentionSuggestion, { backgroundColor: colors.accentSoft }]}
+                  >
+                    <Text style={[styles.mentionSuggestionText, { color: colors.accent }]}>@{member.username}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            </ScrollView>
+          </View>
+        )}
         <View style={[styles.composer, { borderTopColor: colors.border }]}> 
           <TextInput
             value={composer}
@@ -1047,6 +1079,38 @@ function renderMessageText (message: string, username: string, mentionColor: str
   return parts.length > 0 ? parts : message
 }
 
+function getMentionCandidates (
+  composer: string,
+  members: PeerChatMember[],
+  messages: PeerChatMessage[],
+  localId: string
+) {
+  const atIndex = composer.lastIndexOf('@')
+  if (atIndex < 0 || (atIndex > 0 && !/\s/.test(composer[atIndex - 1]))) return []
+  const query = composer.slice(atIndex + 1)
+  if (query.includes('\n') || Array.from(query).length > 50) return []
+
+  const candidates = new Map<string, PeerChatMember>()
+  for (const member of members) {
+    if (!member.self && member.id !== localId) candidates.set(member.id, member)
+  }
+  for (const message of messages) {
+    if (message.self || message.sender === localId || candidates.has(message.sender)) continue
+    candidates.set(message.sender, { id: message.sender, username: message.senderName, self: false })
+  }
+
+  const normalizedQuery = query.toLocaleLowerCase()
+  return [...candidates.values()]
+    .filter((member) => member.username.toLocaleLowerCase().includes(normalizedQuery))
+    .slice(0, 5)
+}
+
+function insertMention (composer: string, username: string) {
+  const atIndex = composer.lastIndexOf('@')
+  if (atIndex < 0) return composer
+  return `${composer.slice(0, atIndex)}@${username} `
+}
+
 function formatMessageTime (timestamp: number) {
   if (!Number.isFinite(timestamp)) return ''
   return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -1192,6 +1256,10 @@ const styles = StyleSheet.create({
   reactionPickerEmoji: { fontSize: 22 },
   replyComposer: { alignItems: 'center', borderTopWidth: 1, flexDirection: 'row', gap: 8, paddingHorizontal: 14, paddingVertical: 7 },
   replyComposerCopy: { flex: 1 },
+  mentionSuggestions: { borderTopWidth: 1, paddingVertical: 6 },
+  mentionSuggestionRow: { flexDirection: 'row', gap: 7, paddingHorizontal: 10 },
+  mentionSuggestion: { borderRadius: 14, paddingHorizontal: 10, paddingVertical: 6 },
+  mentionSuggestionText: { fontSize: 12, fontWeight: '800' },
   cancelReply: { alignItems: 'center', height: 28, justifyContent: 'center', width: 28 },
   cancelReplyText: { fontSize: 18, fontWeight: '700' },
   composer: { alignItems: 'flex-end', borderTopWidth: 1, flexDirection: 'row', gap: 8, padding: 10 },
