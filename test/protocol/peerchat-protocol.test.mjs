@@ -11,6 +11,7 @@ import {
   MAX_PEERCHAT_MESSAGE_BYTES,
   normalizePeerChatMessage,
   normalizePeerChatProfileName,
+  normalizePeerChatReaction,
   normalizePeerChatReply,
   normalizePeerChatRoomKey,
   normalizePeerChatRoomName,
@@ -48,6 +49,38 @@ test('PeerChat bounds and sanitizes desktop-compatible reply metadata', () => {
   })
   assert.equal(normalizePeerChatReply({ id: '', sender: 'desktop', text: 'hello' }), null)
   assert.equal(normalizePeerChatReply('not-an-object'), null)
+})
+
+test('PeerChat bounds desktop-compatible reaction events and preserves removals', () => {
+  assert.deepEqual(normalizePeerChatReaction({
+    id: 'reaction-id',
+    msgId: ` ${'m'.repeat(70)} `,
+    emoji: '🔥'.repeat(12),
+    sender: 'desktop\u202E-peer',
+    sn: 'Desktop',
+    ts: 1000
+  }), {
+    type: 'reaction',
+    id: 'reaction-id',
+    msgId: 'm'.repeat(64),
+    emoji: '🔥'.repeat(10),
+    sender: 'desktop-peer',
+    sn: 'Desktop',
+    ts: 1000
+  })
+  assert.equal(normalizePeerChatReaction({
+    id: 'remove-id',
+    msgId: 'message-id',
+    emoji: '',
+    sender: 'desktop',
+    ts: 1000
+  })?.emoji, '')
+  assert.equal(normalizePeerChatReaction({
+    id: 'bad-id',
+    msgId: '',
+    emoji: '👍',
+    sender: 'desktop'
+  }), null)
 })
 
 test('PeerChat AES-GCM payloads use the desktop room-key derivation', () => {

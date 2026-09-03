@@ -123,6 +123,72 @@ test('PeerChat preserves sanitized reply metadata from desktop peers', async (t)
   await service.close()
 })
 
+test('PeerChat stores, toggles, and history-syncs desktop-compatible reactions', async (t) => {
+  const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-reactions-'))
+  t.after(() => rm(storagePath, { recursive: true, force: true }))
+  const service = await new PeerChatService({ sdk: createFakeSdk(), storagePath }).start()
+  const room = await service.createRoom({ name: 'Reaction Room', username: 'Alice' })
+  const sent = await service.sendMessage({ roomKey: room.roomKey, message: 'React here' })
+
+  await service.reactToMessage({ roomKey: room.roomKey, msgId: sent.id, emoji: '👍' })
+  let snapshot = await service.getSnapshot({ roomKey: room.roomKey, version: -1 })
+  assert.deepEqual(snapshot.messages[0].reactions, [{ emoji: '👍', count: 1, self: true }])
+
+  const frames = []
+  await service.syncHistoryToPeer({
+    connection: { destroyed: false },
+    rooms: [room.roomKey],
+    transport: { send: (frame) => frames.push(JSON.parse(frame)) || true }
+  }, room.roomKey)
+  assert.deepEqual(frames.map((frame) => frame.type), ['sync', 'sync-reaction', 'sync-done'])
+
+  await service.reactToMessage({ roomKey: room.roomKey, msgId: sent.id, emoji: '' })
+  snapshot = await service.getSnapshot({ roomKey: room.roomKey, version: -1 })
+  assert.deepEqual(snapshot.messages[0].reactions, [])
+  await service.close()
+})
+
+test('PeerChat applies only the newest reaction event from a desktop peer', async (t) => {
+  const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-remote-reactions-'))
+  t.after(() => rm(storagePath, { recursive: true, force: true }))
+  const service = await new PeerChatService({ sdk: createFakeSdk(), storagePath }).start()
+  const room = await service.createRoom({ name: 'Remote Reactions', username: 'Alice' })
+  const sent = await service.sendMessage({ roomKey: room.roomKey, message: 'React here' })
+  const now = Date.now()
+  const peer = {
+    id: 'desktop-peer',
+    username: 'Desktop',
+    rooms: [room.roomKey],
+    initialSyncCount: 0,
+    liveRate: { count: 0, resetsAt: now + 60_000 }
+  }
+
+  await service.handlePeerMessage(peer, {
+    type: 'sync-reaction',
+    id: 'new-reaction',
+    roomKey: room.roomKey,
+    msgId: sent.id,
+    emoji: '🔥',
+    sender: 'desktop-peer',
+    sn: 'Desktop',
+    ts: now
+  })
+  await service.handlePeerMessage(peer, {
+    type: 'sync-reaction',
+    id: 'stale-reaction',
+    roomKey: room.roomKey,
+    msgId: sent.id,
+    emoji: '😢',
+    sender: 'desktop-peer',
+    sn: 'Desktop',
+    ts: now - 1000
+  })
+
+  const snapshot = await service.getSnapshot({ roomKey: room.roomKey, version: -1 })
+  assert.deepEqual(snapshot.messages[0].reactions, [{ emoji: '🔥', count: 1, self: false }])
+  await service.close()
+})
+
 test('PeerChat serializes concurrent room joins and removes feed listeners', async (t) => {
   const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-joins-'))
   t.after(() => rm(storagePath, { recursive: true, force: true }))

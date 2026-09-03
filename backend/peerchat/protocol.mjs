@@ -14,6 +14,7 @@ export const MAX_PEERCHAT_ROOM_NAME_LENGTH = 80
 export const MAX_PEERCHAT_REPLY_ID_LENGTH = 64
 export const MAX_PEERCHAT_REPLY_SENDER_LENGTH = 200
 export const MAX_PEERCHAT_REPLY_TEXT_LENGTH = 200
+export const MAX_PEERCHAT_REACTION_EMOJI_LENGTH = 10
 
 const ROOM_KEY_PATTERN = /^[a-f0-9]{64}$/i
 const PROFILE_NAME_PATTERN = /^[A-Za-z0-9]+(?: [A-Za-z0-9]+)*$/
@@ -63,6 +64,27 @@ export function normalizePeerChatReply (value) {
   if (!id || !sender || !text) return null
 
   return { id, sender, sn: sn || sender, text }
+}
+
+export function normalizePeerChatReaction (value) {
+  if (!value || typeof value !== 'object') return null
+
+  const id = normalizeReplyField(value.id, MAX_PEERCHAT_REPLY_ID_LENGTH)
+  const msgId = normalizeReplyField(value.msgId, MAX_PEERCHAT_REPLY_ID_LENGTH)
+  const sender = normalizeReplyField(value.sender, MAX_PEERCHAT_REPLY_SENDER_LENGTH)
+  const sn = normalizeReplyField(value.sn, MAX_PEERCHAT_PROFILE_NAME_LENGTH)
+  const emoji = normalizeReplyField(value.emoji, MAX_PEERCHAT_REACTION_EMOJI_LENGTH)
+  if (!id || !msgId || !sender || typeof value.emoji !== 'string') return null
+
+  return {
+    type: 'reaction',
+    id,
+    msgId,
+    emoji,
+    sender,
+    sn: sn || sender,
+    ts: normalizePeerChatTimestamp(value.ts)
+  }
 }
 
 export function getPeerChatMessageByteLength (value) {

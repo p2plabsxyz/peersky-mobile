@@ -19,6 +19,7 @@ import {
   MAX_PEERCHAT_MESSAGE_BYTES,
   normalizePeerChatMessage,
   normalizePeerChatProfileName,
+  normalizePeerChatReaction,
   normalizePeerChatReply,
   normalizePeerChatRoomKey,
   normalizePeerChatRoomName,
@@ -29,6 +30,7 @@ import { attachPeerChatTransport } from './transport.mjs'
 
 const MAX_ROOMS = 50
 const MAX_RETURNED_MESSAGES = 200
+const MAX_RETURNED_ENTRIES = 1000
 const MAX_SYNC_MESSAGES = 200
 const MAX_SEEN_MESSAGE_IDS = 10_000
 const MAX_FRAME_LENGTH = MAX_PEERCHAT_FRAME_BYTES
@@ -227,6 +229,29 @@ export class PeerChatService {
     this.relayToRoom(normalizedRoomKey, entry)
 
     return this.entryToMessage(entry, normalizedRoomKey)
+  }
+
+  async reactToMessage ({ roomKey, msgId, emoji }) {
+    const normalizedRoomKey = normalizePeerChatRoomKey(roomKey)
+    if (!this.rooms.has(normalizedRoomKey)) throw new Error('PeerChat room not found.')
+    if (!this.profile.username) throw new Error('Set a PeerChat name before reacting.')
+    if (!this.feeds.has(normalizedRoomKey)) await this.joinRoomNetwork(normalizedRoomKey)
+
+    const entry = normalizePeerChatReaction({
+      type: 'reaction',
+      id: createPeerChatMessageId(),
+      msgId,
+      emoji,
+      sender: this.localId,
+      sn: this.profile.username,
+      ts: Date.now()
+    })
+    if (!entry) throw new Error('Invalid PeerChat reaction.')
+
+    this.trackMessageId(entry.id)
+    await this.appendEntry(normalizedRoomKey, entry)
+    this.relayToRoom(normalizedRoomKey, entry)
+    return entry
   }
 
   async leaveRoom ({ roomKey }) {
@@ -516,7 +541,38 @@ export class PeerChatService {
       return
     }
 
-    if (message.type === 'leave' || message.type === 'sync-system' || message.type === 'reaction') return
+    if (message.type === 'leave' || message.type === 'sync-system') return
+
+    const isReaction = message.type === 'reaction' || message.type === 'sync-reaction'
+    if (isReaction) {
+      const isSyncReaction = message.type === 'sync-reaction'
+      if (isSyncReaction) {
+        if (peer.initialSyncCount >= MAX_INITIAL_SYNC_MESSAGES_PER_CONNECTION) return
+        peer.initialSyncCount += 1
+      } else if (!this.consumeLiveRate(peer)) {
+        return
+      }
+
+      const room = this.rooms.get(roomKey)
+      if (
+        isSyncReaction &&
+        !room.isHost &&
+        room.joinedAt &&
+        Number.isFinite(message.ts) &&
+        message.ts < room.joinedAt
+      ) {
+        return
+      }
+
+      const entry = normalizePeerChatReaction({
+        ...message,
+        sender: isSyncReaction ? message.sender : peer.id,
+        sn: message.sn || peer.username || peer.id
+      })
+      if (!entry || !this.trackMessageId(entry.id)) return
+      await this.appendEntry(roomKey, entry)
+      return
+    }
 
     const isSync = message.type === 'sync'
     if (isSync) {
@@ -642,8 +698,9 @@ export class PeerChatService {
       if (peer.connection.destroyed || !peer.rooms.includes(roomKey)) return false
       try {
         const entry = await feed.get(index)
-        if (!entry?.ct) continue
-        const sent = this.sendToPeer(peer, { type: 'sync', roomKey, ...entry })
+        if (!entry?.ct && entry?.type !== 'reaction') continue
+        const type = entry.type === 'reaction' ? 'sync-reaction' : 'sync'
+        const sent = this.sendToPeer(peer, { ...entry, type, roomKey })
         if (!sent && !await waitForConnectionDrain(peer.connection)) return false
       } catch {}
     }
@@ -733,15 +790,55 @@ export class PeerChatService {
     if (!feed) return []
 
     const messages = []
-    const firstIndex = Math.max(0, feed.length - MAX_RETURNED_MESSAGES)
+    const reactions = new Map()
+    const firstIndex = Math.max(0, feed.length - MAX_RETURNED_ENTRIES)
     for (let index = firstIndex; index < feed.length; index += 1) {
       try {
         const entry = await feed.get(index)
+        if (entry?.type === 'reaction') {
+          this.collectReaction(reactions, entry)
+          continue
+        }
         if (!entry?.ct) continue
         messages.push(this.entryToMessage(entry, roomKey))
       } catch {}
     }
-    return messages.sort((left, right) => left.timestamp - right.timestamp)
+    return messages
+      .slice(-MAX_RETURNED_MESSAGES)
+      .map((message) => ({
+        ...message,
+        reactions: this.summarizeReactions(reactions.get(message.id))
+      }))
+      .sort((left, right) => left.timestamp - right.timestamp)
+  }
+
+  collectReaction (reactions, suppliedEntry) {
+    const entry = normalizePeerChatReaction(suppliedEntry)
+    if (!entry) return
+
+    let bySender = reactions.get(entry.msgId)
+    if (!bySender) {
+      bySender = new Map()
+      reactions.set(entry.msgId, bySender)
+    }
+    const previous = bySender.get(entry.sender)
+    if (!previous || previous.ts <= entry.ts) bySender.set(entry.sender, entry)
+  }
+
+  summarizeReactions (bySender) {
+    if (!bySender) return []
+    const grouped = new Map()
+    for (const entry of bySender.values()) {
+      if (!entry.emoji) continue
+      let reaction = grouped.get(entry.emoji)
+      if (!reaction) {
+        reaction = { emoji: entry.emoji, count: 0, self: false }
+        grouped.set(entry.emoji, reaction)
+      }
+      reaction.count += 1
+      if (entry.sender.toLowerCase() === this.localId) reaction.self = true
+    }
+    return [...grouped.values()]
   }
 
   entryToMessage (entry, roomKey) {

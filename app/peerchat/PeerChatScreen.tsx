@@ -37,6 +37,7 @@ import {
   RPC_PEERCHAT_ROOM_JOIN,
   RPC_PEERCHAT_ROOM_LEAVE,
   RPC_PEERCHAT_ROOMS,
+  RPC_PEERCHAT_REACT,
   RPC_PEERCHAT_SEND,
   RPC_PEERCHAT_SNAPSHOT
 } from '../../backend/rpc/commands.mjs'
@@ -49,6 +50,13 @@ type PeerChatMessage = {
   timestamp: number
   self: boolean
   replyTo?: PeerChatReply | null
+  reactions?: PeerChatReactionSummary[]
+}
+
+type PeerChatReactionSummary = {
+  emoji: string
+  count: number
+  self: boolean
 }
 
 type PeerChatReply = {
@@ -99,6 +107,7 @@ type PeerChatScreenProps = {
 
 const POLL_INTERVAL_MS = 1500
 const ROOM_LIST_POLL_INTERVAL_MS = 3000
+const QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🔥']
 const PEERCHAT_ICON = require('../../assets/images/peerchat.png')
 const PEERCHAT_INTRO_FILE = new File(Paths.document, 'peerchat-intro.json')
 
@@ -147,6 +156,7 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
   const [messages, setMessages] = useState<PeerChatMessage[]>([])
   const [composer, setComposer] = useState('')
   const [replyTarget, setReplyTarget] = useState<PeerChatReply | null>(null)
+  const [reactionTargetId, setReactionTargetId] = useState<string | null>(null)
   const [landingAction, setLandingAction] = useState<LandingAction>(null)
   const [restoredUiState, setRestoredUiState] = useState<PeerChatUiState | null>(null)
 
@@ -430,6 +440,7 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
     versionRef.current = -1
     setMessages([])
     setReplyTarget(null)
+    setReactionTargetId(null)
     setActiveRoom(room)
     setError(null)
     onStatus(`Opened PeerChat room ${room.name}`)
@@ -522,6 +533,7 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
             setActiveRoom(null)
             setMessages([])
             setReplyTarget(null)
+            setReactionTargetId(null)
             onStatus('PeerChat room removed')
           })
         }
@@ -544,23 +556,53 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
     }
   }
 
-  function selectReply (message: PeerChatMessage) {
+  function showMessageActions (message: PeerChatMessage) {
     Alert.alert(
-      `Reply to ${message.senderName}`,
-      message.message.slice(0, 200),
+      message.senderName,
+      Array.from(message.message).slice(0, 200).join(''),
       [
         { text: 'Cancel', style: 'cancel' },
         {
+          text: 'React',
+          onPress: () => {
+            setReplyTarget(null)
+            setReactionTargetId(message.id)
+          }
+        },
+        {
           text: 'Reply',
-          onPress: () => setReplyTarget({
-            id: message.id,
-            sender: message.sender,
-            sn: message.senderName,
-            text: message.message
-          })
+          onPress: () => {
+            setReactionTargetId(null)
+            setReplyTarget({
+              id: message.id,
+              sender: message.sender,
+              sn: message.senderName,
+              text: message.message
+            })
+          }
         }
       ]
     )
+  }
+
+  function sendReaction (messageId: string, emoji: string) {
+    if (!activeRoom || isBusy) return
+    const message = messages.find((item) => item.id === messageId)
+    if (!message) return
+    const currentEmoji = message.reactions?.find((reaction) => reaction.self)?.emoji
+
+    void runAction(async () => {
+      const response = await callRpc(RPC_PEERCHAT_REACT, {
+        roomKey: activeRoom.roomKey,
+        msgId: messageId,
+        emoji: currentEmoji === emoji ? '' : emoji
+      })
+      if (!response.ok) throw new Error(response.error || 'Unable to update PeerChat reaction.')
+      if (!mountedRef.current) return
+      setReactionTargetId(null)
+      versionRef.current = -1
+      await refreshRoom(true)
+    })
   }
 
   function continueFromIntro () {
@@ -622,6 +664,7 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
             accessibilityRole='button'
             onPress={() => {
               setReplyTarget(null)
+              setReactionTargetId(null)
               setActiveRoom(null)
             }}
             style={styles.headerAction}
@@ -655,9 +698,9 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
           renderItem={({ item }) => (
             <View style={[styles.messageRow, item.self ? styles.messageRowSelf : null]}>
               <Pressable
-                accessibilityHint='Long press to reply'
+                accessibilityHint='Long press for message actions'
                 accessibilityRole='button'
-                onLongPress={() => selectReply(item)}
+                onLongPress={() => showMessageActions(item)}
                 style={[
                   styles.messageBubble,
                   { backgroundColor: item.self ? colors.selfBubble : colors.peerBubble }
@@ -677,6 +720,29 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
                   </View>
                 )}
                 <Text selectable style={[styles.messageText, { color: colors.text }]}>{item.message}</Text>
+                {item.reactions && item.reactions.length > 0 && (
+                  <View style={styles.reactionRow}>
+                    {item.reactions.map((reaction) => (
+                      <Pressable
+                        accessibilityLabel={`${reaction.emoji}, ${reaction.count} reaction${reaction.count === 1 ? '' : 's'}`}
+                        accessibilityRole='button'
+                        disabled={isBusy}
+                        key={reaction.emoji}
+                        onPress={() => sendReaction(item.id, reaction.emoji)}
+                        style={[
+                          styles.reactionBubble,
+                          {
+                            backgroundColor: reaction.self ? colors.accentSoft : colors.input,
+                            borderColor: reaction.self ? colors.accent : colors.border
+                          },
+                          isBusy ? styles.disabled : null
+                        ]}
+                      >
+                        <Text style={[styles.reactionText, { color: colors.text }]}>{reaction.emoji} {reaction.count}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                )}
                 <Text style={[styles.messageTime, { color: colors.muted }]}>
                   {formatMessageTime(item.timestamp)}
                 </Text>
@@ -693,6 +759,31 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
 
         {error && <Text style={[styles.inlineError, { color: colors.danger }]}>{error}</Text>}
 
+        {reactionTargetId && (
+          <View style={[styles.reactionPicker, { borderTopColor: colors.border, backgroundColor: colors.input }]}>
+            {QUICK_REACTIONS.map((emoji) => (
+              <Pressable
+                accessibilityLabel={`React with ${emoji}`}
+                accessibilityRole='button'
+                disabled={isBusy}
+                key={emoji}
+                onPress={() => sendReaction(reactionTargetId, emoji)}
+                style={[styles.reactionPickerButton, isBusy ? styles.disabled : null]}
+              >
+                <Text style={styles.reactionPickerEmoji}>{emoji}</Text>
+              </Pressable>
+            ))}
+            <Pressable
+              accessibilityLabel='Close reaction picker'
+              accessibilityRole='button'
+              hitSlop={8}
+              onPress={() => setReactionTargetId(null)}
+              style={styles.cancelReply}
+            >
+              <Text style={[styles.cancelReplyText, { color: colors.muted }]}>x</Text>
+            </Pressable>
+          </View>
+        )}
         {replyTarget && (
           <View style={[styles.replyComposer, { borderTopColor: colors.border, backgroundColor: colors.input }]}>
             <View style={styles.replyComposerCopy}>
@@ -1037,10 +1128,16 @@ const styles = StyleSheet.create({
   quotedReply: { borderLeftWidth: 3, borderRadius: 7, marginBottom: 6, paddingHorizontal: 8, paddingVertical: 5 },
   quotedReplySender: { fontSize: 11, fontWeight: '800' },
   quotedReplyText: { fontSize: 11, lineHeight: 15 },
+  reactionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 6 },
+  reactionBubble: { borderRadius: 12, borderWidth: 1, paddingHorizontal: 7, paddingVertical: 2 },
+  reactionText: { fontSize: 12 },
   senderName: { fontSize: 11, fontWeight: '800', marginBottom: 3 },
   messageText: { fontSize: 15, lineHeight: 20 },
   messageTime: { alignSelf: 'flex-end', fontSize: 10, marginTop: 4 },
   inlineError: { fontSize: 12, paddingHorizontal: 14, paddingVertical: 5, textAlign: 'center' },
+  reactionPicker: { alignItems: 'center', borderTopWidth: 1, flexDirection: 'row', justifyContent: 'space-around', paddingHorizontal: 8, paddingVertical: 6 },
+  reactionPickerButton: { alignItems: 'center', borderRadius: 18, height: 36, justifyContent: 'center', width: 36 },
+  reactionPickerEmoji: { fontSize: 22 },
   replyComposer: { alignItems: 'center', borderTopWidth: 1, flexDirection: 'row', gap: 8, paddingHorizontal: 14, paddingVertical: 7 },
   replyComposerCopy: { flex: 1 },
   cancelReply: { alignItems: 'center', height: 28, justifyContent: 'center', width: 28 },
