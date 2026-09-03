@@ -109,7 +109,10 @@ test('PeerChat synchronizes history only once for repeated join frames', async (
   await service.joinRoom({ roomKey: ROOM_KEY, username: 'Alice' })
 
   let syncCount = 0
-  service.syncHistoryToPeer = async () => { syncCount += 1 }
+  service.syncHistoryToPeer = async () => {
+    syncCount += 1
+    return true
+  }
   const peer = {
     connection: { destroyed: false },
     controlRate: { count: 0, resetsAt: Date.now() + 60_000 },
@@ -123,6 +126,41 @@ test('PeerChat synchronizes history only once for repeated join frames', async (
   await service.handlePeerMessage(peer, { type: 'join', roomKey: ROOM_KEY, username: 'Desktop' })
   await service.handlePeerMessage(peer, { type: 'join', roomKey: ROOM_KEY, username: 'Desktop' })
   assert.equal(syncCount, 1)
+  await service.close()
+})
+
+test('PeerChat retries an incomplete history sync and reports room connection state', async (t) => {
+  const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-retry-'))
+  t.after(() => rm(storagePath, { recursive: true, force: true }))
+  const service = await new PeerChatService({ sdk: createFakeSdk(), storagePath }).start()
+  await service.joinRoom({ roomKey: ROOM_KEY, username: 'Alice' })
+
+  let syncCount = 0
+  service.syncHistoryToPeer = async () => {
+    syncCount += 1
+    return syncCount > 1
+  }
+  const peer = {
+    active: true,
+    connection: { destroyed: false },
+    controlRate: { count: 0, resetsAt: Date.now() + 60_000 },
+    id: 'desktop',
+    rooms: [ROOM_KEY],
+    syncedRooms: new Set(),
+    syncingRooms: new Map(),
+    transport: { send: () => true }
+  }
+  service.peers.set(peer.connection, peer)
+
+  assert.equal(service.listRooms()[0].connectionState, 'connected')
+  await service.handlePeerMessage(peer, { type: 'join', roomKey: ROOM_KEY, username: 'Desktop' })
+  assert.equal(peer.syncedRooms.has(ROOM_KEY), false)
+  await service.handlePeerMessage(peer, { type: 'join', roomKey: ROOM_KEY, username: 'Desktop' })
+  assert.equal(syncCount, 2)
+  assert.equal(peer.syncedRooms.has(ROOM_KEY), true)
+
+  service.peers.delete(peer.connection)
+  assert.equal(service.listRooms()[0].connectionState, 'waiting')
   await service.close()
 })
 

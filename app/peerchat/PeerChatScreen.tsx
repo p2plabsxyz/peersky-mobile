@@ -24,6 +24,11 @@ import {
   PEERCHAT_INTRO_POINTS,
   serializePeerChatIntroState
 } from './intro-state.mjs'
+import {
+  parsePeerChatUiState,
+  PEERCHAT_UI_STATE_MAX_BYTES,
+  serializePeerChatUiState
+} from './ui-state.mjs'
 
 import {
   RPC_PEERCHAT_INIT,
@@ -59,6 +64,7 @@ type PeerChatRoom = {
   createdAt: number
   lastMessage: PeerChatLastMessage | null
   peerCount: number
+  connectionState: 'connecting' | 'syncing' | 'connected' | 'waiting'
 }
 
 type PeerChatProfile = {
@@ -90,6 +96,21 @@ const PEERCHAT_INTRO_FILE = new File(Paths.document, 'peerchat-intro.json')
 
 type LandingAction = 'create' | 'join' | null
 
+type PeerChatUiState = {
+  activeRoomKey: string | null
+  draftRoomKey: string | null
+  draft: string
+}
+
+const EMPTY_UI_STATE: PeerChatUiState = {
+  activeRoomKey: null,
+  draftRoomKey: null,
+  draft: ''
+}
+
+const PEERCHAT_UI_STATE_FILE = new File(Paths.document, 'peerchat-ui-state.json')
+const UI_STATE_PERSIST_DELAY_MS = 300
+
 export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenProps) {
   const colors = isDark ? darkColors : lightColors
   const callRpcRef = useRef(onCallRpc)
@@ -100,9 +121,13 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
   const roomListPollInFlightRef = useRef(false)
   const actionInFlightRef = useRef(false)
   const mountedRef = useRef(true)
+  const composerRoomKeyRef = useRef<string | null>(null)
+  const uiStateRef = useRef<PeerChatUiState>(EMPTY_UI_STATE)
+  const uiStateRestoredRef = useRef(false)
   const [isIntroReady, setIsIntroReady] = useState(false)
   const [showIntro, setShowIntro] = useState(false)
   const [isReady, setIsReady] = useState(false)
+  const [isInitialized, setIsInitialized] = useState(false)
   const [isBusy, setIsBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [profile, setProfile] = useState<PeerChatProfile | null>(null)
@@ -114,6 +139,7 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
   const [messages, setMessages] = useState<PeerChatMessage[]>([])
   const [composer, setComposer] = useState('')
   const [landingAction, setLandingAction] = useState<LandingAction>(null)
+  const [restoredUiState, setRestoredUiState] = useState<PeerChatUiState | null>(null)
 
   useEffect(() => {
     callRpcRef.current = onCallRpc
@@ -145,8 +171,30 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
   }, [])
 
   useEffect(() => {
+    let cancelled = false
+
+    async function loadUiState () {
+      let restored = EMPTY_UI_STATE
+      try {
+        if (PEERCHAT_UI_STATE_FILE.exists && PEERCHAT_UI_STATE_FILE.size <= PEERCHAT_UI_STATE_MAX_BYTES) {
+          restored = parsePeerChatUiState(await PEERCHAT_UI_STATE_FILE.text()) as PeerChatUiState
+        }
+      } catch (cause) {
+        console.warn('Unable to load PeerChat UI state:', cause)
+      }
+      if (!cancelled) setRestoredUiState(restored)
+    }
+
+    void loadUiState()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
     mountedRef.current = true
     return () => {
+      if (uiStateRestoredRef.current) persistPeerChatUiState(uiStateRef.current)
       mountedRef.current = false
       activeRoomRef.current = null
     }
@@ -159,6 +207,28 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
   useEffect(() => {
     activeRoomRef.current = activeRoom
   }, [activeRoom])
+
+  useEffect(() => {
+    if (!uiStateRestoredRef.current) return
+
+    const nextState = {
+      activeRoomKey: activeRoom?.roomKey || null,
+      draftRoomKey: composer ? composerRoomKeyRef.current : null,
+      draft: composer
+    }
+    uiStateRef.current = nextState
+    const timer = setTimeout(() => persistPeerChatUiState(nextState), UI_STATE_PERSIST_DELAY_MS)
+    return () => clearTimeout(timer)
+  }, [activeRoom?.roomKey, composer])
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state !== 'active' && uiStateRestoredRef.current) {
+        persistPeerChatUiState(uiStateRef.current)
+      }
+    })
+    return () => subscription.remove()
+  }, [])
 
   useEffect(() => {
     if (!activeRoom) return
@@ -181,6 +251,7 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
         setProfileName(nextProfile?.username || '')
         setRooms(response.rooms || [])
         versionRef.current = Number.isSafeInteger(response.version) ? response.version as number : -1
+        setIsInitialized(true)
         setIsReady(true)
       })
       .catch((cause) => {
@@ -193,6 +264,32 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
       cancelled = true
     }
   }, [callRpc])
+
+  useEffect(() => {
+    if (!isInitialized || !restoredUiState || uiStateRestoredRef.current) return
+
+    const roomKeys = new Set(rooms.map((room) => room.roomKey))
+    const draftRoomKey = restoredUiState.draftRoomKey && roomKeys.has(restoredUiState.draftRoomKey)
+      ? restoredUiState.draftRoomKey
+      : null
+    const restoredRoom = restoredUiState.activeRoomKey
+      ? rooms.find((room) => room.roomKey === restoredUiState.activeRoomKey) || null
+      : null
+
+    composerRoomKeyRef.current = draftRoomKey
+    setComposer(draftRoomKey ? restoredUiState.draft : '')
+    if (restoredRoom) {
+      versionRef.current = -1
+      setMessages([])
+      setActiveRoom(restoredRoom)
+    }
+    uiStateRef.current = {
+      activeRoomKey: restoredRoom?.roomKey || null,
+      draftRoomKey,
+      draft: draftRoomKey ? restoredUiState.draft : ''
+    }
+    uiStateRestoredRef.current = true
+  }, [isInitialized, restoredUiState, rooms])
 
   const refreshRoom = useCallback(async (force = false) => {
     const room = activeRoomRef.current
@@ -319,6 +416,8 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
   }
 
   function openRoom (room: PeerChatRoom) {
+    if (composerRoomKeyRef.current !== room.roomKey) setComposer('')
+    composerRoomKeyRef.current = room.roomKey
     versionRef.current = -1
     setMessages([])
     setActiveRoom(room)
@@ -403,6 +502,10 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
             if (!response.ok) throw new Error(response.error || 'Unable to leave PeerChat room.')
             if (!mountedRef.current) return
             setRooms((current) => current.filter((room) => room.roomKey !== activeRoom.roomKey))
+            if (composerRoomKeyRef.current === activeRoom.roomKey) {
+              composerRoomKeyRef.current = null
+              setComposer('')
+            }
             setActiveRoom(null)
             setMessages([])
             onStatus('PeerChat room removed')
@@ -487,10 +590,11 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
           </Pressable>
           <View style={styles.chatHeaderCopy}>
             <Text numberOfLines={1} style={[styles.chatTitle, { color: colors.text }]}>{activeRoom.name}</Text>
-            <Text style={[styles.connectionText, { color: activeRoom.peerCount > 0 ? colors.success : colors.muted }]}>
-              {activeRoom.peerCount > 0
-                ? `${activeRoom.peerCount} peer${activeRoom.peerCount === 1 ? '' : 's'} connected`
-                : 'Waiting for peers'}
+            <Text style={[
+              styles.connectionText,
+              { color: activeRoom.connectionState === 'connected' ? colors.success : colors.muted }
+            ]}>
+              {formatRoomConnection(activeRoom)}
             </Text>
           </View>
           <Pressable
@@ -707,7 +811,7 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
           <View style={styles.roomMeta}>
             <Text style={[styles.roomTime, { color: colors.muted }]}>{formatRoomTime(item)}</Text>
             <Text style={[styles.roomPeerCount, { color: item.peerCount > 0 ? colors.success : colors.muted }]}>
-              {item.peerCount > 0 ? `${item.peerCount} online` : 'Offline'}
+              {formatRoomConnection(item, true)}
             </Text>
           </View>
         </Pressable>
@@ -740,6 +844,26 @@ function formatRoomTime (room: PeerChatRoom) {
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
   }
   return date.toLocaleDateString([], { day: '2-digit', month: 'short' })
+}
+
+function formatRoomConnection (room: PeerChatRoom, compact = false) {
+  if (room.connectionState === 'connecting') return 'Connecting...'
+  if (room.connectionState === 'syncing') return 'Syncing...'
+  if (room.connectionState === 'connected') {
+    return compact
+      ? `${room.peerCount} online`
+      : `${room.peerCount} peer${room.peerCount === 1 ? '' : 's'} connected`
+  }
+  return compact ? 'No peers' : 'Waiting for peers'
+}
+
+function persistPeerChatUiState (state: PeerChatUiState) {
+  try {
+    if (!PEERCHAT_UI_STATE_FILE.exists) PEERCHAT_UI_STATE_FILE.create({ intermediates: true })
+    PEERCHAT_UI_STATE_FILE.write(serializePeerChatUiState(state))
+  } catch (cause) {
+    console.warn('Unable to save PeerChat UI state:', cause)
+  }
 }
 
 const darkColors = {

@@ -630,19 +630,20 @@ export class PeerChatService {
 
   async syncHistoryToPeer (peer, roomKey) {
     const feed = this.feeds.get(roomKey)
-    if (!feed || peer.connection.destroyed) return
+    if (!feed || peer.connection.destroyed) return false
 
     const firstIndex = Math.max(0, feed.length - MAX_SYNC_MESSAGES)
     for (let index = firstIndex; index < feed.length; index += 1) {
-      if (peer.connection.destroyed || !peer.rooms.includes(roomKey)) return
+      if (peer.connection.destroyed || !peer.rooms.includes(roomKey)) return false
       try {
         const entry = await feed.get(index)
         if (!entry?.ct) continue
         const sent = this.sendToPeer(peer, { type: 'sync', roomKey, ...entry })
-        if (!sent && !await waitForConnectionDrain(peer.connection)) return
+        if (!sent && !await waitForConnectionDrain(peer.connection)) return false
       } catch {}
     }
     this.sendToPeer(peer, { type: 'sync-done' })
+    return !peer.connection.destroyed
   }
 
   async syncHistoryToPeerOnce (peer, roomKey) {
@@ -652,10 +653,15 @@ export class PeerChatService {
     const pending = peer.syncingRooms.get(roomKey)
     if (pending) return pending
 
-    peer.syncedRooms.add(roomKey)
-    const sync = this.syncHistoryToPeer(peer, roomKey).finally(() => {
-      peer.syncingRooms.delete(roomKey)
-    })
+    const sync = this.syncHistoryToPeer(peer, roomKey)
+      .then((completed) => {
+        if (completed) peer.syncedRooms.add(roomKey)
+        return completed
+      })
+      .finally(() => {
+        peer.syncingRooms.delete(roomKey)
+        this.bumpVersion()
+      })
     peer.syncingRooms.set(roomKey, sync)
     return sync
   }
@@ -746,14 +752,26 @@ export class PeerChatService {
   }
 
   publicRoom (room) {
+    const peerCount = this.countRoomPeers(room.roomKey)
     return {
       roomKey: room.roomKey,
       name: room.name,
       isHost: room.isHost === true,
       createdAt: room.createdAt || 0,
       lastMessage: room.lastMessage || null,
-      peerCount: this.countRoomPeers(room.roomKey)
+      peerCount,
+      connectionState: this.getRoomConnectionState(room.roomKey, peerCount)
     }
+  }
+
+  getRoomConnectionState (roomKey, peerCount = this.countRoomPeers(roomKey)) {
+    if (this.pendingJoins.has(roomKey) || !this.joinedRooms.has(roomKey) || !this.feeds.has(roomKey)) {
+      return 'connecting'
+    }
+    for (const peer of this.peers.values()) {
+      if (peer.rooms.includes(roomKey) && peer.syncingRooms?.has(roomKey)) return 'syncing'
+    }
+    return peerCount > 0 ? 'connected' : 'waiting'
   }
 
   countRoomPeers (roomKey) {
