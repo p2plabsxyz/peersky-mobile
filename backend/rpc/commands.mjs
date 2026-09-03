@@ -36,3 +36,4 @@ export const RPC_PEERCHAT_SNAPSHOT = 45
 export const RPC_PEERCHAT_SEND = 46
 export const RPC_PEERCHAT_ROOM_LEAVE = 47
 export const RPC_PEERCHAT_REACT = 48
+export const RPC_PEERCHAT_SET_ACTIVE = 49

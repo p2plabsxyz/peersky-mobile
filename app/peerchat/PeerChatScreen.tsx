@@ -38,6 +38,7 @@ import {
   RPC_PEERCHAT_ROOM_LEAVE,
   RPC_PEERCHAT_ROOMS,
   RPC_PEERCHAT_REACT,
+  RPC_PEERCHAT_SET_ACTIVE,
   RPC_PEERCHAT_SEND,
   RPC_PEERCHAT_SNAPSHOT
 } from '../../backend/rpc/commands.mjs'
@@ -80,6 +81,8 @@ type PeerChatRoom = {
   createdAt: number
   lastMessage: PeerChatLastMessage | null
   peerCount: number
+  unreadCount: number
+  unreadMentions: number
   connectionState: 'connecting' | 'syncing' | 'connected' | 'waiting'
 }
 
@@ -214,6 +217,7 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
     mountedRef.current = true
     return () => {
       if (uiStateRestoredRef.current) persistPeerChatUiState(uiStateRef.current)
+      void callRpcRef.current(RPC_PEERCHAT_SET_ACTIVE, { roomKey: null }).catch(() => {})
       mountedRef.current = false
       activeRoomRef.current = null
     }
@@ -226,6 +230,18 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
   useEffect(() => {
     activeRoomRef.current = activeRoom
   }, [activeRoom])
+
+  useEffect(() => {
+    let cancelled = false
+    void callRpc(RPC_PEERCHAT_SET_ACTIVE, { roomKey: activeRoom?.roomKey || null })
+      .then((response) => {
+        if (!cancelled && mountedRef.current && response.ok && response.rooms) setRooms(response.rooms)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [activeRoom?.roomKey, callRpc])
 
   useEffect(() => {
     if (!uiStateRestoredRef.current) return
@@ -442,6 +458,9 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
     setReplyTarget(null)
     setReactionTargetId(null)
     setActiveRoom(room)
+    setRooms((current) => current.map((item) => item.roomKey === room.roomKey
+      ? { ...item, unreadCount: 0, unreadMentions: 0 }
+      : item))
     setError(null)
     onStatus(`Opened PeerChat room ${room.name}`)
   }
@@ -719,7 +738,9 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
                     </Text>
                   </View>
                 )}
-                <Text selectable style={[styles.messageText, { color: colors.text }]}>{item.message}</Text>
+                <Text selectable style={[styles.messageText, { color: colors.text }]}>
+                  {renderMessageText(item.message, profile?.username || '', colors.accent)}
+                </Text>
                 {item.reactions && item.reactions.length > 0 && (
                   <View style={styles.reactionRow}>
                     {item.reactions.map((reaction) => (
@@ -977,6 +998,13 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
           </View>
           <View style={styles.roomMeta}>
             <Text style={[styles.roomTime, { color: colors.muted }]}>{formatRoomTime(item)}</Text>
+            {item.unreadCount > 0 && (
+              <View style={[styles.unreadBadge, { backgroundColor: colors.accent }]}>
+                <Text style={styles.unreadBadgeText}>
+                  {item.unreadMentions > 0 ? '@ ' : ''}{item.unreadCount}
+                </Text>
+              </View>
+            )}
             <Text style={[styles.roomPeerCount, { color: item.peerCount > 0 ? colors.success : colors.muted }]}>
               {formatRoomConnection(item, true)}
             </Text>
@@ -995,6 +1023,28 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
 
 function getRoomInitials (name: string) {
   return name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || 'PC'
+}
+
+function renderMessageText (message: string, username: string, mentionColor: string) {
+  if (!username) return message
+  const mention = `@${username}`
+  const lowerMessage = message.toLocaleLowerCase()
+  const lowerMention = mention.toLocaleLowerCase()
+  const parts = []
+  let cursor = 0
+  let index = lowerMessage.indexOf(lowerMention)
+  while (index !== -1) {
+    if (index > cursor) parts.push(message.slice(cursor, index))
+    parts.push(
+      <Text key={`${index}-${parts.length}`} style={{ color: mentionColor, fontWeight: '800' }}>
+        {message.slice(index, index + mention.length)}
+      </Text>
+    )
+    cursor = index + mention.length
+    index = lowerMessage.indexOf(lowerMention, cursor)
+  }
+  if (cursor < message.length) parts.push(message.slice(cursor))
+  return parts.length > 0 ? parts : message
 }
 
 function formatMessageTime (timestamp: number) {
@@ -1112,6 +1162,8 @@ const styles = StyleSheet.create({
   roomMeta: { alignItems: 'flex-end', gap: 5 },
   roomTime: { fontSize: 10 },
   roomPeerCount: { fontSize: 11, fontWeight: '700' },
+  unreadBadge: { alignItems: 'center', borderRadius: 10, justifyContent: 'center', minWidth: 20, paddingHorizontal: 6, paddingVertical: 2 },
+  unreadBadgeText: { color: '#ffffff', fontSize: 10, fontWeight: '900' },
   emptyState: { alignItems: 'center', gap: 5, justifyContent: 'center', paddingHorizontal: 28, paddingVertical: 36 },
   emptyTitle: { fontSize: 16, fontWeight: '800' },
   chatHeader: { alignItems: 'center', borderBottomWidth: 1, flexDirection: 'row', minHeight: 62, paddingHorizontal: 8 },

@@ -32,7 +32,8 @@ import {
   RPC_PEERCHAT_SNAPSHOT,
   RPC_PEERCHAT_SEND,
   RPC_PEERCHAT_ROOM_LEAVE,
-  RPC_PEERCHAT_REACT
+  RPC_PEERCHAT_REACT,
+  RPC_PEERCHAT_SET_ACTIVE
 } from './commands.mjs'
 import {
   getDefaultIdentityStoragePath,
@@ -406,6 +407,15 @@ export async function routeRpcRequest (req) {
         ok: true,
         reaction: await peerChat.reactToMessage(parseJsonMessage(req.data)),
         version: peerChat.version
+      })
+      return
+    }
+
+    if (req.command === RPC_PEERCHAT_SET_ACTIVE) {
+      const peerChat = await getPeerChatService()
+      replyJson(req, {
+        ok: true,
+        ...peerChat.setActiveRoom(parseJsonMessage(req.data))
       })
       return
     }

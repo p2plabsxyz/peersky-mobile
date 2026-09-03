@@ -64,6 +64,7 @@ export class PeerChatService {
     this.discoveryKeys = new Map()
     this.peers = new Map()
     this.seenIds = new Set()
+    this.activeRoomKey = null
     this.version = 0
     this.persistTimer = null
     this.started = false
@@ -124,7 +125,10 @@ export class PeerChatService {
       createdAt: Date.now(),
       createdBy: this.localId,
       createdByName: this.profile.username,
-      lastMessage: null
+      lastMessage: null,
+      unreadCount: 0,
+      unreadMentions: 0,
+      lastReadTs: Date.now()
     }
     this.rooms.set(roomKey, room)
     try {
@@ -154,7 +158,10 @@ export class PeerChatService {
         isHost: false,
         createdAt: Date.now(),
         joinedAt: Date.now(),
-        lastMessage: null
+        lastMessage: null,
+        unreadCount: 0,
+        unreadMentions: 0,
+        lastReadTs: Date.now()
       }
       this.rooms.set(normalized, room)
     }
@@ -180,6 +187,23 @@ export class PeerChatService {
         const rightTime = right.lastMessage?.timestamp || right.createdAt
         return rightTime - leftTime
       })
+  }
+
+  setActiveRoom ({ roomKey } = {}) {
+    const normalized = roomKey == null || roomKey === '' ? null : normalizePeerChatRoomKey(roomKey)
+    if (roomKey != null && roomKey !== '' && !normalized) throw new Error('Invalid PeerChat room key.')
+    if (normalized && !this.rooms.has(normalized)) throw new Error('PeerChat room not found.')
+
+    this.activeRoomKey = normalized
+    if (normalized) {
+      const room = this.rooms.get(normalized)
+      room.unreadCount = 0
+      room.unreadMentions = 0
+      room.lastReadTs = Date.now()
+      this.schedulePersist()
+    }
+    this.bumpVersion()
+    return { rooms: this.listRooms(), version: this.version }
   }
 
   async getSnapshot ({ roomKey, version }) {
@@ -275,6 +299,7 @@ export class PeerChatService {
     } catch {}
 
     this.rooms.delete(normalized)
+    if (this.activeRoomKey === normalized) this.activeRoomKey = null
     await this.releaseFeed(normalized)
     this.joinedRooms.delete(normalized)
     this.discoveryKeys.delete(normalized)
@@ -763,7 +788,34 @@ export class PeerChatService {
     this.roomStorageBytes.set(roomKey, measuredRoomBytes)
     this.totalStoredBytes += measuredRoomBytes - roomBytes
     await this.updateLastMessage(roomKey, entry)
+    this.updateUnreadState(roomKey, entry)
     this.bumpVersion()
+  }
+
+  updateUnreadState (roomKey, entry) {
+    const room = this.rooms.get(roomKey)
+    if (!room || this.activeRoomKey === roomKey) return
+
+    const sender = String(entry?.sender || '').toLowerCase()
+    if (!sender || sender === this.localId) return
+    const timestamp = normalizePeerChatTimestamp(entry?.ts)
+    if (timestamp <= (room.lastReadTs || 0)) return
+
+    if (entry?.type === 'reaction') {
+      if (!entry.emoji) return
+      room.unreadCount = Math.min(MAX_PEERCHAT_STORED_MESSAGES_PER_ROOM, (room.unreadCount || 0) + 1)
+      this.schedulePersist()
+      return
+    }
+    if (!entry?.ct) return
+
+    const message = this.entryToMessage(entry, roomKey).message
+    room.unreadCount = Math.min(MAX_PEERCHAT_STORED_MESSAGES_PER_ROOM, (room.unreadCount || 0) + 1)
+    const username = this.profile.username
+    if (username && message.toLocaleLowerCase().includes(`@${username.toLocaleLowerCase()}`)) {
+      room.unreadMentions = Math.min(room.unreadCount, (room.unreadMentions || 0) + 1)
+    }
+    this.schedulePersist()
   }
 
   async updateLastMessage (roomKey, suppliedEntry = null) {
@@ -862,6 +914,8 @@ export class PeerChatService {
       isHost: room.isHost === true,
       createdAt: room.createdAt || 0,
       lastMessage: room.lastMessage || null,
+      unreadCount: room.unreadCount || 0,
+      unreadMentions: room.unreadMentions || 0,
       peerCount,
       connectionState: this.getRoomConnectionState(room.roomKey, peerCount)
     }
@@ -917,7 +971,13 @@ export class PeerChatService {
           joinedAt: Number.isFinite(value?.joinedAt) ? value.joinedAt : Date.now(),
           createdBy: typeof value?.createdBy === 'string' ? value.createdBy.slice(0, 200) : '',
           createdByName: normalizePeerChatProfileName(value?.createdByName),
-          lastMessage: normalizePersistedLastMessage(value?.lastMessage)
+          lastMessage: normalizePersistedLastMessage(value?.lastMessage),
+          unreadCount: normalizeUnreadCount(value?.unreadCount),
+          unreadMentions: Math.min(
+            normalizeUnreadCount(value?.unreadCount),
+            normalizeUnreadCount(value?.unreadMentions)
+          ),
+          lastReadTs: Number.isFinite(value?.lastReadTs) ? value.lastReadTs : 0
         })
       }
     } catch (error) {
@@ -966,6 +1026,11 @@ export class PeerChatService {
     this.feeds.delete(roomKey)
     if (feed?.close) await feed.close().catch(() => {})
   }
+}
+
+function normalizeUnreadCount (value) {
+  if (!Number.isSafeInteger(value) || value < 0) return 0
+  return Math.min(value, MAX_PEERCHAT_STORED_MESSAGES_PER_ROOM)
 }
 
 function normalizePersistedLastMessage (value) {

@@ -189,6 +189,60 @@ test('PeerChat applies only the newest reaction event from a desktop peer', asyn
   await service.close()
 })
 
+test('PeerChat persists bounded unread and mention counts and clears them for active rooms', async (t) => {
+  const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-unread-'))
+  t.after(() => rm(storagePath, { recursive: true, force: true }))
+  const feeds = new Map()
+  const service = await new PeerChatService({ sdk: createFakeSdk(feeds), storagePath }).start()
+  const room = await service.createRoom({ name: 'Unread Room', username: 'Alice Mobile' })
+  const peer = {
+    id: 'desktop-peer',
+    username: 'Desktop',
+    rooms: [room.roomKey],
+    initialSyncCount: 0,
+    liveRate: { count: 0, resetsAt: Date.now() + 60_000 }
+  }
+
+  await service.handlePeerMessage(peer, {
+    id: 'desktop-mention',
+    roomKey: room.roomKey,
+    sn: 'Desktop',
+    ...encryptPeerChatMessage('Hello @alice mobile', room.roomKey),
+    ts: Date.now() + 1_000
+  })
+  let listed = service.listRooms()[0]
+  assert.equal(listed.unreadCount, 1)
+  assert.equal(listed.unreadMentions, 1)
+
+  const active = service.setActiveRoom({ roomKey: room.roomKey })
+  assert.equal(active.rooms[0].unreadCount, 0)
+  await service.handlePeerMessage(peer, {
+    id: 'desktop-active-message',
+    roomKey: room.roomKey,
+    sn: 'Desktop',
+    ...encryptPeerChatMessage('Visible now', room.roomKey),
+    ts: Date.now() + 2_000
+  })
+  assert.equal(service.listRooms()[0].unreadCount, 0)
+
+  service.setActiveRoom({ roomKey: null })
+  await service.handlePeerMessage(peer, {
+    id: 'desktop-unread-message',
+    roomKey: room.roomKey,
+    sn: 'Desktop',
+    ...encryptPeerChatMessage('Read later', room.roomKey),
+    ts: Date.now() + 3_000
+  })
+  assert.equal(service.listRooms()[0].unreadCount, 1)
+  await service.close()
+
+  const restarted = await new PeerChatService({ sdk: createFakeSdk(cloneFeeds(feeds)), storagePath }).start()
+  listed = restarted.listRooms()[0]
+  assert.equal(listed.unreadCount, 1)
+  assert.equal(listed.unreadMentions, 0)
+  await restarted.close()
+})
+
 test('PeerChat serializes concurrent room joins and removes feed listeners', async (t) => {
   const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-joins-'))
   t.after(() => rm(storagePath, { recursive: true, force: true }))
