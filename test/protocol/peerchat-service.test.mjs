@@ -153,6 +153,29 @@ test('PeerChat stores, toggles, and history-syncs desktop-compatible reactions',
   await service.close()
 })
 
+test('PeerChat preserves desktop-compatible Hyperdrive attachment metadata', async (t) => {
+  const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-attachment-'))
+  t.after(() => rm(storagePath, { recursive: true, force: true }))
+  const service = await new PeerChatService({ sdk: createFakeSdk(), storagePath }).start()
+  const room = await service.createRoom({ name: 'Files', username: 'Alice' })
+  const url = `hyper://${'a'.repeat(52)}/shared/report.pdf`
+
+  const sent = await service.sendMessage({
+    roomKey: room.roomKey,
+    message: url,
+    fileName: 'report.pdf',
+    fileSize: 2048
+  })
+  assert.equal(sent.fileName, 'report.pdf')
+  assert.equal(sent.fileSize, 2048)
+
+  const snapshot = await service.getSnapshot({ roomKey: room.roomKey, version: -1 })
+  assert.equal(snapshot.messages[0].message, url)
+  assert.equal(snapshot.messages[0].fileName, 'report.pdf')
+  assert.equal(snapshot.messages[0].fileSize, 2048)
+  await service.close()
+})
+
 test('PeerChat applies only the newest reaction event from a desktop peer', async (t) => {
   const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-remote-reactions-'))
   t.after(() => rm(storagePath, { recursive: true, force: true }))

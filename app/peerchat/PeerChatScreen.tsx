@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { File, Paths } from 'expo-file-system'
+import * as DocumentPicker from 'expo-document-picker'
 import {
   ActivityIndicator,
   Alert,
@@ -37,6 +38,7 @@ import {
 } from './message-search.mjs'
 
 import {
+  RPC_HYPER_LIBRARY_UPLOAD,
   RPC_PEERCHAT_INIT,
   RPC_PEERCHAT_PROFILE_SET,
   RPC_PEERCHAT_ROOM_CREATE,
@@ -60,6 +62,8 @@ type PeerChatMessage = {
   self: boolean
   replyTo?: PeerChatReply | null
   reactions?: PeerChatReactionSummary[]
+  fileName?: string
+  fileSize?: number
 }
 
 type PeerChatReactionSummary = {
@@ -117,11 +121,13 @@ export type PeerChatResponse = {
   messages?: PeerChatMessage[] | null
   version?: number
   sent?: PeerChatMessage
+  item?: { name: string, url: string, byteLength?: number }
 }
 
 type PeerChatScreenProps = {
   isDark: boolean
   onCallRpc: (command: number, data?: object) => Promise<PeerChatResponse>
+  onOpenUrl: (url: string) => void
   onStatus: (message: string) => void
 }
 
@@ -147,8 +153,9 @@ const EMPTY_UI_STATE: PeerChatUiState = {
 
 const PEERCHAT_UI_STATE_FILE = new File(Paths.document, 'peerchat-ui-state.json')
 const UI_STATE_PERSIST_DELAY_MS = 300
+const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
 
-export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenProps) {
+export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: PeerChatScreenProps) {
   const colors = isDark ? darkColors : lightColors
   const callRpcRef = useRef(onCallRpc)
   const messageListRef = useRef<FlatList<PeerChatMessage> | null>(null)
@@ -616,6 +623,42 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
     })
   }
 
+  function attachFile () {
+    if (!activeRoom || isBusy) return
+    void runAction(async () => {
+      const selection = await DocumentPicker.getDocumentAsync({
+        copyToCacheDirectory: true,
+        multiple: false
+      })
+      if (selection.canceled || !selection.assets[0]) return
+
+      const asset = selection.assets[0]
+      const file = new File(asset.uri)
+      const fileSize = asset.size ?? file.size
+      if (!Number.isSafeInteger(fileSize) || !fileSize || fileSize > MAX_ATTACHMENT_BYTES) {
+        throw new Error('Choose a file between 1 byte and 10 MB.')
+      }
+
+      const upload = await callRpc(RPC_HYPER_LIBRARY_UPLOAD, {
+        name: asset.name,
+        contentBase64: await file.base64(),
+        visibility: 'public'
+      })
+      if (!upload.ok || !upload.item) throw new Error(upload.error || 'Unable to upload attachment.')
+
+      const response = await callRpc(RPC_PEERCHAT_SEND, {
+        roomKey: activeRoom.roomKey,
+        message: upload.item.url,
+        fileName: upload.item.name,
+        fileSize: upload.item.byteLength ?? fileSize
+      })
+      if (!response.ok) throw new Error(response.error || 'Unable to send attachment.')
+      versionRef.current = -1
+      await refreshRoom(true)
+      onStatus(`Sent ${upload.item.name}`)
+    })
+  }
+
   function confirmLeaveRoom () {
     if (!activeRoom) return
     Alert.alert(
@@ -862,9 +905,26 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
                     </Text>
                   </View>
                 )}
-                <Text selectable style={[styles.messageText, { color: colors.text }]}>
-                  {renderMessageText(item.message, profile?.username || '', colors.accent)}
-                </Text>
+                {item.fileName
+                  ? (
+                    <Pressable
+                      accessibilityHint='Opens this Hyperdrive attachment'
+                      accessibilityRole='link'
+                      onPress={() => onOpenUrl(item.message)}
+                      style={[styles.attachmentCard, { backgroundColor: colors.input, borderColor: colors.border }]}
+                    >
+                      <Text style={[styles.attachmentIcon, { color: colors.accent }]}>+</Text>
+                      <View style={styles.attachmentCopy}>
+                        <Text numberOfLines={1} style={[styles.attachmentName, { color: colors.text }]}>{item.fileName}</Text>
+                        <Text style={[styles.attachmentMeta, { color: colors.muted }]}>{formatFileSize(item.fileSize)}</Text>
+                      </View>
+                    </Pressable>
+                    )
+                  : (
+                    <Text selectable style={[styles.messageText, { color: colors.text }]}>
+                      {renderMessageText(item.message, profile?.username || '', colors.accent)}
+                    </Text>
+                    )}
                 {item.reactions && item.reactions.length > 0 && (
                   <View style={styles.reactionRow}>
                     {item.reactions.map((reaction) => (
@@ -976,6 +1036,15 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
           </View>
         )}
         <View style={[styles.composer, { borderTopColor: colors.border }]}> 
+          <Pressable
+            accessibilityLabel='Attach file'
+            accessibilityRole='button'
+            disabled={isBusy}
+            onPress={attachFile}
+            style={[styles.attachButton, { backgroundColor: colors.input }, isBusy ? styles.disabled : null]}
+          >
+            <Text style={[styles.attachButtonText, { color: colors.accent }]}>+</Text>
+          </Pressable>
           <TextInput
             value={composer}
             onChangeText={setComposer}
@@ -1262,6 +1331,13 @@ function formatMessageTime (timestamp: number) {
   return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
 
+function formatFileSize (value?: number) {
+  if (!Number.isFinite(value) || Number(value) < 0) return 'Hyperdrive attachment'
+  if (Number(value) < 1024) return `${value} B`
+  if (Number(value) < 1024 * 1024) return `${(Number(value) / 1024).toFixed(1)} KB`
+  return `${(Number(value) / (1024 * 1024)).toFixed(1)} MB`
+}
+
 function formatRoomTime (room: PeerChatRoom) {
   const timestamp = room.lastMessage?.timestamp || room.createdAt
   if (!Number.isFinite(timestamp)) return ''
@@ -1402,6 +1478,11 @@ const styles = StyleSheet.create({
   reactionText: { fontSize: 12 },
   senderName: { fontSize: 11, fontWeight: '800', marginBottom: 3 },
   messageText: { fontSize: 15, lineHeight: 20 },
+  attachmentCard: { alignItems: 'center', borderRadius: 10, borderWidth: 1, flexDirection: 'row', gap: 9, minWidth: 190, padding: 9 },
+  attachmentIcon: { fontSize: 24, fontWeight: '500' },
+  attachmentCopy: { flex: 1 },
+  attachmentName: { fontSize: 13, fontWeight: '800' },
+  attachmentMeta: { fontSize: 10, marginTop: 2 },
   messageTime: { alignSelf: 'flex-end', fontSize: 10, marginTop: 4 },
   inlineError: { fontSize: 12, paddingHorizontal: 14, paddingVertical: 5, textAlign: 'center' },
   reactionPicker: { alignItems: 'center', borderTopWidth: 1, flexDirection: 'row', justifyContent: 'space-around', paddingHorizontal: 8, paddingVertical: 6 },
@@ -1416,6 +1497,8 @@ const styles = StyleSheet.create({
   cancelReply: { alignItems: 'center', height: 28, justifyContent: 'center', width: 28 },
   cancelReplyText: { fontSize: 18, fontWeight: '700' },
   composer: { alignItems: 'flex-end', borderTopWidth: 1, flexDirection: 'row', gap: 8, padding: 10 },
+  attachButton: { alignItems: 'center', borderRadius: 20, height: 42, justifyContent: 'center', width: 42 },
+  attachButtonText: { fontSize: 27, fontWeight: '400', lineHeight: 29 },
   composerInput: { borderRadius: 18, borderWidth: 1, flex: 1, fontSize: 15, maxHeight: 112, minHeight: 42, paddingHorizontal: 13, paddingVertical: 9 },
   sendButton: { alignItems: 'center', borderRadius: 20, height: 42, justifyContent: 'center', paddingHorizontal: 16 },
   sendButtonText: { color: '#ffffff', fontSize: 13, fontWeight: '900' },

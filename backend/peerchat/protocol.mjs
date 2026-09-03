@@ -15,6 +15,7 @@ export const MAX_PEERCHAT_REPLY_ID_LENGTH = 64
 export const MAX_PEERCHAT_REPLY_SENDER_LENGTH = 200
 export const MAX_PEERCHAT_REPLY_TEXT_LENGTH = 200
 export const MAX_PEERCHAT_REACTION_EMOJI_LENGTH = 10
+export const MAX_PEERCHAT_FILE_NAME_LENGTH = 200
 
 const ROOM_KEY_PATTERN = /^[a-f0-9]{64}$/i
 const PROFILE_NAME_PATTERN = /^[A-Za-z0-9]+(?: [A-Za-z0-9]+)*$/
@@ -87,6 +88,21 @@ export function normalizePeerChatReaction (value) {
     sender,
     sn: sn || sender,
     ts: normalizePeerChatTimestamp(value.ts)
+  }
+}
+
+export function normalizePeerChatAttachment ({ message, fileName, fileSize } = {}) {
+  if (!isHyperUrl(message) || typeof fileName !== 'string') return null
+
+  const name = Array.from(stripMetadataControls(fileName).trim())
+    .slice(0, MAX_PEERCHAT_FILE_NAME_LENGTH)
+    .join('')
+  if (!name) return null
+
+  const size = Number.isSafeInteger(fileSize) && fileSize >= 0 ? fileSize : null
+  return {
+    fileName: name,
+    ...(size !== null && { fileSize: size })
   }
 }
 
@@ -240,4 +256,18 @@ function stripMetadataControls (value) {
 function normalizeReplyField (value, maxLength) {
   if (typeof value !== 'string') return ''
   return Array.from(stripMetadataControls(value).trim()).slice(0, maxLength).join('')
+}
+
+function isHyperUrl (value) {
+  if (typeof value !== 'string' || value.length > MAX_PEERCHAT_MESSAGE_BYTES) return false
+  try {
+    const url = new URL(value)
+    return url.protocol === 'hyper:' &&
+      /^[a-z0-9]{52,64}$/i.test(url.hostname) &&
+      !url.username &&
+      !url.password &&
+      !url.port
+  } catch {
+    return false
+  }
 }

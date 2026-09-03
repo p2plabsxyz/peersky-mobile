@@ -18,6 +18,7 @@ import {
   getSharedPeerChatRooms,
   MAX_PEERCHAT_FRAME_BYTES,
   MAX_PEERCHAT_MESSAGE_BYTES,
+  normalizePeerChatAttachment,
   normalizePeerChatMessage,
   normalizePeerChatProfileName,
   normalizePeerChatReaction,
@@ -249,7 +250,7 @@ export class PeerChatService {
     }
   }
 
-  async sendMessage ({ roomKey, message, replyTo }) {
+  async sendMessage ({ roomKey, message, replyTo, fileName, fileSize }) {
     const normalizedRoomKey = normalizePeerChatRoomKey(roomKey)
     const room = this.rooms.get(normalizedRoomKey)
     if (!room) throw new Error('PeerChat room not found.')
@@ -266,12 +267,18 @@ export class PeerChatService {
 
     const encrypted = encryptPeerChatMessage(normalizedMessage, normalizedRoomKey)
     const normalizedReply = normalizePeerChatReply(replyTo)
+    const attachment = normalizePeerChatAttachment({
+      message: normalizedMessage,
+      fileName,
+      fileSize
+    })
     const entry = {
       id: createPeerChatMessageId(),
       sender: this.localId,
       sn: this.profile.username,
       ...encrypted,
       ...(normalizedReply && { replyTo: normalizedReply }),
+      ...(attachment || {}),
       ts: Date.now()
     }
 
@@ -659,6 +666,11 @@ export class PeerChatService {
     if (!plaintext) return
 
     const normalizedReply = normalizePeerChatReply(message.replyTo)
+    const attachment = normalizePeerChatAttachment({
+      message: plaintext,
+      fileName: message.fileName,
+      fileSize: message.fileSize
+    })
     const entry = {
       id: message.id,
       sender: isSync && typeof message.sender === 'string'
@@ -669,6 +681,7 @@ export class PeerChatService {
       iv: message.iv,
       tag: message.tag,
       ...(normalizedReply && { replyTo: normalizedReply }),
+      ...(attachment || {}),
       ts: normalizePeerChatTimestamp(message.ts)
     }
     await this.appendEntry(roomKey, entry)
@@ -925,11 +938,17 @@ export class PeerChatService {
 
   entryToMessage (entry, roomKey) {
     const sender = String(entry.sender || '').slice(0, 200)
+    const message = decryptPeerChatMessage(entry, roomKey)
     return {
       id: String(entry.id || ''),
       sender,
       senderName: normalizePeerChatProfileName(entry.sn) || normalizePeerChatRoomName(sender, 'Peer'),
-      message: decryptPeerChatMessage(entry, roomKey),
+      message,
+      ...(normalizePeerChatAttachment({
+        message,
+        fileName: entry.fileName,
+        fileSize: entry.fileSize
+      }) || {}),
       replyTo: normalizePeerChatReply(entry.replyTo),
       timestamp: normalizePeerChatTimestamp(entry.ts),
       self: sender.toLowerCase() === this.localId

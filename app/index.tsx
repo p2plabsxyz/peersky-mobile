@@ -2616,6 +2616,7 @@ export default function App () {
                 <PeerChatScreen
                   isDark={browserIsDark}
                   onCallRpc={(command, data = {}) => callRpc(command, data) as Promise<PeerChatResponse>}
+                  onOpenUrl={(targetUrl) => void loadBrowserUrl(targetUrl)}
                   onStatus={setStatus}
                 />
                 )
