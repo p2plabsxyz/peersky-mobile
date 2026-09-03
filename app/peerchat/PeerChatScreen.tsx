@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { File, Paths } from 'expo-file-system'
 import {
   ActivityIndicator,
   Alert,
@@ -9,12 +10,20 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
+  ScrollView,
   Share,
   StyleSheet,
   Text,
   TextInput,
   View
 } from 'react-native'
+
+import {
+  parsePeerChatIntroState,
+  PEERCHAT_INTRO_MAX_BYTES,
+  PEERCHAT_INTRO_POINTS,
+  serializePeerChatIntroState
+} from './intro-state.mjs'
 
 import {
   RPC_PEERCHAT_INIT,
@@ -77,6 +86,7 @@ type PeerChatScreenProps = {
 const POLL_INTERVAL_MS = 1500
 const ROOM_LIST_POLL_INTERVAL_MS = 3000
 const PEERCHAT_ICON = require('../../assets/images/peerchat.png')
+const PEERCHAT_INTRO_FILE = new File(Paths.document, 'peerchat-intro.json')
 
 type LandingAction = 'create' | 'join' | null
 
@@ -90,6 +100,8 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
   const roomListPollInFlightRef = useRef(false)
   const actionInFlightRef = useRef(false)
   const mountedRef = useRef(true)
+  const [isIntroReady, setIsIntroReady] = useState(false)
+  const [showIntro, setShowIntro] = useState(false)
   const [isReady, setIsReady] = useState(false)
   const [isBusy, setIsBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -106,6 +118,31 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
   useEffect(() => {
     callRpcRef.current = onCallRpc
   }, [onCallRpc])
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadIntroState () {
+      let completed = false
+      try {
+        if (PEERCHAT_INTRO_FILE.exists && PEERCHAT_INTRO_FILE.size <= PEERCHAT_INTRO_MAX_BYTES) {
+          completed = parsePeerChatIntroState(await PEERCHAT_INTRO_FILE.text())
+        }
+      } catch (cause) {
+        console.warn('Unable to load PeerChat intro state:', cause)
+      }
+
+      if (!cancelled) {
+        setShowIntro(!completed)
+        setIsIntroReady(true)
+      }
+    }
+
+    void loadIntroState()
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     mountedRef.current = true
@@ -390,11 +427,50 @@ export function PeerChatScreen ({ isDark, onCallRpc, onStatus }: PeerChatScreenP
     }
   }
 
-  if (!isReady) {
+  function continueFromIntro () {
+    try {
+      if (!PEERCHAT_INTRO_FILE.exists) PEERCHAT_INTRO_FILE.create({ intermediates: true })
+      PEERCHAT_INTRO_FILE.write(serializePeerChatIntroState())
+    } catch (cause) {
+      console.warn('Unable to save PeerChat intro state:', cause)
+      onStatus('PeerChat will show the introduction again next time.')
+    }
+    setShowIntro(false)
+  }
+
+  if (!isReady || !isIntroReady) {
     return (
       <View style={[styles.centered, { backgroundColor: colors.background }]}>
         <ActivityIndicator color={colors.accent} />
         <Text style={[styles.helper, { color: colors.muted }]}>Starting PeerChat...</Text>
+      </View>
+    )
+  }
+
+  if (showIntro) {
+    return (
+      <View style={[styles.introScreen, { backgroundColor: colors.background }]}>
+        <ScrollView contentContainerStyle={styles.introContent}>
+          <Image source={PEERCHAT_ICON} style={styles.introLogo} />
+          <Text style={[styles.introTitle, { color: colors.text }]}>Chat directly with your peers</Text>
+          <View style={styles.introPoints}>
+            {PEERCHAT_INTRO_POINTS.map((point, index) => (
+              <View key={point} style={styles.introPointRow}>
+                <View style={[styles.introPointNumber, { backgroundColor: colors.accentSoft }]}>
+                  <Text style={[styles.introPointNumberText, { color: colors.accent }]}>{index + 1}</Text>
+                </View>
+                <Text style={[styles.introPointText, { color: colors.text }]}>{point}</Text>
+              </View>
+            ))}
+          </View>
+        </ScrollView>
+        <Pressable
+          accessibilityRole='button'
+          onPress={continueFromIntro}
+          style={[styles.introContinue, { backgroundColor: colors.accent }]}
+        >
+          <Text style={styles.introContinueText}>Continue</Text>
+        </Pressable>
       </View>
     )
   }
@@ -699,6 +775,17 @@ const lightColors = {
 const styles = StyleSheet.create({
   screen: { flex: 1 },
   centered: { alignItems: 'center', flex: 1, gap: 12, justifyContent: 'center' },
+  introScreen: { flex: 1, paddingBottom: 18 },
+  introContent: { flexGrow: 1, paddingHorizontal: 22, paddingVertical: 24 },
+  introLogo: { alignSelf: 'center', borderRadius: 18, height: 72, marginBottom: 18, width: 72 },
+  introTitle: { fontSize: 25, fontWeight: '900', lineHeight: 31, marginBottom: 24, textAlign: 'center' },
+  introPoints: { gap: 20 },
+  introPointRow: { alignItems: 'flex-start', flexDirection: 'row', gap: 13 },
+  introPointNumber: { alignItems: 'center', borderRadius: 15, height: 30, justifyContent: 'center', width: 30 },
+  introPointNumberText: { fontSize: 13, fontWeight: '900' },
+  introPointText: { flex: 1, fontSize: 14, lineHeight: 20 },
+  introContinue: { alignItems: 'center', borderRadius: 12, justifyContent: 'center', marginHorizontal: 22, minHeight: 50 },
+  introContinueText: { color: '#ffffff', fontSize: 15, fontWeight: '900' },
   landingContent: { paddingBottom: 28 },
   landingHeader: { gap: 12, paddingHorizontal: 16, paddingTop: 14 },
   titleRow: { alignItems: 'center', flexDirection: 'row', gap: 10 },
