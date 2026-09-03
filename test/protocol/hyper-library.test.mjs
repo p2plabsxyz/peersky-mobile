@@ -33,6 +33,48 @@ test('lists only immediate directory children and folders first', async () => {
   }])
 })
 
+test('lists an explicit directory without probing it as a file', async () => {
+  const drive = createDrive({
+    '/logos/peer-bird.png': { blob: { byteLength: 12 } }
+  })
+  drive.entry = async () => {
+    throw new Error('Directory path was incorrectly probed as a file.')
+  }
+
+  const response = await listHyperdriveLocation({ url: `${DRIVE_URL}logos/` }, {
+    runtime: { getDrive: async () => drive },
+    recordArchive: async () => {}
+  })
+
+  assert.equal(response.ok, true)
+  assert.deepEqual(response.items.map(({ name }) => name), ['peer-bird.png'])
+})
+
+test('retries an empty directory while initial metadata is still being discovered', async () => {
+  let listAttempt = 0
+  const drive = createDrive({
+    '/logos/peer-bird.png': { blob: { byteLength: 12 } }
+  })
+  const originalList = drive.list
+  drive.core = { length: 0, peers: [] }
+  drive.list = (...args) => {
+    listAttempt += 1
+    if (listAttempt === 1) return (async function * () {})()
+    drive.core.length = 1
+    return originalList(...args)
+  }
+
+  const response = await listHyperdriveLocation({ url: `${DRIVE_URL}logos/` }, {
+    runtime: { getDrive: async () => drive },
+    recordArchive: async () => {},
+    directoryRetryDelaysMs: [0]
+  })
+
+  assert.equal(response.ok, true)
+  assert.equal(response.diagnostics.listAttempts, 2)
+  assert.deepEqual(response.items.map(({ name }) => name), ['peer-bird.png'])
+})
+
 test('returns a fetched file with bounded metadata', async () => {
   const drive = createDrive({ '/manual.pdf': { blob: { byteLength: 128 } } })
   const response = await listHyperdriveLocation({ url: `${DRIVE_URL}manual.pdf` }, {
@@ -54,10 +96,9 @@ test('rejects a missing non-root path instead of displaying an empty folder', as
     runtime: { getDrive: async () => drive }
   })
 
-  assert.deepEqual(response, {
-    ok: false,
-    error: 'No file or directory was found at this Hyper URL.'
-  })
+  assert.equal(response.ok, false)
+  assert.equal(response.error, 'No file or directory was found at this Hyper URL.')
+  assert.equal(response.diagnostics.stage, 'list-directory')
 })
 
 test('returns collected directory entries when listing times out', async () => {

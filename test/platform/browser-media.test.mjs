@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 import {
+  BROWSER_MEDIA_DIAGNOSTIC_MESSAGE_TYPE,
   BROWSER_MEDIA_TOKEN_LENGTH,
   BROWSER_MEDIA_MESSAGE_TYPE,
   MAX_BROWSER_MEDIA_MESSAGE_LENGTH,
@@ -8,6 +9,7 @@ import {
   createBrowserMediaToken,
   createBrowserMediaLongPressScript,
   isDownloadableBrowserMediaUrl,
+  parseBrowserMediaDiagnosticMessage,
   parseBrowserMediaMessage
 } from '../../app/browser-media.mjs'
 
@@ -105,24 +107,45 @@ describe('browser media long press', () => {
     assert.equal(token, '000102030405060708090a0b0c0d0e0f')
   })
 
-  test('uses the native Android path without disabling normal text selection', () => {
-    const nativeScript = createBrowserMediaLongPressScript({
-      nativeHitTesting: true,
-      token: MEDIA_TOKEN
+  test('accepts only authenticated bounded media diagnostics', () => {
+    const message = JSON.stringify({
+      type: BROWSER_MEDIA_DIAGNOSTIC_MESSAGE_TYPE,
+      token: MEDIA_TOKEN,
+      stage: 'native-long-click',
+      details: { hitType: 5, hasTouchPoint: true }
     })
-    const webKitScript = createBrowserMediaLongPressScript({ token: MEDIA_TOKEN })
 
-    assert.match(nativeScript, /nativeHitTesting = true/)
-    assert.match(nativeScript, /document[.]addEventListener\('contextmenu'/)
-    assert.match(nativeScript, /event[.]isTrusted/)
-    assert.match(nativeScript, /token: messageToken/)
-    assert.match(nativeScript, /if \(!kind\) return;/)
-    assert.match(nativeScript, /event[.]preventDefault\(\)/)
-    assert.match(nativeScript, /video[.]currentSrc/)
-    assert.match(webKitScript, /image[.]currentSrc/)
-    assert.match(webKitScript, /linkUrl/)
-    assert.match(webKitScript, /parsed[.]username/)
-    assert.match(webKitScript, /protocols[.]includes/)
-    assert.doesNotMatch(webKitScript, /setTimeout|setInterval/)
+    assert.deepEqual(parseBrowserMediaDiagnosticMessage(message, MEDIA_TOKEN), {
+      stage: 'native-long-click',
+      details: { hitType: 5, hasTouchPoint: true }
+    })
+    assert.equal(parseBrowserMediaDiagnosticMessage(message, 'b'.repeat(BROWSER_MEDIA_TOKEN_LENGTH)), null)
+    assert.equal(parseBrowserMediaDiagnosticMessage(JSON.stringify({
+      type: BROWSER_MEDIA_DIAGNOSTIC_MESSAGE_TYPE,
+      token: MEDIA_TOKEN,
+      stage: '../unsafe',
+      details: {}
+    }), MEDIA_TOKEN), null)
+  })
+
+  test('keeps a DOM fallback for native hit-test misses without disabling text selection', () => {
+    const script = createBrowserMediaLongPressScript({ token: MEDIA_TOKEN })
+
+    assert.match(script, /document[.]addEventListener\('contextmenu'/)
+    assert.match(script, /event[.]isTrusted/)
+    assert.match(script, /token: messageToken/)
+    assert.match(script, /postDiagnostic\('dom-target-missed'/)
+    assert.match(script, /return false;/)
+    assert.match(script, /event[.]preventDefault\(\)/)
+    assert.match(script, /video[.]currentSrc/)
+    assert.match(script, /else if \(image\)/)
+    assert.match(script, /else if \(link\)/)
+    assert.match(script, /image[.]currentSrc/)
+    assert.match(script, /linkUrl/)
+    assert.match(script, /providedToken !== messageToken/)
+    assert.match(script, /document[.]elementsFromPoint/)
+    assert.match(script, /parsed[.]username/)
+    assert.match(script, /protocols[.]includes/)
+    assert.doesNotMatch(script, /nativeHitTesting|setTimeout|setInterval/)
   })
 })

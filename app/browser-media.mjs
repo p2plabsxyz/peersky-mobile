@@ -1,6 +1,7 @@
 import { MAX_BROWSER_URL_LENGTH } from './browser-shell.mjs'
 
 export const BROWSER_MEDIA_MESSAGE_TYPE = 'peersky-browser-media-long-press'
+export const BROWSER_MEDIA_DIAGNOSTIC_MESSAGE_TYPE = 'peersky-browser-media-diagnostic'
 export const MAX_BROWSER_MEDIA_MESSAGE_LENGTH = 24 * 1024
 export const MAX_BROWSER_MEDIA_TEXT_LENGTH = 256
 export const BROWSER_MEDIA_TOKEN_LENGTH = 32
@@ -51,21 +52,56 @@ export function parseBrowserMediaMessage (message, pageUrl = '', expectedToken =
   }
 }
 
-export function createBrowserMediaLongPressScript ({ nativeHitTesting = false, token = '' } = {}) {
+export function parseBrowserMediaDiagnosticMessage (message, expectedToken = '') {
+  if (typeof message !== 'string' || message.length > MAX_BROWSER_MEDIA_MESSAGE_LENGTH) return null
+
+  try {
+    const parsed = JSON.parse(message)
+    if (
+      parsed?.type !== BROWSER_MEDIA_DIAGNOSTIC_MESSAGE_TYPE ||
+      !isBrowserMediaToken(expectedToken) ||
+      parsed.token !== expectedToken ||
+      typeof parsed.stage !== 'string' ||
+      !/^[a-z0-9-]{1,80}$/.test(parsed.stage)
+    ) return null
+
+    const details = parsed.details && typeof parsed.details === 'object' && !Array.isArray(parsed.details)
+      ? Object.fromEntries(Object.entries(parsed.details).slice(0, 16).map(([key, value]) => [
+        Array.from(key).slice(0, 40).join(''),
+        normalizeDiagnosticScalar(value)
+      ]))
+      : {}
+
+    return { stage: parsed.stage, details }
+  } catch {
+    return null
+  }
+}
+
+export function createBrowserMediaLongPressScript ({ token = '' } = {}) {
   return `
     (() => {
       if (window.__peerskyMediaLongPressInstalled) return true;
       window.__peerskyMediaLongPressInstalled = true;
 
-      const nativeHitTesting = ${nativeHitTesting ? 'true' : 'false'};
       const messageType = ${JSON.stringify(BROWSER_MEDIA_MESSAGE_TYPE)};
+      const diagnosticType = ${JSON.stringify(BROWSER_MEDIA_DIAGNOSTIC_MESSAGE_TYPE)};
       const messageToken = ${JSON.stringify(isBrowserMediaToken(token) ? token : '')};
       const maxUrlLength = ${MAX_BROWSER_URL_LENGTH};
       const maxTextLength = ${MAX_BROWSER_MEDIA_TEXT_LENGTH};
 
-      function closestElement(event, selector) {
-        const path = typeof event.composedPath === 'function' ? event.composedPath() : [];
-        for (const candidate of path) {
+      function postDiagnostic(stage, details) {
+        if (!messageToken) return;
+        window.ReactNativeWebView?.postMessage(JSON.stringify({
+          type: diagnosticType,
+          token: messageToken,
+          stage,
+          details
+        }));
+      }
+
+      function closestElement(candidates, selector) {
+        for (const candidate of candidates) {
           if (candidate && candidate.nodeType === 1) {
             if (candidate.matches && candidate.matches(selector)) return candidate;
             if (candidate.closest) {
@@ -74,9 +110,7 @@ export function createBrowserMediaLongPressScript ({ nativeHitTesting = false, t
             }
           }
         }
-
-        const target = event.target;
-        return target && target.closest ? target.closest(selector) : null;
+        return null;
       }
 
       function bridgeSafeUrl(value, protocols) {
@@ -101,12 +135,10 @@ export function createBrowserMediaLongPressScript ({ nativeHitTesting = false, t
           .join('');
       }
 
-      document.addEventListener('contextmenu', (event) => {
-        if (!event.isTrusted || !messageToken) return;
-
-        const video = closestElement(event, 'video');
-        const image = video ? null : closestElement(event, 'img');
-        const link = closestElement(event, 'a[href]');
+      function dispatchTarget(candidates) {
+        const video = closestElement(candidates, 'video');
+        const image = video ? null : closestElement(candidates, 'img');
+        const link = closestElement(candidates, 'a[href]');
 
         let kind = null;
         let mediaUrl = null;
@@ -120,22 +152,29 @@ export function createBrowserMediaLongPressScript ({ nativeHitTesting = false, t
             kind = 'video';
             title = targetTitle(video, link && link.textContent);
           }
-        } else if (image && !nativeHitTesting) {
+        } else if (image) {
           mediaUrl = bridgeSafeUrl(image.currentSrc || image.src, ['http:', 'https:']);
           if (mediaUrl) {
             kind = 'image';
             title = targetTitle(image, link && link.textContent);
           }
-        } else if (link && !nativeHitTesting) {
+        } else if (link) {
           if (linkUrl) {
             kind = 'link';
             title = targetTitle(link);
           }
         }
 
-        if (!kind) return;
+        if (!kind) {
+          postDiagnostic('dom-target-missed', {
+            candidateCount: candidates.length,
+            hasImage: Boolean(image),
+            hasLink: Boolean(link),
+            hasVideo: Boolean(video)
+          });
+          return false;
+        }
 
-        event.preventDefault();
         window.ReactNativeWebView?.postMessage(JSON.stringify({
           type: messageType,
           token: messageToken,
@@ -144,6 +183,50 @@ export function createBrowserMediaLongPressScript ({ nativeHitTesting = false, t
           linkUrl,
           title
         }));
+        postDiagnostic('dom-target-dispatched', { kind });
+        return true;
+      }
+
+      Object.defineProperty(window, '__peerskyResolveMediaLongPressAt', {
+        configurable: false,
+        enumerable: false,
+        writable: false,
+        value(providedToken, xRatio, yRatio) {
+          if (
+            providedToken !== messageToken ||
+            !Number.isFinite(xRatio) ||
+            !Number.isFinite(yRatio) ||
+            xRatio < 0 || xRatio > 1 ||
+            yRatio < 0 || yRatio > 1
+          ) {
+            postDiagnostic('dom-resolver-rejected', {
+              tokenMatched: providedToken === messageToken,
+              validCoordinates: Number.isFinite(xRatio) && Number.isFinite(yRatio)
+            });
+            return false;
+          }
+
+          const x = xRatio * window.innerWidth;
+          const y = yRatio * window.innerHeight;
+          const candidates = typeof document.elementsFromPoint === 'function'
+            ? document.elementsFromPoint(x, y)
+            : [document.elementFromPoint(x, y)].filter(Boolean);
+          const handled = dispatchTarget(candidates);
+          postDiagnostic('dom-resolver-finished', { candidateCount: candidates.length, handled });
+          return handled;
+        }
+      });
+
+      postDiagnostic('script-installed', {
+        hasElementsFromPoint: typeof document.elementsFromPoint === 'function'
+      });
+
+      document.addEventListener('contextmenu', (event) => {
+        if (!event.isTrusted || !messageToken) return;
+        const path = typeof event.composedPath === 'function' ? event.composedPath() : [event.target];
+        const handled = dispatchTarget(path);
+        postDiagnostic('context-menu', { candidateCount: path.length, handled });
+        if (handled) event.preventDefault();
       }, true);
 
       true;
@@ -199,6 +282,13 @@ function normalizeTargetText (value) {
   return Array.from(normalized)
     .slice(0, MAX_BROWSER_MEDIA_TEXT_LENGTH)
     .join('')
+}
+
+function normalizeDiagnosticScalar (value) {
+  if (typeof value === 'boolean') return value
+  if (typeof value === 'number') return Number.isFinite(value) ? value : String(value)
+  if (typeof value === 'string') return Array.from(value).slice(0, 128).join('')
+  return String(value).slice(0, 128)
 }
 
 function hasControlCharacters (value) {

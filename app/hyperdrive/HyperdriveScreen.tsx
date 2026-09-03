@@ -180,7 +180,8 @@ export function HyperdriveScreen ({ isDark, isLandscape, onCallRpc, onOpenItem, 
         error: response.error,
         location: response.location,
         itemCount: Array.isArray(response.items) ? response.items.length : 0,
-        truncated: response.truncated === true
+        truncated: response.truncated === true,
+        backend: response.diagnostics
       })
       if (!response.ok || !response.location) throw new Error(response.error || 'Unable to fetch Hyper data.')
       const fetchedItems = Array.isArray(response.items) ? response.items : []

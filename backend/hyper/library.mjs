@@ -17,6 +17,7 @@ const MAX_UPLOAD_FILE_URI_LENGTH = 8192
 const MAX_LIST_ITEMS = 100
 const MAX_SCANNED_ENTRIES = 500
 const MAX_LIST_TIME_MS = 5000
+const DIRECTORY_DISCOVERY_RETRY_DELAYS_MS = [500, 1000, 1500]
 let uploadTransition = Promise.resolve()
 
 export async function listHyperdriveLocation ({ url } = {}, options = {}) {
@@ -25,17 +26,37 @@ export async function listHyperdriveLocation ({ url } = {}, options = {}) {
     return { ok: false, error: target.error || 'A Hyperdrive address is required.' }
   }
 
+  const startedAt = Date.now()
+  let stage = 'open-runtime'
+  let driveState = null
+
   try {
     return await runWithRuntime(options, async (runtime) => {
+      stage = 'open-drive'
+      const openDriveStartedAt = Date.now()
       const drive = await runtime.getDrive(target.driveAddress)
-      const entry = target.pathname === '/'
+      driveState = inspectDriveState(drive)
+      const openDriveMs = Date.now() - openDriveStartedAt
+      const explicitDirectory = target.pathname === '/' || target.pathname.endsWith('/')
+      stage = explicitDirectory ? 'list-directory' : 'probe-file'
+      const probeStartedAt = Date.now()
+      const entry = target.pathname === '/' || target.pathname.endsWith('/')
         ? null
         : await drive.entry(target.pathname, { timeout: MAX_LIST_TIME_MS })
+      const probeMs = Date.now() - probeStartedAt
 
       if (entry?.value?.blob) {
         const response = {
           ok: true,
-          location: createFileItem(target.driveAddress, target.pathname, entry.value)
+          location: createFileItem(target.driveAddress, target.pathname, entry.value),
+          diagnostics: {
+            stage: 'complete',
+            elapsedMs: Date.now() - startedAt,
+            openDriveMs,
+            probeMs,
+            explicitDirectory,
+            drive: inspectDriveState(drive)
+          }
         }
         await (options.recordArchive || recordHyperArchive)({
           url: response.location.url,
@@ -46,14 +67,30 @@ export async function listHyperdriveLocation ({ url } = {}, options = {}) {
       }
 
       const directory = normalizeDirectoryPath(target.pathname)
-      const { items, truncated, timedOut } = await listDirectory(
+      stage = 'list-directory'
+      const listStartedAt = Date.now()
+      const { items, truncated, timedOut, attempts } = await listDirectoryWithDiscoveryRetry(
         drive,
         target.driveAddress,
         directory,
-        resolveListTimeMs(options.listTimeMs)
+        resolveListTimeMs(options.listTimeMs),
+        options.directoryRetryDelaysMs
       )
       if (directory !== '/' && items.length === 0 && !timedOut) {
-        return { ok: false, error: 'No file or directory was found at this Hyper URL.' }
+        return {
+          ok: false,
+          error: 'No file or directory was found at this Hyper URL.',
+          diagnostics: {
+            stage: 'list-directory',
+            elapsedMs: Date.now() - startedAt,
+            openDriveMs,
+            probeMs,
+            listMs: Date.now() - listStartedAt,
+            listAttempts: attempts,
+            explicitDirectory,
+            drive: inspectDriveState(drive)
+          }
+        }
       }
       const response = {
         ok: true,
@@ -64,7 +101,18 @@ export async function listHyperdriveLocation ({ url } = {}, options = {}) {
           path: directory
         },
         items,
-        truncated
+        truncated,
+        diagnostics: {
+          stage: 'complete',
+          elapsedMs: Date.now() - startedAt,
+          openDriveMs,
+          probeMs,
+          listMs: Date.now() - listStartedAt,
+          listAttempts: attempts,
+          listTimedOut: timedOut,
+          explicitDirectory,
+          drive: inspectDriveState(drive)
+        }
       }
       await (options.recordArchive || recordHyperArchive)({
         url: response.location.url,
@@ -76,8 +124,67 @@ export async function listHyperdriveLocation ({ url } = {}, options = {}) {
   } catch (error) {
     return {
       ok: false,
-      error: error instanceof Error ? error.message : String(error)
+      error: error instanceof Error ? error.message : String(error),
+      diagnostics: {
+        stage,
+        elapsedMs: Date.now() - startedAt,
+        errorName: error instanceof Error ? error.name : typeof error,
+        drive: driveState
+      }
     }
+  }
+}
+
+async function listDirectoryWithDiscoveryRetry (
+  drive,
+  driveAddress,
+  directory,
+  maxListTimeMs,
+  retryDelays = DIRECTORY_DISCOVERY_RETRY_DELAYS_MS
+) {
+  const startedAt = Date.now()
+  const delays = Array.isArray(retryDelays)
+    ? retryDelays.filter((delay) => Number.isSafeInteger(delay) && delay >= 0).slice(0, 3)
+    : DIRECTORY_DISCOVERY_RETRY_DELAYS_MS
+  let attempts = 0
+  let result
+
+  while (true) {
+    attempts += 1
+    result = await listDirectory(
+      drive,
+      driveAddress,
+      directory,
+      Math.max(1, maxListTimeMs - (Date.now() - startedAt))
+    )
+    if (result.items.length > 0 || result.timedOut || !isAwaitingInitialMetadata(drive)) break
+
+    const delay = delays[attempts - 1]
+    const remainingTime = maxListTimeMs - (Date.now() - startedAt)
+    if (delay === undefined || delay >= remainingTime) break
+    await wait(delay)
+  }
+
+  return { ...result, attempts }
+}
+
+function isAwaitingInitialMetadata (drive) {
+  const core = drive?.core || drive?.db?.core || null
+  return core?.length === 0
+}
+
+function wait (delay) {
+  return new Promise((resolve) => setTimeout(resolve, delay))
+}
+
+function inspectDriveState (drive) {
+  const core = drive?.core || drive?.db?.core || null
+  const peers = core?.peers
+  return {
+    opened: drive?.opened === true,
+    metadataLength: Number.isSafeInteger(core?.length) ? core.length : null,
+    metadataContiguousLength: Number.isSafeInteger(core?.contiguousLength) ? core.contiguousLength : null,
+    metadataPeerCount: Array.isArray(peers) ? peers.length : null
   }
 }
 

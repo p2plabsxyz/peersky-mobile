@@ -109,6 +109,7 @@ import {
   BROWSER_MEDIA_TOKEN_LENGTH,
   createBrowserMediaToken,
   createBrowserMediaLongPressScript,
+  parseBrowserMediaDiagnosticMessage,
   parseBrowserMediaMessage
 } from './browser-media.mjs'
 import { BookmarksScreen } from './bookmarks/BookmarksScreen'
@@ -3126,11 +3127,11 @@ export default function App () {
             websiteTextScale: browserPreferences.websiteTextScale
           })
           const browserMediaScript = createBrowserMediaLongPressScript({
-            nativeHitTesting: Platform.OS === 'android' && Boolean(peerSkyWebViewNativeConfig),
             token: browserMediaToken
           })
           const browserInjectedScript = combineBrowserInjectedScripts(
             browserAccessibilityScript,
+            browserMediaScript,
             createBrowserFaviconScript()
           )
           const browserBeforeContentScript = combineBrowserInjectedScripts(
@@ -3261,6 +3262,19 @@ export default function App () {
                   if (browserTabsStateRef.current.activeTabId === tab.id) {
                     setBrowserMediaTarget({ ...mediaTarget, tabId: tab.id })
                   }
+                  return
+                }
+
+                const mediaDiagnostic = parseBrowserMediaDiagnosticMessage(
+                  event.nativeEvent.data,
+                  browserMediaToken
+                )
+                if (mediaDiagnostic) {
+                  recordBrowserDiagnostic('media-long-press', mediaDiagnostic.stage, {
+                    ...mediaDiagnostic.details,
+                    activeTab: browserTabsStateRef.current.activeTabId === tab.id,
+                    sourceKind: entry.source.kind
+                  })
                   return
                 }
 
