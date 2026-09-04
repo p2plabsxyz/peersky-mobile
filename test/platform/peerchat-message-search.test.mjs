@@ -4,6 +4,7 @@ import test from 'node:test'
 import {
   filterPeerChatMessages,
   filterPeerChatRooms,
+  formatPeerChatDateLabel,
   getFirstUnreadMessageIndex,
   PEERCHAT_SEARCH_QUERY_MAX_CHARACTERS
 } from '../../app/peerchat/message-search.mjs'
@@ -52,4 +53,23 @@ test('PeerChat finds the first message after a valid read timestamp', () => {
   assert.equal(getFirstUnreadMessageIndex(timeline, 0), -1)
   assert.equal(getFirstUnreadMessageIndex(timeline, Number.MAX_SAFE_INTEGER + 1), -1)
   assert.equal(getFirstUnreadMessageIndex(null, 200), -1)
+})
+
+test('PeerChat formats desktop-compatible message date separators', () => {
+  const now = new Date(2026, 8, 4, 12).getTime()
+  const yesterday = new Date(2026, 8, 3, 23, 59).getTime()
+  const earlierThisWeek = new Date(2026, 8, 1, 12).getTime()
+  const older = new Date(2026, 7, 20, 12).getTime()
+
+  assert.equal(formatPeerChatDateLabel(now, now), 'Today')
+  assert.equal(formatPeerChatDateLabel(yesterday, now), 'Yesterday')
+  assert.equal(
+    formatPeerChatDateLabel(earlierThisWeek, now),
+    new Date(earlierThisWeek).toLocaleDateString([], { weekday: 'long' })
+  )
+  assert.equal(
+    formatPeerChatDateLabel(older, now),
+    new Date(older).toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' })
+  )
+  assert.equal(formatPeerChatDateLabel(Number.NaN, now), '')
 })

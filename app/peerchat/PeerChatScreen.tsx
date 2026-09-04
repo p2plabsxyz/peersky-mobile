@@ -35,6 +35,7 @@ import {
 import {
   filterPeerChatMessages,
   filterPeerChatRooms,
+  formatPeerChatDateLabel,
   getFirstUnreadMessageIndex,
   PEERCHAT_SEARCH_QUERY_MAX_CHARACTERS
 } from './message-search.mjs'
@@ -1130,13 +1131,25 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
               offset: Math.max(0, averageItemLength * index)
             })
           }}
-          renderItem={({ item, index }) => (
-            <>
+          renderItem={({ item, index }) => {
+            const dateLabel = formatPeerChatDateLabel(item.timestamp)
+            const previousDateLabel = index > 0
+              ? formatPeerChatDateLabel(visibleMessages[index - 1].timestamp)
+              : ''
+            return (
+              <>
               {index === firstUnreadIndex && (
                 <View accessibilityRole='text' style={styles.unreadDivider}>
                   <View style={[styles.unreadDividerLine, { backgroundColor: colors.accent }]} />
                   <Text style={[styles.unreadDividerText, { color: colors.accent }]}>New messages</Text>
                   <View style={[styles.unreadDividerLine, { backgroundColor: colors.accent }]} />
+                </View>
+              )}
+              {!!dateLabel && dateLabel !== previousDateLabel && (
+                <View accessibilityRole='text' style={styles.dateDivider}>
+                  <View style={[styles.dateDividerLine, { backgroundColor: colors.border }]} />
+                  <Text style={[styles.dateDividerText, { color: colors.muted }]}>{dateLabel}</Text>
+                  <View style={[styles.dateDividerLine, { backgroundColor: colors.border }]} />
                 </View>
               )}
               <View style={[styles.messageRow, item.self ? styles.messageRowSelf : null]}>
@@ -1230,8 +1243,9 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
                 </Text>
               </Pressable>
               </View>
-            </>
-          )}
+              </>
+            )
+          }}
           ListEmptyComponent={(
             <View style={styles.emptyState}>
               <Text style={[styles.emptyTitle, { color: colors.text }]}>
@@ -1833,6 +1847,9 @@ const styles = StyleSheet.create({
   unreadDivider: { alignItems: 'center', flexDirection: 'row', gap: 9, marginBottom: 14, marginTop: 5 },
   unreadDividerLine: { flex: 1, height: StyleSheet.hairlineWidth },
   unreadDividerText: { fontSize: 11, fontWeight: '700' },
+  dateDivider: { alignItems: 'center', flexDirection: 'row', gap: 9, marginBottom: 12, marginTop: 4 },
+  dateDividerLine: { flex: 1, height: StyleSheet.hairlineWidth },
+  dateDividerText: { fontSize: 11, fontWeight: '600' },
   messageRow: { alignItems: 'flex-start', marginBottom: 9 },
   messageRowSelf: { alignItems: 'flex-end' },
   messageBubble: { borderRadius: 15, maxWidth: '84%', minWidth: 84, paddingHorizontal: 12, paddingVertical: 8 },

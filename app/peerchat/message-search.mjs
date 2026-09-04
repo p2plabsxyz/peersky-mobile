@@ -31,6 +31,20 @@ export function getFirstUnreadMessageIndex (messages, lastReadTs) {
   return messages.findIndex((message) => Number.isSafeInteger(message?.timestamp) && message.timestamp > lastReadTs)
 }
 
+export function formatPeerChatDateLabel (timestamp, now = Date.now()) {
+  if (!Number.isSafeInteger(timestamp) || timestamp < 0 || !Number.isSafeInteger(now) || now < 0) return ''
+  const date = new Date(timestamp)
+  const today = new Date(now)
+  const dateDay = Date.UTC(date.getFullYear(), date.getMonth(), date.getDate())
+  const todayDay = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate())
+  const daysAgo = Math.round((todayDay - dateDay) / 86_400_000)
+
+  if (daysAgo === 0) return 'Today'
+  if (daysAgo === 1) return 'Yesterday'
+  if (daysAgo > 1 && daysAgo < 7) return date.toLocaleDateString([], { weekday: 'long' })
+  return date.toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' })
+}
+
 function normalizeSearchQuery (query) {
   if (typeof query !== 'string') return ''
   return Array.from(query.trim())
