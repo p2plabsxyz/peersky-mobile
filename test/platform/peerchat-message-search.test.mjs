@@ -5,6 +5,7 @@ import {
   filterPeerChatMessages,
   filterPeerChatRooms,
   formatPeerChatDateLabel,
+  formatPeerChatMessageDetails,
   getFirstUnreadMessageIndex,
   PEERCHAT_SEARCH_QUERY_MAX_CHARACTERS
 } from '../../app/peerchat/message-search.mjs'
@@ -72,4 +73,14 @@ test('PeerChat formats desktop-compatible message date separators', () => {
     new Date(older).toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' })
   )
   assert.equal(formatPeerChatDateLabel(Number.NaN, now), '')
+})
+
+test('PeerChat formats bounded message details', () => {
+  const timestamp = new Date(2026, 8, 4, 12, 30).getTime()
+  const date = new Date(timestamp)
+  const day = date.toLocaleDateString([], { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
+
+  assert.equal(formatPeerChatMessageDetails(timestamp), `Sent ${day} at ${date.toLocaleTimeString()}`)
+  assert.equal(formatPeerChatMessageDetails(-1), 'Sent time unavailable')
+  assert.equal(formatPeerChatMessageDetails(Number.NaN), 'Sent time unavailable')
 })

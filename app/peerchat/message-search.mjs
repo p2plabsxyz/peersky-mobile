@@ -45,6 +45,13 @@ export function formatPeerChatDateLabel (timestamp, now = Date.now()) {
   return date.toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' })
 }
 
+export function formatPeerChatMessageDetails (timestamp) {
+  if (!Number.isSafeInteger(timestamp) || timestamp < 0) return 'Sent time unavailable'
+  const date = new Date(timestamp)
+  const day = date.toLocaleDateString([], { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
+  return `Sent ${day} at ${date.toLocaleTimeString()}`
+}
+
 function normalizeSearchQuery (query) {
   if (typeof query !== 'string') return ''
   return Array.from(query.trim())

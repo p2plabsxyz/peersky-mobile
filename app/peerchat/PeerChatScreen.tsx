@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { File, Paths } from 'expo-file-system'
 import * as DocumentPicker from 'expo-document-picker'
 import { fetch as expoFetch } from 'expo/fetch'
+import { SafeAreaView } from 'react-native-safe-area-context'
 import {
   ActivityIndicator,
   Alert,
@@ -11,6 +12,7 @@ import {
   FlatList,
   Image,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -36,6 +38,7 @@ import {
   filterPeerChatMessages,
   filterPeerChatRooms,
   formatPeerChatDateLabel,
+  formatPeerChatMessageDetails,
   getFirstUnreadMessageIndex,
   PEERCHAT_SEARCH_QUERY_MAX_CHARACTERS
 } from './message-search.mjs'
@@ -231,6 +234,8 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
   const [composer, setComposer] = useState('')
   const [replyTarget, setReplyTarget] = useState<PeerChatReply | null>(null)
   const [reactionTargetId, setReactionTargetId] = useState<string | null>(null)
+  const [messageActionTarget, setMessageActionTarget] = useState<PeerChatMessage | null>(null)
+  const [isMessageInfoVisible, setIsMessageInfoVisible] = useState(false)
   const [isSearching, setIsSearching] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [roomSearchQuery, setRoomSearchQuery] = useState('')
@@ -847,32 +852,35 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
   }
 
   function showMessageActions (message: PeerChatMessage) {
-    Alert.alert(
-      message.senderName,
-      Array.from(message.message).slice(0, 200).join(''),
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'React',
-          onPress: () => {
-            setReplyTarget(null)
-            setReactionTargetId(message.id)
-          }
-        },
-        {
-          text: 'Reply',
-          onPress: () => {
-            setReactionTargetId(null)
-            setReplyTarget({
-              id: message.id,
-              sender: message.sender,
-              sn: message.senderName,
-              text: message.message
-            })
-          }
-        }
-      ]
-    )
+    setIsMessageInfoVisible(false)
+    setMessageActionTarget(message)
+  }
+
+  function reactToMessage (message: PeerChatMessage) {
+    setMessageActionTarget(null)
+    setReplyTarget(null)
+    setReactionTargetId(message.id)
+  }
+
+  function replyToMessage (message: PeerChatMessage) {
+    setMessageActionTarget(null)
+    setReactionTargetId(null)
+    setReplyTarget({
+      id: message.id,
+      sender: message.sender,
+      sn: message.senderName,
+      text: message.message
+    })
+  }
+
+  function copyMessageText (message: PeerChatMessage) {
+    Clipboard.setString(message.message)
+    setMessageActionTarget(null)
+    onStatus('Message copied')
+  }
+
+  function showMessageInfo () {
+    setIsMessageInfoVisible(true)
   }
 
   function sendReaction (messageId: string, emoji: string) {
@@ -1370,6 +1378,66 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
         <Pressable accessibilityRole='button' onPress={confirmLeaveRoom} style={styles.leaveAction}>
           <Text style={[styles.leaveText, { color: colors.danger }]}>Leave room</Text>
         </Pressable>
+        <Modal
+          animationType='fade'
+          onRequestClose={() => setMessageActionTarget(null)}
+          statusBarTranslucent
+          transparent
+          visible={messageActionTarget !== null}
+        >
+          <View accessibilityViewIsModal style={styles.actionSheetRoot}>
+            <Pressable
+              accessibilityLabel='Close message actions'
+              accessibilityRole='button'
+              onPress={() => setMessageActionTarget(null)}
+              style={styles.actionSheetBackdrop}
+            />
+            {messageActionTarget && (
+              <SafeAreaView
+                edges={['bottom', 'left', 'right']}
+                style={[styles.actionSheet, { backgroundColor: colors.surface }]}
+              >
+                <Text numberOfLines={1} style={[styles.actionSheetTitle, { color: colors.text }]}>
+                  {messageActionTarget.self ? 'You' : messageActionTarget.senderName}
+                </Text>
+                <Text numberOfLines={2} style={[styles.actionSheetPreview, { color: colors.muted }]}>
+                  {Array.from(messageActionTarget.message).slice(0, 200).join('')}
+                </Text>
+                <View style={[styles.actionSheetDivider, { backgroundColor: colors.border }]} />
+                {isMessageInfoVisible
+                  ? (
+                    <>
+                      <Text style={[styles.actionSheetDetails, { color: colors.text }]}>
+                        {formatPeerChatMessageDetails(messageActionTarget.timestamp)}
+                      </Text>
+                      <Pressable accessibilityRole='button' onPress={() => setIsMessageInfoVisible(false)} style={styles.actionSheetAction}>
+                        <Text style={[styles.actionSheetActionText, { color: colors.accent }]}>Back</Text>
+                      </Pressable>
+                    </>
+                    )
+                  : (
+                    <>
+                      <Pressable accessibilityRole='button' onPress={() => replyToMessage(messageActionTarget)} style={styles.actionSheetAction}>
+                        <Text style={[styles.actionSheetActionText, { color: colors.text }]}>Reply</Text>
+                      </Pressable>
+                      <Pressable accessibilityRole='button' onPress={() => reactToMessage(messageActionTarget)} style={styles.actionSheetAction}>
+                        <Text style={[styles.actionSheetActionText, { color: colors.text }]}>React</Text>
+                      </Pressable>
+                      <Pressable accessibilityRole='button' onPress={() => copyMessageText(messageActionTarget)} style={styles.actionSheetAction}>
+                        <Text style={[styles.actionSheetActionText, { color: colors.text }]}>Copy text</Text>
+                      </Pressable>
+                      <Pressable accessibilityRole='button' onPress={showMessageInfo} style={styles.actionSheetAction}>
+                        <Text style={[styles.actionSheetActionText, { color: colors.text }]}>Info</Text>
+                      </Pressable>
+                      <Pressable accessibilityRole='button' onPress={() => setMessageActionTarget(null)} style={styles.actionSheetAction}>
+                        <Text style={[styles.actionSheetActionText, { color: colors.accent }]}>Cancel</Text>
+                      </Pressable>
+                    </>
+                    )}
+              </SafeAreaView>
+            )}
+          </View>
+        </Modal>
       </KeyboardAvoidingView>
     )
   }
@@ -1893,5 +1961,14 @@ const styles = StyleSheet.create({
   sendButton: { alignItems: 'center', borderRadius: 20, height: 42, justifyContent: 'center', paddingHorizontal: 16 },
   sendButtonText: { color: '#ffffff', fontSize: 13, fontWeight: '900' },
   leaveAction: { alignItems: 'center', paddingBottom: 7, paddingTop: 2 },
-  leaveText: { fontSize: 11, fontWeight: '700' }
+  leaveText: { fontSize: 11, fontWeight: '700' },
+  actionSheetRoot: { flex: 1, justifyContent: 'flex-end' },
+  actionSheetBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0, 0, 0, 0.45)' },
+  actionSheet: { borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 18, paddingHorizontal: 18, paddingTop: 16 },
+  actionSheetTitle: { fontSize: 16, fontWeight: '800' },
+  actionSheetPreview: { fontSize: 13, lineHeight: 18, marginTop: 4 },
+  actionSheetDivider: { height: StyleSheet.hairlineWidth, marginVertical: 12 },
+  actionSheetDetails: { fontSize: 14, lineHeight: 20, minHeight: 48, paddingVertical: 8 },
+  actionSheetAction: { justifyContent: 'center', minHeight: 48, paddingHorizontal: 4 },
+  actionSheetActionText: { fontSize: 16, fontWeight: '600' }
 })
