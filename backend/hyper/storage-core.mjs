@@ -5,7 +5,8 @@ export const P2P_APP_DRIVES = [
     title: 'Hyperdrive',
     drives: [
       { driveName: 'hyperdrive-public', title: 'Public', autoJoin: true },
-      { driveName: 'hyperdrive-private', title: 'Private', autoJoin: false },
+      { driveName: 'hyperdrive-private', title: 'Private', autoJoin: true },
+      { driveName: 'hyperdrive-device', title: 'This device only', autoJoin: false },
       { driveName: 'hyperdrive', title: 'Legacy', autoJoin: true }
     ]
   }
@@ -13,6 +14,7 @@ export const P2P_APP_DRIVES = [
 export const HYPERDRIVE_APP_DRIVE_NAME = 'hyperdrive'
 export const HYPERDRIVE_PUBLIC_DRIVE_NAME = 'hyperdrive-public'
 export const HYPERDRIVE_PRIVATE_DRIVE_NAME = 'hyperdrive-private'
+export const HYPERDRIVE_DEVICE_DRIVE_NAME = 'hyperdrive-device'
 
 const DEFAULT_PAGE_SIZE = 5
 const MAX_PAGE_SIZE = 10
@@ -32,23 +34,30 @@ export function resolveHyperdriveUploadTarget (visibility) {
     return { driveName: HYPERDRIVE_PUBLIC_DRIVE_NAME, autoJoin: true }
   }
   if (visibility === 'private') {
-    return { driveName: HYPERDRIVE_PRIVATE_DRIVE_NAME, autoJoin: false }
+    return { driveName: HYPERDRIVE_PRIVATE_DRIVE_NAME, autoJoin: true }
+  }
+  if (visibility === 'device') {
+    return { driveName: HYPERDRIVE_DEVICE_DRIVE_NAME, autoJoin: false }
   }
   return null
 }
 
 export function createRoutedP2pStorageRuntime (
   networkedRuntime,
-  getPrivateRuntime
+  getDeviceOnlyRuntime,
+  getSyncedPrivateDrive
 ) {
   return {
     async getExistingDrive (driveName) {
-      const runtime = driveName === HYPERDRIVE_PRIVATE_DRIVE_NAME
-        ? await getPrivateRuntime()
+      if (driveName === HYPERDRIVE_PRIVATE_DRIVE_NAME) {
+        return getSyncedPrivateDrive()
+      }
+      const runtime = driveName === HYPERDRIVE_DEVICE_DRIVE_NAME
+        ? await getDeviceOnlyRuntime()
         : networkedRuntime
       return getExistingNamedDrive(runtime, {
         driveName,
-        autoJoin: driveName !== HYPERDRIVE_PRIVATE_DRIVE_NAME
+        autoJoin: driveName !== HYPERDRIVE_DEVICE_DRIVE_NAME
       })
     }
   }

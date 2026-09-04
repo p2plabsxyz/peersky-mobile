@@ -172,41 +172,49 @@ test('rejects invalid and oversized uploads before opening the runtime', async (
   assert.equal(opened, false)
 })
 
-test('routes public and private uploads to separate runtimes', async () => {
+test('routes public, private, and device-only uploads to separate runtimes', async () => {
   const publicRequests = []
-  const privateRequests = []
+  const deviceRequests = []
   const runtime = {
     getDrive: async (name, options) => {
       publicRequests.push({ name, options })
       return createDrive({})
     }
   }
-  const privateRuntime = {
+  const deviceRuntime = {
     getDrive: async (name, options) => {
-      privateRequests.push({ name, options })
+      deviceRequests.push({ name, options })
       return createDrive({})
     }
   }
+  const syncedDrive = createDrive({})
 
   const publicUpload = await uploadHyperdriveFile({
     name: 'public.txt',
     contentBase64: Buffer.from('public').toString('base64'),
     visibility: 'public'
-  }, { runtime, privateRuntime })
+  }, { runtime })
   const privateUpload = await uploadHyperdriveFile({
     name: 'private.txt',
     contentBase64: Buffer.from('private').toString('base64'),
     visibility: 'private'
-  }, { runtime, privateRuntime })
+  }, { runtime, getSyncedPrivateDrive: async () => syncedDrive })
+  const deviceUpload = await uploadHyperdriveFile({
+    name: 'local.txt',
+    contentBase64: Buffer.from('local').toString('base64'),
+    visibility: 'device'
+  }, { runtime, privateRuntime: deviceRuntime })
 
   assert.deepEqual(publicRequests, [
     { name: 'hyperdrive-public', options: { autoJoin: true } }
   ])
-  assert.deepEqual(privateRequests, [
-    { name: 'hyperdrive-private', options: { autoJoin: false } }
+  assert.deepEqual(deviceRequests, [
+    { name: 'hyperdrive-device', options: { autoJoin: false } }
   ])
   assert.equal(publicUpload.item.visibility, 'public')
   assert.equal(privateUpload.item.visibility, 'private')
+  assert.equal(privateUpload.item.url, `hyper://${syncedDrive.id}/private.txt`)
+  assert.equal(deviceUpload.item.visibility, 'device')
 })
 
 test('rejects missing or invalid upload visibility before opening the runtime', async () => {

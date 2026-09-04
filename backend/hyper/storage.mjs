@@ -6,6 +6,8 @@ import {
   getHyperStoragePath,
   getPrivateHyperRuntime,
   getPrivateHyperStoragePath,
+  getSyncedPrivateHyperdrive,
+  getSyncedPrivateHyperStoragePath,
   withHyperRuntimeMaintenance,
   withHyperRuntimeOperation
 } from './runtime.mjs'
@@ -117,6 +119,7 @@ function performAllP2pDataClear (options) {
     removeStorage: options.removeStorage || ((storagePath) => removeHyperStoragePaths({
       storagePath,
       privateStoragePath: getPrivateHyperStoragePath(),
+      syncedPrivateStoragePath: getSyncedPrivateHyperStoragePath(),
       removeStorage: (target) => rmSync(target, { recursive: true, force: true })
     })),
     clearArchive: options.clearArchive || clearHyperArchive
@@ -125,7 +128,7 @@ function performAllP2pDataClear (options) {
 
 async function createP2pStorageRuntime (mainRuntime = null) {
   const networkedRuntime = mainRuntime || await getHyperRuntime()
-  return createRoutedP2pStorageRuntime(networkedRuntime, getPrivateHyperRuntime)
+  return createRoutedP2pStorageRuntime(networkedRuntime, getPrivateHyperRuntime, () => getSyncedPrivateHyperdrive())
 }
 
 function withStorageTransition (task) {
