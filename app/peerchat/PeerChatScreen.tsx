@@ -145,6 +145,7 @@ type PeerChatMember = {
   bio: string
   avatar: string | null
   self: boolean
+  online: boolean
 }
 
 type PeerChatProfile = {
@@ -1174,7 +1175,7 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
             )}
             {activeRoom.members.some((member) => !member.self) && (
               <View style={styles.memberList}>
-                <Text style={[styles.roomInfoTitle, { color: colors.text }]}>People</Text>
+                <Text style={[styles.roomInfoTitle, { color: colors.text }]}>People online</Text>
                 <TextInput
                   autoCapitalize='none'
                   autoCorrect={false}
@@ -1193,13 +1194,16 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
                     onPress={() => startDirectMessage(member)}
                     style={[styles.memberRow, { backgroundColor: colors.input }]}
                   >
-                    {member.avatar
-                      ? <Image source={{ uri: member.avatar }} style={styles.memberAvatar} />
-                      : (
-                        <View style={[styles.memberAvatarFallback, { backgroundColor: colors.accentSoft }]}>
-                          <Text style={[styles.memberAvatarText, { color: colors.accent }]}>{getRoomInitials(member.username)}</Text>
-                        </View>
-                        )}
+                    <View style={styles.memberAvatarWrap}>
+                      {member.avatar
+                        ? <Image source={{ uri: member.avatar }} style={styles.memberAvatar} />
+                        : (
+                          <View style={[styles.memberAvatarFallback, { backgroundColor: colors.accentSoft }]}>
+                            <Text style={[styles.memberAvatarText, { color: colors.accent }]}>{getRoomInitials(member.username)}</Text>
+                          </View>
+                          )}
+                      <View style={[styles.onlineDot, { backgroundColor: member.online ? colors.success : colors.muted }]} />
+                    </View>
                     <View style={styles.memberCopy}>
                       <Text style={[styles.memberName, { color: colors.text }]}>{member.username}</Text>
                       {!!member.bio && <Text numberOfLines={1} style={[styles.attachmentMeta, { color: colors.muted }]}>{member.bio}</Text>}
@@ -1953,7 +1957,8 @@ function getMentionCandidates (
       username: message.senderName,
       bio: '',
       avatar: null,
-      self: false
+      self: false,
+      online: true
     })
   }
 
@@ -2129,8 +2134,10 @@ const styles = StyleSheet.create({
   memberList: { gap: 6, marginTop: 2 },
   memberRow: { alignItems: 'center', borderRadius: 10, flexDirection: 'row', gap: 8, minHeight: 46, paddingHorizontal: 9, paddingVertical: 6 },
   memberAvatar: { borderRadius: 16, height: 32, width: 32 },
+  memberAvatarWrap: { height: 32, width: 32 },
   memberAvatarFallback: { alignItems: 'center', borderRadius: 16, height: 32, justifyContent: 'center', width: 32 },
   memberAvatarText: { fontSize: 10, fontWeight: '900' },
+  onlineDot: { borderColor: '#ffffff', borderRadius: 5, borderWidth: 2, bottom: -1, height: 10, position: 'absolute', right: -1, width: 10 },
   memberCopy: { flex: 1 },
   memberName: { fontSize: 13, fontWeight: '800' },
   memberMessage: { fontSize: 12, fontWeight: '800' },

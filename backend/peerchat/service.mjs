@@ -1298,7 +1298,8 @@ export class PeerChatService {
         username: this.profile.username,
         bio: this.profile.bio || '',
         avatar: this.profile.avatar || null,
-        self: true
+        self: true,
+        online: true
       })
     }
     for (const peer of this.peers.values()) {
@@ -1310,7 +1311,8 @@ export class PeerChatService {
         username,
         bio: peer.bio || '',
         avatar: peer.avatar || null,
-        self: false
+        self: false,
+        online: true
       })
       if (members.size >= MAX_RETURNED_ROOM_MEMBERS) break
     }

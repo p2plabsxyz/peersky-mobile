@@ -337,8 +337,8 @@ test('PeerChat exposes bounded participant names from desktop profile frames', a
 
   await service.handlePeerMessage(peer, { type: 'profile', username: 'Desktop User' })
   assert.deepEqual(service.listRooms()[0].members, [
-    { id: service.localId, username: 'Alice Mobile', bio: '', avatar: null, self: true },
-    { id: 'desktop-peer', username: 'Desktop User', bio: '', avatar: null, self: false }
+    { id: service.localId, username: 'Alice Mobile', bio: '', avatar: null, self: true, online: true },
+    { id: 'desktop-peer', username: 'Desktop User', bio: '', avatar: null, self: false, online: true }
   ])
 
   await service.handlePeerMessage(peer, { type: 'profile', username: '<invalid>' })
