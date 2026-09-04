@@ -35,6 +35,7 @@ import {
   serializePeerChatUiState
 } from './ui-state.mjs'
 import {
+  filterPeerChatMembers,
   filterPeerChatMessages,
   filterPeerChatRooms,
   formatPeerChatDateLabel,
@@ -43,6 +44,10 @@ import {
   isPeerChatNearBottom,
   PEERCHAT_SEARCH_QUERY_MAX_CHARACTERS
 } from './message-search.mjs'
+import {
+  createPeerChatAvatarDataUrl,
+  MAX_PEERCHAT_AVATAR_FILE_BYTES
+} from './avatar.mjs'
 import {
   extractFirstHttpUrl,
   resolveLinkPreview
@@ -123,6 +128,8 @@ type PeerChatRoom = {
   isPinned: boolean
   isMuted: boolean
   createdAt: number
+  createdBy: string
+  createdByName: string
   lastMessage: PeerChatLastMessage | null
   peerCount: number
   unreadCount: number
@@ -225,8 +232,12 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
   const [profile, setProfile] = useState<PeerChatProfile | null>(null)
   const [profileName, setProfileName] = useState('')
   const [profileBio, setProfileBio] = useState('')
+  const [profileAvatar, setProfileAvatar] = useState<string | null>(null)
   const [linkPreviewsEnabled, setLinkPreviewsEnabled] = useState(true)
   const [roomName, setRoomName] = useState('')
+  const [roomBio, setRoomBio] = useState('')
+  const [roomLink, setRoomLink] = useState('')
+  const [roomAvatar, setRoomAvatar] = useState<string | null>(null)
   const [joinKey, setJoinKey] = useState('')
   const [rooms, setRooms] = useState<PeerChatRoom[]>([])
   const [pendingDirectMessages, setPendingDirectMessages] = useState<PeerChatDirectInvite[]>([])
@@ -246,6 +257,9 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
   const [editRoomName, setEditRoomName] = useState('')
   const [editRoomBio, setEditRoomBio] = useState('')
   const [editRoomLink, setEditRoomLink] = useState('')
+  const [editRoomAvatar, setEditRoomAvatar] = useState<string | null>(null)
+  const [memberSearchQuery, setMemberSearchQuery] = useState('')
+  const [showComposerEmoji, setShowComposerEmoji] = useState(false)
   const [landingAction, setLandingAction] = useState<LandingAction>(null)
   const [restoredUiState, setRestoredUiState] = useState<PeerChatUiState | null>(null)
   const mentionCandidates = getMentionCandidates(
@@ -257,6 +271,10 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
   const visibleMessages = filterPeerChatMessages(messages, isSearching ? searchQuery : '') as PeerChatMessage[]
   const firstUnreadIndex = isSearching ? -1 : getFirstUnreadMessageIndex(visibleMessages, newMessagesAfter)
   const visibleRooms = filterPeerChatRooms(rooms, roomSearchQuery) as PeerChatRoom[]
+  const visibleMembers = filterPeerChatMembers(
+    activeRoom?.members.filter((member) => !member.self) || [],
+    memberSearchQuery
+  ) as PeerChatMember[]
 
   useEffect(() => {
     callRpcRef.current = onCallRpc
@@ -382,6 +400,7 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
         setProfile(nextProfile)
         setProfileName(nextProfile?.username || '')
         setProfileBio(nextProfile?.bio || '')
+        setProfileAvatar(nextProfile?.avatar || null)
         setLinkPreviewsEnabled(nextProfile?.linkPreview !== false)
         setRooms(response.rooms || [])
         setPendingDirectMessages(response.pendingDirectMessages || [])
@@ -527,6 +546,7 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
     const response = await callRpc(RPC_PEERCHAT_PROFILE_SET, {
       username: profileName,
       bio: profileBio,
+      avatar: profileAvatar,
       linkPreview: linkPreviewsEnabled
     })
     if (!response.ok || !response.profile) {
@@ -536,6 +556,7 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
     setProfile(response.profile)
     setProfileName(response.profile.username)
     setProfileBio(response.profile.bio || '')
+    setProfileAvatar(response.profile.avatar || null)
     setLinkPreviewsEnabled(response.profile.linkPreview !== false)
   }
 
@@ -558,6 +579,42 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
     }
   }
 
+  function chooseAvatar (current: string | null, onChange: (avatar: string | null) => void) {
+    if (isBusy) return
+    const select = () => void runAction(async () => {
+      const selection = await DocumentPicker.getDocumentAsync({
+        type: ['image/png', 'image/jpeg', 'image/webp', 'image/gif'],
+        copyToCacheDirectory: true,
+        multiple: false
+      })
+      if (selection.canceled || !selection.assets[0]) return
+
+      const asset = selection.assets[0]
+      const file = new File(asset.uri)
+      const size = asset.size ?? file.size
+      if (!Number.isSafeInteger(size) || Number(size) < 1 || Number(size) > MAX_PEERCHAT_AVATAR_FILE_BYTES) {
+        throw new Error('Choose an image smaller than 143 KB.')
+      }
+      const avatar = createPeerChatAvatarDataUrl({
+        name: asset.name,
+        mimeType: asset.mimeType,
+        size,
+        base64: await file.base64()
+      })
+      if (mountedRef.current) onChange(avatar)
+    })
+
+    if (!current) {
+      select()
+      return
+    }
+    Alert.alert('Chat image', 'Choose a new image or remove the current one.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Remove', style: 'destructive', onPress: () => onChange(null) },
+      { text: 'Choose image', onPress: select }
+    ])
+  }
+
   function openRoom (room: PeerChatRoom) {
     if (composerRoomKeyRef.current !== room.roomKey) setComposer('')
     composerRoomKeyRef.current = room.roomKey
@@ -571,6 +628,9 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
     setEditRoomName(room.name)
     setEditRoomBio(room.bio || '')
     setEditRoomLink(room.link || '')
+    setEditRoomAvatar(room.avatar || null)
+    setMemberSearchQuery('')
+    setShowComposerEmoji(false)
     captureUnreadBoundary(room)
     setActiveRoom(room)
     setRooms((current) => current.map((item) => item.roomKey === room.roomKey
@@ -597,7 +657,8 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
         roomKey: activeRoom.roomKey,
         name: editRoomName,
         bio: editRoomBio,
-        link: editRoomLink
+        link: editRoomLink,
+        avatar: editRoomAvatar
       })
       if (!response.ok || !response.room || !response.rooms) {
         throw new Error(response.error || 'Unable to save room details.')
@@ -608,6 +669,7 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
       setEditRoomName(response.room.name)
       setEditRoomBio(response.room.bio || '')
       setEditRoomLink(response.room.link || '')
+      setEditRoomAvatar(response.room.avatar || null)
       setShowRoomInfo(false)
       onStatus('PeerChat room details saved')
     })
@@ -651,7 +713,10 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
     void runAction(async () => {
       await saveProfile()
       const response = await callRpc(RPC_PEERCHAT_ROOM_CREATE, {
-        name: roomName
+        name: roomName,
+        bio: roomBio,
+        link: roomLink,
+        avatar: roomAvatar
       })
       if (!response.ok || !response.room) {
         throw new Error(response.error || 'Unable to create PeerChat room.')
@@ -659,6 +724,9 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
       if (!mountedRef.current) return
       setRooms((current) => [response.room as PeerChatRoom, ...current])
       setRoomName('')
+      setRoomBio('')
+      setRoomLink('')
+      setRoomAvatar(null)
       openRoom(response.room)
       onStatus('PeerChat room created')
     })
@@ -977,13 +1045,18 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
             <Text style={[styles.headerActionText, { color: colors.accent }]}>Back</Text>
           </Pressable>
           <View style={styles.chatHeaderCopy}>
-            <Text numberOfLines={1} style={[styles.chatTitle, { color: colors.text }]}>{activeRoom.name}</Text>
-            <Text style={[
-              styles.connectionText,
-              { color: activeRoom.connectionState === 'connected' ? colors.success : colors.muted }
-            ]}>
-              {formatRoomConnection(activeRoom)}
-            </Text>
+            {activeRoom.avatar
+              ? <Image source={{ uri: activeRoom.avatar }} style={styles.chatHeaderAvatar} />
+              : null}
+            <View style={styles.chatHeaderText}>
+              <Text numberOfLines={1} style={[styles.chatTitle, { color: colors.text }]}>{activeRoom.name}</Text>
+              <Text style={[
+                styles.connectionText,
+                { color: activeRoom.connectionState === 'connected' ? colors.success : colors.muted }
+              ]}>
+                {formatRoomConnection(activeRoom)}
+              </Text>
+            </View>
           </View>
           <View style={styles.chatHeaderActions}>
             <Pressable
@@ -1014,10 +1087,24 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
         </View>
 
         {showRoomInfo && (
-          <View style={[styles.roomInfo, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
+          <ScrollView
+            keyboardShouldPersistTaps='handled'
+            style={[styles.roomInfoPanel, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}
+            contentContainerStyle={styles.roomInfo}
+          >
             {activeRoom.isHost
               ? (
                 <>
+                  <Pressable
+                    accessibilityRole='button'
+                    onPress={() => chooseAvatar(editRoomAvatar, setEditRoomAvatar)}
+                    style={styles.avatarEditor}
+                  >
+                    {editRoomAvatar
+                      ? <Image source={{ uri: editRoomAvatar }} style={styles.avatarEditorImage} />
+                      : <View style={[styles.avatarEditorImage, { backgroundColor: colors.accentSoft }]} />}
+                    <Text style={[styles.memberMessage, { color: colors.accent }]}>Change room image</Text>
+                  </Pressable>
                   <TextInput
                     maxLength={80}
                     onChangeText={setEditRoomName}
@@ -1069,10 +1156,36 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
                   )}
                 </>
                 )}
+            {!activeRoom.isDM && (
+              <View style={styles.roomProvenance}>
+                <Text style={[styles.helper, { color: colors.muted }]}>
+                  Created by {activeRoom.createdByName || 'Unknown'}{formatRoomCreatedAt(activeRoom.createdAt)}
+                </Text>
+                <Pressable
+                  accessibilityRole='button'
+                  onPress={() => {
+                    Clipboard.setString(activeRoom.roomKey)
+                    onStatus('PeerChat room key copied')
+                  }}
+                >
+                  <Text style={[styles.memberMessage, { color: colors.accent }]}>Copy room key</Text>
+                </Pressable>
+              </View>
+            )}
             {activeRoom.members.some((member) => !member.self) && (
               <View style={styles.memberList}>
                 <Text style={[styles.roomInfoTitle, { color: colors.text }]}>People</Text>
-                {activeRoom.members.filter((member) => !member.self).map((member) => (
+                <TextInput
+                  autoCapitalize='none'
+                  autoCorrect={false}
+                  maxLength={PEERCHAT_SEARCH_QUERY_MAX_CHARACTERS}
+                  onChangeText={setMemberSearchQuery}
+                  placeholder='Search people'
+                  placeholderTextColor={colors.muted}
+                  style={[styles.input, { backgroundColor: colors.input, color: colors.text }]}
+                  value={memberSearchQuery}
+                />
+                {visibleMembers.map((member) => (
                   <Pressable
                     accessibilityHint='Starts a private conversation'
                     accessibilityRole='button'
@@ -1094,9 +1207,12 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
                     <Text style={[styles.memberMessage, { color: colors.accent }]}>Message</Text>
                   </Pressable>
                 ))}
+                {visibleMembers.length === 0 && (
+                  <Text style={[styles.helper, { color: colors.muted }]}>No matching people.</Text>
+                )}
               </View>
             )}
-          </View>
+          </ScrollView>
         )}
 
         {activeRoom.isDM && activeRoom.pendingAcceptance && (
@@ -1370,7 +1486,31 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
             </ScrollView>
           </View>
         )}
+        {showComposerEmoji && (
+          <View style={[styles.reactionPicker, { borderTopColor: colors.border, backgroundColor: colors.input }]}>
+            {QUICK_REACTIONS.map((emoji) => (
+              <Pressable
+                accessibilityLabel={`Insert ${emoji}`}
+                accessibilityRole='button'
+                key={emoji}
+                onPress={() => setComposer((current) => `${current}${emoji}`)}
+                style={styles.reactionPickerButton}
+              >
+                <Text style={styles.reactionPickerEmoji}>{emoji}</Text>
+              </Pressable>
+            ))}
+          </View>
+        )}
         <View style={[styles.composer, { borderTopColor: colors.border }]}> 
+          <Pressable
+            accessibilityLabel='Choose emoji'
+            accessibilityRole='button'
+            disabled={isBusy || activeRoom.pendingAcceptance || activeRoom.rejected}
+            onPress={() => setShowComposerEmoji((current) => !current)}
+            style={[styles.emojiButton, { backgroundColor: colors.input }]}
+          >
+            <Text style={[styles.emojiButtonText, { color: colors.accent }]}>:)</Text>
+          </Pressable>
           <Pressable
             accessibilityLabel='Attach file'
             accessibilityRole='button'
@@ -1494,6 +1634,19 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
           </View>
 
           <View style={styles.profileRow}>
+            <Pressable
+              accessibilityLabel='Change profile image'
+              accessibilityRole='button'
+              onPress={() => chooseAvatar(profileAvatar, setProfileAvatar)}
+            >
+              {profileAvatar
+                ? <Image source={{ uri: profileAvatar }} style={styles.profileAvatar} />
+                : (
+                  <View style={[styles.profileAvatar, styles.profileAvatarFallback, { backgroundColor: colors.accentSoft }]}>
+                    <Text style={[styles.roomAvatarText, { color: colors.accent }]}>{getRoomInitials(profileName)}</Text>
+                  </View>
+                  )}
+            </Pressable>
             <TextInput
               value={profileName}
               onChangeText={setProfileName}
@@ -1506,6 +1659,7 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
             />
             {profile?.username !== profileName.trim() ||
             (profile?.bio || '') !== profileBio.trim() ||
+            (profile?.avatar || null) !== profileAvatar ||
             profile?.linkPreview !== linkPreviewsEnabled ? (
               <Pressable
                 accessibilityRole='button'
@@ -1567,14 +1721,42 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
           </View>
 
           {landingAction === 'create' && (
-            <View style={[styles.actionPanel, { backgroundColor: colors.surface }]}>
+            <View style={[styles.actionPanel, styles.createActionPanel, { backgroundColor: colors.surface }]}>
+              <Pressable
+                accessibilityRole='button'
+                onPress={() => chooseAvatar(roomAvatar, setRoomAvatar)}
+                style={styles.avatarEditor}
+              >
+                {roomAvatar
+                  ? <Image source={{ uri: roomAvatar }} style={styles.avatarEditorImage} />
+                  : <View style={[styles.avatarEditorImage, { backgroundColor: colors.accentSoft }]} />}
+                <Text style={[styles.memberMessage, { color: colors.accent }]}>Add group image</Text>
+              </Pressable>
               <TextInput
                 value={roomName}
                 onChangeText={setRoomName}
                 maxLength={80}
                 placeholder='Group name'
                 placeholderTextColor={colors.muted}
-                style={[styles.input, styles.actionInput, { backgroundColor: colors.input, color: colors.text }]}
+                style={[styles.input, styles.createActionInput, { backgroundColor: colors.input, color: colors.text }]}
+              />
+              <TextInput
+                value={roomBio}
+                onChangeText={setRoomBio}
+                maxLength={300}
+                placeholder='Group description (optional)'
+                placeholderTextColor={colors.muted}
+                style={[styles.input, styles.createActionInput, { backgroundColor: colors.input, color: colors.text }]}
+              />
+              <TextInput
+                value={roomLink}
+                onChangeText={setRoomLink}
+                autoCapitalize='none'
+                autoCorrect={false}
+                maxLength={512}
+                placeholder='https:// link (optional)'
+                placeholderTextColor={colors.muted}
+                style={[styles.input, styles.createActionInput, { backgroundColor: colors.input, color: colors.text }]}
               />
               <Pressable
                 accessibilityRole='button'
@@ -1810,6 +1992,11 @@ function formatRoomTime (room: PeerChatRoom) {
   return date.toLocaleDateString([], { day: '2-digit', month: 'short' })
 }
 
+function formatRoomCreatedAt (timestamp: number) {
+  if (!Number.isSafeInteger(timestamp) || timestamp <= 0) return ''
+  return ` on ${new Date(timestamp).toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' })}`
+}
+
 function formatRoomConnection (room: PeerChatRoom, compact = false) {
   if (room.connectionState === 'connecting') return 'Connecting...'
   if (room.connectionState === 'syncing') return 'Syncing...'
@@ -1882,6 +2069,8 @@ const styles = StyleSheet.create({
   title: { fontSize: 21, fontWeight: '900' },
   helper: { fontSize: 13, lineHeight: 19 },
   profileRow: { alignItems: 'center', flexDirection: 'row', gap: 8 },
+  profileAvatar: { borderRadius: 21, height: 42, width: 42 },
+  profileAvatarFallback: { alignItems: 'center', justifyContent: 'center' },
   profileInput: { flex: 1 },
   bioInput: { maxHeight: 92, minHeight: 52, textAlignVertical: 'top' },
   profileSaveButton: { alignItems: 'center', borderRadius: 10, justifyContent: 'center', minHeight: 42, paddingHorizontal: 14 },
@@ -1893,6 +2082,8 @@ const styles = StyleSheet.create({
   quickActionSymbol: { fontSize: 20, fontWeight: '500' },
   quickActionText: { fontSize: 14, fontWeight: '800' },
   actionPanel: { alignItems: 'center', borderRadius: 12, flexDirection: 'row', gap: 8, padding: 8 },
+  createActionPanel: { alignItems: 'stretch', flexDirection: 'column' },
+  createActionInput: { width: '100%' },
   actionInput: { flex: 1 },
   actionSubmit: { alignItems: 'center', borderRadius: 9, justifyContent: 'center', minHeight: 42, minWidth: 72, paddingHorizontal: 14 },
   actionSubmitText: { color: '#ffffff', fontSize: 13, fontWeight: '800' },
@@ -1923,12 +2114,18 @@ const styles = StyleSheet.create({
   emptyState: { alignItems: 'center', gap: 5, justifyContent: 'center', paddingHorizontal: 28, paddingVertical: 36 },
   emptyTitle: { fontSize: 16, fontWeight: '800' },
   chatHeader: { alignItems: 'center', borderBottomWidth: 1, flexDirection: 'row', minHeight: 62, paddingHorizontal: 8 },
-  chatHeaderCopy: { alignItems: 'center', flex: 1, paddingHorizontal: 5 },
+  chatHeaderCopy: { alignItems: 'center', flex: 1, flexDirection: 'row', gap: 7, paddingHorizontal: 5 },
+  chatHeaderAvatar: { borderRadius: 17, height: 34, width: 34 },
+  chatHeaderText: { alignItems: 'center', flex: 1 },
   chatHeaderActions: { flexDirection: 'row' },
-  roomInfo: { borderBottomWidth: 1, gap: 8, padding: 10 },
+  roomInfoPanel: { borderBottomWidth: 1, maxHeight: '55%' },
+  roomInfo: { gap: 8, padding: 10 },
+  roomProvenance: { alignItems: 'center', flexDirection: 'row', gap: 8, justifyContent: 'space-between' },
   roomInfoTitle: { fontSize: 15, fontWeight: '800' },
   roomInfoLink: { fontSize: 12, textDecorationLine: 'underline' },
   roomInfoSave: { alignItems: 'center', alignSelf: 'flex-end', borderRadius: 9, minHeight: 38, justifyContent: 'center', paddingHorizontal: 14 },
+  avatarEditor: { alignItems: 'center', alignSelf: 'flex-start', flexDirection: 'row', gap: 8, minHeight: 38 },
+  avatarEditorImage: { borderRadius: 18, height: 36, width: 36 },
   memberList: { gap: 6, marginTop: 2 },
   memberRow: { alignItems: 'center', borderRadius: 10, flexDirection: 'row', gap: 8, minHeight: 46, paddingHorizontal: 9, paddingVertical: 6 },
   memberAvatar: { borderRadius: 16, height: 32, width: 32 },
@@ -1995,6 +2192,8 @@ const styles = StyleSheet.create({
   composer: { alignItems: 'flex-end', borderTopWidth: 1, flexDirection: 'row', gap: 8, padding: 10 },
   attachButton: { alignItems: 'center', borderRadius: 20, height: 42, justifyContent: 'center', width: 42 },
   attachButtonText: { fontSize: 27, fontWeight: '400', lineHeight: 29 },
+  emojiButton: { alignItems: 'center', borderRadius: 20, height: 42, justifyContent: 'center', width: 42 },
+  emojiButtonText: { fontSize: 15, fontWeight: '800' },
   composerInput: { borderRadius: 18, borderWidth: 1, flex: 1, fontSize: 15, maxHeight: 112, minHeight: 42, paddingHorizontal: 13, paddingVertical: 9 },
   sendButton: { alignItems: 'center', borderRadius: 20, height: 42, justifyContent: 'center', paddingHorizontal: 16 },
   sendButtonText: { color: '#ffffff', fontSize: 13, fontWeight: '900' },

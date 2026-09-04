@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  filterPeerChatMembers,
   filterPeerChatMessages,
   filterPeerChatRooms,
   formatPeerChatDateLabel,
@@ -41,6 +42,19 @@ test('PeerChat room search matches names, keys, senders, and previews', () => {
   assert.deepEqual(filterPeerChatRooms(rooms, 'new mockup').map((item) => item.name), ['Design'])
   assert.deepEqual(filterPeerChatRooms(rooms, 'ab'.repeat(4)).map((item) => item.name), ['Release Room'])
   assert.equal(filterPeerChatRooms(rooms, 'missing').length, 0)
+})
+
+test('PeerChat member search matches names, bios, and peer IDs', () => {
+  const members = [
+    { id: 'peer-a', username: 'Alice', bio: 'Release lead' },
+    { id: 'peer-b', username: 'Bob', bio: 'Mobile developer' }
+  ]
+
+  assert.deepEqual(filterPeerChatMembers(members, 'alice').map((item) => item.id), ['peer-a'])
+  assert.deepEqual(filterPeerChatMembers(members, 'mobile').map((item) => item.id), ['peer-b'])
+  assert.deepEqual(filterPeerChatMembers(members, 'peer-b').map((item) => item.id), ['peer-b'])
+  assert.equal(filterPeerChatMembers(members, 'missing').length, 0)
+  assert.deepEqual(filterPeerChatMembers(null, 'alice'), [])
 })
 
 test('PeerChat finds the first message after a valid read timestamp', () => {

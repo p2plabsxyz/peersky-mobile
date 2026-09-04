@@ -353,6 +353,9 @@ test('PeerChat persists profile metadata and lets only hosts update room metadat
   const service = await new PeerChatService({ sdk: createFakeSdk(feeds), storagePath }).start()
   service.setProfile({ username: 'Alice', bio: 'Mobile profile', linkPreview: false })
   const room = await service.createRoom({ name: 'Original', bio: 'First bio' })
+  assert.equal(room.createdBy, service.localId)
+  assert.equal(room.createdByName, 'Alice')
+  assert.equal(Number.isSafeInteger(room.createdAt), true)
 
   const updated = service.updateRoom({
     roomKey: room.roomKey,

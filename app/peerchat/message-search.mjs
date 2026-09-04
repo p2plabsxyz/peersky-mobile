@@ -26,6 +26,18 @@ export function filterPeerChatRooms (rooms, query) {
   ].some((value) => typeof value === 'string' && value.toLocaleLowerCase().includes(normalizedQuery)))
 }
 
+export function filterPeerChatMembers (members, query) {
+  if (!Array.isArray(members)) return []
+  const normalizedQuery = normalizeSearchQuery(query)
+  if (!normalizedQuery) return members
+
+  return members.filter((member) => [
+    member?.username,
+    member?.bio,
+    member?.id
+  ].some((value) => typeof value === 'string' && value.toLocaleLowerCase().includes(normalizedQuery)))
+}
+
 export function getFirstUnreadMessageIndex (messages, lastReadTs) {
   if (!Array.isArray(messages) || !Number.isSafeInteger(lastReadTs) || lastReadTs <= 0) return -1
   return messages.findIndex((message) => Number.isSafeInteger(message?.timestamp) && message.timestamp > lastReadTs)
