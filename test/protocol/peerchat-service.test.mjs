@@ -386,6 +386,126 @@ test('PeerChat persists profile metadata and lets only hosts update room metadat
   await client.close()
 })
 
+test('PeerChat persists and synchronizes host-owned room moderation settings', async (t) => {
+  const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-moderation-'))
+  t.after(() => rm(storagePath, { recursive: true, force: true }))
+  const frames = []
+  const feeds = new Map()
+  const service = await new PeerChatService({ sdk: createFakeSdk(feeds), storagePath }).start()
+  const room = await service.createRoom({
+    name: 'Moderated room',
+    username: 'Host',
+    moderation: { abuseFilter: false, nsfwFilter: true, spamRateLimit: 15 }
+  })
+  assert.deepEqual(room.moderation, {
+    abuseFilter: false,
+    nsfwFilter: true,
+    spamRateLimit: 15
+  })
+
+  const peer = createFakePeer('desktop-peer', 'Desktop', frames)
+  peer.rooms = [room.roomKey]
+  service.sendRoomMeta(peer, room.roomKey)
+  assert.deepEqual(frames.at(-1).moderation, room.moderation)
+  await service.close()
+
+  const restarted = await new PeerChatService({ sdk: createFakeSdk(cloneFeeds(feeds)), storagePath }).start()
+  assert.deepEqual(restarted.listRooms()[0].moderation, room.moderation)
+  await restarted.close()
+
+  const clientPath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-client-moderation-'))
+  t.after(() => rm(clientPath, { recursive: true, force: true }))
+  const client = await new PeerChatService({ sdk: createFakeSdk(), storagePath: clientPath }).start()
+  await client.joinRoom({ roomKey: room.roomKey, username: 'Client' })
+  const hostPeer = createFakePeer('desktop-peer', 'Host')
+  hostPeer.rooms = [room.roomKey]
+  await client.handlePeerMessage(hostPeer, {
+    type: 'room-meta',
+    roomKey: room.roomKey,
+    moderation: room.moderation
+  })
+  assert.deepEqual(client.listRooms()[0].moderation, room.moderation)
+  await client.close()
+})
+
+test('PeerChat blocks outgoing content before it reaches the encrypted feed', async (t) => {
+  const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-outgoing-moderation-'))
+  t.after(() => rm(storagePath, { recursive: true, force: true }))
+  const service = await new PeerChatService({ sdk: createFakeSdk(), storagePath }).start()
+  const room = await service.createRoom({ name: 'Room', username: 'Alice' })
+
+  await assert.rejects(
+    service.sendMessage({ roomKey: room.roomKey, message: 'please stfu' }),
+    /Message blocked/
+  )
+  assert.equal(service.feeds.get(room.roomKey).length, 0)
+  await service.close()
+})
+
+test('PeerChat filters synced history without escalating the relaying peer', async (t) => {
+  const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-sync-moderation-'))
+  t.after(() => rm(storagePath, { recursive: true, force: true }))
+  const service = await new PeerChatService({ sdk: createFakeSdk(), storagePath }).start()
+  await service.joinRoom({ roomKey: ROOM_KEY, username: 'Mobile' })
+  const peer = createFakePeer('desktop-peer', 'Desktop')
+  peer.initialSyncCount = 0
+
+  for (let index = 0; index < 3; index += 1) {
+    await service.handlePeerMessage(peer, {
+      type: 'sync',
+      id: `blocked-sync-${index}`,
+      roomKey: ROOM_KEY,
+      sender: 'history-author',
+      sn: 'History author',
+      ...encryptPeerChatMessage('stfu', ROOM_KEY),
+      ts: Date.now() + index
+    })
+  }
+  await service.handlePeerMessage(peer, {
+    id: 'safe-live-message',
+    roomKey: ROOM_KEY,
+    sn: 'Desktop',
+    ...encryptPeerChatMessage('Safe live message', ROOM_KEY),
+    ts: Date.now() + 4
+  })
+
+  const snapshot = await service.getSnapshot({ roomKey: ROOM_KEY, version: -1 })
+  assert.equal(snapshot.messages.filter((message) => message.system).length, 3)
+  assert.equal(snapshot.messages.at(-1).message, 'Safe live message')
+  await service.close()
+})
+
+test('PeerChat escalates repeated live violations and drops a kicked peer', async (t) => {
+  const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-live-moderation-'))
+  t.after(() => rm(storagePath, { recursive: true, force: true }))
+  const service = await new PeerChatService({ sdk: createFakeSdk(), storagePath }).start()
+  await service.joinRoom({ roomKey: ROOM_KEY, username: 'Mobile' })
+  const peer = createFakePeer('desktop-peer', 'Desktop')
+  peer.initialSyncCount = 0
+
+  for (let index = 0; index < 3; index += 1) {
+    await service.handlePeerMessage(peer, {
+      id: `blocked-live-${index}`,
+      roomKey: ROOM_KEY,
+      sn: 'Desktop',
+      ...encryptPeerChatMessage('stfu', ROOM_KEY),
+      ts: Date.now() + index
+    })
+  }
+  await service.handlePeerMessage(peer, {
+    id: 'dropped-after-kick',
+    roomKey: ROOM_KEY,
+    sn: 'Desktop',
+    ...encryptPeerChatMessage('Safe but blocked during cooldown', ROOM_KEY),
+    ts: Date.now() + 4
+  })
+
+  const snapshot = await service.getSnapshot({ roomKey: ROOM_KEY, version: -1 })
+  assert.equal(snapshot.messages.length, 3)
+  assert.match(snapshot.messages.at(-1).message, /temporarily removed/)
+  await service.close()
+})
+
 test('PeerChat verifies and completes desktop-compatible direct-message invitations', async (t) => {
   const senderPath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-dm-sender-'))
   const receiverPath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-dm-receiver-'))

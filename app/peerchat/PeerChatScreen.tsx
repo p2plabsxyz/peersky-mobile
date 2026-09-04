@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { File, Paths } from 'expo-file-system'
 import * as DocumentPicker from 'expo-document-picker'
-import { fetch as expoFetch } from 'expo/fetch'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import {
   ActivityIndicator,
@@ -49,11 +48,6 @@ import {
   MAX_PEERCHAT_AVATAR_FILE_BYTES
 } from './avatar.mjs'
 import {
-  extractFirstHttpUrl,
-  resolveLinkPreview
-} from '../../backend/peerchat/link-preview.mjs'
-
-import {
   RPC_HYPER_LIBRARY_UPLOAD,
   RPC_PEERCHAT_DM_ACCEPT,
   RPC_PEERCHAT_DM_CREATE,
@@ -85,6 +79,13 @@ type PeerChatMessage = {
   fileName?: string
   fileSize?: number
   preview?: PeerChatLinkPreview | null
+  system?: boolean
+}
+
+type PeerChatModeration = {
+  abuseFilter: boolean
+  nsfwFilter: boolean
+  spamRateLimit: number
 }
 
 type PeerChatLinkPreview = {
@@ -130,6 +131,7 @@ type PeerChatRoom = {
   createdAt: number
   createdBy: string
   createdByName: string
+  moderation: PeerChatModeration
   lastMessage: PeerChatLastMessage | null
   peerCount: number
   unreadCount: number
@@ -254,6 +256,9 @@ export function PeerChatScreen ({
   const [roomBio, setRoomBio] = useState('')
   const [roomLink, setRoomLink] = useState('')
   const [roomAvatar, setRoomAvatar] = useState<string | null>(null)
+  const [roomAbuseFilter, setRoomAbuseFilter] = useState(true)
+  const [roomNsfwFilter, setRoomNsfwFilter] = useState(true)
+  const [roomSpamRateLimit, setRoomSpamRateLimit] = useState(10)
   const [joinKey, setJoinKey] = useState('')
   const [rooms, setRooms] = useState<PeerChatRoom[]>([])
   const [pendingDirectMessages, setPendingDirectMessages] = useState<PeerChatDirectInvite[]>([])
@@ -753,7 +758,12 @@ export function PeerChatScreen ({
         name: roomName,
         bio: roomBio,
         link: roomLink,
-        avatar: roomAvatar
+        avatar: roomAvatar,
+        moderation: {
+          abuseFilter: roomAbuseFilter,
+          nsfwFilter: roomNsfwFilter,
+          spamRateLimit: roomSpamRateLimit
+        }
       })
       if (!response.ok || !response.room) {
         throw new Error(response.error || 'Unable to create PeerChat room.')
@@ -764,6 +774,9 @@ export function PeerChatScreen ({
       setRoomBio('')
       setRoomLink('')
       setRoomAvatar(null)
+      setRoomAbuseFilter(true)
+      setRoomNsfwFilter(true)
+      setRoomSpamRateLimit(10)
       openRoom(response.room)
       onStatus('PeerChat room created')
     })
@@ -851,15 +864,10 @@ export function PeerChatScreen ({
     const selectedReply = replyTarget
 
     void runAction(async () => {
-      const previewUrl = linkPreviewsEnabled ? extractFirstHttpUrl(message) : null
-      const preview = previewUrl
-        ? await resolveLinkPreview(previewUrl, { fetchFn: expoFetch, timeoutMs: 1500 })
-        : null
       const response = await callRpc(RPC_PEERCHAT_SEND, {
         roomKey: activeRoom.roomKey,
         message,
-        replyTo: selectedReply,
-        preview
+        replyTo: selectedReply
       })
       if (!response.ok) throw new Error(response.error || 'Unable to send PeerChat message.')
       if (!mountedRef.current) return
@@ -1207,6 +1215,11 @@ export function PeerChatScreen ({
                 >
                   <Text style={[styles.memberMessage, { color: colors.accent }]}>Copy room key</Text>
                 </Pressable>
+                <Text style={[styles.roomInfoTitle, { color: colors.text }]}>Moderation</Text>
+                <Text style={[styles.helper, { color: colors.muted }]}>Abuse filter: {activeRoom.moderation.abuseFilter ? 'On' : 'Off'}</Text>
+                <Text style={[styles.helper, { color: colors.muted }]}>Profanity &amp; slurs: {activeRoom.moderation.nsfwFilter ? 'On' : 'Off'}</Text>
+                <Text style={[styles.helper, { color: colors.muted }]}>Spam limit: {activeRoom.moderation.spamRateLimit} messages / 10 seconds</Text>
+                <Text style={[styles.helper, { color: colors.muted }]}>Adult-domain links: Always blocked</Text>
               </View>
             )}
             {activeRoom.members.some((member) => !member.self) && (
@@ -1336,17 +1349,19 @@ export function PeerChatScreen ({
                   <View style={[styles.dateDividerLine, { backgroundColor: colors.border }]} />
                 </View>
               )}
-              <View style={[styles.messageRow, item.self ? styles.messageRowSelf : null]}>
+              <View style={[styles.messageRow, item.self ? styles.messageRowSelf : null, item.system ? styles.systemMessageRow : null]}>
               <Pressable
                 accessibilityHint='Long press for message actions'
-                accessibilityRole='button'
-                onLongPress={() => showMessageActions(item)}
+                accessibilityRole={item.system ? 'text' : 'button'}
+                disabled={item.system}
+                onLongPress={() => !item.system && showMessageActions(item)}
                 style={[
                   styles.messageBubble,
-                  { backgroundColor: item.self ? colors.selfBubble : colors.peerBubble }
+                  item.system ? styles.systemMessage : null,
+                  { backgroundColor: item.system ? colors.input : item.self ? colors.selfBubble : colors.peerBubble }
                 ]}
               >
-                {!item.self && (
+                {!item.self && !item.system && (
                   <Text style={[styles.senderName, { color: colors.accent }]}>{item.senderName}</Text>
                 )}
                 {item.replyTo && (
@@ -1422,7 +1437,7 @@ export function PeerChatScreen ({
                     ))}
                   </View>
                 )}
-                <Text style={[styles.messageTime, { color: colors.muted }]}>
+                <Text style={[styles.messageTime, item.system ? styles.systemMessageTime : null, { color: colors.muted }]}>
                   {formatMessageTime(item.timestamp)}
                 </Text>
               </Pressable>
@@ -1828,6 +1843,43 @@ export function PeerChatScreen ({
                 placeholderTextColor={colors.muted}
                 style={[styles.input, styles.createActionInput, { backgroundColor: colors.input, color: colors.text }]}
               />
+              <Text style={[styles.actionSectionTitle, { color: colors.text }]}>Room moderation</Text>
+              <Pressable
+                accessibilityRole='switch'
+                accessibilityState={{ checked: roomAbuseFilter }}
+                onPress={() => setRoomAbuseFilter((enabled) => !enabled)}
+                style={[styles.preferenceRow, { backgroundColor: colors.input }]}
+              >
+                <View style={styles.preferenceCopy}>
+                  <Text style={[styles.memberName, { color: colors.text }]}>Abuse filter</Text>
+                  <Text style={[styles.attachmentMeta, { color: colors.muted }]}>Block threats and targeted harassment</Text>
+                </View>
+                <Text style={[styles.preferenceState, { color: roomAbuseFilter ? colors.accent : colors.muted }]}>{roomAbuseFilter ? 'On' : 'Off'}</Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole='switch'
+                accessibilityState={{ checked: roomNsfwFilter }}
+                onPress={() => setRoomNsfwFilter((enabled) => !enabled)}
+                style={[styles.preferenceRow, { backgroundColor: colors.input }]}
+              >
+                <View style={styles.preferenceCopy}>
+                  <Text style={[styles.memberName, { color: colors.text }]}>Profanity &amp; slurs</Text>
+                  <Text style={[styles.attachmentMeta, { color: colors.muted }]}>Filter the shared PeerChat word list</Text>
+                </View>
+                <Text style={[styles.preferenceState, { color: roomNsfwFilter ? colors.accent : colors.muted }]}>{roomNsfwFilter ? 'On' : 'Off'}</Text>
+              </Pressable>
+              <Pressable
+                accessibilityHint='Cycles between 5, 10, and 15 messages per 10 seconds'
+                accessibilityRole='button'
+                onPress={() => setRoomSpamRateLimit((limit) => limit === 5 ? 10 : limit === 10 ? 15 : 5)}
+                style={[styles.preferenceRow, { backgroundColor: colors.input }]}
+              >
+                <View style={styles.preferenceCopy}>
+                  <Text style={[styles.memberName, { color: colors.text }]}>Spam limit</Text>
+                  <Text style={[styles.attachmentMeta, { color: colors.muted }]}>Per peer, within 10 seconds</Text>
+                </View>
+                <Text style={[styles.preferenceState, { color: colors.accent }]}>{roomSpamRateLimit}</Text>
+              </Pressable>
               <Pressable
                 accessibilityRole='button'
                 disabled={!profileName.trim() || isBusy}
@@ -2226,7 +2278,10 @@ const styles = StyleSheet.create({
   dateDividerText: { fontSize: 11, fontWeight: '600' },
   messageRow: { alignItems: 'flex-start', marginBottom: 9 },
   messageRowSelf: { alignItems: 'flex-end' },
+  systemMessageRow: { alignItems: 'center' },
   messageBubble: { borderRadius: 15, maxWidth: '84%', minWidth: 84, paddingHorizontal: 12, paddingVertical: 8 },
+  systemMessage: { maxWidth: '92%' },
+  systemMessageTime: { alignSelf: 'center' },
   quotedReply: { borderLeftWidth: 3, borderRadius: 7, marginBottom: 6, paddingHorizontal: 8, paddingVertical: 5 },
   quotedReplySender: { fontSize: 11, fontWeight: '800' },
   quotedReplyText: { fontSize: 11, lineHeight: 15 },
@@ -2247,6 +2302,7 @@ const styles = StyleSheet.create({
   preferenceRow: { alignItems: 'center', borderRadius: 12, flexDirection: 'row', gap: 10, padding: 11 },
   preferenceCopy: { flex: 1 },
   preferenceState: { fontSize: 12, fontWeight: '900' },
+  actionSectionTitle: { fontSize: 13, fontWeight: '900', marginTop: 2 },
   messageTime: { alignSelf: 'flex-end', fontSize: 10, marginTop: 4 },
   scrollToLatest: { alignItems: 'center', borderRadius: 18, bottom: 10, elevation: 3, justifyContent: 'center', minHeight: 36, paddingHorizontal: 14, position: 'absolute', right: 14 },
   scrollToLatestText: { color: '#ffffff', fontSize: 12, fontWeight: '800' },

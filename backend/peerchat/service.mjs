@@ -11,8 +11,16 @@ import b4a from 'b4a'
 import {
   decodeMessagePayload,
   encodeMessagePayload,
+  extractFirstHttpUrl,
+  resolveLinkPreview,
   sanitizePreview
 } from './link-preview.mjs'
+import {
+  checkPeerChatContent,
+  createPeerChatModerator,
+  DEFAULT_PEERCHAT_MODERATION,
+  normalizePeerChatModeration
+} from './moderation.mjs'
 import {
   createPeerChatMessageId,
   createPeerChatRoomKey,
@@ -70,6 +78,7 @@ export class PeerChatService {
     this.profile = { username: '', bio: '', avatar: null, linkPreview: true }
     this.rooms = new Map()
     this.pendingDirectMessages = new Map()
+    this.moderator = createPeerChatModerator()
     this.feeds = new Map()
     this.feedListeners = new Map()
     this.pendingJoins = new Map()
@@ -142,7 +151,7 @@ export class PeerChatService {
     return this.getProfile()
   }
 
-  async createRoom ({ name, username, bio, link, avatar }) {
+  async createRoom ({ name, username, bio, link, avatar, moderation }) {
     this.ensureProfile(username)
     if (this.rooms.size >= MAX_ROOMS) throw new Error(`PeerChat supports up to ${MAX_ROOMS} rooms.`)
 
@@ -165,6 +174,7 @@ export class PeerChatService {
       createdAt: Date.now(),
       createdBy: this.localId,
       createdByName: this.profile.username,
+      moderation: normalizePeerChatModeration(moderation),
       lastMessage: null,
       unreadCount: 0,
       unreadMentions: 0,
@@ -201,6 +211,7 @@ export class PeerChatService {
         isHost: false,
         createdAt: Date.now(),
         joinedAt: Date.now(),
+        moderation: { ...DEFAULT_PEERCHAT_MODERATION },
         lastMessage: null,
         unreadCount: 0,
         unreadMentions: 0,
@@ -421,7 +432,28 @@ export class PeerChatService {
       throw new Error('Enter a message to send.')
     }
 
-    const normalizedPreview = sanitizePreview(preview)
+    const moderation = this.moderator.checkMessage(
+      this.localId,
+      normalizedRoomKey,
+      normalizedMessage,
+      {
+        allowKick: false,
+        checkSpam: false,
+        settings: room.moderation
+      }
+    )
+    if (!moderation.allowed) {
+      throw new Error(`Message blocked: ${moderation.reason}. Please rephrase it.`)
+    }
+
+    let normalizedPreview = this.sanitizeModeratedPreview(preview, room.moderation)
+    if (!normalizedPreview && this.profile.linkPreview !== false) {
+      const previewUrl = extractFirstHttpUrl(normalizedMessage)
+      if (previewUrl && !checkPeerChatContent(previewUrl, room.moderation).flagged) {
+        const resolved = await resolveLinkPreview(previewUrl, { timeoutMs: 1500 })
+        normalizedPreview = this.sanitizeModeratedPreview(resolved, room.moderation)
+      }
+    }
     const encodedPayload = encodeMessagePayload(normalizedMessage, normalizedPreview)
     const plaintext = getPeerChatMessageByteLength(encodedPayload) <= MAX_PEERCHAT_MESSAGE_BYTES
       ? encodedPayload
@@ -494,6 +526,7 @@ export class PeerChatService {
     } catch {}
 
     this.rooms.delete(normalized)
+    this.moderator.clearRoom(normalized)
     if (this.activeRoomKey === normalized) this.activeRoomKey = null
     await this.releaseFeed(normalized)
     this.joinedRooms.delete(normalized)
@@ -529,6 +562,7 @@ export class PeerChatService {
     }
     this.joinedRooms.clear()
     this.discoveryKeys.clear()
+    this.moderator.clear()
     this.persistNow()
   }
 
@@ -756,6 +790,7 @@ export class PeerChatService {
 
     const roomKey = normalizePeerChatRoomKey(message.roomKey)
     if (!roomKey || !peer.rooms.includes(roomKey) || !this.rooms.has(roomKey)) return
+    if (this.moderator.isKicked(peer.id, roomKey)) return
 
     if (message.type === 'request-room-meta') {
       if (!this.consumeControlRate(peer)) return
@@ -803,6 +838,13 @@ export class PeerChatService {
           const creatorName = normalizePeerChatProfileName(message.createdByName)
           if (creatorName) {
             room.createdByName = creatorName
+            changed = true
+          }
+        }
+        if (message.moderation) {
+          const moderation = normalizePeerChatModeration(message.moderation)
+          if (JSON.stringify(moderation) !== JSON.stringify(room.moderation)) {
+            room.moderation = moderation
             changed = true
           }
         }
@@ -885,9 +927,31 @@ export class PeerChatService {
     }
     if (!plaintext) return
 
+    const decodedPayload = decodeMessagePayload(plaintext)
+    const normalizedMessage = normalizePeerChatMessage(decodedPayload.text)
+    if (!normalizedMessage) return
+    const moderation = isSync
+      ? checkPeerChatContent(normalizedMessage, room.moderation)
+      : this.moderator.checkMessage(peer.id, roomKey, normalizedMessage, {
+        settings: room.moderation
+      })
+    if (moderation.flagged || moderation.allowed === false) {
+      await this.appendModerationNotice(roomKey, message.id, peer, {
+        action: moderation.action || 'warn',
+        reason: moderation.reason
+      }, message.ts)
+      return
+    }
+
+    const safePreview = this.sanitizeModeratedPreview(decodedPayload.preview, room.moderation)
+    const safePlaintext = encodeMessagePayload(normalizedMessage, safePreview)
+    const safeEncrypted = safePlaintext === plaintext
+      ? { ct: message.ct, iv: message.iv, tag: message.tag }
+      : encryptPeerChatMessage(safePlaintext, roomKey)
+
     const normalizedReply = normalizePeerChatReply(message.replyTo)
     const attachment = normalizePeerChatAttachment({
-      message: plaintext,
+      message: normalizedMessage,
       fileName: message.fileName,
       fileSize: message.fileSize
     })
@@ -897,9 +961,7 @@ export class PeerChatService {
         ? message.sender.slice(0, 200)
         : peer.id,
       sn: normalizePeerChatProfileName(message.sn) || peer.username || peer.id,
-      ct: message.ct,
-      iv: message.iv,
-      tag: message.tag,
+      ...safeEncrypted,
       ...(normalizedReply && { replyTo: normalizedReply }),
       ...(attachment || {}),
       ts: normalizePeerChatTimestamp(message.ts)
@@ -973,7 +1035,32 @@ export class PeerChatService {
       link: room.link || '',
       avatar: room.avatar || null,
       createdBy: room.createdBy || (room.isHost ? this.localId : ''),
-      createdByName: room.createdByName || (room.isHost ? this.profile.username : '')
+      createdByName: room.createdByName || (room.isHost ? this.profile.username : ''),
+      moderation: normalizePeerChatModeration(room.moderation)
+    })
+  }
+
+  sanitizeModeratedPreview (preview, settings) {
+    const normalized = sanitizePreview(preview)
+    if (!normalized) return null
+    const text = [normalized.url, normalized.title, normalized.description].filter(Boolean).join(' ')
+    return checkPeerChatContent(text, settings).flagged ? null : normalized
+  }
+
+  async appendModerationNotice (roomKey, sourceId, peer, moderation, timestamp) {
+    const peerName = normalizePeerChatProfileName(peer?.username) || normalizePeerChatPeerId(peer?.id) || 'Peer'
+    const action = moderation.action || 'warn'
+    const text = action === 'kick'
+      ? `${peerName} was temporarily removed (${moderation.reason})`
+      : action === 'final-warn'
+        ? `Final warning for ${peerName} (${moderation.reason})`
+        : `${peerName}: message filtered (${moderation.reason})`
+    await this.appendEntry(roomKey, {
+      id: `mod-${String(sourceId || Date.now()).slice(0, 128)}-${Date.now()}`,
+      type: 'system',
+      moderationNotice: true,
+      message: text,
+      ts: normalizePeerChatTimestamp(timestamp)
     })
   }
 
@@ -1179,6 +1266,10 @@ export class PeerChatService {
           this.collectReaction(reactions, entry)
           continue
         }
+        if (entry?.type === 'system' && entry?.moderationNotice === true) {
+          messages.push(this.entryToSystemMessage(entry))
+          continue
+        }
         if (!entry?.ct) continue
         messages.push(this.entryToMessage(entry, roomKey))
       } catch {}
@@ -1244,6 +1335,18 @@ export class PeerChatService {
     }
   }
 
+  entryToSystemMessage (entry) {
+    return {
+      id: String(entry.id || ''),
+      sender: '',
+      senderName: 'PeerChat',
+      message: String(entry.message || '').slice(0, 500),
+      timestamp: normalizePeerChatTimestamp(entry.ts),
+      self: false,
+      system: true
+    }
+  }
+
   publicRoom (room) {
     const peerCount = this.countRoomPeers(room.roomKey)
     return {
@@ -1262,6 +1365,7 @@ export class PeerChatService {
       createdAt: normalizePeerChatReadTimestamp(room.createdAt),
       createdBy: normalizePeerChatPeerId(room.createdBy),
       createdByName: normalizePeerChatProfileName(room.createdByName),
+      moderation: normalizePeerChatModeration(room.moderation),
       lastMessage: room.lastMessage || null,
       unreadCount: room.unreadCount || 0,
       unreadMentions: room.unreadMentions || 0,
@@ -1369,6 +1473,9 @@ export class PeerChatService {
           joinedAt: Number.isFinite(value?.joinedAt) ? value.joinedAt : Date.now(),
           createdBy: typeof value?.createdBy === 'string' ? value.createdBy.slice(0, 200) : '',
           createdByName: normalizePeerChatProfileName(value?.createdByName),
+          moderation: isDM
+            ? { ...DEFAULT_PEERCHAT_MODERATION }
+            : normalizePeerChatModeration(value?.moderation),
           lastMessage: normalizePersistedLastMessage(value?.lastMessage),
           unreadCount: normalizeUnreadCount(value?.unreadCount),
           unreadMentions: Math.min(

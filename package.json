@@ -7,6 +7,7 @@
     "generate:katex-runtime": "node scripts/generate-katex-runtime.mjs",
     "generate:ieee-runtime": "node scripts/generate-ieee-runtime.mjs",
     "generate:yjs-runtime": "node scripts/generate-yjs-runtime.mjs",
+    "update:peerchat-moderation-data": "node scripts/update-peerchat-moderation-data.mjs",
     "setup:content-blocking": "node scripts/setup-content-blocking.mjs",
     "eas-build-pre-install": "node scripts/setup-content-blocking.mjs --eas && node scripts/update-content-blocking-snapshot.mjs",
     "update:content-blocking-snapshot": "node scripts/update-content-blocking-snapshot.mjs",
@@ -95,6 +96,7 @@
   "standard": {
     "ignore": [
       "app/app.bundle.mjs",
+      "backend/peerchat/moderation-data.mjs",
       "backend/p2pmd/ieee-runtime.mjs",
       "backend/p2pmd/katex-runtime.mjs"
     ]
