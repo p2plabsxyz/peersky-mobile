@@ -12,6 +12,7 @@ import {
   createPeerChatMessageId,
   createPeerChatRoomKey,
   decryptPeerChatMessage,
+  derivePeerChatDirectRoomKey,
   derivePeerChatTopic,
   encryptPeerChatMessage,
   getPeerChatMessageByteLength,
@@ -23,6 +24,7 @@ import {
   normalizePeerChatBio,
   normalizePeerChatLink,
   normalizePeerChatMessage,
+  normalizePeerChatPeerId,
   normalizePeerChatProfileName,
   normalizePeerChatReaction,
   normalizePeerChatReply,
@@ -48,6 +50,7 @@ const MAX_CONTROL_MESSAGES_PER_WINDOW = 60
 const MAX_INITIAL_SYNC_MESSAGES_PER_CONNECTION = 500
 const MAX_PENDING_MESSAGES_PER_CONNECTION = 256
 const MAX_RETURNED_ROOM_MEMBERS = 100
+const MAX_PENDING_DIRECT_MESSAGES = 50
 const PERSIST_DELAY_MS = 500
 const PING_INTERVAL_MS = 25_000
 
@@ -61,6 +64,7 @@ export class PeerChatService {
       : 'mobile'
     this.profile = { username: '', bio: '', avatar: null }
     this.rooms = new Map()
+    this.pendingDirectMessages = new Map()
     this.feeds = new Map()
     this.feedListeners = new Map()
     this.pendingJoins = new Map()
@@ -222,6 +226,95 @@ export class PeerChatService {
       })
   }
 
+  listPendingDirectMessages () {
+    return [...this.pendingDirectMessages.values()]
+      .sort((left, right) => right.receivedAt - left.receivedAt)
+      .slice(0, MAX_PENDING_DIRECT_MESSAGES)
+  }
+
+  async createDirectMessage ({ peerId, username, bio, avatar } = {}) {
+    this.ensureProfile()
+    const normalizedPeerId = normalizePeerChatPeerId(peerId)
+    if (!normalizedPeerId || normalizedPeerId === this.localId) throw new Error('Choose another online peer.')
+    const peer = [...this.peers.values()].find((candidate) => candidate.id === normalizedPeerId)
+    if (!peer) throw new Error('That peer is no longer connected.')
+
+    const roomKey = derivePeerChatDirectRoomKey(this.localId, normalizedPeerId)
+    let room = this.rooms.get(roomKey)
+    const createdRoom = !room
+    if (!room) {
+      if (this.rooms.size >= MAX_ROOMS) throw new Error(`PeerChat supports up to ${MAX_ROOMS} rooms.`)
+      room = this.createDirectRoom({
+        roomKey,
+        peerId: normalizedPeerId,
+        username: normalizePeerChatProfileName(username) || peer.username || normalizedPeerId,
+        bio: normalizePeerChatBio(bio ?? peer.bio),
+        avatar: normalizePeerChatAvatar(avatar ?? peer.avatar),
+        pendingAcceptance: true
+      })
+      this.rooms.set(roomKey, room)
+    } else if (!room.isDM || room.dmWith !== normalizedPeerId) {
+      throw new Error('PeerChat direct-message room is invalid.')
+    }
+    if (room.rejected) {
+      room.rejected = false
+      room.pendingAcceptance = true
+    }
+    try {
+      await this.joinRoomNetwork(roomKey)
+    } catch (error) {
+      if (createdRoom) this.rooms.delete(roomKey)
+      throw error
+    }
+    if (room.pendingAcceptance) this.sendDirectMessageControl(peer, 'dm-invite', room)
+    this.schedulePersist()
+    this.bumpVersion()
+    return { room: this.publicRoom(room), rooms: this.listRooms(), version: this.version }
+  }
+
+  async acceptDirectMessage ({ roomKey } = {}) {
+    const normalized = normalizePeerChatRoomKey(roomKey)
+    const pending = this.pendingDirectMessages.get(normalized)
+    if (!pending) throw new Error('PeerChat direct-message request not found.')
+    if (this.rooms.size >= MAX_ROOMS) throw new Error(`PeerChat supports up to ${MAX_ROOMS} rooms.`)
+
+    const room = this.createDirectRoom({
+      roomKey: normalized,
+      peerId: pending.fromId,
+      username: pending.fromUsername,
+      bio: pending.fromBio,
+      avatar: pending.fromAvatar,
+      createdAt: pending.receivedAt,
+      pendingAcceptance: false
+    })
+    this.rooms.set(normalized, room)
+    this.pendingDirectMessages.delete(normalized)
+    try {
+      await this.joinRoomNetwork(normalized)
+    } catch (error) {
+      this.rooms.delete(normalized)
+      this.pendingDirectMessages.set(normalized, pending)
+      throw error
+    }
+    const peer = [...this.peers.values()].find((candidate) => candidate.id === pending.fromId)
+    if (peer) this.sendDirectMessageControl(peer, 'dm-accept', room)
+    this.persistNow()
+    this.bumpVersion()
+    return { room: this.publicRoom(room), rooms: this.listRooms(), version: this.version }
+  }
+
+  rejectDirectMessage ({ roomKey } = {}) {
+    const normalized = normalizePeerChatRoomKey(roomKey)
+    const pending = this.pendingDirectMessages.get(normalized)
+    if (!pending) throw new Error('PeerChat direct-message request not found.')
+    this.pendingDirectMessages.delete(normalized)
+    const peer = [...this.peers.values()].find((candidate) => candidate.id === pending.fromId)
+    if (peer) this.sendDirectMessageControl(peer, 'dm-reject', { roomKey: normalized, dmWith: pending.fromId })
+    this.persistNow()
+    this.bumpVersion()
+    return { pendingDirectMessages: this.listPendingDirectMessages(), version: this.version }
+  }
+
   setRoomPinned ({ roomKey, pinned } = {}) {
     const normalized = normalizePeerChatRoomKey(roomKey)
     const room = this.rooms.get(normalized)
@@ -308,6 +401,8 @@ export class PeerChatService {
     const normalizedRoomKey = normalizePeerChatRoomKey(roomKey)
     const room = this.rooms.get(normalizedRoomKey)
     if (!room) throw new Error('PeerChat room not found.')
+    if (room.isDM && room.pendingAcceptance) throw new Error('Wait for the peer to accept this message request.')
+    if (room.isDM && room.rejected) throw new Error('This peer declined the message request.')
     if (!this.profile.username) throw new Error('Set a PeerChat name before sending messages.')
     if (!this.feeds.has(normalizedRoomKey)) await this.joinRoomNetwork(normalizedRoomKey)
 
@@ -406,7 +501,7 @@ export class PeerChatService {
     this.sdk.localSwarm?.off?.('topics-change', this.onTopicsChange)
     for (const peer of this.peers.values()) {
       if (peer.pingTimer) clearInterval(peer.pingTimer)
-      peer.transport?.close()
+      peer.transport?.close?.()
     }
     this.peers.clear()
 
@@ -548,6 +643,11 @@ export class PeerChatService {
 
     this.sendProfile(peer)
     for (const roomKey of peer.rooms) this.shareRoom(peer, roomKey)
+    for (const room of this.rooms.values()) {
+      if (room.isDM && room.pendingAcceptance && room.dmWith === peer.id) {
+        this.sendDirectMessageControl(peer, 'dm-invite', room)
+      }
+    }
 
     peer.pingTimer = setInterval(() => {
       this.sendToPeer(peer, { type: 'ping' })
@@ -613,6 +713,32 @@ export class PeerChatService {
         peer.avatar = avatar
         this.bumpVersion()
       }
+      return
+    }
+
+    if (message.type === 'dm-invite') {
+      if (!this.consumeControlRate(peer)) return
+      this.receiveDirectMessageInvite(peer, message)
+      return
+    }
+
+    if (message.type === 'dm-accept' || message.type === 'dm-reject') {
+      if (!this.consumeControlRate(peer)) return
+      const directRoomKey = normalizePeerChatRoomKey(message.roomKey)
+      const expectedRoomKey = derivePeerChatDirectRoomKey(this.localId, peer.id)
+      const directRoom = this.rooms.get(directRoomKey)
+      if (directRoomKey !== expectedRoomKey || !directRoom?.isDM || directRoom.dmWith !== peer.id) return
+      if (message.type === 'dm-accept') {
+        directRoom.pendingAcceptance = false
+        directRoom.name = normalizePeerChatProfileName(message.fromUsername) || directRoom.name
+        directRoom.bio = normalizePeerChatBio(message.fromBio)
+        directRoom.avatar = normalizePeerChatAvatar(message.fromAvatar)
+      } else {
+        directRoom.pendingAcceptance = false
+        directRoom.rejected = true
+      }
+      this.schedulePersist()
+      this.bumpVersion()
       return
     }
 
@@ -839,6 +965,71 @@ export class PeerChatService {
     })
   }
 
+  receiveDirectMessageInvite (peer, message) {
+    const roomKey = normalizePeerChatRoomKey(message.roomKey)
+    const toId = normalizePeerChatPeerId(message.toId)
+    let expectedRoomKey
+    try {
+      expectedRoomKey = derivePeerChatDirectRoomKey(this.localId, peer.id)
+    } catch {
+      return
+    }
+    if (!roomKey || roomKey !== expectedRoomKey || (toId && toId !== this.localId)) return
+
+    const existing = this.rooms.get(roomKey)
+    if (existing?.isDM && existing.dmWith === peer.id) {
+      this.sendDirectMessageControl(peer, 'dm-accept', existing)
+      return
+    }
+    if (this.pendingDirectMessages.has(roomKey) || this.pendingDirectMessages.size >= MAX_PENDING_DIRECT_MESSAGES) return
+
+    this.pendingDirectMessages.set(roomKey, {
+      roomKey,
+      fromId: peer.id,
+      fromUsername: normalizePeerChatProfileName(message.fromUsername) || peer.username || peer.id,
+      fromBio: normalizePeerChatBio(message.fromBio),
+      fromAvatar: normalizePeerChatAvatar(message.fromAvatar),
+      receivedAt: Date.now()
+    })
+    this.persistNow()
+    this.bumpVersion()
+  }
+
+  createDirectRoom ({ roomKey, peerId, username, bio, avatar, createdAt = Date.now(), pendingAcceptance }) {
+    return {
+      roomKey,
+      name: username,
+      bio: bio || '',
+      link: '',
+      avatar: avatar || null,
+      isHost: false,
+      isDM: true,
+      dmWith: peerId,
+      pendingAcceptance: pendingAcceptance === true,
+      rejected: false,
+      createdAt,
+      joinedAt: createdAt,
+      createdBy: this.localId,
+      createdByName: this.profile.username,
+      lastMessage: null,
+      unreadCount: 0,
+      unreadMentions: 0,
+      lastReadTs: Date.now()
+    }
+  }
+
+  sendDirectMessageControl (peer, type, room) {
+    return this.sendToPeer(peer, {
+      type,
+      roomKey: room.roomKey,
+      fromId: this.localId,
+      fromUsername: this.profile.username || this.localId,
+      fromAvatar: this.profile.avatar || null,
+      fromBio: this.profile.bio || '',
+      ...(type === 'dm-invite' && { toId: room.dmWith })
+    })
+  }
+
   async syncHistoryToPeer (peer, roomKey) {
     const feed = this.feeds.get(roomKey)
     if (!feed || peer.connection.destroyed) return false
@@ -1045,6 +1236,10 @@ export class PeerChatService {
       bio: room.bio || '',
       link: room.link || '',
       avatar: room.avatar || null,
+      isDM: room.isDM === true,
+      dmWith: room.dmWith || null,
+      pendingAcceptance: room.pendingAcceptance === true,
+      rejected: room.rejected === true,
       isHost: room.isHost === true,
       isPinned: room.isPinned === true,
       isMuted: room.isMuted === true,
@@ -1133,12 +1328,18 @@ export class PeerChatService {
       for (const value of rooms) {
         const roomKey = normalizePeerChatRoomKey(value?.roomKey)
         if (!roomKey) continue
+        const dmWith = normalizePeerChatPeerId(value?.dmWith)
+        const isDM = value?.isDM === true && Boolean(dmWith)
         this.rooms.set(roomKey, {
           roomKey,
           name: normalizePeerChatRoomName(value?.name, `${roomKey.slice(0, 8)}...`),
           bio: normalizePeerChatBio(value?.bio),
           link: normalizePeerChatLink(value?.link),
           avatar: normalizePeerChatAvatar(value?.avatar),
+          isDM,
+          dmWith: isDM ? dmWith : null,
+          pendingAcceptance: isDM && value?.pendingAcceptance === true,
+          rejected: isDM && value?.rejected === true,
           isHost: value?.isHost === true,
           isPinned: value?.isPinned === true,
           isMuted: value?.isMuted === true,
@@ -1153,6 +1354,23 @@ export class PeerChatService {
             normalizeUnreadCount(value?.unreadMentions)
           ),
           lastReadTs: Number.isFinite(value?.lastReadTs) ? value.lastReadTs : 0
+        })
+      }
+
+      const pendingDirectMessages = Array.isArray(parsed?.pendingDirectMessages)
+        ? parsed.pendingDirectMessages.slice(0, MAX_PENDING_DIRECT_MESSAGES)
+        : []
+      for (const value of pendingDirectMessages) {
+        const roomKey = normalizePeerChatRoomKey(value?.roomKey)
+        const fromId = normalizePeerChatPeerId(value?.fromId)
+        if (!roomKey || !fromId || roomKey !== derivePeerChatDirectRoomKey(this.localId, fromId)) continue
+        this.pendingDirectMessages.set(roomKey, {
+          roomKey,
+          fromId,
+          fromUsername: normalizePeerChatProfileName(value?.fromUsername) || fromId,
+          fromBio: normalizePeerChatBio(value?.fromBio),
+          fromAvatar: normalizePeerChatAvatar(value?.fromAvatar),
+          receivedAt: Number.isFinite(value?.receivedAt) ? value.receivedAt : Date.now()
         })
       }
     } catch (error) {
@@ -1175,7 +1393,8 @@ export class PeerChatService {
       writeFileSync(temporaryPath, JSON.stringify({
         version: 1,
         profile: this.profile,
-        rooms: [...this.rooms.values()]
+        rooms: [...this.rooms.values()],
+        pendingDirectMessages: this.listPendingDirectMessages()
       }), { mode: 0o600 })
       renameSync(temporaryPath, this.stateFilePath)
     } catch (error) {

@@ -6,6 +6,7 @@ import b4a from 'b4a'
 
 import {
   decryptPeerChatMessage,
+  derivePeerChatDirectRoomKey,
   derivePeerChatTopic,
   encryptPeerChatMessage,
   getSharedPeerChatRooms,
@@ -124,6 +125,14 @@ test('PeerChat sanitizes bounded profile and room metadata', () => {
   assert.equal(normalizePeerChatLink('https://user:secret@example.com/'), '')
   assert.equal(normalizePeerChatAvatar('data:image/png;base64,YQ=='), 'data:image/png;base64,YQ==')
   assert.equal(normalizePeerChatAvatar('data:text/html;base64,YQ=='), null)
+})
+
+test('PeerChat derives desktop-compatible direct-message room keys', () => {
+  const first = '1234abcd'
+  const second = '9876fedc'
+  const expected = createHash('sha256').update(`${first}:dm:${second}`).digest('hex')
+  assert.equal(derivePeerChatDirectRoomKey(second, first), expected)
+  assert.throws(() => derivePeerChatDirectRoomKey(first, first), /Invalid PeerChat direct-message peers/)
 })
 
 test('PeerChat AES-GCM payloads use the separated desktop message-key derivation', () => {

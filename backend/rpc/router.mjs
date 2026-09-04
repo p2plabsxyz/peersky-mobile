@@ -36,7 +36,10 @@ import {
   RPC_PEERCHAT_SET_ACTIVE,
   RPC_PEERCHAT_ROOM_PIN,
   RPC_PEERCHAT_ROOM_MUTE,
-  RPC_PEERCHAT_ROOM_UPDATE
+  RPC_PEERCHAT_ROOM_UPDATE,
+  RPC_PEERCHAT_DM_CREATE,
+  RPC_PEERCHAT_DM_ACCEPT,
+  RPC_PEERCHAT_DM_REJECT
 } from './commands.mjs'
 import {
   getDefaultIdentityStoragePath,
@@ -336,6 +339,7 @@ export async function routeRpcRequest (req) {
         ok: true,
         profile: peerChat.getProfile(),
         rooms: peerChat.listRooms(),
+        pendingDirectMessages: peerChat.listPendingDirectMessages(),
         version: peerChat.version
       })
       return
@@ -374,6 +378,7 @@ export async function routeRpcRequest (req) {
         ok: true,
         profile: peerChat.getProfile(),
         rooms: peerChat.listRooms(),
+        pendingDirectMessages: peerChat.listPendingDirectMessages(),
         version: peerChat.version
       })
       return
@@ -446,6 +451,34 @@ export async function routeRpcRequest (req) {
       replyJson(req, {
         ok: true,
         ...peerChat.updateRoom(parseJsonMessage(req.data))
+      })
+      return
+    }
+
+    if (req.command === RPC_PEERCHAT_DM_CREATE) {
+      const peerChat = await getPeerChatService()
+      replyJson(req, {
+        ok: true,
+        ...await peerChat.createDirectMessage(parseJsonMessage(req.data))
+      })
+      return
+    }
+
+    if (req.command === RPC_PEERCHAT_DM_ACCEPT) {
+      const peerChat = await getPeerChatService()
+      replyJson(req, {
+        ok: true,
+        ...await peerChat.acceptDirectMessage(parseJsonMessage(req.data)),
+        pendingDirectMessages: peerChat.listPendingDirectMessages()
+      })
+      return
+    }
+
+    if (req.command === RPC_PEERCHAT_DM_REJECT) {
+      const peerChat = await getPeerChatService()
+      replyJson(req, {
+        ok: true,
+        ...peerChat.rejectDirectMessage(parseJsonMessage(req.data))
       })
       return
     }

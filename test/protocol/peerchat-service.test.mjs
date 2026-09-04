@@ -143,7 +143,10 @@ test('PeerChat stores, toggles, and history-syncs desktop-compatible reactions',
   await service.syncHistoryToPeer({
     connection: { destroyed: false },
     rooms: [room.roomKey],
-    transport: { send: (frame) => frames.push(JSON.parse(frame)) || true }
+    transport: {
+      send: (frame) => frames.push(JSON.parse(frame)) || true,
+      close () {}
+    }
   }, room.roomKey)
   assert.deepEqual(frames.map((frame) => frame.type), ['sync', 'sync-reaction', 'sync-done'])
 
@@ -331,6 +334,89 @@ test('PeerChat persists profile metadata and lets only hosts update room metadat
   await client.close()
 })
 
+test('PeerChat verifies and completes desktop-compatible direct-message invitations', async (t) => {
+  const senderPath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-dm-sender-'))
+  const receiverPath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-dm-receiver-'))
+  t.after(() => rm(senderPath, { recursive: true, force: true }))
+  t.after(() => rm(receiverPath, { recursive: true, force: true }))
+
+  const sender = await new PeerChatService({ sdk: createFakeSdk(new Map(), 7), storagePath: senderPath }).start()
+  const receiver = await new PeerChatService({ sdk: createFakeSdk(new Map(), 8), storagePath: receiverPath }).start()
+  sender.setProfile({ username: 'Alice', bio: 'Sender' })
+  receiver.setProfile({ username: 'Bob', bio: 'Receiver' })
+
+  const inviteFrames = []
+  const senderViewOfReceiver = createFakePeer(receiver.localId, 'Bob', inviteFrames)
+  sender.peers.set(senderViewOfReceiver.connection, senderViewOfReceiver)
+  const outgoing = await sender.createDirectMessage({ peerId: receiver.localId, username: 'Bob' })
+  assert.equal(outgoing.room.isDM, true)
+  assert.equal(outgoing.room.pendingAcceptance, true)
+
+  const senderPeer = createFakePeer(sender.localId, 'Alice')
+  receiver.peers.set(senderPeer.connection, senderPeer)
+  await receiver.handlePeerMessage(senderPeer, {
+    ...inviteFrames[inviteFrames.length - 1],
+    roomKey: 'ff'.repeat(32)
+  })
+  assert.equal(receiver.listPendingDirectMessages().length, 0)
+  await receiver.handlePeerMessage(senderPeer, inviteFrames.pop())
+  assert.equal(receiver.listPendingDirectMessages()[0].fromUsername, 'Alice')
+
+  await receiver.close()
+  const restartedReceiver = await new PeerChatService({
+    sdk: createFakeSdk(new Map(), 8),
+    storagePath: receiverPath
+  }).start()
+  assert.equal(restartedReceiver.listPendingDirectMessages()[0].roomKey, outgoing.room.roomKey)
+
+  const restartedSenderPeer = createFakePeer(sender.localId, 'Alice')
+  restartedReceiver.peers.set(restartedSenderPeer.connection, restartedSenderPeer)
+
+  const acceptFrames = []
+  restartedSenderPeer.transport = {
+    send: (frame) => acceptFrames.push(JSON.parse(frame)) || true,
+    close () {}
+  }
+  const accepted = await restartedReceiver.acceptDirectMessage({ roomKey: outgoing.room.roomKey })
+  assert.equal(accepted.room.pendingAcceptance, false)
+  assert.equal(restartedReceiver.listPendingDirectMessages().length, 0)
+
+  await sender.handlePeerMessage(senderViewOfReceiver, acceptFrames.pop())
+  assert.equal(sender.listRooms()[0].pendingAcceptance, false)
+  const sent = await sender.sendMessage({ roomKey: outgoing.room.roomKey, message: 'Private hello' })
+  assert.equal(sent.message, 'Private hello')
+
+  sender.rooms.get(outgoing.room.roomKey).rejected = true
+  await assert.rejects(
+    sender.sendMessage({ roomKey: outgoing.room.roomKey, message: 'Blocked message' }),
+    /declined/
+  )
+  const retried = await sender.createDirectMessage({ peerId: receiver.localId, username: 'Bob' })
+  assert.equal(retried.room.rejected, false)
+  assert.equal(retried.room.pendingAcceptance, true)
+
+  await sender.close()
+  await restartedReceiver.close()
+})
+
+test('PeerChat restores malformed direct-message state as a regular room', async (t) => {
+  const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-invalid-dm-'))
+  t.after(() => rm(storagePath, { recursive: true, force: true }))
+  await writeFile(path.join(storagePath, 'peerchat-mobile.json'), JSON.stringify({
+    rooms: [{
+      roomKey: ROOM_KEY,
+      name: 'Invalid direct room',
+      isDM: true,
+      dmWith: 'invalid'
+    }]
+  }))
+
+  const service = await new PeerChatService({ sdk: createFakeSdk(), storagePath }).start()
+  assert.equal(service.listRooms()[0].isDM, false)
+  assert.equal(service.listRooms()[0].dmWith, null)
+  await service.close()
+})
+
 test('PeerChat persists pinned rooms and sorts them before newer chats', async (t) => {
   const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-pins-'))
   t.after(() => rm(storagePath, { recursive: true, force: true }))
@@ -493,14 +579,14 @@ test('PeerChat bounds restored deduplication scans and stored room bytes', async
   await quotaService.close()
 })
 
-function createFakeSdk (feeds = new Map()) {
+function createFakeSdk (feeds = new Map(), publicKeyByte = 7) {
   const swarm = new EventEmitter()
   swarm.flush = async () => {}
   const localSwarm = new EventEmitter()
   const joined = []
 
   const sdk = {
-    publicKey: Buffer.alloc(32, 7),
+    publicKey: Buffer.alloc(32, publicKeyByte),
     swarm,
     localSwarm,
     joined,
@@ -518,6 +604,22 @@ function createFakeSdk (feeds = new Map()) {
     async leave () {}
   }
   return sdk
+}
+
+function createFakePeer (id, username, frames = []) {
+  const connection = { destroyed: false }
+  return {
+    active: true,
+    connection,
+    id,
+    username,
+    bio: '',
+    avatar: null,
+    rooms: [ROOM_KEY],
+    controlRate: { count: 0, resetsAt: Date.now() + 60_000 },
+    liveRate: { count: 0, resetsAt: Date.now() + 60_000 },
+    transport: { send: (frame) => frames.push(JSON.parse(frame)) || true }
+  }
 }
 
 class FakeFeed extends EventEmitter {

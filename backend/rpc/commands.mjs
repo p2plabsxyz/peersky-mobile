@@ -40,3 +40,6 @@ export const RPC_PEERCHAT_SET_ACTIVE = 49
 export const RPC_PEERCHAT_ROOM_PIN = 50
 export const RPC_PEERCHAT_ROOM_MUTE = 51
 export const RPC_PEERCHAT_ROOM_UPDATE = 52
+export const RPC_PEERCHAT_DM_CREATE = 53
+export const RPC_PEERCHAT_DM_ACCEPT = 54
+export const RPC_PEERCHAT_DM_REJECT = 55

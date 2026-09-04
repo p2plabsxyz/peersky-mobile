@@ -21,6 +21,7 @@ export const MAX_PEERCHAT_LINK_LENGTH = 512
 export const MAX_PEERCHAT_AVATAR_LENGTH = 192 * 1024
 
 const ROOM_KEY_PATTERN = /^[a-f0-9]{64}$/i
+const PEER_ID_PATTERN = /^[a-f0-9]{8}$/i
 const PROFILE_NAME_PATTERN = /^[A-Za-z0-9]+(?: [A-Za-z0-9]+)*$/
 const MAX_CLOCK_SKEW_MS = 5 * 60 * 1000
 const TOPIC_CONTEXT = 'peersky-chat:topic:'
@@ -30,6 +31,18 @@ const LEGACY_MESSAGE_KEY_CONTEXT = 'peersky-chat:'
 export function normalizePeerChatRoomKey (value) {
   const roomKey = typeof value === 'string' ? value.trim() : ''
   return ROOM_KEY_PATTERN.test(roomKey) ? roomKey.toLowerCase() : ''
+}
+
+export function normalizePeerChatPeerId (value) {
+  const peerId = typeof value === 'string' ? value.trim() : ''
+  return PEER_ID_PATTERN.test(peerId) ? peerId.toLowerCase() : ''
+}
+
+export function derivePeerChatDirectRoomKey (firstPeerId, secondPeerId) {
+  const first = normalizePeerChatPeerId(firstPeerId)
+  const second = normalizePeerChatPeerId(secondPeerId)
+  if (!first || !second || first === second) throw new Error('Invalid PeerChat direct-message peers')
+  return createHash('sha256').update([first, second].sort().join(':dm:')).digest('hex')
 }
 
 export function normalizePeerChatProfileName (value) {

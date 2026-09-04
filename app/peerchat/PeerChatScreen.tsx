@@ -39,6 +39,9 @@ import {
 
 import {
   RPC_HYPER_LIBRARY_UPLOAD,
+  RPC_PEERCHAT_DM_ACCEPT,
+  RPC_PEERCHAT_DM_CREATE,
+  RPC_PEERCHAT_DM_REJECT,
   RPC_PEERCHAT_INIT,
   RPC_PEERCHAT_PROFILE_SET,
   RPC_PEERCHAT_ROOM_CREATE,
@@ -93,6 +96,10 @@ type PeerChatRoom = {
   bio: string
   link: string
   avatar: string | null
+  isDM: boolean
+  dmWith: string | null
+  pendingAcceptance: boolean
+  rejected: boolean
   isHost: boolean
   isPinned: boolean
   isMuted: boolean
@@ -120,6 +127,15 @@ type PeerChatProfile = {
   avatar: string | null
 }
 
+type PeerChatDirectInvite = {
+  roomKey: string
+  fromId: string
+  fromUsername: string
+  fromBio: string
+  fromAvatar: string | null
+  receivedAt: number
+}
+
 export type PeerChatResponse = {
   ok: boolean
   error?: string
@@ -130,6 +146,7 @@ export type PeerChatResponse = {
   version?: number
   sent?: PeerChatMessage
   item?: { name: string, url: string, byteLength?: number }
+  pendingDirectMessages?: PeerChatDirectInvite[]
 }
 
 type PeerChatScreenProps = {
@@ -188,6 +205,7 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
   const [roomName, setRoomName] = useState('')
   const [joinKey, setJoinKey] = useState('')
   const [rooms, setRooms] = useState<PeerChatRoom[]>([])
+  const [pendingDirectMessages, setPendingDirectMessages] = useState<PeerChatDirectInvite[]>([])
   const [activeRoom, setActiveRoom] = useState<PeerChatRoom | null>(null)
   const [messages, setMessages] = useState<PeerChatMessage[]>([])
   const [composer, setComposer] = useState('')
@@ -336,6 +354,7 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
         setProfileName(nextProfile?.username || '')
         setProfileBio(nextProfile?.bio || '')
         setRooms(response.rooms || [])
+        setPendingDirectMessages(response.pendingDirectMessages || [])
         versionRef.current = Number.isSafeInteger(response.version) ? response.version as number : -1
         setIsInitialized(true)
         setIsReady(true)
@@ -444,6 +463,7 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
           setProfile(response.profile)
         }
         setRooms(response.rooms || [])
+        setPendingDirectMessages(response.pendingDirectMessages || [])
         if (Number.isSafeInteger(response.version)) versionRef.current = response.version as number
       } catch (cause) {
         if (!cancelled && mountedRef.current) {
@@ -546,6 +566,40 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
       setEditRoomLink(response.room.link || '')
       setShowRoomInfo(false)
       onStatus('PeerChat room details saved')
+    })
+  }
+
+  function startDirectMessage (member: PeerChatMember) {
+    if (member.self || isBusy) return
+    void runAction(async () => {
+      const response = await callRpc(RPC_PEERCHAT_DM_CREATE, {
+        peerId: member.id,
+        username: member.username,
+        bio: member.bio,
+        avatar: member.avatar
+      })
+      if (!response.ok || !response.room || !response.rooms) {
+        throw new Error(response.error || 'Unable to start direct message.')
+      }
+      if (!mountedRef.current) return
+      setRooms(response.rooms)
+      openRoom(response.room)
+      onStatus(`Message request sent to ${member.username}`)
+    })
+  }
+
+  function respondToDirectMessage (invite: PeerChatDirectInvite, accept: boolean) {
+    if (isBusy) return
+    void runAction(async () => {
+      const response = await callRpc(accept ? RPC_PEERCHAT_DM_ACCEPT : RPC_PEERCHAT_DM_REJECT, {
+        roomKey: invite.roomKey
+      })
+      if (!response.ok) throw new Error(response.error || 'Unable to respond to message request.')
+      if (!mountedRef.current) return
+      setPendingDirectMessages(response.pendingDirectMessages || [])
+      if (response.rooms) setRooms(response.rooms)
+      if (accept && response.room) openRoom(response.room)
+      onStatus(accept ? 'Message request accepted' : 'Message request declined')
     })
   }
 
@@ -963,7 +1017,41 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
                   )}
                 </>
                 )}
+            {activeRoom.members.some((member) => !member.self) && (
+              <View style={styles.memberList}>
+                <Text style={[styles.roomInfoTitle, { color: colors.text }]}>People</Text>
+                {activeRoom.members.filter((member) => !member.self).map((member) => (
+                  <Pressable
+                    accessibilityHint='Starts a private conversation'
+                    accessibilityRole='button'
+                    key={member.id}
+                    onPress={() => startDirectMessage(member)}
+                    style={[styles.memberRow, { backgroundColor: colors.input }]}
+                  >
+                    {member.avatar
+                      ? <Image source={{ uri: member.avatar }} style={styles.memberAvatar} />
+                      : (
+                        <View style={[styles.memberAvatarFallback, { backgroundColor: colors.accentSoft }]}>
+                          <Text style={[styles.memberAvatarText, { color: colors.accent }]}>{getRoomInitials(member.username)}</Text>
+                        </View>
+                        )}
+                    <View style={styles.memberCopy}>
+                      <Text style={[styles.memberName, { color: colors.text }]}>{member.username}</Text>
+                      {!!member.bio && <Text numberOfLines={1} style={[styles.attachmentMeta, { color: colors.muted }]}>{member.bio}</Text>}
+                    </View>
+                    <Text style={[styles.memberMessage, { color: colors.accent }]}>Message</Text>
+                  </Pressable>
+                ))}
+              </View>
+            )}
           </View>
+        )}
+
+        {activeRoom.isDM && activeRoom.pendingAcceptance && (
+          <Text style={[styles.dmStatus, { color: colors.muted, backgroundColor: colors.surface }]}>Waiting for this peer to accept your message request.</Text>
+        )}
+        {activeRoom.isDM && activeRoom.rejected && (
+          <Text style={[styles.dmStatus, { color: colors.danger, backgroundColor: colors.surface }]}>This peer declined the message request.</Text>
         )}
 
         {isSearching && (
@@ -1150,9 +1238,13 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
           <Pressable
             accessibilityLabel='Attach file'
             accessibilityRole='button'
-            disabled={isBusy}
+            disabled={isBusy || activeRoom.pendingAcceptance || activeRoom.rejected}
             onPress={attachFile}
-            style={[styles.attachButton, { backgroundColor: colors.input }, isBusy ? styles.disabled : null]}
+            style={[
+              styles.attachButton,
+              { backgroundColor: colors.input },
+              isBusy || activeRoom.pendingAcceptance || activeRoom.rejected ? styles.disabled : null
+            ]}
           >
             <Text style={[styles.attachButtonText, { color: colors.accent }]}>+</Text>
           </Pressable>
@@ -1162,6 +1254,7 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
             placeholder='Message'
             placeholderTextColor={colors.muted}
             multiline
+            editable={!activeRoom.pendingAcceptance && !activeRoom.rejected}
             maxLength={64 * 1024}
             style={[
               styles.composerInput,
@@ -1170,12 +1263,12 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
           />
           <Pressable
             accessibilityRole='button'
-            disabled={!composer.trim() || isBusy}
+            disabled={!composer.trim() || isBusy || activeRoom.pendingAcceptance || activeRoom.rejected}
             onPress={sendMessage}
             style={[
               styles.sendButton,
               { backgroundColor: colors.accent },
-              !composer.trim() || isBusy ? styles.disabled : null
+              !composer.trim() || isBusy || activeRoom.pendingAcceptance || activeRoom.rejected ? styles.disabled : null
             ]}
           >
             <Text style={styles.sendButtonText}>Send</Text>
@@ -1307,6 +1400,32 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
 
           {error && <Text style={[styles.error, { color: colors.danger }]}>{error}</Text>}
           {isBusy && <ActivityIndicator color={colors.accent} />}
+          {pendingDirectMessages.length > 0 && (
+            <View style={styles.directRequests}>
+              <Text style={[styles.sectionTitle, { color: colors.text }]}>Message requests</Text>
+              {pendingDirectMessages.map((invite) => (
+                <View key={invite.roomKey} style={[styles.directRequest, { backgroundColor: colors.surface }]}>
+                  {invite.fromAvatar
+                    ? <Image source={{ uri: invite.fromAvatar }} style={styles.roomAvatarImage} />
+                    : (
+                      <View style={[styles.roomAvatar, { backgroundColor: colors.accentSoft }]}>
+                        <Text style={[styles.roomAvatarText, { color: colors.accent }]}>{getRoomInitials(invite.fromUsername)}</Text>
+                      </View>
+                      )}
+                  <View style={styles.memberCopy}>
+                    <Text style={[styles.memberName, { color: colors.text }]}>{invite.fromUsername}</Text>
+                    <Text numberOfLines={1} style={[styles.attachmentMeta, { color: colors.muted }]}>wants to message you</Text>
+                  </View>
+                  <Pressable accessibilityRole='button' onPress={() => respondToDirectMessage(invite, false)} style={styles.requestAction}>
+                    <Text style={[styles.requestActionText, { color: colors.danger }]}>Decline</Text>
+                  </Pressable>
+                  <Pressable accessibilityRole='button' onPress={() => respondToDirectMessage(invite, true)} style={[styles.requestAction, { backgroundColor: colors.accent }]}>
+                    <Text style={[styles.requestActionText, { color: '#ffffff' }]}>Accept</Text>
+                  </Pressable>
+                </View>
+              ))}
+            </View>
+          )}
           <View style={styles.sectionHeading}>
             <Text style={[styles.sectionTitle, { color: colors.text }]}>Recent chats</Text>
             {rooms.length > 0 && <Text style={[styles.roomCount, { color: colors.muted }]}>{rooms.length}</Text>}
@@ -1568,6 +1687,10 @@ const styles = StyleSheet.create({
   disabled: { opacity: 0.45 },
   error: { fontSize: 13, lineHeight: 18, textAlign: 'center' },
   sectionHeading: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between', marginTop: 5 },
+  directRequests: { gap: 7 },
+  directRequest: { alignItems: 'center', borderRadius: 12, flexDirection: 'row', gap: 7, padding: 9 },
+  requestAction: { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 7 },
+  requestActionText: { fontSize: 11, fontWeight: '800' },
   sectionTitle: { fontSize: 16, fontWeight: '900' },
   roomSearchInput: { borderRadius: 16, fontSize: 14, minHeight: 38, paddingHorizontal: 12, paddingVertical: 8 },
   roomCount: { fontSize: 12, fontWeight: '700' },
@@ -1594,6 +1717,15 @@ const styles = StyleSheet.create({
   roomInfoTitle: { fontSize: 15, fontWeight: '800' },
   roomInfoLink: { fontSize: 12, textDecorationLine: 'underline' },
   roomInfoSave: { alignItems: 'center', alignSelf: 'flex-end', borderRadius: 9, minHeight: 38, justifyContent: 'center', paddingHorizontal: 14 },
+  memberList: { gap: 6, marginTop: 2 },
+  memberRow: { alignItems: 'center', borderRadius: 10, flexDirection: 'row', gap: 8, minHeight: 46, paddingHorizontal: 9, paddingVertical: 6 },
+  memberAvatar: { borderRadius: 16, height: 32, width: 32 },
+  memberAvatarFallback: { alignItems: 'center', borderRadius: 16, height: 32, justifyContent: 'center', width: 32 },
+  memberAvatarText: { fontSize: 10, fontWeight: '900' },
+  memberCopy: { flex: 1 },
+  memberName: { fontSize: 13, fontWeight: '800' },
+  memberMessage: { fontSize: 12, fontWeight: '800' },
+  dmStatus: { fontSize: 12, paddingHorizontal: 12, paddingVertical: 8, textAlign: 'center' },
   chatTitle: { fontSize: 16, fontWeight: '800', maxWidth: '100%' },
   connectionText: { fontSize: 11, fontWeight: '600', marginTop: 2 },
   headerAction: { alignItems: 'center', minWidth: 52, paddingHorizontal: 5, paddingVertical: 11 },
