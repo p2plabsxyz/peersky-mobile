@@ -10,7 +10,10 @@ import {
   encryptPeerChatMessage,
   getSharedPeerChatRooms,
   MAX_PEERCHAT_MESSAGE_BYTES,
+  normalizePeerChatAvatar,
   normalizePeerChatAttachment,
+  normalizePeerChatBio,
+  normalizePeerChatLink,
   normalizePeerChatMessage,
   normalizePeerChatProfileName,
   normalizePeerChatReaction,
@@ -112,6 +115,15 @@ test('PeerChat accepts only bounded Hyperdrive attachment metadata', () => {
   }), {
     fileName: `safe${'x'.repeat(196)}`
   })
+})
+
+test('PeerChat sanitizes bounded profile and room metadata', () => {
+  assert.equal(normalizePeerChatBio(` About\u202E me ${'x'.repeat(400)}`).length, 300)
+  assert.equal(normalizePeerChatLink(' https://example.com/about '), 'https://example.com/about')
+  assert.equal(normalizePeerChatLink('javascript:alert(1)'), '')
+  assert.equal(normalizePeerChatLink('https://user:secret@example.com/'), '')
+  assert.equal(normalizePeerChatAvatar('data:image/png;base64,YQ=='), 'data:image/png;base64,YQ==')
+  assert.equal(normalizePeerChatAvatar('data:text/html;base64,YQ=='), null)
 })
 
 test('PeerChat AES-GCM payloads use the separated desktop message-key derivation', () => {

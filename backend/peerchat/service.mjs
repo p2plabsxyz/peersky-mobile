@@ -18,7 +18,10 @@ import {
   getSharedPeerChatRooms,
   MAX_PEERCHAT_FRAME_BYTES,
   MAX_PEERCHAT_MESSAGE_BYTES,
+  normalizePeerChatAvatar,
   normalizePeerChatAttachment,
+  normalizePeerChatBio,
+  normalizePeerChatLink,
   normalizePeerChatMessage,
   normalizePeerChatProfileName,
   normalizePeerChatReaction,
@@ -56,7 +59,7 @@ export class PeerChatService {
     this.localId = sdk.publicKey
       ? b4a.toString(sdk.publicKey, 'hex').slice(0, 8).toLowerCase()
       : 'mobile'
-    this.profile = { username: '' }
+    this.profile = { username: '', bio: '', avatar: null }
     this.rooms = new Map()
     this.feeds = new Map()
     this.feedListeners = new Map()
@@ -98,17 +101,29 @@ export class PeerChatService {
   getProfile () {
     return {
       id: this.localId,
-      username: this.profile.username || ''
+      username: this.profile.username || '',
+      bio: this.profile.bio || '',
+      avatar: this.profile.avatar || null
     }
   }
 
-  setProfile ({ username }) {
+  setProfile ({ username, bio, avatar }) {
     const normalized = normalizePeerChatProfileName(username)
     if (!normalized) {
       throw new Error('Name may only contain letters, numbers, and spaces (max 50 characters).')
     }
 
-    this.profile = { username: normalized }
+    const normalizedAvatar = avatar === undefined
+      ? this.profile.avatar
+      : normalizePeerChatAvatar(avatar)
+    if (avatar != null && avatar !== '' && !normalizedAvatar) {
+      throw new Error('Choose a supported PeerChat profile image under 256 KB.')
+    }
+    this.profile = {
+      username: normalized,
+      bio: bio === undefined ? this.profile.bio : normalizePeerChatBio(bio),
+      avatar: normalizedAvatar
+    }
     this.schedulePersist()
     this.bumpVersion()
 
@@ -116,14 +131,25 @@ export class PeerChatService {
     return this.getProfile()
   }
 
-  async createRoom ({ name, username }) {
+  async createRoom ({ name, username, bio, link, avatar }) {
     this.ensureProfile(username)
     if (this.rooms.size >= MAX_ROOMS) throw new Error(`PeerChat supports up to ${MAX_ROOMS} rooms.`)
 
     const roomKey = createPeerChatRoomKey()
+    const normalizedLink = normalizePeerChatLink(link)
+    const normalizedAvatar = normalizePeerChatAvatar(avatar)
+    if (typeof link === 'string' && link.trim() && !normalizedLink) {
+      throw new Error('Room link must be a valid HTTP or HTTPS URL.')
+    }
+    if (avatar != null && avatar !== '' && !normalizedAvatar) {
+      throw new Error('Choose a supported PeerChat room image under 256 KB.')
+    }
     const room = {
       roomKey,
       name: normalizePeerChatRoomName(name),
+      bio: normalizePeerChatBio(bio),
+      link: normalizedLink,
+      avatar: normalizedAvatar,
       isHost: true,
       createdAt: Date.now(),
       createdBy: this.localId,
@@ -158,6 +184,9 @@ export class PeerChatService {
       room = {
         roomKey: normalized,
         name: `${normalized.slice(0, 8)}...`,
+        bio: '',
+        link: '',
+        avatar: null,
         isHost: false,
         createdAt: Date.now(),
         joinedAt: Date.now(),
@@ -214,6 +243,31 @@ export class PeerChatService {
     room.isMuted = muted
     this.schedulePersist()
     this.bumpVersion()
+    return { room: this.publicRoom(room), rooms: this.listRooms(), version: this.version }
+  }
+
+  updateRoom ({ roomKey, name, bio, link, avatar } = {}) {
+    const normalized = normalizePeerChatRoomKey(roomKey)
+    const room = this.rooms.get(normalized)
+    if (!room) throw new Error('PeerChat room not found.')
+    if (!room.isHost) throw new Error('Only the room host can edit room details.')
+
+    const normalizedAvatar = avatar === undefined ? room.avatar || null : normalizePeerChatAvatar(avatar)
+    if (avatar != null && avatar !== '' && !normalizedAvatar) {
+      throw new Error('Choose a supported PeerChat room image under 256 KB.')
+    }
+    room.name = name === undefined ? room.name : normalizePeerChatRoomName(name)
+    room.bio = bio === undefined ? room.bio || '' : normalizePeerChatBio(bio)
+    if (link !== undefined) {
+      room.link = normalizePeerChatLink(link)
+      if (typeof link === 'string' && link.trim() && !room.link) {
+        throw new Error('Room link must be a valid HTTP or HTTPS URL.')
+      }
+    }
+    room.avatar = normalizedAvatar
+    this.schedulePersist()
+    this.bumpVersion()
+    this.announceRoom(normalized)
     return { room: this.publicRoom(room), rooms: this.listRooms(), version: this.version }
   }
 
@@ -552,6 +606,13 @@ export class PeerChatService {
         peer.username = name
         this.bumpVersion()
       }
+      const bio = normalizePeerChatBio(message.bio)
+      const avatar = normalizePeerChatAvatar(message.avatar)
+      if (bio !== peer.bio || avatar !== peer.avatar) {
+        peer.bio = bio
+        peer.avatar = avatar
+        this.bumpVersion()
+      }
       return
     }
 
@@ -574,6 +635,27 @@ export class PeerChatService {
         if (room.name === placeholder && incomingName && incomingName !== placeholder) {
           room.name = incomingName
           changed = true
+        }
+        if (!room.bio) {
+          const bio = normalizePeerChatBio(message.bio)
+          if (bio) {
+            room.bio = bio
+            changed = true
+          }
+        }
+        if (!room.link) {
+          const link = normalizePeerChatLink(message.link)
+          if (link) {
+            room.link = link
+            changed = true
+          }
+        }
+        if (!room.avatar) {
+          const avatar = normalizePeerChatAvatar(message.avatar)
+          if (avatar) {
+            room.avatar = avatar
+            changed = true
+          }
         }
         if (!room.createdBy && typeof message.createdBy === 'string') {
           room.createdBy = message.createdBy.slice(0, 200)
@@ -716,8 +798,8 @@ export class PeerChatService {
       roomKey,
       peerId: this.localId,
       username: this.profile.username || this.localId,
-      bio: '',
-      avatar: null,
+      bio: this.profile.bio || '',
+      avatar: this.profile.avatar || null,
       id: `${roomKey}-${this.localId}-join-${Date.now()}`,
       ts: Date.now()
     })
@@ -736,8 +818,8 @@ export class PeerChatService {
       type: 'profile',
       peerId: this.localId,
       username: this.profile.username,
-      bio: '',
-      avatar: null,
+      bio: this.profile.bio || '',
+      avatar: this.profile.avatar || null,
       rooms: peer.rooms
     })
   }
@@ -749,9 +831,9 @@ export class PeerChatService {
       type: 'room-meta',
       roomKey,
       name: room.name,
-      bio: '',
-      link: '',
-      avatar: null,
+      bio: room.bio || '',
+      link: room.link || '',
+      avatar: room.avatar || null,
       createdBy: room.createdBy || (room.isHost ? this.localId : ''),
       createdByName: room.createdByName || (room.isHost ? this.profile.username : '')
     })
@@ -960,6 +1042,9 @@ export class PeerChatService {
     return {
       roomKey: room.roomKey,
       name: room.name,
+      bio: room.bio || '',
+      link: room.link || '',
+      avatar: room.avatar || null,
       isHost: room.isHost === true,
       isPinned: room.isPinned === true,
       isMuted: room.isMuted === true,
@@ -994,13 +1079,25 @@ export class PeerChatService {
   listRoomMembers (roomKey) {
     const members = new Map()
     if (this.profile.username) {
-      members.set(this.localId, { id: this.localId, username: this.profile.username, self: true })
+      members.set(this.localId, {
+        id: this.localId,
+        username: this.profile.username,
+        bio: this.profile.bio || '',
+        avatar: this.profile.avatar || null,
+        self: true
+      })
     }
     for (const peer of this.peers.values()) {
       if (!peer.rooms.includes(roomKey) || members.has(peer.id)) continue
       const username = normalizePeerChatProfileName(peer.username)
       if (!username) continue
-      members.set(peer.id, { id: peer.id, username, self: false })
+      members.set(peer.id, {
+        id: peer.id,
+        username,
+        bio: peer.bio || '',
+        avatar: peer.avatar || null,
+        self: false
+      })
       if (members.size >= MAX_RETURNED_ROOM_MEMBERS) break
     }
     return [...members.values()]
@@ -1024,7 +1121,13 @@ export class PeerChatService {
       if (!existsSync(this.stateFilePath)) return
       const parsed = JSON.parse(readFileSync(this.stateFilePath, 'utf8'))
       const username = normalizePeerChatProfileName(parsed?.profile?.username)
-      if (username) this.profile = { username }
+      if (username) {
+        this.profile = {
+          username,
+          bio: normalizePeerChatBio(parsed?.profile?.bio),
+          avatar: normalizePeerChatAvatar(parsed?.profile?.avatar)
+        }
+      }
 
       const rooms = Array.isArray(parsed?.rooms) ? parsed.rooms.slice(0, MAX_ROOMS) : []
       for (const value of rooms) {
@@ -1033,6 +1136,9 @@ export class PeerChatService {
         this.rooms.set(roomKey, {
           roomKey,
           name: normalizePeerChatRoomName(value?.name, `${roomKey.slice(0, 8)}...`),
+          bio: normalizePeerChatBio(value?.bio),
+          link: normalizePeerChatLink(value?.link),
+          avatar: normalizePeerChatAvatar(value?.avatar),
           isHost: value?.isHost === true,
           isPinned: value?.isPinned === true,
           isMuted: value?.isMuted === true,

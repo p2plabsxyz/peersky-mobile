@@ -16,6 +16,9 @@ export const MAX_PEERCHAT_REPLY_SENDER_LENGTH = 200
 export const MAX_PEERCHAT_REPLY_TEXT_LENGTH = 200
 export const MAX_PEERCHAT_REACTION_EMOJI_LENGTH = 10
 export const MAX_PEERCHAT_FILE_NAME_LENGTH = 200
+export const MAX_PEERCHAT_BIO_LENGTH = 300
+export const MAX_PEERCHAT_LINK_LENGTH = 512
+export const MAX_PEERCHAT_AVATAR_LENGTH = 256 * 1024
 
 const ROOM_KEY_PATTERN = /^[a-f0-9]{64}$/i
 const PROFILE_NAME_PATTERN = /^[A-Za-z0-9]+(?: [A-Za-z0-9]+)*$/
@@ -50,6 +53,36 @@ export function normalizePeerChatRoomName (value, fallback = 'New Room') {
     .trim()
     .replace(/\s+/g, ' ')
   return Array.from(name).slice(0, MAX_PEERCHAT_ROOM_NAME_LENGTH).join('') || fallback
+}
+
+export function normalizePeerChatBio (value) {
+  if (typeof value !== 'string') return ''
+  return Array.from(stripMetadataControls(value).trim())
+    .slice(0, MAX_PEERCHAT_BIO_LENGTH)
+    .join('')
+}
+
+export function normalizePeerChatLink (value) {
+  if (typeof value !== 'string' || !value.trim()) return ''
+  const candidate = Array.from(stripMetadataControls(value).trim())
+    .slice(0, MAX_PEERCHAT_LINK_LENGTH)
+    .join('')
+  try {
+    const url = new URL(candidate)
+    return (url.protocol === 'https:' || url.protocol === 'http:') && !url.username && !url.password
+      ? url.toString()
+      : ''
+  } catch {
+    return ''
+  }
+}
+
+export function normalizePeerChatAvatar (value) {
+  if (value == null || value === '') return null
+  if (typeof value !== 'string' || value.length > MAX_PEERCHAT_AVATAR_LENGTH) return null
+  return /^data:image\/(?:png|jpeg|webp|gif);base64,[a-z0-9+/]+={0,2}$/i.test(value)
+    ? value
+    : null
 }
 
 export function normalizePeerChatMessage (value) {

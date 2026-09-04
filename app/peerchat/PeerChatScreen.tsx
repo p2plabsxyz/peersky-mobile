@@ -46,6 +46,7 @@ import {
   RPC_PEERCHAT_ROOM_LEAVE,
   RPC_PEERCHAT_ROOM_MUTE,
   RPC_PEERCHAT_ROOM_PIN,
+  RPC_PEERCHAT_ROOM_UPDATE,
   RPC_PEERCHAT_ROOMS,
   RPC_PEERCHAT_REACT,
   RPC_PEERCHAT_SET_ACTIVE,
@@ -89,6 +90,9 @@ type PeerChatLastMessage = {
 type PeerChatRoom = {
   roomKey: string
   name: string
+  bio: string
+  link: string
+  avatar: string | null
   isHost: boolean
   isPinned: boolean
   isMuted: boolean
@@ -104,12 +108,16 @@ type PeerChatRoom = {
 type PeerChatMember = {
   id: string
   username: string
+  bio: string
+  avatar: string | null
   self: boolean
 }
 
 type PeerChatProfile = {
   id: string
   username: string
+  bio: string
+  avatar: string | null
 }
 
 export type PeerChatResponse = {
@@ -176,6 +184,7 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
   const [error, setError] = useState<string | null>(null)
   const [profile, setProfile] = useState<PeerChatProfile | null>(null)
   const [profileName, setProfileName] = useState('')
+  const [profileBio, setProfileBio] = useState('')
   const [roomName, setRoomName] = useState('')
   const [joinKey, setJoinKey] = useState('')
   const [rooms, setRooms] = useState<PeerChatRoom[]>([])
@@ -187,6 +196,10 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
   const [isSearching, setIsSearching] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [roomSearchQuery, setRoomSearchQuery] = useState('')
+  const [showRoomInfo, setShowRoomInfo] = useState(false)
+  const [editRoomName, setEditRoomName] = useState('')
+  const [editRoomBio, setEditRoomBio] = useState('')
+  const [editRoomLink, setEditRoomLink] = useState('')
   const [landingAction, setLandingAction] = useState<LandingAction>(null)
   const [restoredUiState, setRestoredUiState] = useState<PeerChatUiState | null>(null)
   const mentionCandidates = getMentionCandidates(
@@ -321,6 +334,7 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
         const nextProfile = response.profile || null
         setProfile(nextProfile)
         setProfileName(nextProfile?.username || '')
+        setProfileBio(nextProfile?.bio || '')
         setRooms(response.rooms || [])
         versionRef.current = Number.isSafeInteger(response.version) ? response.version as number : -1
         setIsInitialized(true)
@@ -459,13 +473,17 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
   }, [activeRoom, callRpc, isReady])
 
   async function saveProfile () {
-    const response = await callRpc(RPC_PEERCHAT_PROFILE_SET, { username: profileName })
+    const response = await callRpc(RPC_PEERCHAT_PROFILE_SET, {
+      username: profileName,
+      bio: profileBio
+    })
     if (!response.ok || !response.profile) {
       throw new Error(response.error || 'Unable to save PeerChat name.')
     }
     if (!mountedRef.current) return
     setProfile(response.profile)
     setProfileName(response.profile.username)
+    setProfileBio(response.profile.bio || '')
   }
 
   async function runAction (action: () => Promise<void>) {
@@ -496,12 +514,39 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
     setReactionTargetId(null)
     setIsSearching(false)
     setSearchQuery('')
+    setShowRoomInfo(false)
+    setEditRoomName(room.name)
+    setEditRoomBio(room.bio || '')
+    setEditRoomLink(room.link || '')
     setActiveRoom(room)
     setRooms((current) => current.map((item) => item.roomKey === room.roomKey
       ? { ...item, unreadCount: 0, unreadMentions: 0 }
       : item))
     setError(null)
     onStatus(`Opened PeerChat room ${room.name}`)
+  }
+
+  function saveRoomDetails () {
+    if (!activeRoom?.isHost || isBusy) return
+    void runAction(async () => {
+      const response = await callRpc(RPC_PEERCHAT_ROOM_UPDATE, {
+        roomKey: activeRoom.roomKey,
+        name: editRoomName,
+        bio: editRoomBio,
+        link: editRoomLink
+      })
+      if (!response.ok || !response.room || !response.rooms) {
+        throw new Error(response.error || 'Unable to save room details.')
+      }
+      if (!mountedRef.current) return
+      setActiveRoom(response.room)
+      setRooms(response.rooms)
+      setEditRoomName(response.room.name)
+      setEditRoomBio(response.room.bio || '')
+      setEditRoomLink(response.room.link || '')
+      setShowRoomInfo(false)
+      onStatus('PeerChat room details saved')
+    })
   }
 
   function createRoom () {
@@ -837,6 +882,13 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
           <View style={styles.chatHeaderActions}>
             <Pressable
               accessibilityRole='button'
+              onPress={() => setShowRoomInfo((current) => !current)}
+              style={styles.headerAction}
+            >
+              <Text style={[styles.headerActionText, { color: colors.accent }]}>Info</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole='button'
               onPress={() => {
                 setIsSearching((current) => !current)
                 if (isSearching) setSearchQuery('')
@@ -854,6 +906,65 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
             </Pressable>
           </View>
         </View>
+
+        {showRoomInfo && (
+          <View style={[styles.roomInfo, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
+            {activeRoom.isHost
+              ? (
+                <>
+                  <TextInput
+                    maxLength={80}
+                    onChangeText={setEditRoomName}
+                    placeholder='Room name'
+                    placeholderTextColor={colors.muted}
+                    style={[styles.input, { backgroundColor: colors.input, color: colors.text }]}
+                    value={editRoomName}
+                  />
+                  <TextInput
+                    maxLength={300}
+                    multiline
+                    onChangeText={setEditRoomBio}
+                    placeholder='Room description (optional)'
+                    placeholderTextColor={colors.muted}
+                    style={[styles.input, styles.bioInput, { backgroundColor: colors.input, color: colors.text }]}
+                    value={editRoomBio}
+                  />
+                  <TextInput
+                    autoCapitalize='none'
+                    autoCorrect={false}
+                    maxLength={512}
+                    onChangeText={setEditRoomLink}
+                    placeholder='https:// link (optional)'
+                    placeholderTextColor={colors.muted}
+                    style={[styles.input, { backgroundColor: colors.input, color: colors.text }]}
+                    value={editRoomLink}
+                  />
+                  <Pressable
+                    accessibilityRole='button'
+                    disabled={!editRoomName.trim() || isBusy}
+                    onPress={saveRoomDetails}
+                    style={[styles.roomInfoSave, { backgroundColor: colors.accent }, !editRoomName.trim() || isBusy ? styles.disabled : null]}
+                  >
+                    <Text style={styles.profileSaveText}>Save room details</Text>
+                  </Pressable>
+                </>
+                )
+              : (
+                <>
+                  <Text style={[styles.roomInfoTitle, { color: colors.text }]}>{activeRoom.name}</Text>
+                  {!!activeRoom.bio && <Text style={[styles.helper, { color: colors.muted }]}>{activeRoom.bio}</Text>}
+                  {!!activeRoom.link && (
+                    <Pressable accessibilityRole='link' onPress={() => onOpenUrl(activeRoom.link)}>
+                      <Text numberOfLines={1} style={[styles.roomInfoLink, { color: colors.accent }]}>{activeRoom.link}</Text>
+                    </Pressable>
+                  )}
+                  {!activeRoom.bio && !activeRoom.link && (
+                    <Text style={[styles.helper, { color: colors.muted }]}>No room details shared.</Text>
+                  )}
+                </>
+                )}
+          </View>
+        )}
 
         {isSearching && (
           <View style={[styles.searchRow, { borderBottomColor: colors.border }]}>
@@ -1104,7 +1215,7 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
               placeholderTextColor={colors.muted}
               style={[styles.input, styles.profileInput, { backgroundColor: colors.input, color: colors.text }]}
             />
-            {profile?.username !== profileName.trim() && (
+            {profile?.username !== profileName.trim() || (profile?.bio || '') !== profileBio.trim() ? (
               <Pressable
                 accessibilityRole='button'
                 disabled={!profileName.trim() || isBusy}
@@ -1113,8 +1224,17 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
               >
                 <Text style={styles.profileSaveText}>Save</Text>
               </Pressable>
-            )}
+              ) : null}
           </View>
+          <TextInput
+            maxLength={300}
+            multiline
+            onChangeText={setProfileBio}
+            placeholder='Bio (optional)'
+            placeholderTextColor={colors.muted}
+            style={[styles.input, styles.bioInput, { backgroundColor: colors.input, color: colors.text }]}
+            value={profileBio}
+          />
 
           <View style={styles.quickActions}>
             <Pressable
@@ -1218,9 +1338,13 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
             pressed ? { backgroundColor: colors.input } : null
           ]}
         >
-          <View style={[styles.roomAvatar, { backgroundColor: colors.accentSoft }]}> 
-            <Text style={[styles.roomAvatarText, { color: colors.accent }]}>{getRoomInitials(item.name)}</Text>
-          </View>
+          {item.avatar
+            ? <Image source={{ uri: item.avatar }} style={styles.roomAvatarImage} />
+            : (
+              <View style={[styles.roomAvatar, { backgroundColor: colors.accentSoft }]}>
+                <Text style={[styles.roomAvatarText, { color: colors.accent }]}>{getRoomInitials(item.name)}</Text>
+              </View>
+              )}
           <View style={styles.roomCopy}>
             <View style={styles.roomTitleRow}>
               <Text numberOfLines={1} style={[styles.roomTitle, { color: colors.text }]}>{item.name}</Text>
@@ -1311,7 +1435,13 @@ function getMentionCandidates (
   }
   for (const message of messages) {
     if (message.self || message.sender === localId || candidates.has(message.sender)) continue
-    candidates.set(message.sender, { id: message.sender, username: message.senderName, self: false })
+    candidates.set(message.sender, {
+      id: message.sender,
+      username: message.senderName,
+      bio: '',
+      avatar: null,
+      self: false
+    })
   }
 
   const normalizedQuery = query.toLocaleLowerCase()
@@ -1422,6 +1552,7 @@ const styles = StyleSheet.create({
   helper: { fontSize: 13, lineHeight: 19 },
   profileRow: { alignItems: 'center', flexDirection: 'row', gap: 8 },
   profileInput: { flex: 1 },
+  bioInput: { maxHeight: 92, minHeight: 52, textAlignVertical: 'top' },
   profileSaveButton: { alignItems: 'center', borderRadius: 10, justifyContent: 'center', minHeight: 42, paddingHorizontal: 14 },
   profileSaveText: { color: '#ffffff', fontSize: 13, fontWeight: '800' },
   input: { borderRadius: 10, borderWidth: 0, fontSize: 14, minHeight: 42, paddingHorizontal: 12, paddingVertical: 9 },
@@ -1442,6 +1573,7 @@ const styles = StyleSheet.create({
   roomCount: { fontSize: 12, fontWeight: '700' },
   roomRow: { alignItems: 'center', borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: 'row', gap: 11, minHeight: 72, paddingHorizontal: 16, paddingVertical: 10 },
   roomAvatar: { alignItems: 'center', borderRadius: 22, height: 44, justifyContent: 'center', width: 44 },
+  roomAvatarImage: { borderRadius: 22, height: 44, width: 44 },
   roomAvatarText: { fontSize: 14, fontWeight: '900' },
   roomCopy: { flex: 1, gap: 4 },
   roomTitleRow: { alignItems: 'center', flexDirection: 'row', gap: 6 },
@@ -1458,6 +1590,10 @@ const styles = StyleSheet.create({
   chatHeader: { alignItems: 'center', borderBottomWidth: 1, flexDirection: 'row', minHeight: 62, paddingHorizontal: 8 },
   chatHeaderCopy: { alignItems: 'center', flex: 1, paddingHorizontal: 5 },
   chatHeaderActions: { flexDirection: 'row' },
+  roomInfo: { borderBottomWidth: 1, gap: 8, padding: 10 },
+  roomInfoTitle: { fontSize: 15, fontWeight: '800' },
+  roomInfoLink: { fontSize: 12, textDecorationLine: 'underline' },
+  roomInfoSave: { alignItems: 'center', alignSelf: 'flex-end', borderRadius: 9, minHeight: 38, justifyContent: 'center', paddingHorizontal: 14 },
   chatTitle: { fontSize: 16, fontWeight: '800', maxWidth: '100%' },
   connectionText: { fontSize: 11, fontWeight: '600', marginTop: 2 },
   headerAction: { alignItems: 'center', minWidth: 52, paddingHorizontal: 5, paddingVertical: 11 },

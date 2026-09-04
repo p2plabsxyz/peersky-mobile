@@ -286,13 +286,49 @@ test('PeerChat exposes bounded participant names from desktop profile frames', a
 
   await service.handlePeerMessage(peer, { type: 'profile', username: 'Desktop User' })
   assert.deepEqual(service.listRooms()[0].members, [
-    { id: service.localId, username: 'Alice Mobile', self: true },
-    { id: 'desktop-peer', username: 'Desktop User', self: false }
+    { id: service.localId, username: 'Alice Mobile', bio: '', avatar: null, self: true },
+    { id: 'desktop-peer', username: 'Desktop User', bio: '', avatar: null, self: false }
   ])
 
   await service.handlePeerMessage(peer, { type: 'profile', username: '<invalid>' })
   assert.equal(service.listRooms()[0].members[1].username, 'Desktop User')
   await service.close()
+})
+
+test('PeerChat persists profile metadata and lets only hosts update room metadata', async (t) => {
+  const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-metadata-'))
+  t.after(() => rm(storagePath, { recursive: true, force: true }))
+  const feeds = new Map()
+  const service = await new PeerChatService({ sdk: createFakeSdk(feeds), storagePath }).start()
+  service.setProfile({ username: 'Alice', bio: 'Mobile profile' })
+  const room = await service.createRoom({ name: 'Original', bio: 'First bio' })
+
+  const updated = service.updateRoom({
+    roomKey: room.roomKey,
+    name: 'Renamed',
+    bio: 'Room details',
+    link: 'https://example.com/chat'
+  })
+  assert.equal(updated.room.name, 'Renamed')
+  assert.equal(updated.room.bio, 'Room details')
+  assert.equal(updated.room.link, 'https://example.com/chat')
+  await service.close()
+
+  const restarted = await new PeerChatService({ sdk: createFakeSdk(cloneFeeds(feeds)), storagePath }).start()
+  assert.equal(restarted.getProfile().bio, 'Mobile profile')
+  assert.equal(restarted.listRooms()[0].name, 'Renamed')
+  assert.equal(restarted.listRooms()[0].bio, 'Room details')
+  await restarted.close()
+
+  const clientPath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-client-metadata-'))
+  t.after(() => rm(clientPath, { recursive: true, force: true }))
+  const client = await new PeerChatService({ sdk: createFakeSdk(), storagePath: clientPath }).start()
+  await client.joinRoom({ roomKey: ROOM_KEY, username: 'Client' })
+  assert.throws(
+    () => client.updateRoom({ roomKey: ROOM_KEY, name: 'Spoofed' }),
+    /Only the room host/
+  )
+  await client.close()
 })
 
 test('PeerChat persists pinned rooms and sorts them before newer chats', async (t) => {
