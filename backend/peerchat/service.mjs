@@ -117,7 +117,7 @@ export class PeerChatService {
       ? this.profile.avatar
       : normalizePeerChatAvatar(avatar)
     if (avatar != null && avatar !== '' && !normalizedAvatar) {
-      throw new Error('Choose a supported PeerChat profile image under 256 KB.')
+      throw new Error('Choose a supported PeerChat profile image under 192 KB.')
     }
     this.profile = {
       username: normalized,
@@ -142,7 +142,7 @@ export class PeerChatService {
       throw new Error('Room link must be a valid HTTP or HTTPS URL.')
     }
     if (avatar != null && avatar !== '' && !normalizedAvatar) {
-      throw new Error('Choose a supported PeerChat room image under 256 KB.')
+      throw new Error('Choose a supported PeerChat room image under 192 KB.')
     }
     const room = {
       roomKey,
@@ -254,7 +254,7 @@ export class PeerChatService {
 
     const normalizedAvatar = avatar === undefined ? room.avatar || null : normalizePeerChatAvatar(avatar)
     if (avatar != null && avatar !== '' && !normalizedAvatar) {
-      throw new Error('Choose a supported PeerChat room image under 256 KB.')
+      throw new Error('Choose a supported PeerChat room image under 192 KB.')
     }
     room.name = name === undefined ? room.name : normalizePeerChatRoomName(name)
     room.bio = bio === undefined ? room.bio || '' : normalizePeerChatBio(bio)
