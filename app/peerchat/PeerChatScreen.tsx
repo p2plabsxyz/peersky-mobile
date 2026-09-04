@@ -180,9 +180,14 @@ export type PeerChatResponse = {
 
 type PeerChatScreenProps = {
   isDark: boolean
+  notificationPreferencesReady: boolean
+  notificationsEnabled: boolean
   onCallRpc: (command: number, data?: object) => Promise<PeerChatResponse>
+  onNotificationsEnabledChange: (enabled: boolean) => Promise<boolean>
   onOpenUrl: (url: string) => void
+  onSoundsEnabledChange: (enabled: boolean) => boolean
   onStatus: (message: string) => void
+  soundsEnabled: boolean
 }
 
 const POLL_INTERVAL_MS = 1500
@@ -209,7 +214,17 @@ const PEERCHAT_UI_STATE_FILE = new File(Paths.document, 'peerchat-ui-state.json'
 const UI_STATE_PERSIST_DELAY_MS = 300
 const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
 
-export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: PeerChatScreenProps) {
+export function PeerChatScreen ({
+  isDark,
+  notificationPreferencesReady,
+  notificationsEnabled,
+  onCallRpc,
+  onNotificationsEnabledChange,
+  onOpenUrl,
+  onSoundsEnabledChange,
+  onStatus,
+  soundsEnabled
+}: PeerChatScreenProps) {
   const colors = isDark ? darkColors : lightColors
   const callRpcRef = useRef(onCallRpc)
   const messageListRef = useRef<FlatList<PeerChatMessage> | null>(null)
@@ -578,6 +593,27 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
       actionInFlightRef.current = false
       if (mountedRef.current) setIsBusy(false)
     }
+  }
+
+  function changeNotifications () {
+    void runAction(async () => {
+      const enabled = !notificationsEnabled
+      if (!await onNotificationsEnabledChange(enabled)) {
+        throw new Error(enabled
+          ? 'Notification permission was not granted.'
+          : 'Unable to save notification preference.')
+      }
+      onStatus(enabled ? 'PeerChat notifications enabled' : 'PeerChat notifications disabled')
+    })
+  }
+
+  function changeNotificationSounds () {
+    const enabled = !soundsEnabled
+    if (!onSoundsEnabledChange(enabled)) {
+      setError('Unable to save notification sound preference.')
+      return
+    }
+    onStatus(enabled ? 'PeerChat notification sound enabled' : 'PeerChat notification sound disabled')
   }
 
   function chooseAvatar (current: string | null, onChange: (avatar: string | null) => void) {
@@ -1696,6 +1732,36 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
             </View>
             <Text style={[styles.preferenceState, { color: linkPreviewsEnabled ? colors.accent : colors.muted }]}>
               {linkPreviewsEnabled ? 'On' : 'Off'}
+            </Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole='switch'
+            accessibilityState={{ checked: notificationsEnabled, disabled: !notificationPreferencesReady || isBusy }}
+            disabled={!notificationPreferencesReady || isBusy}
+            onPress={changeNotifications}
+            style={[styles.preferenceRow, { backgroundColor: colors.surface }, !notificationPreferencesReady || isBusy ? styles.disabled : null]}
+          >
+            <View style={styles.preferenceCopy}>
+              <Text style={[styles.memberName, { color: colors.text }]}>Message notifications</Text>
+              <Text style={[styles.attachmentMeta, { color: colors.muted }]}>Notify for new unread messages while PeerSky is running</Text>
+            </View>
+            <Text style={[styles.preferenceState, { color: notificationsEnabled ? colors.accent : colors.muted }]}>
+              {notificationsEnabled ? 'On' : 'Off'}
+            </Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole='switch'
+            accessibilityState={{ checked: soundsEnabled, disabled: !notificationsEnabled || isBusy }}
+            disabled={!notificationsEnabled || isBusy}
+            onPress={changeNotificationSounds}
+            style={[styles.preferenceRow, { backgroundColor: colors.surface }, !notificationsEnabled || isBusy ? styles.disabled : null]}
+          >
+            <View style={styles.preferenceCopy}>
+              <Text style={[styles.memberName, { color: colors.text }]}>Notification sound</Text>
+              <Text style={[styles.attachmentMeta, { color: colors.muted }]}>Play a sound with new message notifications</Text>
+            </View>
+            <Text style={[styles.preferenceState, { color: soundsEnabled && notificationsEnabled ? colors.accent : colors.muted }]}>
+              {soundsEnabled ? 'On' : 'Off'}
             </Text>
           </Pressable>
 

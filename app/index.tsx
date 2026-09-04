@@ -122,6 +122,7 @@ import { DownloadsScreen } from './downloads/DownloadsScreen'
 import { findCompletedHyperDownload } from './downloads/browser-downloads.mjs'
 import { HyperdriveScreen } from './hyperdrive/HyperdriveScreen'
 import { PeerChatScreen, type PeerChatResponse } from './peerchat/PeerChatScreen'
+import { usePeerChatNotifications } from './peerchat/usePeerChatNotifications'
 import { peerSkyWebViewNativeConfig } from './downloads/PeerSkyWebView'
 import {
   initializeContentBlocking,
@@ -329,6 +330,11 @@ export default function App () {
   const [browserWebCanGoForward, setBrowserWebCanGoForward] = useState(false)
   const [browserIsLoading, setBrowserIsLoading] = useState(false)
   const [activeTab, setActiveTab] = useState<RuntimeTab>('hyper')
+  const peerChatNotifications = usePeerChatNotifications({
+    isPeerChatVisible: browserSource.kind === 'app' && activeTab === 'peerchat',
+    isRuntimeReady: Boolean(identityStoragePath),
+    onCallRpc: (command, data = {}) => callRpc(command, data) as Promise<PeerChatResponse>
+  })
   const [lastResult, setLastResult] = useState<RpcResponse | null>(null)
   const [hsLivePort, setHsLivePort] = useState('8989')
   const [hsLiveHost, setHsLiveHost] = useState('127.0.0.1')
@@ -2615,9 +2621,14 @@ export default function App () {
               ? (
                 <PeerChatScreen
                   isDark={browserIsDark}
+                  notificationPreferencesReady={peerChatNotifications.isReady}
+                  notificationsEnabled={peerChatNotifications.notificationsEnabled}
                   onCallRpc={(command, data = {}) => callRpc(command, data) as Promise<PeerChatResponse>}
+                  onNotificationsEnabledChange={peerChatNotifications.setNotificationsEnabled}
                   onOpenUrl={(targetUrl) => void loadBrowserUrl(targetUrl)}
+                  onSoundsEnabledChange={peerChatNotifications.setSoundsEnabled}
                   onStatus={setStatus}
+                  soundsEnabled={peerChatNotifications.soundsEnabled}
                 />
                 )
               : (

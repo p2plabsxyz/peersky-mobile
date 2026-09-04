@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import {
   AppState,
   Linking,
-  PermissionsAndroid,
   Platform,
   Pressable,
   StyleSheet,
@@ -10,6 +9,10 @@ import {
   View
 } from 'react-native'
 import { BROWSER_PALETTES } from '../browser-appearance.mjs'
+import {
+  hasPeerChatNotificationPermission,
+  requestPeerChatNotificationPermission
+} from '../peerchat/notifications'
 import type { ExternalLinkBehavior } from './useBrowserPreferences'
 import {
   ChoiceGroup,
@@ -33,17 +36,12 @@ export function Permissions ({
   const [actionError, setActionError] = useState<string | null>(null)
   const [isRequestingNotifications, setIsRequestingNotifications] = useState(false)
   const [notificationsAllowed, setNotificationsAllowed] = useState<boolean | null>(null)
-  const hasRuntimeNotificationPermission = Number(Platform.Version) >= 33
 
   useEffect(() => {
-    if (Platform.OS !== 'android' || !hasRuntimeNotificationPermission) return
-
     let active = true
     const refreshPermission = async () => {
       try {
-        const allowed = await PermissionsAndroid.check(
-          PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS
-        )
+        const allowed = await hasPeerChatNotificationPermission()
         if (active) setNotificationsAllowed(allowed)
       } catch (error) {
         if (active) {
@@ -62,7 +60,7 @@ export function Permissions ({
       active = false
       subscription.remove()
     }
-  }, [hasRuntimeNotificationPermission])
+  }, [])
 
   async function openAppSettings () {
     setActionError(null)
@@ -74,11 +72,6 @@ export function Permissions ({
   }
 
   async function requestNotifications () {
-    if (Platform.OS !== 'android' || !hasRuntimeNotificationPermission) {
-      await openAppSettings()
-      return
-    }
-
     if (notificationsAllowed) {
       await openAppSettings()
       return
@@ -87,13 +80,9 @@ export function Permissions ({
     setActionError(null)
     setIsRequestingNotifications(true)
     try {
-      const result = await PermissionsAndroid.request(
-        PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS
-      )
-      setNotificationsAllowed(result === PermissionsAndroid.RESULTS.GRANTED)
-      if (result === PermissionsAndroid.RESULTS.NEVER_ASK_AGAIN) {
-        await Linking.openSettings()
-      }
+      const allowed = await requestPeerChatNotificationPermission()
+      setNotificationsAllowed(allowed)
+      if (!allowed) await Linking.openSettings()
     } catch (error) {
       setActionError(getActionError(error, 'Unable to request notification permission.'))
     } finally {
@@ -130,28 +119,22 @@ export function Permissions ({
           isDark={isDark}
           onPress={() => void openAppSettings()}
         />
+        <PermissionRow
+          title='Notifications'
+          description={notificationsAllowed
+            ? 'Notifications are allowed. Tap Allowed to manage or disable them in device settings.'
+            : 'Allow PeerSky to display notifications. You can change this later in device settings.'}
+          action={isRequestingNotifications
+            ? 'Requesting...'
+            : notificationsAllowed
+              ? 'Allowed'
+              : 'Allow'}
+          disabled={isRequestingNotifications || notificationsAllowed === null}
+          isDark={isDark}
+          onPress={() => void requestNotifications()}
+        />
         {Platform.OS === 'android' && (
           <>
-            <PermissionRow
-              title='Notifications'
-              description={!hasRuntimeNotificationPermission
-                ? 'Manage PeerSky notifications in device settings.'
-                : notificationsAllowed
-                ? 'Notifications are allowed. Tap Allowed to manage or disable them in device settings.'
-                : 'Allow PeerSky to display notifications. You can change this later in device settings.'}
-              action={isRequestingNotifications
-                ? 'Requesting...'
-                : !hasRuntimeNotificationPermission
-                  ? 'Manage'
-                : notificationsAllowed
-                  ? 'Allowed'
-                  : 'Allow'}
-              disabled={isRequestingNotifications || (
-                hasRuntimeNotificationPermission && notificationsAllowed === null
-              )}
-              isDark={isDark}
-              onPress={() => void requestNotifications()}
-            />
             <PermissionRow
               title='Default browser'
               description='Choose PeerSky as the app that opens web links.'

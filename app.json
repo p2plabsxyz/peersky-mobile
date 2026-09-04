@@ -81,6 +81,13 @@
       "./plugins/with-android-loopback-cleartext",
       "./plugins/with-browser-downloads",
       "./plugins/with-lan-discovery",
+      [
+        "expo-notifications",
+        {
+          "color": "#1f6fd1",
+          "defaultChannel": "peerchat-messages"
+        }
+      ],
       "expo-sharing"
     ]
   }

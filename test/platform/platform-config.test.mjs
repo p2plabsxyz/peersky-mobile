@@ -8,6 +8,7 @@ const { addMulticastLock } = require('../../plugins/with-lan-discovery.js')
 
 const ANDROID_LOOPBACK_CLEARTEXT_PLUGIN = './plugins/with-android-loopback-cleartext'
 const LAN_DISCOVERY_PLUGIN = './plugins/with-lan-discovery'
+const EXPO_NOTIFICATIONS_PLUGIN = 'expo-notifications'
 const REPO_ROOT = new URL('../../', import.meta.url)
 const ANDROID_LOOPBACK_CLEARTEXT_PLUGIN_FILE = repoFile('plugins/with-android-loopback-cleartext.js')
 const LAN_DISCOVERY_PLUGIN_FILE = repoFile('plugins/with-lan-discovery.js')
@@ -66,6 +67,19 @@ describe('mobile platform runtime configuration', () => {
     assert.match(infoPlist?.NSCameraUsageDescription, /website you visit/i)
     assert.match(infoPlist?.NSLocationWhenInUseUsageDescription, /website you visit/i)
     assert.match(infoPlist?.NSMicrophoneUsageDescription, /website you visit/i)
+  })
+
+  it('configures native local notifications for PeerChat', async () => {
+    const appJson = JSON.parse(await readFile(repoFile('app.json'), 'utf8'))
+    const plugins = appJson.expo?.plugins || []
+    const notificationPlugin = plugins.find((plugin) => (
+      Array.isArray(plugin) && plugin[0] === EXPO_NOTIFICATIONS_PLUGIN
+    ))
+
+    assert.deepEqual(notificationPlugin, [
+      EXPO_NOTIFICATIONS_PLUGIN,
+      { color: '#1f6fd1', defaultChannel: 'peerchat-messages' }
+    ])
   })
 
   it('configures local discovery on Android and iOS', async () => {
