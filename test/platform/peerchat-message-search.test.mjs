@@ -7,6 +7,7 @@ import {
   formatPeerChatDateLabel,
   formatPeerChatMessageDetails,
   getFirstUnreadMessageIndex,
+  isPeerChatNearBottom,
   PEERCHAT_SEARCH_QUERY_MAX_CHARACTERS
 } from '../../app/peerchat/message-search.mjs'
 
@@ -83,4 +84,13 @@ test('PeerChat formats bounded message details', () => {
   assert.equal(formatPeerChatMessageDetails(timestamp), `Sent ${day} at ${date.toLocaleTimeString()}`)
   assert.equal(formatPeerChatMessageDetails(-1), 'Sent time unavailable')
   assert.equal(formatPeerChatMessageDetails(Number.NaN), 'Sent time unavailable')
+})
+
+test('PeerChat detects whether the message list is near its latest item', () => {
+  assert.equal(isPeerChatNearBottom({ contentHeight: 1000, viewportHeight: 400, offsetY: 530 }), true)
+  assert.equal(isPeerChatNearBottom({ contentHeight: 1000, viewportHeight: 400, offsetY: 400 }), false)
+  assert.equal(isPeerChatNearBottom({ contentHeight: 300, viewportHeight: 400, offsetY: 0 }), true)
+  assert.equal(isPeerChatNearBottom({ contentHeight: 1000, viewportHeight: 400, offsetY: -20 }), false)
+  assert.equal(isPeerChatNearBottom({ contentHeight: Number.NaN, viewportHeight: 400, offsetY: 0 }), true)
+  assert.equal(isPeerChatNearBottom(null), true)
 })

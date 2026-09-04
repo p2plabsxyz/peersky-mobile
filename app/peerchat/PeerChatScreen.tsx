@@ -40,6 +40,7 @@ import {
   formatPeerChatDateLabel,
   formatPeerChatMessageDetails,
   getFirstUnreadMessageIndex,
+  isPeerChatNearBottom,
   PEERCHAT_SEARCH_QUERY_MAX_CHARACTERS
 } from './message-search.mjs'
 import {
@@ -210,6 +211,7 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
   const roomListPollInFlightRef = useRef(false)
   const actionInFlightRef = useRef(false)
   const unreadScrollPendingRef = useRef(false)
+  const isNearMessageBottomRef = useRef(true)
   const mountedRef = useRef(true)
   const composerRoomKeyRef = useRef<string | null>(null)
   const uiStateRef = useRef<PeerChatUiState>(EMPTY_UI_STATE)
@@ -231,6 +233,7 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
   const [activeRoom, setActiveRoom] = useState<PeerChatRoom | null>(null)
   const [messages, setMessages] = useState<PeerChatMessage[]>([])
   const [newMessagesAfter, setNewMessagesAfter] = useState<number | null>(null)
+  const [showScrollToLatest, setShowScrollToLatest] = useState(false)
   const [composer, setComposer] = useState('')
   const [replyTarget, setReplyTarget] = useState<PeerChatReply | null>(null)
   const [reactionTargetId, setReactionTargetId] = useState<string | null>(null)
@@ -582,6 +585,8 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
       ? room.lastReadTs
       : null
     unreadScrollPendingRef.current = timestamp !== null
+    isNearMessageBottomRef.current = timestamp === null
+    setShowScrollToLatest(timestamp !== null)
     setNewMessagesAfter(timestamp)
   }
 
@@ -1119,7 +1124,8 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
           </View>
         )}
 
-        <FlatList
+        <View style={styles.messageListContainer}>
+          <FlatList
           ref={messageListRef}
           data={visibleMessages}
           keyExtractor={(item) => item.id}
@@ -1128,11 +1134,25 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
             if (isSearching) return
             if (unreadScrollPendingRef.current && firstUnreadIndex >= 0) {
               unreadScrollPendingRef.current = false
+              isNearMessageBottomRef.current = false
+              setShowScrollToLatest(true)
               messageListRef.current?.scrollToIndex({ animated: false, index: firstUnreadIndex, viewPosition: 0 })
-            } else if (newMessagesAfter === null) {
+            } else if (isNearMessageBottomRef.current) {
               messageListRef.current?.scrollToEnd({ animated: false })
             }
           }}
+          onScroll={({ nativeEvent }) => {
+            if (isSearching || unreadScrollPendingRef.current) return
+            const nearBottom = isPeerChatNearBottom({
+              contentHeight: nativeEvent.contentSize.height,
+              viewportHeight: nativeEvent.layoutMeasurement.height,
+              offsetY: nativeEvent.contentOffset.y
+            })
+            if (nearBottom === isNearMessageBottomRef.current) return
+            isNearMessageBottomRef.current = nearBottom
+            setShowScrollToLatest(!nearBottom)
+          }}
+          scrollEventThrottle={100}
           onScrollToIndexFailed={({ averageItemLength, index }) => {
             messageListRef.current?.scrollToOffset({
               animated: false,
@@ -1266,7 +1286,22 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
               </Text>
             </View>
           )}
-        />
+          />
+          {showScrollToLatest && !isSearching && (
+            <Pressable
+              accessibilityHint='Scrolls to the newest message'
+              accessibilityRole='button'
+              onPress={() => {
+                isNearMessageBottomRef.current = true
+                setShowScrollToLatest(false)
+                messageListRef.current?.scrollToEnd({ animated: true })
+              }}
+              style={[styles.scrollToLatest, { backgroundColor: colors.accent }]}
+            >
+              <Text style={styles.scrollToLatestText}>Latest</Text>
+            </Pressable>
+          )}
+        </View>
 
         {error && <Text style={[styles.inlineError, { color: colors.danger }]}>{error}</Text>}
 
@@ -1910,6 +1945,7 @@ const styles = StyleSheet.create({
   searchRow: { alignItems: 'center', borderBottomWidth: 1, flexDirection: 'row', gap: 8, paddingHorizontal: 10, paddingVertical: 7 },
   searchInput: { borderRadius: 16, flex: 1, fontSize: 14, minHeight: 36, paddingHorizontal: 12, paddingVertical: 7 },
   searchCount: { fontSize: 11, minWidth: 24, textAlign: 'center' },
+  messageListContainer: { flex: 1 },
   messageList: { padding: 14, paddingBottom: 8 },
   emptyMessageList: { flexGrow: 1, justifyContent: 'center' },
   unreadDivider: { alignItems: 'center', flexDirection: 'row', gap: 9, marginBottom: 14, marginTop: 5 },
@@ -1942,6 +1978,8 @@ const styles = StyleSheet.create({
   preferenceCopy: { flex: 1 },
   preferenceState: { fontSize: 12, fontWeight: '900' },
   messageTime: { alignSelf: 'flex-end', fontSize: 10, marginTop: 4 },
+  scrollToLatest: { alignItems: 'center', borderRadius: 18, bottom: 10, elevation: 3, justifyContent: 'center', minHeight: 36, paddingHorizontal: 14, position: 'absolute', right: 14 },
+  scrollToLatestText: { color: '#ffffff', fontSize: 12, fontWeight: '800' },
   inlineError: { fontSize: 12, paddingHorizontal: 14, paddingVertical: 5, textAlign: 'center' },
   reactionPicker: { alignItems: 'center', borderTopWidth: 1, flexDirection: 'row', justifyContent: 'space-around', paddingHorizontal: 8, paddingVertical: 6 },
   reactionPickerButton: { alignItems: 'center', borderRadius: 18, height: 36, justifyContent: 'center', width: 36 },

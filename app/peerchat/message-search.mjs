@@ -52,6 +52,13 @@ export function formatPeerChatMessageDetails (timestamp) {
   return `Sent ${day} at ${date.toLocaleTimeString()}`
 }
 
+export function isPeerChatNearBottom (metrics, threshold = 80) {
+  const { contentHeight, viewportHeight, offsetY } = metrics || {}
+  if (![contentHeight, viewportHeight, offsetY, threshold].every(Number.isFinite)) return true
+  if (contentHeight < 0 || viewportHeight < 0 || threshold < 0) return true
+  return contentHeight - viewportHeight - Math.max(0, offsetY) <= threshold
+}
+
 function normalizeSearchQuery (query) {
   if (typeof query !== 'string') return ''
   return Array.from(query.trim())
