@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { File, Paths } from 'expo-file-system'
 import * as DocumentPicker from 'expo-document-picker'
+import { fetch as expoFetch } from 'expo/fetch'
 import {
   ActivityIndicator,
   Alert,
@@ -36,6 +37,10 @@ import {
   filterPeerChatRooms,
   PEERCHAT_SEARCH_QUERY_MAX_CHARACTERS
 } from './message-search.mjs'
+import {
+  extractFirstHttpUrl,
+  resolveLinkPreview
+} from '../../backend/peerchat/link-preview.mjs'
 
 import {
   RPC_HYPER_LIBRARY_UPLOAD,
@@ -68,6 +73,14 @@ type PeerChatMessage = {
   reactions?: PeerChatReactionSummary[]
   fileName?: string
   fileSize?: number
+  preview?: PeerChatLinkPreview | null
+}
+
+type PeerChatLinkPreview = {
+  url: string
+  host?: string
+  title?: string
+  description?: string
 }
 
 type PeerChatReactionSummary = {
@@ -125,6 +138,7 @@ type PeerChatProfile = {
   username: string
   bio: string
   avatar: string | null
+  linkPreview: boolean
 }
 
 type PeerChatDirectInvite = {
@@ -202,6 +216,7 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
   const [profile, setProfile] = useState<PeerChatProfile | null>(null)
   const [profileName, setProfileName] = useState('')
   const [profileBio, setProfileBio] = useState('')
+  const [linkPreviewsEnabled, setLinkPreviewsEnabled] = useState(true)
   const [roomName, setRoomName] = useState('')
   const [joinKey, setJoinKey] = useState('')
   const [rooms, setRooms] = useState<PeerChatRoom[]>([])
@@ -353,6 +368,7 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
         setProfile(nextProfile)
         setProfileName(nextProfile?.username || '')
         setProfileBio(nextProfile?.bio || '')
+        setLinkPreviewsEnabled(nextProfile?.linkPreview !== false)
         setRooms(response.rooms || [])
         setPendingDirectMessages(response.pendingDirectMessages || [])
         versionRef.current = Number.isSafeInteger(response.version) ? response.version as number : -1
@@ -495,7 +511,8 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
   async function saveProfile () {
     const response = await callRpc(RPC_PEERCHAT_PROFILE_SET, {
       username: profileName,
-      bio: profileBio
+      bio: profileBio,
+      linkPreview: linkPreviewsEnabled
     })
     if (!response.ok || !response.profile) {
       throw new Error(response.error || 'Unable to save PeerChat name.')
@@ -504,6 +521,7 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
     setProfile(response.profile)
     setProfileName(response.profile.username)
     setProfileBio(response.profile.bio || '')
+    setLinkPreviewsEnabled(response.profile.linkPreview !== false)
   }
 
   async function runAction (action: () => Promise<void>) {
@@ -702,10 +720,15 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
     const selectedReply = replyTarget
 
     void runAction(async () => {
+      const previewUrl = linkPreviewsEnabled ? extractFirstHttpUrl(message) : null
+      const preview = previewUrl
+        ? await resolveLinkPreview(previewUrl, { fetchFn: expoFetch, timeoutMs: 1500 })
+        : null
       const response = await callRpc(RPC_PEERCHAT_SEND, {
         roomKey: activeRoom.roomKey,
         message,
-        replyTo: selectedReply
+        replyTo: selectedReply,
+        preview
       })
       if (!response.ok) throw new Error(response.error || 'Unable to send PeerChat message.')
       if (!mountedRef.current) return
@@ -1120,9 +1143,29 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
                     </Pressable>
                     )
                   : (
-                    <Text selectable style={[styles.messageText, { color: colors.text }]}>
-                      {renderMessageText(item.message, profile?.username || '', colors.accent)}
-                    </Text>
+                    <>
+                      <Text selectable style={[styles.messageText, { color: colors.text }]}>
+                        {renderMessageText(item.message, profile?.username || '', colors.accent)}
+                      </Text>
+                      {item.preview && (
+                        <Pressable
+                          accessibilityHint='Opens the linked page'
+                          accessibilityRole='link'
+                          onPress={() => onOpenUrl(item.preview?.url || '')}
+                          style={[styles.linkPreview, { backgroundColor: colors.input, borderColor: colors.border }]}
+                        >
+                          <Text numberOfLines={1} style={[styles.linkPreviewHost, { color: colors.accent }]}>
+                            {item.preview.host || item.preview.url}
+                          </Text>
+                          {!!item.preview.title && (
+                            <Text numberOfLines={2} style={[styles.linkPreviewTitle, { color: colors.text }]}>{item.preview.title}</Text>
+                          )}
+                          {!!item.preview.description && (
+                            <Text numberOfLines={2} style={[styles.linkPreviewDescription, { color: colors.muted }]}>{item.preview.description}</Text>
+                          )}
+                        </Pressable>
+                      )}
+                    </>
                     )}
                 {item.reactions && item.reactions.length > 0 && (
                   <View style={styles.reactionRow}>
@@ -1308,7 +1351,9 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
               placeholderTextColor={colors.muted}
               style={[styles.input, styles.profileInput, { backgroundColor: colors.input, color: colors.text }]}
             />
-            {profile?.username !== profileName.trim() || (profile?.bio || '') !== profileBio.trim() ? (
+            {profile?.username !== profileName.trim() ||
+            (profile?.bio || '') !== profileBio.trim() ||
+            profile?.linkPreview !== linkPreviewsEnabled ? (
               <Pressable
                 accessibilityRole='button'
                 disabled={!profileName.trim() || isBusy}
@@ -1328,6 +1373,20 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
             style={[styles.input, styles.bioInput, { backgroundColor: colors.input, color: colors.text }]}
             value={profileBio}
           />
+          <Pressable
+            accessibilityRole='switch'
+            accessibilityState={{ checked: linkPreviewsEnabled }}
+            onPress={() => setLinkPreviewsEnabled((enabled) => !enabled)}
+            style={[styles.preferenceRow, { backgroundColor: colors.surface }]}
+          >
+            <View style={styles.preferenceCopy}>
+              <Text style={[styles.memberName, { color: colors.text }]}>Link previews</Text>
+              <Text style={[styles.attachmentMeta, { color: colors.muted }]}>Fetch page details only when you send a link</Text>
+            </View>
+            <Text style={[styles.preferenceState, { color: linkPreviewsEnabled ? colors.accent : colors.muted }]}>
+              {linkPreviewsEnabled ? 'On' : 'Off'}
+            </Text>
+          </Pressable>
 
           <View style={styles.quickActions}>
             <Pressable
@@ -1751,6 +1810,13 @@ const styles = StyleSheet.create({
   attachmentCopy: { flex: 1 },
   attachmentName: { fontSize: 13, fontWeight: '800' },
   attachmentMeta: { fontSize: 10, marginTop: 2 },
+  linkPreview: { borderRadius: 9, borderWidth: 1, gap: 2, marginTop: 7, padding: 8 },
+  linkPreviewHost: { fontSize: 10, fontWeight: '700' },
+  linkPreviewTitle: { fontSize: 13, fontWeight: '800' },
+  linkPreviewDescription: { fontSize: 11, lineHeight: 15 },
+  preferenceRow: { alignItems: 'center', borderRadius: 12, flexDirection: 'row', gap: 10, padding: 11 },
+  preferenceCopy: { flex: 1 },
+  preferenceState: { fontSize: 12, fontWeight: '900' },
   messageTime: { alignSelf: 'flex-end', fontSize: 10, marginTop: 4 },
   inlineError: { fontSize: 12, paddingHorizontal: 14, paddingVertical: 5, textAlign: 'center' },
   reactionPicker: { alignItems: 'center', borderTopWidth: 1, flexDirection: 'row', justifyContent: 'space-around', paddingHorizontal: 8, paddingVertical: 6 },

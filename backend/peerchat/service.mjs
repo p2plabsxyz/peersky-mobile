@@ -9,6 +9,11 @@ import {
 import b4a from 'b4a'
 
 import {
+  decodeMessagePayload,
+  encodeMessagePayload,
+  sanitizePreview
+} from './link-preview.mjs'
+import {
   createPeerChatMessageId,
   createPeerChatRoomKey,
   decryptPeerChatMessage,
@@ -62,7 +67,7 @@ export class PeerChatService {
     this.localId = sdk.publicKey
       ? b4a.toString(sdk.publicKey, 'hex').slice(0, 8).toLowerCase()
       : 'mobile'
-    this.profile = { username: '', bio: '', avatar: null }
+    this.profile = { username: '', bio: '', avatar: null, linkPreview: true }
     this.rooms = new Map()
     this.pendingDirectMessages = new Map()
     this.feeds = new Map()
@@ -107,11 +112,12 @@ export class PeerChatService {
       id: this.localId,
       username: this.profile.username || '',
       bio: this.profile.bio || '',
-      avatar: this.profile.avatar || null
+      avatar: this.profile.avatar || null,
+      linkPreview: this.profile.linkPreview !== false
     }
   }
 
-  setProfile ({ username, bio, avatar }) {
+  setProfile ({ username, bio, avatar, linkPreview }) {
     const normalized = normalizePeerChatProfileName(username)
     if (!normalized) {
       throw new Error('Name may only contain letters, numbers, and spaces (max 50 characters).')
@@ -126,7 +132,8 @@ export class PeerChatService {
     this.profile = {
       username: normalized,
       bio: bio === undefined ? this.profile.bio : normalizePeerChatBio(bio),
-      avatar: normalizedAvatar
+      avatar: normalizedAvatar,
+      linkPreview: linkPreview === undefined ? this.profile.linkPreview !== false : linkPreview !== false
     }
     this.schedulePersist()
     this.bumpVersion()
@@ -397,7 +404,7 @@ export class PeerChatService {
     }
   }
 
-  async sendMessage ({ roomKey, message, replyTo, fileName, fileSize }) {
+  async sendMessage ({ roomKey, message, replyTo, fileName, fileSize, preview }) {
     const normalizedRoomKey = normalizePeerChatRoomKey(roomKey)
     const room = this.rooms.get(normalizedRoomKey)
     if (!room) throw new Error('PeerChat room not found.')
@@ -414,7 +421,12 @@ export class PeerChatService {
       throw new Error('Enter a message to send.')
     }
 
-    const encrypted = encryptPeerChatMessage(normalizedMessage, normalizedRoomKey)
+    const normalizedPreview = sanitizePreview(preview)
+    const encodedPayload = encodeMessagePayload(normalizedMessage, normalizedPreview)
+    const plaintext = getPeerChatMessageByteLength(encodedPayload) <= MAX_PEERCHAT_MESSAGE_BYTES
+      ? encodedPayload
+      : normalizedMessage
+    const encrypted = encryptPeerChatMessage(plaintext, normalizedRoomKey)
     const normalizedReply = normalizePeerChatReply(replyTo)
     const attachment = normalizePeerChatAttachment({
       message: normalizedMessage,
@@ -1211,12 +1223,16 @@ export class PeerChatService {
 
   entryToMessage (entry, roomKey) {
     const sender = String(entry.sender || '').slice(0, 200)
-    const message = decryptPeerChatMessage(entry, roomKey)
+    const decrypted = decryptPeerChatMessage(entry, roomKey)
+    const payload = decodeMessagePayload(decrypted)
+    const message = normalizePeerChatMessage(payload.text)
+    if (!message) throw new Error('Invalid PeerChat message payload')
     return {
       id: String(entry.id || ''),
       sender,
       senderName: normalizePeerChatProfileName(entry.sn) || normalizePeerChatRoomName(sender, 'Peer'),
       message,
+      ...(payload.preview && { preview: payload.preview }),
       ...(normalizePeerChatAttachment({
         message,
         fileName: entry.fileName,
@@ -1320,7 +1336,8 @@ export class PeerChatService {
         this.profile = {
           username,
           bio: normalizePeerChatBio(parsed?.profile?.bio),
-          avatar: normalizePeerChatAvatar(parsed?.profile?.avatar)
+          avatar: normalizePeerChatAvatar(parsed?.profile?.avatar),
+          linkPreview: parsed?.profile?.linkPreview !== false
         }
       }
 

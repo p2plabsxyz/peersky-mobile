@@ -179,6 +179,50 @@ test('PeerChat preserves desktop-compatible Hyperdrive attachment metadata', asy
   await service.close()
 })
 
+test('PeerChat preserves sanitized desktop-compatible link previews', async (t) => {
+  const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-preview-'))
+  t.after(() => rm(storagePath, { recursive: true, force: true }))
+  const service = await new PeerChatService({ sdk: createFakeSdk(), storagePath }).start()
+  const room = await service.createRoom({ name: 'Links', username: 'Alice' })
+
+  const sent = await service.sendMessage({
+    roomKey: room.roomKey,
+    message: 'Read https://example.com/article',
+    preview: {
+      url: 'https://example.com/article',
+      host: 'EXAMPLE.COM',
+      title: 'Example article',
+      description: 'A safe preview'
+    }
+  })
+  assert.deepEqual(sent.preview, {
+    url: 'https://example.com/article',
+    host: 'example.com',
+    title: 'Example article',
+    description: 'A safe preview'
+  })
+
+  const snapshot = await service.getSnapshot({ roomKey: room.roomKey, version: -1 })
+  assert.deepEqual(snapshot.messages[0].preview, sent.preview)
+
+  const unsafe = await service.sendMessage({
+    roomKey: room.roomKey,
+    message: 'Do not preview this',
+    preview: { url: 'http://127.0.0.1/private', title: 'Private service' }
+  })
+  assert.equal(unsafe.preview, undefined)
+
+  const fullMessage = 'x'.repeat(64 * 1024)
+  const bounded = await service.sendMessage({
+    roomKey: room.roomKey,
+    message: fullMessage,
+    preview: { url: 'https://example.com/', title: 'Dropped to preserve the message limit' }
+  })
+  assert.equal(bounded.message, fullMessage)
+  assert.equal(bounded.preview, undefined)
+  await service.close()
+})
+
 test('PeerChat applies only the newest reaction event from a desktop peer', async (t) => {
   const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-remote-reactions-'))
   t.after(() => rm(storagePath, { recursive: true, force: true }))
@@ -303,7 +347,7 @@ test('PeerChat persists profile metadata and lets only hosts update room metadat
   t.after(() => rm(storagePath, { recursive: true, force: true }))
   const feeds = new Map()
   const service = await new PeerChatService({ sdk: createFakeSdk(feeds), storagePath }).start()
-  service.setProfile({ username: 'Alice', bio: 'Mobile profile' })
+  service.setProfile({ username: 'Alice', bio: 'Mobile profile', linkPreview: false })
   const room = await service.createRoom({ name: 'Original', bio: 'First bio' })
 
   const updated = service.updateRoom({
@@ -319,6 +363,7 @@ test('PeerChat persists profile metadata and lets only hosts update room metadat
 
   const restarted = await new PeerChatService({ sdk: createFakeSdk(cloneFeeds(feeds)), storagePath }).start()
   assert.equal(restarted.getProfile().bio, 'Mobile profile')
+  assert.equal(restarted.getProfile().linkPreview, false)
   assert.equal(restarted.listRooms()[0].name, 'Renamed')
   assert.equal(restarted.listRooms()[0].bio, 'Room details')
   await restarted.close()
