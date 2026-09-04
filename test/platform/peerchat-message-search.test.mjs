@@ -4,6 +4,7 @@ import test from 'node:test'
 import {
   filterPeerChatMessages,
   filterPeerChatRooms,
+  getFirstUnreadMessageIndex,
   PEERCHAT_SEARCH_QUERY_MAX_CHARACTERS
 } from '../../app/peerchat/message-search.mjs'
 
@@ -37,4 +38,18 @@ test('PeerChat room search matches names, keys, senders, and previews', () => {
   assert.deepEqual(filterPeerChatRooms(rooms, 'new mockup').map((item) => item.name), ['Design'])
   assert.deepEqual(filterPeerChatRooms(rooms, 'ab'.repeat(4)).map((item) => item.name), ['Release Room'])
   assert.equal(filterPeerChatRooms(rooms, 'missing').length, 0)
+})
+
+test('PeerChat finds the first message after a valid read timestamp', () => {
+  const timeline = [
+    { id: '1', timestamp: 100 },
+    { id: '2', timestamp: 200 },
+    { id: '3', timestamp: 300 }
+  ]
+
+  assert.equal(getFirstUnreadMessageIndex(timeline, 200), 2)
+  assert.equal(getFirstUnreadMessageIndex(timeline, 300), -1)
+  assert.equal(getFirstUnreadMessageIndex(timeline, 0), -1)
+  assert.equal(getFirstUnreadMessageIndex(timeline, Number.MAX_SAFE_INTEGER + 1), -1)
+  assert.equal(getFirstUnreadMessageIndex(null, 200), -1)
 })

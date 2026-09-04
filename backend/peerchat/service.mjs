@@ -1263,6 +1263,7 @@ export class PeerChatService {
       lastMessage: room.lastMessage || null,
       unreadCount: room.unreadCount || 0,
       unreadMentions: room.unreadMentions || 0,
+      lastReadTs: normalizePeerChatReadTimestamp(room.lastReadTs),
       members: this.listRoomMembers(room.roomKey),
       peerCount,
       connectionState: this.getRoomConnectionState(room.roomKey, peerCount)
@@ -1370,7 +1371,7 @@ export class PeerChatService {
             normalizeUnreadCount(value?.unreadCount),
             normalizeUnreadCount(value?.unreadMentions)
           ),
-          lastReadTs: Number.isFinite(value?.lastReadTs) ? value.lastReadTs : 0
+          lastReadTs: normalizePeerChatReadTimestamp(value?.lastReadTs)
         })
       }
 
@@ -1442,6 +1443,10 @@ export class PeerChatService {
 function normalizeUnreadCount (value) {
   if (!Number.isSafeInteger(value) || value < 0) return 0
   return Math.min(value, MAX_PEERCHAT_STORED_MESSAGES_PER_ROOM)
+}
+
+function normalizePeerChatReadTimestamp (value) {
+  return Number.isSafeInteger(value) && value >= 0 ? value : 0
 }
 
 function normalizePersistedLastMessage (value) {

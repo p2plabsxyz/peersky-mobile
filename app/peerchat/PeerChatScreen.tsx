@@ -35,6 +35,7 @@ import {
 import {
   filterPeerChatMessages,
   filterPeerChatRooms,
+  getFirstUnreadMessageIndex,
   PEERCHAT_SEARCH_QUERY_MAX_CHARACTERS
 } from './message-search.mjs'
 import {
@@ -121,6 +122,7 @@ type PeerChatRoom = {
   peerCount: number
   unreadCount: number
   unreadMentions: number
+  lastReadTs: number
   members: PeerChatMember[]
   connectionState: 'connecting' | 'syncing' | 'connected' | 'waiting'
 }
@@ -203,6 +205,7 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
   const pollInFlightRef = useRef(false)
   const roomListPollInFlightRef = useRef(false)
   const actionInFlightRef = useRef(false)
+  const unreadScrollPendingRef = useRef(false)
   const mountedRef = useRef(true)
   const composerRoomKeyRef = useRef<string | null>(null)
   const uiStateRef = useRef<PeerChatUiState>(EMPTY_UI_STATE)
@@ -223,6 +226,7 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
   const [pendingDirectMessages, setPendingDirectMessages] = useState<PeerChatDirectInvite[]>([])
   const [activeRoom, setActiveRoom] = useState<PeerChatRoom | null>(null)
   const [messages, setMessages] = useState<PeerChatMessage[]>([])
+  const [newMessagesAfter, setNewMessagesAfter] = useState<number | null>(null)
   const [composer, setComposer] = useState('')
   const [replyTarget, setReplyTarget] = useState<PeerChatReply | null>(null)
   const [reactionTargetId, setReactionTargetId] = useState<string | null>(null)
@@ -242,6 +246,7 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
     profile?.id || ''
   )
   const visibleMessages = filterPeerChatMessages(messages, isSearching ? searchQuery : '') as PeerChatMessage[]
+  const firstUnreadIndex = isSearching ? -1 : getFirstUnreadMessageIndex(visibleMessages, newMessagesAfter)
   const visibleRooms = filterPeerChatRooms(rooms, roomSearchQuery) as PeerChatRoom[]
 
   useEffect(() => {
@@ -402,6 +407,7 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
     if (restoredRoom) {
       versionRef.current = -1
       setMessages([])
+      captureUnreadBoundary(restoredRoom)
       setActiveRoom(restoredRoom)
     }
     uiStateRef.current = {
@@ -556,12 +562,21 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
     setEditRoomName(room.name)
     setEditRoomBio(room.bio || '')
     setEditRoomLink(room.link || '')
+    captureUnreadBoundary(room)
     setActiveRoom(room)
     setRooms((current) => current.map((item) => item.roomKey === room.roomKey
       ? { ...item, unreadCount: 0, unreadMentions: 0 }
       : item))
     setError(null)
     onStatus(`Opened PeerChat room ${room.name}`)
+  }
+
+  function captureUnreadBoundary (room: PeerChatRoom) {
+    const timestamp = room.unreadCount > 0 && Number.isSafeInteger(room.lastReadTs) && room.lastReadTs > 0
+      ? room.lastReadTs
+      : null
+    unreadScrollPendingRef.current = timestamp !== null
+    setNewMessagesAfter(timestamp)
   }
 
   function saveRoomDetails () {
@@ -1101,10 +1116,30 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
           keyExtractor={(item) => item.id}
           contentContainerStyle={visibleMessages.length > 0 ? styles.messageList : styles.emptyMessageList}
           onContentSizeChange={() => {
-            if (!isSearching) messageListRef.current?.scrollToEnd({ animated: false })
+            if (isSearching) return
+            if (unreadScrollPendingRef.current && firstUnreadIndex >= 0) {
+              unreadScrollPendingRef.current = false
+              messageListRef.current?.scrollToIndex({ animated: false, index: firstUnreadIndex, viewPosition: 0 })
+            } else if (newMessagesAfter === null) {
+              messageListRef.current?.scrollToEnd({ animated: false })
+            }
           }}
-          renderItem={({ item }) => (
-            <View style={[styles.messageRow, item.self ? styles.messageRowSelf : null]}>
+          onScrollToIndexFailed={({ averageItemLength, index }) => {
+            messageListRef.current?.scrollToOffset({
+              animated: false,
+              offset: Math.max(0, averageItemLength * index)
+            })
+          }}
+          renderItem={({ item, index }) => (
+            <>
+              {index === firstUnreadIndex && (
+                <View accessibilityRole='text' style={styles.unreadDivider}>
+                  <View style={[styles.unreadDividerLine, { backgroundColor: colors.accent }]} />
+                  <Text style={[styles.unreadDividerText, { color: colors.accent }]}>New messages</Text>
+                  <View style={[styles.unreadDividerLine, { backgroundColor: colors.accent }]} />
+                </View>
+              )}
+              <View style={[styles.messageRow, item.self ? styles.messageRowSelf : null]}>
               <Pressable
                 accessibilityHint='Long press for message actions'
                 accessibilityRole='button'
@@ -1194,7 +1229,8 @@ export function PeerChatScreen ({ isDark, onCallRpc, onOpenUrl, onStatus }: Peer
                   {formatMessageTime(item.timestamp)}
                 </Text>
               </Pressable>
-            </View>
+              </View>
+            </>
           )}
           ListEmptyComponent={(
             <View style={styles.emptyState}>
@@ -1794,6 +1830,9 @@ const styles = StyleSheet.create({
   searchCount: { fontSize: 11, minWidth: 24, textAlign: 'center' },
   messageList: { padding: 14, paddingBottom: 8 },
   emptyMessageList: { flexGrow: 1, justifyContent: 'center' },
+  unreadDivider: { alignItems: 'center', flexDirection: 'row', gap: 9, marginBottom: 14, marginTop: 5 },
+  unreadDividerLine: { flex: 1, height: StyleSheet.hairlineWidth },
+  unreadDividerText: { fontSize: 11, fontWeight: '700' },
   messageRow: { alignItems: 'flex-start', marginBottom: 9 },
   messageRowSelf: { alignItems: 'flex-end' },
   messageBubble: { borderRadius: 15, maxWidth: '84%', minWidth: 84, paddingHorizontal: 12, paddingVertical: 8 },

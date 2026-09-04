@@ -26,6 +26,11 @@ export function filterPeerChatRooms (rooms, query) {
   ].some((value) => typeof value === 'string' && value.toLocaleLowerCase().includes(normalizedQuery)))
 }
 
+export function getFirstUnreadMessageIndex (messages, lastReadTs) {
+  if (!Array.isArray(messages) || !Number.isSafeInteger(lastReadTs) || lastReadTs <= 0) return -1
+  return messages.findIndex((message) => Number.isSafeInteger(message?.timestamp) && message.timestamp > lastReadTs)
+}
+
 function normalizeSearchQuery (query) {
   if (typeof query !== 'string') return ''
   return Array.from(query.trim())

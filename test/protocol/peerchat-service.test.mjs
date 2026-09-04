@@ -288,9 +288,12 @@ test('PeerChat persists bounded unread and mention counts and clears them for ac
   let listed = service.listRooms()[0]
   assert.equal(listed.unreadCount, 1)
   assert.equal(listed.unreadMentions, 1)
+  assert.equal(Number.isSafeInteger(listed.lastReadTs), true)
+  const previousLastReadTs = listed.lastReadTs
 
   const active = service.setActiveRoom({ roomKey: room.roomKey })
   assert.equal(active.rooms[0].unreadCount, 0)
+  assert.equal(active.rooms[0].lastReadTs >= previousLastReadTs, true)
   await service.handlePeerMessage(peer, {
     id: 'desktop-active-message',
     roomKey: room.roomKey,
@@ -315,6 +318,7 @@ test('PeerChat persists bounded unread and mention counts and clears them for ac
   listed = restarted.listRooms()[0]
   assert.equal(listed.unreadCount, 1)
   assert.equal(listed.unreadMentions, 0)
+  assert.equal(Number.isSafeInteger(listed.lastReadTs), true)
   await restarted.close()
 })
 
