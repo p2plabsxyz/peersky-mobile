@@ -2,6 +2,7 @@ export async function runP2pCacheClear ({
   getRuntime,
   storagePath,
   stopAssetServer,
+  closeServices = async () => {},
   closeRuntime,
   resetFetch,
   createStore,
@@ -16,6 +17,7 @@ export async function runP2pCacheClear ({
 
   try {
     await stopAssetServer()
+    await closeServices()
     await closeRuntime()
     resetFetch()
 
@@ -44,6 +46,7 @@ export async function runP2pDataClear ({
   getRuntime,
   getStoragePath,
   stopAssetServer,
+  closeServices = async () => {},
   closeRuntime,
   resetFetch,
   removeStorage,
@@ -57,6 +60,7 @@ export async function runP2pDataClear ({
 
   try {
     await stopAssetServer()
+    await closeServices()
     await closeRuntime()
     resetFetch()
     removeStorage(storagePath)
