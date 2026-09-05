@@ -50,6 +50,7 @@ type HyperdriveItem = {
   openedAt?: number
   source?: RecentSource
   visibility?: UploadVisibility
+  localUri?: string
   children?: HyperdriveItem[]
 }
 
@@ -126,14 +127,15 @@ export function HyperdriveScreen ({ isDark, isLandscape, onCallRpc, onOpenItem, 
         visibility
       })
       if (!response.ok || !response.item) throw new Error(response.error || 'Upload failed.')
-      remember(response.item, 'uploaded')
+      const uploadedItem = { ...response.item, localUri: file.uri }
+      remember(uploadedItem, 'uploaded')
       onStatus(`Uploaded ${response.item.name}`)
       const uploadMessage = visibility === 'private'
         ? 'Stored privately on this device.'
         : response.item.url
       Alert.alert('Uploaded to Hyperdrive', uploadMessage, [
         { text: 'Done' },
-        { text: 'Open', onPress: () => onOpenUrl(response.item.url) }
+        { text: 'Open', onPress: () => onOpenItem(uploadedItem) }
       ])
     } catch (uploadError) {
       setError(uploadError instanceof Error ? uploadError.message : String(uploadError))
@@ -142,7 +144,7 @@ export function HyperdriveScreen ({ isDark, isLandscape, onCallRpc, onOpenItem, 
     }
   }
 
-  async function fetchLocation (targetUrl = fetchUrl) {
+  async function fetchLocation (targetUrl = fetchUrl, recordRecent = true) {
     if (busyAction) return
     const normalizedUrl = targetUrl.trim()
     if (!normalizedUrl.toLowerCase().startsWith('hyper://')) {
@@ -157,10 +159,12 @@ export function HyperdriveScreen ({ isDark, isLandscape, onCallRpc, onOpenItem, 
       const response = await onCallRpc(RPC_HYPER_LIBRARY_LIST, { url: normalizedUrl })
       if (!response.ok || !response.location) throw new Error(response.error || 'Unable to fetch Hyper data.')
       const fetchedItems = Array.isArray(response.items) ? response.items : []
-      remember({
-        ...response.location,
-        children: response.location.type === 'directory' ? fetchedItems : undefined
-      }, 'fetched')
+      if (recordRecent) {
+        remember({
+          ...response.location,
+          children: response.location.type === 'directory' ? fetchedItems : undefined
+        }, 'fetched')
+      }
       setFetchUrl(response.location.url)
       if (response.location.type === 'directory') {
         setLocation(response.location)
@@ -196,10 +200,9 @@ export function HyperdriveScreen ({ isDark, isLandscape, onCallRpc, onOpenItem, 
     }
 
     if (item.type === 'directory') {
-      await fetchLocation(item.url)
+      await fetchLocation(item.url, false)
       return
     }
-    remember(item, 'fetched')
     onOpenItem(item)
   }
 

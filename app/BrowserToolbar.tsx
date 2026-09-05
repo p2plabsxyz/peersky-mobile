@@ -21,9 +21,9 @@ import ShareIcon from '../assets/icons/bootstrap/arrow-bar-up.svg'
 import ClearIcon from '../assets/icons/bootstrap/x-circle.svg'
 
 const TOOLBAR_ICON_SIZE = 22
+const ADDRESS_ACTION_ICON_SIZE = 20
 const ADDRESS_CLEAR_ICON_SIZE = 20
 const TOOLBAR_ICON_STROKE_WIDTH = 0.35
-const ADDRESS_ACTION_ICON_STROKE_WIDTH = 0.2
 
 type BrowserToolbarProps = {
   activeTabId: string
@@ -38,6 +38,7 @@ type BrowserToolbarProps = {
   isLoading: boolean
   historySuggestions: BrowserHistoryItem[]
   menuVisible: boolean
+  navigationKey: string
   newTabDisabled: boolean
   palette: {
     accent: string
@@ -86,6 +87,7 @@ export function BrowserToolbar ({
   isLoading,
   historySuggestions,
   menuVisible,
+  navigationKey,
   newTabDisabled,
   palette,
   position,
@@ -116,7 +118,7 @@ export function BrowserToolbar ({
   const addressInputRef = useRef<TextInput>(null)
   const addressFocusProgress = useRef(new Animated.Value(0)).current
   const toolbarControlsWidth = 80
-  const addressActionIconColor = isDark ? '#8d96a8' : palette.mutedText
+  const addressActionIconColor = palette.mutedText
 
   useEffect(() => {
     const animation = Animated.timing(addressFocusProgress, {
@@ -133,7 +135,13 @@ export function BrowserToolbar ({
     addressInputRef.current?.blur()
     Keyboard.dismiss()
     setIsAddressFocused(false)
-  }, [activeTabId])
+  }, [activeTabId, navigationKey])
+
+  function finishAddressEditing () {
+    addressInputRef.current?.blur()
+    Keyboard.dismiss()
+    setIsAddressFocused(false)
+  }
 
   const hiddenControlProps = isAddressFocused
     ? {
@@ -187,7 +195,10 @@ export function BrowserToolbar ({
           styles.browserNavButton,
           !canGoBack ? styles.browserNavButtonDisabled : null
         ]}
-        onPress={onBack}
+        onPress={() => {
+          finishAddressEditing()
+          onBack()
+        }}
         disabled={!canGoBack}
       >
         <BackIcon
@@ -204,7 +215,10 @@ export function BrowserToolbar ({
           styles.browserNavButton,
           !canGoForward ? styles.browserNavButtonDisabled : null
         ]}
-        onPress={onForward}
+        onPress={() => {
+          finishAddressEditing()
+          onForward()
+        }}
         disabled={!canGoForward}
       >
         <ForwardIcon
@@ -278,11 +292,11 @@ export function BrowserToolbar ({
                 ? <ActivityIndicator color={palette.accent} size='small' />
                 : (
                   <ReloadIcon
-                    width={TOOLBAR_ICON_SIZE}
-                    height={TOOLBAR_ICON_SIZE}
+                    width={ADDRESS_ACTION_ICON_SIZE}
+                    height={ADDRESS_ACTION_ICON_SIZE}
                     color={addressActionIconColor}
-                    stroke={addressActionIconColor}
-                    strokeWidth={ADDRESS_ACTION_ICON_STROKE_WIDTH}
+                    opacity={0.76}
+                    style={styles.browserAddressReloadIcon}
                   />
                   )}
             </Pressable>
@@ -293,11 +307,11 @@ export function BrowserToolbar ({
               onPress={onSharePage}
             >
               <ShareIcon
-                width={TOOLBAR_ICON_SIZE}
-                height={TOOLBAR_ICON_SIZE}
+                width={ADDRESS_ACTION_ICON_SIZE}
+                height={ADDRESS_ACTION_ICON_SIZE}
                 color={addressActionIconColor}
-                stroke={addressActionIconColor}
-                strokeWidth={ADDRESS_ACTION_ICON_STROKE_WIDTH}
+                opacity={0.76}
+                style={styles.browserAddressShareIcon}
               />
             </Pressable>
           </View>
@@ -369,10 +383,6 @@ export function BrowserToolbar ({
         }}
         onShow={onOpenMenu}
         onOpenSettings={onOpenSettings}
-        onReload={() => {
-          onCloseMenu()
-          onReload()
-        }}
         onSharePage={() => {
           onCloseMenu()
           onSharePage()

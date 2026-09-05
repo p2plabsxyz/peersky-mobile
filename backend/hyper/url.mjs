@@ -27,6 +27,17 @@ export function parseHyperUrl (url) {
   }
 }
 
+export function createHyperUrl (driveAddress, pathname) {
+  const encodedPath = pathname
+    .split('/')
+    // hypercore-fetch decodes paths with decodeURI, which intentionally keeps
+    // escaped path-safe delimiters such as commas. Keep those delimiters
+    // literal so the URL resolves to the exact Hyperdrive key.
+    .map((segment) => encodeURI(segment).replace(/[?#]/g, encodeURIComponent))
+    .join('/')
+  return `${driveAddress.slice(0, -1)}${encodedPath}`
+}
+
 function getRawHyperPath (url) {
   const withoutProtocol = url.slice('hyper://'.length)
   const slashIndex = withoutProtocol.indexOf('/')

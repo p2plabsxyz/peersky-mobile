@@ -17,8 +17,8 @@ const roomKey = (character) => `hs://${character.repeat(52)}`
 describe('P2PMD room history', () => {
   test('round-trips valid room keys in newest-first order', () => {
     const rooms = [
-      { key: roomKey('a'), lastOpenedAt: 10 },
-      { key: roomKey('b'), lastOpenedAt: 20 }
+      { key: roomKey('a'), role: 'host', lastOpenedAt: 10 },
+      { key: roomKey('b'), role: 'client', lastOpenedAt: 20 }
     ]
 
     assert.deepEqual(
@@ -32,17 +32,20 @@ describe('P2PMD room history', () => {
     for (let index = 0; index < MAX_P2PMD_RECENT_ROOMS + 2; index++) {
       rooms = recordP2pmdRoom(rooms, {
         key: roomKey(String.fromCharCode(97 + index)),
+        role: index === 0 ? 'host' : 'client',
         lastOpenedAt: index
       })
     }
 
     rooms = recordP2pmdRoom(rooms, {
       key: roomKey('d'),
+      role: 'host',
       lastOpenedAt: 100
     })
 
     assert.equal(rooms.length, MAX_P2PMD_RECENT_ROOMS)
     assert.equal(rooms[0].key, roomKey('d'))
+    assert.equal(rooms[0].role, 'host')
     assert.equal(rooms.filter((room) => room.key === roomKey('d')).length, 1)
   })
 
@@ -71,6 +74,7 @@ describe('P2PMD room history', () => {
     })
     assert.equal(rooms.length, 1)
     assert.equal(rooms[0].lastOpenedAt, 2)
+    assert.equal(rooms[0].role, 'client')
   })
 
   test('formats room keys without exposing the full key in setup UI', () => {
@@ -80,7 +84,7 @@ describe('P2PMD room history', () => {
 
   test('persists rooms for restart and rejects oversized files before reading', () => {
     const file = createMemoryFile()
-    const rooms = [{ key: roomKey('a'), lastOpenedAt: 10 }]
+    const rooms = [{ key: roomKey('a'), role: 'host', lastOpenedAt: 10 }]
 
     writeP2pmdRoomHistoryFile(file, rooms)
     assert.deepEqual(readP2pmdRoomHistoryFile(file), rooms)

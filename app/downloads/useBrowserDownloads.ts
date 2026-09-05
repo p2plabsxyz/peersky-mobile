@@ -15,14 +15,20 @@ export type BrowserDownload = {
   name: string
   status: 'pending' | 'running' | 'paused' | 'complete' | 'failed'
   size: number
+  downloadedBytes?: number
+  totalBytes?: number
   createdAt: number
+  reason?: string
   sourceUrl?: string
 }
 
 type BrowserDownloadsNativeModule = {
   getDownloads: () => Promise<BrowserDownload[]>
   openDownload: (id: string) => Promise<boolean>
+  openLocalFile: (uri: string, name?: string) => Promise<boolean>
   removeDownload: (id: string) => Promise<boolean>
+  pauseDownload: (id: string) => Promise<boolean>
+  resumeDownload: (id: string, url: string) => Promise<boolean>
   requestDownload: (url: string) => Promise<boolean>
 }
 
@@ -145,6 +151,28 @@ export function useBrowserDownloads ({ enabled = false } = {}) {
     }
   }
 
+  async function pauseDownload (download: BrowserDownload) {
+    if (
+      Platform.OS !== 'android' ||
+      !download.id.startsWith('r:') ||
+      !['pending', 'running'].includes(download.status)
+    ) {
+      setError('This download cannot be paused.')
+      return false
+    }
+
+    try {
+      const paused = await getAndroidDownloads().pauseDownload(download.id)
+      if (!paused) throw new Error('Download was not paused')
+      await refresh()
+      return true
+    } catch (pauseError) {
+      console.error('Failed pausing browser download:', pauseError)
+      setError('Unable to pause this download.')
+      return false
+    }
+  }
+
   async function openDownload (id: string) {
     try {
       if (Platform.OS === 'android') {
@@ -166,14 +194,75 @@ export function useBrowserDownloads ({ enabled = false } = {}) {
     }
   }
 
+  async function openLocalFile (uri: string, name?: string) {
+    if (Platform.OS !== 'android') {
+      if (!await Sharing.isAvailableAsync()) return false
+      await Sharing.shareAsync(uri)
+      return true
+    }
+
+    try {
+      const opened = await getAndroidDownloads().openLocalFile(uri, name)
+      setError(opened ? null : 'No app is available to open this file.')
+      return opened
+    } catch (openError) {
+      console.error('Failed opening local file:', openError)
+      setError('No app is available to open this file.')
+      return false
+    }
+  }
+
+  async function retryDownload (download: BrowserDownload, sourceUrl = download.sourceUrl) {
+    const normalizedUrl = normalizeBrowserDownloadUrl(sourceUrl)
+    if (!['failed', 'paused'].includes(download.status) || !normalizedUrl) {
+      setError('This download cannot be retried.')
+      return false
+    }
+
+    if (
+      Platform.OS === 'android' &&
+      download.id.startsWith('r:') &&
+      (
+        download.status === 'paused' ||
+        (
+          download.status === 'failed' &&
+          (download.downloadedBytes || 0) > 0 &&
+          ['network-error', 'incomplete-response'].includes(download.reason || '')
+        )
+      )
+    ) {
+      try {
+        const resumed = await getAndroidDownloads().resumeDownload(download.id, normalizedUrl)
+        if (!resumed) throw new Error('Download was not resumed')
+        await refresh()
+        setError(null)
+        return true
+      } catch (resumeError) {
+        console.error('Failed resuming browser download:', resumeError)
+        setError('Unable to resume this download.')
+        return false
+      }
+    }
+
+    const accepted = await requestDownload(normalizedUrl)
+    if (!accepted) return false
+
+    await removeDownload(download.id)
+    setError(null)
+    return true
+  }
+
   return {
     downloads,
     error,
     isReady,
+    openLocalFile,
     openDownload,
+    pauseDownload,
     refresh,
     removeDownload,
-    requestDownload
+    requestDownload,
+    retryDownload
   }
 }
 
@@ -273,5 +362,7 @@ function removeIosDownloadSource (uri: string) {
 }
 
 function hasActiveDownload (downloads: BrowserDownload[]) {
-  return downloads.some(({ status }) => status === 'pending' || status === 'running')
+  return downloads.some(({ status, reason }) =>
+    status === 'pending' || status === 'running' || (status === 'paused' && reason !== 'user-paused')
+  )
 }

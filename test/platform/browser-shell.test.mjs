@@ -176,6 +176,80 @@ describe('browser shell navigation helpers', () => {
     assert.equal(back.canGoForward, true)
   })
 
+  test('repeated native back transitions terminate at the first web page', () => {
+    let state = {
+      history: [{ url: 'https://example.com/1', source: { kind: 'web', uri: 'https://example.com/1' } }],
+      historyIndex: 0
+    }
+    for (let page = 2; page <= 7; page += 1) {
+      state = recordBrowserWebNavigationState(state, `https://example.com/${page}`, {
+        kind: 'web',
+        uri: `https://example.com/${page}`
+      })
+    }
+
+    for (let page = 6; page >= 1; page -= 1) {
+      state = recordBrowserWebNavigationState(state, `https://example.com/${page}`, {
+        kind: 'web',
+        uri: `https://example.com/${page}`
+      }, 'back')
+    }
+
+    assert.equal(state.history.length, 7)
+    assert.equal(state.historyIndex, 0)
+    assert.equal(state.currentUrl, 'https://example.com/1')
+    assert.equal(state.canGoBack, false)
+    assert.equal(state.canGoForward, true)
+  })
+
+  test('deep native back navigation still terminates at Home after history is bounded', () => {
+    let state = {
+      history: [{ url: BROWSER_HOME_URL, source: { kind: 'home' } }],
+      historyIndex: 0
+    }
+
+    for (let index = 0; index < MAX_BROWSER_HISTORY_ENTRIES + 10; index++) {
+      const url = `https://example.com/page-${index}`
+      state = recordBrowserWebNavigationState(state, url, { kind: 'web', uri: url })
+    }
+
+    for (let index = MAX_BROWSER_HISTORY_ENTRIES + 8; index >= 0; index--) {
+      const url = `https://example.com/page-${index}`
+      state = recordBrowserWebNavigationState(
+        state,
+        url,
+        { kind: 'web', uri: url },
+        'back',
+        index > 0
+      )
+    }
+
+    assert.equal(state.historyIndex, 1)
+    assert.equal(state.currentUrl, 'https://example.com/page-0')
+    assert.equal(getBrowserBackState(state).currentUrl, BROWSER_HOME_URL)
+  })
+
+  test('replaces a first-load redirect so Back returns to Home', () => {
+    const initial = commitBrowserEntryState({
+      history: [{ url: BROWSER_HOME_URL, source: { kind: 'home' } }],
+      historyIndex: 0
+    }, 'http://peersky.p2plabs.xyz/', {
+      kind: 'web',
+      uri: 'http://peersky.p2plabs.xyz/'
+    })
+
+    const redirected = recordBrowserWebNavigationState(
+      initial,
+      'https://peersky.p2plabs.xyz/',
+      { kind: 'web', uri: 'https://peersky.p2plabs.xyz/' },
+      null,
+      false
+    )
+
+    assert.equal(redirected.history.length, 2)
+    assert.equal(getBrowserBackState(redirected).currentUrl, BROWSER_HOME_URL)
+  })
+
   test('classifies WebView navigation requests from hyper-rendered pages', () => {
     assert.deepEqual(getBrowserRequestAction({ requestUrl: 'about:blank', currentSourceKind: 'hyper' }), { action: 'allow' })
     assert.deepEqual(getBrowserRequestAction({ requestUrl: 'data:text/html,ok', currentSourceKind: 'hyper' }), { action: 'block' })
@@ -227,8 +301,10 @@ describe('browser shell navigation helpers', () => {
     }
 
     assert.equal(state.history.length, MAX_BROWSER_HISTORY_ENTRIES)
+    assert.equal(state.history[0].url, BROWSER_HOME_URL)
+    assert.equal(state.history[0].source.kind, 'home')
     assert.equal(state.history.at(-1).source.kind, 'hyper')
-    assert.equal(state.history.slice(0, -1).every((entry) => entry.source.kind === 'restore'), true)
+    assert.equal(state.history.slice(1, -1).every((entry) => entry.source.kind === 'restore'), true)
   })
 
   test('blocks oversized WebView navigation URLs', () => {
@@ -242,16 +318,16 @@ describe('browser shell navigation helpers', () => {
 describe('internal app route registry', () => {
   test('keeps local apps on stable peersky routes', () => {
     assert.deepEqual(INTERNAL_APPS.map((app) => app.url), [
+      'peersky://p2p/hyperdrive/',
       'peersky://p2p/p2pmd/',
       'peersky://p2p/peerchat/',
-      'peersky://holesail/',
-      'peersky://hyperdrive/'
+      'peersky://holesail/'
     ])
 
     assert.equal(getRuntimeAppUrl('p2pmd'), 'peersky://p2p/p2pmd/')
     assert.equal(getRuntimeAppUrl('peerchat'), 'peersky://p2p/peerchat/')
     assert.equal(getRuntimeAppUrl('holesail'), 'peersky://holesail/')
-    assert.equal(getRuntimeAppUrl('hyper'), 'peersky://hyperdrive/')
+    assert.equal(getRuntimeAppUrl('hyper'), 'peersky://p2p/hyperdrive/')
     assert.equal(getRuntimeAppUrl('unknown'), 'peersky://p2p/p2pmd/')
   })
 
@@ -260,6 +336,7 @@ describe('internal app route registry', () => {
     assert.equal(getRuntimeAppFromUrl('peersky://p2p/p2pmd/'), 'p2pmd')
     assert.equal(getRuntimeAppFromUrl('PEERSKY://P2P/PEERCHAT////'), 'peerchat')
     assert.equal(getRuntimeAppFromUrl('PEERSKY://HOLESAIL////'), 'holesail')
+    assert.equal(getRuntimeAppFromUrl('peersky://p2p/hyperdrive'), 'hyper')
     assert.equal(getRuntimeAppFromUrl('peersky://hyperdrive'), 'hyper')
     assert.equal(getRuntimeAppFromUrl('peersky://hyper'), 'hyper')
     assert.equal(getRuntimeAppFromUrl('peersky://unknown'), null)

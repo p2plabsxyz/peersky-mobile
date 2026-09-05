@@ -14,6 +14,27 @@ const DOWNLOAD_STATUSES = new Set([
   'failed'
 ])
 
+const DOWNLOAD_REASONS = new Set([
+  'waiting-to-retry',
+  'waiting-for-network',
+  'queued-for-wifi',
+  'paused-unknown',
+  'user-paused',
+  'interrupted',
+  'cannot-resume',
+  'device-unavailable',
+  'file-exists',
+  'file-error',
+  'http-data-error',
+  'insufficient-space',
+  'too-many-redirects',
+  'unhandled-http',
+  'unknown-error',
+  'network-error',
+  'http-error',
+  'incomplete-response'
+])
+
 export function normalizeBrowserDownloadUrl (url) {
   if (typeof url !== 'string' || url.length > 4096) return null
 
@@ -42,10 +63,17 @@ export function normalizeBrowserDownloads (downloads) {
     const size = Number.isFinite(download.size) && download.size >= 0
       ? download.size
       : 0
+    const downloadedBytes = Number.isFinite(download.downloadedBytes) && download.downloadedBytes >= 0
+      ? download.downloadedBytes
+      : 0
+    const totalBytes = Number.isFinite(download.totalBytes) && download.totalBytes >= 0
+      ? download.totalBytes
+      : size
     const createdAt = Number.isFinite(download.createdAt) && download.createdAt >= 0
       ? download.createdAt
       : 0
     const sourceUrl = normalizeBrowserDownloadUrl(download.sourceUrl)
+    const reason = DOWNLOAD_REASONS.has(download.reason) ? download.reason : undefined
 
     if (!id || !name) continue
 
@@ -54,7 +82,10 @@ export function normalizeBrowserDownloads (downloads) {
       name,
       status,
       size,
+      downloadedBytes,
+      totalBytes,
       createdAt,
+      reason,
       sourceUrl: sourceUrl || undefined
     })
     normalized.sort(compareNewest)
@@ -100,7 +131,7 @@ function truncateUnicode (value, limit) {
   return Array.from(value).slice(0, limit).join('')
 }
 
-function getProxiedHyperUrl (value) {
+export function getProxiedHyperUrl (value) {
   const sourceUrl = normalizeBrowserDownloadUrl(value)
   if (!sourceUrl) return null
 
@@ -116,8 +147,11 @@ function normalizeHyperUrl (value) {
   try {
     const parsed = new URL(value)
     if (parsed.protocol !== 'hyper:' || !parsed.hostname || parsed.username || parsed.password) return null
-    parsed.hash = ''
-    return parsed.href
+    const pathname = parsed.pathname
+      .split('/')
+      .map((segment) => encodeURI(decodeURIComponent(segment)).replace(/[?#]/g, encodeURIComponent))
+      .join('/')
+    return `hyper://${parsed.host}${pathname}`
   } catch {
     return null
   }

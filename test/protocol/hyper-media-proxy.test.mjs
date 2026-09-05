@@ -92,11 +92,20 @@ describe('hyper media proxy server', () => {
   })
 
   test('serves HEAD responses with headers and no body', async () => {
+    let upstreamCancelled = false
+    const body = {
+      [Symbol.asyncIterator] () { return this },
+      next: async () => ({ done: false, value: new TextEncoder().encode('should-not-be-read') }),
+      return: async () => {
+        upstreamCancelled = true
+        return { done: true }
+      }
+    }
     const server = createHyperAssetServer({
       httpImpl: http,
       authToken: ASSET_AUTH_TOKEN,
       fetch: async () => createStreamResponse({
-        body: ['should-not-be-read'],
+        body,
         headers: {
           'content-type': 'audio/ogg',
           'content-length': '18'
@@ -113,6 +122,7 @@ describe('hyper media proxy server', () => {
       assert.equal(response.headers.get('content-type'), 'audio/ogg')
       assert.equal(response.headers.get('content-length'), '18')
       assert.equal(await response.text(), '')
+      assert.equal(upstreamCancelled, true)
     })
   })
 

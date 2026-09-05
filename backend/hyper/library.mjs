@@ -7,7 +7,7 @@ import {
   withHyperRuntimeOperation,
   withPrivateHyperRuntimeOperation
 } from './runtime.mjs'
-import { parseHyperUrl } from './url.mjs'
+import { createHyperUrl, parseHyperUrl } from './url.mjs'
 import { recordHyperArchive } from './archive.mjs'
 import { resolveHyperdriveUploadTarget } from './storage-core.mjs'
 
@@ -17,6 +17,7 @@ const MAX_UPLOAD_FILE_URI_LENGTH = 8192
 const MAX_LIST_ITEMS = 100
 const MAX_SCANNED_ENTRIES = 500
 const MAX_LIST_TIME_MS = 5000
+const DIRECTORY_DISCOVERY_RETRY_DELAYS_MS = [500, 1000, 1500]
 let uploadTransition = Promise.resolve()
 
 export async function listHyperdriveLocation ({ url } = {}, options = {}) {
@@ -28,7 +29,8 @@ export async function listHyperdriveLocation ({ url } = {}, options = {}) {
   try {
     return await runWithRuntime(options, async (runtime) => {
       const drive = await runtime.getDrive(target.driveAddress)
-      const entry = target.pathname === '/'
+      const explicitDirectory = target.pathname === '/' || target.pathname.endsWith('/')
+      const entry = explicitDirectory
         ? null
         : await drive.entry(target.pathname, { timeout: MAX_LIST_TIME_MS })
 
@@ -46,11 +48,12 @@ export async function listHyperdriveLocation ({ url } = {}, options = {}) {
       }
 
       const directory = normalizeDirectoryPath(target.pathname)
-      const { items, truncated, timedOut } = await listDirectory(
+      const { items, truncated, timedOut } = await listDirectoryWithDiscoveryRetry(
         drive,
         target.driveAddress,
         directory,
-        resolveListTimeMs(options.listTimeMs)
+        resolveListTimeMs(options.listTimeMs),
+        options.directoryRetryDelaysMs
       )
       if (directory !== '/' && items.length === 0 && !timedOut) {
         return { ok: false, error: 'No file or directory was found at this Hyper URL.' }
@@ -79,6 +82,48 @@ export async function listHyperdriveLocation ({ url } = {}, options = {}) {
       error: error instanceof Error ? error.message : String(error)
     }
   }
+}
+
+async function listDirectoryWithDiscoveryRetry (
+  drive,
+  driveAddress,
+  directory,
+  maxListTimeMs,
+  retryDelays = DIRECTORY_DISCOVERY_RETRY_DELAYS_MS
+) {
+  const startedAt = Date.now()
+  const delays = Array.isArray(retryDelays)
+    ? retryDelays.filter((delay) => Number.isSafeInteger(delay) && delay >= 0).slice(0, 3)
+    : DIRECTORY_DISCOVERY_RETRY_DELAYS_MS
+  let attempts = 0
+  let result
+
+  while (true) {
+    attempts += 1
+    result = await listDirectory(
+      drive,
+      driveAddress,
+      directory,
+      Math.max(1, maxListTimeMs - (Date.now() - startedAt))
+    )
+    if (result.items.length > 0 || result.timedOut || !isAwaitingInitialMetadata(drive)) break
+
+    const delay = delays[attempts - 1]
+    const remainingTime = maxListTimeMs - (Date.now() - startedAt)
+    if (delay === undefined || delay >= remainingTime) break
+    await wait(delay)
+  }
+
+  return result
+}
+
+function isAwaitingInitialMetadata (drive) {
+  const core = drive?.core || drive?.db?.core || null
+  return core?.length === 0
+}
+
+function wait (delay) {
+  return new Promise((resolve) => setTimeout(resolve, delay))
 }
 
 export async function uploadHyperdriveFile ({
@@ -120,9 +165,17 @@ export async function uploadHyperdriveFile ({
     } else {
       await drive.put(pathname, bytes)
     }
+    const storedEntry = await drive.entry(pathname)
+    const expectedByteLength = localFile?.byteLength || bytes.byteLength
+    if (
+      !storedEntry?.value?.blob ||
+      storedEntry.value.blob.byteLength !== expectedByteLength
+    ) {
+      throw new Error('The uploaded file could not be verified in Hyperdrive.')
+    }
 
     const item = createFileItem(`hyper://${drive.id}/`, pathname, {
-      blob: { byteLength: localFile?.byteLength || bytes.byteLength }
+      blob: { byteLength: expectedByteLength }
     })
     await (options.recordArchive || recordHyperArchive)({
       url: item.url,
@@ -346,14 +399,6 @@ function isValidBase64 (value) {
 
 function normalizeDirectoryPath (pathname) {
   return pathname === '/' ? '/' : `${pathname.replace(/\/$/, '')}/`
-}
-
-function createHyperUrl (driveAddress, pathname) {
-  const encodedPath = pathname
-    .split('/')
-    .map((segment) => encodeURIComponent(segment))
-    .join('/')
-  return `${driveAddress.slice(0, -1)}${encodedPath}`
 }
 
 function basename (pathname) {

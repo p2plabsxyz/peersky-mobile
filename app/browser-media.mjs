@@ -51,21 +51,19 @@ export function parseBrowserMediaMessage (message, pageUrl = '', expectedToken =
   }
 }
 
-export function createBrowserMediaLongPressScript ({ nativeHitTesting = false, token = '' } = {}) {
+export function createBrowserMediaLongPressScript ({ token = '' } = {}) {
   return `
     (() => {
       if (window.__peerskyMediaLongPressInstalled) return true;
       window.__peerskyMediaLongPressInstalled = true;
 
-      const nativeHitTesting = ${nativeHitTesting ? 'true' : 'false'};
       const messageType = ${JSON.stringify(BROWSER_MEDIA_MESSAGE_TYPE)};
       const messageToken = ${JSON.stringify(isBrowserMediaToken(token) ? token : '')};
       const maxUrlLength = ${MAX_BROWSER_URL_LENGTH};
       const maxTextLength = ${MAX_BROWSER_MEDIA_TEXT_LENGTH};
 
-      function closestElement(event, selector) {
-        const path = typeof event.composedPath === 'function' ? event.composedPath() : [];
-        for (const candidate of path) {
+      function closestElement(candidates, selector) {
+        for (const candidate of candidates) {
           if (candidate && candidate.nodeType === 1) {
             if (candidate.matches && candidate.matches(selector)) return candidate;
             if (candidate.closest) {
@@ -74,9 +72,7 @@ export function createBrowserMediaLongPressScript ({ nativeHitTesting = false, t
             }
           }
         }
-
-        const target = event.target;
-        return target && target.closest ? target.closest(selector) : null;
+        return null;
       }
 
       function bridgeSafeUrl(value, protocols) {
@@ -101,12 +97,10 @@ export function createBrowserMediaLongPressScript ({ nativeHitTesting = false, t
           .join('');
       }
 
-      document.addEventListener('contextmenu', (event) => {
-        if (!event.isTrusted || !messageToken) return;
-
-        const video = closestElement(event, 'video');
-        const image = video ? null : closestElement(event, 'img');
-        const link = closestElement(event, 'a[href]');
+      function dispatchTarget(candidates) {
+        const video = closestElement(candidates, 'video');
+        const image = video ? null : closestElement(candidates, 'img');
+        const link = closestElement(candidates, 'a[href]');
 
         let kind = null;
         let mediaUrl = null;
@@ -120,22 +114,21 @@ export function createBrowserMediaLongPressScript ({ nativeHitTesting = false, t
             kind = 'video';
             title = targetTitle(video, link && link.textContent);
           }
-        } else if (image && !nativeHitTesting) {
+        } else if (image) {
           mediaUrl = bridgeSafeUrl(image.currentSrc || image.src, ['http:', 'https:']);
           if (mediaUrl) {
             kind = 'image';
             title = targetTitle(image, link && link.textContent);
           }
-        } else if (link && !nativeHitTesting) {
+        } else if (link) {
           if (linkUrl) {
             kind = 'link';
             title = targetTitle(link);
           }
         }
 
-        if (!kind) return;
+        if (!kind) return false;
 
-        event.preventDefault();
         window.ReactNativeWebView?.postMessage(JSON.stringify({
           type: messageType,
           token: messageToken,
@@ -144,6 +137,36 @@ export function createBrowserMediaLongPressScript ({ nativeHitTesting = false, t
           linkUrl,
           title
         }));
+        return true;
+      }
+
+      Object.defineProperty(window, '__peerskyResolveMediaLongPressAt', {
+        configurable: false,
+        enumerable: false,
+        writable: false,
+        value(providedToken, xRatio, yRatio) {
+          if (
+            providedToken !== messageToken ||
+            !Number.isFinite(xRatio) ||
+            !Number.isFinite(yRatio) ||
+            xRatio < 0 || xRatio > 1 ||
+            yRatio < 0 || yRatio > 1
+          ) return false;
+
+          const x = xRatio * window.innerWidth;
+          const y = yRatio * window.innerHeight;
+          const candidates = typeof document.elementsFromPoint === 'function'
+            ? document.elementsFromPoint(x, y)
+            : [document.elementFromPoint(x, y)].filter(Boolean);
+          return dispatchTarget(candidates);
+        }
+      });
+
+      document.addEventListener('contextmenu', (event) => {
+        if (!event.isTrusted || !messageToken) return;
+        const path = typeof event.composedPath === 'function' ? event.composedPath() : [event.target];
+        const handled = dispatchTarget(path);
+        if (handled) event.preventDefault();
       }, true);
 
       true;
