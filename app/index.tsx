@@ -5,15 +5,18 @@ import {
   AppState,
   BackHandler,
   Button,
+  Clipboard,
   Image,
   Keyboard,
   KeyboardAvoidingView,
   Linking,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
   Share,
   StatusBar,
+  StyleSheet,
   Text,
   TextInput,
   useColorScheme,
@@ -22,6 +25,7 @@ import {
 } from 'react-native'
 import { Worklet } from 'react-native-bare-kit'
 import * as Crypto from 'expo-crypto'
+import { CameraView, useCameraPermissions } from 'expo-camera'
 import { File, Paths } from 'expo-file-system'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import b4a from 'b4a'
@@ -119,21 +123,30 @@ import { HistoryScreen } from './history/HistoryScreen'
 import { getBrowserHistoryDocumentTitle } from './history/browser-history.mjs'
 import { useBrowserHistory } from './history/useBrowserHistory'
 import { DownloadsScreen } from './downloads/DownloadsScreen'
-import { findCompletedHyperDownload } from './downloads/browser-downloads.mjs'
+import {
+  findCompletedHyperDownload,
+  getProxiedHyperUrl
+} from './downloads/browser-downloads.mjs'
 import { HyperdriveScreen } from './hyperdrive/HyperdriveScreen'
+import { PeerChatScreen, type PeerChatResponse } from './peerchat/PeerChatScreen'
+import { usePeerChatNotifications } from './peerchat/usePeerChatNotifications'
 import { peerSkyWebViewNativeConfig } from './downloads/PeerSkyWebView'
 import {
   initializeContentBlocking,
   setContentBlockingEnabled as applyContentBlockingEnabled,
   setYoutubeAdBlockingEnabled as applyYoutubeAdBlockingEnabled
 } from './privacy/contentBlocking'
+import {
+  useBrowserDownloads,
+  type BrowserDownload
+} from './downloads/useBrowserDownloads'
 import { createBrowserContentBlockingScript } from './privacy/browserContentBlockingScript.mjs'
-import { useBrowserDownloads } from './downloads/useBrowserDownloads'
 import { BrowserTabsScreen } from './tabs/BrowserTabsScreen'
 import { useBrowserTabPreviews } from './tabs/useBrowserTabPreviews'
 import { isBrowserTabPreviewForPage } from './tabs/browser-tab-preview.mjs'
 import {
   formatP2pmdRoomHistoryKey,
+  normalizeP2pmdRoomKey,
   readP2pmdRoomHistoryFile,
   recordP2pmdRoom,
   writeP2pmdRoomHistoryFile
@@ -170,6 +183,7 @@ type P2pmdViewMode = 'edit' | 'preview' | 'slides'
 
 type P2pmdRoomHistoryEntry = {
   key: string
+  role: 'host' | 'client'
   lastOpenedAt: number
 }
 
@@ -230,7 +244,6 @@ type BrowserTabsState = {
 }
 
 const DESKTOP_BROWSER_USER_AGENT = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 PeerSkyMobile/1.0'
-
 export default function App () {
   const systemColorScheme = useColorScheme()
   const { height: browserWindowHeight, width: browserWindowWidth } = useWindowDimensions()
@@ -244,7 +257,7 @@ export default function App () {
   const p2pmdWebViewRef = useRef<ComponentRef<typeof WebView> | null>(null)
   const p2pmdPublishInFlightRef = useRef(false)
   const browserLoadSeqRef = useRef(0)
-  const browserWebNavigationDirectionsRef = useRef(new Map<string, 'back' | 'forward'>())
+  const browserWebViewGenerationsRef = useRef(new Map<string, number>())
   const externalLinkPromptOpenRef = useRef(false)
   const lastExternalLinkPromptAtRef = useRef(0)
   const [isBooting, setIsBooting] = useState(false)
@@ -263,6 +276,7 @@ export default function App () {
   const [browserTabsState, setBrowserTabsState] = useState<BrowserTabsState>(
     () => createBrowserTabsState() as BrowserTabsState
   )
+  const [browserWebViewGenerations, setBrowserWebViewGenerations] = useState<Record<string, number>>({})
   const {
     isReady: browserPreferencesReady,
     persistenceError: browserPreferencesError,
@@ -302,9 +316,12 @@ export default function App () {
     error: browserDownloadsError,
     isReady: browserDownloadsReady,
     openDownload: openBrowserDownload,
+    openLocalFile: openBrowserLocalFile,
+    pauseDownload: pauseBrowserDownload,
     refresh: refreshBrowserDownloads,
     removeDownload: removeBrowserDownload,
-    requestDownload: requestBrowserDownload
+    requestDownload: requestBrowserDownload,
+    retryDownload: retryBrowserDownloadFromSource
   } = useBrowserDownloads({ enabled: browserDownloadsVisible })
   const browserTabsStateRef = useRef(browserTabsState)
   const browserSessionReadyRef = useRef(false)
@@ -331,6 +348,11 @@ export default function App () {
   const [browserWebCanGoForward, setBrowserWebCanGoForward] = useState(false)
   const [browserIsLoading, setBrowserIsLoading] = useState(false)
   const [activeTab, setActiveTab] = useState<RuntimeTab>('hyper')
+  const peerChatNotifications = usePeerChatNotifications({
+    isPeerChatVisible: browserSource.kind === 'app' && activeTab === 'peerchat',
+    isRuntimeReady: Boolean(identityStoragePath),
+    onCallRpc: (command, data = {}) => callRpc(command, data) as Promise<PeerChatResponse>
+  })
   const [lastResult, setLastResult] = useState<RpcResponse | null>(null)
   const [hsLivePort, setHsLivePort] = useState('8989')
   const [hsLiveHost, setHsLiveHost] = useState('127.0.0.1')
@@ -342,6 +364,9 @@ export default function App () {
   const [p2pmdRoom, setP2pmdRoom] = useState<P2pmdRoom | null>(null)
   const [p2pmdEditorHtml, setP2pmdEditorHtml] = useState<string | null>(null)
   const [p2pmdJoinKey, setP2pmdJoinKey] = useState('')
+  const [isP2pmdScanning, setIsP2pmdScanning] = useState(false)
+  const [p2pmdCameraPermission, requestP2pmdCameraPermission] = useCameraPermissions()
+  const p2pmdScanHandledRef = useRef(false)
   const [p2pmdRoomHistory, setP2pmdRoomHistory] = useState<P2pmdRoomHistoryEntry[]>(loadP2pmdRoomHistory)
   const p2pmdRoomHistoryRef = useRef(p2pmdRoomHistory)
   const [p2pmdParticipants, setP2pmdParticipants] = useState<number | null>(null)
@@ -383,7 +408,6 @@ export default function App () {
     return () => {
       const worklet = workletRef.current
       const rpc = rpcRef.current
-
       setTimeout(() => {
         if (workletGenerationRef.current !== generation) return
         if (workletRef.current === worklet) workletRef.current = null
@@ -571,17 +595,11 @@ export default function App () {
   function updateBrowserTabsState (
     update: BrowserTabsState | ((state: BrowserTabsState) => BrowserTabsState)
   ) {
-    if (typeof update !== 'function') {
-      browserTabsStateRef.current = update
-      setBrowserTabsState(update)
-      return
-    }
-
-    setBrowserTabsState((state) => {
-      const nextState = update(state)
-      browserTabsStateRef.current = nextState
-      return nextState
-    })
+    const nextState = typeof update === 'function'
+      ? update(browserTabsStateRef.current)
+      : update
+    browserTabsStateRef.current = nextState
+    setBrowserTabsState(nextState)
   }
 
   async function startWorklet () {
@@ -656,8 +674,6 @@ export default function App () {
     tabId?: string
   ) {
     const targetTabId = tabId || browserTabsStateRef.current.activeTabId
-    const direction = browserWebNavigationDirectionsRef.current.get(targetTabId)
-    browserWebNavigationDirectionsRef.current.delete(targetTabId)
     const targetTab = browserTabsStateRef.current.tabs.find((tab) => tab.id === targetTabId)
     const nextState = recordBrowserWebNavigationState(
       targetTab
@@ -665,7 +681,8 @@ export default function App () {
         : getBrowserState(),
       url,
       source,
-      direction
+      null,
+      webNavigation?.canGoBack
     )
     applyBrowserState({
       ...nextState,
@@ -912,7 +929,6 @@ export default function App () {
         method: 'GET',
         inlineAssets: true
       })
-
       if (isStaleBrowserLoad(loadSeq, browserLoadSeqRef.current)) return
 
       if (!response.ok) {
@@ -1026,36 +1042,52 @@ export default function App () {
   function onBrowserBack () {
     browserUserInteractedRef.current = true
     cancelPendingBrowserLoad()
+    Keyboard.dismiss()
 
-    if (browserSource.kind === 'web' && browserWebCanGoBack) {
-      browserWebNavigationDirectionsRef.current.set(browserTabsState.activeTabId, 'back')
-      browserWebViewRefs.current.get(browserTabsState.activeTabId)?.goBack()
-      return
-    }
+    const tabsState = browserTabsStateRef.current
+    const tabId = tabsState.activeTabId
+    const activeBrowserTab = tabsState.tabs.find((tab) => tab.id === tabId)
+    const currentEntry = activeBrowserTab?.history[activeBrowserTab.historyIndex]
+    if (!activeBrowserTab || !currentEntry) return
 
-    const nextState = getBrowserBackState(getBrowserState())
+    const nextState = getBrowserBackState({
+      history: activeBrowserTab.history,
+      historyIndex: activeBrowserTab.historyIndex
+    })
     if (!nextState) return
 
     const entry = nextState.history[nextState.historyIndex]
+    remountBrowserWebView(tabId)
     applyBrowserState(nextState)
     setBrowserTitle(getBrowserEntryTitle(entry))
     setActiveTab(entry.source.kind === 'app' ? entry.source.app : 'hyper')
   }
 
+  function remountBrowserWebView (tabId: string) {
+    const generation = (browserWebViewGenerationsRef.current.get(tabId) || 0) + 1
+    browserWebViewGenerationsRef.current.set(tabId, generation)
+    setBrowserWebViewGenerations((current) => ({ ...current, [tabId]: generation }))
+  }
+
   function onBrowserForward () {
     browserUserInteractedRef.current = true
     cancelPendingBrowserLoad()
+    Keyboard.dismiss()
 
-    if (browserSource.kind === 'web' && browserWebCanGoForward) {
-      browserWebNavigationDirectionsRef.current.set(browserTabsState.activeTabId, 'forward')
-      browserWebViewRefs.current.get(browserTabsState.activeTabId)?.goForward()
-      return
-    }
+    const tabsState = browserTabsStateRef.current
+    const tabId = tabsState.activeTabId
+    const activeBrowserTab = tabsState.tabs.find((tab) => tab.id === tabId)
+    const currentEntry = activeBrowserTab?.history[activeBrowserTab.historyIndex]
+    if (!activeBrowserTab || !currentEntry) return
 
-    const nextState = getBrowserForwardState(getBrowserState())
+    const nextState = getBrowserForwardState({
+      history: activeBrowserTab.history,
+      historyIndex: activeBrowserTab.historyIndex
+    })
     if (!nextState) return
 
     const entry = nextState.history[nextState.historyIndex]
+    remountBrowserWebView(tabId)
     applyBrowserState(nextState)
     setBrowserTitle(getBrowserEntryTitle(entry))
     setActiveTab(entry.source.kind === 'app' ? entry.source.app : 'hyper')
@@ -1250,18 +1282,59 @@ export default function App () {
     )
   }
 
+  async function retryBrowserDownload (download: BrowserDownload) {
+    let retryUrl = download.sourceUrl
+    const hyperUrl = getProxiedHyperUrl(retryUrl)
+
+    if (hyperUrl) {
+      try {
+        const response = await callRpc(RPC_HYPER_FETCH, {
+          url: hyperUrl,
+          method: 'GET'
+        })
+        const proxyUrl = response.downloadUrl || response.mediaUrl
+        if (!response.ok || !proxyUrl) {
+          throw new Error(response.error || response.statusText || 'Hyper peer is unavailable')
+        }
+        retryUrl = proxyUrl
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        setStatus(message)
+        return false
+      }
+    }
+
+    const retried = await retryBrowserDownloadFromSource(download, retryUrl)
+    setStatus(retried ? `Retrying ${download.name}` : `Unable to retry ${download.name}`)
+    return retried
+  }
+
   async function openHyperdriveItem (item: {
     name: string
     source?: 'fetched' | 'published' | 'uploaded'
     type?: 'directory' | 'file'
     url: string
+    localUri?: string
   }) {
-    if (item.type !== 'directory' && item.source === 'fetched') {
+    if (item.type !== 'directory') {
+      if (item.localUri) {
+        const opened = await openBrowserLocalFile(item.localUri, item.name)
+        if (opened) {
+          setStatus(`Opened ${item.name}`)
+          return false
+        }
+      }
+
       const downloads = await refreshBrowserDownloads()
       const existing = findCompletedHyperDownload(downloads, item)
       if (existing) {
         const opened = await openBrowserDownload(existing.id)
-        setStatus(opened ? `Opened ${existing.name}` : 'No app is available to open this download')
+        if (opened) {
+          setStatus(`Opened ${existing.name}`)
+          return false
+        }
+
+        setStatus('No app is available to open this downloaded file')
         return false
       }
     }
@@ -1392,6 +1465,13 @@ export default function App () {
     browserFaviconsRef.current.delete(tabId)
     browserLastRecordedUrlsRef.current.delete(tabId)
     browserMediaTokensRef.current.delete(tabId)
+    browserWebViewGenerationsRef.current.delete(tabId)
+    setBrowserWebViewGenerations((current) => {
+      if (!(tabId in current)) return current
+      const next = { ...current }
+      delete next[tabId]
+      return next
+    })
     setBrowserLiveTabIds((tabIds) => tabIds.filter((id) => id !== tabId))
     if (isClosingActive && tab) applyBrowserTab(tab)
     setStatus('Tab closed')
@@ -1410,6 +1490,8 @@ export default function App () {
     const nextState = reset.tabsState
     const tab = nextState.tabs[0]
 
+    browserWebViewGenerationsRef.current.clear()
+    setBrowserWebViewGenerations({})
     updateBrowserTabsState(nextState)
     const previewCacheCleared = clearPreviews
       ? clearAllBrowserTabPreviews()
@@ -1751,9 +1833,55 @@ export default function App () {
     }
   }
 
-  async function onP2pmdRoomCreate () {
+  function applyP2pmdJoinKey (value: string) {
+    const roomKey = normalizeP2pmdRoomKey(value)
+    if (!roomKey) {
+      setP2pmdSetupError('Invalid room key. Use an hs:// room key.')
+      return false
+    }
+
+    setP2pmdJoinKey(roomKey)
+    setP2pmdSetupError(null)
+    return true
+  }
+
+  async function onP2pmdPasteRoomKey () {
+    try {
+      const clipboardValue = await Clipboard.getString()
+      if (!clipboardValue.trim()) {
+        setP2pmdSetupError('The clipboard does not contain a room key.')
+        return
+      }
+      applyP2pmdJoinKey(clipboardValue)
+    } catch (error) {
+      setP2pmdSetupError(error instanceof Error ? error.message : 'Unable to read the clipboard.')
+    }
+  }
+
+  async function onP2pmdOpenScanner () {
+    const permission = p2pmdCameraPermission?.granted
+      ? p2pmdCameraPermission
+      : await requestP2pmdCameraPermission()
+    if (!permission.granted) {
+      setP2pmdSetupError('Camera permission is required to scan a room key.')
+      return
+    }
+
+    p2pmdScanHandledRef.current = false
+    setIsP2pmdScanning(true)
+  }
+
+  function onP2pmdRoomKeyScanned (value: string) {
+    if (p2pmdScanHandledRef.current) return
+    p2pmdScanHandledRef.current = true
+    setIsP2pmdScanning(false)
+    applyP2pmdJoinKey(value)
+  }
+
+  async function onP2pmdRoomCreate (roomKey: string | null = null) {
+    const isReopening = Boolean(roomKey)
     setIsLoading(true)
-    setStatus('Creating P2PMD room...')
+    setStatus(isReopening ? 'Reopening P2PMD room...' : 'Creating P2PMD room...')
     setLastResult(null)
     setP2pmdRoom(null)
     setP2pmdUrl(null)
@@ -1762,10 +1890,11 @@ export default function App () {
     setP2pmdPublishUrl(null)
     setP2pmdEditorHtml(null)
     setP2pmdSetupError(null)
-    setP2pmdSyncStatus('Creating room...')
+    setP2pmdSyncStatus(isReopening ? 'Restoring room...' : 'Creating room...')
 
     try {
       const response = await callRpc(RPC_P2PMD_ROOM_CREATE, {
+        ...(roomKey ? { connector: roomKey } : {}),
         secure: true,
         udp: false
       })
@@ -1784,8 +1913,8 @@ export default function App () {
       setP2pmdPeerDisplayName(loadP2pmdPeerDisplayName())
       setP2pmdRoom(response.room)
       setP2pmdUrl(response.room.localUrl)
-      rememberP2pmdRoom(response.room.key)
-      setStatus('P2PMD room created')
+      rememberP2pmdRoom(response.room.key, 'host')
+      setStatus(isReopening ? 'P2PMD room reopened' : 'P2PMD room created')
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       setP2pmdSetupError(message)
@@ -1831,7 +1960,7 @@ export default function App () {
       setP2pmdPeerDisplayName(loadP2pmdPeerDisplayName())
       setP2pmdRoom(response.room)
       setP2pmdUrl(response.room.localUrl)
-      rememberP2pmdRoom(response.room.key)
+      rememberP2pmdRoom(response.room.key, 'client')
       setP2pmdSyncStatus(response.warning || 'Joining room page...')
       setStatus('P2PMD room joined')
     } catch (error) {
@@ -1844,8 +1973,8 @@ export default function App () {
     }
   }
 
-  function rememberP2pmdRoom (key: string) {
-    const rooms = recordP2pmdRoom(p2pmdRoomHistoryRef.current, { key }) as P2pmdRoomHistoryEntry[]
+  function rememberP2pmdRoom (key: string, role: P2pmdRoomHistoryEntry['role']) {
+    const rooms = recordP2pmdRoom(p2pmdRoomHistoryRef.current, { key, role }) as P2pmdRoomHistoryEntry[]
     if (rooms === p2pmdRoomHistoryRef.current) return
 
     if (!saveP2pmdRoomHistory(rooms)) return
@@ -2098,12 +2227,8 @@ export default function App () {
     }
   }
 
-  const canBrowserGoBack = browserSource.kind === 'web'
-    ? browserWebCanGoBack || browserCanGoBack
-    : browserCanGoBack
-  const canBrowserGoForward = browserSource.kind === 'web'
-    ? browserWebCanGoForward || browserCanGoForward
-    : browserCanGoForward
+  const canBrowserGoBack = browserCanGoBack
+  const canBrowserGoForward = browserCanGoForward
   const browserIsDark = resolveBrowserDarkMode(browserPreferences.theme, systemColorScheme)
   const browserChrome = getBrowserPalette(browserIsDark)
   const browserBookmarkActionAvailable = canBookmarkBrowserPage(
@@ -2149,7 +2274,6 @@ export default function App () {
     browserSource.kind,
     browserTabsState.activeTabId,
     browserTabsVisible,
-    browserWebCanGoBack,
     browserZoomVisible,
     canBrowserGoBack
   ])
@@ -2231,8 +2355,10 @@ export default function App () {
           isReady={browserDownloadsReady}
           onClose={() => setBrowserDownloadsVisible(false)}
           onOpen={(downloadId) => void openBrowserDownload(downloadId)}
+          onPause={(download) => pauseBrowserDownload(download)}
           onRefresh={() => void refreshBrowserDownloads()}
           onRemove={(downloadId) => void removeBrowserDownload(downloadId)}
+          onRetry={retryBrowserDownload}
         />
       </SafeAreaView>
     )
@@ -2469,6 +2595,7 @@ export default function App () {
       isLoading={browserIsLoading}
       historySuggestions={getBrowserHistorySuggestions(browserAddress)}
       menuVisible={browserMenuVisible}
+      navigationKey={`${browserTabsState.activeTabId}:${browserHistoryIndex}`}
       newTabDisabled={browserTabsState.tabs.length >= MAX_BROWSER_TABS}
       palette={browserChrome}
       position={browserPreferences.addressBarPosition}
@@ -2559,7 +2686,10 @@ export default function App () {
         />
         <KeyboardAvoidingView
           behavior='padding'
-          enabled={browserPreferences.addressBarPosition === 'bottom'}
+          enabled={
+            browserPreferences.addressBarPosition === 'bottom' ||
+            (browserSource.kind === 'app' && activeTab === 'peerchat')
+          }
           style={styles.browserShellContent}
         >
         {browserPreferences.addressBarPosition === 'top' && browserToolbar}
@@ -2582,7 +2712,7 @@ export default function App () {
 
         <View
           style={[styles.browserContent, { backgroundColor: browserChrome.shell }]}
-          onTouchStart={Keyboard.dismiss}
+          onTouchStart={browserSource.kind === 'app' && activeTab === 'peerchat' ? undefined : Keyboard.dismiss}
         >
         {browserSource.kind === 'home'
           ? (
@@ -2624,6 +2754,20 @@ export default function App () {
                   onOpenItem={(item) => void openHyperdriveItem(item)}
                   onOpenUrl={(targetUrl) => void loadBrowserUrl(targetUrl)}
                   onStatus={setStatus}
+                />
+                )
+              : activeTab === 'peerchat'
+              ? (
+                <PeerChatScreen
+                  isDark={browserIsDark}
+                  notificationPreferencesReady={peerChatNotifications.isReady}
+                  notificationsEnabled={peerChatNotifications.notificationsEnabled}
+                  onCallRpc={(command, data = {}) => callRpc(command, data) as Promise<PeerChatResponse>}
+                  onNotificationsEnabledChange={peerChatNotifications.setNotificationsEnabled}
+                  onOpenUrl={(targetUrl) => void loadBrowserUrl(targetUrl)}
+                  onSoundsEnabledChange={peerChatNotifications.setSoundsEnabled}
+                  onStatus={setStatus}
+                  soundsEnabled={peerChatNotifications.soundsEnabled}
                 />
                 )
               : (
@@ -2741,7 +2885,7 @@ export default function App () {
                       <View style={styles.p2pmdHeaderCopy}>
                         <Text style={[styles.sectionTitle, styles.p2pmdTitle]}>P2PMD</Text>
                         <Text style={styles.helperText}>
-                          Create or join a Holesail-backed Markdown room, then edit together in the embedded mobile editor.
+                          A real-time peer-to-peer Markdown editor for writing notes and collaboration.
                         </Text>
                       </View>
                       <Text style={[styles.roomPill, p2pmdRoom ? styles.roomPillLive : null]}>
@@ -2781,9 +2925,6 @@ export default function App () {
 
                     <View style={styles.p2pmdSetupBlock}>
                       <Text style={styles.fieldLabel}>Join existing room</Text>
-                      <Text style={styles.helperText}>
-                        Paste a room key shared by another peer to connect through Holesail.
-                      </Text>
                       <TextInput
                         style={[styles.input, styles.p2pmdInput]}
                         autoCapitalize='none'
@@ -2796,6 +2937,32 @@ export default function App () {
                         placeholderTextColor='#6f7484'
                         placeholder='hs://... room key'
                       />
+                      <View style={styles.p2pmdJoinTools}>
+                        <Pressable
+                          accessibilityRole='button'
+                          disabled={isBooting || isLoading}
+                          onPress={() => void onP2pmdPasteRoomKey()}
+                          style={({ pressed }) => [
+                            styles.p2pmdJoinTool,
+                            pressed ? styles.p2pmdRecentRoomPressed : null,
+                            isBooting || isLoading ? styles.p2pmdActionDisabled : null
+                          ]}
+                        >
+                          <Text style={styles.p2pmdTextActionText}>Paste</Text>
+                        </Pressable>
+                        <Pressable
+                          accessibilityRole='button'
+                          disabled={isBooting || isLoading}
+                          onPress={() => void onP2pmdOpenScanner()}
+                          style={({ pressed }) => [
+                            styles.p2pmdJoinTool,
+                            pressed ? styles.p2pmdRecentRoomPressed : null,
+                            isBooting || isLoading ? styles.p2pmdActionDisabled : null
+                          ]}
+                        >
+                          <Text style={styles.p2pmdTextActionText}>Scan QR</Text>
+                        </Pressable>
+                      </View>
                       {p2pmdSetupError && (
                         <Text selectable={true} style={styles.p2pmdSetupError}>
                           {p2pmdSetupError}
@@ -2822,7 +2989,9 @@ export default function App () {
                             accessibilityLabel={`Rejoin P2PMD room ${formatP2pmdRoomHistoryKey(room.key)}`}
                             accessibilityRole='button'
                             disabled={isBooting || isLoading}
-                            onPress={() => void onP2pmdRoomJoin(room.key)}
+                            onPress={() => void (room.role === 'host'
+                              ? onP2pmdRoomCreate(room.key)
+                              : onP2pmdRoomJoin(room.key))}
                             style={({ pressed }) => [
                               styles.p2pmdRecentRoom,
                               pressed ? styles.p2pmdRecentRoomPressed : null,
@@ -2832,11 +3001,45 @@ export default function App () {
                             <Text numberOfLines={1} style={styles.p2pmdRecentRoomKey}>
                               {formatP2pmdRoomHistoryKey(room.key)}
                             </Text>
-                            <Text style={styles.p2pmdRecentRoomAction}>Join</Text>
+                            <Text style={styles.p2pmdRecentRoomAction}>
+                              {room.role === 'host' ? 'Reopen' : 'Join'}
+                            </Text>
                           </Pressable>
                         ))}
                       </View>
                     )}
+                    <Modal
+                      animationType='fade'
+                      onRequestClose={() => setIsP2pmdScanning(false)}
+                      visible={isP2pmdScanning}
+                    >
+                      <View style={styles.p2pmdScanner}>
+                        <CameraView
+                          barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+                          onBarcodeScanned={({ data }) => onP2pmdRoomKeyScanned(data)}
+                          style={StyleSheet.absoluteFill}
+                        />
+                        <SafeAreaView
+                          edges={['top', 'right', 'bottom', 'left']}
+                          style={styles.p2pmdScannerOverlay}
+                        >
+                          <View pointerEvents='none' style={styles.p2pmdScanGuide}>
+                            <View style={[styles.p2pmdScanCorner, styles.p2pmdScanTopLeft]} />
+                            <View style={[styles.p2pmdScanCorner, styles.p2pmdScanTopRight]} />
+                            <View style={[styles.p2pmdScanCorner, styles.p2pmdScanBottomLeft]} />
+                            <View style={[styles.p2pmdScanCorner, styles.p2pmdScanBottomRight]} />
+                          </View>
+                          <Text style={styles.p2pmdScanHint}>Align the P2PMD room QR code inside the frame</Text>
+                          <Pressable
+                            accessibilityRole='button'
+                            onPress={() => setIsP2pmdScanning(false)}
+                            style={styles.p2pmdScannerClose}
+                          >
+                            <Text style={styles.p2pmdScannerCloseText}>Cancel</Text>
+                          </Pressable>
+                        </SafeAreaView>
+                      </View>
+                    </Modal>
                   </View>
                 )}
                 {(isBooting || isLoading) && <ActivityIndicator size='small' />}
@@ -2900,11 +3103,11 @@ export default function App () {
             youtubeAdBlockingEnabled: browserPreferences.youtubeAdBlockingEnabled
           })
           const browserMediaScript = createBrowserMediaLongPressScript({
-            nativeHitTesting: Platform.OS === 'android' && Boolean(peerSkyWebViewNativeConfig),
             token: browserMediaToken
           })
           const browserInjectedScript = combineBrowserInjectedScripts(
             browserAccessibilityScript,
+            browserMediaScript,
             browserContentBlockingScript,
             createBrowserFaviconScript()
           )
@@ -2913,6 +3116,8 @@ export default function App () {
             browserContentBlockingScript,
             browserMediaScript
           )
+
+          const webViewGeneration = browserWebViewGenerations[tab.id] || 0
 
           return (
             <View
@@ -2932,7 +3137,7 @@ export default function App () {
               style={styles.browserWebViewCapture}
             >
             <WebView
-              key={`${getBrowserWebViewKey(tab.id, entry.source.kind)}:${tabDesktopView ? 'desktop' : 'mobile'}:${contentBlockingGeneration}`}
+              key={`${getBrowserWebViewKey(tab.id, entry.source.kind)}:${tabDesktopView ? 'desktop' : 'mobile'}:${contentBlockingGeneration}:${webViewGeneration}`}
               ref={(ref) => {
                 if (ref) {
                   browserWebViewRefs.current.set(tab.id, ref)
@@ -2984,7 +3189,6 @@ export default function App () {
                 }
               }}
               onLoadEnd={() => {
-                browserWebNavigationDirectionsRef.current.delete(tab.id)
                 if (
                   browserTabsStateRef.current.activeTabId === tab.id &&
                   isCurrentBrowserTabEntry(browserTabsStateRef.current, tab.id, entry)
@@ -2994,6 +3198,7 @@ export default function App () {
                 }
               }}
               onNavigationStateChange={(navigationState) => {
+                if ((browserWebViewGenerationsRef.current.get(tab.id) || 0) !== webViewGeneration) return
                 if (entry.source.kind !== 'web') return
                 if (!isCurrentBrowserTabEntry(browserTabsStateRef.current, tab.id, entry)) return
                 if (!isWebUrl(navigationState.url) || navigationState.url.length > MAX_BROWSER_URL_LENGTH) return
@@ -3023,6 +3228,7 @@ export default function App () {
                 }
               }}
               onMessage={(event) => {
+                if ((browserWebViewGenerationsRef.current.get(tab.id) || 0) !== webViewGeneration) return
                 if (!isCurrentBrowserTabEntry(browserTabsStateRef.current, tab.id, entry)) return
 
                 const mediaTarget = parseBrowserMediaMessage(
@@ -3227,5 +3433,6 @@ function getBrowserTabLabel (tab: BrowserTab) {
 function getRuntimeAppIconStyle (app: RuntimeTab) {
   if (app === 'hyper') return styles.browserShortcutIconHyper
   if (app === 'holesail') return styles.browserShortcutIconHolesail
+  if (app === 'peerchat') return styles.browserShortcutIconPeerchat
   return styles.browserShortcutIconP2pmd
 }

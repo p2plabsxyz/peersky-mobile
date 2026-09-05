@@ -180,7 +180,7 @@ export function P2PStorage ({ onCallRpc, onOpenItem }: P2PStorageProps) {
   function confirmClearCache () {
     Alert.alert(
       'Clear downloaded P2P cache?',
-      'This removes Hyper data downloaded from other peers. Locally owned P2PMD and Hyperdrive files are kept.',
+      'This removes Hyper data downloaded from other peers. Locally owned P2PMD and Hyperdrive files, PeerChat rooms, and message history are kept.',
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Clear', style: 'destructive', onPress: () => void clearCache() }
@@ -219,7 +219,7 @@ export function P2PStorage ({ onCallRpc, onOpenItem }: P2PStorageProps) {
   function confirmClearAllData () {
     Alert.alert(
       'Clear all P2P data?',
-      'This permanently removes locally owned P2PMD and Hyperdrive files, downloaded Hyper data, and signing keys from this device. You will permanently lose the ability to update previously shared Hyper URLs, leaving them frozen unless another peer retains their signing keys.',
+      'This permanently removes locally owned P2PMD and Hyperdrive files, PeerChat rooms and message history, downloaded Hyper data, and signing keys from this device. You will permanently lose the ability to update previously shared Hyper URLs, leaving them frozen unless another peer retains their signing keys.',
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Clear all', style: 'destructive', onPress: () => void clearAllData() }
@@ -242,7 +242,7 @@ export function P2PStorage ({ onCallRpc, onOpenItem }: P2PStorageProps) {
         : null
       if (mountedRef.current) {
         setNotice(joinNotices(response.warning, recentWarning))
-        Alert.alert('P2P data cleared', 'All local Hyper data was removed from this device.')
+        Alert.alert('P2P data cleared', 'All local Hyper and PeerChat data was removed from this device.')
         await refreshArchive()
       }
     } catch (clearError) {

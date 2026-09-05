@@ -1,11 +1,15 @@
 package __PACKAGE_NAME__
 
+import android.annotation.SuppressLint
 import android.os.Handler
 import android.os.Looper
+import android.view.MotionEvent
 import android.webkit.WebView
 import android.widget.Toast
+import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.uimanager.annotations.ReactProp
 import com.facebook.react.uimanager.ThemedReactContext
+import com.facebook.react.uimanager.ViewManagerDelegate
 import com.reactnativecommunity.webview.RNCWebViewManager
 import com.reactnativecommunity.webview.RNCWebViewWrapper
 import org.json.JSONObject
@@ -14,9 +18,33 @@ import java.util.WeakHashMap
 
 class PeerSkyWebViewManager : RNCWebViewManager() {
   private val mediaLongPressTokens = WeakHashMap<WebView, String>()
+  private val mediaLongPressPoints = WeakHashMap<WebView, TouchPoint>()
   private val contentBlockerBridges = WeakHashMap<WebView, PeerSkyContentBlockerBridge>()
 
   override fun getName() = "PeerSkyWebView"
+
+  override fun getDelegate(): ViewManagerDelegate<RNCWebViewWrapper> {
+    val inheritedDelegate = checkNotNull(super.getDelegate())
+    return object : ViewManagerDelegate<RNCWebViewWrapper> {
+      override fun setProperty(view: RNCWebViewWrapper, propName: String, value: Any?) {
+        if (propName == "mediaLongPressToken") {
+          setMediaLongPressToken(view, value as? String)
+        } else if (propName == "contentBlockingToken") {
+          setContentBlockingToken(view, value as? String)
+        } else {
+          inheritedDelegate.setProperty(view, propName, value)
+        }
+      }
+
+      override fun receiveCommand(
+        view: RNCWebViewWrapper,
+        commandName: String,
+        args: ReadableArray
+      ) {
+        inheritedDelegate.receiveCommand(view, commandName, args)
+      }
+    }
+  }
 
   override fun addEventEmitters(
     context: ThemedReactContext,
@@ -41,6 +69,7 @@ class PeerSkyWebViewManager : RNCWebViewManager() {
     contentBlockerBridges[wrapper.webView]?.setToken(token?.takeIf(::isValidToken))
   }
 
+  @SuppressLint("ClickableViewAccessibility")
   public override fun createViewInstance(
     context: ThemedReactContext
   ): RNCWebViewWrapper {
@@ -76,39 +105,75 @@ class PeerSkyWebViewManager : RNCWebViewManager() {
     wrapper.webView.setOnLongClickListener {
       handleLongPress(wrapper.webView)
     }
+    wrapper.webView.setOnTouchListener { _, event ->
+      val webView = wrapper.webView
+      when (event.actionMasked) {
+        MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> {
+          if (webView.width > 0 && webView.height > 0) {
+            mediaLongPressPoints[webView] = TouchPoint(
+              (event.x / webView.width).toDouble().coerceIn(0.0, 1.0),
+              (event.y / webView.height).toDouble().coerceIn(0.0, 1.0)
+            )
+          }
+        }
+        MotionEvent.ACTION_UP -> {
+          mediaLongPressPoints.remove(webView)
+        }
+      }
+      false
+    }
     return wrapper
   }
 
   private fun handleLongPress(webView: WebView): Boolean {
-    val result = webView.hitTestResult ?: return false
-
+    val result = webView.hitTestResult
     return when (result.type) {
-      WebView.HitTestResult.IMAGE_TYPE -> dispatchTarget(
-        webView = webView,
-        kind = "image",
-        mediaUrl = result.extra
-      )
+      WebView.HitTestResult.IMAGE_TYPE -> {
+        val handled = dispatchTarget(
+          webView = webView,
+          kind = "image",
+          mediaUrl = result.extra
+        )
+        handled || dispatchDomTarget(webView)
+      }
       WebView.HitTestResult.SRC_IMAGE_ANCHOR_TYPE -> {
+        val touchPoint = mediaLongPressPoints[webView]
         val message = Handler(Looper.getMainLooper()) { response ->
-          dispatchTarget(
+          val handled = dispatchTarget(
             webView = webView,
             kind = "image",
             mediaUrl = response.data.getString("src"),
             linkUrl = response.data.getString("url"),
             title = response.data.getString("title")
           )
+          if (!handled) dispatchDomTarget(webView, touchPoint)
           true
         }.obtainMessage()
         webView.requestFocusNodeHref(message)
         true
       }
-      WebView.HitTestResult.SRC_ANCHOR_TYPE -> dispatchTarget(
-        webView = webView,
-        kind = "link",
-        linkUrl = result.extra
-      )
-      else -> false
+      WebView.HitTestResult.SRC_ANCHOR_TYPE -> {
+        val handled = dispatchTarget(
+          webView = webView,
+          kind = "link",
+          linkUrl = result.extra
+        )
+        handled || dispatchDomTarget(webView)
+      }
+      else -> dispatchDomTarget(webView)
     }
+  }
+
+  private fun dispatchDomTarget(
+    webView: WebView,
+    touchPoint: TouchPoint? = mediaLongPressPoints[webView]
+  ): Boolean {
+    val token = mediaLongPressTokens[webView] ?: return false
+    val point = touchPoint ?: return false
+    val javascript = "window.__peerskyResolveMediaLongPressAt?.(" +
+      JSONObject.quote(token) + "," + point.xRatio + "," + point.yRatio + ");"
+    webView.evaluateJavascript(javascript, null)
+    return true
   }
 
   private fun dispatchTarget(
@@ -178,4 +243,6 @@ class PeerSkyWebViewManager : RNCWebViewManager() {
     internal fun isValidToken(value: String?): Boolean =
       value?.length == TOKEN_LENGTH && value.all { it in '0'..'9' || it in 'a'..'f' }
   }
+
+  private data class TouchPoint(val xRatio: Double, val yRatio: Double)
 }

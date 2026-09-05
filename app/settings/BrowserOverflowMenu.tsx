@@ -5,7 +5,6 @@ import CheckIcon from '../../assets/icons/bootstrap/check2.svg'
 import DisplayIcon from '../../assets/icons/bootstrap/display.svg'
 import DownloadIcon from '../../assets/icons/bootstrap/download.svg'
 import HistoryIcon from '../../assets/icons/bootstrap/clock-history.svg'
-import ReloadIcon from '../../assets/icons/bootstrap/arrow-clockwise.svg'
 import BookmarksIcon from '../../assets/icons/bootstrap/bookmarks.svg'
 import GearIcon from '../../assets/icons/bootstrap/gear.svg'
 import PlusIcon from '../../assets/icons/bootstrap/plus-lg.svg'
@@ -37,7 +36,6 @@ type BrowserOverflowMenuProps = {
   onOpenHistory: () => void
   onOpenSettings: () => void
   onOpenZoom?: () => void
-  onReload?: () => void
   onSharePage?: () => void
   onShow: () => void
   onToggleDesktopView?: () => void
@@ -62,7 +60,6 @@ export function BrowserOverflowMenu ({
   onOpenHistory,
   onOpenSettings,
   onOpenZoom,
-  onReload,
   onSharePage,
   onShow,
   onToggleDesktopView,
@@ -126,7 +123,7 @@ export function BrowserOverflowMenu ({
             isDark ? darkStyles.menu : null
           ]}
           >
-            {bookmarkActionAvailable && onToggleBookmark && onReload && (
+            {bookmarkActionAvailable && onToggleBookmark && (
               <View style={[styles.quickActions, isDark ? darkStyles.divider : null]}>
                 <QuickAction
                   accessibilityLabel={isBookmarked ? 'Remove Bookmark' : 'Add Bookmark'}
@@ -139,10 +136,11 @@ export function BrowserOverflowMenu ({
                   selected={isBookmarked}
                 />
                 <QuickAction
-                  accessibilityLabel='Reload page'
-                  icon={<ReloadIcon {...quickActionIconProps} />}
+                  accessibilityLabel='New Tab'
+                  disabled={newTabDisabled}
+                  icon={<PlusIcon {...quickActionIconProps} />}
                   isDark={isDark}
-                  onPress={onReload}
+                  onPress={onNewTab}
               />
             </View>
             )}
@@ -173,13 +171,15 @@ export function BrowserOverflowMenu ({
                 )}
               </>
             )}
-            <MenuItem
-              disabled={newTabDisabled}
-              icon={<PlusIcon {...menuIconProps} />}
-              isDark={isDark}
-              label='New Tab'
-              onPress={onNewTab}
-            />
+            {!bookmarkActionAvailable && (
+              <MenuItem
+                disabled={newTabDisabled}
+                icon={<PlusIcon {...menuIconProps} />}
+                isDark={isDark}
+                label='New Tab'
+                onPress={onNewTab}
+              />
+            )}
             <MenuItem
               disabled={bookmarksDisabled}
               icon={<BookmarksIcon {...menuIconProps} />}
@@ -242,7 +242,7 @@ function QuickAction ({
       ]}
       onPress={onPress}
     >
-      {icon}
+      <View style={styles.quickActionIcon}>{icon}</View>
     </Pressable>
   )
 }
@@ -344,6 +344,12 @@ const styles = StyleSheet.create({
     height: 44,
     justifyContent: 'center',
     width: 44
+  },
+  quickActionIcon: {
+    alignItems: 'center',
+    height: QUICK_ACTION_ICON_SIZE,
+    justifyContent: 'center',
+    width: QUICK_ACTION_ICON_SIZE
   },
   menuItem: {
     alignItems: 'center',

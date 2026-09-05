@@ -7,11 +7,12 @@ import {
   getRuntimeAppUrl as getRuntimeAppRegistryUrl
 } from './internal-apps-registry.mjs'
 
-export type RuntimeTab = 'hyper' | 'holesail' | 'p2pmd'
+export type RuntimeTab = 'hyper' | 'holesail' | 'p2pmd' | 'peerchat'
 
 const INTERNAL_APP_ICONS: Partial<Record<RuntimeTab, ImageSourcePropType>> = {
   hyper: require('../assets/images/hyperdrive.png'),
-  p2pmd: require('../assets/images/p2pmd.png')
+  p2pmd: require('../assets/images/p2pmd.png'),
+  peerchat: require('../assets/images/peerchat.png')
 }
 
 export const BROWSER_HOME_ICON: ImageSourcePropType = require('../assets/images/icon.png')

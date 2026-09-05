@@ -5,6 +5,7 @@ import { stopHolesail } from './holesail/session.mjs'
 import { stopHyperAssetServer } from './hyper/fetch.mjs'
 import { closeHyperRuntime } from './hyper/runtime.mjs'
 import { disconnectP2pmdRoom } from './p2pmd/room.mjs'
+import { closePeerChatService } from './peerchat/runtime.mjs'
 import { routeRpcRequest } from './rpc/router.mjs'
 
 const { IPC } = BareKit
@@ -16,6 +17,12 @@ function createRpc () {
 }
 
 Bare.on('beforeExit', async () => {
+  try {
+    await closePeerChatService()
+  } catch (error) {
+    console.error('[peerchat] Failed to close service on beforeExit:', error)
+  }
+
   try {
     await disconnectP2pmdRoom()
   } catch (error) {

@@ -8,6 +8,8 @@ const { addMulticastLock } = require('../../plugins/with-lan-discovery.js')
 
 const ANDROID_LOOPBACK_CLEARTEXT_PLUGIN = './plugins/with-android-loopback-cleartext'
 const LAN_DISCOVERY_PLUGIN = './plugins/with-lan-discovery'
+const EXPO_NOTIFICATIONS_PLUGIN = 'expo-notifications'
+const EXPO_AUDIO_PLUGIN = 'expo-audio'
 const REPO_ROOT = new URL('../../', import.meta.url)
 const ANDROID_LOOPBACK_CLEARTEXT_PLUGIN_FILE = repoFile('plugins/with-android-loopback-cleartext.js')
 const LAN_DISCOVERY_PLUGIN_FILE = repoFile('plugins/with-lan-discovery.js')
@@ -54,9 +56,13 @@ describe('mobile platform runtime configuration', () => {
       'android.permission.ACCESS_WIFI_STATE',
       'android.permission.CAMERA',
       'android.permission.CHANGE_WIFI_MULTICAST_STATE',
-      'android.permission.POST_NOTIFICATIONS',
-      'android.permission.RECORD_AUDIO'
+      'android.permission.RECORD_AUDIO',
+      'android.permission.REQUEST_INSTALL_PACKAGES'
     ])
+    assert.equal(
+      android?.blockedPermissions?.includes('android.permission.POST_NOTIFICATIONS') || false,
+      false
+    )
     assert.equal(android?.intentFilters?.length, 1)
     assert.deepEqual(android.intentFilters[0]?.category, ['BROWSABLE', 'DEFAULT'])
     assert.deepEqual(
@@ -66,6 +72,42 @@ describe('mobile platform runtime configuration', () => {
     assert.match(infoPlist?.NSCameraUsageDescription, /website you visit/i)
     assert.match(infoPlist?.NSLocationWhenInUseUsageDescription, /website you visit/i)
     assert.match(infoPlist?.NSMicrophoneUsageDescription, /website you visit/i)
+    assert.equal(infoPlist?.ITSAppUsesNonExemptEncryption, true)
+  })
+
+  it('includes store build profiles and user-facing policy links', async () => {
+    const easJson = JSON.parse(await readFile(repoFile('eas.json'), 'utf8'))
+    const settings = await readFile(repoFile('app/settings/SettingsScreen.tsx'), 'utf8')
+    const privacyPolicy = await readFile(repoFile('PRIVACY.md'), 'utf8')
+    const contentReport = await readFile(repoFile('.github/ISSUE_TEMPLATE/content-report.yml'), 'utf8')
+
+    assert.equal(easJson.cli?.appVersionSource, 'remote')
+    assert.equal(easJson.build?.production?.autoIncrement, true)
+    assert.deepEqual(easJson.submit?.production, {})
+    assert.match(settings, /blob\/main\/PRIVACY[.]md/)
+    assert.match(settings, /issues\/new[?]template=content-report[.]yml/)
+    assert.match(privacyPolicy, /contact@p2plabs[.]xyz/)
+    assert.match(privacyPolicy, /issues\/new[?]template=content-report[.]yml/)
+    assert.match(contentReport, /name: Report harmful content/)
+  })
+
+  it('configures native local notifications for PeerChat', async () => {
+    const appJson = JSON.parse(await readFile(repoFile('app.json'), 'utf8'))
+    const plugins = appJson.expo?.plugins || []
+    const notificationPlugin = plugins.find((plugin) => (
+      Array.isArray(plugin) && plugin[0] === EXPO_NOTIFICATIONS_PLUGIN
+    ))
+
+    assert.deepEqual(notificationPlugin, [
+      EXPO_NOTIFICATIONS_PLUGIN,
+      {
+        color: '#1f6fd1',
+        defaultChannel: 'peerchat-messages-v2',
+        icon: './assets/images/notification-icon.png'
+      }
+    ])
+    assert.equal(hasExpoPlugin(plugins, EXPO_AUDIO_PLUGIN), true)
+    assert.equal(appJson.expo?.android?.softwareKeyboardLayoutMode, 'resize')
   })
 
   it('configures local discovery on Android and iOS', async () => {
@@ -144,12 +186,16 @@ describe('mobile platform runtime configuration', () => {
     const imports = JSON.parse(await readFile(repoFile('backend/bare-imports.json'), 'utf8'))
 
     assert.deepEqual(imports, {
+      'bare-abort-controller': 'bare-abort-controller',
       buffer: 'bare-buffer',
       crypto: 'bare-crypto',
       dgram: 'bare-dgram',
       events: 'bare-events',
+      fs: 'bare-fs',
       net: 'bare-net',
       'node:crypto': 'bare-crypto',
+      'node:fs': 'bare-fs',
+      'node:stream/promises': 'bare-stream/promises',
       'node:zlib': 'bare-zlib',
       os: 'bare-os'
     })
@@ -159,9 +205,11 @@ describe('mobile platform runtime configuration', () => {
     const packageJson = JSON.parse(await readFile(repoFile('package.json'), 'utf8'))
 
     assert.equal(packageJson.dependencies?.['@p2plabs/hyperdht-mdns'], '^1.2.0')
+    assert.equal(typeof packageJson.dependencies?.['bare-abort-controller'], 'string')
     assert.equal(typeof packageJson.dependencies?.['bare-buffer'], 'string')
     assert.equal(typeof packageJson.dependencies?.['bare-dgram'], 'string')
     assert.equal(typeof packageJson.dependencies?.['bare-net'], 'string')
+    assert.equal(typeof packageJson.dependencies?.['expo-audio'], 'string')
     assert.equal(typeof packageJson.dependencies?.['bare-os'], 'string')
     assert.equal(typeof packageJson.dependencies?.['bare-process'], 'string')
   })

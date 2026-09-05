@@ -187,6 +187,8 @@ type SettingsScreenProps = {
 
 const REPOSITORY_URL = 'https://github.com/p2plabsxyz/peersky-mobile'
 const LICENSE_URL = `${REPOSITORY_URL}/blob/main/LICENSE`
+const PRIVACY_POLICY_URL = `${REPOSITORY_URL}/blob/main/PRIVACY.md`
+const CONTENT_REPORT_URL = `${REPOSITORY_URL}/issues/new?template=content-report.yml`
 
 const SETTINGS_PAGES: Array<{
   id: Exclude<SettingsPage, 'main'>
@@ -867,6 +869,22 @@ function AboutSettings({ onOpenUrl }: { onOpenUrl: (url: string) => void }) {
         </Pressable>
         <Pressable style={styles.linkRow} onPress={() => onOpenUrl(LICENSE_URL)}>
           <Text style={[styles.linkText, isDark ? darkStyles.primaryText : null]}>Open-source licenses</Text>
+          <ChevronRightIcon
+            width={16}
+            height={16}
+            color={isDark ? BROWSER_PALETTES.dark.mutedText : '#8190a7'}
+          />
+        </Pressable>
+        <Pressable style={styles.linkRow} onPress={() => onOpenUrl(PRIVACY_POLICY_URL)}>
+          <Text style={[styles.linkText, isDark ? darkStyles.primaryText : null]}>Privacy policy</Text>
+          <ChevronRightIcon
+            width={16}
+            height={16}
+            color={isDark ? BROWSER_PALETTES.dark.mutedText : '#8190a7'}
+          />
+        </Pressable>
+        <Pressable style={styles.linkRow} onPress={() => onOpenUrl(CONTENT_REPORT_URL)}>
+          <Text style={[styles.linkText, isDark ? darkStyles.primaryText : null]}>Report harmful content</Text>
           <ChevronRightIcon
             width={16}
             height={16}

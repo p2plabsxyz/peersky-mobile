@@ -105,24 +105,23 @@ describe('browser media long press', () => {
     assert.equal(token, '000102030405060708090a0b0c0d0e0f')
   })
 
-  test('uses the native Android path without disabling normal text selection', () => {
-    const nativeScript = createBrowserMediaLongPressScript({
-      nativeHitTesting: true,
-      token: MEDIA_TOKEN
-    })
-    const webKitScript = createBrowserMediaLongPressScript({ token: MEDIA_TOKEN })
+  test('keeps a DOM fallback for native hit-test misses without disabling text selection', () => {
+    const script = createBrowserMediaLongPressScript({ token: MEDIA_TOKEN })
 
-    assert.match(nativeScript, /nativeHitTesting = true/)
-    assert.match(nativeScript, /document[.]addEventListener\('contextmenu'/)
-    assert.match(nativeScript, /event[.]isTrusted/)
-    assert.match(nativeScript, /token: messageToken/)
-    assert.match(nativeScript, /if \(!kind\) return;/)
-    assert.match(nativeScript, /event[.]preventDefault\(\)/)
-    assert.match(nativeScript, /video[.]currentSrc/)
-    assert.match(webKitScript, /image[.]currentSrc/)
-    assert.match(webKitScript, /linkUrl/)
-    assert.match(webKitScript, /parsed[.]username/)
-    assert.match(webKitScript, /protocols[.]includes/)
-    assert.doesNotMatch(webKitScript, /setTimeout|setInterval/)
+    assert.match(script, /document[.]addEventListener\('contextmenu'/)
+    assert.match(script, /event[.]isTrusted/)
+    assert.match(script, /token: messageToken/)
+    assert.match(script, /return false;/)
+    assert.match(script, /event[.]preventDefault\(\)/)
+    assert.match(script, /video[.]currentSrc/)
+    assert.match(script, /else if \(image\)/)
+    assert.match(script, /else if \(link\)/)
+    assert.match(script, /image[.]currentSrc/)
+    assert.match(script, /linkUrl/)
+    assert.match(script, /providedToken !== messageToken/)
+    assert.match(script, /document[.]elementsFromPoint/)
+    assert.match(script, /parsed[.]username/)
+    assert.match(script, /protocols[.]includes/)
+    assert.doesNotMatch(script, /nativeHitTesting|setTimeout|setInterval/)
   })
 })

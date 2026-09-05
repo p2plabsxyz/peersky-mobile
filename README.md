@@ -31,11 +31,13 @@ A peer-to-peer mobile browser built with [Bare](https://github.com/holepunchto/b
 - Hyper page asset support for CSS, images, scripts, audio, and video.
 - Hyperdrive app for uploading files, fetching or scanning `hyper://` locations, browsing directories, and reopening recent items.
 - Paginated P2P data management for owned app drives and published/fetched Hyper activity, with separate cache and full-data clearing controls.
+- PeerChat rooms and direct messages with encrypted history, reactions, mentions, attachments, link previews, notifications, presence, and locally enforced room moderation.
 - Encrypted identity transfer from PeerSky Desktop through Hyper.
 - Local app routes for bundled peer-to-peer tools:
   - `peersky://p2p/p2pmd/`
+  - `peersky://p2p/peerchat/`
   - `peersky://holesail/`
-  - `peersky://hyperdrive/`
+  - `peersky://p2p/hyperdrive/`
 
 Hyper media is streamed through a local loopback proxy so WebView can play audio/video while the Bare runtime fetches the underlying `hyper://` asset.
 
@@ -103,6 +105,8 @@ npm run android
 - [Hyper protocol](docs/hyper.md)
 - [Holesail runtime](docs/holesail.md)
 - [P2PMD](docs/p2pmd.md)
+- [PeerChat](docs/peerchat.md)
+- [PeerChat moderation data](backend/peerchat/MODERATION_DATA.md)
 - [Link Device](docs/link-device.md)
 - [Testing guide](docs/testing.md)
 - [Content blocking](docs/content-blocking.md)

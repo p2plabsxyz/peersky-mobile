@@ -26,8 +26,14 @@ test('full P2P storage removal deletes public and private runtime paths', () => 
 test('warns that clearing all P2P data permanently loses signing keys', () => {
   const source = readFileSync(new URL('../../app/settings/P2PStorage.tsx', import.meta.url), 'utf8')
   assert.match(source, /permanently removes[\s\S]*signing keys/)
+  assert.match(source, /PeerChat rooms and message history/)
   assert.match(source, /permanently lose the ability to update previously shared Hyper URLs/)
   assert.match(source, /leaving them frozen/)
+})
+
+test('explains that clearing downloaded P2P cache retains PeerChat history', () => {
+  const source = readFileSync(new URL('../../app/settings/P2PStorage.tsx', import.meta.url), 'utf8')
+  assert.match(source, /Clear downloaded P2P cache[\s\S]*PeerChat rooms[\s\S]*message history are kept/)
 })
 
 test('cache clear closes storage and reopens the runtime in order', async () => {
@@ -37,6 +43,7 @@ test('cache clear closes storage and reopens the runtime in order', async () => 
     getRuntime: async () => { events.push(`runtime-${++runtimeCalls}`) },
     storagePath: '/test/storage',
     stopAssetServer: async () => { events.push('asset-stop') },
+    closeServices: async () => { events.push('services-close') },
     closeRuntime: async () => { events.push('runtime-close') },
     resetFetch: () => { events.push('fetch-reset') },
     createStore: () => ({
@@ -50,6 +57,7 @@ test('cache clear closes storage and reopens the runtime in order', async () => 
   assert.deepEqual(events, [
     'runtime-1',
     'asset-stop',
+    'services-close',
     'runtime-close',
     'fetch-reset',
     'store-ready',
@@ -73,6 +81,26 @@ test('cache clear still reopens the runtime after a storage failure', async () =
     }),
     clearStore: async () => ({ ok: true })
   }), /storage failed/)
+
+  assert.equal(runtimeCalls, 2)
+})
+
+test('cache clear reopens the runtime when a P2P service fails to close', async () => {
+  let runtimeCalls = 0
+
+  await assert.rejects(runP2pCacheClear({
+    getRuntime: async () => { runtimeCalls += 1 },
+    storagePath: '/test/storage',
+    stopAssetServer: async () => {},
+    closeServices: async () => { throw new Error('PeerChat close failed') },
+    closeRuntime: async () => {},
+    resetFetch: () => {},
+    createStore: () => ({
+      ready: async () => {},
+      close: async () => {}
+    }),
+    clearStore: async () => ({ ok: true })
+  }), /PeerChat close failed/)
 
   assert.equal(runtimeCalls, 2)
 })
@@ -104,6 +132,7 @@ test('full P2P clear removes storage and archive before reopening the runtime', 
     getRuntime: async () => { events.push(`runtime-${++runtimeCalls}`) },
     getStoragePath: () => '/test/storage',
     stopAssetServer: async () => { events.push('asset-stop') },
+    closeServices: async () => { events.push('services-close') },
     closeRuntime: async () => { events.push('runtime-close') },
     resetFetch: () => { events.push('fetch-reset') },
     removeStorage: (path) => { events.push(`storage-remove:${path}`) },
@@ -114,6 +143,7 @@ test('full P2P clear removes storage and archive before reopening the runtime', 
   assert.deepEqual(events, [
     'runtime-1',
     'asset-stop',
+    'services-close',
     'runtime-close',
     'fetch-reset',
     'storage-remove:/test/storage',
@@ -134,6 +164,23 @@ test('full P2P clear still reopens the runtime after deletion fails', async () =
     removeStorage: () => { throw new Error('delete failed') },
     clearArchive: async () => {}
   }), /delete failed/)
+
+  assert.equal(runtimeCalls, 2)
+})
+
+test('full P2P clear reopens the runtime when a P2P service fails to close', async () => {
+  let runtimeCalls = 0
+
+  await assert.rejects(runP2pDataClear({
+    getRuntime: async () => { runtimeCalls += 1 },
+    getStoragePath: () => '/test/storage',
+    stopAssetServer: async () => {},
+    closeServices: async () => { throw new Error('PeerChat close failed') },
+    closeRuntime: async () => {},
+    resetFetch: () => {},
+    removeStorage: () => {},
+    clearArchive: async () => {}
+  }), /PeerChat close failed/)
 
   assert.equal(runtimeCalls, 2)
 })
