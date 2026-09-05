@@ -2,6 +2,7 @@ package __PACKAGE_NAME__
 
 import android.graphics.Bitmap
 import android.net.Uri
+import android.webkit.JavascriptInterface
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
@@ -18,6 +19,28 @@ internal fun isRemoteHttpUrl(scheme: String?, host: String?): Boolean {
     !normalizedHost.startsWith("127.")
 }
 
+internal fun isYoutubeAdBreakRequest(
+  requestScheme: String?,
+  requestHost: String?,
+  requestPath: String?,
+  documentScheme: String?,
+  documentHost: String?
+): Boolean {
+  fun isYoutubeHost(value: String?): Boolean {
+    val host = value?.lowercase(Locale.ROOT) ?: return false
+    return host == "youtube.com" ||
+      host.endsWith(".youtube.com") ||
+      host == "youtube-nocookie.com" ||
+      host.endsWith(".youtube-nocookie.com")
+  }
+
+  return requestScheme.equals("https", ignoreCase = true) &&
+    documentScheme.equals("https", ignoreCase = true) &&
+    isYoutubeHost(requestHost) &&
+    isYoutubeHost(documentHost) &&
+    requestPath == "/youtubei/v1/player/ad_break"
+}
+
 class PeerSkyWebViewClient : RNCWebViewClient() {
   private val documentUrl = AtomicReference("")
 
@@ -30,7 +53,7 @@ class PeerSkyWebViewClient : RNCWebViewClient() {
     view: WebView,
     request: WebResourceRequest
   ): WebResourceResponse? {
-    if (shouldBlock(request)) return emptyResponse()
+    if (shouldBlock(request)) return blockedResponse()
     return super.shouldInterceptRequest(view, request)
   }
 
@@ -44,6 +67,7 @@ class PeerSkyWebViewClient : RNCWebViewClient() {
     val pageUrl = documentUrl.get()
     if (pageUrl.isBlank() || pageUrl.length > MAX_FILTER_URL_LENGTH) return false
     if (!isRemoteHttpUrl(Uri.parse(pageUrl))) return false
+    if (PeerSkyYoutubeAdBlocker.shouldBlock(requestUri, Uri.parse(pageUrl))) return true
     return PeerSkyAdBlockEngine.shouldBlock(
       requestUrl,
       pageUrl,
@@ -82,7 +106,7 @@ class PeerSkyWebViewClient : RNCWebViewClient() {
       }
     }
 
-    private fun emptyResponse() = WebResourceResponse(
+    private fun blockedResponse() = WebResourceResponse(
       "text/plain",
       "UTF-8",
       204,
@@ -90,5 +114,93 @@ class PeerSkyWebViewClient : RNCWebViewClient() {
       emptyMap(),
       ByteArrayInputStream(ByteArray(0))
     )
+  }
+}
+
+object PeerSkyYoutubeAdBlocker {
+  @Volatile
+  var enabled = true
+
+  fun shouldBlock(request: Uri, document: Uri): Boolean {
+    if (!enabled) return false
+    return isYoutubeAdBreakRequest(
+      request.scheme,
+      request.host,
+      request.path,
+      document.scheme,
+      document.host
+    )
+  }
+}
+
+class PeerSkyContentBlockerBridge {
+  private val expectedToken = AtomicReference<String?>(null)
+
+  fun setToken(token: String?) {
+    expectedToken.set(token)
+  }
+
+  @JavascriptInterface
+  fun shouldBlock(
+    token: String?,
+    requestUrl: String?,
+    documentUrl: String?,
+    resourceType: String?,
+    method: String?
+  ): Boolean {
+    if (!isAuthorizedToken(expectedToken.get(), token)) return false
+    val normalizedRequestUrl = normalizeRemoteHttpUrl(requestUrl) ?: return false
+    val normalizedDocumentUrl = normalizeRemoteHttpUrl(documentUrl) ?: return false
+    return PeerSkyAdBlockEngine.shouldBlock(
+      normalizedRequestUrl,
+      normalizedDocumentUrl,
+      normalizeResourceType(resourceType),
+      normalizeMethod(method)
+    )
+  }
+
+  private fun normalizeRemoteHttpUrl(value: String?): String? {
+    val candidate = value
+      ?.trim()
+      ?.takeIf {
+        it.isNotBlank() &&
+          it.length <= MAX_FILTER_URL_LENGTH &&
+          it.none { character -> character.code < 32 || character.code in 127..159 }
+      } ?: return null
+
+    return try {
+      val parsed = Uri.parse(candidate)
+      candidate.takeIf { isRemoteHttpUrl(parsed) }
+    } catch (_: Exception) {
+      null
+    }
+  }
+
+  private fun normalizeResourceType(value: String?): String {
+    return when (value?.lowercase(Locale.ROOT)) {
+      "xhr", "xmlhttprequest", "fetch" -> "xhr"
+      "script" -> "script"
+      "stylesheet" -> "stylesheet"
+      "image" -> "image"
+      "font" -> "font"
+      "media" -> "media"
+      else -> "other"
+    }
+  }
+
+  private fun normalizeMethod(value: String?): String {
+    val method = value?.uppercase(Locale.ROOT).orEmpty()
+    return method.takeIf { it.matches(Regex("[A-Z]{1,16}")) } ?: "GET"
+  }
+
+  companion object {
+    private const val MAX_FILTER_URL_LENGTH = 16 * 1024
+
+    internal fun isAuthorizedToken(expected: String?, supplied: String?): Boolean =
+      PeerSkyWebViewManager.isValidToken(expected) && expected == supplied
+
+    private fun isRemoteHttpUrl(uri: Uri): Boolean {
+      return isRemoteHttpUrl(uri.scheme, uri.host)
+    }
   }
 }

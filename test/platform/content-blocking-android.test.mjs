@@ -27,6 +27,7 @@ describe('Android content blocking', () => {
     assert.match(moduleSource, /catch \(error: RejectedExecutionException\)/)
     assert.match(moduleSource, /pendingLoads[.]toList\(\)[.]also \{ pendingLoads[.]clear\(\) \}/)
     assert.match(moduleSource, /ERR_FILTER_LOAD_CANCELLED/)
+    assert.match(moduleSource, /setYoutubeAdBlockingEnabled/)
     assert.match(moduleSource, /if \(removePendingLoad\(promise\)\) promise[.]resolve\(true\)/)
     assert.match(engineSource, /System[.]loadLibrary\("peersky_adblock"\)/)
     assert.match(engineSource, /checkNotNull\(nativeLoadLists\(easyListPath, easyPrivacyPath\)\)/)
@@ -44,8 +45,25 @@ describe('Android content blocking', () => {
     assert.match(clientSource, /"10[.]0[.]2[.]2"/)
     assert.match(clientSource, /isRemoteHttpUrl\(Uri[.]parse\(pageUrl\)\)/)
     assert.match(clientSource, /PeerSkyAdBlockEngine[.]shouldBlock/)
+    assert.match(clientSource, /object PeerSkyYoutubeAdBlocker/)
+    assert.doesNotMatch(clientSource, /!enabled \|\| !PeerSkyAdBlockEngine[.]enabled/)
+    assert.match(clientSource, /isYoutubeAdBreakRequest/)
+    assert.match(clientSource, /requestPath == "\/youtubei\/v1\/player\/ad_break"/)
+    assert.match(clientSource, /host == "youtube[.]com"/)
+    assert.match(clientSource, /host == "youtube-nocookie[.]com"/)
     assert.match(clientSource, /MAX_FILTER_URL_LENGTH = 16 [*] 1024/)
-    assert.match(clientSource, /WebResourceResponse\(/)
+    assert.match(clientSource, /if \(shouldBlock\(request\)\) return blockedResponse\(\)/)
+    assert.match(clientSource, /class PeerSkyContentBlockerBridge/)
+    assert.match(clientSource, /@JavascriptInterface/)
+    assert.match(clientSource, /if \(!isAuthorizedToken\(expectedToken[.]get\(\), token\)\) return false/)
+    assert.match(clientSource, /"xhr", "xmlhttprequest", "fetch" -> "xhr"/)
+    assert.match(clientSource, /204/)
+    assert.match(clientSource, /No Content/)
+    assert.match(clientSource, /ByteArrayInputStream\(ByteArray\(0\)\)/)
+    assert.match(managerSource, /addJavascriptInterface\(/)
+    assert.match(managerSource, /PeerSkyContentBlocker/)
+    assert.match(managerSource, /@ReactProp\(name = "contentBlockingToken"\)/)
+    assert.match(managerSource, /setToken\(token[?][.]takeIf\(::isValidToken\)\)/)
     assert.match(
       managerSource,
       /super[.]addEventEmitters\(context, view\)[\s\S]*webViewClient = PeerSkyWebViewClient\(\)/
@@ -60,6 +78,9 @@ describe('Android content blocking', () => {
     assert.match(testSource, /assertFalse\(isRemoteHttpUrl\("https", "127[.]0[.]0[.]1"\)\)/)
     assert.match(testSource, /assertFalse\(isRemoteHttpUrl\("https", "10[.]0[.]2[.]2"\)\)/)
     assert.match(testSource, /assertFalse\(isRemoteHttpUrl\("https", "::1"\)\)/)
+    assert.match(testSource, /identifiesOnlyThePinnedYoutubeAdBreakRequest/)
+    assert.match(testSource, /"www[.]youtube-nocookie[.]com"/)
+    assert.match(testSource, /"youtube[.]com[.]evil[.]test"/)
   })
 
   test('generates an incremental, reproducible Rust Android build', () => {
@@ -133,5 +154,29 @@ describe('Android content blocking', () => {
     assert.match(appSource, /const rulesReady = applyContentBlockingEnabled\(true\)/)
     assert.match(appSource, /if \(!rulesReady\) \{\s+const initialized = await initializeContentBlocking\(\{ enabled: true \}\)/)
     assert.match(appSource, /setContentBlockingPreference\(true\)/)
+  })
+
+  test('injects native-backed fetch and XHR cancellation on Android', () => {
+    const scriptSource = readFileSync(
+      new URL('../../app/privacy/browserContentBlockingScript.mjs', import.meta.url),
+      'utf8'
+    )
+    const appSource = readFileSync(
+      new URL('../../app/index.tsx', import.meta.url),
+      'utf8'
+    )
+
+    assert.match(scriptSource, /window[.]PeerSkyContentBlocker/)
+    assert.match(scriptSource, /bridge[.]shouldBlock\([^,]+, requestUrl, documentUrl, 'xhr', method\)/)
+    assert.match(scriptSource, /YOUTUBE_AD_BREAK_PATH/)
+    assert.match(scriptSource, /Promise[.]reject\(new TypeError\('Failed to fetch'\)\)/)
+    assert.match(scriptSource, /XMLHttpRequest[.]prototype[.]send/)
+    assert.match(scriptSource, /window[.]XMLHttpRequest[.]DONE/)
+    assert.match(scriptSource, /dispatchEvent\(new Event\('readystatechange'\)\)/)
+    assert.match(scriptSource, /dispatchEvent\(new ProgressEvent\('error'\)\)/)
+    assert.match(scriptSource, /MAX_BROWSER_URL_LENGTH/)
+    assert.match(appSource, /createBrowserContentBlockingScript/)
+    assert.match(appSource, /contentBlockingToken: browserPreferences[.]contentBlockingEnabled/)
+    assert.match(appSource, /injectedJavaScriptBeforeContentLoaded=\{browserBeforeContentScript\}/)
   })
 })

@@ -104,7 +104,8 @@
       "app/app.bundle.mjs",
       "backend/peerchat/moderation-data.mjs",
       "backend/p2pmd/ieee-runtime.mjs",
-      "backend/p2pmd/katex-runtime.mjs"
+      "backend/p2pmd/katex-runtime.mjs",
+      "app/privacy/generated/*.mjs"
     ]
   }
 }

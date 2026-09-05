@@ -15,6 +15,7 @@ import { getWebKitContentRuleFiles } from './webkitContentRules'
 type BrowserContentBlockingNativeModule = {
   loadFilterLists: (...args: string[]) => Promise<boolean>
   setEnabled: (enabled: boolean) => void
+  setYoutubeAdBlockingEnabled: (enabled: boolean) => void
 }
 
 type ContentBlockingOptions = {
@@ -59,6 +60,10 @@ export function setContentBlockingEnabled (enabled: boolean) {
   desiredEnabled = enabled
   applyEnabledState()
   return rulesReady
+}
+
+export function setYoutubeAdBlockingEnabled (enabled: boolean) {
+  nativeContentBlocking?.setYoutubeAdBlockingEnabled(enabled)
 }
 
 export async function getContentBlockingStatus () {

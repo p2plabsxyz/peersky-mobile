@@ -133,12 +133,14 @@ import { usePeerChatNotifications } from './peerchat/usePeerChatNotifications'
 import { peerSkyWebViewNativeConfig } from './downloads/PeerSkyWebView'
 import {
   initializeContentBlocking,
-  setContentBlockingEnabled as applyContentBlockingEnabled
+  setContentBlockingEnabled as applyContentBlockingEnabled,
+  setYoutubeAdBlockingEnabled as applyYoutubeAdBlockingEnabled
 } from './privacy/contentBlocking'
 import {
   useBrowserDownloads,
   type BrowserDownload
 } from './downloads/useBrowserDownloads'
+import { createBrowserContentBlockingScript } from './privacy/browserContentBlockingScript.mjs'
 import { BrowserTabsScreen } from './tabs/BrowserTabsScreen'
 import { useBrowserTabPreviews } from './tabs/useBrowserTabPreviews'
 import { isBrowserTabPreviewForPage } from './tabs/browser-tab-preview.mjs'
@@ -288,7 +290,8 @@ export default function App () {
     setSearchEngine,
     setShowFullAddress,
     setTheme,
-    setWebsiteTextScale
+    setWebsiteTextScale,
+    setYoutubeAdBlockingEnabled
   } = useBrowserPreferences()
   const {
     bookmarks: browserBookmarks,
@@ -492,6 +495,11 @@ export default function App () {
       cancelled = true
     }
   }, [browserPreferencesReady, contentBlockingReady])
+
+  useEffect(() => {
+    if (!browserPreferencesReady) return
+    applyYoutubeAdBlockingEnabled(browserPreferences.youtubeAdBlockingEnabled)
+  }, [browserPreferencesReady, browserPreferences.youtubeAdBlockingEnabled])
 
   useEffect(() => {
     if (!browserSessionReady) return
@@ -1133,6 +1141,12 @@ export default function App () {
       applyContentBlockingEnabled(false)
     }
 
+    refreshContentBlockedPages()
+  }
+
+  function onYoutubeAdBlockingEnabledChange (enabled: boolean) {
+    if (!setYoutubeAdBlockingEnabled(enabled)) return
+    applyYoutubeAdBlockingEnabled(enabled)
     refreshContentBlockedPages()
   }
 
@@ -2380,6 +2394,7 @@ export default function App () {
           showFullAddress={browserPreferences.showFullAddress}
           theme={browserPreferences.theme}
           websiteTextScale={browserPreferences.websiteTextScale}
+          youtubeAdBlockingEnabled={browserPreferences.youtubeAdBlockingEnabled}
           storagePath={identityStoragePath}
           onAddressBarPositionChange={setAddressBarPosition}
           onCallRpc={(command, data = {}) => callRpc(command, data)}
@@ -2401,6 +2416,7 @@ export default function App () {
           onShowFullAddressChange={setShowFullAddress}
           onThemeChange={setTheme}
           onWebsiteTextScaleChange={setWebsiteTextScale}
+          onYoutubeAdBlockingEnabledChange={onYoutubeAdBlockingEnabledChange}
           onResetTabs={onBrowserResetTabs}
           onOpenUrl={(targetUrl) => {
             setBrowserSettingsVisible(false)
@@ -3065,6 +3081,9 @@ export default function App () {
             ? {
                 ...peerSkyWebViewNativeConfig,
                 props: Object.assign({}, peerSkyWebViewNativeConfig.props, {
+                  contentBlockingToken: browserPreferences.contentBlockingEnabled
+                    ? browserMediaToken
+                    : null,
                   mediaLongPressToken: browserMediaToken
                 })
               }
@@ -3076,16 +3095,25 @@ export default function App () {
             pageZoom: tabPageZoom,
             websiteTextScale: browserPreferences.websiteTextScale
           })
+          const browserContentBlockingScript = createBrowserContentBlockingScript({
+            bridgeToken: browserMediaToken,
+            enabled: Platform.OS === 'android' &&
+              Boolean(peerSkyWebViewNativeConfig) &&
+              browserPreferences.contentBlockingEnabled,
+            youtubeAdBlockingEnabled: browserPreferences.youtubeAdBlockingEnabled
+          })
           const browserMediaScript = createBrowserMediaLongPressScript({
             token: browserMediaToken
           })
           const browserInjectedScript = combineBrowserInjectedScripts(
             browserAccessibilityScript,
             browserMediaScript,
+            browserContentBlockingScript,
             createBrowserFaviconScript()
           )
           const browserBeforeContentScript = combineBrowserInjectedScripts(
             browserAccessibilityScript,
+            browserContentBlockingScript,
             browserMediaScript
           )
 

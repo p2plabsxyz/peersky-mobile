@@ -15,16 +15,20 @@ type ContentBlockingStatus = Awaited<ReturnType<typeof getContentBlockingStatus>
 
 type PrivacyProps = {
   contentBlockingEnabled: boolean
+  youtubeAdBlockingEnabled: boolean
   persistenceError: string | null
   onContentBlockingEnabledChange: (enabled: boolean) => Promise<void>
   onFilterListsUpdated: () => void
+  onYoutubeAdBlockingEnabledChange: (enabled: boolean) => void
 }
 
 export function Privacy ({
   contentBlockingEnabled,
+  youtubeAdBlockingEnabled,
   persistenceError,
   onContentBlockingEnabledChange,
-  onFilterListsUpdated
+  onFilterListsUpdated,
+  onYoutubeAdBlockingEnabledChange
 }: PrivacyProps) {
   const isDark = useSettingsDarkMode()
   const mountedRef = useRef(true)
@@ -135,6 +139,23 @@ export function Privacy ({
             onValueChange={(enabled) => void changeProtection(enabled)}
             trackColor={{ false: '#bac3d2', true: '#7eb2ee' }}
             thumbColor={contentBlockingEnabled ? '#1f6fd1' : '#ffffff'}
+          />
+        </View>
+      </SettingsSection>
+
+      <SettingsSection title='YouTube'>
+        <View style={styles.settingRow}>
+          <SettingCopy
+            title='Block YouTube ads'
+            description='Apply YouTube-specific network rules.'
+          />
+          <Switch
+            accessibilityLabel='Block YouTube ads'
+            disabled={isChanging || isUpdating}
+            value={youtubeAdBlockingEnabled}
+            onValueChange={onYoutubeAdBlockingEnabledChange}
+            trackColor={{ false: '#bac3d2', true: '#7eb2ee' }}
+            thumbColor={youtubeAdBlockingEnabled ? '#1f6fd1' : '#ffffff'}
           />
         </View>
       </SettingsSection>

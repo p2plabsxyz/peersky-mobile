@@ -24,6 +24,7 @@ export type BrowserPreferences = {
   showFullAddress: boolean
   theme: BrowserTheme
   websiteTextScale: WebsiteTextScale
+  youtubeAdBlockingEnabled: boolean
 }
 
 export function useBrowserPreferences () {
@@ -119,6 +120,9 @@ export function useBrowserPreferences () {
     },
     setWebsiteTextScale: (websiteTextScale: WebsiteTextScale) => {
       return updatePreferences({ websiteTextScale })
+    },
+    setYoutubeAdBlockingEnabled: (youtubeAdBlockingEnabled: boolean) => {
+      return updatePreferences({ youtubeAdBlockingEnabled })
     }
   }
 }
