@@ -103,6 +103,7 @@ npm run android
 - [Hyper protocol](docs/hyper.md)
 - [Holesail runtime](docs/holesail.md)
 - [P2PMD](docs/p2pmd.md)
+- [PeerChat](docs/peerchat.md)
 - [PeerChat moderation data](backend/peerchat/MODERATION_DATA.md)
 - [Link Device](docs/link-device.md)
 - [Testing guide](docs/testing.md)
