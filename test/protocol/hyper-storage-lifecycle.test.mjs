@@ -26,8 +26,14 @@ test('full P2P storage removal deletes public and private runtime paths', () => 
 test('warns that clearing all P2P data permanently loses signing keys', () => {
   const source = readFileSync(new URL('../../app/settings/P2PStorage.tsx', import.meta.url), 'utf8')
   assert.match(source, /permanently removes[\s\S]*signing keys/)
+  assert.match(source, /PeerChat rooms and message history/)
   assert.match(source, /permanently lose the ability to update previously shared Hyper URLs/)
   assert.match(source, /leaving them frozen/)
+})
+
+test('explains that clearing downloaded P2P cache retains PeerChat history', () => {
+  const source = readFileSync(new URL('../../app/settings/P2PStorage.tsx', import.meta.url), 'utf8')
+  assert.match(source, /Clear downloaded P2P cache[\s\S]*PeerChat rooms[\s\S]*message history are kept/)
 })
 
 test('cache clear closes storage and reopens the runtime in order', async () => {
