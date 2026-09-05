@@ -181,6 +181,28 @@ describe('resolveLinkPreview', () => {
     assert.equal(preview.title, 'Solo Title')
   })
 
+  it('decodes UTF-8 metadata split across response chunks', async () => {
+    const html = '<html><head><title>PeerSky café</title></head></html>'
+    const bytes = new TextEncoder().encode(html)
+    const splitAt = bytes.indexOf(0xc3) + 1
+    const preview = await resolveLinkPreview('https://example.com/', {
+      fetchFn: stubFetch(() => ({
+        ok: true,
+        status: 200,
+        headers: { get: (name) => name === 'content-type' ? 'text/html' : null },
+        body: new ReadableStream({
+          start (controller) {
+            controller.enqueue(bytes.subarray(0, splitAt))
+            controller.enqueue(bytes.subarray(splitAt))
+            controller.close()
+          }
+        })
+      }))
+    })
+
+    assert.equal(preview.title, 'PeerSky café')
+  })
+
   it('returns null on non-HTML content types', async () => {
     const preview = await resolveLinkPreview('https://example.com/f', {
       fetchFn: stubFetch(() => htmlResponse('PNG data', { contentType: 'image/png' }))

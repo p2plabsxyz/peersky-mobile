@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { File, Paths } from 'expo-file-system'
 import * as DocumentPicker from 'expo-document-picker'
+import { useAudioPlayer } from 'expo-audio'
+import { useVideoPlayer, VideoView } from 'expo-video'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import {
   ActivityIndicator,
@@ -43,12 +45,14 @@ import {
   isPeerChatNearBottom,
   PEERCHAT_SEARCH_QUERY_MAX_CHARACTERS
 } from './message-search.mjs'
+import { normalizePeerChatMentionSpacing, splitPeerChatMentions } from './message-text.mjs'
 import {
   createPeerChatAvatarDataUrl,
   MAX_PEERCHAT_AVATAR_FILE_BYTES
 } from './avatar.mjs'
 import {
   RPC_HYPER_LIBRARY_UPLOAD,
+  RPC_HYPER_FETCH,
   RPC_PEERCHAT_DM_ACCEPT,
   RPC_PEERCHAT_DM_CREATE,
   RPC_PEERCHAT_DM_REJECT,
@@ -66,6 +70,15 @@ import {
   RPC_PEERCHAT_SEND,
   RPC_PEERCHAT_SNAPSHOT
 } from '../../backend/rpc/commands.mjs'
+import BackIcon from '../../assets/icons/bootstrap/arrow-left.svg'
+import ShareIcon from '../../assets/icons/bootstrap/share.svg'
+import CloseIcon from '../../assets/icons/bootstrap/x-lg.svg'
+import LatestIcon from '../../assets/icons/peerchat/arrow-down.svg'
+import MuteIcon from '../../assets/icons/peerchat/mute.svg'
+import PinIcon from '../../assets/icons/peerchat/pin.svg'
+import SearchIcon from '../../assets/icons/peerchat/search.svg'
+import SendIcon from '../../assets/icons/peerchat/send.svg'
+import SettingsIcon from '../../assets/icons/peerchat/settings.svg'
 
 type PeerChatMessage = {
   id: string
@@ -178,6 +191,8 @@ export type PeerChatResponse = {
   sent?: PeerChatMessage
   item?: { name: string, url: string, byteLength?: number }
   pendingDirectMessages?: PeerChatDirectInvite[]
+  mediaType?: 'image' | 'video' | 'audio'
+  mediaUrl?: string
 }
 
 type PeerChatScreenProps = {
@@ -214,7 +229,9 @@ const EMPTY_UI_STATE: PeerChatUiState = {
 
 const PEERCHAT_UI_STATE_FILE = new File(Paths.document, 'peerchat-ui-state.json')
 const UI_STATE_PERSIST_DELAY_MS = 300
-const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
+const CHAT_HEADER_ICON_SIZE = 20
+const ROOM_STATE_ICON_SIZE = 13
+const AUTO_INLINE_MEDIA_MAX_BYTES = 100 * 1024 * 1024
 
 export function PeerChatScreen ({
   isDark,
@@ -239,6 +256,8 @@ export function PeerChatScreen ({
   const isNearMessageBottomRef = useRef(true)
   const mountedRef = useRef(true)
   const composerRoomKeyRef = useRef<string | null>(null)
+  const knownMessageIdsRef = useRef<Set<string>>(new Set())
+  const soundRoomKeyRef = useRef<string | null>(null)
   const uiStateRef = useRef<PeerChatUiState>(EMPTY_UI_STATE)
   const uiStateRestoredRef = useRef(false)
   const [isIntroReady, setIsIntroReady] = useState(false)
@@ -247,6 +266,7 @@ export function PeerChatScreen ({
   const [isInitialized, setIsInitialized] = useState(false)
   const [isBusy, setIsBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [moderationWarning, setModerationWarning] = useState<string | null>(null)
   const [profile, setProfile] = useState<PeerChatProfile | null>(null)
   const [profileName, setProfileName] = useState('')
   const [profileBio, setProfileBio] = useState('')
@@ -270,10 +290,13 @@ export function PeerChatScreen ({
   const [replyTarget, setReplyTarget] = useState<PeerChatReply | null>(null)
   const [reactionTargetId, setReactionTargetId] = useState<string | null>(null)
   const [messageActionTarget, setMessageActionTarget] = useState<PeerChatMessage | null>(null)
+  const [roomActionTarget, setRoomActionTarget] = useState<PeerChatRoom | null>(null)
+  const [isConfirmingRoomLeave, setIsConfirmingRoomLeave] = useState(false)
   const [isMessageInfoVisible, setIsMessageInfoVisible] = useState(false)
   const [isSearching, setIsSearching] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [roomSearchQuery, setRoomSearchQuery] = useState('')
+  const [showPeerChatSettings, setShowPeerChatSettings] = useState(false)
   const [showRoomInfo, setShowRoomInfo] = useState(false)
   const [editRoomName, setEditRoomName] = useState('')
   const [editRoomBio, setEditRoomBio] = useState('')
@@ -283,6 +306,8 @@ export function PeerChatScreen ({
   const [showComposerEmoji, setShowComposerEmoji] = useState(false)
   const [landingAction, setLandingAction] = useState<LandingAction>(null)
   const [restoredUiState, setRestoredUiState] = useState<PeerChatUiState | null>(null)
+  const sendSoundPlayer = useAudioPlayer(require('../../assets/sounds/peerchat/send.mp3'))
+  const receiveSoundPlayer = useAudioPlayer(require('../../assets/sounds/peerchat/receive.mp3'))
   const mentionCandidates = getMentionCandidates(
     composer,
     activeRoom?.members || [],
@@ -293,9 +318,16 @@ export function PeerChatScreen ({
   const firstUnreadIndex = isSearching ? -1 : getFirstUnreadMessageIndex(visibleMessages, newMessagesAfter)
   const visibleRooms = filterPeerChatRooms(rooms, roomSearchQuery) as PeerChatRoom[]
   const visibleMembers = filterPeerChatMembers(
-    activeRoom?.members.filter((member) => !member.self) || [],
+    activeRoom?.members || [],
     memberSearchQuery
   ) as PeerChatMember[]
+
+  const playChatSound = useCallback((player: typeof sendSoundPlayer) => {
+    if (!soundsEnabled) return
+    void player.seekTo(0)
+      .then(() => player.play())
+      .catch((error) => console.warn('Unable to play PeerChat sound:', error))
+  }, [soundsEnabled])
 
   useEffect(() => {
     callRpcRef.current = onCallRpc
@@ -364,6 +396,12 @@ export function PeerChatScreen ({
   useEffect(() => {
     activeRoomRef.current = activeRoom
   }, [activeRoom])
+
+  useEffect(() => {
+    if (!moderationWarning) return
+    const timer = setTimeout(() => setModerationWarning(null), 6000)
+    return () => clearTimeout(timer)
+  }, [moderationWarning])
 
   useEffect(() => {
     let cancelled = false
@@ -456,7 +494,7 @@ export function PeerChatScreen ({
     if (restoredRoom) {
       versionRef.current = -1
       setMessages([])
-      captureUnreadBoundary(restoredRoom)
+      captureUnreadBoundary()
       setActiveRoom(restoredRoom)
     }
     uiStateRef.current = {
@@ -482,7 +520,16 @@ export function PeerChatScreen ({
 
       if (response.room) setActiveRoom(response.room)
       if (response.rooms) setRooms(response.rooms)
-      if (Array.isArray(response.messages)) setMessages(response.messages)
+      if (Array.isArray(response.messages)) {
+        const isSameSoundRoom = soundRoomKeyRef.current === room.roomKey
+        const hasIncomingMessage = isSameSoundRoom && response.messages.some((message) => (
+          !message.self && !knownMessageIdsRef.current.has(message.id)
+        ))
+        soundRoomKeyRef.current = room.roomKey
+        knownMessageIdsRef.current = new Set(response.messages.map((message) => message.id))
+        setMessages(response.messages)
+        if (hasIncomingMessage) playChatSound(receiveSoundPlayer)
+      }
       if (Number.isSafeInteger(response.version)) versionRef.current = response.version as number
       setError(null)
     } catch (cause) {
@@ -492,7 +539,7 @@ export function PeerChatScreen ({
     } finally {
       pollInFlightRef.current = false
     }
-  }, [callRpc])
+  }, [callRpc, playChatSound, receiveSoundPlayer])
 
   useEffect(() => {
     if (!activeRoom) return
@@ -581,6 +628,16 @@ export function PeerChatScreen ({
     setLinkPreviewsEnabled(response.profile.linkPreview !== false)
   }
 
+  function openPeerChatSettings () {
+    if (profile) {
+      setProfileName(profile.username)
+      setProfileBio(profile.bio || '')
+      setProfileAvatar(profile.avatar || null)
+      setLinkPreviewsEnabled(profile.linkPreview !== false)
+    }
+    setShowPeerChatSettings(true)
+  }
+
   async function runAction (action: () => Promise<void>) {
     if (actionInFlightRef.current) return
     actionInFlightRef.current = true
@@ -591,7 +648,11 @@ export function PeerChatScreen ({
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause)
       if (mountedRef.current) {
-        setError(message)
+        if (message.startsWith('Message blocked:')) {
+          setModerationWarning(message.replace(/^Message blocked:\s*/, ''))
+        } else {
+          setError(message)
+        }
         onStatus(message)
       }
     } finally {
@@ -661,6 +722,8 @@ export function PeerChatScreen ({
     if (composerRoomKeyRef.current !== room.roomKey) setComposer('')
     composerRoomKeyRef.current = room.roomKey
     versionRef.current = -1
+    soundRoomKeyRef.current = null
+    knownMessageIdsRef.current = new Set()
     setMessages([])
     setReplyTarget(null)
     setReactionTargetId(null)
@@ -673,7 +736,7 @@ export function PeerChatScreen ({
     setEditRoomAvatar(room.avatar || null)
     setMemberSearchQuery('')
     setShowComposerEmoji(false)
-    captureUnreadBoundary(room)
+    captureUnreadBoundary()
     setActiveRoom(room)
     setRooms((current) => current.map((item) => item.roomKey === room.roomKey
       ? { ...item, unreadCount: 0, unreadMentions: 0 }
@@ -682,14 +745,11 @@ export function PeerChatScreen ({
     onStatus(`Opened PeerChat room ${room.name}`)
   }
 
-  function captureUnreadBoundary (room: PeerChatRoom) {
-    const timestamp = room.unreadCount > 0 && Number.isSafeInteger(room.lastReadTs) && room.lastReadTs > 0
-      ? room.lastReadTs
-      : null
-    unreadScrollPendingRef.current = timestamp !== null
-    isNearMessageBottomRef.current = timestamp === null
-    setShowScrollToLatest(timestamp !== null)
-    setNewMessagesAfter(timestamp)
+  function captureUnreadBoundary () {
+    unreadScrollPendingRef.current = false
+    isNearMessageBottomRef.current = true
+    setShowScrollToLatest(false)
+    setNewMessagesAfter(null)
   }
 
   function saveRoomDetails () {
@@ -803,42 +863,8 @@ export function PeerChatScreen ({
   }
 
   function showRoomActions (room: PeerChatRoom) {
-    Alert.alert(
-      room.name,
-      'Manage this chat on this device.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Copy key',
-          onPress: () => {
-            Clipboard.setString(room.roomKey)
-            onStatus('PeerChat room key copied')
-          }
-        },
-        {
-          text: 'Options',
-          onPress: () => showRoomPreferences(room)
-        }
-      ]
-    )
-  }
-
-  function showRoomPreferences (room: PeerChatRoom) {
-    Alert.alert(
-      'Chat options',
-      'These preferences apply on this device.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: room.isMuted ? 'Unmute' : 'Mute',
-          onPress: () => void updateRoomPreference(room, 'muted')
-        },
-        {
-          text: room.isPinned ? 'Unpin' : 'Pin',
-          onPress: () => void updateRoomPreference(room, 'pinned')
-        }
-      ]
-    )
+    setIsConfirmingRoomLeave(false)
+    setRoomActionTarget(room)
   }
 
   async function updateRoomPreference (room: PeerChatRoom, preference: 'muted' | 'pinned') {
@@ -859,7 +885,12 @@ export function PeerChatScreen ({
   }
 
   function sendMessage () {
-    const message = composer.trim()
+    const message = activeRoom
+      ? normalizePeerChatMentionSpacing(
+          composer.trim(),
+          activeRoom.members.map((member) => member.username)
+        )
+      : ''
     if (!activeRoom || !message || isBusy) return
     const selectedReply = replyTarget
 
@@ -880,6 +911,7 @@ export function PeerChatScreen ({
       }
       versionRef.current = -1
       await refreshRoom(true)
+      playChatSound(sendSoundPlayer)
       onStatus('PeerChat message sent')
     })
   }
@@ -896,13 +928,14 @@ export function PeerChatScreen ({
       const asset = selection.assets[0]
       const file = new File(asset.uri)
       const fileSize = asset.size ?? file.size
-      if (!Number.isSafeInteger(fileSize) || !fileSize || fileSize > MAX_ATTACHMENT_BYTES) {
-        throw new Error('Choose a file between 1 byte and 10 MB.')
+      if (!Number.isSafeInteger(fileSize) || !fileSize) {
+        throw new Error('Choose a non-empty file.')
       }
 
       const upload = await callRpc(RPC_HYPER_LIBRARY_UPLOAD, {
         name: asset.name,
-        contentBase64: await file.base64(),
+        fileUri: file.uri,
+        byteLength: fileSize,
         visibility: 'public'
       })
       if (!upload.ok || !upload.item) throw new Error(upload.error || 'Unable to upload attachment.')
@@ -916,42 +949,35 @@ export function PeerChatScreen ({
       if (!response.ok) throw new Error(response.error || 'Unable to send attachment.')
       versionRef.current = -1
       await refreshRoom(true)
+      playChatSound(sendSoundPlayer)
       onStatus(`Sent ${upload.item.name}`)
     })
   }
 
-  function confirmLeaveRoom () {
-    if (!activeRoom) return
-    Alert.alert(
-      'Leave room?',
-      `Remove ${activeRoom.name} from recent rooms on this device?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Leave',
-          style: 'destructive',
-          onPress: () => void runAction(async () => {
-            const response = await callRpc(RPC_PEERCHAT_ROOM_LEAVE, {
-              roomKey: activeRoom.roomKey
-            })
-            if (!response.ok) throw new Error(response.error || 'Unable to leave PeerChat room.')
-            if (!mountedRef.current) return
-            setRooms((current) => current.filter((room) => room.roomKey !== activeRoom.roomKey))
-            if (composerRoomKeyRef.current === activeRoom.roomKey) {
-              composerRoomKeyRef.current = null
-              setComposer('')
-            }
-            setActiveRoom(null)
-            setMessages([])
-            setReplyTarget(null)
-            setReactionTargetId(null)
-            setIsSearching(false)
-            setSearchQuery('')
-            onStatus('PeerChat room removed')
-          })
-        }
-      ]
-    )
+  function leaveRoom (room: PeerChatRoom) {
+    setRoomActionTarget(null)
+    setIsConfirmingRoomLeave(false)
+    void runAction(async () => {
+      const response = await callRpc(RPC_PEERCHAT_ROOM_LEAVE, {
+        roomKey: room.roomKey
+      })
+      if (!response.ok) throw new Error(response.error || 'Unable to leave PeerChat room.')
+      if (!mountedRef.current) return
+      setRooms((current) => current.filter((item) => item.roomKey !== room.roomKey))
+      if (composerRoomKeyRef.current === room.roomKey) {
+        composerRoomKeyRef.current = null
+        setComposer('')
+      }
+      if (activeRoomRef.current?.roomKey === room.roomKey) {
+        setActiveRoom(null)
+        setMessages([])
+        setReplyTarget(null)
+        setReactionTargetId(null)
+        setIsSearching(false)
+        setSearchQuery('')
+      }
+      onStatus('PeerChat room removed')
+    })
   }
 
   async function shareRoom () {
@@ -1071,10 +1097,7 @@ export function PeerChatScreen ({
 
   if (activeRoom) {
     return (
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        style={[styles.screen, { backgroundColor: colors.background }]}
-      >
+      <View style={[styles.screen, { backgroundColor: colors.background }]}>
         <View style={[styles.chatHeader, { borderBottomColor: colors.border }]}> 
           <Pressable
             accessibilityRole='button'
@@ -1087,9 +1110,14 @@ export function PeerChatScreen ({
             }}
             style={styles.headerAction}
           >
-            <Text style={[styles.headerActionText, { color: colors.accent }]}>Back</Text>
+            <BackIcon width={CHAT_HEADER_ICON_SIZE} height={CHAT_HEADER_ICON_SIZE} color={colors.accent} />
           </Pressable>
-          <View style={styles.chatHeaderCopy}>
+          <Pressable
+            accessibilityHint='Opens room information'
+            accessibilityRole='button'
+            onPress={() => setShowRoomInfo(true)}
+            style={styles.chatHeaderCopy}
+          >
             {activeRoom.avatar
               ? <Image source={{ uri: activeRoom.avatar }} style={styles.chatHeaderAvatar} />
               : null}
@@ -1102,16 +1130,10 @@ export function PeerChatScreen ({
                 {formatRoomConnection(activeRoom)}
               </Text>
             </View>
-          </View>
+          </Pressable>
           <View style={styles.chatHeaderActions}>
             <Pressable
-              accessibilityRole='button'
-              onPress={() => setShowRoomInfo((current) => !current)}
-              style={styles.headerAction}
-            >
-              <Text style={[styles.headerActionText, { color: colors.accent }]}>Info</Text>
-            </Pressable>
-            <Pressable
+              accessibilityLabel={isSearching ? 'Close message search' : 'Find messages'}
               accessibilityRole='button'
               onPress={() => {
                 setIsSearching((current) => !current)
@@ -1119,24 +1141,58 @@ export function PeerChatScreen ({
               }}
               style={styles.headerAction}
             >
-              <Text style={[styles.headerActionText, { color: colors.accent }]}>{isSearching ? 'Close' : 'Find'}</Text>
+              {isSearching
+                ? <CloseIcon width={CHAT_HEADER_ICON_SIZE} height={CHAT_HEADER_ICON_SIZE} color={colors.accent} />
+                : <SearchIcon width={CHAT_HEADER_ICON_SIZE} height={CHAT_HEADER_ICON_SIZE} color={colors.accent} />}
             </Pressable>
             <Pressable
+              accessibilityLabel='Share room'
               accessibilityRole='button'
               onPress={() => void shareRoom()}
               style={styles.headerAction}
             >
-              <Text style={[styles.headerActionText, { color: colors.accent }]}>Share</Text>
+              <ShareIcon width={CHAT_HEADER_ICON_SIZE} height={CHAT_HEADER_ICON_SIZE} color={colors.accent} />
             </Pressable>
           </View>
         </View>
 
-        {showRoomInfo && (
-          <ScrollView
-            keyboardShouldPersistTaps='handled'
-            style={[styles.roomInfoPanel, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}
-            contentContainerStyle={styles.roomInfo}
+        <Modal
+          animationType='fade'
+          onRequestClose={() => setShowRoomInfo(false)}
+          statusBarTranslucent
+          transparent
+          visible={showRoomInfo}
+        >
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            style={styles.roomInfoModalRoot}
           >
+            <Pressable
+              accessibilityLabel='Close room information'
+              accessibilityRole='button'
+              onPress={() => setShowRoomInfo(false)}
+              style={styles.roomInfoBackdrop}
+            />
+            <SafeAreaView
+              edges={['bottom', 'left', 'right']}
+              style={[styles.roomInfoPanel, { backgroundColor: colors.surface }]}
+            >
+              <View style={[styles.roomInfoHeader, { borderBottomColor: colors.border }]}>
+                <Text style={[styles.roomInfoHeading, { color: colors.text }]}>Room info</Text>
+                <Pressable
+                  accessibilityLabel='Close room information'
+                  accessibilityRole='button'
+                  hitSlop={8}
+                  onPress={() => setShowRoomInfo(false)}
+                  style={styles.roomInfoClose}
+                >
+                  <CloseIcon width={18} height={18} color={colors.muted} />
+                </Pressable>
+              </View>
+              <ScrollView
+                keyboardShouldPersistTaps='handled'
+                contentContainerStyle={styles.roomInfo}
+              >
             {activeRoom.isHost
               ? (
                 <>
@@ -1222,7 +1278,7 @@ export function PeerChatScreen ({
                 <Text style={[styles.helper, { color: colors.muted }]}>Adult-domain links: Always blocked</Text>
               </View>
             )}
-            {activeRoom.members.some((member) => !member.self) && (
+            {activeRoom.members.length > 0 && (
               <View style={styles.memberList}>
                 <Text style={[styles.roomInfoTitle, { color: colors.text }]}>People online</Text>
                 <TextInput
@@ -1239,8 +1295,9 @@ export function PeerChatScreen ({
                   <Pressable
                     accessibilityHint='Starts a private conversation'
                     accessibilityRole='button'
+                    disabled={member.self}
                     key={member.id}
-                    onPress={() => startDirectMessage(member)}
+                    onPress={() => !member.self && startDirectMessage(member)}
                     style={[styles.memberRow, { backgroundColor: colors.input }]}
                   >
                     <View style={styles.memberAvatarWrap}>
@@ -1257,7 +1314,9 @@ export function PeerChatScreen ({
                       <Text style={[styles.memberName, { color: colors.text }]}>{member.username}</Text>
                       {!!member.bio && <Text numberOfLines={1} style={[styles.attachmentMeta, { color: colors.muted }]}>{member.bio}</Text>}
                     </View>
-                    <Text style={[styles.memberMessage, { color: colors.accent }]}>Message</Text>
+                    <Text style={[styles.memberMessage, { color: member.self ? colors.muted : colors.accent }]}>
+                      {member.self ? 'You' : 'Message'}
+                    </Text>
                   </Pressable>
                 ))}
                 {visibleMembers.length === 0 && (
@@ -1265,11 +1324,30 @@ export function PeerChatScreen ({
                 )}
               </View>
             )}
-          </ScrollView>
-        )}
+              </ScrollView>
+            </SafeAreaView>
+          </KeyboardAvoidingView>
+        </Modal>
 
         {activeRoom.isDM && activeRoom.pendingAcceptance && (
           <Text style={[styles.dmStatus, { color: colors.muted, backgroundColor: colors.surface }]}>Waiting for this peer to accept your message request.</Text>
+        )}
+
+        {moderationWarning && (
+          <View style={[styles.moderationWarning, { backgroundColor: colors.surface, borderColor: colors.danger }]}>
+            <Text numberOfLines={2} style={[styles.moderationWarningText, { color: colors.text }]}>
+              Message blocked: {moderationWarning}
+            </Text>
+            <Pressable
+              accessibilityLabel='Dismiss moderation warning'
+              accessibilityRole='button'
+              hitSlop={8}
+              onPress={() => setModerationWarning(null)}
+              style={styles.moderationWarningClose}
+            >
+              <CloseIcon width={16} height={16} color={colors.muted} />
+            </Pressable>
+          </View>
         )}
         {activeRoom.isDM && activeRoom.rejected && (
           <Text style={[styles.dmStatus, { color: colors.danger, backgroundColor: colors.surface }]}>This peer declined the message request.</Text>
@@ -1376,23 +1454,22 @@ export function PeerChatScreen ({
                 )}
                 {item.fileName
                   ? (
-                    <Pressable
-                      accessibilityHint='Opens this Hyperdrive attachment'
-                      accessibilityRole='link'
-                      onPress={() => onOpenUrl(item.message)}
-                      style={[styles.attachmentCard, { backgroundColor: colors.input, borderColor: colors.border }]}
-                    >
-                      <Text style={[styles.attachmentIcon, { color: colors.accent }]}>+</Text>
-                      <View style={styles.attachmentCopy}>
-                        <Text numberOfLines={1} style={[styles.attachmentName, { color: colors.text }]}>{item.fileName}</Text>
-                        <Text style={[styles.attachmentMeta, { color: colors.muted }]}>{formatFileSize(item.fileSize)}</Text>
-                      </View>
-                    </Pressable>
+                    <PeerChatAttachment
+                      colors={colors}
+                      item={item}
+                      onCallRpc={callRpc}
+                      onOpenUrl={onOpenUrl}
+                    />
                     )
                   : (
                     <>
-                      <Text selectable style={[styles.messageText, { color: colors.text }]}>
-                        {renderMessageText(item.message, profile?.username || '', colors.accent)}
+                      <Text style={[styles.messageText, { color: colors.text }]}>
+                        {renderMessageText(
+                          item.message,
+                          [profile?.username || '', ...activeRoom.members.map((member) => member.username)],
+                          colors.text,
+                          colors.accent
+                        )}
                       </Text>
                       {item.preview && (
                         <Pressable
@@ -1469,7 +1546,7 @@ export function PeerChatScreen ({
               }}
               style={[styles.scrollToLatest, { backgroundColor: colors.accent }]}
             >
-              <Text style={styles.scrollToLatestText}>Latest</Text>
+              <LatestIcon width={18} height={18} color='#ffffff' />
             </Pressable>
           )}
         </View>
@@ -1602,12 +1679,9 @@ export function PeerChatScreen ({
               !composer.trim() || isBusy || activeRoom.pendingAcceptance || activeRoom.rejected ? styles.disabled : null
             ]}
           >
-            <Text style={styles.sendButtonText}>Send</Text>
+            <SendIcon width={20} height={20} color='#ffffff' />
           </Pressable>
         </View>
-        <Pressable accessibilityRole='button' onPress={confirmLeaveRoom} style={styles.leaveAction}>
-          <Text style={[styles.leaveText, { color: colors.danger }]}>Leave room</Text>
-        </Pressable>
         <Modal
           animationType='fade'
           onRequestClose={() => setMessageActionTarget(null)}
@@ -1668,12 +1742,13 @@ export function PeerChatScreen ({
             )}
           </View>
         </Modal>
-      </KeyboardAvoidingView>
+      </View>
     )
   }
 
   return (
-    <FlatList
+    <>
+      <FlatList
       style={[styles.screen, { backgroundColor: colors.background }]}
       contentContainerStyle={styles.landingContent}
       data={visibleRooms}
@@ -1682,103 +1757,168 @@ export function PeerChatScreen ({
         <View style={styles.landingHeader}>
           <View style={styles.titleRow}>
             <Image source={PEERCHAT_ICON} style={styles.logo} />
-            <View style={styles.titleCopy}>
-              <Text style={[styles.title, { color: colors.text }]}>PeerChat</Text>
-              <Text style={[styles.helper, { color: colors.muted }]}>Private peer-to-peer conversations</Text>
-            </View>
+            <Text style={[styles.title, styles.titleCopy, { color: colors.text }]}>PeerChat</Text>
+            <Pressable
+              accessibilityLabel='PeerChat settings'
+              accessibilityRole='button'
+              hitSlop={8}
+              onPress={openPeerChatSettings}
+              style={styles.settingsButton}
+            >
+              <SettingsIcon width={22} height={22} color={colors.muted} />
+            </Pressable>
           </View>
 
-          <View style={styles.profileRow}>
-            <Pressable
-              accessibilityLabel='Change profile image'
-              accessibilityRole='button'
-              onPress={() => chooseAvatar(profileAvatar, setProfileAvatar)}
+          <Pressable
+            accessibilityHint='Opens PeerChat profile settings'
+            accessibilityRole='button'
+            onPress={openPeerChatSettings}
+            style={styles.profileSummary}
+          >
+            {profileAvatar
+              ? <Image source={{ uri: profileAvatar }} style={styles.profileAvatar} />
+              : (
+                <View style={[styles.profileAvatar, styles.profileAvatarFallback, { backgroundColor: colors.accentSoft }]}>
+                  <Text style={[styles.roomAvatarText, { color: colors.accent }]}>{getRoomInitials(profileName)}</Text>
+                </View>
+                )}
+            <Text numberOfLines={1} style={[styles.profileSummaryName, { color: colors.text }]}>
+              {profileName || 'Set up your profile'}
+            </Text>
+          </Pressable>
+
+          <Modal
+            animationType='fade'
+            onRequestClose={() => setShowPeerChatSettings(false)}
+            statusBarTranslucent
+            transparent
+            visible={showPeerChatSettings}
+          >
+            <KeyboardAvoidingView
+              behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+              style={styles.roomInfoModalRoot}
             >
-              {profileAvatar
-                ? <Image source={{ uri: profileAvatar }} style={styles.profileAvatar} />
-                : (
-                  <View style={[styles.profileAvatar, styles.profileAvatarFallback, { backgroundColor: colors.accentSoft }]}>
-                    <Text style={[styles.roomAvatarText, { color: colors.accent }]}>{getRoomInitials(profileName)}</Text>
-                  </View>
-                  )}
-            </Pressable>
-            <TextInput
-              value={profileName}
-              onChangeText={setProfileName}
-              autoCapitalize='words'
-              autoCorrect={false}
-              maxLength={50}
-              placeholder='Your display name'
-              placeholderTextColor={colors.muted}
-              style={[styles.input, styles.profileInput, { backgroundColor: colors.input, color: colors.text }]}
-            />
-            {profile?.username !== profileName.trim() ||
-            (profile?.bio || '') !== profileBio.trim() ||
-            (profile?.avatar || null) !== profileAvatar ||
-            profile?.linkPreview !== linkPreviewsEnabled ? (
               <Pressable
+                accessibilityLabel='Close PeerChat settings'
                 accessibilityRole='button'
-                disabled={!profileName.trim() || isBusy}
-                onPress={() => void runAction(saveProfile)}
-                style={[styles.profileSaveButton, { backgroundColor: colors.accent }, !profileName.trim() || isBusy ? styles.disabled : null]}
+                onPress={() => setShowPeerChatSettings(false)}
+                style={styles.roomInfoBackdrop}
+              />
+              <SafeAreaView
+                edges={['bottom', 'left', 'right']}
+                style={[styles.roomInfoPanel, { backgroundColor: colors.surface }]}
               >
-                <Text style={styles.profileSaveText}>Save</Text>
-              </Pressable>
-              ) : null}
-          </View>
-          <TextInput
-            maxLength={300}
-            multiline
-            onChangeText={setProfileBio}
-            placeholder='Bio (optional)'
-            placeholderTextColor={colors.muted}
-            style={[styles.input, styles.bioInput, { backgroundColor: colors.input, color: colors.text }]}
-            value={profileBio}
-          />
-          <Pressable
-            accessibilityRole='switch'
-            accessibilityState={{ checked: linkPreviewsEnabled }}
-            onPress={() => setLinkPreviewsEnabled((enabled) => !enabled)}
-            style={[styles.preferenceRow, { backgroundColor: colors.surface }]}
-          >
-            <View style={styles.preferenceCopy}>
-              <Text style={[styles.memberName, { color: colors.text }]}>Link previews</Text>
-              <Text style={[styles.attachmentMeta, { color: colors.muted }]}>Fetch page details only when you send a link</Text>
-            </View>
-            <Text style={[styles.preferenceState, { color: linkPreviewsEnabled ? colors.accent : colors.muted }]}>
-              {linkPreviewsEnabled ? 'On' : 'Off'}
-            </Text>
-          </Pressable>
-          <Pressable
-            accessibilityRole='switch'
-            accessibilityState={{ checked: notificationsEnabled, disabled: !notificationPreferencesReady || isBusy }}
-            disabled={!notificationPreferencesReady || isBusy}
-            onPress={changeNotifications}
-            style={[styles.preferenceRow, { backgroundColor: colors.surface }, !notificationPreferencesReady || isBusy ? styles.disabled : null]}
-          >
-            <View style={styles.preferenceCopy}>
-              <Text style={[styles.memberName, { color: colors.text }]}>Message notifications</Text>
-              <Text style={[styles.attachmentMeta, { color: colors.muted }]}>Notify for new unread messages while PeerSky is running</Text>
-            </View>
-            <Text style={[styles.preferenceState, { color: notificationsEnabled ? colors.accent : colors.muted }]}>
-              {notificationsEnabled ? 'On' : 'Off'}
-            </Text>
-          </Pressable>
-          <Pressable
-            accessibilityRole='switch'
-            accessibilityState={{ checked: soundsEnabled, disabled: !notificationsEnabled || isBusy }}
-            disabled={!notificationsEnabled || isBusy}
-            onPress={changeNotificationSounds}
-            style={[styles.preferenceRow, { backgroundColor: colors.surface }, !notificationsEnabled || isBusy ? styles.disabled : null]}
-          >
-            <View style={styles.preferenceCopy}>
-              <Text style={[styles.memberName, { color: colors.text }]}>Notification sound</Text>
-              <Text style={[styles.attachmentMeta, { color: colors.muted }]}>Play a sound with new message notifications</Text>
-            </View>
-            <Text style={[styles.preferenceState, { color: soundsEnabled && notificationsEnabled ? colors.accent : colors.muted }]}>
-              {soundsEnabled ? 'On' : 'Off'}
-            </Text>
-          </Pressable>
+                <View style={[styles.roomInfoHeader, { borderBottomColor: colors.border }]}>
+                  <Text style={[styles.roomInfoHeading, { color: colors.text }]}>PeerChat settings</Text>
+                  <Pressable
+                    accessibilityLabel='Close PeerChat settings'
+                    accessibilityRole='button'
+                    hitSlop={8}
+                    onPress={() => setShowPeerChatSettings(false)}
+                    style={styles.roomInfoClose}
+                  >
+                    <CloseIcon width={18} height={18} color={colors.muted} />
+                  </Pressable>
+                </View>
+                <ScrollView keyboardShouldPersistTaps='handled' contentContainerStyle={styles.profileSettings}>
+                  <View style={styles.profileRow}>
+                    <Pressable
+                      accessibilityLabel='Change profile image'
+                      accessibilityRole='button'
+                      onPress={() => chooseAvatar(profileAvatar, setProfileAvatar)}
+                    >
+                      {profileAvatar
+                        ? <Image source={{ uri: profileAvatar }} style={styles.profileAvatar} />
+                        : (
+                          <View style={[styles.profileAvatar, styles.profileAvatarFallback, { backgroundColor: colors.accentSoft }]}>
+                            <Text style={[styles.roomAvatarText, { color: colors.accent }]}>{getRoomInitials(profileName)}</Text>
+                          </View>
+                          )}
+                    </Pressable>
+                    <TextInput
+                      value={profileName}
+                      onChangeText={setProfileName}
+                      autoCapitalize='words'
+                      autoCorrect={false}
+                      maxLength={50}
+                      placeholder='Your display name'
+                      placeholderTextColor={colors.muted}
+                      style={[styles.input, styles.profileInput, { backgroundColor: colors.input, color: colors.text }]}
+                    />
+                  </View>
+                  <TextInput
+                    maxLength={300}
+                    multiline
+                    onChangeText={setProfileBio}
+                    placeholder='Bio (optional)'
+                    placeholderTextColor={colors.muted}
+                    style={[styles.input, styles.bioInput, { backgroundColor: colors.input, color: colors.text }]}
+                    value={profileBio}
+                  />
+                  <Pressable
+                    accessibilityRole='switch'
+                    accessibilityState={{ checked: linkPreviewsEnabled }}
+                    onPress={() => setLinkPreviewsEnabled((enabled) => !enabled)}
+                    style={[styles.preferenceRow, { backgroundColor: colors.input }]}
+                  >
+                    <View style={styles.preferenceCopy}>
+                      <Text style={[styles.memberName, { color: colors.text }]}>Link previews</Text>
+                      <Text style={[styles.attachmentMeta, { color: colors.muted }]}>Fetch page details only when you send a link</Text>
+                    </View>
+                    <Text style={[styles.preferenceState, { color: linkPreviewsEnabled ? colors.accent : colors.muted }]}>
+                      {linkPreviewsEnabled ? 'On' : 'Off'}
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole='switch'
+                    accessibilityState={{ checked: notificationsEnabled, disabled: !notificationPreferencesReady || isBusy }}
+                    disabled={!notificationPreferencesReady || isBusy}
+                    onPress={changeNotifications}
+                    style={[styles.preferenceRow, { backgroundColor: colors.input }, !notificationPreferencesReady || isBusy ? styles.disabled : null]}
+                  >
+                    <View style={styles.preferenceCopy}>
+                      <Text style={[styles.memberName, { color: colors.text }]}>Message notifications</Text>
+                      <Text style={[styles.attachmentMeta, { color: colors.muted }]}>Notify for unread messages while PeerSky is running</Text>
+                    </View>
+                    <Text style={[styles.preferenceState, { color: notificationsEnabled ? colors.accent : colors.muted }]}>
+                      {notificationsEnabled ? 'On' : 'Off'}
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole='switch'
+                    accessibilityState={{ checked: soundsEnabled, disabled: isBusy }}
+                    disabled={isBusy}
+                    onPress={changeNotificationSounds}
+                    style={[styles.preferenceRow, { backgroundColor: colors.input }, isBusy ? styles.disabled : null]}
+                  >
+                    <View style={styles.preferenceCopy}>
+                      <Text style={[styles.memberName, { color: colors.text }]}>Chat sounds</Text>
+                      <Text style={[styles.attachmentMeta, { color: colors.muted }]}>Play a sound when messages are sent or received</Text>
+                    </View>
+                    <Text style={[styles.preferenceState, { color: soundsEnabled ? colors.accent : colors.muted }]}>
+                      {soundsEnabled ? 'On' : 'Off'}
+                    </Text>
+                  </Pressable>
+                  {(profile?.username !== profileName.trim() ||
+                    (profile?.bio || '') !== profileBio.trim() ||
+                    (profile?.avatar || null) !== profileAvatar ||
+                    profile?.linkPreview !== linkPreviewsEnabled) && (
+                      <Pressable
+                        accessibilityRole='button'
+                        disabled={!profileName.trim() || isBusy}
+                        onPress={() => void runAction(async () => {
+                          await saveProfile()
+                          setShowPeerChatSettings(false)
+                        })}
+                        style={[styles.profileSaveButton, { backgroundColor: colors.accent }, !profileName.trim() || isBusy ? styles.disabled : null]}
+                      >
+                        <Text style={styles.profileSaveText}>Save changes</Text>
+                      </Pressable>
+                  )}
+                </ScrollView>
+              </SafeAreaView>
+            </KeyboardAvoidingView>
+          </Modal>
 
           <View style={styles.quickActions}>
             <Pressable
@@ -1984,10 +2124,10 @@ export function PeerChatScreen ({
             <View style={styles.roomTitleRow}>
               <Text numberOfLines={1} style={[styles.roomTitle, { color: colors.text }]}>{item.name}</Text>
               {item.isPinned && (
-                <Text style={[styles.pinnedLabel, { color: colors.accent, backgroundColor: colors.accentSoft }]}>PINNED</Text>
+                <PinIcon width={ROOM_STATE_ICON_SIZE} height={ROOM_STATE_ICON_SIZE} color={colors.accent} />
               )}
               {item.isMuted && (
-                <Text style={[styles.pinnedLabel, { color: colors.muted, backgroundColor: colors.input }]}>MUTED</Text>
+                <MuteIcon width={ROOM_STATE_ICON_SIZE} height={ROOM_STATE_ICON_SIZE} color={colors.muted} />
               )}
             </View>
             <Text numberOfLines={1} style={[styles.roomPreview, { color: colors.muted }]}>
@@ -2023,34 +2163,245 @@ export function PeerChatScreen ({
           </Text>
         </View>
       )}
+      />
+      <Modal
+        animationType='fade'
+        onRequestClose={() => {
+          setRoomActionTarget(null)
+          setIsConfirmingRoomLeave(false)
+        }}
+        statusBarTranslucent
+        transparent
+        visible={roomActionTarget !== null}
+      >
+        <View accessibilityViewIsModal style={styles.actionSheetRoot}>
+          <Pressable
+            accessibilityLabel='Close chat actions'
+            accessibilityRole='button'
+            onPress={() => {
+              setRoomActionTarget(null)
+              setIsConfirmingRoomLeave(false)
+            }}
+            style={styles.actionSheetBackdrop}
+          />
+          {roomActionTarget && (
+            <SafeAreaView
+              edges={['bottom', 'left', 'right']}
+              style={[styles.actionSheet, { backgroundColor: colors.surface }]}
+            >
+              <Text numberOfLines={1} style={[styles.actionSheetTitle, { color: colors.text }]}>
+                {roomActionTarget.name}
+              </Text>
+              <Text numberOfLines={2} style={[styles.actionSheetPreview, { color: colors.muted }]}>
+                {isConfirmingRoomLeave
+                  ? 'Remove this chat and its local history from this device?'
+                  : 'Manage this chat on this device.'}
+              </Text>
+              <View style={[styles.actionSheetDivider, { backgroundColor: colors.border }]} />
+              {isConfirmingRoomLeave
+                ? (
+                  <>
+                    <Pressable
+                      accessibilityRole='button'
+                      onPress={() => leaveRoom(roomActionTarget)}
+                      style={styles.actionSheetAction}
+                    >
+                      <Text style={[styles.actionSheetActionText, { color: colors.danger }]}>Leave chat</Text>
+                    </Pressable>
+                    <Pressable
+                      accessibilityRole='button'
+                      onPress={() => setIsConfirmingRoomLeave(false)}
+                      style={styles.actionSheetAction}
+                    >
+                      <Text style={[styles.actionSheetActionText, { color: colors.accent }]}>Cancel</Text>
+                    </Pressable>
+                  </>
+                  )
+                : (
+                  <>
+                    <Pressable
+                      accessibilityRole='button'
+                      onPress={() => {
+                        const room = roomActionTarget
+                        setRoomActionTarget(null)
+                        void updateRoomPreference(room, 'pinned')
+                      }}
+                      style={styles.actionSheetAction}
+                    >
+                      <Text style={[styles.actionSheetActionText, { color: colors.text }]}>
+                        {roomActionTarget.isPinned ? 'Unpin chat' : 'Pin chat'}
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      accessibilityRole='button'
+                      onPress={() => {
+                        const room = roomActionTarget
+                        setRoomActionTarget(null)
+                        void updateRoomPreference(room, 'muted')
+                      }}
+                      style={styles.actionSheetAction}
+                    >
+                      <Text style={[styles.actionSheetActionText, { color: colors.text }]}>
+                        {roomActionTarget.isMuted ? 'Unmute notifications' : 'Mute notifications'}
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      accessibilityRole='button'
+                      onPress={() => {
+                        Clipboard.setString(roomActionTarget.roomKey)
+                        setRoomActionTarget(null)
+                        onStatus('PeerChat room key copied')
+                      }}
+                      style={styles.actionSheetAction}
+                    >
+                      <Text style={[styles.actionSheetActionText, { color: colors.text }]}>Copy room key</Text>
+                    </Pressable>
+                    <Pressable
+                      accessibilityRole='button'
+                      onPress={() => setIsConfirmingRoomLeave(true)}
+                      style={styles.actionSheetAction}
+                    >
+                      <Text style={[styles.actionSheetActionText, { color: colors.danger }]}>Leave chat</Text>
+                    </Pressable>
+                    <Pressable
+                      accessibilityRole='button'
+                      onPress={() => setRoomActionTarget(null)}
+                      style={styles.actionSheetAction}
+                    >
+                      <Text style={[styles.actionSheetActionText, { color: colors.accent }]}>Cancel</Text>
+                    </Pressable>
+                  </>
+                  )}
+            </SafeAreaView>
+          )}
+        </View>
+      </Modal>
+    </>
+  )
+}
+
+function PeerChatAttachment ({
+  colors,
+  item,
+  onCallRpc,
+  onOpenUrl
+}: {
+  colors: typeof lightColors
+  item: PeerChatMessage
+  onCallRpc: (command: number, data?: object) => Promise<PeerChatResponse>
+  onOpenUrl: (url: string) => void
+}) {
+  const mediaKind = getPeerChatAttachmentMediaKind(item.fileName || '', item.message)
+  const canPreview = mediaKind !== null && Number.isFinite(item.fileSize) &&
+    Number(item.fileSize) > 0 && Number(item.fileSize) <= AUTO_INLINE_MEDIA_MAX_BYTES
+  const [mediaUrl, setMediaUrl] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!canPreview || !mediaKind) return
+    let cancelled = false
+    void onCallRpc(RPC_HYPER_FETCH, { url: item.message })
+      .then((response) => {
+        if (
+          !cancelled &&
+          response.ok &&
+          response.mediaType === mediaKind &&
+          typeof response.mediaUrl === 'string'
+        ) setMediaUrl(response.mediaUrl)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [canPreview, item.message, mediaKind, onCallRpc])
+
+  if (mediaUrl && mediaKind === 'image') {
+    return (
+      <Pressable
+        accessibilityHint='Opens this image in the browser'
+        accessibilityRole='imagebutton'
+        onPress={() => onOpenUrl(item.message)}
+        style={[styles.inlineMediaCard, { borderColor: colors.border }]}
+      >
+        <Image resizeMode='cover' source={{ uri: mediaUrl }} style={styles.inlineMediaImage} />
+        <AttachmentCaption colors={colors} inline item={item} />
+      </Pressable>
+    )
+  }
+
+  if (mediaUrl && mediaKind === 'video') {
+    return (
+      <View style={[styles.inlineMediaCard, { borderColor: colors.border }]}>
+        <PeerChatVideo mediaUrl={mediaUrl} />
+        <Pressable accessibilityRole='link' onPress={() => onOpenUrl(item.message)}>
+          <AttachmentCaption colors={colors} inline item={item} />
+        </Pressable>
+      </View>
+    )
+  }
+
+  return (
+    <Pressable
+      accessibilityHint='Opens this Hyperdrive attachment'
+      accessibilityRole='link'
+      onPress={() => onOpenUrl(item.message)}
+      style={[styles.attachmentCard, { backgroundColor: colors.input, borderColor: colors.border }]}
+    >
+      <Text style={[styles.attachmentIcon, { color: colors.accent }]}>+</Text>
+      <AttachmentCaption colors={colors} item={item} />
+    </Pressable>
+  )
+}
+
+function PeerChatVideo ({ mediaUrl }: { mediaUrl: string }) {
+  const player = useVideoPlayer(mediaUrl)
+  return (
+    <VideoView
+      contentFit='contain'
+      nativeControls
+      player={player}
+      style={styles.inlineMediaVideo}
+      surfaceType={Platform.OS === 'android' ? 'textureView' : undefined}
     />
   )
+}
+
+function AttachmentCaption ({
+  colors,
+  inline = false,
+  item
+}: {
+  colors: typeof lightColors
+  inline?: boolean
+  item: PeerChatMessage
+}) {
+  return (
+    <View style={inline ? styles.inlineMediaCaption : styles.attachmentCopy}>
+      <Text numberOfLines={1} style={[styles.attachmentName, { color: colors.text }]}>{item.fileName}</Text>
+      <Text style={[styles.attachmentMeta, { color: colors.muted }]}>{formatFileSize(item.fileSize)}</Text>
+    </View>
+  )
+}
+
+function getPeerChatAttachmentMediaKind (fileName: string, url: string): 'image' | 'video' | null {
+  const source = `${fileName} ${url.split(/[?#]/, 1)[0]}`.toLocaleLowerCase()
+  if (/\.(?:avif|gif|jpe?g|png|webp)(?:\s|$)/.test(source)) return 'image'
+  if (/\.(?:m4v|mov|mp4|webm)(?:\s|$)/.test(source)) return 'video'
+  return null
 }
 
 function getRoomInitials (name: string) {
   return name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || 'PC'
 }
 
-function renderMessageText (message: string, username: string, mentionColor: string) {
-  if (!username) return message
-  const mention = `@${username}`
-  const lowerMessage = message.toLocaleLowerCase()
-  const lowerMention = mention.toLocaleLowerCase()
-  const parts = []
-  let cursor = 0
-  let index = lowerMessage.indexOf(lowerMention)
-  while (index !== -1) {
-    if (index > cursor) parts.push(message.slice(cursor, index))
-    parts.push(
-      <Text key={`${index}-${parts.length}`} style={{ color: mentionColor, fontWeight: '800' }}>
-        {message.slice(index, index + mention.length)}
-      </Text>
-    )
-    cursor = index + mention.length
-    index = lowerMessage.indexOf(lowerMention, cursor)
-  }
-  if (cursor < message.length) parts.push(message.slice(cursor))
-  return parts.length > 0 ? parts : message
+function renderMessageText (message: string, usernames: string[], textColor: string, mentionColor: string) {
+  return splitPeerChatMentions(message, usernames).map((part, index) => (
+    <Text
+      key={`${index}-${part.text}`}
+      style={{ color: part.mention ? mentionColor : textColor, fontWeight: part.mention ? '800' : '400' }}
+    >
+      {part.text}
+    </Text>
+  ))
 }
 
 function getMentionCandidates (
@@ -2089,7 +2440,7 @@ function getMentionCandidates (
 function insertMention (composer: string, username: string) {
   const atIndex = composer.lastIndexOf('@')
   if (atIndex < 0) return composer
-  return `${composer.slice(0, atIndex)}@${username} `
+  return `${composer.slice(0, atIndex)}@${username}  `
 }
 
 function formatMessageTime (timestamp: number) {
@@ -2190,11 +2541,15 @@ const styles = StyleSheet.create({
   logo: { borderRadius: 10, height: 38, width: 38 },
   titleCopy: { flex: 1 },
   title: { fontSize: 21, fontWeight: '900' },
+  settingsButton: { alignItems: 'center', height: 40, justifyContent: 'center', width: 40 },
   helper: { fontSize: 13, lineHeight: 19 },
   profileRow: { alignItems: 'center', flexDirection: 'row', gap: 8 },
   profileAvatar: { borderRadius: 21, height: 42, width: 42 },
   profileAvatarFallback: { alignItems: 'center', justifyContent: 'center' },
+  profileSummary: { alignItems: 'center', alignSelf: 'flex-start', flexDirection: 'row', gap: 10, minHeight: 46 },
+  profileSummaryName: { fontSize: 15, fontWeight: '800', maxWidth: 240 },
   profileInput: { flex: 1 },
+  profileSettings: { gap: 10, padding: 16 },
   bioInput: { maxHeight: 92, minHeight: 52, textAlignVertical: 'top' },
   profileSaveButton: { alignItems: 'center', borderRadius: 10, justifyContent: 'center', minHeight: 42, paddingHorizontal: 14 },
   profileSaveText: { color: '#ffffff', fontSize: 13, fontWeight: '800' },
@@ -2227,7 +2582,6 @@ const styles = StyleSheet.create({
   roomCopy: { flex: 1, gap: 4 },
   roomTitleRow: { alignItems: 'center', flexDirection: 'row', gap: 6 },
   roomTitle: { flexShrink: 1, fontSize: 15, fontWeight: '800' },
-  pinnedLabel: { borderRadius: 5, fontSize: 8, fontWeight: '900', overflow: 'hidden', paddingHorizontal: 5, paddingVertical: 2 },
   roomPreview: { fontSize: 12 },
   roomMeta: { alignItems: 'flex-end', gap: 5 },
   roomTime: { fontSize: 10 },
@@ -2241,12 +2595,17 @@ const styles = StyleSheet.create({
   chatHeaderAvatar: { borderRadius: 17, height: 34, width: 34 },
   chatHeaderText: { alignItems: 'center', flex: 1 },
   chatHeaderActions: { flexDirection: 'row' },
-  roomInfoPanel: { borderBottomWidth: 1, maxHeight: '55%' },
-  roomInfo: { gap: 8, padding: 10 },
-  roomProvenance: { alignItems: 'center', flexDirection: 'row', gap: 8, justifyContent: 'space-between' },
+  roomInfoModalRoot: { flex: 1, justifyContent: 'center', paddingHorizontal: 18 },
+  roomInfoBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0, 0, 0, 0.56)' },
+  roomInfoPanel: { alignSelf: 'center', borderRadius: 16, elevation: 12, maxHeight: '82%', maxWidth: 440, overflow: 'hidden', width: '100%' },
+  roomInfoHeader: { alignItems: 'center', borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: 'row', minHeight: 50, paddingHorizontal: 16 },
+  roomInfoHeading: { flex: 1, fontSize: 17, fontWeight: '900' },
+  roomInfoClose: { alignItems: 'center', height: 36, justifyContent: 'center', width: 36 },
+  roomInfo: { gap: 10, padding: 16 },
+  roomProvenance: { alignItems: 'stretch', gap: 7 },
   roomInfoTitle: { fontSize: 15, fontWeight: '800' },
   roomInfoLink: { fontSize: 12, textDecorationLine: 'underline' },
-  roomInfoSave: { alignItems: 'center', alignSelf: 'flex-end', borderRadius: 9, minHeight: 38, justifyContent: 'center', paddingHorizontal: 14 },
+  roomInfoSave: { alignItems: 'center', alignSelf: 'center', borderRadius: 9, minHeight: 38, justifyContent: 'center', paddingHorizontal: 14 },
   avatarEditor: { alignItems: 'center', alignSelf: 'flex-start', flexDirection: 'row', gap: 8, minHeight: 38 },
   avatarEditorImage: { borderRadius: 18, height: 36, width: 36 },
   memberList: { gap: 6, marginTop: 2 },
@@ -2260,10 +2619,12 @@ const styles = StyleSheet.create({
   memberName: { fontSize: 13, fontWeight: '800' },
   memberMessage: { fontSize: 12, fontWeight: '800' },
   dmStatus: { fontSize: 12, paddingHorizontal: 12, paddingVertical: 8, textAlign: 'center' },
+  moderationWarning: { alignItems: 'center', borderBottomWidth: 1, flexDirection: 'row', gap: 8, paddingHorizontal: 12, paddingVertical: 8 },
+  moderationWarningText: { flex: 1, fontSize: 12, lineHeight: 17 },
+  moderationWarningClose: { alignItems: 'center', height: 28, justifyContent: 'center', width: 28 },
   chatTitle: { fontSize: 16, fontWeight: '800', maxWidth: '100%' },
   connectionText: { fontSize: 11, fontWeight: '600', marginTop: 2 },
-  headerAction: { alignItems: 'center', minWidth: 52, paddingHorizontal: 5, paddingVertical: 11 },
-  headerActionText: { fontSize: 13, fontWeight: '800' },
+  headerAction: { alignItems: 'center', justifyContent: 'center', minHeight: 44, minWidth: 44, paddingHorizontal: 5 },
   searchRow: { alignItems: 'center', borderBottomWidth: 1, flexDirection: 'row', gap: 8, paddingHorizontal: 10, paddingVertical: 7 },
   searchInput: { borderRadius: 16, flex: 1, fontSize: 14, minHeight: 36, paddingHorizontal: 12, paddingVertical: 7 },
   searchCount: { fontSize: 11, minWidth: 24, textAlign: 'center' },
@@ -2289,8 +2650,12 @@ const styles = StyleSheet.create({
   reactionBubble: { borderRadius: 12, borderWidth: 1, paddingHorizontal: 7, paddingVertical: 2 },
   reactionText: { fontSize: 12 },
   senderName: { fontSize: 11, fontWeight: '800', marginBottom: 3 },
-  messageText: { fontSize: 15, lineHeight: 20 },
+  messageText: { fontSize: 14, lineHeight: 19 },
   attachmentCard: { alignItems: 'center', borderRadius: 10, borderWidth: 1, flexDirection: 'row', gap: 9, minWidth: 190, padding: 9 },
+  inlineMediaCard: { borderRadius: 10, borderWidth: 1, maxWidth: 260, overflow: 'hidden', width: 240 },
+  inlineMediaImage: { height: 170, width: '100%' },
+  inlineMediaVideo: { height: 180, width: '100%' },
+  inlineMediaCaption: { paddingHorizontal: 9, paddingVertical: 8 },
   attachmentIcon: { fontSize: 24, fontWeight: '500' },
   attachmentCopy: { flex: 1 },
   attachmentName: { fontSize: 13, fontWeight: '800' },
@@ -2304,8 +2669,7 @@ const styles = StyleSheet.create({
   preferenceState: { fontSize: 12, fontWeight: '900' },
   actionSectionTitle: { fontSize: 13, fontWeight: '900', marginTop: 2 },
   messageTime: { alignSelf: 'flex-end', fontSize: 10, marginTop: 4 },
-  scrollToLatest: { alignItems: 'center', borderRadius: 18, bottom: 10, elevation: 3, justifyContent: 'center', minHeight: 36, paddingHorizontal: 14, position: 'absolute', right: 14 },
-  scrollToLatestText: { color: '#ffffff', fontSize: 12, fontWeight: '800' },
+  scrollToLatest: { alignItems: 'center', borderRadius: 18, bottom: 10, elevation: 3, height: 36, justifyContent: 'center', position: 'absolute', right: 14, width: 36 },
   inlineError: { fontSize: 12, paddingHorizontal: 14, paddingVertical: 5, textAlign: 'center' },
   reactionPicker: { alignItems: 'center', borderTopWidth: 1, flexDirection: 'row', justifyContent: 'space-around', paddingHorizontal: 8, paddingVertical: 6 },
   reactionPickerButton: { alignItems: 'center', borderRadius: 18, height: 36, justifyContent: 'center', width: 36 },
@@ -2324,10 +2688,7 @@ const styles = StyleSheet.create({
   emojiButton: { alignItems: 'center', borderRadius: 20, height: 42, justifyContent: 'center', width: 42 },
   emojiButtonText: { fontSize: 15, fontWeight: '800' },
   composerInput: { borderRadius: 18, borderWidth: 1, flex: 1, fontSize: 15, maxHeight: 112, minHeight: 42, paddingHorizontal: 13, paddingVertical: 9 },
-  sendButton: { alignItems: 'center', borderRadius: 20, height: 42, justifyContent: 'center', paddingHorizontal: 16 },
-  sendButtonText: { color: '#ffffff', fontSize: 13, fontWeight: '900' },
-  leaveAction: { alignItems: 'center', paddingBottom: 7, paddingTop: 2 },
-  leaveText: { fontSize: 11, fontWeight: '700' },
+  sendButton: { alignItems: 'center', borderRadius: 20, height: 42, justifyContent: 'center', width: 42 },
   actionSheetRoot: { flex: 1, justifyContent: 'flex-end' },
   actionSheetBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0, 0, 0, 0.45)' },
   actionSheet: { borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 18, paddingHorizontal: 18, paddingTop: 16 },

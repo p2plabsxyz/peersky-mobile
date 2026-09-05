@@ -37,6 +37,7 @@
         "backgroundColor": "#67fce7"
       },
       "package": "xyz.p2plabs.peersky",
+      "softwareKeyboardLayoutMode": "resize",
       "permissions": [
         "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.ACCESS_FINE_LOCATION",
@@ -85,10 +86,13 @@
         "expo-notifications",
         {
           "color": "#1f6fd1",
-          "defaultChannel": "peerchat-messages"
+          "defaultChannel": "peerchat-messages-v2",
+          "icon": "./assets/images/notification-icon.png"
         }
       ],
-      "expo-sharing"
+      "expo-audio",
+      "expo-sharing",
+      "expo-video"
     ]
   }
 }

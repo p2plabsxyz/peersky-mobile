@@ -9,6 +9,7 @@ const { addMulticastLock } = require('../../plugins/with-lan-discovery.js')
 const ANDROID_LOOPBACK_CLEARTEXT_PLUGIN = './plugins/with-android-loopback-cleartext'
 const LAN_DISCOVERY_PLUGIN = './plugins/with-lan-discovery'
 const EXPO_NOTIFICATIONS_PLUGIN = 'expo-notifications'
+const EXPO_AUDIO_PLUGIN = 'expo-audio'
 const REPO_ROOT = new URL('../../', import.meta.url)
 const ANDROID_LOOPBACK_CLEARTEXT_PLUGIN_FILE = repoFile('plugins/with-android-loopback-cleartext.js')
 const LAN_DISCOVERY_PLUGIN_FILE = repoFile('plugins/with-lan-discovery.js')
@@ -58,6 +59,10 @@ describe('mobile platform runtime configuration', () => {
       'android.permission.POST_NOTIFICATIONS',
       'android.permission.RECORD_AUDIO'
     ])
+    assert.equal(
+      android?.blockedPermissions?.includes('android.permission.POST_NOTIFICATIONS') || false,
+      false
+    )
     assert.equal(android?.intentFilters?.length, 1)
     assert.deepEqual(android.intentFilters[0]?.category, ['BROWSABLE', 'DEFAULT'])
     assert.deepEqual(
@@ -78,8 +83,14 @@ describe('mobile platform runtime configuration', () => {
 
     assert.deepEqual(notificationPlugin, [
       EXPO_NOTIFICATIONS_PLUGIN,
-      { color: '#1f6fd1', defaultChannel: 'peerchat-messages' }
+      {
+        color: '#1f6fd1',
+        defaultChannel: 'peerchat-messages-v2',
+        icon: './assets/images/notification-icon.png'
+      }
     ])
+    assert.equal(hasExpoPlugin(plugins, EXPO_AUDIO_PLUGIN), true)
+    assert.equal(appJson.expo?.android?.softwareKeyboardLayoutMode, 'resize')
   })
 
   it('configures local discovery on Android and iOS', async () => {
@@ -158,12 +169,16 @@ describe('mobile platform runtime configuration', () => {
     const imports = JSON.parse(await readFile(repoFile('backend/bare-imports.json'), 'utf8'))
 
     assert.deepEqual(imports, {
+      'bare-abort-controller': 'bare-abort-controller',
       buffer: 'bare-buffer',
       crypto: 'bare-crypto',
       dgram: 'bare-dgram',
       events: 'bare-events',
+      fs: 'bare-fs',
       net: 'bare-net',
       'node:crypto': 'bare-crypto',
+      'node:fs': 'bare-fs',
+      'node:stream/promises': 'bare-stream/promises',
       'node:zlib': 'bare-zlib',
       os: 'bare-os'
     })
@@ -172,10 +187,12 @@ describe('mobile platform runtime configuration', () => {
   it('includes the LAN discovery runtime dependency', async () => {
     const packageJson = JSON.parse(await readFile(repoFile('package.json'), 'utf8'))
 
-    assert.equal(packageJson.dependencies?.['@p2plabs/hyperdht-mdns'], '^1.0.0')
+    assert.equal(packageJson.dependencies?.['@p2plabs/hyperdht-mdns'], '^1.2.0')
+    assert.equal(typeof packageJson.dependencies?.['bare-abort-controller'], 'string')
     assert.equal(typeof packageJson.dependencies?.['bare-buffer'], 'string')
     assert.equal(typeof packageJson.dependencies?.['bare-dgram'], 'string')
     assert.equal(typeof packageJson.dependencies?.['bare-net'], 'string')
+    assert.equal(typeof packageJson.dependencies?.['expo-audio'], 'string')
     assert.equal(typeof packageJson.dependencies?.['bare-os'], 'string')
     assert.equal(typeof packageJson.dependencies?.['bare-process'], 'string')
   })

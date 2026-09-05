@@ -1,4 +1,6 @@
 import b4a from 'b4a'
+import { createReadStream, statSync } from 'node:fs'
+import { pipeline } from 'node:stream/promises'
 import {
   rememberPrivateHyperdrive,
   withHyperRuntimeForAddress,
@@ -11,6 +13,7 @@ import { resolveHyperdriveUploadTarget } from './storage-core.mjs'
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 const MAX_UPLOAD_BASE64_LENGTH = Math.ceil(MAX_UPLOAD_BYTES / 3) * 4
+const MAX_UPLOAD_FILE_URI_LENGTH = 8192
 const MAX_LIST_ITEMS = 100
 const MAX_SCANNED_ENTRIES = 500
 const MAX_LIST_TIME_MS = 5000
@@ -78,35 +81,31 @@ export async function listHyperdriveLocation ({ url } = {}, options = {}) {
   }
 }
 
-export async function uploadHyperdriveFile ({ name, contentBase64, visibility } = {}, options = {}) {
+export async function uploadHyperdriveFile ({
+  name,
+  contentBase64,
+  fileUri,
+  byteLength,
+  visibility
+} = {}, options = {}) {
   const filename = normalizeFilename(name)
   if (!filename) return { ok: false, error: 'Invalid file name.' }
   const uploadTarget = resolveHyperdriveUploadTarget(visibility)
   if (!uploadTarget) return { ok: false, error: 'Choose public or private upload visibility.' }
-  if (typeof contentBase64 !== 'string' || !contentBase64) {
+  const localFile = normalizeLocalUploadFile(fileUri, byteLength)
+  if (!localFile && (typeof contentBase64 !== 'string' || !contentBase64)) {
     return { ok: false, error: 'Missing file content.' }
   }
-  if (contentBase64.length > MAX_UPLOAD_BASE64_LENGTH) {
+  if (!localFile && contentBase64.length > MAX_UPLOAD_BASE64_LENGTH) {
     return { ok: false, error: 'File size must be between 1 byte and 10 MB.' }
   }
-  if (!isValidBase64(contentBase64)) {
+  if (!localFile && !isValidBase64(contentBase64)) {
     return { ok: false, error: 'Invalid file content encoding.' }
   }
 
-  let bytes
-  try {
-    bytes = b4a.from(contentBase64, 'base64')
-  } catch {
-    return { ok: false, error: 'Invalid file content encoding.' }
-  }
-
-  const paddingLength = contentBase64.endsWith('==') ? 2 : contentBase64.endsWith('=') ? 1 : 0
-  const expectedByteLength = (contentBase64.length / 4) * 3 - paddingLength
-  if (bytes.byteLength !== expectedByteLength) {
-    return { ok: false, error: 'Invalid file content encoding.' }
-  }
-
-  if (bytes.byteLength < 1 || bytes.byteLength > MAX_UPLOAD_BYTES) {
+  const bytes = localFile ? null : decodeInlineUpload(contentBase64)
+  if (!localFile && !bytes) return { ok: false, error: 'Invalid file content encoding.' }
+  if (!localFile && (bytes.byteLength < 1 || bytes.byteLength > MAX_UPLOAD_BYTES)) {
     return { ok: false, error: 'File size must be between 1 byte and 10 MB.' }
   }
 
@@ -116,10 +115,14 @@ export async function uploadHyperdriveFile ({ name, contentBase64, visibility } 
     })
     if (visibility === 'private') rememberPrivateHyperdrive(drive)
     const pathname = await uniquePath(drive, `/${filename}`)
-    await drive.put(pathname, bytes)
+    if (localFile) {
+      await writeLocalUpload(drive, pathname, localFile, options)
+    } else {
+      await drive.put(pathname, bytes)
+    }
 
     const item = createFileItem(`hyper://${drive.id}/`, pathname, {
-      blob: { byteLength: bytes.byteLength }
+      blob: { byteLength: localFile?.byteLength || bytes.byteLength }
     })
     await (options.recordArchive || recordHyperArchive)({
       url: item.url,
@@ -137,6 +140,60 @@ export async function uploadHyperdriveFile ({ name, contentBase64, visibility } 
       }
     }
   }, { privateRuntime: visibility === 'private' }))
+}
+
+function normalizeLocalUploadFile (fileUri, byteLength) {
+  if (
+    typeof fileUri !== 'string' ||
+    fileUri.length < 1 ||
+    fileUri.length > MAX_UPLOAD_FILE_URI_LENGTH ||
+    !Number.isSafeInteger(byteLength) ||
+    byteLength < 1
+  ) return null
+
+  try {
+    const parsed = new URL(fileUri)
+    if (parsed.protocol !== 'file:' || parsed.hostname || parsed.search || parsed.hash) return null
+    const filepath = decodeURIComponent(parsed.pathname)
+    const normalizedPath = filepath.replaceAll('\\', '/')
+    if (
+      normalizedPath.includes('\0') ||
+      normalizedPath.split('/').some((segment) => segment === '..') ||
+      !/\/(?:cache|caches)\/documentpicker\//i.test(normalizedPath)
+    ) return null
+
+    return { path: filepath, byteLength }
+  } catch {
+    return null
+  }
+}
+
+function decodeInlineUpload (contentBase64) {
+  try {
+    const bytes = b4a.from(contentBase64, 'base64')
+    const paddingLength = contentBase64.endsWith('==') ? 2 : contentBase64.endsWith('=') ? 1 : 0
+    const expectedByteLength = (contentBase64.length / 4) * 3 - paddingLength
+    return bytes.byteLength === expectedByteLength ? bytes : null
+  } catch {
+    return null
+  }
+}
+
+async function writeLocalUpload (drive, pathname, localFile, options) {
+  if (options.uploadLocalFile) {
+    await options.uploadLocalFile({ drive, pathname, ...localFile })
+    return
+  }
+
+  const stat = statSync(localFile.path)
+  if (!stat.isFile() || stat.size !== localFile.byteLength) {
+    throw new Error('The selected file changed before it could be uploaded.')
+  }
+
+  await pipeline(
+    createReadStream(localFile.path),
+    drive.createWriteStream(pathname)
+  )
 }
 
 async function listDirectory (drive, driveAddress, directory, maxListTimeMs) {

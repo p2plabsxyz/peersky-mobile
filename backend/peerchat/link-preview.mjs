@@ -1,5 +1,7 @@
 // Adapted from PeerSky Desktop's MIT-licensed PeerChat link-preview module.
 // Keep the encrypted payload format compatible so recipients never fetch the link.
+import b4a from 'b4a'
+
 export const MAX_PREVIEW_BYTES = 256 * 1024
 export const PREVIEW_TIMEOUT_MS = 3000
 
@@ -187,8 +189,7 @@ async function readBodyCapped (res, maxBytes) {
   if (!res.body || typeof res.body.getReader !== 'function') return ''
   try {
     const reader = res.body.getReader()
-    const decoder = new TextDecoder()
-    let out = ''
+    const chunks = []
     let totalBytes = 0
     try {
       while (totalBytes < maxBytes) {
@@ -198,21 +199,20 @@ async function readBodyCapped (res, maxBytes) {
         const remaining = maxBytes - totalBytes
         const chunk = value.byteLength > remaining ? value.subarray(0, remaining) : value
         totalBytes += chunk.byteLength
-        out += decoder.decode(chunk, { stream: totalBytes < maxBytes })
+        chunks.push(chunk)
       }
-      if (totalBytes < maxBytes) out += decoder.decode()
     } finally {
       try { await reader.cancel() } catch {}
     }
-    return out
+    return b4a.toString(b4a.concat(chunks, totalBytes), 'utf8')
   } catch {
     return ''
   }
 }
 
-async function fetchHtmlWithFetch (fetchFn, href, timeoutMs, maxBytes, lookupFn) {
+async function fetchHtmlWithFetch (fetchFn, href, timeoutMs, maxBytes, lookupFn, AbortControllerImpl) {
   const deadline = Date.now() + timeoutMs
-  const controller = new AbortController()
+  const controller = new AbortControllerImpl()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
     let current = href
@@ -315,13 +315,19 @@ export async function resolveLinkPreview (url, options = {}) {
   const canonical = typeof url === 'string' ? validateHttpUrl(url) : ''
   if (!canonical) return null
 
-  const fetchFn = typeof options.fetchFn === 'function' ? options.fetchFn : globalThis.fetch
+  const fetchFn = typeof options.fetchFn === 'function'
+    ? options.fetchFn
+    : typeof globalThis.fetch === 'function'
+      ? globalThis.fetch
+      : (await import('bare-fetch')).default
+  const AbortControllerImpl = options.AbortController || globalThis.AbortController ||
+    (await import('bare-abort-controller')).default
   const timeoutMs = options.timeoutMs || PREVIEW_TIMEOUT_MS
   const maxBytes = options.maxBytes || MAX_PREVIEW_BYTES
   const lookupFn = makeLookup(options)
 
   const htmlResult = typeof fetchFn === 'function'
-    ? await fetchHtmlWithFetch(fetchFn, canonical, timeoutMs, maxBytes, lookupFn)
+    ? await fetchHtmlWithFetch(fetchFn, canonical, timeoutMs, maxBytes, lookupFn, AbortControllerImpl)
     : await fetchHtmlWithNode(canonical, timeoutMs, maxBytes, lookupFn)
   if (!htmlResult?.body) return null
   const finalUrl = htmlResult.url || canonical

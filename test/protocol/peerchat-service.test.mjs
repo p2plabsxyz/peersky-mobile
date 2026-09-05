@@ -686,6 +686,88 @@ test('PeerChat synchronizes history only once for repeated join frames', async (
   await service.close()
 })
 
+test('PeerChat exchanges derived topics and opens every mutually held room', async (t) => {
+  const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-topics-'))
+  t.after(() => rm(storagePath, { recursive: true, force: true }))
+  const service = await new PeerChatService({ sdk: createFakeSdk(), storagePath }).start()
+  const otherRoomKey = 'cd'.repeat(32)
+  await service.joinRoom({ roomKey: ROOM_KEY, username: 'Alice' })
+  await service.joinRoom({ roomKey: otherRoomKey, username: 'Alice' })
+
+  const frames = []
+  const peer = createFakePeer('de'.repeat(4), 'Desktop', frames)
+  peer.rooms = [ROOM_KEY]
+  service.peers.set(peer.connection, peer)
+  service.shareTopics(peer)
+
+  const topicsFrame = frames.shift()
+  assert.equal(topicsFrame.type, 'topics')
+  assert.deepEqual(new Set(topicsFrame.topics), new Set([
+    derivePeerChatTopic(ROOM_KEY).toString('hex'),
+    derivePeerChatTopic(otherRoomKey).toString('hex')
+  ]))
+  assert.equal(topicsFrame.topics.includes(ROOM_KEY), false)
+
+  const sharedRooms = []
+  service.shareRoom = (_peer, roomKey) => sharedRooms.push(roomKey)
+  await service.handlePeerMessage(peer, {
+    type: 'topics',
+    topics: [
+      derivePeerChatTopic(ROOM_KEY).toString('hex'),
+      derivePeerChatTopic(otherRoomKey).toString('hex'),
+      'ef'.repeat(32)
+    ]
+  })
+
+  assert.equal(peer.handshake, true)
+  assert.deepEqual(peer.rooms, [ROOM_KEY, otherRoomKey])
+  assert.deepEqual(sharedRooms, [otherRoomKey])
+  await service.close()
+})
+
+test('PeerChat evicts stale sockets so the swarm can reconnect after a network change', async (t) => {
+  const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-liveness-'))
+  t.after(() => rm(storagePath, { recursive: true, force: true }))
+  const service = await new PeerChatService({ sdk: createFakeSdk(), storagePath }).start()
+  const peer = createFakePeer('de'.repeat(4), 'Desktop')
+  let transportClosed = false
+  let connectionDestroyed = false
+  peer.lastReceivedAt = 1_000
+  peer.transport.close = () => { transportClosed = true }
+  peer.connection.destroy = () => {
+    connectionDestroyed = true
+    peer.connection.destroyed = true
+  }
+  service.peers.set(peer.connection, peer)
+
+  assert.equal(service.checkPeerLiveness(peer, 61_000), false)
+  assert.equal(service.peers.has(peer.connection), false)
+  assert.equal(transportClosed, true)
+  assert.equal(connectionDestroyed, true)
+  await service.close()
+})
+
+test('PeerChat does not mark an interrupted history replay as synchronized', async (t) => {
+  const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-interrupted-sync-'))
+  t.after(() => rm(storagePath, { recursive: true, force: true }))
+  const service = await new PeerChatService({ sdk: createFakeSdk(), storagePath }).start()
+  const room = await service.createRoom({ name: 'Replay Room', username: 'Alice' })
+  await service.sendMessage({ roomKey: room.roomKey, message: 'Saved while offline' })
+  const peer = createFakePeer('de'.repeat(4), 'Desktop')
+  peer.rooms = [room.roomKey]
+  peer.syncedRooms = new Set()
+  peer.syncingRooms = new Map()
+  peer.transport.send = (frame) => {
+    if (JSON.parse(frame).type !== 'sync-done') return true
+    peer.connection.destroyed = true
+    return false
+  }
+
+  assert.equal(await service.syncHistoryToPeerOnce(peer, room.roomKey), false)
+  assert.equal(peer.syncedRooms.has(room.roomKey), false)
+  await service.close()
+})
+
 test('PeerChat retries an incomplete history sync and reports room connection state', async (t) => {
   const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-retry-'))
   t.after(() => rm(storagePath, { recursive: true, force: true }))

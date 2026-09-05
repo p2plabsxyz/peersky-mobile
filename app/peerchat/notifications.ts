@@ -1,8 +1,8 @@
 import * as Notifications from 'expo-notifications'
-import { Platform } from 'react-native'
+import { Linking, Platform } from 'react-native'
 
-const PEERCHAT_SOUND_CHANNEL = 'peerchat-messages'
-const PEERCHAT_SILENT_CHANNEL = 'peerchat-messages-silent'
+const PEERCHAT_SOUND_CHANNEL = 'peerchat-messages-v2'
+const PEERCHAT_SILENT_CHANNEL = 'peerchat-messages-silent-v2'
 
 let channelsOpening: Promise<void> | null = null
 
@@ -66,7 +66,7 @@ export async function requestPeerChatNotificationPermission () {
       allowSound: true
     }
   })
-  return permission.granted || (
+  const granted = permission.granted || (
     Platform.OS === 'ios' &&
     permission.ios != null &&
     [
@@ -75,6 +75,8 @@ export async function requestPeerChatNotificationPermission () {
       Notifications.IosAuthorizationStatus.EPHEMERAL
     ].includes(permission.ios.status)
   )
+  if (!granted && permission.canAskAgain === false) await Linking.openSettings()
+  return granted
 }
 
 export async function presentPeerChatNotification ({

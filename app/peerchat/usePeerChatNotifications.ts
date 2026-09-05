@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useAudioPlayer } from 'expo-audio'
 import { File, Paths } from 'expo-file-system'
 import { AppState } from 'react-native'
 
@@ -63,10 +64,12 @@ export function usePeerChatNotifications ({
   const previousRoomsRef = useRef<NotificationRoom[] | null>(null)
   const pollInFlightRef = useRef(false)
   const warnedRef = useRef(false)
+  const receiveSoundPlayer = useAudioPlayer(require('../../assets/sounds/peerchat/receive.mp3'))
 
   callRpcRef.current = onCallRpc
   isPeerChatVisibleRef.current = isPeerChatVisible
   preferencesRef.current = preferences
+  const shouldPoll = preferences.notifications || (isPeerChatVisible && preferences.sounds)
 
   useEffect(() => {
     try {
@@ -111,7 +114,7 @@ export function usePeerChatNotifications ({
   }, [persistPreferences])
 
   useEffect(() => {
-    if (!isReady || !isRuntimeReady || !preferences.notifications) {
+    if (!isReady || !isRuntimeReady || !shouldPoll) {
       previousRoomsRef.current = null
       return
     }
@@ -131,10 +134,18 @@ export function usePeerChatNotifications ({
         const previousRooms = previousRoomsRef.current
         previousRoomsRef.current = nextRooms
         warnedRef.current = false
-        if (!previousRooms || isPeerChatVisibleRef.current || !preferencesRef.current.notifications) return
-        if (!await hasPeerChatNotificationPermission()) return
-
+        if (!previousRooms) return
         const candidates = collectPeerChatNotificationCandidates(previousRooms, nextRooms)
+        if (candidates.length === 0) return
+        if (isPeerChatVisibleRef.current) {
+          if (preferencesRef.current.sounds) {
+            await receiveSoundPlayer.seekTo(0)
+            receiveSoundPlayer.play()
+          }
+          return
+        }
+        if (!preferencesRef.current.notifications || !await hasPeerChatNotificationPermission()) return
+
         for (const candidate of candidates) {
           if (cancelled) return
           await presentPeerChatNotification({
@@ -172,7 +183,7 @@ export function usePeerChatNotifications ({
       if (timer) clearTimeout(timer)
       subscription.remove()
     }
-  }, [isReady, isRuntimeReady, preferences.notifications])
+  }, [isReady, isRuntimeReady, receiveSoundPlayer, shouldPoll])
 
   return {
     isReady,

@@ -2550,7 +2550,10 @@ export default function App () {
         />
         <KeyboardAvoidingView
           behavior='padding'
-          enabled={browserPreferences.addressBarPosition === 'bottom'}
+          enabled={
+            browserPreferences.addressBarPosition === 'bottom' ||
+            (browserSource.kind === 'app' && activeTab === 'peerchat')
+          }
           style={styles.browserShellContent}
         >
         {browserPreferences.addressBarPosition === 'top' && browserToolbar}
@@ -2573,7 +2576,7 @@ export default function App () {
 
         <View
           style={[styles.browserContent, { backgroundColor: browserChrome.shell }]}
-          onTouchStart={Keyboard.dismiss}
+          onTouchStart={browserSource.kind === 'app' && activeTab === 'peerchat' ? undefined : Keyboard.dismiss}
         >
         {browserSource.kind === 'home'
           ? (

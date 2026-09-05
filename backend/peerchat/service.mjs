@@ -66,6 +66,8 @@ const MAX_RETURNED_ROOM_MEMBERS = 100
 const MAX_PENDING_DIRECT_MESSAGES = 50
 const PERSIST_DELAY_MS = 500
 const PING_INTERVAL_MS = 25_000
+const PEER_LIVENESS_TIMEOUT_MS = 60_000
+const MAX_ANNOUNCED_TOPICS = 512
 
 export class PeerChatService {
   constructor ({ sdk, storagePath }) {
@@ -87,6 +89,7 @@ export class PeerChatService {
     this.joinedRooms = new Set()
     this.discoveryKeys = new Map()
     this.peers = new Map()
+    this.pendingPeers = new Map()
     this.seenIds = new Set()
     this.activeRoomKey = null
     this.version = 0
@@ -450,7 +453,7 @@ export class PeerChatService {
     if (!normalizedPreview && this.profile.linkPreview !== false) {
       const previewUrl = extractFirstHttpUrl(normalizedMessage)
       if (previewUrl && !checkPeerChatContent(previewUrl, room.moderation).flagged) {
-        const resolved = await resolveLinkPreview(previewUrl, { timeoutMs: 1500 })
+        const resolved = await resolveLinkPreview(previewUrl)
         normalizedPreview = this.sanitizeModeratedPreview(resolved, room.moderation)
       }
     }
@@ -544,11 +547,13 @@ export class PeerChatService {
 
     this.sdk.swarm.off?.('connection', this.onConnection)
     this.sdk.localSwarm?.off?.('topics-change', this.onTopicsChange)
-    for (const peer of this.peers.values()) {
+    const peers = new Set([...this.peers.values(), ...this.pendingPeers.values()])
+    for (const peer of peers) {
       if (peer.pingTimer) clearInterval(peer.pingTimer)
       peer.transport?.close?.()
     }
     this.peers.clear()
+    this.pendingPeers.clear()
 
     const pendingJoins = [...this.pendingJoins.values()]
     if (pendingJoins.length > 0) await Promise.allSettled(pendingJoins)
@@ -592,6 +597,7 @@ export class PeerChatService {
       try {
         this.sdk.join(topic, { client: true, server: true })
         this.joinedRooms.add(roomKey)
+        for (const peer of this.peers.values()) this.shareTopics(peer)
         await this.sdk.swarm.flush()
       } catch (error) {
         this.discoveryKeys.delete(discoveryKey)
@@ -633,7 +639,12 @@ export class PeerChatService {
 
   handleConnection (connection, info = {}) {
     const sharedRooms = getSharedPeerChatRooms(info.topics, this.discoveryKeys)
-    if (sharedRooms.length === 0 || this.closed) return
+    const hasTopics = Array.isArray(info.topics)
+      ? info.topics.length > 0
+      : !!info.topics?.length
+    // Inbound/server connections can omit info.topics. The Protomux protocol
+    // and the derived-topic handshake identify mutual PeerChat rooms safely.
+    if (this.closed || (sharedRooms.length === 0 && (hasTopics || this.discoveryKeys.size === 0))) return
 
     const peer = {
       connection,
@@ -641,6 +652,7 @@ export class PeerChatService {
         ? b4a.toString(connection.remotePublicKey, 'hex').slice(0, 8).toLowerCase()
         : 'peer',
       rooms: sharedRooms,
+      handshake: false,
       buffer: '',
       active: false,
       initialSyncCount: 0,
@@ -649,20 +661,32 @@ export class PeerChatService {
       pendingMessages: 0,
       processing: Promise.resolve(),
       pingTimer: null,
+      lastReceivedAt: Date.now(),
       syncedRooms: new Set(),
       syncingRooms: new Map(),
       transport: null
     }
+    this.pendingPeers.set(connection, peer)
 
     const transport = attachPeerChatTransport(
       connection,
       (payload) => this.handlePeerPayload(peer, payload),
       {
-        onOpen: () => this.activatePeer(peer),
+        onOpen: () => setImmediate(() => {
+          if (peer.transport !== transport) return
+          transport.ready()
+            .then((opened) => {
+              if (opened) this.activatePeer(peer)
+            })
+            .catch(() => {})
+        }),
         onClose: () => this.deactivatePeer(peer)
       }
     )
-    if (!transport) return
+    if (!transport) {
+      this.pendingPeers.delete(connection)
+      return
+    }
     peer.transport = transport
 
     connection.on('error', () => {})
@@ -670,11 +694,12 @@ export class PeerChatService {
   }
 
   handleTopicsChange (connection, info = {}) {
-    const peer = this.peers.get(connection)
+    const peer = this.peers.get(connection) || this.pendingPeers.get(connection)
     if (!peer) return
 
     const previousRooms = new Set(peer.rooms)
     peer.rooms = getSharedPeerChatRooms(info.topics, this.discoveryKeys)
+    if (this.pendingPeers.has(connection)) return
     for (const roomKey of peer.rooms) {
       if (!previousRooms.has(roomKey)) this.shareRoom(peer, roomKey)
     }
@@ -684,9 +709,11 @@ export class PeerChatService {
   activatePeer (peer) {
     if (peer.active || peer.connection.destroyed || this.closed) return
     peer.active = true
+    this.pendingPeers.delete(peer.connection)
     this.peers.set(peer.connection, peer)
     this.bumpVersion()
 
+    this.shareTopics(peer)
     this.sendProfile(peer)
     for (const roomKey of peer.rooms) this.shareRoom(peer, roomKey)
     for (const room of this.rooms.values()) {
@@ -696,11 +723,35 @@ export class PeerChatService {
     }
 
     peer.pingTimer = setInterval(() => {
-      this.sendToPeer(peer, { type: 'ping' })
+      if (!this.checkPeerLiveness(peer)) return
+      this.shareTopics(peer)
     }, PING_INTERVAL_MS)
   }
 
+  checkPeerLiveness (peer, now = Date.now()) {
+    if (
+      peer.connection.destroyed ||
+      now - peer.lastReceivedAt >= PEER_LIVENESS_TIMEOUT_MS ||
+      !this.sendToPeer(peer, { type: 'ping' })
+    ) {
+      this.disconnectPeer(peer)
+      return false
+    }
+    return true
+  }
+
+  disconnectPeer (peer) {
+    this.deactivatePeer(peer)
+    try {
+      peer.transport?.close?.()
+    } catch {}
+    try {
+      peer.connection.destroy?.()
+    } catch {}
+  }
+
   deactivatePeer (peer) {
+    this.pendingPeers.delete(peer.connection)
     if (!peer.active) return
     peer.active = false
     if (peer.pingTimer) clearInterval(peer.pingTimer)
@@ -710,6 +761,7 @@ export class PeerChatService {
   }
 
   handlePeerPayload (peer, payload) {
+    peer.lastReceivedAt = Date.now()
     const chunk = String(payload)
     if (peer.buffer.length + chunk.length > MAX_FRAME_LENGTH) {
       peer.buffer = ''
@@ -744,6 +796,23 @@ export class PeerChatService {
       return
     }
     if (message.type === 'pong' || message.type === 'sync-done') return
+
+    if (message.type === 'topics') {
+      if (!this.consumeControlRate(peer) || !Array.isArray(message.topics)) return
+      peer.handshake = true
+      const sharedRooms = getSharedPeerChatRooms(
+        message.topics.slice(0, MAX_ANNOUNCED_TOPICS),
+        this.discoveryKeys
+      )
+      const previousRooms = new Set(peer.rooms)
+      for (const roomKey of sharedRooms) {
+        if (previousRooms.has(roomKey)) continue
+        peer.rooms.push(roomKey)
+        this.shareRoom(peer, roomKey)
+      }
+      if (peer.rooms.length !== previousRooms.size) this.bumpVersion()
+      return
+    }
 
     if (message.type === 'profile') {
       if (!this.consumeControlRate(peer)) return
@@ -1008,8 +1077,16 @@ export class PeerChatService {
 
   announceRoom (roomKey) {
     for (const peer of this.peers.values()) {
+      this.shareTopics(peer)
       if (peer.rooms.includes(roomKey)) this.shareRoom(peer, roomKey)
     }
+  }
+
+  shareTopics (peer) {
+    this.sendToPeer(peer, {
+      type: 'topics',
+      topics: [...this.discoveryKeys.keys()].slice(0, MAX_ANNOUNCED_TOPICS)
+    })
   }
 
   sendProfile (peer) {
@@ -1142,9 +1219,12 @@ export class PeerChatService {
         const type = entry.type === 'reaction' ? 'sync-reaction' : 'sync'
         const sent = this.sendToPeer(peer, { ...entry, type, roomKey })
         if (!sent && !await waitForConnectionDrain(peer.connection)) return false
-      } catch {}
+      } catch {
+        return false
+      }
     }
-    this.sendToPeer(peer, { type: 'sync-done' })
+    const sent = this.sendToPeer(peer, { type: 'sync-done' })
+    if (!sent && !await waitForConnectionDrain(peer.connection)) return false
     return !peer.connection.destroyed
   }
 
@@ -1170,7 +1250,9 @@ export class PeerChatService {
 
   relayToRoom (roomKey, message) {
     for (const peer of this.peers.values()) {
-      if (peer.rooms.includes(roomKey)) this.sendToPeer(peer, { ...message, roomKey })
+      if (peer.rooms.includes(roomKey) && !this.sendToPeer(peer, { ...message, roomKey })) {
+        this.disconnectPeer(peer)
+      }
     }
   }
 
@@ -1240,6 +1322,19 @@ export class PeerChatService {
 
     try {
       const entry = suppliedEntry || await feed.get(feed.length - 1)
+      if (entry?.type === 'reaction' && entry.emoji) {
+        const sender = String(entry.sender || '').slice(0, 200)
+        room.lastMessage = {
+          sender,
+          senderName: sender.toLowerCase() === this.localId
+            ? 'You'
+            : normalizePeerChatProfileName(entry.sn) || normalizePeerChatRoomName(sender, 'Peer'),
+          message: `reacted ${entry.emoji}`,
+          timestamp: normalizePeerChatTimestamp(entry.ts)
+        }
+        this.schedulePersist()
+        return
+      }
       if (!entry?.ct) return
       const message = this.entryToMessage(entry, roomKey)
       room.lastMessage = {
