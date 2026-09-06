@@ -60,6 +60,17 @@ The RN UI and worklet speak over `bare-rpc`. The primary commands are:
 
 Responses may be returned as stringified JSON or as binary; the RN client converts binary to string using `b4a` and then parses JSON.
 
+## Private drives
+
+Hyperdrive uploads support three visibility modes:
+
+- **Public** — written to the announced `hyperdrive-public` drive. Anyone with the URL can read it and browse the rest of that drive.
+- **Private** — written to the `hyperdrive-private` drive, encrypted at the block level using a per-device 32-byte `encryptionKey` (`hyperdrive@13.3.3` passes it to `hypercore@11.35.2`, which does block encryption). The drive is announced and replicates like any other drive, so it can sync across your own devices, but every block on the wire is ciphertext. Only a peer holding the same key can decrypt it. The key is generated on first use and persisted in `private-drive-key.json` beside the synced private storage (`hyper-sdk-synced-private`).
+- **This device only** — written to the isolated `hyperdrive-device` drive with discovery and replication disabled (`autoJoin: false`, `doReplicate: false`). It never leaves the phone, so it is the right choice when nothing should leave the device at all.
+
+> [!NOTE]
+> An encrypted private drive is still visible on the network: other peers can see that it exists, roughly how big it is, and when it changed. They cannot read its contents. Because the block encryption key is per-device, the same key must be available on each of your devices for them to decrypt the drive. That distribution currently relies on the device-linking channel described in `link-device.md`; until a drive's key is present on a device, that device cannot open it.
+
 ## Developer notes
 
 - The bundle (`app/app.bundle.mjs`) is generated from the `backend/` sources. Regenerate it after backend changes with `npm run bundle:bare`.

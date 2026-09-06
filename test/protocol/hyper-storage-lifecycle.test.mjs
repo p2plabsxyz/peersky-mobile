@@ -8,19 +8,34 @@ import {
   runP2pDataClear
 } from '../../backend/hyper/storage-lifecycle.mjs'
 
-test('full P2P storage removal deletes public and private runtime paths', () => {
+test('full P2P storage removal deletes public, device-only, and encrypted private runtime paths', () => {
   const removed = []
 
   removeHyperStoragePaths({
     storagePath: '/test/hyper-sdk',
     privateStoragePath: '/test/hyper-sdk-private',
+    syncedPrivateStoragePath: '/test/hyper-sdk-synced-private',
     removeStorage: (path) => { removed.push(path) }
   })
 
   assert.deepEqual(removed, [
     '/test/hyper-sdk',
-    '/test/hyper-sdk-private'
+    '/test/hyper-sdk-private',
+    '/test/hyper-sdk-synced-private'
   ])
+})
+
+test('full P2P storage removal skips paths that overlap the main runtime', () => {
+  const removed = []
+
+  removeHyperStoragePaths({
+    storagePath: '/test/hyper-sdk',
+    privateStoragePath: '/test/hyper-sdk',
+    syncedPrivateStoragePath: '/test/hyper-sdk',
+    removeStorage: (path) => { removed.push(path) }
+  })
+
+  assert.deepEqual(removed, ['/test/hyper-sdk'])
 })
 
 test('warns that clearing all P2P data permanently loses signing keys', () => {

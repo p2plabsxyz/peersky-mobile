@@ -94,11 +94,15 @@ export function runP2pAppDataDelete ({
 export function removeHyperStoragePaths ({
   storagePath,
   privateStoragePath,
+  syncedPrivateStoragePath,
   removeStorage
 }) {
   removeStorage(storagePath)
   if (privateStoragePath && privateStoragePath !== storagePath) {
     removeStorage(privateStoragePath)
+  }
+  if (syncedPrivateStoragePath && syncedPrivateStoragePath !== storagePath) {
+    removeStorage(syncedPrivateStoragePath)
   }
 }
 

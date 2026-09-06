@@ -6,6 +6,14 @@ export function createPrivateHyperRuntimeOptions (storage) {
   }
 }
 
+export function createSyncedPrivateHyperRuntimeOptions (storage) {
+  return {
+    storage,
+    autoJoin: false,
+    doReplicate: true
+  }
+}
+
 export function matchesHyperdriveAddress (address, driveId) {
   if (!driveId) return false
 

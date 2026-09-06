@@ -31,6 +31,7 @@ import {
   getEncryptionPublicKeyHex
 } from '../backup/device-keys.mjs'
 import { decryptIdentityTransfer } from '../backup/identity-transfer.mjs'
+import { adoptTransferredPrivateDrive } from '../backup/private-drive-import.mjs'
 import { randomBytes } from 'node:crypto'
 import b4a from 'b4a'
 import { rmSync, renameSync } from 'bare-fs'
@@ -45,9 +46,11 @@ import {
   getHyperRuntime,
   getHyperStoragePath,
   getLANDiscoveryStatus,
+  getSyncedPrivateHyperStoragePath,
   withHyperRuntimeMaintenance,
   withHyperRuntimeOperation
 } from '../hyper/runtime.mjs'
+import { resetPrivateDriveKeyCache } from '../hyper/private-keys.mjs'
 import { clearAllP2pData, clearP2pCache, deleteP2pAppData, listP2pAppData } from '../hyper/storage.mjs'
 
 import {
@@ -217,8 +220,19 @@ export async function routeRpcRequest (req) {
           return { ok: false, error: `Atomic swap failed: ${err.message}` }
         }
 
+        const privateDriveAdoption = adoptTransferredPrivateDrive(
+          storagePath,
+          getSyncedPrivateHyperStoragePath()
+        )
+        resetPrivateDriveKeyCache()
+
         await getHyperRuntime()
-        return { ok: true, requiresRestart: true }
+        return {
+          ok: true,
+          requiresRestart: true,
+          privateDriveRestored: privateDriveAdoption.adopted,
+          privateDriveId: privateDriveAdoption.driveId || undefined
+        }
       })
       replyJson(req, result)
       return
