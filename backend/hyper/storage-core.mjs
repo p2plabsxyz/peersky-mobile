@@ -45,11 +45,13 @@ export function resolveHyperdriveUploadTarget (visibility) {
 export function createRoutedP2pStorageRuntime (
   networkedRuntime,
   getDeviceOnlyRuntime,
-  getSyncedPrivateDrive
+  getSyncedPrivateDrive,
+  { hasPrivateDrive = async () => true } = {}
 ) {
   return {
     async getExistingDrive (driveName) {
       if (driveName === HYPERDRIVE_PRIVATE_DRIVE_NAME) {
+        if (!(await hasPrivateDrive())) return null
         return getSyncedPrivateDrive()
       }
       const runtime = driveName === HYPERDRIVE_DEVICE_DRIVE_NAME

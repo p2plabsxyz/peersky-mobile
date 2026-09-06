@@ -1,5 +1,7 @@
 /* global Bare */
 
+import { readFileSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import Hyperdrive from 'hyperdrive'
 import { create as createSDK } from 'hyper-sdk'
 import {
@@ -9,6 +11,8 @@ import {
 } from './lan-discovery.mjs'
 import {
   getPrivateDriveKey,
+  getPrivateDriveId,
+  rememberPrivateDriveId,
   resetPrivateDriveKeyCache
 } from './private-keys.mjs'
 import {
@@ -38,6 +42,8 @@ let syncedPrivateSdk = null
 let syncedPrivateSdkOpening = null
 let syncedPrivateStoragePath = null
 let syncedPrivateDriveId = null
+let syncedPrivateDrive = null
+let syncedPrivateDriveOpening = null
 const runtimeCoordinator = createRuntimeCoordinator()
 
 export function withHyperRuntimeOperation (task) {
@@ -54,10 +60,8 @@ export function withSyncedPrivateHyperRuntimeOperation (task) {
 
 export function withHyperRuntimeForAddress (address, task) {
   return runtimeCoordinator.runOperation(async () => {
-    const deviceOnlyRuntime = await getPrivateHyperRuntime()
-    const syncedRuntime = await getSyncedPrivateHyperRuntime()
-    if (isDeviceOnlyHyperdriveAddress(address)) return task(deviceOnlyRuntime)
-    if (isSyncedPrivateHyperdriveAddress(address)) return task(syncedRuntime)
+    if (isDeviceOnlyHyperdriveAddress(address)) return task(await getPrivateHyperRuntime())
+    if (isSyncedPrivateHyperdriveAddress(address)) return task(await getSyncedPrivateHyperRuntime())
     return task(await getHyperRuntime())
   })
 }
@@ -134,27 +138,54 @@ export async function getSyncedPrivateHyperRuntime () {
 }
 
 export async function getSyncedPrivateHyperdrive (runtime = null) {
-  const target = runtime || await getSyncedPrivateHyperRuntime()
-  const encryptionKey = getPrivateDriveKey(syncedPrivateStoragePath || getSyncedPrivateHyperSdkStoragePath())
-  if (!encryptionKey) throw new Error('Private drive encryption key is unavailable.')
+  if (runtime && syncedPrivateDrive) return syncedPrivateDrive
 
-  const corestore = target.namespace(HYPERDRIVE_PRIVATE_DRIVE_NAME)
-  const drive = new Hyperdrive(corestore, undefined, { encryptionKey })
-  await drive.ready()
+  if (syncedPrivateDriveOpening) return syncedPrivateDriveOpening
+  if (syncedPrivateDrive) return syncedPrivateDrive
 
-  if (!drive.core.discovery) {
-    await target.joinCore(drive.core)
-  }
+  const open = (async () => {
+    const target = runtime || await getSyncedPrivateHyperRuntime()
+    const encryptionKey = getPrivateDriveKey(syncedPrivateStoragePath || getSyncedPrivateHyperSdkStoragePath())
+    if (!encryptionKey) throw new Error('Private drive encryption key is unavailable.')
 
-  return drive
+    const corestore = target.namespace(HYPERDRIVE_PRIVATE_DRIVE_NAME)
+    const drive = new Hyperdrive(corestore, undefined, { encryptionKey })
+    await drive.ready()
+
+    if (drive.core.discovery === null) {
+      await target.joinCore(drive.core)
+    }
+
+    syncedPrivateDrive = drive
+    return drive
+  })().finally(() => {
+    syncedPrivateDriveOpening = null
+  })
+
+  syncedPrivateDriveOpening = open
+  return open
 }
 
 export function rememberDeviceOnlyHyperdrive (drive) {
-  if (drive?.id) deviceOnlyDriveId = String(drive.id).toLowerCase()
+  if (!drive?.id) return
+  deviceOnlyDriveId = String(drive.id).toLowerCase()
+
+  const path = deviceOnlyStoragePath || (typeof Bare !== 'undefined' ? getPrivateHyperSdkStoragePath() : null)
+  if (!path) return
+
+  try {
+    writeFileSync(join(path, 'device-drive-id.json'), JSON.stringify({ version: 1, driveId: deviceOnlyDriveId }, null, 2))
+  } catch {}
 }
 
 export function rememberSyncedPrivateHyperdrive (drive) {
-  if (drive?.id) syncedPrivateDriveId = String(drive.id).toLowerCase()
+  if (!drive?.id) return
+  syncedPrivateDriveId = String(drive.id).toLowerCase()
+
+  const path = syncedPrivateStoragePath || (typeof Bare !== 'undefined' ? getSyncedPrivateHyperSdkStoragePath() : null)
+  if (!path) return
+
+  rememberPrivateDriveId(path, syncedPrivateDriveId)
 }
 
 export function isSyncedPrivateHyperdriveAddress (address) {
@@ -195,7 +226,8 @@ export async function closeHyperRuntime () {
     await closeRuntimeCandidates([
       sdk || sdkOpening,
       deviceOnlySdk || deviceOnlySdkOpening,
-      syncedPrivateSdk || syncedPrivateSdkOpening
+      syncedPrivateSdk || syncedPrivateSdkOpening,
+      syncedPrivateDrive
     ])
   } finally {
     sdk = null
@@ -204,6 +236,8 @@ export async function closeHyperRuntime () {
     deviceOnlySdkOpening = null
     syncedPrivateSdk = null
     syncedPrivateSdkOpening = null
+    syncedPrivateDrive = null
+    syncedPrivateDriveOpening = null
     deviceOnlyDriveId = null
     syncedPrivateDriveId = null
     resetPrivateDriveKeyCache()
@@ -233,11 +267,36 @@ function getSyncedPrivateHyperSdkStoragePath () {
 }
 
 function isDeviceOnlyHyperdriveAddressInternal (address) {
-  return matchesHyperdriveAddress(address, deviceOnlyDriveId)
+  return matchesHyperdriveAddress(address, getDeviceOnlyDriveId())
 }
 
 function isSyncedPrivateHyperdriveAddressInternal (address) {
-  return matchesHyperdriveAddress(address, syncedPrivateDriveId)
+  return matchesHyperdriveAddress(address, getSyncedPrivateDriveId())
+}
+
+function getDeviceOnlyDriveId () {
+  if (deviceOnlyDriveId) return deviceOnlyDriveId
+
+  if (typeof Bare !== 'undefined') {
+    try {
+      const parsed = JSON.parse(readFileSync(getDeviceOnlyDriveIdFile(), 'utf8'))
+      if (parsed && typeof parsed.driveId === 'string') deviceOnlyDriveId = String(parsed.driveId).toLowerCase()
+    } catch {}
+  }
+
+  return deviceOnlyDriveId
+}
+
+function getSyncedPrivateDriveId () {
+  if (syncedPrivateDriveId) return syncedPrivateDriveId
+  if (syncedPrivateDrive?.id) syncedPrivateDriveId = String(syncedPrivateDrive.id).toLowerCase()
+  const path = syncedPrivateStoragePath || (typeof Bare !== 'undefined' ? getSyncedPrivateHyperSdkStoragePath() : null)
+  if (!syncedPrivateDriveId && path) syncedPrivateDriveId = getPrivateDriveId(path)
+  return syncedPrivateDriveId
+}
+
+function getDeviceOnlyDriveIdFile () {
+  return join(getPrivateHyperSdkStoragePath(), 'device-drive-id.json')
 }
 
 function joinSiblingPath (filepath, siblingName) {

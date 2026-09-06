@@ -233,6 +233,38 @@ test('rejects missing or invalid upload visibility before opening the runtime', 
   assert.equal(opened, false)
 })
 
+test('repeated private uploads reuse the same synced drive reference', async () => {
+  let getSyncedDriveCalls = 0
+  const syncedDrive = createDrive({})
+
+  const uploadOptions = {
+    syncedPrivateRuntime: { dummy: true },
+    getSyncedPrivateDrive: async () => {
+      getSyncedDriveCalls += 1
+      return syncedDrive
+    }
+  }
+
+  const first = await uploadHyperdriveFile({
+    name: 'a.txt',
+    contentBase64: Buffer.from('a').toString('base64'),
+    visibility: 'private'
+  }, uploadOptions)
+
+  const second = await uploadHyperdriveFile({
+    name: 'b.txt',
+    contentBase64: Buffer.from('b').toString('base64'),
+    visibility: 'private'
+  }, uploadOptions)
+
+  assert.equal(first.ok, true)
+  assert.equal(second.ok, true)
+  assert.equal(getSyncedDriveCalls, 2)
+  assert.equal(syncedDrive.writes.length, 2)
+  assert.equal(syncedDrive.writes[0].path, '/a.txt')
+  assert.equal(syncedDrive.writes[1].path, '/b.txt')
+})
+
 function createDrive (entries) {
   const writes = []
   return {

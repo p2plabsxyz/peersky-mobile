@@ -29,6 +29,7 @@ import {
   runP2pCacheClear,
   runP2pDataClear
 } from './storage-lifecycle.mjs'
+import { hasPrivateDriveKey } from './private-keys.mjs'
 
 let storageTransition = Promise.resolve()
 
@@ -128,7 +129,9 @@ function performAllP2pDataClear (options) {
 
 async function createP2pStorageRuntime (mainRuntime = null) {
   const networkedRuntime = mainRuntime || await getHyperRuntime()
-  return createRoutedP2pStorageRuntime(networkedRuntime, getPrivateHyperRuntime, () => getSyncedPrivateHyperdrive())
+  return createRoutedP2pStorageRuntime(networkedRuntime, getPrivateHyperRuntime, () => getSyncedPrivateHyperdrive(), {
+    hasPrivateDrive: () => hasPrivateDriveKey(getSyncedPrivateHyperStoragePath())
+  })
 }
 
 function withStorageTransition (task) {

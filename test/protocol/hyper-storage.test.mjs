@@ -152,6 +152,35 @@ describe('Hyper app storage', () => {
     }])
   })
 
+  test('does not create a missing private drive when listing or deleting', async () => {
+    const networkedRuntime = createRuntime({})
+    const deviceRuntime = createRuntime({})
+    let privateDriveOpened = false
+    const runtime = createRoutedP2pStorageRuntime(
+      networkedRuntime,
+      async () => deviceRuntime,
+      async () => { privateDriveOpened = true; return null },
+      { hasPrivateDrive: async () => false }
+    )
+
+    assert.equal(await runtime.getExistingDrive('hyperdrive-private'), null)
+    assert.equal(privateDriveOpened, false)
+  })
+
+  test('routes private drive through synced private getter when key exists', async () => {
+    const networkedRuntime = createRuntime({})
+    const deviceRuntime = createRuntime({})
+    const syncedDrive = { id: 'synced-private-id', list: async function * () {}, purge: async () => {} }
+    const runtime = createRoutedP2pStorageRuntime(
+      networkedRuntime,
+      async () => deviceRuntime,
+      async () => syncedDrive,
+      { hasPrivateDrive: async () => true }
+    )
+
+    assert.equal(await runtime.getExistingDrive('hyperdrive-private'), syncedDrive)
+  })
+
   test('does not announce existing drives unless explicitly requested', async () => {
     const requests = []
     const namespace = {

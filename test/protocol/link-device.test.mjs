@@ -1,14 +1,16 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import crypto from 'node:crypto'
-import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { deflateRawSync } from 'node:zlib'
 import sodium from 'sodium-native'
 import { createMobilePairingCode } from '../../app/settings/identity-pairing.mjs'
 import { verifyIdentityTransferSignature } from '../../backend/backup/identity-transfer.mjs'
+import { extractTransferredPrivateDrive, adoptTransferredPrivateDrive } from '../../backend/backup/private-drive-import.mjs'
 import { restoreIdentityFromBackup } from '../../backend/backup/restore.mjs'
+import { resetPrivateDriveKeyCache } from '../../backend/hyper/private-keys.mjs'
 
 function canonicalJson (value) {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
@@ -201,6 +203,100 @@ describe('Link Device Identity Transfer', () => {
       assert.equal(statSync(join(storagePath, 'hyper/large-core')).size, size)
     } finally {
       rmSync(storagePath, { recursive: true, force: true })
+    }
+  })
+
+  it('adopts a transferred private drive key from a restored backup', () => {
+    resetPrivateDriveKeyCache()
+    const sourcePath = mkdtempSync(join(tmpdir(), 'peersky-adopt-source-'))
+    const targetPath = mkdtempSync(join(tmpdir(), 'peersky-adopt-target-'))
+    const driveId = 'e'.repeat(64)
+
+    try {
+      const payload = JSON.stringify({ version: 2, createdAt: new Date().toISOString(), key: 'f'.repeat(64), driveId })
+      writeFileSync(join(sourcePath, 'private-drive-key.json'), payload)
+
+      const result = adoptTransferredPrivateDrive(sourcePath, targetPath)
+      assert.equal(result.adopted, true)
+      assert.equal(result.driveId, driveId)
+
+      const persisted = JSON.parse(readFileSync(join(targetPath, 'private-drive-key.json'), 'utf8'))
+      assert.equal(persisted.key, 'f'.repeat(64))
+      assert.equal(persisted.driveId, driveId)
+    } finally {
+      resetPrivateDriveKeyCache()
+      rmSync(sourcePath, { recursive: true, force: true })
+      rmSync(targetPath, { recursive: true, force: true })
+    }
+  })
+
+  it('returns adopted:false when no private drive key exists in the backup', () => {
+    const sourcePath = mkdtempSync(join(tmpdir(), 'peersky-adopt-empty-'))
+    const targetPath = mkdtempSync(join(tmpdir(), 'peersky-adopt-target2-'))
+
+    try {
+      const result = adoptTransferredPrivateDrive(sourcePath, targetPath)
+      assert.equal(result.adopted, false)
+    } finally {
+      rmSync(sourcePath, { recursive: true, force: true })
+      rmSync(targetPath, { recursive: true, force: true })
+    }
+  })
+
+  it('extracts a valid private drive key from the transferred backup', () => {
+    const storagePath = mkdtempSync(join(tmpdir(), 'peersky-extract-'))
+    const driveId = 'a'.repeat(64)
+
+    try {
+      const payload = JSON.stringify({ version: 2, createdAt: new Date().toISOString(), key: 'c'.repeat(64), driveId })
+      writeFileSync(join(storagePath, 'private-drive-key.json'), payload)
+
+      const result = extractTransferredPrivateDrive(storagePath)
+      assert.ok(result)
+      assert.equal(result.key, 'c'.repeat(64))
+      assert.equal(result.driveId, driveId)
+    } finally {
+      rmSync(storagePath, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects a transferred key with an invalid key format', () => {
+    const storagePath = mkdtempSync(join(tmpdir(), 'peersky-extract-bad-'))
+
+    try {
+      const payload = JSON.stringify({ version: 2, createdAt: new Date().toISOString(), key: 'not-hex' })
+      writeFileSync(join(storagePath, 'private-drive-key.json'), payload)
+
+      const result = extractTransferredPrivateDrive(storagePath)
+      assert.equal(result, null)
+    } finally {
+      rmSync(storagePath, { recursive: true, force: true })
+    }
+  })
+
+  it('links two devices to the same private drive via key transfer', () => {
+    resetPrivateDriveKeyCache()
+    const sourcePath = mkdtempSync(join(tmpdir(), 'peersky-link1-'))
+    const targetPath = mkdtempSync(join(tmpdir(), 'peersky-link2-'))
+    const driveId = 'd'.repeat(64)
+
+    try {
+      const payload = JSON.stringify({ version: 2, createdAt: new Date().toISOString(), key: 'a'.repeat(64), driveId })
+      writeFileSync(join(sourcePath, 'private-drive-key.json'), payload)
+
+      const result = adoptTransferredPrivateDrive(sourcePath, targetPath)
+      assert.equal(result.adopted, true)
+
+      const sourceContent = JSON.parse(readFileSync(join(sourcePath, 'private-drive-key.json'), 'utf8'))
+      const targetContent = JSON.parse(readFileSync(join(targetPath, 'private-drive-key.json'), 'utf8'))
+      assert.equal(targetContent.key, sourceContent.key)
+      assert.equal(targetContent.driveId, sourceContent.driveId)
+      assert.equal(targetContent.key, 'a'.repeat(64))
+      assert.equal(targetContent.driveId, driveId)
+    } finally {
+      resetPrivateDriveKeyCache()
+      rmSync(sourcePath, { recursive: true, force: true })
+      rmSync(targetPath, { recursive: true, force: true })
     }
   })
 })
