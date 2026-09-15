@@ -6,8 +6,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { deflateRawSync } from 'node:zlib'
 import sodium from 'sodium-native'
+import z32 from 'z32'
 import { createMobilePairingCode } from '../../app/settings/identity-pairing.mjs'
 import { verifyIdentityTransferSignature } from '../../backend/backup/identity-transfer.mjs'
+import { extractTransferredPrivateDrive, adoptTransferredPrivateDrive } from '../../backend/backup/private-drive-import.mjs'
+import { resetPrivateDriveKeyCache } from '../../backend/hyper/private-keys.mjs'
+import { adoptedStoragePathFor } from '../../backend/hyper/runtime-routing.mjs'
 import { commitIdentityRestore, restoreIdentityFromBackup } from '../../backend/backup/restore.mjs'
 
 function canonicalJson (value) {
@@ -201,6 +205,294 @@ describe('Link Device Identity Transfer', () => {
       assert.equal(statSync(join(storagePath, 'hyper/large-core')).size, size)
     } finally {
       rmSync(storagePath, { recursive: true, force: true })
+    }
+  })
+
+  it('restores desktop private-hyper corestore from an identity transfer', async () => {
+    const storagePath = mkdtempSync(join(tmpdir(), 'peersky-hyper-private-restore-'))
+
+    try {
+      const result = await restoreIdentityFromBackup(
+        createFileZip('hyper-private/CORESTORE', 'corestore'),
+        storagePath
+      )
+
+      assert.equal(result.restoredFiles, 1)
+      assert.equal(readFileSync(join(storagePath, 'hyper-private/CORESTORE'), 'utf8'), 'corestore')
+    } finally {
+      rmSync(storagePath, { recursive: true, force: true })
+    }
+  })
+
+  it('restores privateHyperdrives.json from an identity transfer', async () => {
+    const storagePath = mkdtempSync(join(tmpdir(), 'peersky-private-registry-restore-'))
+    const registry = JSON.stringify([{ name: 'private', url: 'hyper://entry', timestamp: 1 }])
+
+    try {
+      const result = await restoreIdentityFromBackup(
+        createFileZip('privateHyperdrives.json', registry),
+        storagePath
+      )
+
+      assert.equal(result.restoredFiles, 1)
+      assert.equal(readFileSync(join(storagePath, 'privateHyperdrives.json'), 'utf8'), registry)
+    } finally {
+      rmSync(storagePath, { recursive: true, force: true })
+    }
+  })
+
+  it('adopts a transferred private drive key from a restored backup', () => {
+    resetPrivateDriveKeyCache()
+    const sourcePath = mkdtempSync(join(tmpdir(), 'peersky-adopt-source-'))
+    const targetPath = mkdtempSync(join(tmpdir(), 'peersky-adopt-target-'))
+    const driveId = 'e'.repeat(64)
+
+    try {
+      const payload = JSON.stringify({ version: 2, createdAt: new Date().toISOString(), key: 'f'.repeat(64), driveId })
+      writeFileSync(join(sourcePath, 'private-drive-key.json'), payload)
+
+      const result = adoptTransferredPrivateDrive(sourcePath, targetPath)
+      assert.equal(result.adopted, true)
+      assert.equal(result.driveId, driveId)
+
+      const persisted = JSON.parse(readFileSync(join(targetPath, 'private-drive-key.json'), 'utf8'))
+      assert.equal(persisted.key, 'f'.repeat(64))
+      assert.equal(persisted.driveId, driveId)
+    } finally {
+      resetPrivateDriveKeyCache()
+      rmSync(sourcePath, { recursive: true, force: true })
+      rmSync(targetPath, { recursive: true, force: true })
+    }
+  })
+
+  it('returns adopted:false when no private drive key exists in the backup', () => {
+    const sourcePath = mkdtempSync(join(tmpdir(), 'peersky-adopt-empty-'))
+    const targetPath = mkdtempSync(join(tmpdir(), 'peersky-adopt-target2-'))
+
+    try {
+      const result = adoptTransferredPrivateDrive(sourcePath, targetPath)
+      assert.equal(result.adopted, false)
+    } finally {
+      rmSync(sourcePath, { recursive: true, force: true })
+      rmSync(targetPath, { recursive: true, force: true })
+    }
+  })
+
+  it('extracts a valid private drive key from the transferred backup', () => {
+    const storagePath = mkdtempSync(join(tmpdir(), 'peersky-extract-'))
+    const driveId = 'a'.repeat(64)
+
+    try {
+      const payload = JSON.stringify({ version: 2, createdAt: new Date().toISOString(), key: 'c'.repeat(64), driveId })
+      writeFileSync(join(storagePath, 'private-drive-key.json'), payload)
+
+      const result = extractTransferredPrivateDrive(storagePath)
+      assert.equal(result.length, 1)
+      assert.equal(result[0].key, 'c'.repeat(64))
+      assert.equal(result[0].driveId, driveId)
+    } finally {
+      rmSync(storagePath, { recursive: true, force: true })
+    }
+  })
+
+  it('extracts a v3 desktop key record with a null key', () => {
+    const storagePath = mkdtempSync(join(tmpdir(), 'peersky-extract-v3-'))
+    const driveId = 'b'.repeat(64)
+
+    try {
+      const payload = JSON.stringify({
+        version: 3,
+        createdAt: new Date().toISOString(),
+        key: null,
+        driveId,
+        encrypted: false,
+        source: 'desktop'
+      })
+      writeFileSync(join(storagePath, 'private-drive-key.json'), payload)
+
+      const result = extractTransferredPrivateDrive(storagePath)
+      assert.equal(result.length, 1)
+      assert.equal(result[0].source, 'desktop')
+      assert.equal(result[0].encrypted, false)
+      assert.equal(result[0].key, null)
+      assert.equal(result[0].driveId, driveId)
+
+      const syncedStore = join(storagePath, 'adopted')
+      const adoption = adoptTransferredPrivateDrive(storagePath, syncedStore)
+      assert.equal(adoption.adopted, true)
+      assert.equal(adoption.driveId, driveId)
+      assert.equal(adoption.encrypted, false)
+    } finally {
+      resetPrivateDriveKeyCache()
+      rmSync(storagePath, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects a transferred key with an invalid key format', () => {
+    const storagePath = mkdtempSync(join(tmpdir(), 'peersky-extract-bad-'))
+
+    try {
+      const payload = JSON.stringify({ version: 2, createdAt: new Date().toISOString(), key: 'not-hex' })
+      writeFileSync(join(storagePath, 'private-drive-key.json'), payload)
+
+      const result = extractTransferredPrivateDrive(storagePath)
+      assert.deepEqual(result, [])
+    } finally {
+      rmSync(storagePath, { recursive: true, force: true })
+    }
+  })
+
+  it('links two devices to the same private drive via key transfer', () => {
+    resetPrivateDriveKeyCache()
+    const sourcePath = mkdtempSync(join(tmpdir(), 'peersky-link1-'))
+    const targetPath = mkdtempSync(join(tmpdir(), 'peersky-link2-'))
+    const driveId = 'd'.repeat(64)
+
+    try {
+      const payload = JSON.stringify({ version: 2, createdAt: new Date().toISOString(), key: 'a'.repeat(64), driveId })
+      writeFileSync(join(sourcePath, 'private-drive-key.json'), payload)
+
+      const result = adoptTransferredPrivateDrive(sourcePath, targetPath)
+      assert.equal(result.adopted, true)
+
+      const sourceContent = JSON.parse(readFileSync(join(sourcePath, 'private-drive-key.json'), 'utf8'))
+      const targetContent = JSON.parse(readFileSync(join(targetPath, 'private-drive-key.json'), 'utf8'))
+      assert.equal(targetContent.key, sourceContent.key)
+      assert.equal(targetContent.driveId, sourceContent.driveId)
+      assert.equal(targetContent.key, 'a'.repeat(64))
+      assert.equal(targetContent.driveId, driveId)
+    } finally {
+      resetPrivateDriveKeyCache()
+      rmSync(sourcePath, { recursive: true, force: true })
+      rmSync(targetPath, { recursive: true, force: true })
+    }
+  })
+
+  it('adopts a desktop private drive from its registry when no key file exists', () => {
+    resetPrivateDriveKeyCache()
+    const sourcePath = mkdtempSync(join(tmpdir(), 'peersky-adopt-desk-src-'))
+    const targetPath = mkdtempSync(join(tmpdir(), 'peersky-adopt-desk-tgt-'))
+    const driveId = Buffer.from(crypto.randomBytes(32)).toString('hex')
+    const driveZ32 = z32.encode(Buffer.from(driveId, 'hex')).toLowerCase()
+
+    try {
+      const registry = JSON.stringify([{
+        name: 'files',
+        url: `hyper://${driveZ32}/`,
+        timestamp: 1700000000000
+      }])
+      writeFileSync(join(sourcePath, 'privateHyperdrives.json'), registry)
+
+      const result = adoptTransferredPrivateDrive(sourcePath, targetPath)
+      assert.equal(result.adopted, true)
+      assert.equal(result.driveId, driveId)
+      assert.equal(result.encrypted, false)
+
+      const persisted = JSON.parse(readFileSync(join(targetPath, 'private-drive-key.json'), 'utf8'))
+      assert.equal(persisted.version, 3)
+      assert.equal(persisted.key, null)
+      assert.equal(persisted.encrypted, false)
+      assert.equal(persisted.source, 'desktop')
+      assert.equal(persisted.driveId, driveId)
+    } finally {
+      resetPrivateDriveKeyCache()
+      rmSync(sourcePath, { recursive: true, force: true })
+      rmSync(targetPath, { recursive: true, force: true })
+    }
+  })
+
+  it('adopts desktop private-hyper cores into the dedicated adopted store, not the synced store', () => {
+    const sourcePath = mkdtempSync(join(tmpdir(), 'peersky-adopt-cores-src-'))
+    const targetPath = mkdtempSync(join(tmpdir(), 'peersky-adopt-cores-tgt-'))
+    const driveId = Buffer.from(crypto.randomBytes(32)).toString('hex')
+
+    try {
+      mkdirSync(join(sourcePath, 'hyper-private', 'nested'), { recursive: true })
+      writeFileSync(join(sourcePath, 'hyper-private', 'CORESTORE'), 'corestore')
+      writeFileSync(join(sourcePath, 'hyper-private', 'nested', 'blob'), 'blobbytes')
+      writeFileSync(join(sourcePath, 'privateHyperdrives.json'), JSON.stringify([{
+        name: 'files',
+        url: `hyper://${driveId}/`,
+        timestamp: 1700000000000
+      }]))
+
+      const result = adoptTransferredPrivateDrive(sourcePath, targetPath)
+      assert.equal(result.adopted, true)
+
+      // Cores land in the separate adopted root (hyper-sdk-adopted), never
+      // overlaid onto the phone's live synced store.
+      const adoptedStorePath = adoptedStoragePathFor(targetPath)
+      assert.equal(readFileSync(join(adoptedStorePath, 'CORESTORE'), 'utf8'), 'corestore')
+      assert.equal(readFileSync(join(adoptedStorePath, 'nested', 'blob'), 'utf8'), 'blobbytes')
+
+      // The synced store holds only the identity record + adoption marker.
+      assert.equal(existsSync(join(targetPath, 'CORESTORE')), false)
+      assert.equal(existsSync(join(targetPath, 'private-drive-key.json')), true)
+      assert.equal(existsSync(join(targetPath, 'adopted-corestore.json')), true)
+    } finally {
+      resetPrivateDriveKeyCache()
+      rmSync(sourcePath, { recursive: true, force: true })
+      rmSync(targetPath, { recursive: true, force: true })
+    }
+  })
+
+  it('adopts every drive from a desktop v3 entries record', () => {
+    resetPrivateDriveKeyCache()
+    const sourcePath = mkdtempSync(join(tmpdir(), 'peersky-adopt-entries-'))
+    const targetPath = mkdtempSync(join(tmpdir(), 'peersky-adopt-entries-tgt-'))
+    const first = '1'.repeat(64)
+    const second = '2'.repeat(64)
+
+    try {
+      const payload = JSON.stringify({
+        version: 3,
+        createdAt: new Date().toISOString(),
+        key: null,
+        driveId: first,
+        encrypted: false,
+        announce: false,
+        source: 'desktop',
+        entries: [
+          { driveId: first, createdAt: 2 },
+          { driveId: second, createdAt: 1 }
+        ]
+      })
+      writeFileSync(join(sourcePath, 'private-drive-key.json'), payload)
+
+      const extracted = extractTransferredPrivateDrive(sourcePath)
+      assert.equal(extracted.length, 2)
+      assert.equal(extracted[0].driveId, first)
+      assert.equal(extracted[1].driveId, second)
+
+      const adoption = adoptTransferredPrivateDrive(sourcePath, targetPath)
+      assert.equal(adoption.adopted, true)
+      assert.equal(adoption.driveId, first)
+      assert.deepEqual(adoption.driveIds, [first, second])
+
+      const marker = JSON.parse(readFileSync(join(targetPath, 'adopted-corestore.json'), 'utf8'))
+      assert.equal(marker.version, 2)
+      assert.equal(marker.drives.length, 2)
+      assert.equal(marker.drives[0].driveId, first)
+      assert.equal(marker.drives[1].driveId, second)
+      assert.equal(marker.drives[0].announce, false)
+      assert.equal(marker.drives[1].announce, false)
+    } finally {
+      resetPrivateDriveKeyCache()
+      rmSync(sourcePath, { recursive: true, force: true })
+      rmSync(targetPath, { recursive: true, force: true })
+    }
+  })
+
+  it('does not adopt when both the key file and registry are missing', () => {
+    const sourcePath = mkdtempSync(join(tmpdir(), 'peersky-adopt-none-src-'))
+    const targetPath = mkdtempSync(join(tmpdir(), 'peersky-adopt-none-tgt-'))
+
+    try {
+      const result = adoptTransferredPrivateDrive(sourcePath, targetPath)
+      assert.equal(result.adopted, false)
+    } finally {
+      rmSync(sourcePath, { recursive: true, force: true })
+      rmSync(targetPath, { recursive: true, force: true })
     }
   })
 

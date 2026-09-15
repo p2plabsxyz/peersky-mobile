@@ -3,14 +3,23 @@ import { test } from 'node:test'
 
 import {
   createPrivateHyperRuntimeOptions,
+  createSyncedPrivateHyperRuntimeOptions,
   matchesHyperdriveAddress
 } from '../../backend/hyper/runtime-routing.mjs'
 
-test('private Hyper runtime disables discovery and replication', () => {
+test('device-only Hyper runtime disables discovery and replication', () => {
   assert.deepEqual(createPrivateHyperRuntimeOptions('/data/hyper-sdk-private'), {
     storage: '/data/hyper-sdk-private',
     autoJoin: false,
     doReplicate: false
+  })
+})
+
+test('encrypted private Hyper runtime keeps replication enabled', () => {
+  assert.deepEqual(createSyncedPrivateHyperRuntimeOptions('/data/hyper-sdk-synced-private'), {
+    storage: '/data/hyper-sdk-synced-private',
+    autoJoin: false,
+    doReplicate: true
   })
 })
 
