@@ -17,8 +17,8 @@ const roomKey = (character) => `hs://${character.repeat(52)}`
 describe('P2PMD room history', () => {
   test('round-trips valid room keys in newest-first order', () => {
     const rooms = [
-      { key: roomKey('a'), role: 'host', lastOpenedAt: 10 },
-      { key: roomKey('b'), role: 'client', lastOpenedAt: 20 }
+      { key: roomKey('a'), role: 'host', label: '', lastOpenedAt: 10 },
+      { key: roomKey('b'), role: 'client', label: '', lastOpenedAt: 20 }
     ]
 
     assert.deepEqual(
@@ -82,9 +82,36 @@ describe('P2PMD room history', () => {
     assert.equal(formatP2pmdRoomHistoryKey('invalid'), '')
   })
 
+  test('keeps a note name once it is known, and bounds it', () => {
+    let rooms = recordP2pmdRoom([], {
+      key: roomKey('a'),
+      role: 'host',
+      label: 'Slides - Welcome to Your Presentation',
+      lastOpenedAt: 10
+    })
+    assert.equal(rooms[0].label, 'Slides - Welcome to Your Presentation')
+
+    // Reopening says nothing about the contents, so the name already worked
+    // out survives rather than being blanked.
+    rooms = recordP2pmdRoom(rooms, { key: roomKey('a'), role: 'host', lastOpenedAt: 20 })
+    assert.equal(rooms[0].label, 'Slides - Welcome to Your Presentation')
+
+    // The text comes out of a document that may not be yours. It is only ever
+    // displayed, but it still gets flattened to one line and cut short.
+    rooms = recordP2pmdRoom(rooms, {
+      key: roomKey('b'),
+      role: 'client',
+      label: `  Note -   ${'x'.repeat(200)}\n\nsecond line  `,
+      lastOpenedAt: 30
+    })
+    assert.ok(rooms[0].label.length <= 64)
+    assert.doesNotMatch(rooms[0].label, /\n/)
+    assert.match(rooms[0].label, /^Note - x+$/)
+  })
+
   test('persists rooms for restart and rejects oversized files before reading', () => {
     const file = createMemoryFile()
-    const rooms = [{ key: roomKey('a'), role: 'host', lastOpenedAt: 10 }]
+    const rooms = [{ key: roomKey('a'), role: 'host', label: '', lastOpenedAt: 10 }]
 
     writeP2pmdRoomHistoryFile(file, rooms)
     assert.deepEqual(readP2pmdRoomHistoryFile(file), rooms)

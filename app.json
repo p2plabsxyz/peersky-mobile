@@ -94,6 +94,7 @@
       "./plugins/with-browser-downloads",
       "./plugins/with-lan-discovery",
       "./plugins/with-peerchat-background",
+      "./plugins/with-peersky-share",
       [
         "expo-notifications",
         {

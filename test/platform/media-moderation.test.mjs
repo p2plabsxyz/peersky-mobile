@@ -129,7 +129,8 @@ test('a classifier that cannot answer never clears an upload', async () => {
   // every one of them is unscanned, never allowed.
   for (const guard of [
     /if \(declared\.startsWith\('video\/'\).*\) return MEDIA_UNSCANNED/,
-    /if \(!base64 \|\| !mimeType\) return MEDIA_UNSCANNED/,
+    /if \(!base64\) return MEDIA_UNSCANNED/,
+    /if \(!asset\.base64\) return MEDIA_UNSCANNED/,
     /if \(\(asset\.size \?\? 0\) > MAX_SCANNED_BYTES\) return MEDIA_UNSCANNED/,
     /if \(!liveWebView\) return MEDIA_UNSCANNED/,
     /resolve\(MEDIA_UNSCANNED\)\n {4}\}, SCAN_TIMEOUT_MS\)/,
@@ -140,7 +141,8 @@ test('a classifier that cannot answer never clears an upload', async () => {
 
   // A file the decoder cannot open is a file it cannot judge.
   assert.match(host, /catch \{[\s\S]{0,160}return MEDIA_UNSCANNED/)
-  assert.match(host, /if \(!base64 \|\| !mimeType\) return MEDIA_UNSCANNED/)
+  // A re-encode that produced nothing is not a clean picture either.
+  assert.match(host, /if \(!base64\) return MEDIA_UNSCANNED/)
 
   // Off screen, not hidden: both platforms pause a hidden WebView and it would
   // never answer.
@@ -313,18 +315,39 @@ test('P2PMD images are screened with a type the decoder accepts', async () => {
   assert.ok(upload.indexOf('screenUploadBytes') < upload.indexOf('RPC_P2PMD_IMAGE_UPLOAD'))
 })
 
-test('bytes with no file behind them are still identified before screening', async () => {
+test('bytes with no file behind them are shrunk before they cross the bridge', async () => {
   const host = await readFile(new URL('../../app/media/NsfwScanner.tsx', import.meta.url), 'utf8')
   const fn = host.slice(host.indexOf('export async function scanMedia ('), host.indexOf('async function stageScannerFiles'))
 
-  // Anything with a file goes through the decoder, so its type is settled.
-  // P2PMD hands over bare base64 from a canvas instead, and that path still has
-  // to work out what it is holding rather than guessing.
-  assert.match(fn, /base64 = asset\.base64 \|\| ''/)
-  assert.match(fn, /isUsableImageType\(declared\) \? declared : sniffBase64ImageType\(base64\)/)
+  // P2PMD hands over a whole photo as base64. Posting that at full size took
+  // longer than the scan timeout, and a timeout counts as unscanned, so the
+  // picture went up unchecked. Bytes are written to a scratch file so they go
+  // through the same resize every picked file does.
+  assert.match(fn, /scratch\.write\(asset\.base64, \{ encoding: 'base64' \}\)/)
+  assert.ok(fn.indexOf('scratch.write') < fn.indexOf('ImageManipulator.manipulate'))
+
+  // One resize, one format, one code path. Nothing reaches the classifier at
+  // its original size any more.
+  assert.equal(fn.match(/ImageManipulator\.manipulate/g).length, 1)
+  assert.match(fn, /\.resize\(\{ width: NSFW_INPUT_SIZE \}\)/)
+  assert.match(fn, /dataUrl: `data:image\/jpeg;base64,\$\{base64\}`/)
+
+  // The scratch file is temporary, not something left behind on the phone.
+  assert.match(fn, /scratch\?\.delete\(\)/)
 
   // Video is turned away up front, so a large clip is never decoded.
   assert.ok(fn.indexOf("declared.startsWith('video/')") < fn.indexOf('ImageManipulator.manipulate'))
+})
+
+test('a P2PMD photo is measured by its real size, not its base64 length', async () => {
+  const app = await readFile(new URL('../../app/index.tsx', import.meta.url), 'utf8')
+  const upload = app.slice(app.indexOf('async function uploadP2pmdImage'), app.indexOf('function resolveP2pmdBridgeRequest'))
+
+  // Base64 runs a third longer than the bytes it carries. Passing the string
+  // length made a large photo look bigger than the scan limit, so it skipped
+  // the check on a size it had not actually reached.
+  assert.match(upload, /size: Math\.floor\(\(base64\.length \* 3\) \/ 4\)/)
+  assert.doesNotMatch(upload, /size: base64\.length/)
 })
 
 test('a folder upload screens every file in it before any of them go', async () => {

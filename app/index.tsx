@@ -14,7 +14,6 @@ import {
   Platform,
   Pressable,
   ScrollView,
-  Share,
   StatusBar,
   StyleSheet,
   Text,
@@ -160,7 +159,9 @@ import {
   recordP2pmdRoom,
   writeP2pmdRoomHistoryFile
 } from './p2pmd-room-history.mjs'
-import { styles } from './styles'
+import { describeP2pmdNote } from './p2pmd-note-title.mjs'
+import { shareLink } from './share'
+import { p2pmdLight, styles } from './styles'
 import {
   RPC_HOLESAIL_CONNECT,
   RPC_HOLESAIL_START_LIVE,
@@ -210,6 +211,7 @@ const HYPER_OFFLINE_NETWORK_COMMANDS = new Set([
 type P2pmdRoomHistoryEntry = {
   key: string
   role: 'host' | 'client'
+  label: string
   lastOpenedAt: number
 }
 
@@ -1382,11 +1384,7 @@ export default function App () {
     if (!browserPageActionAvailable) return
 
     try {
-      await Share.share({
-        title: browserTitle,
-        message: browserCurrentUrl,
-        url: browserCurrentUrl
-      })
+      await shareLink({ title: browserTitle, message: browserCurrentUrl })
       setStatus('Page shared')
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error))
@@ -1487,11 +1485,7 @@ export default function App () {
 
   async function onBrowserMediaShare (targetUrl: string, title: string) {
     try {
-      await Share.share({
-        title: title || browserTitle,
-        message: targetUrl,
-        url: targetUrl
-      })
+      await shareLink({ title: title || browserTitle, message: targetUrl })
       setStatus('Shared')
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error))
@@ -1970,7 +1964,7 @@ export default function App () {
   function applyP2pmdJoinKey (value: string) {
     const roomKey = normalizeP2pmdRoomKey(value)
     if (!roomKey) {
-      setP2pmdSetupError('Invalid room key. Use an hs:// room key.')
+      setP2pmdSetupError('Invalid note key. Use an hs:// note key.')
       return false
     }
 
@@ -1983,7 +1977,7 @@ export default function App () {
     try {
       const clipboardValue = await Clipboard.getString()
       if (!clipboardValue.trim()) {
-        setP2pmdSetupError('The clipboard does not contain a room key.')
+        setP2pmdSetupError('The clipboard does not contain a note key.')
         return
       }
       applyP2pmdJoinKey(clipboardValue)
@@ -1997,7 +1991,7 @@ export default function App () {
       ? p2pmdCameraPermission
       : await requestP2pmdCameraPermission()
     if (!permission.granted) {
-      setP2pmdSetupError('Camera permission is required to scan a room key.')
+      setP2pmdSetupError('Camera permission is required to scan a note key.')
       return
     }
 
@@ -2103,13 +2097,25 @@ export default function App () {
     }
   }
 
-  function rememberP2pmdRoom (key: string, role: P2pmdRoomHistoryEntry['role']) {
-    const rooms = recordP2pmdRoom(p2pmdRoomHistoryRef.current, { key, role }) as P2pmdRoomHistoryEntry[]
+  function rememberP2pmdRoom (key: string, role: P2pmdRoomHistoryEntry['role'], label = '') {
+    const rooms = recordP2pmdRoom(p2pmdRoomHistoryRef.current, { key, role, label }) as P2pmdRoomHistoryEntry[]
     if (rooms === p2pmdRoomHistoryRef.current) return
 
     if (!saveP2pmdRoomHistory(rooms)) return
     p2pmdRoomHistoryRef.current = rooms
     setP2pmdRoomHistory(rooms)
+  }
+
+  // A key tells you nothing about which note it is. The editor sends the top
+  // of the document with every save, so the list can show what the note is
+  // called instead. Display only: the key is still what opens it.
+  function rememberP2pmdNoteName (head: unknown, slides: boolean) {
+    const room = p2pmdRoom
+    if (!room?.key || typeof head !== 'string') return
+    const { label } = describeP2pmdNote(head, { slides })
+    const known = p2pmdRoomHistoryRef.current.find((item) => item.key === room.key)
+    if (known?.label === label) return
+    rememberP2pmdRoom(room.key, known?.role || room.role, label)
   }
 
   async function onP2pmdRoomRefresh () {
@@ -2174,9 +2180,9 @@ export default function App () {
     if (!p2pmdRoom) return
 
     try {
-      await Share.share({
-        title: 'Join my P2PMD room',
-        message: `Join my P2PMD room:\n${p2pmdRoom.key}`
+      await shareLink({
+        title: 'Join my P2PMD note',
+        message: `Join my P2PMD note:\n${p2pmdRoom.key}`
       })
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error))
@@ -2196,6 +2202,13 @@ export default function App () {
     p2pmdWebViewRef.current?.injectJavaScript(
       'window.__p2pmdTogglePreview && window.__p2pmdTogglePreview(); true;'
     )
+  }
+
+  // Repeated rather than shared with the page's own media query: the browser
+  // has a light/dark/system setting of its own, and a phone set to dark would
+  // otherwise win over someone asking P2PMD for light.
+  function p2pmdThemeScript (isDark: boolean) {
+    return `document.documentElement.dataset.theme = ${JSON.stringify(isDark ? 'dark' : 'light')}; true;`
   }
 
   function onP2pmdOpenPeerDashboard () {
@@ -2242,12 +2255,7 @@ export default function App () {
       setP2pmdPublishUrl(response.url)
       setP2pmdSyncStatus('Published to Hyper')
       setStatus(`P2PMD published: ${response.url}`)
-      try {
-        await Share.share({
-          title: mode === 'slides' ? 'Published P2PMD presentation' : 'Published P2PMD note',
-          message: response.url
-        })
-      } catch {}
+      promptPublishedLink(response.url, mode === 'slides')
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       setP2pmdSyncStatus(`Publish failed: ${message}`)
@@ -2256,6 +2264,33 @@ export default function App () {
       p2pmdPublishInFlightRef.current = false
       setIsP2pmdPublishing(false)
     }
+  }
+
+  // Publishing hands back a link that is worth nothing if it is not kept. The
+  // share sheet buries copying a few taps in, so offer it outright.
+  function promptPublishedLink (url: string, isSlides: boolean) {
+    Alert.alert(
+      isSlides ? 'Presentation published' : 'Note published',
+      url,
+      [
+        { text: 'Copy link', onPress: () => copyPublishedLink(url) },
+        {
+          text: 'Share',
+          onPress: () => {
+            void shareLink({
+              title: isSlides ? 'Published P2PMD presentation' : 'Published P2PMD note',
+              message: url
+            }).catch(() => {})
+          }
+        },
+        { text: 'Done', style: 'cancel' }
+      ]
+    )
+  }
+
+  function copyPublishedLink (url: string) {
+    Clipboard.setString(url)
+    setStatus('Published link copied')
   }
 
   async function handleP2pmdBridgeRequest (request: Record<string, unknown>) {
@@ -2297,7 +2332,10 @@ export default function App () {
     await screenUploadBytes({
       base64,
       name: typeof payload.name === 'string' ? payload.name : 'image',
-      size: base64.length,
+      // Decoded length, not the base64 length. Base64 runs a third longer, so
+      // measuring the string made a large photo look oversized and skip the
+      // scan on a size guard it never actually crossed.
+      size: Math.floor((base64.length * 3) / 4),
       mimeType: isUsableImageType(declared) ? declared : sniffBase64ImageType(base64)
     })
     return await callRpc(RPC_P2PMD_IMAGE_UPLOAD, payload)
@@ -2335,6 +2373,7 @@ export default function App () {
         case 'p2pmd-document-saved':
           setP2pmdSyncStatus('Saved')
           setStatus(`P2PMD saved (${parsed.contentLength} characters)`)
+          rememberP2pmdNoteName(parsed.head, parsed.slides === true)
           break
         case 'p2pmd-document-updated':
           setP2pmdSyncStatus('Remote update')
@@ -2372,6 +2411,16 @@ export default function App () {
   const canBrowserGoForward = browserCanGoForward
   const browserIsDark = resolveBrowserDarkMode(browserPreferences.theme, systemColorScheme)
   const browserChrome = getBrowserPalette(browserIsDark)
+  // P2PMD is written dark, so light is a set of overrides laid on top. Null
+  // in dark mode means the arrays below collapse to the base style.
+  const p2pmdTheme = browserIsDark ? null : p2pmdLight
+  const p2pmdPageColor = browserIsDark ? '#1f2027' : '#f5f8ff'
+
+  // Push the change into a page that is already open, since the setting can
+  // be flipped while the editor is on screen.
+  useEffect(() => {
+    p2pmdWebViewRef.current?.injectJavaScript(p2pmdThemeScript(browserIsDark))
+  }, [browserIsDark])
   const browserBookmarkActionAvailable = canBookmarkBrowserPage(
     browserSource.kind,
     browserCurrentUrl
@@ -2593,21 +2642,25 @@ export default function App () {
     )
 
     return (
-      <SafeAreaView style={styles.p2pmdWorkspace} edges={['top', 'left', 'right', 'bottom']}>
-        <StatusBar hidden={isP2pmdLandscapeSlides} backgroundColor='#1f2027' barStyle='light-content' />
-        {!isP2pmdLandscapeSlides && <View style={styles.p2pmdWorkspaceHeader}>
-          <Text style={styles.p2pmdWorkspaceTitle}>P2PMD</Text>
-          <Text style={[styles.p2pmdWorkspaceRole, p2pmdRoom.role === 'host' ? styles.p2pmdWorkspaceRoleHost : null]}>
+      <SafeAreaView style={[styles.p2pmdWorkspace, p2pmdTheme?.p2pmdWorkspace]} edges={['top', 'left', 'right', 'bottom']}>
+        <StatusBar
+          hidden={isP2pmdLandscapeSlides}
+          backgroundColor={browserIsDark ? '#1f2027' : '#ffffff'}
+          barStyle={browserIsDark ? 'light-content' : 'dark-content'}
+        />
+        {!isP2pmdLandscapeSlides && <View style={[styles.p2pmdWorkspaceHeader, p2pmdTheme?.p2pmdWorkspaceHeader]}>
+          <Text style={[styles.p2pmdWorkspaceTitle, p2pmdTheme?.p2pmdWorkspaceTitle]}>P2PMD</Text>
+          <Text style={[styles.p2pmdWorkspaceRole, p2pmdTheme?.p2pmdWorkspaceRole, p2pmdRoom.role === 'host' ? [styles.p2pmdWorkspaceRoleHost, p2pmdTheme?.p2pmdWorkspaceRoleHost] : null]}>
             {p2pmdRoom.role}
           </Text>
           <Pressable
             accessibilityRole='button'
             accessibilityLabel={`Peers: ${p2pmdParticipants ?? 'unknown'}`}
             accessibilityHint='Open the room peer dashboard'
-            style={styles.p2pmdWorkspaceParticipants}
+            style={[styles.p2pmdWorkspaceParticipants, p2pmdTheme?.p2pmdWorkspaceParticipants]}
             onPress={onP2pmdOpenPeerDashboard}
           >
-            <Text style={styles.p2pmdWorkspaceParticipantsText}>
+            <Text style={[styles.p2pmdWorkspaceParticipantsText, p2pmdTheme?.p2pmdWorkspaceParticipantsText]}>
               Peers: {p2pmdParticipants ?? '-'}
             </Text>
           </Pressable>
@@ -2653,49 +2706,54 @@ export default function App () {
           />
         </View>}
 
-        {!isP2pmdLandscapeSlides && <View style={styles.p2pmdWorkspaceMeta}>
+        {!isP2pmdLandscapeSlides && <View style={[styles.p2pmdWorkspaceMeta, p2pmdTheme?.p2pmdWorkspaceMeta]}>
           <View style={styles.p2pmdRoomIdentity}>
             <View style={styles.p2pmdWorkspaceKeyRow}>
-              <Text style={styles.p2pmdWorkspaceKeyLabel}>Key</Text>
-              <Text numberOfLines={1} ellipsizeMode='middle' style={styles.p2pmdWorkspaceKey}>
+              <Text style={[styles.p2pmdWorkspaceKeyLabel, p2pmdTheme?.p2pmdWorkspaceKeyLabel]}>Key</Text>
+              <Text numberOfLines={1} ellipsizeMode='middle' style={[styles.p2pmdWorkspaceKey, p2pmdTheme?.p2pmdWorkspaceKey]}>
                 {p2pmdRoom.key}
               </Text>
             </View>
-            <Text numberOfLines={1} ellipsizeMode='middle' style={styles.p2pmdWorkspaceUrl}>
+            <Text numberOfLines={1} ellipsizeMode='middle' style={[styles.p2pmdWorkspaceUrl, p2pmdTheme?.p2pmdWorkspaceUrl]}>
               {p2pmdRoom.localUrl}
             </Text>
             {p2pmdPublishUrl && (
-              <View style={styles.p2pmdPublishedUrlRow}>
-                <Text style={styles.p2pmdPublishedUrlLabel}>Published</Text>
-                <Text numberOfLines={1} ellipsizeMode='middle' style={styles.p2pmdPublishedUrl}>
+              <Pressable
+                accessibilityHint='Copies the published link'
+                accessibilityRole='button'
+                onPress={() => copyPublishedLink(p2pmdPublishUrl)}
+                style={styles.p2pmdPublishedUrlRow}
+              >
+                <Text style={[styles.p2pmdPublishedUrlLabel, p2pmdTheme?.p2pmdPublishedUrlLabel]}>Published</Text>
+                <Text numberOfLines={1} ellipsizeMode='middle' style={[styles.p2pmdPublishedUrl, p2pmdTheme?.p2pmdPublishedUrl]}>
                   {p2pmdPublishUrl}
                 </Text>
-              </View>
+              </Pressable>
             )}
-            <Text numberOfLines={1} style={styles.p2pmdWorkspaceSyncStatus}>
+            <Text numberOfLines={1} style={[styles.p2pmdWorkspaceSyncStatus, p2pmdTheme?.p2pmdWorkspaceSyncStatus]}>
               {p2pmdSyncStatus}
             </Text>
           </View>
           <Pressable
-            style={styles.p2pmdMetaButton}
+            style={[styles.p2pmdMetaButton, p2pmdTheme?.p2pmdMetaButton]}
             onPress={onP2pmdPublishToHyper}
             disabled={isBooting || isLoading || isP2pmdPublishing}
           >
-            <Text style={styles.p2pmdMetaButtonText}>Publish</Text>
+            <Text style={[styles.p2pmdMetaButtonText, p2pmdTheme?.p2pmdMetaButtonText]}>Publish</Text>
           </Pressable>
           <Pressable
-            style={styles.p2pmdMetaButton}
+            style={[styles.p2pmdMetaButton, p2pmdTheme?.p2pmdMetaButton]}
             onPress={() => void onP2pmdShareRoom()}
             disabled={isBooting || isLoading}
           >
-            <Text style={styles.p2pmdMetaButtonText}>Share</Text>
+            <Text style={[styles.p2pmdMetaButtonText, p2pmdTheme?.p2pmdMetaButtonText]}>Share</Text>
           </Pressable>
           <Pressable
-            style={[styles.p2pmdMetaButton, styles.p2pmdMetaButtonDanger]}
+            style={[styles.p2pmdMetaButton, p2pmdTheme?.p2pmdMetaButton, styles.p2pmdMetaButtonDanger, p2pmdTheme?.p2pmdMetaButtonDanger]}
             onPress={() => void onP2pmdRoomDisconnect()}
             disabled={isBooting || isLoading}
           >
-            <Text style={styles.p2pmdMetaButtonText}>Leave</Text>
+            <Text style={[styles.p2pmdMetaButtonText, p2pmdTheme?.p2pmdMetaButtonText]}>Leave</Text>
           </Pressable>
         </View>}
         <WebView
@@ -2705,10 +2763,14 @@ export default function App () {
             html: p2pmdEditorHtmlWithRoomBase,
             baseUrl: p2pmdEditorBaseUrl
           }}
+          // The page cannot see the browser's own light/dark/system setting,
+          // so it is told. Set before first paint so the editor never flashes
+          // the wrong theme on the way in.
+          injectedJavaScriptBeforeContentLoaded={p2pmdThemeScript(browserIsDark)}
           allowsFullscreenVideo={true}
           cacheEnabled={false}
           textZoom={100}
-          style={styles.p2pmdWorkspaceWebView}
+          style={[styles.p2pmdWorkspaceWebView, p2pmdTheme?.p2pmdWorkspaceWebView]}
           onMessage={(event) => onP2pmdWebViewMessage(event.nativeEvent.data)}
           onError={(event) => {
             setStatus(`P2PMD WebView failed: ${event.nativeEvent.description}`)
@@ -2940,11 +3002,15 @@ export default function App () {
               <ScrollView
                 style={[
                   styles.browserContentPage,
-                  activeTab !== 'p2pmd' ? { backgroundColor: browserChrome.surface } : null
+                  // P2PMD paints its own page, so it gets that colour rather
+                  // than the browser surface. Skipping it entirely left the
+                  // scroll view transparent and the shell showed through as a
+                  // dark frame around the light content.
+                  { backgroundColor: activeTab === 'p2pmd' ? p2pmdPageColor : browserChrome.surface }
                 ]}
                 contentContainerStyle={[
-                styles.content,
-                activeTab === 'p2pmd' ? styles.p2pmdAppContent : null
+                  styles.content,
+                  activeTab === 'p2pmd' ? [styles.p2pmdAppContent, p2pmdTheme?.p2pmdAppContent] : null
                 ]}
                 keyboardDismissMode='on-drag'
               >
@@ -3046,23 +3112,23 @@ export default function App () {
                   </View>
                 )}
                 {activeTab === 'p2pmd' && (
-                  <View style={styles.p2pmdSection}>
+                  <View style={[styles.p2pmdSection, p2pmdTheme?.p2pmdSection]}>
                     <View style={styles.p2pmdHeader}>
                       <View style={styles.p2pmdHeaderCopy}>
-                        <Text style={[styles.sectionTitle, styles.p2pmdTitle]}>P2PMD</Text>
-                        <Text style={styles.helperText}>
+                        <Text style={[styles.sectionTitle, p2pmdTheme?.sectionTitle, styles.p2pmdTitle, p2pmdTheme?.p2pmdTitle]}>P2PMD</Text>
+                        <Text style={[styles.helperText, p2pmdTheme?.helperText]}>
                           A real-time peer-to-peer Markdown editor for writing notes and collaboration.
                         </Text>
                       </View>
-                      <Text style={[styles.roomPill, p2pmdRoom ? styles.roomPillLive : null]}>
+                      <Text style={[styles.roomPill, p2pmdTheme?.roomPill, p2pmdRoom ? styles.roomPillLive : null]}>
                         {p2pmdRoom ? 'live' : 'ready'}
                       </Text>
                     </View>
                     {!p2pmdRoom && (
                       <View style={styles.p2pmdSetupBlock}>
-                        <Text style={styles.emptyRoomTitle}>Start a collaborative note</Text>
-                        <Text style={styles.helperText}>
-                          Create a room to host from this phone, or paste an hs:// key to join a room hosted elsewhere.
+                        <Text style={[styles.emptyRoomTitle, p2pmdTheme?.emptyRoomTitle]}>Start a collaborative note</Text>
+                        <Text style={[styles.helperText, p2pmdTheme?.helperText]}>
+                          Create a note to host from this phone, or paste an hs:// key to join a note hosted elsewhere.
                         </Text>
                         <View style={styles.p2pmdActionRow}>
                           <Pressable
@@ -3070,29 +3136,29 @@ export default function App () {
                             onPress={() => void onP2pmdRoomCreate()}
                             disabled={isBooting || isLoading}
                           >
-                            <Text style={styles.p2pmdPrimaryActionText}>Create Room</Text>
+                            <Text style={styles.p2pmdPrimaryActionText}>Create Note</Text>
                           </Pressable>
                           <Pressable
-                            style={[styles.p2pmdTextAction, isBooting || isLoading ? styles.p2pmdActionDisabled : null]}
+                            style={[styles.p2pmdTextAction, p2pmdTheme?.p2pmdTextAction, isBooting || isLoading ? styles.p2pmdActionDisabled : null]}
                             onPress={() => void onP2pmdRoomRefresh()}
                             disabled={isBooting || isLoading}
                           >
-                            <Text style={styles.p2pmdTextActionText}>Refresh</Text>
+                            <Text style={[styles.p2pmdTextActionText, p2pmdTheme?.p2pmdTextActionText]}>Refresh</Text>
                           </Pressable>
                         </View>
                       </View>
                     )}
 
                     <View style={styles.p2pmdDividerRow}>
-                      <View style={styles.p2pmdDividerLine} />
-                      <Text style={styles.p2pmdDividerText}>or join</Text>
-                      <View style={styles.p2pmdDividerLine} />
+                      <View style={[styles.p2pmdDividerLine, p2pmdTheme?.p2pmdDividerLine]} />
+                      <Text style={[styles.p2pmdDividerText, p2pmdTheme?.p2pmdDividerText]}>or join</Text>
+                      <View style={[styles.p2pmdDividerLine, p2pmdTheme?.p2pmdDividerLine]} />
                     </View>
 
                     <View style={styles.p2pmdSetupBlock}>
-                      <Text style={styles.fieldLabel}>Join existing room</Text>
+                      <Text style={[styles.fieldLabel, p2pmdTheme?.fieldLabel]}>Join existing note</Text>
                       <TextInput
-                        style={[styles.input, styles.p2pmdInput]}
+                        style={[styles.input, styles.p2pmdInput, p2pmdTheme?.p2pmdInput]}
                         autoCapitalize='none'
                         autoCorrect={false}
                         value={p2pmdJoinKey}
@@ -3101,7 +3167,7 @@ export default function App () {
                           if (p2pmdSetupError) setP2pmdSetupError(null)
                         }}
                         placeholderTextColor='#6f7484'
-                        placeholder='hs://... room key'
+                        placeholder='hs://... note key'
                       />
                       <View style={styles.p2pmdJoinTools}>
                         <Pressable
@@ -3110,11 +3176,12 @@ export default function App () {
                           onPress={() => void onP2pmdPasteRoomKey()}
                           style={({ pressed }) => [
                             styles.p2pmdJoinTool,
-                            pressed ? styles.p2pmdRecentRoomPressed : null,
+                            p2pmdTheme?.p2pmdJoinTool,
+                            pressed ? [styles.p2pmdRecentRoomPressed, p2pmdTheme?.p2pmdRecentRoomPressed] : null,
                             isBooting || isLoading ? styles.p2pmdActionDisabled : null
                           ]}
                         >
-                          <Text style={styles.p2pmdTextActionText}>Paste</Text>
+                          <Text style={[styles.p2pmdTextActionText, p2pmdTheme?.p2pmdTextActionText]}>Paste</Text>
                         </Pressable>
                         <Pressable
                           accessibilityRole='button'
@@ -3122,37 +3189,39 @@ export default function App () {
                           onPress={() => void onP2pmdOpenScanner()}
                           style={({ pressed }) => [
                             styles.p2pmdJoinTool,
-                            pressed ? styles.p2pmdRecentRoomPressed : null,
+                            p2pmdTheme?.p2pmdJoinTool,
+                            pressed ? [styles.p2pmdRecentRoomPressed, p2pmdTheme?.p2pmdRecentRoomPressed] : null,
                             isBooting || isLoading ? styles.p2pmdActionDisabled : null
                           ]}
                         >
-                          <Text style={styles.p2pmdTextActionText}>Scan QR</Text>
+                          <Text style={[styles.p2pmdTextActionText, p2pmdTheme?.p2pmdTextActionText]}>Scan QR</Text>
                         </Pressable>
                       </View>
                       {p2pmdSetupError && (
-                        <Text selectable={true} style={styles.p2pmdSetupError}>
+                        <Text selectable={true} style={[styles.p2pmdSetupError, p2pmdTheme?.p2pmdSetupError]}>
                           {p2pmdSetupError}
                         </Text>
                       )}
                       <Pressable
                         style={[
                           styles.p2pmdJoinAction,
+                          p2pmdTheme?.p2pmdJoinAction,
                           isBooting || isLoading || !p2pmdJoinKey.trim() ? styles.p2pmdActionDisabled : null
                         ]}
                         onPress={() => void onP2pmdRoomJoin()}
                         disabled={isBooting || isLoading || !p2pmdJoinKey.trim()}
                       >
-                        <Text style={styles.p2pmdJoinActionText}>Join Room</Text>
+                        <Text style={[styles.p2pmdJoinActionText, p2pmdTheme?.p2pmdJoinActionText]}>Join Note</Text>
                       </Pressable>
                     </View>
 
                     {p2pmdRoomHistory.length > 0 && (
                       <View style={styles.p2pmdRecentRooms}>
-                        <Text style={styles.fieldLabel}>Recent rooms</Text>
+                        <Text style={[styles.fieldLabel, p2pmdTheme?.fieldLabel]}>Recent notes</Text>
                         {p2pmdRoomHistory.map((room) => (
                           <Pressable
                             key={room.key}
-                            accessibilityLabel={`Rejoin P2PMD room ${formatP2pmdRoomHistoryKey(room.key)}`}
+                            accessibilityLabel={`Reopen P2PMD note ${room.label || formatP2pmdRoomHistoryKey(room.key)}`}
                             accessibilityRole='button'
                             disabled={isBooting || isLoading}
                             onPress={() => void (room.role === 'host'
@@ -3160,14 +3229,15 @@ export default function App () {
                               : onP2pmdRoomJoin(room.key))}
                             style={({ pressed }) => [
                               styles.p2pmdRecentRoom,
-                              pressed ? styles.p2pmdRecentRoomPressed : null,
+                              p2pmdTheme?.p2pmdRecentRoom,
+                              pressed ? [styles.p2pmdRecentRoomPressed, p2pmdTheme?.p2pmdRecentRoomPressed] : null,
                               isBooting || isLoading ? styles.p2pmdActionDisabled : null
                             ]}
                           >
-                            <Text numberOfLines={1} style={styles.p2pmdRecentRoomKey}>
-                              {formatP2pmdRoomHistoryKey(room.key)}
+                            <Text numberOfLines={1} style={[styles.p2pmdRecentRoomKey, p2pmdTheme?.p2pmdRecentRoomKey]}>
+                              {room.label || formatP2pmdRoomHistoryKey(room.key)}
                             </Text>
-                            <Text style={styles.p2pmdRecentRoomAction}>
+                            <Text style={[styles.p2pmdRecentRoomAction, p2pmdTheme?.p2pmdRecentRoomAction]}>
                               {room.role === 'host' ? 'Reopen' : 'Join'}
                             </Text>
                           </Pressable>
