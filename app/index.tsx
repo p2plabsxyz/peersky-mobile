@@ -1970,7 +1970,7 @@ export default function App () {
   function applyP2pmdJoinKey (value: string) {
     const roomKey = normalizeP2pmdRoomKey(value)
     if (!roomKey) {
-      setP2pmdSetupError('Invalid room key. Use an hs:// room key.')
+      setP2pmdSetupError('Invalid note key. Use an hs:// note key.')
       return false
     }
 
@@ -1983,7 +1983,7 @@ export default function App () {
     try {
       const clipboardValue = await Clipboard.getString()
       if (!clipboardValue.trim()) {
-        setP2pmdSetupError('The clipboard does not contain a room key.')
+        setP2pmdSetupError('The clipboard does not contain a note key.')
         return
       }
       applyP2pmdJoinKey(clipboardValue)
@@ -1997,7 +1997,7 @@ export default function App () {
       ? p2pmdCameraPermission
       : await requestP2pmdCameraPermission()
     if (!permission.granted) {
-      setP2pmdSetupError('Camera permission is required to scan a room key.')
+      setP2pmdSetupError('Camera permission is required to scan a note key.')
       return
     }
 
@@ -3092,7 +3092,7 @@ export default function App () {
                       <View style={styles.p2pmdSetupBlock}>
                         <Text style={styles.emptyRoomTitle}>Start a collaborative note</Text>
                         <Text style={styles.helperText}>
-                          Create a room to host from this phone, or paste an hs:// key to join a room hosted elsewhere.
+                          Create a note to host from this phone, or paste an hs:// key to join a note hosted elsewhere.
                         </Text>
                         <View style={styles.p2pmdActionRow}>
                           <Pressable
@@ -3100,7 +3100,7 @@ export default function App () {
                             onPress={() => void onP2pmdRoomCreate()}
                             disabled={isBooting || isLoading}
                           >
-                            <Text style={styles.p2pmdPrimaryActionText}>Create Room</Text>
+                            <Text style={styles.p2pmdPrimaryActionText}>Create Note</Text>
                           </Pressable>
                           <Pressable
                             style={[styles.p2pmdTextAction, isBooting || isLoading ? styles.p2pmdActionDisabled : null]}
@@ -3131,7 +3131,7 @@ export default function App () {
                           if (p2pmdSetupError) setP2pmdSetupError(null)
                         }}
                         placeholderTextColor='#6f7484'
-                        placeholder='hs://... room key'
+                        placeholder='hs://... note key'
                       />
                       <View style={styles.p2pmdJoinTools}>
                         <Pressable
@@ -3172,17 +3172,17 @@ export default function App () {
                         onPress={() => void onP2pmdRoomJoin()}
                         disabled={isBooting || isLoading || !p2pmdJoinKey.trim()}
                       >
-                        <Text style={styles.p2pmdJoinActionText}>Join Room</Text>
+                        <Text style={styles.p2pmdJoinActionText}>Join Note</Text>
                       </Pressable>
                     </View>
 
                     {p2pmdRoomHistory.length > 0 && (
                       <View style={styles.p2pmdRecentRooms}>
-                        <Text style={styles.fieldLabel}>Recent rooms</Text>
+                        <Text style={styles.fieldLabel}>Recent notes</Text>
                         {p2pmdRoomHistory.map((room) => (
                           <Pressable
                             key={room.key}
-                            accessibilityLabel={`Rejoin P2PMD room ${formatP2pmdRoomHistoryKey(room.key)}`}
+                            accessibilityLabel={`Reopen P2PMD note ${formatP2pmdRoomHistoryKey(room.key)}`}
                             accessibilityRole='button'
                             disabled={isBooting || isLoading}
                             onPress={() => void (room.role === 'host'
