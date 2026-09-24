@@ -63,10 +63,10 @@ describe('p2pmd mobile editor page routing', () => {
     assert.match(html, /data-format="latex"/)
     assert.match(html, /data-format="inline-math"/)
     assert.match(html, /data-format="block-math"/)
-    // The two templates are buttons in the document bar now, not entries
-    // behind a "T" menu that had to be opened first.
-    assert.match(html, /data-template="research-paper-md"/)
-    assert.match(html, /data-template="technical-doc-md"/)
+    // Both templates live behind one button in the document bar, and the menu
+    // is built from the template list rather than written out here.
+    assert.match(html, /data-menu="template"/)
+    assert.match(html, /id="template-menu"/)
     assert.doesNotMatch(html, /id="latex-template-menu"/)
     assert.match(html, /Research Paper/)
     assert.match(html, /Technical Documentation/)

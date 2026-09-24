@@ -1474,7 +1474,7 @@ export function getP2pmdEditorPage () {
       /* Scrollable, but a scrollbar over the keyboard looks like damage. */
       #keyboard-toolbar::-webkit-scrollbar { display: none; }
       #latex-toolbar-group { display: contents; }
-      #latex-template-menu {
+      #template-menu {
         position: absolute;
         z-index: 8;
         top: 46px;
@@ -1486,7 +1486,7 @@ export function getP2pmdEditorPage () {
         background: var(--panel-raised);
         box-shadow: 0 10px 28px var(--shadow-soft);
       }
-      #latex-template-menu button {
+      #template-menu button {
         display: block;
         width: 100%;
         padding: 10px 12px;
@@ -1496,7 +1496,8 @@ export function getP2pmdEditorPage () {
         color: var(--ink);
         text-align: left;
       }
-      #latex-template-menu button:active { background: var(--panel-hover); }
+      #template-menu button:active { background: var(--panel-hover); }
+      #template-menu button:disabled { opacity: 0.42; }
       .template-label { display: block; font: 700 14px/1.3 var(--ui-font); }
       .template-description { display: block; margin-top: 2px; color: var(--ink-muted); font: 12px/1.35 var(--ui-font); }
       .latex-mode-symbol { font-size: 20px; font-weight: 500; }
@@ -1523,20 +1524,18 @@ export function getP2pmdEditorPage () {
     <div class="app-shell">
       <main class="editor-card">
         <div id="formatting-toolbar" role="toolbar" aria-label="Document">
-          <button type="button" data-template="technical-doc-md" title="Technical documentation" aria-label="Technical documentation">
-            <svg class="toolbar-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M14 4.5V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2h5.5zm-3 0A1.5 1.5 0 0 1 9.5 3V1H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V4.5zM8.646 6.646a.5.5 0 0 1 .708 0l2 2a.5.5 0 0 1 0 .708l-2 2a.5.5 0 0 1-.708-.708L10.293 9zm-1.292 0a.5.5 0 0 0-.708 0l-2 2a.5.5 0 0 0 0 .708l2 2a.5.5 0 0 0 .708-.708L5.707 9l1.647-1.646a.5.5 0 0 0 0-.708"/></svg>
-          </button>
-          <button type="button" data-template="research-paper-md" title="Research paper" aria-label="Research paper">
-            <svg class="toolbar-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 10.5a.5.5 0 0 1 .5-.5h2a.5.5 0 0 1 0 1h-2a.5.5 0 0 1-.5-.5m0-2a.5.5 0 0 1 .5-.5h5a.5.5 0 0 1 0 1h-5a.5.5 0 0 1-.5-.5m0-2a.5.5 0 0 1 .5-.5h5a.5.5 0 0 1 0 1h-5a.5.5 0 0 1-.5-.5m0-2a.5.5 0 0 1 .5-.5h5a.5.5 0 0 1 0 1h-5a.5.5 0 0 1-.5-.5"/><path d="M3 0h10a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2m0 1a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1z"/></svg>
-          </button>
-          <div class="toolbar-divider" aria-hidden="true"></div>
           <button type="button" data-format="image" title="Insert image" aria-label="Insert image">
             <svg class="toolbar-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M6.002 5.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0"/><path d="M2.002 1a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2zm12 1a1 1 0 0 1 1 1v6.5l-3.777-1.947a.5.5 0 0 0-.577.093l-3.71 3.71-2.66-1.772a.5.5 0 0 0-.63.062L1.002 12V3a1 1 0 0 1 1-1z"/></svg>
           </button>
           <button type="button" data-format="slides" title="View as slides" aria-label="View as slides">
-            <svg class="toolbar-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V4a1 1 0 0 0-1-1zm0-1h10a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/><path d="M2 6h12v1H2zm0 3h12v1H2z"/><circle cx="5" cy="4.5" r=".8"/><circle cx="8" cy="4.5" r=".8"/><circle cx="11" cy="4.5" r=".8"/></svg>
+            <svg class="toolbar-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0a.5.5 0 0 1 .5.5V2h5A1.5 1.5 0 0 1 15 3.5v7A1.5 1.5 0 0 1 13.5 12H9.05l1.9 3.8a.5.5 0 0 1-.9.4L8.5 13h-1l-1.55 3.2a.5.5 0 0 1-.9-.4L7 12H2.5A1.5 1.5 0 0 1 1 10.5v-7A1.5 1.5 0 0 1 2.5 2h5V.5A.5.5 0 0 1 8 0M2.5 3a.5.5 0 0 0-.5.5v7a.5.5 0 0 0 .5.5h11a.5.5 0 0 0 .5-.5v-7a.5.5 0 0 0-.5-.5z"/></svg>
+          </button>
+          <div class="toolbar-divider" aria-hidden="true"></div>
+          <button type="button" data-menu="template" title="Document templates" aria-label="Document templates" aria-haspopup="true" aria-expanded="false">
+            <svg class="toolbar-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 7a.5.5 0 0 0 0 1h5a.5.5 0 0 0 0-1zM5 9.5a.5.5 0 0 1 .5-.5h5a.5.5 0 0 1 0 1h-5a.5.5 0 0 1-.5-.5m0 2a.5.5 0 0 1 .5-.5h2a.5.5 0 0 1 0 1h-2a.5.5 0 0 1-.5-.5"/><path d="M9.5 0H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V4.5zM9 1v2a1 1 0 0 0 1 1h3v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1z"/></svg>
           </button>
         </div>
+        <div id="template-menu" role="menu" aria-label="Document templates" hidden></div>
         <div id="keyboard-toolbar" role="toolbar" aria-label="Markdown formatting" hidden>
           <button type="button" data-format="bold" title="Bold" aria-label="Bold">
             <svg class="toolbar-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M8.21 13c2.106 0 3.412-1.087 3.412-2.823 0-1.306-.984-2.283-2.324-2.386v-.055a2.176 2.176 0 0 0 1.852-2.14c0-1.51-1.162-2.46-3.014-2.46H3.843V13zM5.908 4.674h1.696c.963 0 1.517.451 1.517 1.244 0 .834-.629 1.32-1.73 1.32H5.908V4.673zm0 6.788V8.598h1.73c1.217 0 1.88.492 1.88 1.415 0 .943-.643 1.449-1.832 1.449H5.907z"/></svg>
@@ -1645,6 +1644,7 @@ export function getP2pmdEditorPage () {
       const latexModeButton = formattingToolbar.querySelector('[data-format="latex"]')
       const latexToolbarGroup = document.getElementById('latex-toolbar-group')
       const keyboardToolbar = document.getElementById('keyboard-toolbar')
+      const templateMenu = document.getElementById('template-menu')
       const imageUploadInput = document.getElementById('image-upload-input')
       const lineGutter = document.getElementById('line-gutter')
       const peerDashboardBackdrop = document.getElementById('peer-dashboard-backdrop')
@@ -2687,6 +2687,56 @@ export function getP2pmdEditorPage () {
         return text || 'image'
       }
 
+      function renderTemplateMenu() {
+        if (!templateMenu) return
+
+        for (const template of templates) {
+          const button = document.createElement('button')
+          button.type = 'button'
+          button.dataset.template = template.id
+          button.setAttribute('role', 'menuitem')
+
+          const label = document.createElement('span')
+          label.className = 'template-label'
+          label.textContent = template.label
+
+          const description = document.createElement('span')
+          description.className = 'template-description'
+          description.textContent = template.description
+
+          button.append(label, description)
+          templateMenu.append(button)
+        }
+      }
+
+      function setTemplateMenuOpen(open) {
+        if (!templateMenu) return
+        // A client can only replace the document once the host has turned
+        // LaTeX mode on. Leaving the entries tappable made them look broken;
+        // greying them out says the same thing honestly.
+        if (open) {
+          const allowed = roomRole === 'host' || latexModeEnabled
+          for (const item of templateMenu.querySelectorAll('button[data-template]')) {
+            item.disabled = !allowed
+            item.title = allowed ? '' : 'The host has not turned on LaTeX mode yet'
+          }
+        }
+        templateMenu.hidden = !open
+        const trigger = formattingToolbar.querySelector('[data-menu="template"]')
+        if (trigger) trigger.setAttribute('aria-expanded', String(open))
+      }
+
+      function toggleTemplateMenu() {
+        setTemplateMenuOpen(templateMenu ? templateMenu.hidden : false)
+      }
+
+      function closeTemplateMenuOnOutsideClick(event) {
+        if (!templateMenu || templateMenu.hidden) return
+        const target = event.target
+        if (templateMenu.contains(target) || target?.closest?.('[data-menu="template"]')) return
+        setTemplateMenuOpen(false)
+      }
+
       function applyTemplate(templateId) {
         const template = templates.find((entry) => entry.id === templateId)
         if (!template) return
@@ -2697,6 +2747,7 @@ export function getP2pmdEditorPage () {
         }
 
         if (roomRole === 'host') setLatexMode(true)
+        setTemplateMenuOpen(false)
         replaceDocumentRange(0, input.value.length, template.content, 0, 0)
       }
 
@@ -2736,11 +2787,15 @@ export function getP2pmdEditorPage () {
       }
 
       function getToolbarButton(event) {
-        return event.target?.closest?.('button[data-format], button[data-template]') || null
+        return event.target?.closest?.('button[data-format], button[data-template], button[data-menu]') || null
       }
 
       function runToolbarButton(button) {
         if (!button || viewMode !== 'edit') return false
+        if (button.dataset.menu === 'template') {
+          toggleTemplateMenu()
+          return true
+        }
         if (button.dataset.template) {
           applyTemplate(button.dataset.template)
           return true
@@ -3507,6 +3562,7 @@ export function getP2pmdEditorPage () {
         preview.hidden = viewMode !== 'preview'
         slidesPreview.hidden = viewMode !== 'slides'
         formattingToolbar.hidden = viewMode !== 'edit'
+        if (viewMode !== 'edit') setTemplateMenuOpen(false)
         // Leaving edit mode closes the keyboard, and the bar has to go with
         // it rather than hang over the preview.
         syncKeyboardToolbar()
@@ -3638,6 +3694,7 @@ export function getP2pmdEditorPage () {
       }
 
       async function initializeEditor() {
+        renderTemplateMenu()
         updateLatexControls()
         peerDisplayName.value = localAuthor.name
         renderPeerDashboard()
@@ -3686,6 +3743,12 @@ export function getP2pmdEditorPage () {
         })
       }
 
+      templateMenu?.addEventListener('click', (event) => {
+        const button = event.target?.closest?.('button[data-template]')
+        if (button) applyTemplate(button.dataset.template)
+      })
+      document.addEventListener('click', closeTemplateMenuOnOutsideClick)
+
       input.addEventListener('focus', scheduleKeyboardToolbarSync)
       input.addEventListener('blur', scheduleKeyboardToolbarSync)
       if (window.visualViewport) {
@@ -3693,6 +3756,7 @@ export function getP2pmdEditorPage () {
         window.visualViewport.addEventListener('scroll', syncKeyboardToolbar)
       }
       document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') setTemplateMenuOpen(false)
         if (event.key === 'Escape' && !peerDashboardBackdrop.hidden) {
           setPeerDashboardVisible(false)
         }

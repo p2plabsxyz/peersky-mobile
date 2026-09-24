@@ -17,8 +17,32 @@ const keyboardBar = server.slice(
 )
 
 test('the document bar holds only what you choose before writing', () => {
-  const buttons = [...documentBar.matchAll(/data-(?:format|template)="([a-z0-9-]+)"/g)].map((m) => m[1])
-  assert.deepEqual(buttons, ['technical-doc-md', 'research-paper-md', 'image', 'slides'])
+  const buttons = [...documentBar.matchAll(/data-(?:format|menu)="([a-z0-9-]+)"/g)].map((m) => m[1])
+  assert.deepEqual(buttons, ['image', 'slides', 'template'])
+})
+
+test('the two document kinds sit behind one button', () => {
+  // Two templates as two toolbar icons meant three near-identical page glyphs
+  // in a row. One button that opens them keeps the bar readable.
+  assert.match(documentBar, /data-menu="template"[^>]*aria-haspopup="true"/)
+  assert.match(server, /<div id="template-menu" role="menu"/)
+  assert.match(server, /button\.dataset\.template = template\.id/)
+  // Built from the template list, so the labels stay whatever templates.mjs
+  // says rather than being retyped here.
+  assert.match(server, /label\.textContent = template\.label/)
+})
+
+test('a template nobody is allowed to apply looks unavailable', () => {
+  // applyTemplate refuses for a client until the host turns LaTeX mode on.
+  // Left tappable, the entries just did nothing.
+  assert.match(server, /const allowed = roomRole === 'host' \|\| latexModeEnabled/)
+  assert.match(server, /item\.disabled = !allowed/)
+  assert.match(server, /#template-menu button:disabled \{ opacity/)
+})
+
+test('slides and templates do not share a glyph', () => {
+  const icons = [...documentBar.matchAll(/<path d="([^"]+)"/g)].map((m) => m[1])
+  assert.equal(new Set(icons).size, icons.length, 'two buttons draw the same path')
 })
 
 test('every formatting button moved to the keyboard bar, none were dropped', () => {
