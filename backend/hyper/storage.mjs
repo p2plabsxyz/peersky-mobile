@@ -6,11 +6,14 @@ import {
   getHyperStoragePath,
   getPrivateHyperRuntime,
   getPrivateHyperStoragePath,
+  getPrivateDriveWarningForDriveId,
+  getPrivateDriveWarnings,
   getSyncedPrivateHyperdrive,
   getSyncedPrivateHyperStoragePath,
   withHyperRuntimeMaintenance,
   withHyperRuntimeOperation
 } from './runtime.mjs'
+import { normalizeDriveAddressId } from './runtime-routing.mjs'
 import { resetHyperFetch, stopHyperAssetServer } from './fetch.mjs'
 import {
   clearHyperArchive,
@@ -60,8 +63,25 @@ export async function listP2pAppData ({
       source: archiveSource
     })
 
-    return { ...appData, archive }
+    return attachP2pDriveWarnings({ ...appData, archive })
   })
+}
+
+function attachP2pDriveWarnings (response) {
+  const warnings = getPrivateDriveWarnings()
+  if (warnings.length === 0 || typeof response !== 'object') return response
+
+  for (const item of Array.isArray(response.items) ? response.items : []) {
+    if (!Array.isArray(item.drives)) continue
+    for (const driveSummary of item.drives) {
+      const driveId = normalizeDriveAddressId(driveSummary.url)
+      if (!driveId) continue
+      const warning = getPrivateDriveWarningForDriveId(driveId)
+      if (warning) driveSummary.warning = warning
+    }
+  }
+
+  return { ...response, warning: warnings[0].message }
 }
 
 export async function deleteP2pAppData ({ appId } = {}, options = {}) {

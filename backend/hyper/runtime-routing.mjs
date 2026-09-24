@@ -35,6 +35,8 @@ export function createSyncedPrivateHyperRuntimeOptions (storage) {
   }
 }
 
+const HEX_DRIVE_KEY = /^[0-9a-f]{64}$/
+
 export function normalizeDriveAddressId (addressOrHostname) {
   let hostname
   try {
@@ -100,11 +102,15 @@ function normalizeMarkerDrives (entries) {
     if (seen.has(driveId)) continue
     seen.add(driveId)
     const encrypted = entry.encrypted !== false
+    const key = encrypted && typeof entry.key === 'string' && HEX_DRIVE_KEY.test(entry.key)
+      ? entry.key.toLowerCase()
+      : null
     drives.push({
       driveId,
       encrypted,
       announce: entry.announce !== false && encrypted,
-      source: typeof entry.source === 'string' ? entry.source : null
+      source: typeof entry.source === 'string' ? entry.source : null,
+      ...(key ? { key } : {})
     })
   }
 

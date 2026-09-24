@@ -10,8 +10,8 @@ import z32 from 'z32'
 import { createMobilePairingCode } from '../../app/settings/identity-pairing.mjs'
 import { verifyIdentityTransferSignature } from '../../backend/backup/identity-transfer.mjs'
 import { extractTransferredPrivateDrive, adoptTransferredPrivateDrive } from '../../backend/backup/private-drive-import.mjs'
-import { resetPrivateDriveKeyCache } from '../../backend/hyper/private-keys.mjs'
-import { adoptedStoragePathFor } from '../../backend/hyper/runtime-routing.mjs'
+import { resetPrivateDriveKeyCache, getPrivateDriveKeyRecord } from '../../backend/hyper/private-keys.mjs'
+import { adoptedStoragePathFor, readSyncedPrivateAdoptedDrives } from '../../backend/hyper/runtime-routing.mjs'
 import { commitIdentityRestore, restoreIdentityFromBackup } from '../../backend/backup/restore.mjs'
 
 function canonicalJson (value) {
@@ -255,9 +255,12 @@ describe('Link Device Identity Transfer', () => {
       assert.equal(result.adopted, true)
       assert.equal(result.driveId, driveId)
 
-      const persisted = JSON.parse(readFileSync(join(targetPath, 'private-drive-key.json'), 'utf8'))
-      assert.equal(persisted.key, 'f'.repeat(64))
-      assert.equal(persisted.driveId, driveId)
+      const adopted = readSyncedPrivateAdoptedDrives(targetPath)
+      assert.equal(adopted.length, 1)
+      assert.equal(adopted[0].key, 'f'.repeat(64))
+      assert.equal(adopted[0].driveId, driveId)
+      assert.equal(adopted[0].encrypted, true)
+      assert.deepEqual(getPrivateDriveKeyRecord(targetPath), { ok: false })
     } finally {
       resetPrivateDriveKeyCache()
       rmSync(sourcePath, { recursive: true, force: true })
@@ -355,12 +358,13 @@ describe('Link Device Identity Transfer', () => {
       const result = adoptTransferredPrivateDrive(sourcePath, targetPath)
       assert.equal(result.adopted, true)
 
-      const sourceContent = JSON.parse(readFileSync(join(sourcePath, 'private-drive-key.json'), 'utf8'))
-      const targetContent = JSON.parse(readFileSync(join(targetPath, 'private-drive-key.json'), 'utf8'))
-      assert.equal(targetContent.key, sourceContent.key)
-      assert.equal(targetContent.driveId, sourceContent.driveId)
-      assert.equal(targetContent.key, 'a'.repeat(64))
-      assert.equal(targetContent.driveId, driveId)
+      const adopted = readSyncedPrivateAdoptedDrives(targetPath)
+      assert.equal(adopted.length, 1)
+      assert.equal(adopted[0].key, 'a'.repeat(64))
+      assert.equal(adopted[0].driveId, driveId)
+      assert.equal(adopted[0].encrypted, true)
+      assert.deepEqual(getPrivateDriveKeyRecord(targetPath), { ok: false })
+      assert.equal(existsSync(join(targetPath, 'private-drive-key.json')), false)
     } finally {
       resetPrivateDriveKeyCache()
       rmSync(sourcePath, { recursive: true, force: true })
@@ -388,12 +392,12 @@ describe('Link Device Identity Transfer', () => {
       assert.equal(result.driveId, driveId)
       assert.equal(result.encrypted, false)
 
-      const persisted = JSON.parse(readFileSync(join(targetPath, 'private-drive-key.json'), 'utf8'))
-      assert.equal(persisted.version, 3)
-      assert.equal(persisted.key, null)
-      assert.equal(persisted.encrypted, false)
-      assert.equal(persisted.source, 'desktop')
-      assert.equal(persisted.driveId, driveId)
+      const adopted = readSyncedPrivateAdoptedDrives(targetPath)
+      assert.equal(adopted.length, 1)
+      assert.equal(adopted[0].driveId, driveId)
+      assert.equal(adopted[0].encrypted, false)
+      assert.equal(adopted[0].source, 'desktop')
+      assert.deepEqual(getPrivateDriveKeyRecord(targetPath), { ok: false })
     } finally {
       resetPrivateDriveKeyCache()
       rmSync(sourcePath, { recursive: true, force: true })
@@ -425,9 +429,8 @@ describe('Link Device Identity Transfer', () => {
       assert.equal(readFileSync(join(adoptedStorePath, 'CORESTORE'), 'utf8'), 'corestore')
       assert.equal(readFileSync(join(adoptedStorePath, 'nested', 'blob'), 'utf8'), 'blobbytes')
 
-      // The synced store holds only the identity record + adoption marker.
       assert.equal(existsSync(join(targetPath, 'CORESTORE')), false)
-      assert.equal(existsSync(join(targetPath, 'private-drive-key.json')), true)
+      assert.equal(existsSync(join(targetPath, 'private-drive-key.json')), false)
       assert.equal(existsSync(join(targetPath, 'adopted-corestore.json')), true)
     } finally {
       resetPrivateDriveKeyCache()

@@ -2,6 +2,7 @@ import b4a from 'b4a'
 import { createReadStream, statSync } from 'node:fs'
 import { pipeline } from 'node:stream/promises'
 import {
+  getPrivateDriveWarningForDriveId,
   getSyncedPrivateHyperdrive,
   getSyncedPrivateHyperdriveForId,
   isSyncedPrivateHyperdriveAddress,
@@ -36,6 +37,7 @@ export async function listHyperdriveLocation ({ url } = {}, options = {}) {
   try {
     return await runWithRuntime(options, async (runtime) => {
       const drive = await resolveDriveForAddress(runtime, target.driveAddress, options)
+      const divergenceWarning = warningForPrivateDrive(drive)
       const explicitDirectory = target.pathname === '/' || target.pathname.endsWith('/')
       let refreshed = false
       const refreshDrive = async () => {
@@ -60,7 +62,8 @@ export async function listHyperdriveLocation ({ url } = {}, options = {}) {
       if (entry?.value?.blob) {
         const response = {
           ok: true,
-          location: createFileItem(target.driveAddress, target.pathname, entry.value)
+          location: createFileItem(target.driveAddress, target.pathname, entry.value),
+          ...(divergenceWarning ? { warning: divergenceWarning } : {})
         }
         await (options.recordArchive || recordHyperArchive)({
           url: response.location.url,
@@ -92,7 +95,8 @@ export async function listHyperdriveLocation ({ url } = {}, options = {}) {
           driveKey: drive.id
         },
         items,
-        truncated
+        truncated,
+        ...(divergenceWarning ? { warning: divergenceWarning } : {})
       }
       await (options.recordArchive || recordHyperArchive)({
         url: response.location.url,
@@ -459,6 +463,12 @@ async function getSyncedPrivateDrive (options) {
     return options.getSyncedPrivateDrive()
   }
   return getSyncedPrivateHyperdrive()
+}
+
+function warningForPrivateDrive (drive) {
+  const key = drive?.core?.key
+  if (!key) return null
+  return getPrivateDriveWarningForDriveId(b4a.toString(key, 'hex').toLowerCase())
 }
 
 async function resolveDriveForAddress (runtime, driveAddress, options) {

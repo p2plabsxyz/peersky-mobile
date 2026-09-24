@@ -316,6 +316,7 @@ export function HyperdriveScreen ({ offlineNetworkAllowed, isDark, isLandscape, 
     try {
       const response = await onCallRpc(RPC_HYPER_LIBRARY_LIST, { url: normalizedUrl })
       if (!response.ok || !response.location) throw new Error(response.error || 'Unable to fetch Hyper data.')
+      if (response.warning) setNotice(response.warning)
       const fetchedItems = Array.isArray(response.items) ? response.items : []
       if (recordRecent) {
         remember({
