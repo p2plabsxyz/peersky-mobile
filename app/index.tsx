@@ -2242,12 +2242,7 @@ export default function App () {
       setP2pmdPublishUrl(response.url)
       setP2pmdSyncStatus('Published to Hyper')
       setStatus(`P2PMD published: ${response.url}`)
-      try {
-        await Share.share({
-          title: mode === 'slides' ? 'Published P2PMD presentation' : 'Published P2PMD note',
-          message: response.url
-        })
-      } catch {}
+      promptPublishedLink(response.url, mode === 'slides')
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       setP2pmdSyncStatus(`Publish failed: ${message}`)
@@ -2256,6 +2251,33 @@ export default function App () {
       p2pmdPublishInFlightRef.current = false
       setIsP2pmdPublishing(false)
     }
+  }
+
+  // Publishing hands back a link that is worth nothing if it is not kept. The
+  // share sheet buries copying a few taps in, so offer it outright.
+  function promptPublishedLink (url: string, isSlides: boolean) {
+    Alert.alert(
+      isSlides ? 'Presentation published' : 'Note published',
+      url,
+      [
+        { text: 'Copy link', onPress: () => copyPublishedLink(url) },
+        {
+          text: 'Share',
+          onPress: () => {
+            void Share.share({
+              title: isSlides ? 'Published P2PMD presentation' : 'Published P2PMD note',
+              message: url
+            }).catch(() => {})
+          }
+        },
+        { text: 'Done', style: 'cancel' }
+      ]
+    )
+  }
+
+  function copyPublishedLink (url: string) {
+    Clipboard.setString(url)
+    setStatus('Published link copied')
   }
 
   async function handleP2pmdBridgeRequest (request: Record<string, unknown>) {
@@ -2668,12 +2690,17 @@ export default function App () {
               {p2pmdRoom.localUrl}
             </Text>
             {p2pmdPublishUrl && (
-              <View style={styles.p2pmdPublishedUrlRow}>
+              <Pressable
+                accessibilityHint='Copies the published link'
+                accessibilityRole='button'
+                onPress={() => copyPublishedLink(p2pmdPublishUrl)}
+                style={styles.p2pmdPublishedUrlRow}
+              >
                 <Text style={styles.p2pmdPublishedUrlLabel}>Published</Text>
                 <Text numberOfLines={1} ellipsizeMode='middle' style={styles.p2pmdPublishedUrl}>
                   {p2pmdPublishUrl}
                 </Text>
-              </View>
+              </Pressable>
             )}
             <Text numberOfLines={1} style={styles.p2pmdWorkspaceSyncStatus}>
               {p2pmdSyncStatus}
