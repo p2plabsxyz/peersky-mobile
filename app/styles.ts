@@ -937,3 +937,59 @@ export const styles = StyleSheet.create({
     color: '#fff'
   }
 })
+
+// P2PMD opens dark, so the styles above are the dark ones and these are the
+// overrides that turn it light. Same key names, so a caller reads as
+// [styles.p2pmdThing, light?.p2pmdThing] and nothing is theme-aware by
+// accident. Only colours belong here; layout stays in one place above.
+//
+// Left out on purpose: the scanner (a camera viewfinder is dark either way),
+// and the white strokes on the accent-filled preview button, which sit on
+// blue in both themes.
+export const p2pmdLight = StyleSheet.create({
+  p2pmdWorkspace: { backgroundColor: '#f5f8ff' },
+  p2pmdWorkspaceHeader: { backgroundColor: '#ffffff', borderBottomColor: '#dbe6f6' },
+  p2pmdWorkspaceTitle: { color: '#1f2a44' },
+  p2pmdWorkspaceParticipants: { backgroundColor: '#e5f0ff' },
+  p2pmdWorkspaceParticipantsText: { color: '#1a5fb4' },
+  p2pmdWorkspaceRole: { backgroundColor: '#fdf0d8', color: '#7a5312' },
+  p2pmdWorkspaceRoleHost: { backgroundColor: '#d9f5e7', color: '#12503a' },
+  p2pmdWorkspaceMeta: { backgroundColor: '#ffffff', borderBottomColor: '#dbe6f6' },
+  p2pmdWorkspaceKeyLabel: { backgroundColor: '#e5f0ff', color: '#1a5fb4' },
+  p2pmdWorkspaceKey: { color: '#1f6fd1' },
+  p2pmdWorkspaceUrl: { color: '#687086' },
+  p2pmdWorkspaceSyncStatus: { color: '#687086' },
+  p2pmdWorkspaceWebView: { backgroundColor: '#ffffff' },
+  p2pmdPublishedUrlLabel: { color: '#1a5fb4' },
+  p2pmdPublishedUrl: { color: '#1f6fd1' },
+  p2pmdMetaButton: { backgroundColor: '#e8f0fb', borderColor: '#c3d3ea' },
+  p2pmdMetaButtonDanger: { backgroundColor: '#fde8ec', borderColor: '#e8a9b6' },
+  p2pmdMetaButtonText: { color: '#1f2a44' },
+  p2pmdSection: { backgroundColor: '#f5f8ff' },
+  p2pmdTitle: { color: '#1f2a44' },
+  p2pmdInput: { backgroundColor: '#ffffff', borderColor: '#dbe6f6', color: '#1f2a44' },
+  p2pmdSetupError: { backgroundColor: '#fde8ec', borderColor: '#e8a9b6', color: '#8f2740' },
+  p2pmdTextAction: { borderColor: '#c3d3ea' },
+  p2pmdTextActionText: { color: '#1f6fd1' },
+  p2pmdDividerLine: { backgroundColor: '#dbe6f6' },
+  p2pmdDividerText: { color: '#687086' },
+  p2pmdJoinAction: { backgroundColor: '#d9f5e7' },
+  p2pmdJoinActionText: { color: '#12503a' },
+  p2pmdJoinTool: { borderColor: '#c3d3ea' },
+  p2pmdRecentRoom: { backgroundColor: '#ffffff', borderColor: '#dbe6f6' },
+  p2pmdRecentRoomPressed: { backgroundColor: '#e8f0fb' },
+  p2pmdRecentRoomKey: { color: '#1f2a44' },
+  p2pmdRecentRoomAction: { color: '#1f6fd1' },
+
+  // The start screen borrows these from the shared set, which is dark-only.
+  // Without them the headings and helper text stay pale grey on a white page
+  // and read as missing rather than as text.
+  helperText: { color: '#687086' },
+  emptyRoomTitle: { color: '#1f2a44' },
+  fieldLabel: { color: '#687086' },
+  sectionTitle: { color: '#1f2a44' },
+  roomPill: { backgroundColor: '#e5f0ff', color: '#1a5fb4' },
+  // The page behind the whole tab. Left dark it frames the light content in
+  // black down every edge.
+  p2pmdAppContent: { backgroundColor: '#f5f8ff' }
+})
