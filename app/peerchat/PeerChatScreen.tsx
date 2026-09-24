@@ -18,7 +18,6 @@ import {
   Platform,
   Pressable,
   ScrollView,
-  Share,
   StyleSheet,
   Text,
   TextInput,
@@ -37,6 +36,7 @@ import {
   serializePeerChatUiState
 } from './ui-state.mjs'
 import { assessLink, describeLinkRisk, extractFirstLink, LINK_SUSPICIOUS } from './link-safety.mjs'
+import { shareLink } from '../share'
 import {
   filterPeerChatMembers,
   filterPeerChatMessages,
@@ -1378,7 +1378,7 @@ export function PeerChatScreen ({
     try {
       // The link, not the bare key. Tapping it joins the room; a 64 character
       // key has to be copied into Join Room by hand.
-      await Share.share({
+      await shareLink({
         title: `Join ${activeRoom.name} on PeerChat`,
         message: buildPeerChatInviteUrl(activeRoom.roomKey) || activeRoom.roomKey
       })
