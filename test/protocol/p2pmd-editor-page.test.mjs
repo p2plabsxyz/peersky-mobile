@@ -63,7 +63,11 @@ describe('p2pmd mobile editor page routing', () => {
     assert.match(html, /data-format="latex"/)
     assert.match(html, /data-format="inline-math"/)
     assert.match(html, /data-format="block-math"/)
-    assert.match(html, /id="latex-template-menu"/)
+    // The two templates are buttons in the document bar now, not entries
+    // behind a "T" menu that had to be opened first.
+    assert.match(html, /data-template="research-paper-md"/)
+    assert.match(html, /data-template="technical-doc-md"/)
+    assert.doesNotMatch(html, /id="latex-template-menu"/)
     assert.match(html, /Research Paper/)
     assert.match(html, /Technical Documentation/)
     assert.match(html, /ydoc\.getMap\('settings'\)/)
@@ -73,7 +77,6 @@ describe('p2pmd mobile editor page routing', () => {
     assert.match(html, /window\.P2pmdIeee/)
     assert.doesNotMatch(html, /roomUrl\('\/lib\/ieee\.min\.js'\)/)
     assert.match(html, /window\.P2pmdIeee\.render\(preview, result\.html\)/)
-    assert.match(html, /closeTemplateMenuOnOutsideClick/)
     assert.match(html, /event\.key === 'Escape'/)
   })
 
