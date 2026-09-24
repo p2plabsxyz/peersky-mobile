@@ -2297,7 +2297,10 @@ export default function App () {
     await screenUploadBytes({
       base64,
       name: typeof payload.name === 'string' ? payload.name : 'image',
-      size: base64.length,
+      // Decoded length, not the base64 length. Base64 runs a third longer, so
+      // measuring the string made a large photo look oversized and skip the
+      // scan on a size guard it never actually crossed.
+      size: Math.floor((base64.length * 3) / 4),
       mimeType: isUsableImageType(declared) ? declared : sniffBase64ImageType(base64)
     })
     return await callRpc(RPC_P2PMD_IMAGE_UPLOAD, payload)
