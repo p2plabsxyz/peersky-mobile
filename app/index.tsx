@@ -160,6 +160,7 @@ import {
   recordP2pmdRoom,
   writeP2pmdRoomHistoryFile
 } from './p2pmd-room-history.mjs'
+import { describeP2pmdNote } from './p2pmd-note-title.mjs'
 import { styles } from './styles'
 import {
   RPC_HOLESAIL_CONNECT,
@@ -210,6 +211,7 @@ const HYPER_OFFLINE_NETWORK_COMMANDS = new Set([
 type P2pmdRoomHistoryEntry = {
   key: string
   role: 'host' | 'client'
+  label: string
   lastOpenedAt: number
 }
 
@@ -2103,13 +2105,25 @@ export default function App () {
     }
   }
 
-  function rememberP2pmdRoom (key: string, role: P2pmdRoomHistoryEntry['role']) {
-    const rooms = recordP2pmdRoom(p2pmdRoomHistoryRef.current, { key, role }) as P2pmdRoomHistoryEntry[]
+  function rememberP2pmdRoom (key: string, role: P2pmdRoomHistoryEntry['role'], label = '') {
+    const rooms = recordP2pmdRoom(p2pmdRoomHistoryRef.current, { key, role, label }) as P2pmdRoomHistoryEntry[]
     if (rooms === p2pmdRoomHistoryRef.current) return
 
     if (!saveP2pmdRoomHistory(rooms)) return
     p2pmdRoomHistoryRef.current = rooms
     setP2pmdRoomHistory(rooms)
+  }
+
+  // A key tells you nothing about which note it is. The editor sends the top
+  // of the document with every save, so the list can show what the note is
+  // called instead. Display only: the key is still what opens it.
+  function rememberP2pmdNoteName (head: unknown, slides: boolean) {
+    const room = p2pmdRoom
+    if (!room?.key || typeof head !== 'string') return
+    const { label } = describeP2pmdNote(head, { slides })
+    const known = p2pmdRoomHistoryRef.current.find((item) => item.key === room.key)
+    if (known?.label === label) return
+    rememberP2pmdRoom(room.key, known?.role || room.role, label)
   }
 
   async function onP2pmdRoomRefresh () {
@@ -2360,6 +2374,7 @@ export default function App () {
         case 'p2pmd-document-saved':
           setP2pmdSyncStatus('Saved')
           setStatus(`P2PMD saved (${parsed.contentLength} characters)`)
+          rememberP2pmdNoteName(parsed.head, parsed.slides === true)
           break
         case 'p2pmd-document-updated':
           setP2pmdSyncStatus('Remote update')
@@ -3182,7 +3197,7 @@ export default function App () {
                         {p2pmdRoomHistory.map((room) => (
                           <Pressable
                             key={room.key}
-                            accessibilityLabel={`Reopen P2PMD note ${formatP2pmdRoomHistoryKey(room.key)}`}
+                            accessibilityLabel={`Reopen P2PMD note ${room.label || formatP2pmdRoomHistoryKey(room.key)}`}
                             accessibilityRole='button'
                             disabled={isBooting || isLoading}
                             onPress={() => void (room.role === 'host'
@@ -3195,7 +3210,7 @@ export default function App () {
                             ]}
                           >
                             <Text numberOfLines={1} style={styles.p2pmdRecentRoomKey}>
-                              {formatP2pmdRoomHistoryKey(room.key)}
+                              {room.label || formatP2pmdRoomHistoryKey(room.key)}
                             </Text>
                             <Text style={styles.p2pmdRecentRoomAction}>
                               {room.role === 'host' ? 'Reopen' : 'Join'}

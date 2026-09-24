@@ -1497,6 +1497,18 @@ export function getP2pmdEditorPage () {
       const PEER_TYPING_IDLE_MS = ${EDIT_ACTIVITY_DEBOUNCE_MS}
       const templates = ${serializedTemplates}
       const slidesTemplate = ${serializedSlidesTemplate}
+      // The note list shows a readable title instead of a key, so every save
+      // carries enough of the text for one to be worked out. Bounded on
+      // purpose: this rides along with each save, and a heading lives at the
+      // top or not at all.
+      const NOTE_HEAD_LENGTH = 2000
+      function noteSummaryFor(content) {
+        return {
+          head: String(content || '').slice(0, NOTE_HEAD_LENGTH),
+          slides: viewMode === 'slides'
+        }
+      }
+
       let viewMode = 'edit'
       let previewRequestId = 0
       let currentSlideIndex = 0
@@ -2951,7 +2963,8 @@ export function getP2pmdEditorPage () {
             applyLineAttributionsFromDocument(syncedDocument)
             notifyNative('p2pmd-document-saved', {
               updatedAt: syncedDocument.updatedAt,
-              contentLength: syncedDocument.content.length
+              contentLength: syncedDocument.content.length,
+              ...noteSummaryFor(syncedDocument.content)
             })
           }
         } catch (error) {
@@ -2992,7 +3005,8 @@ export function getP2pmdEditorPage () {
           const syncedDocument = getSyncedDocumentFromResponse(result, ytext ? getYTextSnapshot() : input.value)
           notifyNative('p2pmd-document-saved', {
             updatedAt: syncedDocument.updatedAt,
-            contentLength: syncedDocument.content.length
+            contentLength: syncedDocument.content.length,
+            ...noteSummaryFor(syncedDocument.content)
           })
           if (flushRetryTimer) {
             clearTimeout(flushRetryTimer)
