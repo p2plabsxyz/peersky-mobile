@@ -565,6 +565,19 @@ function LinkDeviceSettings({
     }
   }
 
+  // Android can quit itself. iOS cannot: BackHandler.exitApp is a no-op
+  // there, and calling exit() reads as a crash to Apple, so asking is the
+  // only honest option. Without this the app sat open on wiped storage and
+  // looked like nothing had happened.
+  function finishAndRestart (done: string) {
+    onIdentityRestored()
+    if (Platform.OS === 'android') {
+      BackHandler.exitApp()
+      return
+    }
+    Alert.alert('Close PeerSky to finish', `${done} Close PeerSky fully, then open it again.`)
+  }
+
   // The other half of moving to a new phone. The desktop releases its side;
   // this one stops this phone being that profile. Without it the old phone
   // keeps writing the same chat feed and forks it.
@@ -581,8 +594,7 @@ function LinkDeviceSettings({
             try {
               const response = await onCallRpc(RPC_IDENTITY_REMOVE, {})
               if (!response.ok) throw new Error(response.error || 'Could not remove the identity')
-              onIdentityRestored()
-              BackHandler.exitApp()
+              finishAndRestart('This phone no longer holds your identity.')
             } catch (removeError) {
               Alert.alert('Remove Failed', removeError instanceof Error ? removeError.message : String(removeError))
             }
@@ -625,8 +637,7 @@ function LinkDeviceSettings({
               try {
                 const confirmResponse = await onCallRpc(RPC_IDENTITY_CONFIRM_RESTORE, {})
                 if (!confirmResponse.ok) throw new Error(confirmResponse.error)
-                onIdentityRestored()
-                BackHandler.exitApp()
+                finishAndRestart('Your identity has been restored.')
               } catch (confirmError) {
                 Alert.alert('Restore Failed', confirmError instanceof Error ? confirmError.message : String(confirmError))
               }

@@ -62,8 +62,6 @@ import {
 } from '../backup/device-keys.mjs'
 import { decryptIdentityTransfer } from '../backup/identity-transfer.mjs'
 import { adoptTransferredPrivateDrive } from '../backup/private-drive-import.mjs'
-import { randomBytes } from 'node:crypto'
-import b4a from 'b4a'
 import { rmSync, renameSync, existsSync } from 'bare-fs'
 import { commitIdentityRestore, restoreIdentityFromBackup } from '../backup/restore.mjs'
 
@@ -91,6 +89,7 @@ import {
   withHyperRuntimeOperation
 } from '../hyper/runtime.mjs'
 import { resetPrivateDriveKeyCache } from '../hyper/private-keys.mjs'
+import { clearPairingNonce, getLivePairingNonce, getOrCreatePairingNonce } from '../backup/pairing-nonce.mjs'
 import { clearAllP2pData, clearP2pCache, deleteP2pAppData, listP2pAppData } from '../hyper/storage.mjs'
 
 import {
@@ -118,13 +117,6 @@ import { parseJsonMessage, replyJson } from './messages.mjs'
 import { closePeerChatService, getPeerChatService } from '../peerchat/runtime.mjs'
 import { openPeerChatAttachment, uploadPeerChatAttachment } from '../peerchat/attachments.mjs'
 
-let currentIdentityNonce = null
-let currentIdentityNonceExpiresAt = 0
-// The nonce ties a desktop's transfer to the pairing code the phone is
-// showing. It has to outlive the round trip: read the code, paste it on the
-// desktop, wait for the upload, come back and restore. Matched to the
-// transfer's own 15 minute ceiling so it never outlives what it protects.
-const IDENTITY_NONCE_TTL_MS = 15 * 60 * 1000
 let pendingRestorePath = null
 
 export async function routeRpcRequest (req) {
@@ -230,21 +222,12 @@ export async function routeRpcRequest (req) {
     }
 
     if (req.command === RPC_IDENTITY_GET_KEY) {
-      const keys = await getDeviceKeys(getDefaultIdentityStoragePath())
-      // Reuse the live nonce instead of minting one per read. The settings
-      // screen refetches this whenever it re-renders, and rerolling each time
-      // meant the code on screen stopped matching the transfer the desktop
-      // had already built, so every restore failed the nonce check and the
-      // verification prompt was never reached.
-      const now = Date.now()
-      if (!currentIdentityNonce || now >= currentIdentityNonceExpiresAt) {
-        currentIdentityNonce = b4a.toString(randomBytes(16), 'hex')
-        currentIdentityNonceExpiresAt = now + IDENTITY_NONCE_TTL_MS
-      }
+      const identityStoragePath = getDefaultIdentityStoragePath()
+      const keys = await getDeviceKeys(identityStoragePath)
       replyJson(req, {
         ok: true,
         encryptionPublicKey: getEncryptionPublicKeyHex(keys),
-        nonce: currentIdentityNonce
+        nonce: getOrCreatePairingNonce(identityStoragePath)
       })
       return
     }
@@ -257,8 +240,8 @@ export async function routeRpcRequest (req) {
         return
       }
 
-      if (!currentIdentityNonce || Date.now() >= currentIdentityNonceExpiresAt) {
-        currentIdentityNonce = null
+      const expectedNonce = getLivePairingNonce(getDefaultIdentityStoragePath())
+      if (!expectedNonce) {
         replyJson(req, { ok: false, error: 'Pairing code expired. Reopen Link Device to get a new one.' })
         return
       }
@@ -283,7 +266,7 @@ export async function routeRpcRequest (req) {
         return
       }
 
-      const { sas, innerZipBytes } = await decryptIdentityTransfer(downloaded.bytes, keys, currentIdentityNonce)
+      const { sas, innerZipBytes } = await decryptIdentityTransfer(downloaded.bytes, keys, expectedNonce)
 
       try { rmSync(tempStoragePath, { recursive: true }) } catch (e) {}
 
@@ -318,8 +301,11 @@ export async function routeRpcRequest (req) {
           try { rmSync(target, { recursive: true, force: true }) } catch (e) {}
         }
         resetPrivateDriveKeyCache()
-        currentIdentityNonce = null
-        currentIdentityNonceExpiresAt = 0
+
+        // Bring the runtime back on fresh storage. iOS has no supported way
+        // to quit an app, so leaving it closed would strand the user in a
+        // half-dead app until they killed it by hand.
+        await getHyperRuntime()
 
         return { ok: true, requiresRestart: true }
       }, closeHyperOfflineDownloads)
@@ -373,6 +359,10 @@ export async function routeRpcRequest (req) {
           getSyncedPrivateHyperStoragePath()
         )
         resetPrivateDriveKeyCache()
+        // Used once and done. The restore replaced the identity storage, so
+        // any nonce still sitting there belongs to the profile that was just
+        // overwritten.
+        clearPairingNonce(storagePath)
 
         await getHyperRuntime()
         return {
