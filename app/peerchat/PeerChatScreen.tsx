@@ -3372,6 +3372,10 @@ const PEERCHAT_ABOUT = [
     a: 'Open their profile and block them. Their direct messages stop right away, and you still share any rooms you are both in. Report sends a note to the people who build PeerChat.'
   },
   {
+    q: 'Can I use the same profile on my phone and my computer?',
+    a: 'One phone and one computer, and only one of them at a time. Messages arrive on whichever is running, not both, and writing from both splits your history in two. Moving to a new phone is a deliberate step: remove the identity from the old one first, in Settings.'
+  },
+  {
     q: 'Does it work without internet?',
     a: 'Yes, on the same WiFi. Phones find each other over the local network, so an outage does not stop a conversation.'
   }

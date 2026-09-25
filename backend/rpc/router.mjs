@@ -23,6 +23,7 @@ import {
   RPC_IDENTITY_GET_KEY,
   RPC_IDENTITY_RESTORE_FROM_HYPER,
   RPC_IDENTITY_CONFIRM_RESTORE,
+  RPC_IDENTITY_REMOVE,
   RPC_P2PMD_ROOM_CREATE,
   RPC_P2PMD_ROOM_DISCONNECT,
   RPC_P2PMD_EDITOR_PAGE,
@@ -118,6 +119,12 @@ import { closePeerChatService, getPeerChatService } from '../peerchat/runtime.mj
 import { openPeerChatAttachment, uploadPeerChatAttachment } from '../peerchat/attachments.mjs'
 
 let currentIdentityNonce = null
+let currentIdentityNonceExpiresAt = 0
+// The nonce ties a desktop's transfer to the pairing code the phone is
+// showing. It has to outlive the round trip: read the code, paste it on the
+// desktop, wait for the upload, come back and restore. Matched to the
+// transfer's own 15 minute ceiling so it never outlives what it protects.
+const IDENTITY_NONCE_TTL_MS = 15 * 60 * 1000
 let pendingRestorePath = null
 
 export async function routeRpcRequest (req) {
@@ -224,7 +231,16 @@ export async function routeRpcRequest (req) {
 
     if (req.command === RPC_IDENTITY_GET_KEY) {
       const keys = await getDeviceKeys(getDefaultIdentityStoragePath())
-      currentIdentityNonce = b4a.toString(randomBytes(16), 'hex')
+      // Reuse the live nonce instead of minting one per read. The settings
+      // screen refetches this whenever it re-renders, and rerolling each time
+      // meant the code on screen stopped matching the transfer the desktop
+      // had already built, so every restore failed the nonce check and the
+      // verification prompt was never reached.
+      const now = Date.now()
+      if (!currentIdentityNonce || now >= currentIdentityNonceExpiresAt) {
+        currentIdentityNonce = b4a.toString(randomBytes(16), 'hex')
+        currentIdentityNonceExpiresAt = now + IDENTITY_NONCE_TTL_MS
+      }
       replyJson(req, {
         ok: true,
         encryptionPublicKey: getEncryptionPublicKeyHex(keys),
@@ -241,8 +257,9 @@ export async function routeRpcRequest (req) {
         return
       }
 
-      if (!currentIdentityNonce) {
-        replyJson(req, { ok: false, error: 'Identity transfer nonce missing. Generate a new key first.' })
+      if (!currentIdentityNonce || Date.now() >= currentIdentityNonceExpiresAt) {
+        currentIdentityNonce = null
+        replyJson(req, { ok: false, error: 'Pairing code expired. Reopen Link Device to get a new one.' })
         return
       }
 
@@ -278,6 +295,36 @@ export async function routeRpcRequest (req) {
         sas,
         restoredFiles: restoreResult.restoredFiles
       })
+      return
+    }
+
+    // Moving an identity to a new phone means the old phone has to stop being
+    // that profile. Two phones on one identity write the same chat feed and
+    // fork it, so leaving the old copy in place is the thing that breaks. The
+    // desktop releases its side; this releases the phone's.
+    if (req.command === RPC_IDENTITY_REMOVE) {
+      const result = await withHyperRuntimeMaintenance(async () => {
+        const storagePath = getDefaultIdentityStoragePath()
+        const syncedPrivatePath = getSyncedPrivateHyperStoragePath()
+
+        await closePeerChatService()
+        await closeHyperRuntime()
+        resetHyperFetch()
+
+        // The private store goes too. It holds drive cores adopted from the
+        // desktop, and keeping them behind without the identity leaves data
+        // the user thinks they deleted.
+        for (const target of [storagePath, syncedPrivatePath]) {
+          try { rmSync(target, { recursive: true, force: true }) } catch (e) {}
+        }
+        resetPrivateDriveKeyCache()
+        currentIdentityNonce = null
+        currentIdentityNonceExpiresAt = 0
+
+        return { ok: true, requiresRestart: true }
+      }, closeHyperOfflineDownloads)
+
+      replyJson(req, result)
       return
     }
 
