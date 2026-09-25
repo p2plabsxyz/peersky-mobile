@@ -31,7 +31,8 @@ import {
   RPC_HYPER_LAN_STATUS,
   RPC_IDENTITY_GET_KEY,
   RPC_IDENTITY_RESTORE_FROM_HYPER,
-  RPC_IDENTITY_CONFIRM_RESTORE
+  RPC_IDENTITY_CONFIRM_RESTORE,
+  RPC_IDENTITY_REMOVE
 } from '../../backend/rpc/commands.mjs'
 import { QrCodeView } from './QrCodeView'
 import { createMobilePairingCode } from './identity-pairing.mjs'
@@ -556,6 +557,33 @@ function LinkDeviceSettings({
     }
   }
 
+  // The other half of moving to a new phone. The desktop releases its side;
+  // this one stops this phone being that profile. Without it the old phone
+  // keeps writing the same chat feed and forks it.
+  function removeIdentity () {
+    Alert.alert(
+      'Remove identity from this phone?',
+      'This deletes your profile, chats and private files from this phone. Anything only stored here is gone. Your desktop keeps its copy.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove & Restart',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const response = await onCallRpc(RPC_IDENTITY_REMOVE, {})
+              if (!response.ok) throw new Error(response.error || 'Could not remove the identity')
+              onIdentityRestored()
+              BackHandler.exitApp()
+            } catch (removeError) {
+              Alert.alert('Remove Failed', removeError instanceof Error ? removeError.message : String(removeError))
+            }
+          }
+        }
+      ]
+    )
+  }
+
   async function restoreIdentity() {
     const trimmedUrl = hyperUrl.trim()
     if (!trimmedUrl.startsWith('hyper://')) {
@@ -697,6 +725,27 @@ function LinkDeviceSettings({
             onPress={openScanner}
           >
             <Text style={[styles.secondaryButtonText, isDark ? darkStyles.primaryText : null]}>Scan QR Code</Text>
+          </Pressable>
+        </View>
+      </SettingsSection>
+
+      <SettingsSection title='This phone'>
+        <View style={styles.linkDeviceBlock}>
+          <SettingCopy
+            title='Remove identity from this phone'
+            description='Your profile lives on one phone at a time. Do this before moving to a new phone, so both are not writing the same chats.'
+          />
+          <Pressable
+            accessibilityRole='button'
+            disabled={isRestoring}
+            style={({ pressed }) => [
+              styles.secondaryButton,
+              isRestoring ? styles.buttonDisabled : null,
+              pressed ? styles.rowPressed : null
+            ]}
+            onPress={removeIdentity}
+          >
+            <Text style={styles.dangerButtonText}>Remove Identity</Text>
           </Pressable>
         </View>
       </SettingsSection>
@@ -1102,6 +1151,13 @@ const styles = StyleSheet.create({
   },
   secondaryButtonText: {
     color: '#1f2a44',
+    fontSize: 14,
+    fontWeight: '800'
+  },
+  // Reads the same in both themes: it sits on the secondary button, which
+  // stays light, and this is a destructive action either way.
+  dangerButtonText: {
+    color: '#c43d35',
     fontSize: 14,
     fontWeight: '800'
   },
