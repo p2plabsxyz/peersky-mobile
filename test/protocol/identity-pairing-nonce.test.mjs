@@ -40,6 +40,21 @@ test('an expired pairing code says so instead of failing the nonce check', () =>
   assert.match(restore, /Pairing code expired\. Reopen Link Device to get a new one\./)
 })
 
+test('the device key is loaded once, not on every render', async () => {
+  const screen = await readFile(new URL('../../app/settings/SettingsScreen.tsx', import.meta.url), 'utf8')
+  const effect = screen.slice(
+    screen.indexOf('const onCallRpcRef = useRef(onCallRpc)'),
+    screen.indexOf('async function restoreIdentity')
+  )
+
+  // The parent rebuilds onCallRpc every render. Keying the effect on it meant
+  // fetch, setState, render, fetch again: a loop that flickered the screen and
+  // hammered the key RPC. The ref keeps the latest without re-running.
+  assert.match(effect, /const response = await onCallRpcRef\.current\(RPC_IDENTITY_GET_KEY, \{\}\)/)
+  assert.match(effect, /\}, \[\]\)/)
+  assert.doesNotMatch(effect, /\}, \[onCallRpc\]\)/)
+})
+
 test('the transfer ceiling the nonce is matched to still exists', async () => {
   const transfer = await readFile(new URL('../../backend/backup/identity-transfer.mjs', import.meta.url), 'utf8')
   assert.match(transfer, /const MAX_TTL = 15 \* 60 \* 1000/)

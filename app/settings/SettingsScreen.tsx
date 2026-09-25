@@ -491,6 +491,14 @@ function LinkDeviceSettings({
   const [permission, requestPermission] = useCameraPermissions()
   const pairingCode = createMobilePairingCode(encryptionPublicKey, nonce)
 
+  // The parent builds a new onCallRpc closure on every one of its renders, so
+  // keying the effect on it re-ran this on every render: fetch the key, set
+  // state, render, fetch again. That loop is what makes the screen flicker,
+  // and it hammered the key RPC. Read the latest one through a ref and load
+  // once instead.
+  const onCallRpcRef = useRef(onCallRpc)
+  onCallRpcRef.current = onCallRpc
+
   useEffect(() => {
     let cancelled = false
 
@@ -499,7 +507,7 @@ function LinkDeviceSettings({
       setError(null)
 
       try {
-        const response = await onCallRpc(RPC_IDENTITY_GET_KEY, {})
+        const response = await onCallRpcRef.current(RPC_IDENTITY_GET_KEY, {})
         if (cancelled) return
 
         if (!response.ok || typeof response.encryptionPublicKey !== 'string') {
@@ -522,7 +530,7 @@ function LinkDeviceSettings({
     return () => {
       cancelled = true
     }
-  }, [onCallRpc])
+  }, [])
 
   function copyDeviceKey() {
     if (!pairingCode) return
