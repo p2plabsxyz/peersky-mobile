@@ -91,9 +91,14 @@ import {
   parseExternalAppLink
 } from './browser-permissions.mjs'
 import { getBrowserShortcutTitleFontSize } from './browser-home-layout.mjs'
+import { createHyperBridgeScript } from './hyper-bridge.mjs'
 import {
-  BACK_SWIPE_MAX_OFFSET,
-  backSwipeOffset,
+  createHyperBridgeReply,
+  createHyperBridgeSettleScript,
+  readHyperBridgeMessage
+} from './hyper-bridge-host.mjs'
+import {
+  backSwipeProgress,
   isBackEdgeSwipe,
   shouldCompleteBackSwipe
 } from './browser-back-gesture.mjs'
@@ -113,6 +118,7 @@ import type { SettingsPage } from './settings/SettingsScreen'
 import { BrowserOverflowMenu } from './settings/BrowserOverflowMenu'
 import { useBrowserPreferences } from './settings/useBrowserPreferences'
 import { BrowserToolbar } from './BrowserToolbar'
+import { BrowserBackSwipe } from './BrowserBackSwipe'
 import { BrowserZoomSheet } from './BrowserZoomSheet'
 import {
   BrowserMediaSheet,
@@ -143,6 +149,7 @@ import {
 import { HyperdriveScreen } from './hyperdrive/HyperdriveScreen'
 import { canUseNetworkForOfflineHyper } from './hyperdrive/offline-network.mjs'
 import { PeerChatScreen, type PeerChatResponse } from './peerchat/PeerChatScreen'
+import { settleIncomingUrl, subscribeToIncomingUrls } from './incoming-links'
 import { parsePeerChatInvite } from './peerchat/peerchat-invite.mjs'
 import { screenUploadBytes } from './media/upload-gate'
 import { isUsableImageType, sniffBase64ImageType } from './media/media-moderation.mjs'
@@ -166,6 +173,7 @@ import { isBrowserTabPreviewForPage } from './tabs/browser-tab-preview.mjs'
 import {
   formatP2pmdRoomHistoryKey,
   normalizeP2pmdRoomKey,
+  parseP2pmdNoteLink,
   readP2pmdRoomHistoryFile,
   recordP2pmdRoom,
   writeP2pmdRoomHistoryFile
@@ -602,41 +610,30 @@ export default function App () {
     return () => subscription.remove()
   }, [])
 
-  useEffect(() => {
-    let active = true
-
-    function queueIncomingUrl (url: string | null) {
-      // peersky:// is our own scheme and is registered for deep links, so a
-      // shared link like peersky://p2p/peertunes/#playlist=... arrives here.
-      // Only accept the ones that name a built-in app, not any peersky:// text.
-      const isInternalAppUrl = Boolean(url) && getRuntimeAppFromUrl(url as string) !== null
-      if (
-        !active ||
-        !url ||
-        (!isWebUrl(url) && !isHyperUrl(url) && !isInternalAppUrl) ||
-        url.length > MAX_BROWSER_URL_LENGTH
-      ) return
-
-      browserUserInteractedRef.current = true
-      setPendingIncomingUrl(url)
+  useEffect(() => subscribeToIncomingUrls((url) => {
+    // peersky:// is our own scheme and is registered for deep links, so a
+    // shared link like peersky://p2p/peertunes/#playlist=... arrives here.
+    // Only accept the ones that name a built-in app, not any peersky:// text.
+    const isInternalAppUrl = getRuntimeAppFromUrl(url) !== null
+    if (
+      (!isWebUrl(url) && !isHyperUrl(url) && !isInternalAppUrl) ||
+      url.length > MAX_BROWSER_URL_LENGTH
+    ) {
+      // Nothing more will come of it, so it should not be replayed.
+      settleIncomingUrl(url)
+      return
     }
 
-    void Linking.getInitialURL()
-      .then(queueIncomingUrl)
-      .catch((error) => console.warn('Unable to read initial browser URL:', error))
-    const subscription = Linking.addEventListener('url', (event) => queueIncomingUrl(event.url))
-
-    return () => {
-      active = false
-      subscription.remove()
-    }
-  }, [])
+    browserUserInteractedRef.current = true
+    setPendingIncomingUrl(url)
+  }), [])
 
   useEffect(() => {
     if (!browserSessionReady || !pendingIncomingUrl) return
 
     const incomingUrl = pendingIncomingUrl
     setPendingIncomingUrl(null)
+    settleIncomingUrl(incomingUrl)
     setBrowserBookmarksVisible(false)
     setBrowserDownloadsVisible(false)
     setBrowserHistoryVisible(false)
@@ -963,6 +960,20 @@ export default function App () {
       return
     }
 
+    // hs:// is a P2PMD note key, not a page to fetch. It used to come back as
+    // "Unsupported URL scheme", so a note shared in a chat had to be copied out
+    // of the message by hand. Opening one fills the join field in, leaving the
+    // one deliberate step: pressing Join.
+    const noteKey = parseP2pmdNoteLink(nextUrl)
+    if (noteKey) {
+      cancelPendingBrowserLoad()
+      openInternalApp('p2pmd')
+      setP2pmdJoinKey(noteKey)
+      setP2pmdSetupError(null)
+      setStatus('Note key ready. Press Join to open it.')
+      return
+    }
+
     if (isHyperUrl(nextUrl)) {
       await loadHyperBrowserUrl(nextUrl)
       return
@@ -1206,6 +1217,51 @@ export default function App () {
     applyBrowserState(nextState)
     setBrowserTitle(getBrowserEntryTitle(entry))
     setActiveTab(entry.source.kind === 'app' ? entry.source.app : 'hyper')
+  }
+
+  // Half-sent uploads, per tab. A body crosses the bridge in pieces because
+  // postMessage carries text, so the pieces are held until the last one lands.
+  const hyperBridgePendingRef = useRef(new Map<string, Map<number, string>>())
+
+  /**
+   * A hyper:// page asking for something its WebView cannot fetch for itself.
+   *
+   * @returns true when the message was ours, so nothing else tries to read it.
+   */
+  function handleHyperBridgeMessage (tabId: string, data: string, token: string) {
+    let pending = hyperBridgePendingRef.current.get(tabId)
+    if (!pending) {
+      pending = new Map<number, string>()
+      hyperBridgePendingRef.current.set(tabId, pending)
+    }
+
+    const message = readHyperBridgeMessage(data, { token, pending })
+    if (message.kind === 'ignore') return false
+    if (message.kind === 'buffered') return true
+
+    const settle = (reply: object) => {
+      browserWebViewRefs.current.get(tabId)?.injectJavaScript(
+        createHyperBridgeSettleScript(token, message.id, reply)
+      )
+    }
+
+    if (message.kind === 'error') {
+      settle({ error: message.error })
+      return true
+    }
+
+    void callRpc(RPC_HYPER_FETCH, {
+      url: message.url,
+      method: message.method,
+      headers: message.headers,
+      body: message.body
+    })
+      .then((response) => settle(createHyperBridgeReply(response)))
+      .catch((error) => settle({
+        error: error instanceof Error ? error.message : String(error)
+      }))
+
+    return true
   }
 
   function remountBrowserWebView (tabId: string) {
@@ -1629,6 +1685,7 @@ export default function App () {
     browserFaviconsRef.current.delete(tabId)
     browserLastRecordedUrlsRef.current.delete(tabId)
     browserMediaTokensRef.current.delete(tabId)
+    hyperBridgePendingRef.current.delete(tabId)
     browserWebViewGenerationsRef.current.delete(tabId)
     setBrowserWebViewGenerations((current) => {
       if (!(tabId in current)) return current
@@ -1663,6 +1720,7 @@ export default function App () {
     browserFaviconsRef.current.clear()
     browserLastRecordedUrlsRef.current.clear()
     browserMediaTokensRef.current.clear()
+    hyperBridgePendingRef.current.clear()
     setBrowserLiveTabIds(reset.liveTabIds)
     if (tab) applyBrowserTab(tab)
     const sessionSaved = writeBrowserSession(nextState)
@@ -2499,8 +2557,7 @@ export default function App () {
   // Native screens with no web history behind them, so the same gesture is
   // recognised here and walks the browser's own history instead. Scoped to the
   // left edge so it never fights a list or the horizontal toolbars.
-  const browserBackDrag = useRef(new Animated.Value(0)).current
-  const browserBackDragStyle = { transform: [{ translateX: browserBackDrag }] }
+  const browserBackSwipe = useRef(new Animated.Value(0)).current
   const peerChatGoBackRef = useRef<(() => boolean) | null>(null)
   const [peerChatRoomOpen, setPeerChatRoomOpen] = useState(false)
   const browserBackGestureStartRef = useRef(0)
@@ -2539,37 +2596,31 @@ export default function App () {
     // drifts; letting it have one halfway through a swipe is what made it
     // need two or three tries elsewhere.
     onPanResponderTerminationRequest: () => false,
+    // A chip left over from the last swipe would otherwise animate away under
+    // the new one.
+    onPanResponderGrant: () => browserBackSwipe.stopAnimation(),
     onPanResponderMove: (_event, gesture) => {
-      browserBackDrag.setValue(backSwipeOffset(gesture.dx))
+      browserBackSwipe.setValue(backSwipeProgress(gesture.dx))
     },
     onPanResponderRelease: (_event, gesture) => {
-      if (!shouldCompleteBackSwipe(gesture)) {
-        Animated.spring(browserBackDrag, {
-          toValue: 0,
-          useNativeDriver: true
-        }).start()
-        return
-      }
-
-      // Carry the page the rest of the way out before swapping it, so the step
-      // reads as one movement rather than a jump.
-      Animated.timing(browserBackDrag, {
-        duration: 140,
-        toValue: BACK_SWIPE_MAX_OFFSET,
-        useNativeDriver: true
-      }).start(({ finished }) => {
-        if (!finished) return
-        goBrowserBackRef.current()
-        browserBackDrag.setValue(0)
-      })
+      // The step happens now and the chip fades over the page that follows,
+      // rather than the page waiting on an animation to finish.
+      if (shouldCompleteBackSwipe(gesture)) goBrowserBackRef.current()
+      settleBrowserBackSwipe()
     },
-    onPanResponderTerminate: () => {
-      Animated.spring(browserBackDrag, {
-        toValue: 0,
-        useNativeDriver: true
-      }).start()
-    }
-  }), [browserBackDrag])
+    onPanResponderTerminate: settleBrowserBackSwipe
+  }), [browserBackSwipe])
+
+  // Always lands on nothing, whether the fade ran or something cut it short.
+  // Skipping the reset on an interrupted animation is what used to leave the
+  // browser sitting to the right of where it belonged.
+  function settleBrowserBackSwipe () {
+    Animated.timing(browserBackSwipe, {
+      duration: 160,
+      toValue: 0,
+      useNativeDriver: true
+    }).start(() => browserBackSwipe.setValue(0))
+  }
 
   // The note workspace replaces the entire browser when it renders, so the
   // close handler has to know the same thing the render branch does.
@@ -2645,7 +2696,7 @@ export default function App () {
           backgroundColor={browserChrome.shell}
           barStyle={browserIsDark ? 'light-content' : 'dark-content'}
         />
-        <Animated.View style={[styles.browserShellContent, browserBackDragStyle]}>
+        <View style={styles.browserShellContent}>
           <BookmarksScreen
             bookmarks={browserBookmarks}
             isDark={browserIsDark}
@@ -2660,7 +2711,12 @@ export default function App () {
               if (removeBrowserBookmark(targetUrl)) setStatus('Bookmark removed')
             }}
           />
-        </Animated.View>
+        </View>
+        <BrowserBackSwipe
+          background={browserChrome.surface}
+          color={browserChrome.text}
+          progress={browserBackSwipe}
+        />
       </SafeAreaView>
     )
   }
@@ -2676,7 +2732,7 @@ export default function App () {
           backgroundColor={browserChrome.shell}
           barStyle={browserIsDark ? 'light-content' : 'dark-content'}
         />
-        <Animated.View style={[styles.browserShellContent, browserBackDragStyle]}>
+        <View style={styles.browserShellContent}>
           <HistoryScreen
             error={browserHistoryError}
             isDark={browserIsDark}
@@ -2695,7 +2751,12 @@ export default function App () {
               if (removeBrowserHistoryItem(item)) setStatus('History entry removed')
             }}
           />
-        </Animated.View>
+        </View>
+        <BrowserBackSwipe
+          background={browserChrome.surface}
+          color={browserChrome.text}
+          progress={browserBackSwipe}
+        />
       </SafeAreaView>
     )
   }
@@ -2711,7 +2772,7 @@ export default function App () {
           backgroundColor={browserChrome.shell}
           barStyle={browserIsDark ? 'light-content' : 'dark-content'}
         />
-        <Animated.View style={[styles.browserShellContent, browserBackDragStyle]}>
+        <View style={styles.browserShellContent}>
           <DownloadsScreen
             downloads={browserDownloads}
             error={browserDownloadsError}
@@ -2724,7 +2785,12 @@ export default function App () {
             onRemove={(downloadId) => void removeBrowserDownload(downloadId)}
             onRetry={retryBrowserDownload}
           />
-        </Animated.View>
+        </View>
+        <BrowserBackSwipe
+          background={browserChrome.surface}
+          color={browserChrome.text}
+          progress={browserBackSwipe}
+        />
       </SafeAreaView>
     )
   }
@@ -2750,7 +2816,7 @@ export default function App () {
             { backgroundColor: browserIsDark ? browserChrome.surface : browserChrome.shell }
           ]}
         />
-        <Animated.View style={[styles.browserShellContent, browserBackDragStyle]}>
+        <View style={styles.browserShellContent}>
           <SettingsScreen
             initialPage={browserSettingsInitialPage}
             addressBarPosition={browserPreferences.addressBarPosition}
@@ -2806,7 +2872,12 @@ export default function App () {
               setBrowserSessionReady(false)
             }}
           />
-        </Animated.View>
+        </View>
+        <BrowserBackSwipe
+          background={browserChrome.surface}
+          color={browserChrome.text}
+          progress={browserBackSwipe}
+        />
       </SafeAreaView>
     )
   }
@@ -3122,9 +3193,9 @@ export default function App () {
           onToggleView={onBrowserToggleTabView}
         />
 
-        <Animated.View
+        <View
           {...browserBackGesture.panHandlers}
-          style={[styles.browserContent, browserBackDragStyle, { backgroundColor: browserChrome.shell }]}
+          style={[styles.browserContent, { backgroundColor: browserChrome.shell }]}
           onTouchStart={browserSource.kind === 'app' && activeTab === 'peerchat' ? undefined : Keyboard.dismiss}
         >
         {browserSource.kind === 'home'
@@ -3602,7 +3673,11 @@ export default function App () {
           const browserBeforeContentScript = combineBrowserInjectedScripts(
             browserAccessibilityScript,
             browserContentBlockingScript,
-            browserMediaScript
+            browserMediaScript,
+            // A hyper:// page's own fetch('hyper://...') has nothing to reach
+            // in a WebView, so it is routed back through the app. Desktop
+            // registers the protocol and needs none of this.
+            entry.source.kind === 'hyper' ? createHyperBridgeScript(browserMediaToken) : ''
           )
 
           const webViewGeneration = browserWebViewGenerations[tab.id] || 0
@@ -3741,6 +3816,12 @@ export default function App () {
                 if ((browserWebViewGenerationsRef.current.get(tab.id) || 0) !== webViewGeneration) return
                 if (!isCurrentBrowserTabEntry(browserTabsStateRef.current, tab.id, entry)) return
 
+                if (entry.source.kind === 'hyper' && handleHyperBridgeMessage(
+                  tab.id,
+                  event.nativeEvent.data,
+                  browserMediaToken
+                )) return
+
                 const mediaTarget = parseBrowserMediaMessage(
                   event.nativeEvent.data,
                   event.nativeEvent.url || entry.url,
@@ -3795,7 +3876,12 @@ export default function App () {
           )
         })}
 
-        </Animated.View>
+        </View>
+        <BrowserBackSwipe
+          background={browserChrome.surface}
+          color={browserChrome.text}
+          progress={browserBackSwipe}
+        />
 
         {browserPreferences.addressBarPosition === 'bottom' && browserToolbar}
 
