@@ -2,6 +2,7 @@ import { type ComponentRef, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
+  Animated,
   AppState,
   BackHandler,
   Button,
@@ -90,7 +91,12 @@ import {
   parseExternalAppLink
 } from './browser-permissions.mjs'
 import { getBrowserShortcutTitleFontSize } from './browser-home-layout.mjs'
-import { isBackEdgeSwipe } from './browser-back-gesture.mjs'
+import {
+  BACK_SWIPE_MAX_OFFSET,
+  backSwipeOffset,
+  isBackEdgeSwipe,
+  shouldCompleteBackSwipe
+} from './browser-back-gesture.mjs'
 import {
   BROWSER_HOME_ICON,
   INTERNAL_APPS,
@@ -2493,27 +2499,77 @@ export default function App () {
   // Native screens with no web history behind them, so the same gesture is
   // recognised here and walks the browser's own history instead. Scoped to the
   // left edge so it never fights a list or the horizontal toolbars.
+  const browserBackDrag = useRef(new Animated.Value(0)).current
+  const browserBackDragStyle = { transform: [{ translateX: browserBackDrag }] }
+  const peerChatGoBackRef = useRef<(() => boolean) | null>(null)
+  const [peerChatRoomOpen, setPeerChatRoomOpen] = useState(false)
   const browserBackGestureStartRef = useRef(0)
   const browserCanGoBackRef = useRef(false)
-  const browserHasNativeBackGestureRef = useRef(false)
-  const onBrowserBackRef = useRef(onBrowserBack)
-  browserCanGoBackRef.current = canBrowserGoBack
-  // Web and hyper pages already swipe through their own history in WKWebView.
-  browserHasNativeBackGestureRef.current =
-    browserSource.kind === 'web' || browserSource.kind === 'hyper'
-  onBrowserBackRef.current = onBrowserBack
+  const goBrowserBackRef = useRef(goBrowserBack)
+  const browserBackAvailable =
+    Boolean(browserMediaTarget) ||
+    browserZoomVisible ||
+    browserMenuVisible ||
+    browserTabsVisible ||
+    browserBookmarksVisible ||
+    browserHistoryVisible ||
+    browserDownloadsVisible ||
+    browserSettingsVisible ||
+    peerChatRoomOpen ||
+    canBrowserGoBack
+  browserCanGoBackRef.current = browserBackAvailable
+  goBrowserBackRef.current = goBrowserBack
   const browserBackGesture = useMemo(() => PanResponder.create({
     onStartShouldSetPanResponderCapture: (event) => {
       browserBackGestureStartRef.current = event.nativeEvent.pageX
       return false
     },
-    onMoveShouldSetPanResponder: (_event, gesture) => (
+    // Claimed on capture, before the touch reaches whatever is underneath. A
+    // WebView takes every touch it is given, which is why the swipe worked on
+    // the React Native screens and nowhere else.
+    onMoveShouldSetPanResponderCapture: (_event, gesture) => (
       browserCanGoBackRef.current &&
-      !browserHasNativeBackGestureRef.current &&
       isBackEdgeSwipe({ startX: browserBackGestureStartRef.current, dx: gesture.dx, dy: gesture.dy })
     ),
-    onPanResponderRelease: () => onBrowserBackRef.current()
-  }), [])
+    onMoveShouldSetPanResponder: (_event, gesture) => (
+      browserCanGoBackRef.current &&
+      isBackEdgeSwipe({ startX: browserBackGestureStartRef.current, dx: gesture.dx, dy: gesture.dy })
+    ),
+    // A scroll view underneath asks for the gesture back the moment the finger
+    // drifts; letting it have one halfway through a swipe is what made it
+    // need two or three tries elsewhere.
+    onPanResponderTerminationRequest: () => false,
+    onPanResponderMove: (_event, gesture) => {
+      browserBackDrag.setValue(backSwipeOffset(gesture.dx))
+    },
+    onPanResponderRelease: (_event, gesture) => {
+      if (!shouldCompleteBackSwipe(gesture)) {
+        Animated.spring(browserBackDrag, {
+          toValue: 0,
+          useNativeDriver: true
+        }).start()
+        return
+      }
+
+      // Carry the page the rest of the way out before swapping it, so the step
+      // reads as one movement rather than a jump.
+      Animated.timing(browserBackDrag, {
+        duration: 140,
+        toValue: BACK_SWIPE_MAX_OFFSET,
+        useNativeDriver: true
+      }).start(({ finished }) => {
+        if (!finished) return
+        goBrowserBackRef.current()
+        browserBackDrag.setValue(0)
+      })
+    },
+    onPanResponderTerminate: () => {
+      Animated.spring(browserBackDrag, {
+        toValue: 0,
+        useNativeDriver: true
+      }).start()
+    }
+  }), [browserBackDrag])
 
   // The note workspace replaces the entire browser when it renders, so the
   // close handler has to know the same thing the render branch does.
@@ -2536,23 +2592,30 @@ export default function App () {
   const activeBrowserDesktopView = browserTabsState.tabs
     .find((tab) => tab.id === browserTabsState.activeTabId)?.desktopView === true
 
+  // One definition of "back", so the Android button, the toolbar arrow and the
+  // edge swipe cannot disagree about what the step before this one was.
+  function goBrowserBack () {
+    if (browserMediaTarget) setBrowserMediaTarget(null)
+    else if (browserZoomVisible) setBrowserZoomVisible(false)
+    else if (browserMenuVisible) setBrowserMenuVisible(false)
+    else if (browserTabsVisible) setBrowserTabsVisible(false)
+    else if (browserBookmarksVisible) setBrowserBookmarksVisible(false)
+    else if (browserHistoryVisible) setBrowserHistoryVisible(false)
+    else if (browserDownloadsVisible) setBrowserDownloadsVisible(false)
+    else if (browserSettingsVisible) closeBrowserSettings()
+    // An open chat is a place you can be, so leaving it lands on the room list
+    // rather than dropping the whole app back to the home screen.
+    else if (peerChatGoBackRef.current?.()) return true
+    else if (canBrowserGoBack) onBrowserBack()
+    else return false
+
+    return true
+  }
+
   useEffect(() => {
     if (Platform.OS !== 'android') return
 
-    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
-      if (browserMediaTarget) setBrowserMediaTarget(null)
-      else if (browserZoomVisible) setBrowserZoomVisible(false)
-      else if (browserMenuVisible) setBrowserMenuVisible(false)
-      else if (browserTabsVisible) setBrowserTabsVisible(false)
-      else if (browserBookmarksVisible) setBrowserBookmarksVisible(false)
-      else if (browserHistoryVisible) setBrowserHistoryVisible(false)
-      else if (browserDownloadsVisible) setBrowserDownloadsVisible(false)
-      else if (browserSettingsVisible) closeBrowserSettings()
-      else if (canBrowserGoBack) onBrowserBack()
-      else return false
-
-      return true
-    })
+    const subscription = BackHandler.addEventListener('hardwareBackPress', goBrowserBack)
 
     return () => subscription.remove()
   }, [
@@ -2574,6 +2637,7 @@ export default function App () {
   if (browserBookmarksVisible) {
     return (
       <SafeAreaView
+        {...browserBackGesture.panHandlers}
         style={[styles.browserShell, { backgroundColor: browserChrome.shell }]}
         edges={['top', 'left', 'right', 'bottom']}
       >
@@ -2581,20 +2645,22 @@ export default function App () {
           backgroundColor={browserChrome.shell}
           barStyle={browserIsDark ? 'light-content' : 'dark-content'}
         />
-        <BookmarksScreen
-          bookmarks={browserBookmarks}
-          isDark={browserIsDark}
-          isReady={browserBookmarksReady}
-          persistenceError={browserBookmarksError}
-          onClose={() => setBrowserBookmarksVisible(false)}
-          onOpen={(targetUrl) => {
-            setBrowserBookmarksVisible(false)
-            void loadBrowserUrl(targetUrl)
-          }}
-          onRemove={(targetUrl) => {
-            if (removeBrowserBookmark(targetUrl)) setStatus('Bookmark removed')
-          }}
-        />
+        <Animated.View style={[styles.browserShellContent, browserBackDragStyle]}>
+          <BookmarksScreen
+            bookmarks={browserBookmarks}
+            isDark={browserIsDark}
+            isReady={browserBookmarksReady}
+            persistenceError={browserBookmarksError}
+            onClose={() => setBrowserBookmarksVisible(false)}
+            onOpen={(targetUrl) => {
+              setBrowserBookmarksVisible(false)
+              void loadBrowserUrl(targetUrl)
+            }}
+            onRemove={(targetUrl) => {
+              if (removeBrowserBookmark(targetUrl)) setStatus('Bookmark removed')
+            }}
+          />
+        </Animated.View>
       </SafeAreaView>
     )
   }
@@ -2602,6 +2668,7 @@ export default function App () {
   if (browserHistoryVisible) {
     return (
       <SafeAreaView
+        {...browserBackGesture.panHandlers}
         style={[styles.browserShell, { backgroundColor: browserChrome.shell }]}
         edges={['top', 'left', 'right', 'bottom']}
       >
@@ -2609,24 +2676,26 @@ export default function App () {
           backgroundColor={browserChrome.shell}
           barStyle={browserIsDark ? 'light-content' : 'dark-content'}
         />
-        <HistoryScreen
-          error={browserHistoryError}
-          isDark={browserIsDark}
-          isReady={browserHistoryReady}
-          items={browserVisitHistory}
-          onClear={() => {
-            if (clearBrowserHistory()) setStatus('Browsing history cleared')
-          }}
-          onClose={() => setBrowserHistoryVisible(false)}
-          onOpen={(targetUrl) => {
-            setBrowserHistoryVisible(false)
-            setActiveTab('hyper')
-            void loadBrowserUrl(targetUrl)
-          }}
-          onRemove={(item) => {
-            if (removeBrowserHistoryItem(item)) setStatus('History entry removed')
-          }}
-        />
+        <Animated.View style={[styles.browserShellContent, browserBackDragStyle]}>
+          <HistoryScreen
+            error={browserHistoryError}
+            isDark={browserIsDark}
+            isReady={browserHistoryReady}
+            items={browserVisitHistory}
+            onClear={() => {
+              if (clearBrowserHistory()) setStatus('Browsing history cleared')
+            }}
+            onClose={() => setBrowserHistoryVisible(false)}
+            onOpen={(targetUrl) => {
+              setBrowserHistoryVisible(false)
+              setActiveTab('hyper')
+              void loadBrowserUrl(targetUrl)
+            }}
+            onRemove={(item) => {
+              if (removeBrowserHistoryItem(item)) setStatus('History entry removed')
+            }}
+          />
+        </Animated.View>
       </SafeAreaView>
     )
   }
@@ -2634,6 +2703,7 @@ export default function App () {
   if (browserDownloadsVisible) {
     return (
       <SafeAreaView
+        {...browserBackGesture.panHandlers}
         style={[styles.browserShell, { backgroundColor: browserChrome.shell }]}
         edges={['top', 'left', 'right', 'bottom']}
       >
@@ -2641,18 +2711,20 @@ export default function App () {
           backgroundColor={browserChrome.shell}
           barStyle={browserIsDark ? 'light-content' : 'dark-content'}
         />
-        <DownloadsScreen
-          downloads={browserDownloads}
-          error={browserDownloadsError}
-          isDark={browserIsDark}
-          isReady={browserDownloadsReady}
-          onClose={() => setBrowserDownloadsVisible(false)}
-          onOpen={(downloadId) => void openBrowserDownload(downloadId)}
-          onPause={(download) => pauseBrowserDownload(download)}
-          onRefresh={() => void refreshBrowserDownloads()}
-          onRemove={(downloadId) => void removeBrowserDownload(downloadId)}
-          onRetry={retryBrowserDownload}
-        />
+        <Animated.View style={[styles.browserShellContent, browserBackDragStyle]}>
+          <DownloadsScreen
+            downloads={browserDownloads}
+            error={browserDownloadsError}
+            isDark={browserIsDark}
+            isReady={browserDownloadsReady}
+            onClose={() => setBrowserDownloadsVisible(false)}
+            onOpen={(downloadId) => void openBrowserDownload(downloadId)}
+            onPause={(download) => pauseBrowserDownload(download)}
+            onRefresh={() => void refreshBrowserDownloads()}
+            onRemove={(downloadId) => void removeBrowserDownload(downloadId)}
+            onRetry={retryBrowserDownload}
+          />
+        </Animated.View>
       </SafeAreaView>
     )
   }
@@ -2663,6 +2735,7 @@ export default function App () {
 
     return (
       <SafeAreaView
+        {...browserBackGesture.panHandlers}
         style={[styles.browserShell, { backgroundColor: browserChrome.shell }]}
         edges={['left', 'right', 'bottom']}
       >
@@ -2677,61 +2750,63 @@ export default function App () {
             { backgroundColor: browserIsDark ? browserChrome.surface : browserChrome.shell }
           ]}
         />
-        <SettingsScreen
-          initialPage={browserSettingsInitialPage}
-          addressBarPosition={browserPreferences.addressBarPosition}
-          contentBlockingEnabled={browserPreferences.contentBlockingEnabled}
-          customSearchUrl={browserPreferences.customSearchUrl}
-          downloadOnlyOnWifi={browserPreferences.downloadOnlyOnWifi}
-          enforceManualPageZoom={browserPreferences.enforceManualPageZoom}
-          externalLinkBehavior={browserPreferences.externalLinkBehavior}
-          isDark={browserIsDark}
-          offlineNetworkAllowed={hyperOfflineNetworkAllowed}
-          persistenceError={browserPreferencesError}
-          restoreTabsOnStartup={browserPreferences.restoreTabsOnStartup}
-          searchEngine={browserPreferences.searchEngine}
-          showFullAddress={browserPreferences.showFullAddress}
-          theme={browserPreferences.theme}
-          websiteTextScale={browserPreferences.websiteTextScale}
-          youtubeAdBlockingEnabled={browserPreferences.youtubeAdBlockingEnabled}
-          storagePath={identityStoragePath}
-          onAddressBarPositionChange={setAddressBarPosition}
-          onCallRpc={(command, data = {}) => callRpc(command, data)}
-          onContentBlockingEnabledChange={onContentBlockingEnabledChange}
-          onClose={closeBrowserSettings}
-          onClearBrowsingData={() => {
-            const { sessionSaved } = onBrowserResetTabs(false)
-            const historyCleared = clearBrowserHistory()
-            if (sessionSaved && historyCleared) closeBrowserSettings()
-            return sessionSaved && historyCleared
-          }}
-          onClearCachedData={clearCachedBrowserTabPreviews}
-          onCustomSearchSave={setCustomSearchEngine}
-          onDownloadOnlyOnWifiChange={setDownloadOnlyOnWifi}
-          onEnforceManualPageZoomChange={setEnforceManualPageZoom}
-          onExternalLinkBehaviorChange={setExternalLinkBehavior}
-          onFilterListsUpdated={refreshContentBlockedPages}
-          onRestoreTabsOnStartupChange={setRestoreTabsOnStartup}
-          onSearchEngineChange={setSearchEngine}
-          onShowFullAddressChange={setShowFullAddress}
-          onThemeChange={setTheme}
-          onWebsiteTextScaleChange={setWebsiteTextScale}
-          onYoutubeAdBlockingEnabledChange={onYoutubeAdBlockingEnabledChange}
-          onResetTabs={onBrowserResetTabs}
-          onOpenUrl={(targetUrl) => {
-            closeBrowserSettings()
-            void loadBrowserUrl(targetUrl)
-          }}
-          onOpenHyperItem={(item) => {
-            void openHyperdriveItem(item).then((didNavigate) => {
-              if (didNavigate) closeBrowserSettings()
-            })
-          }}
-          onIdentityRestored={() => {
-            browserSessionReadyRef.current = false
-            setBrowserSessionReady(false)
-          }}
-        />
+        <Animated.View style={[styles.browserShellContent, browserBackDragStyle]}>
+          <SettingsScreen
+            initialPage={browserSettingsInitialPage}
+            addressBarPosition={browserPreferences.addressBarPosition}
+            contentBlockingEnabled={browserPreferences.contentBlockingEnabled}
+            customSearchUrl={browserPreferences.customSearchUrl}
+            downloadOnlyOnWifi={browserPreferences.downloadOnlyOnWifi}
+            enforceManualPageZoom={browserPreferences.enforceManualPageZoom}
+            externalLinkBehavior={browserPreferences.externalLinkBehavior}
+            isDark={browserIsDark}
+            offlineNetworkAllowed={hyperOfflineNetworkAllowed}
+            persistenceError={browserPreferencesError}
+            restoreTabsOnStartup={browserPreferences.restoreTabsOnStartup}
+            searchEngine={browserPreferences.searchEngine}
+            showFullAddress={browserPreferences.showFullAddress}
+            theme={browserPreferences.theme}
+            websiteTextScale={browserPreferences.websiteTextScale}
+            youtubeAdBlockingEnabled={browserPreferences.youtubeAdBlockingEnabled}
+            storagePath={identityStoragePath}
+            onAddressBarPositionChange={setAddressBarPosition}
+            onCallRpc={(command, data = {}) => callRpc(command, data)}
+            onContentBlockingEnabledChange={onContentBlockingEnabledChange}
+            onClose={closeBrowserSettings}
+            onClearBrowsingData={() => {
+              const { sessionSaved } = onBrowserResetTabs(false)
+              const historyCleared = clearBrowserHistory()
+              if (sessionSaved && historyCleared) closeBrowserSettings()
+              return sessionSaved && historyCleared
+            }}
+            onClearCachedData={clearCachedBrowserTabPreviews}
+            onCustomSearchSave={setCustomSearchEngine}
+            onDownloadOnlyOnWifiChange={setDownloadOnlyOnWifi}
+            onEnforceManualPageZoomChange={setEnforceManualPageZoom}
+            onExternalLinkBehaviorChange={setExternalLinkBehavior}
+            onFilterListsUpdated={refreshContentBlockedPages}
+            onRestoreTabsOnStartupChange={setRestoreTabsOnStartup}
+            onSearchEngineChange={setSearchEngine}
+            onShowFullAddressChange={setShowFullAddress}
+            onThemeChange={setTheme}
+            onWebsiteTextScaleChange={setWebsiteTextScale}
+            onYoutubeAdBlockingEnabledChange={onYoutubeAdBlockingEnabledChange}
+            onResetTabs={onBrowserResetTabs}
+            onOpenUrl={(targetUrl) => {
+              closeBrowserSettings()
+              void loadBrowserUrl(targetUrl)
+            }}
+            onOpenHyperItem={(item) => {
+              void openHyperdriveItem(item).then((didNavigate) => {
+                if (didNavigate) closeBrowserSettings()
+              })
+            }}
+            onIdentityRestored={() => {
+              browserSessionReadyRef.current = false
+              setBrowserSessionReady(false)
+            }}
+          />
+        </Animated.View>
       </SafeAreaView>
     )
   }
@@ -3047,9 +3122,9 @@ export default function App () {
           onToggleView={onBrowserToggleTabView}
         />
 
-        <View
+        <Animated.View
           {...browserBackGesture.panHandlers}
-          style={[styles.browserContent, { backgroundColor: browserChrome.shell }]}
+          style={[styles.browserContent, browserBackDragStyle, { backgroundColor: browserChrome.shell }]}
           onTouchStart={browserSource.kind === 'app' && activeTab === 'peerchat' ? undefined : Keyboard.dismiss}
         >
         {browserSource.kind === 'home'
@@ -3121,6 +3196,8 @@ export default function App () {
                   onNotificationsEnabledChange={peerChatNotifications.setNotificationsEnabled}
                   onOpenLocalFile={openBrowserLocalFile}
                   onRequestedRoomHandled={() => setRequestedPeerChatRoomKey(null)}
+                  onRoomOpenChange={setPeerChatRoomOpen}
+                  registerGoBack={(handler) => { peerChatGoBackRef.current = handler }}
                   onOpenUrl={(targetUrl) => openBrowserUrlInNewTab(targetUrl)}
                   onSoundsEnabledChange={peerChatNotifications.setSoundsEnabled}
                   onStatus={setStatus}
@@ -3572,8 +3649,11 @@ export default function App () {
               // set, and YouTube's player is inline, so the video area stayed
               // black no matter what the content blocker was doing.
               allowsInlineMediaPlayback={true}
-              // Edge swipe for back and forward, the way Safari does it.
-              allowsBackForwardNavigationGestures={true}
+              // The edge swipe is recognised by the app, not WKWebView, so
+              // that one gesture walks the browser's own history everywhere.
+              // WKWebView only knows the page's history, which is why a search
+              // result could not be swiped back to the home screen.
+              allowsBackForwardNavigationGestures={false}
               cacheEnabled={true}
               geolocationEnabled={true}
               mediaCapturePermissionGrantType='prompt'
@@ -3715,7 +3795,7 @@ export default function App () {
           )
         })}
 
-        </View>
+        </Animated.View>
 
         {browserPreferences.addressBarPosition === 'bottom' && browserToolbar}
 

@@ -242,6 +242,10 @@ type PeerChatScreenProps = {
   onOpenLocalFile: (uri: string, name: string) => Promise<boolean>
   onRequestedRoomHandled: () => void
   onOpenUrl: (url: string) => void
+  // The browser's back gesture and the Android button both come through here,
+  // so leaving a chat lands on the room list instead of the home screen.
+  onRoomOpenChange?: (open: boolean) => void
+  registerGoBack?: (handler: (() => boolean) | null) => void
   onSoundsEnabledChange: (enabled: boolean) => boolean
   onStatus: (message: string) => void
   soundsEnabled: boolean
@@ -302,6 +306,8 @@ export function PeerChatScreen ({
   onOpenLocalFile,
   onRequestedRoomHandled,
   onOpenUrl,
+  onRoomOpenChange,
+  registerGoBack,
   onSoundsEnabledChange,
   onStatus,
   soundsEnabled,
@@ -486,6 +492,28 @@ export function PeerChatScreen ({
   useEffect(() => {
     activeRoomRef.current = activeRoom
   }, [activeRoom])
+
+  // Leaving a chat is a back step of its own. The browser owns the gesture and
+  // the Android button, so it is handed a way to take that step first.
+  const leaveActiveRoom = useCallback(() => {
+    if (!activeRoomRef.current) return false
+    setReplyTarget(null)
+    setIsSearching(false)
+    setSearchQuery('')
+    setActiveRoom(null)
+    return true
+  }, [])
+
+  useEffect(() => {
+    registerGoBack?.(leaveActiveRoom)
+    return () => registerGoBack?.(null)
+  }, [leaveActiveRoom, registerGoBack])
+
+  useEffect(() => {
+    onRoomOpenChange?.(Boolean(activeRoom))
+  }, [activeRoom, onRoomOpenChange])
+
+  useEffect(() => () => onRoomOpenChange?.(false), [onRoomOpenChange])
 
   useEffect(() => {
     if (!moderationWarning) return
@@ -1578,12 +1606,7 @@ export function PeerChatScreen ({
         <View style={[styles.chatHeader, { borderBottomColor: colors.border }]}> 
           <Pressable
             accessibilityRole='button'
-            onPress={() => {
-              setReplyTarget(null)
-              setIsSearching(false)
-              setSearchQuery('')
-              setActiveRoom(null)
-            }}
+            onPress={leaveActiveRoom}
             style={styles.headerAction}
           >
             <BackIcon width={CHAT_HEADER_ICON_SIZE} height={CHAT_HEADER_ICON_SIZE} color={colors.accent} />

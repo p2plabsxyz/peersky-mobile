@@ -26,3 +26,27 @@ export function isBackEdgeSwipe ({ startX, dx, dy }) {
   const down = Math.abs(Number(dy) || 0)
   return across > MIN_TRAVEL && across > down * HORIZONTAL_DOMINANCE
 }
+
+// How far the page slides while the finger is down. Damped and capped: the
+// page underneath is not rendered, so a full-width drag would pull the screen
+// off and leave a gap. This is feedback that the gesture took, not a reveal.
+export const BACK_SWIPE_MAX_OFFSET = 96
+const BACK_SWIPE_DAMPING = 0.45
+
+/** Where the page sits, in points, for a finger that has travelled dx. */
+export function backSwipeOffset (dx) {
+  const across = Number(dx) || 0
+  if (across <= 0) return 0
+  return Math.min(BACK_SWIPE_MAX_OFFSET, across * BACK_SWIPE_DAMPING)
+}
+
+const COMPLETE_TRAVEL = 64
+const FLICK_TRAVEL = 24
+const FLICK_VELOCITY = 0.3
+
+/** Whether a released back swipe should go back or spring home. */
+export function shouldCompleteBackSwipe ({ dx, vx }) {
+  const across = Number(dx) || 0
+  const speed = Number(vx) || 0
+  return across > COMPLETE_TRAVEL || (across > FLICK_TRAVEL && speed > FLICK_VELOCITY)
+}
