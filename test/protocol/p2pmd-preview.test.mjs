@@ -6,6 +6,7 @@ import {
   createPublishedSlidesHtml
 } from '../../backend/hyper/drive.mjs'
 import {
+  hasSlideBreaks,
   inlineHyperPreviewImages,
   renderMarkdownPreview,
   renderMarkdownSlides,
@@ -168,12 +169,51 @@ describe('p2pmd Markdown preview rendering', () => {
     assert.deepEqual(indentedSlides, ['# Code\n\n    ---\n\nText'])
   })
 
-  it('requires blank boundaries around horizontal slide separators', () => {
-    const slides = splitMarkdownSlides('# First\n\n---\n\n# Second')
-    const notSlides = splitMarkdownSlides('---\n# Heading\n\nText')
+  // Mobile used to insist on a blank line after "---" as well as before it, so
+  // "---\n# Next slide" was not a break here while it was on desktop. Inserting
+  // an image leaves exactly that shape, which is how a deck came out as one
+  // long note. Only the blank line *before* matters, and only because it tells
+  // a slide break apart from a Setext heading.
+  it('breaks a slide without needing a blank line after the separator', () => {
+    assert.deepEqual(
+      splitMarkdownSlides('# First\n\n---\n\n# Second'),
+      ['# First', '# Second']
+    )
+    assert.deepEqual(
+      splitMarkdownSlides('# First\n\n---\n# Second'),
+      ['# First', '# Second']
+    )
+    assert.deepEqual(
+      splitMarkdownSlides('![shot](hyper://a/i.png)\n\n---\n# Second'),
+      ['![shot](hyper://a/i.png)', '# Second']
+    )
+  })
 
-    assert.deepEqual(slides, ['# First', '# Second'])
-    assert.deepEqual(notSlides, ['---\n# Heading\n\nText'])
+  it('splits a leading separator the way desktop does', () => {
+    assert.deepEqual(splitMarkdownSlides('---\n# Heading\n\nText'), ['# Heading\n\nText'])
+  })
+
+  // Desktop splits on any bare "---" with /^---$/gm. That agrees with this for
+  // every real deck, and is wrong for a Setext heading or a dash line inside a
+  // code fence, which the two tests above cover. Nothing else may drift.
+  it('agrees with the desktop slide splitter on every deck shape', () => {
+    const desktopSplit = (markdown) => markdown
+      .split(/^---$|^<!-- slide -->$/gm)
+      .map((slide) => slide.trim())
+      .filter((slide) => slide.length > 0)
+
+    const decks = [
+      '# One\n\ntext\n\n---\n\n# Two\n\ntext',
+      '# One\n\ntext\n\n---\n# Two\ntext',
+      '# One\n\n![shot](hyper://a/i.png)\n\n---\n# Two',
+      '# One\n\n<!-- slide -->\n# Two',
+      '---\n# Heading\n\nText',
+      '# Title\n\n![shot](hyper://a/i.png)'
+    ]
+
+    for (const deck of decks) {
+      assert.deepEqual(splitMarkdownSlides(deck), desktopSplit(deck), deck)
+    }
   })
 
   it('renders safe slide HTML and hides speaker notes', () => {
@@ -213,5 +253,52 @@ describe('p2pmd Markdown preview rendering', () => {
 
     assert.match(html, /class="katex-display"/)
     assert.match(html, /font-family:KaTeX_Main/)
+  })
+})
+
+/**
+ * The editor asks "is this already a deck?" before offering to replace the
+ * document with the slides template. That check was a separate regular
+ * expression, and when the splitter stopped requiring a blank line after "---"
+ * the two stopped agreeing: a real deck failed the check and the editor offered
+ * to throw it away. They are one function now, and these keep them honest.
+ */
+describe('p2pmd deck detection', () => {
+  const documents = [
+    '# a\n\ntext',
+    '# a\n\n---\n\n# b',
+    '# a\n\n---\n# b',
+    '![i](hyper://a/i.png)\n\n---\n# b',
+    '# a\n\n<!-- slide -->\n# b',
+    '---\n# b\n\ntext',
+    'Title\n---\n\nbody',
+    '# c\n\n```\n---\n```\n\ntext',
+    '# c\n\n    ---\n\ntext',
+    ''
+  ]
+
+  it('sees a deck wherever the splitter finds a break', () => {
+    for (const markdown of documents) {
+      if (splitMarkdownSlides(markdown).length > 1) {
+        assert.equal(hasSlideBreaks(markdown), true, markdown)
+      }
+    }
+  })
+
+  it('never calls a plain note a deck', () => {
+    for (const markdown of documents) {
+      if (!hasSlideBreaks(markdown)) {
+        assert.ok(splitMarkdownSlides(markdown).length <= 1, markdown)
+      }
+    }
+  })
+
+  it('leaves a Setext heading and a fenced dash line alone', () => {
+    assert.equal(hasSlideBreaks('Title\n---\n\nbody'), false)
+    assert.equal(hasSlideBreaks('# c\n\n```\n---\n```\n\ntext'), false)
+  })
+
+  it('recognises the deck the editor writes from its own template', () => {
+    assert.equal(hasSlideBreaks('# One\n\ntext\n\n---\n\n# Two'), true)
   })
 })
