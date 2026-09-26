@@ -2660,8 +2660,13 @@ export function PeerChatScreen ({
             </View>
           )}
 
+          {/* One row could not hold a room key field next to a button labelled
+              "Scan invite or room QR": the buttons took their text width first
+              and the field, which starts at zero and only grows into what is
+              left, collapsed to a sliver. The key gets its own line, the same
+              way the create panel does it. */}
           {landingAction === 'join' && (
-            <View style={[styles.actionPanel, { backgroundColor: colors.surface }]}>
+            <View style={[styles.actionPanel, styles.createActionPanel, { backgroundColor: colors.surface }]}>
               <TextInput
                 value={joinKey}
                 onChangeText={setJoinKey}
@@ -2670,24 +2675,26 @@ export function PeerChatScreen ({
                 maxLength={64}
                 placeholder='64-character room key'
                 placeholderTextColor={colors.muted}
-                style={[styles.input, styles.actionInput, styles.roomKeyInput, { backgroundColor: colors.input, color: colors.text }]}
+                style={[styles.input, styles.createActionInput, styles.roomKeyInput, { backgroundColor: colors.input, color: colors.text }]}
               />
-              <Pressable
-                accessibilityRole='button'
-                disabled={isBusy}
-                onPress={() => void openInviteScanner()}
-                style={[styles.actionSubmit, { backgroundColor: colors.input }, isBusy ? styles.disabled : null]}
-              >
-                <Text style={[styles.actionSubmitText, { color: colors.text }]}>Scan invite or room QR</Text>
-              </Pressable>
-              <Pressable
-                accessibilityRole='button'
-                disabled={!profileName.trim() || joinKey.trim().length !== 64 || isBusy}
-                onPress={joinRoom}
-                style={[styles.actionSubmit, { backgroundColor: colors.accent }, !profileName.trim() || joinKey.trim().length !== 64 || isBusy ? styles.disabled : null]}
-              >
-                <Text style={styles.actionSubmitText}>Join</Text>
-              </Pressable>
+              <View style={styles.actionPanelRow}>
+                <Pressable
+                  accessibilityRole='button'
+                  disabled={isBusy}
+                  onPress={() => void openInviteScanner()}
+                  style={[styles.actionSubmit, styles.actionSubmitGrow, { backgroundColor: colors.input }, isBusy ? styles.disabled : null]}
+                >
+                  <Text style={[styles.actionSubmitText, { color: colors.text }]}>Scan invite or room QR</Text>
+                </Pressable>
+                <Pressable
+                  accessibilityRole='button'
+                  disabled={!profileName.trim() || joinKey.trim().length !== 64 || isBusy}
+                  onPress={joinRoom}
+                  style={[styles.actionSubmit, { backgroundColor: colors.accent }, !profileName.trim() || joinKey.trim().length !== 64 || isBusy ? styles.disabled : null]}
+                >
+                  <Text style={styles.actionSubmitText}>Join</Text>
+                </Pressable>
+              </View>
             </View>
           )}
 
@@ -3596,8 +3603,12 @@ function persistPeerChatUiState (state: PeerChatUiState) {
   }
 }
 
+// Matched to the browser shell (browser-appearance.mjs) on purpose. PeerChat
+// fills the content area while the shell paints the bottom safe area behind the
+// home indicator, and two greys a few values apart showed up as a band across
+// the bottom of the screen.
 const darkColors = {
-  background: '#17181d',
+  background: '#18181b',
   surface: '#23252c',
   input: '#2d3039',
   border: '#3d414d',
@@ -3612,7 +3623,7 @@ const darkColors = {
 }
 
 const lightColors = {
-  background: '#f5f6f8',
+  background: '#f5f8ff',
   surface: '#ffffff',
   input: '#f0f2f5',
   border: '#d8dce5',
@@ -3677,6 +3688,8 @@ const styles = StyleSheet.create({
   createActionPanel: { alignItems: 'stretch', flexDirection: 'column' },
   createActionInput: { width: '100%' },
   actionInput: { flex: 1 },
+  actionPanelRow: { alignItems: 'center', flexDirection: 'row', gap: 8, width: '100%' },
+  actionSubmitGrow: { flex: 1 },
   peerchatScanner: { backgroundColor: '#000000', flex: 1 },
   peerchatScannerOverlay: { alignItems: 'center', flex: 1, justifyContent: 'flex-end', padding: 24 },
   peerchatScanHint: { color: '#ffffff', fontSize: 15, marginBottom: 16, textAlign: 'center' },
