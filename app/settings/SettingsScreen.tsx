@@ -307,6 +307,7 @@ export function SettingsScreen(props: SettingsScreenProps) {
             onCallRpc={props.onCallRpc}
             onDownloadOnlyOnWifiChange={props.onDownloadOnlyOnWifiChange}
             onOpenItem={props.onOpenHyperItem}
+            onOpenUrl={props.onOpenUrl}
           />
         )}
         {page === 'permissions' && <Permissions {...props} />}
