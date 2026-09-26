@@ -49,6 +49,7 @@ import {
 import { RPC_APP_PEERCHAT_CHANGED } from '../rpc/commands.mjs'
 import { notifyApp } from '../rpc/notify.mjs'
 import { attachPeerChatTransport } from './transport.mjs'
+import { createPeerPresence } from './presence.mjs'
 import { PRE_JOINED_PEERCHAT_ROOM_KEY } from './rooms.mjs'
 
 const MAX_ROOMS = 50
@@ -103,6 +104,8 @@ export class PeerChatService {
     this.discoveryKeys = new Map()
     this.peers = new Map()
     this.pendingPeers = new Map()
+    this.presence = createPeerPresence()
+    this.presenceTimer = null
     this.seenIds = new Set()
     this.activeRoomKey = null
     this.version = 0
@@ -677,6 +680,7 @@ export class PeerChatService {
 
     this.rooms.delete(normalized)
     this.moderator.clearRoom(normalized)
+    this.presence.forgetRoom(normalized)
     if (this.activeRoomKey === normalized) this.activeRoomKey = null
     await this.releaseFeed(normalized)
     this.joinedRooms.delete(normalized)
@@ -693,6 +697,9 @@ export class PeerChatService {
     this.persistTimer = null
     if (this.notifyTimer) clearTimeout(this.notifyTimer)
     this.notifyTimer = null
+    if (this.presenceTimer) clearTimeout(this.presenceTimer)
+    this.presenceTimer = null
+    this.presence.clear()
 
     this.sdk.swarm.off?.('connection', this.onConnection)
     this.sdk.localSwarm?.off?.('topics-change', this.onTopicsChange)
@@ -849,6 +856,7 @@ export class PeerChatService {
     const previousRooms = new Set(peer.rooms)
     peer.rooms = getSharedPeerChatRooms(info.topics, this.discoveryKeys)
     if (this.pendingPeers.has(connection)) return
+    this.rememberPeerPresence(peer)
     for (const roomKey of peer.rooms) {
       if (!previousRooms.has(roomKey)) this.shareRoom(peer, roomKey)
     }
@@ -860,6 +868,7 @@ export class PeerChatService {
     peer.active = true
     this.pendingPeers.delete(peer.connection)
     this.peers.set(peer.connection, peer)
+    this.rememberPeerPresence(peer)
     this.bumpVersion()
 
     this.shareTopics(peer)
@@ -906,7 +915,39 @@ export class PeerChatService {
     if (peer.pingTimer) clearInterval(peer.pingTimer)
     peer.pingTimer = null
     this.peers.delete(peer.connection)
+    this.holdPeerPresence(peer)
     this.bumpVersion()
+  }
+
+  rememberPeerPresence (peer) {
+    const peerId = normalizePeerChatPeerId(peer.id)
+    if (!peerId) return
+    for (const roomKey of peer.rooms) this.presence.markPresent(roomKey, peerId)
+  }
+
+  // A dropped connection is usually a redial, so the room keeps them for a
+  // moment rather than reporting someone left and came back.
+  holdPeerPresence (peer) {
+    const peerId = normalizePeerChatPeerId(peer.id)
+    if (!peerId) return
+    for (const roomKey of peer.rooms) this.presence.markAbsent(roomKey, peerId)
+    this.schedulePresencePrune()
+  }
+
+  // Nothing else happens when a held peer finally drops off, so without this
+  // the count would stay as it was until some unrelated event moved it.
+  schedulePresencePrune () {
+    if (this.presenceTimer || this.closed) return
+    const expiresAt = this.presence.nextExpiryAt()
+    if (expiresAt === null) return
+
+    this.presenceTimer = setTimeout(() => {
+      this.presenceTimer = null
+      if (this.closed) return
+      if (this.presence.prune()) this.bumpVersion()
+      this.schedulePresencePrune()
+    }, Math.max(0, expiresAt - Date.now()))
+    this.presenceTimer.unref?.()
   }
 
   handlePeerPayload (peer, payload) {
@@ -1798,11 +1839,11 @@ export class PeerChatService {
   }
 
   countRoomPeers (roomKey) {
-    const peerIds = new Set()
+    const peerIds = []
     for (const peer of this.peers.values()) {
-      if (peer.rooms.includes(roomKey)) peerIds.add(peer.id)
+      if (peer.rooms.includes(roomKey)) peerIds.push(peer.id)
     }
-    return peerIds.size
+    return this.presence.presentIds(roomKey, peerIds).size
   }
 
   listRoomMembers (roomKey) {
@@ -1845,6 +1886,12 @@ export class PeerChatService {
         online: true
       })
       if (members.size >= MAX_RETURNED_ROOM_MEMBERS) break
+    }
+    // Someone mid-redial is still here as far as the room is concerned, so
+    // their dot does not blink off and on again.
+    for (const member of members.values()) {
+      if (member.online || member.self) continue
+      if (this.presence.isPresent(roomKey, member.id)) member.online = true
     }
     return [...members.values()].sort((left, right) => {
       if (left.self !== right.self) return left.self ? -1 : 1
