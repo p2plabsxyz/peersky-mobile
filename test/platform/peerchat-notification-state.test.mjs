@@ -182,3 +182,38 @@ test('PeerChat About answers the questions a first-time user actually asks', asy
   assert.match(screen, /settingsPage === 'about' && \(\s*<PeerChatAboutPage/)
   assert.doesNotMatch(about, /<Modal/)
 })
+
+// A direct message is named after the one person who can be in it, so a body
+// of "Akhilesh: Hi" under a title of "Akhilesh" said the name twice.
+test('a direct message notification does not repeat the sender', () => {
+  const previous = [{ roomKey: 'a'.repeat(64), unreadCount: 0 }]
+  const next = [{
+    roomKey: 'a'.repeat(64),
+    name: 'Akhilesh',
+    isDM: true,
+    unreadCount: 1,
+    lastMessage: { sender: 'peer', senderName: 'Akhilesh', message: 'Hi', timestamp: 2 }
+  }]
+
+  assert.deepEqual(collectPeerChatNotificationCandidates(previous, next), [{
+    roomKey: 'a'.repeat(64),
+    title: 'Akhilesh',
+    body: 'Hi'
+  }])
+})
+
+test('a room notification still says who sent it', () => {
+  const previous = [{ roomKey: 'b'.repeat(64), unreadCount: 0 }]
+  const next = [{
+    roomKey: 'b'.repeat(64),
+    name: 'Peer-to-Peer Republic',
+    unreadCount: 1,
+    lastMessage: { sender: 'peer', senderName: 'Bob', message: 'Hi', timestamp: 2 }
+  }]
+
+  assert.deepEqual(collectPeerChatNotificationCandidates(previous, next), [{
+    roomKey: 'b'.repeat(64),
+    title: 'Peer-to-Peer Republic',
+    body: 'Bob: Hi'
+  }])
+})
