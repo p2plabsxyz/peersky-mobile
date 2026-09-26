@@ -5,7 +5,6 @@ import {
   FlatList,
   Image,
   type ImageSourcePropType,
-  LayoutAnimation,
   Modal,
   PanResponder,
   Platform,
@@ -24,6 +23,7 @@ import GridIcon from '../../assets/icons/bootstrap/grid.svg'
 import ListIcon from '../../assets/icons/bootstrap/list-ul.svg'
 import PlusIcon from '../../assets/icons/bootstrap/plus-lg.svg'
 import CloseIcon from '../../assets/icons/bootstrap/x-lg.svg'
+import { isHorizontalSwipe, shouldCloseOnRelease } from './tab-swipe.mjs'
 
 const TAB_ACTION_ICON_SIZE = 21
 const TAB_ACTION_ICON_STROKE_WIDTH = 0.35
@@ -100,10 +100,9 @@ export function BrowserTabsScreen ({
     color: '#ffffff',
     stroke: '#ffffff'
   }
-  const closeTab = (tabId: string) => {
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut)
-    onCloseTab(tabId)
-  }
+  // The layout animation is configured by the close handler instead: closing
+  // the active tab can swap the whole screen, and only the caller knows when.
+  const closeTab = (tabId: string) => onCloseTab(tabId)
 
   return (
     <Modal
@@ -296,16 +295,16 @@ function SwipeableTabCard ({
   onCloseRef.current = onClose
 
   const panResponder = useRef(PanResponder.create({
-    onMoveShouldSetPanResponder: (_, gesture) => (
-      Math.abs(gesture.dx) > 10 && Math.abs(gesture.dx) > Math.abs(gesture.dy)
-    ),
+    onMoveShouldSetPanResponder: (_, gesture) => isHorizontalSwipe(gesture),
+    // Claim the move before the card's own Pressable sees it, or a swipe that
+    // starts on the preview reads as a press.
+    onMoveShouldSetPanResponderCapture: (_, gesture) => isHorizontalSwipe(gesture),
+    // The FlatList asks for the gesture back as soon as the finger drifts
+    // downward. Saying yes is what made a swipe take two or three tries.
+    onPanResponderTerminationRequest: () => false,
     onPanResponderMove: (_, gesture) => translateX.setValue(gesture.dx),
     onPanResponderRelease: (_, gesture) => {
-      const shouldClose = Math.abs(gesture.dx) > 72 || (
-        Math.abs(gesture.dx) > 24 && Math.abs(gesture.vx) > 0.7
-      )
-
-      if (!shouldClose) {
+      if (!shouldCloseOnRelease(gesture)) {
         Animated.spring(translateX, {
           toValue: 0,
           useNativeDriver: true
