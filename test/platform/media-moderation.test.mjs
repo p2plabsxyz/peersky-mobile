@@ -381,18 +381,25 @@ test('a folder walk is bounded in both depth and count', async () => {
 })
 
 test('the backend opens staged folder files and nothing else', async () => {
+  // One definition now, shared by Hyperdrive uploads and PeerChat attachments,
+  // because two copies drifted the moment the camera roll was added.
+  const localFile = await readFile(new URL('../../backend/hyper/local-file.mjs', import.meta.url), 'utf8')
   const library = await readFile(new URL('../../backend/hyper/library.mjs', import.meta.url), 'utf8')
+  const attachments = await readFile(new URL('../../backend/peerchat/attachments.mjs', import.meta.url), 'utf8')
   const gate = await readFile(new URL('../../app/media/upload-gate.ts', import.meta.url), 'utf8')
+
+  assert.match(library, /normalizePickedLocalFile\(fileUri, byteLength\)/)
+  assert.match(attachments, /normalizePickedLocalFile\(fileUri, byteLength\)/)
 
   // The originals live outside the sandbox, and on Android behind a content
   // uri the backend cannot open, so a folder stages its files first.
   const staging = gate.match(/STAGING_FOLDER = '([\w-]+)'/)
   assert.ok(staging)
-  assert.ok(library.includes(`documentpicker|${staging[1]}`), 'the backend must accept the staging folder')
+  assert.ok(localFile.includes(`'${staging[1]}'`), 'the backend must accept the staging folder')
 
-  // And still nothing outside those two.
-  assert.match(library, /parsed\.protocol !== 'file:'/)
-  assert.match(library, /segment === '\.\.'/)
+  // And still nothing outside the picker caches.
+  assert.match(localFile, /parsed\.protocol !== 'file:'/)
+  assert.match(localFile, /segment === '\.\.'/)
 })
 
 test('Hyperdrive routes a folder through the same gate as files', async () => {

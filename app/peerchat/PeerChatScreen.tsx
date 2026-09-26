@@ -102,6 +102,7 @@ import SettingsIcon from '../../assets/icons/peerchat/settings.svg'
 import { CameraView, useCameraPermissions } from 'expo-camera'
 import { buildPeerChatInviteUrl, parsePeerChatInvite } from './peerchat-invite.mjs'
 import { pickUploads } from '../media/upload-gate'
+import type { UploadSource } from '../media/upload-gate'
 import { scanMedia } from '../media/NsfwScanner'
 import { MEDIA_BLOCKED } from '../media/media-moderation.mjs'
 
@@ -363,6 +364,7 @@ export function PeerChatScreen ({
   const [composer, setComposer] = useState('')
   const [replyTarget, setReplyTarget] = useState<PeerChatReply | null>(null)
   const [messageActionTarget, setMessageActionTarget] = useState<PeerChatMessage | null>(null)
+  const [linkActionTarget, setLinkActionTarget] = useState<string | null>(null)
   const [roomActionTarget, setRoomActionTarget] = useState<PeerChatRoom | null>(null)
   const [profileTarget, setProfileTarget] = useState<PeerChatMember | null>(null)
   // A refresh clears the error, and refreshes now arrive the moment anything
@@ -1353,13 +1355,28 @@ export function PeerChatScreen ({
     onOpenUrl(url)
   }
 
+  // Attaching used to open Files and nothing else, which on iOS cannot reach
+  // the camera roll at all. Same three choices P2PMD gets from its web file
+  // input, offered here because a native picker has to ask for them.
   function attachFile () {
+    if (!activeRoom || isBusy) return
+
+    Alert.alert('Attach', undefined, [
+      { text: 'Photo Library', onPress: () => attachFrom('library') },
+      { text: 'Take Photo', onPress: () => attachFrom('camera') },
+      { text: 'Choose Files', onPress: () => attachFrom('files') },
+      { text: 'Cancel', style: 'cancel' }
+    ])
+  }
+
+  function attachFrom (source: UploadSource) {
     if (!activeRoom || isBusy) return
     void runAction(async () => {
       // pickUploads bounds the batch and screens every file before any of it
       // is uploaded, so a refusal never leaves half a send in the room.
       const assets = await pickUploads({
         multiple: true,
+        source,
         // A room shows a picture to everyone at once, so it is screened. A
         // direct message reaches one person, who can block the sender.
         screen: !activeRoom.isDM
@@ -1460,6 +1477,12 @@ export function PeerChatScreen ({
     Clipboard.setString(message.message)
     setMessageActionTarget(null)
     onStatus('Message copied')
+  }
+
+  function copyMessageLink (url: string) {
+    Clipboard.setString(url)
+    setLinkActionTarget(null)
+    onStatus('Link copied')
   }
 
   function showMessageInfo () {
@@ -2032,7 +2055,8 @@ export function PeerChatScreen ({
                           colors.text,
                           colors.accent,
                           colors.accent,
-                          openMessageLink
+                          openMessageLink,
+                          setLinkActionTarget
                         )}
                       </Text>
                       <PeerChatLinkCard
@@ -2337,6 +2361,58 @@ export function PeerChatScreen ({
                       </Pressable>
                     </>
                     )}
+              </SafeAreaView>
+            )}
+          </View>
+        </Modal>
+        <Modal
+          animationType='fade'
+          onRequestClose={() => setLinkActionTarget(null)}
+          statusBarTranslucent
+          transparent
+          visible={linkActionTarget !== null}
+        >
+          <View accessibilityViewIsModal style={styles.actionSheetRoot}>
+            <Pressable
+              accessibilityLabel='Close link actions'
+              accessibilityRole='button'
+              onPress={() => setLinkActionTarget(null)}
+              style={styles.actionSheetBackdrop}
+            />
+            {linkActionTarget && (
+              <SafeAreaView
+                edges={['bottom', 'left', 'right']}
+                style={[styles.actionSheet, { backgroundColor: colors.surface }]}
+              >
+                <Text numberOfLines={1} style={[styles.actionSheetTitle, { color: colors.text }]}>Link</Text>
+                <Text numberOfLines={3} style={[styles.actionSheetPreview, { color: colors.muted }]}>
+                  {linkActionTarget}
+                </Text>
+                <View style={[styles.actionSheetDivider, { backgroundColor: colors.border }]} />
+                <Pressable
+                  accessibilityRole='button'
+                  onPress={() => copyMessageLink(linkActionTarget)}
+                  style={styles.actionSheetAction}
+                >
+                  <Text style={[styles.actionSheetActionText, { color: colors.text }]}>Copy link</Text>
+                </Pressable>
+                <Pressable
+                  accessibilityRole='button'
+                  onPress={() => {
+                    setLinkActionTarget(null)
+                    openMessageLink(linkActionTarget)
+                  }}
+                  style={styles.actionSheetAction}
+                >
+                  <Text style={[styles.actionSheetActionText, { color: colors.text }]}>Open link</Text>
+                </Pressable>
+                <Pressable
+                  accessibilityRole='button'
+                  onPress={() => setLinkActionTarget(null)}
+                  style={styles.actionSheetAction}
+                >
+                  <Text style={[styles.actionSheetActionText, { color: colors.accent }]}>Cancel</Text>
+                </Pressable>
               </SafeAreaView>
             )}
           </View>
@@ -3587,16 +3663,21 @@ function renderMessageText (
   textColor: string,
   mentionColor: string,
   linkColor: string,
-  onOpenLink: (url: string) => void
+  onOpenLink: (url: string) => void,
+  onHoldLink: (url: string) => void
 ) {
   return splitPeerChatMessageParts(message, usernames).map((part, index) => {
     if (part.link) {
       return (
         <Text
           key={`${index}-${part.text}`}
+          accessibilityHint='Long press to copy this link'
           accessibilityRole='link'
           style={{ color: linkColor, textDecorationLine: 'underline' }}
           onPress={() => onOpenLink(part.link as string)}
+          // A link claims the touch, so the bubble underneath never sees a
+          // long press on it. Without this, holding a link opened it.
+          onLongPress={() => onHoldLink(part.link as string)}
         >
           {part.text}
         </Text>

@@ -22,6 +22,7 @@ import {
   withHyperRuntimeForAddress,
   withHyperRuntimeOperation
 } from '../hyper/runtime.mjs'
+import { normalizePickedLocalFile } from '../hyper/local-file.mjs'
 import { createHyperUrl, parseHyperUrl } from '../hyper/url.mjs'
 import { normalizePeerChatRoomKey } from './protocol.mjs'
 
@@ -31,8 +32,23 @@ const MAGIC = b4a.from('PCA1')
 const IV_BYTES = 12
 const TAG_BYTES = 16
 const ENVELOPE_BYTES = MAGIC.byteLength + IV_BYTES + TAG_BYTES
-const MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024 * 1024
-const MAX_FILE_URI_LENGTH = 8192
+/**
+ * The wire contract seals a file in one piece, on this side and on desktop, so
+ * the whole thing and its ciphertext are both in memory during a send. That is
+ * what bounds an attachment, not the drive: a phone cannot hold half a gigabyte
+ * twice over. Opening one costs the same, so anything larger is refused on the
+ * way in as well.
+ */
+export const MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024
+const MAX_ATTACHMENT_LABEL = `${Math.round(MAX_ATTACHMENT_BYTES / (1024 * 1024))} MB`
+// hyperblobs writes every chunk it is handed as one hypercore block, and
+// hypercore refuses a block over 15 MB. Bare has no streaming aes-256-gcm:
+// update() buffers and returns nothing, and final() hands back the entire
+// ciphertext at once, so a video reached the drive as a single block and the
+// send died with "Appended block exceeds the maximum suggested block size".
+// Splitting here stores the same bytes in the blocks hyperblobs would have
+// picked itself.
+export const ATTACHMENT_BLOCK_BYTES = 64 * 1024
 const CACHE_DIRECTORY_NAME = 'peerchat-attachment-cache'
 let uploadTransition = Promise.resolve()
 const pendingOpens = new Map()
@@ -89,10 +105,10 @@ export async function uploadPeerChatAttachment ({
 } = {}, options = {}) {
   const normalizedRoomKey = normalizePeerChatRoomKey(roomKey)
   if (!normalizedRoomKey) return { ok: false, error: 'Invalid PeerChat room key.' }
-  const localFile = normalizeLocalFile(fileUri, byteLength)
+  const localFile = normalizePickedLocalFile(fileUri, byteLength)
   if (!localFile) return { ok: false, error: 'Invalid attachment file.' }
   if (localFile.byteLength > MAX_ATTACHMENT_BYTES) {
-    return { ok: false, error: 'PeerChat attachments must be 2 GB or smaller.' }
+    return { ok: false, error: `PeerChat attachments must be ${MAX_ATTACHMENT_LABEL} or smaller.` }
   }
 
   return withUploadTransition(async () => {
@@ -141,7 +157,7 @@ export async function openPeerChatAttachment ({
   if (encrypted !== true) return { ok: false, error: 'Attachment is not marked as encrypted.' }
   const expectedSize = Number.isSafeInteger(fileSize) && fileSize >= 0 ? fileSize : null
   if (expectedSize !== null && expectedSize > MAX_ATTACHMENT_BYTES) {
-    return { ok: false, error: 'PeerChat attachments must be 2 GB or smaller.' }
+    return { ok: false, error: `PeerChat attachments must be ${MAX_ATTACHMENT_LABEL} or smaller.` }
   }
 
   const openingKey = `${normalizedRoomKey}:${url}`
@@ -201,9 +217,11 @@ export async function openPeerChatAttachment ({
 }
 
 class AttachmentEncryptStream extends Transform {
-  constructor (roomKey, iv = randomBytes(IV_BYTES)) {
+  // createCipher is injectable so a test can stand in the one-shot cipher Bare
+  // gives us, which is the shape node's streaming one hides.
+  constructor (roomKey, iv = randomBytes(IV_BYTES), createCipher = createCipheriv) {
     super()
-    this.cipher = createCipheriv('aes-256-gcm', deriveAttachmentKey(roomKey), iv)
+    this.cipher = createCipher('aes-256-gcm', deriveAttachmentKey(roomKey), iv)
     this.push(MAGIC)
     this.push(iv)
   }
@@ -225,6 +243,24 @@ class AttachmentEncryptStream extends Transform {
     } catch (error) {
       callback(error)
     }
+  }
+}
+
+/**
+ * Cuts whatever it is handed into drive-sized blocks.
+ *
+ * The encrypt stream above emits what the cipher gives it, which on Bare is one
+ * piece the size of the whole file, and hyperblobs turns every piece into one
+ * hypercore block. The bytes that reach the drive are unchanged; only how they
+ * are handed over is.
+ */
+export class AttachmentBlockStream extends Transform {
+  _transform (chunk, encoding, callback) {
+    const bytes = b4a.from(chunk)
+    for (let offset = 0; offset < bytes.byteLength; offset += ATTACHMENT_BLOCK_BYTES) {
+      this.push(bytes.subarray(offset, offset + ATTACHMENT_BLOCK_BYTES))
+    }
+    callback()
   }
 }
 
@@ -295,35 +331,10 @@ async function writeEncryptedFile (drive, pathname, localFile, roomKey, options)
   }
   await pipeline(
     createReadStream(localFile.path),
-    new AttachmentEncryptStream(roomKey),
+    new AttachmentEncryptStream(roomKey, options.iv, options.createCipher),
+    new AttachmentBlockStream(),
     drive.createWriteStream(pathname)
   )
-}
-
-function normalizeLocalFile (fileUri, byteLength) {
-  if (
-    typeof fileUri !== 'string' ||
-    fileUri.length < 1 ||
-    fileUri.length > MAX_FILE_URI_LENGTH ||
-    !Number.isSafeInteger(byteLength) ||
-    byteLength < 1
-  ) return null
-
-  try {
-    const parsed = new URL(fileUri)
-    if (parsed.protocol !== 'file:' || parsed.hostname || parsed.search || parsed.hash) return null
-    const decodedPath = decodeURIComponent(parsed.pathname)
-    const path = /^\/[a-z]:\//i.test(decodedPath) ? decodedPath.slice(1) : decodedPath
-    const normalizedPath = path.replaceAll('\\', '/')
-    if (
-      normalizedPath.includes('\0') ||
-      normalizedPath.split('/').some((segment) => segment === '..') ||
-      !/\/(?:cache|caches)\/documentpicker\//i.test(normalizedPath)
-    ) return null
-    return { path, byteLength }
-  } catch {
-    return null
-  }
 }
 
 function normalizeFilename (value) {

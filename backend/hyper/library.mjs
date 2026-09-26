@@ -12,6 +12,7 @@ import {
   withPrivateHyperRuntimeOperation,
   withSyncedPrivateHyperRuntimeOperation
 } from './runtime.mjs'
+import { normalizePickedLocalFile } from './local-file.mjs'
 import { normalizeDriveAddressId } from './runtime-routing.mjs'
 import { createHyperUrl, parseHyperUrl } from './url.mjs'
 import { recordHyperArchive } from './archive.mjs'
@@ -20,7 +21,6 @@ import { refreshHyperRuntimeNetwork } from './network-refresh.mjs'
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 const MAX_UPLOAD_BASE64_LENGTH = Math.ceil(MAX_UPLOAD_BYTES / 3) * 4
-const MAX_UPLOAD_FILE_URI_LENGTH = 8192
 const MAX_LIST_ITEMS = 100
 const MAX_SCANNED_ENTRIES = 500
 const MAX_LIST_TIME_MS = 5000
@@ -170,7 +170,7 @@ export async function uploadHyperdriveFile ({
   if (!filename) return { ok: false, error: 'Invalid file name.' }
   const uploadTarget = resolveHyperdriveUploadTarget(visibility)
   if (!uploadTarget) return { ok: false, error: 'Choose public or private upload visibility.' }
-  const localFile = normalizeLocalUploadFile(fileUri, byteLength)
+  const localFile = normalizePickedLocalFile(fileUri, byteLength)
   if (!localFile && (typeof contentBase64 !== 'string' || !contentBase64)) {
     return { ok: false, error: 'Missing file content.' }
   }
@@ -232,36 +232,6 @@ export async function uploadHyperdriveFile ({
       }
     }
   }, { address: undefined, privateRuntime: visibility === 'device', syncedPrivate: visibility === 'private' }))
-}
-
-function normalizeLocalUploadFile (fileUri, byteLength) {
-  if (
-    typeof fileUri !== 'string' ||
-    fileUri.length < 1 ||
-    fileUri.length > MAX_UPLOAD_FILE_URI_LENGTH ||
-    !Number.isSafeInteger(byteLength) ||
-    byteLength < 1
-  ) return null
-
-  try {
-    const parsed = new URL(fileUri)
-    if (parsed.protocol !== 'file:' || parsed.hostname || parsed.search || parsed.hash) return null
-    const filepath = decodeURIComponent(parsed.pathname)
-    const normalizedPath = filepath.replaceAll('\\', '/')
-    if (
-      normalizedPath.includes('\0') ||
-      normalizedPath.split('/').some((segment) => segment === '..') ||
-      // documentpicker is where the file picker copies a single pick. A folder
-      // upload stages its files under peersky-upload instead, because the
-      // originals live outside the sandbox and, on Android, behind a content
-      // uri the backend cannot open.
-      !/\/(?:cache|caches)\/(?:documentpicker|peersky-upload)\//i.test(normalizedPath)
-    ) return null
-
-    return { path: filepath, byteLength }
-  } catch {
-    return null
-  }
 }
 
 function decodeInlineUpload (contentBase64) {

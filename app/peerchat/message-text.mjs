@@ -1,9 +1,10 @@
 const VALID_USERNAME = /^[A-Za-z0-9]+(?: [A-Za-z0-9]+)*$/
 
-// The same set desktop linkifies, so a link that is tappable on one is tappable
-// on the other. peersky:// and hyper:// matter most here: they are how a room
-// invite and a drive get shared, and they were plain text on the phone.
-const MESSAGE_LINK = /(?:https?|hyper|ipfs|ipns|peersky|bt|bittorrent):\/\/[^\s<>"']+|magnet:\?[^\s<>"']+|[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g
+// What desktop linkifies, plus hs://, which is how a P2PMD note is shared and
+// was the one address in this list that stayed plain text on both. peersky://
+// and hyper:// matter most: they are how a room invite and a drive get passed
+// around, and they were not tappable on the phone at all.
+const MESSAGE_LINK = /(?:https?|hs|hyper|ipfs|ipns|peersky|bt|bittorrent):\/\/[^\s<>"']+|magnet:\?[^\s<>"']+|[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g
 
 // Trailing punctuation belongs to the sentence, not the address. A link at the
 // end of "see hyper://key/index.html." keeps the dot out of what gets opened.

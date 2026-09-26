@@ -80,3 +80,15 @@ test('a message with no link is left whole', () => {
   const parts = splitPeerChatMessageParts('just talking', [])
   assert.deepEqual(parts, [{ text: 'just talking', mention: false, link: null }])
 })
+
+// A P2PMD note key is shared the same way a room invite is, and it was the one
+// address in a message that stayed plain text.
+test('an hs:// note key is a link', () => {
+  const parts = splitPeerChatMessageParts(`join hs://${'a'.repeat(52)} tonight`, [])
+  assert.deepEqual(parts.map((part) => part.link), [null, `hs://${'a'.repeat(52)}`, null])
+})
+
+test('https is still https, not an hs link', () => {
+  const parts = splitPeerChatMessageParts('see https://example.com', [])
+  assert.deepEqual(parts.filter((part) => part.link).map((part) => part.link), ['https://example.com'])
+})

@@ -1,4 +1,5 @@
 import * as DocumentPicker from 'expo-document-picker'
+import * as ImagePicker from 'expo-image-picker'
 import { Directory, File, Paths } from 'expo-file-system'
 import { AppState } from 'react-native'
 
@@ -22,6 +23,14 @@ export type UploadAsset = {
 
 export type UploadScanner = (asset: UploadAsset) => Promise<string>
 
+/**
+ * Where a batch came from. The Files browser cannot reach the camera roll on
+ * iOS, so "attach" used to mean "open Files" and a photo took several taps
+ * through the Photos app to reach. P2PMD gets all three for free because its
+ * picker is a web file input and iOS draws that sheet itself.
+ */
+export type UploadSource = 'files' | 'library' | 'camera'
+
 let scanner: UploadScanner | null = null
 
 // Leaving the app while the picker is open means its result never arrives, and
@@ -40,6 +49,36 @@ AppState.addEventListener('change', (state) => {
     if (abandonPick === giveUp) giveUp()
   }, ABANDONED_PICK_GRACE_MS)
 })
+
+async function pickImages (
+  source: 'library' | 'camera',
+  multiple: boolean
+): Promise<ImagePicker.ImagePickerResult | null> {
+  if (abandonPick) return null
+
+  if (source === 'camera') {
+    const permission = await ImagePicker.requestCameraPermissionsAsync()
+    if (!permission.granted) throw new Error('PeerSky needs camera access to take a photo.')
+  }
+
+  const options: ImagePicker.ImagePickerOptions = {
+    allowsMultipleSelection: source === 'library' && multiple,
+    mediaTypes: ['images', 'videos'],
+    quality: 1
+  }
+
+  try {
+    return await new Promise<ImagePicker.ImagePickerResult | null>((resolve, reject) => {
+      abandonPick = () => resolve(null)
+      const launch = source === 'camera'
+        ? ImagePicker.launchCameraAsync(options)
+        : ImagePicker.launchImageLibraryAsync(options)
+      launch.then(resolve, reject)
+    })
+  } finally {
+    abandonPick = null
+  }
+}
 
 // Android rejects a second pick outright, so this keeps the two in step rather
 // than letting the native error reach the user.
@@ -198,8 +237,27 @@ export async function pickUploadFolder (): Promise<UploadAsset[]> {
 export async function pickUploads ({
   multiple = false,
   screen = true,
+  source = 'files',
   type
-}: { multiple?: boolean, screen?: boolean, type?: string | string[] } = {}): Promise<UploadAsset[]> {
+}: {
+  multiple?: boolean
+  screen?: boolean
+  source?: UploadSource
+  type?: string | string[]
+} = {}): Promise<UploadAsset[]> {
+  const picked = source === 'files'
+    ? await pickFromFiles(multiple, type)
+    : await pickFromPhotos(source, multiple)
+  if (picked.length === 0) return []
+
+  if (isTooManyFiles(picked.length)) {
+    throw new Error(describeTooManyFiles(picked.length, MAX_UPLOAD_BATCH))
+  }
+
+  return screen ? await screenAssets(picked) : picked
+}
+
+async function pickFromFiles (multiple: boolean, type?: string | string[]): Promise<UploadAsset[]> {
   const selection = await pickDocuments({
     copyToCacheDirectory: true,
     multiple,
@@ -207,11 +265,7 @@ export async function pickUploads ({
   })
   if (!selection || selection.canceled || !selection.assets?.length) return []
 
-  if (isTooManyFiles(selection.assets.length)) {
-    throw new Error(describeTooManyFiles(selection.assets.length, MAX_UPLOAD_BATCH))
-  }
-
-  const assets: UploadAsset[] = selection.assets.map((asset) => {
+  return selection.assets.map((asset) => {
     const file = new File(asset.uri)
     const size = asset.size ?? file.size
     if (!Number.isSafeInteger(size) || !size) throw new Error('Choose a non-empty file.')
@@ -222,9 +276,38 @@ export async function pickUploads ({
       mimeType: asset.mimeType || ''
     }
   })
+}
 
-  if (!screen) return assets
+async function pickFromPhotos (
+  source: 'library' | 'camera',
+  multiple: boolean
+): Promise<UploadAsset[]> {
+  const selection = await pickImages(source, multiple)
+  if (!selection || selection.canceled || !selection.assets?.length) return []
 
+  return selection.assets.map((asset) => {
+    const file = new File(asset.uri)
+    const size = asset.fileSize ?? file.size
+    if (!Number.isSafeInteger(size) || !size) throw new Error('Choose a non-empty file.')
+    return {
+      uri: file.uri,
+      // The camera roll does not always hand over a name, and a photo with no
+      // name arrives in the room as "undefined".
+      name: asset.fileName || nameFromUri(file.uri, asset.mimeType),
+      size,
+      mimeType: asset.mimeType || ''
+    }
+  })
+}
+
+function nameFromUri (uri: string, mimeType?: string) {
+  const fromPath = uri.split(/[?#]/, 1)[0].split('/').pop() || ''
+  if (fromPath.includes('.')) return fromPath
+  const extension = String(mimeType || '').split('/')[1] || 'jpg'
+  return `${fromPath || 'photo'}.${extension.split('+')[0]}`
+}
+
+async function screenAssets (assets: UploadAsset[]): Promise<UploadAsset[]> {
   const screened = await Promise.all(assets.map(async (asset) => ({
     fileName: asset.name,
     verdict: await scanAsset(asset)
