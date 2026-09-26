@@ -66,6 +66,7 @@ import TrashIcon from '../../assets/icons/bootstrap/trash.svg'
 import UniversalAccessIcon from '../../assets/icons/bootstrap/universal-access-circle.svg'
 import DisplayIcon from '../../assets/icons/bootstrap/display.svg'
 import DatabaseIcon from '../../assets/icons/bootstrap/database.svg'
+import { MODAL_ORIENTATIONS } from '../modal-orientations'
 
 export type SettingsPage =
   | 'main'
@@ -793,7 +794,7 @@ function LinkDeviceSettings({
         </View>
       </SettingsSection>
 
-      <Modal visible={isScanning} animationType='slide' onRequestClose={() => setIsScanning(false)}>
+      <Modal supportedOrientations={MODAL_ORIENTATIONS} visible={isScanning} animationType='slide' onRequestClose={() => setIsScanning(false)}>
         <View style={styles.scannerContainer}>
           {isScanning && (
             <CameraView

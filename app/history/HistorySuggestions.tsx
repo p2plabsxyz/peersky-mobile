@@ -11,12 +11,16 @@ type BrowserPalette = {
 }
 
 export function HistorySuggestions ({
+  background,
   items,
   offset,
   palette,
   position,
   onOpen
 }: {
+  // The toolbar's own colour, not the generic surface. The two are meant to
+  // read as one panel that opened, which they cannot do in two shades.
+  background: string
   items: BrowserHistoryItem[]
   offset: number
   palette: BrowserPalette
@@ -37,7 +41,7 @@ export function HistorySuggestions ({
       // than a separate card floating above it.
       position === 'bottom' ? { bottom: offset } : { top: offset },
       position === 'bottom' ? styles.attachedBelow : styles.attachedAbove,
-      { backgroundColor: palette.surface, borderColor: palette.border }
+      { backgroundColor: background, borderColor: palette.border }
     ]}>
       <ScrollView keyboardShouldPersistTaps='handled'>
         {items.map((item) => (

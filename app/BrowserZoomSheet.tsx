@@ -7,6 +7,7 @@ import {
 import { BROWSER_PALETTES } from './browser-appearance.mjs'
 import ZoomOutIcon from '../assets/icons/bootstrap/dash-lg.svg'
 import ZoomInIcon from '../assets/icons/bootstrap/plus-lg.svg'
+import { MODAL_ORIENTATIONS } from './modal-orientations'
 
 type BrowserZoomSheetProps = {
   isDark: boolean
@@ -34,6 +35,7 @@ export function BrowserZoomSheet ({
 
   return (
     <Modal
+      supportedOrientations={MODAL_ORIENTATIONS}
       animationType='fade'
       transparent={true}
       visible={visible}

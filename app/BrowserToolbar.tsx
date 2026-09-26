@@ -20,6 +20,7 @@ import BackIcon from '../assets/icons/bootstrap/arrow-left.svg'
 import ForwardIcon from '../assets/icons/bootstrap/arrow-right.svg'
 import ShareIcon from '../assets/icons/bootstrap/arrow-bar-up.svg'
 import ClearIcon from '../assets/icons/bootstrap/x-circle.svg'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 const TOOLBAR_ICON_SIZE = 22
 const ADDRESS_ACTION_ICON_SIZE = 20
@@ -75,6 +76,9 @@ type BrowserToolbarProps = {
   onToggleDesktopView: () => void
   onToggleBookmark: () => void
 }
+
+// Matches browserToolbar's own paddingHorizontal.
+const TOOLBAR_SIDE_PADDING = 8
 
 export function BrowserToolbar ({
   activeTabId,
@@ -173,12 +177,19 @@ export function BrowserToolbar ({
       }
     : {}
 
+  const insets = useSafeAreaInsets()
+  const toolbarBackground = isDark ? palette.surface : palette.shell
+
   return (
     <View style={[
       styles.browserToolbar,
       {
-        backgroundColor: isDark ? palette.surface : palette.shell,
-        borderBottomColor: palette.border
+        backgroundColor: toolbarBackground,
+        borderBottomColor: palette.border,
+        // The bar itself reaches both screen edges; only its controls step in
+        // around the notch when the phone is on its side.
+        paddingLeft: TOOLBAR_SIDE_PADDING + insets.left,
+        paddingRight: TOOLBAR_SIDE_PADDING + insets.right
       },
       position === 'bottom'
           ? {
@@ -346,6 +357,7 @@ export function BrowserToolbar ({
       </View>
       {isAddressFocused && (
         <HistorySuggestions
+          background={toolbarBackground}
           items={historySuggestions}
           offset={menuOffset}
           palette={palette}

@@ -30,7 +30,7 @@ import * as Crypto from 'expo-crypto'
 import { CameraView, useCameraPermissions } from 'expo-camera'
 import { File, Paths } from 'expo-file-system'
 import { useNetworkState } from 'expo-network'
-import { SafeAreaView } from 'react-native-safe-area-context'
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import b4a from 'b4a'
 import RPC from 'bare-rpc'
 import { WebView } from 'react-native-webview'
@@ -179,6 +179,7 @@ import {
   writeP2pmdRoomHistoryFile
 } from './p2pmd-room-history.mjs'
 import { describeP2pmdNote } from './p2pmd-note-title.mjs'
+import { MODAL_ORIENTATIONS } from './modal-orientations'
 import { shareLink } from './share'
 import { p2pmdLight, styles } from './styles'
 import {
@@ -293,6 +294,7 @@ type BrowserTabsState = {
 const DESKTOP_BROWSER_USER_AGENT = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 PeerSkyMobile/1.0'
 export default function App () {
   const systemColorScheme = useColorScheme()
+  const browserInsets = useSafeAreaInsets()
   const { height: browserWindowHeight, width: browserWindowWidth } = useWindowDimensions()
   const workletRef = useRef<Worklet | null>(null)
   const rpcRef = useRef<RPC | null>(null)
@@ -3173,10 +3175,11 @@ export default function App () {
     (browserSource.kind === 'web' || browserSource.kind === 'hyper')
 
   return (
-    <SafeAreaView
-      style={[styles.browserShell, { backgroundColor: browserChrome.shell }]}
-      edges={['left', 'right']}
-    >
+    // No left or right safe-area edge on purpose. Insetting the whole shell
+    // left the toolbar stopping short of both screen edges in landscape, with
+    // the page colour showing beside it. The chrome fills the screen and keeps
+    // its own contents clear of the notch instead.
+    <View style={[styles.browserShell, { backgroundColor: browserChrome.shell }]}>
         <StatusBar
           backgroundColor={browserTopInsetColor}
           barStyle={browserIsDark ? 'light-content' : 'dark-content'}
@@ -3213,7 +3216,16 @@ export default function App () {
 
         <View
           {...browserBackGesture.panHandlers}
-          style={[styles.browserContent, { backgroundColor: browserChrome.shell }]}
+          style={[
+            styles.browserContent,
+            {
+              backgroundColor: browserChrome.shell,
+              // The chrome around this reaches the screen edges; the page does
+              // not, so nothing lands under the notch in landscape.
+              paddingLeft: browserInsets.left,
+              paddingRight: browserInsets.right
+            }
+          ]}
           onTouchStart={browserSource.kind === 'app' && activeTab === 'peerchat' ? undefined : Keyboard.dismiss}
         >
         {browserSource.kind === 'home'
@@ -3567,6 +3579,7 @@ export default function App () {
                       </View>
                     )}
                     <Modal
+                      supportedOrientations={MODAL_ORIENTATIONS}
                       animationType='fade'
                       onRequestClose={() => setIsP2pmdScanning(false)}
                       visible={isP2pmdScanning}
@@ -3939,7 +3952,7 @@ export default function App () {
             style={[styles.browserSystemInset, { backgroundColor: browserBottomInsetColor }]}
           />
         )}
-    </SafeAreaView>
+    </View>
   )
 }
 

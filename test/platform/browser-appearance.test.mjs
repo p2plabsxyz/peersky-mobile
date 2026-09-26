@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
+import { readFile, readdir } from 'node:fs/promises'
 import { describe, test } from 'node:test'
 import {
   BROWSER_PALETTES,
@@ -81,5 +81,63 @@ describe('popups attached to the toolbar', () => {
     assert.match(source, /menuAttachment/)
     assert.match(source, /borderBottomLeftRadius: 0/)
     assert.match(source, /borderTopLeftRadius: 0/)
+  })
+})
+
+// The app allows every orientation, but a <Modal> on iOS is portrait-only
+// unless it is told otherwise, so opening a sheet on a phone lying on its side
+// rotated the whole app upright.
+describe('sheets follow the phone', () => {
+  test('every modal supports the orientations the app does', async () => {
+    const root = new URL('../../app/', import.meta.url)
+    const files = (await readdir(root, { recursive: true }))
+      .filter((name) => name.endsWith('.tsx'))
+
+    const missing = []
+    for (const name of files) {
+      const source = await readFile(new URL(name, root), 'utf8')
+      for (const match of source.matchAll(/<Modal\b/g)) {
+        const opening = source.slice(match.index, source.indexOf('>', match.index))
+        if (!opening.includes('supportedOrientations')) missing.push(`${name}:${match.index}`)
+      }
+    }
+
+    assert.deepEqual(missing, [], 'a portrait-only modal rotates the app')
+  })
+
+  test('the list is what the app itself allows', async () => {
+    const source = await readFile(
+      new URL('../../app/modal-orientations.ts', import.meta.url),
+      'utf8'
+    )
+    assert.match(source, /'portrait'/)
+    assert.match(source, /'landscape'/)
+  })
+})
+
+// Insetting the whole shell left the toolbar stopping short of both screen
+// edges in landscape, with the page colour showing beside it.
+describe('chrome reaches the screen edges', () => {
+  test('the shell is not inset sideways', async () => {
+    const source = await readFile(new URL('../../app/index.tsx', import.meta.url), 'utf8')
+    assert.doesNotMatch(source, /edges=\{\['left', 'right'\]\}/)
+    assert.match(source, /paddingLeft: browserInsets\.left/)
+  })
+
+  test('the toolbar steps its own controls around the notch', async () => {
+    const source = await readFile(new URL('../../app/BrowserToolbar.tsx', import.meta.url), 'utf8')
+    assert.match(source, /paddingLeft: TOOLBAR_SIDE_PADDING \+ insets\.left/)
+    assert.match(source, /paddingRight: TOOLBAR_SIDE_PADDING \+ insets\.right/)
+  })
+
+  test('the suggestion list wears the toolbar colour, not a second one', async () => {
+    const toolbar = await readFile(new URL('../../app/BrowserToolbar.tsx', import.meta.url), 'utf8')
+    const list = await readFile(
+      new URL('../../app/history/HistorySuggestions.tsx', import.meta.url),
+      'utf8'
+    )
+    assert.match(toolbar, /background=\{toolbarBackground\}/)
+    assert.match(list, /backgroundColor: background/)
+    assert.doesNotMatch(list, /backgroundColor: palette\.surface/)
   })
 })

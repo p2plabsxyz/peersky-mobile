@@ -106,6 +106,7 @@ import { pickUploads } from '../media/upload-gate'
 import type { UploadSource } from '../media/upload-gate'
 import { scanMedia } from '../media/NsfwScanner'
 import { MEDIA_BLOCKED } from '../media/media-moderation.mjs'
+import { MODAL_ORIENTATIONS } from '../modal-orientations'
 
 type PeerChatMessage = {
   id: string
@@ -1715,6 +1716,7 @@ export function PeerChatScreen ({
         </View>
 
         <Modal
+          supportedOrientations={MODAL_ORIENTATIONS}
           animationType='fade'
           onDismiss={flushPendingModal}
           onRequestClose={() => setShowRoomInfo(false)}
@@ -2295,6 +2297,7 @@ export function PeerChatScreen ({
           </Pressable>
         </View>
         <Modal
+          supportedOrientations={MODAL_ORIENTATIONS}
           animationType='fade'
           onRequestClose={() => setMessageActionTarget(null)}
           statusBarTranslucent
@@ -2368,6 +2371,7 @@ export function PeerChatScreen ({
           </View>
         </Modal>
         <Modal
+          supportedOrientations={MODAL_ORIENTATIONS}
           animationType='fade'
           onRequestClose={() => setLinkActionTarget(null)}
           statusBarTranslucent
@@ -2497,6 +2501,7 @@ export function PeerChatScreen ({
           </Pressable>
 
           <Modal
+            supportedOrientations={MODAL_ORIENTATIONS}
             animationType='fade'
             onRequestClose={() => {
               if (settingsPage === 'about') {
@@ -2982,6 +2987,7 @@ export function PeerChatScreen ({
         target={mediaTarget}
       />
       <Modal
+        supportedOrientations={MODAL_ORIENTATIONS}
         animationType='fade'
         onRequestClose={() => setIsScanningInvite(false)}
         visible={isScanningInvite}
@@ -3007,6 +3013,7 @@ export function PeerChatScreen ({
         </View>
       </Modal>
       <Modal
+        supportedOrientations={MODAL_ORIENTATIONS}
         animationType='fade'
         onRequestClose={() => {
           setRoomActionTarget(null)
@@ -3388,6 +3395,7 @@ function PeerProfileModal ({
 }) {
   return (
     <Modal
+      supportedOrientations={MODAL_ORIENTATIONS}
       animationType='fade'
       onDismiss={onDismiss}
       onRequestClose={onClose}
@@ -3573,6 +3581,7 @@ function PeerChatMediaViewer ({
 }) {
   return (
     <Modal
+      supportedOrientations={MODAL_ORIENTATIONS}
       animationType='fade'
       onRequestClose={onClose}
       statusBarTranslucent

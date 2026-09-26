@@ -13,6 +13,7 @@ import StarFillIcon from '../../assets/icons/bootstrap/star-fill.svg'
 import StarIcon from '../../assets/icons/bootstrap/star.svg'
 import ZoomIcon from '../../assets/icons/bootstrap/zoom-in.svg'
 import { BROWSER_PALETTES } from '../browser-appearance.mjs'
+import { MODAL_ORIENTATIONS } from '../modal-orientations'
 
 const MENU_ICON_SIZE = 18
 const QUICK_ACTION_ICON_SIZE = 22
@@ -113,6 +114,7 @@ export function BrowserOverflowMenu ({
       </Pressable>
 
       <Modal
+        supportedOrientations={MODAL_ORIENTATIONS}
         animationType='fade'
         transparent={true}
         visible={visible}
