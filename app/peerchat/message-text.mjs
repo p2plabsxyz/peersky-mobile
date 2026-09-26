@@ -1,5 +1,49 @@
 const VALID_USERNAME = /^[A-Za-z0-9]+(?: [A-Za-z0-9]+)*$/
 
+// The same set desktop linkifies, so a link that is tappable on one is tappable
+// on the other. peersky:// and hyper:// matter most here: they are how a room
+// invite and a drive get shared, and they were plain text on the phone.
+const MESSAGE_LINK = /(?:https?|hyper|ipfs|ipns|peersky|bt|bittorrent):\/\/[^\s<>"']+|magnet:\?[^\s<>"']+|[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g
+
+// Trailing punctuation belongs to the sentence, not the address. A link at the
+// end of "see hyper://key/index.html." keeps the dot out of what gets opened.
+const TRAILING_PUNCTUATION = /[.,;:!?)\]}'"]+$/
+
+/** Splits a message into plain, mention and link runs, in reading order. */
+export function splitPeerChatMessageParts (message, usernames) {
+  const text = typeof message === 'string' ? message : ''
+  if (!text) return [{ text, mention: false, link: null }]
+
+  const parts = []
+  let cursor = 0
+
+  for (const match of text.matchAll(MESSAGE_LINK)) {
+    const start = match.index
+    let value = match[0]
+    const trimmed = value.replace(TRAILING_PUNCTUATION, '')
+    if (trimmed) value = trimmed
+
+    if (start > cursor) {
+      parts.push(...splitPeerChatMentions(text.slice(cursor, start), usernames)
+        .map((part) => ({ ...part, link: null })))
+    }
+
+    parts.push({
+      text: value,
+      mention: false,
+      link: value.includes('://') || value.startsWith('magnet:') ? value : `mailto:${value}`
+    })
+    cursor = start + value.length
+  }
+
+  if (cursor < text.length) {
+    parts.push(...splitPeerChatMentions(text.slice(cursor), usernames)
+      .map((part) => ({ ...part, link: null })))
+  }
+
+  return parts.length > 0 ? parts : [{ text, mention: false, link: null }]
+}
+
 export function splitPeerChatMentions (message, usernames) {
   const text = typeof message === 'string' ? message : ''
   const names = [...new Set((Array.isArray(usernames) ? usernames : [])
