@@ -1228,7 +1228,12 @@ export default function App () {
    *
    * @returns true when the message was ours, so nothing else tries to read it.
    */
-  function handleHyperBridgeMessage (tabId: string, data: string, token: string) {
+  function handleHyperBridgeMessage (
+    tabId: string,
+    data: string,
+    token: string,
+    allowed: boolean
+  ) {
     let pending = hyperBridgePendingRef.current.get(tabId)
     if (!pending) {
       pending = new Map<number, string>()
@@ -1247,6 +1252,14 @@ export default function App () {
 
     if (message.kind === 'error') {
       settle({ error: message.error })
+      return true
+    }
+
+    // The patch is on every page so it cannot miss the one it was meant for,
+    // but only a page served over hyper:// gets to use it. Answering plainly
+    // beats leaving the request hanging.
+    if (!allowed) {
+      settle({ error: 'hyper:// requests only work from a hyper:// page' })
       return true
     }
 
@@ -2559,6 +2572,7 @@ export default function App () {
   // left edge so it never fights a list or the horizontal toolbars.
   const browserBackSwipe = useRef(new Animated.Value(0)).current
   const peerChatGoBackRef = useRef<(() => boolean) | null>(null)
+  const browserSettingsGoBackRef = useRef<(() => boolean) | null>(null)
   const [peerChatRoomOpen, setPeerChatRoomOpen] = useState(false)
   const browserBackGestureStartRef = useRef(0)
   const browserCanGoBackRef = useRef(false)
@@ -2653,6 +2667,9 @@ export default function App () {
     else if (browserBookmarksVisible) setBrowserBookmarksVisible(false)
     else if (browserHistoryVisible) setBrowserHistoryVisible(false)
     else if (browserDownloadsVisible) setBrowserDownloadsVisible(false)
+    // A subpage is somewhere you can be. Going back from P2P data lands on the
+    // settings list, not on whatever was behind settings.
+    else if (browserSettingsVisible && browserSettingsGoBackRef.current?.()) return true
     else if (browserSettingsVisible) closeBrowserSettings()
     // An open chat is a place you can be, so leaving it lands on the room list
     // rather than dropping the whole app back to the home screen.
@@ -2819,6 +2836,7 @@ export default function App () {
         <View style={styles.browserShellContent}>
           <SettingsScreen
             initialPage={browserSettingsInitialPage}
+            registerGoBack={(handler) => { browserSettingsGoBackRef.current = handler }}
             addressBarPosition={browserPreferences.addressBarPosition}
             contentBlockingEnabled={browserPreferences.contentBlockingEnabled}
             customSearchUrl={browserPreferences.customSearchUrl}
@@ -3671,13 +3689,16 @@ export default function App () {
             createBrowserFaviconScript()
           )
           const browserBeforeContentScript = combineBrowserInjectedScripts(
+            // First, and on every page rather than only hyper:// ones. A WebView
+            // is built once and reused as a tab navigates, so a script that only
+            // appears when the source changes to hyper can arrive after the page
+            // it was meant for. The patch is inert anywhere else: it forwards
+            // every address that is not hyper:// to the real fetch, and the app
+            // refuses a write from a page that is not itself on hyper://.
+            createHyperBridgeScript(browserMediaToken),
             browserAccessibilityScript,
             browserContentBlockingScript,
-            browserMediaScript,
-            // A hyper:// page's own fetch('hyper://...') has nothing to reach
-            // in a WebView, so it is routed back through the app. Desktop
-            // registers the protocol and needs none of this.
-            entry.source.kind === 'hyper' ? createHyperBridgeScript(browserMediaToken) : ''
+            browserMediaScript
           )
 
           const webViewGeneration = browserWebViewGenerations[tab.id] || 0
@@ -3816,10 +3837,11 @@ export default function App () {
                 if ((browserWebViewGenerationsRef.current.get(tab.id) || 0) !== webViewGeneration) return
                 if (!isCurrentBrowserTabEntry(browserTabsStateRef.current, tab.id, entry)) return
 
-                if (entry.source.kind === 'hyper' && handleHyperBridgeMessage(
+                if (handleHyperBridgeMessage(
                   tab.id,
                   event.nativeEvent.data,
-                  browserMediaToken
+                  browserMediaToken,
+                  entry.source.kind === 'hyper'
                 )) return
 
                 const mediaTarget = parseBrowserMediaMessage(
