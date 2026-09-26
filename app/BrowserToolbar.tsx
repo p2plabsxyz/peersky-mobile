@@ -52,6 +52,7 @@ type BrowserToolbarProps = {
   }
   position: 'top' | 'bottom'
   showFullAddress: boolean
+  pageActionAvailable: boolean
   shareActionAvailable: boolean
   tabCount: number
   onAddressChange: (address: string) => void
@@ -92,6 +93,7 @@ export function BrowserToolbar ({
   palette,
   position,
   showFullAddress,
+  pageActionAvailable,
   shareActionAvailable,
   tabCount,
   onAddressChange,
@@ -280,7 +282,7 @@ export function BrowserToolbar ({
             />
           </Pressable>
         )}
-        {!isAddressFocused && shareActionAvailable && (
+        {!isAddressFocused && pageActionAvailable && (
           <View style={styles.browserAddressActions}>
             <Pressable
               accessibilityLabel={isLoading ? 'Stop loading page' : 'Reload page'}
@@ -300,20 +302,22 @@ export function BrowserToolbar ({
                   />
                   )}
             </Pressable>
-            <Pressable
-              accessibilityLabel='Share page'
-              accessibilityRole='button'
-              style={styles.browserAddressAction}
-              onPress={onSharePage}
-            >
-              <ShareIcon
-                width={ADDRESS_ACTION_ICON_SIZE}
-                height={ADDRESS_ACTION_ICON_SIZE}
-                color={addressActionIconColor}
-                opacity={0.76}
-                style={styles.browserAddressShareIcon}
-              />
-            </Pressable>
+            {shareActionAvailable && (
+              <Pressable
+                accessibilityLabel='Share page'
+                accessibilityRole='button'
+                style={styles.browserAddressAction}
+                onPress={onSharePage}
+              >
+                <ShareIcon
+                  width={ADDRESS_ACTION_ICON_SIZE}
+                  height={ADDRESS_ACTION_ICON_SIZE}
+                  color={addressActionIconColor}
+                  opacity={0.76}
+                  style={styles.browserAddressShareIcon}
+                />
+              </Pressable>
+            )}
           </View>
         )}
       </View>
