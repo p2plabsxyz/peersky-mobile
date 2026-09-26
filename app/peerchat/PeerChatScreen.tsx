@@ -100,6 +100,7 @@ import SearchIcon from '../../assets/icons/peerchat/search.svg'
 import SendIcon from '../../assets/icons/peerchat/send.svg'
 import SettingsIcon from '../../assets/icons/peerchat/settings.svg'
 import { CameraView, useCameraPermissions } from 'expo-camera'
+import { getPeerChatUploadTimeout } from './attachment-timeout.mjs'
 import { buildPeerChatInviteUrl, parsePeerChatInvite } from './peerchat-invite.mjs'
 import { pickUploads } from '../media/upload-gate'
 import type { UploadSource } from '../media/upload-gate'
@@ -267,7 +268,7 @@ type PeerChatBlockedPeer = {
 const ERROR_MIN_VISIBLE_MS = 5000
 // A large video streams slowly, so this is generous. It is only here so a
 // stalled upload cannot lock the composer for the rest of the session.
-const UPLOAD_TIMEOUT_MS = 3 * 60 * 1000
+
 
 const PEERCHAT_SOURCE_URL = 'https://github.com/p2plabsxyz/peerchat'
 
@@ -1328,7 +1329,11 @@ export function PeerChatScreen ({
     })
   }
 
-  async function withUploadTimeout (work: Promise<PeerChatResponse>, fileName: string) {
+  async function withUploadTimeout (
+    work: Promise<PeerChatResponse>,
+    fileName: string,
+    byteLength: number
+  ) {
     let timer: ReturnType<typeof setTimeout> | null = null
     try {
       return await Promise.race([
@@ -1336,7 +1341,7 @@ export function PeerChatScreen ({
         new Promise<PeerChatResponse>((_resolve, reject) => {
           timer = setTimeout(
             () => reject(new Error(`${fileName} is taking too long to upload. It may be too large to share here.`)),
-            UPLOAD_TIMEOUT_MS
+            getPeerChatUploadTimeout(byteLength)
           )
         })
       ])
@@ -1389,14 +1394,11 @@ export function PeerChatScreen ({
         onStatus(assets.length === 1
           ? `Uploading ${asset.name}`
           : `Uploading ${index + 1} of ${assets.length}: ${asset.name}`)
-        // A safety net, not a deadline. The upload streams to a Hyperdrive and
-        // always replies in the ordinary case; this only exists so a stall can
-        // never leave the composer stuck busy with no way out.
         const upload = await withUploadTimeout(callRpc(RPC_PEERCHAT_ATTACHMENT_UPLOAD, {
           roomKey: activeRoom.roomKey,
           fileUri: asset.uri,
           byteLength: asset.size
-        }), asset.name)
+        }), asset.name, asset.size)
         if (!upload.ok || !upload.item) throw new Error(upload.error || 'Unable to upload attachment.')
 
         const response = await callRpc(RPC_PEERCHAT_SEND, {

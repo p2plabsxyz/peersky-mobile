@@ -260,11 +260,13 @@ test('an attachment upload can never lock the composer forever', async () => {
   assert.match(screen, /Promise\.race\(/)
   assert.match(screen, /withUploadTimeout\(callRpc\(RPC_PEERCHAT_ATTACHMENT_UPLOAD/)
 
-  // Generous, so a legitimately slow large video is not cut off.
-  const timeout = screen.match(/UPLOAD_TIMEOUT_MS = ([^\n]+)/)
-  assert.ok(timeout)
-  // eslint-disable-next-line no-new-func
-  assert.ok(Function(`return (${timeout[1]})`)() >= 120000, 'too short would cut a real upload')
+  // Generous, and generous in proportion to the file, so a real two hour film
+  // is not cut off part way through being sealed and written.
+  const { UPLOAD_TIMEOUT_MS, getPeerChatUploadTimeout } =
+    await import('../../app/peerchat/attachment-timeout.mjs')
+  assert.ok(UPLOAD_TIMEOUT_MS >= 120000, 'too short would cut a real upload')
+  assert.match(screen, /getPeerChatUploadTimeout\(byteLength\)/)
+  assert.ok(getPeerChatUploadTimeout(1024 * 1024 * 1024) > UPLOAD_TIMEOUT_MS)
 })
 
 test('the media viewer close button clears the Dynamic Island', async () => {
