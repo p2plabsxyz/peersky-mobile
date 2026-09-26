@@ -971,7 +971,9 @@ export function getP2pmdEditorPage () {
         color: var(--ink);
         overflow: auto;
         overflow-wrap: anywhere;
-        font: 16px/1.6 var(--ui-font);
+        /* Follows the width of the phone rather than sitting at a fixed 16px,
+           which read large on a mini and small on a Max. */
+        font: clamp(15px, 4.2vw, 18px)/1.65 var(--ui-font);
       }
       body.preview-mode #preview {
         flex: none;
@@ -1019,6 +1021,41 @@ export function getP2pmdEditorPage () {
       #preview img {
         max-width: 100%;
       }
+      /* Nothing styled tables, so a four-column timesheet was squeezed into the
+         width of the phone and every heading came out one letter per line. The
+         table keeps its own width and scrolls sideways instead. */
+      #preview table,
+      #slides-preview table {
+        display: block;
+        max-width: 100%;
+        margin: 0.9em 0;
+        border-collapse: collapse;
+        overflow-x: auto;
+        overscroll-behavior-x: contain;
+        -webkit-overflow-scrolling: touch;
+      }
+      #preview th,
+      #preview td,
+      #slides-preview th,
+      #slides-preview td {
+        box-sizing: border-box;
+        min-width: 7ch;
+        padding: 8px 11px;
+        border: 1px solid var(--line);
+        text-align: left;
+        vertical-align: top;
+        overflow-wrap: normal;
+      }
+      /* Headings name the column, so they set its width rather than wrapping. */
+      #preview th,
+      #slides-preview th {
+        background: var(--panel-raised);
+        font-weight: 700;
+        white-space: nowrap;
+      }
+      /* A prose column still has to be readable rather than one endless line. */
+      #preview td,
+      #slides-preview td { max-width: 46ch; }
       #slides-preview {
         position: relative;
         box-sizing: border-box;
