@@ -1,4 +1,4 @@
-import { type ComponentRef, useEffect, useRef, useState } from 'react'
+import { type ComponentRef, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
@@ -9,6 +9,7 @@ import {
   Image,
   Keyboard,
   LayoutAnimation,
+  PanResponder,
   KeyboardAvoidingView,
   Linking,
   Modal,
@@ -89,6 +90,7 @@ import {
   parseExternalAppLink
 } from './browser-permissions.mjs'
 import { getBrowserShortcutTitleFontSize } from './browser-home-layout.mjs'
+import { isBackEdgeSwipe } from './browser-back-gesture.mjs'
 import {
   BROWSER_HOME_ICON,
   INTERNAL_APPS,
@@ -101,6 +103,7 @@ import {
   getRuntimeAppUrl
 } from './internal-apps'
 import { SettingsScreen } from './settings/SettingsScreen'
+import type { SettingsPage } from './settings/SettingsScreen'
 import { BrowserOverflowMenu } from './settings/BrowserOverflowMenu'
 import { useBrowserPreferences } from './settings/useBrowserPreferences'
 import { BrowserToolbar } from './BrowserToolbar'
@@ -416,6 +419,7 @@ export default function App () {
   const [isP2pmdScanning, setIsP2pmdScanning] = useState(false)
   const [p2pmdCameraPermission, requestP2pmdCameraPermission] = useCameraPermissions()
   const p2pmdScanHandledRef = useRef(false)
+  const [browserSettingsInitialPage, setBrowserSettingsInitialPage] = useState<SettingsPage | undefined>(undefined)
   const [p2pmdRoomHistory, setP2pmdRoomHistory] = useState<P2pmdRoomHistoryEntry[]>(loadP2pmdRoomHistory)
   const p2pmdRoomHistoryRef = useRef(p2pmdRoomHistory)
   const [p2pmdParticipants, setP2pmdParticipants] = useState<number | null>(null)
@@ -632,6 +636,7 @@ export default function App () {
     setBrowserHistoryVisible(false)
     setBrowserMenuVisible(false)
     setBrowserSettingsVisible(false)
+    setBrowserSettingsInitialPage(undefined)
     setBrowserTabsVisible(false)
     void loadBrowserUrl(incomingUrl)
   }, [browserSessionReady, pendingIncomingUrl])
@@ -2099,6 +2104,9 @@ export default function App () {
       setP2pmdSetupError(null)
       await loadP2pmdEditorHtml()
       setP2pmdPeerDisplayName(loadP2pmdPeerDisplayName())
+      // The key has done its job. Leaving it in the field meant coming back
+      // to the list with the last room you joined still typed into it.
+      setP2pmdJoinKey('')
       setP2pmdRoom(response.room)
       setP2pmdUrl(response.room.localUrl)
       rememberP2pmdRoom(response.room.key, 'client')
@@ -2121,6 +2129,41 @@ export default function App () {
     if (!saveP2pmdRoomHistory(rooms)) return
     p2pmdRoomHistoryRef.current = rooms
     setP2pmdRoomHistory(rooms)
+  }
+
+  // Recent notes is the only list of what you have opened, so it needs a way
+  // to take something off it. The note itself lives in the room and in P2P
+  // Data; this only drops the shortcut.
+  // The settings screen holds its own page state and is unmounted when it
+  // closes, so the chosen landing page has to be cleared or the next open
+  // returns to it instead of the top.
+  function closeBrowserSettings () {
+    setBrowserSettingsVisible(false)
+    setBrowserSettingsInitialPage(undefined)
+  }
+
+  function forgetP2pmdRoom (key: string) {
+    const rooms = p2pmdRoomHistoryRef.current.filter((room) => room.key !== key)
+    if (rooms.length === p2pmdRoomHistoryRef.current.length) return
+    if (!saveP2pmdRoomHistory(rooms)) {
+      setStatus('Could not remove the note')
+      return
+    }
+    p2pmdRoomHistoryRef.current = rooms
+    setP2pmdRoomHistory(rooms)
+    setStatus('Note removed from recents')
+  }
+
+  function confirmForgetP2pmdRoom (room: P2pmdRoomHistoryEntry) {
+    const name = room.label || formatP2pmdRoomHistoryKey(room.key)
+    Alert.alert(
+      'Remove from recents?',
+      `"${name}" goes off this list. The note itself stays in the room and in Settings > P2P Data.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Remove', style: 'destructive', onPress: () => forgetP2pmdRoom(room.key) }
+      ]
+    )
   }
 
   // A key tells you nothing about which note it is. The editor sends the top
@@ -2446,11 +2489,37 @@ export default function App () {
     browserSource.kind === 'app' &&
     canUseP2pAppPageActions(browserSource.app, browserCurrentUrl)
   )
-  // Sharing a peersky:// address is a dead end: nobody outside this phone can
-  // open it, so the button did nothing. Offer it only for addresses that travel.
+  // A web page gets its edge swipe from WKWebView. peersky:// pages are React
+  // Native screens with no web history behind them, so the same gesture is
+  // recognised here and walks the browser's own history instead. Scoped to the
+  // left edge so it never fights a list or the horizontal toolbars.
+  const browserBackGestureStartRef = useRef(0)
+  const browserCanGoBackRef = useRef(false)
+  const browserHasNativeBackGestureRef = useRef(false)
+  const onBrowserBackRef = useRef(onBrowserBack)
+  browserCanGoBackRef.current = canBrowserGoBack
+  // Web and hyper pages already swipe through their own history in WKWebView.
+  browserHasNativeBackGestureRef.current =
+    browserSource.kind === 'web' || browserSource.kind === 'hyper'
+  onBrowserBackRef.current = onBrowserBack
+  const browserBackGesture = useMemo(() => PanResponder.create({
+    onStartShouldSetPanResponderCapture: (event) => {
+      browserBackGestureStartRef.current = event.nativeEvent.pageX
+      return false
+    },
+    onMoveShouldSetPanResponder: (_event, gesture) => (
+      browserCanGoBackRef.current &&
+      !browserHasNativeBackGestureRef.current &&
+      isBackEdgeSwipe({ startX: browserBackGestureStartRef.current, dx: gesture.dx, dy: gesture.dy })
+    ),
+    onPanResponderRelease: () => onBrowserBackRef.current()
+  }), [])
+
   // The note workspace replaces the entire browser when it renders, so the
   // close handler has to know the same thing the render branch does.
   const p2pmdWorkspaceReady = Boolean(p2pmdRoom && p2pmdUrl && p2pmdEditorHtml)
+  // Sharing a peersky:// address is a dead end: nobody outside this phone can
+  // open it, so the button did nothing. Offer it only for addresses that travel.
   const browserShareActionAvailable = browserBookmarkActionAvailable
   const browserPageIsBookmarked = browserBookmarkActionAvailable &&
     isBrowserPageBookmarked(browserCurrentUrl)
@@ -2478,7 +2547,7 @@ export default function App () {
       else if (browserBookmarksVisible) setBrowserBookmarksVisible(false)
       else if (browserHistoryVisible) setBrowserHistoryVisible(false)
       else if (browserDownloadsVisible) setBrowserDownloadsVisible(false)
-      else if (browserSettingsVisible) setBrowserSettingsVisible(false)
+      else if (browserSettingsVisible) closeBrowserSettings()
       else if (canBrowserGoBack) onBrowserBack()
       else return false
 
@@ -2589,6 +2658,9 @@ export default function App () {
   }
 
   if (browserSettingsVisible) {
+    // The screen keeps its own page state, so it has to be remounted to land
+    // somewhere other than the top.
+
     return (
       <SafeAreaView
         style={[styles.browserShell, { backgroundColor: browserChrome.shell }]}
@@ -2606,6 +2678,7 @@ export default function App () {
           ]}
         />
         <SettingsScreen
+          initialPage={browserSettingsInitialPage}
           addressBarPosition={browserPreferences.addressBarPosition}
           contentBlockingEnabled={browserPreferences.contentBlockingEnabled}
           customSearchUrl={browserPreferences.customSearchUrl}
@@ -2625,11 +2698,11 @@ export default function App () {
           onAddressBarPositionChange={setAddressBarPosition}
           onCallRpc={(command, data = {}) => callRpc(command, data)}
           onContentBlockingEnabledChange={onContentBlockingEnabledChange}
-          onClose={() => setBrowserSettingsVisible(false)}
+          onClose={closeBrowserSettings}
           onClearBrowsingData={() => {
             const { sessionSaved } = onBrowserResetTabs(false)
             const historyCleared = clearBrowserHistory()
-            if (sessionSaved && historyCleared) setBrowserSettingsVisible(false)
+            if (sessionSaved && historyCleared) closeBrowserSettings()
             return sessionSaved && historyCleared
           }}
           onClearCachedData={clearCachedBrowserTabPreviews}
@@ -2646,12 +2719,12 @@ export default function App () {
           onYoutubeAdBlockingEnabledChange={onYoutubeAdBlockingEnabledChange}
           onResetTabs={onBrowserResetTabs}
           onOpenUrl={(targetUrl) => {
-            setBrowserSettingsVisible(false)
+            closeBrowserSettings()
             void loadBrowserUrl(targetUrl)
           }}
           onOpenHyperItem={(item) => {
             void openHyperdriveItem(item).then((didNavigate) => {
-              if (didNavigate) setBrowserSettingsVisible(false)
+              if (didNavigate) closeBrowserSettings()
             })
           }}
           onIdentityRestored={() => {
@@ -2975,6 +3048,7 @@ export default function App () {
         />
 
         <View
+          {...browserBackGesture.panHandlers}
           style={[styles.browserContent, { backgroundColor: browserChrome.shell }]}
           onTouchStart={browserSource.kind === 'app' && activeTab === 'peerchat' ? undefined : Keyboard.dismiss}
         >
@@ -3284,6 +3358,8 @@ export default function App () {
                             accessibilityLabel={`Reopen P2PMD note ${room.label || formatP2pmdRoomHistoryKey(room.key)}`}
                             accessibilityRole='button'
                             disabled={isBooting || isLoading}
+                            accessibilityHint='Press and hold to remove this note from the list'
+                            onLongPress={() => confirmForgetP2pmdRoom(room)}
                             onPress={() => void (room.role === 'host'
                               ? onP2pmdRoomCreate(room.key)
                               : onP2pmdRoomJoin(room.key))}
@@ -3302,6 +3378,26 @@ export default function App () {
                             </Text>
                           </Pressable>
                         ))}
+                        <Pressable
+                          accessibilityLabel='Manage stored note data'
+                          accessibilityRole='button'
+                          onPress={() => {
+                            setBrowserSettingsInitialPage('p2p-storage')
+                            setBrowserSettingsVisible(true)
+                          }}
+                          style={({ pressed }) => [
+                            styles.p2pmdRecentRoom,
+                            p2pmdTheme?.p2pmdRecentRoom,
+                            pressed ? [styles.p2pmdRecentRoomPressed, p2pmdTheme?.p2pmdRecentRoomPressed] : null
+                          ]}
+                        >
+                          <Text numberOfLines={1} style={[styles.p2pmdRecentRoomKey, p2pmdTheme?.p2pmdRecentRoomKey]}>
+                            Stored note data
+                          </Text>
+                          <Text style={[styles.p2pmdRecentRoomAction, p2pmdTheme?.p2pmdRecentRoomAction]}>
+                            Manage
+                          </Text>
+                        </Pressable>
                       </View>
                     )}
                     <Modal

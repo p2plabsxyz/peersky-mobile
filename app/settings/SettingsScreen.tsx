@@ -67,7 +67,7 @@ import UniversalAccessIcon from '../../assets/icons/bootstrap/universal-access-c
 import DisplayIcon from '../../assets/icons/bootstrap/display.svg'
 import DatabaseIcon from '../../assets/icons/bootstrap/database.svg'
 
-type SettingsPage =
+export type SettingsPage =
   | 'main'
   | 'general'
   | 'accessibility'
@@ -152,6 +152,7 @@ type LANDiscoveryStatus = {
 
 type SettingsScreenProps = {
   addressBarPosition: AddressBarPosition
+  initialPage?: SettingsPage
   contentBlockingEnabled: boolean
   customSearchUrl: string
   downloadOnlyOnWifi: boolean
@@ -275,7 +276,7 @@ const SETTINGS_PAGES: Array<{
 ]
 
 export function SettingsScreen(props: SettingsScreenProps) {
-  const [page, setPage] = useState<SettingsPage>('main')
+  const [page, setPage] = useState<SettingsPage>(props.initialPage || 'main')
   const [transitionDirection, setTransitionDirection] = useState(1)
   const reduceMotion = useReducedMotion()
   const transition = useRef(new Animated.Value(1)).current
