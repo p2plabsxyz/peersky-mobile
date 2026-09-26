@@ -31,7 +31,12 @@ export function HistorySuggestions ({
       // Measured off the toolbar rather than "bottom: 100%". A percentage is
       // resolved against a parent the keyboard is busy resizing, which is not
       // something to depend on for whether the list covers the address bar.
-      position === 'bottom' ? { bottom: offset + 4 } : { top: offset + 4 },
+      //
+      // Flush against the toolbar, with the touching edge left square and
+      // unbordered, so the list reads as the address bar opening out rather
+      // than a separate card floating above it.
+      position === 'bottom' ? { bottom: offset } : { top: offset },
+      position === 'bottom' ? styles.attachedBelow : styles.attachedAbove,
       { backgroundColor: palette.surface, borderColor: palette.border }
     ]}>
       <ScrollView keyboardShouldPersistTaps='handled'>
@@ -70,6 +75,17 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.18,
     shadowRadius: 10,
     zIndex: 20
+  },
+  // The edge that meets the toolbar.
+  attachedBelow: {
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
+    borderBottomWidth: 0
+  },
+  attachedAbove: {
+    borderTopLeftRadius: 0,
+    borderTopRightRadius: 0,
+    borderTopWidth: 0
   },
   row: { alignItems: 'center', flexDirection: 'row', gap: 12, minHeight: 54, paddingHorizontal: 14 },
   copy: { flex: 1 },

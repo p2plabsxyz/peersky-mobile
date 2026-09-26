@@ -184,11 +184,14 @@ export function BrowserToolbar ({
           ? {
               borderBottomWidth: 0,
               borderTopColor: palette.border,
-              borderTopWidth: 1,
+              // The suggestion list sits flush on this edge, and a line between
+              // them makes it read as a separate card rather than the address
+              // bar opening out.
+              borderTopWidth: isAddressFocused ? 0 : 1,
               paddingBottom: 8
             }
-        : null
-    ]} onLayout={(event) => setMenuOffset(event.nativeEvent.layout.height + 4)}>
+        : { borderBottomWidth: isAddressFocused ? 0 : 1 }
+    ]} onLayout={(event) => setMenuOffset(event.nativeEvent.layout.height)}>
       <Animated.View
         {...hiddenControlProps}
         style={[
