@@ -8,6 +8,7 @@ import {
   Clipboard,
   Image,
   Keyboard,
+  LayoutAnimation,
   KeyboardAvoidingView,
   Linking,
   Modal,
@@ -87,6 +88,7 @@ import {
   getExternalLinkBehaviorAction,
   parseExternalAppLink
 } from './browser-permissions.mjs'
+import { getBrowserShortcutTitleFontSize } from './browser-home-layout.mjs'
 import {
   BROWSER_HOME_ICON,
   INTERNAL_APPS,
@@ -1381,7 +1383,7 @@ export default function App () {
   }
 
   async function onBrowserSharePage () {
-    if (!browserPageActionAvailable) return
+    if (!browserShareActionAvailable) return
 
     try {
       await shareLink({ title: browserTitle, message: browserCurrentUrl })
@@ -1595,6 +1597,21 @@ export default function App () {
 
     const nextState = closeBrowserTabState(currentTabsState, tabId) as BrowserTabsState
     const tab = nextState.tabs.find((item) => item.id === nextState.activeTabId)
+
+    // Closing the active tab next to a live note lands on the note, and that
+    // swaps the whole screen: the tab list, its modal and every web view come
+    // down in one commit. A layout animation configured for that commit is
+    // animating views that are being freed underneath it, which took the app
+    // with it. Animate the ordinary case, and get out of the way of this one.
+    const entersNoteWorkspace = isClosingActive &&
+      p2pmdWorkspaceReady &&
+      isP2pmdWorkspaceTab(tab)
+
+    if (entersNoteWorkspace) {
+      setBrowserTabsVisible(false)
+    } else {
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut)
+    }
 
     updateBrowserTabsState(nextState)
     removeBrowserTabPreview(tabId)
@@ -2429,8 +2446,21 @@ export default function App () {
     browserSource.kind === 'app' &&
     canUseP2pAppPageActions(browserSource.app, browserCurrentUrl)
   )
+  // Sharing a peersky:// address is a dead end: nobody outside this phone can
+  // open it, so the button did nothing. Offer it only for addresses that travel.
+  // The note workspace replaces the entire browser when it renders, so the
+  // close handler has to know the same thing the render branch does.
+  const p2pmdWorkspaceReady = Boolean(p2pmdRoom && p2pmdUrl && p2pmdEditorHtml)
+  const browserShareActionAvailable = browserBookmarkActionAvailable
   const browserPageIsBookmarked = browserBookmarkActionAvailable &&
     isBrowserPageBookmarked(browserCurrentUrl)
+  // Four shortcuts to a row, so each label gets a quarter of the grid minus its
+  // own padding. At a fixed 14pt "Hyperdrive" wrapped onto a second line on a
+  // 13 mini and left the row ragged, so the type follows the width instead.
+  const browserShortcutTitleFontSize = getBrowserShortcutTitleFontSize(
+    browserWindowWidth,
+    BROWSER_HOME_SHORTCUTS.reduce((longest, app) => Math.max(longest, app.title.length), 0)
+  )
   const activeBrowserPageZoom = normalizeBrowserPageZoom(
     browserTabsState.tabs.find((tab) => tab.id === browserTabsState.activeTabId)?.pageZoom
   )
@@ -2633,7 +2663,7 @@ export default function App () {
     )
   }
 
-  if (activeTab === 'p2pmd' && p2pmdRoom && p2pmdUrl && p2pmdEditorHtml) {
+  if (activeTab === 'p2pmd' && p2pmdWorkspaceReady && p2pmdRoom && p2pmdUrl && p2pmdEditorHtml) {
     const p2pmdEditorRoomBaseUrl = p2pmdUrl.replace(/\/$/, '')
     const p2pmdEditorBaseUrl = `${p2pmdEditorRoomBaseUrl}/?role=${encodeURIComponent(p2pmdRoom.role)}`
     const p2pmdEditorHtmlWithRoomBase = p2pmdEditorHtml.replace(
@@ -2660,7 +2690,10 @@ export default function App () {
             style={[styles.p2pmdWorkspaceParticipants, p2pmdTheme?.p2pmdWorkspaceParticipants]}
             onPress={onP2pmdOpenPeerDashboard}
           >
-            <Text style={[styles.p2pmdWorkspaceParticipantsText, p2pmdTheme?.p2pmdWorkspaceParticipantsText]}>
+            <Text
+              numberOfLines={1}
+              style={[styles.p2pmdWorkspaceParticipantsText, p2pmdTheme?.p2pmdWorkspaceParticipantsText]}
+            >
               Peers: {p2pmdParticipants ?? '-'}
             </Text>
           </Pressable>
@@ -2691,6 +2724,7 @@ export default function App () {
             bookmarkActionAvailable={false}
             bookmarksDisabled={!browserBookmarksReady}
             isBookmarked={false}
+            isDark={browserIsDark}
             newTabDisabled={browserTabsState.tabs.length >= MAX_BROWSER_TABS}
             visible={browserMenuVisible}
             onClose={() => setBrowserMenuVisible(false)}
@@ -2768,10 +2802,26 @@ export default function App () {
           // the wrong theme on the way in.
           injectedJavaScriptBeforeContentLoaded={p2pmdThemeScript(browserIsDark)}
           allowsFullscreenVideo={true}
+          // The slide styles lay out <video>, which WKWebView will not play
+          // inline on iPhone without this.
+          allowsInlineMediaPlayback={true}
           cacheEnabled={false}
           textZoom={100}
           style={[styles.p2pmdWorkspaceWebView, p2pmdTheme?.p2pmdWorkspaceWebView]}
           onMessage={(event) => onP2pmdWebViewMessage(event.nativeEvent.data)}
+          // iOS kills a backgrounded WKWebView's content process to reclaim
+          // memory. The view comes back blank and stays blank, which is why an
+          // open note looked empty after the phone had been locked and left
+          // leaving and rejoining the room as the only way out. Reload instead;
+          // the document lives in the room, not in the view.
+          onContentProcessDidTerminate={() => {
+            setStatus('Reloading the note after iOS reclaimed it')
+            p2pmdWebViewRef.current?.reload()
+          }}
+          onRenderProcessGone={() => {
+            setStatus('Reloading the note after the system reclaimed it')
+            p2pmdWebViewRef.current?.reload()
+          }}
           onError={(event) => {
             setStatus(`P2PMD WebView failed: ${event.nativeEvent.description}`)
           }}
@@ -2810,7 +2860,8 @@ export default function App () {
       palette={browserChrome}
       position={browserPreferences.addressBarPosition}
       showFullAddress={browserPreferences.showFullAddress}
-      shareActionAvailable={browserPageActionAvailable}
+      pageActionAvailable={browserPageActionAvailable}
+      shareActionAvailable={browserShareActionAvailable}
       tabCount={browserTabsState.tabs.length}
       onAddressChange={(value) => {
         browserUserInteractedRef.current = true
@@ -2880,6 +2931,9 @@ export default function App () {
   const browserBottomInsetColor = browserIsPortrait && browserPreferences.addressBarPosition === 'bottom'
     ? browserToolbarColor
     : browserChrome.shell
+  const browserWebViewFillsBottomInset =
+    browserPreferences.addressBarPosition !== 'bottom' &&
+    (browserSource.kind === 'web' || browserSource.kind === 'hyper')
 
   return (
     <SafeAreaView
@@ -2932,7 +2986,7 @@ export default function App () {
               keyboardDismissMode='on-drag'
             >
               <View style={styles.browserShortcutGrid}>
-                {INTERNAL_APPS.filter((app) => app.id !== 'holesail').map((app) => (
+                {BROWSER_HOME_SHORTCUTS.map((app) => (
                   <Pressable
                     key={app.id}
                     style={styles.browserShortcut}
@@ -2955,7 +3009,13 @@ export default function App () {
                         </View>
                       )}
                     </View>
-                    <Text numberOfLines={2} style={[styles.browserShortcutTitle, { color: browserChrome.text }]}>
+                    <Text
+                      numberOfLines={2}
+                      style={[
+                        styles.browserShortcutTitle,
+                        { color: browserChrome.text, fontSize: browserShortcutTitleFontSize }
+                      ]}
+                    >
                       {app.title}
                     </Text>
                   </Pressable>
@@ -3412,6 +3472,12 @@ export default function App () {
                       : undefined
                   }}
               allowsFullscreenVideo={true}
+              // WKWebView refuses inline HTML5 video on iPhone unless this is
+              // set, and YouTube's player is inline, so the video area stayed
+              // black no matter what the content blocker was doing.
+              allowsInlineMediaPlayback={true}
+              // Edge swipe for back and forward, the way Safari does it.
+              allowsBackForwardNavigationGestures={true}
               cacheEnabled={true}
               geolocationEnabled={true}
               mediaCapturePermissionGrantType='prompt'
@@ -3425,6 +3491,14 @@ export default function App () {
               textZoom={Math.round(browserPreferences.websiteTextScale * tabPageZoom / 100)}
               userAgent={tabDesktopView ? DESKTOP_BROWSER_USER_AGENT : undefined}
               style={styles.browserWebView}
+              // Same reclaim as the note editor: a backgrounded tab comes back
+              // blank unless it is reloaded when its content process is killed.
+              onContentProcessDidTerminate={() => {
+                browserWebViewRefs.current.get(tab.id)?.reload()
+              }}
+              onRenderProcessGone={() => {
+                browserWebViewRefs.current.get(tab.id)?.reload()
+              }}
               onShouldStartLoadWithRequest={(request) => onBrowserShouldStartLoad(tab.id, entry, request)}
               onOpenWindow={(event) => onBrowserOpenWindow(tab.id, entry, event.nativeEvent.targetUrl)}
               onFileDownload={(event) => {
@@ -3570,10 +3644,17 @@ export default function App () {
         />
 
         </KeyboardAvoidingView>
-        <SafeAreaView
-          edges={['bottom']}
-          style={[styles.browserSystemInset, { backgroundColor: browserBottomInsetColor }]}
-        />
+        {/* A web page has its own background and no way to match the strip we
+            paint under it, so the page runs to the bottom edge instead and the
+            home indicator sits over it, the way Safari does it. Our own screens
+            keep the strip: their controls reach the bottom and would end up
+            under the indicator. */}
+        {!browserWebViewFillsBottomInset && (
+          <SafeAreaView
+            edges={['bottom']}
+            style={[styles.browserSystemInset, { backgroundColor: browserBottomInsetColor }]}
+          />
+        )}
     </SafeAreaView>
   )
 }
@@ -3683,6 +3764,15 @@ function getBrowserTabLabel (tab: BrowserTab) {
   if (!entry) return 'New tab'
 
   return getBrowserEntryTitle(entry)
+}
+
+// Holesail is reachable by address but is not one of the app tiles.
+const BROWSER_HOME_SHORTCUTS = INTERNAL_APPS.filter((app) => app.id !== 'holesail')
+
+/** Whether selecting this tab would hand the screen to the note workspace. */
+function isP2pmdWorkspaceTab (tab: BrowserTab | undefined) {
+  const entry = tab?.history[tab.historyIndex]
+  return entry?.source.kind === 'app' && entry.source.app === 'p2pmd'
 }
 
 function getRuntimeAppIconStyle (app: RuntimeTab) {
