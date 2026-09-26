@@ -33,6 +33,7 @@ import {
 import {
   parsePeerChatUiState,
   PEERCHAT_UI_STATE_MAX_BYTES,
+  recordRecentEmoji,
   serializePeerChatUiState
 } from './ui-state.mjs'
 import { assessLink, describeLinkRisk, extractFirstLink, LINK_SUSPICIOUS } from './link-safety.mjs'
@@ -45,7 +46,7 @@ import {
   formatPeerChatMessageDetails,
   PEERCHAT_SEARCH_QUERY_MAX_CHARACTERS
 } from './message-search.mjs'
-import { normalizePeerChatMentionSpacing, splitPeerChatMentions } from './message-text.mjs'
+import { normalizePeerChatMentionSpacing, splitPeerChatMessageParts } from './message-text.mjs'
 import {
   isPeerChatNotificationBlocked,
   openPeerChatNotificationSettings
@@ -282,12 +283,14 @@ type PeerChatUiState = {
   activeRoomKey: string | null
   draftRoomKey: string | null
   draft: string
+  recentEmojis: string[]
 }
 
 const EMPTY_UI_STATE: PeerChatUiState = {
   activeRoomKey: null,
   draftRoomKey: null,
-  draft: ''
+  draft: '',
+  recentEmojis: []
 }
 
 const PEERCHAT_UI_STATE_FILE = new File(Paths.document, 'peerchat-ui-state.json')
@@ -387,6 +390,7 @@ export function PeerChatScreen ({
   const [emojiSearchQuery, setEmojiSearchQuery] = useState('')
   const [landingAction, setLandingAction] = useState<LandingAction>(null)
   const [restoredUiState, setRestoredUiState] = useState<PeerChatUiState | null>(null)
+  const [recentEmojis, setRecentEmojis] = useState<string[]>([])
   const mentionCandidates = getMentionCandidates(
     composer,
     activeRoom?.members || [],
@@ -539,12 +543,13 @@ export function PeerChatScreen ({
     const nextState = {
       activeRoomKey: activeRoom?.roomKey || null,
       draftRoomKey: composer ? composerRoomKeyRef.current : null,
-      draft: composer
+      draft: composer,
+      recentEmojis
     }
     uiStateRef.current = nextState
     const timer = setTimeout(() => persistPeerChatUiState(nextState), UI_STATE_PERSIST_DELAY_MS)
     return () => clearTimeout(timer)
-  }, [activeRoom?.roomKey, composer])
+  }, [activeRoom?.roomKey, composer, recentEmojis])
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (state) => {
@@ -636,10 +641,12 @@ export function PeerChatScreen ({
       resetMessageScrollState()
       setActiveRoom(restoredRoom)
     }
+    setRecentEmojis(restoredUiState.recentEmojis || [])
     uiStateRef.current = {
       activeRoomKey: restoredRoom?.roomKey || null,
       draftRoomKey,
-      draft: draftRoomKey ? restoredUiState.draft : ''
+      draft: draftRoomKey ? restoredUiState.draft : '',
+      recentEmojis: restoredUiState.recentEmojis || []
     }
     uiStateRestoredRef.current = true
   }, [isInitialized, restoredUiState, rooms])
@@ -966,6 +973,7 @@ export function PeerChatScreen ({
 
   function insertComposerEmoji (emoji: string) {
     setComposer((current) => `${current}${emoji}`)
+    setRecentEmojis((current) => recordRecentEmoji(current, emoji))
     setEmojiSearchQuery('')
     setShowComposerEmoji(false)
   }
@@ -1335,12 +1343,27 @@ export function PeerChatScreen ({
     }
   }
 
+  // A mailto: goes to the mail app; everything else is a scheme the browser
+  // serves, so it opens in a tab rather than being handed to the system.
+  function openMessageLink (url: string) {
+    if (url.startsWith('mailto:')) {
+      Linking.openURL(url).catch(() => onStatus('Unable to open your email app'))
+      return
+    }
+    onOpenUrl(url)
+  }
+
   function attachFile () {
     if (!activeRoom || isBusy) return
     void runAction(async () => {
       // pickUploads bounds the batch and screens every file before any of it
       // is uploaded, so a refusal never leaves half a send in the room.
-      const assets = await pickUploads({ multiple: true })
+      const assets = await pickUploads({
+        multiple: true,
+        // A room shows a picture to everyone at once, so it is screened. A
+        // direct message reaches one person, who can block the sender.
+        screen: !activeRoom.isDM
+      })
       if (assets.length === 0) return
 
       for (const [index, asset] of assets.entries()) {
@@ -1648,7 +1671,11 @@ export function PeerChatScreen ({
                 ? <CloseIcon width={CHAT_HEADER_ICON_SIZE} height={CHAT_HEADER_ICON_SIZE} color={colors.accent} />
                 : <SearchIcon width={CHAT_HEADER_ICON_SIZE} height={CHAT_HEADER_ICON_SIZE} color={colors.accent} />}
             </Pressable>
-            {!activeRoom.isDM && (
+            {activeRoom.isDM
+              // Nothing to share, but the title is centred between the two
+              // action groups and without this it sits left of centre.
+              ? <View style={styles.headerAction} />
+              : (
               <Pressable
                 accessibilityHint='Shares a link that joins this room'
                 accessibilityLabel='Share room'
@@ -2003,7 +2030,9 @@ export function PeerChatScreen ({
                           item.message,
                           [profile?.username || '', ...activeRoom.members.map((member) => member.username)],
                           colors.text,
-                          colors.accent
+                          colors.accent,
+                          colors.accent,
+                          openMessageLink
                         )}
                       </Text>
                       <PeerChatLinkCard
@@ -2050,7 +2079,7 @@ export function PeerChatScreen ({
               <Text style={[styles.emptyTitle, { color: colors.text }]}>
                 {isSearching && searchQuery.trim() ? 'No matching messages' : 'No messages yet'}
               </Text>
-              <Text style={[styles.helper, { color: colors.muted }]}>
+              <Text style={[styles.helper, styles.emptyHelper, { color: colors.muted }]}>
                 {isSearching && searchQuery.trim()
                   ? 'Try another search term.'
                   : 'Share the room key, then start the conversation.'}
@@ -2131,6 +2160,28 @@ export function PeerChatScreen ({
                 </Pressable>
               ))}
             </View>
+            {recentEmojis.length > 0 && !emojiSearchQuery.trim() && (
+              <View>
+                <Text style={[styles.emojiSectionLabel, { color: colors.muted }]}>Recent</Text>
+                <ScrollView
+                  horizontal
+                  keyboardShouldPersistTaps='handled'
+                  showsHorizontalScrollIndicator={false}
+                >
+                  {recentEmojis.map((emoji) => (
+                    <Pressable
+                      accessibilityLabel={`Insert ${emoji}`}
+                      accessibilityRole='button'
+                      key={emoji}
+                      onPress={() => insertComposerEmoji(emoji)}
+                      style={styles.emojiGridButton}
+                    >
+                      <Text style={styles.reactionPickerEmoji}>{emoji}</Text>
+                    </Pressable>
+                  ))}
+                </ScrollView>
+              </View>
+            )}
             <TextInput
               autoCapitalize='none'
               autoCorrect={false}
@@ -2790,12 +2841,6 @@ export function PeerChatScreen ({
           <View style={styles.roomCopy}>
             <View style={styles.roomTitleRow}>
               <Text numberOfLines={1} style={[styles.roomTitle, { color: colors.text }]}>{item.name}</Text>
-              {item.isPinned && (
-                <PinIcon width={ROOM_STATE_ICON_SIZE} height={ROOM_STATE_ICON_SIZE} color={colors.accent} />
-              )}
-              {item.isMuted && (
-                <MuteIcon width={ROOM_STATE_ICON_SIZE} height={ROOM_STATE_ICON_SIZE} color={colors.muted} />
-              )}
             </View>
             <Text numberOfLines={1} style={[styles.roomPreview, { color: colors.muted }]}>
               {item.lastMessage
@@ -2804,7 +2849,15 @@ export function PeerChatScreen ({
             </Text>
           </View>
           <View style={styles.roomMeta}>
-            <Text style={[styles.roomTime, { color: colors.muted }]}>{formatRoomTime(item)}</Text>
+            <View style={styles.roomStateRow}>
+              {item.isMuted && (
+                <MuteIcon width={ROOM_STATE_ICON_SIZE} height={ROOM_STATE_ICON_SIZE} color={colors.muted} />
+              )}
+              {item.isPinned && (
+                <PinIcon width={ROOM_STATE_ICON_SIZE} height={ROOM_STATE_ICON_SIZE} color={colors.accent} />
+              )}
+              <Text style={[styles.roomTime, { color: colors.muted }]}>{formatRoomTime(item)}</Text>
+            </View>
             {item.unreadCount > 0 && (
               <View style={[styles.unreadBadge, { backgroundColor: colors.accent }]}>
                 <Text style={styles.unreadBadgeText}>
@@ -3528,15 +3581,37 @@ function getRoomInitials (name: string) {
   return name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || 'PC'
 }
 
-function renderMessageText (message: string, usernames: string[], textColor: string, mentionColor: string) {
-  return splitPeerChatMentions(message, usernames).map((part, index) => (
-    <Text
-      key={`${index}-${part.text}`}
-      style={{ color: part.mention ? mentionColor : textColor, fontWeight: part.mention ? '800' : '400' }}
-    >
-      {part.text}
-    </Text>
-  ))
+function renderMessageText (
+  message: string,
+  usernames: string[],
+  textColor: string,
+  mentionColor: string,
+  linkColor: string,
+  onOpenLink: (url: string) => void
+) {
+  return splitPeerChatMessageParts(message, usernames).map((part, index) => {
+    if (part.link) {
+      return (
+        <Text
+          key={`${index}-${part.text}`}
+          accessibilityRole='link'
+          style={{ color: linkColor, textDecorationLine: 'underline' }}
+          onPress={() => onOpenLink(part.link as string)}
+        >
+          {part.text}
+        </Text>
+      )
+    }
+
+    return (
+      <Text
+        key={`${index}-${part.text}`}
+        style={{ color: part.mention ? mentionColor : textColor, fontWeight: part.mention ? '800' : '400' }}
+      >
+        {part.text}
+      </Text>
+    )
+  })
 }
 
 function getMentionCandidates (
@@ -3609,6 +3684,9 @@ function formatRoomCreatedAt (timestamp: number) {
 function formatRoomConnection (room: PeerChatRoom, compact = false) {
   if (room.connectionState === 'connecting') return 'Connecting...'
   if (room.connectionState === 'syncing') return 'Syncing...'
+  // A direct message has exactly one other person in it, so counting them
+  // reads as a stray number. Either they are there or they are not.
+  if (room.isDM) return room.connectionState === 'connected' ? 'Online' : 'Offline'
   if (room.connectionState === 'connected') {
     return compact
       ? `${room.peerCount} online`
@@ -3741,12 +3819,14 @@ const styles = StyleSheet.create({
   roomTitle: { flexShrink: 1, fontSize: 15, fontWeight: '800' },
   roomPreview: { fontSize: 12 },
   roomMeta: { alignItems: 'flex-end', gap: 5 },
+  roomStateRow: { alignItems: 'center', flexDirection: 'row', gap: 5 },
   roomTime: { fontSize: 10 },
   roomPeerCount: { fontSize: 11, fontWeight: '700' },
   unreadBadge: { alignItems: 'center', borderRadius: 10, justifyContent: 'center', minWidth: 20, paddingHorizontal: 6, paddingVertical: 2 },
   unreadBadgeText: { color: '#ffffff', fontSize: 10, fontWeight: '900' },
   emptyState: { alignItems: 'center', gap: 5, justifyContent: 'center', paddingHorizontal: 28, paddingVertical: 36 },
-  emptyTitle: { fontSize: 16, fontWeight: '800' },
+  emptyTitle: { fontSize: 16, fontWeight: '800', textAlign: 'center' },
+  emptyHelper: { textAlign: 'center' },
   chatHeader: { alignItems: 'center', borderBottomWidth: 1, flexDirection: 'row', minHeight: 62, paddingHorizontal: 8 },
   chatHeaderCopy: { alignItems: 'center', flex: 1, flexDirection: 'row', gap: 7, paddingHorizontal: 5 },
   chatHeaderAvatar: { borderRadius: 17, height: 34, width: 34 },
@@ -3858,13 +3938,17 @@ const styles = StyleSheet.create({
   preferenceCopy: { flex: 1 },
   preferenceState: { fontSize: 12, fontWeight: '900' },
   actionSectionTitle: { fontSize: 13, fontWeight: '900', marginTop: 2 },
-  messageTime: { alignSelf: 'flex-end', fontSize: 10, marginTop: 4 },
+  // No alignSelf: the row already aligns left for a peer and right for you, and
+  // pinning the time to the right put a peer's timestamp across the screen from
+  // the message it belonged to.
+  messageTime: { fontSize: 10, marginTop: 4 },
   scrollToLatest: { alignItems: 'center', borderRadius: 18, bottom: 10, elevation: 3, height: 36, justifyContent: 'center', position: 'absolute', right: 14, width: 36 },
   inlineError: { fontSize: 12, paddingHorizontal: 14, paddingVertical: 5, textAlign: 'center' },
   reactionPicker: { alignItems: 'center', borderTopWidth: 1, flexDirection: 'row', justifyContent: 'space-around', paddingHorizontal: 8, paddingVertical: 6 },
   reactionPickerButton: { alignItems: 'center', borderRadius: 18, height: 36, justifyContent: 'center', width: 36 },
   reactionPickerEmoji: { fontSize: 22 },
-  emojiPanel: { borderTopWidth: 1, gap: 7, maxHeight: 260, paddingHorizontal: 10, paddingVertical: 8 },
+  emojiPanel: { borderTopWidth: 1, gap: 7, maxHeight: 300, paddingHorizontal: 10, paddingVertical: 8 },
+  emojiSectionLabel: { fontSize: 11, fontWeight: '800', marginBottom: 2, textTransform: 'uppercase' },
   emojiQuickRow: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-around' },
   emojiSearch: { borderRadius: 10, fontSize: 14, minHeight: 38, paddingHorizontal: 12, paddingVertical: 7 },
   emojiGridList: { flexGrow: 0, height: 150 },
