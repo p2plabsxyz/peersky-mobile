@@ -1683,6 +1683,10 @@ export function PeerChatScreen ({
             </View>
           </Pressable>
           <View style={styles.chatHeaderActions}>
+            {/* A direct message has no link to share, but the title is centred
+                between the two action groups, so the slot stays empty and the
+                search button moves out to the corner where share would be. */}
+            {activeRoom.isDM && <View style={styles.headerAction} />}
             <Pressable
               accessibilityLabel={isSearching ? 'Close message search' : 'Find messages'}
               accessibilityRole='button'
@@ -1696,11 +1700,7 @@ export function PeerChatScreen ({
                 ? <CloseIcon width={CHAT_HEADER_ICON_SIZE} height={CHAT_HEADER_ICON_SIZE} color={colors.accent} />
                 : <SearchIcon width={CHAT_HEADER_ICON_SIZE} height={CHAT_HEADER_ICON_SIZE} color={colors.accent} />}
             </Pressable>
-            {activeRoom.isDM
-              // Nothing to share, but the title is centred between the two
-              // action groups and without this it sits left of centre.
-              ? <View style={styles.headerAction} />
-              : (
+            {!activeRoom.isDM && (
               <Pressable
                 accessibilityHint='Shares a link that joins this room'
                 accessibilityLabel='Share room'

@@ -162,11 +162,12 @@ test('a room is shared as an invite link, and a direct message has nothing to sh
   // The bare key has to be pasted into Join Room by hand; the link just joins.
   assert.match(share, /buildPeerChatInviteUrl\(activeRoom[.]roomKey\)/)
 
-  // There is nobody to invite into a one-to-one chat. The button is replaced
-  // by a spacer rather than simply dropped: the title is centred between the
-  // two action groups, and removing one shifted the name off centre.
-  assert.match(screen, /activeRoom[.]isDM\s*\n\s*\/\/[\s\S]{0,200}\?\s*<View style=\{styles[.]headerAction\} \/>/)
-  assert.match(screen, /: \(\s*<Pressable[\s\S]{0,300}Share room/)
+  // There is nobody to invite into a one-to-one chat. The button becomes a
+  // spacer rather than simply going: the title is centred between the two
+  // action groups, and removing one shifted the name off centre. The spacer
+  // comes first so search keeps the corner the share button had.
+  assert.match(screen, /\{activeRoom[.]isDM && <View style=\{styles[.]headerAction\} \/>\}\s*\n\s*<Pressable[\s\S]{0,200}Find messages/)
+  assert.match(screen, /\{!activeRoom[.]isDM && \(\s*<Pressable[\s\S]{0,300}Share room/)
 })
 
 test('creating or joining a room closes the panel behind it', async () => {
