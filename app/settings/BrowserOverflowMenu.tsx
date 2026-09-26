@@ -30,6 +30,7 @@ type BrowserOverflowMenuProps = {
   shareActionAvailable?: boolean
   visible: boolean
   onClose: () => void
+  onDismissed?: () => void
   onNewTab: () => void
   onOpenBookmarks: () => void
   onOpenDownloads: () => void
@@ -54,6 +55,7 @@ export function BrowserOverflowMenu ({
   shareActionAvailable = false,
   visible,
   onClose,
+  onDismissed,
   onNewTab,
   onOpenBookmarks,
   onOpenDownloads,
@@ -110,6 +112,7 @@ export function BrowserOverflowMenu ({
         animationType='fade'
         transparent={true}
         visible={visible}
+        onDismiss={onDismissed}
         onRequestClose={onClose}
       >
         <SafeAreaView style={styles.overlay} edges={['top', 'left', 'right', 'bottom']}>

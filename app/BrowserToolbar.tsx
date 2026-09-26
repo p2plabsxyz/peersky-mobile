@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Animated,
   Keyboard,
+  Platform,
   Pressable,
   Text,
   TextInput,
@@ -52,6 +53,7 @@ type BrowserToolbarProps = {
   }
   position: 'top' | 'bottom'
   showFullAddress: boolean
+  pageActionAvailable: boolean
   shareActionAvailable: boolean
   tabCount: number
   onAddressChange: (address: string) => void
@@ -92,6 +94,7 @@ export function BrowserToolbar ({
   palette,
   position,
   showFullAddress,
+  pageActionAvailable,
   shareActionAvailable,
   tabCount,
   onAddressChange,
@@ -141,6 +144,25 @@ export function BrowserToolbar ({
     addressInputRef.current?.blur()
     Keyboard.dismiss()
     setIsAddressFocused(false)
+  }
+
+  // iOS will not present the share sheet on top of a modal that is still
+  // fading out, and it fails without a word, which is why sharing worked from
+  // the address bar and did nothing from the menu. Wait for the menu to finish
+  // leaving. Android has no such rule and no onDismiss, so it runs straight
+  // away.
+  const pendingMenuActionRef = useRef<(() => void) | null>(null)
+
+  function afterMenuCloses (action: () => void) {
+    if (Platform.OS === 'ios') pendingMenuActionRef.current = action
+    onCloseMenu()
+    if (Platform.OS !== 'ios') action()
+  }
+
+  function runPendingMenuAction () {
+    const action = pendingMenuActionRef.current
+    pendingMenuActionRef.current = null
+    action?.()
   }
 
   const hiddenControlProps = isAddressFocused
@@ -280,7 +302,7 @@ export function BrowserToolbar ({
             />
           </Pressable>
         )}
-        {!isAddressFocused && shareActionAvailable && (
+        {!isAddressFocused && pageActionAvailable && (
           <View style={styles.browserAddressActions}>
             <Pressable
               accessibilityLabel={isLoading ? 'Stop loading page' : 'Reload page'}
@@ -300,26 +322,29 @@ export function BrowserToolbar ({
                   />
                   )}
             </Pressable>
-            <Pressable
-              accessibilityLabel='Share page'
-              accessibilityRole='button'
-              style={styles.browserAddressAction}
-              onPress={onSharePage}
-            >
-              <ShareIcon
-                width={ADDRESS_ACTION_ICON_SIZE}
-                height={ADDRESS_ACTION_ICON_SIZE}
-                color={addressActionIconColor}
-                opacity={0.76}
-                style={styles.browserAddressShareIcon}
-              />
-            </Pressable>
+            {shareActionAvailable && (
+              <Pressable
+                accessibilityLabel='Share page'
+                accessibilityRole='button'
+                style={styles.browserAddressAction}
+                onPress={onSharePage}
+              >
+                <ShareIcon
+                  width={ADDRESS_ACTION_ICON_SIZE}
+                  height={ADDRESS_ACTION_ICON_SIZE}
+                  color={addressActionIconColor}
+                  opacity={0.76}
+                  style={styles.browserAddressShareIcon}
+                />
+              </Pressable>
+            )}
           </View>
         )}
       </View>
       {isAddressFocused && (
         <HistorySuggestions
           items={historySuggestions}
+          offset={menuOffset}
           palette={palette}
           position={position}
           onOpen={(url) => {
@@ -383,10 +408,8 @@ export function BrowserToolbar ({
         }}
         onShow={onOpenMenu}
         onOpenSettings={onOpenSettings}
-        onSharePage={() => {
-          onCloseMenu()
-          onSharePage()
-        }}
+        onDismissed={runPendingMenuAction}
+        onSharePage={() => afterMenuCloses(onSharePage)}
         onToggleDesktopView={() => {
           onCloseMenu()
           onToggleDesktopView()

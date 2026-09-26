@@ -242,6 +242,10 @@ type PeerChatScreenProps = {
   onOpenLocalFile: (uri: string, name: string) => Promise<boolean>
   onRequestedRoomHandled: () => void
   onOpenUrl: (url: string) => void
+  // The browser's back gesture and the Android button both come through here,
+  // so leaving a chat lands on the room list instead of the home screen.
+  onRoomOpenChange?: (open: boolean) => void
+  registerGoBack?: (handler: (() => boolean) | null) => void
   onSoundsEnabledChange: (enabled: boolean) => boolean
   onStatus: (message: string) => void
   soundsEnabled: boolean
@@ -302,6 +306,8 @@ export function PeerChatScreen ({
   onOpenLocalFile,
   onRequestedRoomHandled,
   onOpenUrl,
+  onRoomOpenChange,
+  registerGoBack,
   onSoundsEnabledChange,
   onStatus,
   soundsEnabled,
@@ -486,6 +492,28 @@ export function PeerChatScreen ({
   useEffect(() => {
     activeRoomRef.current = activeRoom
   }, [activeRoom])
+
+  // Leaving a chat is a back step of its own. The browser owns the gesture and
+  // the Android button, so it is handed a way to take that step first.
+  const leaveActiveRoom = useCallback(() => {
+    if (!activeRoomRef.current) return false
+    setReplyTarget(null)
+    setIsSearching(false)
+    setSearchQuery('')
+    setActiveRoom(null)
+    return true
+  }, [])
+
+  useEffect(() => {
+    registerGoBack?.(leaveActiveRoom)
+    return () => registerGoBack?.(null)
+  }, [leaveActiveRoom, registerGoBack])
+
+  useEffect(() => {
+    onRoomOpenChange?.(Boolean(activeRoom))
+  }, [activeRoom, onRoomOpenChange])
+
+  useEffect(() => () => onRoomOpenChange?.(false), [onRoomOpenChange])
 
   useEffect(() => {
     if (!moderationWarning) return
@@ -1578,12 +1606,7 @@ export function PeerChatScreen ({
         <View style={[styles.chatHeader, { borderBottomColor: colors.border }]}> 
           <Pressable
             accessibilityRole='button'
-            onPress={() => {
-              setReplyTarget(null)
-              setIsSearching(false)
-              setSearchQuery('')
-              setActiveRoom(null)
-            }}
+            onPress={leaveActiveRoom}
             style={styles.headerAction}
           >
             <BackIcon width={CHAT_HEADER_ICON_SIZE} height={CHAT_HEADER_ICON_SIZE} color={colors.accent} />
@@ -2660,8 +2683,13 @@ export function PeerChatScreen ({
             </View>
           )}
 
+          {/* One row could not hold a room key field next to a button labelled
+              "Scan invite or room QR": the buttons took their text width first
+              and the field, which starts at zero and only grows into what is
+              left, collapsed to a sliver. The key gets its own line, the same
+              way the create panel does it. */}
           {landingAction === 'join' && (
-            <View style={[styles.actionPanel, { backgroundColor: colors.surface }]}>
+            <View style={[styles.actionPanel, styles.createActionPanel, { backgroundColor: colors.surface }]}>
               <TextInput
                 value={joinKey}
                 onChangeText={setJoinKey}
@@ -2670,24 +2698,26 @@ export function PeerChatScreen ({
                 maxLength={64}
                 placeholder='64-character room key'
                 placeholderTextColor={colors.muted}
-                style={[styles.input, styles.actionInput, styles.roomKeyInput, { backgroundColor: colors.input, color: colors.text }]}
+                style={[styles.input, styles.createActionInput, styles.roomKeyInput, { backgroundColor: colors.input, color: colors.text }]}
               />
-              <Pressable
-                accessibilityRole='button'
-                disabled={isBusy}
-                onPress={() => void openInviteScanner()}
-                style={[styles.actionSubmit, { backgroundColor: colors.input }, isBusy ? styles.disabled : null]}
-              >
-                <Text style={[styles.actionSubmitText, { color: colors.text }]}>Scan invite or room QR</Text>
-              </Pressable>
-              <Pressable
-                accessibilityRole='button'
-                disabled={!profileName.trim() || joinKey.trim().length !== 64 || isBusy}
-                onPress={joinRoom}
-                style={[styles.actionSubmit, { backgroundColor: colors.accent }, !profileName.trim() || joinKey.trim().length !== 64 || isBusy ? styles.disabled : null]}
-              >
-                <Text style={styles.actionSubmitText}>Join</Text>
-              </Pressable>
+              <View style={styles.actionPanelRow}>
+                <Pressable
+                  accessibilityRole='button'
+                  disabled={isBusy}
+                  onPress={() => void openInviteScanner()}
+                  style={[styles.actionSubmit, styles.actionSubmitGrow, { backgroundColor: colors.input }, isBusy ? styles.disabled : null]}
+                >
+                  <Text style={[styles.actionSubmitText, { color: colors.text }]}>Scan invite or room QR</Text>
+                </Pressable>
+                <Pressable
+                  accessibilityRole='button'
+                  disabled={!profileName.trim() || joinKey.trim().length !== 64 || isBusy}
+                  onPress={joinRoom}
+                  style={[styles.actionSubmit, { backgroundColor: colors.accent }, !profileName.trim() || joinKey.trim().length !== 64 || isBusy ? styles.disabled : null]}
+                >
+                  <Text style={styles.actionSubmitText}>Join</Text>
+                </Pressable>
+              </View>
             </View>
           )}
 
@@ -3372,6 +3402,10 @@ const PEERCHAT_ABOUT = [
     a: 'Open their profile and block them. Their direct messages stop right away, and you still share any rooms you are both in. Report sends a note to the people who build PeerChat.'
   },
   {
+    q: 'Can I use the same profile on my phone and my computer?',
+    a: 'One phone and one computer, and only one of them at a time. Messages arrive on whichever is running, not both, and writing from both splits your history in two. Moving to a new phone is a deliberate step: remove the identity from the old one first, in Settings.'
+  },
+  {
     q: 'Does it work without internet?',
     a: 'Yes, on the same WiFi. Phones find each other over the local network, so an outage does not stop a conversation.'
   }
@@ -3592,8 +3626,12 @@ function persistPeerChatUiState (state: PeerChatUiState) {
   }
 }
 
+// Matched to the browser shell (browser-appearance.mjs) on purpose. PeerChat
+// fills the content area while the shell paints the bottom safe area behind the
+// home indicator, and two greys a few values apart showed up as a band across
+// the bottom of the screen.
 const darkColors = {
-  background: '#17181d',
+  background: '#18181b',
   surface: '#23252c',
   input: '#2d3039',
   border: '#3d414d',
@@ -3608,7 +3646,7 @@ const darkColors = {
 }
 
 const lightColors = {
-  background: '#f5f6f8',
+  background: '#f5f8ff',
   surface: '#ffffff',
   input: '#f0f2f5',
   border: '#d8dce5',
@@ -3673,6 +3711,8 @@ const styles = StyleSheet.create({
   createActionPanel: { alignItems: 'stretch', flexDirection: 'column' },
   createActionInput: { width: '100%' },
   actionInput: { flex: 1 },
+  actionPanelRow: { alignItems: 'center', flexDirection: 'row', gap: 8, width: '100%' },
+  actionSubmitGrow: { flex: 1 },
   peerchatScanner: { backgroundColor: '#000000', flex: 1 },
   peerchatScannerOverlay: { alignItems: 'center', flex: 1, justifyContent: 'flex-end', padding: 24 },
   peerchatScanHint: { color: '#ffffff', fontSize: 15, marginBottom: 16, textAlign: 'center' },

@@ -96,11 +96,12 @@ type P2PStorageProps = {
   onCallRpc: (command: number, data?: object) => Promise<P2pStorageResponse>
   onDownloadOnlyOnWifiChange: (enabled: boolean) => void
   onOpenItem: (item: { name: string, source: 'fetched' | 'published', url: string }) => void
+  onOpenUrl: (url: string) => void
 }
 
 const PAGE_SIZE = 5
 
-export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallRpc, onDownloadOnlyOnWifiChange, onOpenItem }: P2PStorageProps) {
+export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallRpc, onDownloadOnlyOnWifiChange, onOpenItem, onOpenUrl }: P2PStorageProps) {
   const isDark = useSettingsDarkMode()
   const requestSequence = useRef(0)
   const offlineRequestSequence = useRef(0)
@@ -411,9 +412,15 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
                     : 'No local data'}
                 </Text>
                 {item.exists && item.url && (
-                  <Text numberOfLines={1} style={[styles.url, isDark ? darkStyles.secondaryText : null]}>
-                    {item.url}
-                  </Text>
+                  <Pressable
+                    accessibilityHint='Opens the drive so you can browse what is in it'
+                    accessibilityRole='link'
+                    onPress={() => onOpenUrl(item.url)}
+                  >
+                    <Text numberOfLines={1} style={[styles.url, styles.urlLink, isDark ? darkStyles.urlLink : null]}>
+                      {item.url}
+                    </Text>
+                  </Pressable>
                 )}
                 {item.drives?.map((drive) => (
                   <View key={drive.id} style={styles.driveRow}>
@@ -424,9 +431,15 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
                       <Text style={[styles.driveSize, isDark ? darkStyles.secondaryText : null]}>
                         {formatFileCount(drive.fileCount, drive.truncated)} - {formatBytes(drive.byteLength)}
                       </Text>
-                      <Text numberOfLines={1} style={[styles.driveUrl, isDark ? darkStyles.secondaryText : null]}>
-                        {drive.url}
-                      </Text>
+                      <Pressable
+                        accessibilityHint='Opens the drive so you can browse what is in it'
+                        accessibilityRole='link'
+                        onPress={() => onOpenUrl(drive.url)}
+                      >
+                        <Text numberOfLines={1} style={[styles.driveUrl, styles.urlLink, isDark ? darkStyles.urlLink : null]}>
+                          {drive.url}
+                        </Text>
+                      </Pressable>
                     </View>
                   </View>
                 ))}
@@ -853,6 +866,11 @@ const styles = StyleSheet.create({
     fontFamily: 'monospace',
     fontSize: 10
   },
+  // Reads as an address you can open rather than one you can only squint at.
+  urlLink: {
+    color: '#1f6fd1',
+    textDecorationLine: 'underline'
+  },
   timestamp: {
     color: '#687086',
     fontSize: 10
@@ -974,6 +992,9 @@ const styles = StyleSheet.create({
 const darkStyles = StyleSheet.create({
   primaryText: {
     color: BROWSER_PALETTES.dark.text
+  },
+  urlLink: {
+    color: BROWSER_PALETTES.dark.accent
   },
   secondaryText: {
     color: BROWSER_PALETTES.dark.mutedText

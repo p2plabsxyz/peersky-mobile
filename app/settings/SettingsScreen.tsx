@@ -31,7 +31,8 @@ import {
   RPC_HYPER_LAN_STATUS,
   RPC_IDENTITY_GET_KEY,
   RPC_IDENTITY_RESTORE_FROM_HYPER,
-  RPC_IDENTITY_CONFIRM_RESTORE
+  RPC_IDENTITY_CONFIRM_RESTORE,
+  RPC_IDENTITY_REMOVE
 } from '../../backend/rpc/commands.mjs'
 import { QrCodeView } from './QrCodeView'
 import { createMobilePairingCode } from './identity-pairing.mjs'
@@ -66,7 +67,7 @@ import UniversalAccessIcon from '../../assets/icons/bootstrap/universal-access-c
 import DisplayIcon from '../../assets/icons/bootstrap/display.svg'
 import DatabaseIcon from '../../assets/icons/bootstrap/database.svg'
 
-type SettingsPage =
+export type SettingsPage =
   | 'main'
   | 'general'
   | 'accessibility'
@@ -151,6 +152,7 @@ type LANDiscoveryStatus = {
 
 type SettingsScreenProps = {
   addressBarPosition: AddressBarPosition
+  initialPage?: SettingsPage
   contentBlockingEnabled: boolean
   customSearchUrl: string
   downloadOnlyOnWifi: boolean
@@ -274,7 +276,7 @@ const SETTINGS_PAGES: Array<{
 ]
 
 export function SettingsScreen(props: SettingsScreenProps) {
-  const [page, setPage] = useState<SettingsPage>('main')
+  const [page, setPage] = useState<SettingsPage>(props.initialPage || 'main')
   const [transitionDirection, setTransitionDirection] = useState(1)
   const reduceMotion = useReducedMotion()
   const transition = useRef(new Animated.Value(1)).current
@@ -305,6 +307,7 @@ export function SettingsScreen(props: SettingsScreenProps) {
             onCallRpc={props.onCallRpc}
             onDownloadOnlyOnWifiChange={props.onDownloadOnlyOnWifiChange}
             onOpenItem={props.onOpenHyperItem}
+            onOpenUrl={props.onOpenUrl}
           />
         )}
         {page === 'permissions' && <Permissions {...props} />}
@@ -490,6 +493,14 @@ function LinkDeviceSettings({
   const [permission, requestPermission] = useCameraPermissions()
   const pairingCode = createMobilePairingCode(encryptionPublicKey, nonce)
 
+  // The parent builds a new onCallRpc closure on every one of its renders, so
+  // keying the effect on it re-ran this on every render: fetch the key, set
+  // state, render, fetch again. That loop is what makes the screen flicker,
+  // and it hammered the key RPC. Read the latest one through a ref and load
+  // once instead.
+  const onCallRpcRef = useRef(onCallRpc)
+  onCallRpcRef.current = onCallRpc
+
   useEffect(() => {
     let cancelled = false
 
@@ -498,7 +509,7 @@ function LinkDeviceSettings({
       setError(null)
 
       try {
-        const response = await onCallRpc(RPC_IDENTITY_GET_KEY, {})
+        const response = await onCallRpcRef.current(RPC_IDENTITY_GET_KEY, {})
         if (cancelled) return
 
         if (!response.ok || typeof response.encryptionPublicKey !== 'string') {
@@ -521,7 +532,7 @@ function LinkDeviceSettings({
     return () => {
       cancelled = true
     }
-  }, [onCallRpc])
+  }, [])
 
   function copyDeviceKey() {
     if (!pairingCode) return
@@ -554,6 +565,45 @@ function LinkDeviceSettings({
     } else {
       setError('Invalid QR code scanned. Must be a hyper:// URL.')
     }
+  }
+
+  // Android can quit itself. iOS cannot: BackHandler.exitApp is a no-op
+  // there, and calling exit() reads as a crash to Apple, so asking is the
+  // only honest option. Without this the app sat open on wiped storage and
+  // looked like nothing had happened.
+  function finishAndRestart (done: string) {
+    onIdentityRestored()
+    if (Platform.OS === 'android') {
+      BackHandler.exitApp()
+      return
+    }
+    Alert.alert('Close PeerSky to finish', `${done} Close PeerSky fully, then open it again.`)
+  }
+
+  // The other half of moving to a new phone. The desktop releases its side;
+  // this one stops this phone being that profile. Without it the old phone
+  // keeps writing the same chat feed and forks it.
+  function removeIdentity () {
+    Alert.alert(
+      'Remove identity from this phone?',
+      'This deletes your profile, chats and private files from this phone. Anything only stored here is gone. Your desktop keeps its copy.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove & Restart',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const response = await onCallRpc(RPC_IDENTITY_REMOVE, {})
+              if (!response.ok) throw new Error(response.error || 'Could not remove the identity')
+              finishAndRestart('This phone no longer holds your identity.')
+            } catch (removeError) {
+              Alert.alert('Remove Failed', removeError instanceof Error ? removeError.message : String(removeError))
+            }
+          }
+        }
+      ]
+    )
   }
 
   async function restoreIdentity() {
@@ -589,8 +639,7 @@ function LinkDeviceSettings({
               try {
                 const confirmResponse = await onCallRpc(RPC_IDENTITY_CONFIRM_RESTORE, {})
                 if (!confirmResponse.ok) throw new Error(confirmResponse.error)
-                onIdentityRestored()
-                BackHandler.exitApp()
+                finishAndRestart('Your identity has been restored.')
               } catch (confirmError) {
                 Alert.alert('Restore Failed', confirmError instanceof Error ? confirmError.message : String(confirmError))
               }
@@ -697,6 +746,27 @@ function LinkDeviceSettings({
             onPress={openScanner}
           >
             <Text style={[styles.secondaryButtonText, isDark ? darkStyles.primaryText : null]}>Scan QR Code</Text>
+          </Pressable>
+        </View>
+      </SettingsSection>
+
+      <SettingsSection title='This phone'>
+        <View style={styles.linkDeviceBlock}>
+          <SettingCopy
+            title='Remove identity from this phone'
+            description='Your profile lives on one phone at a time. Do this before moving to a new phone, so both are not writing the same chats.'
+          />
+          <Pressable
+            accessibilityRole='button'
+            disabled={isRestoring}
+            style={({ pressed }) => [
+              styles.secondaryButton,
+              isRestoring ? styles.buttonDisabled : null,
+              pressed ? styles.rowPressed : null
+            ]}
+            onPress={removeIdentity}
+          >
+            <Text style={styles.dangerButtonText}>Remove Identity</Text>
           </Pressable>
         </View>
       </SettingsSection>
@@ -1102,6 +1172,13 @@ const styles = StyleSheet.create({
   },
   secondaryButtonText: {
     color: '#1f2a44',
+    fontSize: 14,
+    fontWeight: '800'
+  },
+  // Reads the same in both themes: it sits on the secondary button, which
+  // stays light, and this is a destructive action either way.
+  dangerButtonText: {
+    color: '#c43d35',
     fontSize: 14,
     fontWeight: '800'
   },

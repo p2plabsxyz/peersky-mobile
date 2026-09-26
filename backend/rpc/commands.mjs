@@ -58,6 +58,8 @@ export const RPC_PEERCHAT_ATTACHMENT_OPEN = 58
 export const RPC_PEERCHAT_BLOCK = 66
 export const RPC_PEERCHAT_UNBLOCK = 67
 
+export const RPC_IDENTITY_REMOVE = 68
+
 export const RPC_PEERTUNES_START = 70
 
 // Backend to app pushes. Separate range so they never collide with the

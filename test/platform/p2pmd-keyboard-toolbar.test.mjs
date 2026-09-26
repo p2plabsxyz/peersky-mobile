@@ -17,8 +17,10 @@ const keyboardBar = server.slice(
 )
 
 test('the document bar holds only what you choose before writing', () => {
+  // Inserting a picture is something you do mid-sentence, so it belongs with
+  // the other things that act on the words, within reach of a thumb.
   const buttons = [...documentBar.matchAll(/data-(?:format|menu)="([a-z0-9-]+)"/g)].map((m) => m[1])
-  assert.deepEqual(buttons, ['image', 'slides', 'template'])
+  assert.deepEqual(buttons, ['slides', 'template'])
 })
 
 test('the two document kinds sit behind one button', () => {
@@ -48,7 +50,7 @@ test('slides and templates do not share a glyph', () => {
 test('every formatting button moved to the keyboard bar, none were dropped', () => {
   const moved = [...keyboardBar.matchAll(/data-format="([a-z0-9-]+)"/g)].map((m) => m[1])
   assert.deepEqual(moved, [
-    'bold', 'italic', 'h1', 'h2', 'ul', 'ol',
+    'bold', 'italic', 'h1', 'h2', 'image', 'ul', 'ol',
     'link', 'inline-code', 'code-block', 'quote',
     'latex', 'inline-math', 'block-math'
   ])
@@ -58,13 +60,33 @@ test('every formatting button moved to the keyboard bar, none were dropped', () 
 })
 
 test('the bar is placed by the keyboard, not guessed at', () => {
-  // window.innerHeight does not move when the keyboard opens on iOS, so the
-  // overlap has to come from visualViewport or the bar sits under the keys.
-  assert.match(server, /window\.innerHeight - \(viewport\.height \+ viewport\.offsetTop\)/)
+  // visualViewport is the only thing that reports where the keyboard starts:
+  // window.innerHeight does not move when it opens on iOS.
+  assert.match(server, /viewport\.offsetTop \+ viewport\.height/)
   assert.match(server, /visualViewport\.addEventListener\('resize', syncKeyboardToolbar\)/)
   assert.match(server, /visualViewport\.addEventListener\('scroll', syncKeyboardToolbar\)/)
-  // The keyboard animates open, so one read on the next frame lands it.
-  assert.match(server, /window\.requestAnimationFrame\(syncKeyboardToolbar\)/)
+})
+
+test('the bar hangs off the top of the viewport, not the bottom of the page', () => {
+  // Anchored to the bottom and lifted, it slid behind the keyboard whenever
+  // iOS scrolled the layout viewport out from under it. Anchored to the top
+  // and pushed down to the bottom edge of the visual viewport, the only number
+  // it depends on is the one visualViewport reports.
+  const css = server.slice(server.indexOf('#keyboard-toolbar {'), server.indexOf('#keyboard-toolbar::-webkit-scrollbar'))
+  assert.match(css, /position: fixed;/)
+  assert.match(css, /top: 0;/)
+  assert.doesNotMatch(css, /bottom:/)
+})
+
+test('the bar keeps up with a keyboard that iOS moves without telling us', () => {
+  // Scrolling with the keyboard up fires no event we can rely on, so while the
+  // editor holds focus the viewport is read every frame instead. It stops as
+  // soon as focus goes, and skips the write unless the number changed.
+  assert.match(server, /keyboardToolbarFrame = window\.requestAnimationFrame\(trackKeyboardToolbar\)/)
+  assert.match(server, /if \(offset === keyboardToolbarOffsetApplied\) return/)
+  const start = server.indexOf('function trackKeyboardToolbar()')
+  const tracker = server.slice(start, server.indexOf('\n      }', start))
+  assert.match(tracker, /document\.activeElement === input && viewMode === 'edit'/)
 })
 
 test('the bar shows only while the editor is actually being typed in', () => {
@@ -93,4 +115,20 @@ test('a template button applies its template instead of formatting text', () => 
   // of them silently does nothing.
   assert.match(server, /runToolbarButton\(state\.button\)/)
   assert.match(server, /return runToolbarButton\(getToolbarButton\(event\)\)/)
+})
+
+test('the page checks for a deck with the renderer own function', () => {
+  // A copy of the rule is how the editor came to offer to delete a real deck.
+  // The page embeds hasSlideBreaks itself, so there is nothing to keep in sync.
+  assert.match(server, /import \{ hasSlideBreaks, renderMarkdownPreview, renderMarkdownSlides \}/)
+  assert.match(server, /hasSlideBreaks\.toString\(\)/)
+  assert.match(server, /if \(!hasSlideBreaks\(input\.value\)\)/)
+  assert.doesNotMatch(server, /P2PMD_SLIDE_BREAK_PATTERN/)
+})
+
+test('view as slides stays reachable from the preview', () => {
+  // Hiding the bar outside edit mode left no way to open a deck without going
+  // back to editing first. Desktop shows it in every mode.
+  assert.match(server, /formattingToolbar\.hidden = viewMode === 'slides'/)
+  assert.match(server, /templateTrigger\.disabled = viewMode !== 'edit'/)
 })

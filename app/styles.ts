@@ -316,11 +316,18 @@ export const styles = StyleSheet.create({
   browserShortcut: {
     alignItems: 'center',
     gap: 9,
-    paddingHorizontal: 6,
+    // Kept in step with BROWSER_SHORTCUT_HORIZONTAL_PADDING, which is what the
+    // label sizing measures against.
+    paddingHorizontal: 4,
     width: '25%'
   },
   browserShortcutIcon: {
     alignItems: 'center',
+    // A tile to look at while the artwork decodes. Without it the frame is
+    // transparent and the home screen reads as four bare labels on first paint.
+    // Deliberately neutral: the icons are mint and a brand colour here would
+    // flash the wrong colour and then change under you.
+    backgroundColor: 'rgba(127, 140, 163, 0.18)',
     borderRadius: 16,
     height: 64,
     justifyContent: 'center',

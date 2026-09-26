@@ -255,12 +255,25 @@ export function useBrowserTabPreviews<Entry> ({
 
   function clearAllPreviews () {
     const cacheCleared = clearCachedPreviews()
+    for (const timer of captureTimersRef.current.values()) clearTimeout(timer)
+    captureTimersRef.current.clear()
+    captureGenerationRef.current.clear()
     captureLayoutsRef.current.clear()
     captureViewRefs.current.clear()
     return cacheCleared
   }
 
+  // Closing a tab left its queued capture running. Everything else about the
+  // tab was dropped but the timer was not, so up to a second later a capture
+  // still fired for a tab that no longer existed, against a view the tree was
+  // in the middle of tearing down. Cancel the timer and retire the generation
+  // so a late capture cannot start at all.
   function removePreview (tabId: string) {
+    const pendingTimer = captureTimersRef.current.get(tabId)
+    if (pendingTimer) clearTimeout(pendingTimer)
+    captureTimersRef.current.delete(tabId)
+    captureGenerationRef.current.delete(tabId)
+
     clearPreview(tabId)
     captureFailureUntilRef.current.delete(tabId)
     captureLayoutsRef.current.delete(tabId)

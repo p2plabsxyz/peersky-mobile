@@ -23,6 +23,7 @@ import {
   RPC_IDENTITY_GET_KEY,
   RPC_IDENTITY_RESTORE_FROM_HYPER,
   RPC_IDENTITY_CONFIRM_RESTORE,
+  RPC_IDENTITY_REMOVE,
   RPC_P2PMD_ROOM_CREATE,
   RPC_P2PMD_ROOM_DISCONNECT,
   RPC_P2PMD_EDITOR_PAGE,
@@ -61,8 +62,6 @@ import {
 } from '../backup/device-keys.mjs'
 import { decryptIdentityTransfer } from '../backup/identity-transfer.mjs'
 import { adoptTransferredPrivateDrive } from '../backup/private-drive-import.mjs'
-import { randomBytes } from 'node:crypto'
-import b4a from 'b4a'
 import { rmSync, renameSync, existsSync } from 'bare-fs'
 import { commitIdentityRestore, restoreIdentityFromBackup } from '../backup/restore.mjs'
 
@@ -90,6 +89,7 @@ import {
   withHyperRuntimeOperation
 } from '../hyper/runtime.mjs'
 import { resetPrivateDriveKeyCache } from '../hyper/private-keys.mjs'
+import { clearPairingNonce, getLivePairingNonce, getOrCreatePairingNonce } from '../backup/pairing-nonce.mjs'
 import { clearAllP2pData, clearP2pCache, deleteP2pAppData, listP2pAppData } from '../hyper/storage.mjs'
 
 import {
@@ -117,7 +117,6 @@ import { parseJsonMessage, replyJson } from './messages.mjs'
 import { closePeerChatService, getPeerChatService } from '../peerchat/runtime.mjs'
 import { openPeerChatAttachment, uploadPeerChatAttachment } from '../peerchat/attachments.mjs'
 
-let currentIdentityNonce = null
 let pendingRestorePath = null
 
 export async function routeRpcRequest (req) {
@@ -223,12 +222,12 @@ export async function routeRpcRequest (req) {
     }
 
     if (req.command === RPC_IDENTITY_GET_KEY) {
-      const keys = await getDeviceKeys(getDefaultIdentityStoragePath())
-      currentIdentityNonce = b4a.toString(randomBytes(16), 'hex')
+      const identityStoragePath = getDefaultIdentityStoragePath()
+      const keys = await getDeviceKeys(identityStoragePath)
       replyJson(req, {
         ok: true,
         encryptionPublicKey: getEncryptionPublicKeyHex(keys),
-        nonce: currentIdentityNonce
+        nonce: getOrCreatePairingNonce(identityStoragePath)
       })
       return
     }
@@ -241,8 +240,9 @@ export async function routeRpcRequest (req) {
         return
       }
 
-      if (!currentIdentityNonce) {
-        replyJson(req, { ok: false, error: 'Identity transfer nonce missing. Generate a new key first.' })
+      const expectedNonce = getLivePairingNonce(getDefaultIdentityStoragePath())
+      if (!expectedNonce) {
+        replyJson(req, { ok: false, error: 'Pairing code expired. Reopen Link Device to get a new one.' })
         return
       }
 
@@ -266,7 +266,7 @@ export async function routeRpcRequest (req) {
         return
       }
 
-      const { sas, innerZipBytes } = await decryptIdentityTransfer(downloaded.bytes, keys, currentIdentityNonce)
+      const { sas, innerZipBytes } = await decryptIdentityTransfer(downloaded.bytes, keys, expectedNonce)
 
       try { rmSync(tempStoragePath, { recursive: true }) } catch (e) {}
 
@@ -278,6 +278,39 @@ export async function routeRpcRequest (req) {
         sas,
         restoredFiles: restoreResult.restoredFiles
       })
+      return
+    }
+
+    // Moving an identity to a new phone means the old phone has to stop being
+    // that profile. Two phones on one identity write the same chat feed and
+    // fork it, so leaving the old copy in place is the thing that breaks. The
+    // desktop releases its side; this releases the phone's.
+    if (req.command === RPC_IDENTITY_REMOVE) {
+      const result = await withHyperRuntimeMaintenance(async () => {
+        const storagePath = getDefaultIdentityStoragePath()
+        const syncedPrivatePath = getSyncedPrivateHyperStoragePath()
+
+        await closePeerChatService()
+        await closeHyperRuntime()
+        resetHyperFetch()
+
+        // The private store goes too. It holds drive cores adopted from the
+        // desktop, and keeping them behind without the identity leaves data
+        // the user thinks they deleted.
+        for (const target of [storagePath, syncedPrivatePath]) {
+          try { rmSync(target, { recursive: true, force: true }) } catch (e) {}
+        }
+        resetPrivateDriveKeyCache()
+
+        // Bring the runtime back on fresh storage. iOS has no supported way
+        // to quit an app, so leaving it closed would strand the user in a
+        // half-dead app until they killed it by hand.
+        await getHyperRuntime()
+
+        return { ok: true, requiresRestart: true }
+      }, closeHyperOfflineDownloads)
+
+      replyJson(req, result)
       return
     }
 
@@ -326,6 +359,10 @@ export async function routeRpcRequest (req) {
           getSyncedPrivateHyperStoragePath()
         )
         resetPrivateDriveKeyCache()
+        // Used once and done. The restore replaced the identity storage, so
+        // any nonce still sitting there belongs to the profile that was just
+        // overwritten.
+        clearPairingNonce(storagePath)
 
         await getHyperRuntime()
         return {

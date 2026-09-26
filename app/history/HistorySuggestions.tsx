@@ -12,11 +12,13 @@ type BrowserPalette = {
 
 export function HistorySuggestions ({
   items,
+  offset,
   palette,
   position,
   onOpen
 }: {
   items: BrowserHistoryItem[]
+  offset: number
   palette: BrowserPalette
   position: 'top' | 'bottom'
   onOpen: (url: string) => void
@@ -26,7 +28,10 @@ export function HistorySuggestions ({
   return (
     <View style={[
       styles.container,
-      position === 'bottom' ? styles.above : styles.below,
+      // Measured off the toolbar rather than "bottom: 100%". A percentage is
+      // resolved against a parent the keyboard is busy resizing, which is not
+      // something to depend on for whether the list covers the address bar.
+      position === 'bottom' ? { bottom: offset + 4 } : { top: offset + 4 },
       { backgroundColor: palette.surface, borderColor: palette.border }
     ]}>
       <ScrollView keyboardShouldPersistTaps='handled'>
@@ -66,8 +71,6 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
     zIndex: 20
   },
-  above: { bottom: '100%', marginBottom: 8 },
-  below: { marginTop: 8, top: '100%' },
   row: { alignItems: 'center', flexDirection: 'row', gap: 12, minHeight: 54, paddingHorizontal: 14 },
   copy: { flex: 1 },
   title: { fontSize: 14, fontWeight: '600' },
