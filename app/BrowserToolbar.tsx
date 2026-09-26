@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Animated,
   Keyboard,
+  Platform,
   Pressable,
   Text,
   TextInput,
@@ -143,6 +144,25 @@ export function BrowserToolbar ({
     addressInputRef.current?.blur()
     Keyboard.dismiss()
     setIsAddressFocused(false)
+  }
+
+  // iOS will not present the share sheet on top of a modal that is still
+  // fading out, and it fails without a word, which is why sharing worked from
+  // the address bar and did nothing from the menu. Wait for the menu to finish
+  // leaving. Android has no such rule and no onDismiss, so it runs straight
+  // away.
+  const pendingMenuActionRef = useRef<(() => void) | null>(null)
+
+  function afterMenuCloses (action: () => void) {
+    if (Platform.OS === 'ios') pendingMenuActionRef.current = action
+    onCloseMenu()
+    if (Platform.OS !== 'ios') action()
+  }
+
+  function runPendingMenuAction () {
+    const action = pendingMenuActionRef.current
+    pendingMenuActionRef.current = null
+    action?.()
   }
 
   const hiddenControlProps = isAddressFocused
@@ -324,6 +344,7 @@ export function BrowserToolbar ({
       {isAddressFocused && (
         <HistorySuggestions
           items={historySuggestions}
+          offset={menuOffset}
           palette={palette}
           position={position}
           onOpen={(url) => {
@@ -387,10 +408,8 @@ export function BrowserToolbar ({
         }}
         onShow={onOpenMenu}
         onOpenSettings={onOpenSettings}
-        onSharePage={() => {
-          onCloseMenu()
-          onSharePage()
-        }}
+        onDismissed={runPendingMenuAction}
+        onSharePage={() => afterMenuCloses(onSharePage)}
         onToggleDesktopView={() => {
           onCloseMenu()
           onToggleDesktopView()
