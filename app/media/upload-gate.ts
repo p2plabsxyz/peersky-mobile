@@ -189,10 +189,17 @@ export async function pickUploadFolder (): Promise<UploadAsset[]> {
  * Returns an empty array when the picker was cancelled. Throws with a sentence
  * worth showing when a file is refused.
  */
+/**
+ * @param screen Whether to run the classifier over the batch. A direct message
+ *   goes to one person who can block the sender, so screening it protects
+ *   nobody: the safeguard exists for rooms, where a picture lands in front of
+ *   everyone at once before anyone can act.
+ */
 export async function pickUploads ({
   multiple = false,
+  screen = true,
   type
-}: { multiple?: boolean, type?: string | string[] } = {}): Promise<UploadAsset[]> {
+}: { multiple?: boolean, screen?: boolean, type?: string | string[] } = {}): Promise<UploadAsset[]> {
   const selection = await pickDocuments({
     copyToCacheDirectory: true,
     multiple,
@@ -215,6 +222,8 @@ export async function pickUploads ({
       mimeType: asset.mimeType || ''
     }
   })
+
+  if (!screen) return assets
 
   const screened = await Promise.all(assets.map(async (asset) => ({
     fileName: asset.name,
