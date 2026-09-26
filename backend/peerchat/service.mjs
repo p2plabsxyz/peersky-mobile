@@ -856,6 +856,14 @@ export class PeerChatService {
     const previousRooms = new Set(peer.rooms)
     peer.rooms = getSharedPeerChatRooms(info.topics, this.discoveryKeys)
     if (this.pendingPeers.has(connection)) return
+    // An announcement that arrives short a topic drops the peer out of that
+    // room at once, which is the same blink as a redial and happens for the
+    // same reasons. Rooms they no longer announce get the same grace as a
+    // connection that went.
+    const nextRooms = new Set(peer.rooms)
+    for (const roomKey of previousRooms) {
+      if (!nextRooms.has(roomKey)) this.holdPeerPresenceInRoom(peer, roomKey)
+    }
     this.rememberPeerPresence(peer)
     for (const roomKey of peer.rooms) {
       if (!previousRooms.has(roomKey)) this.shareRoom(peer, roomKey)
@@ -928,9 +936,13 @@ export class PeerChatService {
   // A dropped connection is usually a redial, so the room keeps them for a
   // moment rather than reporting someone left and came back.
   holdPeerPresence (peer) {
+    for (const roomKey of peer.rooms) this.holdPeerPresenceInRoom(peer, roomKey)
+  }
+
+  holdPeerPresenceInRoom (peer, roomKey) {
     const peerId = normalizePeerChatPeerId(peer.id)
     if (!peerId) return
-    for (const roomKey of peer.rooms) this.presence.markAbsent(roomKey, peerId)
+    this.presence.markAbsent(roomKey, peerId)
     this.schedulePresencePrune()
   }
 
