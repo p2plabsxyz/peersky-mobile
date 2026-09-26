@@ -9,7 +9,7 @@ import {
 } from './document.mjs'
 import { P2PMD_LOOPBACK_HOST } from './constants.mjs'
 import { createPeerActivityStore, createPeerPresenceStore } from './peers.mjs'
-import { renderMarkdownPreview, renderMarkdownSlides } from './preview.mjs'
+import { hasSlideBreaks, renderMarkdownPreview, renderMarkdownSlides } from './preview.mjs'
 import ieeeBrowserScript from './ieee-runtime.mjs'
 import katexCss from './katex-runtime.mjs'
 import { P2PMD_SCIENTIFIC_STYLES } from './scientific.mjs'
@@ -27,7 +27,6 @@ const peerActivity = createPeerActivityStore()
 const editActivityTimers = new Map()
 let keepaliveInterval = null
 const EDIT_ACTIVITY_DEBOUNCE_MS = 1200
-const P2PMD_SLIDE_BREAK_PATTERN = /(?:\r?\n\r?\n---\r?\n\r?\n|^---\r?\n\r?\n|\r?\n\r?\n---$|^<!-- slide -->$)/m
 const P2PMD_SLIDES_TEMPLATE = `# Welcome to Your Presentation
 
 Your first slide content goes here
@@ -686,7 +685,9 @@ function getQueryParam (rawUrl, key) {
 
 export function getP2pmdEditorPage () {
   const serializedTemplates = JSON.stringify(P2PMD_TEMPLATES).replace(/</g, '\\u003c')
-  const serializedSlideBreakPattern = JSON.stringify(P2PMD_SLIDE_BREAK_PATTERN.source).replace(/</g, '\\u003c')
+  // The page runs the very same function the renderer splits with, rather
+  // than its own copy of the rule. They drifted apart once already.
+  const embeddedSlideBreakCheck = hasSlideBreaks.toString().replace(/<\/script/gi, '<\\/script')
   const serializedSlidesTemplate = JSON.stringify(P2PMD_SLIDES_TEMPLATE).replace(/</g, '\\u003c')
   const embeddedIeeeBrowserScript = ieeeBrowserScript.replace(/<\/script/gi, '<\\/script')
 
@@ -1447,14 +1448,19 @@ export function getP2pmdEditorPage () {
       }
       /* Rides just above the keyboard, the way Notes does it, instead of
          sitting at the top of the screen where a thumb cannot reach it.
-         translateY is driven by visualViewport, which is the only thing that
-         reports how much of the page the keyboard is covering. */
+         Anchored to the top of the layout viewport and moved down to the
+         bottom edge of the visual viewport, rather than anchored to the bottom
+         and lifted: iOS scrolls the layout viewport out from under a
+         bottom-anchored fixed element when the keyboard opens, and the bar
+         slid behind the keyboard. The visual viewport is the only thing that
+         reports where the keyboard actually starts. */
       #keyboard-toolbar {
         position: fixed;
+        top: 0;
         right: 6px;
-        bottom: 6px;
         left: 6px;
         z-index: 9;
+        will-change: transform;
         display: flex;
         align-items: center;
         gap: 2px;
@@ -1524,9 +1530,6 @@ export function getP2pmdEditorPage () {
     <div class="app-shell">
       <main class="editor-card">
         <div id="formatting-toolbar" role="toolbar" aria-label="Document">
-          <button type="button" data-format="image" title="Insert image" aria-label="Insert image">
-            <svg class="toolbar-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M6.002 5.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0"/><path d="M2.002 1a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2zm12 1a1 1 0 0 1 1 1v6.5l-3.777-1.947a.5.5 0 0 0-.577.093l-3.71 3.71-2.66-1.772a.5.5 0 0 0-.63.062L1.002 12V3a1 1 0 0 1 1-1z"/></svg>
-          </button>
           <button type="button" data-format="slides" title="View as slides" aria-label="View as slides">
             <svg class="toolbar-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0a.5.5 0 0 1 .5.5V2h5A1.5 1.5 0 0 1 15 3.5v7A1.5 1.5 0 0 1 13.5 12H9.05l1.9 3.8a.5.5 0 0 1-.9.4L8.5 13h-1l-1.55 3.2a.5.5 0 0 1-.9-.4L7 12H2.5A1.5 1.5 0 0 1 1 10.5v-7A1.5 1.5 0 0 1 2.5 2h5V.5A.5.5 0 0 1 8 0M2.5 3a.5.5 0 0 0-.5.5v7a.5.5 0 0 0 .5.5h11a.5.5 0 0 0 .5-.5v-7a.5.5 0 0 0-.5-.5z"/></svg>
           </button>
@@ -1549,6 +1552,9 @@ export function getP2pmdEditorPage () {
           </button>
           <button type="button" data-format="h2" title="Heading 2" aria-label="Heading 2">
             <svg class="toolbar-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M7.638 13V3.669H6.38V7.62H1.759V3.67H.5V13h1.258V8.728h4.62V13zm3.022-6.733v-.048c0-.889.63-1.668 1.716-1.668.957 0 1.675.608 1.675 1.572 0 .855-.554 1.504-1.067 2.085l-3.513 3.999V13H15.5v-1.094h-4.245v-.075l2.481-2.844c.875-.998 1.586-1.784 1.586-2.953 0-1.463-1.155-2.556-2.919-2.556-1.941 0-2.966 1.326-2.966 2.74v.049z"/></svg>
+          </button>
+          <button type="button" data-format="image" title="Insert image" aria-label="Insert image">
+            <svg class="toolbar-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M6.002 5.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0"/><path d="M2.002 1a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2zm12 1a1 1 0 0 1 1 1v6.5l-3.777-1.947a.5.5 0 0 0-.577.093l-3.71 3.71-2.66-1.772a.5.5 0 0 0-.63.062L1.002 12V3a1 1 0 0 1 1-1z"/></svg>
           </button>
           <div class="toolbar-divider" aria-hidden="true"></div>
           <button type="button" data-format="ul" title="Bullet list" aria-label="Bullet list">
@@ -2751,10 +2757,10 @@ export function getP2pmdEditorPage () {
         replaceDocumentRange(0, input.value.length, template.content, 0, 0)
       }
 
-      function viewAsSlides() {
-        const hasSlideBreak = new RegExp(${serializedSlideBreakPattern}, 'im').test(input.value)
+      ${embeddedSlideBreakCheck}
 
-        if (!hasSlideBreak) {
+      function viewAsSlides() {
+        if (!hasSlideBreaks(input.value)) {
           if (input.value.trim() && !window.confirm('This will clear your notes and give you a slides template. Continue?')) {
             return
           }
@@ -2860,11 +2866,21 @@ export function getP2pmdEditorPage () {
       // keyboard is covering. window.innerHeight does not change when the
       // keyboard opens on iOS, and on Android it changes inconsistently
       // depending on the soft-input mode, so neither can be used on its own.
-      function keyboardOverlap() {
+      const KEYBOARD_TOOLBAR_GAP = 6
+
+      // Distance from the top of the layout viewport down to where the bar's
+      // own top edge belongs: the bottom of the visual viewport, less the bar
+      // and a small gap. Without visualViewport there is nothing reporting the
+      // keyboard, so it sits at the bottom of the page.
+      function keyboardToolbarOffset(barHeight) {
         const viewport = window.visualViewport
-        if (!viewport) return 0
-        return Math.max(0, window.innerHeight - (viewport.height + viewport.offsetTop))
+        const bottom = viewport
+          ? viewport.offsetTop + viewport.height
+          : window.innerHeight
+        return Math.max(0, bottom - barHeight - KEYBOARD_TOOLBAR_GAP)
       }
+
+      let keyboardToolbarOffsetApplied = null
 
       function syncKeyboardToolbar() {
         if (!keyboardToolbar) return
@@ -2872,19 +2888,35 @@ export function getP2pmdEditorPage () {
         // simulator with a hardware keyboard attached never covers the page,
         // and gating on that made the bar vanish after the first tap.
         const open = document.activeElement === input && viewMode === 'edit'
-        keyboardToolbar.hidden = !open
-        if (!open) return
-        // No keyboard means no overlap, which leaves the bar at the bottom of
-        // the page where it belongs anyway.
-        keyboardToolbar.style.transform = 'translateY(' + -keyboardOverlap() + 'px)'
+        if (keyboardToolbar.hidden === open) keyboardToolbar.hidden = !open
+        if (!open) {
+          keyboardToolbarOffsetApplied = null
+          return
+        }
+        const offset = keyboardToolbarOffset(keyboardToolbar.offsetHeight)
+        if (offset === keyboardToolbarOffsetApplied) return
+        keyboardToolbarOffsetApplied = offset
+        keyboardToolbar.style.transform = 'translate3d(0, ' + offset + 'px, 0)'
+      }
+
+      // iOS does not fire a visualViewport event for every movement that
+      // matters: scrolling the page with the keyboard up moves the bar without
+      // telling us, which is how it ended up behind the keyboard. While the
+      // editor holds focus, read the viewport every frame instead. The work is
+      // one property read and an early return unless the number changed.
+      let keyboardToolbarFrame = 0
+
+      function trackKeyboardToolbar() {
+        keyboardToolbarFrame = 0
+        syncKeyboardToolbar()
+        if (document.activeElement === input && viewMode === 'edit') {
+          keyboardToolbarFrame = window.requestAnimationFrame(trackKeyboardToolbar)
+        }
       }
 
       function scheduleKeyboardToolbarSync() {
-        // The keyboard animates, and the viewport reports its height all the
-        // way up. One more read on the next frame lands the bar in the right
-        // place instead of part way there.
-        syncKeyboardToolbar()
-        window.requestAnimationFrame(syncKeyboardToolbar)
+        if (keyboardToolbarFrame) window.cancelAnimationFrame(keyboardToolbarFrame)
+        trackKeyboardToolbar()
       }
 
       function preventNativeContextMenu(event) {
@@ -3561,7 +3593,15 @@ export function getP2pmdEditorPage () {
         input.parentElement.hidden = viewMode !== 'edit'
         preview.hidden = viewMode !== 'preview'
         slidesPreview.hidden = viewMode !== 'slides'
-        formattingToolbar.hidden = viewMode !== 'edit'
+        // Desktop keeps "view as slides" on screen in every mode. Hiding the
+        // bar outside edit mode meant the only way to reach a deck was to go
+        // back to editing first and hunt for the button. The deck itself fills
+        // the screen, so the bar steps aside only there.
+        formattingToolbar.hidden = viewMode === 'slides'
+        const templateTrigger = formattingToolbar.querySelector('[data-menu="template"]')
+        // Applying a template rewrites the document, which is not something to
+        // offer while the reader is looking at a preview of it.
+        if (templateTrigger) templateTrigger.disabled = viewMode !== 'edit'
         if (viewMode !== 'edit') setTemplateMenuOpen(false)
         // Leaving edit mode closes the keyboard, and the bar has to go with
         // it rather than hang over the preview.
