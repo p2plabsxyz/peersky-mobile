@@ -4,6 +4,7 @@ import {
   createProxyAssetUrl,
   getHyperNavigationDownloadName,
   getHyperNavigationMediaType,
+  headersToObject,
   inlineHyperAssets
 } from './assets.mjs'
 import { startHyperAssetServer } from './asset-server.mjs'
@@ -15,11 +16,12 @@ import {
 } from './fetch-retry.mjs'
 import { withHyperRuntimeForAddress } from './runtime.mjs'
 import { refreshHyperRuntimeNetwork } from './network-refresh.mjs'
-import { createHyperUrl, parseHyperUrl } from './url.mjs'
+import { createHyperUrl, getHyperSearch, getHyperVisibility, parseHyperUrl } from './url.mjs'
 import { readHyperBinaryResponse } from './binary-response.mjs'
 import { configureHyperReadTimeout } from './read-policy.mjs'
 
 let hyperFetches = new WeakMap()
+let hyperWriteFetches = new WeakMap()
 
 export { stopHyperAssetServer } from './asset-server.mjs'
 export {
@@ -32,24 +34,53 @@ export {
 
 export function resetHyperFetch () {
   hyperFetches = new WeakMap()
+  hyperWriteFetches = new WeakMap()
 }
+
+// What a page is allowed to ask for. Everything else is a write, which goes
+// down a different path: no asset inlining, no media proxy, and a body.
+const HYPER_READ_METHODS = new Set(['GET', 'HEAD'])
+// POST creates a named drive, PUT puts a file in it. That is the whole publish
+// flow. DELETE is left out on purpose: "DELETE hyper://<key>/" throws away a
+// whole drive, and no page needs that to publish.
+const HYPER_WRITE_METHODS = new Set(['POST', 'PUT'])
+// Uploads here land in the ordinary networked runtime. Private and device-only
+// drives live in separate storage this path does not reach, and quietly
+// publishing something a page asked to keep private is the one outcome worth
+// refusing outright.
+const PUBLIC_VISIBILITY = new Set(['', 'public'])
 
 export async function fetchHyper ({
   url,
   method = 'GET',
+  body = null,
+  headers: requestHeaders = null,
   inlineAssets = false,
   retries = DEFAULT_HYPER_DISCOVERY_RETRIES,
   retryDelay = DEFAULT_HYPER_DISCOVERY_RETRY_DELAY,
   maxRetryDelay = DEFAULT_HYPER_DISCOVERY_MAX_RETRY_DELAY,
   backoffFactor = 2
 } = {}) {
-  if (method.toUpperCase() !== 'GET') {
-    return { ok: false, error: 'Only GET is currently supported' }
+  const normalizedMethod = String(method || 'GET').toUpperCase()
+  if (!HYPER_READ_METHODS.has(normalizedMethod) && !HYPER_WRITE_METHODS.has(normalizedMethod)) {
+    return { ok: false, error: `${normalizedMethod} is not supported over hyper://` }
   }
 
   const target = parseHyperUrl(url)
   if (target.error) return { ok: false, error: target.error }
-  const requestUrl = createHyperUrl(target.driveAddress, target.pathname)
+  // Creating a named drive is hyper://localhost/?key=myapp, so the query has to
+  // survive the trip. Reads never carried one.
+  const requestUrl = createHyperUrl(target.driveAddress, target.pathname) + getHyperSearch(url)
+
+  if (HYPER_WRITE_METHODS.has(normalizedMethod)) {
+    return writeHyper({
+      target,
+      requestUrl,
+      method: normalizedMethod,
+      body,
+      headers: requestHeaders
+    })
+  }
 
   return withHyperRuntimeForAddress(target.driveAddress, async (runtime) => {
     await prepareHyperRead(runtime, target.driveAddress)
@@ -133,6 +164,55 @@ export async function fetchHyper ({
   })
 }
 
+/**
+ * A write from a page: POST to create a named drive, PUT a file into one.
+ *
+ * Nothing here is retried. A read can be attempted again because it has no
+ * effect; repeating a write could upload a file twice.
+ */
+async function writeHyper ({ target, requestUrl, method, body, headers }) {
+  const visibility = getHyperVisibility(requestUrl)
+  if (!PUBLIC_VISIBILITY.has(visibility)) {
+    return { ok: false, error: `Only public uploads work from a page. Use the Hyperdrive app for ${visibility} ones.` }
+  }
+
+  return withHyperRuntimeForAddress(target.driveAddress, async (runtime) => {
+    const fetch = await getHyperWriteFetch(runtime)
+    const payload = decodeRequestBody(body)
+    if (payload.error) return { ok: false, error: payload.error }
+
+    const response = await fetch(requestUrl, {
+      method,
+      ...(payload.bytes === null ? {} : { body: payload.bytes }),
+      ...(headers && typeof headers === 'object' ? { headers } : {})
+    })
+
+    const responseHeaders = headersToObject(response.headers)
+    return {
+      ok: response.ok,
+      status: response.status,
+      statusText: response.statusText,
+      url: response.url || requestUrl,
+      headers: responseHeaders,
+      body: await response.text()
+    }
+  })
+}
+
+// The page hands its body over as base64, because the bridge between the
+// WebView and here carries text.
+function decodeRequestBody (body) {
+  if (body === null || body === undefined || body === '') return { bytes: null }
+  if (typeof body !== 'string') return { error: 'Request body must be base64 text' }
+
+  try {
+    const bytes = b4a.from(body, 'base64')
+    return { bytes }
+  } catch {
+    return { error: 'Request body is not valid base64' }
+  }
+}
+
 function normalizeMediaName (url) {
   try {
     return decodeURIComponent(new URL(url).pathname.split('/').pop() || 'Hyper media')
@@ -209,6 +289,34 @@ async function getHyperFetch (runtime) {
   })
 
   hyperFetches.set(runtime, fetch)
+  return fetch
+}
+
+/**
+ * A second hypercore-fetch, the writable one.
+ *
+ * Reading a page and publishing from one need different instances: with
+ * writable off, hypercore-fetch does not register the POST and PUT routes at
+ * all, so the publish flow came back as "Load failed" no matter what reached
+ * it. Keeping the reading instance read-only means a page being rendered still
+ * cannot write anything by accident; only a request that came through the
+ * bridge gets this.
+ *
+ * It is not a key to everything: hypercore-fetch still refuses any drive this
+ * device does not hold the write key for.
+ */
+async function getHyperWriteFetch (runtime) {
+  const existing = hyperWriteFetches.get(runtime)
+  if (existing) return existing
+
+  ensureFetchGlobals()
+
+  const fetch = await makeHyperFetch({
+    sdk: runtime,
+    writable: true
+  })
+
+  hyperWriteFetches.set(runtime, fetch)
   return fetch
 }
 
