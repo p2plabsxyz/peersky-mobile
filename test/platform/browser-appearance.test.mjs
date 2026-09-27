@@ -74,6 +74,11 @@ describe('popups attached to the toolbar', () => {
     // Edge to edge, and only the far edge drawn, so it reads as one surface.
     assert.match(source, /left: 0/)
     assert.match(source, /right: 0/)
+    // Padding, not a margin: the panel keeps reaching both screen edges while
+    // its rows step in, so a row lines up with the address field rather than
+    // starting against the notch in landscape.
+    assert.match(source, /paddingLeft: insets\.left/)
+    assert.match(source, /paddingRight: insets\.right/)
     assert.doesNotMatch(source, /borderWidth: 1/)
     assert.match(source, /attachedBelow: \{\n\s+borderBottomLeftRadius: 0,\n\s+borderBottomRightRadius: 0,\n\s+borderTopWidth: 1\n\s+\}/)
     assert.match(source, /attachedAbove: \{\n\s+borderBottomWidth: 1,\n\s+borderTopLeftRadius: 0,\n\s+borderTopRightRadius: 0\n\s+\}/)

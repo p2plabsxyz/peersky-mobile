@@ -1,4 +1,5 @@
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import HistoryIcon from '../../assets/icons/bootstrap/clock-history.svg'
 import type { BrowserHistoryItem } from './useBrowserHistory'
 
@@ -27,6 +28,7 @@ export function HistorySuggestions ({
   position: 'top' | 'bottom'
   onOpen: (url: string) => void
 }) {
+  const insets = useSafeAreaInsets()
   if (items.length === 0) return null
 
   return (
@@ -37,7 +39,15 @@ export function HistorySuggestions ({
       // resolved against a parent the keyboard is busy resizing.
       position === 'bottom' ? { bottom: offset } : { top: offset },
       position === 'bottom' ? styles.attachedBelow : styles.attachedAbove,
-      { backgroundColor: background, borderColor: palette.border }
+      {
+        backgroundColor: background,
+        borderColor: palette.border,
+        // Padding, not a margin: the panel still reaches both screen edges
+        // like the bar does, and only the rows step in, so a clock lines up
+        // with where the address field starts rather than with the notch.
+        paddingLeft: insets.left,
+        paddingRight: insets.right
+      }
     ]}>
       <ScrollView keyboardShouldPersistTaps='handled'>
         {items.map((item) => (
