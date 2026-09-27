@@ -49,7 +49,7 @@ test('the answers are thumb sized and cannot be pushed off the edge', () => {
   // The name is its own row above them, and it is one line whatever its length.
   assert.match(screen, /directRequestWho: \{ alignItems: 'center', flexDirection: 'row'/)
 
-  const sheet = screen.slice(screen.indexOf('visible={isRequestsOpen}'), screen.indexOf('isAttachSheetOpen}'))
+  const sheet = screen.slice(screen.indexOf('visible={isRequestsOpen}'), screen.indexOf('visible={isScanningInvite}'))
   assert.match(sheet, /numberOfLines=\{1\} style=\{\[styles\.memberName/)
   assert.match(sheet, /keyboardShouldPersistTaps='handled'/)
 })
@@ -64,4 +64,28 @@ test('opening a room puts the sheet away', () => {
     screen.indexOf('function createRoom (')
   )
   assert.match(respond, /if \(accept && response\.room\) openRoom\(response\.room\)/)
+})
+
+// Both buttons live on the chat list, but both sheets were inside the branch
+// that only renders with a room open. Pressing either from the list set state
+// against a modal that was not in the tree, so nothing happened, and then it
+// appeared the moment a room was opened.
+test('the sheets are rendered where their buttons are', () => {
+  const roomBranch = screen.indexOf('  if (activeRoom) {')
+  const chatList = screen.indexOf('  return (', roomBranch)
+  assert.ok(roomBranch > 0 && chatList > roomBranch)
+
+  for (const sheet of ['visible={isRequestsOpen}', 'visible={isDiscoverOpen}']) {
+    const at = screen.indexOf(sheet)
+    assert.ok(at > chatList, `${sheet} has to sit in the chat list branch`)
+  }
+
+  // And the buttons that open them are on that same screen.
+  assert.ok(screen.indexOf('onPress={openDiscover}') > chatList)
+  assert.ok(screen.indexOf('onPress={() => setIsRequestsOpen(true)}') > chatList)
+})
+
+// Two numbers side by side, one of them a button, read as one thing.
+test('the chat list does not count itself next to the requests button', () => {
+  assert.doesNotMatch(screen, /roomCount/)
 })

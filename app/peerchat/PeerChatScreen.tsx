@@ -1304,9 +1304,34 @@ export function PeerChatScreen ({
     })
   }
 
+  // The person on the other end of a direct message, as a member, so the block
+  // and report the profile already has work from the chat list too.
+  function directMessagePeer (room: PeerChatRoom | null): PeerChatMember | null {
+    if (!room?.isDM || !room.dmWith) return null
+    return {
+      id: room.dmWith,
+      username: room.name || room.dmWith,
+      bio: room.bio || '',
+      avatar: room.avatar || null,
+      self: false,
+      online: false
+    }
+  }
+
   function isMemberBlocked (member: PeerChatMember | null) {
     if (!member) return false
     return blockedPeers.some((blocked) => blocked.peerId === member.id)
+  }
+
+  function confirmBlockPeer (member: PeerChatMember) {
+    Alert.alert(
+      `Block ${member.username}?`,
+      'Their direct messages stop, both ways, and they cannot send another request. You can unblock them in settings.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Block', style: 'destructive', onPress: () => void blockMember(member) }
+      ]
+    )
   }
 
   async function blockMember (member: PeerChatMember) {
@@ -1338,14 +1363,14 @@ export function PeerChatScreen ({
 
   // There is no server to receive a report, so it goes to the maintainers by
   // email with enough context to act on.
-  function reportMember (member: PeerChatMember) {
+  function reportMember (member: PeerChatMember, from: PeerChatRoom | null = activeRoom) {
     setProfileTarget(null)
     const subject = `PeerChat report: ${member.username}`
     const body = [
       `Reported user: ${member.username}`,
       `Peer ID: ${member.id}`,
-      `Room: ${activeRoom?.name || 'unknown'}`,
-      `Room key: ${activeRoom?.roomKey || 'unknown'}`,
+      `Room: ${from?.name || 'unknown'}`,
+      `Room key: ${from?.roomKey || 'unknown'}`,
       `Reported at: ${new Date().toISOString()}`,
       '',
       'What happened?',
@@ -2568,188 +2593,7 @@ export function PeerChatScreen ({
             )}
           </View>
         </Modal>
-      <Modal
-        supportedOrientations={MODAL_ORIENTATIONS}
-        animationType='fade'
-        onDismiss={flushPendingModal}
-        onRequestClose={() => setIsDiscoverOpen(false)}
-        statusBarTranslucent
-        transparent
-        visible={isDiscoverOpen}
-      >
-        <KeyboardAvoidingView behavior='padding' style={styles.roomInfoModalRoot}>
-          <Pressable
-            accessibilityLabel='Close find people'
-            accessibilityRole='button'
-            onPress={() => setIsDiscoverOpen(false)}
-            style={styles.roomInfoBackdrop}
-          />
-          <SafeAreaView
-            edges={['bottom', 'left', 'right']}
-            style={[styles.roomInfoPanel, { backgroundColor: colors.surface }]}
-          >
-            <View style={[styles.roomInfoHeader, { borderBottomColor: colors.border }]}>
-              <Text style={[styles.roomInfoHeading, { color: colors.text }]}>Find people</Text>
-              <Pressable
-                accessibilityLabel='Close find people'
-                accessibilityRole='button'
-                hitSlop={8}
-                onPress={() => setIsDiscoverOpen(false)}
-              >
-                <CloseIcon width={18} height={18} color={colors.muted} />
-              </Pressable>
-            </View>
-            <ScrollView keyboardShouldPersistTaps='handled' contentContainerStyle={styles.discoverBody}>
-              {myInviteUrl
-                ? (
-                  <>
-                    <View style={styles.discoverQr}>
-                      <QrCodeView value={myInviteUrl} size={190} />
-                    </View>
-                    <Text style={[styles.helper, { color: colors.muted }]}>
-                      Your code. Anyone who scans it sends you a message request,
-                      which you can accept, decline or block. It is not a way in:
-                      nothing happens until you say so.
-                    </Text>
-                  </>
-                  )
-                : (
-                  <Text style={[styles.helper, { color: colors.muted }]}>
-                    Set a display name first and your code appears here.
-                  </Text>
-                  )}
 
-              <Text style={[styles.roomInfoTitle, { color: colors.text }]}>Search people</Text>
-              <Text style={[styles.helper, { color: colors.muted }]}>
-                Everyone in Peer-to-Peer Republic, which is the room everyone
-                joins, so it doubles as the place to find somebody. No directory
-                is kept anywhere: this is the room's own member list.
-              </Text>
-              <TextInput
-                autoCapitalize='none'
-                autoCorrect={false}
-                maxLength={PEERCHAT_SEARCH_QUERY_MAX_CHARACTERS}
-                onChangeText={setDiscoverQuery}
-                placeholder='Search by name'
-                placeholderTextColor={colors.muted}
-                returnKeyType='search'
-                style={[styles.input, { backgroundColor: colors.input, color: colors.text }]}
-                value={discoverQuery}
-              />
-              {directory.map((member) => (
-                <Pressable
-                  accessibilityHint={`Sends ${member.username} a message request`}
-                  accessibilityRole='button'
-                  key={member.id}
-                  onPress={() => startDirectMessageFromDiscover(member)}
-                  style={[styles.memberRow, { backgroundColor: colors.input }]}
-                >
-                  <View style={styles.memberAvatarWrap}>
-                    {member.avatar
-                      ? <Image source={{ uri: member.avatar }} style={styles.memberAvatar} />
-                      : (
-                        <View style={[styles.memberAvatarFallback, { backgroundColor: colors.accentSoft }]}>
-                          <Text style={[styles.memberAvatarText, { color: colors.accent }]}>{getRoomInitials(member.username)}</Text>
-                        </View>
-                        )}
-                    <View style={[styles.onlineDot, { backgroundColor: member.online ? colors.success : colors.muted }]} />
-                  </View>
-                  <View style={styles.memberCopy}>
-                    <Text style={[styles.memberName, { color: colors.text }]}>{member.username}</Text>
-                    <Text numberOfLines={1} style={[styles.attachmentMeta, { color: colors.muted }]}>
-                      {member.bio || (member.online ? 'Online' : 'Offline')}
-                    </Text>
-                  </View>
-                  <Text style={[styles.memberMessage, { color: colors.accent }]}>Message</Text>
-                </Pressable>
-              ))}
-              {directory.length === 0 && (
-                <Text style={[styles.helper, { color: colors.muted }]}>
-                  {discoverQuery.trim() ? 'Nobody by that name.' : 'Nobody else here yet.'}
-                </Text>
-              )}
-            </ScrollView>
-          </SafeAreaView>
-        </KeyboardAvoidingView>
-      </Modal>
-
-      <Modal
-        supportedOrientations={MODAL_ORIENTATIONS}
-        animationType='fade'
-        onDismiss={flushPendingModal}
-        onRequestClose={() => setIsRequestsOpen(false)}
-        statusBarTranslucent
-        transparent
-        visible={isRequestsOpen}
-      >
-        <View accessibilityViewIsModal style={styles.actionSheetRoot}>
-          <Pressable
-            accessibilityLabel='Close message requests'
-            accessibilityRole='button'
-            onPress={() => setIsRequestsOpen(false)}
-            style={styles.actionSheetBackdrop}
-          />
-          <SafeAreaView
-            edges={['bottom', 'left', 'right']}
-            style={[styles.actionSheet, { backgroundColor: colors.surface }]}
-          >
-            <Text style={[styles.actionSheetTitle, { color: colors.text }]}>Message requests</Text>
-            <Text style={[styles.actionSheetPreview, { color: colors.muted }]}>
-              Somebody has to ask before they can message you. Blocking one stops
-              them asking again.
-            </Text>
-            <View style={[styles.actionSheetDivider, { backgroundColor: colors.border }]} />
-            <ScrollView
-              contentContainerStyle={styles.requestsListContent}
-              keyboardShouldPersistTaps='handled'
-              style={styles.requestsList}
-            >
-              {/* Name above, answers below. Squeezed onto one row the three
-                  buttons were 27 points tall and a long name pushed them off
-                  the right edge, where Android clips rather than overflows, so
-                  there was nothing left to press. */}
-              {pendingDirectMessages.map((invite) => (
-                <View key={invite.roomKey} style={[styles.directRequest, { backgroundColor: colors.input }]}>
-                  <View style={styles.directRequestWho}>
-                    {invite.fromAvatar
-                      ? <Image source={{ uri: invite.fromAvatar }} style={styles.roomAvatarImage} />
-                      : (
-                        <View style={[styles.roomAvatar, { backgroundColor: colors.accentSoft }]}>
-                          <Text style={[styles.roomAvatarText, { color: colors.accent }]}>{getRoomInitials(invite.fromUsername)}</Text>
-                        </View>
-                        )}
-                    <View style={styles.memberCopy}>
-                      <Text numberOfLines={1} style={[styles.memberName, { color: colors.text }]}>{invite.fromUsername}</Text>
-                      <Text numberOfLines={1} style={[styles.attachmentMeta, { color: colors.muted }]}>wants to message you</Text>
-                    </View>
-                  </View>
-                  <View style={styles.directRequestActions}>
-                    <Pressable accessibilityRole='button' onPress={() => blockDirectMessageRequest(invite)} style={[styles.requestAction, { backgroundColor: colors.surface }]}>
-                      <Text style={[styles.requestActionText, { color: colors.danger }]}>Block</Text>
-                    </Pressable>
-                    <Pressable accessibilityRole='button' onPress={() => respondToDirectMessage(invite, false)} style={[styles.requestAction, { backgroundColor: colors.surface }]}>
-                      <Text style={[styles.requestActionText, { color: colors.muted }]}>Decline</Text>
-                    </Pressable>
-                    <Pressable accessibilityRole='button' onPress={() => respondToDirectMessage(invite, true)} style={[styles.requestAction, { backgroundColor: colors.accent }]}>
-                      <Text style={[styles.requestActionText, { color: '#ffffff' }]}>Accept</Text>
-                    </Pressable>
-                  </View>
-                </View>
-              ))}
-              {pendingDirectMessages.length === 0 && (
-                <Text style={[styles.helper, { color: colors.muted }]}>Nobody is waiting.</Text>
-              )}
-            </ScrollView>
-            <Pressable
-              accessibilityRole='button'
-              onPress={() => setIsRequestsOpen(false)}
-              style={styles.actionSheetAction}
-            >
-              <Text style={[styles.actionSheetActionText, { color: colors.accent }]}>Close</Text>
-            </Pressable>
-          </SafeAreaView>
-        </View>
-      </Modal>
 
         <Modal
           supportedOrientations={MODAL_ORIENTATIONS}
@@ -3318,7 +3162,6 @@ export function PeerChatScreen ({
                 </Text>
               </Pressable>
             )}
-            {rooms.length > 0 && <Text style={[styles.roomCount, { color: colors.muted }]}>{rooms.length}</Text>}
           </View>
           {rooms.length > 0 && (
             <TextInput
@@ -3419,6 +3262,187 @@ export function PeerChatScreen ({
         onClose={() => setMediaTarget(null)}
         target={mediaTarget}
       />
+      <Modal
+        supportedOrientations={MODAL_ORIENTATIONS}
+        animationType='fade'
+        onDismiss={flushPendingModal}
+        onRequestClose={() => setIsDiscoverOpen(false)}
+        statusBarTranslucent
+        transparent
+        visible={isDiscoverOpen}
+      >
+        <KeyboardAvoidingView behavior='padding' style={styles.roomInfoModalRoot}>
+          <Pressable
+            accessibilityLabel='Close find people'
+            accessibilityRole='button'
+            onPress={() => setIsDiscoverOpen(false)}
+            style={styles.roomInfoBackdrop}
+          />
+          <SafeAreaView
+            edges={['bottom', 'left', 'right']}
+            style={[styles.roomInfoPanel, { backgroundColor: colors.surface }]}
+          >
+            <View style={[styles.roomInfoHeader, { borderBottomColor: colors.border }]}>
+              <Text style={[styles.roomInfoHeading, { color: colors.text }]}>Find people</Text>
+              <Pressable
+                accessibilityLabel='Close find people'
+                accessibilityRole='button'
+                hitSlop={8}
+                onPress={() => setIsDiscoverOpen(false)}
+              >
+                <CloseIcon width={18} height={18} color={colors.muted} />
+              </Pressable>
+            </View>
+            <ScrollView keyboardShouldPersistTaps='handled' contentContainerStyle={styles.discoverBody}>
+              {myInviteUrl
+                ? (
+                  <>
+                    <View style={styles.discoverQr}>
+                      <QrCodeView value={myInviteUrl} size={190} />
+                    </View>
+                    <Text style={[styles.helper, { color: colors.muted }]}>
+                      Your code. Anyone who scans it sends you a message request,
+                      which you can accept, decline or block. It is not a way in:
+                      nothing happens until you say so.
+                    </Text>
+                  </>
+                  )
+                : (
+                  <Text style={[styles.helper, { color: colors.muted }]}>
+                    Set a display name first and your code appears here.
+                  </Text>
+                  )}
+
+              <Text style={[styles.roomInfoTitle, { color: colors.text }]}>Search people</Text>
+              <Text style={[styles.helper, { color: colors.muted }]}>
+                Everyone in Peer-to-Peer Republic, which is the room everyone
+                joins, so it doubles as the place to find somebody. No directory
+                is kept anywhere: this is the room's own member list.
+              </Text>
+              <TextInput
+                autoCapitalize='none'
+                autoCorrect={false}
+                maxLength={PEERCHAT_SEARCH_QUERY_MAX_CHARACTERS}
+                onChangeText={setDiscoverQuery}
+                placeholder='Search by name'
+                placeholderTextColor={colors.muted}
+                returnKeyType='search'
+                style={[styles.input, { backgroundColor: colors.input, color: colors.text }]}
+                value={discoverQuery}
+              />
+              {directory.map((member) => (
+                <Pressable
+                  accessibilityHint={`Sends ${member.username} a message request`}
+                  accessibilityRole='button'
+                  key={member.id}
+                  onPress={() => startDirectMessageFromDiscover(member)}
+                  style={[styles.memberRow, { backgroundColor: colors.input }]}
+                >
+                  <View style={styles.memberAvatarWrap}>
+                    {member.avatar
+                      ? <Image source={{ uri: member.avatar }} style={styles.memberAvatar} />
+                      : (
+                        <View style={[styles.memberAvatarFallback, { backgroundColor: colors.accentSoft }]}>
+                          <Text style={[styles.memberAvatarText, { color: colors.accent }]}>{getRoomInitials(member.username)}</Text>
+                        </View>
+                        )}
+                    <View style={[styles.onlineDot, { backgroundColor: member.online ? colors.success : colors.muted }]} />
+                  </View>
+                  <View style={styles.memberCopy}>
+                    <Text style={[styles.memberName, { color: colors.text }]}>{member.username}</Text>
+                    <Text numberOfLines={1} style={[styles.attachmentMeta, { color: colors.muted }]}>
+                      {member.bio || (member.online ? 'Online' : 'Offline')}
+                    </Text>
+                  </View>
+                  <Text style={[styles.memberMessage, { color: colors.accent }]}>Message</Text>
+                </Pressable>
+              ))}
+              {directory.length === 0 && (
+                <Text style={[styles.helper, { color: colors.muted }]}>
+                  {discoverQuery.trim() ? 'Nobody by that name.' : 'Nobody else here yet.'}
+                </Text>
+              )}
+            </ScrollView>
+          </SafeAreaView>
+        </KeyboardAvoidingView>
+      </Modal>
+      <Modal
+        supportedOrientations={MODAL_ORIENTATIONS}
+        animationType='fade'
+        onDismiss={flushPendingModal}
+        onRequestClose={() => setIsRequestsOpen(false)}
+        statusBarTranslucent
+        transparent
+        visible={isRequestsOpen}
+      >
+        <View accessibilityViewIsModal style={styles.actionSheetRoot}>
+          <Pressable
+            accessibilityLabel='Close message requests'
+            accessibilityRole='button'
+            onPress={() => setIsRequestsOpen(false)}
+            style={styles.actionSheetBackdrop}
+          />
+          <SafeAreaView
+            edges={['bottom', 'left', 'right']}
+            style={[styles.actionSheet, { backgroundColor: colors.surface }]}
+          >
+            <Text style={[styles.actionSheetTitle, { color: colors.text }]}>Message requests</Text>
+            <Text style={[styles.actionSheetPreview, { color: colors.muted }]}>
+              Somebody has to ask before they can message you. Blocking one stops
+              them asking again.
+            </Text>
+            <View style={[styles.actionSheetDivider, { backgroundColor: colors.border }]} />
+            <ScrollView
+              contentContainerStyle={styles.requestsListContent}
+              keyboardShouldPersistTaps='handled'
+              style={styles.requestsList}
+            >
+              {/* Name above, answers below. Squeezed onto one row the three
+                  buttons were 27 points tall and a long name pushed them off
+                  the right edge, where Android clips rather than overflows, so
+                  there was nothing left to press. */}
+              {pendingDirectMessages.map((invite) => (
+                <View key={invite.roomKey} style={[styles.directRequest, { backgroundColor: colors.input }]}>
+                  <View style={styles.directRequestWho}>
+                    {invite.fromAvatar
+                      ? <Image source={{ uri: invite.fromAvatar }} style={styles.roomAvatarImage} />
+                      : (
+                        <View style={[styles.roomAvatar, { backgroundColor: colors.accentSoft }]}>
+                          <Text style={[styles.roomAvatarText, { color: colors.accent }]}>{getRoomInitials(invite.fromUsername)}</Text>
+                        </View>
+                        )}
+                    <View style={styles.memberCopy}>
+                      <Text numberOfLines={1} style={[styles.memberName, { color: colors.text }]}>{invite.fromUsername}</Text>
+                      <Text numberOfLines={1} style={[styles.attachmentMeta, { color: colors.muted }]}>wants to message you</Text>
+                    </View>
+                  </View>
+                  <View style={styles.directRequestActions}>
+                    <Pressable accessibilityRole='button' onPress={() => blockDirectMessageRequest(invite)} style={[styles.requestAction, { backgroundColor: colors.surface }]}>
+                      <Text style={[styles.requestActionText, { color: colors.danger }]}>Block</Text>
+                    </Pressable>
+                    <Pressable accessibilityRole='button' onPress={() => respondToDirectMessage(invite, false)} style={[styles.requestAction, { backgroundColor: colors.surface }]}>
+                      <Text style={[styles.requestActionText, { color: colors.muted }]}>Decline</Text>
+                    </Pressable>
+                    <Pressable accessibilityRole='button' onPress={() => respondToDirectMessage(invite, true)} style={[styles.requestAction, { backgroundColor: colors.accent }]}>
+                      <Text style={[styles.requestActionText, { color: '#ffffff' }]}>Accept</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              ))}
+              {pendingDirectMessages.length === 0 && (
+                <Text style={[styles.helper, { color: colors.muted }]}>Nobody is waiting.</Text>
+              )}
+            </ScrollView>
+            <Pressable
+              accessibilityRole='button'
+              onPress={() => setIsRequestsOpen(false)}
+              style={styles.actionSheetAction}
+            >
+              <Text style={[styles.actionSheetActionText, { color: colors.accent }]}>Close</Text>
+            </Pressable>
+          </SafeAreaView>
+        </View>
+      </Modal>
       <Modal
         supportedOrientations={MODAL_ORIENTATIONS}
         animationType='fade'
@@ -3527,29 +3551,74 @@ export function PeerChatScreen ({
                         {roomActionTarget.isMuted ? 'Unmute notifications' : 'Mute notifications'}
                       </Text>
                     </Pressable>
-                    <Pressable
-                      accessibilityRole='button'
-                      onPress={() => {
-                        Clipboard.setString(roomActionTarget.roomKey)
-                        setRoomActionTarget(null)
-                        onStatus('PeerChat room key copied')
-                      }}
-                      style={styles.actionSheetAction}
-                    >
-                      <Text style={[styles.actionSheetActionText, { color: colors.text }]}>Copy room key</Text>
-                    </Pressable>
-                    <Pressable
-                      accessibilityRole='button'
-                      onPress={() => {
-                        // A link anyone can tap to join, same shape as desktop.
-                        Clipboard.setString(buildPeerChatInviteUrl(roomActionTarget.roomKey))
-                        setRoomActionTarget(null)
-                        onStatus('PeerChat invite link copied')
-                      }}
-                      style={styles.actionSheetAction}
-                    >
-                      <Text style={[styles.actionSheetActionText, { color: colors.text }]}>Copy invite link</Text>
-                    </Pressable>
+                    {/* A room key is the way into a room, so it is a room
+                        thing. A direct message has no way in to hand out: the
+                        person is reached by their own code, from Find. What a
+                        conversation with one person does need is the two
+                        answers to that person behaving badly. */}
+                    {roomActionTarget.isDM
+                      ? (
+                        <>
+                          <Pressable
+                            accessibilityRole='button'
+                            onPress={() => {
+                              const peer = directMessagePeer(roomActionTarget)
+                              if (!peer) return
+                              setRoomActionTarget(null)
+                              if (isMemberBlocked(peer)) {
+                                void unblockMember(peer)
+                                return
+                              }
+                              confirmBlockPeer(peer)
+                            }}
+                            style={styles.actionSheetAction}
+                          >
+                            <Text style={[styles.actionSheetActionText, { color: colors.danger }]}>
+                              {isMemberBlocked(directMessagePeer(roomActionTarget)) ? 'Unblock' : 'Block'}
+                            </Text>
+                          </Pressable>
+                          <Pressable
+                            accessibilityRole='button'
+                            onPress={() => {
+                              const peer = directMessagePeer(roomActionTarget)
+                              const from = roomActionTarget
+                              if (!peer) return
+                              setRoomActionTarget(null)
+                              reportMember(peer, from)
+                            }}
+                            style={styles.actionSheetAction}
+                          >
+                            <Text style={[styles.actionSheetActionText, { color: colors.text }]}>Report</Text>
+                          </Pressable>
+                        </>
+                        )
+                      : (
+                        <>
+                          <Pressable
+                            accessibilityRole='button'
+                            onPress={() => {
+                              Clipboard.setString(roomActionTarget.roomKey)
+                              setRoomActionTarget(null)
+                              onStatus('PeerChat room key copied')
+                            }}
+                            style={styles.actionSheetAction}
+                          >
+                            <Text style={[styles.actionSheetActionText, { color: colors.text }]}>Copy room key</Text>
+                          </Pressable>
+                          <Pressable
+                            accessibilityRole='button'
+                            onPress={() => {
+                              // A link anyone can tap to join, same shape as desktop.
+                              Clipboard.setString(buildPeerChatInviteUrl(roomActionTarget.roomKey))
+                              setRoomActionTarget(null)
+                              onStatus('PeerChat invite link copied')
+                            }}
+                            style={styles.actionSheetAction}
+                          >
+                            <Text style={[styles.actionSheetActionText, { color: colors.text }]}>Copy invite link</Text>
+                          </Pressable>
+                        </>
+                        )}
                     <Pressable
                       accessibilityRole='button'
                       onPress={() => setIsConfirmingRoomLeave(true)}
@@ -4367,7 +4436,6 @@ const styles = StyleSheet.create({
   requestActionText: { fontSize: 13, fontWeight: '800' },
   sectionTitle: { fontSize: 16, fontWeight: '900' },
   roomSearchInput: { borderRadius: 16, fontSize: 14, minHeight: 38, paddingHorizontal: 12, paddingVertical: 8 },
-  roomCount: { fontSize: 12, fontWeight: '700' },
   roomRow: { alignItems: 'center', borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: 'row', gap: 11, minHeight: 72, paddingHorizontal: 16, paddingVertical: 10 },
   roomAvatar: { alignItems: 'center', borderRadius: 22, height: 44, justifyContent: 'center', width: 44 },
   roomAvatarImage: { borderRadius: 22, height: 44, width: 44 },

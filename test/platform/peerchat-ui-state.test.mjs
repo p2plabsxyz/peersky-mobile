@@ -107,3 +107,36 @@ test('PeerChat recent emojis survive a file written before they existed', () => 
 
   assert.deepEqual(restored.recentEmojis, [])
 })
+
+// A long press on a chat offers what that chat can actually do. A room key is
+// the way into a room, so it belongs to rooms; a direct message has no way in
+// to hand out, and what it needs instead are the two answers to somebody
+// behaving badly.
+test('a long press offers a room its key and a direct message its answers', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const screen = await readFile(new URL('../../app/peerchat/PeerChatScreen.tsx', import.meta.url), 'utf8')
+
+  const sheet = screen.slice(
+    screen.indexOf('visible={roomActionTarget !== null}'),
+    screen.indexOf('// The preview, plus a plain warning')
+  )
+  assert.ok(sheet.length > 0)
+
+  // The two arms of the same branch: direct message first, room second.
+  const dm = sheet.slice(sheet.indexOf('roomActionTarget.isDM'), sheet.indexOf('Copy room key'))
+  assert.match(dm, /Report</)
+  assert.match(dm, /confirmBlockPeer\(peer\)/)
+  assert.match(dm, /isMemberBlocked\(directMessagePeer\(roomActionTarget\)\) \? 'Unblock' : 'Block'/)
+  // Neither of these means anything for a conversation with one person.
+  assert.doesNotMatch(dm, /Copy room key/)
+  assert.doesNotMatch(dm, /Copy invite link/)
+
+  const room = sheet.slice(sheet.indexOf('Copy room key'))
+  assert.match(room, /Copy room key/)
+  assert.match(room, /Copy invite link/)
+
+  // The report names the conversation it came from, which is the direct
+  // message itself when there is no room open behind it.
+  assert.match(screen, /function reportMember \(member: PeerChatMember, from: PeerChatRoom \| null = activeRoom\)/)
+  assert.match(screen, /reportMember\(peer, from\)/)
+})

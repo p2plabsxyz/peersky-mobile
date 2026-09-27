@@ -7,6 +7,10 @@ import {
   parsePeerChatDirectInvite,
   parsePeerChatInvite
 } from '../../app/peerchat/peerchat-invite.mjs'
+import {
+  getRuntimeAppFromUrl,
+  getRuntimeAppLaunchSuffix
+} from '../../app/internal-apps-registry.mjs'
 
 const PEER = 'a1b2c3d4'
 const ROOM = 'ab'.repeat(32)
@@ -79,4 +83,35 @@ test('a scanned code asks rather than joins, and both kinds of code work', async
   assert.match(request, /That is your own code/)
   // And it waits for a name, exactly like a room invite does.
   assert.match(screen, /if \(!requestedPeerId \|\| !isInitialized \|\| !profile\?\.username\) return/)
+})
+
+// Somebody points their phone camera at a profile code and has never opened
+// PeerSky before. The whole chain: the operating system hands the link over,
+// it names PeerChat, the fragment survives, and the peer id comes back out.
+test('a code scanned with the phone camera reaches PeerChat as a person', () => {
+  const url = buildPeerChatDirectInviteUrl(PEER)
+
+  assert.equal(getRuntimeAppFromUrl(url), 'peerchat')
+  const suffix = getRuntimeAppLaunchSuffix(url)
+  assert.equal(suffix, `#dm=${PEER}`)
+  assert.equal(parsePeerChatDirectInvite(suffix), PEER)
+  // And it is not mistaken for a room to walk into.
+  assert.equal(parsePeerChatInvite(suffix), '')
+})
+
+test('a room code scanned the same way still opens the room', () => {
+  const url = buildPeerChatInviteUrl(ROOM)
+
+  assert.equal(getRuntimeAppFromUrl(url), 'peerchat')
+  assert.equal(parsePeerChatInvite(getRuntimeAppLaunchSuffix(url)), ROOM)
+})
+
+// A brand new install has no name yet, so both kinds of link wait for the
+// welcome screen instead of being thrown away at the door.
+test('either kind of link waits for a name rather than being dropped', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const screen = await readFile(new URL('../../app/peerchat/PeerChatScreen.tsx', import.meta.url), 'utf8')
+
+  assert.match(screen, /if \(!requestedPeerId \|\| !isInitialized \|\| !profile\?\.username\) return/)
+  assert.match(screen, /if \(!requestedRoomKey \|\| !isInitialized \|\| !profile\?\.username\) return/)
 })
