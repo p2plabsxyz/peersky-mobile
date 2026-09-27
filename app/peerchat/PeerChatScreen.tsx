@@ -383,6 +383,7 @@ export function PeerChatScreen ({
   const [messageActionTarget, setMessageActionTarget] = useState<PeerChatMessage | null>(null)
   const [linkActionTarget, setLinkActionTarget] = useState<string | null>(null)
   const [isAttachSheetOpen, setIsAttachSheetOpen] = useState(false)
+  const [isRequestsOpen, setIsRequestsOpen] = useState(false)
   const [roomActionTarget, setRoomActionTarget] = useState<PeerChatRoom | null>(null)
   const [profileTarget, setProfileTarget] = useState<PeerChatMember | null>(null)
   // A refresh clears the error, and refreshes now arrive the moment anything
@@ -1126,6 +1127,39 @@ export function PeerChatScreen ({
       return
     }
     setShowRoomInfo(true)
+  }
+
+  /**
+   * Blocking whoever is asking, from the request itself.
+   *
+   * Declining only answers this one request, so somebody determined just asks
+   * again. Blocking drops the request and stops the next one, which is the
+   * thing you actually want when it is the third time.
+   */
+  function blockDirectMessageRequest (invite: PeerChatDirectInvite) {
+    if (isBusy) return
+    Alert.alert(
+      `Block ${invite.fromUsername}?`,
+      'Their request goes away and they cannot send another. You can unblock them in settings.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Block',
+          style: 'destructive',
+          onPress: () => void runAction(async () => {
+            const response = await callRpc(RPC_PEERCHAT_BLOCK, {
+              peerId: invite.fromId,
+              username: invite.fromUsername
+            })
+            if (!response.ok) throw new Error(response.error || 'Unable to block this person.')
+            if (!mountedRef.current) return
+            setPendingDirectMessages(response.pendingDirectMessages || [])
+            if (response.blockedPeers) setBlockedPeers(response.blockedPeers)
+            onStatus(`${invite.fromUsername} blocked`)
+          })
+        }
+      ]
+    )
   }
 
   function respondToDirectMessage (invite: PeerChatDirectInvite, accept: boolean) {
@@ -2449,6 +2483,71 @@ export function PeerChatScreen ({
             )}
           </View>
         </Modal>
+      <Modal
+        supportedOrientations={MODAL_ORIENTATIONS}
+        animationType='fade'
+        onRequestClose={() => setIsRequestsOpen(false)}
+        statusBarTranslucent
+        transparent
+        visible={isRequestsOpen}
+      >
+        <View accessibilityViewIsModal style={styles.actionSheetRoot}>
+          <Pressable
+            accessibilityLabel='Close message requests'
+            accessibilityRole='button'
+            onPress={() => setIsRequestsOpen(false)}
+            style={styles.actionSheetBackdrop}
+          />
+          <SafeAreaView
+            edges={['bottom', 'left', 'right']}
+            style={[styles.actionSheet, { backgroundColor: colors.surface }]}
+          >
+            <Text style={[styles.actionSheetTitle, { color: colors.text }]}>Message requests</Text>
+            <Text style={[styles.actionSheetPreview, { color: colors.muted }]}>
+              Somebody has to ask before they can message you. Blocking one stops
+              them asking again.
+            </Text>
+            <View style={[styles.actionSheetDivider, { backgroundColor: colors.border }]} />
+            <ScrollView style={styles.requestsList}>
+              {pendingDirectMessages.map((invite) => (
+                <View key={invite.roomKey} style={[styles.directRequest, { backgroundColor: colors.input }]}>
+                  {invite.fromAvatar
+                    ? <Image source={{ uri: invite.fromAvatar }} style={styles.roomAvatarImage} />
+                    : (
+                      <View style={[styles.roomAvatar, { backgroundColor: colors.accentSoft }]}>
+                        <Text style={[styles.roomAvatarText, { color: colors.accent }]}>{getRoomInitials(invite.fromUsername)}</Text>
+                      </View>
+                      )}
+                  <View style={styles.memberCopy}>
+                    <Text style={[styles.memberName, { color: colors.text }]}>{invite.fromUsername}</Text>
+                    <Text numberOfLines={1} style={[styles.attachmentMeta, { color: colors.muted }]}>wants to message you</Text>
+                  </View>
+                  <Pressable accessibilityRole='button' onPress={() => blockDirectMessageRequest(invite)} style={styles.requestAction}>
+                    <Text style={[styles.requestActionText, { color: colors.danger }]}>Block</Text>
+                  </Pressable>
+                  <Pressable accessibilityRole='button' onPress={() => respondToDirectMessage(invite, false)} style={styles.requestAction}>
+                    <Text style={[styles.requestActionText, { color: colors.muted }]}>Decline</Text>
+                  </Pressable>
+                  <Pressable accessibilityRole='button' onPress={() => respondToDirectMessage(invite, true)} style={[styles.requestAction, { backgroundColor: colors.accent }]}>
+                    <Text style={[styles.requestActionText, { color: '#ffffff' }]}>Accept</Text>
+                  </Pressable>
+                </View>
+              ))}
+              {pendingDirectMessages.length === 0 && (
+                <Text style={[styles.helper, { color: colors.muted }]}>Nobody is waiting.</Text>
+              )}
+            </ScrollView>
+            <Pressable
+              accessibilityRole='button'
+              onPress={() => setIsRequestsOpen(false)}
+              style={styles.actionSheetAction}
+            >
+              <Text style={[styles.actionSheetActionText, { color: colors.accent }]}>Close</Text>
+            </Pressable>
+          </SafeAreaView>
+        </View>
+      </Modal>
+
         <Modal
           supportedOrientations={MODAL_ORIENTATIONS}
           animationType='fade'
@@ -2989,34 +3088,23 @@ export function PeerChatScreen ({
 
           {error && <Text style={[styles.error, { color: colors.danger }]}>{error}</Text>}
           {isBusy && <ActivityIndicator color={colors.accent} />}
-          {pendingDirectMessages.length > 0 && (
-            <View style={styles.directRequests}>
-              <Text style={[styles.sectionTitle, { color: colors.text }]}>Message requests</Text>
-              {pendingDirectMessages.map((invite) => (
-                <View key={invite.roomKey} style={[styles.directRequest, { backgroundColor: colors.surface }]}>
-                  {invite.fromAvatar
-                    ? <Image source={{ uri: invite.fromAvatar }} style={styles.roomAvatarImage} />
-                    : (
-                      <View style={[styles.roomAvatar, { backgroundColor: colors.accentSoft }]}>
-                        <Text style={[styles.roomAvatarText, { color: colors.accent }]}>{getRoomInitials(invite.fromUsername)}</Text>
-                      </View>
-                      )}
-                  <View style={styles.memberCopy}>
-                    <Text style={[styles.memberName, { color: colors.text }]}>{invite.fromUsername}</Text>
-                    <Text numberOfLines={1} style={[styles.attachmentMeta, { color: colors.muted }]}>wants to message you</Text>
-                  </View>
-                  <Pressable accessibilityRole='button' onPress={() => respondToDirectMessage(invite, false)} style={styles.requestAction}>
-                    <Text style={[styles.requestActionText, { color: colors.danger }]}>Decline</Text>
-                  </Pressable>
-                  <Pressable accessibilityRole='button' onPress={() => respondToDirectMessage(invite, true)} style={[styles.requestAction, { backgroundColor: colors.accent }]}>
-                    <Text style={[styles.requestActionText, { color: '#ffffff' }]}>Accept</Text>
-                  </Pressable>
-                </View>
-              ))}
-            </View>
-          )}
           <View style={styles.sectionHeading}>
             <Text style={[styles.sectionTitle, { color: colors.text }]}>Recent chats</Text>
+            {/* A line of text rather than a list. Requests used to sit open
+                above the chats and push them down, which with more than one or
+                two left the chats you actually use off the bottom. */}
+            {pendingDirectMessages.length > 0 && (
+              <Pressable
+                accessibilityHint='Opens the people asking to message you'
+                accessibilityRole='button'
+                onPress={() => setIsRequestsOpen(true)}
+                style={styles.requestsButton}
+              >
+                <Text style={[styles.requestsButtonText, { color: colors.accent }]}>
+                  Requests ({pendingDirectMessages.length})
+                </Text>
+              </Pressable>
+            )}
             {rooms.length > 0 && <Text style={[styles.roomCount, { color: colors.muted }]}>{rooms.length}</Text>}
           </View>
           {rooms.length > 0 && (
@@ -4049,10 +4137,13 @@ const styles = StyleSheet.create({
   actionSubmitText: { color: '#ffffff', fontSize: 13, fontWeight: '800' },
   disabled: { opacity: 0.45 },
   error: { fontSize: 13, lineHeight: 18, textAlign: 'center' },
-  sectionHeading: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between', marginTop: 5 },
+  sectionHeading: { alignItems: 'center', columnGap: 10, flexDirection: 'row', justifyContent: 'space-between', marginTop: 5 },
+  requestsButton: { marginLeft: 'auto', paddingVertical: 2 },
+  requestsButtonText: { fontSize: 13, fontWeight: '700' },
   directRequests: { gap: 7 },
   directRequest: { alignItems: 'center', borderRadius: 12, flexDirection: 'row', gap: 7, padding: 9 },
   requestAction: { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 7 },
+  requestsList: { maxHeight: 320 },
   requestActionText: { fontSize: 11, fontWeight: '800' },
   sectionTitle: { fontSize: 16, fontWeight: '900' },
   roomSearchInput: { borderRadius: 16, fontSize: 14, minHeight: 38, paddingHorizontal: 12, paddingVertical: 8 },

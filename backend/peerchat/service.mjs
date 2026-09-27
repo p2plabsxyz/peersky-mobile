@@ -22,6 +22,7 @@ import {
   normalizePeerChatModeration
 } from './moderation.mjs'
 import {
+  earliestPeerChatRoomCreatedAt,
   createPeerChatMessageId,
   createPeerChatRoomKey,
   decryptPeerChatMessage,
@@ -1179,6 +1180,14 @@ export class PeerChatService {
             changed = true
           }
         }
+        // The room cannot have been created after the first person in it, so
+        // the earliest anyone reports wins. Without this every device showed
+        // the day it joined.
+        const earliestCreatedAt = earliestPeerChatRoomCreatedAt(room.createdAt, message.createdAt)
+        if (earliestCreatedAt && earliestCreatedAt !== room.createdAt) {
+          room.createdAt = earliestCreatedAt
+          changed = true
+        }
         if (!room.createdBy && typeof message.createdBy === 'string') {
           room.createdBy = message.createdBy.slice(0, 200)
           changed = true
@@ -1482,6 +1491,7 @@ export class PeerChatService {
       bio: room.bio || '',
       link: room.link || '',
       avatar: room.avatar || null,
+      createdAt: normalizePeerChatReadTimestamp(room.createdAt),
       createdBy: room.createdBy || (room.isHost ? this.localId : ''),
       // Announced by the creator alone. A peer passing this along cannot prove
       // it, so the other side will not take it from them.
