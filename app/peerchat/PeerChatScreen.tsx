@@ -298,6 +298,9 @@ const EMPTY_UI_STATE: PeerChatUiState = {
 
 const PEERCHAT_UI_STATE_FILE = new File(Paths.document, 'peerchat-ui-state.json')
 const UI_STATE_PERSIST_DELAY_MS = 300
+// How long iOS takes to finish dismissing one sheet before it will present
+// another. Shared by the modal handover below and by the attach picker.
+const SHEET_HANDOVER_MS = 450
 const CHAT_HEADER_ICON_SIZE = 20
 const ROOM_STATE_ICON_SIZE = 13
 const AUTO_INLINE_MEDIA_MAX_BYTES = 100 * 1024 * 1024
@@ -1055,7 +1058,7 @@ export function PeerChatScreen ({
     pendingModalRef.current = open
     // onDismiss never fires if the sheet was closed before it finished
     // presenting, so do not rely on it alone.
-    pendingModalTimerRef.current = setTimeout(flushPendingModal, 450)
+    pendingModalTimerRef.current = setTimeout(flushPendingModal, SHEET_HANDOVER_MS)
   }
 
   function openMessageSenderProfile (message: PeerChatMessage) {
@@ -1375,7 +1378,24 @@ export function PeerChatScreen ({
     ])
   }
 
+  /**
+   * The picker is a view controller, and the alert that asked which one is too.
+   * Presenting the picker from inside the alert's own handler asks iOS to do it
+   * while the alert is still dismissing: the presentation is dropped, the
+   * picker never appears, and its promise never settles. That left the attach
+   * button disabled with nothing on screen and nothing to show for it. Same
+   * wait the sheet handover above uses; Android has no such rule.
+   */
   function attachFrom (source: UploadSource) {
+    if (!activeRoom || isBusy) return
+    if (Platform.OS !== 'ios') {
+      startAttach(source)
+      return
+    }
+    setTimeout(() => startAttach(source), SHEET_HANDOVER_MS)
+  }
+
+  function startAttach (source: UploadSource) {
     if (!activeRoom || isBusy) return
     void runAction(async () => {
       // pickUploads bounds the batch and screens every file before any of it

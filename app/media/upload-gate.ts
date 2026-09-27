@@ -38,7 +38,26 @@ let scanner: UploadScanner | null = null
 // stays busy, which hides the attach button behind its own spinner. Coming back
 // to the app is the signal to give up on it.
 const ABANDONED_PICK_GRACE_MS = 2000
+// And a picker that never appeared at all never answers either, and the app
+// never left the foreground for the listener below to notice. Long enough that
+// nobody browsing their photo library trips it, short enough that a session
+// recovers instead of leaving the attach button disabled for good.
+const PICK_TIMEOUT_MS = 2 * 60 * 1000
 let abandonPick: (() => void) | null = null
+
+/**
+ * Gives up on whatever pick is still waiting, so a new one can run.
+ *
+ * This used to refuse instead, which is right while a picker is genuinely on
+ * screen and wrong once one has wedged: every later attach became a silent
+ * no-op for the rest of the session. Nothing can start a second pick while the
+ * first is really open, because the button that starts it is disabled.
+ */
+function supersedePendingPick () {
+  const stale = abandonPick
+  abandonPick = null
+  stale?.()
+}
 
 AppState.addEventListener('change', (state) => {
   if (state !== 'active' || !abandonPick) return
@@ -54,7 +73,7 @@ async function pickImages (
   source: 'library' | 'camera',
   multiple: boolean
 ): Promise<ImagePicker.ImagePickerResult | null> {
-  if (abandonPick) return null
+  supersedePendingPick()
 
   if (source === 'camera') {
     const permission = await ImagePicker.requestCameraPermissionsAsync()
@@ -67,15 +86,18 @@ async function pickImages (
     quality: 1
   }
 
+  let timer: ReturnType<typeof setTimeout> | null = null
   try {
     return await new Promise<ImagePicker.ImagePickerResult | null>((resolve, reject) => {
       abandonPick = () => resolve(null)
+      timer = setTimeout(() => abandonPick?.(), PICK_TIMEOUT_MS)
       const launch = source === 'camera'
         ? ImagePicker.launchCameraAsync(options)
         : ImagePicker.launchImageLibraryAsync(options)
       launch.then(resolve, reject)
     })
   } finally {
+    if (timer) clearTimeout(timer)
     abandonPick = null
   }
 }
@@ -83,11 +105,13 @@ async function pickImages (
 // Android rejects a second pick outright, so this keeps the two in step rather
 // than letting the native error reach the user.
 async function pickDocuments (options: DocumentPicker.DocumentPickerOptions) {
-  if (abandonPick) return null
+  supersedePendingPick()
 
+  let timer: ReturnType<typeof setTimeout> | null = null
   try {
     return await new Promise<DocumentPicker.DocumentPickerResult | null>((resolve, reject) => {
       abandonPick = () => resolve(null)
+      timer = setTimeout(() => abandonPick?.(), PICK_TIMEOUT_MS)
       DocumentPicker.getDocumentAsync(options).then(resolve, reject)
     })
   } catch (error) {
@@ -97,6 +121,7 @@ async function pickDocuments (options: DocumentPicker.DocumentPickerOptions) {
     if (/document picking in progress/i.test(message)) return null
     throw error
   } finally {
+    if (timer) clearTimeout(timer)
     abandonPick = null
   }
 }

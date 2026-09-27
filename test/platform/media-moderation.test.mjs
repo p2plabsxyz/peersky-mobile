@@ -187,7 +187,9 @@ test('a file pick abandoned by leaving the app does not wedge the screen', async
 
   // Android rejects a second pick outright; the user can do nothing with that.
   assert.match(gate, /document picking in progress/i)
-  assert.match(gate, /if \(abandonPick\) return null/)
+  // A pick still outstanding is given up on rather than blocking the new one.
+  // See the wedged-picker test further down for why refusing was worse.
+  assert.match(gate, /supersedePendingPick\(\)/)
 })
 
 test('the classifier page is served from a file and says whether it started', async () => {
@@ -471,4 +473,35 @@ test('video is never put through the image screen', async () => {
   assert.match(screen, /item\.self \|\| mediaKind !== 'image'\) return/)
   assert.match(screen, /mediaKind === 'image' && \(isScreening \|\| isExplicit\)/)
   assert.doesNotMatch(screen, /mediaKind && \(isScreening \|\| isExplicit\)/)
+})
+
+// The attach button stayed disabled with nothing on screen: iOS was being asked
+// to present the picker while it was still dismissing the alert that asked
+// which one, so the presentation was dropped and the picker's promise never
+// settled. Nothing after that could run, and the next tap was blocked too.
+test('the picker is presented after the alert, not from inside it', async () => {
+  const screen = await readFile(new URL('../../app/peerchat/PeerChatScreen.tsx', import.meta.url), 'utf8')
+
+  assert.match(screen, /SHEET_HANDOVER_MS = 450/)
+  const attach = screen.slice(
+    screen.indexOf('function attachFrom ('),
+    screen.indexOf('function startAttach (')
+  )
+  assert.match(attach, /Platform\.OS !== 'ios'/)
+  assert.match(attach, /setTimeout\(\(\) => startAttach\(source\), SHEET_HANDOVER_MS\)/)
+  // The same wait the modal handover uses, not a second number to keep in step.
+  assert.match(screen, /setTimeout\(flushPendingModal, SHEET_HANDOVER_MS\)/)
+})
+
+test('a pick that never came back does not disable attaching for good', async () => {
+  const gate = await readFile(new URL('../../app/media/upload-gate.ts', import.meta.url), 'utf8')
+
+  // It used to refuse a new pick while one was outstanding, which turned one
+  // wedged picker into a silent no-op for the rest of the session.
+  assert.doesNotMatch(gate, /if \(abandonPick\) return null/)
+  assert.match(gate, /function supersedePendingPick \(\)/)
+  assert.equal(gate.split('supersedePendingPick()').length - 1, 2)
+  // And a picker that never appeared is given up on rather than waited on.
+  assert.match(gate, /PICK_TIMEOUT_MS = 2 \* 60 \* 1000/)
+  assert.equal(gate.split('setTimeout(() => abandonPick?.(), PICK_TIMEOUT_MS)').length - 1, 2)
 })
