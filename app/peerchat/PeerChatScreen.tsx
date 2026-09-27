@@ -1002,6 +1002,9 @@ export function PeerChatScreen ({
   }
 
   function openRoom (room: PeerChatRoom) {
+    // Whatever was over the list belongs to the list. A sheet left open sat on
+    // top of the room you had just opened.
+    setIsRequestsOpen(false)
     if (composerRoomKeyRef.current !== room.roomKey) setComposer('')
     composerRoomKeyRef.current = room.roomKey
     versionRef.current = -1
@@ -2673,6 +2676,7 @@ export function PeerChatScreen ({
       <Modal
         supportedOrientations={MODAL_ORIENTATIONS}
         animationType='fade'
+        onDismiss={flushPendingModal}
         onRequestClose={() => setIsRequestsOpen(false)}
         statusBarTranslucent
         transparent
@@ -2695,29 +2699,41 @@ export function PeerChatScreen ({
               them asking again.
             </Text>
             <View style={[styles.actionSheetDivider, { backgroundColor: colors.border }]} />
-            <ScrollView style={styles.requestsList}>
+            <ScrollView
+              contentContainerStyle={styles.requestsListContent}
+              keyboardShouldPersistTaps='handled'
+              style={styles.requestsList}
+            >
+              {/* Name above, answers below. Squeezed onto one row the three
+                  buttons were 27 points tall and a long name pushed them off
+                  the right edge, where Android clips rather than overflows, so
+                  there was nothing left to press. */}
               {pendingDirectMessages.map((invite) => (
                 <View key={invite.roomKey} style={[styles.directRequest, { backgroundColor: colors.input }]}>
-                  {invite.fromAvatar
-                    ? <Image source={{ uri: invite.fromAvatar }} style={styles.roomAvatarImage} />
-                    : (
-                      <View style={[styles.roomAvatar, { backgroundColor: colors.accentSoft }]}>
-                        <Text style={[styles.roomAvatarText, { color: colors.accent }]}>{getRoomInitials(invite.fromUsername)}</Text>
-                      </View>
-                      )}
-                  <View style={styles.memberCopy}>
-                    <Text style={[styles.memberName, { color: colors.text }]}>{invite.fromUsername}</Text>
-                    <Text numberOfLines={1} style={[styles.attachmentMeta, { color: colors.muted }]}>wants to message you</Text>
+                  <View style={styles.directRequestWho}>
+                    {invite.fromAvatar
+                      ? <Image source={{ uri: invite.fromAvatar }} style={styles.roomAvatarImage} />
+                      : (
+                        <View style={[styles.roomAvatar, { backgroundColor: colors.accentSoft }]}>
+                          <Text style={[styles.roomAvatarText, { color: colors.accent }]}>{getRoomInitials(invite.fromUsername)}</Text>
+                        </View>
+                        )}
+                    <View style={styles.memberCopy}>
+                      <Text numberOfLines={1} style={[styles.memberName, { color: colors.text }]}>{invite.fromUsername}</Text>
+                      <Text numberOfLines={1} style={[styles.attachmentMeta, { color: colors.muted }]}>wants to message you</Text>
+                    </View>
                   </View>
-                  <Pressable accessibilityRole='button' onPress={() => blockDirectMessageRequest(invite)} style={styles.requestAction}>
-                    <Text style={[styles.requestActionText, { color: colors.danger }]}>Block</Text>
-                  </Pressable>
-                  <Pressable accessibilityRole='button' onPress={() => respondToDirectMessage(invite, false)} style={styles.requestAction}>
-                    <Text style={[styles.requestActionText, { color: colors.muted }]}>Decline</Text>
-                  </Pressable>
-                  <Pressable accessibilityRole='button' onPress={() => respondToDirectMessage(invite, true)} style={[styles.requestAction, { backgroundColor: colors.accent }]}>
-                    <Text style={[styles.requestActionText, { color: '#ffffff' }]}>Accept</Text>
-                  </Pressable>
+                  <View style={styles.directRequestActions}>
+                    <Pressable accessibilityRole='button' onPress={() => blockDirectMessageRequest(invite)} style={[styles.requestAction, { backgroundColor: colors.surface }]}>
+                      <Text style={[styles.requestActionText, { color: colors.danger }]}>Block</Text>
+                    </Pressable>
+                    <Pressable accessibilityRole='button' onPress={() => respondToDirectMessage(invite, false)} style={[styles.requestAction, { backgroundColor: colors.surface }]}>
+                      <Text style={[styles.requestActionText, { color: colors.muted }]}>Decline</Text>
+                    </Pressable>
+                    <Pressable accessibilityRole='button' onPress={() => respondToDirectMessage(invite, true)} style={[styles.requestAction, { backgroundColor: colors.accent }]}>
+                      <Text style={[styles.requestActionText, { color: '#ffffff' }]}>Accept</Text>
+                    </Pressable>
+                  </View>
                 </View>
               ))}
               {pendingDirectMessages.length === 0 && (
@@ -4338,12 +4354,17 @@ const styles = StyleSheet.create({
   requestsButton: { marginLeft: 'auto', paddingVertical: 2 },
   requestsButtonText: { fontSize: 13, fontWeight: '700' },
   directRequests: { gap: 7 },
-  directRequest: { alignItems: 'center', borderRadius: 12, flexDirection: 'row', gap: 7, padding: 9 },
-  requestAction: { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 7 },
-  requestsList: { maxHeight: 320 },
+  directRequest: { borderRadius: 12, gap: 10, padding: 10 },
+  directRequestWho: { alignItems: 'center', flexDirection: 'row', gap: 8 },
+  directRequestActions: { flexDirection: 'row', gap: 8 },
+  // Full width and 44 points tall: a thumb target, and one that cannot be
+  // pushed off the edge by a long name.
+  requestAction: { alignItems: 'center', borderRadius: 8, flex: 1, justifyContent: 'center', minHeight: 44, paddingHorizontal: 10 },
+  requestsList: { maxHeight: 360 },
+  requestsListContent: { gap: 8 },
   discoverBody: { gap: 8, padding: 14 },
   discoverQr: { alignItems: 'center', paddingVertical: 6 },
-  requestActionText: { fontSize: 11, fontWeight: '800' },
+  requestActionText: { fontSize: 13, fontWeight: '800' },
   sectionTitle: { fontSize: 16, fontWeight: '900' },
   roomSearchInput: { borderRadius: 16, fontSize: 14, minHeight: 38, paddingHorizontal: 12, paddingVertical: 8 },
   roomCount: { fontSize: 12, fontWeight: '700' },

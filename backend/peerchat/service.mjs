@@ -86,6 +86,9 @@ const MAX_INITIAL_SYNC_MESSAGES_PER_CONNECTION = 500
 const MAX_PENDING_MESSAGES_PER_CONNECTION = 256
 const MAX_RETURNED_ROOM_MEMBERS = 100
 const MAX_PENDING_DIRECT_MESSAGES = 50
+// Long enough for the removal notice to leave the wire before the connection
+// it was written to goes away.
+const REMOVED_PEERCHAT_PEER_DROP_MS = 1000
 const PERSIST_DELAY_MS = 500
 const PING_INTERVAL_MS = 25_000
 const PEER_LIVENESS_TIMEOUT_MS = 60_000
@@ -2033,11 +2036,29 @@ export class PeerChatService {
   }
 
   /** Drop anyone in the room who is no longer welcome in it. */
+  /**
+   * Drop anyone in the room who is no longer welcome in it.
+   *
+   * Not straight away. Nothing they send is read and nothing is relayed to
+   * them either way, so the drop is tidiness rather than the barrier, and
+   * closing the connection the same tick threw away the removal notice still
+   * queued on it: the person being removed learned nothing and carried on
+   * typing into a room that had stopped listening.
+   */
   enforceRoomBans (roomKey) {
     for (const other of [...this.peers.values()]) {
       if (!other.rooms.includes(roomKey)) continue
-      if (this.isPeerRemovedFromRoom(roomKey, other)) this.disconnectPeer(other)
+      if (this.isPeerRemovedFromRoom(roomKey, other)) this.dropRemovedPeer(other)
     }
+  }
+
+  dropRemovedPeer (peer) {
+    if (!peer || peer.removedDropTimer) return
+    peer.removedDropTimer = setTimeout(() => {
+      peer.removedDropTimer = null
+      this.disconnectPeer(peer)
+    }, REMOVED_PEERCHAT_PEER_DROP_MS)
+    peer.removedDropTimer.unref?.()
   }
 
   async removeRoomMember ({ roomKey, peerId }) {
@@ -2063,8 +2084,10 @@ export class PeerChatService {
     room.members = (room.members || []).filter((member) => member.id !== id)
 
     await this.appendRemovalNotice(normalized, id, name)
-    this.enforceRoomBans(normalized)
+    // Broadcast first. Enforcing first took the removed peer out of the loop,
+    // so the one person who most needed to hear it was the one who never did.
     this.broadcastRoomBans(normalized)
+    this.enforceRoomBans(normalized)
     this.persistNow()
     this.bumpVersion()
     // The room back, so the list on screen updates from the answer rather than

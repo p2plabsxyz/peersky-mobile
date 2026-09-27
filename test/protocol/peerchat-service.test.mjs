@@ -1326,7 +1326,7 @@ async function createRoomWithMember (t, prefix) {
 }
 
 test('removing somebody takes them out of the member list and keeps them out', async (t) => {
-  const { service, roomKey, peer } = await createRoomWithMember(t, 'peersky-peerchat-remove-')
+  const { service, roomKey } = await createRoomWithMember(t, 'peersky-peerchat-remove-')
 
   assert.equal(service.isRoomCreator(roomKey), true)
   assert.deepEqual(service.listRoomMembers(roomKey).map((m) => m.username), ['Akhilesh', 'Bob'])
@@ -1334,7 +1334,6 @@ test('removing somebody takes them out of the member list and keeps them out', a
   await service.removeRoomMember({ roomKey, peerId: 'aabbccdd' })
 
   assert.deepEqual(service.listRoomMembers(roomKey).map((m) => m.username), ['Akhilesh'])
-  assert.equal(peer.connection.destroyed, true)
 
   // And they stay out when the room hears about them again, which is what
   // used to bring them back.
@@ -1346,6 +1345,25 @@ test('removing somebody takes them out of the member list and keeps them out', a
   const snapshot = service.listRooms().find((room) => room.roomKey === roomKey)
   assert.deepEqual(snapshot.members.map((m) => m.username), ['Akhilesh'])
   assert.equal(snapshot.bans.length, 1)
+  await service.close()
+})
+
+test('the person being removed is told before their connection goes away', async (t) => {
+  const { service, roomKey, peer, frames } = await createRoomWithMember(t, 'peersky-peerchat-notify-')
+
+  await service.removeRoomMember({ roomKey, peerId: 'aabbccdd' })
+
+  // Dropping them first destroyed the connection with this still queued on it,
+  // so the one person who most needed to hear it was the one who never did.
+  const bans = frames.filter((frame) => frame.type === 'room-bans')
+  assert.equal(bans.length, 1)
+  assert.equal(bans[0].roomKey, roomKey)
+  assert.deepEqual(bans[0].bans.map((ban) => ban.id), ['aabbccdd'])
+  assert.notEqual(peer.connection.destroyed, true, 'still connected while the notice goes out')
+
+  // Then the connection goes, because nothing more will pass either way.
+  await new Promise((resolve) => setTimeout(resolve, 1100))
+  assert.equal(peer.connection.destroyed, true)
   await service.close()
 })
 

@@ -36,3 +36,32 @@ test('every request is reachable, not just the newest', () => {
   assert.match(sheet, /pendingDirectMessages\.map\(\(invite\) =>/)
   assert.match(sheet, /Nobody is waiting/)
 })
+
+// On Android the three answers sat on one row with the name, 27 points tall,
+// and a long name pushed them past the right edge where Android clips instead
+// of overflowing. There was nothing left to press.
+test('the answers are thumb sized and cannot be pushed off the edge', () => {
+  const styles = screen.slice(screen.indexOf('  requestAction: {'), screen.indexOf('  requestsList: {'))
+
+  assert.match(styles, /minHeight: 44/)
+  assert.match(styles, /flex: 1/)
+  assert.match(screen, /directRequestActions: \{ flexDirection: 'row'/)
+  // The name is its own row above them, and it is one line whatever its length.
+  assert.match(screen, /directRequestWho: \{ alignItems: 'center', flexDirection: 'row'/)
+
+  const sheet = screen.slice(screen.indexOf('visible={isRequestsOpen}'), screen.indexOf('isAttachSheetOpen}'))
+  assert.match(sheet, /numberOfLines=\{1\} style=\{\[styles\.memberName/)
+  assert.match(sheet, /keyboardShouldPersistTaps='handled'/)
+})
+
+// Accepting opens the new conversation, and the sheet used to stay up over it.
+test('opening a room puts the sheet away', () => {
+  const open = screen.slice(screen.indexOf('function openRoom ('), screen.indexOf('function joinRoomByKey'))
+  assert.match(open, /setIsRequestsOpen\(false\)/)
+
+  const respond = screen.slice(
+    screen.indexOf('function respondToDirectMessage ('),
+    screen.indexOf('function createRoom (')
+  )
+  assert.match(respond, /if \(accept && response\.room\) openRoom\(response\.room\)/)
+})
