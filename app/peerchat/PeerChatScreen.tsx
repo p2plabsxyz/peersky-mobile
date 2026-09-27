@@ -370,6 +370,7 @@ export function PeerChatScreen ({
   const [replyTarget, setReplyTarget] = useState<PeerChatReply | null>(null)
   const [messageActionTarget, setMessageActionTarget] = useState<PeerChatMessage | null>(null)
   const [linkActionTarget, setLinkActionTarget] = useState<string | null>(null)
+  const [isAttachSheetOpen, setIsAttachSheetOpen] = useState(false)
   const [roomActionTarget, setRoomActionTarget] = useState<PeerChatRoom | null>(null)
   const [profileTarget, setProfileTarget] = useState<PeerChatMember | null>(null)
   // A refresh clears the error, and refreshes now arrive the moment anything
@@ -1369,30 +1370,21 @@ export function PeerChatScreen ({
   // input, offered here because a native picker has to ask for them.
   function attachFile () {
     if (!activeRoom || isBusy) return
-
-    Alert.alert('Attach', undefined, [
-      { text: 'Photo Library', onPress: () => attachFrom('library') },
-      { text: 'Take Photo', onPress: () => attachFrom('camera') },
-      { text: 'Choose Files', onPress: () => attachFrom('files') },
-      { text: 'Cancel', style: 'cancel' }
-    ])
+    setIsAttachSheetOpen(true)
   }
 
   /**
-   * The picker is a view controller, and the alert that asked which one is too.
-   * Presenting the picker from inside the alert's own handler asks iOS to do it
-   * while the alert is still dismissing: the presentation is dropped, the
-   * picker never appears, and its promise never settles. That left the attach
-   * button disabled with nothing on screen and nothing to show for it. Same
-   * wait the sheet handover above uses; Android has no such rule.
+   * The picker is a view controller, and so is whatever asked which one.
+   * Presenting it while that is still on its way out asks iOS to do something
+   * it refuses: the presentation is dropped, the picker never appears, and its
+   * promise never settles, which left the attach button disabled with nothing
+   * on screen. This is the handover the profile and room sheets already use,
+   * driven by the sheet actually finishing rather than by a guess at how long
+   * that takes. Android stacks them fine and goes straight through.
    */
   function attachFrom (source: UploadSource) {
     if (!activeRoom || isBusy) return
-    if (Platform.OS !== 'ios') {
-      startAttach(source)
-      return
-    }
-    setTimeout(() => startAttach(source), SHEET_HANDOVER_MS)
+    replaceModal(() => setIsAttachSheetOpen(false), () => startAttach(source))
   }
 
   function startAttach (source: UploadSource) {
@@ -2393,6 +2385,59 @@ export function PeerChatScreen ({
         <Modal
           supportedOrientations={MODAL_ORIENTATIONS}
           animationType='fade'
+          onDismiss={flushPendingModal}
+          onRequestClose={() => setIsAttachSheetOpen(false)}
+          statusBarTranslucent
+          transparent
+          visible={isAttachSheetOpen}
+        >
+          <View accessibilityViewIsModal style={styles.actionSheetRoot}>
+            <Pressable
+              accessibilityLabel='Close the attachment choices'
+              accessibilityRole='button'
+              onPress={() => setIsAttachSheetOpen(false)}
+              style={styles.actionSheetBackdrop}
+            />
+            <SafeAreaView
+              edges={['bottom', 'left', 'right']}
+              style={[styles.actionSheet, { backgroundColor: colors.surface }]}
+            >
+              <Text style={[styles.actionSheetTitle, { color: colors.text }]}>Attachments</Text>
+              <View style={[styles.actionSheetDivider, { backgroundColor: colors.border }]} />
+              <Pressable
+                accessibilityRole='button'
+                onPress={() => attachFrom('library')}
+                style={styles.actionSheetAction}
+              >
+                <Text style={[styles.actionSheetActionText, { color: colors.text }]}>Photo library</Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole='button'
+                onPress={() => attachFrom('camera')}
+                style={styles.actionSheetAction}
+              >
+                <Text style={[styles.actionSheetActionText, { color: colors.text }]}>Take a photo</Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole='button'
+                onPress={() => attachFrom('files')}
+                style={styles.actionSheetAction}
+              >
+                <Text style={[styles.actionSheetActionText, { color: colors.text }]}>Choose files</Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole='button'
+                onPress={() => setIsAttachSheetOpen(false)}
+                style={styles.actionSheetAction}
+              >
+                <Text style={[styles.actionSheetActionText, { color: colors.accent }]}>Cancel</Text>
+              </Pressable>
+            </SafeAreaView>
+          </View>
+        </Modal>
+        <Modal
+          supportedOrientations={MODAL_ORIENTATIONS}
+          animationType='fade'
           onRequestClose={() => setLinkActionTarget(null)}
           statusBarTranslucent
           transparent
@@ -3238,6 +3283,9 @@ function PeerChatAttachment ({
   const [isOpening, setIsOpening] = useState(false)
   const [isExplicit, setIsExplicit] = useState(false)
   const [isScreening, setIsScreening] = useState(false)
+  // Hiding it is a warning, not a verdict. The classifier is wrong often
+  // enough that someone who wants to look has to be able to.
+  const [isRevealed, setIsRevealed] = useState(false)
 
   // Screening what arrived, not only what is sent. The sending side can be
   // stripped out by anyone running a modified build, which is exactly why the
@@ -3315,12 +3363,22 @@ function PeerChatAttachment ({
     }
   }
 
-  if (mediaUrl && mediaKind === 'image' && (isScreening || isExplicit)) {
+  if (mediaUrl && mediaKind === 'image' && (isScreening || (isExplicit && !isRevealed))) {
     return (
       <View style={[styles.inlineMediaCard, styles.mediaNotice, { backgroundColor: colors.input, borderColor: colors.muted }]}>
         <Text style={[styles.mediaNoticeText, { color: isExplicit ? colors.danger : colors.muted }]}>
           {isExplicit ? 'Hidden: this looks explicit' : 'Checking this picture'}
         </Text>
+        {isExplicit && (
+          <Pressable
+            accessibilityHint='Shows a picture the check hid'
+            accessibilityRole='button'
+            onPress={() => setIsRevealed(true)}
+            style={({ pressed }) => [styles.mediaNoticeAction, pressed ? styles.disabled : null]}
+          >
+            <Text style={[styles.mediaNoticeActionText, { color: colors.accent }]}>Show anyway</Text>
+          </Pressable>
+        )}
         <AttachmentCaption colors={colors} inline item={item} />
       </View>
     )
@@ -4019,6 +4077,8 @@ const styles = StyleSheet.create({
   inlineMediaCard: { borderRadius: 10, borderWidth: 1, maxWidth: 260, overflow: 'hidden', width: 240 },
   mediaNotice: { alignItems: 'center', gap: 4, justifyContent: 'center', minHeight: 110, padding: 12 },
   mediaNoticeText: { fontSize: 13, fontWeight: '600' },
+  mediaNoticeAction: { marginTop: 8, paddingVertical: 4 },
+  mediaNoticeActionText: { fontSize: 13, fontWeight: '700' },
   inlineMediaImage: { height: 170, width: '100%' },
   inlineMediaVideo: { height: 180, width: '100%' },
   mediaViewer: { backgroundColor: '#090a0d', flex: 1 },

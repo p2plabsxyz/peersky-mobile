@@ -248,8 +248,9 @@ test('what arrives is screened too, not only what is sent', async () => {
   // Your own upload was already screened on the way out.
   assert.match(attachment, /if \(!mediaUrl \|\| item\.self \|\| mediaKind !== 'image'\) return/)
 
-  // The picture must not render while the verdict is still outstanding.
-  assert.match(screen, /if \(mediaUrl && mediaKind === 'image' && \(isScreening \|\| isExplicit\)\)/)
+  // The picture must not render while the verdict is still outstanding, nor
+  // once it came back explicit unless the reader asked to see it anyway.
+  assert.match(screen, /if \(mediaUrl && mediaKind === 'image' && \(isScreening \|\| \(isExplicit && !isRevealed\)\)\)/)
   assert.match(screen, /Hidden: this looks explicit/)
 })
 
@@ -471,26 +472,41 @@ test('video is never put through the image screen', async () => {
   // Worse, flipping isScreening rebuilt the video player mid-render and the
   // native object was already released.
   assert.match(screen, /item\.self \|\| mediaKind !== 'image'\) return/)
-  assert.match(screen, /mediaKind === 'image' && \(isScreening \|\| isExplicit\)/)
-  assert.doesNotMatch(screen, /mediaKind && \(isScreening \|\| isExplicit\)/)
+  assert.match(screen, /mediaKind === 'image' && \(isScreening \|\|/)
+  assert.doesNotMatch(screen, /mediaKind && \(isScreening \|\|/)
 })
 
 // The attach button stayed disabled with nothing on screen: iOS was being asked
-// to present the picker while it was still dismissing the alert that asked
+// to present the picker while it was still dismissing the sheet that asked
 // which one, so the presentation was dropped and the picker's promise never
 // settled. Nothing after that could run, and the next tap was blocked too.
-test('the picker is presented after the alert, not from inside it', async () => {
+test('the picker waits for the sheet that asked to finish dismissing', async () => {
   const screen = await readFile(new URL('../../app/peerchat/PeerChatScreen.tsx', import.meta.url), 'utf8')
 
-  assert.match(screen, /SHEET_HANDOVER_MS = 450/)
+  // An in-app sheet, so the handover runs off the modal actually finishing
+  // rather than a guess at how long a system alert takes.
+  assert.doesNotMatch(screen, /Alert\.alert\('Attach'/)
+  assert.match(screen, /visible=\{isAttachSheetOpen\}/)
+  assert.match(screen, /onDismiss=\{flushPendingModal\}[\s\S]{0,200}visible=\{isAttachSheetOpen\}/)
+
   const attach = screen.slice(
     screen.indexOf('function attachFrom ('),
     screen.indexOf('function startAttach (')
   )
-  assert.match(attach, /Platform\.OS !== 'ios'/)
-  assert.match(attach, /setTimeout\(\(\) => startAttach\(source\), SHEET_HANDOVER_MS\)/)
-  // The same wait the modal handover uses, not a second number to keep in step.
+  assert.match(attach, /replaceModal\(\(\) => setIsAttachSheetOpen\(false\), \(\) => startAttach\(source\)\)/)
+  // The timer is only the backstop for a sheet closed before it finished
+  // presenting, which never fires onDismiss.
   assert.match(screen, /setTimeout\(flushPendingModal, SHEET_HANDOVER_MS\)/)
+})
+
+test('a hidden picture can still be opened by whoever wants to', async () => {
+  const screen = await readFile(new URL('../../app/peerchat/PeerChatScreen.tsx', import.meta.url), 'utf8')
+
+  // Hiding it is a warning, not a verdict: the classifier is wrong often
+  // enough that a reader has to be able to look.
+  assert.match(screen, /isExplicit && !isRevealed/)
+  assert.match(screen, /onPress=\{\(\) => setIsRevealed\(true\)\}/)
+  assert.match(screen, /Show anyway/)
 })
 
 test('a pick that never came back does not disable attaching for good', async () => {
