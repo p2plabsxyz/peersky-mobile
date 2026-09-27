@@ -50,6 +50,7 @@ import { RPC_APP_PEERCHAT_CHANGED } from '../rpc/commands.mjs'
 import { notifyApp } from '../rpc/notify.mjs'
 import { attachPeerChatTransport } from './transport.mjs'
 import { createPeerPresence } from './presence.mjs'
+import { collapsePeerChatMembers } from './members.mjs'
 import { PRE_JOINED_PEERCHAT_ROOM_KEY } from './rooms.mjs'
 
 const MAX_ROOMS = 50
@@ -1905,7 +1906,7 @@ export class PeerChatService {
       if (member.online || member.self) continue
       if (this.presence.isPresent(roomKey, member.id)) member.online = true
     }
-    return [...members.values()].sort((left, right) => {
+    return collapsePeerChatMembers([...members.values()]).sort((left, right) => {
       if (left.self !== right.self) return left.self ? -1 : 1
       if (left.online !== right.online) return left.online ? -1 : 1
       return left.username.localeCompare(right.username)
