@@ -102,7 +102,14 @@ import SendIcon from '../../assets/icons/peerchat/send.svg'
 import SettingsIcon from '../../assets/icons/peerchat/settings.svg'
 import { CameraView, useCameraPermissions } from 'expo-camera'
 import { getPeerChatUploadTimeout } from './attachment-timeout.mjs'
-import { buildPeerChatInviteUrl, parsePeerChatInvite } from './peerchat-invite.mjs'
+import {
+  buildPeerChatDirectInviteUrl,
+  buildPeerChatInviteUrl,
+  parsePeerChatDirectInvite,
+  parsePeerChatInvite
+} from './peerchat-invite.mjs'
+import { PRE_JOINED_PEERCHAT_ROOM_KEY } from '../../backend/peerchat/rooms.mjs'
+import { QrCodeView } from '../settings/QrCodeView'
 import { pickUploads } from '../media/upload-gate'
 import type { UploadSource } from '../media/upload-gate'
 import { scanMedia } from '../media/NsfwScanner'
@@ -257,6 +264,8 @@ type PeerChatScreenProps = {
   onStatus: (message: string) => void
   soundsEnabled: boolean
   requestedRoomKey: string | null
+  requestedPeerId?: string | null
+  onRequestedPeerHandled?: () => void
 }
 
 const POLL_INTERVAL_MS = 1500
@@ -332,7 +341,9 @@ export function PeerChatScreen ({
   onSoundsEnabledChange,
   onStatus,
   soundsEnabled,
-  requestedRoomKey
+  requestedRoomKey,
+  requestedPeerId,
+  onRequestedPeerHandled
 }: PeerChatScreenProps) {
   const colors = isDark ? darkColors : lightColors
   const callRpcRef = useRef(onCallRpc)
@@ -384,6 +395,8 @@ export function PeerChatScreen ({
   const [linkActionTarget, setLinkActionTarget] = useState<string | null>(null)
   const [isAttachSheetOpen, setIsAttachSheetOpen] = useState(false)
   const [isRequestsOpen, setIsRequestsOpen] = useState(false)
+  const [isDiscoverOpen, setIsDiscoverOpen] = useState(false)
+  const [discoverQuery, setDiscoverQuery] = useState('')
   const [roomActionTarget, setRoomActionTarget] = useState<PeerChatRoom | null>(null)
   const [profileTarget, setProfileTarget] = useState<PeerChatMember | null>(null)
   // A refresh clears the error, and refreshes now arrive the moment anything
@@ -424,6 +437,15 @@ export function PeerChatScreen ({
   )
   const displayedMessages = useMemo(() => [...visibleMessages].reverse(), [visibleMessages])
   const visibleRooms = filterPeerChatRooms(rooms, roomSearchQuery) as PeerChatRoom[]
+  // The welcome room is the only place everyone is, so its member list is the
+  // nearest thing PeerChat has to a directory. Nothing is uploaded anywhere for
+  // this: it is the same list the room already keeps.
+  const directory = filterPeerChatMembers(
+    (rooms.find((room) => room.roomKey === PRE_JOINED_PEERCHAT_ROOM_KEY)?.members || [])
+      .filter((member) => !member.self),
+    discoverQuery
+  ) as PeerChatMember[]
+  const myInviteUrl = buildPeerChatDirectInviteUrl(profile?.id || '')
   const visibleMembers = filterPeerChatMembers(
     activeRoom?.members || [],
     memberSearchQuery
@@ -597,6 +619,13 @@ export function PeerChatScreen ({
     })
     return () => subscription.remove()
   }, [activeRoom])
+
+  useEffect(() => {
+    // Same wait as a room invite: a request cannot be sent without a name.
+    if (!requestedPeerId || !isInitialized || !profile?.username) return
+    onRequestedPeerHandled?.()
+    void requestDirectMessage(requestedPeerId)
+  }, [isInitialized, onRequestedPeerHandled, profile?.username, requestedPeerId])
 
   useEffect(() => {
     // A profile is needed to join anything, so an invite tapped by somebody who
@@ -1036,6 +1065,46 @@ export function PeerChatScreen ({
     })
   }
 
+  /**
+   * Asking one person for a direct message, from a scanned code or a link.
+   *
+   * Their name comes from whatever the welcome room already knows, and falls
+   * back to the id, because a code can be scanned before their profile has
+   * reached this device.
+   */
+  async function requestDirectMessage (peerId: string) {
+    if (peerId === profile?.id) {
+      onStatus('That is your own code')
+      return
+    }
+    const known = (rooms.find((room) => room.roomKey === PRE_JOINED_PEERCHAT_ROOM_KEY)?.members || [])
+      .find((member) => member.id === peerId)
+    await runAction(async () => {
+      const response = await callRpc(RPC_PEERCHAT_DM_CREATE, {
+        peerId,
+        username: known?.username || peerId,
+        bio: known?.bio || '',
+        avatar: known?.avatar || null
+      })
+      if (!response.ok || !response.room || !response.rooms) {
+        throw new Error(response.error || 'Unable to send that message request.')
+      }
+      if (!mountedRef.current) return
+      setRooms(response.rooms)
+      openRoom(response.room)
+      onStatus(`Message request sent to ${known?.username || peerId}`)
+    })
+  }
+
+  function openDiscover () {
+    setDiscoverQuery('')
+    setIsDiscoverOpen(true)
+  }
+
+  function startDirectMessageFromDiscover (member: PeerChatMember) {
+    replaceModal(() => setIsDiscoverOpen(false), () => startDirectMessage(member))
+  }
+
   function startDirectMessage (member: PeerChatMember) {
     if (member.self || isBusy) return
     void runAction(async () => {
@@ -1302,6 +1371,14 @@ export function PeerChatScreen ({
     inviteScanHandledRef.current = true
     setIsScanningInvite(false)
 
+    // A room QR and a personal one look the same to a camera, so both are
+    // tried. A personal one sends a request rather than joining anything.
+    const peerId = parsePeerChatDirectInvite(value)
+    if (peerId) {
+      void requestDirectMessage(peerId)
+      return
+    }
+
     // Accepts an invite link or a bare room key, so either kind of QR works.
     const roomKey = parsePeerChatInvite(value)
     if (!roomKey) {
@@ -1506,6 +1583,11 @@ export function PeerChatScreen ({
               peerId: member.id
             })
             if (!response.ok) throw new Error(response.error || 'Unable to remove this person.')
+            if (!mountedRef.current) return
+            // Straight from the answer. Waiting on the next poll meant the
+            // person you just removed sat there until it came round.
+            if (response.room) setActiveRoom(response.room)
+            if (response.rooms) setRooms(response.rooms)
             versionRef.current = -1
             await refreshRoom(true)
             onStatus(`${member.username} was removed from the room`)
@@ -2486,6 +2568,111 @@ export function PeerChatScreen ({
       <Modal
         supportedOrientations={MODAL_ORIENTATIONS}
         animationType='fade'
+        onDismiss={flushPendingModal}
+        onRequestClose={() => setIsDiscoverOpen(false)}
+        statusBarTranslucent
+        transparent
+        visible={isDiscoverOpen}
+      >
+        <KeyboardAvoidingView behavior='padding' style={styles.roomInfoModalRoot}>
+          <Pressable
+            accessibilityLabel='Close find people'
+            accessibilityRole='button'
+            onPress={() => setIsDiscoverOpen(false)}
+            style={styles.roomInfoBackdrop}
+          />
+          <SafeAreaView
+            edges={['bottom', 'left', 'right']}
+            style={[styles.roomInfoPanel, { backgroundColor: colors.surface }]}
+          >
+            <View style={[styles.roomInfoHeader, { borderBottomColor: colors.border }]}>
+              <Text style={[styles.roomInfoHeading, { color: colors.text }]}>Find people</Text>
+              <Pressable
+                accessibilityLabel='Close find people'
+                accessibilityRole='button'
+                hitSlop={8}
+                onPress={() => setIsDiscoverOpen(false)}
+              >
+                <CloseIcon width={18} height={18} color={colors.muted} />
+              </Pressable>
+            </View>
+            <ScrollView keyboardShouldPersistTaps='handled' contentContainerStyle={styles.discoverBody}>
+              {myInviteUrl
+                ? (
+                  <>
+                    <View style={styles.discoverQr}>
+                      <QrCodeView value={myInviteUrl} size={190} />
+                    </View>
+                    <Text style={[styles.helper, { color: colors.muted }]}>
+                      Your code. Anyone who scans it sends you a message request,
+                      which you can accept, decline or block. It is not a way in:
+                      nothing happens until you say so.
+                    </Text>
+                  </>
+                  )
+                : (
+                  <Text style={[styles.helper, { color: colors.muted }]}>
+                    Set a display name first and your code appears here.
+                  </Text>
+                  )}
+
+              <Text style={[styles.roomInfoTitle, { color: colors.text }]}>Search people</Text>
+              <Text style={[styles.helper, { color: colors.muted }]}>
+                Everyone in Peer-to-Peer Republic, which is the room everyone
+                joins, so it doubles as the place to find somebody. No directory
+                is kept anywhere: this is the room's own member list.
+              </Text>
+              <TextInput
+                autoCapitalize='none'
+                autoCorrect={false}
+                maxLength={PEERCHAT_SEARCH_QUERY_MAX_CHARACTERS}
+                onChangeText={setDiscoverQuery}
+                placeholder='Search by name'
+                placeholderTextColor={colors.muted}
+                returnKeyType='search'
+                style={[styles.input, { backgroundColor: colors.input, color: colors.text }]}
+                value={discoverQuery}
+              />
+              {directory.map((member) => (
+                <Pressable
+                  accessibilityHint={`Sends ${member.username} a message request`}
+                  accessibilityRole='button'
+                  key={member.id}
+                  onPress={() => startDirectMessageFromDiscover(member)}
+                  style={[styles.memberRow, { backgroundColor: colors.input }]}
+                >
+                  <View style={styles.memberAvatarWrap}>
+                    {member.avatar
+                      ? <Image source={{ uri: member.avatar }} style={styles.memberAvatar} />
+                      : (
+                        <View style={[styles.memberAvatarFallback, { backgroundColor: colors.accentSoft }]}>
+                          <Text style={[styles.memberAvatarText, { color: colors.accent }]}>{getRoomInitials(member.username)}</Text>
+                        </View>
+                        )}
+                    <View style={[styles.onlineDot, { backgroundColor: member.online ? colors.success : colors.muted }]} />
+                  </View>
+                  <View style={styles.memberCopy}>
+                    <Text style={[styles.memberName, { color: colors.text }]}>{member.username}</Text>
+                    <Text numberOfLines={1} style={[styles.attachmentMeta, { color: colors.muted }]}>
+                      {member.bio || (member.online ? 'Online' : 'Offline')}
+                    </Text>
+                  </View>
+                  <Text style={[styles.memberMessage, { color: colors.accent }]}>Message</Text>
+                </Pressable>
+              ))}
+              {directory.length === 0 && (
+                <Text style={[styles.helper, { color: colors.muted }]}>
+                  {discoverQuery.trim() ? 'Nobody by that name.' : 'Nobody else here yet.'}
+                </Text>
+              )}
+            </ScrollView>
+          </SafeAreaView>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      <Modal
+        supportedOrientations={MODAL_ORIENTATIONS}
+        animationType='fade'
         onRequestClose={() => setIsRequestsOpen(false)}
         statusBarTranslucent
         transparent
@@ -2689,6 +2876,16 @@ export function PeerChatScreen ({
           <View style={styles.titleRow}>
             <Image source={PEERCHAT_ICON} style={styles.logo} />
             <Text style={[styles.title, styles.titleCopy, { color: colors.text }]}>PeerChat</Text>
+            <Pressable
+              accessibilityHint='Shows your invite code and finds people to message'
+              accessibilityLabel='Find people'
+              accessibilityRole='button'
+              hitSlop={8}
+              onPress={openDiscover}
+              style={styles.settingsButton}
+            >
+              <SearchIcon width={21} height={21} color={colors.muted} />
+            </Pressable>
             <Pressable
               accessibilityLabel='PeerChat settings'
               accessibilityRole='button'
@@ -4144,6 +4341,8 @@ const styles = StyleSheet.create({
   directRequest: { alignItems: 'center', borderRadius: 12, flexDirection: 'row', gap: 7, padding: 9 },
   requestAction: { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 7 },
   requestsList: { maxHeight: 320 },
+  discoverBody: { gap: 8, padding: 14 },
+  discoverQr: { alignItems: 'center', paddingVertical: 6 },
   requestActionText: { fontSize: 11, fontWeight: '800' },
   sectionTitle: { fontSize: 16, fontWeight: '900' },
   roomSearchInput: { borderRadius: 16, fontSize: 14, minHeight: 38, paddingHorizontal: 12, paddingVertical: 8 },

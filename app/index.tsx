@@ -150,7 +150,7 @@ import { HyperdriveScreen } from './hyperdrive/HyperdriveScreen'
 import { canUseNetworkForOfflineHyper } from './hyperdrive/offline-network.mjs'
 import { PeerChatScreen, type PeerChatResponse } from './peerchat/PeerChatScreen'
 import { settleIncomingUrl, subscribeToIncomingUrls } from './incoming-links'
-import { parsePeerChatInvite } from './peerchat/peerchat-invite.mjs'
+import { parsePeerChatDirectInvite, parsePeerChatInvite } from './peerchat/peerchat-invite.mjs'
 import { screenUploadBytes } from './media/upload-gate'
 import { isUsableImageType, sniffBase64ImageType } from './media/media-moderation.mjs'
 import { NsfwScanner } from './media/NsfwScanner'
@@ -408,6 +408,7 @@ export default function App () {
   const [browserIsLoading, setBrowserIsLoading] = useState(false)
   const [activeTab, setActiveTab] = useState<RuntimeTab>('hyper')
   const [requestedPeerChatRoomKey, setRequestedPeerChatRoomKey] = useState<string | null>(null)
+  const [requestedPeerChatPeerId, setRequestedPeerChatPeerId] = useState<string | null>(null)
   const peerChatNotifications = usePeerChatNotifications({
     isPeerChatVisible: browserSource.kind === 'app' && activeTab === 'peerchat',
     isRuntimeReady: Boolean(identityStoragePath),
@@ -1139,6 +1140,10 @@ export default function App () {
     if (app === 'peerchat') {
       const invited = parsePeerChatInvite(launchSuffix)
       if (invited) setRequestedPeerChatRoomKey(invited)
+      // A personal invite names a person rather than a room, so it asks them
+      // rather than joining anything.
+      const invitedPeer = parsePeerChatDirectInvite(launchSuffix)
+      if (invitedPeer) setRequestedPeerChatPeerId(invitedPeer)
     }
 
     if (app === 'peertunes') {
@@ -3303,6 +3308,8 @@ export default function App () {
                   onSoundsEnabledChange={peerChatNotifications.setSoundsEnabled}
                   onStatus={setStatus}
                   requestedRoomKey={requestedPeerChatRoomKey}
+                  requestedPeerId={requestedPeerChatPeerId}
+                  onRequestedPeerHandled={() => setRequestedPeerChatPeerId(null)}
                   soundsEnabled={peerChatNotifications.soundsEnabled}
                 />
                 )

@@ -2067,7 +2067,9 @@ export class PeerChatService {
     this.broadcastRoomBans(normalized)
     this.persistNow()
     this.bumpVersion()
-    return { ok: true }
+    // The room back, so the list on screen updates from the answer rather than
+    // waiting on the next poll to notice.
+    return { ok: true, room: this.publicRoom(room), rooms: this.listRooms() }
   }
 
   async restoreRoomMember ({ roomKey, peerId }) {
@@ -2082,7 +2084,7 @@ export class PeerChatService {
     this.broadcastRoomBans(normalized)
     this.persistNow()
     this.bumpVersion()
-    return { ok: true }
+    return { ok: true, room: this.publicRoom(room), rooms: this.listRooms() }
   }
 
   countRoomPeers (roomKey) {
