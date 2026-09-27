@@ -14,6 +14,10 @@ export const styles = StyleSheet.create({
   browserSystemInset: {
     width: '100%'
   },
+  browserToolbarStack: {
+    position: 'relative',
+    zIndex: 10
+  },
   browserToolbar: {
     alignItems: 'center',
     backgroundColor: '#f5f8ff',

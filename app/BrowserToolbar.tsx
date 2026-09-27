@@ -181,6 +181,11 @@ export function BrowserToolbar ({
   const toolbarBackground = isDark ? palette.surface : palette.shell
 
   return (
+    // The bar and the list it opens are siblings in a stack with no padding of
+    // its own, so "sit on the bar's edge" is the bar's measured height and
+    // nothing else. Positioning the list inside the bar made that depend on
+    // the bar's own padding, which is where the gap kept coming back.
+    <View style={styles.browserToolbarStack}>
     <View style={[
       styles.browserToolbar,
       {
@@ -355,20 +360,6 @@ export function BrowserToolbar ({
           </View>
         )}
       </View>
-      {isAddressFocused && (
-        <HistorySuggestions
-          background={toolbarBackground}
-          items={historySuggestions}
-          offset={menuOffset}
-          palette={palette}
-          position={position}
-          onOpen={(url) => {
-            addressInputRef.current?.blur()
-            setIsAddressFocused(false)
-            onSuggestionPress(url)
-          }}
-        />
-      )}
       <Animated.View
         {...hiddenControlProps}
         style={[
@@ -432,6 +423,21 @@ export function BrowserToolbar ({
         onToggleBookmark={onToggleBookmark}
       />
       </Animated.View>
+    </View>
+    {isAddressFocused && (
+      <HistorySuggestions
+        background={toolbarBackground}
+        items={historySuggestions}
+        offset={menuOffset}
+        palette={palette}
+        position={position}
+        onOpen={(url) => {
+          addressInputRef.current?.blur()
+          setIsAddressFocused(false)
+          onSuggestionPress(url)
+        }}
+      />
+    )}
     </View>
   )
 }

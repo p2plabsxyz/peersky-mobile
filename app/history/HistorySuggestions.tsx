@@ -32,13 +32,9 @@ export function HistorySuggestions ({
   return (
     <View style={[
       styles.container,
-      // Measured off the toolbar rather than "bottom: 100%". A percentage is
-      // resolved against a parent the keyboard is busy resizing, which is not
-      // something to depend on for whether the list covers the address bar.
-      //
-      // Flush against the toolbar, with the touching edge left square and
-      // unbordered, so the list reads as the address bar opening out rather
-      // than a separate card floating above it.
+      // The bar's measured height, in a stack with no padding of its own, so
+      // the list lands exactly on the bar's edge. A percentage would be
+      // resolved against a parent the keyboard is busy resizing.
       position === 'bottom' ? { bottom: offset } : { top: offset },
       position === 'bottom' ? styles.attachedBelow : styles.attachedAbove,
       { backgroundColor: background, borderColor: palette.border }
@@ -67,29 +63,31 @@ export function HistorySuggestions ({
 const styles = StyleSheet.create({
   container: {
     borderRadius: 10,
-    borderWidth: 1,
     elevation: 10,
-    left: 12,
+    // Edge to edge, like the bar it opens from. Inset by twelve, with a border
+    // all the way round, it read as a card that happened to be nearby.
+    left: 0,
     maxHeight: 290,
     overflow: 'hidden',
     position: 'absolute',
-    right: 12,
+    right: 0,
     shadowColor: '#10131a',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.18,
     shadowRadius: 10,
     zIndex: 20
   },
-  // The edge that meets the toolbar.
+  // Only the far edge is drawn. The edge meeting the bar, and both sides, are
+  // the bar's own, so the two read as one surface that grew.
   attachedBelow: {
     borderBottomLeftRadius: 0,
     borderBottomRightRadius: 0,
-    borderBottomWidth: 0
+    borderTopWidth: 1
   },
   attachedAbove: {
+    borderBottomWidth: 1,
     borderTopLeftRadius: 0,
-    borderTopRightRadius: 0,
-    borderTopWidth: 0
+    borderTopRightRadius: 0
   },
   row: { alignItems: 'center', flexDirection: 'row', gap: 12, minHeight: 54, paddingHorizontal: 14 },
   copy: { flex: 1 },

@@ -58,17 +58,25 @@ describe('popups attached to the toolbar', () => {
   })
 
   test('the suggestion list sits on the toolbar edge', async () => {
+    const toolbar = await readFile(new URL('../../app/BrowserToolbar.tsx', import.meta.url), 'utf8')
     const source = await readFile(
       new URL('../../app/history/HistorySuggestions.tsx', import.meta.url),
       'utf8'
     )
+
+    // Siblings in a stack with no padding, so the offset is the bar's height
+    // and nothing else. Inside the bar it also had to clear the bar's padding,
+    // which is where the gap kept coming back.
+    assert.match(toolbar, /<View style=\{styles\.browserToolbarStack\}>/)
     assert.match(source, /position === 'bottom' \? \{ bottom: offset \} : \{ top: offset \}/)
     assert.match(source, /styles\.attachedBelow : styles\.attachedAbove/)
-    for (const edge of ['attachedBelow', 'attachedAbove']) {
-      assert.ok(source.includes(`${edge}: {`), `${edge} should exist`)
-    }
-    assert.match(source, /borderBottomWidth: 0/)
-    assert.match(source, /borderTopWidth: 0/)
+
+    // Edge to edge, and only the far edge drawn, so it reads as one surface.
+    assert.match(source, /left: 0/)
+    assert.match(source, /right: 0/)
+    assert.doesNotMatch(source, /borderWidth: 1/)
+    assert.match(source, /attachedBelow: \{\n\s+borderBottomLeftRadius: 0,\n\s+borderBottomRightRadius: 0,\n\s+borderTopWidth: 1\n\s+\}/)
+    assert.match(source, /attachedAbove: \{\n\s+borderBottomWidth: 1,\n\s+borderTopLeftRadius: 0,\n\s+borderTopRightRadius: 0\n\s+\}/)
   })
 
   test('the overflow menu sits on the toolbar edge', async () => {
