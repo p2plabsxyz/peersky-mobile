@@ -40,6 +40,8 @@ import {
   RPC_PEERCHAT_ROOMS,
   RPC_PEERCHAT_SNAPSHOT,
   RPC_PEERCHAT_UNBLOCK,
+  RPC_PEERCHAT_ROOM_REMOVE_MEMBER,
+  RPC_PEERCHAT_ROOM_RESTORE_MEMBER,
   RPC_PEERCHAT_SEND,
   RPC_PEERCHAT_ROOM_LEAVE,
   RPC_PEERCHAT_REACT,
@@ -547,6 +549,18 @@ export async function routeRpcRequest (req) {
         ok: true,
         ...peerChat.unblockPeer(parseJsonMessage(req.data))
       })
+      return
+    }
+
+    if (req.command === RPC_PEERCHAT_ROOM_REMOVE_MEMBER) {
+      const peerChat = await getPeerChatService()
+      replyJson(req, await peerChat.removeRoomMember(parseJsonMessage(req.data)))
+      return
+    }
+
+    if (req.command === RPC_PEERCHAT_ROOM_RESTORE_MEMBER) {
+      const peerChat = await getPeerChatService()
+      replyJson(req, await peerChat.restoreRoomMember(parseJsonMessage(req.data)))
       return
     }
 

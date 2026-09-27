@@ -181,3 +181,23 @@ test('creating or joining a room closes the panel behind it', async () => {
     assert.match(body, /setLandingAction\(null\)/, `${name} leaves the panel open`)
   }
 })
+
+// Tapping an invite before setting a name threw the request away: the effect
+// cleared it and then failed the join, so the link did nothing once the welcome
+// screen was finally done with.
+test('an invite tapped without a username waits for the welcome screen', async () => {
+  const screen = await readFile(new URL('../../app/peerchat/PeerChatScreen.tsx', import.meta.url), 'utf8')
+  const effect = screen.slice(
+    screen.indexOf('if (!requestedRoomKey || !isInitialized'),
+    screen.indexOf('void joinRoomByKey(requestedRoomKey)')
+  )
+
+  assert.match(effect, /!profile\?\.username\) return/)
+  // And it runs again once the name is set, or it would wait forever.
+  assert.match(screen, /\[isInitialized, onRequestedRoomHandled, profile\?\.username, requestedRoomKey, rooms\]/)
+
+  // The request is only cleared once it is actually being acted on.
+  const clear = screen.indexOf('onRequestedRoomHandled()')
+  const guard = screen.indexOf('!profile?.username) return')
+  assert.ok(guard > -1 && clear > guard)
+})

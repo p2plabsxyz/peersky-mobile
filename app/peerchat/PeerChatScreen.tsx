@@ -82,6 +82,7 @@ import {
   RPC_PEERCHAT_ROOM_LEAVE,
   RPC_PEERCHAT_ROOM_MUTE,
   RPC_PEERCHAT_ROOM_PIN,
+  RPC_PEERCHAT_ROOM_REMOVE_MEMBER,
   RPC_PEERCHAT_ROOM_UPDATE,
   RPC_PEERCHAT_ROOMS,
   RPC_PEERCHAT_REACT,
@@ -174,6 +175,8 @@ type PeerChatRoom = {
   createdAt: number
   createdBy: string
   createdByName: string
+  isCreator: boolean
+  removedByCreator: boolean
   moderation: PeerChatModeration
   lastMessage: PeerChatLastMessage | null
   peerCount: number
@@ -442,6 +445,9 @@ export function PeerChatScreen ({
   const isDirectMessageBlocked = Boolean(
     activeRoom?.isDM && (activeRoom.blockedByPeer || blockedTheDirectMessage)
   )
+  // Nothing sent from here would be passed on, so the composer says so rather
+  // than letting messages go nowhere.
+  const isRemovedFromRoom = activeRoom?.removedByCreator === true
 
   useEffect(() => {
     callRpcRef.current = onCallRpc
@@ -592,7 +598,11 @@ export function PeerChatScreen ({
   }, [activeRoom])
 
   useEffect(() => {
-    if (!requestedRoomKey || !isInitialized) return
+    // A profile is needed to join anything, so an invite tapped by somebody who
+    // has not set a name waits for the welcome screen rather than being thrown
+    // away. It used to clear the request and then fail the join, which left the
+    // link doing nothing once they were finally through.
+    if (!requestedRoomKey || !isInitialized || !profile?.username) return
     const room = rooms.find((item) => item.roomKey === requestedRoomKey)
     if (room) {
       openRoom(room)
@@ -604,7 +614,7 @@ export function PeerChatScreen ({
     // tapping a link does the whole thing rather than landing on the list.
     onRequestedRoomHandled()
     void joinRoomByKey(requestedRoomKey)
-  }, [isInitialized, onRequestedRoomHandled, requestedRoomKey, rooms])
+  }, [isInitialized, onRequestedRoomHandled, profile?.username, requestedRoomKey, rooms])
 
   useEffect(() => {
     let cancelled = false
@@ -1440,6 +1450,37 @@ export function PeerChatScreen ({
     })
   }
 
+  /**
+   * Removing somebody from a room you made.
+   *
+   * Permanent, and it is the room's decision rather than a private one, which
+   * is why it asks first. Blocking is the private version and stays separate.
+   */
+  function confirmRemoveMember (member: PeerChatMember) {
+    if (!activeRoom || isBusy) return
+    Alert.alert(
+      `Remove ${member.username}?`,
+      'They will not be able to come back to this room. Everyone running PeerChat will stop passing their messages on.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: () => void runAction(async () => {
+            const response = await callRpc(RPC_PEERCHAT_ROOM_REMOVE_MEMBER, {
+              roomKey: activeRoom.roomKey,
+              peerId: member.id
+            })
+            if (!response.ok) throw new Error(response.error || 'Unable to remove this person.')
+            versionRef.current = -1
+            await refreshRoom(true)
+            onStatus(`${member.username} was removed from the room`)
+          })
+        }
+      ]
+    )
+  }
+
   function leaveRoom (room: PeerChatRoom) {
     setRoomActionTarget(null)
     setIsConfirmingRoomLeave(false)
@@ -1902,6 +1943,17 @@ export function PeerChatScreen ({
                     <Text style={[styles.memberMessage, { color: member.self ? colors.muted : colors.accent }]}>
                       {member.self ? 'You' : 'Message'}
                     </Text>
+                    {activeRoom.isCreator && !member.self && (
+                      <Pressable
+                        accessibilityHint={`Removes ${member.username} from this room`}
+                        accessibilityRole='button'
+                        hitSlop={6}
+                        onPress={() => confirmRemoveMember(member)}
+                        style={styles.memberRemove}
+                      >
+                        <Text style={[styles.memberMessage, { color: colors.danger }]}>Remove</Text>
+                      </Pressable>
+                    )}
                   </Pressable>
                 ))}
                 {visibleMembers.length === 0 && (
@@ -1913,6 +1965,12 @@ export function PeerChatScreen ({
             </SafeAreaView>
           </KeyboardAvoidingView>
         </Modal>
+
+        {activeRoom.removedByCreator && (
+          <Text style={[styles.dmStatus, { color: colors.danger, backgroundColor: colors.surface }]}>
+            You were removed from this room by {activeRoom.createdByName || 'whoever made it'}.
+          </Text>
+        )}
 
         {activeRoom.isDM && activeRoom.pendingAcceptance && (
           <Text style={[styles.dmStatus, { color: colors.muted, backgroundColor: colors.surface }]}>Waiting for this peer to accept your message request.</Text>
@@ -2269,7 +2327,7 @@ export function PeerChatScreen ({
           <Pressable
             accessibilityLabel='Choose emoji'
             accessibilityRole='button'
-            disabled={isBusy || activeRoom.pendingAcceptance || activeRoom.rejected || isDirectMessageBlocked}
+            disabled={isBusy || activeRoom.pendingAcceptance || activeRoom.rejected || isDirectMessageBlocked || isRemovedFromRoom}
             onPress={() => {
               setEmojiSearchQuery('')
               setShowComposerEmoji((current) => !current)
@@ -2281,12 +2339,12 @@ export function PeerChatScreen ({
           <Pressable
             accessibilityLabel='Attach file'
             accessibilityRole='button'
-            disabled={isBusy || activeRoom.pendingAcceptance || activeRoom.rejected || isDirectMessageBlocked}
+            disabled={isBusy || activeRoom.pendingAcceptance || activeRoom.rejected || isDirectMessageBlocked || isRemovedFromRoom}
             onPress={attachFile}
             style={[
               styles.attachButton,
               { backgroundColor: colors.input },
-              isBusy || activeRoom.pendingAcceptance || activeRoom.rejected || isDirectMessageBlocked ? styles.disabled : null
+              isBusy || activeRoom.pendingAcceptance || activeRoom.rejected || isDirectMessageBlocked || isRemovedFromRoom ? styles.disabled : null
             ]}
           >
             <Text style={[styles.attachButtonText, { color: colors.accent }]}>+</Text>
@@ -2306,12 +2364,12 @@ export function PeerChatScreen ({
           />
           <Pressable
             accessibilityRole='button'
-            disabled={!composer.trim() || isBusy || activeRoom.pendingAcceptance || activeRoom.rejected || isDirectMessageBlocked}
+            disabled={!composer.trim() || isBusy || activeRoom.pendingAcceptance || activeRoom.rejected || isDirectMessageBlocked || isRemovedFromRoom}
             onPress={sendMessage}
             style={[
               styles.sendButton,
               { backgroundColor: colors.accent },
-              !composer.trim() || isBusy || activeRoom.pendingAcceptance || activeRoom.rejected || isDirectMessageBlocked ? styles.disabled : null
+              !composer.trim() || isBusy || activeRoom.pendingAcceptance || activeRoom.rejected || isDirectMessageBlocked || isRemovedFromRoom ? styles.disabled : null
             ]}
           >
             <SendIcon width={20} height={20} color='#ffffff' />
@@ -3626,6 +3684,10 @@ const PEERCHAT_ABOUT = [
     a: 'Send them the invite link or the room key. Anyone who has it can join, so share it the way you would a house key.'
   },
   {
+    q: 'Can somebody be removed from a room?',
+    a: 'Whoever made the room can remove anyone in it, and nobody else can. It lasts: they cannot come back. Every copy of PeerChat checks the removal came from the person who made the room, by the connection it arrived on, so it cannot be faked. What it cannot do is take the room key back. Somebody removed still has it, and could run a changed app and listen, so removal means every ordinary PeerChat stops passing their messages on rather than a lock they cannot pick. The three-strikes spam and abuse limit is separate, and that one is a five minute pause, not a removal.'
+  },
+  {
     q: 'Can people send anything they like?',
     a: 'Some things are blocked for everyone, with nothing to switch on. Nudity in pictures is refused before it is sent and again when it arrives, covering what you post, your profile picture, a room picture and anything inside a folder you upload. Text is filtered for abuse, slurs and adult links. A link that looks like a scam gets a warning under it. Violent or graphic pictures are not detected, so block and report are what to use for those.'
   },
@@ -4042,6 +4104,7 @@ const styles = StyleSheet.create({
   avatarEditor: { alignItems: 'center', alignSelf: 'flex-start', flexDirection: 'row', gap: 8, minHeight: 38 },
   avatarEditorImage: { borderRadius: 18, height: 36, width: 36 },
   memberList: { gap: 6, marginTop: 2 },
+  memberRemove: { paddingLeft: 10 },
   memberRow: { alignItems: 'center', borderRadius: 10, flexDirection: 'row', gap: 8, minHeight: 46, paddingHorizontal: 9, paddingVertical: 6 },
   memberAvatar: { borderRadius: 16, height: 32, width: 32 },
   memberAvatarWrap: { height: 32, width: 32 },

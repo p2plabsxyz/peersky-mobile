@@ -57,6 +57,10 @@ export const RPC_PEERCHAT_ATTACHMENT_OPEN = 58
 // 59-65 are the hyper offline range, so the PeerChat additions continue at 66.
 export const RPC_PEERCHAT_BLOCK = 66
 export const RPC_PEERCHAT_UNBLOCK = 67
+// Removing somebody from a room, which only the person who made it can do.
+// Blocking above is a private decision; this one is the room's.
+export const RPC_PEERCHAT_ROOM_REMOVE_MEMBER = 71
+export const RPC_PEERCHAT_ROOM_RESTORE_MEMBER = 72
 
 export const RPC_IDENTITY_REMOVE = 68
 

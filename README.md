@@ -31,7 +31,7 @@ A peer-to-peer mobile browser built with [Bare](https://github.com/holepunchto/b
 - Hyper page asset support for CSS, images, scripts, audio, and video.
 - Hyperdrive app for uploading files, fetching or scanning `hyper://` locations, browsing directories, and reopening recent items.
 - Paginated P2P data management for owned app drives and published/fetched Hyper activity, with separate cache and full-data clearing controls.
-- PeerChat rooms and direct messages with encrypted history, reactions, mentions, attachments, link previews, notifications, presence, and locally enforced room moderation.
+- PeerChat rooms and direct messages with encrypted history, reactions, mentions, attachments, link previews, notifications, presence, and locally enforced room moderation. Whoever created a room can remove someone from it permanently; the removal is checked against the creator's public key on the connection it arrives on, and is honoured by every client running PeerChat. It does not revoke the room key, so it is not a cryptographic bar.
 - Encrypted identity transfer from PeerSky Desktop through Hyper.
 - Local app routes for bundled peer-to-peer tools:
   - `peersky://p2p/p2pmd/`

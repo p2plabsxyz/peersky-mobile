@@ -51,6 +51,16 @@ import { notifyApp } from '../rpc/notify.mjs'
 import { attachPeerChatTransport } from './transport.mjs'
 import { createPeerPresence } from './presence.mjs'
 import { collapsePeerChatMembers } from './members.mjs'
+import {
+  acceptsPeerChatCreatorKey,
+  addPeerChatRoomBan,
+  isPeerChatPeerBanned,
+  isPeerChatRoomCreator,
+  normalizePeerChatCreatorKey,
+  normalizePeerChatRoomBans,
+  removePeerChatRoomBan,
+  resolvePeerChatCreatorKey
+} from './room-moderation.mjs'
 import { PRE_JOINED_PEERCHAT_ROOM_KEY } from './rooms.mjs'
 
 const MAX_ROOMS = 50
@@ -85,6 +95,7 @@ export class PeerChatService {
     this.sdk = sdk
     this.storagePath = storagePath
     this.stateFilePath = `${storagePath}/peerchat-mobile.json`
+    this.localKey = sdk.publicKey ? b4a.toString(sdk.publicKey, 'hex').toLowerCase() : ''
     this.localId = sdk.publicKey
       ? b4a.toString(sdk.publicKey, 'hex').slice(0, 8).toLowerCase()
       : 'mobile'
@@ -225,8 +236,12 @@ export class PeerChatService {
       isHost: true,
       createdAt: Date.now(),
       createdBy: this.localId,
+      // The whole key, because the eight characters above are a label and a
+      // removal has to be checked against something that cannot be ground out.
+      creatorKey: this.localKey,
       createdByName: this.profile.username,
       moderation: normalizePeerChatModeration(moderation),
+      bans: [],
       lastMessage: null,
       unreadCount: 0,
       unreadMentions: 0,
@@ -808,6 +823,11 @@ export class PeerChatService {
       id: connection.remotePublicKey
         ? b4a.toString(connection.remotePublicKey, 'hex').slice(0, 8).toLowerCase()
         : 'peer',
+      // The whole key the handshake established. Nothing a peer says about
+      // itself can change this, which is what makes it worth checking against.
+      key: connection.remotePublicKey
+        ? b4a.toString(connection.remotePublicKey, 'hex').toLowerCase()
+        : '',
       rooms: sharedRooms,
       handshake: false,
       buffer: '',
@@ -1094,6 +1114,19 @@ export class PeerChatService {
     if (!roomKey || !peer.rooms.includes(roomKey) || !this.rooms.has(roomKey)) return
     if (this.moderator.isKicked(peer.id, roomKey)) return
 
+    // Removed by whoever made the room. Nothing they send counts, including
+    // the removal list itself, so this sits above the handlers below.
+    if (this.isPeerRemovedFromRoom(roomKey, peer)) return
+
+    // The removal list, from the creator and nobody else. It carries no
+    // message id and no encrypted body, so an older build drops it at its
+    // first check rather than making anything of it.
+    if (message.type === 'room-bans') {
+      if (!this.consumeControlRate(peer)) return
+      this.receiveRoomBans(roomKey, peer, message.bans)
+      return
+    }
+
     // A block only closes direct messages. Shared rooms keep working, so this
     // check is scoped to the one-to-one room rather than the peer.
     const incomingRoom = this.rooms.get(roomKey)
@@ -1148,6 +1181,18 @@ export class PeerChatService {
         }
         if (!room.createdBy && typeof message.createdBy === 'string') {
           room.createdBy = message.createdBy.slice(0, 200)
+          changed = true
+        }
+        // Only from the creator, and only once. The connection is what proves
+        // it: whoever is announcing has to be the key they are announcing.
+        if (acceptsPeerChatCreatorKey({
+          roomKey,
+          storedKey: room.creatorKey,
+          createdBy: room.createdBy,
+          announcedKey: message.creatorKey,
+          connectionKey: peer.key
+        })) {
+          room.creatorKey = normalizePeerChatCreatorKey(message.creatorKey)
           changed = true
         }
         if (!room.createdByName) {
@@ -1216,6 +1261,10 @@ export class PeerChatService {
     }
 
     const room = this.rooms.get(roomKey)
+
+    // A removed person's old messages can still reach us through somebody
+    // else's history sync, which is how they kept appearing after a removal.
+    if (isSync && this.isPeerIdRemovedFromRoom(roomKey, normalizePeerChatPeerId(message.sender))) return
 
     if (typeof message.id !== 'string' || message.id.length > 128 || !this.trackMessageId(message.id)) return
 
@@ -1375,6 +1424,13 @@ export class PeerChatService {
   }
 
   shareRoom (peer, roomKey) {
+    // Before anything else they might act on. If they are the one who was
+    // removed, this is how they find out.
+    this.sendRoomBans(peer, roomKey)
+    if (this.isPeerRemovedFromRoom(roomKey, peer)) {
+      this.disconnectPeer(peer)
+      return
+    }
     this.sendRoomMeta(peer, roomKey)
     this.shareMembers(peer, roomKey)
     this.sendToPeer(peer, {
@@ -1427,6 +1483,9 @@ export class PeerChatService {
       link: room.link || '',
       avatar: room.avatar || null,
       createdBy: room.createdBy || (room.isHost ? this.localId : ''),
+      // Announced by the creator alone. A peer passing this along cannot prove
+      // it, so the other side will not take it from them.
+      creatorKey: room.isHost ? this.localKey : '',
       createdByName: room.createdByName || (room.isHost ? this.profile.username : ''),
       moderation: normalizePeerChatModeration(room.moderation)
     })
@@ -1584,9 +1643,9 @@ export class PeerChatService {
 
   relayToRoom (roomKey, message) {
     for (const peer of this.peers.values()) {
-      if (peer.rooms.includes(roomKey) && !this.sendToPeer(peer, { ...message, roomKey })) {
-        this.disconnectPeer(peer)
-      }
+      if (!peer.rooms.includes(roomKey)) continue
+      if (this.isPeerRemovedFromRoom(roomKey, peer)) continue
+      if (!this.sendToPeer(peer, { ...message, roomKey })) this.disconnectPeer(peer)
     }
   }
 
@@ -1822,6 +1881,9 @@ export class PeerChatService {
       pendingAcceptance: room.pendingAcceptance === true,
       rejected: room.rejected === true,
       isHost: room.isHost === true,
+      isCreator: this.isRoomCreator(room.roomKey),
+      removedByCreator: this.isRemovedFromRoom(room.roomKey),
+      bans: normalizePeerChatRoomBans(room.bans),
       isPinned: room.isPinned === true,
       isMuted: room.isMuted === true,
       createdAt: normalizePeerChatReadTimestamp(room.createdAt),
@@ -1849,6 +1911,168 @@ export class PeerChatService {
       }
     }
     return peerCount > 0 ? 'connected' : 'waiting'
+  }
+
+  /**
+   * Removing people from a room.
+   *
+   * There is no server, so this is what every honest client agrees to do. What
+   * keeps it from being a free-for-all is that hyperswarm's handshake already
+   * told both sides who the other is, so a removal is checked against the
+   * connection it came in on. See room-moderation.mjs.
+   */
+  isRoomCreator (roomKey) {
+    const room = this.rooms.get(roomKey)
+    if (!room) return false
+    const creatorKey = resolvePeerChatCreatorKey(roomKey, room.creatorKey)
+    // A room made before any of this has no key on record. Its host is still
+    // its host locally, which is what lets them fill the key in.
+    return creatorKey ? creatorKey === this.localKey : room.isHost === true
+  }
+
+  isPeerRemovedFromRoom (roomKey, peer) {
+    const room = this.rooms.get(roomKey)
+    if (!room?.bans?.length) return false
+    return isPeerChatPeerBanned(room.bans, { peerId: peer.id, connectionKey: peer.key })
+  }
+
+  /**
+   * By id alone, for the member list and for history somebody else relays.
+   *
+   * Weaker than the connection check: a ban held by key cannot be matched
+   * against an id, so it only catches what the room already knows about them.
+   */
+  isPeerIdRemovedFromRoom (roomKey, peerId) {
+    const room = this.rooms.get(roomKey)
+    if (!room?.bans?.length) return false
+    return isPeerChatPeerBanned(room.bans, { peerId })
+  }
+
+  /**
+   * The line in the room saying somebody was removed.
+   *
+   * Written by each peer that honours the removal rather than relayed, so it
+   * appears exactly where the removal took effect and cannot be forged by
+   * somebody who is not the creator.
+   */
+  async appendRemovalNotice (roomKey, peerId, username) {
+    const name = normalizePeerChatProfileName(username) ||
+      this.rooms.get(roomKey)?.members?.find((member) => member.id === peerId)?.username ||
+      peerId
+    try {
+      await this.appendEntry(roomKey, {
+        id: `removed-${roomKey}-${peerId}-${Date.now()}`,
+        type: 'system',
+        moderationNotice: true,
+        message: `${name} was removed from the room by its creator`,
+        ts: Date.now()
+      })
+    } catch (error) {
+      console.warn('[peerchat] Unable to record a removal:', error)
+    }
+  }
+
+  /** Whether this device is the one that was removed. */
+  isRemovedFromRoom (roomKey) {
+    const room = this.rooms.get(roomKey)
+    if (!room?.bans?.length || this.isRoomCreator(roomKey)) return false
+    return isPeerChatPeerBanned(room.bans, { peerId: this.localId, connectionKey: this.localKey })
+  }
+
+  sendRoomBans (peer, roomKey) {
+    if (!this.isRoomCreator(roomKey)) return
+    const room = this.rooms.get(roomKey)
+    this.sendToPeer(peer, {
+      type: 'room-bans',
+      roomKey,
+      bans: normalizePeerChatRoomBans(room?.bans)
+    })
+  }
+
+  broadcastRoomBans (roomKey) {
+    if (!this.isRoomCreator(roomKey)) return
+    for (const peer of this.peers.values()) {
+      if (peer.rooms.includes(roomKey)) this.sendRoomBans(peer, roomKey)
+    }
+  }
+
+  receiveRoomBans (roomKey, peer, bans) {
+    const room = this.rooms.get(roomKey)
+    if (!room) return
+    // Only the creator, proven by the connection rather than claimed in the
+    // payload. Their list replaces ours outright: they are the record.
+    if (!isPeerChatRoomCreator({
+      roomKey,
+      storedKey: room.creatorKey,
+      connectionKey: peer.key
+    })) return
+
+    const before = new Set(normalizePeerChatRoomBans(room.bans).map((ban) => ban.id))
+    room.bans = normalizePeerChatRoomBans(bans)
+    for (const ban of room.bans) {
+      if (before.has(ban.id)) continue
+      this.appendRemovalNotice(roomKey, ban.id, '').catch(() => {})
+    }
+    // Anyone the creator has let back in stops being filtered out of the list.
+    room.members = (room.members || []).filter((member) => (
+      !isPeerChatPeerBanned(room.bans, { peerId: member.id })
+    ))
+    this.enforceRoomBans(roomKey)
+    this.persistNow()
+    this.bumpVersion()
+  }
+
+  /** Drop anyone in the room who is no longer welcome in it. */
+  enforceRoomBans (roomKey) {
+    for (const other of [...this.peers.values()]) {
+      if (!other.rooms.includes(roomKey)) continue
+      if (this.isPeerRemovedFromRoom(roomKey, other)) this.disconnectPeer(other)
+    }
+  }
+
+  async removeRoomMember ({ roomKey, peerId }) {
+    const normalized = normalizePeerChatRoomKey(roomKey)
+    const room = this.rooms.get(normalized)
+    if (!room) throw new Error('PeerChat room not found.')
+    if (room.isDM) throw new Error('There is nobody to remove from a direct message.')
+    if (!this.isRoomCreator(normalized)) {
+      throw new Error('Only the person who made this room can remove people from it.')
+    }
+
+    const id = normalizePeerChatPeerId(peerId)
+    if (!id) throw new Error('Invalid PeerChat member.')
+    if (id === this.localId) throw new Error('You cannot remove yourself from your own room.')
+
+    // Their full key if they are here to take it from, so the removal catches
+    // that person rather than anyone sharing their first eight characters.
+    const connected = [...this.peers.values()]
+      .find((peer) => peer.id === id && peer.rooms.includes(normalized))
+    const name = (room.members || []).find((member) => member.id === id)?.username ||
+      connected?.username || id
+    room.bans = addPeerChatRoomBan(room.bans, { id, key: connected?.key || '' })
+    room.members = (room.members || []).filter((member) => member.id !== id)
+
+    await this.appendRemovalNotice(normalized, id, name)
+    this.enforceRoomBans(normalized)
+    this.broadcastRoomBans(normalized)
+    this.persistNow()
+    this.bumpVersion()
+    return { ok: true }
+  }
+
+  async restoreRoomMember ({ roomKey, peerId }) {
+    const normalized = normalizePeerChatRoomKey(roomKey)
+    const room = this.rooms.get(normalized)
+    if (!room) throw new Error('PeerChat room not found.')
+    if (!this.isRoomCreator(normalized)) {
+      throw new Error('Only the person who made this room can let people back in.')
+    }
+
+    room.bans = removePeerChatRoomBan(room.bans, peerId)
+    this.broadcastRoomBans(normalized)
+    this.persistNow()
+    this.bumpVersion()
+    return { ok: true }
   }
 
   countRoomPeers (roomKey) {
@@ -1900,6 +2124,15 @@ export class PeerChatService {
       })
       if (members.size >= MAX_RETURNED_ROOM_MEMBERS) break
     }
+    // Someone removed is not in the room, so they are not in its list. Without
+    // this they came straight back: the list is rebuilt from what peers relay,
+    // and deleting the stored entry only lasted until the next member list
+    // arrived from somebody else.
+    for (const [id, member] of members) {
+      if (member.self) continue
+      if (this.isPeerIdRemovedFromRoom(roomKey, id)) members.delete(id)
+    }
+
     // Someone mid-redial is still here as far as the room is concerned, so
     // their dot does not blink off and on again.
     for (const member of members.values()) {
@@ -2024,6 +2257,13 @@ export class PeerChatService {
           createdAt: Number.isFinite(value?.createdAt) ? value.createdAt : Date.now(),
           joinedAt: Number.isFinite(value?.joinedAt) ? value.joinedAt : Date.now(),
           createdBy: typeof value?.createdBy === 'string' ? value.createdBy.slice(0, 200) : '',
+          // A room made before any of this has no creator key on record. The
+          // device that made it is the one device that can fill that in from
+          // its own key, which is what lets an existing room be moderated at
+          // all, P2P Republic included.
+          creatorKey: normalizePeerChatCreatorKey(value?.creatorKey) ||
+            (value?.isHost === true && !isDM ? this.localKey : ''),
+          bans: isDM ? [] : normalizePeerChatRoomBans(value?.bans),
           createdByName: normalizePeerChatProfileName(value?.createdByName),
           moderation: isDM
             ? { ...DEFAULT_PEERCHAT_MODERATION }
