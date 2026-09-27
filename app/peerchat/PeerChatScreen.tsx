@@ -304,6 +304,15 @@ const SHEET_HANDOVER_MS = 450
 const CHAT_HEADER_ICON_SIZE = 20
 const ROOM_STATE_ICON_SIZE = 13
 const AUTO_INLINE_MEDIA_MAX_BYTES = 100 * 1024 * 1024
+/**
+ * Pictures the reader has chosen to see despite the screen hiding them.
+ *
+ * Outside the component on purpose. A row scrolling out of the list unmounts
+ * it, and the decision has to outlive that, otherwise the picture comes back
+ * hidden and has to be revealed again. Keyed by the attachment address, which
+ * is unique per file and is what the screen ran against.
+ */
+const revealedAttachments = new Set<string>()
 
 export function PeerChatScreen ({
   isDark,
@@ -3285,7 +3294,7 @@ function PeerChatAttachment ({
   const [isScreening, setIsScreening] = useState(false)
   // Hiding it is a warning, not a verdict. The classifier is wrong often
   // enough that someone who wants to look has to be able to.
-  const [isRevealed, setIsRevealed] = useState(false)
+  const [isRevealed, setIsRevealed] = useState(() => revealedAttachments.has(item.message))
 
   // Screening what arrived, not only what is sent. The sending side can be
   // stripped out by anyone running a modified build, which is exactly why the
@@ -3296,6 +3305,9 @@ function PeerChatAttachment ({
     // player down and rebuilt it mid-render: "Cannot use shared object that
     // was already released".
     if (!mediaUrl || item.self || mediaKind !== 'image') return
+    // Already asked for and answered. Running it again only puts "Checking
+    // this picture" back over a picture the reader is looking at.
+    if (revealedAttachments.has(item.message)) return
     let cancelled = false
     setIsScreening(true)
     void scanMedia({ uri: mediaUrl, mimeType: getPeerChatAttachmentMimeType(item.fileName || ''), size: item.fileSize })
@@ -3305,7 +3317,7 @@ function PeerChatAttachment ({
         setIsScreening(false)
       })
     return () => { cancelled = true }
-  }, [mediaUrl, item.self, item.fileName, item.fileSize, mediaKind])
+  }, [mediaUrl, item.self, item.message, item.fileName, item.fileSize, mediaKind])
 
   useEffect(() => {
     if (!canPreview || !mediaKind) return
@@ -3373,7 +3385,10 @@ function PeerChatAttachment ({
           <Pressable
             accessibilityHint='Shows a picture the check hid'
             accessibilityRole='button'
-            onPress={() => setIsRevealed(true)}
+            onPress={() => {
+              revealedAttachments.add(item.message)
+              setIsRevealed(true)
+            }}
             style={({ pressed }) => [styles.mediaNoticeAction, pressed ? styles.disabled : null]}
           >
             <Text style={[styles.mediaNoticeActionText, { color: colors.accent }]}>Show anyway</Text>

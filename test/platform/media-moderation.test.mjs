@@ -505,7 +505,7 @@ test('a hidden picture can still be opened by whoever wants to', async () => {
   // Hiding it is a warning, not a verdict: the classifier is wrong often
   // enough that a reader has to be able to look.
   assert.match(screen, /isExplicit && !isRevealed/)
-  assert.match(screen, /onPress=\{\(\) => setIsRevealed\(true\)\}/)
+  assert.match(screen, /setIsRevealed\(true\)/)
   assert.match(screen, /Show anyway/)
 })
 
@@ -520,4 +520,22 @@ test('a pick that never came back does not disable attaching for good', async ()
   // And a picker that never appeared is given up on rather than waited on.
   assert.match(gate, /PICK_TIMEOUT_MS = 2 \* 60 \* 1000/)
   assert.equal(gate.split('setTimeout(() => abandonPick?.(), PICK_TIMEOUT_MS)').length - 1, 2)
+})
+
+// Revealing flickered and had to be done twice: the row unmounts when it
+// scrolls out of the list, and the screen ran again on the way back, so the
+// picture returned hidden and the decision was lost.
+test('a picture the reader opened stays open', async () => {
+  const screen = await readFile(new URL('../../app/peerchat/PeerChatScreen.tsx', import.meta.url), 'utf8')
+
+  // Outside the component, so a remount cannot forget it.
+  assert.match(screen, /const revealedAttachments = new Set<string>\(\)/)
+  const component = screen.slice(screen.indexOf('function PeerChatAttachment ('))
+  assert.doesNotMatch(component, /const revealedAttachments/)
+
+  assert.match(screen, /useState\(\(\) => revealedAttachments\.has\(item\.message\)\)/)
+  assert.match(screen, /revealedAttachments\.add\(item\.message\)/)
+  // And it is not screened again, which is what put "Checking this picture"
+  // back over a picture already on screen.
+  assert.match(screen, /if \(revealedAttachments\.has\(item\.message\)\) return/)
 })
