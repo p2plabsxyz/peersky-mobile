@@ -11,6 +11,7 @@ import {
   parsePeerTunesScanRequest,
   serializeScanResult
 } from './peertunes-screen.mjs'
+import { MODAL_ORIENTATIONS } from '../modal-orientations'
 
 type Props = {
   error: string | null
@@ -151,6 +152,7 @@ export function PeerTunesScreen ({
       }}
     />
     <Modal
+      supportedOrientations={MODAL_ORIENTATIONS}
       animationType='fade'
       onRequestClose={() => finishScan(null)}
       visible={scanRequestId !== null}

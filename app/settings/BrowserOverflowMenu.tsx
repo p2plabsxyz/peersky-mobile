@@ -13,6 +13,7 @@ import StarFillIcon from '../../assets/icons/bootstrap/star-fill.svg'
 import StarIcon from '../../assets/icons/bootstrap/star.svg'
 import ZoomIcon from '../../assets/icons/bootstrap/zoom-in.svg'
 import { BROWSER_PALETTES } from '../browser-appearance.mjs'
+import { MODAL_ORIENTATIONS } from '../modal-orientations'
 
 const MENU_ICON_SIZE = 18
 const QUICK_ACTION_ICON_SIZE = 22
@@ -71,9 +72,13 @@ export function BrowserOverflowMenu ({
   const insets = useSafeAreaInsets()
   const iconColor = isDark ? BROWSER_PALETTES.dark.mutedText : BROWSER_PALETTES.light.text
   const menuEdge = 12 + insets.right
+  // Flush against the toolbar, with the touching edge square and unbordered,
+  // so the menu reads as the three dots opening out rather than a card that
+  // happens to be nearby.
   const menuPosition = position === 'bottom'
     ? { bottom: offset + insets.bottom }
     : { top: offset + insets.top }
+  const menuAttachment = position === 'bottom' ? styles.attachedBelow : styles.attachedAbove
   const menuMaxHeight = Math.max(
     180,
     windowHeight - offset - insets.top - insets.bottom - 20
@@ -109,6 +114,7 @@ export function BrowserOverflowMenu ({
       </Pressable>
 
       <Modal
+        supportedOrientations={MODAL_ORIENTATIONS}
         animationType='fade'
         transparent={true}
         visible={visible}
@@ -122,6 +128,7 @@ export function BrowserOverflowMenu ({
             style={[
             styles.menu,
             menuPosition,
+            menuAttachment,
             { maxHeight: menuMaxHeight, right: menuEdge },
             isDark ? darkStyles.menu : null
           ]}
@@ -331,6 +338,17 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.2,
     shadowRadius: 10
+  },
+  // The edge that meets the toolbar.
+  attachedBelow: {
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
+    borderBottomWidth: 0
+  },
+  attachedAbove: {
+    borderTopLeftRadius: 0,
+    borderTopRightRadius: 0,
+    borderTopWidth: 0
   },
   quickActions: {
     borderBottomColor: '#e7ebf1',

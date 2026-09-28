@@ -38,11 +38,24 @@ export function normalizePeerChatPeerId (value) {
   return PEER_ID_PATTERN.test(peerId) ? peerId.toLowerCase() : ''
 }
 
-export function derivePeerChatDirectRoomKey (firstPeerId, secondPeerId) {
-  const first = normalizePeerChatPeerId(firstPeerId)
-  const second = normalizePeerChatPeerId(secondPeerId)
-  if (!first || !second || first === second) throw new Error('Invalid PeerChat direct-message peers')
-  return createHash('sha256').update([first, second].sort().join(':dm:')).digest('hex')
+/**
+ * The earliest creation time anybody in a room reports for it.
+ *
+ * Nothing used to share this, so every device stamped the moment it joined and
+ * a room whose messages start in April read as created in September on a phone
+ * that arrived then. A room cannot have been created after the first person who
+ * was in it, so the earliest plausible answer wins and everyone converges on it
+ * without anything being hardcoded.
+ *
+ * A time in the future is nonsense and is ignored, which is also what stops a
+ * peer with a wrong clock dragging the date forward.
+ */
+export function earliestPeerChatRoomCreatedAt (current, announced, now = Date.now()) {
+  const currentAt = Number.isSafeInteger(current) && current > 0 ? current : 0
+  const announcedAt = Number.isSafeInteger(announced) && announced > 0 ? announced : 0
+  if (!announcedAt || announcedAt > now) return currentAt
+  if (!currentAt) return announcedAt
+  return Math.min(currentAt, announcedAt)
 }
 
 export function normalizePeerChatProfileName (value) {

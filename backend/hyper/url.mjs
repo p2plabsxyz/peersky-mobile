@@ -27,6 +27,41 @@ export function parseHyperUrl (url) {
   }
 }
 
+/**
+ * The query a hyper:// address carries, if any.
+ *
+ * parseHyperUrl reports the drive and the path and drops everything else, which
+ * is right for reading a page. Writing needs the query kept: creating a named
+ * drive is "hyper://localhost/?key=myapp" and without the key it is a request
+ * for something else entirely.
+ */
+export function getHyperSearch (url) {
+  try {
+    const { search } = new URL(url)
+    // Only what a query can legitimately hold, so nothing smuggles a newline
+    // or a control character into the request line.
+    return /^\??[\w\-.~%!$&'()*+,;=:@/?]*$/.test(search) ? search : ''
+  } catch {
+    return ''
+  }
+}
+
+/**
+ * What a write address asked to be stored as: '', 'public', 'private' or
+ * 'device'.
+ *
+ * The Hyperdrive page sends this alongside the key. Private and device-only
+ * drives live in their own storage, which the page write path does not reach,
+ * so this is what lets it refuse rather than quietly publish.
+ */
+export function getHyperVisibility (url) {
+  try {
+    return (new URL(url).searchParams.get('visibility') || '').trim().toLowerCase()
+  } catch {
+    return ''
+  }
+}
+
 export function createHyperUrl (driveAddress, pathname) {
   const encodedPath = pathname
     .split('/')

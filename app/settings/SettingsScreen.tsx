@@ -66,6 +66,7 @@ import TrashIcon from '../../assets/icons/bootstrap/trash.svg'
 import UniversalAccessIcon from '../../assets/icons/bootstrap/universal-access-circle.svg'
 import DisplayIcon from '../../assets/icons/bootstrap/display.svg'
 import DatabaseIcon from '../../assets/icons/bootstrap/database.svg'
+import { MODAL_ORIENTATIONS } from '../modal-orientations'
 
 export type SettingsPage =
   | 'main'
@@ -153,6 +154,9 @@ type LANDiscoveryStatus = {
 type SettingsScreenProps = {
   addressBarPosition: AddressBarPosition
   initialPage?: SettingsPage
+  // Lets the back gesture and the Android button step out of a subpage the way
+  // its own back arrow does, instead of closing settings from inside one.
+  registerGoBack?: (handler: (() => boolean) | null) => void
   contentBlockingEnabled: boolean
   customSearchUrl: string
   downloadOnlyOnWifi: boolean
@@ -280,6 +284,9 @@ export function SettingsScreen(props: SettingsScreenProps) {
   const [transitionDirection, setTransitionDirection] = useState(1)
   const reduceMotion = useReducedMotion()
   const transition = useRef(new Animated.Value(1)).current
+  const pageRef = useRef(page)
+  pageRef.current = page
+  const { registerGoBack } = props
   let content
 
   if (page === 'main') {
@@ -333,6 +340,22 @@ export function SettingsScreen(props: SettingsScreenProps) {
     animation.start()
     return () => animation.stop()
   }, [page, reduceMotion, transition])
+
+  // P2P data and every other subpage sits inside this screen, so going back
+  // from one used to close settings altogether and land on the page behind it.
+  const goBackOnePage = useCallback(() => {
+    if (pageRef.current === 'main') return false
+    transition.stopAnimation()
+    transition.setValue(reduceMotion ? 1 : 0)
+    setTransitionDirection(-1)
+    setPage('main')
+    return true
+  }, [reduceMotion, transition])
+
+  useEffect(() => {
+    registerGoBack?.(goBackOnePage)
+    return () => registerGoBack?.(null)
+  }, [goBackOnePage, registerGoBack])
 
   function changePage(nextPage: SettingsPage, direction: number) {
     if (nextPage === page) return
@@ -771,7 +794,7 @@ function LinkDeviceSettings({
         </View>
       </SettingsSection>
 
-      <Modal visible={isScanning} animationType='slide' onRequestClose={() => setIsScanning(false)}>
+      <Modal supportedOrientations={MODAL_ORIENTATIONS} visible={isScanning} animationType='slide' onRequestClose={() => setIsScanning(false)}>
         <View style={styles.scannerContainer}>
           {isScanning && (
             <CameraView

@@ -1,4 +1,5 @@
 import * as DocumentPicker from 'expo-document-picker'
+import * as ImagePicker from 'expo-image-picker'
 import { Directory, File, Paths } from 'expo-file-system'
 import { AppState } from 'react-native'
 
@@ -22,6 +23,14 @@ export type UploadAsset = {
 
 export type UploadScanner = (asset: UploadAsset) => Promise<string>
 
+/**
+ * Where a batch came from. The Files browser cannot reach the camera roll on
+ * iOS, so "attach" used to mean "open Files" and a photo took several taps
+ * through the Photos app to reach. P2PMD gets all three for free because its
+ * picker is a web file input and iOS draws that sheet itself.
+ */
+export type UploadSource = 'files' | 'library' | 'camera'
+
 let scanner: UploadScanner | null = null
 
 // Leaving the app while the picker is open means its result never arrives, and
@@ -29,7 +38,26 @@ let scanner: UploadScanner | null = null
 // stays busy, which hides the attach button behind its own spinner. Coming back
 // to the app is the signal to give up on it.
 const ABANDONED_PICK_GRACE_MS = 2000
+// And a picker that never appeared at all never answers either, and the app
+// never left the foreground for the listener below to notice. Long enough that
+// nobody browsing their photo library trips it, short enough that a session
+// recovers instead of leaving the attach button disabled for good.
+const PICK_TIMEOUT_MS = 2 * 60 * 1000
 let abandonPick: (() => void) | null = null
+
+/**
+ * Gives up on whatever pick is still waiting, so a new one can run.
+ *
+ * This used to refuse instead, which is right while a picker is genuinely on
+ * screen and wrong once one has wedged: every later attach became a silent
+ * no-op for the rest of the session. Nothing can start a second pick while the
+ * first is really open, because the button that starts it is disabled.
+ */
+function supersedePendingPick () {
+  const stale = abandonPick
+  abandonPick = null
+  stale?.()
+}
 
 AppState.addEventListener('change', (state) => {
   if (state !== 'active' || !abandonPick) return
@@ -41,14 +69,49 @@ AppState.addEventListener('change', (state) => {
   }, ABANDONED_PICK_GRACE_MS)
 })
 
+async function pickImages (
+  source: 'library' | 'camera',
+  multiple: boolean
+): Promise<ImagePicker.ImagePickerResult | null> {
+  supersedePendingPick()
+
+  if (source === 'camera') {
+    const permission = await ImagePicker.requestCameraPermissionsAsync()
+    if (!permission.granted) throw new Error('PeerSky needs camera access to take a photo.')
+  }
+
+  const options: ImagePicker.ImagePickerOptions = {
+    allowsMultipleSelection: source === 'library' && multiple,
+    mediaTypes: ['images', 'videos'],
+    quality: 1
+  }
+
+  let timer: ReturnType<typeof setTimeout> | null = null
+  try {
+    return await new Promise<ImagePicker.ImagePickerResult | null>((resolve, reject) => {
+      abandonPick = () => resolve(null)
+      timer = setTimeout(() => abandonPick?.(), PICK_TIMEOUT_MS)
+      const launch = source === 'camera'
+        ? ImagePicker.launchCameraAsync(options)
+        : ImagePicker.launchImageLibraryAsync(options)
+      launch.then(resolve, reject)
+    })
+  } finally {
+    if (timer) clearTimeout(timer)
+    abandonPick = null
+  }
+}
+
 // Android rejects a second pick outright, so this keeps the two in step rather
 // than letting the native error reach the user.
 async function pickDocuments (options: DocumentPicker.DocumentPickerOptions) {
-  if (abandonPick) return null
+  supersedePendingPick()
 
+  let timer: ReturnType<typeof setTimeout> | null = null
   try {
     return await new Promise<DocumentPicker.DocumentPickerResult | null>((resolve, reject) => {
       abandonPick = () => resolve(null)
+      timer = setTimeout(() => abandonPick?.(), PICK_TIMEOUT_MS)
       DocumentPicker.getDocumentAsync(options).then(resolve, reject)
     })
   } catch (error) {
@@ -58,6 +121,7 @@ async function pickDocuments (options: DocumentPicker.DocumentPickerOptions) {
     if (/document picking in progress/i.test(message)) return null
     throw error
   } finally {
+    if (timer) clearTimeout(timer)
     abandonPick = null
   }
 }
@@ -189,10 +253,36 @@ export async function pickUploadFolder (): Promise<UploadAsset[]> {
  * Returns an empty array when the picker was cancelled. Throws with a sentence
  * worth showing when a file is refused.
  */
+/**
+ * @param screen Whether to run the classifier over the batch. A direct message
+ *   goes to one person who can block the sender, so screening it protects
+ *   nobody: the safeguard exists for rooms, where a picture lands in front of
+ *   everyone at once before anyone can act.
+ */
 export async function pickUploads ({
   multiple = false,
+  screen = true,
+  source = 'files',
   type
-}: { multiple?: boolean, type?: string | string[] } = {}): Promise<UploadAsset[]> {
+}: {
+  multiple?: boolean
+  screen?: boolean
+  source?: UploadSource
+  type?: string | string[]
+} = {}): Promise<UploadAsset[]> {
+  const picked = source === 'files'
+    ? await pickFromFiles(multiple, type)
+    : await pickFromPhotos(source, multiple)
+  if (picked.length === 0) return []
+
+  if (isTooManyFiles(picked.length)) {
+    throw new Error(describeTooManyFiles(picked.length, MAX_UPLOAD_BATCH))
+  }
+
+  return screen ? await screenAssets(picked) : picked
+}
+
+async function pickFromFiles (multiple: boolean, type?: string | string[]): Promise<UploadAsset[]> {
   const selection = await pickDocuments({
     copyToCacheDirectory: true,
     multiple,
@@ -200,11 +290,7 @@ export async function pickUploads ({
   })
   if (!selection || selection.canceled || !selection.assets?.length) return []
 
-  if (isTooManyFiles(selection.assets.length)) {
-    throw new Error(describeTooManyFiles(selection.assets.length, MAX_UPLOAD_BATCH))
-  }
-
-  const assets: UploadAsset[] = selection.assets.map((asset) => {
+  return selection.assets.map((asset) => {
     const file = new File(asset.uri)
     const size = asset.size ?? file.size
     if (!Number.isSafeInteger(size) || !size) throw new Error('Choose a non-empty file.')
@@ -215,7 +301,38 @@ export async function pickUploads ({
       mimeType: asset.mimeType || ''
     }
   })
+}
 
+async function pickFromPhotos (
+  source: 'library' | 'camera',
+  multiple: boolean
+): Promise<UploadAsset[]> {
+  const selection = await pickImages(source, multiple)
+  if (!selection || selection.canceled || !selection.assets?.length) return []
+
+  return selection.assets.map((asset) => {
+    const file = new File(asset.uri)
+    const size = asset.fileSize ?? file.size
+    if (!Number.isSafeInteger(size) || !size) throw new Error('Choose a non-empty file.')
+    return {
+      uri: file.uri,
+      // The camera roll does not always hand over a name, and a photo with no
+      // name arrives in the room as "undefined".
+      name: asset.fileName || nameFromUri(file.uri, asset.mimeType),
+      size,
+      mimeType: asset.mimeType || ''
+    }
+  })
+}
+
+function nameFromUri (uri: string, mimeType?: string) {
+  const fromPath = uri.split(/[?#]/, 1)[0].split('/').pop() || ''
+  if (fromPath.includes('.')) return fromPath
+  const extension = String(mimeType || '').split('/')[1] || 'jpg'
+  return `${fromPath || 'photo'}.${extension.split('+')[0]}`
+}
+
+async function screenAssets (assets: UploadAsset[]): Promise<UploadAsset[]> {
   const screened = await Promise.all(assets.map(async (asset) => ({
     fileName: asset.name,
     verdict: await scanAsset(asset)

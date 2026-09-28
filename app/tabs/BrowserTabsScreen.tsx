@@ -24,6 +24,7 @@ import ListIcon from '../../assets/icons/bootstrap/list-ul.svg'
 import PlusIcon from '../../assets/icons/bootstrap/plus-lg.svg'
 import CloseIcon from '../../assets/icons/bootstrap/x-lg.svg'
 import { isHorizontalSwipe, shouldCloseOnRelease } from './tab-swipe.mjs'
+import { MODAL_ORIENTATIONS } from '../modal-orientations'
 
 const TAB_ACTION_ICON_SIZE = 21
 const TAB_ACTION_ICON_STROKE_WIDTH = 0.35
@@ -106,6 +107,7 @@ export function BrowserTabsScreen ({
 
   return (
     <Modal
+      supportedOrientations={MODAL_ORIENTATIONS}
       animationType='slide'
       visible={visible}
       onRequestClose={onClose}

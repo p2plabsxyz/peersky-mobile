@@ -44,6 +44,7 @@ import {
   loadHyperdriveRecents,
   persistHyperdriveRecents
 } from './recents-store'
+import { MODAL_ORIENTATIONS } from '../modal-orientations'
 
 const hyperdriveIcon = require('../../assets/images/hyperdrive.png')
 
@@ -622,7 +623,7 @@ export function HyperdriveScreen ({ offlineNetworkAllowed, isDark, isLandscape, 
           </ScrollView>
           )}
 
-      <Modal visible={isScanning} animationType='fade' onRequestClose={() => setIsScanning(false)}>
+      <Modal supportedOrientations={MODAL_ORIENTATIONS} visible={isScanning} animationType='fade' onRequestClose={() => setIsScanning(false)}>
         <View style={styles.scanner}>
           {isScanning && (
             <CameraView

@@ -32,7 +32,8 @@
         "NSMicrophoneUsageDescription": "PeerSky uses the microphone only when a website you visit requests it and you allow access.",
         "UIBackgroundModes": [
           "audio"
-        ]
+        ],
+        "NSPhotoLibraryUsageDescription": "PeerSky uses your photo library so you can attach a picture or video to a chat message or a note."
       }
     },
     "android": {

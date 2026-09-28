@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict'
 import { createCipheriv, createDecipheriv, createHash } from 'node:crypto'
+import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
 import b4a from 'b4a'
 
 import {
   decryptPeerChatMessage,
-  derivePeerChatDirectRoomKey,
   derivePeerChatTopic,
   encryptPeerChatMessage,
   getSharedPeerChatRooms,
@@ -130,12 +130,15 @@ test('PeerChat sanitizes bounded profile and room metadata', () => {
   assert.equal(normalizePeerChatAvatar('data:text/html;base64,YQ=='), null)
 })
 
-test('PeerChat derives desktop-compatible direct-message room keys', () => {
-  const first = '1234abcd'
-  const second = '9876fedc'
-  const expected = createHash('sha256').update(`${first}:dm:${second}`).digest('hex')
-  assert.equal(derivePeerChatDirectRoomKey(second, first), expected)
-  assert.throws(() => derivePeerChatDirectRoomKey(first, first), /Invalid PeerChat direct-message peers/)
+// A direct-message key used to be sha256 of the two peer ids. Those are public,
+// so anybody who knew both could derive it and read the conversation. There is
+// no derivation left: a key is minted and handed over on the connection.
+test('PeerChat has no way to compute a direct-message key from public ids', async () => {
+  const protocol = await import('../../backend/peerchat/protocol.mjs')
+  assert.equal(protocol.derivePeerChatDirectRoomKey, undefined)
+
+  const source = await readFile(new URL('../../backend/peerchat/protocol.mjs', import.meta.url), 'utf8')
+  assert.doesNotMatch(source, /:dm:/)
 })
 
 test('PeerChat AES-GCM payloads use the separated desktop message-key derivation', () => {

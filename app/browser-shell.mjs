@@ -30,6 +30,24 @@ export function normalizeBrowserAddress (
   return `https://${value}`
 }
 
+/**
+ * A drive address that lists what is in it instead of resolving to a page.
+ *
+ * hypercore-fetch serves index.html for a directory that has one, which is
+ * right for visiting a site and wrong for "show me this drive". P2PMD publishes
+ * a note as index.html, so opening its app data opened the note rather than the
+ * files behind it.
+ */
+export function getHyperDriveListingUrl (url) {
+  const value = String(url || '')
+  if (!isHyperUrl(value) || /[?&]noResolve(?:[=&]|$)/i.test(value)) return value
+
+  const hashIndex = value.indexOf('#')
+  const address = hashIndex === -1 ? value : value.slice(0, hashIndex)
+  const fragment = hashIndex === -1 ? '' : value.slice(hashIndex)
+  return `${address}${address.includes('?') ? '&' : '?'}noResolve${fragment}`
+}
+
 export function getSearchUrl (searchEngine, query, customSearchUrl = '') {
   const encodedQuery = encodeURIComponent(String(query || ''))
   const normalizedCustomUrl = normalizeCustomSearchUrl(customSearchUrl)

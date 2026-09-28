@@ -187,7 +187,9 @@ test('a file pick abandoned by leaving the app does not wedge the screen', async
 
   // Android rejects a second pick outright; the user can do nothing with that.
   assert.match(gate, /document picking in progress/i)
-  assert.match(gate, /if \(abandonPick\) return null/)
+  // A pick still outstanding is given up on rather than blocking the new one.
+  // See the wedged-picker test further down for why refusing was worse.
+  assert.match(gate, /supersedePendingPick\(\)/)
 })
 
 test('the classifier page is served from a file and says whether it started', async () => {
@@ -246,8 +248,9 @@ test('what arrives is screened too, not only what is sent', async () => {
   // Your own upload was already screened on the way out.
   assert.match(attachment, /if \(!mediaUrl \|\| item\.self \|\| mediaKind !== 'image'\) return/)
 
-  // The picture must not render while the verdict is still outstanding.
-  assert.match(screen, /if \(mediaUrl && mediaKind === 'image' && \(isScreening \|\| isExplicit\)\)/)
+  // The picture must not render while the verdict is still outstanding, nor
+  // once it came back explicit unless the reader asked to see it anyway.
+  assert.match(screen, /if \(mediaUrl && mediaKind === 'image' && \(isScreening \|\| \(isExplicit && !isRevealed\)\)\)/)
   assert.match(screen, /Hidden: this looks explicit/)
 })
 
@@ -260,11 +263,13 @@ test('an attachment upload can never lock the composer forever', async () => {
   assert.match(screen, /Promise\.race\(/)
   assert.match(screen, /withUploadTimeout\(callRpc\(RPC_PEERCHAT_ATTACHMENT_UPLOAD/)
 
-  // Generous, so a legitimately slow large video is not cut off.
-  const timeout = screen.match(/UPLOAD_TIMEOUT_MS = ([^\n]+)/)
-  assert.ok(timeout)
-  // eslint-disable-next-line no-new-func
-  assert.ok(Function(`return (${timeout[1]})`)() >= 120000, 'too short would cut a real upload')
+  // Generous, and generous in proportion to the file, so a real two hour film
+  // is not cut off part way through being sealed and written.
+  const { UPLOAD_TIMEOUT_MS, getPeerChatUploadTimeout } =
+    await import('../../app/peerchat/attachment-timeout.mjs')
+  assert.ok(UPLOAD_TIMEOUT_MS >= 120000, 'too short would cut a real upload')
+  assert.match(screen, /getPeerChatUploadTimeout\(byteLength\)/)
+  assert.ok(getPeerChatUploadTimeout(1024 * 1024 * 1024) > UPLOAD_TIMEOUT_MS)
 })
 
 test('the media viewer close button clears the Dynamic Island', async () => {
@@ -381,18 +386,25 @@ test('a folder walk is bounded in both depth and count', async () => {
 })
 
 test('the backend opens staged folder files and nothing else', async () => {
+  // One definition now, shared by Hyperdrive uploads and PeerChat attachments,
+  // because two copies drifted the moment the camera roll was added.
+  const localFile = await readFile(new URL('../../backend/hyper/local-file.mjs', import.meta.url), 'utf8')
   const library = await readFile(new URL('../../backend/hyper/library.mjs', import.meta.url), 'utf8')
+  const attachments = await readFile(new URL('../../backend/peerchat/attachments.mjs', import.meta.url), 'utf8')
   const gate = await readFile(new URL('../../app/media/upload-gate.ts', import.meta.url), 'utf8')
+
+  assert.match(library, /normalizePickedLocalFile\(fileUri, byteLength\)/)
+  assert.match(attachments, /normalizePickedLocalFile\(fileUri, byteLength\)/)
 
   // The originals live outside the sandbox, and on Android behind a content
   // uri the backend cannot open, so a folder stages its files first.
   const staging = gate.match(/STAGING_FOLDER = '([\w-]+)'/)
   assert.ok(staging)
-  assert.ok(library.includes(`documentpicker|${staging[1]}`), 'the backend must accept the staging folder')
+  assert.ok(localFile.includes(`'${staging[1]}'`), 'the backend must accept the staging folder')
 
-  // And still nothing outside those two.
-  assert.match(library, /parsed\.protocol !== 'file:'/)
-  assert.match(library, /segment === '\.\.'/)
+  // And still nothing outside the picker caches.
+  assert.match(localFile, /parsed\.protocol !== 'file:'/)
+  assert.match(localFile, /segment === '\.\.'/)
 })
 
 test('Hyperdrive routes a folder through the same gate as files', async () => {
@@ -460,6 +472,70 @@ test('video is never put through the image screen', async () => {
   // Worse, flipping isScreening rebuilt the video player mid-render and the
   // native object was already released.
   assert.match(screen, /item\.self \|\| mediaKind !== 'image'\) return/)
-  assert.match(screen, /mediaKind === 'image' && \(isScreening \|\| isExplicit\)/)
-  assert.doesNotMatch(screen, /mediaKind && \(isScreening \|\| isExplicit\)/)
+  assert.match(screen, /mediaKind === 'image' && \(isScreening \|\|/)
+  assert.doesNotMatch(screen, /mediaKind && \(isScreening \|\|/)
+})
+
+// The attach button stayed disabled with nothing on screen: iOS was being asked
+// to present the picker while it was still dismissing the sheet that asked
+// which one, so the presentation was dropped and the picker's promise never
+// settled. Nothing after that could run, and the next tap was blocked too.
+test('the picker waits for the sheet that asked to finish dismissing', async () => {
+  const screen = await readFile(new URL('../../app/peerchat/PeerChatScreen.tsx', import.meta.url), 'utf8')
+
+  // An in-app sheet, so the handover runs off the modal actually finishing
+  // rather than a guess at how long a system alert takes.
+  assert.doesNotMatch(screen, /Alert\.alert\('Attach'/)
+  assert.match(screen, /visible=\{isAttachSheetOpen\}/)
+  assert.match(screen, /onDismiss=\{flushPendingModal\}[\s\S]{0,200}visible=\{isAttachSheetOpen\}/)
+
+  const attach = screen.slice(
+    screen.indexOf('function attachFrom ('),
+    screen.indexOf('function startAttach (')
+  )
+  assert.match(attach, /replaceModal\(\(\) => setIsAttachSheetOpen\(false\), \(\) => startAttach\(source\)\)/)
+  // The timer is only the backstop for a sheet closed before it finished
+  // presenting, which never fires onDismiss.
+  assert.match(screen, /setTimeout\(flushPendingModal, SHEET_HANDOVER_MS\)/)
+})
+
+test('a hidden picture can still be opened by whoever wants to', async () => {
+  const screen = await readFile(new URL('../../app/peerchat/PeerChatScreen.tsx', import.meta.url), 'utf8')
+
+  // Hiding it is a warning, not a verdict: the classifier is wrong often
+  // enough that a reader has to be able to look.
+  assert.match(screen, /isExplicit && !isRevealed/)
+  assert.match(screen, /setIsRevealed\(true\)/)
+  assert.match(screen, /Show anyway/)
+})
+
+test('a pick that never came back does not disable attaching for good', async () => {
+  const gate = await readFile(new URL('../../app/media/upload-gate.ts', import.meta.url), 'utf8')
+
+  // It used to refuse a new pick while one was outstanding, which turned one
+  // wedged picker into a silent no-op for the rest of the session.
+  assert.doesNotMatch(gate, /if \(abandonPick\) return null/)
+  assert.match(gate, /function supersedePendingPick \(\)/)
+  assert.equal(gate.split('supersedePendingPick()').length - 1, 2)
+  // And a picker that never appeared is given up on rather than waited on.
+  assert.match(gate, /PICK_TIMEOUT_MS = 2 \* 60 \* 1000/)
+  assert.equal(gate.split('setTimeout(() => abandonPick?.(), PICK_TIMEOUT_MS)').length - 1, 2)
+})
+
+// Revealing flickered and had to be done twice: the row unmounts when it
+// scrolls out of the list, and the screen ran again on the way back, so the
+// picture returned hidden and the decision was lost.
+test('a picture the reader opened stays open', async () => {
+  const screen = await readFile(new URL('../../app/peerchat/PeerChatScreen.tsx', import.meta.url), 'utf8')
+
+  // Outside the component, so a remount cannot forget it.
+  assert.match(screen, /const revealedAttachments = new Set<string>\(\)/)
+  const component = screen.slice(screen.indexOf('function PeerChatAttachment ('))
+  assert.doesNotMatch(component, /const revealedAttachments/)
+
+  assert.match(screen, /useState\(\(\) => revealedAttachments\.has\(item\.message\)\)/)
+  assert.match(screen, /revealedAttachments\.add\(item\.message\)/)
+  // And it is not screened again, which is what put "Checking this picture"
+  // back over a picture already on screen.
+  assert.match(screen, /if \(revealedAttachments\.has\(item\.message\)\) return/)
 })

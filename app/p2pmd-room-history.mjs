@@ -97,6 +97,18 @@ export function formatP2pmdRoomHistoryKey (key) {
   return value.length > 20 ? `${value.slice(0, 20)}...` : value
 }
 
+/**
+ * A tapped or pasted hs:// address, as a note key.
+ *
+ * normalizeP2pmdRoomKey also takes a bare key, which is what a field someone
+ * types into wants but is wrong for an address bar: "peersky" would read as a
+ * note. This only answers for something that said hs:// itself.
+ */
+export function parseP2pmdNoteLink (value) {
+  const text = String(value || '').trim()
+  return text.toLowerCase().startsWith('hs://') ? normalizeP2pmdRoomKey(text) : null
+}
+
 export function normalizeP2pmdRoomKey (key) {
   const value = String(key || '').trim()
   const baseKey = value.toLowerCase().startsWith('hs://')

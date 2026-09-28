@@ -22,6 +22,7 @@ import {
   withHyperRuntimeForAddress,
   withHyperRuntimeOperation
 } from '../hyper/runtime.mjs'
+import { normalizePickedLocalFile } from '../hyper/local-file.mjs'
 import { createHyperUrl, parseHyperUrl } from '../hyper/url.mjs'
 import { normalizePeerChatRoomKey } from './protocol.mjs'
 
@@ -31,8 +32,54 @@ const MAGIC = b4a.from('PCA1')
 const IV_BYTES = 12
 const TAG_BYTES = 16
 const ENVELOPE_BYTES = MAGIC.byteLength + IV_BYTES + TAG_BYTES
-const MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024 * 1024
-const MAX_FILE_URI_LENGTH = 8192
+
+/**
+ * PCA2, the framed layout.
+ *
+ *   "PCA2" | frame size, uint32 big-endian | 8 random bytes
+ *   then, repeatedly: one frame's ciphertext, then its 16-byte tag
+ *
+ * PCA1 seals a file in one piece, which is fine for a photo and impossible for
+ * a film: bare's aes-256-gcm holds every byte until final(), and desktop's
+ * WebCrypto is one shot too, so sending or opening cost twice the file in
+ * memory. A phone has nowhere to put four gigabytes.
+ *
+ * Framing seals a megabyte at a time, so memory stays flat however big the
+ * file is. Each frame's nonce is the 8 random bytes followed by its index, and
+ * the last frame sets the top bit of that index, so frames cannot be reordered
+ * and a truncated file cannot pass as a whole one. The header is the additional
+ * data on every frame, so the frame size cannot be edited either.
+ *
+ * There is always a last frame, even when the file divides evenly, so the count
+ * is floor(size / frame) + 1.
+ */
+const FRAMED_MAGIC = b4a.from('PCA2')
+const FRAME_COUNTER_BYTES = 4
+const BASE_NONCE_BYTES = IV_BYTES - FRAME_COUNTER_BYTES
+const FRAMED_HEADER_BYTES = FRAMED_MAGIC.byteLength + FRAME_COUNTER_BYTES + BASE_NONCE_BYTES
+const FINAL_FRAME_FLAG = 0x80000000
+export const ATTACHMENT_FRAME_BYTES = 1024 * 1024
+const MAX_ATTACHMENT_FRAME_BYTES = 16 * 1024 * 1024
+
+export const MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024 * 1024
+/**
+ * Where framing takes over from the single seal.
+ *
+ * Desktop only reads PCA1 today, so anything it could already open is still
+ * written that way and nothing that works now stops working. Past this, a file
+ * was not sendable at all before, so there is nothing to keep compatible.
+ */
+export const MAX_SINGLE_SEAL_BYTES = 100 * 1024 * 1024
+const MAX_ATTACHMENT_LABEL = formatByteLimit(MAX_ATTACHMENT_BYTES)
+const MAX_SINGLE_SEAL_LABEL = formatByteLimit(MAX_SINGLE_SEAL_BYTES)
+// hyperblobs writes every chunk it is handed as one hypercore block, and
+// hypercore refuses a block over 15 MB. Bare has no streaming aes-256-gcm:
+// update() buffers and returns nothing, and final() hands back the entire
+// ciphertext at once, so a video reached the drive as a single block and the
+// send died with "Appended block exceeds the maximum suggested block size".
+// Splitting here stores the same bytes in the blocks hyperblobs would have
+// picked itself.
+export const ATTACHMENT_BLOCK_BYTES = 64 * 1024
 const CACHE_DIRECTORY_NAME = 'peerchat-attachment-cache'
 let uploadTransition = Promise.resolve()
 const pendingOpens = new Map()
@@ -59,6 +106,84 @@ export function isEncryptedAttachment (bytes) {
   return bytes instanceof Uint8Array &&
     bytes.byteLength >= ENVELOPE_BYTES &&
     MAGIC.every((byte, index) => bytes[index] === byte)
+}
+
+/** How many bytes a file of this size takes up once sealed, in either layout. */
+export function singleSealedLength (byteLength) {
+  return byteLength + ENVELOPE_BYTES
+}
+
+export function framedSealedLength (byteLength, frameBytes = ATTACHMENT_FRAME_BYTES) {
+  const frames = Math.floor(byteLength / frameBytes) + 1
+  return FRAMED_HEADER_BYTES + byteLength + frames * TAG_BYTES
+}
+
+/**
+ * Whether a stored size could be this file sealed in frames.
+ *
+ * The frame size is declared in the file's own header, which has not been read
+ * at this point, so the exact length is not knowable here. What is knowable is
+ * that the overhead is a header and a whole number of tags, at least one. The
+ * exact size is checked again against the file that comes out.
+ */
+export function isFramedSealedLength (storedSize, byteLength) {
+  const overhead = storedSize - FRAMED_HEADER_BYTES - byteLength
+  return overhead >= TAG_BYTES && overhead % TAG_BYTES === 0
+}
+
+export function sealedAttachmentLength (byteLength, options = {}) {
+  return usesFraming(byteLength, options)
+    ? framedSealedLength(byteLength, options.frameBytes || ATTACHMENT_FRAME_BYTES)
+    : singleSealedLength(byteLength)
+}
+
+function usesFraming (byteLength, options = {}) {
+  const limit = Number.isSafeInteger(options.singleSealLimit)
+    ? options.singleSealLimit
+    : MAX_SINGLE_SEAL_BYTES
+  return byteLength > limit
+}
+
+function formatByteLimit (bytes) {
+  const gigabytes = bytes / (1024 * 1024 * 1024)
+  return gigabytes >= 1
+    ? `${Math.round(gigabytes)} GB`
+    : `${Math.round(bytes / (1024 * 1024))} MB`
+}
+
+function writeUint32BE (target, value, offset) {
+  target[offset] = (value >>> 24) & 0xff
+  target[offset + 1] = (value >>> 16) & 0xff
+  target[offset + 2] = (value >>> 8) & 0xff
+  target[offset + 3] = value & 0xff
+}
+
+function readUint32BE (source, offset) {
+  return (source[offset] * 0x1000000) +
+    (source[offset + 1] << 16) +
+    (source[offset + 2] << 8) +
+    source[offset + 3]
+}
+
+function startsWith (bytes, prefix) {
+  return bytes.byteLength >= prefix.byteLength &&
+    prefix.every((byte, index) => bytes[index] === byte)
+}
+
+function createFramedHeader (baseNonce, frameBytes) {
+  const header = b4a.alloc(FRAMED_HEADER_BYTES)
+  header.set(FRAMED_MAGIC, 0)
+  writeUint32BE(header, frameBytes, FRAMED_MAGIC.byteLength)
+  header.set(baseNonce, FRAMED_MAGIC.byteLength + FRAME_COUNTER_BYTES)
+  return header
+}
+
+function frameNonce (baseNonce, index, isFinal) {
+  if (index >= FINAL_FRAME_FLAG) throw new Error('PeerChat attachment has too many frames.')
+  const nonce = b4a.alloc(IV_BYTES)
+  nonce.set(baseNonce, 0)
+  writeUint32BE(nonce, isFinal ? (index | FINAL_FRAME_FLAG) >>> 0 : index, BASE_NONCE_BYTES)
+  return nonce
 }
 
 export function encryptAttachment (bytes, roomKey, iv = randomBytes(IV_BYTES)) {
@@ -89,10 +214,10 @@ export async function uploadPeerChatAttachment ({
 } = {}, options = {}) {
   const normalizedRoomKey = normalizePeerChatRoomKey(roomKey)
   if (!normalizedRoomKey) return { ok: false, error: 'Invalid PeerChat room key.' }
-  const localFile = normalizeLocalFile(fileUri, byteLength)
+  const localFile = normalizePickedLocalFile(fileUri, byteLength)
   if (!localFile) return { ok: false, error: 'Invalid attachment file.' }
   if (localFile.byteLength > MAX_ATTACHMENT_BYTES) {
-    return { ok: false, error: 'PeerChat attachments must be 2 GB or smaller.' }
+    return { ok: false, error: `PeerChat attachments must be ${MAX_ATTACHMENT_LABEL} or smaller.` }
   }
 
   return withUploadTransition(async () => {
@@ -103,7 +228,7 @@ export async function uploadPeerChatAttachment ({
         await writeEncryptedFile(drive, pathname, localFile, normalizedRoomKey, options)
 
         const storedEntry = await drive.entry(pathname)
-        const expectedLength = localFile.byteLength + ENVELOPE_BYTES
+        const expectedLength = sealedAttachmentLength(localFile.byteLength, options)
         if (storedEntry?.value?.blob?.byteLength !== expectedLength) {
           throw new Error('The encrypted attachment could not be verified.')
         }
@@ -141,7 +266,7 @@ export async function openPeerChatAttachment ({
   if (encrypted !== true) return { ok: false, error: 'Attachment is not marked as encrypted.' }
   const expectedSize = Number.isSafeInteger(fileSize) && fileSize >= 0 ? fileSize : null
   if (expectedSize !== null && expectedSize > MAX_ATTACHMENT_BYTES) {
-    return { ok: false, error: 'PeerChat attachments must be 2 GB or smaller.' }
+    return { ok: false, error: `PeerChat attachments must be ${MAX_ATTACHMENT_LABEL} or smaller.` }
   }
 
   const openingKey = `${normalizedRoomKey}:${url}`
@@ -155,13 +280,26 @@ export async function openPeerChatAttachment ({
     if (!Number.isSafeInteger(storedSize) || storedSize < 1) {
       throw new Error('PeerChat attachment was not found.')
     }
-    if (storedSize > MAX_ATTACHMENT_BYTES + ENVELOPE_BYTES) {
+    if (storedSize > framedSealedLength(MAX_ATTACHMENT_BYTES)) {
       throw new Error('PeerChat attachment is too large.')
     }
 
-    const outputSize = storedSize - ENVELOPE_BYTES
-    if (outputSize < 0 || (expectedSize !== null && outputSize !== expectedSize)) {
+    const outputSize = expectedSize !== null ? expectedSize : storedSize - ENVELOPE_BYTES
+    if (outputSize < 0) {
       throw new Error('PeerChat attachment size does not match the message.')
+    }
+    if (expectedSize !== null) {
+      // A file of this size stores as one length or the other depending on how
+      // it was sealed, and under a single frame the two are the same number.
+      const singleLength = singleSealedLength(expectedSize)
+      if (storedSize !== singleLength && !isFramedSealedLength(storedSize, expectedSize)) {
+        throw new Error('PeerChat attachment size does not match the message.')
+      }
+      // Sealed in one piece, so opening it means holding it and its ciphertext
+      // at once. Whoever sent it had the memory for that and this phone may not.
+      if (storedSize === singleLength && expectedSize > MAX_SINGLE_SEAL_BYTES) {
+        throw new Error(`This attachment was sent in one piece, so it only opens up to ${MAX_SINGLE_SEAL_LABEL} on a phone.`)
+      }
     }
 
     const cachePath = getAttachmentCachePath(normalizedRoomKey, url, normalizedName, options.storagePath)
@@ -201,9 +339,11 @@ export async function openPeerChatAttachment ({
 }
 
 class AttachmentEncryptStream extends Transform {
-  constructor (roomKey, iv = randomBytes(IV_BYTES)) {
+  // createCipher is injectable so a test can stand in the one-shot cipher Bare
+  // gives us, which is the shape node's streaming one hides.
+  constructor (roomKey, iv = randomBytes(IV_BYTES), createCipher = createCipheriv) {
     super()
-    this.cipher = createCipheriv('aes-256-gcm', deriveAttachmentKey(roomKey), iv)
+    this.cipher = createCipher('aes-256-gcm', deriveAttachmentKey(roomKey), iv)
     this.push(MAGIC)
     this.push(iv)
   }
@@ -228,41 +368,36 @@ class AttachmentEncryptStream extends Transform {
   }
 }
 
-class AttachmentDecryptStream extends Transform {
-  constructor (roomKey) {
+export class AttachmentFrameEncryptStream extends Transform {
+  constructor (roomKey, {
+    baseNonce = randomBytes(BASE_NONCE_BYTES),
+    frameBytes = ATTACHMENT_FRAME_BYTES,
+    createCipher = createCipheriv
+  } = {}) {
     super()
     this.key = deriveAttachmentKey(roomKey)
-    this.header = b4a.alloc(0)
-    this.tail = b4a.alloc(0)
-    this.decipher = null
+    this.createCipher = createCipher
+    this.baseNonce = baseNonce
+    this.frameBytes = frameBytes
+    this.header = createFramedHeader(baseNonce, frameBytes)
+    this.pending = []
+    this.pendingBytes = 0
+    this.frameIndex = 0
+    this.push(this.header)
   }
 
   _transform (chunk, encoding, callback) {
     try {
-      let bytes = b4a.from(chunk)
-      if (!this.decipher) {
-        const combined = b4a.concat([this.header, bytes])
-        if (combined.byteLength < MAGIC.byteLength + IV_BYTES) {
-          this.header = combined
-          callback()
-          return
-        }
-        if (!MAGIC.every((byte, index) => combined[index] === byte)) {
-          throw new Error('Invalid encrypted PeerChat attachment header.')
-        }
-        const iv = combined.subarray(MAGIC.byteLength, MAGIC.byteLength + IV_BYTES)
-        this.decipher = createDecipheriv('aes-256-gcm', this.key, iv)
-        bytes = combined.subarray(MAGIC.byteLength + IV_BYTES)
-        this.header = b4a.alloc(0)
-      }
-
-      const sealed = b4a.concat([this.tail, bytes])
-      if (sealed.byteLength > TAG_BYTES) {
-        const ciphertextEnd = sealed.byteLength - TAG_BYTES
-        this.push(this.decipher.update(sealed.subarray(0, ciphertextEnd)))
-        this.tail = sealed.subarray(ciphertextEnd)
-      } else {
-        this.tail = sealed
+      this.pending.push(b4a.from(chunk))
+      this.pendingBytes += chunk.byteLength
+      // Strictly more than a frame, never exactly: the leftover is what the
+      // flush seals as the last frame, and there has to be one.
+      while (this.pendingBytes >= this.frameBytes) {
+        const merged = b4a.concat(this.pending)
+        this.sealFrame(merged.subarray(0, this.frameBytes), false)
+        const rest = merged.subarray(this.frameBytes)
+        this.pending = rest.byteLength > 0 ? [rest] : []
+        this.pendingBytes = rest.byteLength
       }
       callback()
     } catch (error) {
@@ -272,15 +407,168 @@ class AttachmentDecryptStream extends Transform {
 
   _flush (callback) {
     try {
-      if (!this.decipher || this.tail.byteLength !== TAG_BYTES) {
-        throw new Error('Encrypted PeerChat attachment is incomplete.')
-      }
-      this.decipher.setAuthTag(this.tail)
-      this.push(this.decipher.final())
+      // Always emitted, even when empty, so a reader can tell a finished file
+      // from one that stopped early.
+      this.sealFrame(b4a.concat(this.pending), true)
+      this.pending = []
+      this.pendingBytes = 0
       callback()
-    } catch {
-      callback(new Error('PeerChat attachment decryption failed.'))
+    } catch (error) {
+      callback(error)
     }
+  }
+
+  sealFrame (plaintext, isFinal) {
+    const cipher = this.createCipher(
+      'aes-256-gcm',
+      this.key,
+      frameNonce(this.baseNonce, this.frameIndex, isFinal)
+    )
+    cipher.setAAD(this.header)
+    this.push(b4a.concat([cipher.update(plaintext), cipher.final()]))
+    this.push(cipher.getAuthTag())
+    this.frameIndex += 1
+  }
+}
+
+/**
+ * Cuts whatever it is handed into drive-sized blocks.
+ *
+ * The encrypt stream above emits what the cipher gives it, which on Bare is one
+ * piece the size of the whole file, and hyperblobs turns every piece into one
+ * hypercore block. The bytes that reach the drive are unchanged; only how they
+ * are handed over is.
+ */
+export class AttachmentBlockStream extends Transform {
+  _transform (chunk, encoding, callback) {
+    const bytes = b4a.from(chunk)
+    for (let offset = 0; offset < bytes.byteLength; offset += ATTACHMENT_BLOCK_BYTES) {
+      this.push(bytes.subarray(offset, offset + ATTACHMENT_BLOCK_BYTES))
+    }
+    callback()
+  }
+}
+
+/**
+ * Reads either layout, chosen by the magic at the front.
+ *
+ * Both start with sixteen bytes, so a file is never ambiguous: "PCA1" is the
+ * single seal every desktop build writes, "PCA2" is framed.
+ */
+export class AttachmentDecryptStream extends Transform {
+  constructor (roomKey) {
+    super()
+    this.key = deriveAttachmentKey(roomKey)
+    this.pending = b4a.alloc(0)
+    this.layout = null
+    // PCA1
+    this.decipher = null
+    // PCA2
+    this.header = null
+    this.baseNonce = null
+    this.frameBytes = 0
+    this.frameIndex = 0
+  }
+
+  _transform (chunk, encoding, callback) {
+    try {
+      this.pending = b4a.concat([this.pending, b4a.from(chunk)])
+      this.readLayout()
+      if (this.layout === 'single') this.drainSingle()
+      else if (this.layout === 'framed') this.drainFrames()
+      callback()
+    } catch (error) {
+      callback(describeDecryptFailure(error))
+    }
+  }
+
+  _flush (callback) {
+    try {
+      if (this.layout === 'single') this.finishSingle()
+      else if (this.layout === 'framed') this.finishFrames()
+      else throw new Error('Encrypted PeerChat attachment is incomplete.')
+      callback()
+    } catch (error) {
+      callback(describeDecryptFailure(error))
+    }
+  }
+
+  readLayout () {
+    if (this.layout) return
+
+    if (startsWith(this.pending, MAGIC)) {
+      if (this.pending.byteLength < MAGIC.byteLength + IV_BYTES) return
+      const iv = this.pending.subarray(MAGIC.byteLength, MAGIC.byteLength + IV_BYTES)
+      this.decipher = createDecipheriv('aes-256-gcm', this.key, iv)
+      this.pending = this.pending.subarray(MAGIC.byteLength + IV_BYTES)
+      this.layout = 'single'
+      return
+    }
+
+    if (startsWith(this.pending, FRAMED_MAGIC)) {
+      if (this.pending.byteLength < FRAMED_HEADER_BYTES) return
+      this.header = b4a.from(this.pending.subarray(0, FRAMED_HEADER_BYTES))
+      this.frameBytes = readUint32BE(this.header, FRAMED_MAGIC.byteLength)
+      if (this.frameBytes < 1 || this.frameBytes > MAX_ATTACHMENT_FRAME_BYTES) {
+        throw new Error('Invalid encrypted PeerChat attachment header.')
+      }
+      this.baseNonce = this.header.subarray(FRAMED_MAGIC.byteLength + FRAME_COUNTER_BYTES)
+      this.pending = this.pending.subarray(FRAMED_HEADER_BYTES)
+      this.layout = 'framed'
+      return
+    }
+
+    // Not enough yet to tell, unless what is there already disagrees.
+    if (this.pending.byteLength >= MAGIC.byteLength) {
+      throw new Error('Invalid encrypted PeerChat attachment header.')
+    }
+  }
+
+  drainSingle () {
+    if (this.pending.byteLength <= TAG_BYTES) return
+    const ciphertextEnd = this.pending.byteLength - TAG_BYTES
+    this.push(this.decipher.update(this.pending.subarray(0, ciphertextEnd)))
+    this.pending = this.pending.subarray(ciphertextEnd)
+  }
+
+  finishSingle () {
+    if (this.pending.byteLength !== TAG_BYTES) {
+      throw new Error('Encrypted PeerChat attachment is incomplete.')
+    }
+    this.decipher.setAuthTag(this.pending)
+    this.push(this.decipher.final())
+  }
+
+  drainFrames () {
+    const frame = this.frameBytes + TAG_BYTES
+    // A full frame is only ever a middle one: the writer keeps the last frame
+    // short, so anything this size has more behind it.
+    while (this.pending.byteLength >= frame) {
+      this.openFrame(this.pending.subarray(0, frame), false)
+      this.pending = this.pending.subarray(frame)
+    }
+  }
+
+  finishFrames () {
+    if (this.pending.byteLength < TAG_BYTES) {
+      throw new Error('Encrypted PeerChat attachment is incomplete.')
+    }
+    this.openFrame(this.pending, true)
+    this.pending = b4a.alloc(0)
+  }
+
+  openFrame (frame, isFinal) {
+    const ciphertext = frame.subarray(0, frame.byteLength - TAG_BYTES)
+    const tag = frame.subarray(frame.byteLength - TAG_BYTES)
+    const decipher = createDecipheriv(
+      'aes-256-gcm',
+      this.key,
+      frameNonce(this.baseNonce, this.frameIndex, isFinal)
+    )
+    decipher.setAAD(this.header)
+    decipher.setAuthTag(tag)
+    this.push(b4a.concat([decipher.update(ciphertext), decipher.final()]))
+    this.frameIndex += 1
   }
 }
 
@@ -295,35 +583,30 @@ async function writeEncryptedFile (drive, pathname, localFile, roomKey, options)
   }
   await pipeline(
     createReadStream(localFile.path),
-    new AttachmentEncryptStream(roomKey),
+    createEncryptStream(roomKey, localFile.byteLength, options),
+    new AttachmentBlockStream(),
     drive.createWriteStream(pathname)
   )
 }
 
-function normalizeLocalFile (fileUri, byteLength) {
-  if (
-    typeof fileUri !== 'string' ||
-    fileUri.length < 1 ||
-    fileUri.length > MAX_FILE_URI_LENGTH ||
-    !Number.isSafeInteger(byteLength) ||
-    byteLength < 1
-  ) return null
+// A wrong key, a damaged frame and a forged tag all arrive here the same way,
+// and none of them is worth describing any further than this.
+function describeDecryptFailure (error) {
+  const message = error instanceof Error ? error.message : ''
+  return /header|incomplete|too many frames/i.test(message)
+    ? error
+    : new Error('PeerChat attachment decryption failed.')
+}
 
-  try {
-    const parsed = new URL(fileUri)
-    if (parsed.protocol !== 'file:' || parsed.hostname || parsed.search || parsed.hash) return null
-    const decodedPath = decodeURIComponent(parsed.pathname)
-    const path = /^\/[a-z]:\//i.test(decodedPath) ? decodedPath.slice(1) : decodedPath
-    const normalizedPath = path.replaceAll('\\', '/')
-    if (
-      normalizedPath.includes('\0') ||
-      normalizedPath.split('/').some((segment) => segment === '..') ||
-      !/\/(?:cache|caches)\/documentpicker\//i.test(normalizedPath)
-    ) return null
-    return { path, byteLength }
-  } catch {
-    return null
+function createEncryptStream (roomKey, byteLength, options) {
+  if (!usesFraming(byteLength, options)) {
+    return new AttachmentEncryptStream(roomKey, options.iv, options.createCipher)
   }
+  return new AttachmentFrameEncryptStream(roomKey, {
+    ...(options.baseNonce ? { baseNonce: options.baseNonce } : {}),
+    ...(options.frameBytes ? { frameBytes: options.frameBytes } : {}),
+    ...(options.createCipher ? { createCipher: options.createCipher } : {})
+  })
 }
 
 function normalizeFilename (value) {

@@ -162,8 +162,12 @@ test('a room is shared as an invite link, and a direct message has nothing to sh
   // The bare key has to be pasted into Join Room by hand; the link just joins.
   assert.match(share, /buildPeerChatInviteUrl\(activeRoom[.]roomKey\)/)
 
-  // There is nobody to invite into a one-to-one chat.
-  assert.match(screen, /\{!activeRoom[.]isDM && \(\s*<Pressable[\s\S]{0,260}Share room/)
+  // There is nobody to invite into a one-to-one chat. The button becomes a
+  // spacer rather than simply going: the title is centred between the two
+  // action groups, and removing one shifted the name off centre. The spacer
+  // comes first so search keeps the corner the share button had.
+  assert.match(screen, /\{activeRoom[.]isDM && <View style=\{styles[.]headerAction\} \/>\}\s*\n\s*<Pressable[\s\S]{0,200}Find messages/)
+  assert.match(screen, /\{!activeRoom[.]isDM && \(\s*<Pressable[\s\S]{0,300}Share room/)
 })
 
 test('creating or joining a room closes the panel behind it', async () => {
@@ -176,4 +180,24 @@ test('creating or joining a room closes the panel behind it', async () => {
     const body = screen.slice(screen.indexOf(name), screen.indexOf(next))
     assert.match(body, /setLandingAction\(null\)/, `${name} leaves the panel open`)
   }
+})
+
+// Tapping an invite before setting a name threw the request away: the effect
+// cleared it and then failed the join, so the link did nothing once the welcome
+// screen was finally done with.
+test('an invite tapped without a username waits for the welcome screen', async () => {
+  const screen = await readFile(new URL('../../app/peerchat/PeerChatScreen.tsx', import.meta.url), 'utf8')
+  const effect = screen.slice(
+    screen.indexOf('if (!requestedRoomKey || !isInitialized'),
+    screen.indexOf('void joinRoomByKey(requestedRoomKey)')
+  )
+
+  assert.match(effect, /!profile\?\.username\) return/)
+  // And it runs again once the name is set, or it would wait forever.
+  assert.match(screen, /\[isInitialized, onRequestedRoomHandled, profile\?\.username, requestedRoomKey, rooms\]/)
+
+  // The request is only cleared once it is actually being acted on.
+  const clear = screen.indexOf('onRequestedRoomHandled()')
+  const guard = screen.indexOf('!profile?.username) return')
+  assert.ok(guard > -1 && clear > guard)
 })

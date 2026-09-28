@@ -27,22 +27,27 @@ export function isBackEdgeSwipe ({ startX, dx, dy }) {
   return across > MIN_TRAVEL && across > down * HORIZONTAL_DOMINANCE
 }
 
-// How far the page slides while the finger is down. Damped and capped: the
-// page underneath is not rendered, so a full-width drag would pull the screen
-// off and leave a gap. This is feedback that the gesture took, not a reveal.
-export const BACK_SWIPE_MAX_OFFSET = 96
-const BACK_SWIPE_DAMPING = 0.45
-
-/** Where the page sits, in points, for a finger that has travelled dx. */
-export function backSwipeOffset (dx) {
-  const across = Number(dx) || 0
-  if (across <= 0) return 0
-  return Math.min(BACK_SWIPE_MAX_OFFSET, across * BACK_SWIPE_DAMPING)
-}
-
+// How far the finger travels before letting go goes back.
 const COMPLETE_TRAVEL = 64
 const FLICK_TRAVEL = 24
 const FLICK_VELOCITY = 0.3
+
+/**
+ * How far in the edge chip is, 0 to 1, for a finger that has travelled dx.
+ *
+ * The page itself used to slide instead, which had two problems. A swipe that
+ * was interrupted part way left the page slid, so the browser sat a quarter of
+ * a screen to the right until something else re-rendered it. And what is behind
+ * the page is not drawn, so the movement revealed nothing and only opened a
+ * gap. An indicator answers the gesture without moving anything that can get
+ * stuck, and it is full by COMPLETE_TRAVEL, so the screen and the release
+ * agree about when the swipe has taken.
+ */
+export function backSwipeProgress (dx) {
+  const across = Number(dx) || 0
+  if (across <= 0) return 0
+  return Math.min(1, across / COMPLETE_TRAVEL)
+}
 
 /** Whether a released back swipe should go back or spring home. */
 export function shouldCompleteBackSwipe ({ dx, vx }) {

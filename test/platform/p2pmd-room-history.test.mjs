@@ -5,6 +5,7 @@ import {
   MAX_P2PMD_ROOM_HISTORY_FILE_BYTES,
   MAX_P2PMD_RECENT_ROOMS,
   normalizeP2pmdRoomKey,
+  parseP2pmdNoteLink,
   parseP2pmdRoomHistory,
   readP2pmdRoomHistoryFile,
   recordP2pmdRoom,
@@ -126,6 +127,29 @@ describe('P2PMD room history', () => {
       }
     }), [])
     assert.equal(read, false)
+  })
+})
+
+// A note shared in a chat used to come back as "Unsupported URL scheme", so the
+// key had to be copied out of the message by hand.
+describe('P2PMD note links', () => {
+  test('an hs:// address is a note key', () => {
+    assert.equal(parseP2pmdNoteLink(roomKey('a')), roomKey('a'))
+    assert.equal(parseP2pmdNoteLink(`  HS://${'B'.repeat(52)}  `), `hs://${'B'.repeat(52)}`)
+  })
+
+  test('a bare key is not an address', () => {
+    assert.equal(parseP2pmdNoteLink('a'.repeat(52)), null)
+    assert.equal(parseP2pmdNoteLink('peersky'), null)
+    assert.equal(parseP2pmdNoteLink('https://example.com'), null)
+    assert.equal(parseP2pmdNoteLink(''), null)
+    assert.equal(parseP2pmdNoteLink(null), null)
+  })
+
+  test('an hs:// address that is not a key opens nothing', () => {
+    assert.equal(parseP2pmdNoteLink('hs://not a key'), null)
+    assert.equal(parseP2pmdNoteLink('hs://'), null)
+    assert.equal(parseP2pmdNoteLink(`hs://${'a'.repeat(400)}`), null)
   })
 })
 

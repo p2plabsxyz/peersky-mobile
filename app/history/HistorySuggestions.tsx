@@ -1,4 +1,5 @@
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import HistoryIcon from '../../assets/icons/bootstrap/clock-history.svg'
 import type { BrowserHistoryItem } from './useBrowserHistory'
 
@@ -11,28 +12,42 @@ type BrowserPalette = {
 }
 
 export function HistorySuggestions ({
+  background,
   items,
   offset,
   palette,
   position,
   onOpen
 }: {
+  // The toolbar's own colour, not the generic surface. The two are meant to
+  // read as one panel that opened, which they cannot do in two shades.
+  background: string
   items: BrowserHistoryItem[]
   offset: number
   palette: BrowserPalette
   position: 'top' | 'bottom'
   onOpen: (url: string) => void
 }) {
+  const insets = useSafeAreaInsets()
   if (items.length === 0) return null
 
   return (
     <View style={[
       styles.container,
-      // Measured off the toolbar rather than "bottom: 100%". A percentage is
-      // resolved against a parent the keyboard is busy resizing, which is not
-      // something to depend on for whether the list covers the address bar.
-      position === 'bottom' ? { bottom: offset + 4 } : { top: offset + 4 },
-      { backgroundColor: palette.surface, borderColor: palette.border }
+      // The bar's measured height, in a stack with no padding of its own, so
+      // the list lands exactly on the bar's edge. A percentage would be
+      // resolved against a parent the keyboard is busy resizing.
+      position === 'bottom' ? { bottom: offset } : { top: offset },
+      position === 'bottom' ? styles.attachedBelow : styles.attachedAbove,
+      {
+        backgroundColor: background,
+        borderColor: palette.border,
+        // Padding, not a margin: the panel still reaches both screen edges
+        // like the bar does, and only the rows step in, so a clock lines up
+        // with where the address field starts rather than with the notch.
+        paddingLeft: insets.left,
+        paddingRight: insets.right
+      }
     ]}>
       <ScrollView keyboardShouldPersistTaps='handled'>
         {items.map((item) => (
@@ -58,18 +73,31 @@ export function HistorySuggestions ({
 const styles = StyleSheet.create({
   container: {
     borderRadius: 10,
-    borderWidth: 1,
     elevation: 10,
-    left: 12,
+    // Edge to edge, like the bar it opens from. Inset by twelve, with a border
+    // all the way round, it read as a card that happened to be nearby.
+    left: 0,
     maxHeight: 290,
     overflow: 'hidden',
     position: 'absolute',
-    right: 12,
+    right: 0,
     shadowColor: '#10131a',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.18,
     shadowRadius: 10,
     zIndex: 20
+  },
+  // Only the far edge is drawn. The edge meeting the bar, and both sides, are
+  // the bar's own, so the two read as one surface that grew.
+  attachedBelow: {
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
+    borderTopWidth: 1
+  },
+  attachedAbove: {
+    borderBottomWidth: 1,
+    borderTopLeftRadius: 0,
+    borderTopRightRadius: 0
   },
   row: { alignItems: 'center', flexDirection: 'row', gap: 12, minHeight: 54, paddingHorizontal: 14 },
   copy: { flex: 1 },

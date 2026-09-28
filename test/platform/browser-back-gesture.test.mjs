@@ -2,8 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
   BACK_EDGE_WIDTH,
-  BACK_SWIPE_MAX_OFFSET,
-  backSwipeOffset,
+  backSwipeProgress,
   isBackEdgeSwipe,
   shouldCompleteBackSwipe,
   startsAtBackEdge
@@ -46,25 +45,26 @@ test('a missing or nonsense start is not an edge', () => {
   assert.equal(startsAtBackEdge(Number.NaN), false)
 })
 
-// The gesture used to jump straight to the previous page on release with no
-// sign it had been recognised. The page follows the finger now, damped and
-// capped, because what is behind it is not drawn and a full drag would open a
-// gap.
+// The page used to slide with the finger, and a swipe cut short left it slid:
+// the browser sat a quarter of a screen to the right until something re-rendered
+// it. An edge chip answers the gesture instead, so nothing underneath moves.
 
-test('the page follows the finger', () => {
-  assert.ok(backSwipeOffset(40) > 0)
-  assert.ok(backSwipeOffset(80) > backSwipeOffset(40))
+test('the chip comes in as the finger travels', () => {
+  assert.ok(backSwipeProgress(20) > 0)
+  assert.ok(backSwipeProgress(40) > backSwipeProgress(20))
 })
 
-test('the page never slides far enough to open a gap', () => {
-  assert.equal(backSwipeOffset(2000), BACK_SWIPE_MAX_OFFSET)
-  assert.ok(backSwipeOffset(300) <= BACK_SWIPE_MAX_OFFSET)
+test('the chip is full by the point where letting go goes back', () => {
+  const committed = { dx: 64.1, vx: 0 }
+  assert.equal(shouldCompleteBackSwipe(committed), true)
+  assert.equal(backSwipeProgress(committed.dx), 1)
+  assert.equal(backSwipeProgress(2000), 1)
 })
 
-test('pulling the wrong way moves nothing', () => {
-  assert.equal(backSwipeOffset(-120), 0)
-  assert.equal(backSwipeOffset(0), 0)
-  assert.equal(backSwipeOffset(undefined), 0)
+test('pulling the wrong way shows nothing', () => {
+  assert.equal(backSwipeProgress(-120), 0)
+  assert.equal(backSwipeProgress(0), 0)
+  assert.equal(backSwipeProgress(undefined), 0)
 })
 
 test('a long pull goes back', () => {

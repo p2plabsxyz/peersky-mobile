@@ -21,6 +21,7 @@ import TrashIcon from '../../assets/icons/bootstrap/trash.svg'
 import { BROWSER_PALETTES } from '../browser-appearance.mjs'
 import { getProxiedHyperUrl, sortBrowserDownloads } from './browser-downloads.mjs'
 import type { BrowserDownload } from './useBrowserDownloads'
+import { MODAL_ORIENTATIONS } from '../modal-orientations'
 
 type DownloadSort = 'newest' | 'oldest' | 'name' | 'size'
 
@@ -240,6 +241,7 @@ export function DownloadsScreen ({
           )}
 
       <Modal
+        supportedOrientations={MODAL_ORIENTATIONS}
         animationType='fade'
         transparent
         visible={isSortOpen}
