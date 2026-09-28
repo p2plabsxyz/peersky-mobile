@@ -8,10 +8,12 @@ import {
   PEERTUNES_SCAN_BRIDGE_SCRIPT,
   createPeerTunesPageUrl,
   isPeerTunesPageRequest,
+  parsePeerTunesHapticRequest,
   parsePeerTunesScanRequest,
   serializeScanResult
 } from './peertunes-screen.mjs'
 import { MODAL_ORIENTATIONS } from '../modal-orientations'
+import { tapFeedback } from '../haptics'
 
 type Props = {
   error: string | null
@@ -122,6 +124,11 @@ export function PeerTunesScreen ({
       originWhitelist={[localUrl]}
       injectedJavaScriptBeforeContentLoaded={PEERTUNES_SCAN_BRIDGE_SCRIPT}
       onMessage={(event) => {
+        const weight = parsePeerTunesHapticRequest(event.nativeEvent.data)
+        if (weight) {
+          tapFeedback(weight)
+          return
+        }
         const requestId = parsePeerTunesScanRequest(event.nativeEvent.data)
         if (requestId) void beginScan(requestId)
       }}

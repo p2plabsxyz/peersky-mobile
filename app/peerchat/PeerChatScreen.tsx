@@ -115,6 +115,7 @@ import type { UploadSource } from '../media/upload-gate'
 import { scanMedia } from '../media/NsfwScanner'
 import { MEDIA_BLOCKED } from '../media/media-moderation.mjs'
 import { MODAL_ORIENTATIONS } from '../modal-orientations'
+import { tapFeedback } from '../haptics'
 
 type PeerChatMessage = {
   id: string
@@ -2224,7 +2225,11 @@ export function PeerChatScreen ({
                 accessibilityHint='Long press for message actions'
                 accessibilityRole={item.system ? 'text' : 'button'}
                 disabled={item.system}
-                onLongPress={() => !item.system && showMessageActions(item)}
+                onLongPress={() => {
+                  if (item.system) return
+                  tapFeedback()
+                  showMessageActions(item)
+                }}
                 style={[
                   styles.messageBubble,
                   item.system ? styles.systemMessage : null,
@@ -3182,7 +3187,10 @@ export function PeerChatScreen ({
         <Pressable
           accessibilityHint='Long press for chat options'
           accessibilityRole='button'
-          onLongPress={() => showRoomActions(item)}
+          onLongPress={() => {
+            tapFeedback()
+            showRoomActions(item)
+          }}
           onPress={() => openRoom(item)}
           style={({ pressed }) => [
             styles.roomRow,
@@ -4217,7 +4225,10 @@ function renderMessageText (
           onPress={() => onOpenLink(part.link as string)}
           // A link claims the touch, so the bubble underneath never sees a
           // long press on it. Without this, holding a link opened it.
-          onLongPress={() => onHoldLink(part.link as string)}
+          onLongPress={() => {
+            tapFeedback()
+            onHoldLink(part.link as string)
+          }}
         >
           {part.text}
         </Text>

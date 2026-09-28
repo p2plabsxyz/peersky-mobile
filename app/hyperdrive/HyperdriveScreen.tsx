@@ -45,6 +45,7 @@ import {
   persistHyperdriveRecents
 } from './recents-store'
 import { MODAL_ORIENTATIONS } from '../modal-orientations'
+import { tapFeedback } from '../haptics'
 
 const hyperdriveIcon = require('../../assets/images/hyperdrive.png')
 
@@ -421,7 +422,10 @@ export function HyperdriveScreen ({ offlineNetworkAllowed, isDark, isLandscape, 
         <Pressable
           accessibilityRole='button'
           accessibilityLabel={`${item.type === 'directory' ? 'Folder' : 'File'} ${item.name}`}
-          onLongPress={() => removeRecent(item)}
+          onLongPress={() => {
+            tapFeedback()
+            removeRecent(item)
+          }}
           onPress={() => void openItem(item)}
           style={({ pressed }) => [styles.itemOpen, pressed ? styles.pressed : null]}
         >

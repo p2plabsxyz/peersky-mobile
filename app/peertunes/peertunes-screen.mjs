@@ -40,6 +40,16 @@ export const PEERTUNES_SCAN_BRIDGE_SCRIPT = `(function () {
     delete pending[id];
     resolve(typeof value === 'string' && value ? value : null);
   };
+  // A page inside a WebView cannot reach the taptic engine, so it asks. One
+  // message per press, with the weight it wants; native does the rest.
+  window.peerskyHaptic = function (weight) {
+    if (!window.ReactNativeWebView) return false;
+    window.ReactNativeWebView.postMessage(JSON.stringify({
+      type: 'peertunes-haptic',
+      weight: weight === 'medium' || weight === 'heavy' ? weight : 'light'
+    }));
+    return true;
+  };
   window.peerskyScanQr = function () {
     return new Promise(function (resolve) {
       if (!window.ReactNativeWebView) return resolve(null);
@@ -73,4 +83,17 @@ export function serializeScanResult (value) {
   return JSON.stringify(value ?? null)
     .replace(/\u2028/g, '\\u2028')
     .replace(/\u2029/g, '\\u2029')
+}
+
+// The weight a page asked for, or null when the message is not a haptic
+// request. Anything unrecognised reads as the lightest one rather than being
+// refused: a buzz is not worth an error path.
+export function parsePeerTunesHapticRequest (raw) {
+  try {
+    const parsed = JSON.parse(String(raw || ''))
+    if (parsed?.type !== 'peertunes-haptic') return null
+    return parsed.weight === 'medium' || parsed.weight === 'heavy' ? parsed.weight : 'light'
+  } catch {
+    return null
+  }
 }

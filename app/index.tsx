@@ -120,6 +120,7 @@ import { useBrowserPreferences } from './settings/useBrowserPreferences'
 import { BrowserToolbar } from './BrowserToolbar'
 import { BrowserBackSwipe } from './BrowserBackSwipe'
 import { BrowserZoomSheet } from './BrowserZoomSheet'
+import { tapFeedback } from './haptics'
 import {
   BrowserMediaSheet,
   type BrowserMediaTarget
@@ -3544,7 +3545,10 @@ export default function App () {
                             accessibilityRole='button'
                             disabled={isBooting || isLoading}
                             accessibilityHint='Press and hold to remove this note from the list'
-                            onLongPress={() => confirmForgetP2pmdRoom(room)}
+                            onLongPress={() => {
+                              tapFeedback()
+                              confirmForgetP2pmdRoom(room)
+                            }}
                             onPress={() => void (room.role === 'host'
                               ? onP2pmdRoomCreate(room.key)
                               : onP2pmdRoomJoin(room.key))}
@@ -3638,7 +3642,7 @@ export default function App () {
               styles.browserWebViewLayer,
               activeTab === 'peertunes' && browserSource.kind === 'app'
                 ? null
-                : styles.browserWebViewLayerHidden
+                : styles.browserWebViewLayerOffscreen
             ]}
           >
             <PeerTunesScreen
