@@ -4030,6 +4030,10 @@ const PEERCHAT_ABOUT = [
     a: 'Only the people in the room. Everything is locked with the room key before it leaves your phone, so anyone in between sees scrambled text.'
   },
   {
+    q: 'Are my chats secure?',
+    a: 'Everything is locked before it leaves your phone, pictures and files included, and only the people in the conversation hold the key. A room is locked with its room key, so whoever you send that to is in, and anyone else who comes across the room on the network sees nothing but scrambled text. A chat with one person gets its own key, made fresh for that conversation and handed over on a connection that already proved who they are, so it cannot be worked out from your name or your code. Two things it does not hide: your phone talks to theirs directly, so anyone in a conversation with you can see your network address, and a room key never expires, so whoever you gave it to can read that room for as long as they keep it.'
+  },
+  {
     q: 'Where do my messages live?',
     a: 'On the phones of the people you are talking to, and nowhere else. Your conversation belongs to the people in it.'
   },

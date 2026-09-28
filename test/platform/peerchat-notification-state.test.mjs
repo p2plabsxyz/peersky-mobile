@@ -167,6 +167,15 @@ test('PeerChat About answers the questions a first-time user actually asks', asy
   assert.match(about, /No tracking, no analytics/)
   assert.match(about, /Who can read my messages\?/)
 
+  // "Is this secure" is the question the whole app rests on, so it names how a
+  // room is locked, how a one to one chat is locked, and what neither hides.
+  assert.match(about, /Are my chats secure\?/)
+  assert.match(about, /locked with its room key/)
+  assert.match(about, /its own key, made fresh for that conversation/)
+  assert.match(about, /cannot be worked out from your name or your code/)
+  assert.match(about, /can see your network address/)
+  assert.match(about, /a room key never expires/)
+
   // And the peer to peer facts a normal person trips over.
   assert.match(about, /both need to be awake/)
   assert.match(about, /start fresh from the moment you join/)
