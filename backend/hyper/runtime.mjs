@@ -10,6 +10,7 @@ import {
   resetLANDiscovery,
   startLANDiscovery
 } from './lan-discovery.mjs'
+import { checkPrivateDriveDivergence } from './drive-state.mjs'
 import {
   getPrivateDriveKey,
   getPrivateDriveId,
@@ -54,6 +55,7 @@ let adoptedSdk = null
 let adoptedSdkOpening = null
 let adoptedStoragePath = null
 const syncedPrivateDrivesById = new Map()
+const privateDriveWarnings = new Map()
 let networkRefresh = null
 const runtimeCoordinator = createRuntimeCoordinator()
 
@@ -162,22 +164,42 @@ export async function getSyncedPrivateHyperdrive (runtime = null) {
     if (!driveId && !encryptionKey) throw new Error('Private drive encryption key is unavailable.')
 
     const announce = encryptionKey !== null && shouldAnnounceSyncedPrivateDrive(storage)
-
-    // A linked desktop drive lives in the ADOPTED store (its cores were copied
-    // there by the identity transfer), so the phone's own open/publish path has
-    // to target that store too. Opening the driveId from the synced-private
-    // namespace would resolve to a placeholder core and silently drop writes.
-    const adoptedDrive = isAdoptedSyncedPrivateDrive(storage, driveId)
-    const corestore = adoptedDrive
-      ? (await getAdoptedPrivateHyperRuntime()).corestore
-      : target.namespace(HYPERDRIVE_PRIVATE_DRIVE_NAME)
     const driveOptions = encryptionKey ? { encryptionKey } : undefined
+
+    // Legacy guard: before received drives were made read-only, adopting a
+    // desktop identity overwrote the phone's own key record, so existing
+    // devices can still hold a record that points at an adopted desktop drive.
+    // Treat that as an adopted drive (read-only, opened from the adopted
+    // store) instead of the phone's own drive so the phone never writes the
+    // desktop writer copy again.
+    if (driveId && isAdoptedSyncedPrivateDrive(storage, driveId)) {
+      const adoptedRuntime = await getAdoptedPrivateHyperRuntime()
+      const adoptedDrive = new Hyperdrive(
+        adoptedRuntime.corestore,
+        b4a.from(driveId, 'hex'),
+        driveOptions
+      )
+      await adoptedDrive.ready()
+      await recordPrivateDriveDivergence(adoptedDriveHeadStatePath(), adoptedDrive)
+      syncedPrivateDrive = adoptedDrive
+      return adoptedDrive
+    }
+
+    // The phone's own private drive always lives in its own synced-private
+    // namespace, never in the adopted store. Adopted drives (imported from a
+    // desktop identity transfer) are separate, read-only on this device, and
+    // are reached through getSyncedPrivateHyperdriveForId() instead. Routing
+    // the phone's own open here into the adopted store would hand the phone the
+    // desktop writer keys and let both devices write the same drive, silently
+    // diverging their lists.
+    const corestore = target.namespace(HYPERDRIVE_PRIVATE_DRIVE_NAME)
     const drive = new Hyperdrive(
       corestore,
       driveId ? b4a.from(driveId, 'hex') : undefined,
       driveOptions
     )
     await drive.ready()
+    await recordPrivateDriveDivergence(storage, drive)
 
     if (announce && !drive.core.discovery) {
       await target.joinCore(drive.core)
@@ -206,13 +228,17 @@ export async function getSyncedPrivateHyperdriveForId (driveId, runtime = null) 
   // `runtime` argument is kept for call-site compatibility but intentionally
   // ignored: adopted drives always open from the adopted store.
   const target = await getAdoptedPrivateHyperRuntime()
-  const driveOptions = adopted.encrypted ? { encryptionKey: getPrivateDriveKey(storage) } : undefined
+  const record = getPrivateDriveKeyRecord(storage)
+  const legacyKey = record.ok && record.driveId === normalized ? record.key : null
+  const encryptionKeyHex = adopted.key || (adopted.encrypted && legacyKey ? b4a.toString(legacyKey, 'hex') : null)
+  const driveOptions = encryptionKeyHex ? { encryptionKey: b4a.from(encryptionKeyHex, 'hex') } : undefined
   const drive = new Hyperdrive(
     target.corestore,
     b4a.from(normalized, 'hex'),
     driveOptions
   )
   await drive.ready()
+  await recordPrivateDriveDivergence(adoptedDriveHeadStatePath(), drive)
 
   syncedPrivateDrivesById.set(normalized, drive)
   return drive
@@ -228,7 +254,10 @@ export async function getAdoptedPrivateHyperRuntime () {
         storage: adoptedStoragePath,
         autoJoin: false,
         doReplicate: false,
-        corestoreOpts: { allowBackup: true }
+        // Received drives are read-only on this device: the desktop holds the
+        // only writer keys, and the phone must never append to a drive it can
+        // then diverge from. Reads of the copied cores keep working.
+        corestoreOpts: { allowBackup: true, readOnly: true }
       }),
       async (runtime) => {
         adoptedSdk = runtime
@@ -306,6 +335,20 @@ export function refreshHyperNetworking () {
 
 export { getLANDiscoveryStatus }
 
+export function getPrivateDriveWarnings () {
+  return Array.from(privateDriveWarnings.entries()).map(([driveId, message]) => ({
+    driveId,
+    url: `hyper://${driveId}/`,
+    message
+  }))
+}
+
+export function getPrivateDriveWarningForDriveId (driveId) {
+  const normalized = String(driveId || '').toLowerCase()
+  if (privateDriveWarnings.has(normalized)) return privateDriveWarnings.get(normalized)
+  return null
+}
+
 export async function closeHyperRuntime () {
   try {
     await closeRuntimeCandidates([
@@ -328,12 +371,32 @@ export async function closeHyperRuntime () {
     syncedPrivateDrive = null
     syncedPrivateDriveOpening = null
     syncedPrivateDrivesById.clear()
+    privateDriveWarnings.clear()
     deviceOnlyDriveId = null
     syncedPrivateDriveId = null
     resetPrivateDriveKeyCache()
     networkRefresh = null
     resetLANDiscovery()
   }
+}
+
+function adoptedDriveHeadStatePath () {
+  return adoptedStoragePath || adoptedStoragePathFor(getSyncedPrivateHyperSdkStoragePath())
+}
+
+async function recordPrivateDriveDivergence (stateStoragePath, drive) {
+  const hexId = drive?.core?.key ? b4a.toString(drive.core.key, 'hex').toLowerCase() : null
+  if (!hexId || !stateStoragePath) return
+
+  const { diverged } = await checkPrivateDriveDivergence({
+    storagePath: stateStoragePath,
+    driveId: hexId,
+    core: drive.core
+  })
+
+  const message = 'This private drive changed on another device. It is open read-only here; copy anything you need, then re-import the identity to get the latest copy.'
+  if (diverged) privateDriveWarnings.set(hexId, message)
+  else privateDriveWarnings.delete(hexId)
 }
 
 function getHyperSdkStoragePath () {

@@ -114,7 +114,7 @@ describe('Encrypted private drive sync guards', () => {
     })
   })
 
-  it('adopting an unencrypted drive records announce:false, lands in its own store, and never announces', async (t) => {
+  it('adopts an unencrypted drive read-only in its own store, never announces, and leaves the phone key record alone', async (t) => {
     const root = await mkdtemp(join(tmpdir(), 'peersky-guard-announce-'))
     const sdks = []
     const drives = []
@@ -162,14 +162,14 @@ describe('Encrypted private drive sync guards', () => {
     assert.equal(adopted[0].encrypted, false)
     assert.equal(adopted[0].announce, false)
 
-    const record = getPrivateDriveKeyRecord(syncedStore)
-    assert.equal(record.ok, true)
-    assert.equal(record.encrypted, false)
-    assert.equal(record.announce, false)
+    // Adoption must not write a primary key record: the adopted drive is not
+    // the phone's own drive, and the phone's private drive stays the only
+    // write target.
+    assert.deepEqual(getPrivateDriveKeyRecord(syncedStore), { ok: false })
 
     const mobile = await createSDK({
       storage: adoptedStore,
-      corestoreOpts: { allowBackup: true },
+      corestoreOpts: { allowBackup: true, readOnly: true },
       swarmOpts: SWARM_OFF,
       autoJoin: false,
       doReplicate: false
@@ -178,6 +178,7 @@ describe('Encrypted private drive sync guards', () => {
 
     const adoptedDrive = trackDrive(new Hyperdrive(mobile.corestore, HexToBinary(driveId)))
     await adoptedDrive.ready()
+    assert.equal(adoptedDrive.writable, false)
     assert.equal(Buffer.from(await adoptedDrive.get('/note.txt')).toString(), 'desktop note')
     const discovery = adoptedDrive.core.discovery
     assert.ok(discovery === null || discovery === undefined, 'adopted drive must not join any swarm topic')

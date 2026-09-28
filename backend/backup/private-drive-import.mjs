@@ -2,14 +2,12 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSy
 import { join } from 'node:path'
 import z32 from 'z32'
 import {
-  importPrivateDriveKey,
   isValidPrivateDriveId,
-  normalizePrivateDriveKey,
-  PRIVATE_DRIVE_KEY_FILE
+  normalizePrivateDriveKey
 } from '../hyper/private-keys.mjs'
 import { ADOPTED_CORESTORE_FILE, adoptedStoragePathFor, readSyncedPrivateAdoptedDrives } from '../hyper/runtime-routing.mjs'
 
-const PRIVATE_DRIVE_TRANSFER_ENTRY = `${PRIVATE_DRIVE_KEY_FILE}`
+const PRIVATE_DRIVE_TRANSFER_ENTRY = 'private-drive-key.json'
 const PRIVATE_HYPERDRIVES_REGISTRY = 'privateHyperdrives.json'
 const DESKTOP_PRIVATE_STORE_DIR = 'hyper-private'
 
@@ -53,7 +51,6 @@ export function adoptTransferredPrivateDrive (storagePath, syncedPrivateStorageP
   try {
     importTransferredPrivateCores(storagePath, adoptedStorePath)
 
-    let primarySet = false
     for (const entry of transferred) {
       const encrypted = !!entry.key
       const announce = entry.announce !== false && encrypted
@@ -61,19 +58,9 @@ export function adoptTransferredPrivateDrive (storagePath, syncedPrivateStorageP
         driveId: entry.driveId,
         encrypted,
         announce,
-        source: entry.source
+        source: entry.source,
+        ...(encrypted && entry.key ? { key: String(entry.key).toLowerCase() } : {})
       })
-
-      if (entry.key || !primarySet) {
-        importPrivateDriveKey(syncedPrivateStoragePath, {
-          key: entry.key || null,
-          driveId: entry.driveId,
-          source: entry.source,
-          announce,
-          preserve: true
-        })
-        primarySet = true
-      }
     }
 
     return {
@@ -230,7 +217,8 @@ function writeAdoptedCorestoreMarker (syncedPrivateStoragePath, transferred) {
     driveId: entry.driveId,
     encrypted: entry.encrypted,
     announce: entry.announce,
-    ...(entry.source ? { source: entry.source } : {})
+    ...(entry.source ? { source: entry.source } : {}),
+    ...(entry.encrypted && entry.key ? { key: entry.key } : {})
   }))
 
   if (!seen.has(transferred.driveId)) {
@@ -238,7 +226,8 @@ function writeAdoptedCorestoreMarker (syncedPrivateStoragePath, transferred) {
       driveId: transferred.driveId,
       encrypted: !!transferred.encrypted,
       announce: !!transferred.announce,
-      ...(transferred.source ? { source: transferred.source } : {})
+      ...(transferred.source ? { source: transferred.source } : {}),
+      ...(transferred.encrypted && transferred.key ? { key: String(transferred.key).toLowerCase() } : {})
     })
   }
 

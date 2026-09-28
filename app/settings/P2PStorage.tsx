@@ -41,6 +41,7 @@ type P2pAppData = {
     fileCount: number
     byteLength: number
     truncated?: boolean
+    warning?: string
   }>
 }
 
@@ -194,6 +195,7 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
       setArchiveItems(response.archive?.items || [])
       setArchivePage(response.archive?.page || nextPage)
       setArchiveTotalPages(Math.max(1, response.archive?.totalPages || 1))
+      setNotice(response.warning || null)
       setArchiveTotal(response.archive?.total || 0)
     } catch (loadError) {
       if (sequence !== requestSequence.current) return
@@ -462,6 +464,11 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
                           {drive.url}
                         </Text>
                       </Pressable>
+                      {drive.warning && (
+                        <Text style={[styles.driveWarning, isDark ? darkStyles.warningText : null]}>
+                          {drive.warning}
+                        </Text>
+                      )}
                     </View>
                   </View>
                 ))}
@@ -898,6 +905,11 @@ const styles = StyleSheet.create({
     fontFamily: 'monospace',
     fontSize: 9
   },
+  driveWarning: {
+    color: '#a97400',
+    fontSize: 10,
+    marginTop: 2
+  },
   url: {
     color: '#687086',
     fontFamily: 'monospace',
@@ -1061,5 +1073,8 @@ const darkStyles = StyleSheet.create({
   },
   actionText: {
     color: BROWSER_PALETTES.dark.selectedControl
+  },
+  warningText: {
+    color: '#e0b030'
   }
 })
