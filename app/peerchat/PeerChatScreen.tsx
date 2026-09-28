@@ -4450,7 +4450,9 @@ const styles = StyleSheet.create({
   roomPreview: { fontSize: 12 },
   roomMeta: { alignItems: 'flex-end', gap: 5 },
   roomStateRow: { alignItems: 'center', flexDirection: 'row', gap: 5 },
-  roomTime: { fontSize: 10 },
+  // Line height matched to the pin and mute icons beside it, so centring the
+  // row lines the three up exactly rather than centring boxes of two heights.
+  roomTime: { fontSize: 10, lineHeight: ROOM_STATE_ICON_SIZE },
   roomPeerCount: { fontSize: 11, fontWeight: '700' },
   unreadBadge: { alignItems: 'center', borderRadius: 10, justifyContent: 'center', minWidth: 20, paddingHorizontal: 6, paddingVertical: 2 },
   unreadBadgeText: { color: '#ffffff', fontSize: 10, fontWeight: '900' },

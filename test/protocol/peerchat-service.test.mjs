@@ -1357,22 +1357,23 @@ test('removing somebody takes them out of the member list and keeps them out', a
   await service.close()
 })
 
-test('the person being removed is told before their connection goes away', async (t) => {
+test('the person being removed is told, and keeps the rooms they are still in', async (t) => {
   const { service, roomKey, peer, frames } = await createRoomWithMember(t, 'peersky-peerchat-notify-')
 
   await service.removeRoomMember({ roomKey, peerId: 'aabbccdd' })
 
   // Dropping them first destroyed the connection with this still queued on it,
   // so the one person who most needed to hear it was the one who never did.
+  // It also took them offline in every other room the two of us share.
   const bans = frames.filter((frame) => frame.type === 'room-bans')
   assert.equal(bans.length, 1)
   assert.equal(bans[0].roomKey, roomKey)
   assert.deepEqual(bans[0].bans.map((ban) => ban.id), ['aabbccdd'])
-  assert.notEqual(peer.connection.destroyed, true, 'still connected while the notice goes out')
-
-  // Then the connection goes, because nothing more will pass either way.
+  // And they keep the connection: it carries every room the two of you share,
+  // so taking it down over one room took them offline in all of them.
+  assert.notEqual(peer.connection.destroyed, true)
   await new Promise((resolve) => setTimeout(resolve, 1100))
-  assert.equal(peer.connection.destroyed, true)
+  assert.notEqual(peer.connection.destroyed, true)
   await service.close()
 })
 
@@ -1384,7 +1385,7 @@ test('removing somebody says so in the room', async (t) => {
   const notices = service.feeds.get(roomKey).entries
     .filter((entry) => entry.type === 'system')
     .map((entry) => entry.message)
-  assert.deepEqual(notices, ['Bob was removed from the room by its creator'])
+  assert.deepEqual(notices, ['Bob was removed from the room by Akhilesh'])
   await service.close()
 })
 
@@ -1520,6 +1521,47 @@ test('two conversations opened at once converge on one', async (t) => {
   assert.equal(service.listPendingDirectMessages().some((dm) => dm.fromId === '11223344'), false)
   assert.equal(frames.at(-1)?.type, 'dm-invite')
   assert.equal(frames.at(-1)?.roomKey, second.room.roomKey)
+  await service.close()
+})
+
+// The bug that hid nobody. A removal records the peer's whole key whenever they
+// are connected to take it from, and the member list has nothing but short ids
+// to ask about. Asking with an id against a ban that carried a key answered
+// "not removed", so everybody removed stayed in the list, kept being re-added
+// by relayed lists, and could leave and rejoin as if nothing had happened.
+test('somebody removed while connected leaves the list and stays out', async (t) => {
+  const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-keyban-'))
+  t.after(() => rm(storagePath, { recursive: true, force: true }))
+  const service = await new PeerChatService({ sdk: createFakeSdk(), storagePath }).start()
+  await service.completeOnboarding({ username: 'Akhilesh' })
+
+  const room = await service.createRoom({ name: 'Test Room', username: 'Akhilesh' })
+  const roomKey = room.roomKey
+  service.rooms.get(roomKey).members = [
+    { id: 'aabbccdd', username: 'Bob', bio: '', avatar: null, joinedAt: Date.now() }
+  ]
+
+  // Connected, so the removal catches their key and not merely their first
+  // eight characters.
+  const peer = createFakePeer('aabbccdd', 'Bob', [])
+  peer.key = 'aabbccdd' + 'ee'.repeat(28)
+  peer.rooms = [roomKey]
+  service.peers.set(peer.connection, peer)
+
+  await service.removeRoomMember({ roomKey, peerId: 'aabbccdd' })
+
+  assert.equal(service.rooms.get(roomKey).bans[0].key, 'aabbccdd' + 'ee'.repeat(28))
+  assert.equal(service.isPeerIdRemovedFromRoom(roomKey, 'aabbccdd'), true)
+  assert.deepEqual(service.listRoomMembers(roomKey).map((member) => member.username), ['Akhilesh'])
+
+  // A member list relayed by somebody who has not heard yet does not put them
+  // back, and neither does their own join announcement.
+  service.mergeMembersList(roomKey, { aabbccdd: { username: 'Bob' } })
+  service.rememberRoomMember(service.rooms.get(roomKey), peer)
+  assert.deepEqual(service.listRoomMembers(roomKey).map((member) => member.username), ['Akhilesh'])
+
+  // And the room is still shut to them, by key and by id alike.
+  assert.equal(service.isPeerRemovedFromRoom(roomKey, peer), true)
   await service.close()
 })
 

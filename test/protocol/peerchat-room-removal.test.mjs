@@ -43,14 +43,27 @@ test('nothing a removed peer sends counts, including a removal list', () => {
   assert.ok(banCheck < banHandler, 'the check has to sit above every handler')
 })
 
-test('a removed peer is dropped, not relayed to', () => {
+// A removal stops one room, and a connection carries every room two people
+// share. Dropping it took them offline everywhere the two of you met, and threw
+// away the removal notice still queued on it, so they never learned why.
+test('a removed peer is cut out of the room, not off the connection', () => {
   const relay = service.slice(service.indexOf('relayToRoom (roomKey, message)'), service.indexOf('sendToPeer (peer, message)'))
   assert.match(relay, /if \(this\.isPeerRemovedFromRoom\(roomKey, peer\)\) continue/)
 
   const share = service.slice(service.indexOf('shareRoom (peer, roomKey)'), service.indexOf('announceRoom (roomKey)'))
-  // Told before anything else, so the one who was removed finds out.
-  assert.ok(share.indexOf('this.sendRoomBans(peer, roomKey)') < share.indexOf('this.sendRoomMeta(peer, roomKey)'))
-  assert.match(share, /this\.disconnectPeer\(peer\)/)
+  // The creator key comes first, because a removal is only believed from the
+  // connection whose key that is. The other way round the list arrived with
+  // nothing to check it against, so leaving and rejoining reopened the room.
+  assert.ok(share.indexOf('this.sendRoomMeta(peer, roomKey)') < share.indexOf('this.sendRoomBans(peer, roomKey)'))
+  assert.match(share, /if \(this\.isPeerRemovedFromRoom\(roomKey, peer\)\) return/)
+
+  // Out of the room is out of its history too.
+  const sync = service.slice(service.indexOf('async syncHistoryToPeer ('), service.indexOf('async syncHistoryToPeerOnce ('))
+  assert.match(sync, /if \(this\.isPeerRemovedFromRoom\(roomKey, peer\)\) return false/)
+
+  // And nothing takes the connection down over a room ban.
+  assert.doesNotMatch(service, /dropRemovedPeer/)
+  assert.doesNotMatch(service, /enforceRoomBans/)
 })
 
 test('only the creator can remove, and not themselves', () => {
@@ -164,7 +177,9 @@ test('a removed member is filtered out of the list, not just deleted once', () =
 
 test('a removal is said out loud in the room, by everyone who honours it', () => {
   assert.match(service, /async appendRemovalNotice \(roomKey, peerId, username\)/)
-  assert.match(service, /was removed from the room by its creator/)
+  // By name: "the creator" tells nobody in the room who that was.
+  assert.match(service, /was removed from the room by \$\{by\}/)
+  assert.match(service, /room\?\.createdByName \|\| room\?\.createdBy \|\| 'whoever made the room'/)
 
   // The creator says it when they do it.
   const remove = service.slice(service.indexOf('async removeRoomMember ('), service.indexOf('async restoreRoomMember ('))

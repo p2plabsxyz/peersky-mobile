@@ -85,9 +85,6 @@ const MAX_INITIAL_SYNC_MESSAGES_PER_CONNECTION = 500
 const MAX_PENDING_MESSAGES_PER_CONNECTION = 256
 const MAX_RETURNED_ROOM_MEMBERS = 100
 const MAX_PENDING_DIRECT_MESSAGES = 50
-// Long enough for the removal notice to leave the wire before the connection
-// it was written to goes away.
-const REMOVED_PEERCHAT_PEER_DROP_MS = 1000
 const PERSIST_DELAY_MS = 500
 const PING_INTERVAL_MS = 25_000
 const PEER_LIVENESS_TIMEOUT_MS = 60_000
@@ -1422,6 +1419,9 @@ export class PeerChatService {
       const id = normalizePeerChatPeerId(rawId)
       const username = normalizePeerChatProfileName(value?.username)
       if (!id || !username || id === this.localId) continue
+      // Somebody removed is not in the room, so a list relayed by anyone who
+      // has not heard yet cannot put them back into it.
+      if (this.isPeerIdRemovedFromRoom(roomKey, id)) continue
 
       const index = members.findIndex((member) => member.id === id)
       if (index >= 0) {
@@ -1455,14 +1455,19 @@ export class PeerChatService {
   }
 
   shareRoom (peer, roomKey) {
-    // Before anything else they might act on. If they are the one who was
-    // removed, this is how they find out.
-    this.sendRoomBans(peer, roomKey)
-    if (this.isPeerRemovedFromRoom(roomKey, peer)) {
-      this.disconnectPeer(peer)
-      return
-    }
+    // Room metadata before the removals, because it carries the creator key
+    // and a removal is only believed from the connection whose key that is.
+    // Sent first, the list arrived before there was anything to check it
+    // against and was dropped, so somebody who left and rejoined found the
+    // room open again.
     this.sendRoomMeta(peer, roomKey)
+    this.sendRoomBans(peer, roomKey)
+
+    // One connection carries every room two people share, so a removal stops
+    // that room and leaves the rest alone. Dropping the connection instead
+    // took them offline everywhere the two of you met.
+    if (this.isPeerRemovedFromRoom(roomKey, peer)) return
+
     this.shareMembers(peer, roomKey)
     this.sendToPeer(peer, {
       type: 'join',
@@ -1646,6 +1651,8 @@ export class PeerChatService {
   async syncHistoryToPeer (peer, roomKey) {
     const feed = this.feeds.get(roomKey)
     if (!feed || peer.connection.destroyed) return false
+    // Out of the room is out of its history too.
+    if (this.isPeerRemovedFromRoom(roomKey, peer)) return false
 
     // Send only what this peer missed. Someone who just joined starts with an
     // empty room rather than inheriting a stranger's backlog, while a member
@@ -2009,15 +2016,20 @@ export class PeerChatService {
    * somebody who is not the creator.
    */
   async appendRemovalNotice (roomKey, peerId, username) {
+    const room = this.rooms.get(roomKey)
     const name = normalizePeerChatProfileName(username) ||
-      this.rooms.get(roomKey)?.members?.find((member) => member.id === peerId)?.username ||
+      room?.members?.find((member) => member.id === peerId)?.username ||
       peerId
+    // By name, because "the creator" tells nobody in the room who that was.
+    const by = this.isRoomCreator(roomKey)
+      ? (this.profile.username || this.localId)
+      : (room?.createdByName || room?.createdBy || 'whoever made the room')
     try {
       await this.appendEntry(roomKey, {
         id: `removed-${roomKey}-${peerId}-${Date.now()}`,
         type: 'system',
         moderationNotice: true,
-        message: `${name} was removed from the room by its creator`,
+        message: `${name} was removed from the room by ${by}`,
         ts: Date.now()
       })
     } catch (error) {
@@ -2070,37 +2082,11 @@ export class PeerChatService {
     room.members = (room.members || []).filter((member) => (
       !isPeerChatPeerBanned(room.bans, { peerId: member.id })
     ))
-    this.enforceRoomBans(roomKey)
     this.persistNow()
     this.bumpVersion()
   }
 
   /** Drop anyone in the room who is no longer welcome in it. */
-  /**
-   * Drop anyone in the room who is no longer welcome in it.
-   *
-   * Not straight away. Nothing they send is read and nothing is relayed to
-   * them either way, so the drop is tidiness rather than the barrier, and
-   * closing the connection the same tick threw away the removal notice still
-   * queued on it: the person being removed learned nothing and carried on
-   * typing into a room that had stopped listening.
-   */
-  enforceRoomBans (roomKey) {
-    for (const other of [...this.peers.values()]) {
-      if (!other.rooms.includes(roomKey)) continue
-      if (this.isPeerRemovedFromRoom(roomKey, other)) this.dropRemovedPeer(other)
-    }
-  }
-
-  dropRemovedPeer (peer) {
-    if (!peer || peer.removedDropTimer) return
-    peer.removedDropTimer = setTimeout(() => {
-      peer.removedDropTimer = null
-      this.disconnectPeer(peer)
-    }, REMOVED_PEERCHAT_PEER_DROP_MS)
-    peer.removedDropTimer.unref?.()
-  }
-
   async removeRoomMember ({ roomKey, peerId }) {
     const normalized = normalizePeerChatRoomKey(roomKey)
     const room = this.rooms.get(normalized)
@@ -2124,10 +2110,7 @@ export class PeerChatService {
     room.members = (room.members || []).filter((member) => member.id !== id)
 
     await this.appendRemovalNotice(normalized, id, name)
-    // Broadcast first. Enforcing first took the removed peer out of the loop,
-    // so the one person who most needed to hear it was the one who never did.
     this.broadcastRoomBans(normalized)
-    this.enforceRoomBans(normalized)
     this.persistNow()
     this.bumpVersion()
     // The room back, so the list on screen updates from the answer rather than
@@ -2231,6 +2214,8 @@ export class PeerChatService {
     const id = normalizePeerChatPeerId(peer?.id)
     const username = normalizePeerChatProfileName(peer?.username)
     if (!room || !id || id === this.localId || !username) return false
+    // Announcing a join does not undo a removal.
+    if (this.isPeerRemovedFromRoom(room.roomKey, peer)) return false
 
     const members = Array.isArray(room.members) ? [...room.members] : []
     const index = members.findIndex((member) => member.id === id)
