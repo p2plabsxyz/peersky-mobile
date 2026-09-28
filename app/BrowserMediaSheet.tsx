@@ -9,6 +9,7 @@ import ShareIcon from '../assets/icons/bootstrap/arrow-bar-up.svg'
 import XIcon from '../assets/icons/bootstrap/x-circle.svg'
 import { BROWSER_PALETTES } from './browser-appearance.mjs'
 import { isDownloadableBrowserMediaUrl } from './browser-media.mjs'
+import { MODAL_ORIENTATIONS } from './modal-orientations'
 
 const MEDIA_ACTION_ICON_STROKE_WIDTH = 0.35
 
@@ -53,6 +54,7 @@ export function BrowserMediaSheet ({
   if (previewVisible && target.mediaUrl) {
     return (
       <Modal
+        supportedOrientations={MODAL_ORIENTATIONS}
         animationType='fade'
         visible={true}
         onRequestClose={() => setPreviewVisible(false)}
@@ -84,6 +86,7 @@ export function BrowserMediaSheet ({
 
   return (
     <Modal
+      supportedOrientations={MODAL_ORIENTATIONS}
       animationType='fade'
       transparent={true}
       visible={true}

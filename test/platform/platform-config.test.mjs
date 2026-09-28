@@ -222,11 +222,23 @@ describe('mobile platform runtime configuration', () => {
   it('opens incoming Android web and Hyper links after browser startup completes', async () => {
     const indexSource = await readFile(repoFile('app/index.tsx'), 'utf8')
 
-    assert.match(indexSource, /Linking\.getInitialURL\(\)/)
-    assert.match(indexSource, /Linking\.addEventListener\('url'/)
+    assert.match(indexSource, /subscribeToIncomingUrls\(\(url\) => \{/)
     assert.match(indexSource, /!isWebUrl\(url\) && !isHyperUrl\(url\)/)
     assert.match(indexSource, /if \(!browserSessionReady \|\| !pendingIncomingUrl\) return/)
     assert.match(indexSource, /void loadBrowserUrl\(incomingUrl\)/)
+    // The browser says when it has dealt with one, so a link that arrived on
+    // the way to expo-router's unmatched route is not lost with the screen.
+    assert.match(indexSource, /settleIncomingUrl\(incomingUrl\)/)
+  })
+
+  it('listens for deep links outside the screen expo-router unmounts', async () => {
+    const linksSource = await readFile(repoFile('app/incoming-links.ts'), 'utf8')
+
+    assert.match(linksSource, /Linking\.getInitialURL\(\)/)
+    assert.match(linksSource, /Linking\.addEventListener\('url'/)
+    // Module scope, not inside a hook or a component, so it survives the
+    // unmount and remount a peersky:// link causes.
+    assert.doesNotMatch(linksSource, /useEffect|export default function/)
   })
 
   it('bundles the Bare backend before native Android/iOS runs', async () => {

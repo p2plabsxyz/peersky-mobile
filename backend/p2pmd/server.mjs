@@ -9,7 +9,7 @@ import {
 } from './document.mjs'
 import { P2PMD_LOOPBACK_HOST } from './constants.mjs'
 import { createPeerActivityStore, createPeerPresenceStore } from './peers.mjs'
-import { renderMarkdownPreview, renderMarkdownSlides } from './preview.mjs'
+import { hasSlideBreaks, renderMarkdownPreview, renderMarkdownSlides } from './preview.mjs'
 import ieeeBrowserScript from './ieee-runtime.mjs'
 import katexCss from './katex-runtime.mjs'
 import { P2PMD_SCIENTIFIC_STYLES } from './scientific.mjs'
@@ -27,7 +27,6 @@ const peerActivity = createPeerActivityStore()
 const editActivityTimers = new Map()
 let keepaliveInterval = null
 const EDIT_ACTIVITY_DEBOUNCE_MS = 1200
-const P2PMD_SLIDE_BREAK_PATTERN = /(?:\r?\n\r?\n---\r?\n\r?\n|^---\r?\n\r?\n|\r?\n\r?\n---$|^<!-- slide -->$)/m
 const P2PMD_SLIDES_TEMPLATE = `# Welcome to Your Presentation
 
 Your first slide content goes here
@@ -686,7 +685,9 @@ function getQueryParam (rawUrl, key) {
 
 export function getP2pmdEditorPage () {
   const serializedTemplates = JSON.stringify(P2PMD_TEMPLATES).replace(/</g, '\\u003c')
-  const serializedSlideBreakPattern = JSON.stringify(P2PMD_SLIDE_BREAK_PATTERN.source).replace(/</g, '\\u003c')
+  // The page runs the very same function the renderer splits with, rather
+  // than its own copy of the rule. They drifted apart once already.
+  const embeddedSlideBreakCheck = hasSlideBreaks.toString().replace(/<\/script/gi, '<\\/script')
   const serializedSlidesTemplate = JSON.stringify(P2PMD_SLIDES_TEMPLATE).replace(/</g, '\\u003c')
   const embeddedIeeeBrowserScript = ieeeBrowserScript.replace(/<\/script/gi, '<\\/script')
 
@@ -697,18 +698,159 @@ export function getP2pmdEditorPage () {
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>P2PMD</title>
     <style>
+      /* Dark is the default because the editor opens dark. Light is a full
+         palette below, not a filter over this one. Every colour in this
+         stylesheet is a token: a literal anywhere else is a colour that
+         cannot follow the theme. */
       :root {
         --page: #1f2027;
         --panel-deep: #202128;
+        --panel-sunken: #23252d;
+        --panel-raised: #292b34;
+        --panel-hover: #30333e;
+        --well: #181a20;
+        --sheet: #24262f;
+        --chip: #454a58;
+
         --ink: #f1f2f7;
+        --ink-strong: #ffffff;
+        --ink-muted: #aeb3c3;
+        --ink-faint: #6f7484;
+        --ink-code: #d8dcff;
+
         --line: #3a3d49;
+        --line-strong: #454a58;
+        --grabber: #626777;
+
         --accent: #2f80ed;
+        --accent-ink: #8fc1ff;
+        --accent-tint: #263d5e;
+        --accent-line: rgba(89, 166, 255, .5);
+
         --local: #f2d35b;
+        --local-ink: #b8a95a;
         --remote: #59a6ff;
+        --remote-ink: #6aa5ea;
+
+        --badge-host-bg: #1d6045;
+        --badge-host-ink: #d4f8e8;
+        --badge-client-bg: #5b421e;
+        --badge-client-ink: #ffe0a3;
+
+        --scrim: rgba(8, 9, 13, .62);
+        --shadow-strong: rgba(0, 0, 0, .42);
+        --shadow-soft: rgba(0, 0, 0, .38);
+
+        /* Slides stay paper in both themes. A deck is projected at a room,
+           not read in bed, and a dark slide is someone else's problem to
+           print. These deliberately do not flip. */
+        --slide-paper: #f7f7f5;
+        --slide-ink: #202124;
+        --slide-ink-muted: #3c4043;
+        --slide-chip: #e4e7ec;
+        --slide-control: rgba(32, 33, 36, 0.12);
+        --slide-control-soft: rgba(32, 33, 36, 0.1);
+        --slide-code-bg: #202128;
+        --slide-code-ink: #f1f2f7;
+
         --ui-font: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         --editor-font: "FontWithASyntaxHighlighter", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
         --editor-font-size: 16px;
         --editor-line-height: 24.8px;
+      }
+
+      /* The app tells the page which theme it is in, because the browser has
+         its own light/dark/system setting and the WebView cannot see it.
+         The media query is the fallback for whatever arrives first. */
+      :root[data-theme="light"],
+      :root:not([data-theme="dark"]) {
+        color-scheme: light;
+      }
+      :root[data-theme="dark"] { color-scheme: dark; }
+
+      @media (prefers-color-scheme: light) {
+        :root:not([data-theme="dark"]) {
+          --page: #f5f8ff;
+          --panel-deep: #ffffff;
+          --panel-sunken: #eef3fb;
+          --panel-raised: #ffffff;
+          --panel-hover: #e8f0fb;
+          --well: #eef1f7;
+          --sheet: #ffffff;
+          --chip: #e2e8f4;
+
+          --ink: #1f2a44;
+          --ink-strong: #0f172a;
+          --ink-muted: #687086;
+          --ink-faint: #97a1b5;
+          --ink-code: #3f3f8f;
+
+          --line: #dbe6f6;
+          --line-strong: #c3d3ea;
+          --grabber: #c3d3ea;
+
+          --accent: #1f6fd1;
+          --accent-ink: #1a5fb4;
+          --accent-tint: #e5f0ff;
+          --accent-line: rgba(31, 111, 209, .45);
+
+          --local: #b8860b;
+          --local-ink: #8a6d1f;
+          --remote: #1f6fd1;
+          --remote-ink: #1a5fb4;
+
+          --badge-host-bg: #d4f8e8;
+          --badge-host-ink: #12503a;
+          --badge-client-bg: #ffe8c2;
+          --badge-client-ink: #6b4a12;
+
+          --scrim: rgba(31, 42, 68, .38);
+          --shadow-strong: rgba(31, 42, 68, .18);
+          --shadow-soft: rgba(31, 42, 68, .16);
+        }
+      }
+
+      /* Repeated rather than shared with the media query above: a light
+         palette defined only inside the query would never win when the app
+         asks for light on a phone set to dark. */
+      :root[data-theme="light"] {
+        --page: #f5f8ff;
+        --panel-deep: #ffffff;
+        --panel-sunken: #eef3fb;
+        --panel-raised: #ffffff;
+        --panel-hover: #e8f0fb;
+        --well: #eef1f7;
+        --sheet: #ffffff;
+        --chip: #e2e8f4;
+
+        --ink: #1f2a44;
+        --ink-strong: #0f172a;
+        --ink-muted: #687086;
+        --ink-faint: #97a1b5;
+        --ink-code: #3f3f8f;
+
+        --line: #dbe6f6;
+        --line-strong: #c3d3ea;
+        --grabber: #c3d3ea;
+
+        --accent: #1f6fd1;
+        --accent-ink: #1a5fb4;
+        --accent-tint: #e5f0ff;
+        --accent-line: rgba(31, 111, 209, .45);
+
+        --local: #b8860b;
+        --local-ink: #8a6d1f;
+        --remote: #1f6fd1;
+        --remote-ink: #1a5fb4;
+
+        --badge-host-bg: #d4f8e8;
+        --badge-host-ink: #12503a;
+        --badge-client-bg: #ffe8c2;
+        --badge-client-ink: #6b4a12;
+
+        --scrim: rgba(31, 42, 68, .38);
+        --shadow-strong: rgba(31, 42, 68, .18);
+        --shadow-soft: rgba(31, 42, 68, .16);
       }
       body {
         box-sizing: border-box;
@@ -767,8 +909,8 @@ export function getP2pmdEditorPage () {
       #line-gutter-wrap {
         position: relative;
         min-height: 0;
-        border-right: 1px solid #2d3039;
-        background: #23252d;
+        border-right: 1px solid var(--line);
+        background: var(--panel-sunken);
         overflow: hidden;
       }
       #line-gutter {
@@ -776,7 +918,7 @@ export function getP2pmdEditorPage () {
         top: 14px;
         right: 0;
         left: 0;
-        color: #6f7484;
+        color: var(--ink-faint);
         font: var(--editor-font-size)/var(--editor-line-height) var(--editor-font);
         text-align: right;
       }
@@ -788,12 +930,12 @@ export function getP2pmdEditorPage () {
       }
       .gutter-line.local {
         border-right-color: var(--local);
-        color: #b8a95a;
+        color: var(--local-ink);
         font-weight: 700;
       }
       .gutter-line.remote {
         border-right-color: var(--remote);
-        color: #6aa5ea;
+        color: var(--remote-ink);
         font-weight: 700;
       }
       textarea {
@@ -829,7 +971,9 @@ export function getP2pmdEditorPage () {
         color: var(--ink);
         overflow: auto;
         overflow-wrap: anywhere;
-        font: 16px/1.6 var(--ui-font);
+        /* Follows the width of the phone rather than sitting at a fixed 16px,
+           which read large on a mini and small on a Max. */
+        font: clamp(15px, 4.2vw, 18px)/1.65 var(--ui-font);
       }
       body.preview-mode #preview {
         flex: none;
@@ -848,19 +992,19 @@ export function getP2pmdEditorPage () {
       #preview pre {
         padding: 12px;
         border-radius: 8px;
-        background: #181a20;
+        background: var(--well);
         overflow-x: auto;
       }
       #preview code {
-        color: #d8dcff;
+        color: var(--ink-code);
         font-family: var(--editor-font);
       }
       #preview :not(pre) > code {
         padding: 0.12rem 0.34rem;
-        border: 1px solid #3a3d49;
+        border: 1px solid var(--line);
         border-radius: 6px;
-        background: #2b2d38;
-        color: #f1f2f7;
+        background: var(--panel-raised);
+        color: var(--ink);
         font-size: 0.92em;
       }
       #preview pre code {
@@ -872,18 +1016,53 @@ export function getP2pmdEditorPage () {
         margin-left: 0;
         padding-left: 14px;
         border-left: 3px solid var(--remote);
-        color: #c4c8d8;
+        color: var(--ink-muted);
       }
       #preview img {
         max-width: 100%;
       }
+      /* Nothing styled tables, so a four-column timesheet was squeezed into the
+         width of the phone and every heading came out one letter per line. The
+         table keeps its own width and scrolls sideways instead. */
+      #preview table,
+      #slides-preview table {
+        display: block;
+        max-width: 100%;
+        margin: 0.9em 0;
+        border-collapse: collapse;
+        overflow-x: auto;
+        overscroll-behavior-x: contain;
+        -webkit-overflow-scrolling: touch;
+      }
+      #preview th,
+      #preview td,
+      #slides-preview th,
+      #slides-preview td {
+        box-sizing: border-box;
+        min-width: 7ch;
+        padding: 8px 11px;
+        border: 1px solid var(--line);
+        text-align: left;
+        vertical-align: top;
+        overflow-wrap: normal;
+      }
+      /* Headings name the column, so they set its width rather than wrapping. */
+      #preview th,
+      #slides-preview th {
+        background: var(--panel-raised);
+        font-weight: 700;
+        white-space: nowrap;
+      }
+      /* A prose column still has to be readable rather than one endless line. */
+      #preview td,
+      #slides-preview td { max-width: 46ch; }
       #slides-preview {
         position: relative;
         box-sizing: border-box;
         flex: 1;
         min-height: 0;
-        background: #f7f7f5;
-        color: #202124;
+        background: var(--slide-paper);
+        color: var(--slide-ink);
         overflow: hidden;
         touch-action: pan-y;
         -webkit-user-select: text;
@@ -900,7 +1079,7 @@ export function getP2pmdEditorPage () {
         height: 100%;
         padding: clamp(26px, 7vw, 68px) clamp(54px, 11vw, 100px);
         overflow: auto;
-        color: #202124;
+        color: var(--slide-ink);
         text-align: center;
         flex-direction: column;
         align-items: center;
@@ -942,8 +1121,8 @@ export function getP2pmdEditorPage () {
         width: min(100%, 920px);
         padding: 14px;
         border-radius: 9px;
-        background: #202128;
-        color: #f1f2f7;
+        background: var(--slide-code-bg);
+        color: var(--slide-code-ink);
         overflow: auto;
         text-align: left;
       }
@@ -951,7 +1130,7 @@ export function getP2pmdEditorPage () {
       #slides-preview :not(pre) > code {
         padding: 0.12em 0.32em;
         border-radius: 5px;
-        background: #e4e7ec;
+        background: var(--slide-chip);
       }
       #slides-preview blockquote {
         margin-right: auto;
@@ -978,8 +1157,8 @@ export function getP2pmdEditorPage () {
         padding: 0;
         border: 0;
         border-radius: 50%;
-        background: rgba(32, 33, 36, 0.12);
-        color: #202124;
+        background: var(--slide-control);
+        color: var(--slide-ink);
         font: 700 28px/1 var(--ui-font);
         place-items: center;
         transform: translateY(-50%);
@@ -995,7 +1174,7 @@ export function getP2pmdEditorPage () {
         left: 0;
         z-index: 2;
         height: 4px;
-        background: rgba(32, 33, 36, 0.12);
+        background: var(--slide-control);
       }
       #slides-progress-value {
         display: block;
@@ -1011,8 +1190,8 @@ export function getP2pmdEditorPage () {
         z-index: 2;
         padding: 5px 9px;
         border-radius: 999px;
-        background: rgba(32, 33, 36, 0.1);
-        color: #3c4043;
+        background: var(--slide-control-soft);
+        color: var(--slide-ink-muted);
         font: 700 12px/1 var(--ui-font);
       }
       #slides-exit {
@@ -1026,8 +1205,8 @@ export function getP2pmdEditorPage () {
         padding: 0;
         border: 0;
         border-radius: 50%;
-        background: rgba(32, 33, 36, 0.12);
-        color: #202124;
+        background: var(--slide-control);
+        color: var(--slide-ink);
         font: 600 24px/1 var(--ui-font);
         place-items: center;
       }
@@ -1037,19 +1216,19 @@ export function getP2pmdEditorPage () {
         z-index: 20;
         display: flex;
         align-items: flex-end;
-        background: rgba(8, 9, 13, .62);
+        background: var(--scrim);
       }
       #peer-dashboard-backdrop[hidden] { display: none; }
       #peer-dashboard {
         box-sizing: border-box;
         width: 100%;
         max-height: min(86dvh, 760px);
-        border: 1px solid #444857;
+        border: 1px solid var(--line-strong);
         border-bottom: 0;
         border-radius: 20px 20px 0 0;
-        background: #24262f;
+        background: var(--sheet);
         color: var(--ink);
-        box-shadow: 0 -18px 48px rgba(0, 0, 0, .42);
+        box-shadow: 0 -18px 48px var(--shadow-strong);
         overflow: hidden;
       }
       .peer-dashboard-handle {
@@ -1057,7 +1236,7 @@ export function getP2pmdEditorPage () {
         height: 4px;
         margin: 8px auto 2px;
         border-radius: 999px;
-        background: #626777;
+        background: var(--grabber);
       }
       .peer-dashboard-header {
         display: flex;
@@ -1077,7 +1256,7 @@ export function getP2pmdEditorPage () {
         padding: 0;
         border: 0;
         border-radius: 50%;
-        background: #30333e;
+        background: var(--panel-hover);
         color: var(--ink);
         font: 500 26px/1 var(--ui-font);
       }
@@ -1097,7 +1276,7 @@ export function getP2pmdEditorPage () {
       }
       #peer-dashboard-room-key {
         min-width: 0;
-        color: #aeb3c3;
+        color: var(--ink-muted);
         font: 12px/1.4 var(--editor-font);
         overflow: hidden;
         text-overflow: ellipsis;
@@ -1107,14 +1286,14 @@ export function getP2pmdEditorPage () {
         flex: 0 0 auto;
         padding: 3px 8px;
         border-radius: 999px;
-        background: #454a58;
-        color: #f4f5f8;
+        background: var(--chip);
+        color: var(--ink);
         font: 800 10px/1.2 var(--ui-font);
         letter-spacing: .04em;
         text-transform: uppercase;
       }
-      .peer-role-badge.host { background: #1d6045; color: #d4f8e8; }
-      .peer-role-badge.client { background: #5b421e; color: #ffe0a3; }
+      .peer-role-badge.host { background: var(--badge-host-bg); color: var(--badge-host-ink); }
+      .peer-role-badge.client { background: var(--badge-client-bg); color: var(--badge-client-ink); }
       .peer-profile-editor {
         display: grid;
         grid-template-columns: minmax(0, 1fr) auto;
@@ -1125,9 +1304,9 @@ export function getP2pmdEditorPage () {
         min-width: 0;
         height: 42px;
         padding: 0 12px;
-        border: 1px solid #464b5a;
+        border: 1px solid var(--line-strong);
         border-radius: 10px;
-        background: #1f2027;
+        background: var(--page);
         color: var(--ink);
         font: 15px/1 var(--ui-font);
       }
@@ -1136,13 +1315,13 @@ export function getP2pmdEditorPage () {
         border: 0;
         border-radius: 10px;
         background: var(--accent);
-        color: #ffffff;
+        color: var(--ink-strong);
         font: 800 13px/1 var(--ui-font);
       }
       #peer-profile-hint {
         grid-column: 1 / -1;
         min-height: 16px;
-        color: #aeb3c3;
+        color: var(--ink-muted);
         font: 12px/1.3 var(--ui-font);
       }
       #peer-dashboard-stats {
@@ -1154,13 +1333,13 @@ export function getP2pmdEditorPage () {
       .peer-stat {
         padding: 9px 4px;
         border-radius: 10px;
-        background: #2d303a;
+        background: var(--panel-raised);
         text-align: center;
       }
       .peer-stat strong,
       .peer-stat span { display: block; }
       .peer-stat strong { font: 800 17px/1.1 var(--ui-font); }
-      .peer-stat span { margin-top: 3px; color: #aeb3c3; font: 10px/1.2 var(--ui-font); }
+      .peer-stat span { margin-top: 3px; color: var(--ink-muted); font: 10px/1.2 var(--ui-font); }
       .peer-dashboard-section { margin-top: 18px; }
       .peer-dashboard-section h3 {
         margin: 0 0 9px;
@@ -1177,9 +1356,9 @@ export function getP2pmdEditorPage () {
         gap: 0 10px;
         align-items: center;
         padding: 10px;
-        border: 1px solid #3e4250;
+        border: 1px solid var(--line);
         border-radius: 12px;
-        background: #292b34;
+        background: var(--panel-raised);
       }
       .peer-avatar {
         grid-row: 1 / 3;
@@ -1187,7 +1366,7 @@ export function getP2pmdEditorPage () {
         width: 36px;
         height: 36px;
         border-radius: 50%;
-        color: #ffffff;
+        color: var(--ink-strong);
         font: 800 14px/1 var(--ui-font);
         place-items: center;
       }
@@ -1200,15 +1379,15 @@ export function getP2pmdEditorPage () {
       }
       .peer-position,
       .peer-updated {
-        color: #aeb3c3;
+        color: var(--ink-muted);
         font: 11px/1.35 var(--ui-font);
       }
       .peer-updated { grid-column: 3; grid-row: 2; text-align: right; }
       .peer-empty {
         padding: 14px;
-        border: 1px dashed #454a58;
+        border: 1px dashed var(--line-strong);
         border-radius: 12px;
-        color: #aeb3c3;
+        color: var(--ink-muted);
         font: 13px/1.4 var(--ui-font);
         text-align: center;
       }
@@ -1222,12 +1401,12 @@ export function getP2pmdEditorPage () {
       }
       .peer-activity-item {
         padding: 10px 11px;
-        border-left: 3px solid #596174;
+        border-left: 3px solid var(--line-strong);
         border-radius: 0 10px 10px 0;
-        background: #292b34;
+        background: var(--panel-raised);
       }
       .peer-activity-message { font: 600 13px/1.35 var(--ui-font); }
-      .peer-activity-meta { margin-top: 4px; color: #aeb3c3; font: 11px/1.3 var(--ui-font); }
+      .peer-activity-meta { margin-top: 4px; color: var(--ink-muted); font: 11px/1.3 var(--ui-font); }
       @media (min-width: 680px) {
         #peer-dashboard { max-width: 680px; margin: 0 auto; border-radius: 20px 20px 0 0; }
         .peer-dashboard-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -1262,7 +1441,7 @@ export function getP2pmdEditorPage () {
         gap: 2px;
         padding: 4px 8px;
         border-bottom: 1px solid var(--line);
-        background: #24262f;
+        background: var(--sheet);
         overflow-x: auto;
         overscroll-behavior-x: contain;
         touch-action: pan-x;
@@ -1270,7 +1449,8 @@ export function getP2pmdEditorPage () {
         -webkit-user-select: none;
         user-select: none;
       }
-      #formatting-toolbar button {
+      #formatting-toolbar button,
+      #keyboard-toolbar button {
         align-items: center;
         justify-content: center;
         flex: 0 0 auto;
@@ -1281,27 +1461,63 @@ export function getP2pmdEditorPage () {
         border: 1px solid transparent;
         border-radius: 6px;
         background: transparent;
-        color: rgba(255, 255, 255, 0.72);
+        color: var(--ink-muted);
         font: 700 14px/1 var(--ui-font);
         touch-action: manipulation;
         transition: background-color 0.15s ease, color 0.15s ease;
         -webkit-user-select: none;
         user-select: none;
       }
-      #formatting-toolbar button:hover {
-        color: #ffffff;
+      #formatting-toolbar button:hover,
+      #keyboard-toolbar button:hover {
+        color: var(--ink-strong);
       }
-      #formatting-toolbar button:active {
-        background: #343744;
-        color: #ffffff;
+      #formatting-toolbar button:active,
+      #keyboard-toolbar button:active {
+        background: var(--panel-hover);
+        color: var(--ink-strong);
       }
-      #formatting-toolbar button[aria-pressed="true"] {
-        border-color: rgba(89, 166, 255, .5);
-        background: #263d5e;
-        color: #8fc1ff;
+      #formatting-toolbar button[aria-pressed="true"],
+      #keyboard-toolbar button[aria-pressed="true"] {
+        border-color: var(--accent-line);
+        background: var(--accent-tint);
+        color: var(--accent-ink);
       }
+      /* Rides just above the keyboard, the way Notes does it, instead of
+         sitting at the top of the screen where a thumb cannot reach it.
+         Anchored to the top of the layout viewport and moved down to the
+         bottom edge of the visual viewport, rather than anchored to the bottom
+         and lifted: iOS scrolls the layout viewport out from under a
+         bottom-anchored fixed element when the keyboard opens, and the bar
+         slid behind the keyboard. The visual viewport is the only thing that
+         reports where the keyboard actually starts. */
+      #keyboard-toolbar {
+        position: fixed;
+        top: 0;
+        right: 6px;
+        left: 6px;
+        z-index: 9;
+        will-change: transform;
+        display: flex;
+        align-items: center;
+        gap: 2px;
+        padding: 4px 6px;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: var(--sheet);
+        box-shadow: 0 8px 24px var(--shadow-soft);
+        overflow-x: auto;
+        overscroll-behavior-x: contain;
+        touch-action: pan-x;
+        transition: transform 120ms ease-out;
+        -webkit-overflow-scrolling: touch;
+        -webkit-user-select: none;
+        user-select: none;
+      }
+      /* Scrollable, but a scrollbar over the keyboard looks like damage. */
+      #keyboard-toolbar::-webkit-scrollbar { display: none; }
       #latex-toolbar-group { display: contents; }
-      #latex-template-menu {
+      #template-menu {
         position: absolute;
         z-index: 8;
         top: 46px;
@@ -1310,10 +1526,10 @@ export function getP2pmdEditorPage () {
         padding: 6px;
         border: 1px solid var(--line);
         border-radius: 10px;
-        background: #292b35;
-        box-shadow: 0 10px 28px rgba(0, 0, 0, .38);
+        background: var(--panel-raised);
+        box-shadow: 0 10px 28px var(--shadow-soft);
       }
-      #latex-template-menu button {
+      #template-menu button {
         display: block;
         width: 100%;
         padding: 10px 12px;
@@ -1323,9 +1539,10 @@ export function getP2pmdEditorPage () {
         color: var(--ink);
         text-align: left;
       }
-      #latex-template-menu button:active { background: #353844; }
+      #template-menu button:active { background: var(--panel-hover); }
+      #template-menu button:disabled { opacity: 0.42; }
       .template-label { display: block; font: 700 14px/1.3 var(--ui-font); }
-      .template-description { display: block; margin-top: 2px; color: #aeb3c3; font: 12px/1.35 var(--ui-font); }
+      .template-description { display: block; margin-top: 2px; color: var(--ink-muted); font: 12px/1.35 var(--ui-font); }
       .latex-mode-symbol { font-size: 20px; font-weight: 500; }
       .toolbar-icon {
         display: block;
@@ -1349,7 +1566,17 @@ export function getP2pmdEditorPage () {
   <body>
     <div class="app-shell">
       <main class="editor-card">
-        <div id="formatting-toolbar" role="toolbar" aria-label="Markdown formatting">
+        <div id="formatting-toolbar" role="toolbar" aria-label="Document">
+          <button type="button" data-format="slides" title="View as slides" aria-label="View as slides">
+            <svg class="toolbar-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0a.5.5 0 0 1 .5.5V2h5A1.5 1.5 0 0 1 15 3.5v7A1.5 1.5 0 0 1 13.5 12H9.05l1.9 3.8a.5.5 0 0 1-.9.4L8.5 13h-1l-1.55 3.2a.5.5 0 0 1-.9-.4L7 12H2.5A1.5 1.5 0 0 1 1 10.5v-7A1.5 1.5 0 0 1 2.5 2h5V.5A.5.5 0 0 1 8 0M2.5 3a.5.5 0 0 0-.5.5v7a.5.5 0 0 0 .5.5h11a.5.5 0 0 0 .5-.5v-7a.5.5 0 0 0-.5-.5z"/></svg>
+          </button>
+          <div class="toolbar-divider" aria-hidden="true"></div>
+          <button type="button" data-menu="template" title="Document templates" aria-label="Document templates" aria-haspopup="true" aria-expanded="false">
+            <svg class="toolbar-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 7a.5.5 0 0 0 0 1h5a.5.5 0 0 0 0-1zM5 9.5a.5.5 0 0 1 .5-.5h5a.5.5 0 0 1 0 1h-5a.5.5 0 0 1-.5-.5m0 2a.5.5 0 0 1 .5-.5h2a.5.5 0 0 1 0 1h-2a.5.5 0 0 1-.5-.5"/><path d="M9.5 0H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V4.5zM9 1v2a1 1 0 0 0 1 1h3v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1z"/></svg>
+          </button>
+        </div>
+        <div id="template-menu" role="menu" aria-label="Document templates" hidden></div>
+        <div id="keyboard-toolbar" role="toolbar" aria-label="Markdown formatting" hidden>
           <button type="button" data-format="bold" title="Bold" aria-label="Bold">
             <svg class="toolbar-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M8.21 13c2.106 0 3.412-1.087 3.412-2.823 0-1.306-.984-2.283-2.324-2.386v-.055a2.176 2.176 0 0 0 1.852-2.14c0-1.51-1.162-2.46-3.014-2.46H3.843V13zM5.908 4.674h1.696c.963 0 1.517.451 1.517 1.244 0 .834-.629 1.32-1.73 1.32H5.908V4.673zm0 6.788V8.598h1.73c1.217 0 1.88.492 1.88 1.415 0 .943-.643 1.449-1.832 1.449H5.907z"/></svg>
           </button>
@@ -1363,6 +1590,9 @@ export function getP2pmdEditorPage () {
           <button type="button" data-format="h2" title="Heading 2" aria-label="Heading 2">
             <svg class="toolbar-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M7.638 13V3.669H6.38V7.62H1.759V3.67H.5V13h1.258V8.728h4.62V13zm3.022-6.733v-.048c0-.889.63-1.668 1.716-1.668.957 0 1.675.608 1.675 1.572 0 .855-.554 1.504-1.067 2.085l-3.513 3.999V13H15.5v-1.094h-4.245v-.075l2.481-2.844c.875-.998 1.586-1.784 1.586-2.953 0-1.463-1.155-2.556-2.919-2.556-1.941 0-2.966 1.326-2.966 2.74v.049z"/></svg>
           </button>
+          <button type="button" data-format="image" title="Insert image" aria-label="Insert image">
+            <svg class="toolbar-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M6.002 5.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0"/><path d="M2.002 1a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2zm12 1a1 1 0 0 1 1 1v6.5l-3.777-1.947a.5.5 0 0 0-.577.093l-3.71 3.71-2.66-1.772a.5.5 0 0 0-.63.062L1.002 12V3a1 1 0 0 1 1-1z"/></svg>
+          </button>
           <div class="toolbar-divider" aria-hidden="true"></div>
           <button type="button" data-format="ul" title="Bullet list" aria-label="Bullet list">
             <svg class="toolbar-icon" viewBox="0 0 16 16" aria-hidden="true"><path fill-rule="evenodd" d="M5 11.5a.5.5 0 0 1 .5-.5h9a.5.5 0 0 1 0 1h-9a.5.5 0 0 1-.5-.5m0-4a.5.5 0 0 1 .5-.5h9a.5.5 0 0 1 0 1h-9a.5.5 0 0 1-.5-.5m0-4a.5.5 0 0 1 .5-.5h9a.5.5 0 0 1 0 1h-9a.5.5 0 0 1-.5-.5m-3 1a1 1 0 1 0 0-2 1 1 0 0 0 0 2m0 4a1 1 0 1 0 0-2 1 1 0 0 0 0 2m0 4a1 1 0 1 0 0-2 1 1 0 0 0 0 2"/></svg>
@@ -1374,10 +1604,6 @@ export function getP2pmdEditorPage () {
           <button type="button" data-format="link" title="Insert link" aria-label="Insert link">
             <svg class="toolbar-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.715 6.542 3.343 7.914a3 3 0 1 0 4.243 4.243l1.828-1.829A3 3 0 0 0 8.586 5.5L8 6.086a1 1 0 0 0-.154.199 2 2 0 0 1 .861 3.337L6.88 11.45a2 2 0 1 1-2.83-2.83l.793-.792a4 4 0 0 1-.128-1.287z"/><path d="M6.586 4.672A3 3 0 0 0 7.414 9.5l.775-.776a2 2 0 0 1-.896-3.346L9.12 3.55a2 2 0 1 1 2.83 2.83l-.793.792c.112.42.155.855.128 1.287l1.372-1.372a3 3 0 1 0-4.243-4.243z"/></svg>
           </button>
-          <button type="button" data-format="image" title="Insert image" aria-label="Insert image">
-            <svg class="toolbar-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M6.002 5.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0"/><path d="M2.002 1a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2zm12 1a1 1 0 0 1 1 1v6.5l-3.777-1.947a.5.5 0 0 0-.577.093l-3.71 3.71-2.66-1.772a.5.5 0 0 0-.63.062L1.002 12V3a1 1 0 0 1 1-1z"/></svg>
-          </button>
-          <div class="toolbar-divider" aria-hidden="true"></div>
           <button type="button" data-format="inline-code" title="Inline code" aria-label="Inline code">
             <svg class="toolbar-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M10.478 1.647a.5.5 0 1 0-.956-.294l-4 13a.5.5 0 0 0 .956.294zM4.854 4.146a.5.5 0 0 1 0 .708L1.707 8l3.147 3.146a.5.5 0 0 1-.708.708l-3.5-3.5a.5.5 0 0 1 0-.708l3.5-3.5a.5.5 0 0 1 .708 0m6.292 0a.5.5 0 0 0 0 .708L14.293 8l-3.147 3.146a.5.5 0 0 0 .708.708l3.5-3.5a.5.5 0 0 0 0-.708l-3.5-3.5a.5.5 0 0 0-.708 0"/></svg>
           </button>
@@ -1394,14 +1620,8 @@ export function getP2pmdEditorPage () {
           <span id="latex-toolbar-group" hidden>
             <button type="button" data-format="inline-math" title="Inline math" aria-label="Inline math">$x$</button>
             <button type="button" data-format="block-math" title="Block math" aria-label="Block math">$$</button>
-            <button type="button" data-format="template" title="Scientific templates" aria-label="Scientific templates">T</button>
           </span>
-          <div class="toolbar-divider" aria-hidden="true"></div>
-          <button type="button" data-format="slides" title="View as slides" aria-label="View as slides">
-            <svg class="toolbar-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V4a1 1 0 0 0-1-1zm0-1h10a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/><path d="M2 6h12v1H2zm0 3h12v1H2z"/><circle cx="5" cy="4.5" r=".8"/><circle cx="8" cy="4.5" r=".8"/><circle cx="11" cy="4.5" r=".8"/></svg>
-          </button>
         </div>
-        <div id="latex-template-menu" role="menu" aria-label="Scientific templates" hidden></div>
         <input id="image-upload-input" type="file" accept="image/*" hidden />
         <div class="editor-frame">
           <div id="line-gutter-wrap" aria-hidden="true">
@@ -1466,7 +1686,8 @@ export function getP2pmdEditorPage () {
       const formattingToolbar = document.getElementById('formatting-toolbar')
       const latexModeButton = formattingToolbar.querySelector('[data-format="latex"]')
       const latexToolbarGroup = document.getElementById('latex-toolbar-group')
-      const latexTemplateMenu = document.getElementById('latex-template-menu')
+      const keyboardToolbar = document.getElementById('keyboard-toolbar')
+      const templateMenu = document.getElementById('template-menu')
       const imageUploadInput = document.getElementById('image-upload-input')
       const lineGutter = document.getElementById('line-gutter')
       const peerDashboardBackdrop = document.getElementById('peer-dashboard-backdrop')
@@ -1497,6 +1718,18 @@ export function getP2pmdEditorPage () {
       const PEER_TYPING_IDLE_MS = ${EDIT_ACTIVITY_DEBOUNCE_MS}
       const templates = ${serializedTemplates}
       const slidesTemplate = ${serializedSlidesTemplate}
+      // The note list shows a readable title instead of a key, so every save
+      // carries enough of the text for one to be worked out. Bounded on
+      // purpose: this rides along with each save, and a heading lives at the
+      // top or not at all.
+      const NOTE_HEAD_LENGTH = 2000
+      function noteSummaryFor(content) {
+        return {
+          head: String(content || '').slice(0, NOTE_HEAD_LENGTH),
+          slides: viewMode === 'slides'
+        }
+      }
+
       let viewMode = 'edit'
       let previewRequestId = 0
       let currentSlideIndex = 0
@@ -1678,7 +1911,6 @@ export function getP2pmdEditorPage () {
             : 'LaTeX mode is controlled by the host'
         }
         if (latexToolbarGroup) latexToolbarGroup.hidden = !latexModeEnabled
-        if (!latexModeEnabled && latexTemplateMenu) latexTemplateMenu.hidden = true
       }
 
       function setLatexMode(enabled, { persist = true, sync = true, fromSharedState = false } = {}) {
@@ -2498,25 +2730,13 @@ export function getP2pmdEditorPage () {
         return text || 'image'
       }
 
-      function toggleTemplateMenu() {
-        if (!latexModeEnabled || !latexTemplateMenu) return
-        latexTemplateMenu.hidden = !latexTemplateMenu.hidden
-      }
-
-      function closeTemplateMenuOnOutsideClick(event) {
-        if (!latexTemplateMenu || latexTemplateMenu.hidden) return
-        const target = event.target
-        if (latexTemplateMenu.contains(target) || target?.closest?.('[data-format="template"]')) return
-        latexTemplateMenu.hidden = true
-      }
-
       function renderTemplateMenu() {
-        if (!latexTemplateMenu) return
+        if (!templateMenu) return
 
         for (const template of templates) {
           const button = document.createElement('button')
           button.type = 'button'
-          button.dataset.templateId = template.id
+          button.dataset.template = template.id
           button.setAttribute('role', 'menuitem')
 
           const label = document.createElement('span')
@@ -2528,8 +2748,36 @@ export function getP2pmdEditorPage () {
           description.textContent = template.description
 
           button.append(label, description)
-          latexTemplateMenu.append(button)
+          templateMenu.append(button)
         }
+      }
+
+      function setTemplateMenuOpen(open) {
+        if (!templateMenu) return
+        // A client can only replace the document once the host has turned
+        // LaTeX mode on. Leaving the entries tappable made them look broken;
+        // greying them out says the same thing honestly.
+        if (open) {
+          const allowed = roomRole === 'host' || latexModeEnabled
+          for (const item of templateMenu.querySelectorAll('button[data-template]')) {
+            item.disabled = !allowed
+            item.title = allowed ? '' : 'The host has not turned on LaTeX mode yet'
+          }
+        }
+        templateMenu.hidden = !open
+        const trigger = formattingToolbar.querySelector('[data-menu="template"]')
+        if (trigger) trigger.setAttribute('aria-expanded', String(open))
+      }
+
+      function toggleTemplateMenu() {
+        setTemplateMenuOpen(templateMenu ? templateMenu.hidden : false)
+      }
+
+      function closeTemplateMenuOnOutsideClick(event) {
+        if (!templateMenu || templateMenu.hidden) return
+        const target = event.target
+        if (templateMenu.contains(target) || target?.closest?.('[data-menu="template"]')) return
+        setTemplateMenuOpen(false)
       }
 
       function applyTemplate(templateId) {
@@ -2542,14 +2790,14 @@ export function getP2pmdEditorPage () {
         }
 
         if (roomRole === 'host') setLatexMode(true)
-        latexTemplateMenu.hidden = true
+        setTemplateMenuOpen(false)
         replaceDocumentRange(0, input.value.length, template.content, 0, 0)
       }
 
-      function viewAsSlides() {
-        const hasSlideBreak = new RegExp(${serializedSlideBreakPattern}, 'im').test(input.value)
+      ${embeddedSlideBreakCheck}
 
-        if (!hasSlideBreak) {
+      function viewAsSlides() {
+        if (!hasSlideBreaks(input.value)) {
           if (input.value.trim() && !window.confirm('This will clear your notes and give you a slides template. Continue?')) {
             return
           }
@@ -2572,7 +2820,6 @@ export function getP2pmdEditorPage () {
         else if (format === 'latex') setLatexMode(!latexModeEnabled)
         else if (format === 'inline-math') wrapSelection('$', '$')
         else if (format === 'block-math') wrapSelection('$$' + newline, newline + '$$')
-        else if (format === 'template') toggleTemplateMenu()
         else if (format === 'slides') viewAsSlides()
         else if (format === 'inline-code') wrapSelection(codeMarker, codeMarker)
         else if (format === 'code-block') {
@@ -2583,15 +2830,25 @@ export function getP2pmdEditorPage () {
       }
 
       function getToolbarButton(event) {
-        return event.target?.closest?.('button[data-format]') || null
+        return event.target?.closest?.('button[data-format], button[data-template], button[data-menu]') || null
+      }
+
+      function runToolbarButton(button) {
+        if (!button || viewMode !== 'edit') return false
+        if (button.dataset.menu === 'template') {
+          toggleTemplateMenu()
+          return true
+        }
+        if (button.dataset.template) {
+          applyTemplate(button.dataset.template)
+          return true
+        }
+        applyFormatting(button.dataset.format)
+        return true
       }
 
       function handleToolbarFormat(event) {
-        const button = getToolbarButton(event)
-        if (!button || viewMode !== 'edit') return false
-
-        applyFormatting(button.dataset.format)
-        return true
+        return runToolbarButton(getToolbarButton(event))
       }
 
       function restoreSelection(selection) {
@@ -2606,6 +2863,11 @@ export function getP2pmdEditorPage () {
           toolbarPointerState = null
           return
         }
+
+        // Pressing a button in the keyboard bar would otherwise blur the
+        // textarea, close the keyboard, and drop the bar with it. The action
+        // runs on pointerup, so nothing is lost by refusing the focus change.
+        if (event.currentTarget === keyboardToolbar) event.preventDefault()
 
         toolbarPointerState = {
           button,
@@ -2634,7 +2896,64 @@ export function getP2pmdEditorPage () {
         event.preventDefault()
         suppressToolbarClick = true
         restoreSelection(state.selection)
-        applyFormatting(state.button.dataset.format)
+        runToolbarButton(state.button)
+      }
+
+      // visualViewport is the only thing that reports how much of the page the
+      // keyboard is covering. window.innerHeight does not change when the
+      // keyboard opens on iOS, and on Android it changes inconsistently
+      // depending on the soft-input mode, so neither can be used on its own.
+      const KEYBOARD_TOOLBAR_GAP = 6
+
+      // Distance from the top of the layout viewport down to where the bar's
+      // own top edge belongs: the bottom of the visual viewport, less the bar
+      // and a small gap. Without visualViewport there is nothing reporting the
+      // keyboard, so it sits at the bottom of the page.
+      function keyboardToolbarOffset(barHeight) {
+        const viewport = window.visualViewport
+        const bottom = viewport
+          ? viewport.offsetTop + viewport.height
+          : window.innerHeight
+        return Math.max(0, bottom - barHeight - KEYBOARD_TOOLBAR_GAP)
+      }
+
+      let keyboardToolbarOffsetApplied = null
+
+      function syncKeyboardToolbar() {
+        if (!keyboardToolbar) return
+        // Tied to the editor having focus, not to the keyboard being up. A
+        // simulator with a hardware keyboard attached never covers the page,
+        // and gating on that made the bar vanish after the first tap.
+        const open = document.activeElement === input && viewMode === 'edit'
+        if (keyboardToolbar.hidden === open) keyboardToolbar.hidden = !open
+        if (!open) {
+          keyboardToolbarOffsetApplied = null
+          return
+        }
+        const offset = keyboardToolbarOffset(keyboardToolbar.offsetHeight)
+        if (offset === keyboardToolbarOffsetApplied) return
+        keyboardToolbarOffsetApplied = offset
+        keyboardToolbar.style.transform = 'translate3d(0, ' + offset + 'px, 0)'
+      }
+
+      // iOS does not fire a visualViewport event for every movement that
+      // matters: scrolling the page with the keyboard up moves the bar without
+      // telling us, which is how it ended up behind the keyboard. While the
+      // editor holds focus, read the viewport every frame instead. The work is
+      // one property read and an early return unless the number changed.
+      let keyboardToolbarFrame = 0
+
+      function trackKeyboardToolbar() {
+        keyboardToolbarFrame = 0
+        syncKeyboardToolbar()
+        if (document.activeElement === input && viewMode === 'edit') {
+          keyboardToolbarFrame = window.requestAnimationFrame(trackKeyboardToolbar)
+        }
+      }
+
+      function scheduleKeyboardToolbarSync() {
+        if (keyboardToolbarFrame) window.cancelAnimationFrame(keyboardToolbarFrame)
+        trackKeyboardToolbar()
       }
 
       function preventNativeContextMenu(event) {
@@ -2951,7 +3270,8 @@ export function getP2pmdEditorPage () {
             applyLineAttributionsFromDocument(syncedDocument)
             notifyNative('p2pmd-document-saved', {
               updatedAt: syncedDocument.updatedAt,
-              contentLength: syncedDocument.content.length
+              contentLength: syncedDocument.content.length,
+              ...noteSummaryFor(syncedDocument.content)
             })
           }
         } catch (error) {
@@ -2992,7 +3312,8 @@ export function getP2pmdEditorPage () {
           const syncedDocument = getSyncedDocumentFromResponse(result, ytext ? getYTextSnapshot() : input.value)
           notifyNative('p2pmd-document-saved', {
             updatedAt: syncedDocument.updatedAt,
-            contentLength: syncedDocument.content.length
+            contentLength: syncedDocument.content.length,
+            ...noteSummaryFor(syncedDocument.content)
           })
           if (flushRetryTimer) {
             clearTimeout(flushRetryTimer)
@@ -3309,7 +3630,19 @@ export function getP2pmdEditorPage () {
         input.parentElement.hidden = viewMode !== 'edit'
         preview.hidden = viewMode !== 'preview'
         slidesPreview.hidden = viewMode !== 'slides'
-        formattingToolbar.hidden = viewMode !== 'edit'
+        // Desktop keeps "view as slides" on screen in every mode. Hiding the
+        // bar outside edit mode meant the only way to reach a deck was to go
+        // back to editing first and hunt for the button. The deck itself fills
+        // the screen, so the bar steps aside only there.
+        formattingToolbar.hidden = viewMode === 'slides'
+        const templateTrigger = formattingToolbar.querySelector('[data-menu="template"]')
+        // Applying a template rewrites the document, which is not something to
+        // offer while the reader is looking at a preview of it.
+        if (templateTrigger) templateTrigger.disabled = viewMode !== 'edit'
+        if (viewMode !== 'edit') setTemplateMenuOpen(false)
+        // Leaving edit mode closes the keyboard, and the bar has to go with
+        // it rather than hang over the preview.
+        syncKeyboardToolbar()
         notifyNative('p2pmd-view-mode', { mode: viewMode })
 
         if (viewMode === 'edit') {
@@ -3470,13 +3803,37 @@ export function getP2pmdEditorPage () {
 
         handleToolbarFormat(event)
       })
-      latexTemplateMenu?.addEventListener('click', (event) => {
-        const button = event.target?.closest?.('button[data-template-id]')
-        if (button) applyTemplate(button.dataset.templateId)
+      for (const bar of [keyboardToolbar]) {
+        if (!bar) continue
+        bar.addEventListener('pointerdown', handleToolbarPointerDown)
+        bar.addEventListener('pointerup', handleToolbarPointerUp)
+        bar.addEventListener('pointercancel', () => {
+          toolbarPointerState = null
+        })
+        bar.addEventListener('click', (event) => {
+          if (suppressToolbarClick) {
+            suppressToolbarClick = false
+            return
+          }
+
+          handleToolbarFormat(event)
+        })
+      }
+
+      templateMenu?.addEventListener('click', (event) => {
+        const button = event.target?.closest?.('button[data-template]')
+        if (button) applyTemplate(button.dataset.template)
       })
       document.addEventListener('click', closeTemplateMenuOnOutsideClick)
+
+      input.addEventListener('focus', scheduleKeyboardToolbarSync)
+      input.addEventListener('blur', scheduleKeyboardToolbarSync)
+      if (window.visualViewport) {
+        window.visualViewport.addEventListener('resize', syncKeyboardToolbar)
+        window.visualViewport.addEventListener('scroll', syncKeyboardToolbar)
+      }
       document.addEventListener('keydown', (event) => {
-        if (event.key === 'Escape' && latexTemplateMenu) latexTemplateMenu.hidden = true
+        if (event.key === 'Escape') setTemplateMenuOpen(false)
         if (event.key === 'Escape' && !peerDashboardBackdrop.hidden) {
           setPeerDashboardVisible(false)
         }

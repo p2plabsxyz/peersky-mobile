@@ -7,6 +7,7 @@ import {
   getBrowserForwardState,
   getBrowserRequestAction,
   getBrowserWebViewKey,
+  getHyperDriveListingUrl,
   getSearchUrl,
   isHyperUrl,
   isStaleBrowserLoad,
@@ -381,4 +382,33 @@ test('keeps subframe web requests inside a Hyper page instead of navigating', ()
     url: 'https://example.com/',
     source: { kind: 'web', uri: 'https://example.com/' }
   })
+})
+
+// P2PMD publishes a note as index.html, and hypercore-fetch serves that for a
+// directory that has one, so opening its app data opened the note instead of
+// the files behind it.
+test('a drive address can ask for its listing instead of its page', () => {
+  assert.equal(
+    getHyperDriveListingUrl(`hyper://${'a'.repeat(52)}/`),
+    `hyper://${'a'.repeat(52)}/?noResolve`
+  )
+  assert.equal(
+    getHyperDriveListingUrl(`hyper://${'a'.repeat(52)}/?version=3`),
+    `hyper://${'a'.repeat(52)}/?version=3&noResolve`
+  )
+  assert.equal(
+    getHyperDriveListingUrl(`hyper://${'a'.repeat(52)}/#top`),
+    `hyper://${'a'.repeat(52)}/?noResolve#top`
+  )
+})
+
+test('asking twice does not stack up', () => {
+  const once = getHyperDriveListingUrl(`hyper://${'a'.repeat(52)}/`)
+  assert.equal(getHyperDriveListingUrl(once), once)
+})
+
+test('only hyper addresses are rewritten', () => {
+  assert.equal(getHyperDriveListingUrl('https://example.com/'), 'https://example.com/')
+  assert.equal(getHyperDriveListingUrl(''), '')
+  assert.equal(getHyperDriveListingUrl(null), '')
 })

@@ -56,10 +56,14 @@ export function splitMarkdownSlides (content) {
 
     const trimmedLine = line.trim()
     const previousLine = currentSlide[currentSlide.length - 1]
-    const nextLine = lines[index + 1]
+    // A blank line before is what separates a slide break from a setext
+    // heading: "Title\n---" underlines the title, it does not start a slide.
+    // Desktop splits on any bare "---" and gets that case wrong, so this keeps
+    // the check. What it no longer asks for is a blank line *after*, which
+    // desktop never wanted either: "---\n# Next slide" is a perfectly normal
+    // way to write a deck, and inserting an image leaves exactly that shape.
     const hasBlankBefore = currentSlide.length === 0 || !String(previousLine).trim()
-    const hasBlankAfter = nextLine === undefined || !nextLine.trim()
-    const isHorizontalSlideBreak = line === '---' && hasBlankBefore && hasBlankAfter
+    const isHorizontalSlideBreak = line === '---' && hasBlankBefore
     const isCommentSlideBreak = trimmedLine.toLowerCase() === SLIDE_DELIMITER
 
     if (!fence && (isHorizontalSlideBreak || isCommentSlideBreak)) {
@@ -90,6 +94,51 @@ export function renderMarkdownSlides (content) {
     count: renderedSlides.length,
     html
   }
+}
+
+/**
+ * Whether a document already reads as a deck.
+ *
+ * Deliberately self-contained: the editor page embeds this function's own
+ * source so the check the browser runs is this exact code. It used to be a
+ * separate regular expression, and when splitMarkdownSlides stopped requiring
+ * a blank line after "---" the two drifted apart. A real deck then failed the
+ * check and the editor offered to throw the document away and start from the
+ * template.
+ */
+export function hasSlideBreaks (content) {
+  const lines = String(content).replace(/\r\n?/g, '\n').split('\n')
+  let fence = null
+  let slideStart = true
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]
+    const fenceMatch = line.match(/^\s{0,3}(`{3,}|~{3,})/)
+
+    if (fenceMatch) {
+      const marker = fenceMatch[1]
+      if (!fence) {
+        fence = { character: marker[0], length: marker.length }
+      } else if (
+        marker[0] === fence.character &&
+        marker.length >= fence.length &&
+        new RegExp('^\\s{0,3}' + fence.character + '{' + fence.length + ',}\\s*$').test(line)
+      ) {
+        fence = null
+      }
+    }
+
+    if (!fence) {
+      const previous = lines[index - 1]
+      const blankBefore = slideStart || !String(previous === undefined ? '' : previous).trim()
+      if (line === '---' && blankBefore) return true
+      if (line.trim().toLowerCase() === '<!-- slide -->') return true
+    }
+
+    if (line.trim()) slideStart = false
+  }
+
+  return false
 }
 
 function appendSlide (slides, lines) {

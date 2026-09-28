@@ -136,7 +136,26 @@ describe('browser bookmarks', () => {
     const script = combineBrowserInjectedScripts('(() => true)()', '(() => true)()')
 
     assert.doesNotThrow(() => new vm.Script(script))
-    assert.match(script, /\(\);\n\(\(/)
+    assert.equal(script.split('(() => true)()').length - 1, 2)
+  })
+
+  // They are evaluated as one string, so a script that throws used to stop
+  // every script after it from running. That is how an injected bridge could be
+  // sent to a page and still not be there.
+  test('one injected script failing does not take the rest with it', () => {
+    const script = combineBrowserInjectedScripts(
+      '(() => { throw new Error("boom") })()',
+      'globalThis.__peerskyLaterScriptRan = true'
+    )
+    const context = { console: { warn () {} } }
+    vm.createContext(context)
+    assert.doesNotThrow(() => new vm.Script(script).runInContext(context))
+    assert.equal(context.__peerskyLaterScriptRan, true)
+  })
+
+  test('an empty slot adds nothing', () => {
+    const script = combineBrowserInjectedScripts('(() => true)()', '', null)
+    assert.equal(script.split('catch').length - 1, 1)
   })
 
   test('rejects malformed, unsupported, credentialed, and duplicate entries', () => {

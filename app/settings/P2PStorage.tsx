@@ -7,6 +7,7 @@ import {
   StyleSheet,
   Switch,
   Text,
+  TextInput,
   View
 } from 'react-native'
 import {
@@ -20,6 +21,7 @@ import {
   RPC_HYPER_STORAGE_LIST
 } from '../../backend/rpc/commands.mjs'
 import { BROWSER_PALETTES } from '../browser-appearance.mjs'
+import { getHyperDriveListingUrl } from '../browser-shell.mjs'
 import CopyIcon from '../../assets/icons/bootstrap/copy.svg'
 import { clearHyperdriveRecents } from '../hyperdrive/recents-store'
 import { SettingsSection, useSettingsDarkMode } from './SettingsUI'
@@ -97,11 +99,15 @@ type P2PStorageProps = {
   onCallRpc: (command: number, data?: object) => Promise<P2pStorageResponse>
   onDownloadOnlyOnWifiChange: (enabled: boolean) => void
   onOpenItem: (item: { name: string, source: 'fetched' | 'published', url: string }) => void
+  onOpenUrl: (url: string) => void
 }
 
 const PAGE_SIZE = 5
+// Long enough that a search settles while someone is still typing, short enough
+// that it does not feel like a pause.
+const ARCHIVE_SEARCH_DELAY_MS = 250
 
-export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallRpc, onDownloadOnlyOnWifiChange, onOpenItem }: P2PStorageProps) {
+export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallRpc, onDownloadOnlyOnWifiChange, onOpenItem, onOpenUrl }: P2PStorageProps) {
   const isDark = useSettingsDarkMode()
   const requestSequence = useRef(0)
   const offlineRequestSequence = useRef(0)
@@ -113,6 +119,11 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
   const [archivePage, setArchivePage] = useState(1)
   const [archiveTotalPages, setArchiveTotalPages] = useState(1)
   const [archiveSource, setArchiveSource] = useState<HyperArchiveSource>('all')
+  const [archiveSearch, setArchiveSearch] = useState('')
+  // What the list was actually loaded with, so typing does not fire a request
+  // per keystroke.
+  const [archiveQuery, setArchiveQuery] = useState('')
+  const [archiveTotal, setArchiveTotal] = useState(0)
   const [offlineItems, setOfflineItems] = useState<HyperOfflineItem[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isOfflineLoading, setIsOfflineLoading] = useState(true)
@@ -122,9 +133,18 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
   const [offlineError, setOfflineError] = useState<string | null>(null)
 
   useEffect(() => {
-    void loadPage(archivePage, archiveSource)
+    void loadPage(archivePage, archiveSource, undefined, archiveQuery)
     return () => { requestSequence.current += 1 }
-  }, [archivePage, archiveSource])
+  }, [archivePage, archiveSource, archiveQuery])
+
+  useEffect(() => {
+    if (archiveSearch.trim().toLowerCase() === archiveQuery) return
+    const timer = setTimeout(() => {
+      setArchivePage(1)
+      setArchiveQuery(archiveSearch.trim().toLowerCase())
+    }, ARCHIVE_SEARCH_DELAY_MS)
+    return () => clearTimeout(timer)
+  }, [archiveQuery, archiveSearch])
 
   useEffect(() => {
     mountedRef.current = true
@@ -148,7 +168,8 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
   async function loadPage (
     nextPage: number,
     nextSource = archiveSource,
-    includeAppData = !appDataLoadedRef.current
+    includeAppData = !appDataLoadedRef.current,
+    nextQuery = archiveQuery
   ) {
     const sequence = ++requestSequence.current
     setIsLoading(true)
@@ -161,6 +182,7 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
         archivePage: nextPage,
         archivePageSize: PAGE_SIZE,
         archiveSource: nextSource,
+        archiveQuery: nextQuery,
         includeAppData
       })
       if (sequence !== requestSequence.current) return
@@ -174,6 +196,7 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
       setArchivePage(response.archive?.page || nextPage)
       setArchiveTotalPages(Math.max(1, response.archive?.totalPages || 1))
       setNotice(response.warning || null)
+      setArchiveTotal(response.archive?.total || 0)
     } catch (loadError) {
       if (sequence !== requestSequence.current) return
       setError(loadError instanceof Error ? loadError.message : String(loadError))
@@ -413,9 +436,15 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
                     : 'No local data'}
                 </Text>
                 {item.exists && item.url && (
-                  <Text numberOfLines={1} style={[styles.url, isDark ? darkStyles.secondaryText : null]}>
-                    {item.url}
-                  </Text>
+                  <Pressable
+                    accessibilityHint='Lists the files in this drive'
+                    accessibilityRole='link'
+                    onPress={() => onOpenUrl(getHyperDriveListingUrl(item.url))}
+                  >
+                    <Text numberOfLines={1} style={[styles.url, styles.urlLink, isDark ? darkStyles.urlLink : null]}>
+                      {item.url}
+                    </Text>
+                  </Pressable>
                 )}
                 {item.drives?.map((drive) => (
                   <View key={drive.id} style={styles.driveRow}>
@@ -426,9 +455,15 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
                       <Text style={[styles.driveSize, isDark ? darkStyles.secondaryText : null]}>
                         {formatFileCount(drive.fileCount, drive.truncated)} - {formatBytes(drive.byteLength)}
                       </Text>
-                      <Text numberOfLines={1} style={[styles.driveUrl, isDark ? darkStyles.secondaryText : null]}>
-                        {drive.url}
-                      </Text>
+                      <Pressable
+                        accessibilityHint='Lists the files in this drive'
+                        accessibilityRole='link'
+                        onPress={() => onOpenUrl(getHyperDriveListingUrl(drive.url))}
+                      >
+                        <Text numberOfLines={1} style={[styles.driveUrl, styles.urlLink, isDark ? darkStyles.urlLink : null]}>
+                          {drive.url}
+                        </Text>
+                      </Pressable>
                       {drive.warning && (
                         <Text style={[styles.driveWarning, isDark ? darkStyles.warningText : null]}>
                           {drive.warning}
@@ -545,6 +580,17 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
       {notice && <Text accessibilityRole='alert' style={styles.notice}>{notice}</Text>}
 
       <SettingsSection title='Hyper archive'>
+        <TextInput
+          accessibilityLabel='Search the Hyper archive'
+          autoCapitalize='none'
+          autoCorrect={false}
+          clearButtonMode='while-editing'
+          onChangeText={setArchiveSearch}
+          placeholder='Search by name or address'
+          placeholderTextColor={isDark ? '#7b8494' : '#6f7484'}
+          style={[styles.search, isDark ? darkStyles.search : null]}
+          value={archiveSearch}
+        />
         <View style={[styles.filters, isDark ? darkStyles.divider : null]}>
           {(['all', 'published', 'fetched'] as HyperArchiveSource[]).map((source) => (
             <Pressable
@@ -573,7 +619,11 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
         {isLoading && archiveItems.length === 0
           ? <ActivityIndicator style={styles.loading} />
           : archiveItems.length === 0
-            ? <Text style={[styles.empty, isDark ? darkStyles.secondaryText : null]}>No Hyper activity yet.</Text>
+            ? (
+              <Text style={[styles.empty, isDark ? darkStyles.secondaryText : null]}>
+                {archiveQuery ? `Nothing here matches "${archiveQuery}".` : 'No Hyper activity yet.'}
+              </Text>
+              )
             : archiveItems.map((item, index) => (
               <View
                 key={`${item.source}:${item.url}`}
@@ -619,7 +669,7 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
           <View style={[styles.pagination, isDark ? darkStyles.divider : null]}>
             <PageButton isDark={isDark} title='Previous' disabled={archivePage <= 1 || isLoading} onPress={() => setArchivePage((value) => value - 1)} />
             <Text style={[styles.pageText, isDark ? darkStyles.secondaryText : null]}>
-              {archivePage} of {archiveTotalPages}
+              {archivePage} of {archiveTotalPages} ({archiveTotal})
             </Text>
             <PageButton isDark={isDark} title='Next' disabled={archivePage >= archiveTotalPages || isLoading} onPress={() => setArchivePage((value) => value + 1)} />
           </View>
@@ -865,6 +915,11 @@ const styles = StyleSheet.create({
     fontFamily: 'monospace',
     fontSize: 10
   },
+  // Reads as an address you can open rather than one you can only squint at.
+  urlLink: {
+    color: '#1f6fd1',
+    textDecorationLine: 'underline'
+  },
   timestamp: {
     color: '#687086',
     fontSize: 10
@@ -885,6 +940,16 @@ const styles = StyleSheet.create({
   fetched: {
     backgroundColor: '#e6f1ff',
     color: '#1f6fd1'
+  },
+  search: {
+    backgroundColor: '#f2f5fa',
+    borderRadius: 10,
+    color: '#1f2a44',
+    fontSize: 14,
+    marginHorizontal: 14,
+    marginTop: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 9
   },
   filters: {
     borderBottomColor: '#e1e7f0',
@@ -986,6 +1051,13 @@ const styles = StyleSheet.create({
 const darkStyles = StyleSheet.create({
   primaryText: {
     color: BROWSER_PALETTES.dark.text
+  },
+  search: {
+    backgroundColor: BROWSER_PALETTES.dark.button,
+    color: BROWSER_PALETTES.dark.text
+  },
+  urlLink: {
+    color: BROWSER_PALETTES.dark.accent
   },
   secondaryText: {
     color: BROWSER_PALETTES.dark.mutedText

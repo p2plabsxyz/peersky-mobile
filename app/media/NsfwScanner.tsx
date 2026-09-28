@@ -13,9 +13,7 @@ import {
   NSFW_PAGE_FILE
 } from './nsfw-scanner-page.mjs'
 import {
-  isUsableImageType,
   MEDIA_UNSCANNED,
-  sniffBase64ImageType,
   verdictFromPredictions
 } from './media-moderation.mjs'
 import { setUploadScanner, type UploadAsset } from './upload-gate'
@@ -82,32 +80,41 @@ export async function scanMedia (asset: {
   if ((asset.size ?? 0) > MAX_SCANNED_BYTES) return MEDIA_UNSCANNED
   if (!liveWebView) return MEDIA_UNSCANNED
 
+  // Everything goes through the decoder, whether it arrived as a file or as
+  // bare bytes. Two reasons. It normalises whatever the platform can open into
+  // one JPEG, so an iPhone's HEIC is judged instead of waved through. And it
+  // shrinks the picture to the size the model wants before anything crosses
+  // the bridge.
+  //
+  // That second part is what P2PMD was failing on. Its editor hands over a
+  // whole photo as base64, and posting megabytes of it took longer than the
+  // scan timeout, which reads as unscanned and lets the picture through. A
+  // picked file was always resized first, which is why PeerChat looked fine
+  // while P2PMD did not.
+  let scratch: File | null = null
   let base64 = ''
-  let mimeType = ''
-  if (asset.uri) {
-    try {
-      // Re-encoded rather than read raw. An iPhone photo is HEIC by default,
-      // which no sniffer here recognised and no data url could carry, so it
-      // used to come back unscanned and upload unchecked. Going through the
-      // decoder normalises whatever the platform can open into one JPEG, and
-      // shrinking to the size the model wants keeps the bridge payload small.
-      const rendered = await ImageManipulator.manipulate(asset.uri)
-        .resize({ width: NSFW_INPUT_SIZE })
-        .renderAsync()
-      const jpeg = await rendered.saveAsync({ base64: true, compress: 0.9, format: SaveFormat.JPEG })
-      base64 = jpeg.base64 || ''
-      mimeType = 'image/jpeg'
-    } catch {
-      // Not something the platform can decode, so not something it can judge.
-      return MEDIA_UNSCANNED
+  try {
+    let sourceUri = asset.uri || ''
+    if (!sourceUri) {
+      if (!asset.base64) return MEDIA_UNSCANNED
+      scratch = new File(Paths.cache, `nsfw-scan-${Date.now().toString(36)}-${++nextId}`)
+      if (scratch.exists) scratch.delete()
+      scratch.create()
+      scratch.write(asset.base64, { encoding: 'base64' })
+      sourceUri = scratch.uri
     }
-  } else {
-    // Bytes with no file behind them: P2PMD hands its editor images over this
-    // way, already PNG or JPEG from a canvas.
-    base64 = asset.base64 || ''
-    mimeType = isUsableImageType(declared) ? declared : sniffBase64ImageType(base64)
+    const rendered = await ImageManipulator.manipulate(sourceUri)
+      .resize({ width: NSFW_INPUT_SIZE })
+      .renderAsync()
+    const jpeg = await rendered.saveAsync({ base64: true, compress: 0.9, format: SaveFormat.JPEG })
+    base64 = jpeg.base64 || ''
+  } catch {
+    // Not something the platform can decode, so not something it can judge.
+    return MEDIA_UNSCANNED
+  } finally {
+    try { scratch?.delete() } catch {}
   }
-  if (!base64 || !mimeType) return MEDIA_UNSCANNED
+  if (!base64) return MEDIA_UNSCANNED
 
   const id = String(++nextId)
   return await new Promise<string>((resolve) => {
@@ -116,7 +123,7 @@ export async function scanMedia (asset: {
       resolve(MEDIA_UNSCANNED)
     }, SCAN_TIMEOUT_MS)
     pending.set(id, { resolve, timer })
-    liveWebView?.postMessage(JSON.stringify({ id, dataUrl: `data:${mimeType};base64,${base64}` }))
+    liveWebView?.postMessage(JSON.stringify({ id, dataUrl: `data:image/jpeg;base64,${base64}` }))
   })
 }
 

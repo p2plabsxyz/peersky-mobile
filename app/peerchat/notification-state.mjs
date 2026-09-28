@@ -53,7 +53,16 @@ export function collectPeerChatNotificationCandidates (previousRooms, nextRooms)
     .map((room) => ({
       roomKey: room.roomKey,
       title: truncateText(room.name || 'PeerChat', 80),
-      body: truncateText(`${room.lastMessage.senderName || 'Peer'}: ${room.lastMessage.message}`, 180)
+      // In a direct message the room is named after the one person in it, so
+      // prefixing the body with their name says it twice: "Akhilesh" over
+      // "Akhilesh: Hi". A room needs the prefix, because anyone in it could
+      // have sent the message.
+      body: truncateText(
+        room.isDM === true
+          ? room.lastMessage.message
+          : `${room.lastMessage.senderName || 'Peer'}: ${room.lastMessage.message}`,
+        180
+      )
     }))
 }
 

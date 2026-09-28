@@ -167,6 +167,15 @@ test('PeerChat About answers the questions a first-time user actually asks', asy
   assert.match(about, /No tracking, no analytics/)
   assert.match(about, /Who can read my messages\?/)
 
+  // "Is this secure" is the question the whole app rests on, so it names how a
+  // room is locked, how a one to one chat is locked, and what neither hides.
+  assert.match(about, /Are my chats secure\?/)
+  assert.match(about, /locked with its room key/)
+  assert.match(about, /its own key, made fresh for that conversation/)
+  assert.match(about, /cannot be worked out from your name or your code/)
+  assert.match(about, /can see your network address/)
+  assert.match(about, /a room key never expires/)
+
   // And the peer to peer facts a normal person trips over.
   assert.match(about, /both need to be awake/)
   assert.match(about, /start fresh from the moment you join/)
@@ -181,4 +190,39 @@ test('PeerChat About answers the questions a first-time user actually asks', asy
   assert.match(screen, /setSettingsPage\('about'\)/)
   assert.match(screen, /settingsPage === 'about' && \(\s*<PeerChatAboutPage/)
   assert.doesNotMatch(about, /<Modal/)
+})
+
+// A direct message is named after the one person who can be in it, so a body
+// of "Akhilesh: Hi" under a title of "Akhilesh" said the name twice.
+test('a direct message notification does not repeat the sender', () => {
+  const previous = [{ roomKey: 'a'.repeat(64), unreadCount: 0 }]
+  const next = [{
+    roomKey: 'a'.repeat(64),
+    name: 'Akhilesh',
+    isDM: true,
+    unreadCount: 1,
+    lastMessage: { sender: 'peer', senderName: 'Akhilesh', message: 'Hi', timestamp: 2 }
+  }]
+
+  assert.deepEqual(collectPeerChatNotificationCandidates(previous, next), [{
+    roomKey: 'a'.repeat(64),
+    title: 'Akhilesh',
+    body: 'Hi'
+  }])
+})
+
+test('a room notification still says who sent it', () => {
+  const previous = [{ roomKey: 'b'.repeat(64), unreadCount: 0 }]
+  const next = [{
+    roomKey: 'b'.repeat(64),
+    name: 'Peer-to-Peer Republic',
+    unreadCount: 1,
+    lastMessage: { sender: 'peer', senderName: 'Bob', message: 'Hi', timestamp: 2 }
+  }]
+
+  assert.deepEqual(collectPeerChatNotificationCandidates(previous, next), [{
+    roomKey: 'b'.repeat(64),
+    title: 'Peer-to-Peer Republic',
+    body: 'Bob: Hi'
+  }])
 })

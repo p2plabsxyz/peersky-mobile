@@ -44,14 +44,30 @@ export function recordHyperArchiveItem (items, candidate, now = Date.now()) {
   ].slice(0, MAX_HYPER_ARCHIVE_ENTRIES)
 }
 
+// Long enough for a drive key, which is the other thing someone pastes in here
+// besides a name.
+export const MAX_HYPER_ARCHIVE_QUERY_LENGTH = 128
+
+export function normalizeHyperArchiveQuery (value) {
+  return String(value || '')
+    .trim()
+    .toLocaleLowerCase()
+    .slice(0, MAX_HYPER_ARCHIVE_QUERY_LENGTH)
+}
+
 export function listHyperArchiveItems (
   items,
-  { page = 1, pageSize = DEFAULT_PAGE_SIZE, source = 'all' } = {}
+  { page = 1, pageSize = DEFAULT_PAGE_SIZE, query = '', source = 'all' } = {}
 ) {
   const normalizedSource = source === 'published' || source === 'fetched' ? source : 'all'
-  const filtered = normalizedSource === 'all'
-    ? items
-    : items.filter((item) => item.source === normalizedSource)
+  // Searching before paging, so a match on the last page is still found from
+  // the first one. The archive holds at most a few hundred entries, so this
+  // stays a pass over an array.
+  const normalizedQuery = normalizeHyperArchiveQuery(query)
+  const filtered = items.filter((item) => (
+    (normalizedSource === 'all' || item.source === normalizedSource) &&
+    (!normalizedQuery || matchesHyperArchiveQuery(item, normalizedQuery))
+  ))
   const normalizedPageSize = Math.min(normalizePositiveInteger(pageSize, DEFAULT_PAGE_SIZE), MAX_PAGE_SIZE)
   const totalPages = Math.max(1, Math.ceil(filtered.length / normalizedPageSize))
   const normalizedPage = Math.min(normalizePositiveInteger(page, 1), totalPages)
@@ -61,10 +77,16 @@ export function listHyperArchiveItems (
     items: filtered.slice(start, start + normalizedPageSize),
     page: normalizedPage,
     pageSize: normalizedPageSize,
+    query: normalizedQuery,
     source: normalizedSource,
     total: filtered.length,
     totalPages
   }
+}
+
+function matchesHyperArchiveQuery (item, query) {
+  return String(item.name || '').toLocaleLowerCase().includes(query) ||
+    String(item.url || '').toLocaleLowerCase().includes(query)
 }
 
 export function removeHyperArchiveItems (items, { appId, source } = {}) {

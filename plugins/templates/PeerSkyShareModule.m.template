@@ -1,0 +1,157 @@
+#import <React/RCTBridgeModule.h>
+#import <LinkPresentation/LinkPresentation.h>
+#import <UIKit/UIKit.h>
+
+// iOS builds the header of the share sheet from the item being shared. For a
+// plain string it has nothing to draw, and for a hyper:// link it cannot fetch
+// anything either, so it falls back to a blank page glyph. Handing it an
+// LPLinkMetadata with the app icon is the only way to put something there, and
+// that needs UIActivityItemSource, which React Native's own Share does not
+// expose.
+@interface PeerSkyShareItem : NSObject <UIActivityItemSource>
+@property (nonatomic, copy) NSString *text;
+@property (nonatomic, copy) NSString *title;
+@end
+
+@implementation PeerSkyShareItem
+
+- (id)activityViewControllerPlaceholderItem:(UIActivityViewController *)controller
+{
+  return self.text ?: @"";
+}
+
+- (id)activityViewController:(UIActivityViewController *)controller
+         itemForActivityType:(UIActivityType)activityType
+{
+  return self.text ?: @"";
+}
+
+- (NSString *)activityViewController:(UIActivityViewController *)controller
+              subjectForActivityType:(UIActivityType)activityType
+{
+  return self.title ?: @"";
+}
+
+- (LPLinkMetadata *)activityViewControllerLinkMetadata:(UIActivityViewController *)controller
+{
+  LPLinkMetadata *metadata = [LPLinkMetadata new];
+  metadata.title = self.title.length > 0 ? self.title : self.text;
+
+  // Deliberately no originalURL. Setting it makes iOS try to fetch the page,
+  // which it cannot do for a peer-to-peer scheme, and the blank glyph comes
+  // back while it fails.
+  UIImage *icon = [PeerSkyShareItem appIcon];
+  if (icon) {
+    metadata.iconProvider = [[NSItemProvider alloc] initWithObject:icon];
+  }
+  return metadata;
+}
+
++ (UIImage *)appIcon
+{
+  NSDictionary *icons = [NSBundle.mainBundle.infoDictionary objectForKey:@"CFBundleIcons"];
+  NSDictionary *primary = [icons objectForKey:@"CFBundlePrimaryIcon"];
+  NSArray<NSString *> *files = [primary objectForKey:@"CFBundleIconFiles"];
+  NSString *name = files.lastObject;
+  UIImage *source = name.length > 0 ? [UIImage imageNamed:name] : nil;
+  if (!source) return nil;
+
+  // The bundle icon comes back at 60pt, and the sheet pads anything that does
+  // not fill its square, which is the white margin around the logo. Redrawing
+  // it larger leaves nothing to pad. App icons are square, so filling the
+  // rect cannot distort it.
+  CGSize size = CGSizeMake(180, 180);
+  UIGraphicsImageRendererFormat *format = UIGraphicsImageRendererFormat.defaultFormat;
+  format.opaque = NO;
+  UIGraphicsImageRenderer *renderer =
+    [[UIGraphicsImageRenderer alloc] initWithSize:size format:format];
+  return [renderer imageWithActions:^(UIGraphicsImageRendererContext *context) {
+    [source drawInRect:CGRectMake(0, 0, size.width, size.height)];
+  }];
+}
+
+@end
+
+@interface PeerSkyShare : NSObject <RCTBridgeModule>
+@end
+
+@implementation PeerSkyShare
+
+RCT_EXPORT_MODULE(PeerSkyShare)
+
++ (BOOL)requiresMainQueueSetup
+{
+  return YES;
+}
+
+RCT_EXPORT_METHOD(share:(NSString *)text
+                  title:(NSString *)title
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+{
+  if (text.length == 0) {
+    reject(@"empty_share", @"Nothing to share.", nil);
+    return;
+  }
+
+  dispatch_async(dispatch_get_main_queue(), ^{
+    UIViewController *presenter = [PeerSkyShare topViewController];
+    if (!presenter) {
+      reject(@"no_presenter", @"No view controller to present from.", nil);
+      return;
+    }
+
+    PeerSkyShareItem *item = [PeerSkyShareItem new];
+    item.text = text;
+    item.title = title;
+
+    UIActivityViewController *sheet =
+      [[UIActivityViewController alloc] initWithActivityItems:@[item] applicationActivities:nil];
+
+    // An iPad refuses to present without an anchor, so give it the middle of
+    // the screen rather than crashing.
+    UIPopoverPresentationController *popover = sheet.popoverPresentationController;
+    if (popover) {
+      popover.sourceView = presenter.view;
+      popover.sourceRect = CGRectMake(CGRectGetMidX(presenter.view.bounds),
+                                      CGRectGetMidY(presenter.view.bounds),
+                                      1,
+                                      1);
+      popover.permittedArrowDirections = 0;
+    }
+
+    sheet.completionWithItemsHandler = ^(UIActivityType activityType,
+                                         BOOL completed,
+                                         NSArray *returnedItems,
+                                         NSError *activityError) {
+      if (activityError) {
+        reject(@"share_failed", activityError.localizedDescription, activityError);
+        return;
+      }
+      resolve(@{ @"action": completed ? @"sharedAction" : @"dismissedAction" });
+    };
+
+    [presenter presentViewController:sheet animated:YES completion:nil];
+  });
+}
+
++ (UIViewController *)topViewController
+{
+  UIWindow *window = nil;
+  for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+    if (scene.activationState != UISceneActivationStateForegroundActive) continue;
+    if (![scene isKindOfClass:UIWindowScene.class]) continue;
+    for (UIWindow *candidate in ((UIWindowScene *)scene).windows) {
+      if (candidate.isKeyWindow) { window = candidate; break; }
+    }
+    if (window) break;
+  }
+
+  UIViewController *controller = window.rootViewController;
+  while (controller.presentedViewController) {
+    controller = controller.presentedViewController;
+  }
+  return controller;
+}
+
+@end

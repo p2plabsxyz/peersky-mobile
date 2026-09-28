@@ -87,8 +87,19 @@ export function createBrowserFaviconScript () {
   })()`
 }
 
+/**
+ * Joins page scripts into the one string a WebView evaluates.
+ *
+ * Each one is isolated, because they are evaluated together: a script that
+ * throws used to stop every script after it from running at all, silently. That
+ * is how the hyper bridge could be injected and still not be there. They are all
+ * self-contained closures, so wrapping one changes nothing else about it.
+ */
 export function combineBrowserInjectedScripts (...scripts) {
-  return `${scripts.join(';\n')};\ntrue`
+  return `${scripts
+    .filter(Boolean)
+    .map((script) => `try{\n${script}\n}catch(error){console.warn('PeerSky page script failed', error)}`)
+    .join('\n')}\ntrue`
 }
 
 function isSupportedImageDataUrl (value) {

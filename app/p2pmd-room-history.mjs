@@ -3,6 +3,10 @@ export const MAX_P2PMD_ROOM_HISTORY_FILE_BYTES = 8 * 1024
 
 const MAX_P2PMD_ROOM_KEY_LENGTH = 256
 const MIN_P2PMD_ROOM_KEY_LENGTH = 32
+// A label is only ever shown, never matched on, but it is still text from a
+// document that may have come from someone else. Bound it and keep it on one
+// line so it cannot push the history file past its own size limit.
+const MAX_P2PMD_ROOM_LABEL_LENGTH = 64
 
 export function parseP2pmdRoomHistory (serialized) {
   let value
@@ -67,10 +71,18 @@ export function writeP2pmdRoomHistoryFile (file, rooms) {
 export function recordP2pmdRoom (rooms, {
   key,
   role = 'client',
+  label = '',
   lastOpenedAt = Date.now()
 }) {
-  const room = normalizeP2pmdRoomHistoryEntry({ key, role, lastOpenedAt })
+  const room = normalizeP2pmdRoomHistoryEntry({ key, role, label, lastOpenedAt })
   if (!room) return rooms
+
+  // Reopening a note says nothing about its contents, so a name already
+  // worked out is kept rather than blanked.
+  if (!room.label) {
+    const known = rooms.find((item) => item.key === room.key)
+    if (known?.label) room.label = known.label
+  }
 
   return parseP2pmdRoomHistory({
     items: [room, ...rooms.filter((item) => item.key !== room.key)]
@@ -83,6 +95,18 @@ export function formatP2pmdRoomHistoryKey (key) {
 
   const value = normalized.slice('hs://'.length)
   return value.length > 20 ? `${value.slice(0, 20)}...` : value
+}
+
+/**
+ * A tapped or pasted hs:// address, as a note key.
+ *
+ * normalizeP2pmdRoomKey also takes a bare key, which is what a field someone
+ * types into wants but is wrong for an address bar: "peersky" would read as a
+ * note. This only answers for something that said hs:// itself.
+ */
+export function parseP2pmdNoteLink (value) {
+  const text = String(value || '').trim()
+  return text.toLowerCase().startsWith('hs://') ? normalizeP2pmdRoomKey(text) : null
 }
 
 export function normalizeP2pmdRoomKey (key) {
@@ -102,14 +126,22 @@ export function normalizeP2pmdRoomKey (key) {
   return `hs://${baseKey}`
 }
 
+export function normalizeP2pmdRoomLabel (value) {
+  return String(value || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, MAX_P2PMD_ROOM_LABEL_LENGTH)
+}
+
 function normalizeP2pmdRoomHistoryEntry (value) {
   const key = normalizeP2pmdRoomKey(value?.key)
   const role = value?.role === 'host' ? 'host' : 'client'
+  const label = normalizeP2pmdRoomLabel(value?.label)
   const lastOpenedAt = Number(value?.lastOpenedAt)
 
   if (!key || !Number.isSafeInteger(lastOpenedAt) || lastOpenedAt < 0) {
     return null
   }
 
-  return { key, role, lastOpenedAt }
+  return { key, role, label, lastOpenedAt }
 }

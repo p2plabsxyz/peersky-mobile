@@ -43,6 +43,7 @@ export async function listP2pAppData ({
   pageSize = 5,
   archivePage = 1,
   archivePageSize = 5,
+  archiveQuery = '',
   archiveSource = 'all',
   includeAppData = true
 } = {}, options = {}) {
@@ -60,6 +61,7 @@ export async function listP2pAppData ({
     const archive = await (options.listArchive || listHyperArchive)({
       page: archivePage,
       pageSize: archivePageSize,
+      query: archiveQuery,
       source: archiveSource
     })
 

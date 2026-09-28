@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Animated,
   Keyboard,
+  Platform,
   Pressable,
   Text,
   TextInput,
@@ -19,6 +20,7 @@ import BackIcon from '../assets/icons/bootstrap/arrow-left.svg'
 import ForwardIcon from '../assets/icons/bootstrap/arrow-right.svg'
 import ShareIcon from '../assets/icons/bootstrap/arrow-bar-up.svg'
 import ClearIcon from '../assets/icons/bootstrap/x-circle.svg'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 const TOOLBAR_ICON_SIZE = 22
 const ADDRESS_ACTION_ICON_SIZE = 20
@@ -52,6 +54,7 @@ type BrowserToolbarProps = {
   }
   position: 'top' | 'bottom'
   showFullAddress: boolean
+  pageActionAvailable: boolean
   shareActionAvailable: boolean
   tabCount: number
   onAddressChange: (address: string) => void
@@ -74,6 +77,9 @@ type BrowserToolbarProps = {
   onToggleBookmark: () => void
 }
 
+// Matches browserToolbar's own paddingHorizontal.
+const TOOLBAR_SIDE_PADDING = 8
+
 export function BrowserToolbar ({
   activeTabId,
   address,
@@ -92,6 +98,7 @@ export function BrowserToolbar ({
   palette,
   position,
   showFullAddress,
+  pageActionAvailable,
   shareActionAvailable,
   tabCount,
   onAddressChange,
@@ -143,6 +150,25 @@ export function BrowserToolbar ({
     setIsAddressFocused(false)
   }
 
+  // iOS will not present the share sheet on top of a modal that is still
+  // fading out, and it fails without a word, which is why sharing worked from
+  // the address bar and did nothing from the menu. Wait for the menu to finish
+  // leaving. Android has no such rule and no onDismiss, so it runs straight
+  // away.
+  const pendingMenuActionRef = useRef<(() => void) | null>(null)
+
+  function afterMenuCloses (action: () => void) {
+    if (Platform.OS === 'ios') pendingMenuActionRef.current = action
+    onCloseMenu()
+    if (Platform.OS !== 'ios') action()
+  }
+
+  function runPendingMenuAction () {
+    const action = pendingMenuActionRef.current
+    pendingMenuActionRef.current = null
+    action?.()
+  }
+
   const hiddenControlProps = isAddressFocused
     ? {
         accessibilityElementsHidden: true,
@@ -151,22 +177,37 @@ export function BrowserToolbar ({
       }
     : {}
 
+  const insets = useSafeAreaInsets()
+  const toolbarBackground = isDark ? palette.surface : palette.shell
+
   return (
+    // The bar and the list it opens are siblings in a stack with no padding of
+    // its own, so "sit on the bar's edge" is the bar's measured height and
+    // nothing else. Positioning the list inside the bar made that depend on
+    // the bar's own padding, which is where the gap kept coming back.
+    <View style={styles.browserToolbarStack}>
     <View style={[
       styles.browserToolbar,
       {
-        backgroundColor: isDark ? palette.surface : palette.shell,
-        borderBottomColor: palette.border
+        backgroundColor: toolbarBackground,
+        borderBottomColor: palette.border,
+        // The bar itself reaches both screen edges; only its controls step in
+        // around the notch when the phone is on its side.
+        paddingLeft: TOOLBAR_SIDE_PADDING + insets.left,
+        paddingRight: TOOLBAR_SIDE_PADDING + insets.right
       },
       position === 'bottom'
           ? {
               borderBottomWidth: 0,
               borderTopColor: palette.border,
-              borderTopWidth: 1,
+              // The suggestion list sits flush on this edge, and a line between
+              // them makes it read as a separate card rather than the address
+              // bar opening out.
+              borderTopWidth: isAddressFocused ? 0 : 1,
               paddingBottom: 8
             }
-        : null
-    ]} onLayout={(event) => setMenuOffset(event.nativeEvent.layout.height + 4)}>
+        : { borderBottomWidth: isAddressFocused ? 0 : 1 }
+    ]} onLayout={(event) => setMenuOffset(event.nativeEvent.layout.height)}>
       <Animated.View
         {...hiddenControlProps}
         style={[
@@ -280,7 +321,7 @@ export function BrowserToolbar ({
             />
           </Pressable>
         )}
-        {!isAddressFocused && shareActionAvailable && (
+        {!isAddressFocused && pageActionAvailable && (
           <View style={styles.browserAddressActions}>
             <Pressable
               accessibilityLabel={isLoading ? 'Stop loading page' : 'Reload page'}
@@ -300,35 +341,25 @@ export function BrowserToolbar ({
                   />
                   )}
             </Pressable>
-            <Pressable
-              accessibilityLabel='Share page'
-              accessibilityRole='button'
-              style={styles.browserAddressAction}
-              onPress={onSharePage}
-            >
-              <ShareIcon
-                width={ADDRESS_ACTION_ICON_SIZE}
-                height={ADDRESS_ACTION_ICON_SIZE}
-                color={addressActionIconColor}
-                opacity={0.76}
-                style={styles.browserAddressShareIcon}
-              />
-            </Pressable>
+            {shareActionAvailable && (
+              <Pressable
+                accessibilityLabel='Share page'
+                accessibilityRole='button'
+                style={styles.browserAddressAction}
+                onPress={onSharePage}
+              >
+                <ShareIcon
+                  width={ADDRESS_ACTION_ICON_SIZE}
+                  height={ADDRESS_ACTION_ICON_SIZE}
+                  color={addressActionIconColor}
+                  opacity={0.76}
+                  style={styles.browserAddressShareIcon}
+                />
+              </Pressable>
+            )}
           </View>
         )}
       </View>
-      {isAddressFocused && (
-        <HistorySuggestions
-          items={historySuggestions}
-          palette={palette}
-          position={position}
-          onOpen={(url) => {
-            addressInputRef.current?.blur()
-            setIsAddressFocused(false)
-            onSuggestionPress(url)
-          }}
-        />
-      )}
       <Animated.View
         {...hiddenControlProps}
         style={[
@@ -383,10 +414,8 @@ export function BrowserToolbar ({
         }}
         onShow={onOpenMenu}
         onOpenSettings={onOpenSettings}
-        onSharePage={() => {
-          onCloseMenu()
-          onSharePage()
-        }}
+        onDismissed={runPendingMenuAction}
+        onSharePage={() => afterMenuCloses(onSharePage)}
         onToggleDesktopView={() => {
           onCloseMenu()
           onToggleDesktopView()
@@ -394,6 +423,21 @@ export function BrowserToolbar ({
         onToggleBookmark={onToggleBookmark}
       />
       </Animated.View>
+    </View>
+    {isAddressFocused && (
+      <HistorySuggestions
+        background={toolbarBackground}
+        items={historySuggestions}
+        offset={menuOffset}
+        palette={palette}
+        position={position}
+        onOpen={(url) => {
+          addressInputRef.current?.blur()
+          setIsAddressFocused(false)
+          onSuggestionPress(url)
+        }}
+      />
+    )}
     </View>
   )
 }

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -634,11 +635,19 @@ test('PeerChat verifies and completes desktop-compatible direct-message invitati
 
   const senderPeer = createFakePeer(sender.localId, 'Alice')
   receiver.peers.set(senderPeer.connection, senderPeer)
+
+  // A key this device already holds as something other than a conversation
+  // with them is not theirs to name.
+  const ownRoom = await receiver.createRoom({ name: 'Bob only', username: 'Bob' })
   await receiver.handlePeerMessage(senderPeer, {
     ...inviteFrames[inviteFrames.length - 1],
-    roomKey: 'ff'.repeat(32)
+    roomKey: ownRoom.roomKey
   })
   assert.equal(receiver.listPendingDirectMessages().length, 0)
+
+  // A key they minted is theirs to name. The handshake already proved who they
+  // are, and the key is a secret rather than something anybody could work out
+  // from two public peer ids.
   await receiver.handlePeerMessage(senderPeer, inviteFrames.pop())
   assert.equal(receiver.listPendingDirectMessages()[0].fromUsername, 'Alice')
 
@@ -1299,6 +1308,260 @@ test('PeerChat rejects a duplicate message replayed after restart', async (t) =>
 
   assert.equal(restoredFeed.length, 1)
   assert.equal(service.listRooms()[0].unreadCount, 1)
+  await service.close()
+})
+
+// Removing somebody has to be a fact the room keeps, not one delete. The first
+// attempt deleted the stored entry and the member came straight back, because
+// the list is rebuilt from what peers relay.
+async function createRoomWithMember (t, prefix) {
+  const storagePath = await mkdtemp(path.join(tmpdir(), prefix))
+  t.after(() => rm(storagePath, { recursive: true, force: true }))
+  const service = await new PeerChatService({ sdk: createFakeSdk(), storagePath }).start()
+  await service.completeOnboarding({ username: 'Akhilesh' })
+
+  const room = await service.createRoom({ name: 'Test Room', username: 'Akhilesh' })
+  const stored = service.rooms.get(room.roomKey)
+  stored.members = [{ id: 'aabbccdd', username: 'Bob', bio: '', avatar: null, joinedAt: Date.now() }]
+
+  const frames = []
+  const peer = createFakePeer('aabbccdd', 'Bob', frames)
+  peer.key = ''
+  peer.rooms = [room.roomKey]
+  peer.connection.destroy = function () { this.destroyed = true }
+  service.peers.set(peer.connection, peer)
+
+  return { service, roomKey: room.roomKey, peer, frames }
+}
+
+test('removing somebody takes them out of the member list and keeps them out', async (t) => {
+  const { service, roomKey } = await createRoomWithMember(t, 'peersky-peerchat-remove-')
+
+  assert.equal(service.isRoomCreator(roomKey), true)
+  assert.deepEqual(service.listRoomMembers(roomKey).map((m) => m.username), ['Akhilesh', 'Bob'])
+
+  await service.removeRoomMember({ roomKey, peerId: 'aabbccdd' })
+
+  assert.deepEqual(service.listRoomMembers(roomKey).map((m) => m.username), ['Akhilesh'])
+
+  // And they stay out when the room hears about them again, which is what
+  // used to bring them back.
+  service.rooms.get(roomKey).members.push({
+    id: 'aabbccdd', username: 'Bob', bio: '', avatar: null, joinedAt: Date.now()
+  })
+  assert.deepEqual(service.listRoomMembers(roomKey).map((m) => m.username), ['Akhilesh'])
+
+  const snapshot = service.listRooms().find((room) => room.roomKey === roomKey)
+  assert.deepEqual(snapshot.members.map((m) => m.username), ['Akhilesh'])
+  assert.equal(snapshot.bans.length, 1)
+  await service.close()
+})
+
+test('the person being removed is told, and keeps the rooms they are still in', async (t) => {
+  const { service, roomKey, peer, frames } = await createRoomWithMember(t, 'peersky-peerchat-notify-')
+
+  await service.removeRoomMember({ roomKey, peerId: 'aabbccdd' })
+
+  // Dropping them first destroyed the connection with this still queued on it,
+  // so the one person who most needed to hear it was the one who never did.
+  // It also took them offline in every other room the two of us share.
+  const bans = frames.filter((frame) => frame.type === 'room-bans')
+  assert.equal(bans.length, 1)
+  assert.equal(bans[0].roomKey, roomKey)
+  assert.deepEqual(bans[0].bans.map((ban) => ban.id), ['aabbccdd'])
+  // And they keep the connection: it carries every room the two of you share,
+  // so taking it down over one room took them offline in all of them.
+  assert.notEqual(peer.connection.destroyed, true)
+  await new Promise((resolve) => setTimeout(resolve, 1100))
+  assert.notEqual(peer.connection.destroyed, true)
+  await service.close()
+})
+
+test('removing somebody says so in the room', async (t) => {
+  const { service, roomKey } = await createRoomWithMember(t, 'peersky-peerchat-remove-notice-')
+
+  await service.removeRoomMember({ roomKey, peerId: 'aabbccdd' })
+
+  const notices = service.feeds.get(roomKey).entries
+    .filter((entry) => entry.type === 'system')
+    .map((entry) => entry.message)
+  assert.deepEqual(notices, ['Bob was removed from the room by Akhilesh'])
+  await service.close()
+})
+
+test('nothing a removed person sends is read, live or relayed', async (t) => {
+  const { service, roomKey, peer } = await createRoomWithMember(t, 'peersky-peerchat-remove-quiet-')
+  await service.removeRoomMember({ roomKey, peerId: 'aabbccdd' })
+
+  const before = service.feeds.get(roomKey).entries.length
+  const encrypted = encryptPeerChatMessage('hello anyway', roomKey)
+
+  // Straight from them.
+  await service.handlePeerMessage(peer, {
+    type: 'message', roomKey, id: 'live-1', ts: Date.now(), ...encrypted
+  })
+
+  // And the same message passed along by somebody else's history sync, which
+  // is how their messages kept turning up after a removal.
+  const relay = createFakePeer('99887766', 'Carol')
+  relay.key = ''
+  relay.rooms = [roomKey]
+  service.peers.set(relay.connection, relay)
+  await service.handlePeerMessage(relay, {
+    type: 'sync', roomKey, id: 'sync-1', sender: 'aabbccdd', ts: Date.now(), ...encrypted
+  })
+
+  assert.equal(service.feeds.get(roomKey).entries.length, before)
+  await service.close()
+})
+
+test('letting somebody back in puts them back in the list', async (t) => {
+  const { service, roomKey } = await createRoomWithMember(t, 'peersky-peerchat-restore-')
+  await service.removeRoomMember({ roomKey, peerId: 'aabbccdd' })
+  assert.deepEqual(service.listRoomMembers(roomKey).map((m) => m.username), ['Akhilesh'])
+
+  await service.restoreRoomMember({ roomKey, peerId: 'aabbccdd' })
+  service.rooms.get(roomKey).members.push({
+    id: 'aabbccdd', username: 'Bob', bio: '', avatar: null, joinedAt: Date.now()
+  })
+  assert.deepEqual(service.listRoomMembers(roomKey).map((m) => m.username), ['Akhilesh', 'Bob'])
+  await service.close()
+})
+
+test('the same person on two devices is one row, not two', async (t) => {
+  const { service, roomKey, peer } = await createRoomWithMember(t, 'peersky-peerchat-collapse-')
+
+  // A peer id comes from a device key, so a reinstall or a second device joins
+  // under the same name. The room remembers both. This is what the member list
+  // and the people search are both built from, so it has to collapse here.
+  service.rooms.get(roomKey).members.push({
+    id: '11223344', username: 'Bob', bio: '', avatar: null, joinedAt: Date.now()
+  })
+
+  const members = service.listRoomMembers(roomKey)
+  assert.deepEqual(members.map((member) => member.username), ['Akhilesh', 'Bob'])
+  // The one that is here now is the one worth showing: it is the one that can
+  // be messaged.
+  assert.equal(members.find((member) => member.username === 'Bob').id, peer.id)
+  assert.equal(members.find((member) => member.username === 'Bob').online, true)
+  await service.close()
+})
+
+// A direct-message key used to be sha256 of the two peer ids. Both are public,
+// they are in every member list and on every personal QR code, so anybody who
+// knew them could derive the key, join the topic and read the conversation and
+// its media. The key is a secret now, minted and handed over on the connection.
+test('a direct message gets a minted key, not one anybody can work out', async (t) => {
+  const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-dmkey-'))
+  t.after(() => rm(storagePath, { recursive: true, force: true }))
+  const service = await new PeerChatService({ sdk: createFakeSdk(), storagePath }).start()
+  await service.completeOnboarding({ username: 'Akhilesh' })
+
+  const { room } = await service.createDirectMessage({ peerId: 'aabbccdd', username: 'Bob' })
+  const derivable = createHash('sha256')
+    .update([service.localId, 'aabbccdd'].sort().join(':dm:'))
+    .digest('hex')
+
+  assert.match(room.roomKey, /^[a-f0-9]{64}$/)
+  assert.notEqual(room.roomKey, derivable)
+
+  // And two of them in a row are two different secrets, not one function of
+  // the same public inputs.
+  const other = await service.createDirectMessage({ peerId: '11223344', username: 'Eve' })
+  assert.notEqual(other.room.roomKey, room.roomKey)
+  await service.close()
+})
+
+test('asking the same person again reuses the conversation', async (t) => {
+  const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-dmsame-'))
+  t.after(() => rm(storagePath, { recursive: true, force: true }))
+  const service = await new PeerChatService({ sdk: createFakeSdk(), storagePath }).start()
+  await service.completeOnboarding({ username: 'Akhilesh' })
+
+  const first = await service.createDirectMessage({ peerId: 'aabbccdd', username: 'Bob' })
+  const again = await service.createDirectMessage({ peerId: 'aabbccdd', username: 'Bob' })
+
+  assert.equal(again.room.roomKey, first.room.roomKey)
+  assert.equal(service.listRooms().filter((room) => room.isDM).length, 1)
+  await service.close()
+})
+
+// Both sides press Message before either invite lands, so there are two keys
+// for one conversation. Keys are random, so the lower one is an answer both
+// reach alone.
+test('two conversations opened at once converge on one', async (t) => {
+  const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-dmrace-'))
+  t.after(() => rm(storagePath, { recursive: true, force: true }))
+  const service = await new PeerChatService({ sdk: createFakeSdk(), storagePath }).start()
+  await service.completeOnboarding({ username: 'Akhilesh' })
+
+  const frames = []
+  const peer = createFakePeer('aabbccdd', 'Bob', frames)
+  service.peers.set(peer.connection, peer)
+  const { room } = await service.createDirectMessage({ peerId: 'aabbccdd', username: 'Bob' })
+
+  // Theirs sorts lower, so ours goes and theirs is what we answer.
+  const lower = '00'.repeat(32)
+  await service.handlePeerMessage(peer, {
+    type: 'dm-invite', roomKey: lower, fromId: 'aabbccdd', fromUsername: 'Bob', toId: service.localId
+  })
+  assert.equal(service.rooms.has(room.roomKey), false, 'the higher key is given up')
+  assert.equal(service.listPendingDirectMessages()[0].roomKey, lower)
+
+  // And the other way round: theirs sorts higher, so ours stands and we offer
+  // it again rather than keeping two.
+  const second = await service.createDirectMessage({ peerId: '11223344', username: 'Eve' })
+  const eve = createFakePeer('11223344', 'Eve', frames)
+  service.peers.set(eve.connection, eve)
+  frames.length = 0
+  await service.handlePeerMessage(eve, {
+    type: 'dm-invite', roomKey: 'ff'.repeat(32), fromId: '11223344', fromUsername: 'Eve', toId: service.localId
+  })
+  assert.equal(service.rooms.has(second.room.roomKey), true)
+  assert.equal(service.listPendingDirectMessages().some((dm) => dm.fromId === '11223344'), false)
+  assert.equal(frames.at(-1)?.type, 'dm-invite')
+  assert.equal(frames.at(-1)?.roomKey, second.room.roomKey)
+  await service.close()
+})
+
+// The bug that hid nobody. A removal records the peer's whole key whenever they
+// are connected to take it from, and the member list has nothing but short ids
+// to ask about. Asking with an id against a ban that carried a key answered
+// "not removed", so everybody removed stayed in the list, kept being re-added
+// by relayed lists, and could leave and rejoin as if nothing had happened.
+test('somebody removed while connected leaves the list and stays out', async (t) => {
+  const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-keyban-'))
+  t.after(() => rm(storagePath, { recursive: true, force: true }))
+  const service = await new PeerChatService({ sdk: createFakeSdk(), storagePath }).start()
+  await service.completeOnboarding({ username: 'Akhilesh' })
+
+  const room = await service.createRoom({ name: 'Test Room', username: 'Akhilesh' })
+  const roomKey = room.roomKey
+  service.rooms.get(roomKey).members = [
+    { id: 'aabbccdd', username: 'Bob', bio: '', avatar: null, joinedAt: Date.now() }
+  ]
+
+  // Connected, so the removal catches their key and not merely their first
+  // eight characters.
+  const peer = createFakePeer('aabbccdd', 'Bob', [])
+  peer.key = 'aabbccdd' + 'ee'.repeat(28)
+  peer.rooms = [roomKey]
+  service.peers.set(peer.connection, peer)
+
+  await service.removeRoomMember({ roomKey, peerId: 'aabbccdd' })
+
+  assert.equal(service.rooms.get(roomKey).bans[0].key, 'aabbccdd' + 'ee'.repeat(28))
+  assert.equal(service.isPeerIdRemovedFromRoom(roomKey, 'aabbccdd'), true)
+  assert.deepEqual(service.listRoomMembers(roomKey).map((member) => member.username), ['Akhilesh'])
+
+  // A member list relayed by somebody who has not heard yet does not put them
+  // back, and neither does their own join announcement.
+  service.mergeMembersList(roomKey, { aabbccdd: { username: 'Bob' } })
+  service.rememberRoomMember(service.rooms.get(roomKey), peer)
+  assert.deepEqual(service.listRoomMembers(roomKey).map((member) => member.username), ['Akhilesh'])
+
+  // And the room is still shut to them, by key and by id alike.
+  assert.equal(service.isPeerRemovedFromRoom(roomKey, peer), true)
   await service.close()
 })
 

@@ -5,7 +5,9 @@ import { join } from 'node:path'
 import { test } from 'node:test'
 import {
   MAX_HYPER_ARCHIVE_ENTRIES,
+  MAX_HYPER_ARCHIVE_QUERY_LENGTH,
   listHyperArchiveItems,
+  normalizeHyperArchiveQuery,
   parseHyperArchive,
   recordHyperArchiveItem,
   removeHyperArchiveItems,
@@ -200,4 +202,56 @@ test('warns and preserves the archive when one entry exceeds the size limit', as
     console.warn = originalWarn
     await rm(directory, { recursive: true, force: true })
   }
+})
+
+// Paging alone stops being useful once the archive is long: what you are
+// looking for is on a page you would have to walk to.
+const searchable = [
+  { url: `hyper://${'a'.repeat(52)}/`, name: 'Holiday photos', source: 'published', updatedAt: 3 },
+  { url: `hyper://${'b'.repeat(52)}/`, name: 'Notes', source: 'fetched', updatedAt: 2 },
+  { url: `hyper://${'c'.repeat(52)}/`, name: 'holiday plan.md', source: 'fetched', updatedAt: 1 }
+]
+
+test('search matches a name whatever the case', () => {
+  const found = listHyperArchiveItems(searchable, { query: 'HOLIDAY', pageSize: 10 })
+  assert.deepEqual(found.items.map((item) => item.name), ['Holiday photos', 'holiday plan.md'])
+  assert.equal(found.total, 2)
+  assert.equal(found.query, 'holiday')
+})
+
+test('search matches an address, which is what gets pasted in', () => {
+  const found = listHyperArchiveItems(searchable, { query: 'b'.repeat(52), pageSize: 10 })
+  assert.deepEqual(found.items.map((item) => item.name), ['Notes'])
+})
+
+test('search runs before paging, so a match on the last page is still found', () => {
+  const found = listHyperArchiveItems(searchable, { query: 'holiday', page: 1, pageSize: 1 })
+  assert.deepEqual(found.items.map((item) => item.name), ['Holiday photos'])
+  assert.equal(found.totalPages, 2)
+  assert.equal(found.total, 2)
+})
+
+test('search and the source filter narrow together', () => {
+  const found = listHyperArchiveItems(searchable, { query: 'holiday', source: 'fetched', pageSize: 10 })
+  assert.deepEqual(found.items.map((item) => item.name), ['holiday plan.md'])
+})
+
+test('no search leaves the list alone', () => {
+  const all = listHyperArchiveItems(searchable, { pageSize: 10 })
+  assert.equal(all.total, searchable.length)
+  assert.equal(all.query, '')
+})
+
+test('a search that matches nothing is an empty page, not page one of everything', () => {
+  const none = listHyperArchiveItems(searchable, { query: 'nothing here', pageSize: 10 })
+  assert.deepEqual(none.items, [])
+  assert.equal(none.total, 0)
+  assert.equal(none.totalPages, 1)
+})
+
+test('a pasted wall of text is bounded before it is used', () => {
+  const long = 'x'.repeat(MAX_HYPER_ARCHIVE_QUERY_LENGTH + 50)
+  assert.equal(normalizeHyperArchiveQuery(long).length, MAX_HYPER_ARCHIVE_QUERY_LENGTH)
+  assert.equal(normalizeHyperArchiveQuery('  Mixed Case  '), 'mixed case')
+  assert.equal(normalizeHyperArchiveQuery(null), '')
 })
