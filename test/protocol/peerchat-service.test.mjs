@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -634,11 +635,19 @@ test('PeerChat verifies and completes desktop-compatible direct-message invitati
 
   const senderPeer = createFakePeer(sender.localId, 'Alice')
   receiver.peers.set(senderPeer.connection, senderPeer)
+
+  // A key this device already holds as something other than a conversation
+  // with them is not theirs to name.
+  const ownRoom = await receiver.createRoom({ name: 'Bob only', username: 'Bob' })
   await receiver.handlePeerMessage(senderPeer, {
     ...inviteFrames[inviteFrames.length - 1],
-    roomKey: 'ff'.repeat(32)
+    roomKey: ownRoom.roomKey
   })
   assert.equal(receiver.listPendingDirectMessages().length, 0)
+
+  // A key they minted is theirs to name. The handshake already proved who they
+  // are, and the key is a secret rather than something anybody could work out
+  // from two public peer ids.
   await receiver.handlePeerMessage(senderPeer, inviteFrames.pop())
   assert.equal(receiver.listPendingDirectMessages()[0].fromUsername, 'Alice')
 
@@ -1434,6 +1443,83 @@ test('the same person on two devices is one row, not two', async (t) => {
   // be messaged.
   assert.equal(members.find((member) => member.username === 'Bob').id, peer.id)
   assert.equal(members.find((member) => member.username === 'Bob').online, true)
+  await service.close()
+})
+
+// A direct-message key used to be sha256 of the two peer ids. Both are public,
+// they are in every member list and on every personal QR code, so anybody who
+// knew them could derive the key, join the topic and read the conversation and
+// its media. The key is a secret now, minted and handed over on the connection.
+test('a direct message gets a minted key, not one anybody can work out', async (t) => {
+  const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-dmkey-'))
+  t.after(() => rm(storagePath, { recursive: true, force: true }))
+  const service = await new PeerChatService({ sdk: createFakeSdk(), storagePath }).start()
+  await service.completeOnboarding({ username: 'Akhilesh' })
+
+  const { room } = await service.createDirectMessage({ peerId: 'aabbccdd', username: 'Bob' })
+  const derivable = createHash('sha256')
+    .update([service.localId, 'aabbccdd'].sort().join(':dm:'))
+    .digest('hex')
+
+  assert.match(room.roomKey, /^[a-f0-9]{64}$/)
+  assert.notEqual(room.roomKey, derivable)
+
+  // And two of them in a row are two different secrets, not one function of
+  // the same public inputs.
+  const other = await service.createDirectMessage({ peerId: '11223344', username: 'Eve' })
+  assert.notEqual(other.room.roomKey, room.roomKey)
+  await service.close()
+})
+
+test('asking the same person again reuses the conversation', async (t) => {
+  const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-dmsame-'))
+  t.after(() => rm(storagePath, { recursive: true, force: true }))
+  const service = await new PeerChatService({ sdk: createFakeSdk(), storagePath }).start()
+  await service.completeOnboarding({ username: 'Akhilesh' })
+
+  const first = await service.createDirectMessage({ peerId: 'aabbccdd', username: 'Bob' })
+  const again = await service.createDirectMessage({ peerId: 'aabbccdd', username: 'Bob' })
+
+  assert.equal(again.room.roomKey, first.room.roomKey)
+  assert.equal(service.listRooms().filter((room) => room.isDM).length, 1)
+  await service.close()
+})
+
+// Both sides press Message before either invite lands, so there are two keys
+// for one conversation. Keys are random, so the lower one is an answer both
+// reach alone.
+test('two conversations opened at once converge on one', async (t) => {
+  const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-dmrace-'))
+  t.after(() => rm(storagePath, { recursive: true, force: true }))
+  const service = await new PeerChatService({ sdk: createFakeSdk(), storagePath }).start()
+  await service.completeOnboarding({ username: 'Akhilesh' })
+
+  const frames = []
+  const peer = createFakePeer('aabbccdd', 'Bob', frames)
+  service.peers.set(peer.connection, peer)
+  const { room } = await service.createDirectMessage({ peerId: 'aabbccdd', username: 'Bob' })
+
+  // Theirs sorts lower, so ours goes and theirs is what we answer.
+  const lower = '00'.repeat(32)
+  await service.handlePeerMessage(peer, {
+    type: 'dm-invite', roomKey: lower, fromId: 'aabbccdd', fromUsername: 'Bob', toId: service.localId
+  })
+  assert.equal(service.rooms.has(room.roomKey), false, 'the higher key is given up')
+  assert.equal(service.listPendingDirectMessages()[0].roomKey, lower)
+
+  // And the other way round: theirs sorts higher, so ours stands and we offer
+  // it again rather than keeping two.
+  const second = await service.createDirectMessage({ peerId: '11223344', username: 'Eve' })
+  const eve = createFakePeer('11223344', 'Eve', frames)
+  service.peers.set(eve.connection, eve)
+  frames.length = 0
+  await service.handlePeerMessage(eve, {
+    type: 'dm-invite', roomKey: 'ff'.repeat(32), fromId: '11223344', fromUsername: 'Eve', toId: service.localId
+  })
+  assert.equal(service.rooms.has(second.room.roomKey), true)
+  assert.equal(service.listPendingDirectMessages().some((dm) => dm.fromId === '11223344'), false)
+  assert.equal(frames.at(-1)?.type, 'dm-invite')
+  assert.equal(frames.at(-1)?.roomKey, second.room.roomKey)
   await service.close()
 })
 

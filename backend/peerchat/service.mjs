@@ -26,7 +26,6 @@ import {
   createPeerChatMessageId,
   createPeerChatRoomKey,
   decryptPeerChatMessage,
-  derivePeerChatDirectRoomKey,
   derivePeerChatTopic,
   encryptPeerChatMessage,
   getPeerChatMessageByteLength,
@@ -345,7 +344,12 @@ export class PeerChatService {
     const peer = [...this.peers.values()].find((candidate) => candidate.id === normalizedPeerId)
     const known = peer || this.findKnownMember(normalizedPeerId)
 
-    const roomKey = derivePeerChatDirectRoomKey(this.localId, normalizedPeerId)
+    // One conversation per person, found by who it is with. The key used to be
+    // sha256 of the two peer ids, and those are public: anybody who knew both
+    // could derive it, join the topic and read the whole conversation along
+    // with its media. A room key is a secret, so it is minted like any other
+    // room's and handed to them on the connection instead.
+    const roomKey = this.findDirectRoomKey(normalizedPeerId) || createPeerChatRoomKey()
     let room = this.rooms.get(roomKey)
     const createdRoom = !room
     if (!room) {
@@ -691,23 +695,37 @@ export class PeerChatService {
       ts: Date.now()
     })
 
-    const pendingJoin = this.pendingJoins.get(normalized)
-    if (pendingJoin) await pendingJoin.catch(() => {})
+    await this.dropRoomLocally(normalized)
+    return { ok: true }
+  }
 
-    try {
-      await this.sdk.leave(derivePeerChatTopic(normalized))
-    } catch {}
+  /**
+   * Forget a room on this device: its topic, its feed, its record.
+   *
+   * No leave announcement, because callers either send their own or are
+   * dropping a room nobody else ever joined. The record goes first and the
+   * topic after, so a caller that does not wait still sees the room gone on
+   * the very next line.
+   */
+  async dropRoomLocally (roomKey) {
+    const normalized = normalizePeerChatRoomKey(roomKey)
+    if (!normalized) return
 
     this.rooms.delete(normalized)
     this.moderator.clearRoom(normalized)
     this.presence.forgetRoom(normalized)
     if (this.activeRoomKey === normalized) this.activeRoomKey = null
-    await this.releaseFeed(normalized)
     this.joinedRooms.delete(normalized)
     this.discoveryKeys.delete(peerChatTopicHex(derivePeerChatTopic(normalized)))
     this.persistNow()
     this.bumpVersion()
-    return { ok: true }
+
+    const pendingJoin = this.pendingJoins.get(normalized)
+    if (pendingJoin) await pendingJoin.catch(() => {})
+    try {
+      await this.sdk.leave(derivePeerChatTopic(normalized))
+    } catch {}
+    await this.releaseFeed(normalized)
   }
 
   async close () {
@@ -1095,9 +1113,10 @@ export class PeerChatService {
     if (message.type === 'dm-accept' || message.type === 'dm-reject') {
       if (!this.consumeControlRate(peer)) return
       const directRoomKey = normalizePeerChatRoomKey(message.roomKey)
-      const expectedRoomKey = derivePeerChatDirectRoomKey(this.localId, peer.id)
       const directRoom = this.rooms.get(directRoomKey)
-      if (directRoomKey !== expectedRoomKey || !directRoom?.isDM || directRoom.dmWith !== peer.id) return
+      // The room has to be a conversation with the peer this arrived from.
+      // Their identity comes from the handshake, which cannot be claimed.
+      if (!directRoomKey || !directRoom?.isDM || directRoom.dmWith !== peer.id) return
       if (message.type === 'dm-accept') {
         directRoom.pendingAcceptance = false
         directRoom.rejected = false
@@ -1541,19 +1560,30 @@ export class PeerChatService {
     }
     const roomKey = normalizePeerChatRoomKey(message.roomKey)
     const toId = normalizePeerChatPeerId(message.toId)
-    let expectedRoomKey
-    try {
-      expectedRoomKey = derivePeerChatDirectRoomKey(this.localId, peer.id)
-    } catch {
-      return
-    }
-    if (!roomKey || roomKey !== expectedRoomKey || (toId && toId !== this.localId)) return
+    if (!roomKey || (toId && toId !== this.localId)) return
 
     const existing = this.rooms.get(roomKey)
     if (existing?.isDM && existing.dmWith === peer.id) {
       this.sendDirectMessageControl(peer, 'dm-accept', existing)
       return
     }
+    // A key we already hold as something other than a conversation with this
+    // person is not theirs to name.
+    if (existing) return
+
+    // Both of us pressed Message before either invite landed, so there are two
+    // keys for one conversation. Keys are random, so the lower one is an answer
+    // both sides reach alone: whoever holds the other drops it, and a room
+    // nobody has accepted has nothing in it to lose.
+    const ours = this.findDirectRoomKey(peer.id)
+    if (ours) {
+      if (!this.rooms.get(ours)?.pendingAcceptance || ours < roomKey) {
+        this.sendDirectMessageControl(peer, 'dm-invite', this.rooms.get(ours))
+        return
+      }
+      this.dropRoomLocally(ours).catch(() => {})
+    }
+
     if (this.pendingDirectMessages.has(roomKey) || this.pendingDirectMessages.size >= MAX_PENDING_DIRECT_MESSAGES) return
 
     this.pendingDirectMessages.set(roomKey, {
@@ -1566,6 +1596,16 @@ export class PeerChatService {
     })
     this.persistNow()
     this.bumpVersion()
+  }
+
+  /** The room this device already keeps for a conversation with one person. */
+  findDirectRoomKey (peerId) {
+    const wanted = normalizePeerChatPeerId(peerId)
+    if (!wanted) return ''
+    for (const [roomKey, room] of this.rooms) {
+      if (room.isDM && room.dmWith === wanted) return roomKey
+    }
+    return ''
   }
 
   createDirectRoom ({ roomKey, peerId, username, bio, avatar, createdAt = Date.now(), pendingAcceptance }) {
@@ -2320,7 +2360,7 @@ export class PeerChatService {
       for (const value of pendingDirectMessages) {
         const roomKey = normalizePeerChatRoomKey(value?.roomKey)
         const fromId = normalizePeerChatPeerId(value?.fromId)
-        if (!roomKey || !fromId || roomKey !== derivePeerChatDirectRoomKey(this.localId, fromId)) continue
+        if (!roomKey || !fromId) continue
         this.pendingDirectMessages.set(roomKey, {
           roomKey,
           fromId,

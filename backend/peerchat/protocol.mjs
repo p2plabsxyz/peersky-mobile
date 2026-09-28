@@ -38,13 +38,6 @@ export function normalizePeerChatPeerId (value) {
   return PEER_ID_PATTERN.test(peerId) ? peerId.toLowerCase() : ''
 }
 
-export function derivePeerChatDirectRoomKey (firstPeerId, secondPeerId) {
-  const first = normalizePeerChatPeerId(firstPeerId)
-  const second = normalizePeerChatPeerId(secondPeerId)
-  if (!first || !second || first === second) throw new Error('Invalid PeerChat direct-message peers')
-  return createHash('sha256').update([first, second].sort().join(':dm:')).digest('hex')
-}
-
 /**
  * The earliest creation time anybody in a room reports for it.
  *
