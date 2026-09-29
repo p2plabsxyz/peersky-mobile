@@ -15,11 +15,13 @@ describe('browser preferences', () => {
   test('restores supported browser preferences', () => {
     const preferences = {
       addressBarPosition: 'bottom',
+      appLogoColor: 'violet',
       contentBlockingEnabled: false,
       customSearchUrl: 'https://example.com/search?q=%s',
       downloadOnlyOnWifi: true,
       enforceManualPageZoom: true,
       externalLinkBehavior: 'allow',
+      forceDarkWebsites: true,
       searchEngine: 'custom',
       showFullAddress: true,
       theme: 'dark',
@@ -36,11 +38,13 @@ describe('browser preferences', () => {
   test('rejects unsupported preference values independently', () => {
     assert.deepEqual(parseBrowserPreferences({
       addressBarPosition: 'side',
+      appLogoColor: 'chartreuse',
       contentBlockingEnabled: 'yes',
       customSearchUrl: 'http://example.com/search?q=%s',
       downloadOnlyOnWifi: 'yes',
       enforceManualPageZoom: 'yes',
       externalLinkBehavior: 'always',
+      forceDarkWebsites: 'yes',
       searchEngine: 'brave',
       showFullAddress: 'yes',
       theme: 'sepia',

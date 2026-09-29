@@ -114,6 +114,7 @@ import { pickUploads } from '../media/upload-gate'
 import type { UploadSource } from '../media/upload-gate'
 import { scanMedia } from '../media/NsfwScanner'
 import { MEDIA_BLOCKED } from '../media/media-moderation.mjs'
+import { AppLoading } from '../AppLoading'
 import { MODAL_ORIENTATIONS } from '../modal-orientations'
 import { tapFeedback } from '../haptics'
 
@@ -1764,8 +1765,7 @@ export function PeerChatScreen ({
   if (!isReady || !isIntroReady) {
     return (
       <View style={[styles.centered, { backgroundColor: colors.background }]}>
-        <ActivityIndicator color={colors.accent} />
-        <Text style={[styles.helper, { color: colors.muted }]}>Starting PeerChat...</Text>
+        <AppLoading app='peerchat' isDark={isDark} />
       </View>
     )
   }

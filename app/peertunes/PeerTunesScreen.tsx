@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ActivityIndicator, AppState, Modal, Pressable, StyleSheet, Text, View } from 'react-native'
+import { AppState, Modal, Pressable, StyleSheet, Text, View } from 'react-native'
 import { CameraView, useCameraPermissions } from 'expo-camera'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { WebView } from 'react-native-webview'
@@ -13,6 +13,7 @@ import {
   parsePeerTunesScanRequest,
   serializeScanResult
 } from './peertunes-screen.mjs'
+import { AppLoading } from '../AppLoading'
 import { MODAL_ORIENTATIONS } from '../modal-orientations'
 import { tapFeedback } from '../haptics'
 
@@ -124,10 +125,7 @@ export function PeerTunesScreen ({
 
   if (!localUrl) {
     return (
-      <View style={styles.centered}>
-        <ActivityIndicator size='small' />
-        <Text style={[styles.message, isDark ? styles.messageDark : null]}>Starting PeerTunes...</Text>
-      </View>
+      <AppLoading app='peertunes' isDark={isDark} />
     )
   }
 

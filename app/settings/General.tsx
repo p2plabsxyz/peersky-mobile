@@ -5,6 +5,7 @@ import {
   Platform,
   Pressable,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View
@@ -25,18 +26,22 @@ import type { SearchEngine } from './useBrowserPreferences'
 
 type GeneralProps = {
   customSearchUrl: string
+  forceDarkWebsites: boolean
   persistenceError: string | null
   searchEngine: SearchEngine
   onCustomSearchSave: (url: string) => boolean
+  onForceDarkWebsitesChange: (enabled: boolean) => void
   onSearchEngineChange: (searchEngine: SearchEngine) => void
   onResetTabs: () => void
 }
 
 export function General ({
   customSearchUrl,
+  forceDarkWebsites,
   persistenceError,
   searchEngine,
   onCustomSearchSave,
+  onForceDarkWebsitesChange,
   onSearchEngineChange,
   onResetTabs
 }: GeneralProps) {
@@ -131,6 +136,25 @@ export function General ({
           {defaultBrowserError && <Text style={styles.validationError}>{defaultBrowserError}</Text>}
         </SettingsSection>
       )}
+
+      {/* Off by default. Inverting a page is a blunt instrument and plenty of
+          sites now ship their own dark theme, so this is for the ones that
+          never did rather than something to leave on and forget. */}
+      <SettingsSection title='Dark websites'>
+        <View style={styles.settingRow}>
+          <SettingCopy
+            title='Force dark mode'
+            description='Darken sites that have no dark theme of their own. Sites that are already dark are left as they are.'
+          />
+          <Switch
+            accessibilityLabel='Force dark mode on websites'
+            value={forceDarkWebsites}
+            onValueChange={onForceDarkWebsitesChange}
+            trackColor={{ false: '#bac3d2', true: '#7eb2ee' }}
+            thumbColor={forceDarkWebsites ? '#1f6fd1' : '#ffffff'}
+          />
+        </View>
+      </SettingsSection>
 
       <SettingsSection title='Search engine'>
         <ChoiceGroup

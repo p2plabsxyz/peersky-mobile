@@ -1,5 +1,5 @@
 <p align="center">
-    <img align="center" src="/assets/images/app-icon-transparent.png" width="200" height="200"></img>
+    <img align="center" src="/assets/images/logo-adaptive.png" width="200" height="200"></img>
 </p>
 
 <h1 align="center">PeerSky Mobile</h1>

@@ -1,4 +1,6 @@
-import { StyleSheet, Switch, Text, View } from 'react-native'
+import { Pressable, StyleSheet, Switch, Text, View } from 'react-native'
+import { AppLogo } from '../AppLogo'
+import { APP_LOGO_COLORS } from '../app-logo-colors.mjs'
 import { BROWSER_PALETTES } from '../browser-appearance.mjs'
 import type {
   AddressBarPosition,
@@ -13,20 +15,24 @@ import {
 
 type AppearanceProps = {
   addressBarPosition: AddressBarPosition
+  appLogoColor: string
   persistenceError: string | null
   showFullAddress: boolean
   theme: BrowserTheme
   onAddressBarPositionChange: (position: AddressBarPosition) => void
+  onAppLogoColorChange: (color: string) => void
   onShowFullAddressChange: (enabled: boolean) => void
   onThemeChange: (theme: BrowserTheme) => void
 }
 
 export function Appearance ({
   addressBarPosition,
+  appLogoColor,
   persistenceError,
   showFullAddress,
   theme,
   onAddressBarPositionChange,
+  onAppLogoColorChange,
   onShowFullAddressChange,
   onThemeChange
 }: AppearanceProps) {
@@ -76,11 +82,63 @@ export function Appearance ({
           />
         </View>
       </SettingsSection>
+
+      {/* Shown large rather than as six coloured dots: the thing being picked
+          is the logo, so the logo is what you pick from. */}
+      <SettingsSection title='Logo'>
+        <View style={styles.logoRow}>
+          {APP_LOGO_COLORS.map((color) => {
+            const selected = color.id === appLogoColor
+            return (
+              <Pressable
+                key={color.id}
+                accessibilityRole='button'
+                accessibilityLabel={`${color.title} logo`}
+                accessibilityState={{ selected }}
+                style={({ pressed }) => [styles.logoOption, pressed ? styles.logoPressed : null]}
+                onPress={() => onAppLogoColorChange(color.id)}
+              >
+                <View style={[
+                  styles.logoRing,
+                  selected ? styles.logoRingSelected : null,
+                  isDark ? styles.logoRingDark : null,
+                  selected && isDark ? styles.logoRingSelectedDark : null
+                ]}>
+                  <AppLogo color={color.id} size={48} />
+                </View>
+                <Text style={[styles.logoLabel, isDark ? styles.logoLabelDark : null]}>
+                  {color.title}
+                </Text>
+              </Pressable>
+            )
+          })}
+        </View>
+      </SettingsSection>
     </View>
   )
 }
 
 const styles = StyleSheet.create({
+  logoRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    justifyContent: 'space-between',
+    padding: 16
+  },
+  logoOption: { alignItems: 'center', gap: 6 },
+  logoPressed: { opacity: 0.7 },
+  logoRing: {
+    borderColor: 'transparent',
+    borderRadius: 32,
+    borderWidth: 2,
+    padding: 3
+  },
+  logoRingDark: { borderColor: 'transparent' },
+  logoRingSelected: { borderColor: '#1f6fd1' },
+  logoRingSelectedDark: { borderColor: '#7eb2ee' },
+  logoLabel: { color: '#687086', fontSize: 12, fontWeight: '700' },
+  logoLabelDark: { color: '#aab4c8' },
   page: {
     backgroundColor: '#f5f8fc',
     flexGrow: 1

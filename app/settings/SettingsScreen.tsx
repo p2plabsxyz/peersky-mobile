@@ -157,6 +157,8 @@ type LANDiscoveryStatus = {
 
 type SettingsScreenProps = {
   addressBarPosition: AddressBarPosition
+  appLogoColor: string
+  forceDarkWebsites: boolean
   initialPage?: SettingsPage
   // Lets the back gesture and the Android button step out of a subpage the way
   // its own back arrow does, instead of closing settings from inside one.
@@ -176,6 +178,8 @@ type SettingsScreenProps = {
   youtubeAdBlockingEnabled: boolean
   storagePath: string
   onAddressBarPositionChange: (position: AddressBarPosition) => void
+  onAppLogoColorChange: (color: string) => void
+  onForceDarkWebsitesChange: (enabled: boolean) => void
   onCallRpc: (command: number, data?: object) => Promise<RpcResponse>
   onContentBlockingEnabledChange: (enabled: boolean) => Promise<void>
   onClose: () => void
@@ -277,7 +281,7 @@ const SETTINGS_PAGES: Array<{
     title: 'About',
     description: 'Version, source code, and licenses',
     icon: InfoIcon,
-    image: require('../../assets/images/app-icon-transparent.png')
+    image: require('../../assets/images/logo.png')
   }
 ]
 

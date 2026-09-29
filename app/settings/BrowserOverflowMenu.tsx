@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
-import { Modal, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native'
+import { useEffect, useRef } from 'react'
+import { Animated, Easing, Modal, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native'
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import CheckIcon from '../../assets/icons/bootstrap/check2.svg'
 import DisplayIcon from '../../assets/icons/bootstrap/display.svg'
@@ -15,9 +16,11 @@ import ZoomIcon from '../../assets/icons/bootstrap/zoom-in.svg'
 import { BROWSER_PALETTES } from '../browser-appearance.mjs'
 import { MODAL_ORIENTATIONS } from '../modal-orientations'
 
-const MENU_ICON_SIZE = 18
-const QUICK_ACTION_ICON_SIZE = 22
+const MENU_ICON_SIZE = 22
+const CARD_ICON_SIZE = 26
 const MENU_ICON_STROKE_WIDTH = 0.35
+const OPEN_MS = 260
+const CLOSE_MS = 190
 
 type BrowserOverflowMenuProps = {
   bookmarkActionAvailable?: boolean
@@ -26,8 +29,6 @@ type BrowserOverflowMenuProps = {
   isBookmarked?: boolean
   isDark?: boolean
   newTabDisabled?: boolean
-  offset?: number
-  position?: 'top' | 'bottom'
   shareActionAvailable?: boolean
   visible: boolean
   onClose: () => void
@@ -51,8 +52,6 @@ export function BrowserOverflowMenu ({
   isBookmarked = false,
   isDark = false,
   newTabDisabled = false,
-  offset = 70,
-  position = 'top',
   shareActionAvailable = false,
   visible,
   onClose,
@@ -70,32 +69,88 @@ export function BrowserOverflowMenu ({
 }: BrowserOverflowMenuProps) {
   const { height: windowHeight } = useWindowDimensions()
   const insets = useSafeAreaInsets()
-  const iconColor = isDark ? BROWSER_PALETTES.dark.mutedText : BROWSER_PALETTES.light.text
-  const menuEdge = 12 + insets.right
-  // Flush against the toolbar, with the touching edge square and unbordered,
-  // so the menu reads as the three dots opening out rather than a card that
-  // happens to be nearby.
-  const menuPosition = position === 'bottom'
-    ? { bottom: offset + insets.bottom }
-    : { top: offset + insets.top }
-  const menuAttachment = position === 'bottom' ? styles.attachedBelow : styles.attachedAbove
-  const menuMaxHeight = Math.max(
-    180,
-    windowHeight - offset - insets.top - insets.bottom - 20
-  )
-  const menuIconProps = {
+  const palette = isDark ? BROWSER_PALETTES.dark : BROWSER_PALETTES.light
+  const iconColor = isDark ? '#ffffff' : BROWSER_PALETTES.light.text
+  const menuMaxHeight = Math.max(240, windowHeight * 0.76)
+
+  // Modal's own slide animation carries the dimmed backdrop up with the sheet,
+  // which reads as a shutter closing over the page rather than a sheet rising
+  // in front of it. The backdrop fades and the sheet slides, separately.
+  const open = useRef(new Animated.Value(0)).current
+
+  useEffect(() => {
+    const animation = Animated.timing(open, {
+      duration: visible ? OPEN_MS : CLOSE_MS,
+      easing: visible ? Easing.out(Easing.cubic) : Easing.in(Easing.cubic),
+      toValue: visible ? 1 : 0,
+      useNativeDriver: true
+    })
+    animation.start()
+
+    return () => animation.stop()
+  }, [open, visible])
+
+  const iconProps = {
     color: iconColor,
     height: MENU_ICON_SIZE,
     stroke: iconColor,
     strokeWidth: MENU_ICON_STROKE_WIDTH,
     width: MENU_ICON_SIZE
   }
-  const quickActionIconProps = {
-    color: iconColor,
-    height: QUICK_ACTION_ICON_SIZE,
-    stroke: iconColor,
-    strokeWidth: MENU_ICON_STROKE_WIDTH,
-    width: QUICK_ACTION_ICON_SIZE
+  const cardIconProps = { ...iconProps, height: CARD_ICON_SIZE, width: CARD_ICON_SIZE }
+  const surface = isDark ? '#1c1c1e' : '#ffffff'
+  const cardColor = isDark ? '#2c2c2e' : '#f1f3f7'
+
+  const pageActions: ReactNode[] = []
+  if (bookmarkActionAvailable && onToggleBookmark) {
+    pageActions.push(
+      <MenuItem
+        key='bookmark'
+        cardColor={cardColor}
+        disabled={bookmarksDisabled}
+        icon={isBookmarked ? <StarFillIcon {...iconProps} /> : <StarIcon {...iconProps} />}
+        isDark={isDark}
+        label={isBookmarked ? 'Remove Bookmark' : 'Add Bookmark'}
+        onPress={onToggleBookmark}
+      />
+    )
+  }
+  if (shareActionAvailable && onSharePage) {
+    pageActions.push(
+      <MenuItem
+        key='share'
+        cardColor={cardColor}
+        icon={<ShareIcon {...iconProps} />}
+        isDark={isDark}
+        label='Share'
+        onPress={onSharePage}
+      />
+    )
+    if (onOpenZoom) {
+      pageActions.push(
+        <MenuItem
+          key='zoom'
+          cardColor={cardColor}
+          icon={<ZoomIcon {...iconProps} />}
+          isDark={isDark}
+          label='Zoom'
+          onPress={onOpenZoom}
+        />
+      )
+    }
+    if (onToggleDesktopView) {
+      pageActions.push(
+        <MenuItem
+          key='desktop'
+          cardColor={cardColor}
+          icon={<DisplayIcon {...iconProps} />}
+          isDark={isDark}
+          label='Desktop View'
+          onPress={onToggleDesktopView}
+          selected={desktopView}
+        />
+      )
+    }
   }
 
   return (
@@ -115,149 +170,149 @@ export function BrowserOverflowMenu ({
 
       <Modal
         supportedOrientations={MODAL_ORIENTATIONS}
-        animationType='fade'
+        animationType='none'
         transparent={true}
         visible={visible}
         onDismiss={onDismissed}
         onRequestClose={onClose}
       >
-        <SafeAreaView style={styles.overlay} edges={['top', 'left', 'right', 'bottom']}>
-          <Pressable accessibilityLabel='Close browser menu' style={styles.backdrop} onPress={onClose} />
-          <ScrollView
-            showsVerticalScrollIndicator={false}
+        <SafeAreaView style={styles.overlay} edges={['top', 'left', 'right']}>
+          <Animated.View style={[styles.backdrop, { opacity: open }]}>
+            <Pressable
+              accessibilityLabel='Close browser menu'
+              style={StyleSheet.absoluteFill}
+              onPress={onClose}
+            />
+          </Animated.View>
+
+          <Animated.View
             style={[
-            styles.menu,
-            menuPosition,
-            menuAttachment,
-            { maxHeight: menuMaxHeight, right: menuEdge },
-            isDark ? darkStyles.menu : null
-          ]}
+              styles.sheet,
+              {
+                backgroundColor: surface,
+                paddingBottom: Math.max(insets.bottom, 12),
+                transform: [{
+                  translateY: open.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [windowHeight * 0.5, 0]
+                  })
+                }]
+              }
+            ]}
           >
-            {bookmarkActionAvailable && onToggleBookmark && (
-              <View style={[styles.quickActions, isDark ? darkStyles.divider : null]}>
-                <QuickAction
-                  accessibilityLabel={isBookmarked ? 'Remove Bookmark' : 'Add Bookmark'}
-                  disabled={bookmarksDisabled}
-                  icon={isBookmarked
-                    ? <StarFillIcon {...quickActionIconProps} />
-                    : <StarIcon {...quickActionIconProps} />}
-                  isDark={isDark}
-                  onPress={onToggleBookmark}
-                  selected={isBookmarked}
-                />
-                <QuickAction
-                  accessibilityLabel='New Tab'
+            <View style={[styles.grabber, { backgroundColor: palette.border }]} />
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              style={{ maxHeight: menuMaxHeight }}
+              contentContainerStyle={styles.content}
+            >
+              {/* The two people reach for, side by side and big enough to hit
+                  without looking. Everything else is a list. */}
+              <View style={styles.cardRow}>
+                <BigAction
+                  cardColor={cardColor}
                   disabled={newTabDisabled}
-                  icon={<PlusIcon {...quickActionIconProps} />}
+                  icon={<PlusIcon {...cardIconProps} />}
                   isDark={isDark}
+                  label='New Tab'
                   onPress={onNewTab}
-              />
-            </View>
-            )}
-            {shareActionAvailable && onSharePage && (
-              <>
-                <MenuItem
-                  icon={<ShareIcon {...menuIconProps} />}
-                  isDark={isDark}
-                  label='Share'
-                  onPress={onSharePage}
                 />
-                {onOpenZoom && (
+                <BigAction
+                  cardColor={cardColor}
+                  icon={<GearIcon {...cardIconProps} />}
+                  isDark={isDark}
+                  label='Settings'
+                  onPress={onOpenSettings}
+                />
+              </View>
+
+              {pageActions.length > 0 && (
+                <View style={[styles.group, { backgroundColor: cardColor }]}>
+                  {withDividers(pageActions, palette.border)}
+                </View>
+              )}
+
+              <View style={[styles.group, { backgroundColor: cardColor }]}>
+                {withDividers([
                   <MenuItem
-                    icon={<ZoomIcon {...menuIconProps} />}
+                    key='bookmarks'
+                    cardColor={cardColor}
+                    disabled={bookmarksDisabled}
+                    icon={<BookmarksIcon {...iconProps} />}
                     isDark={isDark}
-                    label='Zoom'
-                    onPress={onOpenZoom}
-                  />
-                )}
-                {onToggleDesktopView && (
+                    label='Bookmarks'
+                    onPress={onOpenBookmarks}
+                  />,
                   <MenuItem
-                    icon={<DisplayIcon {...menuIconProps} />}
+                    key='history'
+                    cardColor={cardColor}
+                    icon={<HistoryIcon {...iconProps} />}
                     isDark={isDark}
-                    label='Desktop View'
-                    onPress={onToggleDesktopView}
-                    selected={desktopView}
+                    label='History'
+                    onPress={onOpenHistory}
+                  />,
+                  <MenuItem
+                    key='downloads'
+                    cardColor={cardColor}
+                    icon={<DownloadIcon {...iconProps} />}
+                    isDark={isDark}
+                    label='Downloads'
+                    onPress={onOpenDownloads}
                   />
-                )}
-              </>
-            )}
-            {!bookmarkActionAvailable && (
-              <MenuItem
-                disabled={newTabDisabled}
-                icon={<PlusIcon {...menuIconProps} />}
-                isDark={isDark}
-                label='New Tab'
-                onPress={onNewTab}
-              />
-            )}
-            <MenuItem
-              disabled={bookmarksDisabled}
-              icon={<BookmarksIcon {...menuIconProps} />}
-              isDark={isDark}
-              label='Bookmarks'
-              onPress={onOpenBookmarks}
-            />
-            <MenuItem
-              icon={<HistoryIcon {...menuIconProps} />}
-              isDark={isDark}
-              label='History'
-              onPress={onOpenHistory}
-            />
-            <MenuItem
-              icon={<DownloadIcon {...menuIconProps} />}
-              isDark={isDark}
-              label='Downloads'
-              onPress={onOpenDownloads}
-            />
-            <MenuItem
-              icon={<GearIcon {...menuIconProps} />}
-              isDark={isDark}
-              label='Settings'
-              onPress={onOpenSettings}
-            />
-          </ScrollView>
+                ], palette.border)}
+              </View>
+            </ScrollView>
+          </Animated.View>
         </SafeAreaView>
       </Modal>
     </>
   )
 }
 
-function QuickAction ({
-  accessibilityLabel,
+// Hairlines between rows, inset past the icon so the list reads as one card.
+function withDividers (items: ReactNode[], color: string) {
+  return items.flatMap((item, index) => index === 0
+    ? [item]
+    : [<View key={`divider-${index}`} style={[styles.divider, { backgroundColor: color }]} />, item])
+}
+
+function BigAction ({
+  cardColor,
   disabled = false,
   icon,
   isDark,
-  onPress,
-  selected
+  label,
+  onPress
 }: {
-  accessibilityLabel: string
+  cardColor: string
   disabled?: boolean
   icon: ReactNode
   isDark: boolean
+  label: string
   onPress: () => void
-  selected?: boolean
 }) {
   return (
     <Pressable
-      accessibilityLabel={accessibilityLabel}
+      accessibilityLabel={label}
       accessibilityRole='button'
-      accessibilityState={{ disabled, selected }}
+      accessibilityState={{ disabled }}
       disabled={disabled}
       style={({ pressed }) => [
-        styles.quickAction,
-        isDark ? darkStyles.quickAction : null,
-        disabled ? styles.menuItemDisabled : null,
-        pressed ? styles.pressed : null,
-        pressed && isDark ? darkStyles.pressed : null
+        styles.bigAction,
+        { backgroundColor: cardColor },
+        disabled ? styles.disabled : null,
+        pressed ? styles.pressed : null
       ]}
       onPress={onPress}
     >
-      <View style={styles.quickActionIcon}>{icon}</View>
+      {icon}
+      <Text style={[styles.bigActionText, isDark ? darkStyles.text : null]}>{label}</Text>
     </Pressable>
   )
 }
 
 function MenuItem ({
+  cardColor,
   disabled = false,
   icon,
   isDark,
@@ -265,6 +320,7 @@ function MenuItem ({
   onPress,
   selected = false
 }: {
+  cardColor: string
   disabled?: boolean
   icon: ReactNode
   isDark: boolean
@@ -279,14 +335,14 @@ function MenuItem ({
       disabled={disabled}
       style={({ pressed }) => [
         styles.menuItem,
-        disabled ? styles.menuItemDisabled : null,
-        pressed ? styles.pressed : null,
-        pressed && isDark ? darkStyles.pressed : null
+        { backgroundColor: cardColor },
+        disabled ? styles.disabled : null,
+        pressed ? styles.pressed : null
       ]}
       onPress={onPress}
     >
       <View style={styles.menuItemIcon}>{icon}</View>
-      <Text style={[styles.menuItemText, isDark ? darkStyles.menuItemText : null]}>{label}</Text>
+      <Text style={[styles.menuItemText, isDark ? darkStyles.text : null]}>{label}</Text>
       {selected && (
         <CheckIcon
           width={MENU_ICON_SIZE}
@@ -307,9 +363,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     width: 38
   },
-  dots: {
-    gap: 3
-  },
+  dots: { gap: 3 },
   dot: {
     backgroundColor: '#1f2a44',
     borderRadius: 2,
@@ -317,106 +371,81 @@ const styles = StyleSheet.create({
     width: 4
   },
   overlay: {
-    flex: 1
+    flex: 1,
+    justifyContent: 'flex-end'
   },
   backdrop: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(21, 24, 33, 0.16)'
+    backgroundColor: 'rgba(0, 0, 0, 0.45)'
   },
-  menu: {
-    position: 'absolute',
-    right: 12,
-    alignSelf: 'flex-end',
-    backgroundColor: '#ffffff',
-    borderColor: '#dbe3ef',
-    borderRadius: 12,
-    borderWidth: 1,
-    elevation: 8,
-    minWidth: 220,
+  sheet: {
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+    elevation: 12,
     overflow: 'hidden',
+    paddingTop: 8,
     shadowColor: '#10131a',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 10
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.18,
+    shadowRadius: 12
   },
-  // The edge that meets the toolbar.
-  attachedBelow: {
-    borderBottomLeftRadius: 0,
-    borderBottomRightRadius: 0,
-    borderBottomWidth: 0
+  grabber: {
+    alignSelf: 'center',
+    borderRadius: 3,
+    height: 5,
+    marginBottom: 10,
+    width: 40
   },
-  attachedAbove: {
-    borderTopLeftRadius: 0,
-    borderTopRightRadius: 0,
-    borderTopWidth: 0
-  },
-  quickActions: {
-    borderBottomColor: '#e7ebf1',
-    borderBottomWidth: 1,
-    flexDirection: 'row',
+  content: {
     gap: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 12
+    paddingHorizontal: 14,
+    paddingVertical: 4
   },
-  quickAction: {
+  cardRow: { flexDirection: 'row', gap: 12 },
+  bigAction: {
     alignItems: 'center',
-    backgroundColor: '#edf3fb',
-    borderRadius: 22,
-    height: 44,
+    borderRadius: 16,
+    flex: 1,
+    gap: 10,
     justifyContent: 'center',
-    width: 44
+    paddingVertical: 20
   },
-  quickActionIcon: {
-    alignItems: 'center',
-    height: QUICK_ACTION_ICON_SIZE,
-    justifyContent: 'center',
-    width: QUICK_ACTION_ICON_SIZE
+  bigActionText: {
+    color: BROWSER_PALETTES.light.text,
+    fontSize: 15,
+    fontWeight: '600'
+  },
+  group: {
+    borderRadius: 16,
+    overflow: 'hidden'
+  },
+  divider: {
+    height: StyleSheet.hairlineWidth,
+    marginLeft: 56
   },
   menuItem: {
     alignItems: 'center',
     flexDirection: 'row',
-    gap: 12,
-    justifyContent: 'flex-start',
-    minHeight: 52,
-    paddingHorizontal: 18
-  },
-  menuItemDisabled: {
-    opacity: 0.45
+    gap: 14,
+    minHeight: 54,
+    paddingHorizontal: 16
   },
   menuItemIcon: {
     alignItems: 'center',
+    height: MENU_ICON_SIZE,
     justifyContent: 'center',
-    width: 22
-  },
-  pressed: {
-    backgroundColor: '#edf5ff'
+    width: MENU_ICON_SIZE
   },
   menuItemText: {
-    color: '#1f2a44',
+    color: BROWSER_PALETTES.light.text,
     flex: 1,
-    fontSize: 15,
-    fontWeight: '600'
-  }
+    fontSize: 16
+  },
+  disabled: { opacity: 0.4 },
+  pressed: { opacity: 0.6 }
 })
 
 const darkStyles = StyleSheet.create({
-  menu: {
-    backgroundColor: BROWSER_PALETTES.dark.surface,
-    borderColor: BROWSER_PALETTES.dark.border
-  },
-  menuItemText: {
-    color: BROWSER_PALETTES.dark.text
-  },
-  divider: {
-    borderBottomColor: BROWSER_PALETTES.dark.border
-  },
-  dot: {
-    backgroundColor: BROWSER_PALETTES.dark.mutedText
-  },
-  pressed: {
-    backgroundColor: BROWSER_PALETTES.dark.selectedBackground
-  },
-  quickAction: {
-    backgroundColor: BROWSER_PALETTES.dark.button
-  }
+  text: { color: '#ffffff' },
+  dot: { backgroundColor: BROWSER_PALETTES.dark.mutedText }
 })

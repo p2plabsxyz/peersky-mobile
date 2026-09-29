@@ -19,13 +19,17 @@ export type BrowserTheme = 'system' | 'light' | 'dark'
 export type ExternalLinkBehavior = 'ask' | 'allow' | 'block'
 export type WebsiteTextScale = 80 | 100 | 120 | 150
 
+export type AppLogoColor = string
+
 export type BrowserPreferences = {
   addressBarPosition: AddressBarPosition
+  appLogoColor: AppLogoColor
   contentBlockingEnabled: boolean
   customSearchUrl: string
   downloadOnlyOnWifi: boolean
   enforceManualPageZoom: boolean
   externalLinkBehavior: ExternalLinkBehavior
+  forceDarkWebsites: boolean
   searchEngine: SearchEngine
   showFullAddress: boolean
   theme: BrowserTheme
@@ -114,6 +118,12 @@ export function useBrowserPreferences () {
     },
     setExternalLinkBehavior: (externalLinkBehavior: ExternalLinkBehavior) => {
       return updatePreferences({ externalLinkBehavior })
+    },
+    setForceDarkWebsites: (forceDarkWebsites: boolean) => {
+      return updatePreferences({ forceDarkWebsites })
+    },
+    setAppLogoColor: (appLogoColor: AppLogoColor) => {
+      return updatePreferences({ appLogoColor })
     },
     setSearchEngine: (searchEngine: SearchEngine) => {
       return updatePreferences({ searchEngine })

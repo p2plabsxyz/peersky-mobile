@@ -7,7 +7,7 @@ import DatabaseIcon from '../assets/icons/bootstrap/database.svg'
 import ShieldLockIcon from '../assets/icons/bootstrap/shield-lock.svg'
 import PeopleIcon from '../assets/icons/bootstrap/people.svg'
 
-const PEERSKY_ICON = require('../assets/images/app-icon-transparent.png')
+const PEERSKY_ICON = require('../assets/images/logo.png')
 
 // Four things worth knowing before the first page loads, and nothing else. A
 // tour is something to escape from; this is one screen with one button.

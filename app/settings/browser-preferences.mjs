@@ -1,13 +1,16 @@
+import { DEFAULT_APP_LOGO_COLOR, normalizeAppLogoColor } from '../app-logo-colors.mjs'
 import { EXTERNAL_LINK_BEHAVIORS } from '../browser-permissions.mjs'
 import { normalizeCustomSearchUrl } from '../browser-shell.mjs'
 
 export const DEFAULT_BROWSER_PREFERENCES = {
   addressBarPosition: 'top',
+  appLogoColor: DEFAULT_APP_LOGO_COLOR,
   contentBlockingEnabled: true,
   customSearchUrl: '',
   downloadOnlyOnWifi: false,
   enforceManualPageZoom: false,
   externalLinkBehavior: 'ask',
+  forceDarkWebsites: false,
   searchEngine: 'duckduckgo',
   showFullAddress: false,
   theme: 'system',
@@ -41,6 +44,7 @@ export function parseBrowserPreferences (serialized) {
     addressBarPosition: ADDRESS_BAR_POSITIONS.includes(value?.addressBarPosition)
       ? value.addressBarPosition
       : DEFAULT_BROWSER_PREFERENCES.addressBarPosition,
+    appLogoColor: normalizeAppLogoColor(value?.appLogoColor),
     contentBlockingEnabled: typeof value?.contentBlockingEnabled === 'boolean'
       ? value.contentBlockingEnabled
       : DEFAULT_BROWSER_PREFERENCES.contentBlockingEnabled,
@@ -54,6 +58,9 @@ export function parseBrowserPreferences (serialized) {
     externalLinkBehavior: EXTERNAL_LINK_BEHAVIORS.includes(value?.externalLinkBehavior)
       ? value.externalLinkBehavior
       : DEFAULT_BROWSER_PREFERENCES.externalLinkBehavior,
+    forceDarkWebsites: typeof value?.forceDarkWebsites === 'boolean'
+      ? value.forceDarkWebsites
+      : DEFAULT_BROWSER_PREFERENCES.forceDarkWebsites,
     searchEngine: SEARCH_ENGINES.some((engine) => engine.id === value?.searchEngine)
       ? value.searchEngine
       : DEFAULT_BROWSER_PREFERENCES.searchEngine,

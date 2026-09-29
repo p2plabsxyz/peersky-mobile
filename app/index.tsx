@@ -85,6 +85,7 @@ import {
   resolveBrowserDarkMode
 } from './browser-appearance.mjs'
 import { createBrowserAccessibilityScript } from './browser-accessibility.mjs'
+import { createForceDarkScript } from './browser-force-dark.mjs'
 import { clearBrowserWebViewData } from './browser-data.mjs'
 import {
   canPromptExternalLink,
@@ -125,6 +126,9 @@ import { BrowserToolbar } from './BrowserToolbar'
 import { BrowserBackSwipe } from './BrowserBackSwipe'
 import { BrowserZoomSheet } from './BrowserZoomSheet'
 import { WelcomeScreen } from './WelcomeScreen'
+import { BrowserHomeBackground } from './BrowserHomeBackground'
+import { StartupScreen } from './StartupScreen'
+import { AppLoading } from './AppLoading'
 import { BrowserSiteInfoSheet } from './BrowserSiteInfoSheet'
 import { hasSeenWelcome, markWelcomeSeen, WELCOME_FILE_NAME } from './welcome-state.mjs'
 import { tapFeedback } from './haptics'
@@ -351,6 +355,8 @@ export default function App () {
     persistenceError: browserPreferencesError,
     preferences: browserPreferences,
     setAddressBarPosition,
+    setAppLogoColor,
+    setForceDarkWebsites,
     setContentBlockingEnabled: setContentBlockingPreference,
     setCustomSearchEngine,
     setDownloadOnlyOnWifi,
@@ -1409,6 +1415,14 @@ export default function App () {
       openInternalApp(browserSource.app, false)
     }
   }
+
+  useEffect(() => {
+    if (!browserPreferencesReady) return
+    const script = createForceDarkScript(browserPreferences.forceDarkWebsites)
+    for (const webView of browserWebViewRefs.current.values()) {
+      webView?.injectJavaScript(script)
+    }
+  }, [browserPreferencesReady, browserPreferences.forceDarkWebsites])
 
   async function onContentBlockingEnabledChange (enabled: boolean) {
     const previousEnabled = browserPreferences.contentBlockingEnabled
@@ -2940,6 +2954,8 @@ export default function App () {
             initialPage={browserSettingsInitialPage}
             registerGoBack={(handler) => { browserSettingsGoBackRef.current = handler }}
             addressBarPosition={browserPreferences.addressBarPosition}
+            appLogoColor={browserPreferences.appLogoColor}
+            forceDarkWebsites={browserPreferences.forceDarkWebsites}
             contentBlockingEnabled={browserPreferences.contentBlockingEnabled}
             customSearchUrl={browserPreferences.customSearchUrl}
             downloadOnlyOnWifi={browserPreferences.downloadOnlyOnWifi}
@@ -2955,6 +2971,8 @@ export default function App () {
             youtubeAdBlockingEnabled={browserPreferences.youtubeAdBlockingEnabled}
             storagePath={identityStoragePath}
             onAddressBarPositionChange={setAddressBarPosition}
+            onAppLogoColorChange={setAppLogoColor}
+            onForceDarkWebsitesChange={setForceDarkWebsites}
             onCallRpc={(command, data = {}) => callRpc(command, data)}
             onContentBlockingEnabledChange={onContentBlockingEnabledChange}
             onClose={closeBrowserSettings}
@@ -3178,7 +3196,7 @@ export default function App () {
 
         {(isBooting || isLoading) && (
           <View style={styles.p2pmdWorkspaceLoader}>
-            <ActivityIndicator size='small' />
+            <AppLoading app='p2pmd' isDark={browserIsDark} />
           </View>
         )}
       </SafeAreaView>
@@ -3279,10 +3297,18 @@ export default function App () {
     : browserChrome.shell
   const browserWebViewFillsBottomInset =
     browserPreferences.addressBarPosition !== 'bottom' &&
-    (browserSource.kind === 'web' || browserSource.kind === 'hyper')
+    (browserSource.kind === 'web' ||
+      browserSource.kind === 'hyper' ||
+      // The home screen has a wallpaper rather than a flat colour, and a strip
+      // of shell paint under it read as a gap at the bottom of the picture.
+      browserSource.kind === 'home')
 
   // Shown once, before anything else, on a phone that has never opened PeerSky.
   // Not a tour: one screen, four things, one button.
+  if (!browserSessionReady) {
+    return <StartupScreen isDark={browserIsDark} logoColor={browserPreferences.appLogoColor} />
+  }
+
   if (showWelcome) {
     return (
       <WelcomeScreen
@@ -3393,9 +3419,15 @@ export default function App () {
             )
           : browserSource.kind === 'home'
           ? (
+            <BrowserHomeBackground scrim={browserIsDark ? 'rgba(24, 24, 27, 0.45)' : 'rgba(255, 255, 255, 0.72)'}>
             <ScrollView
               style={styles.browserContentPage}
-              contentContainerStyle={styles.browserHome}
+              contentContainerStyle={[
+                styles.browserHome,
+                // The picture reaches the bottom edge, so the shortcuts have to
+                // clear the home indicator themselves.
+                { paddingBottom: 36 + browserInsets.bottom }
+              ]}
               keyboardDismissMode='on-drag'
             >
               <View style={styles.browserShortcutGrid}>
@@ -3435,6 +3467,7 @@ export default function App () {
                 ))}
               </View>
             </ScrollView>
+            </BrowserHomeBackground>
             )
           : browserSource.kind === 'app'
             ? activeTab === 'hyper'
@@ -3868,6 +3901,9 @@ export default function App () {
             browserAccessibilityScript,
             browserMediaScript,
             browserContentBlockingScript,
+            // After the page has drawn, so the check for a site that is already
+            // dark reads the site's own background rather than an empty one.
+            createForceDarkScript(browserPreferences.forceDarkWebsites),
             createBrowserFaviconScript()
           )
           const browserBeforeContentScript = combineBrowserInjectedScripts(

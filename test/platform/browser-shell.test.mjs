@@ -479,7 +479,9 @@ test('the p2p address lists the built-in apps', async () => {
   // Typed, or restored with the tab: both land on the same screen.
   assert.equal((index.match(/isBrowserP2pUrl\(/g) || []).length, 2)
   // Every app, Holesail included, which the home grid leaves out.
-  const screen = index.slice(index.indexOf("browserSource.kind === 'p2p'"), index.indexOf("browserSource.kind === 'home'"))
+  const p2pStart = index.indexOf("browserSource.kind === 'p2p'")
+  const screen = index.slice(p2pStart, index.indexOf("browserSource.kind === 'home'", p2pStart))
+  assert.ok(p2pStart > 0 && screen.length > 0)
   assert.match(screen, /INTERNAL_APPS\.map/)
   assert.ok(INTERNAL_APPS.some((app) => app.id === 'holesail'))
 })

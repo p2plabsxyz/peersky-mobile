@@ -453,8 +453,6 @@ export function BrowserToolbar ({
         isBookmarked={isBookmarked}
         isDark={isDark}
         newTabDisabled={newTabDisabled}
-        offset={menuOffset}
-        position={position}
         shareActionAvailable={shareActionAvailable}
         visible={menuVisible}
         onClose={onCloseMenu}

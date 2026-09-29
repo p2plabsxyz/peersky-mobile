@@ -84,16 +84,16 @@ describe('popups attached to the toolbar', () => {
     assert.match(source, /attachedAbove: \{\n\s+borderBottomWidth: 1,\n\s+borderTopLeftRadius: 0,\n\s+borderTopRightRadius: 0\n\s+\}/)
   })
 
-  test('the overflow menu sits on the toolbar edge', async () => {
+  test('the history suggestions still hang off the toolbar', async () => {
     const source = await readFile(
-      new URL('../../app/settings/BrowserOverflowMenu.tsx', import.meta.url),
+      new URL('../../app/history/HistorySuggestions.tsx', import.meta.url),
       'utf8'
     )
-    assert.match(source, /\{ bottom: offset \+ insets\.bottom \}/)
-    assert.match(source, /\{ top: offset \+ insets\.top \}/)
-    assert.match(source, /menuAttachment/)
-    assert.match(source, /borderBottomLeftRadius: 0/)
-    assert.match(source, /borderTopLeftRadius: 0/)
+
+    // The menu became a bottom sheet and stopped needing to be told where the
+    // toolbar is. Suggestions still do: they belong to the address bar.
+    assert.match(source, /offset/)
+    assert.match(source, /position/)
   })
 })
 
