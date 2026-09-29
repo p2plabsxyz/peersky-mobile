@@ -37,6 +37,8 @@ import { WebView } from 'react-native-webview'
 import bundle from './app.bundle.mjs'
 import {
   BROWSER_HOME_URL,
+  BROWSER_P2P_URL,
+  isBrowserP2pUrl,
   commitBrowserEntryState,
   getBrowserBackState,
   getBrowserForwardState,
@@ -263,6 +265,7 @@ type RpcResponse = {
 
 type BrowserSource =
   | { kind: 'home' }
+  | { kind: 'p2p' }
   | { kind: 'app', app: RuntimeTab }
   | { kind: 'web', uri: string }
   | { kind: 'hyper', html: string, baseUrl: string }
@@ -968,6 +971,13 @@ export default function App () {
     // "Unsupported URL scheme", so a note shared in a chat had to be copied out
     // of the message by hand. Opening one fills the join field in, leaving the
     // one deliberate step: pressing Join.
+    if (isBrowserP2pUrl(nextUrl)) {
+      cancelPendingBrowserLoad()
+      commitBrowserEntry(BROWSER_P2P_URL, { kind: 'p2p' })
+      setBrowserTitle('P2P apps')
+      return
+    }
+
     const noteKey = parseP2pmdNoteLink(nextUrl)
     if (noteKey) {
       cancelPendingBrowserLoad()
@@ -1008,6 +1018,12 @@ export default function App () {
 
     if (internalApp) {
       openInternalApp(internalApp, false, getRuntimeAppLaunchSuffix(url))
+      return
+    }
+
+    if (isBrowserP2pUrl(url)) {
+      replaceBrowserEntry(BROWSER_P2P_URL, { kind: 'p2p' })
+      setBrowserTitle('P2P apps')
       return
     }
 
@@ -3261,7 +3277,49 @@ export default function App () {
           ]}
           onTouchStart={browserSource.kind === 'app' && activeTab === 'peerchat' ? undefined : Keyboard.dismiss}
         >
-        {browserSource.kind === 'home'
+        {browserSource.kind === 'p2p'
+          ? (
+            <ScrollView
+              style={styles.browserContentPage}
+              contentContainerStyle={styles.browserHome}
+              keyboardDismissMode='on-drag'
+            >
+              {/* Every built-in app, Holesail included, which the home screen
+                  leaves out to keep its grid to the four people open daily. */}
+              <View style={styles.browserShortcutGrid}>
+                {INTERNAL_APPS.map((app) => (
+                  <Pressable
+                    key={app.id}
+                    accessibilityRole='button'
+                    accessibilityLabel={`Open ${app.title}`}
+                    style={styles.browserShortcut}
+                    onPress={() => void loadBrowserUrl(app.url)}
+                  >
+                    <View style={styles.browserShortcutIconFrame}>
+                      <View style={[
+                        styles.browserShortcutIcon,
+                        app.iconSource ? null : getRuntimeAppIconStyle(app.id)
+                      ]}>
+                        {app.iconSource
+                          ? <Image source={app.iconSource} style={styles.browserShortcutIconImage} />
+                          : <Text style={styles.browserShortcutIconText}>{app.icon}</Text>}
+                      </View>
+                    </View>
+                    <Text
+                      numberOfLines={2}
+                      style={[
+                        styles.browserShortcutTitle,
+                        { color: browserChrome.text, fontSize: browserShortcutTitleFontSize }
+                      ]}
+                    >
+                      {app.title}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            </ScrollView>
+            )
+          : browserSource.kind === 'home'
           ? (
             <ScrollView
               style={styles.browserContentPage}

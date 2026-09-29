@@ -39,8 +39,8 @@ class PeerChatBackgroundService : Service() {
     }
     val notification = NotificationCompat.Builder(this, CHANNEL_ID)
       .setSmallIcon(R.drawable.notification_icon)
-      .setContentTitle("PeerChat is listening")
-      .setContentText("Keeping peer-to-peer messages available in the background")
+      .setContentTitle("PeerChat")
+      .setContentText("Staying connected so messages reach you")
       .setContentIntent(pendingIntent)
       .setCategory(NotificationCompat.CATEGORY_SERVICE)
       .setOngoing(true)

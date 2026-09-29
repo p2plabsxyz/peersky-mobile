@@ -1,6 +1,14 @@
 import { parseExternalAppLink } from './browser-permissions.mjs'
 
 export const BROWSER_HOME_URL = 'peersky://home'
+// The index of the built-in apps. It used to resolve to nothing and come back
+// as an unsupported scheme, which is a poor answer for an address the app
+// itself hands out.
+export const BROWSER_P2P_URL = 'peersky://p2p'
+
+export function isBrowserP2pUrl (value) {
+  return /^peersky:\/\/p2p\/?$/i.test(String(value || '').trim())
+}
 export const MAX_BROWSER_HISTORY_ENTRIES = 20
 export const MAX_BROWSER_URL_LENGTH = 8192
 export const DEFAULT_SEARCH_ENGINE = 'duckduckgo'

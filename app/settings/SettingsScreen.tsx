@@ -15,6 +15,7 @@ import {
   BackHandler,
   Clipboard,
   Easing,
+  Image,
   Modal,
   Platform,
   Pressable,
@@ -25,6 +26,7 @@ import {
   TextInput,
   View
 } from 'react-native'
+import type { ImageSourcePropType } from 'react-native'
 import type { SvgProps } from 'react-native-svg'
 import { BROWSER_PALETTES } from '../browser-appearance.mjs'
 import {
@@ -61,6 +63,7 @@ import ChevronRightIcon from '../../assets/icons/bootstrap/chevron-right.svg'
 import InfoIcon from '../../assets/icons/bootstrap/info-circle.svg'
 import PaletteIcon from '../../assets/icons/bootstrap/palette.svg'
 import ShieldLockIcon from '../../assets/icons/bootstrap/shield-lock.svg'
+import LinkIcon from '../../assets/icons/bootstrap/link-45deg.svg'
 import SlidersIcon from '../../assets/icons/bootstrap/sliders.svg'
 import TrashIcon from '../../assets/icons/bootstrap/trash.svg'
 import UniversalAccessIcon from '../../assets/icons/bootstrap/universal-access-circle.svg'
@@ -209,6 +212,7 @@ Explain why this content should be reviewed without reproducing harmful content.
 ## Confirmation
 
 - [ ] I have not included private credentials, personal information, or illegal media in this report.`
+const FEEDBACK_EMAIL = 'contact@p2plabs.xyz'
 const CONTENT_REPORT_URL = `${REPOSITORY_URL}/issues/new?template=content-report.yml&title=${encodeURIComponent(CONTENT_REPORT_TITLE)}&body=${encodeURIComponent(CONTENT_REPORT_BODY)}`
 
 const SETTINGS_PAGES: Array<{
@@ -216,6 +220,9 @@ const SETTINGS_PAGES: Array<{
   title: string
   description: string
   icon: ComponentType<SvgProps>
+  // About wears the app's own mark, which is a bitmap rather than a tintable
+  // glyph, so a row may carry one instead of drawing its icon.
+  image?: ImageSourcePropType
 }> = [
   {
     id: 'general',
@@ -263,7 +270,7 @@ const SETTINGS_PAGES: Array<{
     id: 'link-device',
     title: 'Link Device',
     description: 'Restore identity from desktop',
-    icon: DisplayIcon
+    icon: LinkIcon
   },
   {
     id: 'lan-discovery',
@@ -275,7 +282,8 @@ const SETTINGS_PAGES: Array<{
     id: 'about',
     title: 'About',
     description: 'Version, source code, and licenses',
-    icon: InfoIcon
+    icon: InfoIcon,
+    image: require('../../assets/images/app-icon-transparent.png')
   }
 ]
 
@@ -419,6 +427,7 @@ function SettingsHome({
         <View style={[styles.menu, isDark ? darkStyles.surface : null]}>
           {SETTINGS_PAGES.map((page, index) => {
             const Icon = page.icon
+            const image = page.image ?? null
 
             return (
               <Pressable
@@ -437,11 +446,15 @@ function SettingsHome({
                   styles.menuIcon,
                   isDark ? darkStyles.menuIcon : null
                 ]}>
-                  <Icon
-                    width={22}
-                    height={22}
-                    color={isDark ? '#8fc1ff' : '#1f6fd1'}
-                  />
+                  {image
+                    ? <Image source={image} style={styles.menuIconImage} />
+                    : (
+                      <Icon
+                        width={22}
+                        height={22}
+                        color={isDark ? '#8fc1ff' : '#1f6fd1'}
+                      />
+                      )}
                 </View>
                 <SettingCopy
                   title={page.title}
@@ -967,6 +980,11 @@ function AboutSettings({ onOpenUrl }: { onOpenUrl: (url: string) => void }) {
   const isDark = useSettingsDarkMode()
   const platformName = Platform.OS === 'ios' ? 'iOS' : 'Android'
   const feedbackUrl = `${REPOSITORY_URL}/issues/new?title=${encodeURIComponent(`[${platformName}] Feedback`)}`
+  // An email, because reporting something should not need a GitHub account.
+  // The version rides in the subject so a report says which build it came from.
+  const feedbackMailUrl = `mailto:${FEEDBACK_EMAIL}?subject=${encodeURIComponent(
+    `Feedback for PeerSky ${Constants.expoConfig?.version || 'unknown'}`
+  )}`
 
   return (
     <View style={[styles.pageContent, isDark ? darkStyles.page : null]}>
@@ -993,8 +1011,8 @@ function AboutSettings({ onOpenUrl }: { onOpenUrl: (url: string) => void }) {
             color={isDark ? BROWSER_PALETTES.dark.mutedText : '#8190a7'}
           />
         </Pressable>
-        <Pressable accessibilityRole='link' style={styles.linkRow} onPress={() => onOpenUrl(CONTENT_REPORT_URL)}>
-          <Text style={[styles.linkText, isDark ? darkStyles.primaryText : null]}>Report harmful content</Text>
+        <Pressable accessibilityRole='link' style={styles.linkRow} onPress={() => onOpenUrl(feedbackMailUrl)}>
+          <Text style={[styles.linkText, isDark ? darkStyles.primaryText : null]}>Send feedback</Text>
           <ChevronRightIcon
             width={16}
             height={16}
@@ -1091,6 +1109,10 @@ const styles = StyleSheet.create({
     height: 42,
     justifyContent: 'center',
     width: 42
+  },
+  menuIconImage: {
+    height: 26,
+    width: 26
   },
   rowDivider: {
     borderTopColor: '#e7ebf1',
