@@ -123,6 +123,7 @@ import type { SettingsPage } from './settings/SettingsScreen'
 import { BrowserOverflowMenu } from './settings/BrowserOverflowMenu'
 import { useBrowserPreferences } from './settings/useBrowserPreferences'
 import { BrowserToolbar } from './BrowserToolbar'
+import { BrowserNavBar } from './BrowserNavBar'
 import { BrowserBackSwipe } from './BrowserBackSwipe'
 import { BrowserZoomSheet } from './BrowserZoomSheet'
 import { WelcomeScreen } from './WelcomeScreen'
@@ -3214,6 +3215,32 @@ export default function App () {
       activeTabId={browserTabsState.activeTabId}
       address={browserAddress}
       currentUrl={browserCurrentUrl}
+      isDark={browserIsDark}
+      isLoading={browserIsLoading}
+      historySuggestions={getBrowserHistorySuggestions(browserAddress)}
+      navigationKey={`${browserTabsState.activeTabId}:${browserHistoryIndex}`}
+      pageActionAvailable={browserPageActionAvailable}
+      palette={browserChrome}
+      position={browserPreferences.addressBarPosition}
+      shareActionAvailable={browserShareActionAvailable}
+      showFullAddress={browserPreferences.showFullAddress}
+      onAddressChange={(value) => {
+        browserUserInteractedRef.current = true
+        setBrowserAddress(value)
+      }}
+      onCloseMenu={() => setBrowserMenuVisible(false)}
+      onOpenSiteInfo={() => setSiteInfoVisible(true)}
+      onReload={onBrowserReload}
+      onSharePage={() => void onBrowserSharePage()}
+      onSubmit={() => void onBrowserSubmit()}
+      onSuggestionPress={(targetUrl) => {
+        setBrowserAddress(targetUrl)
+        void loadBrowserUrl(targetUrl)
+      }}
+    />
+  )
+  const browserNavBar = (
+    <BrowserNavBar
       bookmarkActionAvailable={browserBookmarkActionAvailable}
       bookmarksDisabled={!browserBookmarksReady}
       canGoBack={canBrowserGoBack}
@@ -3221,29 +3248,28 @@ export default function App () {
       desktopView={activeBrowserDesktopView}
       isBookmarked={browserPageIsBookmarked}
       isDark={browserIsDark}
-      isLoading={browserIsLoading}
-      historySuggestions={getBrowserHistorySuggestions(browserAddress)}
+      isHome={browserSource.kind === 'home'}
       menuVisible={browserMenuVisible}
-      navigationKey={`${browserTabsState.activeTabId}:${browserHistoryIndex}`}
       newTabDisabled={browserTabsState.tabs.length >= MAX_BROWSER_TABS}
       palette={browserChrome}
-      position={browserPreferences.addressBarPosition}
-      showFullAddress={browserPreferences.showFullAddress}
-      pageActionAvailable={browserPageActionAvailable}
       shareActionAvailable={browserShareActionAvailable}
+      // The address bar's own top edge is the seam when it sits directly
+      // above, so the navigation bar does not draw a second one.
+      showTopBorder={browserPreferences.addressBarPosition === 'top'}
       tabCount={browserTabsState.tabs.length}
-      onAddressChange={(value) => {
-        browserUserInteractedRef.current = true
-        setBrowserAddress(value)
-      }}
       onBack={onBrowserBack}
+      onBurnTabs={onBrowserBurnTabs}
       onCloseMenu={() => setBrowserMenuVisible(false)}
       onForward={onBrowserForward}
-      onOpenMenu={() => setBrowserMenuVisible(true)}
       onNewTab={onBrowserNewTab}
       onOpenBookmarks={onBrowserOpenBookmarks}
       onOpenDownloads={onBrowserOpenDownloads}
       onOpenHistory={onBrowserOpenHistory}
+      onOpenMenu={() => setBrowserMenuVisible(true)}
+      onOpenNearby={() => {
+        setBrowserSettingsInitialPage('lan-discovery')
+        setBrowserSettingsVisible(true)
+      }}
       onOpenSettings={() => {
         setBrowserMenuVisible(false)
         setBrowserSettingsVisible(true)
@@ -3253,16 +3279,9 @@ export default function App () {
         setBrowserTabsVisible(true)
       }}
       onOpenZoom={() => setBrowserZoomVisible(true)}
-      onReload={onBrowserReload}
       onSharePage={() => void onBrowserSharePage()}
-      onSubmit={() => void onBrowserSubmit()}
-      onSuggestionPress={(targetUrl) => {
-        setBrowserAddress(targetUrl)
-        void loadBrowserUrl(targetUrl)
-      }}
-      onToggleDesktopView={onBrowserToggleDesktopView}
-      onOpenSiteInfo={() => setSiteInfoVisible(true)}
       onToggleBookmark={onBrowserToggleBookmark}
+      onToggleDesktopView={onBrowserToggleDesktopView}
     />
   )
   const runtimeInputTheme = {
@@ -3298,16 +3317,10 @@ export default function App () {
   const browserTopInsetColor = browserIsPortrait && browserPreferences.addressBarPosition === 'top'
     ? browserToolbarColor
     : browserChrome.shell
-  const browserBottomInsetColor = browserIsPortrait && browserPreferences.addressBarPosition === 'bottom'
-    ? browserToolbarColor
-    : browserChrome.shell
-  const browserWebViewFillsBottomInset =
-    browserPreferences.addressBarPosition !== 'bottom' &&
-    (browserSource.kind === 'web' ||
-      browserSource.kind === 'hyper' ||
-      // The home screen has a wallpaper rather than a flat colour, and a strip
-      // of shell paint under it read as a gap at the bottom of the picture.
-      browserSource.kind === 'home')
+  // The navigation bar is the last thing on screen now, whatever is above it,
+  // so the strip under the home indicator is always its colour. Nothing else
+  // can reach the bottom edge any more.
+  const browserBottomInsetColor = browserIsPortrait ? browserToolbarColor : browserChrome.shell
 
   // Shown once, before anything else, on a phone that has never opened PeerSky.
   // Not a tour: one screen, four things, one button.
@@ -3428,12 +3441,7 @@ export default function App () {
             <BrowserHomeBackground scrim={browserIsDark ? 'rgba(24, 24, 27, 0.35)' : 'rgba(255, 255, 255, 0.14)'}>
             <ScrollView
               style={styles.browserContentPage}
-              contentContainerStyle={[
-                styles.browserHome,
-                // The picture reaches the bottom edge, so the shortcuts have to
-                // clear the home indicator themselves.
-                { paddingBottom: 36 + browserInsets.bottom }
-              ]}
+              contentContainerStyle={styles.browserHome}
               keyboardDismissMode='on-drag'
             >
               <View style={styles.browserShortcutGrid}>
@@ -4134,6 +4142,7 @@ export default function App () {
         />
 
         {browserPreferences.addressBarPosition === 'bottom' && browserToolbar}
+        {browserNavBar}
 
         <BrowserSiteInfoSheet
           blockingEnabled={browserPreferences.contentBlockingEnabled}
@@ -4168,17 +4177,12 @@ export default function App () {
         />
 
         </KeyboardAvoidingView>
-        {/* A web page has its own background and no way to match the strip we
-            paint under it, so the page runs to the bottom edge instead and the
-            home indicator sits over it, the way Safari does it. Our own screens
-            keep the strip: their controls reach the bottom and would end up
-            under the indicator. */}
-        {!browserWebViewFillsBottomInset && (
-          <SafeAreaView
-            edges={['bottom']}
-            style={[styles.browserSystemInset, { backgroundColor: browserBottomInsetColor }]}
-          />
-        )}
+        {/* Painted in the navigation bar's colour so the two read as one bar
+            that happens to be taller where the home indicator is. */}
+        <SafeAreaView
+          edges={['bottom']}
+          style={[styles.browserSystemInset, { backgroundColor: browserBottomInsetColor }]}
+        />
     </View>
   )
 }

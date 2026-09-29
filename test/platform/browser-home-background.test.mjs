@@ -22,14 +22,14 @@ describe('home wallpaper', () => {
     assert.match(styles, /browserShortcutTitleOnDark[\s\S]{0,140}textShadowRadius: 5/)
   })
 
-  test('the picture runs to the bottom edge', async () => {
+  test('the picture runs down to the navigation bar', async () => {
     const index = await readFile(new URL('../../app/index.tsx', import.meta.url), 'utf8')
 
-    // A strip of shell paint under the home indicator read as a gap at the
-    // bottom of the photograph, so the page fills it the way a web page does
-    // and clears the indicator with its own padding instead.
-    assert.match(index, /browserSource\.kind === 'home'\)$/m)
-    assert.match(index, /paddingBottom: 36 \+ browserInsets\.bottom/)
+    // The navigation bar is the last thing on screen now, so it owns the
+    // bottom edge and the wallpaper simply runs into it. Nothing else paints a
+    // strip down there, which is what used to read as a gap.
+    assert.doesNotMatch(index, /browserWebViewFillsBottomInset/)
+    assert.match(index, /const browserBottomInsetColor = browserIsPortrait \? browserToolbarColor/)
   })
 
   test('the wallpaper is small enough to ship', async () => {

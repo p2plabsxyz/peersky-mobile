@@ -1,0 +1,59 @@
+import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
+import { describe, test } from 'node:test'
+
+const navBar = await readFile(new URL('../../app/BrowserNavBar.tsx', import.meta.url), 'utf8')
+const toolbar = await readFile(new URL('../../app/BrowserToolbar.tsx', import.meta.url), 'utf8')
+const index = await readFile(new URL('../../app/index.tsx', import.meta.url), 'utf8')
+
+describe('browser chrome layout', () => {
+  test('five slots: two that change, then burn, tabs and the menu', () => {
+    assert.match(navBar, /label='Go back'/)
+    assert.match(navBar, /label='Go forward'/)
+    assert.match(navBar, /label='Burn tabs and cached data'/)
+    assert.match(navBar, /Open tabs, \$\{tabCount\} open/)
+    assert.match(navBar, /<BrowserOverflowMenu[\s>]/)
+  })
+
+  test('the home screen has no history, so those two slots go elsewhere', () => {
+    const home = navBar.slice(navBar.indexOf('{isHome'), navBar.indexOf("label='Burn"))
+
+    assert.match(home, /label='Bookmarks'/)
+    assert.match(home, /label='Nearby devices'/)
+    // And back and forward are still there for every other page.
+    assert.match(home, /label='Go back'/)
+  })
+
+  test('no second line where the two bars meet', () => {
+    // The address bar sits directly above when it is at the bottom, and its
+    // own top edge is the seam.
+    assert.match(navBar, /borderTopWidth: showTopBorder \? 1 : 0/)
+    assert.match(index, /showTopBorder=\{browserPreferences\.addressBarPosition === 'top'\}/)
+  })
+
+  test('the address bar carries only the address and the page actions', () => {
+    // The whole point of moving the rest off: the address gets the width, and
+    // it can sit at either end without the controls following it around.
+    assert.doesNotMatch(toolbar, /Go back|Go forward|Open tabs|BrowserOverflowMenu/)
+    assert.match(toolbar, /accessibilityLabel='Browser address'/)
+    assert.match(toolbar, /Reload page/)
+    assert.match(toolbar, /accessibilityLabel='Share page'/)
+  })
+
+  test('the address bar moves, the navigation bar does not', () => {
+    assert.match(index, /addressBarPosition === 'top' && browserToolbar/)
+    assert.match(index, /addressBarPosition === 'bottom' && browserToolbar/)
+    // Rendered unconditionally, and after the bottom address bar, so it is the
+    // last thing on screen either way.
+    const bottomAt = index.indexOf("addressBarPosition === 'bottom' && browserToolbar")
+    const navAt = index.indexOf('{browserNavBar}', bottomAt)
+    assert.ok(navAt > bottomAt, 'the navigation bar has to come after the address bar')
+    assert.equal((index.match(/\{browserNavBar\}/g) || []).length, 1)
+  })
+
+  test('top is what a new install gets', async () => {
+    const { DEFAULT_BROWSER_PREFERENCES } = await import('../../app/settings/browser-preferences.mjs')
+
+    assert.equal(DEFAULT_BROWSER_PREFERENCES.addressBarPosition, 'top')
+  })
+})

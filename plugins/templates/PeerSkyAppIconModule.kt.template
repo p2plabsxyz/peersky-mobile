@@ -36,7 +36,6 @@ class PeerSkyAppIconModule(
     try {
       val manager = reactApplicationContext.packageManager
       val enabled = ALIASES.firstOrNull { name ->
-        if (name == DEFAULT_ALIAS) return@firstOrNull false
         val component = ComponentName(reactApplicationContext.packageName, aliasFor(name))
         manager.getComponentEnabledSetting(component) ==
           PackageManager.COMPONENT_ENABLED_STATE_ENABLED
@@ -50,31 +49,23 @@ class PeerSkyAppIconModule(
   @ReactMethod
   fun setIcon(name: String?, promise: Promise) {
     val manager = reactApplicationContext.packageManager
-    val packageName = reactApplicationContext.packageName
-    // The activity carries the default icon and its own launcher entry, so
-    // DEFAULT_ALIAS means "no alias": leaving both on would put two copies of
-    // the app on the home screen.
-    val target = name?.takeIf { it != DEFAULT_ALIAS && ALIASES.contains(it) }
-    val main = ComponentName(packageName, "$packageName.MainActivity")
+    // Every colour is an alias, the activity itself is never one of them. It
+    // has no launcher entry to compete with and must stay enabled: disabling
+    // it breaks starting the app by class name, which is how the dev launcher
+    // and anything holding an explicit component start it.
+    val target = name?.takeIf { ALIASES.contains(it) } ?: DEFAULT_ALIAS
 
     try {
-      // Whatever should end up enabled goes first. Disabling everything and
+      // The one that should end up on goes first. Disabling everything and
       // then enabling leaves a window with no launcher entry at all, and a
       // launcher that refreshes inside it drops the app.
-      val wanted = if (target != null) {
-        ComponentName(packageName, aliasFor(target))
-      } else {
-        main
-      }
       manager.setComponentEnabledSetting(
-        wanted,
+        ComponentName(reactApplicationContext.packageName, aliasFor(target)),
         PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
         PackageManager.DONT_KILL_APP
       )
 
-      val stale = componentsFor(ALIASES.filter { it != DEFAULT_ALIAS && it != target }) +
-        if (target != null) listOf(main) else emptyList()
-      for (component in stale) {
+      for (component in componentsFor(ALIASES.filter { it != target })) {
         manager.setComponentEnabledSetting(
           component,
           PackageManager.COMPONENT_ENABLED_STATE_DISABLED,

@@ -44,6 +44,21 @@ export const styles = StyleSheet.create({
     justifyContent: 'center',
     width: 38
   },
+  // Its own bar along the bottom, spread out rather than bunched at one end,
+  // because there is nothing else on this row to make room for.
+  browserNavBar: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    paddingHorizontal: 8,
+    paddingVertical: 6
+  },
+  browserNavBarButton: {
+    alignItems: 'center',
+    height: 46,
+    justifyContent: 'center',
+    minWidth: 46
+  },
   browserNavButtonDisabled: {
     opacity: 0.35
   },
@@ -51,12 +66,14 @@ export const styles = StyleSheet.create({
     alignItems: 'center',
     height: 32,
     justifyContent: 'center',
-    paddingLeft: 10
+    paddingLeft: 12
   },
   browserAddressContainer: {
     alignItems: 'center',
     backgroundColor: '#ffffff',
-    borderRadius: 8,
+    // A pill at this height, with room either side of it, so the bar reads as
+    // a field sitting on the chrome rather than a box wedged into it.
+    borderRadius: 19,
     elevation: 2,
     flex: 1,
     flexDirection: 'row',
@@ -68,7 +85,7 @@ export const styles = StyleSheet.create({
     shadowRadius: 3
   },
   browserAddressBesideSecurity: {
-    paddingLeft: 6
+    paddingLeft: 10
   },
   browserAddress: {
     color: '#151821',
@@ -82,16 +99,18 @@ export const styles = StyleSheet.create({
     alignItems: 'center',
     flexDirection: 'row',
     height: '100%',
-    paddingRight: 3
+    paddingRight: 8
   },
+  // 32 wide around a 22 icon leaves 5 either side, so two of these side by
+  // side sit 10 apart: the same gap as the shield to the text.
   browserAddressAction: {
     alignItems: 'center',
     height: 32,
     justifyContent: 'center',
-    width: 26
+    width: 32
   },
   browserAddressClearAction: {
-    marginRight: 2
+    marginRight: 8
   },
   browserAddressReloadIcon: {
     transform: [{ translateY: 1 }]

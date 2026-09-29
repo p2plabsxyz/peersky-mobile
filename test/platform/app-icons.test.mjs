@@ -37,29 +37,34 @@ describe('alternate app icons', () => {
     )
   })
 
-  test('the default colour switches no alias on', async () => {
+  test('the activity is never the thing being switched off', async () => {
     const module = await readFile(
       new URL('../../plugins/templates/PeerSkyAppIconModule.kt.template', import.meta.url),
       'utf8'
     )
 
-    // The activity carries the default icon and its own launcher entry, so
-    // enabling an alias for it as well puts the app on the home screen twice.
-    assert.match(module, /val target = name\?\.takeIf \{ it != DEFAULT_ALIAS/)
-    assert.match(module, /if \(target != null\) listOf\(main\) else emptyList\(\)/)
+    // Disabling MainActivity to hide its launcher entry also stops anything
+    // starting the app by class name, and the dev launcher does exactly that:
+    // "unable to find explicit activity class". Every colour is an alias
+    // instead, and the activity keeps out of it.
+    // The aliases are named after it, so the check is for the bare activity
+    // itself: nothing may build a component that stops at MainActivity.
+    assert.doesNotMatch(module, /MainActivity"/)
+    assert.doesNotMatch(module, /val main\b/)
+    assert.match(module, /val target = name\?\.takeIf \{ ALIASES\.contains\(it\) \} \?: DEFAULT_ALIAS/)
     // Enabled first, disabled after: a gap with nothing enabled loses the app.
-    const enableAt = module.indexOf('COMPONENT_ENABLED_STATE_ENABLED,\n        PackageManager.DONT_KILL_APP')
+    const enableAt = module.indexOf('COMPONENT_ENABLED_STATE_ENABLED')
     const disableAt = module.indexOf('COMPONENT_ENABLED_STATE_DISABLED')
     assert.ok(enableAt > 0 && disableAt > enableAt)
   })
 
-  test('the aliases keep the launcher intent they are named for', async () => {
+  test('the launcher entry belongs to the aliases, and one is always on', async () => {
     const source = await readFile(new URL('../../plugins/with-app-icons.js', import.meta.url), 'utf8')
 
-    // An alias without it hides the app from the launcher, and the only way
-    // back is a reinstall.
-    assert.match(source, /category\.\$\['android:name'\] === 'android\.intent\.category\.LAUNCHER'/)
-    assert.match(source, /'android:enabled': 'false'/)
+    // It moves off the activity, so the app is never listed twice, and the
+    // activity keeps every other filter so deep links still reach it.
+    assert.match(source, /activity\['intent-filter'\] = \(activity\['intent-filter'\] \|\| \[\]\)\.filter\(\s*\n?\s*\(filter\) => !isLauncher\(filter\)/)
+    assert.match(source, /'android:enabled': color === COLORS\[0\] \? 'true' : 'false'/)
   })
 })
 

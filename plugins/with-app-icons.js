@@ -230,18 +230,29 @@ function withAndroidAliases (config) {
   return withAndroidManifest(config, (config) => {
     const application = AndroidConfig.Manifest.getMainApplicationOrThrow(config.modResults)
     const activity = AndroidConfig.Manifest.getMainActivityOrThrow(config.modResults)
-    // Every alias needs the launcher intent, or switching to one hides the app
-    // from the launcher entirely and the only way back is a reinstall.
-    const launcher = (activity['intent-filter'] || []).filter((filter) => (
-      (filter.category || []).some((category) => (
-        category.$['android:name'] === 'android.intent.category.LAUNCHER'
-      ))
-    ))
 
+    const isLauncher = (filter) => (filter.category || []).some((category) => (
+      category.$['android:name'] === 'android.intent.category.LAUNCHER'
+    ))
+    const launcher = (activity['intent-filter'] || []).filter(isLauncher)
+
+    // The launcher entry moves off the activity and onto the aliases, all of
+    // it. The activity itself stays enabled and keeps every other filter, so
+    // deep links and anything that starts it by class still work.
+    //
+    // The alternative, leaving the entry here and disabling the activity when
+    // an alias is on, breaks starting it by name: the dev launcher, and
+    // anything else holding an explicit component, gets "unable to find
+    // explicit activity class".
+    activity['intent-filter'] = (activity['intent-filter'] || []).filter(
+      (filter) => !isLauncher(filter)
+    )
+
+    // One is on from the start, or a fresh install has no icon at all.
     application['activity-alias'] = COLORS.map((color) => ({
       $: {
         'android:name': aliasName(color),
-        'android:enabled': 'false',
+        'android:enabled': color === COLORS[0] ? 'true' : 'false',
         'android:exported': 'true',
         'android:icon': `@mipmap/ic_launcher_${color}`,
         'android:roundIcon': `@mipmap/ic_launcher_${color}`,

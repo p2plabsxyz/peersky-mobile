@@ -51,7 +51,7 @@ describe('browser appearance helpers', () => {
 describe('popups attached to the toolbar', () => {
   test('the toolbar hands over its own height, with nothing added', async () => {
     const toolbar = await readFile(new URL('../../app/BrowserToolbar.tsx', import.meta.url), 'utf8')
-    assert.match(toolbar, /setMenuOffset\(event\.nativeEvent\.layout\.height\)/)
+    assert.match(toolbar, /setBarHeight\(event\.nativeEvent\.layout\.height\)/)
     // The seam belongs to whichever panel is open, not to both.
     assert.match(toolbar, /borderTopWidth: isAddressFocused \? 0 : 1/)
     assert.match(toolbar, /borderBottomWidth: isAddressFocused \? 0 : 1/)

@@ -852,10 +852,14 @@ function LANDiscoveryTest({
     onCallRpcRef.current = onCallRpc
   }, [onCallRpc])
 
-  const refreshStatus = useCallback(async () => {
+  // The poll behind this runs every couple of seconds. Showing its spinner
+  // put a flicker beside the connection count for as long as the page was
+  // open, which reads as something going wrong rather than something working.
+  // Only a refresh somebody asked for says so.
+  const refreshStatus = useCallback(async ({ silent = false } = {}) => {
     if (refreshInFlightRef.current) return
     refreshInFlightRef.current = true
-    setIsRefreshing(true)
+    if (!silent) setIsRefreshing(true)
 
     try {
       const response = await withTimeout(
@@ -872,13 +876,13 @@ function LANDiscoveryTest({
       setError(refreshError instanceof Error ? refreshError.message : String(refreshError))
     } finally {
       refreshInFlightRef.current = false
-      setIsRefreshing(false)
+      if (!silent) setIsRefreshing(false)
     }
   }, [])
 
   useEffect(() => {
     void refreshStatus()
-    const timer = setInterval(() => void refreshStatus(), 2000)
+    const timer = setInterval(() => void refreshStatus({ silent: true }), 2000)
     return () => clearInterval(timer)
   }, [refreshStatus])
 
@@ -959,7 +963,7 @@ function LANDiscoveryTest({
               No peers discovered yet
             </Text>
             <Text style={[styles.helperText, isDark ? darkStyles.secondaryText : null]}>
-              Open PeerSky on another phone connected to the same Wi-Fi network. Both phones can remain offline.
+              Open PeerSky on another device connected to the same Wi-Fi network. Neither one needs the internet: you can chat, share files and listen together with both of them offline.
             </Text>
           </View>
         ) : peers.map((peer, index) => (

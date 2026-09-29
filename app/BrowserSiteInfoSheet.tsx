@@ -4,7 +4,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { BROWSER_PALETTES } from './browser-appearance.mjs'
 import { describeSiteSecurity, getSiteSecurity, SITE_SECURITY } from './site-security.mjs'
 import { MODAL_ORIENTATIONS } from './modal-orientations'
-import ShieldLockIcon from '../assets/icons/bootstrap/shield-lock.svg'
+import ShieldCheckIcon from '../assets/icons/bootstrap/shield-check.svg'
 import ShieldSlashIcon from '../assets/icons/bootstrap/shield-slash.svg'
 
 type BrowserSiteInfoSheetProps = {
@@ -59,7 +59,7 @@ export function BrowserSiteInfoSheet ({
           <View style={styles.row}>
             {insecure
               ? <ShieldSlashIcon width={22} height={22} color='#c2563f' />
-              : <ShieldLockIcon width={22} height={22} color={palette.selectedControl} />}
+              : <ShieldCheckIcon width={22} height={22} color={palette.selectedControl} />}
             <View style={styles.copy}>
               <Text style={[styles.title, { color: insecure ? '#c2563f' : palette.text }]}>{title}</Text>
               <Text style={[styles.body, { color: palette.mutedText }]}>{body}</Text>
@@ -69,7 +69,7 @@ export function BrowserSiteInfoSheet ({
           <View style={[styles.divider, { backgroundColor: palette.border }]} />
 
           <View style={styles.row}>
-            <ShieldLockIcon
+            <ShieldCheckIcon
               width={22}
               height={22}
               color={blockingEnabled ? palette.selectedControl : palette.mutedText}
