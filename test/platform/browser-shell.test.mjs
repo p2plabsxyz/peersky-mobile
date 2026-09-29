@@ -412,3 +412,24 @@ test('only hyper addresses are rewritten', () => {
   assert.equal(getHyperDriveListingUrl(''), '')
   assert.equal(getHyperDriveListingUrl(null), '')
 })
+
+// A note key tapped in PeerChat opens a new tab, and a new tab goes through the
+// restored path rather than loadBrowserUrl, so the link that already worked
+// from the address bar came back as "Unsupported restored URL scheme".
+test('a note key opens P2PMD however the tab was opened', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const index = await readFile(new URL('../../app/index.tsx', import.meta.url), 'utf8')
+
+  const restored = index.slice(
+    index.indexOf('async function loadRestoredBrowserUrl'),
+    index.indexOf('async function loadHyperBrowserUrl')
+  )
+  assert.match(restored, /parseP2pmdNoteLink\(url\)/)
+  assert.match(restored, /setP2pmdJoinKey\(noteKey\)/)
+  // Ahead of the error it used to fall through to.
+  assert.ok(restored.indexOf('parseP2pmdNoteLink') < restored.indexOf('Unsupported restored URL scheme'))
+
+  // And the address bar path still does it too.
+  const typed = index.slice(index.indexOf('const noteKey = parseP2pmdNoteLink(nextUrl)'))
+  assert.match(typed.slice(0, 400), /openInternalApp\('p2pmd'\)/)
+})

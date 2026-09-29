@@ -12,6 +12,19 @@ const NETWORK_SECURITY_CONFIG = `<?xml version="1.0" encoding="utf-8"?>
 </network-security-config>
 `
 
+// Debug builds talk to the Metro dev server, which is wherever the developer's
+// machine is on the network and speaks plain HTTP.
+const DEBUG_NETWORK_SECURITY_CONFIG = `<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+  <base-config cleartextTrafficPermitted="true" />
+</network-security-config>
+`
+
+function write (dir, contents) {
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(path.join(dir, 'network_security_config.xml'), contents)
+}
+
 module.exports = function withAndroidLoopbackCleartext (config) {
   config = withAndroidManifest(config, (androidConfig) => {
     const application = androidConfig.modResults.manifest.application?.[0]
@@ -26,11 +39,13 @@ module.exports = function withAndroidLoopbackCleartext (config) {
   })
 
   return withDangerousMod(config, ['android', async (androidConfig) => {
-    const xmlDir = path.join(androidConfig.modRequest.platformProjectRoot, 'app/src/main/res/xml')
-    const xmlPath = path.join(xmlDir, 'network_security_config.xml')
-
-    fs.mkdirSync(xmlDir, { recursive: true })
-    fs.writeFileSync(xmlPath, NETWORK_SECURITY_CONFIG)
+    const root = androidConfig.modRequest.platformProjectRoot
+    write(path.join(root, 'app/src/main/res/xml'), NETWORK_SECURITY_CONFIG)
+    // Debug only, and it overrides the one above for that build type alone. A
+    // development build loads its JavaScript from Metro over plain HTTP on the
+    // machine's LAN address, which the shipped rule refuses, so every launch
+    // opened on "CLEARTEXT communication not permitted" until it was reloaded.
+    write(path.join(root, 'app/src/debug/res/xml'), DEBUG_NETWORK_SECURITY_CONFIG)
 
     return androidConfig
   }])

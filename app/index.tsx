@@ -1011,6 +1011,18 @@ export default function App () {
       return
     }
 
+    // A note key tapped in PeerChat opens a new tab, and a new tab lands here
+    // rather than in loadBrowserUrl, so without this the link that already
+    // worked from the address bar came back as an error page.
+    const noteKey = parseP2pmdNoteLink(url)
+    if (noteKey) {
+      openInternalApp('p2pmd', false)
+      setP2pmdJoinKey(noteKey)
+      setP2pmdSetupError(null)
+      setStatus('Note key ready. Press Join to open it.')
+      return
+    }
+
     if (isHyperUrl(url)) {
       await loadHyperBrowserUrl(url, false, false)
       return

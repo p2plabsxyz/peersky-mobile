@@ -1565,6 +1565,48 @@ test('somebody removed while connected leaves the list and stays out', async (t)
   await service.close()
 })
 
+// Desktop has always written this; mobile wrote nothing, so a room on a phone
+// never said who had turned up.
+test('somebody arriving is said out loud, by name', async (t) => {
+  const { service, roomKey } = await createRoomWithMember(t, 'peersky-peerchat-join-')
+  const frames = []
+  const newcomer = createFakePeer('11223344', 'Eve', frames)
+  newcomer.rooms = [roomKey]
+  service.peers.set(newcomer.connection, newcomer)
+
+  const notices = () => service.feeds.get(roomKey).entries
+    .filter((entry) => entry.type === 'system')
+    .map((entry) => entry.message)
+
+  await service.handlePeerMessage(newcomer, {
+    type: 'join', roomKey, peerId: '11223344', username: 'Eve', ts: Date.now()
+  })
+  assert.deepEqual(notices(), ['Eve joined'])
+
+  // Reconnecting is not arriving: the room already counts them as a member.
+  await service.handlePeerMessage(newcomer, {
+    type: 'join', roomKey, peerId: '11223344', username: 'Eve', ts: Date.now()
+  })
+  assert.deepEqual(notices(), ['Eve joined'])
+  await service.close()
+})
+
+test('an arrival with no name given keeps the one we already have', async (t) => {
+  const { service, roomKey } = await createRoomWithMember(t, 'peersky-peerchat-joinname-')
+  const peer = createFakePeer('11223344', 'Eve', [])
+  peer.rooms = [roomKey]
+  service.peers.set(peer.connection, peer)
+
+  // Eight characters of a public key mean nothing to anybody reading the room.
+  await service.handlePeerMessage(peer, {
+    type: 'join', roomKey, peerId: '11223344', ts: Date.now()
+  })
+
+  const notice = service.feeds.get(roomKey).entries.find((entry) => entry.type === 'system')
+  assert.equal(notice.message, 'Eve joined')
+  await service.close()
+})
+
 function createFakeSdk (feeds = new Map(), publicKeyByte = 7) {
   const swarm = new EventEmitter()
   swarm.flush = async () => {}
