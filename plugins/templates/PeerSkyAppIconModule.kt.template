@@ -22,6 +22,39 @@ class PeerSkyAppIconModule(
 
   override fun getName() = "PeerSkyAppIcon"
 
+  /**
+   * Undoes the damage an earlier build did.
+   *
+   * That version hid the launcher entry by disabling MainActivity itself,
+   * which also stopped anything starting the app by class name: the dev
+   * launcher, and any deep link. A device that ran it keeps that setting
+   * through reinstalls, because component state belongs to the package and
+   * not to the APK, and adb cannot undo it either since only the app may
+   * change its own components. So the app does it, once, on the way up.
+   */
+  override fun initialize() {
+    super.initialize()
+
+    try {
+      val manager = reactApplicationContext.packageManager
+      val main = ComponentName(
+        reactApplicationContext.packageName,
+        "${reactApplicationContext.packageName}.MainActivity"
+      )
+      if (manager.getComponentEnabledSetting(main) ==
+        PackageManager.COMPONENT_ENABLED_STATE_DISABLED
+      ) {
+        manager.setComponentEnabledSetting(
+          main,
+          PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+          PackageManager.DONT_KILL_APP
+        )
+      }
+    } catch (error: Exception) {
+      // Nothing to do about it here, and it must not stop the app starting.
+    }
+  }
+
   private fun aliasFor(name: String): String {
     val packageName = reactApplicationContext.packageName
     return "$packageName.MainActivity${name.replaceFirstChar { it.uppercase() }}"

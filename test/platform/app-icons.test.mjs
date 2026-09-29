@@ -47,14 +47,15 @@ describe('alternate app icons', () => {
     // starting the app by class name, and the dev launcher does exactly that:
     // "unable to find explicit activity class". Every colour is an alias
     // instead, and the activity keeps out of it.
-    // The aliases are named after it, so the check is for the bare activity
-    // itself: nothing may build a component that stops at MainActivity.
-    assert.doesNotMatch(module, /MainActivity"/)
-    assert.doesNotMatch(module, /val main\b/)
+    // setIcon must never touch it. The only place that names the bare
+    // activity is the repair below, which only ever enables it.
+    const setIcon = module.slice(module.indexOf('fun setIcon'))
+    assert.doesNotMatch(setIcon, /MainActivity"/)
+    assert.doesNotMatch(setIcon, /val main\b/)
     assert.match(module, /val target = name\?\.takeIf \{ ALIASES\.contains\(it\) \} \?: DEFAULT_ALIAS/)
     // Enabled first, disabled after: a gap with nothing enabled loses the app.
-    const enableAt = module.indexOf('COMPONENT_ENABLED_STATE_ENABLED')
-    const disableAt = module.indexOf('COMPONENT_ENABLED_STATE_DISABLED')
+    const enableAt = setIcon.indexOf('COMPONENT_ENABLED_STATE_ENABLED')
+    const disableAt = setIcon.indexOf('COMPONENT_ENABLED_STATE_DISABLED')
     assert.ok(enableAt > 0 && disableAt > enableAt)
   })
 
@@ -125,5 +126,21 @@ describe('adaptive icon layers', () => {
     assert.doesNotMatch(source, /sips'|"sips"|execFileSync|spawnSync/)
     assert.match(source, /require\('@expo\/image-utils'\)/)
     assert.match(source, /generateImageAsync\(/)
+  })
+
+  test('a device left with MainActivity disabled repairs itself', async () => {
+    const module = await readFile(
+      new URL('../../plugins/templates/PeerSkyAppIconModule.kt.template', import.meta.url),
+      'utf8'
+    )
+
+    // Component state belongs to the package, not the APK, so it survives
+    // reinstalling, and adb cannot clear it because only the app may change
+    // its own components. The app is the only thing that can undo it.
+    const repair = module.slice(module.indexOf('override fun initialize'), module.indexOf('fun aliasFor'))
+    assert.match(repair, /COMPONENT_ENABLED_STATE_DISABLED/)
+    assert.match(repair, /COMPONENT_ENABLED_STATE_ENABLED/)
+    // And it must never stop the app starting.
+    assert.match(repair, /catch \(error: Exception\)/)
   })
 })
