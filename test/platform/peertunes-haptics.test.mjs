@@ -44,3 +44,35 @@ test('PeerTunes stays attached when another tab is in front', async () => {
   assert.doesNotMatch(offscreen, /display: 'none'/)
   assert.match(offscreen, /left: -20000/)
 })
+
+// Importing a playlist only ever stored the addresses, so the songs still came
+// off the network every time. PeerSky already downloads a hyper folder when it
+// is asked to; this is the page asking on the user's behalf.
+test('a page can ask for a shared folder to be kept on the device', async () => {
+  const { parsePeerTunesKeepOfflineRequest } = await import('../../app/peertunes/peertunes-screen.mjs')
+  const ask = (url, requestId = 'keep-1') =>
+    parsePeerTunesKeepOfflineRequest(JSON.stringify({ type: 'peertunes-keep-offline', requestId, url }))
+
+  assert.deepEqual(ask('hyper://key/mix/'), { requestId: 'keep-1', url: 'hyper://key/mix/' })
+
+  // Only a hyper folder: nothing else is something this can download, and the
+  // request rides the same channel as a QR scan.
+  assert.equal(ask('https://example.com/'), null)
+  assert.equal(ask('file:///etc/passwd'), null)
+  assert.equal(ask(''), null)
+  assert.equal(ask('hyper://key/mix/', 'scan-1'), null)
+  assert.equal(parsePeerTunesKeepOfflineRequest('{"type":"peertunes-haptic"}'), null)
+})
+
+test('the offer is only made where something can answer it', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const ui = await readFile(new URL('../../assets/peertunes/js/ui.js', import.meta.url), 'utf8')
+  const screen = await readFile(new URL('../../app/peertunes/PeerTunesScreen.tsx', import.meta.url), 'utf8')
+
+  // No bridge, no row: PeerTunes runs outside PeerSky too.
+  assert.match(ui, /if \(window\.peerskyKeepOffline && \/\^hyper:/)
+  // And only for a playlist that came from a drive in the first place.
+  assert.match(ui, /test\(p\.sourceUrl \|\| ""\)/)
+  // Native answers with the same download the Hyperdrive screen starts.
+  assert.match(screen, /await onKeepOffline\(url\)/)
+})

@@ -34,6 +34,7 @@ export function isPeerTunesPageRequest (requestUrl, localUrl) {
 // a promise; native runs the camera and resolves it.
 export const PEERTUNES_SCAN_BRIDGE_SCRIPT = `(function () {
   var pending = {};
+  // One reply channel for both, keyed by the id that went out.
   window.__peerskyResolveScan = function (id, value) {
     var resolve = pending[id];
     if (!resolve) return;
@@ -49,6 +50,21 @@ export const PEERTUNES_SCAN_BRIDGE_SCRIPT = `(function () {
       weight: weight === 'medium' || weight === 'heavy' ? weight : 'light'
     }));
     return true;
+  };
+  // Keeping a shared folder on the device. PeerSky already downloads a hyper
+  // folder when you ask it to; this is the page asking on the user's behalf,
+  // so an imported playlist plays with the network off.
+  window.peerskyKeepOffline = function (url) {
+    return new Promise(function (resolve) {
+      if (!window.ReactNativeWebView) return resolve(null);
+      var id = 'keep-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+      pending[id] = resolve;
+      window.ReactNativeWebView.postMessage(JSON.stringify({
+        type: 'peertunes-keep-offline',
+        requestId: id,
+        url: String(url || '')
+      }));
+    });
   };
   window.peerskyScanQr = function () {
     return new Promise(function (resolve) {
@@ -93,6 +109,23 @@ export function parsePeerTunesHapticRequest (raw) {
     const parsed = JSON.parse(String(raw || ''))
     if (parsed?.type !== 'peertunes-haptic') return null
     return parsed.weight === 'medium' || parsed.weight === 'heavy' ? parsed.weight : 'light'
+  } catch {
+    return null
+  }
+}
+
+// The url a page wants kept on the device, or null when the message is not a
+// keep-offline request.
+export function parsePeerTunesKeepOfflineRequest (raw) {
+  try {
+    const parsed = JSON.parse(String(raw || ''))
+    if (parsed?.type !== 'peertunes-keep-offline') return null
+    const requestId = parsed.requestId
+    const url = typeof parsed.url === 'string' ? parsed.url.trim() : ''
+    if (!/^keep-[\w-]{1,64}$/.test(String(requestId))) return null
+    // Only a hyper folder. Anything else is not something this can download.
+    if (!/^hyper:\/\//i.test(url) || url.length > 2048) return null
+    return { requestId, url }
   } catch {
     return null
   }

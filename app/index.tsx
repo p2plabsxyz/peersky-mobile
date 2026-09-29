@@ -1154,6 +1154,21 @@ export default function App () {
     }
   }
 
+  // The same download the Hyperdrive screen starts, asked for by the PeerTunes
+  // page. An imported playlist is a list of hyper:// urls and nothing more
+  // until the folder behind it is on the device.
+  async function keepPeerTunesFolderOffline (url: string) {
+    try {
+      const response = await callRpc(RPC_HYPER_OFFLINE_KEEP, { url, wait: false })
+      if (!response.ok) return { ok: false, error: response.error || 'Unable to keep this offline.' }
+      const status = (response.item as { status?: string } | undefined)?.status
+      if (status === 'waiting-for-wifi') setStatus('Offline download waiting for Wi-Fi')
+      return { ok: true, status }
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  }
+
   async function ensurePeerTunesServer () {
     setPeertunesError(null)
 
@@ -3651,6 +3666,7 @@ export default function App () {
               launchSuffix={peertunesLaunchSuffix}
               localUrl={peertunesUrl}
               onEnsureServer={() => void ensurePeerTunesServer()}
+              onKeepOffline={keepPeerTunesFolderOffline}
               onOpenUrl={(targetUrl) => openBrowserUrlInNewTab(targetUrl)}
               onStatus={setStatus}
             />
