@@ -6,7 +6,8 @@ import {
   convertFilterListToWebKitRules,
   convertFilterListToWebKitRulesAsync,
   serializeWebKitContentRuleChunks,
-  serializeWebKitContentRules
+  serializeWebKitContentRules,
+  WEBKIT_RULE_FORMAT_VERSION
 } from '../../app/privacy/webkit-content-rules.mjs'
 
 const require = createRequire(import.meta.url)
@@ -126,5 +127,99 @@ describe('iOS content blocking', () => {
     assert.match(module, /hasPrefix:allowedPrefix/)
     assert.match(module, /snapshot-\[0-9\]/)
     assert.match(module, /setYoutubeAdBlockingEnabled/)
+  })
+
+  // EasyPrivacy ships "*$ping,third-party". $ping has no WebKit equivalent, and
+  // widening it to "raw" turned that one line into "block every third-party
+  // fetch on every page", which is what stopped YouTube playing: the player
+  // loaded, read the duration, then waited forever on media that comes from
+  // googlevideo.com over fetch.
+  test('skips $ping rather than widening it to every fetch', () => {
+    const rules = convertFilterListToWebKitRules([
+      '*$ping,third-party',
+      '.com/hit$ping',
+      '||tracker.example/beacon$ping,third-party'
+    ].join('\n'))
+
+    assert.deepEqual(rules, [])
+  })
+
+  test('the bundled lists never block an ordinary third-party fetch', async () => {
+    const { readFile } = await import('node:fs/promises')
+
+    for (const list of ['easylist', 'easyprivacy']) {
+      const contents = await readFile(
+        new URL(`../../assets/content-blocking/${list}.txt`, import.meta.url),
+        'utf8'
+      )
+      const rules = convertFilterListToWebKitRules(contents)
+      assert.ok(rules.length > 1000, `${list} produced too few rules`)
+
+      // A url-filter that matches this matches everything, whatever it was
+      // written to catch.
+      const unrelated = 'https://media.example.org/stream/segment-00042.m4s'
+      const overBroad = rules.filter((rule) =>
+        rule.action.type === 'block' &&
+        !rule.trigger['if-domain'] &&
+        new RegExp(rule.trigger['url-filter'], 'i').test(unrelated)
+      )
+
+      assert.deepEqual(
+        overBroad.map((rule) => rule.trigger['url-filter']),
+        [],
+        `${list} has a rule broad enough to block any page's requests`
+      )
+    }
+  })
+
+  // A converter fix is worthless if the device keeps serving the rules it built
+  // last week. Both caches key on the filter-list snapshot, and that does not
+  // move when the converter does, so the version has to.
+  test('a converter change invalidates the rules already on the device', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const blocker = await readFile(
+      new URL('../../plugins/templates/PeerSkyContentBlocker.m.template', import.meta.url),
+      'utf8'
+    )
+    const ruleFiles = await readFile(
+      new URL('../../app/privacy/webkitContentRules.ts', import.meta.url),
+      'utf8'
+    )
+
+    assert.match(ruleFiles, /\.v\$\{WEBKIT_RULE_FORMAT_VERSION\}\$\{WEBKIT_RULE_SUFFIX\}/)
+    assert.match(ruleFiles, /removeStaleRuleFiles\(/)
+    assert.match(blocker, /peersky-%@-%@-%lu", snapshotName, PeerSkyRuleFormatVersion/)
+    assert.match(blocker, /peersky-%@-%@-", snapshotName, PeerSkyRuleFormatVersion/)
+
+    const nativeVersion = /PeerSkyRuleFormatVersion = @"v([0-9]+)"/.exec(blocker)?.[1]
+    assert.equal(Number(nativeVersion), WEBKIT_RULE_FORMAT_VERSION)
+  })
+
+  // Switching blocking off used to leave every open tab blocking, because rule
+  // lists are attached when a WKWebView is built and nothing re-read them. The
+  // same gap left the first page of a cold start unprotected, since the rules
+  // finish compiling after that tab already exists.
+  test('rule changes reach tabs that are already open', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const blocker = await readFile(
+      new URL('../../plugins/templates/PeerSkyContentBlocker.m.template', import.meta.url),
+      'utf8'
+    )
+
+    assert.match(blocker, /liveControllers = \[NSHashTable weakObjectsHashTable\]/)
+    assert.match(blocker, /\[self\.liveControllers addObject:configuration\.userContentController\]/)
+    assert.match(
+      blocker,
+      /- \(void\)setEnabled:\(BOOL\)enabled[\s\S]{0,200}\[self applyRuleListsToOpenWebViews\]/
+    )
+    assert.match(
+      blocker,
+      /self\.ruleLists = \[compiled copy\];\s*\}\s*\[self applyRuleListsToOpenWebViews\]/
+    )
+    // Stale lists are dropped first, so a second pass cannot stack duplicates.
+    assert.match(
+      blocker,
+      /removeAllContentRuleLists\];\s*if \(enabled\)/
+    )
   })
 })

@@ -1,5 +1,12 @@
 export const MAX_WEBKIT_RULES_PER_LIST = 150_000
 
+// Bumped whenever a converter change makes the rules already on disk wrong.
+// It lands in the rule filename and in the WebKit identifier, because both
+// caches are keyed by the filter-list snapshot, which does not move when the
+// converter does. Keep it in step with PeerSkyRuleFormatVersion in
+// plugins/templates/PeerSkyContentBlocker.m.template.
+export const WEBKIT_RULE_FORMAT_VERSION = 2
+
 const DEFAULT_BATCH_SIZE = 500
 
 const DEFAULT_RESOURCE_TYPES = Object.freeze([
@@ -24,10 +31,15 @@ const RESOURCE_TYPE_OPTIONS = new Map([
   ['xmlhttprequest', 'raw'],
   ['subdocument', 'raw'],
   ['websocket', 'raw'],
-  ['ping', 'raw'],
   ['other', 'raw']
 ])
 
+// $ping has no WebKit equivalent. It used to be widened to 'raw', which turned
+// EasyPrivacy's "*$ping,third-party" into a rule that blocked every
+// third-party fetch on every page: YouTube loaded its player, knew the
+// duration and then sat on a spinner forever, because the media comes from
+// googlevideo.com over fetch. A beacon rule is not worth that, so $ping now
+// falls through to the unsupported branch and the line is skipped.
 const SAFE_FLAG_OPTIONS = new Set(['important'])
 const MAX_FILTER_LINE_LENGTH = 4 * 1024
 const MAX_URL_FILTER_LENGTH = 2 * 1024
