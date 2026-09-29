@@ -74,26 +74,52 @@ function createBrowserDocumentHtml (title, body) {
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>${escapeHtml(title)}</title>
 <style>
+  /* Raw text, a directory listing and a failed page all land here. Every other
+     browser turns these dark with the phone, and a white sheet at night is the
+     one part of the app that used to flash. color-scheme is what makes the
+     engine paint the page behind the body dark too. */
+  :root {
+    color-scheme: light dark;
+    --page: #ffffff;
+    --ink: #151821;
+    --ink-muted: #657086;
+    --link: #0f6fd4;
+    --block: #f4f6f8;
+    --block-edge: #dce2ea;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page: #12151b;
+      --ink: #e7eaf0;
+      --ink-muted: #98a1b2;
+      --link: #6fb0ff;
+      --block: #1a1f27;
+      --block-edge: #2a313c;
+    }
+  }
+
   body {
-    color: #151821;
+    background: var(--page);
+    color: var(--ink);
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     line-height: 1.55;
     margin: 0;
     padding: 22px;
   }
-  a { color: #0f6fd4; }
+  a { color: var(--link); }
   ul { padding-left: 20px; }
   li { margin: 10px 0; overflow-wrap: anywhere; }
   pre {
-    background: #f4f6f8;
-    border: 1px solid #dce2ea;
+    background: var(--block);
+    border: 1px solid var(--block-edge);
     border-radius: 8px;
     overflow: auto;
     padding: 14px;
     white-space: pre-wrap;
   }
   .muted {
-    color: #657086;
+    color: var(--ink-muted);
     overflow-wrap: anywhere;
   }
 </style>

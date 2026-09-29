@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import {
   Alert,
+  Linking,
+  Platform,
   Pressable,
   StyleSheet,
   Switch,
@@ -47,6 +49,7 @@ export function General ({
   const [draftUrl, setDraftUrl] = useState(customSearchUrl)
   const [selectedEngine, setSelectedEngine] = useState(searchEngine)
   const [validationError, setValidationError] = useState<string | null>(null)
+  const [defaultBrowserError, setDefaultBrowserError] = useState<string | null>(null)
 
   useEffect(() => setDraftUrl(customSearchUrl), [customSearchUrl])
   useEffect(() => setSelectedEngine(searchEngine), [searchEngine])
@@ -84,6 +87,15 @@ export function General ({
     setValidationError(null)
   }
 
+  async function openDefaultBrowserSettings () {
+    setDefaultBrowserError(null)
+    try {
+      await Linking.sendIntent('android.settings.MANAGE_DEFAULT_APPS_SETTINGS')
+    } catch {
+      setDefaultBrowserError('Unable to open default browser settings.')
+    }
+  }
+
   function confirmResetTabs () {
     Alert.alert(
       'Reset tab session?',
@@ -118,6 +130,28 @@ export function General ({
           />
         </View>
       </SettingsSection>
+
+      {/* Which app opens a web link is a preference, not a permission: it
+          grants nothing and revokes nothing. It sat under Permissions, where
+          nobody looking for it would think to check. */}
+      {Platform.OS === 'android' && (
+        <SettingsSection title='Default browser'>
+          <View style={styles.settingRow}>
+            <SettingCopy
+              title='Open web links with PeerSky'
+              description='Choose PeerSky as the app that opens web links.'
+            />
+            <Pressable
+              accessibilityRole='button'
+              style={({ pressed }) => [styles.saveButton, pressed ? styles.saveButtonDisabled : null]}
+              onPress={() => void openDefaultBrowserSettings()}
+            >
+              <Text style={styles.saveButtonText}>Choose</Text>
+            </Pressable>
+          </View>
+          {defaultBrowserError && <Text style={styles.validationError}>{defaultBrowserError}</Text>}
+        </SettingsSection>
+      )}
 
       <SettingsSection title='Search engine'>
         <ChoiceGroup

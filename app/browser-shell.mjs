@@ -56,6 +56,16 @@ export function getHyperDriveListingUrl (url) {
   return `${address}${address.includes('?') ? '&' : '?'}noResolve${fragment}`
 }
 
+// Each one is the engine's own plain search address. noai.duckduckgo.com is
+// DuckDuckGo's own host for results without the AI answers on top.
+const SEARCH_ENGINE_URLS = {
+  duckduckgo: 'https://duckduckgo.com/?q=',
+  'duckduckgo-noai': 'https://noai.duckduckgo.com/?q=',
+  startpage: 'https://www.startpage.com/sp/search?q=',
+  ecosia: 'https://www.ecosia.org/search?q=',
+  kagi: 'https://kagi.com/search?q='
+}
+
 export function getSearchUrl (searchEngine, query, customSearchUrl = '') {
   const encodedQuery = encodeURIComponent(String(query || ''))
   const normalizedCustomUrl = normalizeCustomSearchUrl(customSearchUrl)
@@ -64,7 +74,10 @@ export function getSearchUrl (searchEngine, query, customSearchUrl = '') {
     return normalizedCustomUrl.replaceAll(CUSTOM_SEARCH_QUERY_PLACEHOLDER, encodedQuery)
   }
 
-  return `https://duckduckgo.com/?q=${encodedQuery}`
+  // An engine this build has never heard of falls back rather than failing to
+  // search at all, which is what a saved setting from a newer version looks
+  // like after a downgrade.
+  return `${SEARCH_ENGINE_URLS[searchEngine] || SEARCH_ENGINE_URLS[DEFAULT_SEARCH_ENGINE]}${encodedQuery}`
 }
 
 export function normalizeCustomSearchUrl (customSearchUrl) {

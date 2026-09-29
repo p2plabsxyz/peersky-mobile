@@ -10,6 +10,7 @@ import {
   MEDIA_UNSCANNED,
   screenUploadBatch
 } from './media-moderation.mjs'
+import { ensurePermission } from '../permission-prompt'
 
 export type UploadAsset = {
   name: string
@@ -76,8 +77,21 @@ async function pickImages (
   supersedePendingPick()
 
   if (source === 'camera') {
-    const permission = await ImagePicker.requestCameraPermissionsAsync()
-    if (!permission.granted) throw new Error('PeerSky needs camera access to take a photo.')
+    const allowed = await ensurePermission({
+      request: () => ImagePicker.requestCameraPermissionsAsync(),
+      title: 'Camera access is off',
+      message: 'PeerSky needs the camera to take a photo. Turn it on in Settings.'
+    })
+    if (!allowed) throw new Error('PeerSky needs camera access to take a photo.')
+  } else {
+    // Android asks for this; on iOS the picker runs out of process and needs
+    // nothing, so a granted answer comes straight back.
+    const allowed = await ensurePermission({
+      request: () => ImagePicker.requestMediaLibraryPermissionsAsync(),
+      title: 'Photo access is off',
+      message: 'PeerSky needs your photo library to attach a picture. Turn it on in Settings.'
+    })
+    if (!allowed) throw new Error('PeerSky needs photo access to attach a picture.')
   }
 
   const options: ImagePicker.ImagePickerOptions = {

@@ -22,6 +22,10 @@ export const WEBSITE_TEXT_SCALES = [80, 100, 120, 150]
 
 export const SEARCH_ENGINES = /** @type {const} */ ([
   { id: 'duckduckgo', title: 'DuckDuckGo' },
+  { id: 'duckduckgo-noai', title: 'DuckDuckGo (no AI)' },
+  { id: 'startpage', title: 'Startpage' },
+  { id: 'ecosia', title: 'Ecosia' },
+  { id: 'kagi', title: 'Kagi' },
   { id: 'custom', title: 'Custom' }
 ])
 

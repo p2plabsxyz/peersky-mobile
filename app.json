@@ -92,6 +92,7 @@
       "expo-font",
       "./plugins/with-ios-pod-deployment-target",
       "./plugins/with-android-16kb-libs",
+      "./plugins/with-android-app-category",
       "./plugins/with-android-loopback-cleartext",
       "./plugins/with-browser-downloads",
       "./plugins/with-lan-discovery",

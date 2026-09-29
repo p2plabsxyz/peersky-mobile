@@ -64,15 +64,57 @@ export function createHyperBridgeScript (token) {
     return bytes
   }
 
-  const encodeBody = async (body) => {
-    if (body === null || body === undefined || body === '') return ''
-    if (typeof body === 'string') return toBase64(new TextEncoder().encode(body))
-    if (body instanceof Blob) return toBase64(new Uint8Array(await body.arrayBuffer()))
-    if (body instanceof ArrayBuffer) return toBase64(new Uint8Array(body))
-    if (ArrayBuffer.isView(body)) {
-      return toBase64(new Uint8Array(body.buffer, body.byteOffset, body.byteLength))
+  // A field name or filename goes inside a quoted string in the part header,
+  // so a quote or a newline in one would end that header early.
+  const quoteField = (value) => String(value)
+    .replace(/\r?\n|\r/g, ' ')
+    .replace(/"/g, '%22')
+
+  // The browser builds this itself for an ordinary fetch, including the
+  // boundary it puts in the Content-Type. Nothing does that here, because the
+  // request leaves the page as base64 rather than as a body the engine sends,
+  // so the same multipart document is written by hand.
+  const encodeFormData = async (form) => {
+    const boundary = '----peersky' + Math.random().toString(36).slice(2) + Date.now().toString(36)
+    const encoder = new TextEncoder()
+    const parts = []
+
+    for (const [name, value] of form.entries()) {
+      const isFile = typeof Blob !== 'undefined' && value instanceof Blob
+      const disposition = isFile
+        ? 'Content-Disposition: form-data; name="' + quoteField(name) + '"; filename="' + quoteField(value.name || 'blob') + '"\r\n' +
+          'Content-Type: ' + (value.type || 'application/octet-stream') + '\r\n\r\n'
+        : 'Content-Disposition: form-data; name="' + quoteField(name) + '"\r\n\r\n'
+      parts.push(encoder.encode('--' + boundary + '\r\n' + disposition))
+      parts.push(isFile ? new Uint8Array(await value.arrayBuffer()) : encoder.encode(String(value)))
+      parts.push(encoder.encode('\r\n'))
     }
-    if (body instanceof URLSearchParams) return toBase64(new TextEncoder().encode(String(body)))
+    parts.push(encoder.encode('--' + boundary + '--\r\n'))
+
+    let length = 0
+    for (const part of parts) length += part.length
+    const bytes = new Uint8Array(length)
+    let offset = 0
+    for (const part of parts) { bytes.set(part, offset); offset += part.length }
+
+    return { base64: toBase64(bytes), contentType: 'multipart/form-data; boundary=' + boundary }
+  }
+
+  const encodeBody = async (body) => {
+    if (body === null || body === undefined || body === '') return { base64: '', contentType: '' }
+    if (typeof body === 'string') return { base64: toBase64(new TextEncoder().encode(body)), contentType: '' }
+    if (typeof FormData !== 'undefined' && body instanceof FormData) return encodeFormData(body)
+    if (body instanceof Blob) return { base64: toBase64(new Uint8Array(await body.arrayBuffer())), contentType: body.type || '' }
+    if (body instanceof ArrayBuffer) return { base64: toBase64(new Uint8Array(body)), contentType: '' }
+    if (ArrayBuffer.isView(body)) {
+      return { base64: toBase64(new Uint8Array(body.buffer, body.byteOffset, body.byteLength)), contentType: '' }
+    }
+    if (body instanceof URLSearchParams) {
+      return {
+        base64: toBase64(new TextEncoder().encode(String(body))),
+        contentType: 'application/x-www-form-urlencoded;charset=UTF-8'
+      }
+    }
     throw new TypeError('This body type cannot be sent over hyper:// yet')
   }
 
@@ -137,8 +179,11 @@ export function createHyperBridgeScript (token) {
     const method = String(options.method || 'GET').toUpperCase()
 
     let bodyBase64 = ''
+    let bodyContentType = ''
     try {
-      bodyBase64 = await encodeBody(options.body)
+      const encoded = await encodeBody(options.body)
+      bodyBase64 = encoded.base64
+      bodyContentType = encoded.contentType
     } catch (error) {
       throw new TypeError(error && error.message ? error.message : 'Unsupported body')
     }
@@ -152,6 +197,12 @@ export function createHyperBridgeScript (token) {
         ? (() => { const out = []; options.headers.forEach((v, k) => out.push([k, v])); return out })()
         : Object.entries(options.headers)
       for (const [name, value] of entries) headers[String(name)] = String(value)
+    }
+    // The boundary is only known here, so a page that hands over a FormData
+    // and sets no Content-Type of its own gets the right one. A page that did
+    // set one meant it, and keeps it.
+    if (bodyContentType && !Object.keys(headers).some((name) => name.toLowerCase() === 'content-type')) {
+      headers['Content-Type'] = bodyContentType
     }
 
     const result = await request(absolute(raw), { method, headers }, bodyBase64)

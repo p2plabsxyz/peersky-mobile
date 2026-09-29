@@ -7,7 +7,13 @@ import {
 } from './browser-preferences.mjs'
 import { normalizeCustomSearchUrl } from '../browser-shell.mjs'
 
-export type SearchEngine = 'duckduckgo' | 'custom'
+export type SearchEngine =
+  | 'duckduckgo'
+  | 'duckduckgo-noai'
+  | 'startpage'
+  | 'ecosia'
+  | 'kagi'
+  | 'custom'
 export type AddressBarPosition = 'top' | 'bottom'
 export type BrowserTheme = 'system' | 'light' | 'dark'
 export type ExternalLinkBehavior = 'ask' | 'allow' | 'block'

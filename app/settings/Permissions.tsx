@@ -90,19 +90,6 @@ export function Permissions ({
     }
   }
 
-  async function openDefaultBrowserSettings () {
-    setActionError(null)
-    try {
-      if (Platform.OS === 'android') {
-        await Linking.sendIntent('android.settings.MANAGE_DEFAULT_APPS_SETTINGS')
-      } else {
-        await Linking.openSettings()
-      }
-    } catch (error) {
-      setActionError(getActionError(error, 'Unable to open default browser settings.'))
-    }
-  }
-
   return (
     <View style={[styles.page, isDark ? styles.pageDark : null]}>
       {(persistenceError || actionError) && (
@@ -133,17 +120,6 @@ export function Permissions ({
           isDark={isDark}
           onPress={() => void requestNotifications()}
         />
-        {Platform.OS === 'android' && (
-          <>
-            <PermissionRow
-              title='Default browser'
-              description='Choose PeerSky as the app that opens web links.'
-              action='Choose'
-              isDark={isDark}
-              onPress={() => void openDefaultBrowserSettings()}
-            />
-          </>
-        )}
       </SettingsSection>
 
       <SettingsSection title='External app links'>

@@ -177,7 +177,7 @@ export function restoreBrowserTabsState (serialized) {
 function getPersistedSource (entry) {
   const { source } = entry
 
-  if (source.kind === 'home' || source.kind === 'app') {
+  if (source.kind === 'home' || source.kind === 'p2p' || source.kind === 'app') {
     return source
   }
 
