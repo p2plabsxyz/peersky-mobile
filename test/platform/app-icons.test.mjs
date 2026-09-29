@@ -114,4 +114,16 @@ describe('adaptive icon layers', () => {
       assert.ok(Math.abs(centerY - image.height / 2) < 2, `${layer} is off centre vertically`)
     }
   })
+
+  test('the icons are built with something that exists off a Mac', async () => {
+    const source = await readFile(new URL('../../plugins/with-app-icons.js', import.meta.url), 'utf8')
+
+    // sips is macOS only, so prebuild on a Linux runner died with
+    // "spawnSync sips ENOENT" before it reached the Android icons. This is
+    // the tool Expo's own icon generation uses, sharp where it is available
+    // and jimp everywhere else.
+    assert.doesNotMatch(source, /sips'|"sips"|execFileSync|spawnSync/)
+    assert.match(source, /require\('@expo\/image-utils'\)/)
+    assert.match(source, /generateImageAsync\(/)
+  })
 })

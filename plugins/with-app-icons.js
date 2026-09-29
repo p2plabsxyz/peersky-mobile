@@ -1,4 +1,3 @@
-const { execFileSync } = require('node:child_process')
 const fs = require('node:fs')
 const path = require('node:path')
 const {
@@ -118,20 +117,28 @@ function aliasName (color) {
   return `.MainActivity${color.charAt(0).toUpperCase()}${color.slice(1)}`
 }
 
-// Scaling through sips keeps this to tools every macOS build machine has, and
-// Linux CI never builds the iOS half anyway.
-function resize (source, destination, size) {
+// The same image tool Expo's own icon generation uses. It prefers sharp and
+// falls back to jimp, so this works on a Linux runner as well as a Mac; sips
+// does not exist off macOS, which is what broke CI.
+async function resize (projectRoot, source, destination, size) {
+  const { generateImageAsync } = require('@expo/image-utils')
+  const { source: resized } = await generateImageAsync(
+    { projectRoot, cacheType: 'peersky-app-icons' },
+    {
+      src: source,
+      width: size,
+      height: size,
+      resizeMode: 'contain',
+      backgroundColor: 'transparent'
+    }
+  )
+
   fs.mkdirSync(path.dirname(destination), { recursive: true })
-  execFileSync('sips', [
-    '-s', 'format', 'png',
-    '-z', String(size), String(size),
-    source,
-    '--out', destination
-  ], { stdio: 'ignore' })
+  fs.writeFileSync(destination, resized)
 }
 
 function withIosIconFiles (config) {
-  return withDangerousMod(config, ['ios', (config) => {
+  return withDangerousMod(config, ['ios', async (config) => {
     const projectRoot = config.modRequest.projectRoot
     const platformRoot = config.modRequest.platformProjectRoot
     const projectName = IOSConfig.XcodeUtils.getProjectName(projectRoot)
@@ -142,7 +149,12 @@ function withIosIconFiles (config) {
       const source = path.join(projectRoot, 'assets/app-icons/ios', `${color}.png`)
       for (const { scale, size } of IOS_SIZES) {
         const suffix = scale === 1 ? '' : `@${scale}x`
-        resize(source, path.join(destination, `${iosIconName(color)}${suffix}.png`), size)
+        await resize(
+          projectRoot,
+          source,
+          path.join(destination, `${iosIconName(color)}${suffix}.png`),
+          size
+        )
       }
     }
     return config
@@ -190,14 +202,15 @@ function withIosAlternateIcons (config) {
 }
 
 function withAndroidAlternateIcons (config) {
-  return withDangerousMod(config, ['android', (config) => {
+  return withDangerousMod(config, ['android', async (config) => {
     const projectRoot = config.modRequest.projectRoot
     const resRoot = path.join(config.modRequest.platformProjectRoot, 'app/src/main/res')
 
     for (const color of COLORS) {
       const source = path.join(projectRoot, 'assets/app-icons/android', `background-${color}.png`)
       for (const { name, size } of ANDROID_DENSITIES) {
-        resize(
+        await resize(
+          projectRoot,
           source,
           path.join(resRoot, `mipmap-${name}`, `ic_launcher_background_${color}.png`),
           size
