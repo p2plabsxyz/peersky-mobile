@@ -1,7 +1,7 @@
 import type { ComponentType } from 'react'
 import { useRef } from 'react'
 import type { SvgProps } from 'react-native-svg'
-import { Keyboard, Platform, Pressable, Text, View } from 'react-native'
+import { Keyboard, Platform, Pressable, StyleSheet, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { BrowserOverflowMenu } from './settings/BrowserOverflowMenu'
@@ -28,6 +28,7 @@ type BrowserNavBarProps = {
   isDark: boolean
   isHome: boolean
   menuVisible: boolean
+  printActionAvailable: boolean
   newTabDisabled: boolean
   palette: {
     border: string
@@ -51,6 +52,7 @@ type BrowserNavBarProps = {
   onOpenSettings: () => void
   onOpenTabs: () => void
   onOpenZoom: () => void
+  onPrintPage: () => void
   onSharePage: () => void
   onToggleBookmark: () => void
   onToggleDesktopView: () => void
@@ -73,6 +75,7 @@ export function BrowserNavBar ({
   isDark,
   isHome,
   menuVisible,
+  printActionAvailable,
   newTabDisabled,
   palette,
   shareActionAvailable,
@@ -91,6 +94,7 @@ export function BrowserNavBar ({
   onOpenSettings,
   onOpenTabs,
   onOpenZoom,
+  onPrintPage,
   onSharePage,
   onToggleBookmark,
   onToggleDesktopView
@@ -125,7 +129,7 @@ export function BrowserNavBar ({
           // With the address bar directly above, its own top edge is the only
           // seam this chrome needs. A second line between the two bars cuts
           // them apart.
-          borderTopWidth: showTopBorder ? 1 : 0,
+          borderTopWidth: showTopBorder ? StyleSheet.hairlineWidth : 0,
           paddingLeft: insets.left,
           paddingRight: insets.right
         }
@@ -212,6 +216,7 @@ export function BrowserNavBar ({
           onCloseMenu()
           onOpenZoom()
         }}
+        {...(printActionAvailable ? { onPrintPage: () => afterMenuCloses(onPrintPage) } : {})}
         onSharePage={() => afterMenuCloses(onSharePage)}
         onShow={() => {
           Keyboard.dismiss()

@@ -129,6 +129,12 @@ import { BrowserZoomSheet } from './BrowserZoomSheet'
 import { WelcomeScreen } from './WelcomeScreen'
 import { BrowserHomeBackground } from './BrowserHomeBackground'
 import { applyAppIcon } from './app-icon'
+import {
+  canPrintBrowserUrl,
+  createBrowserPrintScript,
+  parseBrowserPrintMessage,
+  printBrowserPage
+} from './browser-print'
 import { StartupScreen } from './StartupScreen'
 import { AppLoading } from './AppLoading'
 import { BrowserSiteInfoSheet } from './BrowserSiteInfoSheet'
@@ -2099,6 +2105,20 @@ export default function App () {
   }
 
 
+  // expo-print takes markup, not a page address, so printing is a round trip:
+  // ask the tab for what it rendered, then hand that to the dialog.
+  function onBrowserPrintPage () {
+    const tabId = browserTabsStateRef.current.activeTabId
+    const token = browserMediaTokensRef.current.get(tabId)
+    const webView = browserWebViewRefs.current.get(tabId)
+
+    if (!token || !webView) {
+      Alert.alert('Unable to print', 'This page cannot be printed')
+      return
+    }
+    webView.injectJavaScript(createBrowserPrintScript(token))
+  }
+
   async function onHolesailStartLive () {
     setIsLoading(true)
     setStatus('Starting Holesail live tunnel...')
@@ -3250,6 +3270,9 @@ export default function App () {
       isDark={browserIsDark}
       isHome={browserSource.kind === 'home'}
       menuVisible={browserMenuVisible}
+      // Both systems print from a URL the printer fetches itself, so there is
+      // nothing to offer on a hyper:// page or one of our own screens.
+      printActionAvailable={canPrintBrowserUrl(browserCurrentUrl)}
       newTabDisabled={browserTabsState.tabs.length >= MAX_BROWSER_TABS}
       palette={browserChrome}
       shareActionAvailable={browserShareActionAvailable}
@@ -3279,6 +3302,7 @@ export default function App () {
         setBrowserTabsVisible(true)
       }}
       onOpenZoom={() => setBrowserZoomVisible(true)}
+      onPrintPage={onBrowserPrintPage}
       onSharePage={() => void onBrowserSharePage()}
       onToggleBookmark={onBrowserToggleBookmark}
       onToggleDesktopView={onBrowserToggleDesktopView}
@@ -4089,6 +4113,18 @@ export default function App () {
                   if (browserTabsStateRef.current.activeTabId === tab.id) {
                     setBrowserMediaTarget({ ...mediaTarget, tabId: tab.id })
                   }
+                  return
+                }
+
+                const printHtml = parseBrowserPrintMessage(
+                  event.nativeEvent.data,
+                  browserMediaToken
+                )
+                if (printHtml) {
+                  void printBrowserPage(printHtml, event.nativeEvent.url || entry.url)
+                    .then((problem) => {
+                      if (problem) Alert.alert('Unable to print', problem)
+                    })
                   return
                 }
 

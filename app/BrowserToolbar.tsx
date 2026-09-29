@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ActivityIndicator, Keyboard, Pressable, TextInput, View } from 'react-native'
+import { ActivityIndicator, Keyboard, Pressable, StyleSheet, TextInput, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { getBrowserAddressForUrl, MAX_BROWSER_URL_LENGTH } from './browser-shell.mjs'
 import { formatBrowserAddress } from './browser-appearance.mjs'
@@ -18,7 +18,10 @@ const ADDRESS_ACTION_ICON_SIZE = 22
 // thin outlines. Drawn at the same number it reads as the larger of the
 // three, so it is drawn smaller to look the same size.
 const ADDRESS_SECURITY_ICON_SIZE = 20
-const ADDRESS_CLEAR_ICON_SIZE = 22
+// x-circle fills its box the way the shield does, while the reload and
+// share arrows do not, so it is drawn at the shield's size to look the
+// same as all three.
+const ADDRESS_CLEAR_ICON_SIZE = ADDRESS_SECURITY_ICON_SIZE
 const TOOLBAR_ICON_STROKE_WIDTH = 0.35
 
 // Matches browserToolbar's own paddingHorizontal.
@@ -93,6 +96,9 @@ export function BrowserToolbar ({
   const addressActionIconColor = palette.mutedText
   const insets = useSafeAreaInsets()
   const toolbarBackground = isDark ? palette.surface : palette.shell
+  // The suggestion list sits flush on this edge, so a line between them makes
+  // it read as a separate card rather than the address bar opening out.
+  const seamColor = isAddressFocused ? 'transparent' : palette.border
 
   useEffect(() => {
     addressInputRef.current?.blur()
@@ -111,22 +117,25 @@ export function BrowserToolbar ({
           styles.browserToolbar,
           {
             backgroundColor: toolbarBackground,
-            borderBottomColor: palette.border,
             // The bar itself reaches both screen edges; only its controls step
             // in around the notch when the phone is on its side.
             paddingLeft: TOOLBAR_SIDE_PADDING + insets.left,
             paddingRight: TOOLBAR_SIDE_PADDING + insets.right
           },
+          // The seam is always the same hairline, and only its colour changes.
+          // Taking the border away while the suggestion list is open moved
+          // everything below it by a pixel, which on a photograph is a jump
+          // you can see.
           position === 'bottom'
             ? {
                 borderBottomWidth: 0,
-                borderTopColor: palette.border,
-                // The suggestion list sits flush on this edge, and a line
-                // between them makes it read as a separate card rather than
-                // the address bar opening out.
-                borderTopWidth: isAddressFocused ? 0 : 1
+                borderTopColor: seamColor,
+                borderTopWidth: StyleSheet.hairlineWidth
               }
-            : { borderBottomWidth: isAddressFocused ? 0 : 1 }
+            : {
+                borderBottomColor: seamColor,
+                borderBottomWidth: StyleSheet.hairlineWidth
+              }
         ]}
         onLayout={(event) => setBarHeight(event.nativeEvent.layout.height)}
       >

@@ -27,7 +27,7 @@ describe('browser chrome layout', () => {
   test('no second line where the two bars meet', () => {
     // The address bar sits directly above when it is at the bottom, and its
     // own top edge is the seam.
-    assert.match(navBar, /borderTopWidth: showTopBorder \? 1 : 0/)
+    assert.match(navBar, /borderTopWidth: showTopBorder \? StyleSheet\.hairlineWidth : 0/)
     assert.match(index, /showTopBorder=\{browserPreferences\.addressBarPosition === 'top'\}/)
   })
 
@@ -55,5 +55,33 @@ describe('browser chrome layout', () => {
     const { DEFAULT_BROWSER_PREFERENCES } = await import('../../app/settings/browser-preferences.mjs')
 
     assert.equal(DEFAULT_BROWSER_PREFERENCES.addressBarPosition, 'top')
+  })
+})
+
+describe('chrome polish', () => {
+  test('the seam never changes width, only colour', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const toolbar = await readFile(new URL('../../app/BrowserToolbar.tsx', import.meta.url), 'utf8')
+
+    // Taking the border away while the suggestion list is open moved
+    // everything below it by a pixel, and on a photograph that jump is
+    // visible every time you tap the address bar.
+    assert.doesNotMatch(toolbar, /borderBottomWidth: isAddressFocused/)
+    assert.doesNotMatch(toolbar, /borderTopWidth: isAddressFocused/)
+    assert.match(toolbar, /const seamColor = isAddressFocused \? 'transparent' : palette\.border/)
+    assert.equal((toolbar.match(/StyleSheet\.hairlineWidth/g) || []).length, 2)
+  })
+
+  test('arriving home fades rather than cuts', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const background = await readFile(
+      new URL('../../app/BrowserHomeBackground.tsx', import.meta.url),
+      'utf8'
+    )
+
+    // Burning every tab lands here, and cutting straight to a photograph makes
+    // that land hard. Opacity only: a transform would show an edge.
+    assert.match(background, /opacity: enter/)
+    assert.doesNotMatch(background, /scale|translateY/)
   })
 })

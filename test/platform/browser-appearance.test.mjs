@@ -52,9 +52,9 @@ describe('popups attached to the toolbar', () => {
   test('the toolbar hands over its own height, with nothing added', async () => {
     const toolbar = await readFile(new URL('../../app/BrowserToolbar.tsx', import.meta.url), 'utf8')
     assert.match(toolbar, /setBarHeight\(event\.nativeEvent\.layout\.height\)/)
-    // The seam belongs to whichever panel is open, not to both.
-    assert.match(toolbar, /borderTopWidth: isAddressFocused \? 0 : 1/)
-    assert.match(toolbar, /borderBottomWidth: isAddressFocused \? 0 : 1/)
+    // The seam belongs to whichever panel is open, not to both, but it keeps
+    // its width either way so nothing below it moves.
+    assert.match(toolbar, /const seamColor = isAddressFocused \? 'transparent' : palette\.border/)
   })
 
   test('the suggestion list sits on the toolbar edge', async () => {

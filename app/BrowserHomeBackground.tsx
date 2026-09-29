@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
-import { ImageBackground, StyleSheet, View } from 'react-native'
+import { useEffect, useRef } from 'react'
+import { Animated, Easing, ImageBackground, StyleSheet } from 'react-native'
 
 const WALLPAPER = require('../assets/images/wallpaper-ten-lakes.jpg')
 
@@ -10,6 +11,10 @@ const WALLPAPER = require('../assets/images/wallpaper-ten-lakes.jpg')
  * The scrim is the theme's own background at most of its opacity, so the
  * labels keep the colour they already had and stay readable over the bright
  * part of the picture as well as the dark part.
+ *
+ * It fades in on the way here. Arriving home is usually the end of something,
+ * closing a tab or burning the lot, and cutting straight to a photograph makes
+ * that land hard. Opacity only, so nothing shifts or shows an edge.
  */
 export function BrowserHomeBackground ({
   children,
@@ -18,10 +23,26 @@ export function BrowserHomeBackground ({
   children: ReactNode
   scrim: string
 }) {
+  const enter = useRef(new Animated.Value(0)).current
+
+  useEffect(() => {
+    const animation = Animated.timing(enter, {
+      duration: 220,
+      easing: Easing.out(Easing.quad),
+      toValue: 1,
+      useNativeDriver: true
+    })
+    animation.start()
+
+    return () => animation.stop()
+  }, [enter])
+
   return (
-    <ImageBackground source={WALLPAPER} resizeMode='cover' style={styles.background}>
-      <View style={[styles.scrim, { backgroundColor: scrim }]}>{children}</View>
-    </ImageBackground>
+    <Animated.View style={[styles.background, { opacity: enter }]}>
+      <ImageBackground source={WALLPAPER} resizeMode='cover' style={styles.background}>
+        <Animated.View style={[styles.scrim, { backgroundColor: scrim }]}>{children}</Animated.View>
+      </ImageBackground>
+    </Animated.View>
   )
 }
 

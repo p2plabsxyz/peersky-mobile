@@ -9,6 +9,7 @@ import HistoryIcon from '../../assets/icons/bootstrap/clock-history.svg'
 import BookmarksIcon from '../../assets/icons/bootstrap/bookmarks.svg'
 import GearIcon from '../../assets/icons/bootstrap/gear.svg'
 import PlusIcon from '../../assets/icons/bootstrap/plus-lg.svg'
+import PrinterIcon from '../../assets/icons/bootstrap/printer.svg'
 import ShareIcon from '../../assets/icons/bootstrap/share.svg'
 import StarFillIcon from '../../assets/icons/bootstrap/star-fill.svg'
 import StarIcon from '../../assets/icons/bootstrap/star.svg'
@@ -39,6 +40,7 @@ type BrowserOverflowMenuProps = {
   onOpenHistory: () => void
   onOpenSettings: () => void
   onOpenZoom?: () => void
+  onPrintPage?: () => void
   onSharePage?: () => void
   onShow: () => void
   onToggleDesktopView?: () => void
@@ -62,6 +64,7 @@ export function BrowserOverflowMenu ({
   onOpenHistory,
   onOpenSettings,
   onOpenZoom,
+  onPrintPage,
   onSharePage,
   onShow,
   onToggleDesktopView,
@@ -135,6 +138,18 @@ export function BrowserOverflowMenu ({
           isDark={isDark}
           label='Zoom'
           onPress={onOpenZoom}
+        />
+      )
+    }
+    if (onPrintPage) {
+      pageActions.push(
+        <MenuItem
+          key='print'
+          cardColor={cardColor}
+          icon={<PrinterIcon {...iconProps} />}
+          isDark={isDark}
+          label='Print'
+          onPress={onPrintPage}
         />
       )
     }

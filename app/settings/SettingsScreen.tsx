@@ -212,6 +212,7 @@ const LAN_PERMISSION_HELP = Platform.OS === 'ios'
   : 'PeerSky finds nearby devices over your local network. Check that Wi-Fi is on and that Nearby devices is allowed for PeerSky in Settings, with both devices on the same network.'
 
 const FEEDBACK_EMAIL = 'contact@p2plabs.xyz'
+const PEERSKY_WEBSITE_URL = 'https://peersky.p2plabs.xyz'
 
 const SETTINGS_PAGES: Array<{
   id: Exclude<SettingsPage, 'main'>
@@ -272,8 +273,10 @@ const SETTINGS_PAGES: Array<{
   },
   {
     id: 'lan-discovery',
-    title: 'LAN Discovery Test',
-    description: 'View peers discovered on local Wi-Fi',
+    // Not "LAN Discovery Test": what it is for is using PeerSky with no
+    // internet, and a screen called Test reads as something unfinished.
+    title: 'Offline',
+    description: 'Use PeerSky with no internet, over local Wi-Fi',
     icon: DisplayIcon
   },
   {
@@ -332,7 +335,7 @@ export function SettingsScreen(props: SettingsScreenProps) {
           />
         )}
         {page === 'permissions' && <Permissions {...props} />}
-        {page === 'link-device' && <LinkDeviceSettings {...props} />}
+        {page === 'link-device' && <LinkDeviceSettings {...props} onOpenUrl={openUrl} />}
         {page === 'lan-discovery' && <LANDiscoveryTest onCallRpc={props.onCallRpc} />}
         {page === 'about' && <AboutSettings onOpenUrl={openUrl} />}
       </SettingsSubpage>
@@ -518,11 +521,8 @@ function SettingsSubpage({
 }
 
 
-function LinkDeviceSettings({
-  onCallRpc,
-  storagePath,
-  onIdentityRestored
-}: SettingsScreenProps) {
+function LinkDeviceSettings(props: SettingsScreenProps) {
+  const { onCallRpc, storagePath, onIdentityRestored } = props
   const isDark = useSettingsDarkMode()
   const [encryptionPublicKey, setEncryptionPublicKey] = useState('')
   const [nonce, setNonce] = useState('')
@@ -708,6 +708,27 @@ function LinkDeviceSettings({
           <Text style={[styles.successText, isDark ? darkStyles.successText : null]}>{message}</Text>
         </View>
       )}
+
+      {/* Everything on this screen assumes the desktop browser is already
+          running somewhere, and until now nothing in the app said where to
+          get it. */}
+      <SettingsSection title='PeerSky on desktop'>
+        <Pressable
+          accessibilityRole='link'
+          style={[styles.linkRow, styles.linkRowFirst]}
+          onPress={() => props.onOpenUrl(PEERSKY_WEBSITE_URL)}
+        >
+          <SettingCopy
+            title='Get the desktop browser'
+            description='Get PeerSky on a Mac, Windows or Linux machine.'
+          />
+          <ChevronRightIcon
+            width={16}
+            height={16}
+            color={isDark ? BROWSER_PALETTES.dark.mutedText : '#8190a7'}
+          />
+        </Pressable>
+      </SettingsSection>
 
       <SettingsSection title='Device pairing code'>
         <View style={styles.linkDeviceBlock}>
@@ -895,7 +916,7 @@ function LANDiscoveryTest({
           <Text style={styles.errorText}>{error}</Text>
         </View>
       )}
-      <SettingsSection title='Local discovery'>
+      <SettingsSection title='Local LAN discovery'>
         <View style={styles.lanSummary}>
           <View style={styles.lanTitleRow}>
             <SettingCopy
@@ -963,7 +984,7 @@ function LANDiscoveryTest({
               No peers discovered yet
             </Text>
             <Text style={[styles.helperText, isDark ? darkStyles.secondaryText : null]}>
-              Open PeerSky on another device connected to the same Wi-Fi network. Neither one needs the internet: you can chat, share files and listen together with both of them offline.
+              Open PeerSky on another device connected to the same Wi-Fi network. Neither one needs the internet: you can chat and share files with both of them offline.
             </Text>
           </View>
         ) : peers.map((peer, index) => (
@@ -1185,6 +1206,12 @@ const styles = StyleSheet.create({
   },
   aboutRow: {
     padding: 16
+  },
+  // The top border is the line between one row and the next, so the first row
+  // in a card leaves it off: the card's own edge is already there and two of
+  // them read as a thick rule.
+  linkRowFirst: {
+    borderTopWidth: 0
   },
   linkRow: {
     alignItems: 'center',

@@ -96,4 +96,19 @@ describe('browser session lifecycle', () => {
     )
     assert.equal(getSettingsReturnPage(null, { tabId: 'tab-1', url: pending.url }), null)
   })
+
+  test('every settings page that opens a link reports which page it was', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const settings = await readFile(
+      new URL('../../app/settings/SettingsScreen.tsx', import.meta.url),
+      'utf8'
+    )
+
+    // props.onOpenUrl is the raw one and names no page, so back from the link
+    // lands wherever the tab was before instead of back in settings.
+    assert.doesNotMatch(settings, /onOpenUrl=\{props\.onOpenUrl\}/)
+    // One per page that has a link on it: privacy, p2p storage, link device
+    // and about.
+    assert.equal((settings.match(/onOpenUrl=\{openUrl\}/g) || []).length, 4)
+  })
 })
