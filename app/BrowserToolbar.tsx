@@ -9,8 +9,11 @@ import {
   TextInput,
   View
 } from 'react-native'
-import { MAX_BROWSER_URL_LENGTH } from './browser-shell.mjs'
+import { getBrowserAddressForUrl, MAX_BROWSER_URL_LENGTH } from './browser-shell.mjs'
 import { formatBrowserAddress } from './browser-appearance.mjs'
+import { getSiteSecurity, SITE_SECURITY } from './site-security.mjs'
+import ShieldLockIcon from '../assets/icons/bootstrap/shield-lock.svg'
+import ShieldSlashIcon from '../assets/icons/bootstrap/shield-slash.svg'
 import { BrowserOverflowMenu } from './settings/BrowserOverflowMenu'
 import { HistorySuggestions } from './history/HistorySuggestions'
 import type { BrowserHistoryItem } from './history/useBrowserHistory'
@@ -53,6 +56,8 @@ type BrowserToolbarProps = {
     text: string
   }
   position: 'top' | 'bottom'
+  currentUrl: string
+  onOpenSiteInfo: () => void
   showFullAddress: boolean
   pageActionAvailable: boolean
   shareActionAvailable: boolean
@@ -97,6 +102,8 @@ export function BrowserToolbar ({
   newTabDisabled,
   palette,
   position,
+  currentUrl,
+  onOpenSiteInfo,
   showFullAddress,
   pageActionAvailable,
   shareActionAvailable,
@@ -121,6 +128,9 @@ export function BrowserToolbar ({
   onToggleBookmark
 }: BrowserToolbarProps) {
   const [isAddressFocused, setIsAddressFocused] = useState(false)
+  // The page that loaded, not the text in the box: once you type an address
+  // and tap away without going there, the two disagree.
+  const siteSecurity = getSiteSecurity(getBrowserAddressForUrl(currentUrl))
   const [menuOffset, setMenuOffset] = useState(70)
   const addressInputRef = useRef<TextInput>(null)
   const addressFocusProgress = useRef(new Animated.Value(0)).current
@@ -277,6 +287,22 @@ export function BrowserToolbar ({
           backgroundColor: palette.address
         }
       ]}>
+        {/* The one thing a padlock is for: whether anybody on the way can read
+            this. Hidden while typing, where the address is being edited rather
+            than describing a page. */}
+        {!isAddressFocused && siteSecurity !== SITE_SECURITY.UNKNOWN && (
+          <Pressable
+            accessibilityRole='button'
+            accessibilityLabel='Connection information'
+            hitSlop={8}
+            onPress={onOpenSiteInfo}
+            style={styles.browserSecurity}
+          >
+            {siteSecurity === SITE_SECURITY.INSECURE
+              ? <ShieldSlashIcon width={15} height={15} color='#c2563f' />
+              : <ShieldLockIcon width={15} height={15} color={palette.mutedText} />}
+          </Pressable>
+        )}
         <TextInput
           ref={addressInputRef}
           accessibilityLabel='Browser address'

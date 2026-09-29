@@ -47,6 +47,11 @@ export const styles = StyleSheet.create({
   browserNavButtonDisabled: {
     opacity: 0.35
   },
+  browserSecurity: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingLeft: 10
+  },
   browserAddressContainer: {
     alignItems: 'center',
     backgroundColor: '#ffffff',

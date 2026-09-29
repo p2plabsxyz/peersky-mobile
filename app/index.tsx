@@ -123,6 +123,7 @@ import { BrowserToolbar } from './BrowserToolbar'
 import { BrowserBackSwipe } from './BrowserBackSwipe'
 import { BrowserZoomSheet } from './BrowserZoomSheet'
 import { WelcomeScreen } from './WelcomeScreen'
+import { BrowserSiteInfoSheet } from './BrowserSiteInfoSheet'
 import { hasSeenWelcome, markWelcomeSeen, WELCOME_FILE_NAME } from './welcome-state.mjs'
 import { tapFeedback } from './haptics'
 import {
@@ -324,6 +325,7 @@ export default function App () {
   // Read once, synchronously, so the first frame is either the welcome screen
   // or the browser rather than one flashing into the other.
   const [showWelcome, setShowWelcome] = useState(() => !hasSeenWelcome(getWelcomeFile()))
+  const [siteInfoVisible, setSiteInfoVisible] = useState(false)
   const [browserCurrentUrl, setBrowserCurrentUrl] = useState(BROWSER_HOME_URL)
   const [browserTitle, setBrowserTitle] = useState('New tab')
   const [browserFavicon, setBrowserFavicon] = useState<string | null>(null)
@@ -3138,6 +3140,7 @@ export default function App () {
     <BrowserToolbar
       activeTabId={browserTabsState.activeTabId}
       address={browserAddress}
+      currentUrl={browserCurrentUrl}
       bookmarkActionAvailable={browserBookmarkActionAvailable}
       bookmarksDisabled={!browserBookmarksReady}
       canGoBack={canBrowserGoBack}
@@ -3185,6 +3188,7 @@ export default function App () {
         void loadBrowserUrl(targetUrl)
       }}
       onToggleDesktopView={onBrowserToggleDesktopView}
+      onOpenSiteInfo={() => setSiteInfoVisible(true)}
       onToggleBookmark={onBrowserToggleBookmark}
     />
   )
@@ -4036,6 +4040,18 @@ export default function App () {
 
         {browserPreferences.addressBarPosition === 'bottom' && browserToolbar}
 
+        <BrowserSiteInfoSheet
+          blockingEnabled={browserPreferences.contentBlockingEnabled}
+          isDark={browserIsDark}
+          url={browserCurrentUrl}
+          visible={siteInfoVisible}
+          onClose={() => setSiteInfoVisible(false)}
+          onOpenPrivacySettings={() => {
+            setSiteInfoVisible(false)
+            setBrowserSettingsInitialPage('privacy')
+            setBrowserSettingsVisible(true)
+          }}
+        />
         <BrowserZoomSheet
           isDark={browserIsDark}
           pageZoom={activeBrowserPageZoom}
