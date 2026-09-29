@@ -83,7 +83,10 @@ export function PeerTunesScreen ({
       answer = { ok: false, error: error instanceof Error ? error.message : String(error) }
     }
     webViewRef.current?.injectJavaScript(
-      `window.__peerskyResolveScan(${serializeScanResult(requestId)}, ${JSON.stringify(answer)}); true;`
+      // Through the same escaping as a scan result: an error message carrying a
+      // line separator is valid JSON and a broken JavaScript string, which would
+      // leave the page waiting on a promise that never settles.
+      `window.__peerskyResolveScan(${serializeScanResult(requestId)}, ${serializeScanResult(answer)}); true;`
     )
   }, [onKeepOffline])
 

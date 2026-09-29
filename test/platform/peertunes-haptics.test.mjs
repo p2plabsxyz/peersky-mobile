@@ -76,3 +76,18 @@ test('the offer is only made where something can answer it', async () => {
   // Native answers with the same download the Hyperdrive screen starts.
   assert.match(screen, /await onKeepOffline\(url\)/)
 })
+
+// Whatever comes back rides into the page as a JavaScript literal, so it goes
+// through the same escaping a scanned QR code does.
+test('an answer with a line separator in it does not break the page', async () => {
+  const { serializeScanResult } = await import('../../app/peertunes/peertunes-screen.mjs')
+  const answer = { ok: false, error: 'no\u2028route' }
+
+  const literal = serializeScanResult(answer)
+  assert.doesNotMatch(literal, /\u2028|\u2029/)
+  assert.deepEqual(JSON.parse(literal.replace(/\\u2028/g, '\u2028')), answer)
+
+  const screen = await readFile(new URL('../../app/peertunes/PeerTunesScreen.tsx', import.meta.url), 'utf8')
+  assert.doesNotMatch(screen, /JSON\.stringify\(answer\)/)
+  assert.match(screen, /serializeScanResult\(answer\)/)
+})
