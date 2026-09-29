@@ -378,6 +378,33 @@ export const styles = StyleSheet.create({
     overflow: 'hidden',
     width: 64
   },
+  // Below the built-in apps, with air between the two so they read as two
+  // groups rather than one grid that happens to be eight wide.
+  browserFavouritesGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginTop: 34,
+    rowGap: 28,
+    width: '100%'
+  },
+  browserFavouriteIcon: {
+    alignItems: 'center',
+    borderRadius: 16,
+    height: 64,
+    justifyContent: 'center',
+    overflow: 'hidden',
+    width: 64
+  },
+  browserFavouriteIconImage: {
+    height: 38,
+    resizeMode: 'contain',
+    width: 38
+  },
+  // The first letter of the site, for the many that serve no icon at all.
+  browserFavouriteInitial: {
+    fontSize: 26,
+    fontWeight: '800'
+  },
   browserShortcutIconFrame: {
     position: 'relative'
   },

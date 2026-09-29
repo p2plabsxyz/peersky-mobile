@@ -11,6 +11,8 @@ import GearIcon from '../../assets/icons/bootstrap/gear.svg'
 import PlusIcon from '../../assets/icons/bootstrap/plus-lg.svg'
 import PrinterIcon from '../../assets/icons/bootstrap/printer.svg'
 import ShareIcon from '../../assets/icons/bootstrap/share.svg'
+import BookmarkFillIcon from '../../assets/icons/bootstrap/bookmark-fill.svg'
+import BookmarkIcon from '../../assets/icons/bootstrap/bookmark.svg'
 import StarFillIcon from '../../assets/icons/bootstrap/star-fill.svg'
 import StarIcon from '../../assets/icons/bootstrap/star.svg'
 import ZoomIcon from '../../assets/icons/bootstrap/zoom-in.svg'
@@ -26,6 +28,8 @@ const CLOSE_MS = 190
 type BrowserOverflowMenuProps = {
   bookmarkActionAvailable?: boolean
   bookmarksDisabled?: boolean
+  favouritesDisabled?: boolean
+  isFavourited?: boolean
   desktopView?: boolean
   isBookmarked?: boolean
   isDark?: boolean
@@ -41,6 +45,7 @@ type BrowserOverflowMenuProps = {
   onOpenSettings: () => void
   onOpenZoom?: () => void
   onPrintPage?: () => void
+  onToggleFavourite?: () => void
   onSharePage?: () => void
   onShow: () => void
   onToggleDesktopView?: () => void
@@ -50,6 +55,8 @@ type BrowserOverflowMenuProps = {
 export function BrowserOverflowMenu ({
   bookmarkActionAvailable = false,
   bookmarksDisabled = false,
+  favouritesDisabled = false,
+  isFavourited = false,
   desktopView = false,
   isBookmarked = false,
   isDark = false,
@@ -65,6 +72,7 @@ export function BrowserOverflowMenu ({
   onOpenSettings,
   onOpenZoom,
   onPrintPage,
+  onToggleFavourite,
   onSharePage,
   onShow,
   onToggleDesktopView,
@@ -111,10 +119,23 @@ export function BrowserOverflowMenu ({
         key='bookmark'
         cardColor={cardColor}
         disabled={bookmarksDisabled}
-        icon={isBookmarked ? <StarFillIcon {...iconProps} /> : <StarIcon {...iconProps} />}
+        icon={isBookmarked ? <BookmarkFillIcon {...iconProps} /> : <BookmarkIcon {...iconProps} />}
         isDark={isDark}
         label={isBookmarked ? 'Remove Bookmark' : 'Add Bookmark'}
         onPress={onToggleBookmark}
+      />
+    )
+  }
+  if (bookmarkActionAvailable && onToggleFavourite) {
+    pageActions.push(
+      <MenuItem
+        key='favourite'
+        cardColor={cardColor}
+        disabled={favouritesDisabled}
+        icon={isFavourited ? <StarFillIcon {...iconProps} /> : <StarIcon {...iconProps} />}
+        isDark={isDark}
+        label={isFavourited ? 'Remove Favourite' : 'Add Favourite'}
+        onPress={onToggleFavourite}
       />
     )
   }

@@ -21,6 +21,8 @@ const NAV_ICON_STROKE_WIDTH = 0.35
 type BrowserNavBarProps = {
   bookmarkActionAvailable: boolean
   bookmarksDisabled: boolean
+  favouritesDisabled: boolean
+  isFavourited: boolean
   canGoBack: boolean
   canGoForward: boolean
   desktopView: boolean
@@ -56,6 +58,7 @@ type BrowserNavBarProps = {
   onSharePage: () => void
   onToggleBookmark: () => void
   onToggleDesktopView: () => void
+  onToggleFavourite: () => void
 }
 
 /**
@@ -68,6 +71,8 @@ type BrowserNavBarProps = {
 export function BrowserNavBar ({
   bookmarkActionAvailable,
   bookmarksDisabled,
+  favouritesDisabled,
+  isFavourited,
   canGoBack,
   canGoForward,
   desktopView,
@@ -97,7 +102,8 @@ export function BrowserNavBar ({
   onPrintPage,
   onSharePage,
   onToggleBookmark,
-  onToggleDesktopView
+  onToggleDesktopView,
+  onToggleFavourite
 }: BrowserNavBarProps) {
   const insets = useSafeAreaInsets()
 
@@ -196,7 +202,9 @@ export function BrowserNavBar ({
         bookmarkActionAvailable={bookmarkActionAvailable}
         bookmarksDisabled={bookmarksDisabled}
         desktopView={desktopView}
+        favouritesDisabled={favouritesDisabled}
         isBookmarked={isBookmarked}
+        isFavourited={isFavourited}
         isDark={isDark}
         newTabDisabled={newTabDisabled}
         shareActionAvailable={shareActionAvailable}
@@ -223,6 +231,7 @@ export function BrowserNavBar ({
           onOpenMenu()
         }}
         onToggleBookmark={onToggleBookmark}
+        onToggleFavourite={onToggleFavourite}
         onToggleDesktopView={() => {
           onCloseMenu()
           onToggleDesktopView()

@@ -1048,7 +1048,7 @@ function AboutSettings({ onOpenUrl }: { onOpenUrl: (url: string) => void }) {
       <SettingsSection title='PeerSky Mobile'>
         <View style={styles.aboutRow}>
           <SettingCopy
-            title='PeerSky Browser'
+            title='PeerSky'
             description={`Version ${Constants.expoConfig?.version || 'unknown'}`}
           />
         </View>

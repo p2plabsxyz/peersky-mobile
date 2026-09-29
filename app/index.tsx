@@ -158,6 +158,9 @@ import {
   parseBrowserFaviconMessage
 } from './bookmarks/browser-favicon.mjs'
 import { useBrowserBookmarks } from './bookmarks/useBrowserBookmarks'
+import { useBrowserFavourites } from './favourites/useBrowserFavourites'
+import { BrowserFavourites } from './favourites/BrowserFavourites'
+import { MAX_BROWSER_FAVOURITES } from './favourites/browser-favourites.mjs'
 import { HistoryScreen } from './history/HistoryScreen'
 import { getBrowserHistoryDocumentTitle } from './history/browser-history.mjs'
 import { useBrowserHistory } from './history/useBrowserHistory'
@@ -392,6 +395,13 @@ export default function App () {
     removeBookmark: removeBrowserBookmark,
     toggleBookmark: toggleBrowserBookmark
   } = useBrowserBookmarks()
+  const {
+    favourites: browserFavourites,
+    isReady: browserFavouritesReady,
+    isFavourited: isBrowserPageFavourited,
+    removeFavourite: removeBrowserFavourite,
+    toggleFavourite: toggleBrowserFavourite
+  } = useBrowserFavourites()
   const {
     clearHistory: clearBrowserHistory,
     getSuggestions: getBrowserHistorySuggestions,
@@ -1561,6 +1571,44 @@ export default function App () {
     } else {
       setStatus('Unable to update bookmark')
     }
+  }
+
+  // The home screen keeps eight, so a ninth is a choice rather than a queue:
+  // say which one has to go instead of quietly dropping the oldest.
+  function onBrowserToggleFavourite () {
+    const result = toggleBrowserFavourite({
+      url: browserCurrentUrl,
+      title: browserTitle,
+      favicon: browserFavicon
+    })
+
+    if (result === 'limit-reached') {
+      Alert.alert(
+        'Home is full',
+        `Remove one of your ${MAX_BROWSER_FAVOURITES} favourites to add this one.`
+      )
+    } else if (result) {
+      setStatus(result === 'added' ? 'Added to home' : 'Removed from home')
+    } else {
+      setStatus('Unable to update favourites')
+    }
+  }
+
+  function onBrowserRemoveFavourite (favourite: { title: string, url: string }) {
+    Alert.alert(
+      favourite.title,
+      'Remove this from the home screen?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: () => {
+            if (removeBrowserFavourite(favourite.url)) setStatus('Removed from home')
+          }
+        }
+      ]
+    )
   }
 
   async function onBrowserSharePage () {
@@ -3263,6 +3311,8 @@ export default function App () {
     <BrowserNavBar
       bookmarkActionAvailable={browserBookmarkActionAvailable}
       bookmarksDisabled={!browserBookmarksReady}
+      favouritesDisabled={!browserFavouritesReady}
+      isFavourited={isBrowserPageFavourited(browserCurrentUrl)}
       canGoBack={canBrowserGoBack}
       canGoForward={canBrowserGoForward}
       desktopView={activeBrowserDesktopView}
@@ -3306,6 +3356,7 @@ export default function App () {
       onSharePage={() => void onBrowserSharePage()}
       onToggleBookmark={onBrowserToggleBookmark}
       onToggleDesktopView={onBrowserToggleDesktopView}
+      onToggleFavourite={onBrowserToggleFavourite}
     />
   )
   const runtimeInputTheme = {
@@ -3508,6 +3559,12 @@ export default function App () {
                   </Pressable>
                 ))}
               </View>
+              <BrowserFavourites
+                favourites={browserFavourites}
+                palette={browserChrome}
+                onOpen={(targetUrl) => void loadBrowserUrl(targetUrl)}
+                onRemove={onBrowserRemoveFavourite}
+              />
             </ScrollView>
             </BrowserHomeBackground>
             )
