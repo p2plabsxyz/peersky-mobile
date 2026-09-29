@@ -26,7 +26,6 @@ export type BrowserPreferences = {
   downloadOnlyOnWifi: boolean
   enforceManualPageZoom: boolean
   externalLinkBehavior: ExternalLinkBehavior
-  restoreTabsOnStartup: boolean
   searchEngine: SearchEngine
   showFullAddress: boolean
   theme: BrowserTheme
@@ -115,9 +114,6 @@ export function useBrowserPreferences () {
     },
     setExternalLinkBehavior: (externalLinkBehavior: ExternalLinkBehavior) => {
       return updatePreferences({ externalLinkBehavior })
-    },
-    setRestoreTabsOnStartup: (enabled: boolean) => {
-      return updatePreferences({ restoreTabsOnStartup: enabled })
     },
     setSearchEngine: (searchEngine: SearchEngine) => {
       return updatePreferences({ searchEngine })

@@ -29,6 +29,21 @@ export function getExternalAppName (scheme) {
   return 'another app'
 }
 
+// What a link is actually addressed to, for when no app can open it. A mailto:
+// carries a subject and a body in its query; the part worth showing, and worth
+// copying, is the address on its own.
+export function getExternalLinkTarget (url) {
+  const link = parseExternalAppLink(url)
+  if (!link) return null
+
+  const target = link.url.slice(link.scheme.length + 1).split('?')[0]
+  try {
+    return decodeURIComponent(target).trim() || null
+  } catch {
+    return target.trim() || null
+  }
+}
+
 export function canPromptExternalLink (lastPromptAt, now = Date.now()) {
   if (!Number.isFinite(lastPromptAt) || !Number.isFinite(now)) return false
   return now - lastPromptAt >= EXTERNAL_LINK_LAUNCH_COOLDOWN_MS

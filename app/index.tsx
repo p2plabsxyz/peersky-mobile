@@ -72,6 +72,7 @@ import {
 } from './browser-tabs.mjs'
 import {
   createBrowserResetSession,
+  getSettingsReturnPage,
   resolveBrowserStartupSession
 } from './browser-session.mjs'
 import {
@@ -89,6 +90,7 @@ import {
   canPromptExternalLink,
   formatExternalLinkForPrompt,
   getExternalAppName,
+  getExternalLinkTarget,
   getExternalLinkBehaviorAction,
   parseExternalAppLink
 } from './browser-permissions.mjs'
@@ -326,6 +328,12 @@ export default function App () {
   // or the browser rather than one flashing into the other.
   const [showWelcome, setShowWelcome] = useState(() => !hasSeenWelcome(getWelcomeFile()))
   const [siteInfoVisible, setSiteInfoVisible] = useState(false)
+  // Where a link opened from settings came from, so back can go back there.
+  const settingsReturnRef = useRef<{
+    page: SettingsPage
+    tabId: string
+    url: string
+  } | null>(null)
   const [browserCurrentUrl, setBrowserCurrentUrl] = useState(BROWSER_HOME_URL)
   const [browserTitle, setBrowserTitle] = useState('New tab')
   const [browserFavicon, setBrowserFavicon] = useState<string | null>(null)
@@ -348,7 +356,6 @@ export default function App () {
     setDownloadOnlyOnWifi,
     setEnforceManualPageZoom,
     setExternalLinkBehavior,
-    setRestoreTabsOnStartup,
     setSearchEngine,
     setShowFullAddress,
     setTheme,
@@ -560,7 +567,6 @@ export default function App () {
         if (cancelled) return
 
         const restored = resolveBrowserStartupSession({
-          restoreTabsOnStartup: browserPreferences.restoreTabsOnStartup,
           serializedSession,
           userInteracted: browserUserInteractedRef.current
         }) as BrowserTabsState | null
@@ -1263,6 +1269,21 @@ export default function App () {
     const activeBrowserTab = tabsState.tabs.find((tab) => tab.id === tabId)
     const currentEntry = activeBrowserTab?.history[activeBrowserTab.historyIndex]
     if (!activeBrowserTab || !currentEntry) return
+
+    // Settings is a sheet, not a history entry, so back from a page it opened
+    // used to land on whatever the tab was showing before. Only while that
+    // page is still the one on screen, in the tab it opened in: navigate on,
+    // or switch tabs, and back is ordinary again.
+    const settingsReturnPage = getSettingsReturnPage(settingsReturnRef.current, {
+      tabId,
+      url: currentEntry.url
+    })
+    if (settingsReturnPage) {
+      settingsReturnRef.current = null
+      setBrowserSettingsInitialPage(settingsReturnPage)
+      setBrowserSettingsVisible(true)
+      return
+    }
 
     const nextState = getBrowserBackState({
       history: activeBrowserTab.history,
@@ -2029,13 +2050,36 @@ export default function App () {
 
     externalLinkPromptOpenRef.current = true
     void Linking.openURL(externalLink.url)
-      .catch((error) => {
-        console.error('Failed opening external app link:', error)
-        Alert.alert('Unable to open link', 'No compatible app could open this link.')
-      })
+      .catch(() => offerExternalLinkFallback(externalLink.scheme, externalLink.url))
       .finally(() => {
         externalLinkPromptOpenRef.current = false
       })
+  }
+
+  // A device with no mail app, or no phone, is not a broken link. Telling
+  // somebody there is nothing to open leaves them stuck; handing them the
+  // address lets them write from wherever they read mail.
+  function offerExternalLinkFallback (scheme: string, targetUrl: string) {
+    const target = getExternalLinkTarget(targetUrl)
+    if (!target) {
+      Alert.alert('Unable to open link', 'No app on this device can open this link.')
+      return
+    }
+
+    Alert.alert(
+      `No app for ${getExternalAppName(scheme)}`,
+      target,
+      [
+        { text: 'Close', style: 'cancel' },
+        {
+          text: 'Copy',
+          onPress: () => {
+            Clipboard.setString(target)
+            setStatus('Copied')
+          }
+        }
+      ]
+    )
   }
 
 
@@ -2904,7 +2948,6 @@ export default function App () {
             isDark={browserIsDark}
             offlineNetworkAllowed={hyperOfflineNetworkAllowed}
             persistenceError={browserPreferencesError}
-            restoreTabsOnStartup={browserPreferences.restoreTabsOnStartup}
             searchEngine={browserPreferences.searchEngine}
             showFullAddress={browserPreferences.showFullAddress}
             theme={browserPreferences.theme}
@@ -2927,15 +2970,21 @@ export default function App () {
             onEnforceManualPageZoomChange={setEnforceManualPageZoom}
             onExternalLinkBehaviorChange={setExternalLinkBehavior}
             onFilterListsUpdated={refreshContentBlockedPages}
-            onRestoreTabsOnStartupChange={setRestoreTabsOnStartup}
             onSearchEngineChange={setSearchEngine}
             onShowFullAddressChange={setShowFullAddress}
             onThemeChange={setTheme}
             onWebsiteTextScaleChange={setWebsiteTextScale}
             onYoutubeAdBlockingEnabledChange={onYoutubeAdBlockingEnabledChange}
             onResetTabs={onBrowserResetTabs}
-            onOpenUrl={(targetUrl) => {
+            onOpenUrl={(targetUrl, fromPage) => {
               closeBrowserSettings()
+              settingsReturnRef.current = !fromPage || fromPage === 'main'
+                ? null
+                : {
+                    page: fromPage,
+                    tabId: browserTabsStateRef.current.activeTabId,
+                    url: targetUrl
+                  }
               void loadBrowserUrl(targetUrl)
             }}
             onOpenHyperItem={(item) => {

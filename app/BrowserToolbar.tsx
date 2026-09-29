@@ -27,6 +27,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 const TOOLBAR_ICON_SIZE = 22
 const ADDRESS_ACTION_ICON_SIZE = 20
+// The shield is a solid glyph filling its box, while reload and share are
+// thin outlines. Drawn at the same number it reads as the larger of the
+// three, so it is drawn smaller to look the same size.
+const ADDRESS_SECURITY_ICON_SIZE = 18
 const ADDRESS_CLEAR_ICON_SIZE = 20
 const TOOLBAR_ICON_STROKE_WIDTH = 0.35
 
@@ -131,6 +135,7 @@ export function BrowserToolbar ({
   // The page that loaded, not the text in the box: once you type an address
   // and tap away without going there, the two disagree.
   const siteSecurity = getSiteSecurity(getBrowserAddressForUrl(currentUrl))
+  const showSiteSecurity = !isAddressFocused && siteSecurity !== SITE_SECURITY.UNKNOWN
   const [menuOffset, setMenuOffset] = useState(70)
   const addressInputRef = useRef<TextInput>(null)
   const addressFocusProgress = useRef(new Animated.Value(0)).current
@@ -290,7 +295,7 @@ export function BrowserToolbar ({
         {/* The one thing a padlock is for: whether anybody on the way can read
             this. Hidden while typing, where the address is being edited rather
             than describing a page. */}
-        {!isAddressFocused && siteSecurity !== SITE_SECURITY.UNKNOWN && (
+        {showSiteSecurity && (
           <Pressable
             accessibilityRole='button'
             accessibilityLabel='Connection information'
@@ -298,15 +303,36 @@ export function BrowserToolbar ({
             onPress={onOpenSiteInfo}
             style={styles.browserSecurity}
           >
+            {/* Same size, colour and weight as reload and share, on the same
+                centre line, so the row reads as one set of controls rather
+                than a badge somebody bolted on. */}
             {siteSecurity === SITE_SECURITY.INSECURE
-              ? <ShieldSlashIcon width={15} height={15} color='#c2563f' />
-              : <ShieldLockIcon width={15} height={15} color={palette.mutedText} />}
+              ? (
+                <ShieldSlashIcon
+                  width={ADDRESS_SECURITY_ICON_SIZE}
+                  height={ADDRESS_SECURITY_ICON_SIZE}
+                  color='#c2563f'
+                  opacity={0.76}
+                />
+                )
+              : (
+                <ShieldLockIcon
+                  width={ADDRESS_SECURITY_ICON_SIZE}
+                  height={ADDRESS_SECURITY_ICON_SIZE}
+                  color={addressActionIconColor}
+                  opacity={0.76}
+                />
+                )}
           </Pressable>
         )}
         <TextInput
           ref={addressInputRef}
           accessibilityLabel='Browser address'
-          style={[styles.browserAddress, { color: palette.text }]}
+          style={[
+            styles.browserAddress,
+            showSiteSecurity ? styles.browserAddressBesideSecurity : null,
+            { color: palette.text }
+          ]}
           autoCapitalize='none'
           autoCorrect={false}
           keyboardType='url'
@@ -352,6 +378,7 @@ export function BrowserToolbar ({
             <Pressable
               accessibilityLabel={isLoading ? 'Stop loading page' : 'Reload page'}
               accessibilityRole='button'
+              hitSlop={6}
               style={styles.browserAddressAction}
               onPress={onReload}
             >
@@ -371,6 +398,7 @@ export function BrowserToolbar ({
               <Pressable
                 accessibilityLabel='Share page'
                 accessibilityRole='button'
+                hitSlop={6}
                 style={styles.browserAddressAction}
                 onPress={onSharePage}
               >

@@ -15,14 +15,14 @@ const QUALITIES = [
   {
     id: 'p2p',
     Icon: GlobeIcon,
-    title: 'The web, and the one after it',
-    body: 'Ordinary sites work as they always did. hyper:// pages come from other people’s devices instead of a company’s servers, and keep working with the internet down.'
+    title: 'Every site, plus peer to peer ones',
+    body: 'Normal websites work exactly as they do anywhere else. PeerSky also opens pages shared straight from other people’s devices, which keep working when the internet does not.'
   },
   {
     id: 'yours',
     Icon: DatabaseIcon,
-    title: 'Your data stays here',
-    body: 'Tabs, files, messages and keys live on this phone. Settings shows you everything that is stored and lets you remove any of it.'
+    title: 'We know nothing about you',
+    body: 'Nothing about you is sent to us, because there is nowhere to send it. Your tabs, files, messages and keys stay on this phone, and Settings lets you delete any of them.'
   },
   {
     id: 'clean',
@@ -33,8 +33,8 @@ const QUALITIES = [
   {
     id: 'together',
     Icon: PeopleIcon,
-    title: 'Talk and share directly',
-    body: 'Chat, notes and music move straight between devices, encrypted on the way, with nobody in the middle holding a copy.'
+    title: 'Chat and share, device to device',
+    body: 'Messages, notes and music go straight from your phone to theirs, encrypted the whole way. No server keeps a copy, because there is no server.'
   }
 ]
 
@@ -50,7 +50,7 @@ export function WelcomeScreen ({ isDark, onDone }: { isDark: boolean, onDone: ()
         <Image source={PEERSKY_ICON} style={styles.logo} />
         <Text style={[styles.title, { color: palette.text }]}>PeerSky</Text>
         <Text style={[styles.lead, { color: palette.mutedText }]}>
-          A browser with nobody in the middle.
+          A peer to peer, surveillance free browser.
         </Text>
 
         <View style={styles.qualities}>

@@ -5,7 +5,6 @@ import {
   Platform,
   Pressable,
   StyleSheet,
-  Switch,
   Text,
   TextInput,
   View
@@ -27,10 +26,8 @@ import type { SearchEngine } from './useBrowserPreferences'
 type GeneralProps = {
   customSearchUrl: string
   persistenceError: string | null
-  restoreTabsOnStartup: boolean
   searchEngine: SearchEngine
   onCustomSearchSave: (url: string) => boolean
-  onRestoreTabsOnStartupChange: (enabled: boolean) => void
   onSearchEngineChange: (searchEngine: SearchEngine) => void
   onResetTabs: () => void
 }
@@ -38,10 +35,8 @@ type GeneralProps = {
 export function General ({
   customSearchUrl,
   persistenceError,
-  restoreTabsOnStartup,
   searchEngine,
   onCustomSearchSave,
-  onRestoreTabsOnStartupChange,
   onSearchEngineChange,
   onResetTabs
 }: GeneralProps) {
@@ -114,22 +109,6 @@ export function General ({
           <Text style={styles.errorText}>{persistenceError}</Text>
         </View>
       )}
-
-      <SettingsSection title='Startup'>
-        <View style={styles.settingRow}>
-          <SettingCopy
-            title='Restore previous tabs'
-            description='Continue with your open tabs when PeerSky starts.'
-          />
-          <Switch
-            accessibilityLabel='Restore previous tabs on startup'
-            value={restoreTabsOnStartup}
-            onValueChange={onRestoreTabsOnStartupChange}
-            trackColor={{ false: '#bac3d2', true: '#7eb2ee' }}
-            thumbColor={restoreTabsOnStartup ? '#1f6fd1' : '#ffffff'}
-          />
-        </View>
-      </SettingsSection>
 
       {/* Which app opens a web link is a preference, not a permission: it
           grants nothing and revokes nothing. It sat under Permissions, where

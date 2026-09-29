@@ -20,7 +20,6 @@ describe('browser preferences', () => {
       downloadOnlyOnWifi: true,
       enforceManualPageZoom: true,
       externalLinkBehavior: 'allow',
-      restoreTabsOnStartup: false,
       searchEngine: 'custom',
       showFullAddress: true,
       theme: 'dark',
@@ -42,7 +41,6 @@ describe('browser preferences', () => {
       downloadOnlyOnWifi: 'yes',
       enforceManualPageZoom: 'yes',
       externalLinkBehavior: 'always',
-      restoreTabsOnStartup: 'yes',
       searchEngine: 'brave',
       showFullAddress: 'yes',
       theme: 'sepia',
@@ -53,12 +51,10 @@ describe('browser preferences', () => {
 
   test('fills missing appearance preferences with defaults', () => {
     assert.deepEqual(parseBrowserPreferences({
-      restoreTabsOnStartup: false,
       searchEngine: 'custom',
       customSearchUrl: 'https://search.example/?query=%s'
     }), {
       ...DEFAULT_BROWSER_PREFERENCES,
-      restoreTabsOnStartup: false,
       searchEngine: 'custom',
       customSearchUrl: 'https://search.example/?query=%s'
     })

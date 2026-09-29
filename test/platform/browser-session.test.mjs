@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 import {
   createBrowserResetSession,
+  getSettingsReturnPage,
   resolveBrowserStartupSession
 } from '../../app/browser-session.mjs'
 import {
@@ -11,10 +12,9 @@ import {
 } from '../../app/browser-tabs.mjs'
 
 describe('browser session lifecycle', () => {
-  test('restores a saved session when startup restoration is enabled', () => {
+  test('always restores a saved session', () => {
     const saved = addBrowserTabState(createBrowserTabsState())
     const restored = resolveBrowserStartupSession({
-      restoreTabsOnStartup: true,
       serializedSession: serializeBrowserTabsState(saved),
       userInteracted: false
     })
@@ -23,24 +23,22 @@ describe('browser session lifecycle', () => {
     assert.equal(restored.activeTabId, saved.activeTabId)
   })
 
-  test('skips restoration when disabled or when no session exists', () => {
-    const serializedSession = serializeBrowserTabsState(createBrowserTabsState())
-
+  test('skips restoration only when there is no saved session', () => {
     assert.equal(resolveBrowserStartupSession({
-      restoreTabsOnStartup: false,
-      serializedSession,
+      serializedSession: null,
       userInteracted: false
     }), null)
-    assert.equal(resolveBrowserStartupSession({
-      restoreTabsOnStartup: true,
-      serializedSession: null,
+
+    // A first run has nothing to restore. Every later start does, and there is
+    // no longer a switch that can throw it away.
+    assert.notEqual(resolveBrowserStartupSession({
+      serializedSession: serializeBrowserTabsState(createBrowserTabsState()),
       userInteracted: false
     }), null)
   })
 
   test('falls back safely when the saved session is malformed', () => {
     const restored = resolveBrowserStartupSession({
-      restoreTabsOnStartup: true,
       serializedSession: '{invalid',
       userInteracted: false
     })
@@ -51,7 +49,6 @@ describe('browser session lifecycle', () => {
 
   test('does not overwrite navigation started while restoration was loading', () => {
     assert.equal(resolveBrowserStartupSession({
-      restoreTabsOnStartup: true,
       serializedSession: serializeBrowserTabsState(createBrowserTabsState()),
       userInteracted: true
     }), null)
@@ -64,7 +61,6 @@ describe('browser session lifecycle', () => {
     ])
     const reset = createBrowserResetSession(webViewRefs, 'list')
     const restored = resolveBrowserStartupSession({
-      restoreTabsOnStartup: true,
       serializedSession: reset.serializedSession,
       userInteracted: false
     })
@@ -77,5 +73,27 @@ describe('browser session lifecycle', () => {
     assert.equal(restored.tabs.length, 1)
     assert.equal(restored.tabs[0].history[0].source.kind, 'home')
     assert.equal(restored.viewMode, 'list')
+  })
+
+  // Settings closes to show the link, so back had nothing of settings left to
+  // return to and dropped the user wherever the tab was before.
+  test('back returns to the settings page a link was opened from', () => {
+    const pending = { page: 'about', tabId: 'tab-1', url: 'https://github.com/p2plabsxyz/peersky-mobile' }
+
+    assert.equal(
+      getSettingsReturnPage(pending, { tabId: 'tab-1', url: pending.url }),
+      'about'
+    )
+    // Followed a link from there: back belongs to history again.
+    assert.equal(
+      getSettingsReturnPage(pending, { tabId: 'tab-1', url: `${pending.url}/issues` }),
+      null
+    )
+    // A different tab is a different place entirely.
+    assert.equal(
+      getSettingsReturnPage(pending, { tabId: 'tab-2', url: pending.url }),
+      null
+    )
+    assert.equal(getSettingsReturnPage(null, { tabId: 'tab-1', url: pending.url }), null)
   })
 })

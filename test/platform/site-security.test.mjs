@@ -59,7 +59,15 @@ test('the address bar shows the shield, and hides it while typing', async () => 
   assert.match(toolbar, /!isAddressFocused && siteSecurity !== SITE_SECURITY\.UNKNOWN/)
   // Only the unencrypted case is coloured: a padlock on every page teaches
   // people to ignore it.
-  assert.match(toolbar, /siteSecurity === SITE_SECURITY\.INSECURE\s*\n\s*\? <ShieldSlashIcon/)
+  assert.match(toolbar, /siteSecurity === SITE_SECURITY\.INSECURE/)
+  // And it is one of the address bar's icons, not a badge beside them: same
+  // size, same colour, same weight, on the same centre line.
+  const shieldStart = toolbar.indexOf('{showSiteSecurity && (')
+  const shield = toolbar.slice(shieldStart, toolbar.indexOf('<TextInput', shieldStart))
+  assert.ok(shieldStart > 0 && shield.length > 0)
+  assert.equal((shield.match(/width=\{ADDRESS_SECURITY_ICON_SIZE\}/g) || []).length, 2)
+  assert.equal((shield.match(/opacity=\{0\.76\}/g) || []).length, 2)
+  assert.match(shield, /color=\{addressActionIconColor\}/)
 })
 
 test('the sheet states blocking rather than inventing a count', async () => {
@@ -72,4 +80,48 @@ test('the sheet states blocking rather than inventing a count', async () => {
   assert.doesNotMatch(sheet, /blockedCount|blockCount|trackersBlocked/)
   // And it leads somewhere the switch can actually be changed.
   assert.match(sheet, /onOpenPrivacySettings/)
+})
+
+test('the sheet clears the home indicator once, not twice', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const sheet = await readFile(new URL('../../app/BrowserSiteInfoSheet.tsx', import.meta.url), 'utf8')
+
+  // Padding the safe area on the container and the sheet both left a band of
+  // empty sheet under the last row.
+  assert.doesNotMatch(sheet, /edges=\{\['top', 'left', 'right', 'bottom'\]\}/)
+  assert.match(sheet, /paddingBottom: Math\.max\(insets\.bottom, 16\)/)
+})
+
+test('privacy settings point at a test nobody here controls', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const privacy = await readFile(new URL('../../app/settings/Privacy.tsx', import.meta.url), 'utf8')
+
+  // It sits with the switch it tests, not off in its own section.
+  const protection = privacy.slice(
+    privacy.indexOf("title='Block ads and trackers'"),
+    privacy.indexOf("title='YouTube'")
+  )
+  assert.match(protection, /https:\/\/coveryourtracks\.eff\.org\//)
+})
+
+test('the address bar keeps one rhythm', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const toolbar = await readFile(new URL('../../app/BrowserToolbar.tsx', import.meta.url), 'utf8')
+  const styles = await readFile(new URL('../../app/styles.ts', import.meta.url), 'utf8')
+
+  const read = (name, key) => {
+    const block = styles.slice(styles.indexOf(`${name}: {`))
+    return Number(new RegExp(`${key}: ([0-9]+)`).exec(block.slice(0, block.indexOf('}')))?.[1])
+  }
+  const actionWidth = read('browserAddressAction', 'width')
+  const actionIcon = Number(/const ADDRESS_ACTION_ICON_SIZE = ([0-9]+)/.exec(toolbar)[1])
+  const securityIcon = Number(/const ADDRESS_SECURITY_ICON_SIZE = ([0-9]+)/.exec(toolbar)[1])
+
+  // Reload sits beside share, so their gap is the padding either side of both.
+  assert.equal(actionWidth - actionIcon, read('browserAddressBesideSecurity', 'paddingLeft'))
+  // A solid shield next to two thin outlines has to be drawn smaller to look
+  // the same size.
+  assert.ok(securityIcon < actionIcon)
+  // The narrower box gives back in touch area what it takes in width.
+  assert.equal((toolbar.match(/hitSlop=\{6\}/g) || []).length, 2)
 })

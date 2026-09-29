@@ -1,5 +1,5 @@
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native'
-import { SafeAreaView } from 'react-native-safe-area-context'
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { BROWSER_PALETTES } from './browser-appearance.mjs'
 import { describeSiteSecurity, getSiteSecurity, SITE_SECURITY } from './site-security.mjs'
@@ -33,6 +33,7 @@ export function BrowserSiteInfoSheet ({
   onClose,
   onOpenPrivacySettings
 }: BrowserSiteInfoSheetProps) {
+  const insets = useSafeAreaInsets()
   const palette = isDark ? BROWSER_PALETTES.dark : BROWSER_PALETTES.light
   const security = getSiteSecurity(url)
   const { title, body } = describeSiteSecurity(security)
@@ -46,9 +47,15 @@ export function BrowserSiteInfoSheet ({
       visible={visible}
       onRequestClose={onClose}
     >
-      <SafeAreaView style={styles.overlay} edges={['top', 'left', 'right', 'bottom']}>
+      <SafeAreaView style={styles.overlay} edges={['top', 'left', 'right']}>
         <Pressable accessibilityLabel='Close connection information' style={styles.backdrop} onPress={onClose} />
-        <View style={[styles.sheet, { backgroundColor: palette.surface }]}>
+        <View style={[
+          styles.sheet,
+          // The home indicator is the only thing that needs clearing here.
+          // Padding the safe area and the sheet both left a band of empty
+          // sheet under the last row.
+          { backgroundColor: palette.surface, paddingBottom: Math.max(insets.bottom, 16) }
+        ]}>
           <View style={styles.row}>
             {insecure
               ? <ShieldSlashIcon width={22} height={22} color='#c2563f' />
@@ -79,20 +86,22 @@ export function BrowserSiteInfoSheet ({
             </View>
           </View>
 
-          <Pressable
-            accessibilityRole='button'
-            style={({ pressed }) => [styles.action, pressed ? styles.actionPressed : null]}
-            onPress={onOpenPrivacySettings}
-          >
-            <Text style={[styles.actionText, { color: palette.selectedControl }]}>Privacy settings</Text>
-          </Pressable>
-          <Pressable
-            accessibilityRole='button'
-            style={({ pressed }) => [styles.action, pressed ? styles.actionPressed : null]}
-            onPress={onClose}
-          >
-            <Text style={[styles.actionText, { color: palette.mutedText }]}>Close</Text>
-          </Pressable>
+          <View style={styles.actions}>
+            <Pressable
+              accessibilityRole='button'
+              style={({ pressed }) => [styles.action, pressed ? styles.actionPressed : null]}
+              onPress={onOpenPrivacySettings}
+            >
+              <Text style={[styles.actionText, { color: palette.selectedControl }]}>Privacy settings</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole='button'
+              style={({ pressed }) => [styles.action, pressed ? styles.actionPressed : null]}
+              onPress={onClose}
+            >
+              <Text style={[styles.actionText, { color: palette.mutedText }]}>Close</Text>
+            </Pressable>
+          </View>
         </View>
       </SafeAreaView>
     </Modal>
@@ -106,7 +115,6 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     gap: 16,
-    paddingBottom: 12,
     paddingHorizontal: 20,
     paddingTop: 20
   },
@@ -115,7 +123,12 @@ const styles = StyleSheet.create({
   title: { fontSize: 15, fontWeight: '800' },
   body: { fontSize: 13, lineHeight: 19 },
   divider: { height: StyleSheet.hairlineWidth },
-  action: { justifyContent: 'center', minHeight: 46 },
+  actions: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between'
+  },
+  action: { justifyContent: 'center', minHeight: 44 },
   actionPressed: { opacity: 0.65 },
   actionText: { fontSize: 15, fontWeight: '700' }
 })

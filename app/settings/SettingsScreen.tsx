@@ -169,7 +169,6 @@ type SettingsScreenProps = {
   isDark: boolean
   offlineNetworkAllowed: boolean
   persistenceError: string | null
-  restoreTabsOnStartup: boolean
   searchEngine: SearchEngine
   showFullAddress: boolean
   theme: BrowserTheme
@@ -187,32 +186,19 @@ type SettingsScreenProps = {
   onEnforceManualPageZoomChange: (enabled: boolean) => void
   onExternalLinkBehaviorChange: (behavior: ExternalLinkBehavior) => void
   onFilterListsUpdated: () => void
-  onRestoreTabsOnStartupChange: (enabled: boolean) => void
   onSearchEngineChange: (searchEngine: SearchEngine) => void
   onShowFullAddressChange: (enabled: boolean) => void
   onThemeChange: (theme: BrowserTheme) => void
   onWebsiteTextScaleChange: (scale: WebsiteTextScale) => void
   onYoutubeAdBlockingEnabledChange: (enabled: boolean) => void
   onResetTabs: () => void
-  onOpenUrl: (url: string) => void
+  onOpenUrl: (url: string, fromPage?: SettingsPage) => void
   onOpenHyperItem: (item: { name: string, source: 'fetched' | 'published', url: string }) => void
   onIdentityRestored: () => void
 }
 
 const REPOSITORY_URL = 'https://github.com/p2plabsxyz/peersky-mobile'
 const LICENSE_URL = `${REPOSITORY_URL}/blob/main/LICENSE`
-const CONTENT_REPORT_TITLE = '[Content report]: '
-const CONTENT_REPORT_BODY = `## Content URL
-
-Provide the public HTTP, HTTPS, or Hyper URL where the content is available.
-
-## Reason for reporting
-
-Explain why this content should be reviewed without reproducing harmful content.
-
-## Confirmation
-
-- [ ] I have not included private credentials, personal information, or illegal media in this report.`
 // Both systems ask once and remember the answer. iOS puts it under the app's
 // own entry; Android keeps it with the permissions for nearby devices, and
 // needs Wi-Fi on for any of it to work.
@@ -222,7 +208,6 @@ const LAN_PERMISSION_HELP = Platform.OS === 'ios'
   : 'PeerSky finds nearby devices over your local network. Check that Wi-Fi is on and that Nearby devices is allowed for PeerSky in Settings, with both devices on the same network.'
 
 const FEEDBACK_EMAIL = 'contact@p2plabs.xyz'
-const CONTENT_REPORT_URL = `${REPOSITORY_URL}/issues/new?template=content-report.yml&title=${encodeURIComponent(CONTENT_REPORT_TITLE)}&body=${encodeURIComponent(CONTENT_REPORT_BODY)}`
 
 const SETTINGS_PAGES: Array<{
   id: Exclude<SettingsPage, 'main'>
@@ -306,6 +291,14 @@ export function SettingsScreen(props: SettingsScreenProps) {
   const { registerGoBack } = props
   let content
 
+  // Settings closes to show the link, so back has nothing of settings left to
+  // return to. Naming the page it was opened from is what lets the browser put
+  // it back instead of dropping the user wherever they were before.
+  const openUrl = useCallback(
+    (url: string) => props.onOpenUrl(url, pageRef.current),
+    [props.onOpenUrl]
+  )
+
   if (page === 'main') {
     content = (
       <SettingsHome
@@ -323,7 +316,7 @@ export function SettingsScreen(props: SettingsScreenProps) {
         {page === 'accessibility' && <Accessibility {...props} />}
         {page === 'appearance' && <Appearance {...props} />}
         {page === 'data-clearing' && <DataClearing {...props} />}
-        {page === 'privacy' && <Privacy {...props} />}
+        {page === 'privacy' && <Privacy {...props} onOpenUrl={openUrl} />}
         {page === 'p2p-storage' && (
           <P2PStorage
             downloadOnlyOnWifi={props.downloadOnlyOnWifi}
@@ -331,13 +324,13 @@ export function SettingsScreen(props: SettingsScreenProps) {
             onCallRpc={props.onCallRpc}
             onDownloadOnlyOnWifiChange={props.onDownloadOnlyOnWifiChange}
             onOpenItem={props.onOpenHyperItem}
-            onOpenUrl={props.onOpenUrl}
+            onOpenUrl={openUrl}
           />
         )}
         {page === 'permissions' && <Permissions {...props} />}
         {page === 'link-device' && <LinkDeviceSettings {...props} />}
         {page === 'lan-discovery' && <LANDiscoveryTest onCallRpc={props.onCallRpc} />}
-        {page === 'about' && <AboutSettings onOpenUrl={props.onOpenUrl} />}
+        {page === 'about' && <AboutSettings onOpenUrl={openUrl} />}
       </SettingsSubpage>
     )
   }
@@ -1014,10 +1007,9 @@ async function withTimeout<T> (promise: Promise<T>, timeoutMs: number) {
 
 function AboutSettings({ onOpenUrl }: { onOpenUrl: (url: string) => void }) {
   const isDark = useSettingsDarkMode()
-  const platformName = Platform.OS === 'ios' ? 'iOS' : 'Android'
-  const feedbackUrl = `${REPOSITORY_URL}/issues/new?title=${encodeURIComponent(`[${platformName}] Feedback`)}`
-  // An email, because reporting something should not need a GitHub account.
-  // The version rides in the subject so a report says which build it came from.
+  // One address for everything: feedback, a bug, or content that needs taking
+  // down. A GitHub account is not a fair thing to ask for any of those. The
+  // version rides in the subject so a report says which build it came from.
   const feedbackMailUrl = `mailto:${FEEDBACK_EMAIL}?subject=${encodeURIComponent(
     `Feedback for PeerSky ${Constants.expoConfig?.version || 'unknown'}`
   )}`
@@ -1047,28 +1039,8 @@ function AboutSettings({ onOpenUrl }: { onOpenUrl: (url: string) => void }) {
             color={isDark ? BROWSER_PALETTES.dark.mutedText : '#8190a7'}
           />
         </Pressable>
-        {/* Kept alongside feedback, not replaced by it. Both stores require a
-            way to report objectionable content in an app that shows content
-            other people published, and a general feedback address is not that:
-            this one files a report with the context a takedown needs. */}
-        <Pressable accessibilityRole='link' style={styles.linkRow} onPress={() => onOpenUrl(CONTENT_REPORT_URL)}>
-          <Text style={[styles.linkText, isDark ? darkStyles.primaryText : null]}>Report harmful content</Text>
-          <ChevronRightIcon
-            width={16}
-            height={16}
-            color={isDark ? BROWSER_PALETTES.dark.mutedText : '#8190a7'}
-          />
-        </Pressable>
         <Pressable accessibilityRole='link' style={styles.linkRow} onPress={() => onOpenUrl(feedbackMailUrl)}>
           <Text style={[styles.linkText, isDark ? darkStyles.primaryText : null]}>Send feedback</Text>
-          <ChevronRightIcon
-            width={16}
-            height={16}
-            color={isDark ? BROWSER_PALETTES.dark.mutedText : '#8190a7'}
-          />
-        </Pressable>
-        <Pressable accessibilityRole='link' style={styles.linkRow} onPress={() => onOpenUrl(feedbackUrl)}>
-          <Text style={[styles.linkText, isDark ? darkStyles.primaryText : null]}>Send {platformName} feedback</Text>
           <ChevronRightIcon
             width={16}
             height={16}

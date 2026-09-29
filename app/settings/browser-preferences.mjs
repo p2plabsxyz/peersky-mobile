@@ -8,7 +8,6 @@ export const DEFAULT_BROWSER_PREFERENCES = {
   downloadOnlyOnWifi: false,
   enforceManualPageZoom: false,
   externalLinkBehavior: 'ask',
-  restoreTabsOnStartup: true,
   searchEngine: 'duckduckgo',
   showFullAddress: false,
   theme: 'system',
@@ -55,9 +54,6 @@ export function parseBrowserPreferences (serialized) {
     externalLinkBehavior: EXTERNAL_LINK_BEHAVIORS.includes(value?.externalLinkBehavior)
       ? value.externalLinkBehavior
       : DEFAULT_BROWSER_PREFERENCES.externalLinkBehavior,
-    restoreTabsOnStartup: typeof value?.restoreTabsOnStartup === 'boolean'
-      ? value.restoreTabsOnStartup
-      : DEFAULT_BROWSER_PREFERENCES.restoreTabsOnStartup,
     searchEngine: SEARCH_ENGINES.some((engine) => engine.id === value?.searchEngine)
       ? value.searchEngine
       : DEFAULT_BROWSER_PREFERENCES.searchEngine,

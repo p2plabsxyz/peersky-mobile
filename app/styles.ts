@@ -49,6 +49,7 @@ export const styles = StyleSheet.create({
   },
   browserSecurity: {
     alignItems: 'center',
+    height: 32,
     justifyContent: 'center',
     paddingLeft: 10
   },
@@ -65,6 +66,9 @@ export const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.16,
     shadowRadius: 3
+  },
+  browserAddressBesideSecurity: {
+    paddingLeft: 6
   },
   browserAddress: {
     color: '#151821',
@@ -84,7 +88,7 @@ export const styles = StyleSheet.create({
     alignItems: 'center',
     height: 32,
     justifyContent: 'center',
-    width: 32
+    width: 26
   },
   browserAddressClearAction: {
     marginRight: 2
