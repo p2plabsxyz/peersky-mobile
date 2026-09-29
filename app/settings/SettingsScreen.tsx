@@ -70,6 +70,7 @@ import UniversalAccessIcon from '../../assets/icons/bootstrap/universal-access-c
 import DisplayIcon from '../../assets/icons/bootstrap/display.svg'
 import DatabaseIcon from '../../assets/icons/bootstrap/database.svg'
 import { MODAL_ORIENTATIONS } from '../modal-orientations'
+import { offerPermissionSettings } from '../permission-prompt'
 
 export type SettingsPage =
   | 'main'
@@ -212,6 +213,14 @@ Explain why this content should be reviewed without reproducing harmful content.
 ## Confirmation
 
 - [ ] I have not included private credentials, personal information, or illegal media in this report.`
+// Both systems ask once and remember the answer. iOS puts it under the app's
+// own entry; Android keeps it with the permissions for nearby devices, and
+// needs Wi-Fi on for any of it to work.
+const LAN_PERMISSION_TITLE = 'Nearby devices cannot be found'
+const LAN_PERMISSION_HELP = Platform.OS === 'ios'
+  ? 'PeerSky finds nearby devices over your local network. If that was turned down, switch Local Network back on for PeerSky in Settings. Wi-Fi also has to be on, and both devices on the same network.'
+  : 'PeerSky finds nearby devices over your local network. Check that Wi-Fi is on and that Nearby devices is allowed for PeerSky in Settings, with both devices on the same network.'
+
 const FEEDBACK_EMAIL = 'contact@p2plabs.xyz'
 const CONTENT_REPORT_URL = `${REPOSITORY_URL}/issues/new?template=content-report.yml&title=${encodeURIComponent(CONTENT_REPORT_TITLE)}&body=${encodeURIComponent(CONTENT_REPORT_BODY)}`
 
@@ -896,6 +905,33 @@ function LANDiscoveryTest({
             />
             {isRefreshing && <ActivityIndicator size='small' />}
           </View>
+          {/* This page is where somebody comes when nearby devices are not
+              showing up, so when discovery has genuinely failed it says why and
+              offers the one place the answer can be changed. A refusal of the
+              local network is the usual reason, and no app can ask for it a
+              second time. */}
+          {lanStatus && !lanStatus.available && (
+            <View style={styles.lanHelp}>
+              <Text style={[styles.lanHelpText, isDark ? darkStyles.secondaryText : null]}>
+                {LAN_PERMISSION_HELP}
+              </Text>
+              <Pressable
+                accessibilityRole='button'
+                style={({ pressed }) => [
+                  styles.secondaryButton,
+                  pressed ? styles.rowPressed : null
+                ]}
+                onPress={() => offerPermissionSettings(LAN_PERMISSION_TITLE, LAN_PERMISSION_HELP)}
+              >
+                <Text style={[
+                  styles.secondaryButtonText,
+                  isDark ? darkStyles.primaryText : null
+                ]}>
+                  Open settings
+                </Text>
+              </Pressable>
+            </View>
+          )}
           {lanStatus?.publicKey && (
             <Text style={[styles.keyText, isDark ? darkStyles.primaryText : null]}>
               Local peer: {lanStatus.publicKey}
@@ -1109,6 +1145,15 @@ const styles = StyleSheet.create({
     height: 42,
     justifyContent: 'center',
     width: 42
+  },
+  lanHelp: {
+    gap: 10,
+    marginTop: 4
+  },
+  lanHelpText: {
+    color: '#657086',
+    fontSize: 13,
+    lineHeight: 19
   },
   menuIconImage: {
     height: 26,

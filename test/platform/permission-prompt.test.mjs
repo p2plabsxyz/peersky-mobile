@@ -28,3 +28,22 @@ test('the picker uses it for both the camera and the library', async () => {
   // And a refusal still stops the pick rather than opening an empty picker.
   assert.match(gate, /if \(!allowed\) throw new Error/)
 })
+
+// The LAN page is where somebody goes when nearby devices are not showing up,
+// so a genuine failure there says why and offers the one place the answer can
+// be changed. No app can ask for the local network a second time.
+test('a failed local discovery explains itself and offers settings', async () => {
+  const settings = await readFile(new URL('../../app/settings/SettingsScreen.tsx', import.meta.url), 'utf8')
+
+  // Only on a real failure, which the backend reports; "no peers nearby" is
+  // the normal case and says nothing.
+  assert.match(settings, /lanStatus && !lanStatus\.available &&/)
+  assert.match(settings, /offerPermissionSettings\(LAN_PERMISSION_TITLE, LAN_PERMISSION_HELP\)/)
+
+  // Each system keeps the switch somewhere different, so the words differ.
+  assert.match(settings, /Platform\.OS === 'ios'/)
+  assert.match(settings, /Local Network back on for PeerSky/)
+  assert.match(settings, /Nearby devices is allowed for PeerSky/)
+  // And Wi-Fi being off looks identical from in here, so both say so.
+  assert.equal((settings.match(/Wi-Fi/g) || []).length >= 2, true)
+})
