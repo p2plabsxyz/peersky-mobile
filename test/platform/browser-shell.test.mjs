@@ -433,3 +433,28 @@ test('a note key opens P2PMD however the tab was opened', async () => {
   const typed = index.slice(index.indexOf('const noteKey = parseP2pmdNoteLink(nextUrl)'))
   assert.match(typed.slice(0, 400), /openInternalApp\('p2pmd'\)/)
 })
+
+// The button offers what pressing it does, not what you are looking at. Naming
+// it after the current view is the easy mistake, and it reads backwards.
+test('the P2PMD button names the view it takes you to', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const index = await readFile(new URL('../../app/index.tsx', import.meta.url), 'utf8')
+  const server = await readFile(new URL('../../backend/p2pmd/server.mjs', import.meta.url), 'utf8')
+
+  const button = index.slice(
+    index.indexOf('onPress={onP2pmdTogglePreview}'),
+    index.indexOf('<BrowserOverflowMenu')
+  )
+  // Editing offers Preview; anything else offers Edit.
+  assert.match(button, /p2pmdViewMode === 'edit' \? 'Preview' : 'Edit'/)
+  // And the icon agrees with the words: a pencil to go and edit, an eye to go
+  // and look.
+  assert.ok(button.indexOf('p2pmdViewMode !== \'edit\'') < button.indexOf('p2pmdPencilIcon'))
+  assert.ok(button.indexOf('p2pmdPencilIcon') < button.indexOf('p2pmdEyeIcon'))
+
+  // The label follows the page rather than guessing: every change of view is
+  // announced, and both sides start in the same one.
+  assert.match(server, /notifyNative\('p2pmd-view-mode', \{ mode: viewMode \}\)/)
+  assert.match(server, /let viewMode = 'edit'/)
+  assert.match(index, /useState<P2pmdViewMode>\('edit'\)/)
+})
