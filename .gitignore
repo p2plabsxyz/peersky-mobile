@@ -1,8 +1,11 @@
 node_modules/
 .expo/
 dist/
-ios/
-android/
+# Anchored: these are the generated native projects at the repo root, not any
+# directory called ios or android. Unanchored they also swallowed
+# assets/app-icons/ios, which the icon plugin needs at prebuild time.
+/ios/
+/android/
 npm-debug.*
 *.jks
 *.p8

@@ -40,12 +40,18 @@
         ],
         "NSPhotoLibraryUsageDescription": "PeerSky uses your photo library so you can attach a picture or video to a chat message or a note.",
         "LSApplicationCategoryType": "public.app-category.utilities"
+      },
+      "icon": {
+        "light": "./assets/app-icons/ios/cyan.png",
+        "dark": "./assets/app-icons/ios/appearance-dark.png",
+        "tinted": "./assets/app-icons/ios/appearance-tinted.png"
       }
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#67fce7"
+        "foregroundImage": "./assets/app-icons/android/foreground.png",
+        "monochromeImage": "./assets/app-icons/android/monochrome.png",
+        "backgroundImage": "./assets/app-icons/android/background-cyan.png"
       },
       "package": "xyz.p2plabs.peersky",
       "softwareKeyboardLayoutMode": "resize",
@@ -103,6 +109,7 @@
       "./plugins/with-lan-discovery",
       "./plugins/with-peerchat-background",
       "./plugins/with-peersky-share",
+      "./plugins/with-app-icons",
       [
         "expo-notifications",
         {

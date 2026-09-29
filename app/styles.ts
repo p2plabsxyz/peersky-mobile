@@ -334,6 +334,18 @@ export const styles = StyleSheet.create({
     paddingHorizontal: 4,
     width: '25%'
   },
+  // A label on a photograph needs its own separation, whichever way round the
+  // theme is. This is what lets the wallpaper stay a wallpaper.
+  browserShortcutTitleOnLight: {
+    textShadowColor: 'rgba(255, 255, 255, 0.95)',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 5
+  },
+  browserShortcutTitleOnDark: {
+    textShadowColor: 'rgba(0, 0, 0, 0.85)',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 5
+  },
   browserShortcutIcon: {
     alignItems: 'center',
     // A tile to look at while the artwork decodes. Without it the frame is

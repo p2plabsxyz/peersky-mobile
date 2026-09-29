@@ -12,9 +12,14 @@ describe('home wallpaper', () => {
 
     assert.match(background, /resizeMode='cover'/)
     assert.match(background, /backgroundColor: scrim/)
-    // One for each theme, so the labels keep the colour they already had.
-    assert.match(index, /rgba\(24, 24, 27, 0\.45\)/)
-    assert.match(index, /rgba\(255, 255, 255, 0\.72\)/)
+    // Not the same number in both: a white veil flattens a photograph in a
+    // way a dark one does not, so matching the numbers does not match the
+    // look. The labels carry their own contrast instead.
+    assert.match(index, /rgba\(24, 24, 27, 0\.35\)/)
+    assert.match(index, /rgba\(255, 255, 255, 0\.14\)/)
+    const styles = await readFile(new URL('../../app/styles.ts', import.meta.url), 'utf8')
+    assert.match(styles, /browserShortcutTitleOnLight[\s\S]{0,140}textShadowRadius: 5/)
+    assert.match(styles, /browserShortcutTitleOnDark[\s\S]{0,140}textShadowRadius: 5/)
   })
 
   test('the picture runs to the bottom edge', async () => {

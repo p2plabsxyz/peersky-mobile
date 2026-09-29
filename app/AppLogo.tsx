@@ -1,7 +1,8 @@
 import { Image, StyleSheet, View } from 'react-native'
 
 import { getAppLogoColor } from './app-logo-colors.mjs'
-import { BROWSER_HOME_ICON } from './internal-apps'
+
+const BIRD = require('../assets/images/logo.png')
 
 /**
  * The bird in its circle, drawn rather than shipped as a picture.
@@ -26,7 +27,7 @@ export function AppLogo ({ color, size = 96 }: { color: string, size?: number })
         }
       ]}
     >
-      <Image source={BROWSER_HOME_ICON} style={{ height: size * 0.76, width: size * 0.76 }} />
+      <Image source={BIRD} style={{ height: size * 0.76, width: size * 0.76 }} />
     </View>
   )
 }

@@ -127,6 +127,7 @@ import { BrowserBackSwipe } from './BrowserBackSwipe'
 import { BrowserZoomSheet } from './BrowserZoomSheet'
 import { WelcomeScreen } from './WelcomeScreen'
 import { BrowserHomeBackground } from './BrowserHomeBackground'
+import { applyAppIcon } from './app-icon'
 import { StartupScreen } from './StartupScreen'
 import { AppLoading } from './AppLoading'
 import { BrowserSiteInfoSheet } from './BrowserSiteInfoSheet'
@@ -2971,7 +2972,12 @@ export default function App () {
             youtubeAdBlockingEnabled={browserPreferences.youtubeAdBlockingEnabled}
             storagePath={identityStoragePath}
             onAddressBarPositionChange={setAddressBarPosition}
-            onAppLogoColorChange={setAppLogoColor}
+            onAppLogoColorChange={(color) => {
+              // The in-app logo changes either way; the home screen icon is a
+              // best effort, because a device can refuse an alternate icon.
+              if (!setAppLogoColor(color)) return
+              void applyAppIcon(color)
+            }}
             onForceDarkWebsitesChange={setForceDarkWebsites}
             onCallRpc={(command, data = {}) => callRpc(command, data)}
             onContentBlockingEnabledChange={onContentBlockingEnabledChange}
@@ -3306,7 +3312,7 @@ export default function App () {
   // Shown once, before anything else, on a phone that has never opened PeerSky.
   // Not a tour: one screen, four things, one button.
   if (!browserSessionReady) {
-    return <StartupScreen isDark={browserIsDark} logoColor={browserPreferences.appLogoColor} />
+    return <StartupScreen isDark={browserIsDark} />
   }
 
   if (showWelcome) {
@@ -3419,7 +3425,7 @@ export default function App () {
             )
           : browserSource.kind === 'home'
           ? (
-            <BrowserHomeBackground scrim={browserIsDark ? 'rgba(24, 24, 27, 0.45)' : 'rgba(255, 255, 255, 0.72)'}>
+            <BrowserHomeBackground scrim={browserIsDark ? 'rgba(24, 24, 27, 0.35)' : 'rgba(255, 255, 255, 0.14)'}>
             <ScrollView
               style={styles.browserContentPage}
               contentContainerStyle={[
@@ -3458,6 +3464,10 @@ export default function App () {
                       numberOfLines={2}
                       style={[
                         styles.browserShortcutTitle,
+                        // The labels carry their own contrast now, so the
+                        // wallpaper does not have to be washed out to hold
+                        // them.
+                        browserIsDark ? styles.browserShortcutTitleOnDark : styles.browserShortcutTitleOnLight,
                         { color: browserChrome.text, fontSize: browserShortcutTitleFontSize }
                       ]}
                     >
