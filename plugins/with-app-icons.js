@@ -5,7 +5,6 @@ const {
   IOSConfig,
   withAndroidManifest,
   withDangerousMod,
-  withInfoPlist,
   withMainApplication,
   withXcodeProject
 } = require('@expo/config-plugins')
@@ -18,11 +17,14 @@ const PACKAGE_REGISTRATION = 'add(PeerSkyAppIconPackage())'
 // the launcher has to have an icon under each one.
 const COLORS = ['cyan', 'green', 'violet', 'yellow', 'light', 'dark']
 
-// iOS reads alternate icons off plain files in the bundle rather than from the
-// asset catalog, at the two sizes a home screen actually draws.
-const IOS_SIZES = [
-  { scale: 2, size: 120 },
-  { scale: 3, size: 180 }
+// Every alternate is its own icon set in the asset catalog, not a loose file
+// in the bundle. Loose files are a single image each, with no dark or tinted
+// variant, so picking a colour used to switch the system appearance icons off
+// altogether. An icon set carries all three.
+const IOS_APPEARANCES = [
+  { file: null, name: '' },
+  { file: 'appearance-dark.png', name: 'dark' },
+  { file: 'appearance-tinted.png', name: 'tinted' }
 ]
 
 const ANDROID_DENSITIES = [
@@ -35,7 +37,6 @@ const ANDROID_DENSITIES = [
 
 module.exports = function withAppIcons (config) {
   config = withIosAlternateIcons(config)
-  config = withIosIconFiles(config)
   config = withIosModule(config)
   config = withAndroidAlternateIcons(config)
   config = withAndroidAliases(config)
@@ -137,68 +138,73 @@ async function resize (projectRoot, source, destination, size) {
   fs.writeFileSync(destination, resized)
 }
 
-function withIosIconFiles (config) {
+function withIosAlternateIcons (config) {
+  // Xcode only compiles icon sets it is told about by name, and only ships the
+  // ones beyond the primary when asked.
+  config = withXcodeProject(config, (config) => {
+    const project = config.modResults
+    const target = IOSConfig.XcodeUtils.getApplicationNativeTarget({
+      project,
+      projectName: IOSConfig.XcodeUtils.getProjectName(config.modRequest.projectRoot)
+    })
+
+    for (const { buildSettings } of Object.values(project.pbxXCBuildConfigurationSection())) {
+      if (!buildSettings || buildSettings.PRODUCT_NAME === undefined) continue
+      // A list, not a space joined string: the pbxproj parser reads a bare
+      // quote in a scalar as the start of a new token and refuses the file.
+      buildSettings.ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = COLORS
+        .map((color) => `"${iosIconName(color)}"`)
+      buildSettings.ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = 'YES'
+    }
+
+    if (!target) throw new Error('Alternate app icons need an application target.')
+    return config
+  })
+
   return withDangerousMod(config, ['ios', async (config) => {
     const projectRoot = config.modRequest.projectRoot
-    const platformRoot = config.modRequest.platformProjectRoot
     const projectName = IOSConfig.XcodeUtils.getProjectName(projectRoot)
-    const destination = path.join(platformRoot, projectName, 'AlternateIcons')
-    fs.mkdirSync(destination, { recursive: true })
+    const catalog = path.join(
+      config.modRequest.platformProjectRoot,
+      projectName,
+      'Images.xcassets'
+    )
 
     for (const color of COLORS) {
-      const source = path.join(projectRoot, 'assets/app-icons/ios', `${color}.png`)
-      for (const { scale, size } of IOS_SIZES) {
-        const suffix = scale === 1 ? '' : `@${scale}x`
-        await resize(
-          projectRoot,
-          source,
-          path.join(destination, `${iosIconName(color)}${suffix}.png`),
-          size
-        )
-      }
-    }
-    return config
-  }])
-}
+      const set = path.join(catalog, `${iosIconName(color)}.appiconset`)
+      fs.mkdirSync(set, { recursive: true })
 
-function withIosAlternateIcons (config) {
-  config = withInfoPlist(config, (config) => {
-    const icons = config.modResults.CFBundleIcons || {}
-    const alternates = {}
+      const images = []
+      for (const appearance of IOS_APPEARANCES) {
+        // The colour only changes the light icon. Dark is the same dark icon
+        // whichever colour is chosen, and tinted is greyscale by definition.
+        const source = appearance.file
+          ? path.join(projectRoot, 'assets/app-icons/ios', appearance.file)
+          : path.join(projectRoot, 'assets/app-icons/ios', `${color}.png`)
+        const filename = appearance.name
+          ? `icon-${appearance.name}.png`
+          : 'icon.png'
 
-    for (const color of COLORS) {
-      alternates[color] = {
-        CFBundleIconFiles: [iosIconName(color)],
-        UIPrerenderedIcon: false
-      }
-    }
-
-    config.modResults.CFBundleIcons = { ...icons, CFBundleAlternateIcons: alternates }
-    return config
-  })
-
-  // The files have to be in Copy Bundle Resources, not merely on disk, or
-  // setAlternateIconName fails at runtime with no icon found.
-  return withXcodeProject(config, (config) => {
-    const project = config.modResults
-    const projectName = IOSConfig.XcodeUtils.getProjectName(config.modRequest.projectRoot)
-
-    for (const color of COLORS) {
-      for (const { scale } of IOS_SIZES) {
-        const suffix = scale === 1 ? '' : `@${scale}x`
-        const filepath = `${projectName}/AlternateIcons/${iosIconName(color)}${suffix}.png`
-        if (project.hasFile(filepath)) continue
-        IOSConfig.XcodeUtils.addResourceFileToGroup({
-          filepath,
-          groupName: projectName,
-          project,
-          isBuildFile: true,
-          verbose: false
+        await resize(projectRoot, source, path.join(set, filename), 1024)
+        images.push({
+          filename,
+          idiom: 'universal',
+          platform: 'ios',
+          size: '1024x1024',
+          ...(appearance.name
+            ? { appearances: [{ appearance: 'luminosity', value: appearance.name }] }
+            : {})
         })
       }
+
+      fs.writeFileSync(
+        path.join(set, 'Contents.json'),
+        `${JSON.stringify({ images, info: { version: 1, author: 'peersky' } }, null, 2)}\n`
+      )
     }
+
     return config
-  })
+  }])
 }
 
 function withAndroidAlternateIcons (config) {

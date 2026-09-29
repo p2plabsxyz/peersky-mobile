@@ -484,4 +484,25 @@ test('the p2p address lists the built-in apps', async () => {
   assert.ok(p2pStart > 0 && screen.length > 0)
   assert.match(screen, /INTERNAL_APPS\.map/)
   assert.ok(INTERNAL_APPS.some((app) => app.id === 'holesail'))
+
+  test('following a search result keeps the search behind it', () => {
+    const web = (url) => ({ kind: 'web', uri: url })
+    const search = 'https://duckduckgo.com/?q=jj'
+    const result = 'https://example.com/article'
+
+    let state = commitBrowserEntryState(
+      { history: [{ url: BROWSER_HOME_URL, source: { kind: 'home' } }], historyIndex: 0 },
+      search,
+      web(search)
+    )
+    // The search settles with nothing behind it in the WebView's own list.
+    state = recordBrowserWebNavigationState(state, search, web(search), null, false, false)
+    // Tapping a result fires once while it is still loading, when the WebView
+    // has not added it to that list yet, and again when it lands.
+    state = recordBrowserWebNavigationState(state, result, web(result), null, false, true)
+    state = recordBrowserWebNavigationState(state, result, web(result), null, true, false)
+
+    assert.deepEqual(state.history.map((entry) => entry.url), [BROWSER_HOME_URL, search, result])
+    assert.equal(getBrowserBackState(state).currentUrl, search)
+  })
 })

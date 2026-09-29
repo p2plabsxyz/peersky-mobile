@@ -97,6 +97,23 @@ describe('browser session lifecycle', () => {
     assert.equal(getSettingsReturnPage(null, { tabId: 'tab-1', url: pending.url }), null)
   })
 
+  test('a link to a bare host still matches once it has loaded', () => {
+    // "https://example.com" becomes "https://example.com/" the moment anything
+    // parses it, so comparing what was asked for against what loaded failed
+    // for every link that names a host and no path.
+    const pending = { page: 'link-device', tabId: 'tab-1', url: 'https://peersky.p2plabs.xyz' }
+
+    assert.equal(
+      getSettingsReturnPage(pending, { tabId: 'tab-1', url: 'https://peersky.p2plabs.xyz/' }),
+      'link-device'
+    )
+    // A different page on the same host is somewhere you navigated to.
+    assert.equal(
+      getSettingsReturnPage(pending, { tabId: 'tab-1', url: 'https://peersky.p2plabs.xyz/download' }),
+      null
+    )
+  })
+
   test('every settings page that opens a link reports which page it was', async () => {
     const { readFile } = await import('node:fs/promises')
     const settings = await readFile(

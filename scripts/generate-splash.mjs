@@ -4,8 +4,8 @@
  * The native launch image and the startup screen the app draws itself are two
  * pictures shown back to back, so any difference between them reads as a
  * flash. Generating one from the same numbers as the other is what keeps them
- * the same picture: the bird, at the same size, in the middle, and nothing
- * else.
+ * the same picture: the badge, at the same size, in the middle, and nothing
+ * else. The badge itself is generated too, by scripts/generate-logo-variants.
  */
 import { readFileSync, writeFileSync } from 'node:fs'
 import { PNG } from 'pngjs'
@@ -23,15 +23,16 @@ const root = new URL('../', import.meta.url)
 // the bird with white behind it: the artwork is drawn with black outlines and
 // they vanish against a dark screen.
 const VARIANTS = [
-  { name: 'splash.png', background: [0xff, 0xff, 0xff], bird: 'assets/images/logo.png' },
-  { name: 'splash-dark.png', background: [0x18, 0x18, 0x1b], bird: 'assets/images/logo-on-dark.png' }
+  { name: 'splash.png', background: [0xff, 0xff, 0xff] },
+  { name: 'splash-dark.png', background: [0x18, 0x18, 0x1b] }
 ]
+const BADGE_FILE = 'assets/images/logo-badge.png'
 
 const birdLeft = Math.round((WIDTH - BIRD_BOX) / 2)
 const birdTop = Math.round((HEIGHT - BIRD_BOX) / 2)
 
 for (const variant of VARIANTS) {
-  const bird = PNG.sync.read(readFileSync(new URL(variant.bird, root)))
+  const bird = PNG.sync.read(readFileSync(new URL(BADGE_FILE, root)))
   const out = new PNG({ width: WIDTH, height: HEIGHT })
 
   for (let y = 0; y < HEIGHT; y++) {

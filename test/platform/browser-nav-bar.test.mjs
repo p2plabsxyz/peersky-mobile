@@ -46,9 +46,11 @@ describe('browser chrome layout', () => {
     // Rendered unconditionally, and after the bottom address bar, so it is the
     // last thing on screen either way.
     const bottomAt = index.indexOf("addressBarPosition === 'bottom' && browserToolbar")
-    const navAt = index.indexOf('{browserNavBar}', bottomAt)
+    const navAt = index.indexOf('browserNavBar}', bottomAt)
     assert.ok(navAt > bottomAt, 'the navigation bar has to come after the address bar')
-    assert.equal((index.match(/\{browserNavBar\}/g) || []).length, 1)
+    // Rendered once, and not while the keyboard is up.
+    assert.equal((index.match(/browserNavBar\}/g) || []).length, 1)
+    assert.match(index, /\{!isKeyboardVisible && browserNavBar\}/)
   })
 
   test('top is what a new install gets', async () => {
@@ -83,5 +85,22 @@ describe('chrome polish', () => {
     // that land hard. Opacity only: a transform would show an edge.
     assert.match(background, /opacity: enter/)
     assert.doesNotMatch(background, /scale|translateY/)
+  })
+})
+
+describe('peerchat onboarding', () => {
+  test('the continue button keeps its gap when the keyboard opens', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const screen = await readFile(
+      new URL('../../app/peerchat/PeerChatScreen.tsx', import.meta.url),
+      'utf8'
+    )
+
+    // KeyboardAvoidingView with behavior='padding' sets the container's own
+    // paddingBottom to the keyboard height, throwing away whatever was there,
+    // so the gap has to live on the button.
+    assert.match(screen, /introScreen: \{ flex: 1 \}/)
+    assert.match(screen, /onboardingScreen: \{ flex: 1 \}/)
+    assert.match(screen, /introContinue: \{[\s\S]{0,400}marginBottom: 28/)
   })
 })

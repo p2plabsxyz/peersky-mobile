@@ -163,6 +163,9 @@ type SettingsScreenProps = {
   // Lets the back gesture and the Android button step out of a subpage the way
   // its own back arrow does, instead of closing settings from inside one.
   registerGoBack?: (handler: (() => boolean) | null) => void
+  // Settings opened straight onto a page from somewhere else, so there is no
+  // settings list behind it to go back to.
+  closeOnBack?: boolean
   contentBlockingEnabled: boolean
   customSearchUrl: string
   downloadOnlyOnWifi: boolean
@@ -362,12 +365,15 @@ export function SettingsScreen(props: SettingsScreenProps) {
   // from one used to close settings altogether and land on the page behind it.
   const goBackOnePage = useCallback(() => {
     if (pageRef.current === 'main') return false
+    // Opened straight onto this page from outside, so back means leave, not
+    // "up to a list the person never came through".
+    if (props.closeOnBack && pageRef.current === props.initialPage) return false
     transition.stopAnimation()
     transition.setValue(reduceMotion ? 1 : 0)
     setTransitionDirection(-1)
     setPage('main')
     return true
-  }, [reduceMotion, transition])
+  }, [props.closeOnBack, props.initialPage, reduceMotion, transition])
 
   useEffect(() => {
     registerGoBack?.(goBackOnePage)

@@ -154,11 +154,21 @@ export function recordBrowserWebNavigationState (
   url,
   source,
   direction = null,
-  hasNativeBackEntry = true
+  hasNativeBackEntry = true,
+  isLoading = false
 ) {
   const currentEntry = state.history[state.historyIndex]
   if (currentEntry?.url === url) {
     return replaceBrowserEntryState(state, url, source)
+  }
+
+  // Nothing is decided until the navigation lands. A page that is still
+  // loading is not on the WebView's back list yet, so hasNativeBackEntry still
+  // describes the page being left, and reading it here made every link look
+  // like a redirect: following a search result replaced the search instead of
+  // stacking on it, and Back went to whatever was before the search.
+  if (isLoading) {
+    return buildBrowserState(state.history, state.historyIndex)
   }
 
   // A WebView with no native back entry has replaced or redirected its first

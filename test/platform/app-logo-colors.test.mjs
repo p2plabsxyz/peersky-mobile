@@ -36,13 +36,20 @@ test('the startup screen is the launch image, still', async () => {
   assert.doesNotMatch(startup, /Animated|ActivityIndicator|Easing/)
   assert.doesNotMatch(startup, /PeerSky</)
   assert.match(startup, /const BIRD_SIZE = 140/)
+  // One badge for both themes: the bird alone is drawn with black outlines
+  // and needs something behind it whichever background it lands on.
+  assert.match(startup, /logo-badge\.png/)
+  // One image, not one per theme. Only the screen behind it follows the theme.
+  assert.equal((startup.match(/require\(/g) || []).length, 1)
 
   // 140pt on a three times screen is 420 of a 1284 wide launch image.
   const box = Number(/const BIRD_BOX = ([0-9]+)/.exec(splash)[1])
   const width = Number(/const WIDTH = ([0-9]+)/.exec(splash)[1])
   assert.equal(box / 3, 140)
   assert.equal(width / 3, 428)
-  assert.doesNotMatch(splash, /RING|BADGE/)
+  // The circle is drawn once, by generate-logo-variants, and both the launch
+  // image and the app read that one file.
+  assert.doesNotMatch(splash, /RING_WIDTH|coverage\(/)
 
   // It has to come down on its own, or a failed boot is a screen you cannot
   // leave.
@@ -68,14 +75,11 @@ test('the bare bird launches, the tile sits among the other tiles', async () => 
   // The tab strip and the home grid are full of tiles, and a loose bird among
   // them reads as a missing icon rather than a different one.
   assert.match(apps, /BROWSER_HOME_ICON[^\n]*home-icon\.png/)
-  // The launch image has no tile, so neither does the screen that follows it.
-  assert.match(startup, /logo\.png/)
+  // The launch image shows the badge, so the screen that follows it does too.
+  assert.match(startup, /logo-badge\.png/)
   assert.doesNotMatch(startup, /home-icon\.png/)
 
-  // The artwork's outlines are black, so on a dark screen it needs the version
-  // with white behind it, and the dark launch image has to use the same one.
+  // Both launch images draw the same badge the app does.
   const splash = await readFile(new URL('../../scripts/generate-splash.mjs', import.meta.url), 'utf8')
-  assert.match(startup, /logo-on-dark\.png/)
-  assert.match(startup, /isDark \? BIRD\.dark : BIRD\.light/)
-  assert.match(splash, /splash-dark\.png', background: \[0x18, 0x18, 0x1b\], bird: 'assets\/images\/logo-on-dark\.png'/)
+  assert.match(splash, /const BADGE_FILE = 'assets\/images\/logo-badge\.png'/)
 })

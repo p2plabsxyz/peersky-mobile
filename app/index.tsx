@@ -129,6 +129,7 @@ import { BrowserZoomSheet } from './BrowserZoomSheet'
 import { WelcomeScreen } from './WelcomeScreen'
 import { BrowserHomeBackground } from './BrowserHomeBackground'
 import { applyAppIcon } from './app-icon'
+import { useKeyboardVisible } from './use-keyboard-visible'
 import {
   canPrintBrowserUrl,
   createBrowserPrintScript,
@@ -343,6 +344,7 @@ export default function App () {
   // or the browser rather than one flashing into the other.
   const [showWelcome, setShowWelcome] = useState(() => !hasSeenWelcome(getWelcomeFile()))
   const [siteInfoVisible, setSiteInfoVisible] = useState(false)
+  const isKeyboardVisible = useKeyboardVisible()
   // Where a link opened from settings came from, so back can go back there.
   const settingsReturnRef = useRef<{
     page: SettingsPage
@@ -479,6 +481,9 @@ export default function App () {
   const [p2pmdCameraPermission, requestP2pmdCameraPermission] = useCameraPermissions()
   const p2pmdScanHandledRef = useRef(false)
   const [browserSettingsInitialPage, setBrowserSettingsInitialPage] = useState<SettingsPage | undefined>(undefined)
+  // Opened from the navigation bar rather than through the settings list, so
+  // back has to leave rather than climb to a list nobody came through.
+  const [browserSettingsCloseOnBack, setBrowserSettingsCloseOnBack] = useState(false)
   const [p2pmdRoomHistory, setP2pmdRoomHistory] = useState<P2pmdRoomHistoryEntry[]>(loadP2pmdRoomHistory)
   const p2pmdRoomHistoryRef = useRef(p2pmdRoomHistory)
   const [p2pmdParticipants, setP2pmdParticipants] = useState<number | null>(null)
@@ -808,7 +813,7 @@ export default function App () {
   function syncBrowserEntry (
     url: string,
     source: BrowserSource,
-    webNavigation?: { canGoBack: boolean, canGoForward: boolean },
+    webNavigation?: { canGoBack: boolean, canGoForward: boolean, loading?: boolean },
     tabId?: string
   ) {
     const targetTabId = tabId || browserTabsStateRef.current.activeTabId
@@ -820,7 +825,8 @@ export default function App () {
       url,
       source,
       null,
-      webNavigation?.canGoBack
+      webNavigation?.canGoBack,
+      webNavigation?.loading
     )
     applyBrowserState({
       ...nextState,
@@ -1141,7 +1147,7 @@ export default function App () {
         kind: 'hyper',
         html: response.mediaType && response.mediaUrl
           ? createHyperMediaHtml(response)
-          : createHyperBrowserHtml(response, nextUrl),
+          : createHyperBrowserHtml(response, nextUrl, browserIsDark),
         baseUrl: nextUrl
       }
 
@@ -1166,7 +1172,7 @@ export default function App () {
       const message = error instanceof Error ? error.message : String(error)
       const source: BrowserSource = {
         kind: 'error',
-        html: createBrowserErrorHtml(nextUrl, message)
+        html: createBrowserErrorHtml(nextUrl, message, browserIsDark)
       }
 
       if (shouldCommit) {
@@ -1275,7 +1281,7 @@ export default function App () {
   function showBrowserError (targetUrl: string, message: string) {
     const source: BrowserSource = {
       kind: 'error',
-      html: createBrowserErrorHtml(targetUrl, message)
+      html: createBrowserErrorHtml(targetUrl, message, browserIsDark)
     }
 
     commitBrowserEntry(targetUrl, source)
@@ -2403,6 +2409,7 @@ export default function App () {
   function closeBrowserSettings () {
     setBrowserSettingsVisible(false)
     setBrowserSettingsInitialPage(undefined)
+    setBrowserSettingsCloseOnBack(false)
   }
 
   function forgetP2pmdRoom (key: string) {
@@ -3022,6 +3029,7 @@ export default function App () {
         <View style={styles.browserShellContent}>
           <SettingsScreen
             initialPage={browserSettingsInitialPage}
+            closeOnBack={browserSettingsCloseOnBack}
             registerGoBack={(handler) => { browserSettingsGoBackRef.current = handler }}
             addressBarPosition={browserPreferences.addressBarPosition}
             appLogoColor={browserPreferences.appLogoColor}
@@ -3341,10 +3349,12 @@ export default function App () {
       onOpenMenu={() => setBrowserMenuVisible(true)}
       onOpenNearby={() => {
         setBrowserSettingsInitialPage('lan-discovery')
+        setBrowserSettingsCloseOnBack(true)
         setBrowserSettingsVisible(true)
       }}
       onOpenSettings={() => {
         setBrowserMenuVisible(false)
+        setBrowserSettingsCloseOnBack(false)
         setBrowserSettingsVisible(true)
       }}
       onOpenTabs={() => {
@@ -4140,7 +4150,8 @@ export default function App () {
                     uri: navigationState.url
                   }, {
                     canGoBack: navigationState.canGoBack,
-                    canGoForward: navigationState.canGoForward
+                    canGoForward: navigationState.canGoForward,
+                    loading: navigationState.loading
                   }, tab.id)
                   const title = normalizeBrowserTabTitle(navigationState.title || navigationState.url)
                   setBrowserTitle(title)
@@ -4210,7 +4221,7 @@ export default function App () {
                   : entry.url
                 const errorSource: BrowserSource = {
                   kind: 'error',
-                  html: createBrowserErrorHtml(failedUrl, event.nativeEvent.description)
+                  html: createBrowserErrorHtml(failedUrl, event.nativeEvent.description, browserIsDark)
                 }
 
                 if (browserTabsStateRef.current.activeTabId === tab.id) {
@@ -4235,7 +4246,11 @@ export default function App () {
         />
 
         {browserPreferences.addressBarPosition === 'bottom' && browserToolbar}
-        {browserNavBar}
+        {/* Out of the way while typing. It is worth a row of the screen when
+            you are reading and worth nothing when you are filling in a
+            field, which on a short screen is the difference between seeing
+            that field and not. */}
+        {!isKeyboardVisible && browserNavBar}
 
         <BrowserSiteInfoSheet
           blockingEnabled={browserPreferences.contentBlockingEnabled}

@@ -2,12 +2,10 @@ import { Image, StyleSheet, View } from 'react-native'
 
 import { BROWSER_PALETTES } from './browser-appearance.mjs'
 
-// The artwork is drawn with black outlines, which vanish against a dark
-// screen, so the dark one carries its own white backing.
-const BIRD = {
-  light: require('../assets/images/logo.png'),
-  dark: require('../assets/images/logo-on-dark.png')
-}
+// The circle, the same mark the app wears on the home screen. The bird on its
+// own is drawn with black outlines and needs something behind it in either
+// theme, so the badge is that something in both.
+const BADGE = require('../assets/images/logo-badge.png')
 
 
 // 140pt, the same as the launch image draws it on a three times screen, so the
@@ -26,7 +24,7 @@ export function StartupScreen ({ isDark }: { isDark: boolean }) {
 
   return (
     <View style={[styles.screen, { backgroundColor: palette.shell }]}>
-      <Image source={isDark ? BIRD.dark : BIRD.light} style={styles.bird} />
+      <Image source={BADGE} style={styles.bird} />
     </View>
   )
 }

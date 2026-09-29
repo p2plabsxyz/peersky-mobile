@@ -2,6 +2,24 @@ import assert from 'node:assert/strict'
 import { readFile, stat } from 'node:fs/promises'
 import { describe, test } from 'node:test'
 
+// The frame size lives in a start-of-frame marker, which is any of SOF0
+// through SOF15 except the two that are not frames at all.
+function readJpegSize (buffer) {
+  let offset = 2
+  while (offset < buffer.length) {
+    if (buffer[offset] !== 0xff) {
+      offset++
+      continue
+    }
+    const marker = buffer[offset + 1]
+    if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+      return { height: buffer.readUInt16BE(offset + 5), width: buffer.readUInt16BE(offset + 7) }
+    }
+    offset += 2 + buffer.readUInt16BE(offset + 2)
+  }
+  throw new Error('No JPEG frame header found')
+}
+
 describe('home wallpaper', () => {
   test('the picture sits behind a scrim, not behind bare text', async () => {
     const background = await readFile(
@@ -32,11 +50,17 @@ describe('home wallpaper', () => {
     assert.match(index, /const browserBottomInsetColor = browserIsPortrait \? browserToolbarColor/)
   })
 
-  test('the wallpaper is small enough to ship', async () => {
-    const file = await stat(new URL('../../assets/images/wallpaper-ten-lakes.jpg', import.meta.url))
+  test('the wallpaper is sharp enough to look at and small enough to ship', async () => {
+    const url = new URL('../../assets/images/wallpaper-ten-lakes.jpg', import.meta.url)
+    const file = await stat(url)
+    const { height, width } = readJpegSize(await readFile(url))
 
-    // The desktop copy is 2.6MB at 3024px, which is a lot of bundle for a
-    // backdrop nobody looks at directly.
+    // Scaling the whole landscape down to fit left a picture 1248 tall, which
+    // the phone then stretched to well over 2000: that is the softness. A
+    // portrait crop at the source's own height is sharp and no bigger.
+    assert.ok(height >= 2000, `wallpaper is only ${height} tall`)
+    assert.ok(width < height, 'the home screen is portrait, so the picture should be')
+    // The desktop copy is 2.6MB, which is a lot of bundle for a backdrop.
     assert.ok(file.size < 900 * 1024, `wallpaper is ${Math.round(file.size / 1024)}KB`)
   })
 })

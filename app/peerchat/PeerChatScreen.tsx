@@ -4373,7 +4373,7 @@ const lightColors = {
 const styles = StyleSheet.create({
   screen: { flex: 1 },
   centered: { alignItems: 'center', flex: 1, gap: 12, justifyContent: 'center' },
-  introScreen: { flex: 1, paddingBottom: 32 },
+  introScreen: { flex: 1 },
   introContent: { flexGrow: 1, paddingHorizontal: 22, paddingVertical: 24 },
   introLogo: { alignSelf: 'center', borderRadius: 18, height: 72, marginBottom: 18, width: 72 },
   introTitle: { fontSize: 25, fontWeight: '900', lineHeight: 31, marginBottom: 24, textAlign: 'center' },
@@ -4382,9 +4382,20 @@ const styles = StyleSheet.create({
   introPointNumber: { alignItems: 'center', borderRadius: 15, height: 30, justifyContent: 'center', width: 30 },
   introPointNumberText: { fontSize: 13, fontWeight: '900' },
   introPointText: { flex: 1, fontSize: 14, lineHeight: 20 },
-  introContinue: { alignItems: 'center', borderRadius: 12, justifyContent: 'center', marginHorizontal: 22, minHeight: 50 },
+  introContinue: {
+    alignItems: 'center',
+    borderRadius: 12,
+    justifyContent: 'center',
+    // On the button rather than the screen around it: with
+    // behavior='padding' the keyboard overwrites the container's own
+    // paddingBottom, which left this sitting flush on whatever was
+    // below it.
+    marginBottom: 28,
+    marginHorizontal: 22,
+    minHeight: 50
+  },
   introContinueText: { color: '#ffffff', fontSize: 15, fontWeight: '900' },
-  onboardingScreen: { flex: 1, paddingBottom: 32 },
+  onboardingScreen: { flex: 1 },
   onboardingContent: { flexGrow: 1, justifyContent: 'center', paddingHorizontal: 24, paddingVertical: 28 },
   onboardingLogo: { alignSelf: 'center', borderRadius: 18, height: 72, marginBottom: 16, width: 72 },
   onboardingTitle: { fontSize: 25, fontWeight: '900', textAlign: 'center' },

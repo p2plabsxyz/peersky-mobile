@@ -27,8 +27,21 @@ export function resolveBrowserStartupSession ({
  */
 export function getSettingsReturnPage (pending, { tabId, url }) {
   if (!pending?.page) return null
-  if (pending.tabId !== tabId || pending.url !== url) return null
+  if (pending.tabId !== tabId) return null
+  // "https://example.com" becomes "https://example.com/" the moment anything
+  // parses it, so comparing the address as typed against the address that
+  // loaded failed for every link to a bare host.
+  if (normalizeReturnUrl(pending.url) !== normalizeReturnUrl(url)) return null
   return pending.page
+}
+
+function normalizeReturnUrl (url) {
+  const value = String(url || '')
+  try {
+    return new URL(value).href
+  } catch {
+    return value
+  }
 }
 
 export function createBrowserResetSession (webViewRefs, viewMode) {
