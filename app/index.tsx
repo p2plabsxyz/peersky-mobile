@@ -122,6 +122,8 @@ import { useBrowserPreferences } from './settings/useBrowserPreferences'
 import { BrowserToolbar } from './BrowserToolbar'
 import { BrowserBackSwipe } from './BrowserBackSwipe'
 import { BrowserZoomSheet } from './BrowserZoomSheet'
+import { WelcomeScreen } from './WelcomeScreen'
+import { hasSeenWelcome, markWelcomeSeen, WELCOME_FILE_NAME } from './welcome-state.mjs'
 import { tapFeedback } from './haptics'
 import {
   BrowserMediaSheet,
@@ -319,6 +321,9 @@ export default function App () {
   const [status, setStatus] = useState('Starting Hyper runtime...')
   const [identityStoragePath, setIdentityStoragePath] = useState('')
   const [browserAddress, setBrowserAddress] = useState('')
+  // Read once, synchronously, so the first frame is either the welcome screen
+  // or the browser rather than one flashing into the other.
+  const [showWelcome, setShowWelcome] = useState(() => !hasSeenWelcome(getWelcomeFile()))
   const [browserCurrentUrl, setBrowserCurrentUrl] = useState(BROWSER_HOME_URL)
   const [browserTitle, setBrowserTitle] = useState('New tab')
   const [browserFavicon, setBrowserFavicon] = useState<string | null>(null)
@@ -3223,6 +3228,20 @@ export default function App () {
     browserPreferences.addressBarPosition !== 'bottom' &&
     (browserSource.kind === 'web' || browserSource.kind === 'hyper')
 
+  // Shown once, before anything else, on a phone that has never opened PeerSky.
+  // Not a tour: one screen, four things, one button.
+  if (showWelcome) {
+    return (
+      <WelcomeScreen
+        isDark={browserIsDark}
+        onDone={() => {
+          markWelcomeSeen(getWelcomeFile())
+          setShowWelcome(false)
+        }}
+      />
+    )
+  }
+
   return (
     // No left or right safe-area edge on purpose. Insetting the whole shell
     // left the toolbar stopping short of both screen edges in landscape, with
@@ -4121,6 +4140,10 @@ function saveP2pmdPeerDisplayName (value: unknown): RpcResponse {
 
 function serializeInlineScriptValue (value: string | null) {
   return JSON.stringify(value).replace(/</g, '\\u003c')
+}
+
+function getWelcomeFile () {
+  return new File(Paths.document, WELCOME_FILE_NAME)
 }
 
 function getBrowserSessionFile () {

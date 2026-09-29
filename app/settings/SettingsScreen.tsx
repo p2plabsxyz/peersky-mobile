@@ -1047,6 +1047,18 @@ function AboutSettings({ onOpenUrl }: { onOpenUrl: (url: string) => void }) {
             color={isDark ? BROWSER_PALETTES.dark.mutedText : '#8190a7'}
           />
         </Pressable>
+        {/* Kept alongside feedback, not replaced by it. Both stores require a
+            way to report objectionable content in an app that shows content
+            other people published, and a general feedback address is not that:
+            this one files a report with the context a takedown needs. */}
+        <Pressable accessibilityRole='link' style={styles.linkRow} onPress={() => onOpenUrl(CONTENT_REPORT_URL)}>
+          <Text style={[styles.linkText, isDark ? darkStyles.primaryText : null]}>Report harmful content</Text>
+          <ChevronRightIcon
+            width={16}
+            height={16}
+            color={isDark ? BROWSER_PALETTES.dark.mutedText : '#8190a7'}
+          />
+        </Pressable>
         <Pressable accessibilityRole='link' style={styles.linkRow} onPress={() => onOpenUrl(feedbackMailUrl)}>
           <Text style={[styles.linkText, isDark ? darkStyles.primaryText : null]}>Send feedback</Text>
           <ChevronRightIcon
