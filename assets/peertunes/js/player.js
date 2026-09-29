@@ -25,6 +25,10 @@
         this._positionState();
       });
       audio.addEventListener("durationchange", () => this.dispatchEvent(new CustomEvent("time")));
+      // Where the playhead actually landed, and how fast it is moving: both are
+      // what the system scrubber draws itself from.
+      audio.addEventListener("seeked", () => this._positionState(true));
+      audio.addEventListener("ratechange", () => this._positionState(true));
       audio.addEventListener("error", () => {
         if (this.current()) this.dispatchEvent(new CustomEvent("trackerror", { detail: this.current() }));
       });
@@ -157,18 +161,28 @@
       }
     }
 
-    // Jump to an absolute position, used by the touch scrubber.
-    seekTo(sec) {
+    // Jump to an absolute position: the touch scrubber, and the one on the
+    // lock screen. fastSeek is what the system asks for mid-drag, cheaper, with
+    // the exact landing settled by the seek that ends it.
+    seekTo(sec, fast = false) {
       const d = this.audio.duration;
       if (!Number.isFinite(d) || d <= 0) return;
-      this.audio.currentTime = Math.min(Math.max(0, sec), Math.max(0, d - 0.2));
+      const target = Math.min(Math.max(0, sec), Math.max(0, d - 0.2));
+      try {
+        if (fast && typeof this.audio.fastSeek === "function") this.audio.fastSeek(target);
+        else this.audio.currentTime = target;
+      } catch {
+        return;
+      }
+      this._positionState(true);
       this.dispatchEvent(new CustomEvent("time"));
     }
 
     seekBy(sec) {
       const d = this.audio.duration;
       if (!Number.isFinite(d)) return;
-      this.audio.currentTime = Math.min(Math.max(0, this.audio.currentTime + sec), d - 0.2);
+      // Through the same path as a drag, so the system hears about it too.
+      this.seekTo(this.audio.currentTime + sec);
     }
 
     setVolume(v) {
@@ -195,7 +209,14 @@
       safe("pause", () => this.audio.pause());
       safe("previoustrack", () => this.prev());
       safe("nexttrack", () => this.next());
-      safe("seekto", (d) => { if (d.seekTime != null) this.audio.currentTime = d.seekTime; });
+      // The system scrubber moves on what we last reported, not on what the
+      // audio element is doing, and reporting is throttled to once a second. A
+      // drag that landed inside that second was answered with the old position
+      // and the scrubber sprang straight back. Every seek reports at once.
+      safe("seekto", (d) => {
+        if (d.seekTime == null) return;
+        this.seekTo(d.seekTime, d.fastSeek === true);
+      });
       safe("seekbackward", (d) => this.seekBy(-(d.seekOffset || 10)));
       safe("seekforward", (d) => this.seekBy(d.seekOffset || 10));
       safe("stop", () => { this.audio.pause(); this.audio.currentTime = 0; });
@@ -218,12 +239,12 @@
       } catch {}
     }
 
-    _positionState() {
+    _positionState(force = false) {
       if (!("mediaSession" in navigator) || !navigator.mediaSession.setPositionState) return;
       const d = this.audio.duration;
       if (!Number.isFinite(d) || d <= 0) return;
       const now = performance.now();
-      if (this._lastPos && now - this._lastPos < 1000) return;
+      if (!force && this._lastPos && now - this._lastPos < 1000) return;
       this._lastPos = now;
       try {
         navigator.mediaSession.setPositionState({

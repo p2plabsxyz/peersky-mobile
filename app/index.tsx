@@ -120,6 +120,7 @@ import { useBrowserPreferences } from './settings/useBrowserPreferences'
 import { BrowserToolbar } from './BrowserToolbar'
 import { BrowserBackSwipe } from './BrowserBackSwipe'
 import { BrowserZoomSheet } from './BrowserZoomSheet'
+import { tapFeedback } from './haptics'
 import {
   BrowserMediaSheet,
   type BrowserMediaTarget
@@ -1010,6 +1011,18 @@ export default function App () {
       return
     }
 
+    // A note key tapped in PeerChat opens a new tab, and a new tab lands here
+    // rather than in loadBrowserUrl, so without this the link that already
+    // worked from the address bar came back as an error page.
+    const noteKey = parseP2pmdNoteLink(url)
+    if (noteKey) {
+      openInternalApp('p2pmd', false)
+      setP2pmdJoinKey(noteKey)
+      setP2pmdSetupError(null)
+      setStatus('Note key ready. Press Join to open it.')
+      return
+    }
+
     if (isHyperUrl(url)) {
       await loadHyperBrowserUrl(url, false, false)
       return
@@ -1150,6 +1163,21 @@ export default function App () {
       setPeertunesMounted(true)
       setPeertunesLaunchSuffix(launchSuffix)
       void ensurePeerTunesServer()
+    }
+  }
+
+  // The same download the Hyperdrive screen starts, asked for by the PeerTunes
+  // page. An imported playlist is a list of hyper:// urls and nothing more
+  // until the folder behind it is on the device.
+  async function keepPeerTunesFolderOffline (url: string) {
+    try {
+      const response = await callRpc(RPC_HYPER_OFFLINE_KEEP, { url, wait: false })
+      if (!response.ok) return { ok: false, error: response.error || 'Unable to keep this offline.' }
+      const status = (response.item as { status?: string } | undefined)?.status
+      if (status === 'waiting-for-wifi') setStatus('Offline download waiting for Wi-Fi')
+      return { ok: true, status }
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) }
     }
   }
 
@@ -3544,7 +3572,10 @@ export default function App () {
                             accessibilityRole='button'
                             disabled={isBooting || isLoading}
                             accessibilityHint='Press and hold to remove this note from the list'
-                            onLongPress={() => confirmForgetP2pmdRoom(room)}
+                            onLongPress={() => {
+                              tapFeedback()
+                              confirmForgetP2pmdRoom(room)
+                            }}
                             onPress={() => void (room.role === 'host'
                               ? onP2pmdRoomCreate(room.key)
                               : onP2pmdRoomJoin(room.key))}
@@ -3638,7 +3669,7 @@ export default function App () {
               styles.browserWebViewLayer,
               activeTab === 'peertunes' && browserSource.kind === 'app'
                 ? null
-                : styles.browserWebViewLayerHidden
+                : styles.browserWebViewLayerOffscreen
             ]}
           >
             <PeerTunesScreen
@@ -3647,6 +3678,7 @@ export default function App () {
               launchSuffix={peertunesLaunchSuffix}
               localUrl={peertunesUrl}
               onEnsureServer={() => void ensurePeerTunesServer()}
+              onKeepOffline={keepPeerTunesFolderOffline}
               onOpenUrl={(targetUrl) => openBrowserUrlInNewTab(targetUrl)}
               onStatus={setStatus}
             />

@@ -412,6 +412,15 @@ export const styles = StyleSheet.create({
     display: 'none',
     zIndex: 0
   },
+  // Out of sight but still attached and laid out. A WebView inside a
+  // display:none view has its media suspended by the platform, which is what
+  // silenced PeerTunes the moment you switched tab. Kept full size so the page
+  // does not reflow to nothing and lose its layout while it plays on.
+  browserWebViewLayerOffscreen: {
+    left: -20000,
+    right: 20000,
+    zIndex: 0
+  },
   browserWebView: {
     backgroundColor: '#ffffff',
     flex: 1

@@ -8,10 +8,13 @@ import {
   PEERTUNES_SCAN_BRIDGE_SCRIPT,
   createPeerTunesPageUrl,
   isPeerTunesPageRequest,
+  parsePeerTunesHapticRequest,
+  parsePeerTunesKeepOfflineRequest,
   parsePeerTunesScanRequest,
   serializeScanResult
 } from './peertunes-screen.mjs'
 import { MODAL_ORIENTATIONS } from '../modal-orientations'
+import { tapFeedback } from '../haptics'
 
 type Props = {
   error: string | null
@@ -19,6 +22,7 @@ type Props = {
   launchSuffix: string
   localUrl: string | null
   onEnsureServer: () => void
+  onKeepOffline: (url: string) => Promise<{ ok: boolean, status?: string, error?: string }>
   onOpenUrl: (url: string) => void
   onStatus: (message: string) => void
 }
@@ -29,6 +33,7 @@ export function PeerTunesScreen ({
   launchSuffix,
   localUrl,
   onEnsureServer,
+  onKeepOffline,
   onOpenUrl,
   onStatus
 }: Props) {
@@ -67,6 +72,23 @@ export function PeerTunesScreen ({
       `window.__peerskyResolveScan(${serializeScanResult(requestId)}, ${serializeScanResult(value)}); true;`
     )
   }, [scanRequestId])
+
+  // PeerSky downloads a hyper folder when asked; the page asks on behalf of a
+  // playlist that was just imported, so it plays with the network off.
+  const keepOffline = useCallback(async (requestId: string, url: string) => {
+    let answer: { ok: boolean, status?: string, error?: string }
+    try {
+      answer = await onKeepOffline(url)
+    } catch (error) {
+      answer = { ok: false, error: error instanceof Error ? error.message : String(error) }
+    }
+    webViewRef.current?.injectJavaScript(
+      // Through the same escaping as a scan result: an error message carrying a
+      // line separator is valid JSON and a broken JavaScript string, which would
+      // leave the page waiting on a promise that never settles.
+      `window.__peerskyResolveScan(${serializeScanResult(requestId)}, ${serializeScanResult(answer)}); true;`
+    )
+  }, [onKeepOffline])
 
   const beginScan = useCallback(async (requestId: string) => {
     const permission = cameraPermission?.granted
@@ -122,6 +144,16 @@ export function PeerTunesScreen ({
       originWhitelist={[localUrl]}
       injectedJavaScriptBeforeContentLoaded={PEERTUNES_SCAN_BRIDGE_SCRIPT}
       onMessage={(event) => {
+        const weight = parsePeerTunesHapticRequest(event.nativeEvent.data)
+        if (weight) {
+          tapFeedback(weight)
+          return
+        }
+        const keep = parsePeerTunesKeepOfflineRequest(event.nativeEvent.data)
+        if (keep) {
+          void keepOffline(keep.requestId, keep.url)
+          return
+        }
         const requestId = parsePeerTunesScanRequest(event.nativeEvent.data)
         if (requestId) void beginScan(requestId)
       }}

@@ -1248,10 +1248,17 @@ export class PeerChatService {
     if (message.type === 'join') {
       if (!this.consumeControlRate(peer)) return
       const room = this.rooms.get(roomKey)
+      // Whether the room already counted them as a member, asked before
+      // remembering them, so the notice below is for a first arrival rather
+      // than for every reconnect.
+      const wasMember = Boolean(
+        (room?.members || []).find((member) => member.id === peer.id)?.joinedAt
+      )
       if (message.username) peer.username = normalizePeerChatProfileName(message.username) || peer.username
       if (Object.hasOwn(message, 'bio')) peer.bio = normalizePeerChatBio(message.bio)
       if (Object.hasOwn(message, 'avatar')) peer.avatar = normalizePeerChatAvatar(message.avatar)
       if (this.rememberRoomMember(room, peer, message.ts)) this.schedulePersist()
+      await this.appendJoinNotice(roomKey, peer, message, wasMember)
       this.sendRoomMeta(peer, roomKey)
       await this.syncHistoryToPeerOnce(peer, roomKey)
       this.bumpVersion()
@@ -2015,6 +2022,36 @@ export class PeerChatService {
    * appears exactly where the removal took effect and cannot be forged by
    * somebody who is not the creator.
    */
+  /**
+   * "Somebody joined", the way desktop has always written it.
+   *
+   * Mobile wrote nothing at all, so a room on a phone never said who had
+   * turned up. By name: the id is eight characters of a public key and means
+   * nothing to anybody reading the room, so a peer we already have a name for
+   * keeps it even when the announcement arrives without one.
+   */
+  async appendJoinNotice (roomKey, peer, message, wasMember) {
+    if (wasMember) return
+    const id = `${roomKey}-${peer.id}-join-${message.ts || Date.now()}`
+    if (!this.trackMessageId(typeof message.id === 'string' ? message.id : id)) return
+    if (!this.feeds.has(roomKey)) return
+
+    const name = normalizePeerChatProfileName(message.username) ||
+      normalizePeerChatProfileName(peer.username) ||
+      this.rooms.get(roomKey)?.members?.find((member) => member.id === peer.id)?.username ||
+      peer.id
+    try {
+      await this.appendEntry(roomKey, {
+        id,
+        type: 'system',
+        message: `${name} joined`,
+        ts: message.ts || Date.now()
+      })
+    } catch (error) {
+      console.warn('[peerchat] Unable to record a join:', error)
+    }
+  }
+
   async appendRemovalNotice (roomKey, peerId, username) {
     const room = this.rooms.get(roomKey)
     const name = normalizePeerChatProfileName(username) ||
