@@ -18,10 +18,14 @@ const INTERNAL_APP_ICONS: Partial<Record<RuntimeTab, ImageSourcePropType>> = {
   peertunes: require('../assets/images/peertunes.png')
 }
 
-// Not icon.png: that one is the store icon and has to be fully opaque, because
-// iOS flattens any alpha onto white and shows a ring. In the app the icon sits
-// on our own surfaces and needs its transparent corners back.
-export const BROWSER_HOME_ICON: ImageSourcePropType = require('../assets/images/app-icon-transparent.png')
+// The tile, not the bare bird. This one sits in the tab strip and on the home
+// grid beside PeerChat and the rest, which are all tiles, and a loose bird
+// among them reads as a missing icon rather than a different one.
+//
+// Not icon.png either: that is the store icon and has to be fully opaque,
+// because iOS flattens any alpha onto white and shows a ring. Here it sits on
+// our own surfaces and needs its transparent corners back.
+export const BROWSER_HOME_ICON: ImageSourcePropType = require('../assets/images/home-icon.png')
 
 export const INTERNAL_APPS = (INTERNAL_APP_REGISTRY as Array<{
   id: RuntimeTab

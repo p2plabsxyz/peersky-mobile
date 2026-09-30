@@ -1,6 +1,14 @@
 import { parseExternalAppLink } from './browser-permissions.mjs'
 
 export const BROWSER_HOME_URL = 'peersky://home'
+// The index of the built-in apps. It used to resolve to nothing and come back
+// as an unsupported scheme, which is a poor answer for an address the app
+// itself hands out.
+export const BROWSER_P2P_URL = 'peersky://p2p'
+
+export function isBrowserP2pUrl (value) {
+  return /^peersky:\/\/p2p\/?$/i.test(String(value || '').trim())
+}
 export const MAX_BROWSER_HISTORY_ENTRIES = 20
 export const MAX_BROWSER_URL_LENGTH = 8192
 export const DEFAULT_SEARCH_ENGINE = 'duckduckgo'
@@ -48,6 +56,16 @@ export function getHyperDriveListingUrl (url) {
   return `${address}${address.includes('?') ? '&' : '?'}noResolve${fragment}`
 }
 
+// Each one is the engine's own plain search address. noai.duckduckgo.com is
+// DuckDuckGo's own host for results without the AI answers on top.
+const SEARCH_ENGINE_URLS = {
+  duckduckgo: 'https://duckduckgo.com/?q=',
+  'duckduckgo-noai': 'https://noai.duckduckgo.com/?q=',
+  startpage: 'https://www.startpage.com/sp/search?q=',
+  ecosia: 'https://www.ecosia.org/search?q=',
+  kagi: 'https://kagi.com/search?q='
+}
+
 export function getSearchUrl (searchEngine, query, customSearchUrl = '') {
   const encodedQuery = encodeURIComponent(String(query || ''))
   const normalizedCustomUrl = normalizeCustomSearchUrl(customSearchUrl)
@@ -56,7 +74,10 @@ export function getSearchUrl (searchEngine, query, customSearchUrl = '') {
     return normalizedCustomUrl.replaceAll(CUSTOM_SEARCH_QUERY_PLACEHOLDER, encodedQuery)
   }
 
-  return `https://duckduckgo.com/?q=${encodedQuery}`
+  // An engine this build has never heard of falls back rather than failing to
+  // search at all, which is what a saved setting from a newer version looks
+  // like after a downgrade.
+  return `${SEARCH_ENGINE_URLS[searchEngine] || SEARCH_ENGINE_URLS[DEFAULT_SEARCH_ENGINE]}${encodedQuery}`
 }
 
 export function normalizeCustomSearchUrl (customSearchUrl) {
@@ -133,11 +154,21 @@ export function recordBrowserWebNavigationState (
   url,
   source,
   direction = null,
-  hasNativeBackEntry = true
+  hasNativeBackEntry = true,
+  isLoading = false
 ) {
   const currentEntry = state.history[state.historyIndex]
   if (currentEntry?.url === url) {
     return replaceBrowserEntryState(state, url, source)
+  }
+
+  // Nothing is decided until the navigation lands. A page that is still
+  // loading is not on the WebView's back list yet, so hasNativeBackEntry still
+  // describes the page being left, and reading it here made every link look
+  // like a redirect: following a search result replaced the search instead of
+  // stacking on it, and Back went to whatever was before the search.
+  if (isLoading) {
+    return buildBrowserState(state.history, state.historyIndex)
   }
 
   // A WebView with no native back entry has replaced or redirected its first

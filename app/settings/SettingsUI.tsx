@@ -122,7 +122,9 @@ const styles = StyleSheet.create({
     letterSpacing: 0.8,
     paddingBottom: 8,
     paddingHorizontal: 20,
-    paddingTop: 18,
+    // Room above the first heading on a page, where it would otherwise sit
+    // straight under the screen title.
+    paddingTop: 26,
     textTransform: 'uppercase'
   },
   sectionCard: {

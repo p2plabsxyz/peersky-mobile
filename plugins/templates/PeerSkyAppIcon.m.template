@@ -1,0 +1,77 @@
+#import "PeerSkyAppIcon.h"
+#import <UIKit/UIKit.h>
+
+// Changing the home screen icon. iOS keeps the alternates in the bundle under
+// the names Info.plist lists, and the switch itself has to happen on the main
+// thread: called from the React queue it silently does nothing.
+// The alternates live in the asset catalog, one icon set per colour, which is
+// what lets each of them carry its own dark and tinted variant. A loose file
+// in the bundle is a single image and iOS shows the light one whatever the
+// system appearance is. The catalog names them after the sets, not the
+// colours the app thinks in.
+static NSString *PeerSkyIconSetName(NSString *color)
+{
+  return color.length > 0 ? [NSString stringWithFormat:@"AppIcon-%@", color] : nil;
+}
+
+static NSString *PeerSkyColorFromIconSet(NSString *name)
+{
+  NSString *prefix = @"AppIcon-";
+  return [name hasPrefix:prefix] ? [name substringFromIndex:prefix.length] : name;
+}
+
+@implementation PeerSkyAppIcon
+
+RCT_EXPORT_MODULE(PeerSkyAppIcon)
+
+RCT_EXPORT_METHOD(getIcon:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject)
+{
+  dispatch_async(dispatch_get_main_queue(), ^{
+    if (![[UIApplication sharedApplication] respondsToSelector:@selector(alternateIconName)]) {
+      resolve([NSNull null]);
+      return;
+    }
+    NSString *name = [UIApplication sharedApplication].alternateIconName;
+    resolve(name ? PeerSkyColorFromIconSet(name) : [NSNull null]);
+  });
+}
+
+RCT_EXPORT_METHOD(setIcon:(NSString *)name
+                  resolve:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject)
+{
+  dispatch_async(dispatch_get_main_queue(), ^{
+    UIApplication *application = [UIApplication sharedApplication];
+
+    if (![application supportsAlternateIcons]) {
+      reject(@"unsupported", @"This device cannot change the app icon.", nil);
+      return;
+    }
+
+    // An empty name means the icon the app shipped with. Asking for the one
+    // already set makes iOS show its confirmation alert for no reason, so
+    // that case returns early.
+    NSString *target = PeerSkyIconSetName(name);
+    NSString *current = application.alternateIconName;
+    if ((target == nil && current == nil) || (target != nil && [target isEqualToString:current])) {
+      resolve(@(YES));
+      return;
+    }
+
+    [application setAlternateIconName:target completionHandler:^(NSError *error) {
+      if (error) {
+        reject(@"failed", error.localizedDescription, error);
+        return;
+      }
+      resolve(@(YES));
+    }];
+  });
+}
+
++ (BOOL)requiresMainQueueSetup
+{
+  return NO;
+}
+
+@end

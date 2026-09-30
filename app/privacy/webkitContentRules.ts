@@ -1,9 +1,10 @@
-import { File, type FileHandle } from 'expo-file-system'
+import { Directory, File, type FileHandle } from 'expo-file-system'
 import type { FilterListState } from './filterListStore'
 import { getFilterListFiles } from './filterListStore'
 import {
   convertFilterListToWebKitRulesAsync,
-  serializeWebKitContentRuleChunks
+  serializeWebKitContentRuleChunks,
+  WEBKIT_RULE_FORMAT_VERSION
 } from './webkit-content-rules.mjs'
 
 const WEBKIT_RULE_SUFFIX = '.webkit.json'
@@ -11,27 +12,49 @@ const MIN_WEBKIT_RULES_PER_LIST = 1_000
 
 export async function getWebKitContentRuleFiles (state: FilterListState) {
   const sourceFiles = getFilterListFiles(state)
-  const ruleFiles: File[] = []
+  const ruleFiles = sourceFiles.map((sourceFile) => new File(
+    sourceFile.parentDirectory,
+    `${sourceFile.name.slice(0, -'.txt'.length)}.v${WEBKIT_RULE_FORMAT_VERSION}${WEBKIT_RULE_SUFFIX}`
+  ))
 
-  for (const sourceFile of sourceFiles) {
-    const ruleFile = new File(
-      sourceFile.parentDirectory,
-      `${sourceFile.name.slice(0, -'.txt'.length)}${WEBKIT_RULE_SUFFIX}`
-    )
-    if (!ruleFile.exists || ruleFile.size === 0) {
-      const rules = await convertFilterListToWebKitRulesAsync(await sourceFile.text())
-      if (rules.length < MIN_WEBKIT_RULES_PER_LIST) {
-        throw new Error('Filter list produced too few supported WebKit rules.')
-      }
-      await writeRuleFileAtomically(
-        ruleFile,
-        await serializeWebKitContentRuleChunks(rules)
-      )
+  // Converted rules are cached against the filter-list snapshot, which does not
+  // move when the converter changes. The version in the name is what makes a
+  // wrong rule file unreachable; this is what stops it sitting there, because
+  // each one runs to several megabytes.
+  removeStaleRuleFiles(sourceFiles[0]?.parentDirectory, ruleFiles)
+
+  for (let index = 0; index < sourceFiles.length; index++) {
+    const ruleFile = ruleFiles[index]
+    if (ruleFile.exists && ruleFile.size > 0) continue
+
+    const rules = await convertFilterListToWebKitRulesAsync(await sourceFiles[index].text())
+    if (rules.length < MIN_WEBKIT_RULES_PER_LIST) {
+      throw new Error('Filter list produced too few supported WebKit rules.')
     }
-    ruleFiles.push(ruleFile)
+    await writeRuleFileAtomically(
+      ruleFile,
+      await serializeWebKitContentRuleChunks(rules)
+    )
   }
 
   return ruleFiles
+}
+
+function removeStaleRuleFiles (directory: Directory | undefined, keep: File[]) {
+  if (!directory) return
+  const wanted = new Set(keep.map((file) => file.name))
+
+  try {
+    for (const entry of directory.list()) {
+      if (entry instanceof File &&
+          entry.name.endsWith(WEBKIT_RULE_SUFFIX) &&
+          !wanted.has(entry.name)) {
+        entry.delete()
+      }
+    }
+  } catch (error) {
+    console.warn('Unable to remove stale WebKit rule files:', error)
+  }
 }
 
 async function writeRuleFileAtomically (destination: File, chunks: string[]) {

@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "PeerSky Browser",
+    "name": "PeerSky",
     "slug": "peersky-mobile",
     "version": "1.0.0",
     "orientation": "default",
@@ -10,7 +10,12 @@
     "splash": {
       "image": "./assets/images/splash.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#ffffff",
+      "dark": {
+        "image": "./assets/images/splash-dark.png",
+        "resizeMode": "contain",
+        "backgroundColor": "#18181b"
+      }
     },
     "ios": {
       "supportsTablet": true,
@@ -33,13 +38,20 @@
         "UIBackgroundModes": [
           "audio"
         ],
-        "NSPhotoLibraryUsageDescription": "PeerSky uses your photo library so you can attach a picture or video to a chat message or a note."
+        "NSPhotoLibraryUsageDescription": "PeerSky uses your photo library so you can attach a picture or video to a chat message or a note.",
+        "LSApplicationCategoryType": "public.app-category.utilities"
+      },
+      "icon": {
+        "light": "./assets/app-icons/ios/cyan.png",
+        "dark": "./assets/app-icons/ios/appearance-dark.png",
+        "tinted": "./assets/app-icons/ios/appearance-tinted.png"
       }
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#67fce7"
+        "foregroundImage": "./assets/app-icons/android/foreground.png",
+        "monochromeImage": "./assets/app-icons/android/monochrome.png",
+        "backgroundImage": "./assets/app-icons/android/background-cyan.png"
       },
       "package": "xyz.p2plabs.peersky",
       "softwareKeyboardLayoutMode": "resize",
@@ -91,11 +103,13 @@
       "expo-font",
       "./plugins/with-ios-pod-deployment-target",
       "./plugins/with-android-16kb-libs",
+      "./plugins/with-android-app-category",
       "./plugins/with-android-loopback-cleartext",
       "./plugins/with-browser-downloads",
       "./plugins/with-lan-discovery",
       "./plugins/with-peerchat-background",
       "./plugins/with-peersky-share",
+      "./plugins/with-app-icons",
       [
         "expo-notifications",
         {

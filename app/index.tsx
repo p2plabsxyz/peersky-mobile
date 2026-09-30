@@ -37,6 +37,8 @@ import { WebView } from 'react-native-webview'
 import bundle from './app.bundle.mjs'
 import {
   BROWSER_HOME_URL,
+  BROWSER_P2P_URL,
+  isBrowserP2pUrl,
   commitBrowserEntryState,
   getBrowserBackState,
   getBrowserForwardState,
@@ -70,6 +72,7 @@ import {
 } from './browser-tabs.mjs'
 import {
   createBrowserResetSession,
+  getSettingsReturnPage,
   resolveBrowserStartupSession
 } from './browser-session.mjs'
 import {
@@ -82,11 +85,13 @@ import {
   resolveBrowserDarkMode
 } from './browser-appearance.mjs'
 import { createBrowserAccessibilityScript } from './browser-accessibility.mjs'
+import { createForceDarkScript } from './browser-force-dark.mjs'
 import { clearBrowserWebViewData } from './browser-data.mjs'
 import {
   canPromptExternalLink,
   formatExternalLinkForPrompt,
   getExternalAppName,
+  getExternalLinkTarget,
   getExternalLinkBehaviorAction,
   parseExternalAppLink
 } from './browser-permissions.mjs'
@@ -118,8 +123,23 @@ import type { SettingsPage } from './settings/SettingsScreen'
 import { BrowserOverflowMenu } from './settings/BrowserOverflowMenu'
 import { useBrowserPreferences } from './settings/useBrowserPreferences'
 import { BrowserToolbar } from './BrowserToolbar'
+import { BrowserNavBar } from './BrowserNavBar'
 import { BrowserBackSwipe } from './BrowserBackSwipe'
 import { BrowserZoomSheet } from './BrowserZoomSheet'
+import { WelcomeScreen } from './WelcomeScreen'
+import { BrowserHomeBackground } from './BrowserHomeBackground'
+import { applyAppIcon } from './app-icon'
+import { useKeyboardVisible } from './use-keyboard-visible'
+import {
+  canPrintBrowserUrl,
+  createBrowserPrintScript,
+  parseBrowserPrintMessage,
+  printBrowserPage
+} from './browser-print'
+import { StartupScreen } from './StartupScreen'
+import { AppLoading } from './AppLoading'
+import { BrowserSiteInfoSheet } from './BrowserSiteInfoSheet'
+import { hasSeenWelcome, markWelcomeSeen, WELCOME_FILE_NAME } from './welcome-state.mjs'
 import { tapFeedback } from './haptics'
 import {
   BrowserMediaSheet,
@@ -139,6 +159,9 @@ import {
   parseBrowserFaviconMessage
 } from './bookmarks/browser-favicon.mjs'
 import { useBrowserBookmarks } from './bookmarks/useBrowserBookmarks'
+import { useBrowserFavourites } from './favourites/useBrowserFavourites'
+import { BrowserFavourites } from './favourites/BrowserFavourites'
+import { MAX_BROWSER_FAVOURITES } from './favourites/browser-favourites.mjs'
 import { HistoryScreen } from './history/HistoryScreen'
 import { getBrowserHistoryDocumentTitle } from './history/browser-history.mjs'
 import { useBrowserHistory } from './history/useBrowserHistory'
@@ -263,6 +286,7 @@ type RpcResponse = {
 
 type BrowserSource =
   | { kind: 'home' }
+  | { kind: 'p2p' }
   | { kind: 'app', app: RuntimeTab }
   | { kind: 'web', uri: string }
   | { kind: 'hyper', html: string, baseUrl: string }
@@ -316,6 +340,17 @@ export default function App () {
   const [status, setStatus] = useState('Starting Hyper runtime...')
   const [identityStoragePath, setIdentityStoragePath] = useState('')
   const [browserAddress, setBrowserAddress] = useState('')
+  // Read once, synchronously, so the first frame is either the welcome screen
+  // or the browser rather than one flashing into the other.
+  const [showWelcome, setShowWelcome] = useState(() => !hasSeenWelcome(getWelcomeFile()))
+  const [siteInfoVisible, setSiteInfoVisible] = useState(false)
+  const isKeyboardVisible = useKeyboardVisible()
+  // Where a link opened from settings came from, so back can go back there.
+  const settingsReturnRef = useRef<{
+    page: SettingsPage
+    tabId: string
+    url: string
+  } | null>(null)
   const [browserCurrentUrl, setBrowserCurrentUrl] = useState(BROWSER_HOME_URL)
   const [browserTitle, setBrowserTitle] = useState('New tab')
   const [browserFavicon, setBrowserFavicon] = useState<string | null>(null)
@@ -333,12 +368,13 @@ export default function App () {
     persistenceError: browserPreferencesError,
     preferences: browserPreferences,
     setAddressBarPosition,
+    setAppLogoColor,
+    setForceDarkWebsites,
     setContentBlockingEnabled: setContentBlockingPreference,
     setCustomSearchEngine,
     setDownloadOnlyOnWifi,
     setEnforceManualPageZoom,
     setExternalLinkBehavior,
-    setRestoreTabsOnStartup,
     setSearchEngine,
     setShowFullAddress,
     setTheme,
@@ -361,6 +397,13 @@ export default function App () {
     removeBookmark: removeBrowserBookmark,
     toggleBookmark: toggleBrowserBookmark
   } = useBrowserBookmarks()
+  const {
+    favourites: browserFavourites,
+    isReady: browserFavouritesReady,
+    isFavourited: isBrowserPageFavourited,
+    removeFavourite: removeBrowserFavourite,
+    toggleFavourite: toggleBrowserFavourite
+  } = useBrowserFavourites()
   const {
     clearHistory: clearBrowserHistory,
     getSuggestions: getBrowserHistorySuggestions,
@@ -438,6 +481,9 @@ export default function App () {
   const [p2pmdCameraPermission, requestP2pmdCameraPermission] = useCameraPermissions()
   const p2pmdScanHandledRef = useRef(false)
   const [browserSettingsInitialPage, setBrowserSettingsInitialPage] = useState<SettingsPage | undefined>(undefined)
+  // Opened from the navigation bar rather than through the settings list, so
+  // back has to leave rather than climb to a list nobody came through.
+  const [browserSettingsCloseOnBack, setBrowserSettingsCloseOnBack] = useState(false)
   const [p2pmdRoomHistory, setP2pmdRoomHistory] = useState<P2pmdRoomHistoryEntry[]>(loadP2pmdRoomHistory)
   const p2pmdRoomHistoryRef = useRef(p2pmdRoomHistory)
   const [p2pmdParticipants, setP2pmdParticipants] = useState<number | null>(null)
@@ -550,7 +596,6 @@ export default function App () {
         if (cancelled) return
 
         const restored = resolveBrowserStartupSession({
-          restoreTabsOnStartup: browserPreferences.restoreTabsOnStartup,
           serializedSession,
           userInteracted: browserUserInteractedRef.current
         }) as BrowserTabsState | null
@@ -768,7 +813,7 @@ export default function App () {
   function syncBrowserEntry (
     url: string,
     source: BrowserSource,
-    webNavigation?: { canGoBack: boolean, canGoForward: boolean },
+    webNavigation?: { canGoBack: boolean, canGoForward: boolean, loading?: boolean },
     tabId?: string
   ) {
     const targetTabId = tabId || browserTabsStateRef.current.activeTabId
@@ -780,7 +825,8 @@ export default function App () {
       url,
       source,
       null,
-      webNavigation?.canGoBack
+      webNavigation?.canGoBack,
+      webNavigation?.loading
     )
     applyBrowserState({
       ...nextState,
@@ -968,6 +1014,13 @@ export default function App () {
     // "Unsupported URL scheme", so a note shared in a chat had to be copied out
     // of the message by hand. Opening one fills the join field in, leaving the
     // one deliberate step: pressing Join.
+    if (isBrowserP2pUrl(nextUrl)) {
+      cancelPendingBrowserLoad()
+      commitBrowserEntry(BROWSER_P2P_URL, { kind: 'p2p' })
+      setBrowserTitle('P2P apps')
+      return
+    }
+
     const noteKey = parseP2pmdNoteLink(nextUrl)
     if (noteKey) {
       cancelPendingBrowserLoad()
@@ -1008,6 +1061,12 @@ export default function App () {
 
     if (internalApp) {
       openInternalApp(internalApp, false, getRuntimeAppLaunchSuffix(url))
+      return
+    }
+
+    if (isBrowserP2pUrl(url)) {
+      replaceBrowserEntry(BROWSER_P2P_URL, { kind: 'p2p' })
+      setBrowserTitle('P2P apps')
       return
     }
 
@@ -1088,7 +1147,7 @@ export default function App () {
         kind: 'hyper',
         html: response.mediaType && response.mediaUrl
           ? createHyperMediaHtml(response)
-          : createHyperBrowserHtml(response, nextUrl),
+          : createHyperBrowserHtml(response, nextUrl, browserIsDark),
         baseUrl: nextUrl
       }
 
@@ -1113,7 +1172,7 @@ export default function App () {
       const message = error instanceof Error ? error.message : String(error)
       const source: BrowserSource = {
         kind: 'error',
-        html: createBrowserErrorHtml(nextUrl, message)
+        html: createBrowserErrorHtml(nextUrl, message, browserIsDark)
       }
 
       if (shouldCommit) {
@@ -1222,7 +1281,7 @@ export default function App () {
   function showBrowserError (targetUrl: string, message: string) {
     const source: BrowserSource = {
       kind: 'error',
-      html: createBrowserErrorHtml(targetUrl, message)
+      html: createBrowserErrorHtml(targetUrl, message, browserIsDark)
     }
 
     commitBrowserEntry(targetUrl, source)
@@ -1240,6 +1299,21 @@ export default function App () {
     const activeBrowserTab = tabsState.tabs.find((tab) => tab.id === tabId)
     const currentEntry = activeBrowserTab?.history[activeBrowserTab.historyIndex]
     if (!activeBrowserTab || !currentEntry) return
+
+    // Settings is a sheet, not a history entry, so back from a page it opened
+    // used to land on whatever the tab was showing before. Only while that
+    // page is still the one on screen, in the tab it opened in: navigate on,
+    // or switch tabs, and back is ordinary again.
+    const settingsReturnPage = getSettingsReturnPage(settingsReturnRef.current, {
+      tabId,
+      url: currentEntry.url
+    })
+    if (settingsReturnPage) {
+      settingsReturnRef.current = null
+      setBrowserSettingsInitialPage(settingsReturnPage)
+      setBrowserSettingsVisible(true)
+      return
+    }
 
     const nextState = getBrowserBackState({
       history: activeBrowserTab.history,
@@ -1365,6 +1439,14 @@ export default function App () {
       openInternalApp(browserSource.app, false)
     }
   }
+
+  useEffect(() => {
+    if (!browserPreferencesReady) return
+    const script = createForceDarkScript(browserPreferences.forceDarkWebsites)
+    for (const webView of browserWebViewRefs.current.values()) {
+      webView?.injectJavaScript(script)
+    }
+  }, [browserPreferencesReady, browserPreferences.forceDarkWebsites])
 
   async function onContentBlockingEnabledChange (enabled: boolean) {
     const previousEnabled = browserPreferences.contentBlockingEnabled
@@ -1495,6 +1577,44 @@ export default function App () {
     } else {
       setStatus('Unable to update bookmark')
     }
+  }
+
+  // The home screen keeps eight, so a ninth is a choice rather than a queue:
+  // say which one has to go instead of quietly dropping the oldest.
+  function onBrowserToggleFavourite () {
+    const result = toggleBrowserFavourite({
+      url: browserCurrentUrl,
+      title: browserTitle,
+      favicon: browserFavicon
+    })
+
+    if (result === 'limit-reached') {
+      Alert.alert(
+        'Home is full',
+        `Remove one of your ${MAX_BROWSER_FAVOURITES} favourites to add this one.`
+      )
+    } else if (result) {
+      setStatus(result === 'added' ? 'Added to home' : 'Removed from home')
+    } else {
+      setStatus('Unable to update favourites')
+    }
+  }
+
+  function onBrowserRemoveFavourite (favourite: { title: string, url: string }) {
+    Alert.alert(
+      favourite.title,
+      'Remove this from the home screen?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: () => {
+            if (removeBrowserFavourite(favourite.url)) setStatus('Removed from home')
+          }
+        }
+      ]
+    )
   }
 
   async function onBrowserSharePage () {
@@ -2006,15 +2126,52 @@ export default function App () {
 
     externalLinkPromptOpenRef.current = true
     void Linking.openURL(externalLink.url)
-      .catch((error) => {
-        console.error('Failed opening external app link:', error)
-        Alert.alert('Unable to open link', 'No compatible app could open this link.')
-      })
+      .catch(() => offerExternalLinkFallback(externalLink.scheme, externalLink.url))
       .finally(() => {
         externalLinkPromptOpenRef.current = false
       })
   }
 
+  // A device with no mail app, or no phone, is not a broken link. Telling
+  // somebody there is nothing to open leaves them stuck; handing them the
+  // address lets them write from wherever they read mail.
+  function offerExternalLinkFallback (scheme: string, targetUrl: string) {
+    const target = getExternalLinkTarget(targetUrl)
+    if (!target) {
+      Alert.alert('Unable to open link', 'No app on this device can open this link.')
+      return
+    }
+
+    Alert.alert(
+      `No app for ${getExternalAppName(scheme)}`,
+      target,
+      [
+        { text: 'Close', style: 'cancel' },
+        {
+          text: 'Copy',
+          onPress: () => {
+            Clipboard.setString(target)
+            setStatus('Copied')
+          }
+        }
+      ]
+    )
+  }
+
+
+  // expo-print takes markup, not a page address, so printing is a round trip:
+  // ask the tab for what it rendered, then hand that to the dialog.
+  function onBrowserPrintPage () {
+    const tabId = browserTabsStateRef.current.activeTabId
+    const token = browserMediaTokensRef.current.get(tabId)
+    const webView = browserWebViewRefs.current.get(tabId)
+
+    if (!token || !webView) {
+      Alert.alert('Unable to print', 'This page cannot be printed')
+      return
+    }
+    webView.injectJavaScript(createBrowserPrintScript(token))
+  }
 
   async function onHolesailStartLive () {
     setIsLoading(true)
@@ -2252,6 +2409,7 @@ export default function App () {
   function closeBrowserSettings () {
     setBrowserSettingsVisible(false)
     setBrowserSettingsInitialPage(undefined)
+    setBrowserSettingsCloseOnBack(false)
   }
 
   function forgetP2pmdRoom (key: string) {
@@ -2871,8 +3029,11 @@ export default function App () {
         <View style={styles.browserShellContent}>
           <SettingsScreen
             initialPage={browserSettingsInitialPage}
+            closeOnBack={browserSettingsCloseOnBack}
             registerGoBack={(handler) => { browserSettingsGoBackRef.current = handler }}
             addressBarPosition={browserPreferences.addressBarPosition}
+            appLogoColor={browserPreferences.appLogoColor}
+            forceDarkWebsites={browserPreferences.forceDarkWebsites}
             contentBlockingEnabled={browserPreferences.contentBlockingEnabled}
             customSearchUrl={browserPreferences.customSearchUrl}
             downloadOnlyOnWifi={browserPreferences.downloadOnlyOnWifi}
@@ -2881,7 +3042,6 @@ export default function App () {
             isDark={browserIsDark}
             offlineNetworkAllowed={hyperOfflineNetworkAllowed}
             persistenceError={browserPreferencesError}
-            restoreTabsOnStartup={browserPreferences.restoreTabsOnStartup}
             searchEngine={browserPreferences.searchEngine}
             showFullAddress={browserPreferences.showFullAddress}
             theme={browserPreferences.theme}
@@ -2889,6 +3049,13 @@ export default function App () {
             youtubeAdBlockingEnabled={browserPreferences.youtubeAdBlockingEnabled}
             storagePath={identityStoragePath}
             onAddressBarPositionChange={setAddressBarPosition}
+            onAppLogoColorChange={(color) => {
+              // The in-app logo changes either way; the home screen icon is a
+              // best effort, because a device can refuse an alternate icon.
+              if (!setAppLogoColor(color)) return
+              void applyAppIcon(color)
+            }}
+            onForceDarkWebsitesChange={setForceDarkWebsites}
             onCallRpc={(command, data = {}) => callRpc(command, data)}
             onContentBlockingEnabledChange={onContentBlockingEnabledChange}
             onClose={closeBrowserSettings}
@@ -2904,15 +3071,21 @@ export default function App () {
             onEnforceManualPageZoomChange={setEnforceManualPageZoom}
             onExternalLinkBehaviorChange={setExternalLinkBehavior}
             onFilterListsUpdated={refreshContentBlockedPages}
-            onRestoreTabsOnStartupChange={setRestoreTabsOnStartup}
             onSearchEngineChange={setSearchEngine}
             onShowFullAddressChange={setShowFullAddress}
             onThemeChange={setTheme}
             onWebsiteTextScaleChange={setWebsiteTextScale}
             onYoutubeAdBlockingEnabledChange={onYoutubeAdBlockingEnabledChange}
             onResetTabs={onBrowserResetTabs}
-            onOpenUrl={(targetUrl) => {
+            onOpenUrl={(targetUrl, fromPage) => {
               closeBrowserSettings()
+              settingsReturnRef.current = !fromPage || fromPage === 'main'
+                ? null
+                : {
+                    page: fromPage,
+                    tabId: browserTabsStateRef.current.activeTabId,
+                    url: targetUrl
+                  }
               void loadBrowserUrl(targetUrl)
             }}
             onOpenHyperItem={(item) => {
@@ -3106,7 +3279,7 @@ export default function App () {
 
         {(isBooting || isLoading) && (
           <View style={styles.p2pmdWorkspaceLoader}>
-            <ActivityIndicator size='small' />
+            <AppLoading app='p2pmd' isDark={browserIsDark} />
           </View>
         )}
       </SafeAreaView>
@@ -3117,45 +3290,22 @@ export default function App () {
     <BrowserToolbar
       activeTabId={browserTabsState.activeTabId}
       address={browserAddress}
-      bookmarkActionAvailable={browserBookmarkActionAvailable}
-      bookmarksDisabled={!browserBookmarksReady}
-      canGoBack={canBrowserGoBack}
-      canGoForward={canBrowserGoForward}
-      desktopView={activeBrowserDesktopView}
-      isBookmarked={browserPageIsBookmarked}
+      currentUrl={browserCurrentUrl}
       isDark={browserIsDark}
       isLoading={browserIsLoading}
       historySuggestions={getBrowserHistorySuggestions(browserAddress)}
-      menuVisible={browserMenuVisible}
       navigationKey={`${browserTabsState.activeTabId}:${browserHistoryIndex}`}
-      newTabDisabled={browserTabsState.tabs.length >= MAX_BROWSER_TABS}
+      pageActionAvailable={browserPageActionAvailable}
       palette={browserChrome}
       position={browserPreferences.addressBarPosition}
-      showFullAddress={browserPreferences.showFullAddress}
-      pageActionAvailable={browserPageActionAvailable}
       shareActionAvailable={browserShareActionAvailable}
-      tabCount={browserTabsState.tabs.length}
+      showFullAddress={browserPreferences.showFullAddress}
       onAddressChange={(value) => {
         browserUserInteractedRef.current = true
         setBrowserAddress(value)
       }}
-      onBack={onBrowserBack}
       onCloseMenu={() => setBrowserMenuVisible(false)}
-      onForward={onBrowserForward}
-      onOpenMenu={() => setBrowserMenuVisible(true)}
-      onNewTab={onBrowserNewTab}
-      onOpenBookmarks={onBrowserOpenBookmarks}
-      onOpenDownloads={onBrowserOpenDownloads}
-      onOpenHistory={onBrowserOpenHistory}
-      onOpenSettings={() => {
-        setBrowserMenuVisible(false)
-        setBrowserSettingsVisible(true)
-      }}
-      onOpenTabs={() => {
-        browserUserInteractedRef.current = true
-        setBrowserTabsVisible(true)
-      }}
-      onOpenZoom={() => setBrowserZoomVisible(true)}
+      onOpenSiteInfo={() => setSiteInfoVisible(true)}
       onReload={onBrowserReload}
       onSharePage={() => void onBrowserSharePage()}
       onSubmit={() => void onBrowserSubmit()}
@@ -3163,8 +3313,60 @@ export default function App () {
         setBrowserAddress(targetUrl)
         void loadBrowserUrl(targetUrl)
       }}
-      onToggleDesktopView={onBrowserToggleDesktopView}
+    />
+  )
+  const browserNavBar = (
+    <BrowserNavBar
+      bookmarkActionAvailable={browserBookmarkActionAvailable}
+      bookmarksDisabled={!browserBookmarksReady}
+      favouritesDisabled={!browserFavouritesReady}
+      isFavourited={isBrowserPageFavourited(browserCurrentUrl)}
+      canGoBack={canBrowserGoBack}
+      canGoForward={canBrowserGoForward}
+      desktopView={activeBrowserDesktopView}
+      isBookmarked={browserPageIsBookmarked}
+      isDark={browserIsDark}
+      isHome={browserSource.kind === 'home'}
+      menuVisible={browserMenuVisible}
+      // Both systems print from a URL the printer fetches itself, so there is
+      // nothing to offer on a hyper:// page or one of our own screens.
+      printActionAvailable={canPrintBrowserUrl(browserCurrentUrl)}
+      newTabDisabled={browserTabsState.tabs.length >= MAX_BROWSER_TABS}
+      palette={browserChrome}
+      shareActionAvailable={browserShareActionAvailable}
+      // The address bar's own top edge is the seam when it sits directly
+      // above, so the navigation bar does not draw a second one.
+      showTopBorder={browserPreferences.addressBarPosition === 'top'}
+      tabCount={browserTabsState.tabs.length}
+      onBack={onBrowserBack}
+      onBurnTabs={onBrowserBurnTabs}
+      onCloseMenu={() => setBrowserMenuVisible(false)}
+      onForward={onBrowserForward}
+      onNewTab={onBrowserNewTab}
+      onOpenBookmarks={onBrowserOpenBookmarks}
+      onOpenDownloads={onBrowserOpenDownloads}
+      onOpenHistory={onBrowserOpenHistory}
+      onOpenMenu={() => setBrowserMenuVisible(true)}
+      onOpenNearby={() => {
+        setBrowserSettingsInitialPage('lan-discovery')
+        setBrowserSettingsCloseOnBack(true)
+        setBrowserSettingsVisible(true)
+      }}
+      onOpenSettings={() => {
+        setBrowserMenuVisible(false)
+        setBrowserSettingsCloseOnBack(false)
+        setBrowserSettingsVisible(true)
+      }}
+      onOpenTabs={() => {
+        browserUserInteractedRef.current = true
+        setBrowserTabsVisible(true)
+      }}
+      onOpenZoom={() => setBrowserZoomVisible(true)}
+      onPrintPage={onBrowserPrintPage}
+      onSharePage={() => void onBrowserSharePage()}
       onToggleBookmark={onBrowserToggleBookmark}
+      onToggleDesktopView={onBrowserToggleDesktopView}
+      onToggleFavourite={onBrowserToggleFavourite}
     />
   )
   const runtimeInputTheme = {
@@ -3200,12 +3402,28 @@ export default function App () {
   const browserTopInsetColor = browserIsPortrait && browserPreferences.addressBarPosition === 'top'
     ? browserToolbarColor
     : browserChrome.shell
-  const browserBottomInsetColor = browserIsPortrait && browserPreferences.addressBarPosition === 'bottom'
-    ? browserToolbarColor
-    : browserChrome.shell
-  const browserWebViewFillsBottomInset =
-    browserPreferences.addressBarPosition !== 'bottom' &&
-    (browserSource.kind === 'web' || browserSource.kind === 'hyper')
+  // The navigation bar is the last thing on screen now, whatever is above it,
+  // so the strip under the home indicator is always its colour. Nothing else
+  // can reach the bottom edge any more.
+  const browserBottomInsetColor = browserToolbarColor
+
+  // Shown once, before anything else, on a phone that has never opened PeerSky.
+  // Not a tour: one screen, four things, one button.
+  if (!browserSessionReady) {
+    return <StartupScreen isDark={browserIsDark} />
+  }
+
+  if (showWelcome) {
+    return (
+      <WelcomeScreen
+        isDark={browserIsDark}
+        onDone={() => {
+          markWelcomeSeen(getWelcomeFile())
+          setShowWelcome(false)
+        }}
+      />
+    )
+  }
 
   return (
     // No left or right safe-area edge on purpose. Insetting the whole shell
@@ -3261,11 +3479,65 @@ export default function App () {
           ]}
           onTouchStart={browserSource.kind === 'app' && activeTab === 'peerchat' ? undefined : Keyboard.dismiss}
         >
-        {browserSource.kind === 'home'
+        {browserSource.kind === 'p2p'
           ? (
             <ScrollView
               style={styles.browserContentPage}
               contentContainerStyle={styles.browserHome}
+              keyboardDismissMode='on-drag'
+            >
+              {/* Every built-in app, Holesail included, which the home screen
+                  leaves out to keep its grid to the four people open daily. */}
+              <View style={styles.browserShortcutGrid}>
+                {INTERNAL_APPS.map((app) => (
+                  <Pressable
+                    key={app.id}
+                    accessibilityRole='button'
+                    accessibilityLabel={`Open ${app.title}`}
+                    style={styles.browserShortcut}
+                    onPress={() => void loadBrowserUrl(app.url)}
+                  >
+                    <View style={styles.browserShortcutIconFrame}>
+                      <View style={[
+                        styles.browserShortcutIcon,
+                        app.iconSource ? null : getRuntimeAppIconStyle(app.id)
+                      ]}>
+                        {app.iconSource
+                          ? <Image source={app.iconSource} style={styles.browserShortcutIconImage} />
+                          : <Text style={styles.browserShortcutIconText}>{app.icon}</Text>}
+                      </View>
+                    </View>
+                    <Text
+                      numberOfLines={2}
+                      style={[
+                        styles.browserShortcutTitle,
+                        { color: browserChrome.text, fontSize: browserShortcutTitleFontSize }
+                      ]}
+                    >
+                      {app.title}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            </ScrollView>
+            )
+          : browserSource.kind === 'home'
+          ? (
+            <BrowserHomeBackground
+              bleed={{ left: browserInsets.left, right: browserInsets.right }}
+              scrim={browserIsDark ? 'rgba(24, 24, 27, 0.35)' : 'rgba(255, 255, 255, 0.14)'}
+            >
+            <ScrollView
+              style={styles.browserContentPage}
+              contentContainerStyle={[
+                styles.browserHome,
+                // Put back what the wallpaper bled through, so the shortcuts
+                // still clear the notch in landscape.
+                {
+                  paddingLeft: BROWSER_HOME_PADDING + browserInsets.left,
+                  paddingRight: BROWSER_HOME_PADDING + browserInsets.right
+                }
+              ]}
               keyboardDismissMode='on-drag'
             >
               <View style={styles.browserShortcutGrid}>
@@ -3296,6 +3568,10 @@ export default function App () {
                       numberOfLines={2}
                       style={[
                         styles.browserShortcutTitle,
+                        // The labels carry their own contrast now, so the
+                        // wallpaper does not have to be washed out to hold
+                        // them.
+                        browserIsDark ? styles.browserShortcutTitleOnDark : styles.browserShortcutTitleOnLight,
                         { color: browserChrome.text, fontSize: browserShortcutTitleFontSize }
                       ]}
                     >
@@ -3304,7 +3580,14 @@ export default function App () {
                   </Pressable>
                 ))}
               </View>
+              <BrowserFavourites
+                favourites={browserFavourites}
+                palette={browserChrome}
+                onOpen={(targetUrl) => void loadBrowserUrl(targetUrl)}
+                onRemove={onBrowserRemoveFavourite}
+              />
             </ScrollView>
+            </BrowserHomeBackground>
             )
           : browserSource.kind === 'app'
             ? activeTab === 'hyper'
@@ -3738,6 +4021,9 @@ export default function App () {
             browserAccessibilityScript,
             browserMediaScript,
             browserContentBlockingScript,
+            // After the page has drawn, so the check for a site that is already
+            // dark reads the site's own background rather than an empty one.
+            createForceDarkScript(browserPreferences.forceDarkWebsites),
             createBrowserFaviconScript()
           )
           const browserBeforeContentScript = combineBrowserInjectedScripts(
@@ -3875,7 +4161,8 @@ export default function App () {
                     uri: navigationState.url
                   }, {
                     canGoBack: navigationState.canGoBack,
-                    canGoForward: navigationState.canGoForward
+                    canGoForward: navigationState.canGoForward,
+                    loading: navigationState.loading
                   }, tab.id)
                   const title = normalizeBrowserTabTitle(navigationState.title || navigationState.url)
                   setBrowserTitle(title)
@@ -3908,6 +4195,18 @@ export default function App () {
                   return
                 }
 
+                const printHtml = parseBrowserPrintMessage(
+                  event.nativeEvent.data,
+                  browserMediaToken
+                )
+                if (printHtml) {
+                  void printBrowserPage(printHtml, event.nativeEvent.url || entry.url)
+                    .then((problem) => {
+                      if (problem) Alert.alert('Unable to print', problem)
+                    })
+                  return
+                }
+
                 const favicon = parseBrowserFaviconMessage(
                   event.nativeEvent.data,
                   event.nativeEvent.url || entry.url
@@ -3933,7 +4232,7 @@ export default function App () {
                   : entry.url
                 const errorSource: BrowserSource = {
                   kind: 'error',
-                  html: createBrowserErrorHtml(failedUrl, event.nativeEvent.description)
+                  html: createBrowserErrorHtml(failedUrl, event.nativeEvent.description, browserIsDark)
                 }
 
                 if (browserTabsStateRef.current.activeTabId === tab.id) {
@@ -3958,7 +4257,24 @@ export default function App () {
         />
 
         {browserPreferences.addressBarPosition === 'bottom' && browserToolbar}
+        {/* Out of the way while typing. It is worth a row of the screen when
+            you are reading and worth nothing when you are filling in a
+            field, which on a short screen is the difference between seeing
+            that field and not. */}
+        {!isKeyboardVisible && browserNavBar}
 
+        <BrowserSiteInfoSheet
+          blockingEnabled={browserPreferences.contentBlockingEnabled}
+          isDark={browserIsDark}
+          url={browserCurrentUrl}
+          visible={siteInfoVisible}
+          onClose={() => setSiteInfoVisible(false)}
+          onOpenPrivacySettings={() => {
+            setSiteInfoVisible(false)
+            setBrowserSettingsInitialPage('privacy')
+            setBrowserSettingsVisible(true)
+          }}
+        />
         <BrowserZoomSheet
           isDark={browserIsDark}
           pageZoom={activeBrowserPageZoom}
@@ -3980,17 +4296,12 @@ export default function App () {
         />
 
         </KeyboardAvoidingView>
-        {/* A web page has its own background and no way to match the strip we
-            paint under it, so the page runs to the bottom edge instead and the
-            home indicator sits over it, the way Safari does it. Our own screens
-            keep the strip: their controls reach the bottom and would end up
-            under the indicator. */}
-        {!browserWebViewFillsBottomInset && (
-          <SafeAreaView
-            edges={['bottom']}
-            style={[styles.browserSystemInset, { backgroundColor: browserBottomInsetColor }]}
-          />
-        )}
+        {/* Painted in the navigation bar's colour so the two read as one bar
+            that happens to be taller where the home indicator is. */}
+        <SafeAreaView
+          edges={['bottom']}
+          style={[styles.browserSystemInset, { backgroundColor: browserBottomInsetColor }]}
+        />
     </View>
   )
 }
@@ -4065,6 +4376,10 @@ function serializeInlineScriptValue (value: string | null) {
   return JSON.stringify(value).replace(/</g, '\\u003c')
 }
 
+function getWelcomeFile () {
+  return new File(Paths.document, WELCOME_FILE_NAME)
+}
+
 function getBrowserSessionFile () {
   return new File(Paths.document, 'browser-tabs.json')
 }
@@ -4104,6 +4419,8 @@ function getBrowserTabLabel (tab: BrowserTab) {
 
 // Holesail is reachable by address but is not one of the app tiles.
 const BROWSER_HOME_SHORTCUTS = INTERNAL_APPS.filter((app) => app.id !== 'holesail')
+// Matches browserHome's own paddingHorizontal.
+const BROWSER_HOME_PADDING = 18
 
 /** Whether selecting this tab would hand the screen to the note workspace. */
 function isP2pmdWorkspaceTab (tab: BrowserTab | undefined) {

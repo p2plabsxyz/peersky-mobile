@@ -144,6 +144,24 @@ export function Privacy ({
             thumbColor={contentBlockingEnabled ? '#1f6fd1' : '#ffffff'}
           />
         </View>
+        {/* Nobody should take a browser's word for this, least of all ours.
+            The EFF's test is run by people with no stake in the answer. */}
+        <Pressable
+          accessibilityLabel='Open the Cover Your Tracks test'
+          accessibilityRole='link'
+          style={styles.linkRow}
+          onPress={() => onOpenUrl('https://coveryourtracks.eff.org/')}
+        >
+          <SettingCopy
+            title='Test this browser'
+            description='Cover Your Tracks, from the Electronic Frontier Foundation, shows what trackers can see when you visit a page.'
+          />
+          <ChevronRightIcon
+            width={16}
+            height={16}
+            color={isDark ? BROWSER_PALETTES.dark.mutedText : '#8190a7'}
+          />
+        </Pressable>
       </SettingsSection>
 
       <SettingsSection title='YouTube'>

@@ -1,121 +1,87 @@
 <p align="center">
-    <img align="center" src="/assets/images/icon.png" width="200" height="200"></img>
+    <img align="center" src="/assets/images/logo-adaptive.png" width="200" height="200"></img>
 </p>
 
 <h1 align="center">PeerSky Mobile</h1>
 
 <div align="center">
-    <!-- <img src="https://img.shields.io/github/actions/workflow/status/p2plabsxyz/peersky-mobile/build.yml" alt="GitHub Actions Workflow Status"> -->
-    <!-- <img src="https://img.shields.io/github/v/release/p2plabsxyz/peersky-mobile?color=green" alt="GitHub Release"> -->
     <a href="https://mastodon.social/@peersky"><img src="https://img.shields.io/mastodon/follow/113323887574214930" alt="Mastodon Follow"></a>
     <a href="https://deepwiki.com/p2plabsxyz/peersky-mobile"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki"></a>
     <a href="https://standardjs.com"><img src="https://img.shields.io/badge/code_style-standard-brightgreen.svg" alt="JavaScript Style Guide"></a>
 </div>
 
-A peer-to-peer mobile browser built with [Bare](https://github.com/holepunchto/bare), [Expo](https://expo.dev), and [React Native WebView](https://github.com/react-native-webview/react-native-webview).
+A peer-to-peer browser for your phone. It opens the ordinary web, and it opens
+`hyper://` too, where pages come from other people's devices rather than from a
+company's servers. No account, no analytics, and nothing about you kept anywhere
+you cannot reach.
 
-## Features
+Built with [Bare](https://github.com/holepunchto/bare),
+[Expo](https://expo.dev) and
+[React Native WebView](https://github.com/react-native-webview/react-native-webview).
+There is a desktop version too, at [peersky.p2plabs.xyz](https://peersky.p2plabs.xyz/).
 
-- Browser shell with address/search input, history suggestions, home/back/forward navigation, reload, and native page sharing.
-- Persistent multi-tab browsing with grid/list management, page previews, swipe-to-close, and close-all/burn controls.
-- Local bookmarks with favicon support.
-- Per-tab zoom and Desktop View controls.
-- Browser download history and management.
-- Long-press actions for opening, previewing, sharing, and downloading web media.
-- Browser settings for search, appearance, accessibility, data clearing, and external app links.
-- Native camera, microphone, location, and notification permission handling.
-- Android system-back navigation, incoming web-link handling, and default-browser setup.
-- Native ad and tracker blocking with EasyList, EasyPrivacy, and optional YouTube-specific protection.
-- `http://` and `https://` browsing through React Native WebView.
-- `hyper://` browsing through the Bare worklet and `hypercore-fetch`.
-- Hyper page asset support for CSS, images, scripts, audio, and video.
-- Hyperdrive app for uploading files, fetching or scanning `hyper://` locations, browsing directories, and reopening recent items.
-- Paginated P2P data management for owned app drives and published/fetched Hyper activity, with separate cache and full-data clearing controls.
-- PeerChat rooms and direct messages with encrypted history, reactions, mentions, attachments, link previews, notifications, presence, and locally enforced room moderation. Whoever created a room can remove someone from it permanently; the removal is checked against the creator's public key on the connection it arrives on, and is honoured by every client running PeerChat. It does not revoke the room key, so it is not a cryptographic bar.
-- A direct message gets its own random room key, minted by whoever opens the conversation and handed over inside the request, which only travels on a connection whose public key the handshake has already proved. Earlier builds derived it from the two 8-character peer ids, and those are public, so anybody who knew both could work the key out and read the conversation. Conversations started before this keep the old key.
-- Encrypted identity transfer from PeerSky Desktop through Hyper.
-- Local app routes for bundled peer-to-peer tools:
-  - `peersky://p2p/p2pmd/`
-  - `peersky://p2p/peerchat/`
-  - `peersky://p2p/peertunes/`
-  - `peersky://holesail/`
-  - `peersky://p2p/hyperdrive/`
+## What it does
 
-Hyper media is streamed through a local loopback proxy so WebView can play audio/video while the Bare runtime fetches the underlying `hyper://` asset.
+**Browsing.** Tabs that survive a restart, bookmarks, history, downloads, per-tab
+zoom and desktop view, and page sharing. Ads and trackers are blocked by the
+engine itself using EasyList and EasyPrivacy, with a snapshot bundled so you are
+protected before the first update lands.
 
-## Ad and Tracker Blocking
+**The peer-to-peer web.** `hyper://` pages are fetched by a Bare worklet and
+served to the WebView, images, scripts and media included. A page built on Hyper
+can publish and upload from the phone the same way it does on desktop. Devices
+on the same Wi-Fi find each other directly, so it keeps working with the
+internet down.
 
-PeerSky blocks matching ad and tracker requests at the WebView engine level. Android uses [`adblock-rust`](https://github.com/brave/adblock-rust), while iOS compiles supported rules with `WKContentRuleList`. A validated EasyList and EasyPrivacy snapshot is bundled so protection can initialize before the first network update.
+**Apps that came with it.** A Hyperdrive file browser, P2PMD for notes and
+slides, PeerChat for encrypted rooms and direct messages, and PeerTunes for
+music from your own drives. Each has its own address:
 
-YouTube protection independently blocks the narrowly scoped `youtubei/v1/player/ad_break` network request on YouTube and YouTube nocookie pages.
+```
+peersky://p2p/hyperdrive/   peersky://p2p/p2pmd/   peersky://p2p/peerchat/
+peersky://p2p/peertunes/    peersky://holesail/
+```
 
-This initial implementation covers network requests, not cosmetic filtering or element hiding. See the [content-blocking documentation](docs/content-blocking.md) for platform setup, update behavior, safeguards, and current limitations.
+**Your data.** Everything lives on the device. P2P storage is listed per app so
+you can see what is there and remove it, and an identity can be moved from
+PeerSky Desktop over an encrypted transfer.
 
-## Usage
+See [PRIVACY.md](PRIVACY.md) for exactly what leaves the phone and what does not.
+To report harmful public content, [open a report](https://github.com/p2plabsxyz/peersky-mobile/issues/new?template=content-report.yml).
 
-Start by installing the dependencies:
+## Running it
 
 ```sh
 npm install
+npm run ios       # or: npm run android
 ```
 
-### Linting
-
-This project uses [StandardJS](https://standardjs.com) for code style. To check for lint errors:
-
-```bash
-npm run lint
-```
-
-To auto-fix lint errors:
-
-```bash
-npx standard --fix
-```
-
-When finished, you can run the app on either iOS or Android.
-
-### iOS
-
-```sh
-npm run ios
-```
-
-### Android
-
-Install the Rust Android build prerequisites once:
+Android needs the Rust toolchain for content blocking once:
 
 ```sh
 npm run setup:content-blocking
 ```
 
-EAS Android builds run this setup automatically through the
-`eas-build-pre-install` hook. The hook is skipped for iOS builds.
-
-Builds fetch and validate the current EasyList and EasyPrivacy snapshots before
-bundling them into the app. The generated files are not stored in Git, so the
-first build requires network access; the resulting app can initialize protection
-offline.
+EAS Android builds run that automatically through the `eas-build-pre-install`
+hook; iOS skips it. Builds fetch and validate the current filter lists before
+bundling them, so the first build needs network access. The app itself starts
+blocking offline.
 
 ```sh
-npm run android
+npm run lint      # StandardJS, with npx standard --fix to repair
+npm test          # the full suite
 ```
 
 ## Docs
 
-- [Browser shell](docs/browser-shell.md)
-- [Hyper protocol](docs/hyper.md)
-- [Holesail runtime](docs/holesail.md)
-- [P2PMD](docs/p2pmd.md)
-- [PeerChat](docs/peerchat.md)
-- [PeerChat moderation data](backend/peerchat/MODERATION_DATA.md)
-- [PeerTunes](docs/peertunes.md)
-- [Link Device](docs/link-device.md)
-- [Testing guide](docs/testing.md)
-- [Content blocking](docs/content-blocking.md)
+[docs/](docs/README.md) has the rest: how the browser shell is put together, how
+`hyper://` is fetched, how content blocking works per platform, and one page for
+each built-in app.
 
 ## License
 
 MIT
 
-Bootstrapped from the [bare-expo](https://github.com/holepunchto/bare-expo) template by Holepunch, using [react-native-bare-kit](https://github.com/holepunchto/react-native-bare-kit).
+Bootstrapped from the [bare-expo](https://github.com/holepunchto/bare-expo)
+template by Holepunch, using
+[react-native-bare-kit](https://github.com/holepunchto/react-native-bare-kit).

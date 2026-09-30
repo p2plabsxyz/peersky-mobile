@@ -1,19 +1,22 @@
-export function createHyperBrowserHtml (response, targetUrl) {
+import { SAD_BIRD_DATA_URI } from './browser-error-art.mjs'
+import { describeBrowserError } from './browser-error-copy.mjs'
+
+export function createHyperBrowserHtml (response, targetUrl, isDark = false) {
   const body = response.body || ''
   const contentType = response.headers?.['content-type'] || ''
 
   if (contentType.includes('application/json')) {
-    return createHyperDirectoryHtml(body, targetUrl)
+    return createHyperDirectoryHtml(body, targetUrl, isDark)
   }
 
   if (contentType.includes('text/html') || looksLikeHtml(body)) {
     return ensureBaseHref(ensureMobileViewport(body), targetUrl)
   }
 
-  return createBrowserDocumentHtml(targetUrl, `<pre>${escapeHtml(body)}</pre>`)
+  return createBrowserDocumentHtml(targetUrl, `<pre>${escapeHtml(body)}</pre>`, isDark)
 }
 
-function createHyperDirectoryHtml (body, targetUrl) {
+function createHyperDirectoryHtml (body, targetUrl, isDark) {
   try {
     const files = JSON.parse(body)
     if (!Array.isArray(files)) throw new Error('Expected a directory listing')
@@ -28,17 +31,31 @@ function createHyperDirectoryHtml (body, targetUrl) {
 
     return createBrowserDocumentHtml(
       targetUrl,
-      `<h1>Index of ${escapeHtml(targetUrl)}</h1><ul>${links || '<li>No files found.</li>'}</ul>`
+      `<h1>Index of ${escapeHtml(targetUrl)}</h1><ul>${links || '<li>No files found.</li>'}</ul>`,
+      isDark
     )
   } catch {
-    return createBrowserDocumentHtml(targetUrl, `<pre>${escapeHtml(body)}</pre>`)
+    return createBrowserDocumentHtml(targetUrl, `<pre>${escapeHtml(body)}</pre>`, isDark)
   }
 }
 
-export function createBrowserErrorHtml (targetUrl, message) {
+export function createBrowserErrorHtml (targetUrl, message, isDark = false) {
+  const { title, body } = describeBrowserError(targetUrl, message)
+  const detail = String(message || '').trim()
+
+  // The raw message goes in a details element rather than a box on the page.
+  // It is the first thing somebody debugging wants and the last thing anybody
+  // else needs to read.
   return createBrowserDocumentHtml(
-    'PeerSky could not load this page',
-    `<h1>Page failed</h1><p class="muted">${escapeHtml(targetUrl)}</p><pre>${escapeHtml(message)}</pre>`
+    title,
+    `<div class="error">
+  <img class="art" src="${SAD_BIRD_DATA_URI}" alt="" width="180" height="180" />
+  <h1>${escapeHtml(title)}</h1>
+  <p class="lead">${escapeHtml(body)}</p>
+  <p class="address">${escapeHtml(targetUrl)}</p>
+  ${detail ? `<details><summary>What went wrong</summary><pre>${escapeHtml(detail)}</pre></details>` : ''}
+</div>`,
+    isDark
   )
 }
 
@@ -68,34 +85,115 @@ export function createHyperMediaHtml ({ mediaName, mediaType, mediaUrl }) {
 </html>`
 }
 
-function createBrowserDocumentHtml (title, body) {
+// Light and dark written out rather than left to prefers-color-scheme. The
+// media query follows the system, and the app has its own theme setting that
+// can disagree with it, so a page built here would come out light while every
+// piece of chrome around it was dark. These are the palette's own colours.
+const DOCUMENT_THEMES = {
+  light: {
+    page: '#ffffff',
+    ink: '#151821',
+    muted: '#657086',
+    link: '#0f6fd4',
+    block: '#f4f6f8',
+    blockEdge: '#dce2ea'
+  },
+  dark: {
+    page: '#18181b',
+    ink: '#e7eaf0',
+    muted: '#98a1b2',
+    link: '#6fb0ff',
+    block: '#27272a',
+    blockEdge: '#3f3f46'
+  }
+}
+
+function createBrowserDocumentHtml (title, body, isDark = false) {
+  const theme = isDark ? DOCUMENT_THEMES.dark : DOCUMENT_THEMES.light
+
   return `<!doctype html>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>${escapeHtml(title)}</title>
 <style>
+  /* Raw text, a directory listing and a failed page all land here. color-scheme
+     is what makes the engine paint its own furniture, scrollbars and form
+     controls, to match rather than staying light over a dark page. */
+  :root { color-scheme: ${isDark ? 'dark' : 'light'}; }
   body {
-    color: #151821;
+    background: ${theme.page};
+    color: ${theme.ink};
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     line-height: 1.55;
     margin: 0;
     padding: 22px;
   }
-  a { color: #0f6fd4; }
+  a { color: ${theme.link}; }
   ul { padding-left: 20px; }
   li { margin: 10px 0; overflow-wrap: anywhere; }
   pre {
-    background: #f4f6f8;
-    border: 1px solid #dce2ea;
+    background: ${theme.block};
+    border: 1px solid ${theme.blockEdge};
     border-radius: 8px;
     overflow: auto;
     padding: 14px;
     white-space: pre-wrap;
   }
   .muted {
-    color: #657086;
+    color: ${theme.muted};
     overflow-wrap: anywhere;
   }
+
+  /* Centred in the viewport rather than pinned to the top: a short message in
+     the corner of an empty screen reads as something that went wrong twice. */
+  .error {
+    align-items: center;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    margin: 0 auto;
+    max-width: 30rem;
+    min-height: calc(100vh - 44px);
+    text-align: center;
+  }
+  .art {
+    height: auto;
+    margin-bottom: 18px;
+    max-width: 180px;
+    width: 45%;
+  }
+  .error h1 {
+    font-size: 1.45rem;
+    line-height: 1.3;
+    margin: 0 0 10px;
+  }
+  .lead {
+    color: ${theme.muted};
+    font-size: 1rem;
+    margin: 0 0 18px;
+  }
+  .address {
+    color: ${theme.muted};
+    font-size: 0.82rem;
+    margin: 0;
+    overflow-wrap: anywhere;
+    opacity: 0.75;
+  }
+  details {
+    margin-top: 26px;
+    text-align: left;
+    width: 100%;
+  }
+  summary {
+    color: ${theme.muted};
+    cursor: pointer;
+    font-size: 0.85rem;
+    list-style: none;
+    text-align: center;
+  }
+  summary::-webkit-details-marker { display: none; }
+  details pre { font-size: 0.8rem; margin-top: 10px; }
 </style>
 ${body}
 `

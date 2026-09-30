@@ -2,6 +2,12 @@
 
 static NSString *const PeerSkyContentBlockerDomain = @"PeerSkyContentBlocker";
 static NSString *const PeerSkyYoutubeRuleIdentifier = @"peersky-youtube-ad-break-v3";
+// WebKit keeps the compiled rules under this identifier, and the filter-list
+// snapshot it is built from does not move when the converter changes. Without
+// a version here a converter fix never reaches anybody who already has the
+// app. Keep it in step with WEBKIT_RULE_FORMAT_VERSION in
+// app/privacy/webkit-content-rules.mjs.
+static NSString *const PeerSkyRuleFormatVersion = @"v2";
 static const unsigned long long MaxRuleFileBytes = 48ULL * 1024ULL * 1024ULL;
 
 // WKContentRuleListStore initializes WebKit on first touch, and WebKit must be
@@ -22,6 +28,12 @@ static void PeerSkyRunOnMain(dispatch_block_t block)
 @property (nonatomic, assign) BOOL enabled;
 @property (nonatomic, assign) BOOL youtubeAdBlockingEnabled;
 @property (nonatomic, strong, nullable) WKContentRuleList *youtubeRuleList;
+// Rule lists are attached to a WKWebView's content controller when the view is
+// built, and nothing re-reads them afterwards. That left two holes: switching
+// blocking off in settings did nothing to the tabs already open, and the rules
+// finish compiling after the first tab exists, so the first page of a cold
+// start went unprotected. Weak references, so a closed tab still goes away.
+@property (nonatomic, strong) NSHashTable<WKUserContentController *> *liveControllers;
 @end
 
 @implementation PeerSkyContentBlocker
@@ -33,6 +45,7 @@ static void PeerSkyRunOnMain(dispatch_block_t block)
   dispatch_once(&onceToken, ^{
     instance = [PeerSkyContentBlocker new];
     instance.ruleLists = @[];
+    instance.liveControllers = [NSHashTable weakObjectsHashTable];
     instance.youtubeAdBlockingEnabled = YES;
     [instance ensureYoutubeRuleLoaded];
   });
@@ -45,6 +58,7 @@ static void PeerSkyRunOnMain(dispatch_block_t block)
     _youtubeAdBlockingEnabled = enabled;
   }
   if (enabled) [self ensureYoutubeRuleLoaded];
+  [self applyRuleListsToOpenWebViews];
 }
 
 - (void)setEnabled:(BOOL)enabled
@@ -52,6 +66,39 @@ static void PeerSkyRunOnMain(dispatch_block_t block)
   @synchronized (self) {
     _enabled = enabled;
   }
+  [self applyRuleListsToOpenWebViews];
+}
+
+// The next page each open tab loads uses the rules as they stand now. The page
+// already on screen keeps what it was given, which is how Safari behaves too.
+- (void)applyRuleListsToOpenWebViews
+{
+  PeerSkyRunOnMain(^{
+  NSArray<WKUserContentController *> *controllers;
+  NSArray<WKContentRuleList *> *ruleLists;
+  BOOL enabled;
+  BOOL youtubeAdBlockingEnabled;
+  WKContentRuleList *youtubeRuleList;
+  @synchronized (self) {
+    controllers = self.liveControllers.allObjects;
+    ruleLists = self.ruleLists;
+    enabled = self.enabled;
+    youtubeAdBlockingEnabled = self.youtubeAdBlockingEnabled;
+    youtubeRuleList = self.youtubeRuleList;
+  }
+
+  for (WKUserContentController *controller in controllers) {
+    [controller removeAllContentRuleLists];
+    if (enabled) {
+      for (WKContentRuleList *ruleList in ruleLists) {
+        [controller addContentRuleList:ruleList];
+      }
+    }
+    if (youtubeAdBlockingEnabled && youtubeRuleList) {
+      [controller addContentRuleList:youtubeRuleList];
+    }
+  }
+  });
 }
 
 - (void)loadRuleFiles:(NSArray<NSURL *> *)ruleFiles
@@ -76,6 +123,7 @@ static void PeerSkyRunOnMain(dispatch_block_t block)
     @synchronized (self) {
       self.ruleLists = [compiled copy];
     }
+    [self applyRuleListsToOpenWebViews];
     [self removeStaleRuleListsKeepingSnapshot:snapshotName];
     completion(nil);
   }];
@@ -83,7 +131,7 @@ static void PeerSkyRunOnMain(dispatch_block_t block)
 
 - (void)removeStaleRuleListsKeepingSnapshot:(NSString *)snapshotName
 {
-  NSString *activePrefix = [NSString stringWithFormat:@"peersky-%@-", snapshotName];
+  NSString *activePrefix = [NSString stringWithFormat:@"peersky-%@-%@-", snapshotName, PeerSkyRuleFormatVersion];
   PeerSkyRunOnMain(^{
   WKContentRuleListStore *store = [WKContentRuleListStore defaultStore];
   [store getAvailableContentRuleListIdentifiers:^(NSArray<NSString *> *identifiers) {
@@ -119,6 +167,10 @@ static void PeerSkyRunOnMain(dispatch_block_t block)
   if (youtubeAdBlockingEnabled && youtubeRuleList) {
     [configuration.userContentController addContentRuleList:youtubeRuleList];
   }
+
+  @synchronized (self) {
+    [self.liveControllers addObject:configuration.userContentController];
+  }
 }
 
 - (void)loadYoutubeRule:(void (^)(WKContentRuleList * _Nullable ruleList, NSError * _Nullable error))completion
@@ -149,6 +201,7 @@ static void PeerSkyRunOnMain(dispatch_block_t block)
     @synchronized (self) {
       self.youtubeRuleList = youtubeRule;
     }
+    [self applyRuleListsToOpenWebViews];
   }];
 }
 
@@ -163,7 +216,7 @@ static void PeerSkyRunOnMain(dispatch_block_t block)
     return;
   }
 
-  NSString *identifier = [NSString stringWithFormat:@"peersky-%@-%lu", snapshotName, (unsigned long)index];
+  NSString *identifier = [NSString stringWithFormat:@"peersky-%@-%@-%lu", snapshotName, PeerSkyRuleFormatVersion, (unsigned long)index];
   PeerSkyRunOnMain(^{
   WKContentRuleListStore *store = [WKContentRuleListStore defaultStore];
   [store lookUpContentRuleListForIdentifier:identifier completionHandler:^(WKContentRuleList *cached, NSError *lookupError) {

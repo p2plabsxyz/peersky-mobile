@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import {
   Alert,
+  Linking,
+  Platform,
   Pressable,
   StyleSheet,
   Switch,
@@ -24,22 +26,22 @@ import type { SearchEngine } from './useBrowserPreferences'
 
 type GeneralProps = {
   customSearchUrl: string
+  forceDarkWebsites: boolean
   persistenceError: string | null
-  restoreTabsOnStartup: boolean
   searchEngine: SearchEngine
   onCustomSearchSave: (url: string) => boolean
-  onRestoreTabsOnStartupChange: (enabled: boolean) => void
+  onForceDarkWebsitesChange: (enabled: boolean) => void
   onSearchEngineChange: (searchEngine: SearchEngine) => void
   onResetTabs: () => void
 }
 
 export function General ({
   customSearchUrl,
+  forceDarkWebsites,
   persistenceError,
-  restoreTabsOnStartup,
   searchEngine,
   onCustomSearchSave,
-  onRestoreTabsOnStartupChange,
+  onForceDarkWebsitesChange,
   onSearchEngineChange,
   onResetTabs
 }: GeneralProps) {
@@ -47,6 +49,7 @@ export function General ({
   const [draftUrl, setDraftUrl] = useState(customSearchUrl)
   const [selectedEngine, setSelectedEngine] = useState(searchEngine)
   const [validationError, setValidationError] = useState<string | null>(null)
+  const [defaultBrowserError, setDefaultBrowserError] = useState<string | null>(null)
 
   useEffect(() => setDraftUrl(customSearchUrl), [customSearchUrl])
   useEffect(() => setSelectedEngine(searchEngine), [searchEngine])
@@ -84,6 +87,15 @@ export function General ({
     setValidationError(null)
   }
 
+  async function openDefaultBrowserSettings () {
+    setDefaultBrowserError(null)
+    try {
+      await Linking.sendIntent('android.settings.MANAGE_DEFAULT_APPS_SETTINGS')
+    } catch {
+      setDefaultBrowserError('Unable to open default browser settings.')
+    }
+  }
+
   function confirmResetTabs () {
     Alert.alert(
       'Reset tab session?',
@@ -103,18 +115,43 @@ export function General ({
         </View>
       )}
 
-      <SettingsSection title='Startup'>
+      {/* Which app opens a web link is a preference, not a permission: it
+          grants nothing and revokes nothing. It sat under Permissions, where
+          nobody looking for it would think to check. */}
+      {Platform.OS === 'android' && (
+        <SettingsSection title='Default browser'>
+          <View style={styles.settingRow}>
+            <SettingCopy
+              title='Open web links with PeerSky'
+              description='Choose PeerSky as the app that opens web links.'
+            />
+            <Pressable
+              accessibilityRole='button'
+              style={({ pressed }) => [styles.saveButton, pressed ? styles.saveButtonDisabled : null]}
+              onPress={() => void openDefaultBrowserSettings()}
+            >
+              <Text style={styles.saveButtonText}>Choose</Text>
+            </Pressable>
+          </View>
+          {defaultBrowserError && <Text style={styles.validationError}>{defaultBrowserError}</Text>}
+        </SettingsSection>
+      )}
+
+      {/* Off by default. Inverting a page is a blunt instrument and plenty of
+          sites now ship their own dark theme, so this is for the ones that
+          never did rather than something to leave on and forget. */}
+      <SettingsSection title='Dark websites'>
         <View style={styles.settingRow}>
           <SettingCopy
-            title='Restore previous tabs'
-            description='Continue with your open tabs when PeerSky starts.'
+            title='Force dark mode'
+            description='Darken sites that have no dark theme of their own. Sites that are already dark are left as they are.'
           />
           <Switch
-            accessibilityLabel='Restore previous tabs on startup'
-            value={restoreTabsOnStartup}
-            onValueChange={onRestoreTabsOnStartupChange}
+            accessibilityLabel='Force dark mode on websites'
+            value={forceDarkWebsites}
+            onValueChange={onForceDarkWebsitesChange}
             trackColor={{ false: '#bac3d2', true: '#7eb2ee' }}
-            thumbColor={restoreTabsOnStartup ? '#1f6fd1' : '#ffffff'}
+            thumbColor={forceDarkWebsites ? '#1f6fd1' : '#ffffff'}
           />
         </View>
       </SettingsSection>

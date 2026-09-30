@@ -44,13 +44,36 @@ export const styles = StyleSheet.create({
     justifyContent: 'center',
     width: 38
   },
+  // Its own bar along the bottom, spread out rather than bunched at one end,
+  // because there is nothing else on this row to make room for.
+  browserNavBar: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    paddingHorizontal: 8,
+    paddingVertical: 6
+  },
+  browserNavBarButton: {
+    alignItems: 'center',
+    height: 46,
+    justifyContent: 'center',
+    minWidth: 46
+  },
   browserNavButtonDisabled: {
     opacity: 0.35
+  },
+  browserSecurity: {
+    alignItems: 'center',
+    height: 32,
+    justifyContent: 'center',
+    paddingLeft: 12
   },
   browserAddressContainer: {
     alignItems: 'center',
     backgroundColor: '#ffffff',
-    borderRadius: 8,
+    // A pill at this height, with room either side of it, so the bar reads as
+    // a field sitting on the chrome rather than a box wedged into it.
+    borderRadius: 19,
     elevation: 2,
     flex: 1,
     flexDirection: 'row',
@@ -60,6 +83,9 @@ export const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.16,
     shadowRadius: 3
+  },
+  browserAddressBesideSecurity: {
+    paddingLeft: 10
   },
   browserAddress: {
     color: '#151821',
@@ -73,8 +99,10 @@ export const styles = StyleSheet.create({
     alignItems: 'center',
     flexDirection: 'row',
     height: '100%',
-    paddingRight: 3
+    paddingRight: 8
   },
+  // 32 wide around a 22 icon leaves 5 either side, so two of these side by
+  // side sit 10 apart: the same gap as the shield to the text.
   browserAddressAction: {
     alignItems: 'center',
     height: 32,
@@ -82,7 +110,7 @@ export const styles = StyleSheet.create({
     width: 32
   },
   browserAddressClearAction: {
-    marginRight: 2
+    marginRight: 8
   },
   browserAddressReloadIcon: {
     transform: [{ translateY: 1 }]
@@ -295,6 +323,8 @@ export const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '800'
   },
+  // Kept in step with BROWSER_HOME_PADDING, which index.tsx adds the notch
+  // inset to so the wallpaper can bleed past it.
   browserHome: {
     paddingHorizontal: 18,
     paddingTop: 32,
@@ -325,6 +355,18 @@ export const styles = StyleSheet.create({
     paddingHorizontal: 4,
     width: '25%'
   },
+  // A label on a photograph needs its own separation, whichever way round the
+  // theme is. This is what lets the wallpaper stay a wallpaper.
+  browserShortcutTitleOnLight: {
+    textShadowColor: 'rgba(255, 255, 255, 0.95)',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 5
+  },
+  browserShortcutTitleOnDark: {
+    textShadowColor: 'rgba(0, 0, 0, 0.85)',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 5
+  },
   browserShortcutIcon: {
     alignItems: 'center',
     // A tile to look at while the artwork decodes. Without it the frame is
@@ -337,6 +379,33 @@ export const styles = StyleSheet.create({
     justifyContent: 'center',
     overflow: 'hidden',
     width: 64
+  },
+  // Below the built-in apps, with air between the two so they read as two
+  // groups rather than one grid that happens to be eight wide.
+  browserFavouritesGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginTop: 34,
+    rowGap: 28,
+    width: '100%'
+  },
+  browserFavouriteIcon: {
+    alignItems: 'center',
+    borderRadius: 16,
+    height: 64,
+    justifyContent: 'center',
+    overflow: 'hidden',
+    width: 64
+  },
+  browserFavouriteIconImage: {
+    height: 38,
+    resizeMode: 'contain',
+    width: 38
+  },
+  // The first letter of the site, for the many that serve no icon at all.
+  browserFavouriteInitial: {
+    fontSize: 26,
+    fontWeight: '800'
   },
   browserShortcutIconFrame: {
     position: 'relative'

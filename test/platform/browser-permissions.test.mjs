@@ -7,6 +7,7 @@ import {
   formatExternalLinkForPrompt,
   getExternalAppName,
   getExternalLinkBehaviorAction,
+  getExternalLinkTarget,
   parseExternalAppLink
 } from '../../app/browser-permissions.mjs'
 
@@ -68,5 +69,18 @@ describe('browser external app permissions', () => {
     assert.equal(canPromptExternalLink(now, now + EXTERNAL_LINK_LAUNCH_COOLDOWN_MS - 1), false)
     assert.equal(canPromptExternalLink(now, now + EXTERNAL_LINK_LAUNCH_COOLDOWN_MS), true)
     assert.equal(canPromptExternalLink(Number.NaN, now), false)
+  })
+
+  // A phone with no mail app answers "cannot open" to a perfectly good address.
+  // Saying so and stopping leaves the person stuck, so hand them the address.
+  test('reads the address out of a link no app could open', () => {
+    assert.equal(
+      getExternalLinkTarget('mailto:contact@p2plabs.xyz?subject=Some%20subject&body=Some%20body'),
+      'contact@p2plabs.xyz'
+    )
+    assert.equal(getExternalLinkTarget('mailto:contact@p2plabs.xyz'), 'contact@p2plabs.xyz')
+    assert.equal(getExternalLinkTarget('tel:+15550100'), '+15550100')
+    assert.equal(getExternalLinkTarget('https://example.com'), null)
+    assert.equal(getExternalLinkTarget(''), null)
   })
 })

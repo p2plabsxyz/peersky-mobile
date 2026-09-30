@@ -458,3 +458,51 @@ test('the P2PMD button names the view it takes you to', async () => {
   assert.match(server, /let viewMode = 'edit'/)
   assert.match(index, /useState<P2pmdViewMode>\('edit'\)/)
 })
+
+// peersky://p2p is an address the app hands out, and it used to resolve to
+// nothing and come back as an unsupported scheme.
+test('the p2p address lists the built-in apps', async () => {
+  const { BROWSER_P2P_URL, isBrowserP2pUrl } = await import('../../app/browser-shell.mjs')
+  const { INTERNAL_APPS } = await import('../../app/internal-apps-registry.mjs')
+
+  assert.equal(BROWSER_P2P_URL, 'peersky://p2p')
+  assert.equal(isBrowserP2pUrl('peersky://p2p'), true)
+  assert.equal(isBrowserP2pUrl('peersky://p2p/'), true)
+  assert.equal(isBrowserP2pUrl('PEERSKY://P2P/'), true)
+  // Not the apps themselves, which have screens of their own.
+  assert.equal(isBrowserP2pUrl('peersky://p2p/peerchat/'), false)
+  assert.equal(isBrowserP2pUrl('peersky://home'), false)
+  assert.equal(isBrowserP2pUrl(''), false)
+
+  const { readFile } = await import('node:fs/promises')
+  const index = await readFile(new URL('../../app/index.tsx', import.meta.url), 'utf8')
+  // Typed, or restored with the tab: both land on the same screen.
+  assert.equal((index.match(/isBrowserP2pUrl\(/g) || []).length, 2)
+  // Every app, Holesail included, which the home grid leaves out.
+  const p2pStart = index.indexOf("browserSource.kind === 'p2p'")
+  const screen = index.slice(p2pStart, index.indexOf("browserSource.kind === 'home'", p2pStart))
+  assert.ok(p2pStart > 0 && screen.length > 0)
+  assert.match(screen, /INTERNAL_APPS\.map/)
+  assert.ok(INTERNAL_APPS.some((app) => app.id === 'holesail'))
+
+  test('following a search result keeps the search behind it', () => {
+    const web = (url) => ({ kind: 'web', uri: url })
+    const search = 'https://duckduckgo.com/?q=jj'
+    const result = 'https://example.com/article'
+
+    let state = commitBrowserEntryState(
+      { history: [{ url: BROWSER_HOME_URL, source: { kind: 'home' } }], historyIndex: 0 },
+      search,
+      web(search)
+    )
+    // The search settles with nothing behind it in the WebView's own list.
+    state = recordBrowserWebNavigationState(state, search, web(search), null, false, false)
+    // Tapping a result fires once while it is still loading, when the WebView
+    // has not added it to that list yet, and again when it lands.
+    state = recordBrowserWebNavigationState(state, result, web(result), null, false, true)
+    state = recordBrowserWebNavigationState(state, result, web(result), null, true, false)
+
+    assert.deepEqual(state.history.map((entry) => entry.url), [BROWSER_HOME_URL, search, result])
+    assert.equal(getBrowserBackState(state).currentUrl, search)
+  })
+})

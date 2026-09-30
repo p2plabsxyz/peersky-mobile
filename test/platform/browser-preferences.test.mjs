@@ -15,12 +15,13 @@ describe('browser preferences', () => {
   test('restores supported browser preferences', () => {
     const preferences = {
       addressBarPosition: 'bottom',
+      appLogoColor: 'violet',
       contentBlockingEnabled: false,
       customSearchUrl: 'https://example.com/search?q=%s',
       downloadOnlyOnWifi: true,
       enforceManualPageZoom: true,
       externalLinkBehavior: 'allow',
-      restoreTabsOnStartup: false,
+      forceDarkWebsites: true,
       searchEngine: 'custom',
       showFullAddress: true,
       theme: 'dark',
@@ -37,12 +38,13 @@ describe('browser preferences', () => {
   test('rejects unsupported preference values independently', () => {
     assert.deepEqual(parseBrowserPreferences({
       addressBarPosition: 'side',
+      appLogoColor: 'chartreuse',
       contentBlockingEnabled: 'yes',
       customSearchUrl: 'http://example.com/search?q=%s',
       downloadOnlyOnWifi: 'yes',
       enforceManualPageZoom: 'yes',
       externalLinkBehavior: 'always',
-      restoreTabsOnStartup: 'yes',
+      forceDarkWebsites: 'yes',
       searchEngine: 'brave',
       showFullAddress: 'yes',
       theme: 'sepia',
@@ -53,12 +55,10 @@ describe('browser preferences', () => {
 
   test('fills missing appearance preferences with defaults', () => {
     assert.deepEqual(parseBrowserPreferences({
-      restoreTabsOnStartup: false,
       searchEngine: 'custom',
       customSearchUrl: 'https://search.example/?query=%s'
     }), {
       ...DEFAULT_BROWSER_PREFERENCES,
-      restoreTabsOnStartup: false,
       searchEngine: 'custom',
       customSearchUrl: 'https://search.example/?query=%s'
     })

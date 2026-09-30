@@ -7,20 +7,29 @@ import {
 } from './browser-preferences.mjs'
 import { normalizeCustomSearchUrl } from '../browser-shell.mjs'
 
-export type SearchEngine = 'duckduckgo' | 'custom'
+export type SearchEngine =
+  | 'duckduckgo'
+  | 'duckduckgo-noai'
+  | 'startpage'
+  | 'ecosia'
+  | 'kagi'
+  | 'custom'
 export type AddressBarPosition = 'top' | 'bottom'
 export type BrowserTheme = 'system' | 'light' | 'dark'
 export type ExternalLinkBehavior = 'ask' | 'allow' | 'block'
 export type WebsiteTextScale = 80 | 100 | 120 | 150
 
+export type AppLogoColor = string
+
 export type BrowserPreferences = {
   addressBarPosition: AddressBarPosition
+  appLogoColor: AppLogoColor
   contentBlockingEnabled: boolean
   customSearchUrl: string
   downloadOnlyOnWifi: boolean
   enforceManualPageZoom: boolean
   externalLinkBehavior: ExternalLinkBehavior
-  restoreTabsOnStartup: boolean
+  forceDarkWebsites: boolean
   searchEngine: SearchEngine
   showFullAddress: boolean
   theme: BrowserTheme
@@ -110,8 +119,11 @@ export function useBrowserPreferences () {
     setExternalLinkBehavior: (externalLinkBehavior: ExternalLinkBehavior) => {
       return updatePreferences({ externalLinkBehavior })
     },
-    setRestoreTabsOnStartup: (enabled: boolean) => {
-      return updatePreferences({ restoreTabsOnStartup: enabled })
+    setForceDarkWebsites: (forceDarkWebsites: boolean) => {
+      return updatePreferences({ forceDarkWebsites })
+    },
+    setAppLogoColor: (appLogoColor: AppLogoColor) => {
+      return updatePreferences({ appLogoColor })
     },
     setSearchEngine: (searchEngine: SearchEngine) => {
       return updatePreferences({ searchEngine })

@@ -15,6 +15,7 @@ import {
   BackHandler,
   Clipboard,
   Easing,
+  Image,
   Modal,
   Platform,
   Pressable,
@@ -25,6 +26,7 @@ import {
   TextInput,
   View
 } from 'react-native'
+import type { ImageSourcePropType } from 'react-native'
 import type { SvgProps } from 'react-native-svg'
 import { BROWSER_PALETTES } from '../browser-appearance.mjs'
 import {
@@ -61,12 +63,14 @@ import ChevronRightIcon from '../../assets/icons/bootstrap/chevron-right.svg'
 import InfoIcon from '../../assets/icons/bootstrap/info-circle.svg'
 import PaletteIcon from '../../assets/icons/bootstrap/palette.svg'
 import ShieldLockIcon from '../../assets/icons/bootstrap/shield-lock.svg'
+import LinkIcon from '../../assets/icons/bootstrap/link-45deg.svg'
 import SlidersIcon from '../../assets/icons/bootstrap/sliders.svg'
 import TrashIcon from '../../assets/icons/bootstrap/trash.svg'
 import UniversalAccessIcon from '../../assets/icons/bootstrap/universal-access-circle.svg'
 import DisplayIcon from '../../assets/icons/bootstrap/display.svg'
 import DatabaseIcon from '../../assets/icons/bootstrap/database.svg'
 import { MODAL_ORIENTATIONS } from '../modal-orientations'
+import { offerPermissionSettings } from '../permission-prompt'
 
 export type SettingsPage =
   | 'main'
@@ -153,10 +157,15 @@ type LANDiscoveryStatus = {
 
 type SettingsScreenProps = {
   addressBarPosition: AddressBarPosition
+  appLogoColor: string
+  forceDarkWebsites: boolean
   initialPage?: SettingsPage
   // Lets the back gesture and the Android button step out of a subpage the way
   // its own back arrow does, instead of closing settings from inside one.
   registerGoBack?: (handler: (() => boolean) | null) => void
+  // Settings opened straight onto a page from somewhere else, so there is no
+  // settings list behind it to go back to.
+  closeOnBack?: boolean
   contentBlockingEnabled: boolean
   customSearchUrl: string
   downloadOnlyOnWifi: boolean
@@ -165,7 +174,6 @@ type SettingsScreenProps = {
   isDark: boolean
   offlineNetworkAllowed: boolean
   persistenceError: string | null
-  restoreTabsOnStartup: boolean
   searchEngine: SearchEngine
   showFullAddress: boolean
   theme: BrowserTheme
@@ -173,6 +181,8 @@ type SettingsScreenProps = {
   youtubeAdBlockingEnabled: boolean
   storagePath: string
   onAddressBarPositionChange: (position: AddressBarPosition) => void
+  onAppLogoColorChange: (color: string) => void
+  onForceDarkWebsitesChange: (enabled: boolean) => void
   onCallRpc: (command: number, data?: object) => Promise<RpcResponse>
   onContentBlockingEnabledChange: (enabled: boolean) => Promise<void>
   onClose: () => void
@@ -183,39 +193,38 @@ type SettingsScreenProps = {
   onEnforceManualPageZoomChange: (enabled: boolean) => void
   onExternalLinkBehaviorChange: (behavior: ExternalLinkBehavior) => void
   onFilterListsUpdated: () => void
-  onRestoreTabsOnStartupChange: (enabled: boolean) => void
   onSearchEngineChange: (searchEngine: SearchEngine) => void
   onShowFullAddressChange: (enabled: boolean) => void
   onThemeChange: (theme: BrowserTheme) => void
   onWebsiteTextScaleChange: (scale: WebsiteTextScale) => void
   onYoutubeAdBlockingEnabledChange: (enabled: boolean) => void
   onResetTabs: () => void
-  onOpenUrl: (url: string) => void
+  onOpenUrl: (url: string, fromPage?: SettingsPage) => void
   onOpenHyperItem: (item: { name: string, source: 'fetched' | 'published', url: string }) => void
   onIdentityRestored: () => void
 }
 
 const REPOSITORY_URL = 'https://github.com/p2plabsxyz/peersky-mobile'
 const LICENSE_URL = `${REPOSITORY_URL}/blob/main/LICENSE`
-const CONTENT_REPORT_TITLE = '[Content report]: '
-const CONTENT_REPORT_BODY = `## Content URL
+// Both systems ask once and remember the answer. iOS puts it under the app's
+// own entry; Android keeps it with the permissions for nearby devices, and
+// needs Wi-Fi on for any of it to work.
+const LAN_PERMISSION_TITLE = 'Nearby devices cannot be found'
+const LAN_PERMISSION_HELP = Platform.OS === 'ios'
+  ? 'PeerSky finds nearby devices over your local network. If that was turned down, switch Local Network back on for PeerSky in Settings. Wi-Fi also has to be on, and both devices on the same network.'
+  : 'PeerSky finds nearby devices over your local network. Check that Wi-Fi is on and that Nearby devices is allowed for PeerSky in Settings, with both devices on the same network.'
 
-Provide the public HTTP, HTTPS, or Hyper URL where the content is available.
-
-## Reason for reporting
-
-Explain why this content should be reviewed without reproducing harmful content.
-
-## Confirmation
-
-- [ ] I have not included private credentials, personal information, or illegal media in this report.`
-const CONTENT_REPORT_URL = `${REPOSITORY_URL}/issues/new?template=content-report.yml&title=${encodeURIComponent(CONTENT_REPORT_TITLE)}&body=${encodeURIComponent(CONTENT_REPORT_BODY)}`
+const FEEDBACK_EMAIL = 'contact@p2plabs.xyz'
+const PEERSKY_WEBSITE_URL = 'https://peersky.p2plabs.xyz'
 
 const SETTINGS_PAGES: Array<{
   id: Exclude<SettingsPage, 'main'>
   title: string
   description: string
   icon: ComponentType<SvgProps>
+  // About wears the app's own mark, which is a bitmap rather than a tintable
+  // glyph, so a row may carry one instead of drawing its icon.
+  image?: ImageSourcePropType
 }> = [
   {
     id: 'general',
@@ -263,19 +272,22 @@ const SETTINGS_PAGES: Array<{
     id: 'link-device',
     title: 'Link Device',
     description: 'Restore identity from desktop',
-    icon: DisplayIcon
+    icon: LinkIcon
   },
   {
     id: 'lan-discovery',
-    title: 'LAN Discovery Test',
-    description: 'View peers discovered on local Wi-Fi',
+    // Not "LAN Discovery Test": what it is for is using PeerSky with no
+    // internet, and a screen called Test reads as something unfinished.
+    title: 'Offline',
+    description: 'Use PeerSky with no internet, over local Wi-Fi',
     icon: DisplayIcon
   },
   {
     id: 'about',
     title: 'About',
     description: 'Version, source code, and licenses',
-    icon: InfoIcon
+    icon: InfoIcon,
+    image: require('../../assets/images/logo.png')
   }
 ]
 
@@ -288,6 +300,14 @@ export function SettingsScreen(props: SettingsScreenProps) {
   pageRef.current = page
   const { registerGoBack } = props
   let content
+
+  // Settings closes to show the link, so back has nothing of settings left to
+  // return to. Naming the page it was opened from is what lets the browser put
+  // it back instead of dropping the user wherever they were before.
+  const openUrl = useCallback(
+    (url: string) => props.onOpenUrl(url, pageRef.current),
+    [props.onOpenUrl]
+  )
 
   if (page === 'main') {
     content = (
@@ -306,7 +326,7 @@ export function SettingsScreen(props: SettingsScreenProps) {
         {page === 'accessibility' && <Accessibility {...props} />}
         {page === 'appearance' && <Appearance {...props} />}
         {page === 'data-clearing' && <DataClearing {...props} />}
-        {page === 'privacy' && <Privacy {...props} />}
+        {page === 'privacy' && <Privacy {...props} onOpenUrl={openUrl} />}
         {page === 'p2p-storage' && (
           <P2PStorage
             downloadOnlyOnWifi={props.downloadOnlyOnWifi}
@@ -314,13 +334,13 @@ export function SettingsScreen(props: SettingsScreenProps) {
             onCallRpc={props.onCallRpc}
             onDownloadOnlyOnWifiChange={props.onDownloadOnlyOnWifiChange}
             onOpenItem={props.onOpenHyperItem}
-            onOpenUrl={props.onOpenUrl}
+            onOpenUrl={openUrl}
           />
         )}
         {page === 'permissions' && <Permissions {...props} />}
-        {page === 'link-device' && <LinkDeviceSettings {...props} />}
+        {page === 'link-device' && <LinkDeviceSettings {...props} onOpenUrl={openUrl} />}
         {page === 'lan-discovery' && <LANDiscoveryTest onCallRpc={props.onCallRpc} />}
-        {page === 'about' && <AboutSettings onOpenUrl={props.onOpenUrl} />}
+        {page === 'about' && <AboutSettings onOpenUrl={openUrl} />}
       </SettingsSubpage>
     )
   }
@@ -345,12 +365,15 @@ export function SettingsScreen(props: SettingsScreenProps) {
   // from one used to close settings altogether and land on the page behind it.
   const goBackOnePage = useCallback(() => {
     if (pageRef.current === 'main') return false
+    // Opened straight onto this page from outside, so back means leave, not
+    // "up to a list the person never came through".
+    if (props.closeOnBack && pageRef.current === props.initialPage) return false
     transition.stopAnimation()
     transition.setValue(reduceMotion ? 1 : 0)
     setTransitionDirection(-1)
     setPage('main')
     return true
-  }, [reduceMotion, transition])
+  }, [props.closeOnBack, props.initialPage, reduceMotion, transition])
 
   useEffect(() => {
     registerGoBack?.(goBackOnePage)
@@ -419,6 +442,7 @@ function SettingsHome({
         <View style={[styles.menu, isDark ? darkStyles.surface : null]}>
           {SETTINGS_PAGES.map((page, index) => {
             const Icon = page.icon
+            const image = page.image ?? null
 
             return (
               <Pressable
@@ -437,11 +461,15 @@ function SettingsHome({
                   styles.menuIcon,
                   isDark ? darkStyles.menuIcon : null
                 ]}>
-                  <Icon
-                    width={22}
-                    height={22}
-                    color={isDark ? '#8fc1ff' : '#1f6fd1'}
-                  />
+                  {image
+                    ? <Image source={image} style={styles.menuIconImage} />
+                    : (
+                      <Icon
+                        width={22}
+                        height={22}
+                        color={isDark ? '#8fc1ff' : '#1f6fd1'}
+                      />
+                      )}
                 </View>
                 <SettingCopy
                   title={page.title}
@@ -499,11 +527,8 @@ function SettingsSubpage({
 }
 
 
-function LinkDeviceSettings({
-  onCallRpc,
-  storagePath,
-  onIdentityRestored
-}: SettingsScreenProps) {
+function LinkDeviceSettings(props: SettingsScreenProps) {
+  const { onCallRpc, storagePath, onIdentityRestored } = props
   const isDark = useSettingsDarkMode()
   const [encryptionPublicKey, setEncryptionPublicKey] = useState('')
   const [nonce, setNonce] = useState('')
@@ -690,6 +715,27 @@ function LinkDeviceSettings({
         </View>
       )}
 
+      {/* Everything on this screen assumes the desktop browser is already
+          running somewhere, and until now nothing in the app said where to
+          get it. */}
+      <SettingsSection title='PeerSky on desktop'>
+        <Pressable
+          accessibilityRole='link'
+          style={[styles.linkRow, styles.linkRowFirst]}
+          onPress={() => props.onOpenUrl(PEERSKY_WEBSITE_URL)}
+        >
+          <SettingCopy
+            title='Get the desktop browser'
+            description='Get PeerSky on a Mac, Windows or Linux machine.'
+          />
+          <ChevronRightIcon
+            width={16}
+            height={16}
+            color={isDark ? BROWSER_PALETTES.dark.mutedText : '#8190a7'}
+          />
+        </Pressable>
+      </SettingsSection>
+
       <SettingsSection title='Device pairing code'>
         <View style={styles.linkDeviceBlock}>
           <SettingCopy
@@ -833,10 +879,14 @@ function LANDiscoveryTest({
     onCallRpcRef.current = onCallRpc
   }, [onCallRpc])
 
-  const refreshStatus = useCallback(async () => {
+  // The poll behind this runs every couple of seconds. Showing its spinner
+  // put a flicker beside the connection count for as long as the page was
+  // open, which reads as something going wrong rather than something working.
+  // Only a refresh somebody asked for says so.
+  const refreshStatus = useCallback(async ({ silent = false } = {}) => {
     if (refreshInFlightRef.current) return
     refreshInFlightRef.current = true
-    setIsRefreshing(true)
+    if (!silent) setIsRefreshing(true)
 
     try {
       const response = await withTimeout(
@@ -853,13 +903,13 @@ function LANDiscoveryTest({
       setError(refreshError instanceof Error ? refreshError.message : String(refreshError))
     } finally {
       refreshInFlightRef.current = false
-      setIsRefreshing(false)
+      if (!silent) setIsRefreshing(false)
     }
   }, [])
 
   useEffect(() => {
     void refreshStatus()
-    const timer = setInterval(() => void refreshStatus(), 2000)
+    const timer = setInterval(() => void refreshStatus({ silent: true }), 2000)
     return () => clearInterval(timer)
   }, [refreshStatus])
 
@@ -872,7 +922,7 @@ function LANDiscoveryTest({
           <Text style={styles.errorText}>{error}</Text>
         </View>
       )}
-      <SettingsSection title='Local discovery'>
+      <SettingsSection title='Local LAN discovery'>
         <View style={styles.lanSummary}>
           <View style={styles.lanTitleRow}>
             <SettingCopy
@@ -883,6 +933,33 @@ function LANDiscoveryTest({
             />
             {isRefreshing && <ActivityIndicator size='small' />}
           </View>
+          {/* This page is where somebody comes when nearby devices are not
+              showing up, so when discovery has genuinely failed it says why and
+              offers the one place the answer can be changed. A refusal of the
+              local network is the usual reason, and no app can ask for it a
+              second time. */}
+          {lanStatus && !lanStatus.available && (
+            <View style={styles.lanHelp}>
+              <Text style={[styles.lanHelpText, isDark ? darkStyles.secondaryText : null]}>
+                {LAN_PERMISSION_HELP}
+              </Text>
+              <Pressable
+                accessibilityRole='button'
+                style={({ pressed }) => [
+                  styles.secondaryButton,
+                  pressed ? styles.rowPressed : null
+                ]}
+                onPress={() => offerPermissionSettings(LAN_PERMISSION_TITLE, LAN_PERMISSION_HELP)}
+              >
+                <Text style={[
+                  styles.secondaryButtonText,
+                  isDark ? darkStyles.primaryText : null
+                ]}>
+                  Open settings
+                </Text>
+              </Pressable>
+            </View>
+          )}
           {lanStatus?.publicKey && (
             <Text style={[styles.keyText, isDark ? darkStyles.primaryText : null]}>
               Local peer: {lanStatus.publicKey}
@@ -913,7 +990,7 @@ function LANDiscoveryTest({
               No peers discovered yet
             </Text>
             <Text style={[styles.helperText, isDark ? darkStyles.secondaryText : null]}>
-              Open PeerSky on another phone connected to the same Wi-Fi network. Both phones can remain offline.
+              Open PeerSky on another device connected to the same Wi-Fi network. Neither one needs the internet: you can chat and share files with both of them offline.
             </Text>
           </View>
         ) : peers.map((peer, index) => (
@@ -965,15 +1042,19 @@ async function withTimeout<T> (promise: Promise<T>, timeoutMs: number) {
 
 function AboutSettings({ onOpenUrl }: { onOpenUrl: (url: string) => void }) {
   const isDark = useSettingsDarkMode()
-  const platformName = Platform.OS === 'ios' ? 'iOS' : 'Android'
-  const feedbackUrl = `${REPOSITORY_URL}/issues/new?title=${encodeURIComponent(`[${platformName}] Feedback`)}`
+  // One address for everything: feedback, a bug, or content that needs taking
+  // down. A GitHub account is not a fair thing to ask for any of those. The
+  // version rides in the subject so a report says which build it came from.
+  const feedbackMailUrl = `mailto:${FEEDBACK_EMAIL}?subject=${encodeURIComponent(
+    `Feedback for PeerSky ${Constants.expoConfig?.version || 'unknown'}`
+  )}`
 
   return (
     <View style={[styles.pageContent, isDark ? darkStyles.page : null]}>
       <SettingsSection title='PeerSky Mobile'>
         <View style={styles.aboutRow}>
           <SettingCopy
-            title='PeerSky Browser'
+            title='PeerSky'
             description={`Version ${Constants.expoConfig?.version || 'unknown'}`}
           />
         </View>
@@ -993,16 +1074,8 @@ function AboutSettings({ onOpenUrl }: { onOpenUrl: (url: string) => void }) {
             color={isDark ? BROWSER_PALETTES.dark.mutedText : '#8190a7'}
           />
         </Pressable>
-        <Pressable accessibilityRole='link' style={styles.linkRow} onPress={() => onOpenUrl(CONTENT_REPORT_URL)}>
-          <Text style={[styles.linkText, isDark ? darkStyles.primaryText : null]}>Report harmful content</Text>
-          <ChevronRightIcon
-            width={16}
-            height={16}
-            color={isDark ? BROWSER_PALETTES.dark.mutedText : '#8190a7'}
-          />
-        </Pressable>
-        <Pressable accessibilityRole='link' style={styles.linkRow} onPress={() => onOpenUrl(feedbackUrl)}>
-          <Text style={[styles.linkText, isDark ? darkStyles.primaryText : null]}>Send {platformName} feedback</Text>
+        <Pressable accessibilityRole='link' style={styles.linkRow} onPress={() => onOpenUrl(feedbackMailUrl)}>
+          <Text style={[styles.linkText, isDark ? darkStyles.primaryText : null]}>Send feedback</Text>
           <ChevronRightIcon
             width={16}
             height={16}
@@ -1092,6 +1165,19 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     width: 42
   },
+  lanHelp: {
+    gap: 10,
+    marginTop: 4
+  },
+  lanHelpText: {
+    color: '#657086',
+    fontSize: 13,
+    lineHeight: 19
+  },
+  menuIconImage: {
+    height: 26,
+    width: 26
+  },
   rowDivider: {
     borderTopColor: '#e7ebf1',
     borderTopWidth: 1
@@ -1126,6 +1212,12 @@ const styles = StyleSheet.create({
   },
   aboutRow: {
     padding: 16
+  },
+  // The top border is the line between one row and the next, so the first row
+  // in a card leaves it off: the card's own edge is already there and two of
+  // them read as a thick rule.
+  linkRowFirst: {
+    borderTopWidth: 0
   },
   linkRow: {
     alignItems: 'center',

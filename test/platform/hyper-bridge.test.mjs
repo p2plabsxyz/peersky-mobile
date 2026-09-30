@@ -174,3 +174,28 @@ test('the injected page script declares the bridge and patches fetch', () => {
   assert.match(script, /if \(!isHyper\(raw\)\) return nativeFetch\(input, init\)/)
   assert.ok(script.includes(JSON.stringify(TOKEN)))
 })
+
+// A page built on hyper commonly posts a form. The bridge refused outright,
+// which made anything with an upload form unusable on the phone while the same
+// page worked on desktop.
+test('a form posts over hyper, with the boundary the body was written with', async () => {
+  const script = createHyperBridgeScript('token')
+
+  // The multipart document is written here because the request leaves the page
+  // as base64 rather than as a body the engine sends, so nothing else can.
+  assert.match(script, /body instanceof FormData\) return encodeFormData\(body\)/)
+  assert.match(script, /multipart\/form-data; boundary=/)
+  assert.match(script, /Content-Disposition: form-data; name="/)
+  assert.match(script, /filename="/)
+
+  // A field name cannot end its own header early.
+  assert.match(script, /const quoteField = \(value\) =>/)
+  assert.match(script, /replace\(\/"\/g, '%22'\)/)
+
+  // The page's own Content-Type wins; otherwise the boundary is filled in,
+  // since only the encoder knows it.
+  assert.match(script, /!Object\.keys\(headers\)\.some\(\(name\) => name\.toLowerCase\(\) === 'content-type'\)/)
+
+  // And the other shapes still carry the type they imply.
+  assert.match(script, /application\/x-www-form-urlencoded;charset=UTF-8/)
+})

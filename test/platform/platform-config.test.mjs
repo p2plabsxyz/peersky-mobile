@@ -89,11 +89,12 @@ describe('mobile platform runtime configuration', () => {
     assert.equal(easJson.build?.production?.autoIncrement, true)
     assert.deepEqual(easJson.submit?.production, {})
     assert.match(privacySettings, /blob\/main\/PRIVACY[.]md/)
-    assert.match(settings, /issues\/new[?]template=content-report[.]yml/)
-    assert.match(settings, /CONTENT_REPORT_TITLE/)
-    assert.match(settings, /CONTENT_REPORT_BODY/)
-    assert.match(settings, /I have not included private credentials/)
-    assert.match(settings, /Send \{platformName\} feedback/)
+    // One address in the app, for feedback, a bug, or content that needs
+    // taking down. The issue template is still the public route, linked from
+    // the privacy policy, and it does not need a GitHub account to write in.
+    assert.match(settings, /mailto:\$\{FEEDBACK_EMAIL\}/)
+    assert.match(settings, /Send feedback/)
+    assert.doesNotMatch(settings, /Report harmful content/)
     assert.match(privacyPolicy, /contact@p2plabs[.]xyz/)
     assert.match(privacyPolicy, /issues\/new[?]template=content-report[.]yml/)
     assert.match(contentReport, /name: Report harmful content/)
