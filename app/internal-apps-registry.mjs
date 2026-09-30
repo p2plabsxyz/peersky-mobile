@@ -23,13 +23,24 @@ export const INTERNAL_APPS = [
     url: 'peersky://p2p/peertunes/',
     icon: 'PT'
   },
+  // A runtime check for working on the tunnel P2PMD rides on, not an app
+  // anyone uses. It only exists in development builds.
   {
     id: 'holesail',
     title: 'Holesail',
     url: 'peersky://holesail/',
-    icon: 'HS'
+    icon: 'HS',
+    devOnly: true
   }
 ]
+
+// React Native defines __DEV__ before any module runs; under node it is not
+// there, which reads as a release build.
+const DEV_APPS_ENABLED = globalThis.__DEV__ === true
+
+// What peersky://p2p and the home screen list. Development tools never show
+// up here, even in a development build.
+export const P2P_APPS = INTERNAL_APPS.filter((app) => !app.devOnly)
 
 const LEGACY_INTERNAL_APP_ROUTES = new Map([
   ['peersky://hyper', 'hyper'],
@@ -46,10 +57,12 @@ export function getRuntimeAppUrl (app) {
   return match?.url || 'peersky://p2p/p2pmd/'
 }
 
-export function getRuntimeAppFromUrl (targetUrl) {
+export function getRuntimeAppFromUrl (targetUrl, { devApps = DEV_APPS_ENABLED } = {}) {
   const normalizedUrl = normalizeInternalAppUrl(targetUrl)
-  return INTERNAL_APPS.find((app) => normalizeInternalAppUrl(app.url) === normalizedUrl)?.id ||
-    LEGACY_INTERNAL_APP_ROUTES.get(normalizedUrl) || null
+  const app = INTERNAL_APPS.find((item) => normalizeInternalAppUrl(item.url) === normalizedUrl)
+  // In a release build peersky://holesail is just an address nothing answers.
+  if (app && app.devOnly && !devApps) return null
+  return app?.id || LEGACY_INTERNAL_APP_ROUTES.get(normalizedUrl) || null
 }
 
 export function getRuntimeAppTitle (app) {

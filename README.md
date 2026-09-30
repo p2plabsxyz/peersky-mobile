@@ -39,7 +39,7 @@ music from your own drives. Each has its own address:
 
 ```
 peersky://p2p/hyperdrive/   peersky://p2p/p2pmd/   peersky://p2p/peerchat/
-peersky://p2p/peertunes/    peersky://holesail/
+peersky://p2p/peertunes/
 ```
 
 **Your data.** Everything lives on the device. P2P storage is listed per app so

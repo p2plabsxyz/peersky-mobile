@@ -109,7 +109,7 @@ import {
 } from './browser-back-gesture.mjs'
 import {
   BROWSER_HOME_ICON,
-  INTERNAL_APPS,
+  P2P_APPS,
   type RuntimeTab,
   canUseP2pAppPageActions,
   getRuntimeAppFromUrl,
@@ -3486,10 +3486,10 @@ export default function App () {
               contentContainerStyle={styles.browserHome}
               keyboardDismissMode='on-drag'
             >
-              {/* Every built-in app, Holesail included, which the home screen
-                  leaves out to keep its grid to the four people open daily. */}
+              {/* Every built-in app people use. Holesail is a development
+                  tool and is only reachable by address in a debug build. */}
               <View style={styles.browserShortcutGrid}>
-                {INTERNAL_APPS.map((app) => (
+                {P2P_APPS.map((app) => (
                   <Pressable
                     key={app.id}
                     accessibilityRole='button'
@@ -4417,8 +4417,7 @@ function getBrowserTabLabel (tab: BrowserTab) {
   return getBrowserEntryTitle(entry)
 }
 
-// Holesail is reachable by address but is not one of the app tiles.
-const BROWSER_HOME_SHORTCUTS = INTERNAL_APPS.filter((app) => app.id !== 'holesail')
+const BROWSER_HOME_SHORTCUTS = P2P_APPS
 // Matches browserHome's own paddingHorizontal.
 const BROWSER_HOME_PADDING = 18
 

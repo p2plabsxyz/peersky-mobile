@@ -120,8 +120,7 @@ describe('browser tab state helpers', () => {
       ['peersky://p2p/peertunes/#playlist=hyper%3A%2F%2Fabc%2Fmusic%2F', 'peertunes'],
       ['peersky://p2p/peerchat/', 'peerchat'],
       ['peersky://p2p/hyperdrive/', 'hyper'],
-      ['peersky://p2p/p2pmd/', 'p2pmd'],
-      ['peersky://holesail/', 'holesail']
+      ['peersky://p2p/p2pmd/', 'p2pmd']
     ]
 
     for (const [url, app] of cases) {
@@ -143,6 +142,24 @@ describe('browser tab state helpers', () => {
         `${url} should restore straight into ${app}`
       )
     }
+  })
+
+  // A tab left on the Holesail check in a debug build must not reopen the
+  // development tool in a release build. It restores as a plain address.
+  test('a Holesail tab does not reopen the dev tool in a release build', () => {
+    const restored = restoreBrowserTabsState(JSON.stringify({
+      version: 1,
+      activeTabId: 'tab-1',
+      viewMode: 'grid',
+      tabs: [{
+        id: 'tab-1',
+        title: 'Holesail',
+        historyIndex: 0,
+        history: [{ url: 'peersky://holesail/', source: { kind: 'app', app: 'holesail' } }]
+      }]
+    }))
+
+    assert.deepEqual(restored.tabs[0].history[0].source, { kind: 'restore', url: 'peersky://holesail/' })
   })
 
   test('falls back safely when persisted state is malformed', () => {
