@@ -59,7 +59,7 @@ The sender clears the transfer when its sheet is closed, or 15 minutes after it 
 
 ## Phone to desktop
 
-On the desktop, Backup & Restore shows a pairing code with `deviceType=desktop`. The phone scans it in *Send from here*, and sends what a desktop can use: the open tabs, the bookmarks and favourites, and the address of its private drive when that drive is encrypted with the desktop's key (see Private files). Chats, notes, history and the stores stay on the phone. None of it needs the stores closed.
+On the desktop, Backup & Restore shows a pairing code with `deviceType=desktop`. The phone scans it in *Send from here*, and sends what a desktop can use: the open tabs, the bookmarks and favourites, and its private drive with the key to it (see Private files). Chats, notes, history and the stores stay on the phone. None of it needs the stores closed.
 
 It goes in the desktop's own transfer format (`backend/backup/desktop-sync.mjs`), so the desktop checks it with the code it already has for transfers:
 
@@ -68,7 +68,9 @@ It goes in the desktop's own transfer format (`backend/backup/desktop-sync.mjs`)
 3. The manifest is signed with the phone's Ed25519 key over the same fields the desktop signs, with `targetDeviceType: 'desktop'`.
 4. The file is put on a drive at `/backup.zip`, so the drive's bare address works on the desktop too. The phone shows it as a QR code with **Copy link**, and the six characters.
 
-On the desktop, *Restore from the network* takes the link. It downloads it, checks that it was made for a code this desktop showed in the last hour, checks the signature, decrypts it, and shows the six characters. Only once the person confirms does anything change: the bookmarks are added after the desktop's own, the tabs open asleep in a collapsed group called Phone, and the phone's private drive is added to the desktop's private drives, read-only, as a drive adopted from another device always is. Nothing is replaced and nothing restarts. The code is used up, and the page shows a fresh one.
+On the desktop, *Restore from the network* takes the link. It downloads it, checks that it was made for a code this desktop showed in the last hour, checks the signature, decrypts it, and shows the six characters. Only once the person confirms does anything change: the bookmarks are added after the desktop's own, the tabs open asleep in a collapsed group called Phone, and the phone's private drive is added to the desktop's private drives, read-only, as a drive adopted from another device always is. A bookmark or tab the desktop already has is skipped. Nothing is replaced and nothing restarts. The code is used up, and the page shows a fresh one.
+
+A desktop that is still in its first-run screen takes the same link there, under *Restore a backup, or bring tabs from your phone*, and opens its first window with the phone's tabs beside Home.
 
 ## Desktop to phone
 
@@ -89,7 +91,7 @@ A drive the desktop lists that is the phone's own, sent there earlier, is not ad
 
 Private uploads are encrypted with the key the desktop sends with its identity, so the desktop can open them too. Until a desktop has sent one, choosing Private in Hyperdrive asks to link the desktop first, with Link Device to go and do it, or This device only to keep the file on the phone.
 
-The phone keeps the desktop's key at the top of Documents (`private-drive-key.json`). Its own private drive gets its key the first time it is opened, from that file when it is there (`getPrivateDriveKey` with `linkedKey` in `backend/hyper/private-keys.mjs`). A key the phone already has is never swapped, since the files under it would stop opening, so a drive made before linking stays readable on this phone only. The key file travels in backups and phone-to-phone transfers, so a phone restored from this one encrypts for the same desktop.
+The phone keeps the desktop's key at the top of Documents (`private-drive-key.json`). Its own private drive gets its key the first time it is opened, from that file when it is there (`getPrivateDriveKey` with `linkedKey` in `backend/hyper/private-keys.mjs`). A key the phone already has is never swapped, since the files under it would stop opening. That does not keep a drive made before linking from the desktop: *Send from here* sends the drive's own key with its address, sealed to the desktop like the rest, and the desktop opens the drive with it. The same goes for a second desktop. The key file travels in backups and phone-to-phone transfers, so a phone restored from this one encrypts for the same desktop.
 
 
 ## Putting a restore in place

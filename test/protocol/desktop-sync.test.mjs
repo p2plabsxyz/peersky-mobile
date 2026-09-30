@@ -158,28 +158,24 @@ describe('what a phone sends a desktop', () => {
     assert.deepEqual(sync.privateDrives, [])
   })
 
-  it('offers the private drive only when it uses the key the desktop sent', async (t) => {
+  it('sends the private drive with its key, whichever key it was made with', async (t) => {
     const storagePath = await tempDir(t)
     const synced = join(storagePath, 'hyper-sdk-synced-private')
     mkdirSync(synced, { recursive: true })
-    const desktopKey = 'd'.repeat(64)
     const driveId = 'e'.repeat(64)
 
-    // No desktop yet: the phone's drive is its own.
+    // No private drive yet: nothing to send.
+    assert.deepEqual(sharedPrivateDrives(synced), [])
+    assert.deepEqual(sharedPrivateDrives(null), [])
+
+    // Made with the phone's own key, before any desktop was linked.
     writeJson(join(synced, 'private-drive-key.json'), { version: 2, key: 'a'.repeat(64), driveId })
-    assert.deepEqual(sharedPrivateDrives(storagePath, synced), [])
+    assert.deepEqual(sharedPrivateDrives(synced), [{ driveId, key: 'a'.repeat(64) }])
 
-    // A desktop sent its key, but the drive was made before, with the phone's.
-    writeJson(join(storagePath, 'private-drive-key.json'), { version: 3, key: desktopKey, encrypted: true, source: 'desktop', entries: [] })
-    assert.deepEqual(sharedPrivateDrives(storagePath, synced), [])
-
-    // Made with the desktop's key: the desktop can open it.
-    writeJson(join(synced, 'private-drive-key.json'), { version: 2, key: desktopKey, driveId })
-    assert.deepEqual(sharedPrivateDrives(storagePath, synced), [{ driveId }])
-
-    // A desktop that keeps private files on itself only sends no usable key.
-    writeJson(join(storagePath, 'private-drive-key.json'), { version: 3, key: desktopKey, encrypted: false, driveId })
-    assert.deepEqual(sharedPrivateDrives(storagePath, synced), [])
+    // Made with the key a desktop sent.
+    writeJson(join(storagePath, 'private-drive-key.json'), { version: 3, key: 'd'.repeat(64), encrypted: true, source: 'desktop', entries: [] })
+    writeJson(join(synced, 'private-drive-key.json'), { version: 2, key: 'd'.repeat(64), driveId })
+    assert.deepEqual(sharedPrivateDrives(synced), [{ driveId, key: 'd'.repeat(64) }])
   })
 
   it('is a desktop identity transfer, sealed to the desktop, with the code both screens show', async (t) => {

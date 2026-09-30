@@ -15,13 +15,13 @@ import {
   transferBody
 } from './identity-transfer.mjs'
 import { isImportableUrl } from './browser-import.mjs'
-import { getPrivateDriveKeyRecord, linkedPrivateDriveKey } from '../hyper/private-keys.mjs'
+import { getPrivateDriveKeyRecord } from '../hyper/private-keys.mjs'
 import { createStoredZip } from './zip-writer.mjs'
 
 // What a phone sends to PeerSky Desktop: its open tabs, its bookmarks and
-// favourites, and the address of its private drive when the desktop holds
-// the key to it. The rest of a phone, its chats and notes and stores, means
-// nothing to the desktop, which keeps those its own way.
+// favourites, and its private drive with the key to it. The rest of a phone,
+// its chats and notes and stores, means nothing to the desktop, which keeps
+// those its own way.
 //
 // It goes in the desktop's own transfer format, so the desktop checks it with
 // the code it already has: a zip of a signed manifest and a payload that is
@@ -69,21 +69,21 @@ export function collectDesktopSync ({ storagePath, syncedPrivatePath } = {}) {
     }
   }
 
-  return { tabs, bookmarks, privateDrives: sharedPrivateDrives(storagePath, syncedPrivatePath) }
+  return { tabs, bookmarks, privateDrives: sharedPrivateDrives(syncedPrivatePath) }
 }
 
 /**
- * The phone's private drive, if the desktop can open it: only when it is
- * encrypted with the key that came from the desktop in a Link Device
- * transfer. A drive made before that has a key only this phone holds, and
- * its address would lead the desktop nowhere.
+ * The phone's private drive, with its key. The desktop opens it with that
+ * key, so it does not matter which key the drive was made with: one from
+ * before the phone was linked opens there too, and so does one sent to a
+ * second desktop. The key is safe in transit: the payload is sealed to the
+ * desktop, and the person has checked the code on both screens.
  */
-export function sharedPrivateDrives (storagePath, syncedPrivatePath) {
-  const linked = linkedPrivateDriveKey(storagePath)
-  if (!linked || !syncedPrivatePath) return []
+export function sharedPrivateDrives (syncedPrivatePath) {
+  if (!syncedPrivatePath) return []
   const own = getPrivateDriveKeyRecord(syncedPrivatePath)
-  if (!own.ok || !own.key || !own.driveId || !b4a.equals(own.key, linked)) return []
-  return [{ driveId: own.driveId }]
+  if (!own.ok || !own.key || !own.driveId) return []
+  return [{ driveId: own.driveId, key: b4a.toString(own.key, 'hex') }]
 }
 
 export async function createDesktopTransfer ({

@@ -138,6 +138,8 @@ test('sending to a desktop says what it gets and shows a link to paste there', a
   const confirm = screen.slice(screen.indexOf('function confirmSend'), screen.indexOf('async function send ('))
   assert.match(confirm, /'Send to PeerSky Desktop\?'/)
   assert.match(confirm, /the pages open on this phone and your bookmarks/)
+  // The key to the phone's private drive goes too, so the person is told.
+  assert.match(confirm, /can open your private files/)
 
   const sheet = screen.slice(screen.indexOf(': sending'), screen.indexOf('direction === \'receive\''))
   assert.match(sheet, /sending\.toDesktop \? 'Open this on the desktop'/)
