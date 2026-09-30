@@ -445,7 +445,7 @@ async function resolveDriveForAddress (runtime, driveAddress, options) {
   if (isSyncedPrivateHyperdriveAddress(driveAddress)) {
     const primary = await getSyncedPrivateDrive(options)
     const addressId = normalizeDriveAddressId(driveAddress)
-    if (addressId && primary && String(primary.id).toLowerCase() !== addressId) {
+    if (addressId && primary && b4a.toString(primary.key, 'hex') !== addressId) {
       const adopted = await getSyncedPrivateHyperdriveForId(addressId, runtime)
       if (adopted) return adopted
     }
