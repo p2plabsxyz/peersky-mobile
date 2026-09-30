@@ -19,6 +19,7 @@ Settings > Link Device moves everything PeerSky keeps on a phone to another devi
 | PeerChat profile, rooms and messages | Replaced | Not sent |
 | P2PMD notes, name and recent notes | Replaced | Not sent |
 | Drives: public, private and this-device-only | Replaced | Private drives adopted read-only |
+| The key for private files | Replaced | Sent, and used for the phone's private uploads |
 
 Never copied: `device-key.json` and `pairing-nonce.json` (this device's own keys), `welcome-seen`, notification settings tied to this phone's permission, downloads, and the content blocking lists, which rebuild on their own.
 
@@ -71,6 +72,14 @@ What the phone keeps:
 
 What it skips: the desktop's own `hyper/` store, which nothing on the phone opens and which can run to gigabytes, and `lastOpened.json`, `peersky-chat-rooms.json`, `peersky-ports.json` and the desktop caches. An unknown file fails the restore; `device-key.json` is always refused.
 
+A drive the desktop lists that is the phone's own, sent there earlier, is not adopted: that would make the phone's own drive read-only on the phone.
+
+## Private files
+
+Private uploads are encrypted with the key the desktop sends with its identity, so the desktop can open them too. Until a desktop has sent one, choosing Private in Hyperdrive asks to link the desktop first, with Link Device to go and do it, or This device only to keep the file on the phone.
+
+The phone keeps the desktop's key at the top of Documents (`private-drive-key.json`). Its own private drive gets its key the first time it is opened, from that file when it is there (`getPrivateDriveKey` with `linkedKey` in `backend/hyper/private-keys.mjs`). A key the phone already has is never swapped, since the files under it would stop opening, so a drive made before linking stays readable on this phone only. The key file travels in backups and phone-to-phone transfers, so a phone restored from this one encrypts for the same desktop.
+
 ## Putting a restore in place
 
 - Everything is decrypted into `Documents/.peersky-restore-staging` first. Cancelling the confirmation deletes it.
@@ -103,6 +112,7 @@ What it skips: the desktop's own `hyper/` store, which nothing on the phone open
 - `backend/backup/transfer-publisher.mjs`: putting a transfer on a drive and clearing it.
 - `backend/backup/pairing-code.mjs`, `pairing-nonce.mjs`, `device-keys.mjs`, `private-drive-import.mjs`.
 - `app/settings/LinkDevice.tsx`: the screen and its sheets; `app/settings/link-device-state.mjs` holds its plain logic.
+- `app/hyperdrive/private-upload.mjs`: whether this phone has a desktop's key yet, for the Private choice in Hyperdrive.
 - `app/RestartRequiredScreen.tsx`.
 
 ## RPC API
@@ -133,4 +143,6 @@ npm run test:runtime
 - `test/protocol/link-device.test.mjs`: desktop transfers built the way the desktop builds them (`test/fixtures/desktop-transfer.mjs`): expired, wrong target, old code, flipped payload byte, forged manifest, a swapped payload, `device-key.json`, and a 24 MB transfer streamed from disk.
 - `test/protocol/phone-transfer-publish.test.mjs`: a transfer put on a drive, replicated to a second store, read back exactly, and cleared on both.
 - `test/protocol/link-device-safety.test.mjs`: the stores held shut, one job at a time, restore ids, an interrupted swap undone, a failing drive write, damaged and expanding deflate data, and which kind of file each flow accepts.
+- `test/protocol/linked-private-key.test.mjs`: the desktop's key used for a new private drive and never swapped in for an old one, the phone's own drive never adopted back, and the Private prompt.
+- `test/protocol/private-drive-address.test.mjs`: the phone recognising a link to its own private or device-only drive in either form.
 - `test/platform/link-device-screen.test.mjs`: the screen's layout and flows.

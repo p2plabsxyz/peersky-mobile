@@ -16,6 +16,7 @@ import {
   getPrivateDriveId,
   getPrivateDriveKeyRecord,
   hasPrivateDriveKey,
+  linkedPrivateDriveKey,
   rememberPrivateDriveId,
   resetPrivateDriveKeyCache
 } from './private-keys.mjs'
@@ -39,6 +40,7 @@ import {
   HYPERDRIVE_PRIVATE_DRIVE_NAME
 } from './storage-core.mjs'
 import { refreshHyperRuntimeNetwork } from './network-refresh.mjs'
+import { getDefaultIdentityStoragePath } from '../backup/device-keys.mjs'
 
 let sdk = null
 let sdkOpening = null
@@ -255,7 +257,7 @@ export async function getSyncedPrivateHyperdrive (runtime = null) {
     const target = runtime || await getSyncedPrivateHyperRuntime()
     const storage = syncedPrivateStoragePath || getSyncedPrivateHyperSdkStoragePath()
     const driveId = getSyncedPrivateDriveId()
-    const encryptionKey = getPrivateDriveKey(storage)
+    const encryptionKey = getPrivateDriveKey(storage, { linkedKey: linkedPrivateDriveKey(getDefaultIdentityStoragePath()) })
     if (!driveId && !encryptionKey) throw new Error('Private drive encryption key is unavailable.')
 
     const announce = encryptionKey !== null && shouldAnnounceSyncedPrivateDrive(storage)

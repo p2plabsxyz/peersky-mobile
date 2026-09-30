@@ -43,6 +43,11 @@ test('what a backup holds is said the way a person would say it', () => {
     describeBackupContents(['hyper-private', 'incoming-tabs.json', 'peersky-identity.json', 'privateHyperdrives.json']),
     'Tabs and private files'
   )
+  // A desktop with no private drives still sends its key. That is not files.
+  assert.equal(
+    describeBackupContents(['incoming-bookmarks.json', 'incoming-tabs.json', 'peersky-identity.json', 'private-drive-key.json']),
+    'Tabs and bookmarks'
+  )
   assert.equal(describeBackupContents(['browser-bookmarks.json']), 'Bookmarks')
   assert.equal(describeBackupContents([]), '')
   assert.equal(describeBackupContents(undefined), '')

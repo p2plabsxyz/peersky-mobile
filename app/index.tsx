@@ -3660,6 +3660,11 @@ export default function App () {
                   isLandscape={!browserIsPortrait}
                   onCallRpc={(command, data = {}) => callRpc(command, data)}
                   onOpenItem={(item) => void openHyperdriveItem(item)}
+                  onOpenLinkDevice={() => {
+                    setBrowserSettingsInitialPage('link-device')
+                    setBrowserSettingsCloseOnBack(true)
+                    setBrowserSettingsVisible(true)
+                  }}
                   onOpenUrl={(targetUrl) => void loadBrowserUrl(targetUrl)}
                   onStatus={setStatus}
                 />

@@ -17,7 +17,7 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { CameraView, useCameraPermissions } from 'expo-camera'
-import { File } from 'expo-file-system'
+import { File, Paths } from 'expo-file-system'
 import { pickUploadFolder, pickUploads, type UploadAsset } from '../media/upload-gate'
 import ArrowLeftIcon from '../../assets/icons/bootstrap/arrow-left.svg'
 import ChevronRightIcon from '../../assets/icons/bootstrap/chevron-right.svg'
@@ -47,6 +47,7 @@ import {
 import { MODAL_ORIENTATIONS } from '../modal-orientations'
 import { tapFeedback } from '../haptics'
 import { PublishedLinkSheet } from '../PublishedLinkSheet'
+import { isLinkedPrivateKey, LINKED_PRIVATE_KEY_FILE } from './private-upload.mjs'
 
 const hyperdriveIcon = require('../../assets/images/hyperdrive.png')
 
@@ -84,6 +85,7 @@ type Props = {
   isLandscape: boolean
   onCallRpc: (command: number, data?: Record<string, unknown>) => Promise<any>
   onOpenItem: (item: HyperdriveItem) => void
+  onOpenLinkDevice: () => void
   onOpenUrl: (url: string) => void
   onStatus: (message: string) => void
 }
@@ -96,7 +98,7 @@ const RECENT_FILTERS: Array<{ id: RecentFilter, label: string }> = [
   { id: 'fetched', label: 'Fetched' }
 ]
 
-export function HyperdriveScreen ({ offlineNetworkAllowed, isDark, isLandscape, onCallRpc, onOpenItem, onOpenUrl, onStatus }: Props) {
+export function HyperdriveScreen ({ offlineNetworkAllowed, isDark, isLandscape, onCallRpc, onOpenItem, onOpenLinkDevice, onOpenUrl, onStatus }: Props) {
   const [recents, setRecents] = useState<HyperdriveItem[]>(loadHyperdriveRecents)
   const [items, setItems] = useState<HyperdriveItem[] | null>(null)
   const [location, setLocation] = useState<HyperdriveItem | null>(null)
@@ -247,14 +249,34 @@ export function HyperdriveScreen ({ offlineNetworkAllowed, isDark, isLandscape, 
   function chooseUploadVisibility (source: UploadSource) {
     Alert.alert(
       'Choose where to store the file',
-      'Public files can be shared, and anyone with one public link may browse other files in your public drive. Private files are encrypted with a key on this phone: the link is safe to share, but only your devices with the key can open them. Link Device in Settings moves them to a new phone. This device only keeps files on this phone and never syncs.',
+      'Public files can be shared, and anyone with one public link may browse other files in your public drive. Private files are encrypted: the link is safe to share, and only your linked devices can open them. This device only keeps files on this phone and never syncs.',
       [
         // Android renders at most three buttons and silently drops the rest,
         // which is why Public was missing there. Back dismisses instead.
         ...(Platform.OS === 'android' ? [] : [{ text: 'Cancel', style: 'cancel' as const }]),
-        { text: 'Private', onPress: () => void uploadFile('private', source) },
+        { text: 'Private', onPress: () => choosePrivate(source) },
         { text: 'This device only', onPress: () => void uploadFile('device', source) },
         { text: 'Public', onPress: () => void uploadFile('public', source) }
+      ],
+      { cancelable: true }
+    )
+  }
+
+  // Private files are encrypted with the key your desktop sends along with
+  // your identity, so the desktop can open them too. Without it they would
+  // only ever open on this phone, which is what This device only is for.
+  function choosePrivate (source: UploadSource) {
+    if (hasLinkedIdentity()) {
+      void uploadFile('private', source)
+      return
+    }
+    Alert.alert(
+      'Link PeerSky Desktop first',
+      'Private files are encrypted with your identity\'s key, so your desktop can open them too. Bring your identity over in Link Device, then upload again. To keep a file on this phone only, choose This device only.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'This device only', onPress: () => void uploadFile('device', source) },
+        { text: 'Link Device', onPress: onOpenLinkDevice }
       ],
       { cancelable: true }
     )
@@ -829,9 +851,18 @@ function formatRecentMeta (item: HyperdriveItem) {
   return `${details} - ${new Date(item.openedAt).toLocaleDateString()}`
 }
 
+function hasLinkedIdentity () {
+  try {
+    const file = new File(Paths.document, LINKED_PRIVATE_KEY_FILE)
+    return file.exists && isLinkedPrivateKey(file.textSync())
+  } catch {
+    return false
+  }
+}
+
 function getUploadSuccessMessage (visibility: UploadVisibility, _item: HyperdriveItem) {
   if (visibility === 'device') return 'Stored on this device only. It never syncs. A backup from Settings > Link Device keeps a copy if this phone is lost.'
-  if (visibility === 'private') return 'Encrypted with a key on this phone. The link is safe to share, but only your devices with the key can open it.'
+  if (visibility === 'private') return 'Encrypted. The link is safe to share, and only your linked devices can open it.'
   return 'Share it with other peers! Anyone with the link can open it, straight from this phone. Keep PeerSky open while they grab it.'
 }
 

@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSy
 import { join } from 'node:path'
 import z32 from 'z32'
 import {
+  getPrivateDriveId,
   isValidPrivateDriveId,
   normalizePrivateDriveKey
 } from '../hyper/private-keys.mjs'
@@ -43,7 +44,12 @@ export { extractTransferredPrivateDrives, extractTransferredPrivateDrives as ext
 export function adoptTransferredPrivateDrive (storagePath, syncedPrivateStoragePath, adoptedStoragePath = null) {
   if (!storagePath || !syncedPrivateStoragePath) return { adopted: false }
 
+  // The desktop lists every private drive it can open, and that includes this
+  // phone's own once the phone has sent it over. Adopting it would make the
+  // phone's own drive read-only here.
+  const ownDriveId = getPrivateDriveId(syncedPrivateStoragePath)
   const transferred = extractTransferredPrivateDrives(storagePath)
+    .filter((entry) => entry.driveId !== ownDriveId)
   if (transferred.length === 0) return { adopted: false }
 
   const adoptedStorePath = adoptedStoragePath || adoptedStoragePathFor(syncedPrivateStoragePath)

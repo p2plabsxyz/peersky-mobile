@@ -65,6 +65,9 @@ export const PHONE_BACKUP_FILES = Object.freeze([
   'peerchat-intro.json',
   'peerchat-ui-state.json',
   'peersky-identity.json',
+  // The private drive key a desktop sent, kept so a phone restored from this
+  // one encrypts its private files for the same desktop.
+  'private-drive-key.json',
   'hyper-sdk-offline.json',
   'hyper-sdk-private-offline.json',
   'hyper-sdk-synced-private-offline.json'
