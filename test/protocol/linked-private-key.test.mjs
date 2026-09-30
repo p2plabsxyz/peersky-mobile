@@ -1,10 +1,11 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import b4a from 'b4a'
+import Corestore from 'corestore'
 import {
   getPrivateDriveKey,
   getPrivateDriveKeyRecord,
@@ -90,6 +91,40 @@ describe('private uploads use the key the desktop sent', () => {
     assert.equal(adoption.adopted, true)
     assert.deepEqual(adoption.driveIds, [desktopDrive])
     assert.deepEqual(readSyncedPrivateAdoptedDrives(synced).map((entry) => entry.driveId), [desktopDrive])
+  })
+
+  it('a drive adopted before the phone had a private store stays known once the store opens', async (t) => {
+    const storagePath = await tempDir(t)
+    const synced = join(storagePath, 'hyper-sdk-synced-private')
+    const phoneDrive = 'a'.repeat(64)
+    const secondDrive = 'b'.repeat(64)
+    const desktopKey = (fill) => ({
+      version: 3,
+      key: 'd'.repeat(64),
+      encrypted: true,
+      announce: true,
+      source: 'desktop',
+      entries: [{ driveId: fill, key: 'c'.repeat(64) }]
+    })
+
+    // A phone linked before its first private upload: nothing in the
+    // private store's folder but the marker the adoption writes.
+    writeJson(join(storagePath, 'private-drive-key.json'), desktopKey(phoneDrive))
+    assert.equal(adoptTransferredPrivateDrive(storagePath, synced, join(storagePath, 'hyper-sdk-adopted')).adopted, true)
+
+    // The storage layer moves what it does not know into db/ as it opens.
+    const store = new Corestore(synced)
+    await store.ready()
+    await store.close()
+    assert.equal(existsSync(join(synced, 'adopted-corestore.json')), false)
+    assert.deepEqual(readSyncedPrivateAdoptedDrives(synced).map((entry) => [entry.driveId, entry.key]), [[phoneDrive, 'c'.repeat(64)]])
+
+    // The next adoption keeps it, and puts the marker back where it belongs.
+    writeJson(join(storagePath, 'private-drive-key.json'), desktopKey(secondDrive))
+    assert.equal(adoptTransferredPrivateDrive(storagePath, synced, join(storagePath, 'hyper-sdk-adopted')).adopted, true)
+    assert.equal(existsSync(join(synced, 'adopted-corestore.json')), true)
+    assert.equal(existsSync(join(synced, 'db', 'adopted-corestore.json')), false)
+    assert.deepEqual(readSyncedPrivateAdoptedDrives(synced).map((entry) => entry.driveId), [phoneDrive, secondDrive])
   })
 
   it('the screen asks to link the desktop before a private upload', async () => {

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import z32 from 'z32'
 import {
@@ -6,7 +6,12 @@ import {
   isValidPrivateDriveId,
   normalizePrivateDriveKey
 } from '../hyper/private-keys.mjs'
-import { ADOPTED_CORESTORE_FILE, adoptedStoragePathFor, readSyncedPrivateAdoptedDrives } from '../hyper/runtime-routing.mjs'
+import {
+  ADOPTED_CORESTORE_FILE,
+  adoptedStoragePathFor,
+  movedAdoptedCorestoreFile,
+  readSyncedPrivateAdoptedDrives
+} from '../hyper/runtime-routing.mjs'
 
 const PRIVATE_DRIVE_TRANSFER_ENTRY = 'private-drive-key.json'
 const PRIVATE_HYPERDRIVES_REGISTRY = 'privateHyperdrives.json'
@@ -241,4 +246,6 @@ function writeAdoptedCorestoreMarker (syncedPrivateStoragePath, transferred) {
     version: 2,
     drives
   }, null, 2))
+  // A copy the storage layer moved into db/ is in the one just written.
+  rmSync(movedAdoptedCorestoreFile(syncedPrivateStoragePath), { force: true })
 }
