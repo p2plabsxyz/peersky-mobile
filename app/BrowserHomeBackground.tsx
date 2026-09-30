@@ -17,9 +17,14 @@ const WALLPAPER = require('../assets/images/wallpaper-ten-lakes.jpg')
  * that land hard. Opacity only, so nothing shifts or shows an edge.
  */
 export function BrowserHomeBackground ({
+  bleed,
   children,
   scrim
 }: {
+  // The page around this steps in around the notch, which in landscape left a
+  // band of shell down each side of the photograph. The wallpaper reaches the
+  // glass; the shortcuts on top of it keep the inset.
+  bleed: { left: number, right: number }
   children: ReactNode
   scrim: string
 }) {
@@ -38,7 +43,12 @@ export function BrowserHomeBackground ({
   }, [enter])
 
   return (
-    <Animated.View style={[styles.background, { opacity: enter }]}>
+    <Animated.View
+      style={[
+        styles.background,
+        { marginLeft: -bleed.left, marginRight: -bleed.right, opacity: enter }
+      ]}
+    >
       <ImageBackground source={WALLPAPER} resizeMode='cover' style={styles.background}>
         <Animated.View style={[styles.scrim, { backgroundColor: scrim }]}>{children}</Animated.View>
       </ImageBackground>

@@ -3405,7 +3405,7 @@ export default function App () {
   // The navigation bar is the last thing on screen now, whatever is above it,
   // so the strip under the home indicator is always its colour. Nothing else
   // can reach the bottom edge any more.
-  const browserBottomInsetColor = browserIsPortrait ? browserToolbarColor : browserChrome.shell
+  const browserBottomInsetColor = browserToolbarColor
 
   // Shown once, before anything else, on a phone that has never opened PeerSky.
   // Not a tour: one screen, four things, one button.
@@ -3523,10 +3523,21 @@ export default function App () {
             )
           : browserSource.kind === 'home'
           ? (
-            <BrowserHomeBackground scrim={browserIsDark ? 'rgba(24, 24, 27, 0.35)' : 'rgba(255, 255, 255, 0.14)'}>
+            <BrowserHomeBackground
+              bleed={{ left: browserInsets.left, right: browserInsets.right }}
+              scrim={browserIsDark ? 'rgba(24, 24, 27, 0.35)' : 'rgba(255, 255, 255, 0.14)'}
+            >
             <ScrollView
               style={styles.browserContentPage}
-              contentContainerStyle={styles.browserHome}
+              contentContainerStyle={[
+                styles.browserHome,
+                // Put back what the wallpaper bled through, so the shortcuts
+                // still clear the notch in landscape.
+                {
+                  paddingLeft: BROWSER_HOME_PADDING + browserInsets.left,
+                  paddingRight: BROWSER_HOME_PADDING + browserInsets.right
+                }
+              ]}
               keyboardDismissMode='on-drag'
             >
               <View style={styles.browserShortcutGrid}>
@@ -4408,6 +4419,8 @@ function getBrowserTabLabel (tab: BrowserTab) {
 
 // Holesail is reachable by address but is not one of the app tiles.
 const BROWSER_HOME_SHORTCUTS = INTERNAL_APPS.filter((app) => app.id !== 'holesail')
+// Matches browserHome's own paddingHorizontal.
+const BROWSER_HOME_PADDING = 18
 
 /** Whether selecting this tab would hand the screen to the note workspace. */
 function isP2pmdWorkspaceTab (tab: BrowserTab | undefined) {

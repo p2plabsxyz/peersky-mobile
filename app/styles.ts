@@ -323,6 +323,8 @@ export const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '800'
   },
+  // Kept in step with BROWSER_HOME_PADDING, which index.tsx adds the notch
+  // inset to so the wallpaper can bleed past it.
   browserHome: {
     paddingHorizontal: 18,
     paddingTop: 32,

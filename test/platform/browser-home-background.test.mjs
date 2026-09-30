@@ -21,6 +21,20 @@ function readJpegSize (buffer) {
 }
 
 describe('home wallpaper', () => {
+  test('the picture reaches the glass, the shortcuts keep the notch', async () => {
+    const background = await readFile(
+      new URL('../../app/BrowserHomeBackground.tsx', import.meta.url),
+      'utf8'
+    )
+    const index = await readFile(new URL('../../app/index.tsx', import.meta.url), 'utf8')
+
+    // The page steps in around the notch, which in landscape left a band of
+    // shell down each side of the photograph.
+    assert.match(background, /marginLeft: -bleed\.left, marginRight: -bleed\.right/)
+    assert.match(index, /paddingLeft: BROWSER_HOME_PADDING \+ browserInsets\.left/)
+    assert.match(index, /bleed=\{\{ left: browserInsets\.left, right: browserInsets\.right \}\}/)
+  })
+
   test('the picture sits behind a scrim, not behind bare text', async () => {
     const background = await readFile(
       new URL('../../app/BrowserHomeBackground.tsx', import.meta.url),
@@ -47,7 +61,9 @@ describe('home wallpaper', () => {
     // bottom edge and the wallpaper simply runs into it. Nothing else paints a
     // strip down there, which is what used to read as a gap.
     assert.doesNotMatch(index, /browserWebViewFillsBottomInset/)
-    assert.match(index, /const browserBottomInsetColor = browserIsPortrait \? browserToolbarColor/)
+    // In either orientation: the strip used to take the shell colour on its
+    // side, which showed as a band under the navigation bar.
+    assert.match(index, /const browserBottomInsetColor = browserToolbarColor$/m)
   })
 
   test('the wallpaper is sharp enough to look at and small enough to ship', async () => {
@@ -55,12 +71,11 @@ describe('home wallpaper', () => {
     const file = await stat(url)
     const { height, width } = readJpegSize(await readFile(url))
 
-    // Scaling the whole landscape down to fit left a picture 1248 tall, which
-    // the phone then stretched to well over 2000: that is the softness. A
-    // portrait crop at the source's own height is sharp and no bigger.
-    assert.ok(height >= 2000, `wallpaper is only ${height} tall`)
-    assert.ok(width < height, 'the home screen is portrait, so the picture should be')
-    // The desktop copy is 2.6MB, which is a lot of bundle for a backdrop.
-    assert.ok(file.size < 900 * 1024, `wallpaper is ${Math.round(file.size / 1024)}KB`)
+    // A phone turns, and cover then scales the picture to the long edge either
+    // way. Cropping it to portrait made landscape stretch it twice over. Both
+    // dimensions have to clear the long edge of a phone screen instead.
+    assert.ok(width >= 2800, `wallpaper is only ${width} wide`)
+    assert.ok(height >= 2300, `wallpaper is only ${height} tall`)
+    assert.ok(file.size < 1300 * 1024, `wallpaper is ${Math.round(file.size / 1024)}KB`)
   })
 })
