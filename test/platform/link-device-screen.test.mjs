@@ -111,7 +111,7 @@ test('Link Device is laid out like a sync screen, not a debug page', async () =>
     'This phone',
     'Remove my data from this phone'
   ])
-  assert.match(main, /title=\{Platform\.OS === 'ios' \? 'iPhone' : 'Android phone'\}\s*trailing='This device'/)
+  assert.match(main, /title=\{Platform\.OS === 'ios' \? \(Platform\.isPad \? 'iPad' : 'iPhone'\) : 'Android phone'\}\s*trailing='This device'/)
   // The old page showed the key file's location and a hyper:// text field.
   assert.doesNotMatch(screen, /Identity key file location/)
   assert.doesNotMatch(screen, /placeholder='hyper:\/\/\.\.\.'/)

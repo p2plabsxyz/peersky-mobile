@@ -223,7 +223,7 @@ export function LinkDeviceSettings ({ onCallRpc, onRestartRequired, onOpenUrl }:
       <SettingsSection title='My devices'>
         <LinkRow
           icon={PhoneIcon}
-          title={Platform.OS === 'ios' ? 'iPhone' : 'Android phone'}
+          title={Platform.OS === 'ios' ? (Platform.isPad ? 'iPad' : 'iPhone') : 'Android phone'}
           trailing='This device'
         />
         <LinkRow
