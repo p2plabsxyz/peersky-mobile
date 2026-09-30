@@ -1,3 +1,6 @@
+import { SAD_BIRD_DATA_URI } from './browser-error-art.mjs'
+import { describeBrowserError } from './browser-error-copy.mjs'
+
 export function createHyperBrowserHtml (response, targetUrl, isDark = false) {
   const body = response.body || ''
   const contentType = response.headers?.['content-type'] || ''
@@ -37,9 +40,21 @@ function createHyperDirectoryHtml (body, targetUrl, isDark) {
 }
 
 export function createBrowserErrorHtml (targetUrl, message, isDark = false) {
+  const { title, body } = describeBrowserError(targetUrl, message)
+  const detail = String(message || '').trim()
+
+  // The raw message goes in a details element rather than a box on the page.
+  // It is the first thing somebody debugging wants and the last thing anybody
+  // else needs to read.
   return createBrowserDocumentHtml(
-    'PeerSky could not load this page',
-    `<h1>Page failed</h1><p class="muted">${escapeHtml(targetUrl)}</p><pre>${escapeHtml(message)}</pre>`,
+    title,
+    `<div class="error">
+  <img class="art" src="${SAD_BIRD_DATA_URI}" alt="" width="180" height="180" />
+  <h1>${escapeHtml(title)}</h1>
+  <p class="lead">${escapeHtml(body)}</p>
+  <p class="address">${escapeHtml(targetUrl)}</p>
+  ${detail ? `<details><summary>What went wrong</summary><pre>${escapeHtml(detail)}</pre></details>` : ''}
+</div>`,
     isDark
   )
 }
@@ -128,6 +143,57 @@ function createBrowserDocumentHtml (title, body, isDark = false) {
     color: ${theme.muted};
     overflow-wrap: anywhere;
   }
+
+  /* Centred in the viewport rather than pinned to the top: a short message in
+     the corner of an empty screen reads as something that went wrong twice. */
+  .error {
+    align-items: center;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    margin: 0 auto;
+    max-width: 30rem;
+    min-height: calc(100vh - 44px);
+    text-align: center;
+  }
+  .art {
+    height: auto;
+    margin-bottom: 18px;
+    max-width: 180px;
+    width: 45%;
+  }
+  .error h1 {
+    font-size: 1.45rem;
+    line-height: 1.3;
+    margin: 0 0 10px;
+  }
+  .lead {
+    color: ${theme.muted};
+    font-size: 1rem;
+    margin: 0 0 18px;
+  }
+  .address {
+    color: ${theme.muted};
+    font-size: 0.82rem;
+    margin: 0;
+    overflow-wrap: anywhere;
+    opacity: 0.75;
+  }
+  details {
+    margin-top: 26px;
+    text-align: left;
+    width: 100%;
+  }
+  summary {
+    color: ${theme.muted};
+    cursor: pointer;
+    font-size: 0.85rem;
+    list-style: none;
+    text-align: center;
+  }
+  summary::-webkit-details-marker { display: none; }
+  details pre { font-size: 0.8rem; margin-top: 10px; }
 </style>
 ${body}
 `
