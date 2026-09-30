@@ -46,6 +46,7 @@ import {
 } from './recents-store'
 import { MODAL_ORIENTATIONS } from '../modal-orientations'
 import { tapFeedback } from '../haptics'
+import { PublishedLinkSheet } from '../PublishedLinkSheet'
 
 const hyperdriveIcon = require('../../assets/images/hyperdrive.png')
 
@@ -107,6 +108,9 @@ export function HyperdriveScreen ({ offlineNetworkAllowed, isDark, isLandscape, 
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [isScanning, setIsScanning] = useState(false)
+  // The last upload that can be shared, with where it went, so the sheet can
+  // say who is able to open it.
+  const [sharedUpload, setSharedUpload] = useState<{ item: HyperdriveItem, visibility: UploadVisibility, count: number } | null>(null)
   const [offlineItem, setOfflineItem] = useState<HyperOfflineItem | null>(null)
   const [offlineBusy, setOfflineBusy] = useState(false)
   const [offlineChecking, setOfflineChecking] = useState(false)
@@ -243,7 +247,7 @@ export function HyperdriveScreen ({ offlineNetworkAllowed, isDark, isLandscape, 
   function chooseUploadVisibility (source: UploadSource) {
     Alert.alert(
       'Choose where to store the file',
-      'Public files can be shared, and anyone with one public link may browse other files in your public drive. Private files are encrypted and locked with a key that lives on this phone: sharing a link is safe, but only a device holding the key can open the drive. Paste an identity-transfer URL in Settings to adopt a drive published on the desktop browser; a phone-created keyed drive has no export path yet, so it stays on this phone. This device only keeps files on this phone and never syncs.',
+      'Public files can be shared, and anyone with one public link may browse other files in your public drive. Private files are encrypted with a key on this phone: the link is safe to share, but only your devices with the key can open them. Link Device in Settings moves them to a new phone. This device only keeps files on this phone and never syncs.',
       [
         // Android renders at most three buttons and silently drops the rest,
         // which is why Public was missing there. Back dismisses instead.
@@ -292,11 +296,17 @@ export function HyperdriveScreen ({ offlineNetworkAllowed, isDark, isLandscape, 
       if (!lastItem) return
 
       onStatus(assets.length === 1 ? `Uploaded ${lastItem.name}` : `Uploaded ${assets.length} files`)
-      const uploadMessage = getUploadSuccessMessage(visibility, lastItem)
-      Alert.alert('Uploaded to Hyperdrive', uploadMessage, [
-        { text: 'Done' },
-        { text: 'Open', onPress: () => onOpenItem(lastItem) }
-      ])
+      // A device-only file never leaves the phone, so there is no link to
+      // pass on. Everything else gets the share sheet.
+      if (visibility === 'device') {
+        const openItem = lastItem
+        Alert.alert('Saved on this phone', getUploadSuccessMessage(visibility, lastItem), [
+          { text: 'Done' },
+          { text: 'Open', onPress: () => onOpenItem(openItem) }
+        ])
+      } else {
+        setSharedUpload({ item: lastItem, visibility, count: assets.length })
+      }
     } catch (uploadError) {
       setError(uploadError instanceof Error ? uploadError.message : String(uploadError))
     } finally {
@@ -628,6 +638,21 @@ export function HyperdriveScreen ({ offlineNetworkAllowed, isDark, isLandscape, 
           </ScrollView>
           )}
 
+      <PublishedLinkSheet
+        isDark={isDark}
+        message={sharedUpload ? getUploadSuccessMessage(sharedUpload.visibility, sharedUpload.item) : ''}
+        shareTitle={sharedUpload?.item.name || 'Hyperdrive file'}
+        title={sharedUpload && sharedUpload.count > 1 ? `${sharedUpload.count} files uploaded` : 'Uploaded'}
+        url={sharedUpload?.item.url || null}
+        visible={sharedUpload !== null}
+        onClose={() => setSharedUpload(null)}
+        onOpen={() => {
+          const item = sharedUpload?.item
+          setSharedUpload(null)
+          if (item) onOpenItem(item)
+        }}
+      />
+
       <Modal supportedOrientations={MODAL_ORIENTATIONS} visible={isScanning} animationType='fade' onRequestClose={() => setIsScanning(false)}>
         <View style={styles.scanner}>
           {isScanning && (
@@ -804,10 +829,10 @@ function formatRecentMeta (item: HyperdriveItem) {
   return `${details} - ${new Date(item.openedAt).toLocaleDateString()}`
 }
 
-function getUploadSuccessMessage (visibility: UploadVisibility, item: HyperdriveItem) {
-  if (visibility === 'device') return 'Stored on this device only. It never syncs and will be lost if this phone is reset.'
-  if (visibility === 'private') return 'Encrypted with a key held on this phone. The link alone is safe to share, but only a device holding the key can open the drive.'
-  return item.url
+function getUploadSuccessMessage (visibility: UploadVisibility, _item: HyperdriveItem) {
+  if (visibility === 'device') return 'Stored on this device only. It never syncs. A backup from Settings > Link Device keeps a copy if this phone is lost.'
+  if (visibility === 'private') return 'Encrypted with a key on this phone. The link is safe to share, but only your devices with the key can open it.'
+  return 'Share it with other peers! Anyone with the link can open it, straight from this phone. Keep PeerSky open while they grab it.'
 }
 
 function formatBytes (bytes: number) {

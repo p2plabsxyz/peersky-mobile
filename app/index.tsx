@@ -126,6 +126,7 @@ import { BrowserToolbar } from './BrowserToolbar'
 import { BrowserNavBar } from './BrowserNavBar'
 import { BrowserBackSwipe } from './BrowserBackSwipe'
 import { BrowserZoomSheet } from './BrowserZoomSheet'
+import { PublishedLinkSheet } from './PublishedLinkSheet'
 import { WelcomeScreen } from './WelcomeScreen'
 import { BrowserHomeBackground } from './BrowserHomeBackground'
 import { applyAppIcon } from './app-icon'
@@ -499,6 +500,8 @@ export default function App () {
   const [p2pmdSetupError, setP2pmdSetupError] = useState<string | null>(null)
   const [p2pmdPublishUrl, setP2pmdPublishUrl] = useState<string | null>(null)
   const [isP2pmdPublishing, setIsP2pmdPublishing] = useState(false)
+  const [p2pmdPublishSheet, setP2pmdPublishSheet] = useState<'note' | 'slides' | null>(null)
+  const p2pmdPublishedModeRef = useRef<'note' | 'slides'>('note')
   const shouldShowRuntimeStatus = activeTab === 'holesail'
   const {
     clearAllPreviews: clearAllBrowserTabPreviews,
@@ -2626,31 +2629,12 @@ export default function App () {
     }
   }
 
-  // Publishing hands back a link that is worth nothing if it is not kept. The
-  // share sheet buries copying a few taps in, so offer it outright.
-  function promptPublishedLink (url: string, isSlides: boolean) {
-    Alert.alert(
-      isSlides ? 'Presentation published' : 'Note published',
-      url,
-      [
-        { text: 'Copy link', onPress: () => copyPublishedLink(url) },
-        {
-          text: 'Share',
-          onPress: () => {
-            void shareLink({
-              title: isSlides ? 'Published P2PMD presentation' : 'Published P2PMD note',
-              message: url
-            }).catch(() => {})
-          }
-        },
-        { text: 'Done', style: 'cancel' }
-      ]
-    )
-  }
-
-  function copyPublishedLink (url: string) {
-    Clipboard.setString(url)
-    setStatus('Published link copied')
+  // Publishing hands back a link that is worth nothing if it is not kept. It
+  // used to be an alert: Copy or Done and it was gone. The sheet says what to
+  // do with it, and the Published row in the note bar opens it again.
+  function promptPublishedLink (_url: string, isSlides: boolean) {
+    p2pmdPublishedModeRef.current = isSlides ? 'slides' : 'note'
+    setP2pmdPublishSheet(p2pmdPublishedModeRef.current)
   }
 
   async function handleP2pmdBridgeRequest (request: Record<string, unknown>) {
@@ -3228,15 +3212,16 @@ export default function App () {
             </Text>
             {p2pmdPublishUrl && (
               <Pressable
-                accessibilityHint='Copies the published link'
+                accessibilityHint='Shows the published link to share or copy'
                 accessibilityRole='button'
-                onPress={() => copyPublishedLink(p2pmdPublishUrl)}
+                onPress={() => setP2pmdPublishSheet(p2pmdPublishedModeRef.current)}
                 style={styles.p2pmdPublishedUrlRow}
               >
                 <Text style={[styles.p2pmdPublishedUrlLabel, p2pmdTheme?.p2pmdPublishedUrlLabel]}>Published</Text>
                 <Text numberOfLines={1} ellipsizeMode='middle' style={[styles.p2pmdPublishedUrl, p2pmdTheme?.p2pmdPublishedUrl]}>
                   {p2pmdPublishUrl}
                 </Text>
+                <Text style={[styles.p2pmdPublishedUrlAction, p2pmdTheme?.p2pmdPublishedUrlAction]}>Share</Text>
               </Pressable>
             )}
             <Text numberOfLines={1} style={[styles.p2pmdWorkspaceSyncStatus, p2pmdTheme?.p2pmdWorkspaceSyncStatus]}>
@@ -3312,6 +3297,20 @@ export default function App () {
             <AppLoading app='p2pmd' isDark={browserIsDark} />
           </View>
         )}
+
+        <PublishedLinkSheet
+          isDark={browserIsDark}
+          message='Share it with other peers! It loads straight from this phone, so keep PeerSky open while they open it.'
+          shareTitle={p2pmdPublishSheet === 'slides' ? 'Published P2PMD presentation' : 'Published P2PMD note'}
+          title={p2pmdPublishSheet === 'slides' ? 'Your slides are live' : 'Your note is live'}
+          url={p2pmdPublishUrl}
+          visible={p2pmdPublishSheet !== null}
+          onClose={() => setP2pmdPublishSheet(null)}
+          onOpen={(url) => {
+            setP2pmdPublishSheet(null)
+            openBrowserUrlInNewTab(url)
+          }}
+        />
       </SafeAreaView>
     )
   }

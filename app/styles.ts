@@ -657,23 +657,35 @@ export const styles = StyleSheet.create({
     fontSize: 11,
     minWidth: 0
   },
+  // Big enough to notice and to hit. At 10pt it read as a caption, and
+  // people could not find their way back to a link they had just published.
   p2pmdPublishedUrlRow: {
     alignItems: 'center',
+    backgroundColor: 'rgba(89, 166, 255, 0.14)',
+    borderRadius: 8,
     flexDirection: 'row',
-    gap: 5,
-    minWidth: 0
+    gap: 6,
+    marginTop: 2,
+    minHeight: 30,
+    minWidth: 0,
+    paddingHorizontal: 8
   },
   p2pmdPublishedUrlLabel: {
     color: '#cdd6ff',
-    fontSize: 10,
+    fontSize: 12,
     fontWeight: '800'
   },
   p2pmdPublishedUrl: {
     color: '#59a6ff',
     flex: 1,
     fontFamily: 'monospace',
-    fontSize: 10,
+    fontSize: 11,
     minWidth: 0
+  },
+  p2pmdPublishedUrlAction: {
+    color: '#cdd6ff',
+    fontSize: 12,
+    fontWeight: '800'
   },
   p2pmdWorkspaceSyncStatus: {
     color: '#cdd6ff',
@@ -1076,6 +1088,7 @@ export const p2pmdLight = StyleSheet.create({
   p2pmdWorkspaceSyncStatus: { color: '#687086' },
   p2pmdWorkspaceWebView: { backgroundColor: '#ffffff' },
   p2pmdPublishedUrlLabel: { color: '#1a5fb4' },
+  p2pmdPublishedUrlAction: { color: '#1a5fb4' },
   p2pmdPublishedUrl: { color: '#1f6fd1' },
   p2pmdMetaButton: { backgroundColor: '#e8f0fb', borderColor: '#c3d3ea' },
   p2pmdMetaButtonDanger: { backgroundColor: '#fde8ec', borderColor: '#e8a9b6' },
