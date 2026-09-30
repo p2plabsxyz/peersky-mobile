@@ -43,8 +43,7 @@ export function convertDesktopTabs (text, { now = Date.now() } = {}) {
 }
 
 /**
- * Desktop bookmarks.json is [{ url, title, dateAdded }]. The desktop does not
- * send it yet; this is here so the phone takes them the day it does.
+ * Desktop bookmarks.json is [{ url, title, dateAdded }].
  */
 export function convertDesktopBookmarks (text, { now = Date.now() } = {}) {
   const parsed = parseJson(text)

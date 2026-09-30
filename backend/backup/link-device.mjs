@@ -16,10 +16,11 @@ import {
   stagePhoneBackupFile
 } from './phone-backup.mjs'
 import { stageDesktopTransferFile } from './desktop-transfer.mjs'
+import { createDesktopTransfer, DESKTOP_TRANSFER_FILE_NAME } from './desktop-sync.mjs'
 import { commitStagedRestore, recoverInterruptedRestore, RESTORE_STAGING_DIR } from './restore.mjs'
 import { adoptTransferredPrivateDrive } from './private-drive-import.mjs'
 import { isBackupFileHeader, isZipHeader, readFileHead } from './backup-file.mjs'
-import { publishTransferFile, purgeTransferDrive, transferDriveName } from './transfer-publisher.mjs'
+import { publishTransferFile, purgeTransferDrive, TRANSFER_FILE_NAME, transferDriveName } from './transfer-publisher.mjs'
 import { fetchHyperToFile, resetHyperFetch } from '../hyper/fetch.mjs'
 import { closeHyperOfflineDownloads } from '../hyper/offline-manager.mjs'
 import {
@@ -28,9 +29,10 @@ import {
   getSyncedPrivateHyperStoragePath,
   holdHyperStores,
   withHyperRuntimeMaintenance,
-  withHyperRuntimeOperation
+  withHyperRuntimeOperation,
+  withSyncedPrivateHyperRuntimeOperation
 } from '../hyper/runtime.mjs'
-import { resetPrivateDriveKeyCache } from '../hyper/private-keys.mjs'
+import { hasPrivateDriveKey, resetPrivateDriveKeyCache } from '../hyper/private-keys.mjs'
 import { closePeerChatService } from '../peerchat/runtime.mjs'
 import { notifyApp } from '../rpc/notify.mjs'
 import { RPC_APP_BACKUP_PROGRESS } from '../rpc/commands.mjs'
@@ -264,9 +266,14 @@ export function confirmRestore ({ restoreId } = {}) {
 }
 
 /**
- * Sends this phone to the phone whose pairing code was scanned: everything is
- * packed and sealed to that phone, and put on a drive for it to fetch. The
- * other phone shows the same six characters as this one.
+ * Sends this phone to the device whose pairing code was scanned, sealed to
+ * that device and put on a drive for it to fetch. Both screens then show the
+ * same six characters.
+ *
+ * Another phone gets everything, packed with the stores closed. PeerSky
+ * Desktop gets the open tabs, the bookmarks and the private drive's address,
+ * in its own format (desktop-sync.mjs): the rest of a phone means nothing to
+ * a desktop, and none of it needs the stores closed.
  */
 export function sendTransfer ({ pairingCode, peerskyVersion, platform } = {}) {
   let target
@@ -276,39 +283,47 @@ export function sendTransfer ({ pairingCode, peerskyVersion, platform } = {}) {
     return { ok: false, error: error.message }
   }
   if (!target) {
-    return { ok: false, error: 'That is not a pairing code. On the other phone, open Link Device and scan the code it shows.' }
+    return { ok: false, error: 'That is not a pairing code. On the other device, open Link Device or Backup & Restore and scan the code it shows.' }
   }
-  if (target.deviceType !== 'mobile') {
-    return {
-      ok: false,
-      code: 'DESKTOP_TARGET',
-      error: 'PeerSky Desktop cannot take a phone\'s data yet. Send from the desktop to this phone instead.'
-    }
-  }
+  const toDesktop = target.deviceType === 'desktop'
 
   return runExclusive(async () => {
     const storagePath = getDefaultIdentityStoragePath()
     const deviceKeys = await getDeviceKeys(storagePath)
     if (target.encryptionPublicKey === b4a.toString(deviceKeys.encryption.publicKey, 'hex')) {
-      return { ok: false, error: 'That is this phone\'s own code. Scan the code on the other phone.' }
+      return { ok: false, error: 'That is this phone\'s own code. Scan the code on the other device.' }
     }
 
     await stopOutgoingTransfer()
     const transferDir = join(storagePath, TRANSFER_DIR)
     mkdirSync(transferDir, { recursive: true })
-    const filePath = join(transferDir, `outgoing-${target.nonce}.peersky`)
+    const filePath = join(transferDir, `outgoing-${target.nonce}.${toDesktop ? 'zip' : 'peersky'}`)
     const driveName = transferDriveName(target.nonce)
 
     try {
-      const created = await withStoresClosed(() => createPhoneTransfer({
-        storagePath,
-        outPath: filePath,
-        target,
-        deviceKeys,
-        peerskyVersion,
-        platform,
-        onProgress: progress('packing')
-      }))
+      // The private drive is opened first: that saves which drive it is, for
+      // the desktop to be told, and announces it, so the desktop can fetch it.
+      if (toDesktop && hasPrivateDriveKey(getSyncedPrivateHyperStoragePath())) {
+        await withSyncedPrivateHyperRuntimeOperation(() => {}).catch(() => {})
+      }
+      const created = toDesktop
+        ? await createDesktopTransfer({
+          storagePath,
+          syncedPrivatePath: getSyncedPrivateHyperStoragePath(),
+          outPath: filePath,
+          target,
+          deviceKeys,
+          peerskyVersion
+        })
+        : await withStoresClosed(() => createPhoneTransfer({
+          storagePath,
+          outPath: filePath,
+          target,
+          deviceKeys,
+          peerskyVersion,
+          platform,
+          onProgress: progress('packing')
+        }))
 
       writeFileSync(join(transferDir, OUTGOING_MARKER), JSON.stringify({ driveName, expiresAt: created.expiresAt }))
       let published
@@ -316,6 +331,7 @@ export function sendTransfer ({ pairingCode, peerskyVersion, platform } = {}) {
         published = await withHyperRuntimeOperation((runtime) => publishTransferFile(runtime, {
           driveName,
           filePath,
+          fileName: toDesktop ? DESKTOP_TRANSFER_FILE_NAME : TRANSFER_FILE_NAME,
           onProgress: progress('sharing')
         }))
       } catch (error) {
@@ -336,7 +352,9 @@ export function sendTransfer ({ pairingCode, peerskyVersion, platform } = {}) {
         url: published.url,
         verificationCode: created.verificationCode,
         expiresAt: created.expiresAt,
-        bytes: created.bytes
+        bytes: created.bytes,
+        deviceType: target.deviceType,
+        sent: created.sent
       }
     } finally {
       // The drive holds its own copy now.

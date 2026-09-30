@@ -128,11 +128,22 @@ test('what the camera sees decides the direction', async () => {
 
   assert.match(handle, /classifyLinkDeviceCode\(text\)/)
   assert.match(handle, /result\.kind === 'transfer' && result\.url\) \{\s*await receive\(result\.url\)/)
-  assert.match(handle, /if \(result\.code\) confirmSend\(result\.code\)/)
-  // A desktop cannot take a phone's data yet, and is told which way round
-  // works instead of failing half way.
-  assert.match(handle, /result\.deviceType === 'desktop'/)
-  assert.match(handle, /send to this phone instead/)
+  // A desktop's code sends to the desktop: it takes the tabs and bookmarks.
+  assert.match(handle, /if \(result\.code\) confirmSend\(result\.code, result\.deviceType === 'desktop'\)/)
+  assert.doesNotMatch(handle, /send to this phone instead/)
+})
+
+test('sending to a desktop says what it gets and shows a link to paste there', async () => {
+  const screen = await read('app/settings/LinkDevice.tsx')
+  const confirm = screen.slice(screen.indexOf('function confirmSend'), screen.indexOf('async function send ('))
+  assert.match(confirm, /'Send to PeerSky Desktop\?'/)
+  assert.match(confirm, /the pages open on this phone and your bookmarks/)
+
+  const sheet = screen.slice(screen.indexOf(': sending'), screen.indexOf('direction === \'receive\''))
+  assert.match(sheet, /sending\.toDesktop \? 'Open this on the desktop'/)
+  assert.match(sheet, /Under Restore from the network, paste this link or scan it/)
+  assert.match(sheet, /onPress=\{copyLink\}/)
+  assert.match(screen, /Clipboard\.setString\(sending\.url\)/)
 })
 
 test('a restore waits for the code to be compared, and a cancel frees the space', async () => {
@@ -153,7 +164,7 @@ test('a restore waits for the code to be compared, and a cancel frees the space'
 test('packing stops offline downloads, so the app starts them again', async () => {
   const screen = await read('app/settings/LinkDevice.tsx')
   for (const [start, end] of [
-    ['async function send (code: string)', 'function copyCode'],
+    ['async function send (', 'function copyCode'],
     ['async function createBackup ()', 'async function shareBackup']
   ]) {
     const flow = screen.slice(screen.indexOf(start), screen.indexOf(end))

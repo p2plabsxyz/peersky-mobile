@@ -322,9 +322,10 @@ function SyncSheet ({
   const [pairingCode, setPairingCode] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
   const [progress, setProgress] = useState<LinkDeviceProgress | null>(null)
-  const [sending, setSending] = useState<{ url: string, code: string } | null>(null)
+  const [sending, setSending] = useState<{ url: string, code: string, toDesktop: boolean } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
+  const [linkCopied, setLinkCopied] = useState(false)
   const [scanning, setScanning] = useState(false)
   const scanHandledRef = useRef(false)
   const visibleRef = useRef(visible)
@@ -407,11 +408,7 @@ function SyncSheet ({
       await receive(result.url)
       return
     }
-    if (result.deviceType === 'desktop') {
-      setError('PeerSky Desktop cannot take a phone\'s data yet. On the desktop, send to this phone instead: scan this phone\'s code there.')
-      return
-    }
-    if (result.code) confirmSend(result.code)
+    if (result.code) confirmSend(result.code, result.deviceType === 'desktop')
   }
 
   async function receive (url: string) {
@@ -456,21 +453,24 @@ function SyncSheet ({
     )
   }
 
-  function confirmSend (code: string) {
+  function confirmSend (code: string, toDesktop: boolean) {
     Alert.alert(
-      'Send this phone to the other one?',
-      'It gets everything on this phone: tabs, bookmarks, history, settings, chats, notes and files. Nothing passes through a server.',
+      toDesktop ? 'Send to PeerSky Desktop?' : 'Send this phone to the other one?',
+      toDesktop
+        ? 'It gets the pages open on this phone and your bookmarks, added to its own. Nothing passes through a server.'
+        : 'It gets everything on this phone: tabs, bookmarks, history, settings, chats, notes and files. Nothing passes through a server.',
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Send', onPress: () => void send(code) }
+        { text: 'Send', onPress: () => void send(code, toDesktop) }
       ]
     )
   }
 
-  async function send (code: string) {
+  async function send (code: string, toDesktop: boolean) {
     setError(null)
     setProgress(null)
-    setBusy('Packing up your data')
+    setLinkCopied(false)
+    setBusy(toDesktop ? 'Getting your tabs and bookmarks ready' : 'Packing up your data')
     try {
       const response = await call(RPC_IDENTITY_SEND, {
         pairingCode: code,
@@ -483,7 +483,7 @@ function SyncSheet ({
         return
       }
       tapFeedback()
-      setSending({ url: response.url, code: response.verificationCode })
+      setSending({ url: response.url, code: response.verificationCode, toDesktop })
     } catch (sendError) {
       setError(errorMessage(sendError))
     } finally {
@@ -501,6 +501,15 @@ function SyncSheet ({
     setCopied(true)
   }
 
+  // A desktop scans with its webcam, which is fiddly; pasting the link is the
+  // usual way there, and on Apple devices the copy reaches the Mac by itself.
+  function copyLink () {
+    if (!sending) return
+    Clipboard.setString(sending.url)
+    tapFeedback()
+    setLinkCopied(true)
+  }
+
   return (
     <SheetFrame title='Sync with another device' visible={visible} onClose={close} closeLabel={sending ? 'Done' : 'Close'}>
       {error && <Banner kind='error' text={error} onDismiss={() => setError(null)} />}
@@ -510,21 +519,34 @@ function SyncSheet ({
         : sending
           ? (
             <View style={styles.sheetBlock}>
-              <Text style={[styles.sheetHeading, isDark ? darkStyles.text : null]}>Scan this on the other phone</Text>
+              <Text style={[styles.sheetHeading, isDark ? darkStyles.text : null]}>
+                {sending.toDesktop ? 'Open this on the desktop' : 'Scan this on the other phone'}
+              </Text>
               <Text style={[styles.sheetText, isDark ? darkStyles.muted : null]}>
-                In Sync with another device on the other phone, tap Scan code and point it here.
+                {sending.toDesktop
+                  ? 'In PeerSky Desktop, open Backup & Restore. Under Restore from the network, paste this link or scan it, then press Download.'
+                  : 'In Sync with another device on the other phone, tap Scan code and point it here.'}
               </Text>
               <QrCodeView value={sending.url} size={220} />
+              <Pressable accessibilityRole='button' hitSlop={8} onPress={copyLink}>
+                <Text style={styles.linkText}>{linkCopied ? 'Link copied' : 'Copy link'}</Text>
+              </Pressable>
               <View style={[styles.codeBox, isDark ? darkStyles.codeBox : null]}>
-                <Text style={[styles.codeLabel, isDark ? darkStyles.muted : null]}>Both phones show</Text>
+                <Text style={[styles.codeLabel, isDark ? darkStyles.muted : null]}>
+                  {sending.toDesktop ? 'Both screens show' : 'Both phones show'}
+                </Text>
                 <Text style={[styles.codeValue, isDark ? darkStyles.text : null]}>{sending.code}</Text>
               </View>
               <Text style={[styles.sheetText, isDark ? darkStyles.muted : null]}>
-                Keep PeerSky open on both phones until it finishes. This code works for 15 minutes.
+                {sending.toDesktop
+                  ? 'Keep PeerSky open on this phone until the desktop has it. This code works for 15 minutes.'
+                  : 'Keep PeerSky open on both phones until it finishes. This code works for 15 minutes.'}
               </Text>
-              <Text style={[styles.sheetNote, isDark ? darkStyles.muted : null]}>
-                Moving for good? Once the new phone has everything, remove your data from this one, so the two are not using the same chats.
-              </Text>
+              {!sending.toDesktop && (
+                <Text style={[styles.sheetNote, isDark ? darkStyles.muted : null]}>
+                  Moving for good? Once the new phone has everything, remove your data from this one, so the two are not using the same chats.
+                </Text>
+              )}
             </View>
             )
           : (
@@ -557,8 +579,8 @@ function SyncSheet ({
                   )
                 : (
                   <>
-                    <Step number={1} text='On the other phone, open Link Device and tap Sync with another device.' />
-                    <Step number={2} text='Scan the code it shows. This phone packs everything up and shows a code back.' />
+                    <Step number={1} text='On the other phone, open Link Device and tap Sync with another device. On PeerSky Desktop, open Backup & Restore.' />
+                    <Step number={2} text='Scan the code it shows. A phone gets everything on this one. The desktop gets your open pages and bookmarks.' />
                   </>
                   )}
 

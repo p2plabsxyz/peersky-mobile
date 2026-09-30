@@ -4,22 +4,22 @@ Settings > Link Device moves everything PeerSky keeps on a phone to another devi
 
 ## The screen
 
-- **This device**, then **Sync with another device**: one sheet for both directions. *Receive here* shows this phone's pairing code; *Send from here* is for scanning the other phone's. The scan decides what happens either way: a pairing code (`peersky-identity:`) means "send this phone there", and a `hyper://` code is a transfer another device has ready for this one.
+- **This device**, then **Sync with another device**: one sheet for both directions. *Receive here* shows this phone's pairing code; *Send from here* is for scanning the other device's. The scan decides what happens either way: a pairing code (`peersky-identity:`) means "send this phone there", and a `hyper://` code is a transfer another device has ready for this one. A desktop's pairing code sends the tabs and bookmarks to that desktop.
 - **Save a backup file** and **Restore from a backup file**.
 - **Get the desktop browser**.
 - **Remove my data from this phone**, for handing a phone on or finishing a move.
 
 ## What moves
 
-| Data | Backup file, or phone to phone | Desktop to phone |
-|---|---|---|
-| Tabs | Replaced | Added to the tabs already open |
-| Bookmarks and favourites | Replaced | Added, once the desktop sends them (it does not yet) |
-| History and settings | Replaced | Not sent |
-| PeerChat profile, rooms and messages | Replaced | Not sent |
-| P2PMD notes, name and recent notes | Replaced | Not sent |
-| Drives: public, private and this-device-only | Replaced | Private drives adopted read-only |
-| The key for private files | Replaced | Sent, and used for the phone's private uploads |
+| Data | Backup file, or phone to phone | Desktop to phone | Phone to desktop |
+|---|---|---|---|
+| Tabs | Replaced | Added to the tabs already open | Opened asleep in a group called Phone |
+| Bookmarks and favourites | Replaced | Added | Added to the desktop's bookmarks |
+| History and settings | Replaced | Not sent | Not sent |
+| PeerChat profile, rooms and messages | Replaced | Not sent | Not sent |
+| P2PMD notes, name and recent notes | Replaced | Not sent | Not sent |
+| Drives: public, private and this-device-only | Replaced | Private drives adopted read-only | The private drive, readable there and read-only |
+| The key for private files | Replaced | Sent, and used for the phone's private uploads | Not sent: the desktop made it |
 
 Never copied: `device-key.json` and `pairing-nonce.json` (this device's own keys), `welcome-seen`, notification settings tied to this phone's permission, downloads, and the content blocking lists, which rebuild on their own.
 
@@ -45,7 +45,7 @@ payload              secretstream header, then [u32 LE length][ciphertext] frame
 - The payload is XChaCha20-Poly1305 secretstream: every 64 KiB frame is authenticated, and the last one is marked, so a file cut short is caught instead of half restored.
 - Inside the payload is a run of records, `[u32 LE header length][header JSON][file bytes]`, ending with `{ "type": "end" }`. Files stream from disk to disk and are never held in memory whole.
 
-Why not the desktop's zip and AES-GCM: every zip entry needs a CRC32, which the phone would have to compute in JavaScript over gigabytes of Hyper data, and bare-crypto's GCM holds the whole payload in memory, twice. The desktop cannot open a phone backup yet, and a phone cannot open a desktop backup: each holds the other's own store layout.
+Why not the desktop's zip and AES-GCM: every zip entry needs a CRC32, which the phone would have to compute in JavaScript over gigabytes of Hyper data, and bare-crypto's GCM holds the whole payload in memory, twice. The desktop cannot open a phone backup, and a phone cannot open a desktop backup: each holds the other's own store layout. What a phone sends a desktop is a few hundred kilobytes at most, so that does use the desktop's format (see Phone to desktop).
 
 ## Phone to phone
 
@@ -57,20 +57,31 @@ Why not the desktop's zip and AES-GCM: every zip entry needs a CRC32, which the 
 
 The sender clears the transfer when its sheet is closed, or 15 minutes after it was made. Each send uses a new drive. Hyperdrive's `purge()` calls a method that does not exist in the hypercore release in use, so the file's blocks are cleared instead; the drive's index is kept, because clearing it leaves a drive that hangs whenever it is opened again. A send cut short by the app being killed leaves a marker, and the next start clears its drive.
 
-PeerSky Desktop cannot take a phone's data yet. Scanning a desktop's code says so, and points the other way round.
+## Phone to desktop
+
+On the desktop, Backup & Restore shows a pairing code with `deviceType=desktop`. The phone scans it in *Send from here*, and sends what a desktop can use: the open tabs, the bookmarks and favourites, and the address of its private drive when that drive is encrypted with the desktop's key (see Private files). Chats, notes, history and the stores stay on the phone. None of it needs the stores closed.
+
+It goes in the desktop's own transfer format (`backend/backup/desktop-sync.mjs`), so the desktop checks it with the code it already has for transfers:
+
+1. An inner zip holds `phone-tabs.json`, `phone-bookmarks.json`, `phone-private-drives.json` when there is a drive to share, and a `manifest.json` that says `"source": "mobile"` and lists each file's SHA-256.
+2. That zip is encrypted with AES-256-GCM under a random key sealed to the desktop with `crypto_box_seal`. It is small, so bare-crypto's GCM in one piece is fine here. The zips are stored, not compressed (`backend/backup/zip-writer.mjs`).
+3. The manifest is signed with the phone's Ed25519 key over the same fields the desktop signs, with `targetDeviceType: 'desktop'`.
+4. The file is put on a drive at `/backup.zip`, so the drive's bare address works on the desktop too. The phone shows it as a QR code with **Copy link**, and the six characters.
+
+On the desktop, *Restore from the network* takes the link. It downloads it, checks that it was made for a code this desktop showed in the last hour, checks the signature, decrypts it, and shows the six characters. Only once the person confirms does anything change: the bookmarks are added after the desktop's own, the tabs open asleep in a collapsed group called Phone, and the phone's private drive is added to the desktop's private drives, read-only, as a drive adopted from another device always is. Nothing is replaced and nothing restarts. The code is used up, and the page shows a fresh one.
 
 ## Desktop to phone
 
-The desktop scans the phone's code and uploads a transfer sealed to the phone (`identity-payload.bin`, AES-256-GCM, format version 1). The phone downloads it to disk and decrypts it as AES-256-CTR, starting from the counter GCM uses for its first block, which streams. The GCM tag is not what vouches for the bytes: the SHA-256 of the encrypted payload is in the signed manifest, and the result is only kept if it matches.
+The desktop scans the phone's code and uploads a transfer sealed to the phone (`identity-payload.bin`, AES-256-GCM, format version 1). It sends only what a phone keeps: `tabs.json`, `bookmarks.json`, `peersky-identity.json`, and with private uploads included, which is the default, the private drives and the key for private files. The key goes even when the desktop has no private drives yet, because the phone's own private uploads use it. The phone downloads it to disk and decrypts it as AES-256-CTR, starting from the counter GCM uses for its first block, which streams. The GCM tag is not what vouches for the bytes: the SHA-256 of the encrypted payload is in the signed manifest, and the result is only kept if it matches.
 
 What the phone keeps:
 
 - `peersky-identity.json`.
 - The private drives: `privateHyperdrives.json`, `private-drive-key.json` and `hyper-private/`, adopted read-only into `hyper-sdk-adopted`. The copy of `hyper-private/` is removed once adopted.
 - `tabs.json`, turned into `incoming-tabs.json`: a plain list the app adds to the open tabs on its next start. The desktop keeps tabs keyed by window, which the phone cannot read.
-- `bookmarks.json`, the same way, once the desktop sends it.
+- `bookmarks.json`, the same way, into `incoming-bookmarks.json`.
 
-What it skips: the desktop's own `hyper/` store, which nothing on the phone opens and which can run to gigabytes, and `lastOpened.json`, `peersky-chat-rooms.json`, `peersky-ports.json` and the desktop caches. An unknown file fails the restore; `device-key.json` is always refused.
+What it skips, from desktops that still send it: the desktop's own `hyper/` store, which nothing on the phone opens and which can run to gigabytes, and `lastOpened.json`, `peersky-chat-rooms.json`, `peersky-ports.json` and the desktop caches. An unknown file fails the restore; `device-key.json` is always refused.
 
 A drive the desktop lists that is the phone's own, sent there earlier, is not adopted: that would make the phone's own drive read-only on the phone.
 
@@ -79,6 +90,7 @@ A drive the desktop lists that is the phone's own, sent there earlier, is not ad
 Private uploads are encrypted with the key the desktop sends with its identity, so the desktop can open them too. Until a desktop has sent one, choosing Private in Hyperdrive asks to link the desktop first, with Link Device to go and do it, or This device only to keep the file on the phone.
 
 The phone keeps the desktop's key at the top of Documents (`private-drive-key.json`). Its own private drive gets its key the first time it is opened, from that file when it is there (`getPrivateDriveKey` with `linkedKey` in `backend/hyper/private-keys.mjs`). A key the phone already has is never swapped, since the files under it would stop opening, so a drive made before linking stays readable on this phone only. The key file travels in backups and phone-to-phone transfers, so a phone restored from this one encrypts for the same desktop.
+
 
 ## Putting a restore in place
 
@@ -106,6 +118,7 @@ The phone keeps the desktop's key at the top of Documents (`private-drive-key.js
 - `backend/backup/backup-file.mjs`: the file format and the encrypted payload.
 - `backend/backup/backup-archive.mjs`: the records inside the payload.
 - `backend/backup/desktop-transfer.mjs`: receiving a desktop transfer from disk.
+- `backend/backup/desktop-sync.mjs`: what a phone sends a desktop, in the desktop's format; `zip-writer.mjs` writes its zips.
 - `backend/backup/zip-file.mjs`: reading a zip from disk, a stream at a time.
 - `backend/backup/restore.mjs`: what a desktop transfer keeps, and the swap into Documents.
 - `backend/backup/browser-import.mjs`: desktop tabs and bookmarks into lists the phone reads.
@@ -126,7 +139,7 @@ The phone keeps the desktop's key at the top of Documents (`private-drive-key.js
 | `RPC_BACKUP_CREATE` (34) | `{ outPath, passphrase, peerskyVersion, platform }` | `{ ok, path, bytes, contents }` |
 | `RPC_BACKUP_INSPECT` (35) | `{ path }` | `{ ok, kind, createdAt, platform, contents, sizeBytes, needsPassphrase }` |
 | `RPC_BACKUP_RESTORE_FILE` (36) | `{ path, passphrase }` | `{ ok, restoreId, restoredFiles, contents, about }` |
-| `RPC_IDENTITY_SEND` (37) | `{ pairingCode, peerskyVersion, platform }` | `{ ok, url, verificationCode, expiresAt, bytes }` |
+| `RPC_IDENTITY_SEND` (37) | `{ pairingCode, peerskyVersion, platform }` | `{ ok, url, verificationCode, expiresAt, bytes, deviceType, sent }`; `sent` counts tabs, bookmarks and private drives for a desktop |
 | `RPC_IDENTITY_SEND_STOP` (38) | `{}` | `{ ok }` |
 | `RPC_IDENTITY_DISCARD_RESTORE` (39) | `{ restoreId }` | `{ ok }` |
 | `RPC_IDENTITY_REMOVE` (68) | `{}` | `{ ok, requiresRestart: true }` |
@@ -143,6 +156,7 @@ npm run test:runtime
 - `test/protocol/link-device.test.mjs`: desktop transfers built the way the desktop builds them (`test/fixtures/desktop-transfer.mjs`): expired, wrong target, old code, flipped payload byte, forged manifest, a swapped payload, `device-key.json`, and a 24 MB transfer streamed from disk.
 - `test/protocol/phone-transfer-publish.test.mjs`: a transfer put on a drive, replicated to a second store, read back exactly, and cleared on both.
 - `test/protocol/link-device-safety.test.mjs`: the stores held shut, one job at a time, restore ids, an interrupted swap undone, a failing drive write, damaged and expanding deflate data, and which kind of file each flow accepts.
+- `test/protocol/desktop-sync.test.mjs`: what goes to a desktop, the transfer checked field by field and decrypted, and the stored zips read back by both zip readers.
 - `test/protocol/linked-private-key.test.mjs`: the desktop's key used for a new private drive and never swapped in for an old one, the phone's own drive never adopted back, and the Private prompt.
 - `test/protocol/private-drive-address.test.mjs`: the phone recognising a link to its own private or device-only drive in either form.
 - `test/platform/link-device-screen.test.mjs`: the screen's layout and flows.

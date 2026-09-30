@@ -19,9 +19,9 @@ export function transferDriveName (nonce) {
   return `peersky-transfer-${String(nonce).toLowerCase()}-${b4a.toString(suffix, 'hex')}`
 }
 
-export async function publishTransferFile (runtime, { driveName, filePath, onProgress } = {}) {
+export async function publishTransferFile (runtime, { driveName, filePath, fileName = TRANSFER_FILE_NAME, onProgress } = {}) {
   const drive = await runtime.getDrive(driveName)
-  await writeFileToDrive(drive, TRANSFER_FILE_NAME, filePath, onProgress)
+  await writeFileToDrive(drive, fileName, filePath, onProgress)
 
   // Announced before the code is shown, so the other phone does not scan it
   // into a lookup that cannot find anyone yet.
@@ -29,7 +29,7 @@ export async function publishTransferFile (runtime, { driveName, filePath, onPro
     if (runtime.swarm && typeof runtime.swarm.flush === 'function') await runtime.swarm.flush()
   } catch {}
 
-  return { url: `hyper://${drive.id}${TRANSFER_FILE_NAME}`, driveName }
+  return { url: `hyper://${drive.id}${fileName}`, driveName }
 }
 
 /**
