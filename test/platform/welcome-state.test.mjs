@@ -41,6 +41,24 @@ test('the welcome screen explains itself without jargon', async () => {
   assert.match(screen, /No ads, no trackers, no account/)
 })
 
+// What makes PeerSky different is read first; ordinary websites, the part
+// nobody needs convincing of, come last.
+test('the welcome screen leads with device to device and ends with the web', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const screen = await readFile(new URL('../../app/WelcomeScreen.tsx', import.meta.url), 'utf8')
+  const titles = [...screen.matchAll(/title: '([^']+)'/g)].map((match) => match[1])
+
+  assert.deepEqual(titles, [
+    'Share data device to device',
+    'We know nothing about you',
+    'No ads, no trackers, no account',
+    'Works with every website'
+  ])
+  assert.match(screen, /There is no server\. Your phone is the server\./)
+  // The old card needed a second read to follow.
+  assert.doesNotMatch(screen, /Every site, plus peer to peer ones/)
+})
+
 test('about offers one place to write to, not three', async () => {
   const { readFile } = await import('node:fs/promises')
   const settings = await readFile(new URL('../../app/settings/SettingsScreen.tsx', import.meta.url), 'utf8')
