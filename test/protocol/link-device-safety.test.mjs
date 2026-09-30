@@ -7,7 +7,8 @@ import { join } from 'node:path'
 import b4a from 'b4a'
 import sodium from 'sodium-native'
 import { Writable } from 'streamx'
-import { deflateRawSync } from 'node:zlib'
+import { Transform } from 'bare-stream'
+import { deflateRawSync, inflateRawSync } from 'node:zlib'
 import { getHyperRuntime, holdHyperStores } from '../../backend/hyper/runtime.mjs'
 import {
   commitStagedRestore,
@@ -264,7 +265,52 @@ describe('streams that fail', () => {
     await new Promise((resolve) => setTimeout(resolve, 20))
     assert.equal(unhandled, null)
   })
+
+  it('reads an entry over the high water mark through an inflater that works like Bare\'s', async (t) => {
+    const dir = await tempDir(t)
+    // Random bytes do not compress, so the deflated entry is well over the
+    // inflater's 16 KB high water mark, like a desktop transfer that carries
+    // a private drive. Waiting on this used to never end on a phone.
+    const data = b4a.alloc(50 * 1024)
+    sodium.randombytes_buf(data)
+    writeFileSync(join(dir, 'large.zip'), craftDeflatedEntry('identity-payload.bin', deflateRawSync(data), data.byteLength))
+
+    const zip = openZipFile(join(dir, 'large.zip'), { createInflater: bareLikeInflater })
+    t.after(() => zip.close())
+    const entry = zip.find('identity-payload.bin')
+    assert.ok(entry.compressedSize > 16 * 1024)
+
+    const chunks = []
+    const outcome = await Promise.race([
+      zip.streamEntry(entry, (chunk) => { chunks.push(chunk) }).then(() => 'finished', (error) => error.message),
+      new Promise((resolve) => setTimeout(() => resolve('hung'), 5000))
+    ])
+    assert.equal(outcome, 'finished')
+    assert.ok(b4a.equals(b4a.concat(chunks), data))
+  })
 })
+
+// Like bare-zlib's inflater: a bare-stream transform that finishes each write
+// in the tick after it, where node's inflater works on another thread and
+// answers later. It inflates once the input is all in, which is enough to
+// show how writes and drains line up.
+function bareLikeInflater ({ maxOutputLength }) {
+  const input = []
+  return new Transform({
+    transform (chunk, encoding, callback) {
+      input.push(chunk)
+      callback(null)
+    },
+    flush (callback) {
+      try {
+        this.push(inflateRawSync(b4a.concat(input), { maxOutputLength }))
+        callback(null)
+      } catch (error) {
+        callback(error)
+      }
+    }
+  })
+}
 
 describe('what each kind of file may be opened as', () => {
   async function keys () {

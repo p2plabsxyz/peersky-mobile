@@ -18,17 +18,20 @@ const READ_CHUNK_BYTES = 256 * 1024
 const DEFLATE_CHUNK_BYTES = 64 * 1024
 const ZIP64_MARKER = 0xffffffff
 
-export function openZipFile (filePath) {
+// createInflater: bare-zlib's in the app. The tests run under node, whose
+// inflater works on another thread, and pass one that behaves like Bare's.
+export function openZipFile (filePath, { createInflater = createInflateRaw } = {}) {
   const fd = openSync(filePath, 'r')
 
   try {
     const fileSize = fstatSync(fd).size
     const entries = readCentralDirectory(fd, fileSize)
+    const stream = (entry, onChunk) => streamEntry(fd, fileSize, entry, onChunk, createInflater)
     return {
       entries,
       find: (name) => entries.find((entry) => entry.name === name) || null,
-      readEntry: (entry, maxBytes = 8 * 1024 * 1024) => readEntry(fd, fileSize, entry, maxBytes),
-      streamEntry: (entry, onChunk) => streamEntry(fd, fileSize, entry, onChunk),
+      readEntry: (entry, maxBytes = 8 * 1024 * 1024) => readEntry(stream, entry, maxBytes),
+      streamEntry: stream,
       close: () => closeSync(fd)
     }
   } catch (error) {
@@ -107,7 +110,7 @@ function dataOffsetFor (fd, fileSize, entry) {
   return start
 }
 
-async function streamEntry (fd, fileSize, entry, onChunk) {
+async function streamEntry (fd, fileSize, entry, onChunk, createInflater) {
   if (entry.isDirectory) return
   const start = dataOffsetFor(fd, fileSize, entry)
 
@@ -129,7 +132,7 @@ async function streamEntry (fd, fileSize, entry, onChunk) {
   let produced = 0
   let failure = null
   const pending = []
-  const inflater = createInflateRaw({ maxOutputLength: Math.max(1, entry.uncompressedSize) })
+  const inflater = createInflater({ maxOutputLength: Math.max(1, entry.uncompressedSize) })
   inflater.on('data', (chunk) => {
     produced += chunk.byteLength
     if (produced > entry.uncompressedSize) {
@@ -156,9 +159,15 @@ async function streamEntry (fd, fileSize, entry, onChunk) {
 
   try {
     await forEachChunk(fd, start, entry.compressedSize, async (chunk) => {
-      const accepted = inflater.write(chunk)
+      // The wait for drain starts before anything is awaited. Bare's
+      // inflater finishes a write in the next tick, and a streamx stream
+      // only emits drain to a listener that is already there. Started after
+      // the flush below, the wait missed it and never ended: a phone stopped
+      // on any transfer with a chunk over the inflater's 16 KB high water mark.
+      const drained = inflater.write(chunk) ? null : waitForDrain(inflater)
+      drained?.catch(() => {})
       await flush()
-      if (!accepted) await waitForDrain(inflater)
+      if (drained) await drained
       await flush()
     }, DEFLATE_CHUNK_BYTES)
     inflater.end()
@@ -189,10 +198,10 @@ function waitForDrain (stream) {
   })
 }
 
-async function readEntry (fd, fileSize, entry, maxBytes) {
+async function readEntry (stream, entry, maxBytes) {
   if (entry.uncompressedSize > maxBytes) throw new Error(`ZIP entry is too large: ${entry.name}`)
   const chunks = []
-  await streamEntry(fd, fileSize, entry, (chunk) => { chunks.push(chunk) })
+  await stream(entry, (chunk) => { chunks.push(chunk) })
   return b4a.concat(chunks)
 }
 
