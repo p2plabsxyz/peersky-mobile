@@ -2934,6 +2934,13 @@ export default function App () {
     canBrowserGoBack
   ])
 
+  // Before every other screen. Link Device lives in Settings, and when this
+  // came after the Settings screen the restart screen never showed: the old
+  // page stayed up, under a sheet that could not be closed.
+  if (restartRequired) {
+    return <RestartRequiredScreen isDark={browserIsDark} />
+  }
+
   if (browserBookmarksVisible) {
     return (
       <SafeAreaView
@@ -3464,10 +3471,6 @@ export default function App () {
 
   // Shown once, before anything else, on a phone that has never opened PeerSky.
   // Not a tour: one screen, four things, one button.
-  if (restartRequired) {
-    return <RestartRequiredScreen isDark={browserIsDark} />
-  }
-
   if (!browserSessionReady) {
     return <StartupScreen isDark={browserIsDark} />
   }

@@ -115,6 +115,23 @@ describe('one Link Device job at a time', () => {
     assert.match(replace, /Nothing on this phone was changed/)
     assert.match(screen, /void replaceData\(RPC_IDENTITY_REMOVE, \{\}, 'Your data was not removed'\)/)
   })
+
+  // Found on a simulator: the restart screen never showed. Link Device is in
+  // Settings, which the app returned before it looked at restartRequired, and
+  // the sheet the confirmation came from stayed up over everything.
+  it('the restart screen comes before every other screen, with the sheet closed first', async () => {
+    const app = await read('app/index.tsx')
+    const restart = app.indexOf('if (restartRequired) {')
+    assert.ok(restart > 0)
+    for (const screen of ['if (browserBookmarksVisible) {', 'if (browserHistoryVisible) {', 'if (browserDownloadsVisible) {', 'if (browserSettingsVisible) {', 'if (!browserSessionReady) {', 'if (showWelcome) {']) {
+      assert.ok(app.indexOf(screen) > restart, `${screen} is checked before the restart screen`)
+    }
+
+    const screen = await read('app/settings/LinkDevice.tsx')
+    const replace = screen.slice(screen.indexOf('const replaceData = useCallback'), screen.indexOf('const commitRestore = useCallback'))
+    assert.ok(replace.indexOf('setSyncVisible(false)') < replace.indexOf('onRestartRequired()'))
+    assert.ok(replace.indexOf('setBackupVisible(false)') < replace.indexOf('onRestartRequired()'))
+  })
 })
 
 describe('an interrupted restore', () => {

@@ -120,6 +120,11 @@ export function LinkDeviceSettings ({ onCallRpc, onRestartRequired, onOpenUrl }:
   // stays up until the app is started again, on both, because on newer
   // Android exitApp only sends the app to the background.
   const replaceData = useCallback(async (command: number, data: object, failureTitle: string) => {
+    // The sheet goes first. On iOS a sheet still up when the screens under it
+    // are swapped for the restart screen can stay stuck over it.
+    setSyncVisible(false)
+    setBackupVisible(false)
+    await new Promise((resolve) => setTimeout(resolve, 450))
     onRestartRequired()
     await new Promise((resolve) => setTimeout(resolve, 300))
     try {
