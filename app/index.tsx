@@ -55,6 +55,7 @@ import {
 import {
   addBackgroundBrowserTabState,
   addBrowserTabState,
+  appendIncomingBrowserTabs,
   BROWSER_PAGE_ZOOMS,
   closeBrowserTabState,
   createBrowserTabsState,
@@ -128,6 +129,8 @@ import { BrowserBackSwipe } from './BrowserBackSwipe'
 import { BrowserZoomSheet } from './BrowserZoomSheet'
 import { PublishedLinkSheet } from './PublishedLinkSheet'
 import { WelcomeScreen } from './WelcomeScreen'
+import { RestartRequiredScreen } from './RestartRequiredScreen'
+import { emitLinkDeviceProgress } from './settings/link-device-progress'
 import { BrowserHomeBackground } from './BrowserHomeBackground'
 import { applyAppIcon } from './app-icon'
 import { useKeyboardVisible } from './use-keyboard-visible'
@@ -228,6 +231,7 @@ import {
   RPC_P2PMD_ROOM_JOIN,
   RPC_P2PMD_ROOM_PUBLISH,
   RPC_P2PMD_ROOM_STATUS,
+  RPC_APP_BACKUP_PROGRESS,
   RPC_APP_PEERCHAT_CHANGED,
   RPC_PEERTUNES_START
 } from '../backend/rpc/commands.mjs'
@@ -345,6 +349,7 @@ export default function App () {
   // Read once, synchronously, so the first frame is either the welcome screen
   // or the browser rather than one flashing into the other.
   const [showWelcome, setShowWelcome] = useState(() => !hasSeenWelcome(getWelcomeFile()))
+  const [restartRequired, setRestartRequired] = useState(false)
   const [siteInfoVisible, setSiteInfoVisible] = useState(false)
   const isKeyboardVisible = useKeyboardVisible()
   // Where a link opened from settings came from, so back can go back there.
@@ -607,11 +612,26 @@ export default function App () {
           serializedSession,
           userInteracted: browserUserInteractedRef.current
         }) as BrowserTabsState | null
-        if (!restored) return
+        // Tabs from the desktop, left by a Link Device restore. They join the
+        // tabs already open rather than replacing them, and are saved before
+        // the file that brought them is removed.
+        const incoming = await readIncomingTabs()
+        if (cancelled) return
+        if (!restored && !incoming) return
 
-        const tab = restored.tabs.find((item) => item.id === restored.activeTabId)
-        updateBrowserTabsState(restored)
-        if (tab) applyBrowserTab(tab)
+        const base = restored || browserTabsStateRef.current
+        const next = incoming
+          ? appendIncomingBrowserTabs(base, incoming) as BrowserTabsState
+          : base
+        updateBrowserTabsState(next)
+        if (restored) {
+          const tab = next.tabs.find((item) => item.id === next.activeTabId)
+          if (tab) applyBrowserTab(tab)
+        }
+        if (incoming && writeBrowserSession(next)) {
+          removeIncomingTabs()
+          setStatus(`Added ${next.tabs.length - base.tabs.length} tabs from your other device`)
+        }
       } catch (error) {
         console.error('Failed restoring browser tabs:', error)
       } finally {
@@ -760,6 +780,11 @@ export default function App () {
       const rpc = new RPC(worklet.IPC, (request) => {
         if (request.command === RPC_APP_PEERCHAT_CHANGED) {
           setPeerChatRevision((value) => value + 1)
+        }
+        if (request.command === RPC_APP_BACKUP_PROGRESS && request.data) {
+          emitLinkDeviceProgress(typeof request.data === 'string'
+            ? request.data
+            : b4a.toString(request.data as Uint8Array))
         }
         try {
           request.reply()
@@ -3107,9 +3132,10 @@ export default function App () {
                 if (didNavigate) closeBrowserSettings()
               })
             }}
-            onIdentityRestored={() => {
+            onRestartRequired={() => {
               browserSessionReadyRef.current = false
               setBrowserSessionReady(false)
+              setRestartRequired(true)
             }}
           />
         </View>
@@ -3438,6 +3464,10 @@ export default function App () {
 
   // Shown once, before anything else, on a phone that has never opened PeerSky.
   // Not a tour: one screen, four things, one button.
+  if (restartRequired) {
+    return <RestartRequiredScreen isDark={browserIsDark} />
+  }
+
   if (!browserSessionReady) {
     return <StartupScreen isDark={browserIsDark} />
   }
@@ -4505,6 +4535,30 @@ function getWelcomeFile () {
 
 function getBrowserSessionFile () {
   return new File(Paths.document, 'browser-tabs.json')
+}
+
+function getIncomingTabsFile () {
+  return new File(Paths.document, 'incoming-tabs.json')
+}
+
+async function readIncomingTabs () {
+  try {
+    const file = getIncomingTabsFile()
+    if (!file.exists) return null
+    const parsed = JSON.parse(await file.text())
+    return parsed && Array.isArray(parsed.tabs) ? parsed : null
+  } catch (error) {
+    console.error('Failed reading tabs from another device:', error)
+    removeIncomingTabs()
+    return null
+  }
+}
+
+function removeIncomingTabs () {
+  try {
+    const file = getIncomingTabsFile()
+    if (file.exists) file.delete()
+  } catch {}
 }
 
 function writeBrowserSession (state: BrowserTabsState) {

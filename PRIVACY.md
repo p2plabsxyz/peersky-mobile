@@ -1,6 +1,6 @@
 # PeerSky Mobile Privacy Policy
 
-Last updated: September 28, 2026
+Last updated: September 29, 2026
 
 PeerSky Mobile is a web and peer-to-peer browser. There are no accounts, no
 analytics and no servers of ours, so there is nowhere for us to collect anything
@@ -25,6 +25,12 @@ Peer-to-peer is the part worth understanding. Opening a `hyper://` address or us
 PeerChat rooms and direct messages are encrypted with a key only the people in them hold, and attachments with a key derived from it. Two honest limits: a room key is a shared secret, so anybody who has it can read that room including its past messages, and it never rotates, meaning somebody removed from a room still holds the key. What is encrypted is the content, not the fact that two devices are talking.
 
 Public Hyperdrive uploads are shared with the peer-to-peer network and can be accessed by anyone who has the corresponding Hyper URL. Private Hyperdrive uploads remain in isolated local app storage unless you choose to share or transfer that storage.
+
+## Backups and Moving to Another Device
+
+Link Device in Settings can move your data to another device or save it as a backup file. Both hold everything PeerSky keeps: tabs, bookmarks, history, settings, chats, notes, files, and the keys that make your chats and drives yours.
+
+A move goes straight from one device to the other, the same way PeerChat does, and is encrypted so that only the receiving device can open it. Both screens show the same six characters to compare before anything is replaced. A backup file is encrypted with a passphrase you choose. It goes wherever you send it, and anyone who has both the file and the passphrase can open it, so keep the passphrase to yourself. Nobody, including us, can recover a forgotten one.
 
 ## Device Permissions
 

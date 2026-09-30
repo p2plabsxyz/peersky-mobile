@@ -4,6 +4,7 @@ import {
   addBrowserBookmark,
   isBrowserUrlBookmarked,
   MAX_BROWSER_BOOKMARKS,
+  mergeIncomingBrowserBookmarks,
   parseBrowserBookmarks,
   removeBrowserBookmark,
   serializeBrowserBookmarks
@@ -28,9 +29,23 @@ export function useBrowserBookmarks () {
     async function loadBookmarks () {
       try {
         const file = getBookmarksFile()
-        if (!file.exists) return
-
-        const restored = parseBrowserBookmarks(await file.text()) as BrowserBookmark[]
+        const stored = file.exists
+          ? parseBrowserBookmarks(await file.text()) as BrowserBookmark[]
+          : []
+        // Bookmarks from another device, left by a Link Device restore. They
+        // go after the ones already here, and the file that brought them is
+        // only removed once they are saved.
+        const incoming = await readIncomingBookmarks()
+        const restored = incoming
+          ? mergeIncomingBrowserBookmarks(stored, incoming) as BrowserBookmark[]
+          : stored
+        if (incoming) {
+          if (restored !== stored) {
+            if (!file.exists) file.create({ intermediates: true })
+            file.write(serializeBrowserBookmarks(restored))
+          }
+          removeIncomingBookmarks()
+        }
         if (!cancelled) {
           bookmarksRef.current = restored
           setBookmarks(restored)
@@ -104,4 +119,27 @@ export function useBrowserBookmarks () {
 
 function getBookmarksFile () {
   return new File(Paths.document, 'browser-bookmarks.json')
+}
+
+function getIncomingBookmarksFile () {
+  return new File(Paths.document, 'incoming-bookmarks.json')
+}
+
+async function readIncomingBookmarks () {
+  try {
+    const file = getIncomingBookmarksFile()
+    if (!file.exists) return null
+    return JSON.parse(await file.text())
+  } catch (error) {
+    console.error('Failed reading bookmarks from another device:', error)
+    removeIncomingBookmarks()
+    return null
+  }
+}
+
+function removeIncomingBookmarks () {
+  try {
+    const file = getIncomingBookmarksFile()
+    if (file.exists) file.delete()
+  } catch {}
 }

@@ -34,6 +34,14 @@ export const RPC_P2PMD_IMAGE_UPLOAD = 27
 export const RPC_IDENTITY_GET_KEY = 30
 export const RPC_IDENTITY_RESTORE_FROM_HYPER = 31
 export const RPC_IDENTITY_CONFIRM_RESTORE = 32
+// Backups and phone-to-phone transfers, all under Link Device.
+export const RPC_BACKUP_ESTIMATE = 33
+export const RPC_BACKUP_CREATE = 34
+export const RPC_BACKUP_INSPECT = 35
+export const RPC_BACKUP_RESTORE_FILE = 36
+export const RPC_IDENTITY_SEND = 37
+export const RPC_IDENTITY_SEND_STOP = 38
+export const RPC_IDENTITY_DISCARD_RESTORE = 39
 
 export const RPC_PEERCHAT_INIT = 40
 export const RPC_PEERCHAT_PROFILE_SET = 41
@@ -69,3 +77,5 @@ export const RPC_PEERTUNES_START = 70
 // Backend to app pushes. Separate range so they never collide with the
 // app-initiated commands above.
 export const RPC_APP_PEERCHAT_CHANGED = 100
+// { phase, done, total } while a backup or transfer is packed, sent or unpacked.
+export const RPC_APP_BACKUP_PROGRESS = 101

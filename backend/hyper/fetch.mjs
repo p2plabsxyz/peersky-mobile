@@ -17,7 +17,7 @@ import {
 import { withHyperRuntimeForAddress } from './runtime.mjs'
 import { refreshHyperRuntimeNetwork } from './network-refresh.mjs'
 import { createHyperUrl, getHyperSearch, getHyperVisibility, parseHyperUrl } from './url.mjs'
-import { readHyperBinaryResponse } from './binary-response.mjs'
+import { readHyperBinaryResponse, writeHyperResponseToFile } from './binary-response.mjs'
 import { configureHyperReadTimeout } from './read-policy.mjs'
 
 let hyperFetches = new WeakMap()
@@ -273,6 +273,45 @@ export async function fetchHyperBinary ({
       backoffFactor,
       beforeRetry: () => refreshHyperRuntimeNetwork(runtime),
       readResponse: (response, headers) => readHyperBinaryResponse(response, headers, requestUrl)
+    })
+  })
+}
+
+/**
+ * Downloads one hyper:// file straight to disk. Used for a transfer from
+ * another device, which can be hundreds of megabytes: the body is written as
+ * it arrives instead of being collected in memory. Blocks get a longer wait
+ * than a page does, because a transfer comes from one phone over whatever
+ * connection it has, and one slow block should not end the whole thing.
+ */
+export async function fetchHyperToFile ({
+  url,
+  filePath,
+  maxBytes,
+  retries = 8,
+  retryDelay = 500,
+  maxRetryDelay = 4000,
+  backoffFactor = 2,
+  onProgress
+} = {}) {
+  const target = parseHyperUrl(url)
+  if (target.error) return { ok: false, error: target.error }
+  const requestUrl = createHyperUrl(target.driveAddress, target.pathname)
+
+  return withHyperRuntimeForAddress(target.driveAddress, async (runtime) => {
+    const drive = await runtime.getDrive(target.driveAddress)
+    configureHyperReadTimeout(drive, { timeoutMs: 30000 })
+    const fetch = await getHyperFetch(runtime)
+
+    return withHyperRetry({
+      fetch,
+      url: requestUrl,
+      retries,
+      retryDelay,
+      maxRetryDelay,
+      backoffFactor,
+      beforeRetry: () => refreshHyperRuntimeNetwork(runtime),
+      readResponse: (response, headers) => writeHyperResponseToFile(response, headers, requestUrl, filePath, { maxBytes, onProgress })
     })
   })
 }

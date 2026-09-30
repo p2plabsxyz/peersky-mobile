@@ -4,6 +4,7 @@ import { BROWSER_HOME_URL } from '../../app/browser-shell.mjs'
 import {
   addBackgroundBrowserTabState,
   addBrowserTabState,
+  appendIncomingBrowserTabs,
   closeBrowserTabState,
   createBrowserTabsState,
   getActiveBrowserTab,
@@ -357,5 +358,61 @@ describe('browser tab state helpers', () => {
     const nextState = suspendInactiveBrowserTabsState(state, [])
 
     assert.equal(nextState.tabs[0].history[0], entry)
+  })
+})
+
+// Tabs that arrive from the desktop through Link Device. They used to replace
+// browser-tabs.json with a file the phone could not read, which left one empty
+// tab: the phone's tabs gone and none of the desktop's.
+describe('tabs from another device', () => {
+  const open = (url) => ({ url, source: { kind: 'web', uri: url } })
+
+  test('join the tabs already open, and the tab on screen stays on screen', () => {
+    const state = restoreBrowserTabsState(JSON.stringify({
+      version: 1,
+      activeTabId: 'tab-4',
+      nextTabIndex: 5,
+      viewMode: 'grid',
+      tabs: [{ id: 'tab-4', title: 'Phone', historyIndex: 0, history: [open('https://phone.example/')] }]
+    }))
+
+    const next = appendIncomingBrowserTabs(state, {
+      tabs: [
+        { url: 'https://desktop.example/', title: 'Desktop' },
+        { url: `hyper://${'a'.repeat(52)}/`, title: 'A hyper site' },
+        // Already open here, so not opened twice.
+        { url: 'https://phone.example/', title: 'Duplicate' },
+        { url: 'peersky://settings', title: 'Desktop only' },
+        { url: 'javascript:alert(1)', title: 'No' },
+        { title: 'No address' }
+      ]
+    })
+
+    assert.equal(next.activeTabId, 'tab-4')
+    assert.deepEqual(next.tabs.map((tab) => tab.id), ['tab-4', 'tab-5', 'tab-6'])
+    assert.deepEqual(next.tabs.map((tab) => tab.history[0].url), [
+      'https://phone.example/',
+      'https://desktop.example/',
+      `hyper://${'a'.repeat(52)}/`
+    ])
+    assert.deepEqual(next.tabs[1].history[0].source, { kind: 'web', uri: 'https://desktop.example/' })
+    assert.deepEqual(next.tabs[2].history[0].source, { kind: 'restore', url: `hyper://${'a'.repeat(52)}/` })
+    assert.equal(next.tabs[1].title, 'Desktop')
+    assert.equal(next.nextTabIndex, 7)
+
+    // The result survives a save and a restart.
+    const saved = restoreBrowserTabsState(serializeBrowserTabsState(next))
+    assert.equal(saved.tabs.length, 3)
+  })
+
+  test('never go past the tab limit or reuse an id', () => {
+    const state = createBrowserTabsState()
+    const many = Array.from({ length: MAX_BROWSER_TABS + 10 }, (_, index) => ({ url: `https://example.com/${index}` }))
+    const next = appendIncomingBrowserTabs({ ...state, nextTabIndex: 1 }, { tabs: many })
+
+    assert.equal(next.tabs.length, MAX_BROWSER_TABS)
+    assert.equal(new Set(next.tabs.map((tab) => tab.id)).size, MAX_BROWSER_TABS)
+    assert.equal(appendIncomingBrowserTabs(state, { tabs: [] }), state)
+    assert.equal(appendIncomingBrowserTabs(state, null), state)
   })
 })

@@ -24,6 +24,13 @@ import {
   RPC_IDENTITY_RESTORE_FROM_HYPER,
   RPC_IDENTITY_CONFIRM_RESTORE,
   RPC_IDENTITY_REMOVE,
+  RPC_IDENTITY_SEND,
+  RPC_IDENTITY_SEND_STOP,
+  RPC_IDENTITY_DISCARD_RESTORE,
+  RPC_BACKUP_CREATE,
+  RPC_BACKUP_ESTIMATE,
+  RPC_BACKUP_INSPECT,
+  RPC_BACKUP_RESTORE_FILE,
   RPC_P2PMD_ROOM_CREATE,
   RPC_P2PMD_ROOM_DISCONNECT,
   RPC_P2PMD_EDITOR_PAGE,
@@ -62,16 +69,24 @@ import {
   getDeviceKeys,
   getEncryptionPublicKeyHex
 } from '../backup/device-keys.mjs'
-import { decryptIdentityTransfer } from '../backup/identity-transfer.mjs'
-import { adoptTransferredPrivateDrive } from '../backup/private-drive-import.mjs'
-import { rmSync, renameSync, existsSync } from 'bare-fs'
-import { commitIdentityRestore, restoreIdentityFromBackup } from '../backup/restore.mjs'
+import {
+  clearOrphanedTransfer,
+  confirmRestore,
+  createBackupFile,
+  discardPendingRestore,
+  estimateBackup,
+  inspectBackup,
+  receiveTransfer,
+  removeIdentity,
+  restoreBackupFile,
+  sendTransfer,
+  stopOutgoingTransfer
+} from '../backup/link-device.mjs'
 
 import { createDrive, publishMarkdownDocument, readHyperFile, uploadHyperFile } from '../hyper/drive.mjs'
 import { listHyperdriveLocation, uploadHyperdriveFile } from '../hyper/library.mjs'
-import { fetchHyper, fetchHyperBinary, resetHyperFetch } from '../hyper/fetch.mjs'
+import { fetchHyper } from '../hyper/fetch.mjs'
 import {
-  closeHyperOfflineDownloads,
   keepHyperOffline,
   listHyperOffline,
   pauseHyperOffline,
@@ -80,18 +95,13 @@ import {
   resumeWantedHyperOffline
 } from '../hyper/offline-manager.mjs'
 import {
-  closeHyperRuntime,
   ensureLANDiscovery,
-  getHyperRuntime,
   getHyperStoragePath,
   getLANDiscoveryStatus,
-  getSyncedPrivateHyperStoragePath,
   refreshHyperNetworking,
-  withHyperRuntimeMaintenance,
   withHyperRuntimeOperation
 } from '../hyper/runtime.mjs'
-import { resetPrivateDriveKeyCache } from '../hyper/private-keys.mjs'
-import { clearPairingNonce, getLivePairingNonce, getOrCreatePairingNonce } from '../backup/pairing-nonce.mjs'
+import { getOrCreatePairingNonce } from '../backup/pairing-nonce.mjs'
 import { clearAllP2pData, clearP2pCache, deleteP2pAppData, listP2pAppData } from '../hyper/storage.mjs'
 
 import {
@@ -116,16 +126,15 @@ import { getP2pmdEditorPage } from '../p2pmd/server.mjs'
 import { hasIeeeMarker } from '../p2pmd/templates.mjs'
 import { startPeerTunesServer } from '../peertunes/server.mjs'
 import { parseJsonMessage, replyJson } from './messages.mjs'
-import { closePeerChatService, getPeerChatService } from '../peerchat/runtime.mjs'
+import { getPeerChatService } from '../peerchat/runtime.mjs'
 import { openPeerChatAttachment, uploadPeerChatAttachment } from '../peerchat/attachments.mjs'
-
-let pendingRestorePath = null
 
 export async function routeRpcRequest (req) {
   try {
     if (req.command === RPC_HYPER_INIT) {
       const options = parseJsonMessage(req.data)
       await withHyperRuntimeOperation(() => {})
+      clearOrphanedTransfer()
       replyJson(req, {
         ok: true,
         storagePath: getHyperStoragePath(),
@@ -235,51 +244,7 @@ export async function routeRpcRequest (req) {
     }
 
     if (req.command === RPC_IDENTITY_RESTORE_FROM_HYPER) {
-      const body = parseJsonMessage(req.data)
-      const hyperUrl = typeof body.hyperUrl === 'string' ? body.hyperUrl.trim() : ''
-      if (!hyperUrl) {
-        replyJson(req, { ok: false, error: 'Missing hyper:// identity transfer URL' })
-        return
-      }
-
-      const expectedNonce = getLivePairingNonce(getDefaultIdentityStoragePath())
-      if (!expectedNonce) {
-        replyJson(req, { ok: false, error: 'Pairing code expired. Reopen Link Device to get a new one.' })
-        return
-      }
-
-      const storagePath = getDefaultIdentityStoragePath()
-      const tempStoragePath = storagePath + '.tmp'
-      const keys = await getDeviceKeys(storagePath)
-      const downloaded = await fetchHyperBinary({
-        url: hyperUrl,
-        method: 'GET',
-        retries: 5,
-        retryDelay: 500,
-        maxRetryDelay: 4000,
-        backoffFactor: 2
-      })
-
-      if (!downloaded.ok || !downloaded.bytes) {
-        replyJson(req, {
-          ok: false,
-          error: downloaded.error || `Unable to download identity transfer (${downloaded.status || 'unknown status'})`
-        })
-        return
-      }
-
-      const { sas, innerZipBytes } = await decryptIdentityTransfer(downloaded.bytes, keys, expectedNonce)
-
-      try { rmSync(tempStoragePath, { recursive: true }) } catch (e) {}
-
-      const restoreResult = await restoreIdentityFromBackup(innerZipBytes, tempStoragePath)
-      pendingRestorePath = tempStoragePath
-
-      replyJson(req, {
-        ok: true,
-        sas,
-        restoredFiles: restoreResult.restoredFiles
-      })
+      replyJson(req, await receiveTransfer(parseJsonMessage(req.data)))
       return
     }
 
@@ -288,94 +253,47 @@ export async function routeRpcRequest (req) {
     // fork it, so leaving the old copy in place is the thing that breaks. The
     // desktop releases its side; this releases the phone's.
     if (req.command === RPC_IDENTITY_REMOVE) {
-      const result = await withHyperRuntimeMaintenance(async () => {
-        const storagePath = getDefaultIdentityStoragePath()
-        const syncedPrivatePath = getSyncedPrivateHyperStoragePath()
-
-        await closePeerChatService()
-        await closeHyperRuntime()
-        resetHyperFetch()
-
-        // The private store goes too. It holds drive cores adopted from the
-        // desktop, and keeping them behind without the identity leaves data
-        // the user thinks they deleted.
-        for (const target of [storagePath, syncedPrivatePath]) {
-          try { rmSync(target, { recursive: true, force: true }) } catch (e) {}
-        }
-        resetPrivateDriveKeyCache()
-
-        // Bring the runtime back on fresh storage. iOS has no supported way
-        // to quit an app, so leaving it closed would strand the user in a
-        // half-dead app until they killed it by hand.
-        await getHyperRuntime()
-
-        return { ok: true, requiresRestart: true }
-      }, closeHyperOfflineDownloads)
-
-      replyJson(req, result)
+      replyJson(req, await removeIdentity())
       return
     }
 
     if (req.command === RPC_IDENTITY_CONFIRM_RESTORE) {
-      if (!pendingRestorePath) {
-        replyJson(req, { ok: false, error: 'No pending identity restore to confirm' })
-        return
-      }
+      replyJson(req, await confirmRestore(parseJsonMessage(req.data)))
+      return
+    }
 
-      const result = await withHyperRuntimeMaintenance(async () => {
-        const storagePath = getDefaultIdentityStoragePath()
-        const backupPath = storagePath + '.backup'
-        const syncedPrivatePath = getSyncedPrivateHyperStoragePath()
-        const syncedPrivateStash = storagePath + '.synced-stash'
-        const hadSyncedPrivate = existsSync(syncedPrivatePath)
+    if (req.command === RPC_IDENTITY_DISCARD_RESTORE) {
+      replyJson(req, discardPendingRestore(parseJsonMessage(req.data)))
+      return
+    }
 
-        await closePeerChatService()
-        await closeHyperRuntime()
-        resetHyperFetch()
+    if (req.command === RPC_IDENTITY_SEND) {
+      replyJson(req, await sendTransfer(parseJsonMessage(req.data)))
+      return
+    }
 
-        if (hadSyncedPrivate) {
-          try { rmSync(syncedPrivateStash, { recursive: true }) } catch (e) {}
-          try { renameSync(syncedPrivatePath, syncedPrivateStash) } catch (e) {}
-        }
+    if (req.command === RPC_IDENTITY_SEND_STOP) {
+      replyJson(req, await stopOutgoingTransfer())
+      return
+    }
 
-        try {
-          commitIdentityRestore({
-            storagePath,
-            pendingPath: pendingRestorePath,
-            backupPath
-          })
-          pendingRestorePath = null
-        } catch (err) {
-          if (hadSyncedPrivate && !existsSync(syncedPrivatePath) && existsSync(syncedPrivateStash)) {
-            try { renameSync(syncedPrivateStash, syncedPrivatePath) } catch (e) {}
-          }
-          return { ok: false, error: `Atomic swap failed: ${err.message}` }
-        }
+    if (req.command === RPC_BACKUP_ESTIMATE) {
+      replyJson(req, estimateBackup())
+      return
+    }
 
-        if (hadSyncedPrivate && existsSync(syncedPrivateStash)) {
-          try { renameSync(syncedPrivateStash, syncedPrivatePath) } catch (e) {}
-        }
+    if (req.command === RPC_BACKUP_CREATE) {
+      replyJson(req, await createBackupFile(parseJsonMessage(req.data)))
+      return
+    }
 
-        const privateDriveAdoption = adoptTransferredPrivateDrive(
-          storagePath,
-          getSyncedPrivateHyperStoragePath()
-        )
-        resetPrivateDriveKeyCache()
-        // Used once and done. The restore replaced the identity storage, so
-        // any nonce still sitting there belongs to the profile that was just
-        // overwritten.
-        clearPairingNonce(storagePath)
+    if (req.command === RPC_BACKUP_INSPECT) {
+      replyJson(req, inspectBackup(parseJsonMessage(req.data)))
+      return
+    }
 
-        await getHyperRuntime()
-        return {
-          ok: true,
-          requiresRestart: true,
-          privateDriveRestored: privateDriveAdoption.adopted,
-          privateDriveId: privateDriveAdoption.driveId || undefined,
-          adoptedDriveIds: privateDriveAdoption.driveIds
-        }
-      }, closeHyperOfflineDownloads)
-      replyJson(req, result)
+    if (req.command === RPC_BACKUP_RESTORE_FILE) {
+      replyJson(req, await restoreBackupFile(parseJsonMessage(req.data)))
       return
     }
 

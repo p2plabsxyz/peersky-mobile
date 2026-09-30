@@ -83,7 +83,34 @@ export function withHyperRuntimeMaintenance (task, prepare) {
   return runtimeCoordinator.runMaintenance(task, prepare)
 }
 
+// While Link Device packs or replaces the stores, nothing may open them.
+// PeerChat and the storage listing open the runtime directly rather than
+// through the coordinator, so a maintenance window alone does not hold them
+// back: PeerChat polls every few seconds, and one poll landing mid-backup
+// reopened the store and rewrote files the backup was reading.
+let storesHeld = null
+
+export function holdHyperStores () {
+  let release
+  const held = new Promise((resolve) => { release = resolve })
+  storesHeld = held
+  return () => {
+    if (storesHeld === held) storesHeld = null
+    release()
+  }
+}
+
+async function waitForHeldStores () {
+  let held = storesHeld
+  while (held) {
+    await held
+    held = storesHeld
+  }
+}
+
 export async function getHyperRuntime () {
+  if (sdk) return sdk
+  await waitForHeldStores()
   if (sdk) return sdk
 
   if (!sdkOpening) {
@@ -104,6 +131,8 @@ export async function getHyperRuntime () {
 }
 
 export async function getPrivateHyperRuntime () {
+  if (deviceOnlySdk) return deviceOnlySdk
+  await waitForHeldStores()
   if (deviceOnlySdk) return deviceOnlySdk
 
   if (!deviceOnlySdkOpening) {
@@ -129,6 +158,8 @@ export async function getPrivateHyperRuntime () {
 }
 
 export async function getSyncedPrivateHyperRuntime () {
+  if (syncedPrivateSdk) return syncedPrivateSdk
+  await waitForHeldStores()
   if (syncedPrivateSdk) return syncedPrivateSdk
 
   if (!syncedPrivateSdkOpening) {
@@ -245,6 +276,8 @@ export async function getSyncedPrivateHyperdriveForId (driveId, runtime = null) 
 }
 
 export async function getAdoptedPrivateHyperRuntime () {
+  if (adoptedSdk) return adoptedSdk
+  await waitForHeldStores()
   if (adoptedSdk) return adoptedSdk
 
   if (!adoptedSdkOpening) {

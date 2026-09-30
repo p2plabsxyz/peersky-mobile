@@ -12,7 +12,9 @@ import { verifyIdentityTransferSignature } from '../../backend/backup/identity-t
 import { extractTransferredPrivateDrive, adoptTransferredPrivateDrive } from '../../backend/backup/private-drive-import.mjs'
 import { resetPrivateDriveKeyCache, getPrivateDriveKeyRecord } from '../../backend/hyper/private-keys.mjs'
 import { adoptedStoragePathFor, readSyncedPrivateAdoptedDrives } from '../../backend/hyper/runtime-routing.mjs'
-import { commitIdentityRestore, restoreIdentityFromBackup } from '../../backend/backup/restore.mjs'
+import { commitStagedRestore, restoreIdentityFromBackup, RESTORE_STAGING_DIR } from '../../backend/backup/restore.mjs'
+import { stageDesktopTransferFile } from '../../backend/backup/desktop-transfer.mjs'
+import { createDesktopTransfer, createDeviceKeys, wrapDesktopTransfer } from '../fixtures/desktop-transfer.mjs'
 
 function canonicalJson (value) {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
@@ -99,6 +101,29 @@ function createDeflatedFileZip (name, contents) {
   return Buffer.concat([localHeader, compressedBytes, centralDirectory, endOfCentralDirectory])
 }
 
+// A phone waiting for a desktop transfer: its keys, the code it is showing,
+// and somewhere to stage what arrives.
+function createPhoneReceiver (t) {
+  const root = mkdtempSync(join(tmpdir(), 'peersky-desktop-transfer-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const keys = createDeviceKeys()
+  const nonce = toHex(crypto.randomBytes(16))
+  const stagingPath = join(root, 'documents', RESTORE_STAGING_DIR)
+  mkdirSync(join(root, 'documents'), { recursive: true })
+
+  return {
+    keys,
+    nonce,
+    stagingPath,
+    publicKey: toHex(keys.encryption.publicKey),
+    async stage (bytes) {
+      const filePath = join(root, `transfer-${Date.now()}-${Math.random()}.zip`)
+      writeFileSync(filePath, bytes)
+      return stageDesktopTransferFile({ filePath, stagingPath, deviceKeys: keys, expectedNonce: nonce })
+    }
+  }
+}
+
 describe('Link Device Identity Transfer', () => {
   it('creates a complete mobile pairing code for QR and clipboard use', () => {
     const publicKey = 'AA'.repeat(32)
@@ -145,16 +170,144 @@ describe('Link Device Identity Transfer', () => {
     assert.equal(verifyIdentityTransferSignature(transfer), false)
   })
 
-  it('Expired transfer is rejected', async () => {
-    assert.ok(true)
+  it('Expired transfer is rejected', async (t) => {
+    const phone = createPhoneReceiver(t)
+    const issuedAt = Date.now() - 20 * 60 * 1000
+    const { bytes } = createDesktopTransfer({
+      files: [{ name: 'peersky-identity.json', data: '{}' }],
+      targetEncryptionPublicKey: phone.publicKey,
+      nonce: phone.nonce,
+      issuedAt,
+      ttlMs: 10 * 60 * 1000
+    })
+
+    await assert.rejects(phone.stage(bytes), /Identity transfer has expired/)
+    assert.equal(existsSync(phone.stagingPath), false)
   })
 
-  it('Wrong targetEncryptionPublicKey is rejected', async () => {
-    assert.ok(true)
+  it('Wrong targetEncryptionPublicKey is rejected', async (t) => {
+    const phone = createPhoneReceiver(t)
+    const someoneElse = createDeviceKeys()
+    const { bytes } = createDesktopTransfer({
+      files: [{ name: 'peersky-identity.json', data: '{}' }],
+      targetEncryptionPublicKey: toHex(someoneElse.encryption.publicKey),
+      nonce: phone.nonce
+    })
+
+    await assert.rejects(phone.stage(bytes), /encrypted for a different device/)
   })
 
-  it('Flipped byte in payload fails GCM auth tag', async () => {
-    assert.ok(true)
+  it('A transfer made for an older pairing code is rejected', async (t) => {
+    const phone = createPhoneReceiver(t)
+    const { bytes } = createDesktopTransfer({
+      files: [{ name: 'peersky-identity.json', data: '{}' }],
+      targetEncryptionPublicKey: phone.publicKey,
+      nonce: toHex(crypto.randomBytes(16))
+    })
+
+    await assert.rejects(phone.stage(bytes), /nonce does not match/)
+  })
+
+  it('Flipped byte in payload is caught before anything is restored', async (t) => {
+    const phone = createPhoneReceiver(t)
+    const { bytes } = createDesktopTransfer({
+      files: [{ name: 'peersky-identity.json', data: JSON.stringify({ identityId: 'x'.repeat(64) }) }],
+      targetEncryptionPublicKey: phone.publicKey,
+      nonce: phone.nonce
+    })
+    // The payload is the second entry: flip a byte inside its data.
+    const payloadStart = bytes.indexOf(Buffer.from('identity-payload.bin')) + 'identity-payload.bin'.length
+    const flipped = Buffer.from(bytes)
+    flipped[payloadStart + 8] ^= 0x01
+
+    await assert.rejects(phone.stage(flipped), /checksum mismatch|invalid|incorrect|size mismatch/i)
+    assert.equal(existsSync(phone.stagingPath), false)
+  })
+
+  it('A forged manifest is rejected even with a valid-looking payload', async (t) => {
+    const phone = createPhoneReceiver(t)
+    const { manifest, payload } = createDesktopTransfer({
+      files: [{ name: 'peersky-identity.json', data: '{}' }],
+      targetEncryptionPublicKey: phone.publicKey,
+      nonce: phone.nonce
+    })
+
+    // Someone else's key in the manifest: the code on screen would change, and
+    // the signature no longer verifies.
+    const swapped = structuredClone(manifest)
+    swapped.identityTransfer.sourceSigningPublicKey = 'a'.repeat(64)
+    await assert.rejects(phone.stage(wrapDesktopTransfer(swapped, payload)), /signature is invalid/)
+
+    // A payload swapped for another under the same signed manifest.
+    await assert.rejects(
+      phone.stage(wrapDesktopTransfer(manifest, crypto.randomBytes(payload.length))),
+      /payload checksum mismatch/
+    )
+  })
+
+  it('Restores a desktop transfer from disk: private drives and identity, tabs as a list to add', async (t) => {
+    const phone = createPhoneReceiver(t)
+    const registry = JSON.stringify([{ name: 'private', url: `hyper://${'e'.repeat(64)}/`, timestamp: 1 }])
+    const desktopTabs = JSON.stringify({
+      main: {
+        tabs: [
+          { id: 'tab-1', url: 'https://example.com/', title: 'Example' },
+          { id: 'tab-2', url: 'peersky://settings', title: 'Settings' },
+          { id: 'tab-3', url: `hyper://${'b'.repeat(52)}/`, title: 'A hyper site' }
+        ],
+        activeTabId: 'tab-1'
+      },
+      'window-2': { tabs: [{ id: 'tab-9', url: 'https://example.com/', title: 'Duplicate' }] }
+    })
+    const { bytes, verificationCode } = createDesktopTransfer({
+      files: [
+        { name: 'peersky-identity.json', data: JSON.stringify({ version: 1, identityId: 'a'.repeat(64) }) },
+        { name: 'privateHyperdrives.json', data: registry },
+        { name: 'hyper-private/', data: null },
+        { name: 'hyper-private/db/000001.sst', data: 'private core' },
+        { name: 'tabs.json', data: desktopTabs },
+        { name: 'lastOpened.json', data: '[]' },
+        { name: 'peersky-chat-rooms.json', data: '[]' },
+        // The desktop's own store. The phone never used it, and it can be huge.
+        { name: 'hyper/', data: null },
+        { name: 'hyper/db/000002.sst', data: 'desktop public core' }
+      ],
+      targetEncryptionPublicKey: phone.publicKey,
+      nonce: phone.nonce
+    })
+
+    const staged = await phone.stage(bytes)
+    assert.equal(staged.sas, verificationCode)
+    assert.deepEqual(staged.names, ['hyper-private', 'incoming-tabs.json', 'peersky-identity.json', 'privateHyperdrives.json'])
+    assert.equal(existsSync(join(phone.stagingPath, 'hyper')), false)
+    assert.equal(existsSync(join(phone.stagingPath, 'tabs.json')), false)
+    assert.equal(existsSync(join(phone.stagingPath, 'browser-tabs.json')), false)
+
+    const incoming = JSON.parse(readFileSync(join(phone.stagingPath, 'incoming-tabs.json'), 'utf8'))
+    assert.deepEqual(incoming.tabs, [
+      { url: 'https://example.com/', title: 'Example' },
+      { url: `hyper://${'b'.repeat(52)}/`, title: 'A hyper site' }
+    ])
+    assert.equal(readFileSync(join(phone.stagingPath, 'hyper-private/db/000001.sst'), 'utf8'), 'private core')
+    assert.equal(existsSync(`${phone.stagingPath}.inner.zip`), false)
+  })
+
+  it('Streams a large desktop transfer instead of holding it in memory', async (t) => {
+    const phone = createPhoneReceiver(t)
+    const large = crypto.randomBytes(24 * 1024 * 1024)
+    const { bytes } = createDesktopTransfer({
+      files: [
+        { name: 'peersky-identity.json', data: '{}' },
+        { name: 'hyper-private/db/large.sst', data: large }
+      ],
+      targetEncryptionPublicKey: phone.publicKey,
+      nonce: phone.nonce
+    })
+
+    await phone.stage(bytes)
+    const restored = readFileSync(join(phone.stagingPath, 'hyper-private/db/large.sst'))
+    assert.equal(restored.length, large.length)
+    assert.ok(restored.equals(large))
   })
 
   it('Entry named ../../evil throws', async () => {
@@ -187,8 +340,19 @@ describe('Link Device Identity Transfer', () => {
     }
   })
 
-  it('Entry named device-key.json is refused', async () => {
-    assert.ok(true)
+  it('Entry named device-key.json is refused', async (t) => {
+    const phone = createPhoneReceiver(t)
+    const { bytes } = createDesktopTransfer({
+      files: [
+        { name: 'peersky-identity.json', data: '{}' },
+        { name: 'device-key.json', data: '{"signing":{}}' }
+      ],
+      targetEncryptionPublicKey: phone.publicKey,
+      nonce: phone.nonce
+    })
+
+    await assert.rejects(phone.stage(bytes), /Refusing to restore device-key.json/)
+    assert.equal(existsSync(phone.stagingPath), false)
   })
 
   it('restores an identity backup larger than 50 MB', async () => {
@@ -197,12 +361,12 @@ describe('Link Device Identity Transfer', () => {
 
     try {
       const result = await restoreIdentityFromBackup(
-        createDeflatedFileZip('hyper/large-core', Buffer.alloc(size)),
+        createDeflatedFileZip('hyper-private/large-core', Buffer.alloc(size)),
         storagePath
       )
 
       assert.equal(result.restoredFiles, 1)
-      assert.equal(statSync(join(storagePath, 'hyper/large-core')).size, size)
+      assert.equal(statSync(join(storagePath, 'hyper-private/large-core')).size, size)
     } finally {
       rmSync(storagePath, { recursive: true, force: true })
     }
@@ -499,33 +663,44 @@ describe('Link Device Identity Transfer', () => {
     }
   })
 
-  it('preserves device-local PeerChat state across repeated desktop identity restores', () => {
-    const parent = mkdtempSync(join(tmpdir(), 'peersky-identity-swap-'))
-    const storagePath = join(parent, 'current')
-    const backupPath = join(parent, 'backup')
+  // A desktop restore only replaces what it brought. It used to rename the
+  // whole storage folder away and keep a short list, and that folder is the
+  // app's documents: bookmarks, history, settings and downloads went with it.
+  it('keeps everything on the phone across repeated desktop identity restores', () => {
+    const storagePath = mkdtempSync(join(tmpdir(), 'peersky-identity-swap-'))
 
     try {
       mkdirSync(join(storagePath, 'hyper-sdk'), { recursive: true })
+      mkdirSync(join(storagePath, 'browser-downloads'), { recursive: true })
       writeFileSync(join(storagePath, 'device-key.json'), 'device-key')
       writeFileSync(join(storagePath, 'hyper-sdk', 'peerchat-mobile.json'), 'mobile-chat')
       writeFileSync(join(storagePath, 'peerchat-ui-state.json'), 'mobile-ui')
-      writeFileSync(join(storagePath, 'old-desktop.json'), 'desktop-a')
+      writeFileSync(join(storagePath, 'browser-bookmarks.json'), 'bookmarks')
+      writeFileSync(join(storagePath, 'browser-history.json'), 'history')
+      writeFileSync(join(storagePath, 'browser-preferences.json'), 'settings')
+      writeFileSync(join(storagePath, 'browser-downloads', 'file.pdf'), 'pdf')
+      writeFileSync(join(storagePath, 'welcome-seen'), '')
 
       for (const identity of ['desktop-b', 'desktop-c']) {
-        const pendingPath = join(parent, `pending-${identity}`)
-        mkdirSync(pendingPath, { recursive: true })
-        writeFileSync(join(pendingPath, 'peersky-identity.json'), identity)
+        const stagingPath = join(storagePath, RESTORE_STAGING_DIR)
+        mkdirSync(stagingPath, { recursive: true })
+        writeFileSync(join(stagingPath, 'peersky-identity.json'), identity)
 
-        const result = commitIdentityRestore({ storagePath, pendingPath, backupPath })
-        assert.ok(result.preservedPaths.includes('hyper-sdk'))
+        const result = commitStagedRestore({ storagePath, stagingPath, names: ['peersky-identity.json'] })
+        assert.deepEqual(result.restored, ['peersky-identity.json'])
         assert.equal(readFileSync(join(storagePath, 'device-key.json'), 'utf8'), 'device-key')
         assert.equal(readFileSync(join(storagePath, 'hyper-sdk', 'peerchat-mobile.json'), 'utf8'), 'mobile-chat')
         assert.equal(readFileSync(join(storagePath, 'peerchat-ui-state.json'), 'utf8'), 'mobile-ui')
+        assert.equal(readFileSync(join(storagePath, 'browser-bookmarks.json'), 'utf8'), 'bookmarks')
+        assert.equal(readFileSync(join(storagePath, 'browser-history.json'), 'utf8'), 'history')
+        assert.equal(readFileSync(join(storagePath, 'browser-preferences.json'), 'utf8'), 'settings')
+        assert.equal(readFileSync(join(storagePath, 'browser-downloads', 'file.pdf'), 'utf8'), 'pdf')
+        assert.ok(existsSync(join(storagePath, 'welcome-seen')))
         assert.equal(readFileSync(join(storagePath, 'peersky-identity.json'), 'utf8'), identity)
-        assert.equal(existsSync(pendingPath), false)
+        assert.equal(existsSync(stagingPath), false)
       }
     } finally {
-      rmSync(parent, { recursive: true, force: true })
+      rmSync(storagePath, { recursive: true, force: true })
     }
   })
 })

@@ -6,38 +6,24 @@ import {
   useRef,
   useState
 } from 'react'
-import { CameraView, useCameraPermissions } from 'expo-camera'
 import {
   AccessibilityInfo,
   ActivityIndicator,
-  Alert,
   Animated,
-  BackHandler,
-  Clipboard,
   Easing,
   Image,
-  Modal,
   Platform,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View
 } from 'react-native'
 import type { ImageSourcePropType } from 'react-native'
 import type { SvgProps } from 'react-native-svg'
 import { BROWSER_PALETTES } from '../browser-appearance.mjs'
-import {
-  RPC_HYPER_LAN_STATUS,
-  RPC_IDENTITY_GET_KEY,
-  RPC_IDENTITY_RESTORE_FROM_HYPER,
-  RPC_IDENTITY_CONFIRM_RESTORE,
-  RPC_IDENTITY_REMOVE
-} from '../../backend/rpc/commands.mjs'
-import { QrCodeView } from './QrCodeView'
-import { createMobilePairingCode } from './identity-pairing.mjs'
+import { RPC_HYPER_LAN_STATUS } from '../../backend/rpc/commands.mjs'
+import { LinkDeviceSettings } from './LinkDevice'
 import { Appearance } from './Appearance'
 import { Accessibility } from './Accessibility'
 import { DataClearing } from './DataClearing'
@@ -201,7 +187,7 @@ type SettingsScreenProps = {
   onResetTabs: () => void
   onOpenUrl: (url: string, fromPage?: SettingsPage) => void
   onOpenHyperItem: (item: { name: string, source: 'fetched' | 'published', url: string }) => void
-  onIdentityRestored: () => void
+  onRestartRequired: () => void
 }
 
 const REPOSITORY_URL = 'https://github.com/p2plabsxyz/peersky-mobile'
@@ -215,7 +201,6 @@ const LAN_PERMISSION_HELP = Platform.OS === 'ios'
   : 'PeerSky finds nearby devices over your local network. Check that Wi-Fi is on and that Nearby devices is allowed for PeerSky in Settings, with both devices on the same network.'
 
 const FEEDBACK_EMAIL = 'contact@p2plabs.xyz'
-const PEERSKY_WEBSITE_URL = 'https://peersky.p2plabs.xyz'
 
 const SETTINGS_PAGES: Array<{
   id: Exclude<SettingsPage, 'main'>
@@ -271,7 +256,7 @@ const SETTINGS_PAGES: Array<{
   {
     id: 'link-device',
     title: 'Link Device',
-    description: 'Restore identity from desktop',
+    description: 'Sync with another device, or save a backup',
     icon: LinkIcon
   },
   {
@@ -338,7 +323,13 @@ export function SettingsScreen(props: SettingsScreenProps) {
           />
         )}
         {page === 'permissions' && <Permissions {...props} />}
-        {page === 'link-device' && <LinkDeviceSettings {...props} onOpenUrl={openUrl} />}
+        {page === 'link-device' && (
+          <LinkDeviceSettings
+            onCallRpc={props.onCallRpc}
+            onRestartRequired={props.onRestartRequired}
+            onOpenUrl={openUrl}
+          />
+        )}
         {page === 'lan-discovery' && <LANDiscoveryTest onCallRpc={props.onCallRpc} />}
         {page === 'about' && <AboutSettings onOpenUrl={openUrl} />}
       </SettingsSubpage>
@@ -522,342 +513,6 @@ function SettingsSubpage({
       <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
         {children}
       </ScrollView>
-    </View>
-  )
-}
-
-
-function LinkDeviceSettings(props: SettingsScreenProps) {
-  const { onCallRpc, storagePath, onIdentityRestored } = props
-  const isDark = useSettingsDarkMode()
-  const [encryptionPublicKey, setEncryptionPublicKey] = useState('')
-  const [nonce, setNonce] = useState('')
-  const [hyperUrl, setHyperUrl] = useState('')
-  const [isLoadingKey, setIsLoadingKey] = useState(true)
-  const [isRestoring, setIsRestoring] = useState(false)
-  const [message, setMessage] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [isScanning, setIsScanning] = useState(false)
-  const [permission, requestPermission] = useCameraPermissions()
-  const pairingCode = createMobilePairingCode(encryptionPublicKey, nonce)
-
-  // The parent builds a new onCallRpc closure on every one of its renders, so
-  // keying the effect on it re-ran this on every render: fetch the key, set
-  // state, render, fetch again. That loop is what makes the screen flicker,
-  // and it hammered the key RPC. Read the latest one through a ref and load
-  // once instead.
-  const onCallRpcRef = useRef(onCallRpc)
-  onCallRpcRef.current = onCallRpc
-
-  useEffect(() => {
-    let cancelled = false
-
-    async function loadDeviceKey() {
-      setIsLoadingKey(true)
-      setError(null)
-
-      try {
-        const response = await onCallRpcRef.current(RPC_IDENTITY_GET_KEY, {})
-        if (cancelled) return
-
-        if (!response.ok || typeof response.encryptionPublicKey !== 'string') {
-          throw new Error(response.error || 'Unable to load mobile device key')
-        }
-
-        setEncryptionPublicKey(response.encryptionPublicKey)
-        setNonce(response.nonce || '')
-      } catch (loadError) {
-        if (!cancelled) {
-          setError(loadError instanceof Error ? loadError.message : String(loadError))
-        }
-      } finally {
-        if (!cancelled) setIsLoadingKey(false)
-      }
-    }
-
-    void loadDeviceKey()
-
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  function copyDeviceKey() {
-    if (!pairingCode) return
-
-    try {
-      Clipboard.setString(pairingCode)
-      setMessage('Device pairing code copied.')
-      setError(null)
-    } catch (copyError) {
-      setError(copyError instanceof Error ? copyError.message : String(copyError))
-    }
-  }
-
-  async function openScanner() {
-    if (!permission?.granted) {
-      const response = await requestPermission()
-      if (!response.granted) {
-        setError('Camera permission is required to scan QR codes.')
-        return
-      }
-    }
-    setIsScanning(true)
-    setError(null)
-  }
-
-  function handleBarcodeScanned({ data }: { data: string }) {
-    setIsScanning(false)
-    if (data && data.startsWith('hyper://')) {
-      setHyperUrl(data)
-    } else {
-      setError('Invalid QR code scanned. Must be a hyper:// URL.')
-    }
-  }
-
-  // Android can quit itself. iOS cannot: BackHandler.exitApp is a no-op
-  // there, and calling exit() reads as a crash to Apple, so asking is the
-  // only honest option. Without this the app sat open on wiped storage and
-  // looked like nothing had happened.
-  function finishAndRestart (done: string) {
-    onIdentityRestored()
-    if (Platform.OS === 'android') {
-      BackHandler.exitApp()
-      return
-    }
-    Alert.alert('Close PeerSky to finish', `${done} Close PeerSky fully, then open it again.`)
-  }
-
-  // The other half of moving to a new phone. The desktop releases its side;
-  // this one stops this phone being that profile. Without it the old phone
-  // keeps writing the same chat feed and forks it.
-  function removeIdentity () {
-    Alert.alert(
-      'Remove identity from this phone?',
-      'This deletes your profile, chats and private files from this phone. Anything only stored here is gone. Your desktop keeps its copy.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Remove & Restart',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const response = await onCallRpc(RPC_IDENTITY_REMOVE, {})
-              if (!response.ok) throw new Error(response.error || 'Could not remove the identity')
-              finishAndRestart('This phone no longer holds your identity.')
-            } catch (removeError) {
-              Alert.alert('Remove Failed', removeError instanceof Error ? removeError.message : String(removeError))
-            }
-          }
-        }
-      ]
-    )
-  }
-
-  async function restoreIdentity() {
-    const trimmedUrl = hyperUrl.trim()
-    if (!trimmedUrl.startsWith('hyper://')) {
-      setError('Enter the hyper:// identity transfer URL from PeerSky Desktop.')
-      setMessage(null)
-      return
-    }
-
-    setIsRestoring(true)
-    setError(null)
-    setMessage(null)
-
-    try {
-      const response = await onCallRpc(RPC_IDENTITY_RESTORE_FROM_HYPER, {
-        hyperUrl: trimmedUrl
-      })
-
-      if (!response.ok) {
-        throw new Error(response.error || 'Identity restore failed')
-      }
-
-      Alert.alert(
-        'Confirm Identity Restore',
-        `Does this code match the desktop screen?\n\n${response.sas}\n\nRestoring will overwrite your identity and restart the app.`,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Confirm & Restart',
-            style: 'destructive',
-            onPress: async () => {
-              try {
-                const confirmResponse = await onCallRpc(RPC_IDENTITY_CONFIRM_RESTORE, {})
-                if (!confirmResponse.ok) throw new Error(confirmResponse.error)
-                finishAndRestart('Your identity has been restored.')
-              } catch (confirmError) {
-                Alert.alert('Restore Failed', confirmError instanceof Error ? confirmError.message : String(confirmError))
-              }
-            }
-          }
-        ]
-      )
-    } catch (restoreError) {
-      setError(restoreError instanceof Error ? restoreError.message : String(restoreError))
-    } finally {
-      setIsRestoring(false)
-    }
-  }
-
-  return (
-    <View style={[styles.pageContent, isDark ? darkStyles.page : null]}>
-      {error && (
-        <View style={styles.errorBanner}>
-          <Text style={styles.errorText}>{error}</Text>
-        </View>
-      )}
-      {message && (
-        <View style={[styles.successBanner, isDark ? darkStyles.successBanner : null]}>
-          <Text style={[styles.successText, isDark ? darkStyles.successText : null]}>{message}</Text>
-        </View>
-      )}
-
-      {/* Everything on this screen assumes the desktop browser is already
-          running somewhere, and until now nothing in the app said where to
-          get it. */}
-      <SettingsSection title='PeerSky on desktop'>
-        <Pressable
-          accessibilityRole='link'
-          style={[styles.linkRow, styles.linkRowFirst]}
-          onPress={() => props.onOpenUrl(PEERSKY_WEBSITE_URL)}
-        >
-          <SettingCopy
-            title='Get the desktop browser'
-            description='Get PeerSky on a Mac, Windows or Linux machine.'
-          />
-          <ChevronRightIcon
-            width={16}
-            height={16}
-            color={isDark ? BROWSER_PALETTES.dark.mutedText : '#8190a7'}
-          />
-        </Pressable>
-      </SettingsSection>
-
-      <SettingsSection title='Device pairing code'>
-        <View style={styles.linkDeviceBlock}>
-          <SettingCopy
-            title='This device pairing code'
-            description='Scan this QR code with PeerSky Desktop or copy the pairing code below.'
-          />
-          {pairingCode ? <QrCodeView value={pairingCode} size={200} /> : null}
-          <View style={[styles.keyBox, isDark ? darkStyles.input : null]}>
-            {isLoadingKey
-              ? <ActivityIndicator size='small' />
-              : (
-                <Text
-                  selectable
-                  style={[styles.keyText, isDark ? darkStyles.primaryText : null]}
-                >
-                  {pairingCode || 'No pairing code available'}
-                </Text>
-              )}
-          </View>
-          <Pressable
-            accessibilityRole='button'
-            disabled={!pairingCode}
-            style={({ pressed }) => [
-              styles.primaryButton,
-              !pairingCode ? styles.buttonDisabled : null,
-              pressed ? styles.rowPressed : null
-            ]}
-            onPress={copyDeviceKey}
-          >
-            <Text style={styles.primaryButtonText}>Copy Code</Text>
-          </Pressable>
-          <Text style={[styles.helperText, isDark ? darkStyles.secondaryText : null]}>
-            Identity key file location: {storagePath || 'app document storage'}
-          </Text>
-        </View>
-      </SettingsSection>
-
-      <SettingsSection title='Restore from desktop'>
-        <View style={styles.linkDeviceBlock}>
-          <SettingCopy
-            title='Identity transfer URL'
-            description='Paste the hyper:// URL shown by PeerSky Desktop after uploading the encrypted identity transfer.'
-          />
-          <TextInput
-            autoCapitalize='none'
-            autoCorrect={false}
-            editable={!isRestoring}
-            multiline
-            placeholder='hyper://...'
-            placeholderTextColor={isDark ? '#6f7b91' : '#8a96a8'}
-            style={[styles.urlInput, isDark ? darkStyles.input : null]}
-            value={hyperUrl}
-            onChangeText={setHyperUrl}
-          />
-          <Pressable
-            accessibilityRole='button'
-            disabled={isRestoring}
-            style={({ pressed }) => [
-              styles.primaryButton,
-              isRestoring ? styles.buttonDisabled : null,
-              pressed ? styles.rowPressed : null
-            ]}
-            onPress={restoreIdentity}
-          >
-            {isRestoring
-              ? <ActivityIndicator color='#ffffff' size='small' />
-              : <Text style={styles.primaryButtonText}>Restore Identity</Text>}
-          </Pressable>
-          <Pressable
-            accessibilityRole='button'
-            disabled={isRestoring}
-            style={({ pressed }) => [
-              styles.secondaryButton,
-              isRestoring ? styles.buttonDisabled : null,
-              pressed ? styles.rowPressed : null
-            ]}
-            onPress={openScanner}
-          >
-            <Text style={[styles.secondaryButtonText, isDark ? darkStyles.primaryText : null]}>Scan QR Code</Text>
-          </Pressable>
-        </View>
-      </SettingsSection>
-
-      <SettingsSection title='This phone'>
-        <View style={styles.linkDeviceBlock}>
-          <SettingCopy
-            title='Remove identity from this phone'
-            description='Your profile lives on one phone at a time. Do this before moving to a new phone, so both are not writing the same chats.'
-          />
-          <Pressable
-            accessibilityRole='button'
-            disabled={isRestoring}
-            style={({ pressed }) => [
-              styles.secondaryButton,
-              isRestoring ? styles.buttonDisabled : null,
-              pressed ? styles.rowPressed : null
-            ]}
-            onPress={removeIdentity}
-          >
-            <Text style={styles.dangerButtonText}>Remove Identity</Text>
-          </Pressable>
-        </View>
-      </SettingsSection>
-
-      <Modal supportedOrientations={MODAL_ORIENTATIONS} visible={isScanning} animationType='slide' onRequestClose={() => setIsScanning(false)}>
-        <View style={styles.scannerContainer}>
-          {isScanning && (
-            <CameraView
-              style={StyleSheet.absoluteFillObject}
-              barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
-              onBarcodeScanned={handleBarcodeScanned}
-            />
-          )}
-          <View style={styles.scannerOverlay}>
-            <View style={styles.scannerHeader}>
-              <Pressable style={styles.scannerCloseButton} onPress={() => setIsScanning(false)}>
-                <Text style={styles.scannerCloseText}>Cancel</Text>
-              </Pressable>
-            </View>
-          </View>
-        </View>
-      </Modal>
     </View>
   )
 }
@@ -1216,9 +871,6 @@ const styles = StyleSheet.create({
   // The top border is the line between one row and the next, so the first row
   // in a card leaves it off: the card's own edge is already there and two of
   // them read as a thick rule.
-  linkRowFirst: {
-    borderTopWidth: 0
-  },
   linkRow: {
     alignItems: 'center',
     borderTopColor: '#e6ecf5',
@@ -1233,47 +885,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600'
   },
-  linkDeviceBlock: {
-    gap: 12,
-    padding: 16
-  },
-  keyBox: {
-    backgroundColor: '#f7f9fc',
-    borderColor: '#d8e0ec',
-    borderRadius: 12,
-    borderWidth: 1,
-    minHeight: 72,
-    padding: 12
-  },
   keyText: {
     color: '#1f2a44',
     fontFamily: 'monospace',
     fontSize: 12,
     lineHeight: 18
-  },
-  urlInput: {
-    backgroundColor: '#f7f9fc',
-    borderColor: '#d8e0ec',
-    borderRadius: 12,
-    borderWidth: 1,
-    color: '#1f2a44',
-    fontSize: 14,
-    minHeight: 96,
-    padding: 12,
-    textAlignVertical: 'top'
-  },
-  primaryButton: {
-    alignItems: 'center',
-    backgroundColor: '#1f6fd1',
-    borderRadius: 12,
-    justifyContent: 'center',
-    minHeight: 46,
-    paddingHorizontal: 14
-  },
-  primaryButtonText: {
-    color: '#ffffff',
-    fontSize: 14,
-    fontWeight: '800'
   },
   secondaryButton: {
     alignItems: 'center',
@@ -1292,14 +908,6 @@ const styles = StyleSheet.create({
   },
   // Reads the same in both themes: it sits on the secondary button, which
   // stays light, and this is a destructive action either way.
-  dangerButtonText: {
-    color: '#c43d35',
-    fontSize: 14,
-    fontWeight: '800'
-  },
-  buttonDisabled: {
-    opacity: 0.55
-  },
   helperText: {
     color: '#687086',
     fontSize: 12,
@@ -1368,43 +976,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18
   },
-  successBanner: {
-    backgroundColor: '#edf9f0',
-    borderBottomColor: '#a9d9b5',
-    borderBottomWidth: 1,
-    paddingHorizontal: 20,
-    paddingVertical: 12
-  },
-  successText: {
-    color: '#246a36',
-    fontSize: 13,
-    lineHeight: 18
-  },
-  scannerContainer: {
-    flex: 1,
-    backgroundColor: '#000000'
-  },
-  scannerOverlay: {
-    flex: 1,
-    justifyContent: 'space-between',
-    padding: 20
-  },
-  scannerHeader: {
-    alignItems: 'flex-end',
-    paddingTop: 40
-  },
-  scannerCloseButton: {
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
-    borderRadius: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 10
-  },
-  scannerCloseText: {
-    color: '#ffffff',
-    fontSize: 16,
-    fontWeight: '600'
-
-  }
 })
 
 const darkStyles = StyleSheet.create({
@@ -1433,16 +1004,4 @@ const darkStyles = StyleSheet.create({
   secondaryText: {
     color: BROWSER_PALETTES.dark.mutedText
   },
-  input: {
-    backgroundColor: '#121927',
-    borderColor: BROWSER_PALETTES.dark.border,
-    color: BROWSER_PALETTES.dark.text
-  },
-  successBanner: {
-    backgroundColor: '#12301d',
-    borderBottomColor: '#2d7b45'
-  },
-  successText: {
-    color: '#bfeccb'
-  }
 })

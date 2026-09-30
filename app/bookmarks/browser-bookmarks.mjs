@@ -63,6 +63,27 @@ export function addBrowserBookmark (bookmarks, {
   ]
 }
 
+/**
+ * Adds bookmarks that came from another device after the ones already here,
+ * so the phone's own stay on top. Anything already bookmarked is left as it
+ * is, and the limit holds.
+ */
+export function mergeIncomingBrowserBookmarks (bookmarks, incoming) {
+  const list = Array.isArray(incoming?.bookmarks) ? incoming.bookmarks : []
+  const merged = [...bookmarks]
+  const seen = new Set(bookmarks.map((bookmark) => bookmark.url))
+
+  for (const item of list) {
+    if (merged.length >= MAX_BROWSER_BOOKMARKS) break
+    const bookmark = normalizeBrowserBookmark(item)
+    if (!bookmark || seen.has(bookmark.url)) continue
+    seen.add(bookmark.url)
+    merged.push(bookmark)
+  }
+
+  return merged.length === bookmarks.length ? bookmarks : merged
+}
+
 export function removeBrowserBookmark (bookmarks, url) {
   const normalizedUrl = normalizeBrowserBookmarkUrl(url)
   if (!normalizedUrl) return bookmarks
