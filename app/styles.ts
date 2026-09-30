@@ -907,6 +907,32 @@ export const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 10
   },
+  p2pmdNameRow: {
+    alignItems: 'stretch',
+    flexDirection: 'row',
+    gap: 10
+  },
+  p2pmdNameInput: {
+    flex: 1,
+    fontSize: 16,
+    fontWeight: '700'
+  },
+  p2pmdNameShuffle: {
+    flex: 0,
+    minWidth: 88
+  },
+  p2pmdNameSummary: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 10,
+    justifyContent: 'space-between'
+  },
+  p2pmdNameSummaryText: {
+    flex: 1
+  },
+  p2pmdNameSummaryName: {
+    fontWeight: '800'
+  },
   p2pmdJoinTool: {
     alignItems: 'center',
     borderColor: '#384052',

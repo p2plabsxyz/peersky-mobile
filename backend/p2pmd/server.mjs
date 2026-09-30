@@ -14,6 +14,7 @@ import ieeeBrowserScript from './ieee-runtime.mjs'
 import katexCss from './katex-runtime.mjs'
 import { P2PMD_SCIENTIFIC_STYLES } from './scientific.mjs'
 import { P2PMD_TEMPLATES, hasIeeeMarker } from './templates.mjs'
+import { FUN_PEER_NAME_ADJECTIVES, FUN_PEER_NAME_ANIMALS } from './peer-names.mjs'
 import { scheduleP2pmdRoomSnapshot } from './snapshots.mjs'
 import yjsBrowserScript from './yjs-runtime.mjs'
 
@@ -689,6 +690,7 @@ export function getP2pmdEditorPage () {
   // than its own copy of the rule. They drifted apart once already.
   const embeddedSlideBreakCheck = hasSlideBreaks.toString().replace(/<\/script/gi, '<\\/script')
   const serializedSlidesTemplate = JSON.stringify(P2PMD_SLIDES_TEMPLATE).replace(/</g, '\\u003c')
+  const serializedFunNameWords = JSON.stringify([FUN_PEER_NAME_ADJECTIVES, FUN_PEER_NAME_ANIMALS]).replace(/</g, '\\u003c')
   const embeddedIeeeBrowserScript = ieeeBrowserScript.replace(/<\/script/gi, '<\\/script')
 
   return `<!doctype html>
@@ -1718,6 +1720,7 @@ export function getP2pmdEditorPage () {
       const PEER_TYPING_IDLE_MS = ${EDIT_ACTIVITY_DEBOUNCE_MS}
       const templates = ${serializedTemplates}
       const slidesTemplate = ${serializedSlidesTemplate}
+      const FUN_NAME_WORDS = ${serializedFunNameWords}
       // The note list shows a readable title instead of a key, so every save
       // carries enough of the text for one to be worked out. Bounded on
       // purpose: this rides along with each save, and a heading lives at the
@@ -1777,7 +1780,7 @@ export function getP2pmdEditorPage () {
       const localAuthor = {
         clientId,
         color: colorFromClientId(clientId),
-        name: loadPeerDisplayName() || 'Mobile peer'
+        name: loadPeerDisplayName() || createFallbackDisplayName()
       }
       const roomBaseUrl = getRoomBaseUrl()
 
@@ -1886,6 +1889,18 @@ export function getP2pmdEditorPage () {
         try {
           window.localStorage.setItem(PEER_DISPLAY_NAME_KEY, value)
         } catch {}
+      }
+
+      // The app asks for a name before a note opens, so this only covers a
+      // page opened some other way. A fun name beats "Mobile peer", and it is
+      // kept so the same person does not turn into someone new on reload.
+      function createFallbackDisplayName() {
+        const adjectives = FUN_NAME_WORDS[0]
+        const animals = FUN_NAME_WORDS[1]
+        const name = adjectives[Math.floor(Math.random() * adjectives.length)] + ' ' +
+          animals[Math.floor(Math.random() * animals.length)]
+        persistPeerDisplayName(name)
+        return name
       }
 
       function loadPersistedLatexMode() {
