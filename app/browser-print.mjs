@@ -25,11 +25,15 @@ export function createBrowserPrintScript (token = '') {
   return `(() => {
     try {
       var html = document.documentElement ? document.documentElement.outerHTML : '';
-      window.ReactNativeWebView.postMessage(JSON.stringify({
+      var message = {
         type: ${JSON.stringify(BROWSER_PRINT_MESSAGE_TYPE)},
         token: ${JSON.stringify(String(token || ''))},
         html: html.slice(0, ${MAX_PRINT_HTML_LENGTH})
-      }));
+      };
+      // Sent through the bridge's sender, taken before the page could replace
+      // JSON.stringify and read the token out of this message.
+      if (typeof window.__peerskyPostNative === 'function') window.__peerskyPostNative(message);
+      else window.ReactNativeWebView.postMessage(JSON.stringify(message));
     } catch (error) {}
   })(); true;`
 }

@@ -219,6 +219,9 @@ export function getBrowserRequestAction ({ requestUrl, currentSourceKind, isTopF
   }
 
   if (isHyperUrl(url)) {
+    // A hyper:// frame cannot load in place, and turning it into a navigation
+    // let any embed or ad take the whole tab to a page of its choosing.
+    if (!isTopFrame) return { action: 'block' }
     return { action: 'load-hyper', url }
   }
 
@@ -251,6 +254,40 @@ export function getBrowserRequestAction ({ requestUrl, currentSourceKind, isTopF
   }
 
   return { action: 'allow' }
+}
+
+/**
+ * The host of a hyper:// address, lower case: how a site is known for things
+ * like the publishing permission. Null for anything else.
+ */
+export function getHyperSiteId (url) {
+  try {
+    const parsed = new URL(String(url || ''))
+    if (parsed.protocol !== 'hyper:') return null
+    const host = parsed.hostname.toLowerCase()
+    return /^([0-9a-f]{64}|[a-z0-9]{52})$/.test(host) ? host : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * The site a hyper:// tab's bridge request speaks for, or null when it may not
+ * use the bridge. A WebView reports a page it loaded from a string as
+ * about:blank, so only an address from somewhere else counts against the tab:
+ * one that navigated off to the web.
+ */
+export function getHyperBridgeSite ({ url, reportedUrl = '', isHyper }) {
+  const siteId = isHyper ? getHyperSiteId(url) : null
+  if (!siteId) return null
+  const reported = String(reportedUrl || '').split('#')[0]
+  if (reported && !reported.startsWith('about:') && getHyperSiteId(reported) !== siteId) return null
+  return siteId
+}
+
+export function formatHyperSiteForPrompt (siteId) {
+  const id = String(siteId || '')
+  return id.length > 16 ? `${id.slice(0, 8)}…${id.slice(-4)}` : id
 }
 
 export function isStaleBrowserLoad (loadSeq, currentSeq) {

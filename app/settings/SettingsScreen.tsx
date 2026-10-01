@@ -41,6 +41,7 @@ import type {
   AddressBarPosition,
   BrowserTheme,
   ExternalLinkBehavior,
+  PublishingDecision,
   SearchEngine,
   WebsiteTextScale
 } from './useBrowserPreferences'
@@ -160,6 +161,7 @@ type SettingsScreenProps = {
   isDark: boolean
   offlineNetworkAllowed: boolean
   persistenceError: string | null
+  publishingSites: Record<string, PublishingDecision>
   searchEngine: SearchEngine
   showFullAddress: boolean
   theme: BrowserTheme
@@ -178,6 +180,7 @@ type SettingsScreenProps = {
   onDownloadOnlyOnWifiChange: (enabled: boolean) => void
   onEnforceManualPageZoomChange: (enabled: boolean) => void
   onExternalLinkBehaviorChange: (behavior: ExternalLinkBehavior) => void
+  onPublishingSiteChange: (siteId: string, decision: PublishingDecision | null) => void
   onFilterListsUpdated: () => void
   onSearchEngineChange: (searchEngine: SearchEngine) => void
   onShowFullAddressChange: (enabled: boolean) => void

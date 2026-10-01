@@ -4,7 +4,8 @@ import {
   getContentTypeFromUrl,
   headersToObject,
   isMalformedRangeHeader,
-  normalizeDownloadFilename
+  normalizeDownloadFilename,
+  signHyperAssetUrl
 } from './assets.mjs'
 import { parseHyperUrl } from './url.mjs'
 
@@ -35,7 +36,11 @@ function handleHyperAssetRequest (req, res, fetch, fetchRange, authToken) {
     sendAssetText(res, 404, 'Not found')
     return
   }
-  if (requestUrl.searchParams.get('token') !== authToken) {
+  if (!requestUrl.searchParams.get('url')) {
+    sendAssetText(res, 400, 'Missing asset url')
+    return
+  }
+  if (!hasValidAssetSignature(requestUrl, authToken)) {
     sendAssetText(res, 401, 'Unauthorized')
     return
   }
@@ -70,6 +75,17 @@ function handleHyperAssetRequest (req, res, fetch, fetchRange, authToken) {
       if (req.aborted || res.destroyed) return
       sendAssetError(res, error)
     })
+}
+
+function hasValidAssetSignature (requestUrl, secret) {
+  const token = requestUrl.searchParams.get('token') || ''
+  const expected = signHyperAssetUrl(secret, requestUrl.searchParams.get('url') || '')
+  if (token.length !== expected.length) return false
+  let difference = 0
+  for (let index = 0; index < token.length; index++) {
+    difference |= token.charCodeAt(index) ^ expected.charCodeAt(index)
+  }
+  return difference === 0
 }
 
 export async function streamHyperAsset (fetch, fetchRange, assetUrl, req, res, downloadName) {

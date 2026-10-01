@@ -13,7 +13,8 @@ import {
   hasPeerChatNotificationPermission,
   requestPeerChatNotificationPermission
 } from '../peerchat/notifications'
-import type { ExternalLinkBehavior } from './useBrowserPreferences'
+import { formatHyperSiteForPrompt } from '../browser-shell.mjs'
+import type { ExternalLinkBehavior, PublishingDecision } from './useBrowserPreferences'
 import {
   ChoiceGroup,
   SettingCopy,
@@ -24,13 +25,17 @@ import {
 type PermissionsProps = {
   externalLinkBehavior: ExternalLinkBehavior
   persistenceError: string | null
+  publishingSites: Record<string, PublishingDecision>
   onExternalLinkBehaviorChange: (behavior: ExternalLinkBehavior) => void
+  onPublishingSiteChange: (siteId: string, decision: PublishingDecision | null) => void
 }
 
 export function Permissions ({
   externalLinkBehavior,
   persistenceError,
-  onExternalLinkBehaviorChange
+  publishingSites,
+  onExternalLinkBehaviorChange,
+  onPublishingSiteChange
 }: PermissionsProps) {
   const isDark = useSettingsDarkMode()
   const [actionError, setActionError] = useState<string | null>(null)
@@ -139,6 +144,28 @@ export function Permissions ({
           Controls links that open email (mailto:), phone (tel:), messaging (sms:), and map (geo:) apps. Web and Hyper links continue to open in PeerSky. Always allow skips confirmation, so only enable it if you trust the sites you visit.
         </Text>
       </View>
+
+      <SettingsSection title='Publishing from sites'>
+        {Object.keys(publishingSites).length === 0
+          ? (
+            <View style={[styles.permissionRow, isDark ? styles.permissionRowDark : null]}>
+              <SettingCopy
+                title='No site has asked yet'
+                description='A hyper:// site asks before it creates drives on this phone or saves files to them. Your answers show up here.'
+              />
+            </View>
+            )
+          : Object.entries(publishingSites).map(([siteId, decision]) => (
+            <PermissionRow
+              key={siteId}
+              title={`hyper://${formatHyperSiteForPrompt(siteId)}`}
+              description={decision === 'allow' ? 'Can publish from this phone.' : 'Blocked from publishing.'}
+              action='Forget'
+              isDark={isDark}
+              onPress={() => onPublishingSiteChange(siteId, null)}
+            />
+          ))}
+      </SettingsSection>
     </View>
   )
 }

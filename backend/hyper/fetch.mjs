@@ -14,7 +14,15 @@ import {
   DEFAULT_HYPER_DISCOVERY_RETRY_DELAY,
   withHyperRetry
 } from './fetch-retry.mjs'
-import { withHyperRuntimeForAddress } from './runtime.mjs'
+import { isPrivateHyperAddress, withHyperRuntimeForAddress } from './runtime.mjs'
+import { normalizeDriveAddressId } from './runtime-routing.mjs'
+import {
+  isNamedDriveRequest,
+  namespacePageDriveRequest,
+  pageMayWriteTo,
+  pageSiteId,
+  rememberPageDrive
+} from './page-access.mjs'
 import { refreshHyperRuntimeNetwork } from './network-refresh.mjs'
 import { createHyperUrl, getHyperSearch, getHyperVisibility, parseHyperUrl } from './url.mjs'
 import { readHyperBinaryResponse, writeHyperResponseToFile } from './binary-response.mjs'
@@ -50,11 +58,17 @@ const HYPER_WRITE_METHODS = new Set(['POST', 'PUT'])
 // refusing outright.
 const PUBLIC_VISIBILITY = new Set(['', 'public'])
 
+/**
+ * @param {object} options
+ * @param {string|null} [options.page] The hyper:// page that asked, when the
+ *   request came through the page bridge rather than from the app itself.
+ */
 export async function fetchHyper ({
   url,
   method = 'GET',
   body = null,
   headers: requestHeaders = null,
+  page = null,
   inlineAssets = false,
   retries = DEFAULT_HYPER_DISCOVERY_RETRIES,
   retryDelay = DEFAULT_HYPER_DISCOVERY_RETRY_DELAY,
@@ -72,14 +86,27 @@ export async function fetchHyper ({
   // survive the trip. Reads never carried one.
   const requestUrl = createHyperUrl(target.driveAddress, target.pathname) + getHyperSearch(url)
 
+  const pageSite = page === null ? null : pageSiteId(page)
+  if (page !== null && !pageSite) {
+    return { ok: false, status: 403, error: 'Only a hyper:// page can make hyper:// requests' }
+  }
+
   if (HYPER_WRITE_METHODS.has(normalizedMethod)) {
     return writeHyper({
       target,
       requestUrl,
       method: normalizedMethod,
       body,
-      headers: requestHeaders
+      headers: requestHeaders,
+      pageSite
     })
+  }
+
+  // A link to someone's private drive can reach a page, and the phone holds
+  // the keys that open it. Only that drive's own pages may read it.
+  if (pageSite && normalizeDriveAddressId(target.driveAddress) !== pageSite &&
+    await isPrivateHyperAddress(target.driveAddress)) {
+    return { ok: false, status: 403, error: 'A page cannot read private drives' }
   }
 
   return withHyperRuntimeForAddress(target.driveAddress, async (runtime) => {
@@ -170,10 +197,19 @@ export async function fetchHyper ({
  * Nothing here is retried. A read can be attempted again because it has no
  * effect; repeating a write could upload a file twice.
  */
-async function writeHyper ({ target, requestUrl, method, body, headers }) {
+async function writeHyper ({ target, requestUrl, method, body, headers, pageSite = null }) {
   const visibility = getHyperVisibility(requestUrl)
   if (!PUBLIC_VISIBILITY.has(visibility)) {
     return { ok: false, error: `Only public uploads work from a page. Use the Hyperdrive app for ${visibility} ones.` }
+  }
+
+  const namedDrive = Boolean(pageSite) && isNamedDriveRequest(requestUrl, method)
+  if (namedDrive) {
+    const namespaced = namespacePageDriveRequest(requestUrl, pageSite)
+    if (namespaced.error) return { ok: false, status: 400, error: namespaced.error }
+    requestUrl = namespaced.url
+  } else if (pageSite && !pageMayWriteTo(pageSite, target.driveAddress)) {
+    return { ok: false, status: 403, error: 'A page can only write to drives it created' }
   }
 
   return withHyperRuntimeForAddress(target.driveAddress, async (runtime) => {
@@ -188,13 +224,15 @@ async function writeHyper ({ target, requestUrl, method, body, headers }) {
     })
 
     const responseHeaders = headersToObject(response.headers)
+    const responseText = await response.text()
+    if (namedDrive && response.ok) rememberPageDrive(pageSite, responseText)
     return {
       ok: response.ok,
       status: response.status,
       statusText: response.statusText,
       url: response.url || requestUrl,
       headers: responseHeaders,
-      body: await response.text()
+      body: responseText
     }
   })
 }

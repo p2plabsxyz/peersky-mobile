@@ -129,14 +129,18 @@ export function createBrowserMediaLongPressScript ({ token = '' } = {}) {
 
         if (!kind) return false;
 
-        window.ReactNativeWebView?.postMessage(JSON.stringify({
+        const message = {
           type: messageType,
           token: messageToken,
           kind,
           mediaUrl,
           linkUrl,
           title
-        }));
+        };
+        // The bridge's own sender when it is there, so a page that replaced
+        // JSON.stringify never sees the token.
+        if (typeof window.__peerskyPostNative === 'function') window.__peerskyPostNative(message);
+        else window.ReactNativeWebView?.postMessage(JSON.stringify(message));
         return true;
       }
 

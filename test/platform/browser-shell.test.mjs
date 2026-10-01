@@ -5,7 +5,10 @@ import {
   commitBrowserEntryState,
   getBrowserBackState,
   getBrowserForwardState,
+  formatHyperSiteForPrompt,
+  getHyperBridgeSite,
   getBrowserRequestAction,
+  getHyperSiteId,
   getBrowserWebViewKey,
   getHyperDriveListingUrl,
   getSearchUrl,
@@ -281,6 +284,45 @@ describe('browser shell navigation helpers', () => {
       source: { kind: 'web', uri: 'https://example.com' }
     })
     assert.deepEqual(getBrowserRequestAction({ requestUrl: 'https://example.com', currentSourceKind: 'web' }), { action: 'allow' })
+  })
+
+  test('a hyper:// frame never takes the whole tab with it', () => {
+    // An ad or embed pointing at hyper:// used to become a full navigation, so
+    // any page could send the tab to a hyper site of its choosing.
+    for (const currentSourceKind of ['web', 'hyper']) {
+      assert.deepEqual(getBrowserRequestAction({
+        requestUrl: 'hyper://somewhere/',
+        currentSourceKind,
+        isTopFrame: false
+      }), { action: 'block' })
+    }
+  })
+
+  test('knows a hyper site by its host, for the publishing permission', () => {
+    const hex = 'ab'.repeat(32)
+    const z32 = 'y'.repeat(52)
+    assert.equal(getHyperSiteId(`hyper://${hex}/app/index.html`), hex)
+    assert.equal(getHyperSiteId(`hyper://${z32.toUpperCase()}/`), z32)
+    assert.equal(getHyperSiteId('hyper://localhost/?key=x'), null)
+    assert.equal(getHyperSiteId('https://example.com/'), null)
+    assert.equal(getHyperSiteId('about:blank'), null)
+    assert.equal(formatHyperSiteForPrompt(hex), `${hex.slice(0, 8)}…${hex.slice(-4)}`)
+  })
+
+  // Android reports a page loaded from a string as about:blank, and iOS hyper
+  // pages have no base address at all. Only a real address elsewhere means the
+  // tab has left its site.
+  test('lets a hyper tab use the bridge until it navigates somewhere else', () => {
+    const site = 'ab'.repeat(32)
+    const url = `hyper://${site}/index.html`
+    assert.equal(getHyperBridgeSite({ url, reportedUrl: 'about:blank', isHyper: true }), site)
+    assert.equal(getHyperBridgeSite({ url, reportedUrl: '', isHyper: true }), site)
+    assert.equal(getHyperBridgeSite({ url, reportedUrl: `hyper://${site}/other#top`, isHyper: true }), site)
+    assert.equal(getHyperBridgeSite({ url, reportedUrl: 'about:blank#/route', isHyper: true }), site)
+    assert.equal(getHyperBridgeSite({ url, reportedUrl: 'https://evil.example/', isHyper: true }), null)
+    assert.equal(getHyperBridgeSite({ url, reportedUrl: `hyper://${'cd'.repeat(32)}/`, isHyper: true }), null)
+    assert.equal(getHyperBridgeSite({ url, reportedUrl: 'about:blank', isHyper: false }), null)
+    assert.equal(getHyperBridgeSite({ url: 'https://example.com/', reportedUrl: '', isHyper: true }), null)
   })
 
   test('guards stale async hyper loads by sequence number', () => {

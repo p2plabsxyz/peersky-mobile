@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import vm from 'node:vm'
 import {
   createHyperBridgeScript,
   HYPER_BRIDGE_CHUNK,
@@ -173,6 +174,42 @@ test('the injected page script declares the bridge and patches fetch', () => {
   // Anything that is not hyper:// still goes to the real fetch.
   assert.match(script, /if \(!isHyper\(raw\)\) return nativeFetch\(input, init\)/)
   assert.ok(script.includes(JSON.stringify(TOKEN)))
+})
+
+// The token travelled out through whatever JSON.stringify and postMessage the
+// page had at the time, so a page that replaced either one read it, and with it
+// could forge bridge, media and print messages.
+test('a page that replaces JSON.stringify or postMessage later never sees the token', async () => {
+  const sent = []
+  const leaks = []
+  const context = vm.createContext({
+    URL,
+    TextEncoder,
+    btoa,
+    atob,
+    document: { baseURI: 'hyper://site/' },
+    ReactNativeWebView: { postMessage: (text) => sent.push(text) },
+    fetch: async () => { throw new Error('not hyper') },
+    leaks
+  })
+  context.window = context
+  vm.runInContext(createHyperBridgeScript(TOKEN), context)
+
+  vm.runInContext(`
+    JSON.stringify = (value) => { leaks.push(value && value.token); return '{}' }
+    window.ReactNativeWebView.postMessage = (text) => leaks.push(text)
+    Object.prototype.toJSON = function () { leaks.push(this.token); return {} }
+    try { window.__peerskyHyperBridge = { settle () {} } } catch {}
+    try { window.__peerskyPostNative = () => {} } catch {}
+    window.fetch('hyper://site/data.json')
+  `, context)
+  await new Promise((resolve) => setImmediate(resolve))
+
+  assert.equal(sent.length, 1)
+  assert.equal(JSON.parse(sent[0]).token, TOKEN)
+  assert.ok(!leaks.some((value) => String(value).includes(TOKEN)), 'the page saw the token')
+  assert.equal(typeof context.__peerskyHyperBridge.settle, 'function')
+  assert.equal(Object.isFrozen(context.__peerskyHyperBridge), true)
 })
 
 // A page built on hyper commonly posts a form. The bridge refused outright,

@@ -413,6 +413,12 @@ export function isDeviceOnlyHyperdriveAddress (address) {
   return isDeviceOnlyHyperdriveAddressInternal(address)
 }
 
+/** This phone's private drive, one adopted from a desktop, or the device-only one. */
+export async function isPrivateHyperAddress (address) {
+  await learnSyncedPrivateDriveId()
+  return isSyncedPrivateHyperdriveAddressInternal(address) || isDeviceOnlyHyperdriveAddressInternal(address)
+}
+
 export function getHyperStoragePath () {
   if (!storagePath && typeof Bare !== 'undefined') storagePath = getHyperSdkStoragePath()
   return storagePath

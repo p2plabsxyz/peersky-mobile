@@ -34,9 +34,23 @@ export function createHyperBridgeScript (token) {
   const pending = new Map()
   let nextId = 0
 
-  const post = (payload) => {
-    window.ReactNativeWebView.postMessage(JSON.stringify({ ...payload, token: TOKEN }))
+  // Taken before any page script runs. A page that later replaced
+  // JSON.stringify or postMessage was handed the token with every message.
+  // A copy with no prototype gives a page's Object.prototype.toJSON nothing to
+  // catch either. The media and print scripts send through the same function.
+  const stringify = JSON.stringify
+  const channel = window.ReactNativeWebView
+  const postToNative = channel && channel.postMessage.bind(channel)
+  const postSealed = (payload) => {
+    if (postToNative) postToNative(stringify(Object.assign(Object.create(null), payload)))
   }
+  Object.defineProperty(window, '__peerskyPostNative', {
+    value: Object.freeze(postSealed),
+    writable: false,
+    configurable: false
+  })
+
+  const post = (payload) => postSealed({ ...payload, token: TOKEN })
 
   const isHyper = (value) => {
     try {
@@ -121,16 +135,21 @@ export function createHyperBridgeScript (token) {
     throw new TypeError('This body type cannot be sent over hyper:// yet')
   }
 
-  window.__peerskyHyperBridge = {
-    // Called by the native side, never by the page.
-    settle (token, id, result) {
-      if (token !== TOKEN) return
-      const entry = pending.get(id)
-      if (!entry) return
-      pending.delete(id)
-      entry(result)
-    }
-  }
+  // Called by the native side, never by the page, and fixed in place so a
+  // page cannot swap it for one that keeps the replies.
+  Object.defineProperty(window, '__peerskyHyperBridge', {
+    value: Object.freeze({
+      settle (token, id, result) {
+        if (token !== TOKEN) return
+        const entry = pending.get(id)
+        if (!entry) return
+        pending.delete(id)
+        entry(result)
+      }
+    }),
+    writable: false,
+    configurable: false
+  })
 
   const request = (url, init, bodyBase64) => new Promise((resolve) => {
     const id = ++nextId

@@ -29,7 +29,8 @@ protected before the first update lands.
 
 **The peer-to-peer web.** `hyper://` pages are fetched by a Bare worklet and
 served to the WebView, images, scripts and media included. A page built on Hyper
-can publish and upload from the phone the same way it does on desktop. Devices
+can publish and upload from the phone the same way it does on desktop, once you
+let that site publish. Devices
 on the same Wi-Fi find each other directly, so it keeps working with the
 internet down.
 

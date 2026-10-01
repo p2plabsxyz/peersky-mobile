@@ -42,6 +42,8 @@ import {
   commitBrowserEntryState,
   getBrowserBackState,
   getBrowserForwardState,
+  formatHyperSiteForPrompt,
+  getHyperBridgeSite,
   getBrowserRequestAction,
   getBrowserWebViewKey,
   isHyperUrl,
@@ -392,6 +394,7 @@ export default function App () {
     setDownloadOnlyOnWifi,
     setEnforceManualPageZoom,
     setExternalLinkBehavior,
+    setPublishingSite,
     setSearchEngine,
     setShowFullAddress,
     setTheme,
@@ -1431,11 +1434,36 @@ export default function App () {
    *
    * @returns true when the message was ours, so nothing else tries to read it.
    */
+  // One question per site at a time: a page that fires several writes at
+  // once waits on the same answer.
+  const publishingPromptsRef = useRef(new Map<string, Promise<boolean>>())
+
+  function decidePublishing (siteId: string) {
+    const decided = browserPreferences.publishingSites[siteId]
+    if (decided) return Promise.resolve(decided === 'allow')
+    const pending = publishingPromptsRef.current.get(siteId)
+    if (pending) return pending
+
+    const prompt = new Promise<boolean>((resolve) => {
+      Alert.alert(
+        'Let this site publish?',
+        `hyper://${formatHyperSiteForPrompt(siteId)} wants to create drives on this phone and save files to them. Anyone with the link can read what it publishes.`,
+        [
+          { text: 'Don\'t allow', style: 'cancel', onPress: () => { setPublishingSite(siteId, 'block'); resolve(false) } },
+          { text: 'Allow', onPress: () => { setPublishingSite(siteId, 'allow'); resolve(true) } }
+        ],
+        { cancelable: true, onDismiss: () => resolve(false) }
+      )
+    }).finally(() => publishingPromptsRef.current.delete(siteId))
+    publishingPromptsRef.current.set(siteId, prompt)
+    return prompt
+  }
+
   function handleHyperBridgeMessage (
     tabId: string,
     data: string,
     token: string,
-    allowed: boolean
+    page: { url: string, reportedUrl: string, isHyper: boolean }
   ) {
     let pending = hyperBridgePendingRef.current.get(tabId)
     if (!pending) {
@@ -1458,25 +1486,42 @@ export default function App () {
       return true
     }
 
-    // The patch is on every page so it cannot miss the one it was meant for,
-    // but only a page served over hyper:// gets to use it. Answering plainly
-    // beats leaving the request hanging.
-    if (!allowed) {
+    // Only hyper:// pages may use the bridge.
+    const siteId = getHyperBridgeSite(page)
+    if (!siteId) {
       settle({ error: 'hyper:// requests only work from a hyper:// page' })
       return true
     }
 
-    void callRpc(RPC_HYPER_FETCH, {
-      url: message.url,
-      method: message.method,
-      headers: message.headers,
-      body: message.body
-    })
-      .then((response) => settle(createHyperBridgeReply(response)))
-      .catch((error) => settle({
-        error: error instanceof Error ? error.message : String(error)
-      }))
+    const forward = () => {
+      void callRpc(RPC_HYPER_FETCH, {
+        url: message.url,
+        method: message.method,
+        headers: message.headers,
+        body: message.body,
+        page: page.url
+      })
+        .then((response) => settle(createHyperBridgeReply(response)))
+        .catch((error) => settle({
+          error: error instanceof Error ? error.message : String(error)
+        }))
+    }
 
+    if (message.method === 'GET' || message.method === 'HEAD') {
+      forward()
+      return true
+    }
+
+    // A write puts files on this phone and shares them, so the person decides,
+    // once per site. A tab in the background cannot ask.
+    if (browserTabsStateRef.current.activeTabId !== tabId) {
+      settle({ error: 'Open this tab to let it publish' })
+      return true
+    }
+    void decidePublishing(siteId).then((allowed) => {
+      if (allowed) forward()
+      else settle({ error: 'Publishing from this site is off. You can change that in Settings, under Permissions.' })
+    })
     return true
   }
 
@@ -3203,6 +3248,7 @@ export default function App () {
             isDark={browserIsDark}
             offlineNetworkAllowed={hyperOfflineNetworkAllowed}
             persistenceError={browserPreferencesError}
+            publishingSites={browserPreferences.publishingSites}
             searchEngine={browserPreferences.searchEngine}
             showFullAddress={browserPreferences.showFullAddress}
             theme={browserPreferences.theme}
@@ -3231,6 +3277,7 @@ export default function App () {
             onDownloadOnlyOnWifiChange={setDownloadOnlyOnWifi}
             onEnforceManualPageZoomChange={setEnforceManualPageZoom}
             onExternalLinkBehaviorChange={setExternalLinkBehavior}
+            onPublishingSiteChange={setPublishingSite}
             onFilterListsUpdated={refreshContentBlockedPages}
             onSearchEngineChange={setSearchEngine}
             onShowFullAddressChange={setShowFullAddress}
@@ -4458,7 +4505,11 @@ export default function App () {
                   tab.id,
                   event.nativeEvent.data,
                   browserMediaToken,
-                  entry.source.kind === 'hyper'
+                  {
+                    url: entry.url,
+                    reportedUrl: event.nativeEvent.url || '',
+                    isHyper: entry.source.kind === 'hyper'
+                  }
                 )) return
 
                 const mediaTarget = parseBrowserMediaMessage(

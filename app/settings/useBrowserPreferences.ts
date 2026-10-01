@@ -18,6 +18,7 @@ export type AddressBarPosition = 'top' | 'bottom'
 export type BrowserTheme = 'system' | 'light' | 'dark'
 export type ExternalLinkBehavior = 'ask' | 'allow' | 'block'
 export type WebsiteTextScale = 80 | 100 | 120 | 150
+export type PublishingDecision = 'allow' | 'block'
 
 export type AppLogoColor = string
 
@@ -30,6 +31,7 @@ export type BrowserPreferences = {
   enforceManualPageZoom: boolean
   externalLinkBehavior: ExternalLinkBehavior
   forceDarkWebsites: boolean
+  publishingSites: Record<string, PublishingDecision>
   searchEngine: SearchEngine
   showFullAddress: boolean
   theme: BrowserTheme
@@ -121,6 +123,13 @@ export function useBrowserPreferences () {
     },
     setForceDarkWebsites: (forceDarkWebsites: boolean) => {
       return updatePreferences({ forceDarkWebsites })
+    },
+    // null forgets the answer, so the site asks again next time.
+    setPublishingSite: (siteId: string, decision: PublishingDecision | null) => {
+      const publishingSites = { ...preferencesRef.current.publishingSites }
+      if (decision) publishingSites[siteId] = decision
+      else delete publishingSites[siteId]
+      return updatePreferences({ publishingSites })
     },
     setAppLogoColor: (appLogoColor: AppLogoColor) => {
       return updatePreferences({ appLogoColor })
