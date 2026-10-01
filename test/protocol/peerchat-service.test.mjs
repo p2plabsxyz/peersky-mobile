@@ -204,7 +204,8 @@ test('PeerChat stores, toggles, and history-syncs desktop-compatible reactions',
   await new Promise((resolve) => setTimeout(resolve, 5))
   assert.deepEqual(await syncTo('bbbbbbbb', Date.now()), ['sync-done'])
 
-  // And a peer who has not said when they joined gets nothing either.
+  // And a peer who has not said when they joined gets nothing either, not even
+  // the end of a sync: their join, when it comes, sends what they missed.
   const unknownFrames = []
   await service.syncHistoryToPeer({
     id: 'cccccccc',
@@ -215,7 +216,7 @@ test('PeerChat stores, toggles, and history-syncs desktop-compatible reactions',
       close () {}
     }
   }, room.roomKey)
-  assert.deepEqual(unknownFrames.map((frame) => frame.type), ['sync-done'])
+  assert.deepEqual(unknownFrames.map((frame) => frame.type), [])
 
   await service.reactToMessage({ roomKey: room.roomKey, msgId: sent.id, emoji: '' })
   snapshot = await service.getSnapshot({ roomKey: room.roomKey, version: -1 })
@@ -1178,6 +1179,7 @@ test('PeerChat finishes sync state for a connection that drops during history re
   peer.rooms = [room.roomKey]
   peer.syncedRooms = new Set()
   peer.syncingRooms = new Map()
+  service.rooms.get(room.roomKey).members = [{ id: peer.id, username: 'Desktop', bio: '', avatar: null, joinedAt: 1 }]
   peer.transport.send = (frame) => {
     if (JSON.parse(frame).type !== 'sync-done') return true
     peer.connection.destroyed = true

@@ -217,6 +217,10 @@ type PeerChatProfile = {
   bio: string
   avatar: string | null
   linkPreview: boolean
+  // This device's fixed label after the name, as 'mobile', when the name
+  // came from the person's desktop. Empty on the device the name was made on.
+  device?: string
+  displayName?: string
 }
 
 type PeerChatDirectInvite = {
@@ -2772,7 +2776,7 @@ export function PeerChatScreen ({
               }
               setProfileTarget({
                 id: profile.id,
-                username: profile.username,
+                username: profile.displayName || profile.username,
                 bio: profile.bio || '',
                 avatar: profile.avatar || null,
                 self: true,
@@ -2789,7 +2793,7 @@ export function PeerChatScreen ({
                 </View>
                 )}
             <Text numberOfLines={1} style={[styles.profileSummaryName, { color: colors.text }]}>
-              {profileName || 'Set up your profile'}
+              {profileName ? `${profileName}${profile?.device ? `@${profile.device}` : ''}` : 'Set up your profile'}
             </Text>
           </Pressable>
 
@@ -2875,6 +2879,16 @@ export function PeerChatScreen ({
                       placeholderTextColor={colors.muted}
                       style={[styles.input, styles.profileInput, { backgroundColor: colors.input, color: colors.text }]}
                     />
+                    {profile?.device
+                      ? (
+                        <Text
+                          accessibilityLabel={`This device shows as ${profile.device}. That stays the same when the name changes.`}
+                          style={[styles.profileDevice, { color: colors.muted }]}
+                        >
+                          @{profile.device}
+                        </Text>
+                        )
+                      : null}
                   </View>
                   <TextInput
                     maxLength={300}
@@ -4417,6 +4431,7 @@ const styles = StyleSheet.create({
   profileSummary: { alignItems: 'center', alignSelf: 'flex-start', flexDirection: 'row', gap: 10, minHeight: 46 },
   profileSummaryName: { fontSize: 15, fontWeight: '800', maxWidth: 240 },
   profileInput: { flex: 1 },
+  profileDevice: { fontSize: 15, fontWeight: '700' },
   profileSettings: { gap: 10, padding: 16 },
   bioInput: { maxHeight: 92, minHeight: 52, textAlignVertical: 'top' },
   profileSaveButton: { alignItems: 'center', borderRadius: 10, justifyContent: 'center', minHeight: 42, paddingHorizontal: 14 },

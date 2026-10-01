@@ -39,7 +39,7 @@ const CONTENT_LABELS = [
   ['bookmarks', ['browser-bookmarks.json', 'browser-favourites.json', 'incoming-bookmarks.json']],
   ['history', ['browser-history.json']],
   ['settings', ['browser-preferences.json']],
-  ['chats', ['hyper-sdk', 'peerchat-intro.json', 'peerchat-ui-state.json']],
+  ['chats', ['hyper-sdk', 'peerchat-intro.json', 'peerchat-ui-state.json', 'peerchat-incoming.json']],
   ['notes', ['hyper-sdk', 'p2pmd-profile.json', 'p2pmd-room-history.json']],
   // Not private-drive-key.json: a desktop sends its key even with no private
   // drives, and a transfer with only the key has no files to speak of.

@@ -16,7 +16,7 @@ Settings > Link Device moves everything PeerSky keeps on a phone to another devi
 | Tabs | Replaced | Added to the tabs already open | Opened asleep in a group called Phone |
 | Bookmarks and favourites | Replaced | Added | Added to the desktop's bookmarks |
 | History and settings | Replaced | Not sent | Not sent |
-| PeerChat profile, rooms and messages | Replaced | Not sent | Not sent |
+| PeerChat profile, rooms and messages | Replaced | The profile and rooms, as `name@mobile` | The profile and rooms, as `name@desktop` |
 | P2PMD notes, name and recent notes | Replaced | Not sent | Not sent |
 | Drives: public, private and this-device-only | Replaced | Private drives adopted read-only | The private drive, readable there and read-only |
 | The key for private files | Replaced | Sent, and used for the phone's private uploads | Not sent: the desktop made it |
@@ -28,6 +28,20 @@ A phone backup restored somewhere, or a phone-to-phone transfer, carries the Hyp
 ## One phone per identity
 
 Two phones holding the same identity write the same chat feeds and split them. After moving to a new phone, remove your data from the old one. The sheet says so once a send is done.
+
+## PeerChat on your phone and desktops
+
+A person's PeerChat goes with the transfers between a phone and a desktop, and each device stays its own member of a room: its own network key, and a label after the name so everyone can tell which device a message came from. The device the name was made on shows the name alone. The phone is `ada@mobile`, and desktops are `ada@desktop1`, `ada@desktop2`, or, when the name was made on the phone, `ada@desktop` first and then `ada@desktop2`. The label is fixed: it cannot be edited and does not change with the name. There is one phone; a new phone takes this one's place, by phone to phone and then *Remove my data from this phone* on the old one.
+
+What goes (`backend/peerchat/device-link.mjs`, the same rules as `lib/device-link.js` in PeerChat on the desktop):
+
+- The profile: name, bio, picture, and when they were last changed.
+- Every room with its key, and when the person joined it, so peers send the new device the history since then. Direct messages too, except ones the other person declined. A phone keeps up to 50 rooms.
+- The label the other device takes, and a link: 32 random bytes the person's devices share. It only travels inside the sealed transfers.
+
+A device takes PeerChat only when its pairing code says `chat=1`, which this phone's code does. An older app refuses files it does not know, so it is sent none.
+
+A name, bio or picture changed on one device reaches the others the next time they are in a room together. Every profile a device sends carries a proof: an HMAC-SHA256 with the link key over the name without its label, the bio, the picture's SHA-256, when they were set, and the labels it knows. A device takes a newer profile only with a proof it can check, so nobody else can rename a person's devices, and a name one of them holds does not count as taken. A room joined later on one device is not sent to the others: a new transfer or the room's link brings it.
 
 ## Backup files
 
@@ -59,16 +73,16 @@ The sender clears the transfer when its sheet is closed, or 15 minutes after it 
 
 ## Phone to desktop
 
-On the desktop, Backup & Restore shows a pairing code with `deviceType=desktop`. The phone scans it in *Send from here*, and sends what a desktop can use: the open tabs, the bookmarks and favourites, and its private drive with the key to it (see Private files). Chats, notes, history and the stores stay on the phone. None of it needs the stores closed.
+On the desktop, Backup & Restore shows a pairing code with `deviceType=desktop`. The phone scans it in *Send from here*, and sends what a desktop can use: the open tabs, the bookmarks and favourites, its private drive with the key to it (see Private files), and PeerChat (see PeerChat on your phone and desktops) when the desktop's code has `chat=1`. Messages, notes, history and the stores stay on the phone. None of it needs the stores closed.
 
 It goes in the desktop's own transfer format (`backend/backup/desktop-sync.mjs`), so the desktop checks it with the code it already has for transfers:
 
-1. An inner zip holds `phone-tabs.json`, `phone-bookmarks.json`, `phone-private-drives.json` when there is a drive to share, and a `manifest.json` that says `"source": "mobile"` and lists each file's SHA-256.
+1. An inner zip holds `phone-tabs.json`, `phone-bookmarks.json`, `phone-private-drives.json` when there is a drive to share, `phone-peerchat.json` for PeerChat, and a `manifest.json` that says `"source": "mobile"` and lists each file's SHA-256.
 2. That zip is encrypted with AES-256-GCM under a random key sealed to the desktop with `crypto_box_seal`. It is small, so bare-crypto's GCM in one piece is fine here. The zips are stored, not compressed (`backend/backup/zip-writer.mjs`).
 3. The manifest is signed with the phone's Ed25519 key over the same fields the desktop signs, with `targetDeviceType: 'desktop'`.
 4. The file is put on a drive at `/backup.zip`, so the drive's bare address works on the desktop too. The phone shows it as a QR code with **Copy link**, and the six characters.
 
-On the desktop, *Restore from the network* takes the link. It downloads it, checks that it was made for a code this desktop showed in the last hour, checks the signature, decrypts it, and shows the six characters. Only once the person confirms does anything change: the bookmarks are added after the desktop's own, the tabs open asleep in a collapsed group called Phone, and the phone's private drive is added to the desktop's private drives, read-only, as a drive adopted from another device always is. A bookmark or tab the desktop already has is skipped. Nothing is replaced and nothing restarts. The code is used up, and the page shows a fresh one.
+On the desktop, *Restore from the network* takes the link. It downloads it, checks that it was made for a code this desktop showed in the last hour, checks the signature, decrypts it, and shows the six characters. Only once the person confirms does anything change: the bookmarks are added after the desktop's own, the tabs open asleep in a collapsed group called Phone, and the phone's private drive is added to the desktop's private drives, read-only, as a drive adopted from another device always is, and PeerChat there takes the phone's name with its own label and joins the phone's rooms. A bookmark or tab the desktop already has is skipped. Nothing else is replaced and nothing restarts. The code is used up, and the page shows a fresh one.
 
 A desktop that is still in its first-run screen takes the same link there, under *Restore a backup, or bring tabs from your phone*, and opens its first window with the phone's tabs beside Home.
 
@@ -82,6 +96,7 @@ What the phone keeps:
 - The private drives: `privateHyperdrives.json`, `private-drive-key.json` and `hyper-private/`, adopted read-only into `hyper-sdk-adopted`. The copy of `hyper-private/` is removed once adopted.
 - `tabs.json`, turned into `incoming-tabs.json`: a plain list the app adds to the open tabs on its next start. The desktop keeps tabs keyed by window, which the phone cannot read.
 - `bookmarks.json`, the same way, into `incoming-bookmarks.json`.
+- `peerchat-incoming.json`, the person's PeerChat. PeerChat takes it on its next start, as `name@mobile`, and deletes it.
 
 What it skips, from desktops that still send it: the desktop's own `hyper/` store, which nothing on the phone opens and which can run to gigabytes, and `lastOpened.json`, `peersky-chat-rooms.json`, `peersky-ports.json` and the desktop caches. An unknown file fails the restore; `device-key.json` is always refused.
 
@@ -126,6 +141,7 @@ The phone keeps the desktop's key at the top of Documents (`private-drive-key.js
 - `backend/backup/browser-import.mjs`: desktop tabs and bookmarks into lists the phone reads.
 - `backend/backup/transfer-publisher.mjs`: putting a transfer on a drive and clearing it.
 - `backend/backup/pairing-code.mjs`, `pairing-nonce.mjs`, `device-keys.mjs`, `private-drive-import.mjs`.
+- `backend/peerchat/device-link.mjs`: labels, the profile proof and the PeerChat part of a transfer.
 - `app/settings/LinkDevice.tsx`: the screen and its sheets; `app/settings/link-device-state.mjs` holds its plain logic.
 - `app/hyperdrive/private-upload.mjs`: whether this phone has a desktop's key yet, for the Private choice in Hyperdrive.
 - `app/RestartRequiredScreen.tsx`.
@@ -141,7 +157,7 @@ The phone keeps the desktop's key at the top of Documents (`private-drive-key.js
 | `RPC_BACKUP_CREATE` (34) | `{ outPath, passphrase, peerskyVersion, platform }` | `{ ok, path, bytes, contents }` |
 | `RPC_BACKUP_INSPECT` (35) | `{ path }` | `{ ok, kind, createdAt, platform, contents, sizeBytes, needsPassphrase }` |
 | `RPC_BACKUP_RESTORE_FILE` (36) | `{ path, passphrase }` | `{ ok, restoreId, restoredFiles, contents, about }` |
-| `RPC_IDENTITY_SEND` (37) | `{ pairingCode, peerskyVersion, platform }` | `{ ok, url, verificationCode, expiresAt, bytes, deviceType, sent }`; `sent` counts tabs, bookmarks and private drives for a desktop |
+| `RPC_IDENTITY_SEND` (37) | `{ pairingCode, peerskyVersion, platform }` | `{ ok, url, verificationCode, expiresAt, bytes, deviceType, sent }`; `sent` counts tabs, bookmarks, private drives and PeerChat rooms for a desktop |
 | `RPC_IDENTITY_SEND_STOP` (38) | `{}` | `{ ok }` |
 | `RPC_IDENTITY_DISCARD_RESTORE` (39) | `{ restoreId }` | `{ ok }` |
 | `RPC_IDENTITY_REMOVE` (68) | `{}` | `{ ok, requiresRestart: true }` |
@@ -157,6 +173,7 @@ npm run test:runtime
 - `test/protocol/phone-backup.test.mjs`: a real Hyper store backed up and restored into a second phone folder, then opened the ordinary way, with the same swarm key, a writable drive, and PeerChat and P2PMD files where they were. Wrong passphrases, flipped bytes, cut-off and padded files, path traversal, transfers for another phone, another code, expired, or with a changed signature.
 - `test/protocol/link-device.test.mjs`: desktop transfers built the way the desktop builds them (`test/fixtures/desktop-transfer.mjs`): expired, wrong target, old code, flipped payload byte, forged manifest, a swapped payload, `device-key.json`, and a 24 MB transfer streamed from disk.
 - `test/protocol/phone-transfer-publish.test.mjs`: a transfer put on a drive, replicated to a second store, read back exactly, and cleared on both.
+- `test/protocol/peerchat-devices.test.mjs`: labels, a proof vector shared with PeerChat on the desktop, the PeerChat part of a transfer both ways, a rename taken only from the person's own device, and the names others send with their labels.
 - `test/protocol/link-device-safety.test.mjs`: the stores held shut, one job at a time, restore ids, an interrupted swap undone, a failing drive write, damaged and expanding deflate data, and which kind of file each flow accepts.
 - `test/protocol/desktop-sync.test.mjs`: what goes to a desktop, the transfer checked field by field and decrypted, and the stored zips read back by both zip readers.
 - `test/protocol/linked-private-key.test.mjs`: the desktop's key used for a new private drive and never swapped in for an old one, the phone's own drive never adopted back, and the Private prompt.

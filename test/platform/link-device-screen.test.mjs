@@ -48,6 +48,11 @@ test('what a backup holds is said the way a person would say it', () => {
     describeBackupContents(['incoming-bookmarks.json', 'incoming-tabs.json', 'peersky-identity.json', 'private-drive-key.json']),
     'Tabs and bookmarks'
   )
+  // A desktop's PeerChat: the profile and rooms, which PeerChat takes on start.
+  assert.equal(
+    describeBackupContents(['incoming-tabs.json', 'peerchat-incoming.json', 'peersky-identity.json']),
+    'Tabs and chats'
+  )
   assert.equal(describeBackupContents(['browser-bookmarks.json']), 'Bookmarks')
   assert.equal(describeBackupContents([]), '')
   assert.equal(describeBackupContents(undefined), '')

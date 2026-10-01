@@ -15,12 +15,14 @@ import {
   transferBody
 } from './identity-transfer.mjs'
 import { isImportableUrl } from './browser-import.mjs'
+import { PHONE_PEERCHAT_FILE } from '../peerchat/device-link.mjs'
 import { getPrivateDriveKeyRecord } from '../hyper/private-keys.mjs'
 import { createStoredZip } from './zip-writer.mjs'
 
 // What a phone sends to PeerSky Desktop: its open tabs, its bookmarks and
-// favourites, and its private drive with the key to it. The rest of a phone,
-// its chats and notes and stores, means nothing to the desktop, which keeps
+// favourites, its private drive with the key to it, and, to a desktop whose
+// code says it takes it, the person's PeerChat (device-link.mjs). The rest of
+// a phone, its notes and stores, means nothing to the desktop, which keeps
 // those its own way.
 //
 // It goes in the desktop's own transfer format, so the desktop checks it with
@@ -93,6 +95,7 @@ export async function createDesktopTransfer ({
   target,
   deviceKeys,
   peerskyVersion = '',
+  chat = null,
   ttlMs = DESKTOP_TRANSFER_TTL_MS,
   now = Date.now
 } = {}) {
@@ -104,7 +107,7 @@ export async function createDesktopTransfer ({
   }
 
   const sync = collectDesktopSync({ storagePath, syncedPrivatePath })
-  if (sync.tabs.length === 0 && sync.bookmarks.length === 0 && sync.privateDrives.length === 0) {
+  if (sync.tabs.length === 0 && sync.bookmarks.length === 0 && sync.privateDrives.length === 0 && !chat) {
     const error = new Error('There are no open pages or bookmarks on this phone to send yet.')
     error.code = 'NOTHING_TO_SEND'
     throw error
@@ -118,6 +121,7 @@ export async function createDesktopTransfer ({
   if (sync.privateDrives.length > 0) {
     files.push({ name: PHONE_PRIVATE_DRIVES_FILE, bytes: jsonBytes({ version: 1, drives: sync.privateDrives }) })
   }
+  if (chat) files.push({ name: PHONE_PEERCHAT_FILE, bytes: jsonBytes(chat) })
   const innerManifest = {
     version: DESKTOP_FORMAT_VERSION,
     peerskyVersion: String(peerskyVersion || ''),
@@ -190,7 +194,8 @@ export async function createDesktopTransfer ({
       sent: {
         tabs: sync.tabs.length,
         bookmarks: sync.bookmarks.length,
-        privateDrives: sync.privateDrives.length
+        privateDrives: sync.privateDrives.length,
+        chatRooms: chat ? chat.rooms.length : 0
       }
     }
   } finally {

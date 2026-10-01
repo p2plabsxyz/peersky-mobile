@@ -457,7 +457,10 @@ function SyncSheet ({
     Alert.alert(
       toDesktop ? 'Send to PeerSky Desktop?' : 'Send this phone to the other one?',
       toDesktop
-        ? 'It gets the pages open on this phone and your bookmarks, added to its own, and can open your private files. Nothing passes through a server.'
+        ? 'It gets the pages open on this phone and your bookmarks, added to its own, and can open your private files.' +
+          // A desktop says in its code whether it takes PeerChat.
+          (/[?&]chat=1(&|$)/.test(code) ? ' PeerChat there takes your name and rooms.' : '') +
+          ' Nothing passes through a server.'
         : 'It gets everything on this phone: tabs, bookmarks, history, settings, chats, notes and files. Nothing passes through a server.',
       [
         { text: 'Cancel', style: 'cancel' },
@@ -580,7 +583,7 @@ function SyncSheet ({
                 : (
                   <>
                     <Step number={1} text='On the other phone, open Link Device and tap Sync with another device. On PeerSky Desktop, open Backup & Restore.' />
-                    <Step number={2} text='Scan the code it shows. A phone gets everything on this one. The desktop gets your open pages and bookmarks.' />
+                    <Step number={2} text='Scan the code it shows. A phone gets everything on this one. The desktop gets your open pages, bookmarks and PeerChat rooms.' />
                   </>
                   )}
 

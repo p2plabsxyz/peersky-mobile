@@ -33,7 +33,7 @@ import {
   withSyncedPrivateHyperRuntimeOperation
 } from '../hyper/runtime.mjs'
 import { hasPrivateDriveKey, resetPrivateDriveKeyCache } from '../hyper/private-keys.mjs'
-import { closePeerChatService } from '../peerchat/runtime.mjs'
+import { closePeerChatService, exportPeerChatTransfer } from '../peerchat/runtime.mjs'
 import { notifyApp } from '../rpc/notify.mjs'
 import { RPC_APP_BACKUP_PROGRESS } from '../rpc/commands.mjs'
 
@@ -306,6 +306,13 @@ export function sendTransfer ({ pairingCode, peerskyVersion, platform } = {}) {
       if (toDesktop && hasPrivateDriveKey(getSyncedPrivateHyperStoragePath())) {
         await withSyncedPrivateHyperRuntimeOperation(() => {}).catch(() => {})
       }
+      // PeerChat goes only to a desktop whose code says it takes it.
+      const chat = toDesktop && target.chat
+        ? await exportPeerChatTransfer('desktop').catch((error) => {
+          console.warn(`[link-device] PeerChat was not packed: ${error.message}`)
+          return null
+        })
+        : null
       const created = toDesktop
         ? await createDesktopTransfer({
           storagePath,
@@ -313,7 +320,8 @@ export function sendTransfer ({ pairingCode, peerskyVersion, platform } = {}) {
           outPath: filePath,
           target,
           deviceKeys,
-          peerskyVersion
+          peerskyVersion,
+          chat
         })
         : await withStoresClosed(() => createPhoneTransfer({
           storagePath,

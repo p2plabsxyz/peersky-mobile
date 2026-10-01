@@ -26,6 +26,7 @@ import {
   MANIFEST_NAME,
   verifyIdentityTransferSignature
 } from '../../backend/backup/identity-transfer.mjs'
+import { PHONE_PEERCHAT_FILE } from '../../backend/peerchat/device-link.mjs'
 
 const read = (path) => readFile(new URL(`../../${path}`, import.meta.url), 'utf8')
 
@@ -198,7 +199,7 @@ describe('what a phone sends a desktop', () => {
     })
 
     assert.equal(created.verificationCode, deriveVerificationCode(hex(phone.signing.publicKey), hex(desktop.publicKey), nonce))
-    assert.deepEqual(created.sent, { tabs: 2, bookmarks: 2, privateDrives: 0 })
+    assert.deepEqual(created.sent, { tabs: 2, bookmarks: 2, privateDrives: 0, chatRooms: 0 })
     assert.equal(created.expiresAt, 1750000000000 + 15 * 60 * 1000)
     assert.equal(DESKTOP_TRANSFER_FILE_NAME, '/backup.zip')
 
@@ -256,6 +257,27 @@ describe('what a phone sends a desktop', () => {
       (error) => error.code === 'NOTHING_TO_SEND'
     )
   })
+
+  it('sends PeerChat when there is some, even with no tabs or bookmarks', async (t) => {
+    const storagePath = await tempDir(t)
+    const phone = deviceKeys()
+    const desktop = keyPair('box')
+    const chat = { version: 1, label: 'desktop', link: { key: 'ab'.repeat(32), origin: 'mobile', labels: ['desktop'] }, profile: { username: 'ada', bio: '', avatar: null, at: 1 }, rooms: [{ roomKey: 'cc'.repeat(32) }] }
+    const outPath = join(storagePath, 'out.zip')
+    const created = await createDesktopTransfer({
+      storagePath,
+      syncedPrivatePath: join(storagePath, 'hyper-sdk-synced-private'),
+      outPath,
+      target: { encryptionPublicKey: hex(desktop.publicKey), nonce: '0'.repeat(32), deviceType: 'desktop', chat: true },
+      deviceKeys: phone,
+      chat
+    })
+    assert.equal(created.sent.chatRooms, 1)
+    const { innerFiles } = openDesktopTransfer(readFileSync(outPath), desktop)
+    const inner = JSON.parse(b4a.toString(innerFiles.get(MANIFEST_NAME)))
+    assert.equal(inner.files[PHONE_PEERCHAT_FILE], `sha256:${sha256(innerFiles.get(PHONE_PEERCHAT_FILE))}`)
+    assert.deepEqual(JSON.parse(b4a.toString(innerFiles.get(PHONE_PEERCHAT_FILE))), chat)
+  })
 })
 
 describe('sending from Link Device', () => {
@@ -265,6 +287,8 @@ describe('sending from Link Device', () => {
     assert.doesNotMatch(send, /DESKTOP_TARGET/)
     assert.match(send, /const toDesktop = target\.deviceType === 'desktop'/)
     assert.match(send, /toDesktop\s*\? await createDesktopTransfer\(/)
+    // PeerChat only to a desktop whose code says it takes it.
+    assert.match(send, /const chat = toDesktop && target\.chat/)
     assert.match(send, /: await withStoresClosed\(\(\) => createPhoneTransfer\(/)
     assert.match(send, /fileName: toDesktop \? DESKTOP_TRANSFER_FILE_NAME : TRANSFER_FILE_NAME/)
   })

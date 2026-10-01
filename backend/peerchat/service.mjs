@@ -30,6 +30,7 @@ import {
   encryptPeerChatMessage,
   getPeerChatMessageByteLength,
   getSharedPeerChatRooms,
+  MAX_PEERCHAT_AVATAR_LENGTH,
   MAX_PEERCHAT_FRAME_BYTES,
   MAX_PEERCHAT_MESSAGE_BYTES,
   normalizePeerChatAvatar,
@@ -62,6 +63,20 @@ import {
   resolvePeerChatCreatorKey
 } from './room-moderation.mjs'
 import { PRE_JOINED_PEERCHAT_ROOM_KEY } from './rooms.mjs'
+import {
+  checkProfileProof,
+  createLink,
+  displayName,
+  linkId,
+  makeProfileProof,
+  makeTransfer,
+  mergeLabels,
+  nextLabel,
+  normalizeLabel,
+  normalizeLink,
+  normalizeMemberName,
+  normalizeTransfer
+} from './device-link.mjs'
 
 const MAX_ROOMS = 50
 const MAX_BLOCKED_PEERS = 500
@@ -91,15 +106,26 @@ const PEER_LIVENESS_TIMEOUT_MS = 60_000
 const MAX_ANNOUNCED_TOPICS = 512
 
 export class PeerChatService {
-  constructor ({ sdk, storagePath }) {
+  constructor ({ sdk, storagePath, incomingPath = '' }) {
     this.sdk = sdk
     this.storagePath = storagePath
     this.stateFilePath = `${storagePath}/peerchat-mobile.json`
+    // Where a restore leaves PeerChat from another of this person's devices.
+    this.incomingPath = incomingPath
     this.localKey = sdk.publicKey ? b4a.toString(sdk.publicKey, 'hex').toLowerCase() : ''
     this.localId = sdk.publicKey
       ? b4a.toString(sdk.publicKey, 'hex').slice(0, 8).toLowerCase()
       : 'mobile'
-    this.profile = { username: '', bio: '', avatar: null, linkPreview: true }
+    // at: when the name, bio or picture last changed. This person's other
+    // devices take the newest.
+    this.profile = { username: '', bio: '', avatar: null, linkPreview: true, at: 0 }
+    // This device's fixed label after the name, and the link this person's
+    // devices share. See device-link.mjs.
+    this.device = { label: '' }
+    this.link = null
+    // Peers whose profile carried a proof made with the link: this person's
+    // other devices.
+    this.siblings = new Set()
     this.rooms = new Map()
     this.pendingDirectMessages = new Map()
     // Blocking is deliberately narrow: it stops direct messages only. A blocked
@@ -133,6 +159,7 @@ export class PeerChatService {
     if (this.started) return this
     this.started = true
     this.loadState()
+    this.takeIncomingTransfer()
 
     this.sdk.swarm.on('connection', this.onConnection)
     this.sdk.localSwarm?.on('topics-change', this.onTopicsChange)
@@ -154,8 +181,15 @@ export class PeerChatService {
       username: this.profile.username || '',
       bio: this.profile.bio || '',
       avatar: this.profile.avatar || null,
-      linkPreview: this.profile.linkPreview !== false
+      linkPreview: this.profile.linkPreview !== false,
+      device: this.device.label || '',
+      displayName: this.myName()
     }
+  }
+
+  // The name everyone sees: the profile name and this device's label.
+  myName () {
+    return displayName(this.profile.username, this.device.label)
   }
 
   hasRoom (roomKey) {
@@ -178,12 +212,16 @@ export class PeerChatService {
     if (avatar != null && avatar !== '' && !normalizedAvatar) {
       throw new Error('Choose a supported PeerChat profile image under 192 KB.')
     }
-    this.profile = {
+    const next = {
       username: normalized,
       bio: bio === undefined ? this.profile.bio : normalizePeerChatBio(bio),
       avatar: normalizedAvatar,
       linkPreview: linkPreview === undefined ? this.profile.linkPreview !== false : linkPreview !== false
     }
+    const changed = next.username !== this.profile.username ||
+      (next.bio || '') !== (this.profile.bio || '') ||
+      (next.avatar || null) !== (this.profile.avatar || null)
+    this.profile = { ...next, at: changed ? Date.now() : this.profile.at || 0 }
     this.schedulePersist()
     this.bumpVersion()
 
@@ -219,6 +257,7 @@ export class PeerChatService {
     if (this.rooms.size >= MAX_ROOMS) throw new Error(`PeerChat supports up to ${MAX_ROOMS} rooms.`)
 
     const roomKey = createPeerChatRoomKey()
+    const now = Date.now()
     const normalizedLink = normalizePeerChatLink(link)
     const normalizedAvatar = normalizePeerChatAvatar(avatar)
     if (typeof link === 'string' && link.trim() && !normalizedLink) {
@@ -234,12 +273,13 @@ export class PeerChatService {
       link: normalizedLink,
       avatar: normalizedAvatar,
       isHost: true,
-      createdAt: Date.now(),
+      createdAt: now,
+      joinedAt: now,
       createdBy: this.localId,
       // The whole key, because the eight characters above are a label and a
       // removal has to be checked against something that cannot be ground out.
       creatorKey: this.localKey,
-      createdByName: this.profile.username,
+      createdByName: this.myName(),
       moderation: normalizePeerChatModeration(moderation),
       bans: [],
       lastMessage: null,
@@ -354,7 +394,7 @@ export class PeerChatService {
       room = this.createDirectRoom({
         roomKey,
         peerId: normalizedPeerId,
-        username: normalizePeerChatProfileName(username) || known?.username || normalizedPeerId,
+        username: normalizeMemberName(username) || known?.username || normalizedPeerId,
         bio: normalizePeerChatBio(bio ?? known?.bio),
         avatar: normalizePeerChatAvatar(avatar ?? known?.avatar),
         pendingAcceptance: true
@@ -433,13 +473,13 @@ export class PeerChatService {
     if (!wanted) return false
 
     for (const peer of this.peers.values()) {
-      if (normalizePeerChatPeerId(peer.id) === this.localId) continue
-      if (normalizePeerChatProfileName(peer.username).toLowerCase() === wanted) return true
+      if (normalizePeerChatPeerId(peer.id) === this.localId || this.siblings.has(peer.id)) continue
+      if (normalizeMemberName(peer.username).toLowerCase() === wanted) return true
     }
     for (const room of this.rooms.values()) {
       for (const member of room.members || []) {
-        if (member.id === this.localId) continue
-        if (normalizePeerChatProfileName(member.username).toLowerCase() === wanted) return true
+        if (member.id === this.localId || this.siblings.has(member.id)) continue
+        if (normalizeMemberName(member.username).toLowerCase() === wanted) return true
       }
     }
     return false
@@ -472,7 +512,7 @@ export class PeerChatService {
     const existing = this.blockedPeers.get(id)
     this.blockedPeers.set(id, {
       peerId: id,
-      username: normalizePeerChatProfileName(username) || existing?.username || id,
+      username: normalizeMemberName(username) || existing?.username || id,
       blockedAt: existing?.blockedAt ?? Date.now()
     })
     while (this.blockedPeers.size > MAX_BLOCKED_PEERS) {
@@ -642,7 +682,7 @@ export class PeerChatService {
     const entry = {
       id: createPeerChatMessageId(),
       sender: this.localId,
-      sn: this.profile.username,
+      sn: this.myName(),
       ...encrypted,
       ...(normalizedReply && { replyTo: normalizedReply }),
       ...(attachment || {}),
@@ -668,7 +708,7 @@ export class PeerChatService {
       msgId,
       emoji,
       sender: this.localId,
-      sn: this.profile.username,
+      sn: this.myName(),
       ts: Date.now()
     })
     if (!entry) throw new Error('Invalid PeerChat reaction.')
@@ -687,7 +727,7 @@ export class PeerChatService {
       type: 'leave',
       roomKey: normalized,
       peerId: this.localId,
-      username: this.profile.username || this.localId,
+      username: this.myName() || this.localId,
       id: `${normalized}-${this.localId}-left-${Date.now()}`,
       ts: Date.now()
     })
@@ -1058,8 +1098,13 @@ export class PeerChatService {
 
     if (message.type === 'profile') {
       if (!this.consumeControlRate(peer)) return
+      if (message.link && this.link && this.profile.username &&
+          checkProfileProof(this.link, message.link, message.avatar || null)) {
+        this.siblings.add(peer.id)
+        this.takeSiblingProfile(message.link, message.avatar || null)
+      }
       let changed = false
-      const name = normalizePeerChatProfileName(message.username)
+      const name = normalizeMemberName(message.username)
       if (name && name !== peer.username) {
         peer.username = name
         changed = true
@@ -1118,7 +1163,7 @@ export class PeerChatService {
         directRoom.pendingAcceptance = false
         directRoom.rejected = false
         directRoom.blockedByPeer = false
-        directRoom.name = normalizePeerChatProfileName(message.fromUsername) || directRoom.name
+        directRoom.name = normalizeMemberName(message.fromUsername) || directRoom.name
         directRoom.bio = normalizePeerChatBio(message.fromBio)
         directRoom.avatar = normalizePeerChatAvatar(message.fromAvatar)
       } else {
@@ -1131,6 +1176,14 @@ export class PeerChatService {
     }
 
     const roomKey = normalizePeerChatRoomKey(message.roomKey)
+    // A join names the room by its key, which only its members hold, and it
+    // can arrive before the list of topics that names the room: a desktop
+    // answers this phone's topics with its joins before sending its own.
+    // Dropped, the phone never learned when they joined, and so never sent
+    // them the room's history.
+    const joinedBeforeTopics = message.type === 'join' && Boolean(roomKey) &&
+      this.rooms.has(roomKey) && !peer.rooms.includes(roomKey)
+    if (joinedBeforeTopics) peer.rooms.push(roomKey)
     if (!roomKey || !peer.rooms.includes(roomKey) || !this.rooms.has(roomKey)) return
     if (this.moderator.isKicked(peer.id, roomKey)) return
 
@@ -1224,7 +1277,7 @@ export class PeerChatService {
           changed = true
         }
         if (!room.createdByName) {
-          const creatorName = normalizePeerChatProfileName(message.createdByName)
+          const creatorName = normalizeMemberName(message.createdByName)
           if (creatorName) {
             room.createdByName = creatorName
             changed = true
@@ -1254,13 +1307,16 @@ export class PeerChatService {
       const wasMember = Boolean(
         (room?.members || []).find((member) => member.id === peer.id)?.joinedAt
       )
-      if (message.username) peer.username = normalizePeerChatProfileName(message.username) || peer.username
+      if (message.username) peer.username = normalizeMemberName(message.username) || peer.username
       if (Object.hasOwn(message, 'bio')) peer.bio = normalizePeerChatBio(message.bio)
       if (Object.hasOwn(message, 'avatar')) peer.avatar = normalizePeerChatAvatar(message.avatar)
       if (this.rememberRoomMember(room, peer, message.ts)) this.schedulePersist()
       await this.appendJoinNotice(roomKey, peer, message, wasMember)
       this.sendRoomMeta(peer, roomKey)
       await this.syncHistoryToPeerOnce(peer, roomKey)
+      // Everything a shared room is announced with, once their join time is
+      // known, so the history it sends has something to start from.
+      if (joinedBeforeTopics) this.shareRoom(peer, roomKey)
       this.bumpVersion()
       return
     }
@@ -1345,7 +1401,7 @@ export class PeerChatService {
       sender: isSync && typeof message.sender === 'string'
         ? message.sender.slice(0, 200)
         : peer.id,
-      sn: normalizePeerChatProfileName(message.sn) || peer.username || peer.id,
+      sn: normalizeMemberName(message.sn) || peer.username || peer.id,
       ...safeEncrypted,
       ...(normalizedReply && { replyTo: normalizedReply }),
       ...(attachment || {}),
@@ -1424,7 +1480,7 @@ export class PeerChatService {
 
     for (const [rawId, value] of Object.entries(incoming)) {
       const id = normalizePeerChatPeerId(rawId)
-      const username = normalizePeerChatProfileName(value?.username)
+      const username = normalizeMemberName(value?.username)
       if (!id || !username || id === this.localId) continue
       // Somebody removed is not in the room, so a list relayed by anyone who
       // has not heard yet cannot put them back into it.
@@ -1480,7 +1536,7 @@ export class PeerChatService {
       type: 'join',
       roomKey,
       peerId: this.localId,
-      username: this.profile.username || this.localId,
+      username: this.myName() || this.localId,
       bio: this.profile.bio || '',
       avatar: this.profile.avatar || null,
       id: `${roomKey}-${this.localId}-join-${Date.now()}`,
@@ -1505,14 +1561,157 @@ export class PeerChatService {
 
   sendProfile (peer) {
     if (!this.profile.username) return
+    const proof = makeProfileProof(this.link, this.profile)
     this.sendToPeer(peer, {
       type: 'profile',
       peerId: this.localId,
-      username: this.profile.username,
+      username: this.myName(),
       bio: this.profile.bio || '',
       avatar: this.profile.avatar || null,
-      rooms: peer.rooms
+      rooms: peer.rooms,
+      // This device's label, and a proof only this person's other devices
+      // can check. Apps without either ignore them.
+      ...(proof && { device: this.device.label || '', link: proof })
     })
+  }
+
+  // A profile from another of this person's devices: the labels it knows, and
+  // its name, bio and picture when they were set after ours.
+  takeSiblingProfile (proof, avatar) {
+    const labels = mergeLabels(this.link.labels, proof.labels)
+    const labelsChanged = labels.join() !== mergeLabels(this.link.labels).join()
+    if (labelsChanged) this.link = { ...this.link, labels }
+    const newer = proof.at > (this.profile.at || 0)
+    if (newer) this.adoptProfile({ username: proof.name, bio: proof.bio, avatar, at: proof.at })
+    if (!labelsChanged && !newer) return
+    this.schedulePersist()
+    if (!newer) return
+    this.bumpVersion()
+    for (const peer of this.peers.values()) this.sendProfile(peer)
+  }
+
+  adoptProfile ({ username, bio, avatar, at }) {
+    this.profile = {
+      ...this.profile,
+      username,
+      bio: normalizePeerChatBio(bio),
+      avatar: normalizePeerChatAvatar(avatar),
+      at: Number.isSafeInteger(at) && at > 0 ? at : 0
+    }
+  }
+
+  /**
+   * For a transfer to another of this person's devices: the link, the label
+   * the other device takes, the profile and every room with its key. The link
+   * is made here the first time, which makes this phone the device the name
+   * was made on. Null until a name is set.
+   */
+  exportTransfer ({ targetType = 'desktop' } = {}) {
+    if (!this.profile.username) return null
+    if (!this.link) this.link = createLink('mobile')
+    const rooms = []
+    for (const room of this.rooms.values()) {
+      if (room.isDM && (room.rejected || !room.dmWith)) continue
+      if (this.isRemovedFromRoom(room.roomKey)) continue
+      rooms.push({
+        roomKey: room.roomKey,
+        name: room.name,
+        bio: room.bio,
+        link: room.link,
+        isDM: room.isDM === true,
+        dmWith: room.dmWith || '',
+        createdAt: room.createdAt,
+        joinedAt: room.joinedAt || 0,
+        createdBy: room.createdBy || (room.isHost ? this.localId : ''),
+        createdByName: room.createdByName || '',
+        creatorKey: room.creatorKey || ''
+      })
+    }
+    // Kept as given, so the next desktop is not given the same label.
+    const label = nextLabel(this.link, targetType === 'mobile' ? 'mobile' : 'desktop')
+    this.link = { ...this.link, labels: mergeLabels(this.link.labels, [label]) }
+    this.persistNow()
+    return makeTransfer({ link: this.link, label, profile: this.profile, rooms })
+  }
+
+  /**
+   * Puts a transfer from another of this person's devices in place and returns
+   * the rooms it added. A phone holding another link, or none, takes the
+   * person's link, name and the label it was given. One already holding this
+   * link keeps its label and takes the name only when it is newer.
+   */
+  applyTransfer (transfer) {
+    const sameLink = Boolean(this.link) && linkId(this.link) === linkId(transfer.link)
+    if (!sameLink) {
+      this.link = { ...transfer.link, labels: mergeLabels(transfer.link.labels, [transfer.label]) }
+      this.device = { label: transfer.label }
+      if (transfer.profile) this.adoptProfile(transfer.profile)
+    } else {
+      this.link = { ...this.link, labels: mergeLabels(this.link.labels, transfer.link.labels) }
+      if (transfer.profile && transfer.profile.at > (this.profile.at || 0)) this.adoptProfile(transfer.profile)
+    }
+
+    const added = []
+    for (const room of transfer.rooms) {
+      const existing = this.rooms.get(room.roomKey)
+      if (existing) {
+        if (room.creatorKey && !existing.creatorKey) existing.creatorKey = room.creatorKey
+        continue
+      }
+      if (this.rooms.size >= MAX_ROOMS) break
+      const now = Date.now()
+      this.rooms.set(room.roomKey, {
+        roomKey: room.roomKey,
+        name: normalizePeerChatRoomName(room.name, `${room.roomKey.slice(0, 8)}...`),
+        bio: normalizePeerChatBio(room.bio),
+        link: normalizePeerChatLink(room.link),
+        avatar: null,
+        isDM: room.isDM,
+        dmWith: room.isDM ? room.dmWith : null,
+        pendingAcceptance: false,
+        rejected: false,
+        isHost: Boolean(room.creatorKey) && room.creatorKey === this.localKey,
+        isPinned: false,
+        isMuted: false,
+        createdAt: room.createdAt || now,
+        // Joined as of when the person joined, so peers send this phone the
+        // history since then.
+        joinedAt: room.joinedAt || room.createdAt || now,
+        createdBy: room.createdBy,
+        creatorKey: room.creatorKey,
+        bans: [],
+        createdByName: normalizeMemberName(room.createdByName),
+        moderation: { ...DEFAULT_PEERCHAT_MODERATION },
+        lastMessage: null,
+        unreadCount: 0,
+        unreadMentions: 0,
+        lastReadTs: now,
+        members: []
+      })
+      added.push(room.roomKey)
+    }
+    this.schedulePersist()
+    this.bumpVersion()
+    return added
+  }
+
+  // A transfer a restore left here. Taken once, before the rooms are joined:
+  // the file goes whether or not it could be used.
+  takeIncomingTransfer () {
+    if (!this.incomingPath || !existsSync(this.incomingPath)) return
+    try {
+      const transfer = normalizeTransfer(
+        JSON.parse(readFileSync(this.incomingPath, 'utf8')),
+        { maxAvatar: MAX_PEERCHAT_AVATAR_LENGTH }
+      )
+      if (transfer) {
+        this.applyTransfer(transfer)
+        this.persistNow()
+      }
+    } catch (error) {
+      console.warn(`[peerchat] Unable to take PeerChat from another device: ${error.message}`)
+    }
+    try { rmSync(this.incomingPath, { force: true }) } catch {}
   }
 
   sendRoomMeta (peer, roomKey) {
@@ -1530,7 +1729,7 @@ export class PeerChatService {
       // Announced by the creator alone. A peer passing this along cannot prove
       // it, so the other side will not take it from them.
       creatorKey: room.isHost ? this.localKey : '',
-      createdByName: room.createdByName || (room.isHost ? this.profile.username : ''),
+      createdByName: room.createdByName || (room.isHost ? this.myName() : ''),
       moderation: normalizePeerChatModeration(room.moderation)
     })
   }
@@ -1543,7 +1742,7 @@ export class PeerChatService {
   }
 
   async appendModerationNotice (roomKey, sourceId, peer, moderation, timestamp) {
-    const peerName = normalizePeerChatProfileName(peer?.username) || normalizePeerChatPeerId(peer?.id) || 'Peer'
+    const peerName = normalizeMemberName(peer?.username) || normalizePeerChatPeerId(peer?.id) || 'Peer'
     const action = moderation.action || 'warn'
     const text = action === 'kick'
       ? `${peerName} was temporarily removed (${moderation.reason})`
@@ -1601,7 +1800,7 @@ export class PeerChatService {
     this.pendingDirectMessages.set(roomKey, {
       roomKey,
       fromId: peer.id,
-      fromUsername: normalizePeerChatProfileName(message.fromUsername) || peer.username || peer.id,
+      fromUsername: normalizeMemberName(message.fromUsername) || peer.username || peer.id,
       fromBio: normalizePeerChatBio(message.fromBio),
       fromAvatar: normalizePeerChatAvatar(message.fromAvatar),
       receivedAt: Date.now()
@@ -1635,7 +1834,7 @@ export class PeerChatService {
       createdAt,
       joinedAt: createdAt,
       createdBy: this.localId,
-      createdByName: this.profile.username,
+      createdByName: this.myName(),
       lastMessage: null,
       unreadCount: 0,
       unreadMentions: 0,
@@ -1648,7 +1847,7 @@ export class PeerChatService {
       type,
       roomKey: room.roomKey,
       fromId: this.localId,
-      fromUsername: this.profile.username || this.localId,
+      fromUsername: this.myName() || this.localId,
       fromAvatar: this.profile.avatar || null,
       fromBio: this.profile.bio || '',
       ...(type === 'dm-invite' && { toId: room.dmWith })
@@ -1664,11 +1863,13 @@ export class PeerChatService {
     // Send only what this peer missed. Someone who just joined starts with an
     // empty room rather than inheriting a stranger's backlog, while a member
     // coming back still gets everything since they were last here. Until they
-    // tell us when they joined, send nothing.
+    // tell us when they joined, send nothing, and leave it not done: their
+    // join, which can come after this, sends what they missed.
     const since = this.peerJoinedAt(roomKey, peer.id)
+    if (since === null) return false
 
     const firstIndex = Math.max(0, feed.length - MAX_SYNC_MESSAGES)
-    for (let index = since === null ? feed.length : firstIndex; index < feed.length; index += 1) {
+    for (let index = firstIndex; index < feed.length; index += 1) {
       if (peer.connection.destroyed || !peer.rooms.includes(roomKey)) return false
       try {
         const entry = await feed.get(index)
@@ -1788,7 +1989,7 @@ export class PeerChatService {
           sender,
           senderName: sender.toLowerCase() === this.localId
             ? 'You'
-            : normalizePeerChatProfileName(entry.sn) || normalizePeerChatRoomName(sender, 'Peer'),
+            : normalizeMemberName(entry.sn) || normalizePeerChatRoomName(sender, 'Peer'),
           message: `reacted ${entry.emoji}`,
           timestamp: normalizePeerChatTimestamp(entry.ts)
         }
@@ -1843,7 +2044,7 @@ export class PeerChatService {
 
   collectEntryAuthor (authors, entry) {
     const id = normalizePeerChatPeerId(entry?.sender)
-    const username = normalizePeerChatProfileName(entry?.sn)
+    const username = normalizeMemberName(entry?.sn)
     if (!id || !username || id === this.localId || authors.has(id)) return
     authors.set(id, username)
   }
@@ -1908,7 +2109,7 @@ export class PeerChatService {
     return {
       id: String(entry.id || ''),
       sender,
-      senderName: normalizePeerChatProfileName(entry.sn) || normalizePeerChatRoomName(sender, 'Peer'),
+      senderName: normalizeMemberName(entry.sn) || normalizePeerChatRoomName(sender, 'Peer'),
       message,
       ...(payload.preview && { preview: payload.preview }),
       ...(normalizePeerChatAttachment({
@@ -1955,7 +2156,7 @@ export class PeerChatService {
       isMuted: room.isMuted === true,
       createdAt: normalizePeerChatReadTimestamp(room.createdAt),
       createdBy: normalizePeerChatPeerId(room.createdBy),
-      createdByName: normalizePeerChatProfileName(room.createdByName),
+      createdByName: normalizeMemberName(room.createdByName),
       moderation: normalizePeerChatModeration(room.moderation),
       blockedByPeer: room.blockedByPeer === true,
       lastMessage: room.lastMessage || null,
@@ -2036,8 +2237,8 @@ export class PeerChatService {
     if (!this.trackMessageId(typeof message.id === 'string' ? message.id : id)) return
     if (!this.feeds.has(roomKey)) return
 
-    const name = normalizePeerChatProfileName(message.username) ||
-      normalizePeerChatProfileName(peer.username) ||
+    const name = normalizeMemberName(message.username) ||
+      normalizeMemberName(peer.username) ||
       this.rooms.get(roomKey)?.members?.find((member) => member.id === peer.id)?.username ||
       peer.id
     try {
@@ -2054,12 +2255,12 @@ export class PeerChatService {
 
   async appendRemovalNotice (roomKey, peerId, username) {
     const room = this.rooms.get(roomKey)
-    const name = normalizePeerChatProfileName(username) ||
+    const name = normalizeMemberName(username) ||
       room?.members?.find((member) => member.id === peerId)?.username ||
       peerId
     // By name, because "the creator" tells nobody in the room who that was.
     const by = this.isRoomCreator(roomKey)
-      ? (this.profile.username || this.localId)
+      ? (this.myName() || this.localId)
       : (room?.createdByName || room?.createdBy || 'whoever made the room')
     try {
       await this.appendEntry(roomKey, {
@@ -2183,7 +2384,7 @@ export class PeerChatService {
     if (this.profile.username) {
       members.set(this.localId, {
         id: this.localId,
-        username: this.profile.username,
+        username: this.myName(),
         bio: this.profile.bio || '',
         avatar: this.profile.avatar || null,
         self: true,
@@ -2206,7 +2407,7 @@ export class PeerChatService {
     for (const peer of this.peers.values()) {
       if (!peer.rooms.includes(roomKey)) continue
       const id = normalizePeerChatPeerId(peer.id)
-      const username = normalizePeerChatProfileName(peer.username)
+      const username = normalizeMemberName(peer.username)
       if (!id || !username) continue
       if (!members.has(id) && members.size >= MAX_RETURNED_ROOM_MEMBERS) break
       members.set(id, {
@@ -2249,7 +2450,7 @@ export class PeerChatService {
 
   rememberRoomMember (room, peer, announcedJoinedAt) {
     const id = normalizePeerChatPeerId(peer?.id)
-    const username = normalizePeerChatProfileName(peer?.username)
+    const username = normalizeMemberName(peer?.username)
     if (!room || !id || id === this.localId || !username) return false
     // Announcing a join does not undo a removal.
     if (this.isPeerRemovedFromRoom(room.roomKey, peer)) return false
@@ -2257,12 +2458,19 @@ export class PeerChatService {
     const members = Array.isArray(room.members) ? [...room.members] : []
     const index = members.findIndex((member) => member.id === id)
     const existing = index >= 0 ? members[index] : null
+    const announced = announcedJoinTs(announcedJoinedAt)
+    // This person's other device is in the room as of when the person joined
+    // it, so the history since then goes to it too, sent again if some went
+    // before this arrived.
+    const earlier = this.siblings.has(id) && announcedJoinedAt !== undefined &&
+      Number.isFinite(existing?.joinedAt) && announced < existing.joinedAt
+    if (earlier) peer.syncedRooms?.delete(room.roomKey)
     const member = {
       id,
       username,
       bio: normalizePeerChatBio(peer.bio),
       avatar: normalizePeerChatAvatar(peer.avatar),
-      joinedAt: existing?.joinedAt ?? announcedJoinTs(announcedJoinedAt)
+      joinedAt: earlier ? announced : existing?.joinedAt ?? announced
     }
     if (existing && JSON.stringify(existing) === JSON.stringify(member)) return false
     if (!existing && members.length >= MAX_RETURNED_ROOM_MEMBERS - 1) {
@@ -2314,20 +2522,24 @@ export class PeerChatService {
       const parsed = JSON.parse(readFileSync(this.stateFilePath, 'utf8'))
       const username = normalizePeerChatProfileName(parsed?.profile?.username)
       if (username) {
+        const at = parsed?.profile?.at
         this.profile = {
           username,
           bio: normalizePeerChatBio(parsed?.profile?.bio),
           avatar: normalizePeerChatAvatar(parsed?.profile?.avatar),
-          linkPreview: parsed?.profile?.linkPreview !== false
+          linkPreview: parsed?.profile?.linkPreview !== false,
+          at: Number.isSafeInteger(at) && at > 0 ? at : 0
         }
       }
+      this.device = { label: normalizeLabel(parsed?.device?.label) }
+      this.link = normalizeLink(parsed?.link)
 
       for (const value of Array.isArray(parsed?.blockedPeers) ? parsed.blockedPeers.slice(0, MAX_BLOCKED_PEERS) : []) {
         const peerId = normalizePeerChatPeerId(value?.peerId)
         if (!peerId || peerId === this.localId) continue
         this.blockedPeers.set(peerId, {
           peerId,
-          username: normalizePeerChatProfileName(value?.username) || peerId,
+          username: normalizeMemberName(value?.username) || peerId,
           blockedAt: normalizePeerChatTimestamp(value?.blockedAt)
         })
       }
@@ -2352,7 +2564,12 @@ export class PeerChatService {
           isPinned: value?.isPinned === true,
           isMuted: value?.isMuted === true,
           createdAt: Number.isFinite(value?.createdAt) ? value.createdAt : Date.now(),
-          joinedAt: Number.isFinite(value?.joinedAt) ? value.joinedAt : Date.now(),
+          // A room made here has no join time of its own: it was joined when
+          // it was made. Now would move it forward on every start, and peers
+          // send a member only the history since they joined.
+          joinedAt: Number.isFinite(value?.joinedAt)
+            ? value.joinedAt
+            : Number.isFinite(value?.createdAt) ? value.createdAt : Date.now(),
           createdBy: typeof value?.createdBy === 'string' ? value.createdBy.slice(0, 200) : '',
           // A room made before any of this has no creator key on record. The
           // device that made it is the one device that can fill that in from
@@ -2361,7 +2578,7 @@ export class PeerChatService {
           creatorKey: normalizePeerChatCreatorKey(value?.creatorKey) ||
             (value?.isHost === true && !isDM ? this.localKey : ''),
           bans: isDM ? [] : normalizePeerChatRoomBans(value?.bans),
-          createdByName: normalizePeerChatProfileName(value?.createdByName),
+          createdByName: normalizeMemberName(value?.createdByName),
           moderation: isDM
             ? { ...DEFAULT_PEERCHAT_MODERATION }
             : normalizePeerChatModeration(value?.moderation),
@@ -2386,7 +2603,7 @@ export class PeerChatService {
         this.pendingDirectMessages.set(roomKey, {
           roomKey,
           fromId,
-          fromUsername: normalizePeerChatProfileName(value?.fromUsername) || fromId,
+          fromUsername: normalizeMemberName(value?.fromUsername) || fromId,
           fromBio: normalizePeerChatBio(value?.fromBio),
           fromAvatar: normalizePeerChatAvatar(value?.fromAvatar),
           receivedAt: Number.isFinite(value?.receivedAt) ? value.receivedAt : Date.now()
@@ -2412,6 +2629,8 @@ export class PeerChatService {
       writeFileSync(temporaryPath, JSON.stringify({
         version: 1,
         profile: this.profile,
+        device: this.device,
+        link: this.link,
         rooms: [...this.rooms.values()],
         pendingDirectMessages: this.listPendingDirectMessages(),
         blockedPeers: this.listBlockedPeers()
@@ -2469,7 +2688,7 @@ function normalizePersistedLastMessage (value) {
   if (!message) return null
   return {
     sender: typeof value.sender === 'string' ? value.sender.slice(0, 200) : '',
-    senderName: normalizePeerChatProfileName(value.senderName),
+    senderName: normalizeMemberName(value.senderName),
     message,
     timestamp: Number.isFinite(value.timestamp) ? value.timestamp : 0
   }
@@ -2481,7 +2700,7 @@ function normalizePersistedRoomMembers (value, localId) {
   const seen = new Set()
   for (const candidate of value.slice(0, MAX_RETURNED_ROOM_MEMBERS - 1)) {
     const id = normalizePeerChatPeerId(candidate?.id)
-    const username = normalizePeerChatProfileName(candidate?.username)
+    const username = normalizeMemberName(candidate?.username)
     if (!id || id === localId || !username || seen.has(id)) continue
     seen.add(id)
     // joinedAt stays absent unless the peer announced one. Storing a zero here

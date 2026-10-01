@@ -131,7 +131,7 @@ describe('Link Device Identity Transfer', () => {
 
     assert.equal(
       createMobilePairingCode(publicKey, nonce),
-      `peersky-identity:${'aa'.repeat(32)}?nonce=${'bb'.repeat(16)}&deviceType=mobile`
+      `peersky-identity:${'aa'.repeat(32)}?nonce=${'bb'.repeat(16)}&deviceType=mobile&chat=1`
     )
     assert.equal(createMobilePairingCode('invalid', nonce), '')
     assert.equal(createMobilePairingCode(publicKey, 'invalid'), '')
@@ -268,6 +268,8 @@ describe('Link Device Identity Transfer', () => {
         { name: 'tabs.json', data: desktopTabs },
         { name: 'lastOpened.json', data: '[]' },
         { name: 'peersky-chat-rooms.json', data: '[]' },
+        // The person's PeerChat, for PeerChat here to take on its next start.
+        { name: 'peerchat-incoming.json', data: '{"version":1}' },
         // The desktop's own store. The phone never used it, and it can be huge.
         { name: 'hyper/', data: null },
         { name: 'hyper/db/000002.sst', data: 'desktop public core' }
@@ -278,7 +280,7 @@ describe('Link Device Identity Transfer', () => {
 
     const staged = await phone.stage(bytes)
     assert.equal(staged.sas, verificationCode)
-    assert.deepEqual(staged.names, ['hyper-private', 'incoming-tabs.json', 'peersky-identity.json', 'privateHyperdrives.json'])
+    assert.deepEqual(staged.names, ['hyper-private', 'incoming-tabs.json', 'peerchat-incoming.json', 'peersky-identity.json', 'privateHyperdrives.json'])
     assert.equal(existsSync(join(phone.stagingPath, 'hyper')), false)
     assert.equal(existsSync(join(phone.stagingPath, 'tabs.json')), false)
     assert.equal(existsSync(join(phone.stagingPath, 'browser-tabs.json')), false)

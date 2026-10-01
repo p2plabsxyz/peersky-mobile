@@ -1,9 +1,11 @@
 // The code a receiving device shows so another device can send to it:
 //
-//   peersky-identity:<encryption public key>?nonce=<16 bytes>&deviceType=mobile
+//   peersky-identity:<encryption public key>?nonce=<16 bytes>&deviceType=mobile&chat=1
 //
 // The desktop writes the same thing with the parameters the other way round,
-// so the query is parsed rather than matched.
+// so the query is parsed rather than matched. chat=1 says the device takes
+// PeerChat in a transfer; one that does not say so refuses files it does not
+// know, so it is sent none.
 export const PAIRING_CODE_PREFIX = 'peersky-identity:'
 
 const HEX_KEY = /^[0-9a-f]{64}$/
@@ -14,11 +16,11 @@ export function createPairingCode (encryptionPublicKey, nonce, deviceType = 'mob
   const key = String(encryptionPublicKey || '').toLowerCase()
   const value = String(nonce || '').toLowerCase()
   if (!HEX_KEY.test(key) || !HEX_NONCE.test(value) || !DEVICE_TYPES.has(deviceType)) return ''
-  return `${PAIRING_CODE_PREFIX}${key}?nonce=${value}&deviceType=${deviceType}`
+  return `${PAIRING_CODE_PREFIX}${key}?nonce=${value}&deviceType=${deviceType}&chat=1`
 }
 
 /**
- * Returns { encryptionPublicKey, nonce, deviceType }, or null when the text is
+ * Returns { encryptionPublicKey, nonce, deviceType, chat }, or null when the text is
  * not a pairing code at all. Throws when it is one but something in it is off,
  * so the person hears what is wrong rather than "not a PeerSky code".
  */
@@ -38,5 +40,5 @@ export function parsePairingCode (text) {
     throw new Error('That pairing code is damaged. Show a fresh one on the other device and scan it again.')
   }
 
-  return { encryptionPublicKey, nonce, deviceType }
+  return { encryptionPublicKey, nonce, deviceType, chat: params.get('chat') === '1' }
 }
