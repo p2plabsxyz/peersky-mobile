@@ -10,9 +10,13 @@ import { closePeerChatService } from './peerchat/runtime.mjs'
 import { stopPeerTunesServer } from './peertunes/server.mjs'
 import { setAppNotifier } from './rpc/notify.mjs'
 import { routeRpcRequest } from './rpc/router.mjs'
+import { recoverLinkDeviceStorage } from './backup/link-device.mjs'
 
 const { IPC } = BareKit
 
+// Before anything can open a store: a restore the app was killed in the
+// middle of is undone here, while nothing has its files open.
+recoverLinkDeviceStorage()
 createRpc()
 
 function createRpc () {

@@ -1,8 +1,10 @@
 # PeerChat on mobile
 
-PeerChat provides encrypted peer-to-peer group rooms and direct messages at
-`peersky://p2p/peerchat/`. The mobile implementation uses the same room-key,
-topic, message-encryption, and transport formats as PeerSky Desktop.
+PeerChat provides end to end encrypted peer-to-peer group rooms and direct
+messages at `peersky://p2p/peerchat/`. There are no accounts and no servers, and
+rooms keep working on a local network without internet. The mobile
+implementation uses the same room-key, topic, room-proof, message-encryption,
+and transport formats as PeerSky Desktop.
 
 ## Capabilities
 
@@ -25,7 +27,9 @@ bridge. A single `PeerChatService` in the Bare worklet uses PeerSky's shared
 second SDK, Corestore, swarm, local HTTP server, or unrestricted proxy.
 
 Each room derives a discovery topic and an AES-256-GCM message key from separate
-contexts. The room key itself is never used as the public discovery topic. Every
+contexts. The room key itself is never used as the public discovery topic, and
+it never goes over the wire either: frames name a room by its topic, and a peer
+is let into a room on a connection only after it proves it holds the key. Every
 received frame, profile field, URL, attachment description, timestamp, and
 persisted record is normalized and bounded before use.
 
@@ -34,6 +38,7 @@ Important files:
 - `app/peerchat/PeerChatScreen.tsx`: mobile room list, chat UI, and actions.
 - `backend/peerchat/service.mjs`: rooms, feeds, synchronization, and lifecycle.
 - `backend/peerchat/protocol.mjs`: validation, key derivation, and encryption.
+- `backend/peerchat/room-proof.mjs`: the proof a peer gives that it holds a room's key.
 - `backend/peerchat/transport.mjs`: bounded newline-delimited peer frames.
 - `backend/peerchat/link-preview.mjs`: bounded public-network preview fetching.
 - `backend/peerchat/moderation.mjs`: local content and spam enforcement.
@@ -47,6 +52,29 @@ history, so share it only with intended participants. PeerChat currently has no
 server-side account, invitation revocation, or mechanism to remove knowledge of
 a key from a device that already received it. Create a new room and distribute a
 new key if an old key is exposed.
+
+A room's discovery topic is public: DHT nodes see it on the way past, so knowing
+it opens nothing. On every connection each side sends, for each of its rooms,
+the topic and an HMAC-SHA256 keyed with `SHA-256("peersky-chat:proof:" +
+roomKey)` over `"peersky-chat/2 room\n" + handshakeHash + "\n" +
+senderPublicKey`, both as hex. The Noise handshake hash is the same at both ends
+of one connection and different on every other, and the sender key is the one
+that handshake proved, so a proof cannot be replayed elsewhere or bounced back.
+A room opens to a peer only when its proof checks out, and this phone sends its
+own proofs before anything about a room, so its join never arrives first. Being
+found under a room's topic, or naming the room in a frame, counts for nothing.
+The desktop makes the same proof, and both pin one test vector.
+
+The chat channel is `peersky-chat/2`. Version 1 sent the room key to anyone who
+turned up under a room's topic, so a room used with a version 1 build that has
+to stay private is worth recreating. The two versions do not open a channel
+with each other.
+
+A direct message's key is the one key that crosses the wire, inside the invite,
+to the one person it is for. It goes to their full public key, recorded when the
+conversation starts and checked on every answer, never to the 8-character peer
+id, which is short enough to grind. While two connected keys share that id, the
+invite waits.
 
 Messages are encrypted before they are appended to a room feed or sent to a
 peer. Sender names, timestamps, reactions, and other routing metadata are not
@@ -63,8 +91,10 @@ must therefore be considered part of the local threat model.
 
 PeerChat stores attachments in a dedicated Hyperdrive for each room. Before
 upload, file bytes are sealed with AES-256-GCM using a key derived from the room
-key and the opaque `PCA1` attachment format used by PeerSky Desktop. The real
-file name and size travel inside the encrypted chat message. Room members can
+key, in the attachment formats PeerSky Desktop uses too: `PCA1`, in one piece,
+up to 100 MB, and `PCA2`, a megabyte frame at a time, up to 2 GB. Both apps
+read both, and neither ever holds a framed file whole. The real file name and
+size travel inside the encrypted chat message. Room members can
 decrypt attachments because they hold the room key; obtaining the `hyper://`
 URL alone exposes only ciphertext. Legacy plaintext attachments remain readable
 for compatibility.
@@ -106,13 +136,12 @@ separate and does not clear PeerChat or other P2P data.
 
 ## Identity transfer
 
-PeerSky Mobile can restore supported identity data sent by PeerSky Desktop.
-Restoring another desktop identity preserves the phone's device key, local
-PeerChat profile, rooms, message feeds, preferences, and attachment cache. This
-keeps one stable mobile PeerChat identity when the same phone is linked to more
-than one desktop. The desktop PeerChat state format is not imported into the
-mobile state; rooms already present only on the desktop must still be joined on
-mobile with their room keys.
+Link Device carries PeerChat between a person's devices: the profile, every
+room with its key, a fixed label for the new device (`ada@mobile`,
+`ada@desktop1`), and a link the devices use to prove to each other that they
+belong to the same person. Each device stays its own member of a room, so
+messages reach all of them, and renames and newly joined rooms follow between
+them. See [link-device.md](link-device.md).
 
 ## Resource limits
 

@@ -4,6 +4,10 @@ PeerSky Mobile includes a minimal Holesail runtime inside the Bare worklet for p
 
 > Scope: this is Holesail protocol/runtime integration only. It is not the final p2pmd app UX.
 
+The runtime check page at `peersky://holesail/` exists in development builds
+only. It is not listed on `peersky://p2p`, and a release build does not answer
+the address. The tunnel itself still ships: P2PMD notes travel over it.
+
 ## What is implemented
 
 - Start Holesail in live/server mode
@@ -29,7 +33,7 @@ PeerSky Mobile includes a minimal Holesail runtime inside the Bare worklet for p
    # or
    npm run ios
 
-4. Open the app, switch to `Holesail` tab, then test:
+4. In a development build, open `peersky://holesail/`, then test:
    - **Start Live** with default host/port (`127.0.0.1`, `8989`)
    - **Status** should report running session and mode
    - **Stop** should report stopped session

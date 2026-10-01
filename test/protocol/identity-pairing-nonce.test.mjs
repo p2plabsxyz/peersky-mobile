@@ -2,8 +2,8 @@
 // showing. It used to be reminted on every read of the key RPC, and the
 // settings screen refetches on every re-render, so by the time the desktop
 // had uploaded, the phone expected a different nonce and every restore failed
-// the check in decryptIdentityTransfer. The verification prompt sits behind
-// that check, which is why it never appeared.
+// the transfer's nonce check. The verification prompt sits behind that
+// check, which is why it never appeared.
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFile, mkdtemp, rm, writeFile } from 'node:fs/promises'
@@ -78,10 +78,13 @@ test('an expired nonce stops being live and is replaced on the next read', async
 })
 
 test('the nonce cannot outlive the transfer it protects', async () => {
-  // decryptIdentityTransfer caps a transfer at 15 minutes. A longer-lived
-  // nonce would accept a code the transfer had already stopped honouring.
-  const transfer = await readFile(new URL('../../backend/backup/identity-transfer.mjs', import.meta.url), 'utf8')
-  assert.match(transfer, /const MAX_TTL = 15 \* 60 \* 1000/)
+  // Transfers from the desktop and from another phone are both capped at 15
+  // minutes. A longer-lived nonce would accept a code the transfer had
+  // already stopped honouring.
+  const desktop = await readFile(new URL('../../backend/backup/desktop-transfer.mjs', import.meta.url), 'utf8')
+  assert.match(desktop, /const MAX_TTL = 15 \* 60 \* 1000/)
+  const { PHONE_TRANSFER_TTL_MS } = await import('../../backend/backup/phone-backup.mjs')
+  assert.equal(PHONE_TRANSFER_TTL_MS, 15 * 60 * 1000)
   assert.equal(PAIRING_NONCE_TTL_MS, 15 * 60 * 1000)
 })
 
@@ -113,81 +116,101 @@ test('a corrupt record is replaced rather than thrown', async () => {
 })
 
 const router = await readFile(new URL('../../backend/rpc/router.mjs', import.meta.url), 'utf8')
+const linkDevice = await readFile(new URL('../../backend/backup/link-device.mjs', import.meta.url), 'utf8')
+
+function bodyOf (source, signature) {
+  const start = source.indexOf(signature)
+  assert.ok(start > -1, `${signature} is missing`)
+  return source.slice(start, source.indexOf('\n}\n', start))
+}
 
 test('the router reads the nonce from disk and never mints one to restore with', () => {
   assert.match(router, /nonce: getOrCreatePairingNonce\(identityStoragePath\)/)
   // A restore has to answer the code that was shown, so it reads without
   // minting. getOrCreate here would hand every transfer a fresh nonce to
   // fail against.
-  assert.match(router, /const expectedNonce = getLivePairingNonce\(getDefaultIdentityStoragePath\(\)\)/)
-  assert.match(router, /decryptIdentityTransfer\(downloaded\.bytes, keys, expectedNonce\)/)
+  const receive = bodyOf(linkDevice, 'export function receiveTransfer')
+  assert.match(receive, /const expectedNonce = getLivePairingNonce\(storagePath\)/)
+  assert.match(receive, /stageDesktopTransferFile\(\{ filePath, stagingPath, deviceKeys, expectedNonce, now: startedAt \}\)/)
+  assert.match(receive, /stagePhoneBackupFile\(\{[\s\S]*?expectedNonce,/)
+  assert.doesNotMatch(linkDevice, /getOrCreatePairingNonce/)
   // Nothing in memory: a worklet restart must not change the answer.
-  assert.doesNotMatch(router, /currentIdentityNonce/)
+  assert.doesNotMatch(router + linkDevice, /currentIdentityNonce/)
 })
 
 test('an expired pairing code says so instead of failing the nonce check', () => {
-  const restore = router.slice(router.indexOf('if (req.command === RPC_IDENTITY_RESTORE_FROM_HYPER)'))
-  assert.match(restore, /if \(!expectedNonce\)/)
-  assert.match(restore, /Pairing code expired\. Reopen Link Device to get a new one\./)
+  const receive = bodyOf(linkDevice, 'export function receiveTransfer')
+  assert.match(receive, /if \(!expectedNonce\)/)
+  assert.match(receive, /Pairing code expired\. Reopen Link Device to get a new one\./)
+  // Checked before anything is downloaded.
+  assert.ok(receive.indexOf('if (!expectedNonce)') < receive.indexOf('fetchHyperToFile'))
 })
 
 test('removing an identity leaves the app usable, not half dead', () => {
-  const remove = router.slice(router.indexOf('req.command === RPC_IDENTITY_REMOVE'))
-  const handler = remove.slice(0, remove.indexOf('replyJson(req, result)'))
+  assert.match(router, /if \(req\.command === RPC_IDENTITY_REMOVE\) \{\s*replyJson\(req, await removeIdentity\(\)\)/)
+  const handler = bodyOf(linkDevice, 'export function removeIdentity')
 
   // Both stores go: the private one holds drive cores adopted from the
   // desktop, and keeping them without the identity leaves data the user
   // thinks they deleted.
+  assert.match(handler, /return withStoresClosed\(async \(\) => \{/)
   assert.match(handler, /for \(const target of \[storagePath, syncedPrivatePath\]\)/)
   assert.match(handler, /rmSync\(target, \{ recursive: true, force: true \}\)/)
   // iOS cannot be made to quit, so the runtime has to come back up on fresh
-  // storage or the app sits there with nothing running.
-  assert.match(handler, /await getHyperRuntime\(\)/)
+  // storage or the app sits there with nothing running. The stores reopen as
+  // the removal finishes.
+  assert.match(bodyOf(linkDevice, 'function withStoresClosed (task)'), /finally \{\s*release\(\)\s*await getHyperRuntime\(\)/)
 })
 
 test('a restart the platform cannot perform is asked for instead', async () => {
-  const screen = await readFile(new URL('../../app/settings/SettingsScreen.tsx', import.meta.url), 'utf8')
+  const screen = await readFile(new URL('../../app/settings/LinkDevice.tsx', import.meta.url), 'utf8')
+  const app = await readFile(new URL('../../app/index.tsx', import.meta.url), 'utf8')
+  const restart = await readFile(new URL('../../app/RestartRequiredScreen.tsx', import.meta.url), 'utf8')
   const helper = screen.slice(
-    screen.indexOf('function finishAndRestart'),
-    screen.indexOf('function removeIdentity')
+    screen.indexOf('const replaceData = useCallback'),
+    screen.indexOf('async function pickBackupFile')
   )
 
-  // BackHandler.exitApp is a no-op on iOS, so both flows used to finish by
-  // doing nothing visible at all.
-  assert.match(helper, /Platform\.OS === 'android'/)
-  assert.match(helper, /BackHandler\.exitApp\(\)/)
-  assert.match(helper, /Close PeerSky to finish/)
+  // BackHandler.exitApp is a no-op on iOS, and on newer Android it only sends
+  // the app to the background, so exiting is never all there is.
+  assert.match(helper, /onRestartRequired\(\)/)
+  assert.match(helper, /if \(Platform\.OS === 'android'\) BackHandler\.exitApp\(\)/)
+  assert.equal(screen.match(/BackHandler\.exitApp\(\)/g).length, 1)
 
-  // Neither flow may call exitApp directly any more, or it silently does
-  // nothing on the platform being tested.
-  const flows = screen.slice(screen.indexOf('function finishAndRestart'))
-  assert.equal(flows.match(/BackHandler\.exitApp\(\)/g).length, 1)
-  assert.match(flows, /finishAndRestart\('Your identity has been restored\.'\)/)
-  assert.match(flows, /finishAndRestart\('This phone no longer holds your identity\.'\)/)
+  // What is on screen belongs to the data being replaced. It is swapped for a
+  // screen that asks for the restart, on both platforms, until it gets one.
+  assert.match(app, /onRestartRequired=\{\(\) => \{[\s\S]*?setRestartRequired\(true\)/)
+  assert.ok(app.indexOf('if (restartRequired) {') < app.indexOf('if (!browserSessionReady) {'))
+  assert.match(app, /return <RestartRequiredScreen isDark=\{browserIsDark\} \/>/)
+  assert.match(restart, /Close PeerSky to finish/)
+
+  // Every flow that replaces or removes data goes through it.
+  assert.equal((screen.match(/onConfirmRestore=\{commitRestore\}/g) || []).length, 2)
+  assert.match(bodyOf(screen, 'function removeData ()'), /replaceData\(RPC_IDENTITY_REMOVE/)
 })
 
 test('the device key is loaded once, not on every render', async () => {
-  const screen = await readFile(new URL('../../app/settings/SettingsScreen.tsx', import.meta.url), 'utf8')
-  const effect = screen.slice(
-    screen.indexOf('const onCallRpcRef = useRef(onCallRpc)'),
-    screen.indexOf('async function restoreIdentity')
-  )
+  const screen = await readFile(new URL('../../app/settings/LinkDevice.tsx', import.meta.url), 'utf8')
 
-  // The parent rebuilds onCallRpc every render. Keying the effect on it meant
+  // The parent rebuilds onCallRpc every render. Keying an effect on it meant
   // fetch, setState, render, fetch again: a loop that flickered the screen and
-  // hammered the key RPC. The ref keeps the latest without re-running.
-  assert.match(effect, /const response = await onCallRpcRef\.current\(RPC_IDENTITY_GET_KEY, \{\}\)/)
-  assert.match(effect, /\}, \[\]\)/)
-  assert.doesNotMatch(effect, /\}, \[onCallRpc\]\)/)
+  // hammered the key RPC. The ref keeps the latest, and the call made from it
+  // never changes, so the code loads when the sheet opens and not otherwise.
+  assert.match(screen, /onCallRpcRef\.current = onCallRpc/)
+  assert.match(screen, /const call = useCallback<CallRpc>\(\(command, data = \{\}\) => onCallRpcRef\.current\(command, data\), \[\]\)/)
+  const effect = screen.slice(screen.indexOf('call(RPC_IDENTITY_GET_KEY)') - 600, screen.indexOf('call(RPC_IDENTITY_GET_KEY)') + 600)
+  assert.match(effect, /\}, \[call, visible\]\)/)
+  assert.doesNotMatch(screen, /\}, \[onCallRpc\]\)/)
 })
 
 test('the transfer ceiling the nonce is matched to still exists', async () => {
-  const transfer = await readFile(new URL('../../backend/backup/identity-transfer.mjs', import.meta.url), 'utf8')
+  const transfer = await readFile(new URL('../../backend/backup/desktop-transfer.mjs', import.meta.url), 'utf8')
   assert.match(transfer, /const MAX_TTL = 15 \* 60 \* 1000/)
   // The nonce check is what the whole flow hangs on, so it stays ahead of the
   // SAS the user is asked to compare.
+  const verify = transfer.slice(transfer.indexOf('export function verifyDesktopTransfer'))
   assert.ok(
-    transfer.indexOf('nonce does not match the QR code') < transfer.indexOf('const sas ='),
+    verify.indexOf('nonce does not match the QR code') < verify.indexOf('sas: deriveVerificationCode'),
     'SAS is computed before the nonce check'
   )
 })

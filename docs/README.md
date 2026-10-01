@@ -11,7 +11,7 @@ Written for whoever picks this up next, including us in six months.
 
 - [Hyper protocol](hyper.md) — how `hyper://` is fetched, served to the WebView, and kept offline.
 - [Holesail runtime](holesail.md) — the tunnel the P2PMD notes travel through.
-- [Link Device](link-device.md) — moving an identity from PeerSky Desktop.
+- [Link Device](link-device.md): syncing with another device, and backup files.
 
 ## The built-in apps
 

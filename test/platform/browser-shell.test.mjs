@@ -339,7 +339,9 @@ describe('internal app route registry', () => {
     assert.equal(getRuntimeAppFromUrl('peersky://p2p/p2pmd'), 'p2pmd')
     assert.equal(getRuntimeAppFromUrl('peersky://p2p/p2pmd/'), 'p2pmd')
     assert.equal(getRuntimeAppFromUrl('PEERSKY://P2P/PEERCHAT////'), 'peerchat')
-    assert.equal(getRuntimeAppFromUrl('PEERSKY://HOLESAIL////'), 'holesail')
+    // Holesail is a development tool: a release build does not answer it.
+    assert.equal(getRuntimeAppFromUrl('PEERSKY://HOLESAIL////'), null)
+    assert.equal(getRuntimeAppFromUrl('PEERSKY://HOLESAIL////', { devApps: true }), 'holesail')
     assert.equal(getRuntimeAppFromUrl('peersky://p2p/hyperdrive'), 'hyper')
     assert.equal(getRuntimeAppFromUrl('peersky://hyperdrive'), 'hyper')
     assert.equal(getRuntimeAppFromUrl('peersky://hyper'), 'hyper')
@@ -463,7 +465,7 @@ test('the P2PMD button names the view it takes you to', async () => {
 // nothing and come back as an unsupported scheme.
 test('the p2p address lists the built-in apps', async () => {
   const { BROWSER_P2P_URL, isBrowserP2pUrl } = await import('../../app/browser-shell.mjs')
-  const { INTERNAL_APPS } = await import('../../app/internal-apps-registry.mjs')
+  const { P2P_APPS } = await import('../../app/internal-apps-registry.mjs')
 
   assert.equal(BROWSER_P2P_URL, 'peersky://p2p')
   assert.equal(isBrowserP2pUrl('peersky://p2p'), true)
@@ -478,12 +480,12 @@ test('the p2p address lists the built-in apps', async () => {
   const index = await readFile(new URL('../../app/index.tsx', import.meta.url), 'utf8')
   // Typed, or restored with the tab: both land on the same screen.
   assert.equal((index.match(/isBrowserP2pUrl\(/g) || []).length, 2)
-  // Every app, Holesail included, which the home grid leaves out.
+  // Every app people use. Holesail is a development tool and is not listed.
   const p2pStart = index.indexOf("browserSource.kind === 'p2p'")
   const screen = index.slice(p2pStart, index.indexOf("browserSource.kind === 'home'", p2pStart))
   assert.ok(p2pStart > 0 && screen.length > 0)
-  assert.match(screen, /INTERNAL_APPS\.map/)
-  assert.ok(INTERNAL_APPS.some((app) => app.id === 'holesail'))
+  assert.match(screen, /P2P_APPS\.map/)
+  assert.ok(!P2P_APPS.some((app) => app.id === 'holesail'))
 
   test('following a search result keeps the search behind it', () => {
     const web = (url) => ({ kind: 'web', uri: url })

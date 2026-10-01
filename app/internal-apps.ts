@@ -2,6 +2,7 @@ import type { ImageSourcePropType } from 'react-native'
 
 import {
   INTERNAL_APPS as INTERNAL_APP_REGISTRY,
+  P2P_APPS as P2P_APP_REGISTRY,
   canUseP2pAppPageActions as canUseP2pAppRegistryPageActions,
   getRuntimeAppFromUrl as getRuntimeAppFromRegistryUrl,
   getRuntimeAppLaunchSuffix as getRuntimeAppRegistryLaunchSuffix,
@@ -27,22 +28,29 @@ const INTERNAL_APP_ICONS: Partial<Record<RuntimeTab, ImageSourcePropType>> = {
 // our own surfaces and needs its transparent corners back.
 export const BROWSER_HOME_ICON: ImageSourcePropType = require('../assets/images/home-icon.png')
 
-export const INTERNAL_APPS = (INTERNAL_APP_REGISTRY as Array<{
+type InternalAppEntry = {
   id: RuntimeTab
   title: string
   url: string
   icon: string
-}>).map((app) => ({
-  ...app,
-  iconSource: INTERNAL_APP_ICONS[app.id]
-}))
+  devOnly?: boolean
+}
+
+function withIcon (app: InternalAppEntry) {
+  return { ...app, iconSource: INTERNAL_APP_ICONS[app.id] }
+}
+
+export const INTERNAL_APPS = (INTERNAL_APP_REGISTRY as InternalAppEntry[]).map(withIcon)
+
+// The apps a person can open. Holesail is left out: it is a development tool.
+export const P2P_APPS = (P2P_APP_REGISTRY as InternalAppEntry[]).map(withIcon)
 
 export function getRuntimeAppUrl (app: RuntimeTab) {
   return getRuntimeAppRegistryUrl(app)
 }
 
 export function getRuntimeAppFromUrl (targetUrl: string) {
-  return getRuntimeAppFromRegistryUrl(targetUrl) as RuntimeTab | null
+  return getRuntimeAppFromRegistryUrl(targetUrl, { devApps: __DEV__ }) as RuntimeTab | null
 }
 
 export function getRuntimeAppTitle (app: RuntimeTab) {

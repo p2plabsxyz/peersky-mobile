@@ -1263,18 +1263,25 @@
         label: "Copy",
         action: async () => {
           const ok = await copyText(link);
+          // the link stays on screen after a copy, so it is never lost the
+          // moment the first dialog closes
           this.dialog({
             msg: ok ? "Link copied" : "Could not copy",
-            sub: ok ? link : "Select the link below and copy it by hand.\n" + link,
-            buttons: [{ label: "OK" }],
+            sub: ok ? "Send it to a friend.\n" + link : "Select the link below and copy it by hand.\n" + link,
+            buttons: [{ label: "Done" }],
           });
         },
       }];
       if (typeof navigator.share === "function") {
         buttons.push({ label: "Share…", action: () => { navigator.share({ title: "PeerTunes", url: link }).catch(() => {}); } });
       }
-      buttons.push({ label: "OK" });
-      this.dialog({ msg: "Share link ready", sub: link, buttons, defaultSel: 0 });
+      buttons.push({ label: "Done" });
+      this.dialog({
+        msg: "Share it with other peers!",
+        sub: "Anyone with this link can listen, straight from the source.\n" + link,
+        buttons,
+        defaultSel: 0,
+      });
     }
 
     urlScreen() {

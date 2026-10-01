@@ -1,3 +1,4 @@
+import { closeSync, openSync, writeSync } from 'node:fs'
 import b4a from 'b4a'
 import { MAX_BACKUP_SIZE_BYTES } from '../backup/limits.mjs'
 
@@ -51,6 +52,71 @@ export async function readHyperBinaryResponse (
     url: response.url || url,
     headers,
     bytes: b4a.concat(chunks)
+  }
+}
+
+/**
+ * The same limits as readHyperBinaryResponse, but the body goes to a file as
+ * it arrives. A transfer from another device can be large, and collecting it
+ * in memory first meant holding it twice before it was even decrypted.
+ */
+export async function writeHyperResponseToFile (
+  response,
+  headers,
+  url,
+  filePath,
+  { maxBytes = MAX_BACKUP_SIZE_BYTES, onProgress } = {}
+) {
+  const contentLength = Number(headers['content-length'] || 0)
+  if (contentLength > maxBytes) {
+    throw new Error(`Response exceeds ${formatSizeLimit(maxBytes)} limit: ${contentLength} bytes`)
+  }
+
+  const fd = openSync(filePath, 'w')
+  let totalLength = 0
+  const appendChunk = (chunk) => {
+    const bytes = toBytes(chunk)
+    if (bytes.byteLength > maxBytes - totalLength) {
+      throw new Error(`Response exceeds ${formatSizeLimit(maxBytes)} limit`)
+    }
+    let offset = 0
+    while (offset < bytes.byteLength) offset += writeSync(fd, bytes, offset, bytes.byteLength - offset)
+    totalLength += bytes.byteLength
+    if (onProgress) onProgress(totalLength, contentLength || null)
+  }
+
+  try {
+    const body = response.body
+    if (body && typeof body.getReader === 'function') {
+      const reader = body.getReader()
+      try {
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          appendChunk(value)
+        }
+      } catch (error) {
+        try { await reader.cancel() } catch {}
+        throw error
+      } finally {
+        if (reader.releaseLock) reader.releaseLock()
+      }
+    } else if (body && typeof body[Symbol.asyncIterator] === 'function') {
+      for await (const chunk of body) appendChunk(chunk)
+    } else {
+      appendChunk(await response.arrayBuffer())
+    }
+  } finally {
+    closeSync(fd)
+  }
+
+  return {
+    ok: response.ok,
+    status: response.status,
+    statusText: response.statusText,
+    url: response.url || url,
+    headers,
+    byteLength: totalLength
   }
 }
 

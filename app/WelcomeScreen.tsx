@@ -11,30 +11,34 @@ const PEERSKY_ICON = require('../assets/images/logo.png')
 
 // Four things worth knowing before the first page loads, and nothing else. A
 // tour is something to escape from; this is one screen with one button.
+//
+// Device to device goes first because it is the one thing no other browser
+// does, and each card is short enough to take in at a glance. Ordinary
+// websites go last: they are the part nobody needs convincing of.
 const QUALITIES = [
   {
-    id: 'p2p',
-    Icon: GlobeIcon,
-    title: 'Every site, plus peer to peer ones',
-    body: 'Normal websites work exactly as they do anywhere else. PeerSky also opens pages shared straight from other people’s devices, which keep working when the internet does not.'
+    id: 'together',
+    Icon: PeopleIcon,
+    title: 'Share data device to device',
+    body: 'Chats, notes and music go straight between phones. There is no server. Your phone is the server.'
   },
   {
     id: 'yours',
     Icon: DatabaseIcon,
     title: 'We know nothing about you',
-    body: 'Nothing about you is sent to us, because there is nowhere to send it. Your tabs, files, messages and keys stay on this phone, and Settings lets you delete any of them.'
+    body: 'Your tabs, chats and files stay on this phone. They are yours, not ours.'
   },
   {
     id: 'clean',
     Icon: ShieldLockIcon,
     title: 'No ads, no trackers, no account',
-    body: 'Ads and trackers are blocked before a page can load them. There is nothing to sign up for, and nothing about you is collected.'
+    body: 'Blocked before a page can load them. Nothing to sign up for.'
   },
   {
-    id: 'together',
-    Icon: PeopleIcon,
-    title: 'Chat and share, device to device',
-    body: 'Messages, notes and music go straight from your phone to theirs, encrypted the whole way. No server keeps a copy, because there is no server.'
+    id: 'web',
+    Icon: GlobeIcon,
+    title: 'Works with every website',
+    body: 'Normal sites work as usual. PeerSky also opens sites that live on people’s devices instead of servers.'
   }
 ]
 

@@ -260,6 +260,44 @@ function restorePersistedSource (source, url) {
   return { kind: 'restore', url }
 }
 
+/**
+ * Adds tabs that came from another device, after the ones already open. A
+ * page that is already open is not opened twice, the tab limit holds, and the
+ * tab on screen stays the one on screen: these load when they are chosen.
+ */
+export function appendIncomingBrowserTabs (state, incoming) {
+  const list = Array.isArray(incoming?.tabs) ? incoming.tabs : []
+  if (list.length === 0) return state
+
+  const openUrls = new Set(state.tabs.map((tab) => tab.history[tab.historyIndex]?.url).filter(Boolean))
+  const usedIds = new Set(state.tabs.map((tab) => tab.id))
+  const tabs = [...state.tabs]
+  let nextTabIndex = state.nextTabIndex
+
+  for (const item of list) {
+    if (tabs.length >= MAX_BROWSER_TABS) break
+    const url = typeof item?.url === 'string' ? item.url : ''
+    if (!/^(?:https?|hyper):\/\/\S+$/i.test(url) || openUrls.has(url)) continue
+
+    while (usedIds.has(`tab-${nextTabIndex}`)) nextTabIndex += 1
+    const tab = restoreBrowserTab({
+      id: `tab-${nextTabIndex}`,
+      title: typeof item.title === 'string' && item.title ? item.title : url,
+      historyIndex: 0,
+      history: [{ url, source: isWebUrl(url) ? { kind: 'web', uri: url } : { kind: 'restore', url } }]
+    })
+    if (!tab) continue
+
+    usedIds.add(tab.id)
+    openUrls.add(url)
+    nextTabIndex += 1
+    tabs.push(tab)
+  }
+
+  if (tabs.length === state.tabs.length) return state
+  return { ...state, tabs, nextTabIndex }
+}
+
 export function switchBrowserTabState (state, tabId) {
   if (!state.tabs.some((tab) => tab.id === tabId)) return state
 

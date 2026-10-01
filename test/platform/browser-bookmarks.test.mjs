@@ -7,6 +7,7 @@ import {
   isBrowserUrlBookmarked,
   MAX_BROWSER_BOOKMARKS,
   MAX_BROWSER_BOOKMARK_TITLE_LENGTH,
+  mergeIncomingBrowserBookmarks,
   parseBrowserBookmarks,
   removeBrowserBookmark,
   serializeBrowserBookmarks
@@ -264,5 +265,31 @@ describe('browser bookmarks', () => {
     assert.equal(canBookmarkBrowserPage('app', 'peersky://p2p/p2pmd/'), false)
     assert.equal(canBookmarkBrowserPage('error', 'https://example.com/'), false)
     assert.equal(canBookmarkBrowserPage('restore', 'hyper://akhilesh.art/'), false)
+  })
+})
+
+describe('bookmarks from another device', () => {
+  test('go after the ones already here, and nothing is bookmarked twice', () => {
+    const mine = addBrowserBookmark([], { url: 'https://mine.example/', title: 'Mine', createdAt: 5 })
+    const merged = mergeIncomingBrowserBookmarks(mine, {
+      bookmarks: [
+        { url: 'https://mine.example/', title: 'Same page', createdAt: 1 },
+        { url: 'https://desktop.example/', title: 'From the desktop', createdAt: 2 },
+        { url: 'peersky://settings', title: 'Desktop only', createdAt: 3 },
+        { url: 'https://broken.example/', title: 'No date' }
+      ]
+    })
+
+    assert.deepEqual(merged.map((bookmark) => bookmark.url), ['https://mine.example/', 'https://desktop.example/'])
+    assert.equal(merged[0].title, 'Mine')
+    assert.equal(mergeIncomingBrowserBookmarks(mine, { bookmarks: [] }), mine)
+    assert.equal(mergeIncomingBrowserBookmarks(mine, null), mine)
+  })
+
+  test('stop at the bookmark limit', () => {
+    const full = Array.from({ length: MAX_BROWSER_BOOKMARKS }, (_, index) => ({ url: `https://example.com/${index}`, title: `${index}`, createdAt: index }))
+    const mine = parseBrowserBookmarks({ items: full })
+    const merged = mergeIncomingBrowserBookmarks(mine, { bookmarks: [{ url: 'https://one-more.example/', title: 'No room', createdAt: 1 }] })
+    assert.equal(merged.length, MAX_BROWSER_BOOKMARKS)
   })
 })

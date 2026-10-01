@@ -26,6 +26,9 @@ import {
 const JOIN_READY_ATTEMPTS = 12
 const JOIN_READY_DELAY_MS = 500
 const JOIN_READY_REQUEST_TIMEOUT_MS = 3000
+// How long a shared note is looked for on the person's other devices before
+// this phone hosts its own copy.
+const SHARED_NOTE_LOOK_MS = 8000
 
 let room = null
 let roomTransition = Promise.resolve()
@@ -34,7 +37,10 @@ export async function createP2pmdRoom ({
   connector,
   secure = true,
   udp = false,
-  log = false
+  log = false,
+  // Hosting a shared note nobody else has open: only from a copy. Without
+  // one, an empty note would go up in place of the real one.
+  requireCopy = false
 } = {}) {
   return withRoomTransition(async () => {
     await disconnectRoomInternal()
@@ -44,6 +50,11 @@ export async function createP2pmdRoom ({
       if (snapshot) {
         const restored = updateDocumentState(snapshot.content, snapshot.lineAttributions)
         if (!restored.ok) return restored
+      } else if (requireCopy) {
+        return {
+          ok: false,
+          error: 'Nobody has this note open right now, and there is no copy of it on this phone.'
+        }
       }
     }
 
@@ -112,7 +123,12 @@ export async function createP2pmdRoom ({
 export async function joinP2pmdRoom ({
   key,
   udp = false,
-  log = false
+  log = false,
+  // Looking for a shared note on the person's other devices. A join is
+  // listening locally whether or not anyone hosts the note, so here a room
+  // that does not answer is reported as nobody there, for the caller to host
+  // its own copy, instead of being joined and retried.
+  probe = false
 } = {}) {
   return withRoomTransition(async () => {
     await disconnectRoomInternal()
@@ -146,8 +162,12 @@ export async function joinP2pmdRoom ({
 
     let warning = null
     try {
-      await waitForJoinedRoomReady(boundPort)
+      await waitForJoinedRoomReady(boundPort, probe ? SHARED_NOTE_LOOK_MS : null)
     } catch (error) {
+      if (probe) {
+        await stopHolesail()
+        return { ok: false, noHost: true, error: 'Nobody has this note open right now.' }
+      }
       warning = `Holesail proxy is listening, but the room did not answer readiness checks yet. The editor will keep retrying. (${getErrorMessage(error)})`
     }
 
@@ -237,12 +257,17 @@ async function withRoomTransition (operation) {
   }
 }
 
-async function waitForJoinedRoomReady (port) {
+// Tries a fixed number of times, or, given a time budget, until it runs out.
+async function waitForJoinedRoomReady (port, budgetMs = null) {
   let lastError = null
+  const deadline = budgetMs === null ? null : Date.now() + budgetMs
 
-  for (let attempt = 0; attempt < JOIN_READY_ATTEMPTS; attempt++) {
+  for (let attempt = 0; deadline === null ? attempt < JOIN_READY_ATTEMPTS : Date.now() < deadline; attempt++) {
     try {
-      if (await requestP2pmdStatus(port)) return
+      const timeoutMs = deadline === null
+        ? JOIN_READY_REQUEST_TIMEOUT_MS
+        : Math.min(JOIN_READY_REQUEST_TIMEOUT_MS, Math.max(500, deadline - Date.now()))
+      if (await requestP2pmdStatus(port, timeoutMs)) return
     } catch (error) {
       lastError = error
     }
@@ -253,7 +278,7 @@ async function waitForJoinedRoomReady (port) {
   throw new Error(lastError?.message || 'Timed out waiting for joined P2PMD room.')
 }
 
-function requestP2pmdStatus (port) {
+function requestP2pmdStatus (port, timeoutMs = JOIN_READY_REQUEST_TIMEOUT_MS) {
   return new Promise((resolve, reject) => {
     let body = ''
     let settled = false
@@ -292,7 +317,7 @@ function requestP2pmdStatus (port) {
         req.destroy()
       } catch {}
       settle(new Error('Timed out probing joined P2PMD room.'))
-    }, JOIN_READY_REQUEST_TIMEOUT_MS)
+    }, timeoutMs)
     req.end()
   })
 }

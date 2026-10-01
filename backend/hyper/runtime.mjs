@@ -15,6 +15,8 @@ import {
   getPrivateDriveKey,
   getPrivateDriveId,
   getPrivateDriveKeyRecord,
+  hasPrivateDriveKey,
+  linkedPrivateDriveKey,
   rememberPrivateDriveId,
   resetPrivateDriveKeyCache
 } from './private-keys.mjs'
@@ -29,6 +31,7 @@ import {
   createSyncedPrivateHyperRuntimeOptions,
   isAdoptedSyncedPrivateDrive,
   matchesHyperdriveAddress,
+  normalizeDriveAddressId,
   readSyncedPrivateAdoptedDrives
 } from './runtime-routing.mjs'
 import {
@@ -37,6 +40,7 @@ import {
   HYPERDRIVE_PRIVATE_DRIVE_NAME
 } from './storage-core.mjs'
 import { refreshHyperRuntimeNetwork } from './network-refresh.mjs'
+import { getDefaultIdentityStoragePath } from '../backup/device-keys.mjs'
 
 let sdk = null
 let sdkOpening = null
@@ -73,17 +77,106 @@ export function withSyncedPrivateHyperRuntimeOperation (task) {
 
 export function withHyperRuntimeForAddress (address, task) {
   return runtimeCoordinator.runOperation(async () => {
+    await learnSyncedPrivateDriveId()
     if (isDeviceOnlyHyperdriveAddress(address)) return task(await getPrivateHyperRuntime())
-    if (isSyncedPrivateHyperdriveAddress(address)) return task(await getSyncedPrivateHyperRuntime())
+    if (isSyncedPrivateHyperdriveAddress(address)) return task(withPrivateDriveKeys(await getSyncedPrivateHyperRuntime()))
     return task(await getHyperRuntime())
   })
+}
+
+// Until this version the phone never saved which drive its private one was
+// (see driveIdOf), so after a restart it could not tell a link to its own
+// private files from anyone else's, and read them from the public store. A
+// phone with a private key but no saved drive opens the drive once, which
+// saves it.
+let learningSyncedPrivateDriveId = null
+
+async function learnSyncedPrivateDriveId () {
+  if (getSyncedPrivateDriveId()) return
+  const storage = syncedPrivateStoragePath || (typeof Bare !== 'undefined' ? getSyncedPrivateHyperSdkStoragePath() : null)
+  if (!storage || !hasPrivateDriveKey(storage)) return
+  if (!learningSyncedPrivateDriveId) {
+    learningSyncedPrivateDriveId = getSyncedPrivateHyperRuntime()
+      .catch(() => {})
+      .finally(() => { learningSyncedPrivateDriveId = null })
+  }
+  await learningSyncedPrivateDriveId
+}
+
+// The SDK opens a drive by address without its encryption key, and an
+// encrypted drive read that way is only ciphertext. That is how the browser
+// reads (hypercore-fetch asks the SDK), so a private link never opened on
+// the phone that made it. The runtime handed out for a private address gives
+// back this phone's own private drive, and the drives adopted from a desktop,
+// already opened with their keys; anything else goes to the SDK as before.
+const keyedRuntimes = new WeakMap()
+
+function withPrivateDriveKeys (runtime) {
+  if (!runtime || typeof runtime !== 'object') return runtime
+  const existing = keyedRuntimes.get(runtime)
+  if (existing) return existing
+
+  const keyed = new Proxy(runtime, {
+    get (target, property) {
+      if (property === 'getDrive') {
+        return async (nameOrKeyOrUrl, opts) => {
+          const drive = await getKeyedPrivateHyperdrive(nameOrKeyOrUrl)
+          return drive || target.getDrive(nameOrKeyOrUrl, opts)
+        }
+      }
+      const value = Reflect.get(target, property, target)
+      return typeof value === 'function' ? value.bind(target) : value
+    }
+  })
+  keyedRuntimes.set(runtime, keyed)
+  return keyed
+}
+
+/**
+ * This phone's own private drive or a drive adopted from a desktop, opened
+ * with its key, for an address, a hex id or a raw key. Null for any other.
+ */
+export async function getKeyedPrivateHyperdrive (address) {
+  const id = b4a.isBuffer(address) ? b4a.toString(address, 'hex') : normalizeDriveAddressId(address)
+  if (!id) return null
+  if (id === getSyncedPrivateDriveId()) return getSyncedPrivateHyperdrive()
+  const storage = syncedPrivateStoragePath || (typeof Bare !== 'undefined' ? getSyncedPrivateHyperSdkStoragePath() : null)
+  if (isAdoptedSyncedPrivateDrive(storage, id)) return getSyncedPrivateHyperdriveForId(id)
+  return null
 }
 
 export function withHyperRuntimeMaintenance (task, prepare) {
   return runtimeCoordinator.runMaintenance(task, prepare)
 }
 
+// While Link Device packs or replaces the stores, nothing may open them.
+// PeerChat and the storage listing open the runtime directly rather than
+// through the coordinator, so a maintenance window alone does not hold them
+// back: PeerChat polls every few seconds, and one poll landing mid-backup
+// reopened the store and rewrote files the backup was reading.
+let storesHeld = null
+
+export function holdHyperStores () {
+  let release
+  const held = new Promise((resolve) => { release = resolve })
+  storesHeld = held
+  return () => {
+    if (storesHeld === held) storesHeld = null
+    release()
+  }
+}
+
+async function waitForHeldStores () {
+  let held = storesHeld
+  while (held) {
+    await held
+    held = storesHeld
+  }
+}
+
 export async function getHyperRuntime () {
+  if (sdk) return sdk
+  await waitForHeldStores()
   if (sdk) return sdk
 
   if (!sdkOpening) {
@@ -104,6 +197,8 @@ export async function getHyperRuntime () {
 }
 
 export async function getPrivateHyperRuntime () {
+  if (deviceOnlySdk) return deviceOnlySdk
+  await waitForHeldStores()
   if (deviceOnlySdk) return deviceOnlySdk
 
   if (!deviceOnlySdkOpening) {
@@ -129,6 +224,8 @@ export async function getPrivateHyperRuntime () {
 }
 
 export async function getSyncedPrivateHyperRuntime () {
+  if (syncedPrivateSdk) return syncedPrivateSdk
+  await waitForHeldStores()
   if (syncedPrivateSdk) return syncedPrivateSdk
 
   if (!syncedPrivateSdkOpening) {
@@ -160,7 +257,7 @@ export async function getSyncedPrivateHyperdrive (runtime = null) {
     const target = runtime || await getSyncedPrivateHyperRuntime()
     const storage = syncedPrivateStoragePath || getSyncedPrivateHyperSdkStoragePath()
     const driveId = getSyncedPrivateDriveId()
-    const encryptionKey = getPrivateDriveKey(storage)
+    const encryptionKey = getPrivateDriveKey(storage, { linkedKey: linkedPrivateDriveKey(getDefaultIdentityStoragePath()) })
     if (!driveId && !encryptionKey) throw new Error('Private drive encryption key is unavailable.')
 
     const announce = encryptionKey !== null && shouldAnnounceSyncedPrivateDrive(storage)
@@ -246,6 +343,8 @@ export async function getSyncedPrivateHyperdriveForId (driveId, runtime = null) 
 
 export async function getAdoptedPrivateHyperRuntime () {
   if (adoptedSdk) return adoptedSdk
+  await waitForHeldStores()
+  if (adoptedSdk) return adoptedSdk
 
   if (!adoptedSdkOpening) {
     adoptedStoragePath = adoptedStoragePathFor(getSyncedPrivateHyperSdkStoragePath())
@@ -272,9 +371,20 @@ export async function getAdoptedPrivateHyperRuntime () {
   }
 }
 
+// Drive ids are kept as hex: that is what every lookup compares against
+// (normalizeDriveAddressId turns an address into hex), and what the key
+// record accepts. drive.id is the z32 form, and keeping that meant this
+// phone never recognised a link to its own private or device-only drive,
+// and never saved which drive its private one was.
+function driveIdOf (drive) {
+  if (drive?.key && b4a.isBuffer(drive.key)) return b4a.toString(drive.key, 'hex')
+  return normalizeDriveAddressId(drive?.id)
+}
+
 export function rememberDeviceOnlyHyperdrive (drive) {
-  if (!drive?.id) return
-  deviceOnlyDriveId = String(drive.id).toLowerCase()
+  const id = driveIdOf(drive)
+  if (!id) return
+  deviceOnlyDriveId = id
 
   const path = deviceOnlyStoragePath || (typeof Bare !== 'undefined' ? getPrivateHyperSdkStoragePath() : null)
   if (!path) return
@@ -285,8 +395,9 @@ export function rememberDeviceOnlyHyperdrive (drive) {
 }
 
 export function rememberSyncedPrivateHyperdrive (drive) {
-  if (!drive?.id) return
-  syncedPrivateDriveId = String(drive.id).toLowerCase()
+  const id = driveIdOf(drive)
+  if (!id) return
+  syncedPrivateDriveId = id
 
   const path = syncedPrivateStoragePath || (typeof Bare !== 'undefined' ? getSyncedPrivateHyperSdkStoragePath() : null)
   if (!path) return
@@ -442,7 +553,8 @@ function getDeviceOnlyDriveId () {
   if (typeof Bare !== 'undefined') {
     try {
       const parsed = JSON.parse(readFileSync(getDeviceOnlyDriveIdFile(), 'utf8'))
-      if (parsed && typeof parsed.driveId === 'string') deviceOnlyDriveId = String(parsed.driveId).toLowerCase()
+      // Older versions wrote the z32 form.
+      if (parsed && typeof parsed.driveId === 'string') deviceOnlyDriveId = normalizeDriveAddressId(parsed.driveId)
     } catch {}
   }
 
@@ -451,7 +563,7 @@ function getDeviceOnlyDriveId () {
 
 function getSyncedPrivateDriveId () {
   if (syncedPrivateDriveId) return syncedPrivateDriveId
-  if (syncedPrivateDrive?.id) syncedPrivateDriveId = String(syncedPrivateDrive.id).toLowerCase()
+  if (syncedPrivateDrive) syncedPrivateDriveId = driveIdOf(syncedPrivateDrive)
   const path = syncedPrivateStoragePath || (typeof Bare !== 'undefined' ? getSyncedPrivateHyperSdkStoragePath() : null)
   if (!syncedPrivateDriveId && path) syncedPrivateDriveId = getPrivateDriveId(path)
   return syncedPrivateDriveId

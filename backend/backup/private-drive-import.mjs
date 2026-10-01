@@ -1,11 +1,17 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import z32 from 'z32'
 import {
+  getPrivateDriveId,
   isValidPrivateDriveId,
   normalizePrivateDriveKey
 } from '../hyper/private-keys.mjs'
-import { ADOPTED_CORESTORE_FILE, adoptedStoragePathFor, readSyncedPrivateAdoptedDrives } from '../hyper/runtime-routing.mjs'
+import {
+  ADOPTED_CORESTORE_FILE,
+  adoptedStoragePathFor,
+  movedAdoptedCorestoreFile,
+  readSyncedPrivateAdoptedDrives
+} from '../hyper/runtime-routing.mjs'
 
 const PRIVATE_DRIVE_TRANSFER_ENTRY = 'private-drive-key.json'
 const PRIVATE_HYPERDRIVES_REGISTRY = 'privateHyperdrives.json'
@@ -43,7 +49,12 @@ export { extractTransferredPrivateDrives, extractTransferredPrivateDrives as ext
 export function adoptTransferredPrivateDrive (storagePath, syncedPrivateStoragePath, adoptedStoragePath = null) {
   if (!storagePath || !syncedPrivateStoragePath) return { adopted: false }
 
+  // The desktop lists every private drive it can open, and that includes this
+  // phone's own once the phone has sent it over. Adopting it would make the
+  // phone's own drive read-only here.
+  const ownDriveId = getPrivateDriveId(syncedPrivateStoragePath)
   const transferred = extractTransferredPrivateDrives(storagePath)
+    .filter((entry) => entry.driveId !== ownDriveId)
   if (transferred.length === 0) return { adopted: false }
 
   const adoptedStorePath = adoptedStoragePath || adoptedStoragePathFor(syncedPrivateStoragePath)
@@ -235,4 +246,6 @@ function writeAdoptedCorestoreMarker (syncedPrivateStoragePath, transferred) {
     version: 2,
     drives
   }, null, 2))
+  // A copy the storage layer moved into db/ is in the one just written.
+  rmSync(movedAdoptedCorestoreFile(syncedPrivateStoragePath), { force: true })
 }

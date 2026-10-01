@@ -1,4 +1,7 @@
+import { join } from 'node:path'
 import { getHyperRuntime, getHyperStoragePath } from '../hyper/runtime.mjs'
+import { getDefaultIdentityStoragePath } from '../backup/device-keys.mjs'
+import { PEERCHAT_INCOMING_FILE } from './device-link.mjs'
 import { PeerChatService } from './service.mjs'
 
 let service = null
@@ -24,7 +27,9 @@ export async function getPeerChatService () {
       if (previousService) await previousService.close()
       const nextService = new PeerChatService({
         sdk,
-        storagePath: getHyperStoragePath() || 'hyper-storage'
+        storagePath: getHyperStoragePath() || 'hyper-storage',
+        // A restore puts what it brings in the identity folder.
+        incomingPath: join(getDefaultIdentityStoragePath(), PEERCHAT_INCOMING_FILE)
       })
       try {
         await nextService.start()
@@ -48,6 +53,15 @@ export async function getPeerChatService () {
   } finally {
     if (serviceOpening === opening) serviceOpening = null
   }
+}
+
+/**
+ * PeerChat for a transfer to another of this person's devices, or null when
+ * there is no PeerChat name here yet.
+ */
+export async function exportPeerChatTransfer (targetType) {
+  const peerChat = await getPeerChatService()
+  return peerChat.exportTransfer({ targetType })
 }
 
 export async function closePeerChatService () {

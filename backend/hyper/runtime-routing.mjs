@@ -74,10 +74,21 @@ export function isAdoptedSyncedPrivateDrive (storage, driveId) {
   return readSyncedPrivateAdoptedDrives(storage).some((entry) => entry.driveId === id)
 }
 
+// Where the storage layer puts the marker on a phone that had no private
+// store yet when it adopted a drive. A folder with no CORESTORE file looks
+// like an old layout to hypercore-storage, which moves every file it does
+// not know into db/ when the store first opens, and a phone linked before
+// its first private upload has only this marker there. Read from here, the
+// drive stays known; the next adoption writes it back where it belongs.
+export function movedAdoptedCorestoreFile (storage) {
+  return join(getStorageRoot(storage), 'db', ADOPTED_CORESTORE_FILE)
+}
+
 export function readSyncedPrivateAdoptedDrives (storage) {
   if (!storage) return []
   try {
-    const markerPath = join(getStorageRoot(storage), ADOPTED_CORESTORE_FILE)
+    let markerPath = join(getStorageRoot(storage), ADOPTED_CORESTORE_FILE)
+    if (!existsSync(markerPath)) markerPath = movedAdoptedCorestoreFile(storage)
     if (!existsSync(markerPath)) return []
     const marker = JSON.parse(readFileSync(markerPath, 'utf8'))
     if (!marker || typeof marker !== 'object') return []

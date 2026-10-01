@@ -7,7 +7,8 @@ import { randomBytes } from 'hypercore-crypto'
 
 export const PAIRING_NONCE_FILE = 'pairing-nonce.json'
 
-// Matched to the ceiling decryptIdentityTransfer enforces, so a live nonce can
+// Matched to the ceiling a transfer is held to (desktop-transfer.mjs and
+// phone-backup.mjs), so a live nonce can
 // never outlast a transfer built against it.
 export const PAIRING_NONCE_TTL_MS = 15 * 60 * 1000
 

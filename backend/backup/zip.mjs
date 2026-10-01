@@ -79,11 +79,6 @@ export function readZipEntries (zipBytes) {
   return entries
 }
 
-export function readZipFile (zipBytes, name) {
-  const entry = readZipEntries(zipBytes).find((candidate) => candidate.name === name)
-  return entry ? entry.bytes : null
-}
-
 function readEntryData (zipBytes, entry) {
   if ((entry.flags & 0x1) !== 0) {
     throw new Error(`ZIP entry is encrypted: ${entry.name}`)

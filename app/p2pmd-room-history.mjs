@@ -77,16 +77,62 @@ export function recordP2pmdRoom (rooms, {
   const room = normalizeP2pmdRoomHistoryEntry({ key, role, label, lastOpenedAt })
   if (!room) return rooms
 
+  const known = rooms.find((item) => item.key === room.key)
   // Reopening a note says nothing about its contents, so a name already
   // worked out is kept rather than blanked.
-  if (!room.label) {
-    const known = rooms.find((item) => item.key === room.key)
-    if (known?.label) room.label = known.label
+  if (!room.label && known?.label) room.label = known.label
+  // Nor does it stop the note being on another device: joined or hosted this
+  // time, it is still looked for there first next time.
+  if (known?.shared) {
+    room.role = 'host'
+    room.shared = true
   }
 
   return parseP2pmdRoomHistory({
     items: [room, ...rooms.filter((item) => item.key !== room.key)]
   })
+}
+
+/**
+ * Notes another of this person's devices sent, as the backend took them: a
+ * hosted one only when this phone now has a copy of it. A note already in the
+ * list keeps its name; it becomes shared when it now has a copy here.
+ */
+export function mergeP2pmdRoomsFromDevice (rooms, incoming) {
+  const merged = [...rooms]
+  for (const value of Array.isArray(incoming) ? incoming : []) {
+    const note = normalizeP2pmdRoomHistoryEntry(value)
+    if (!note) continue
+    const index = merged.findIndex((item) => item.key === note.key)
+    if (index === -1) {
+      merged.push(note)
+      continue
+    }
+    const known = merged[index]
+    merged[index] = {
+      ...known,
+      label: known.label || note.label,
+      lastOpenedAt: Math.max(known.lastOpenedAt, note.lastOpenedAt),
+      ...(note.shared && { role: 'host', shared: true })
+    }
+  }
+  return parseP2pmdRoomHistory({ items: merged })
+}
+
+/**
+ * Hosted notes that just went to another device with their text. This phone
+ * looks for them there before hosting them itself from now on.
+ */
+export function markP2pmdRoomsShared (rooms, keys) {
+  const shared = new Set(Array.isArray(keys) ? keys.map(normalizeP2pmdRoomKey).filter(Boolean) : [])
+  if (shared.size === 0) return rooms
+  let changed = false
+  const next = rooms.map((room) => {
+    if (room.role !== 'host' || room.shared || !shared.has(room.key)) return room
+    changed = true
+    return { ...room, shared: true }
+  })
+  return changed ? next : rooms
 }
 
 export function formatP2pmdRoomHistoryKey (key) {
@@ -133,15 +179,19 @@ export function normalizeP2pmdRoomLabel (value) {
     .slice(0, MAX_P2PMD_ROOM_LABEL_LENGTH)
 }
 
+// shared: a note this phone hosts that is on another of the person's devices
+// too. It is joined there first when that device has it open, and hosted here
+// from this phone's copy only when nobody does.
 function normalizeP2pmdRoomHistoryEntry (value) {
   const key = normalizeP2pmdRoomKey(value?.key)
   const role = value?.role === 'host' ? 'host' : 'client'
   const label = normalizeP2pmdRoomLabel(value?.label)
   const lastOpenedAt = Number(value?.lastOpenedAt)
+  const shared = role === 'host' && value?.shared === true
 
   if (!key || !Number.isSafeInteger(lastOpenedAt) || lastOpenedAt < 0) {
     return null
   }
 
-  return { key, role, label, lastOpenedAt }
+  return { key, role, label, lastOpenedAt, ...(shared && { shared: true }) }
 }

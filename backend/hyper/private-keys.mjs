@@ -22,14 +22,30 @@ export function getPrivateDriveKeyRecord (storagePath) {
   }
 }
 
-export function getPrivateDriveKey (storagePath) {
+// linkedKey: the key a desktop sent with its identity, if this phone has had
+// one. A phone that has no key of its own yet takes that one instead of
+// making its own, so the desktop can open this phone's private files too.
+// A key already made is never swapped: the files under it would be lost.
+export function getPrivateDriveKey (storagePath, { linkedKey = null } = {}) {
   if (!storagePath) return null
   if (cachedEntry && cachedEntry.path === storagePath) return cachedEntry.key
 
   const record = getPrivateDriveKeyRecord(storagePath)
-  const key = record.ok ? record.key : loadOrCreatePrivateDriveKey(storagePath)
+  const key = record.ok ? record.key : loadOrCreatePrivateDriveKey(storagePath, linkedKey)
   cachedEntry = { path: storagePath, key }
   return key
+}
+
+/**
+ * The private drive key a desktop sent with its identity, or null when this
+ * phone has not had one. A desktop transfer leaves it at the top of storage
+ * (restore.mjs keeps private-drive-key.json), apart from the phone's own key,
+ * which lives in the synced private store.
+ */
+export function linkedPrivateDriveKey (identityStoragePath) {
+  if (!identityStoragePath) return null
+  const record = getPrivateDriveKeyRecord(identityStoragePath)
+  return record.ok && record.key && record.encrypted ? record.key : null
 }
 
 export function resetPrivateDriveKeyCache () {
@@ -187,7 +203,7 @@ function normalizePrivateDriveKeyRecord (parsed) {
   }
 }
 
-function loadOrCreatePrivateDriveKey (storagePath) {
+function loadOrCreatePrivateDriveKey (storagePath, linkedKey = null) {
   const filePath = getPrivateDriveKeyFile(storagePath)
 
   try {
@@ -198,7 +214,9 @@ function loadOrCreatePrivateDriveKey (storagePath) {
   } catch {
   }
 
-  const key = randomBytes(PRIVATE_DRIVE_KEY_BYTES)
+  const key = linkedKey && linkedKey.byteLength === PRIVATE_DRIVE_KEY_BYTES
+    ? b4a.from(linkedKey)
+    : randomBytes(PRIVATE_DRIVE_KEY_BYTES)
   const serialized = JSON.stringify({
     version: 2,
     createdAt: new Date().toISOString(),

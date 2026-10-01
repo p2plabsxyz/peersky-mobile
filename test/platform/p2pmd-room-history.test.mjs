@@ -2,8 +2,10 @@ import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 import {
   formatP2pmdRoomHistoryKey,
+  markP2pmdRoomsShared,
   MAX_P2PMD_ROOM_HISTORY_FILE_BYTES,
   MAX_P2PMD_RECENT_ROOMS,
+  mergeP2pmdRoomsFromDevice,
   normalizeP2pmdRoomKey,
   parseP2pmdNoteLink,
   parseP2pmdRoomHistory,
@@ -132,6 +134,76 @@ describe('P2PMD room history', () => {
 
 // A note shared in a chat used to come back as "Unsupported URL scheme", so the
 // key had to be copied out of the message by hand.
+// A note this phone hosts that is on the person's desktop too. It is looked
+// for there first, so the two devices never host it at once and drift apart.
+describe('P2PMD notes on another device too', () => {
+  test('stays shared whichever way it is opened next', () => {
+    const shared = [{ key: roomKey('a'), role: 'host', label: 'Note - Plans', lastOpenedAt: 1, shared: true }]
+
+    // Joined live on the desktop, or reopened from the copy here.
+    for (const role of ['client', 'host']) {
+      assert.deepEqual(recordP2pmdRoom(shared, { key: roomKey('a'), role, lastOpenedAt: 9 }), [
+        { key: roomKey('a'), role: 'host', label: 'Note - Plans', lastOpenedAt: 9, shared: true }
+      ])
+    }
+  })
+
+  test('is only ever a note this phone hosts, and survives the file', () => {
+    assert.deepEqual(parseP2pmdRoomHistory({ items: [{ key: roomKey('a'), role: 'client', lastOpenedAt: 1, shared: true }] }), [
+      { key: roomKey('a'), role: 'client', label: '', lastOpenedAt: 1 }
+    ])
+    const rooms = [{ key: roomKey('a'), role: 'host', label: '', lastOpenedAt: 1, shared: true }]
+    assert.deepEqual(parseP2pmdRoomHistory(serializeP2pmdRoomHistory(rooms)), rooms)
+  })
+
+  test('takes a desktop\'s notes without replacing anything here', () => {
+    const rooms = [
+      { key: roomKey('a'), role: 'client', label: 'Mine', lastOpenedAt: 50 },
+      { key: roomKey('b'), role: 'host', label: 'Also mine', lastOpenedAt: 40 }
+    ]
+
+    const merged = mergeP2pmdRoomsFromDevice(rooms, [
+      // Joined here before; now this phone has a copy of it too.
+      { key: roomKey('a'), role: 'host', label: 'Theirs', lastOpenedAt: 10, shared: true },
+      { key: roomKey('c'), role: 'host', label: 'New', lastOpenedAt: 45, shared: true },
+      { key: roomKey('d'), role: 'client', label: 'Joined there', lastOpenedAt: 30, shared: false },
+      { key: 'not a key', role: 'host', lastOpenedAt: 99 }
+    ])
+
+    assert.deepEqual(merged, [
+      { key: roomKey('a'), role: 'host', label: 'Mine', lastOpenedAt: 50, shared: true },
+      { key: roomKey('c'), role: 'host', label: 'New', lastOpenedAt: 45, shared: true },
+      { key: roomKey('b'), role: 'host', label: 'Also mine', lastOpenedAt: 40 },
+      { key: roomKey('d'), role: 'client', label: 'Joined there', lastOpenedAt: 30 }
+    ])
+  })
+
+  test('keeps the five most recent after taking a desktop\'s', () => {
+    const rooms = ['a', 'b', 'c', 'd', 'e'].map((character, index) => ({ key: roomKey(character), role: 'host', label: '', lastOpenedAt: index }))
+    const incoming = ['v', 'w', 'x', 'y', 'z'].map((character, index) => ({ key: roomKey(character), role: 'client', label: '', lastOpenedAt: 10 + index }))
+
+    assert.deepEqual(
+      mergeP2pmdRoomsFromDevice(rooms, incoming).map((room) => room.key),
+      ['z', 'y', 'x', 'w', 'v'].map(roomKey)
+    )
+  })
+
+  test('marks only hosted notes that went with their text', () => {
+    const rooms = [
+      { key: roomKey('a'), role: 'host', label: '', lastOpenedAt: 2 },
+      { key: roomKey('b'), role: 'client', label: '', lastOpenedAt: 1 }
+    ]
+
+    assert.deepEqual(markP2pmdRoomsShared(rooms, [roomKey('a'), roomKey('b')]), [
+      { key: roomKey('a'), role: 'host', label: '', lastOpenedAt: 2, shared: true },
+      { key: roomKey('b'), role: 'client', label: '', lastOpenedAt: 1 }
+    ])
+    // Nothing to change returns the same list, so nothing is written.
+    assert.equal(markP2pmdRoomsShared(rooms, []), rooms)
+    assert.equal(markP2pmdRoomsShared(rooms, [roomKey('b')]), rooms)
+  })
+})
+
 describe('P2PMD note links', () => {
   test('an hs:// address is a note key', () => {
     assert.equal(parseP2pmdNoteLink(roomKey('a')), roomKey('a'))

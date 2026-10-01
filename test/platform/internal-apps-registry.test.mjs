@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 import { describe, test } from 'node:test'
 import {
   INTERNAL_APPS,
+  P2P_APPS,
   getRuntimeAppFromUrl,
   getRuntimeAppLaunchSuffix,
   getRuntimeAppTitle,
@@ -41,6 +42,31 @@ describe('internal app registry', () => {
     assert.equal(getRuntimeAppFromUrl('peersky://hyper'), 'hyper')
     assert.equal(getRuntimeAppFromUrl('peersky://p2p/peertunes-extra/'), null)
     assert.equal(getRuntimeAppFromUrl('https://example.com/#peersky://p2p/peertunes/'), null)
+  })
+
+  // Holesail is a runtime check for the tunnel P2PMD uses. Nobody opens it on
+  // purpose, so peersky://p2p never lists it and a release build does not
+  // answer its address at all.
+  test('keeps Holesail out of the app list and out of release builds', () => {
+    assert.deepEqual(P2P_APPS.map((app) => app.id), ['hyper', 'p2pmd', 'peerchat', 'peertunes'])
+    assert.ok(INTERNAL_APPS.some((app) => app.id === 'holesail' && app.devOnly === true))
+
+    assert.equal(getRuntimeAppFromUrl('peersky://holesail/'), null)
+    assert.equal(getRuntimeAppFromUrl('peersky://holesail/', { devApps: false }), null)
+    assert.equal(getRuntimeAppFromUrl('peersky://holesail/', { devApps: true }), 'holesail')
+    // The apps people use answer either way.
+    assert.equal(getRuntimeAppFromUrl('peersky://p2p/p2pmd/', { devApps: false }), 'p2pmd')
+  })
+
+  test('the p2p page and the home grid draw from the listed apps only', async () => {
+    const app = await readFile(new URL('../../app/index.tsx', import.meta.url), 'utf8')
+    const shell = await readFile(new URL('../../app/internal-apps.ts', import.meta.url), 'utf8')
+
+    assert.match(app, /\{P2P_APPS\.map\(\(app\) => \(/)
+    assert.match(app, /const BROWSER_HOME_SHORTCUTS = P2P_APPS/)
+    assert.doesNotMatch(app, /INTERNAL_APPS\.map/)
+    // Routing follows the build: a debug build still reaches Holesail.
+    assert.match(shell, /getRuntimeAppFromRegistryUrl\(targetUrl, \{ devApps: __DEV__ \}\)/)
   })
 
   test('hands share link payloads to the app and drops anything unsafe', () => {

@@ -15,9 +15,20 @@ import {
   encryptPeerChatMessage,
   MAX_PEERCHAT_FRAME_BYTES
 } from '../../backend/peerchat/protocol.mjs'
+import { checkRoomProof, roomProof } from '../../backend/peerchat/room-proof.mjs'
 import { PRE_JOINED_PEERCHAT_ROOM_KEY } from '../../backend/peerchat/rooms.mjs'
 
 const ROOM_KEY = 'ab'.repeat(32)
+
+// How a room is named on the wire: by its topic, never its key.
+const wireRoom = (roomKey) => derivePeerChatTopic(roomKey).toString('hex')
+
+// A frame from one service as it reaches another: through the wire, where a
+// room named by topic only comes back as a key the receiver holds.
+async function deliver (service, peer, frame) {
+  service.handlePeerPayload(peer, `${JSON.stringify(frame)}\n`)
+  await peer.processing
+}
 // The shape resizeImage produces: 369px JPEG, about 27 KB as a data url.
 const CAROL_AVATAR = `data:image/jpeg;base64,${'A'.repeat(27_000)}`
 
@@ -204,7 +215,8 @@ test('PeerChat stores, toggles, and history-syncs desktop-compatible reactions',
   await new Promise((resolve) => setTimeout(resolve, 5))
   assert.deepEqual(await syncTo('bbbbbbbb', Date.now()), ['sync-done'])
 
-  // And a peer who has not said when they joined gets nothing either.
+  // And a peer who has not said when they joined gets nothing either, not even
+  // the end of a sync: their join, when it comes, sends what they missed.
   const unknownFrames = []
   await service.syncHistoryToPeer({
     id: 'cccccccc',
@@ -215,7 +227,7 @@ test('PeerChat stores, toggles, and history-syncs desktop-compatible reactions',
       close () {}
     }
   }, room.roomKey)
-  assert.deepEqual(unknownFrames.map((frame) => frame.type), ['sync-done'])
+  assert.deepEqual(unknownFrames.map((frame) => frame.type), [])
 
   await service.reactToMessage({ roomKey: room.roomKey, msgId: sent.id, emoji: '' })
   snapshot = await service.getSnapshot({ roomKey: room.roomKey, version: -1 })
@@ -670,7 +682,7 @@ test('PeerChat verifies and completes desktop-compatible direct-message invitati
   assert.equal(accepted.room.pendingAcceptance, false)
   assert.equal(restartedReceiver.listPendingDirectMessages().length, 0)
 
-  await sender.handlePeerMessage(senderViewOfReceiver, acceptFrames.pop())
+  await deliver(sender, senderViewOfReceiver, acceptFrames.pop())
   assert.equal(sender.listRooms()[0].pendingAcceptance, false)
   const sent = await sender.sendMessage({ roomKey: outgoing.room.roomKey, message: 'Private hello' })
   assert.equal(sent.message, 'Private hello')
@@ -777,7 +789,8 @@ test('PeerChat exchanges room member lists with peers the desktop way', async (t
   // And we hand ours back the same way.
   service.shareMembers(peer, ROOM_KEY)
   const shared = frames.find((frame) => frame.type === 'members-list')
-  assert.equal(shared.roomKey, ROOM_KEY)
+  assert.equal(shared.room, wireRoom(ROOM_KEY))
+  assert.equal(shared.roomKey, undefined)
   assert.equal(shared.members.cc00cc00.username, 'Carol')
   assert.equal(shared.members.cc00cc00.avatar, CAROL_AVATAR)
 
@@ -918,7 +931,7 @@ test('PeerChat blocking stops direct messages both ways and survives a restart',
 
   const notice = blockedFrames.pop()
   assert.equal(notice.type, 'dm-blocked')
-  await sender.handlePeerMessage(senderViewOfReceiver, notice)
+  await deliver(sender, senderViewOfReceiver, notice)
   const senderSide = sender.listRooms().find((room) => room.roomKey === outgoing.room.roomKey)
   assert.equal(senderSide.blockedByPeer, true)
   // A block is not a decline: it reads differently and cannot be retried.
@@ -937,7 +950,7 @@ test('PeerChat blocking stops direct messages both ways and survives a restart',
 
   // Still blocked, so the same answer comes back.
   await receiver.handlePeerMessage(senderPeer, inviteFrames.pop())
-  await sender.handlePeerMessage(senderViewOfReceiver, blockedFrames.pop())
+  await deliver(sender, senderViewOfReceiver, blockedFrames.pop())
   assert.equal(sender.listRooms().find((room) => room.roomKey === outgoing.room.roomKey).blockedByPeer, true)
 
   // Blocking is one way. Alice can still open the room, Bob cannot start one.
@@ -1107,7 +1120,7 @@ test('PeerChat synchronizes history only once for repeated join frames', async (
   await service.close()
 })
 
-test('PeerChat exchanges derived topics and opens every mutually held room', async (t) => {
+test('PeerChat proves its rooms and opens only those a peer proves too', async (t) => {
   const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-topics-'))
   t.after(() => rm(storagePath, { recursive: true, force: true }))
   const service = await new PeerChatService({ sdk: createFakeSdk(), storagePath }).start()
@@ -1121,28 +1134,211 @@ test('PeerChat exchanges derived topics and opens every mutually held room', asy
   service.peers.set(peer.connection, peer)
   service.shareTopics(peer)
 
+  // Each room by topic, with a proof made for this connection. Never a key.
   const topicsFrame = frames.shift()
   assert.equal(topicsFrame.type, 'topics')
-  assert.deepEqual(new Set(topicsFrame.topics), new Set([
-    derivePeerChatTopic(ROOM_KEY).toString('hex'),
-    derivePeerChatTopic(otherRoomKey).toString('hex')
-  ]))
-  assert.equal(topicsFrame.topics.includes(ROOM_KEY), false)
+  assert.deepEqual(
+    new Set(topicsFrame.rooms.map((entry) => entry.topic)),
+    new Set([wireRoom(ROOM_KEY), wireRoom(otherRoomKey)])
+  )
+  for (const entry of topicsFrame.rooms) {
+    const roomKey = entry.topic === wireRoom(ROOM_KEY) ? ROOM_KEY : otherRoomKey
+    assert.equal(checkRoomProof(roomKey, peer.connection.handshakeHash, peer.connection.publicKey, entry.proof), true)
+  }
+  assert.equal(JSON.stringify(topicsFrame).includes(ROOM_KEY), false)
+  assert.equal(JSON.stringify(topicsFrame).includes(otherRoomKey), false)
 
   const sharedRooms = []
   service.shareRoom = (_peer, roomKey) => sharedRooms.push(roomKey)
+  const theirs = (roomKey) => ({ topic: wireRoom(roomKey), proof: roomProof(roomKey, peer.connection.handshakeHash, peer.key) })
   await service.handlePeerMessage(peer, {
     type: 'topics',
-    topics: [
-      derivePeerChatTopic(ROOM_KEY).toString('hex'),
-      derivePeerChatTopic(otherRoomKey).toString('hex'),
-      'ef'.repeat(32)
-    ]
+    rooms: [theirs(ROOM_KEY), theirs(otherRoomKey), { topic: 'ef'.repeat(32), proof: '00'.repeat(32) }]
   })
 
   assert.equal(peer.handshake, true)
   assert.deepEqual(peer.rooms, [ROOM_KEY, otherRoomKey])
   assert.deepEqual(sharedRooms, [otherRoomKey])
+  await service.close()
+})
+
+// Anyone watching the DHT knows a room's topic. That has to get them nothing.
+test('PeerChat opens nothing for a topic alone, or for a proof made elsewhere or bounced back', async (t) => {
+  const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-topic-only-'))
+  t.after(() => rm(storagePath, { recursive: true, force: true }))
+  const service = await new PeerChatService({ sdk: createFakeSdk(), storagePath }).start()
+  await service.joinRoom({ roomKey: ROOM_KEY, username: 'Alice' })
+
+  const frames = []
+  const eve = createFakePeer('ee00ee00', 'Eve', frames)
+  eve.rooms = []
+  service.peers.set(eve.connection, eve)
+  const sharedRooms = []
+  service.shareRoom = (_peer, roomKey) => sharedRooms.push(roomKey)
+
+  // The topic alone, the way a build before proofs said it.
+  await deliver(service, eve, { type: 'topics', topics: [wireRoom(ROOM_KEY)] })
+  // A proof made for some other connection, and this phone's own sent back.
+  const elsewhere = roomProof(ROOM_KEY, Buffer.alloc(64, 1), eve.key)
+  const bounced = roomProof(ROOM_KEY, eve.connection.handshakeHash, eve.connection.publicKey)
+  await deliver(service, eve, {
+    type: 'topics',
+    rooms: [{ topic: wireRoom(ROOM_KEY), proof: elsewhere }, { topic: wireRoom(ROOM_KEY), proof: bounced }]
+  })
+  // And a join naming the room as if already in.
+  await deliver(service, eve, { type: 'join', room: wireRoom(ROOM_KEY), peerId: eve.id, username: 'Eve', ts: 1 })
+
+  assert.deepEqual(eve.rooms, [])
+  assert.deepEqual(sharedRooms, [])
+  assert.equal(frames.some((frame) => frame.room === wireRoom(ROOM_KEY)), false)
+  assert.equal(JSON.stringify(frames).includes(ROOM_KEY), false)
+  await service.close()
+})
+
+test('PeerChat names rooms by topic in everything it sends, never by key', async (t) => {
+  const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-no-keys-'))
+  t.after(() => rm(storagePath, { recursive: true, force: true }))
+  const service = await new PeerChatService({ sdk: createFakeSdk(), storagePath }).start()
+  const { roomKey } = await service.createRoom({ name: 'Launch crew', username: 'Alice' })
+
+  const frames = []
+  const bob = createFakePeer('bb00bb00', 'Bob', frames)
+  bob.rooms = [roomKey]
+  service.peers.set(bob.connection, bob)
+  service.shareRoom(bob, roomKey)
+  service.sendProfile(bob)
+  await service.sendMessage({ roomKey, message: 'hello' })
+  await service.leaveRoom({ roomKey })
+
+  const types = new Set(frames.map((frame) => frame.type || 'message'))
+  for (const type of ['room-meta', 'join', 'profile', 'message', 'leave']) assert.ok(types.has(type), `no ${type} frame`)
+  assert.ok(frames.filter((frame) => frame.type !== 'profile').every((frame) => frame.room === wireRoom(roomKey)))
+  assert.deepEqual(frames.find((frame) => frame.type === 'profile').rooms, [wireRoom(roomKey)])
+  assert.equal(JSON.stringify(frames).includes(roomKey), false)
+  await service.close()
+})
+
+// A short id is 32 bits, so a key can be ground to match somebody's. An invite
+// carries the conversation's key, so it never goes to a short id alone.
+test('PeerChat sends an invite to one key only, and holds it while two keys share a short id', async (t) => {
+  const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-dm-key-'))
+  t.after(() => rm(storagePath, { recursive: true, force: true }))
+  const service = await new PeerChatService({ sdk: createFakeSdk(), storagePath }).start()
+  await service.completeOnboarding({ username: 'Alice' })
+
+  const frames = []
+  const bob = createFakePeer('aabbccdd', 'Bob', frames)
+  const impostor = createFakePeer('aabbccdd', 'Bob', frames)
+  impostor.key = `aabbccdd${'ee'.repeat(28)}`
+  service.peers.set(bob.connection, bob)
+  service.peers.set(impostor.connection, impostor)
+
+  const { room } = await service.createDirectMessage({ peerId: 'aabbccdd', username: 'Bob' })
+  assert.equal(frames.some((frame) => frame.type === 'dm-invite'), false, 'two keys behind one short id get nothing')
+  assert.equal(service.rooms.get(room.roomKey).dmWithKey, undefined)
+
+  // The impostor goes. Bob reconnects alone and gets it, and from then on the
+  // conversation is his key's.
+  service.peers.delete(impostor.connection)
+  service.peers.delete(bob.connection)
+  bob.active = false
+  service.pendingPeers.set(bob.connection, bob)
+  service.activatePeer(bob)
+  const invite = frames.find((frame) => frame.type === 'dm-invite')
+  assert.equal(invite?.roomKey, room.roomKey)
+  assert.equal(service.rooms.get(room.roomKey).dmWithKey, bob.key)
+
+  // Bound, so an impostor that connects later gets no invite and is not
+  // believed when it answers.
+  frames.length = 0
+  impostor.active = false
+  service.pendingPeers.set(impostor.connection, impostor)
+  service.activatePeer(impostor)
+  assert.equal(frames.some((frame) => frame.type === 'dm-invite'), false)
+  await deliver(service, impostor, { type: 'dm-accept', room: wireRoom(room.roomKey), fromId: 'aabbccdd', fromUsername: 'Mallory' })
+  assert.equal(service.rooms.get(room.roomKey).pendingAcceptance, true)
+  await deliver(service, bob, { type: 'dm-accept', room: wireRoom(room.roomKey), fromId: 'aabbccdd', fromUsername: 'Bob' })
+  assert.equal(service.rooms.get(room.roomKey).pendingAcceptance, false)
+  await service.close()
+})
+
+test('PeerChat answers a request at the key it came from, and keeps that key across a restart', async (t) => {
+  const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-dm-from-key-'))
+  t.after(() => rm(storagePath, { recursive: true, force: true }))
+  const service = await new PeerChatService({ sdk: createFakeSdk(), storagePath }).start()
+  await service.completeOnboarding({ username: 'Alice' })
+
+  const frames = []
+  const bob = createFakePeer('aabbccdd', 'Bob', frames)
+  service.peers.set(bob.connection, bob)
+  const dmKey = 'c4'.repeat(32)
+  await deliver(service, bob, { type: 'dm-invite', roomKey: dmKey, fromId: 'aabbccdd', fromUsername: 'Bob', toId: service.localId })
+  assert.equal(service.listPendingDirectMessages()[0].fromKey, bob.key)
+
+  await service.close()
+  const restarted = await new PeerChatService({ sdk: createFakeSdk(), storagePath }).start()
+  assert.equal(restarted.listPendingDirectMessages()[0].fromKey, bob.key)
+
+  // The impostor shares the short id and is connected too. The answer goes to
+  // the key the request came from.
+  const impostorFrames = []
+  const impostor = createFakePeer('aabbccdd', 'Bob', impostorFrames)
+  impostor.key = `aabbccdd${'ee'.repeat(28)}`
+  const bobAgain = createFakePeer('aabbccdd', 'Bob', frames)
+  frames.length = 0
+  restarted.peers.set(impostor.connection, impostor)
+  restarted.peers.set(bobAgain.connection, bobAgain)
+  await restarted.acceptDirectMessage({ roomKey: dmKey })
+  const accept = frames.find((frame) => frame.type === 'dm-accept')
+  assert.equal(accept?.room, wireRoom(dmKey))
+  assert.equal(accept?.roomKey, undefined)
+  assert.equal(impostorFrames.some((frame) => frame.type === 'dm-accept'), false)
+  assert.equal(restarted.rooms.get(dmKey).dmWithKey, bob.key)
+
+  await restarted.close()
+  const again = await new PeerChatService({ sdk: createFakeSdk(), storagePath }).start()
+  assert.equal(again.rooms.get(dmKey).dmWithKey, bob.key)
+  await again.close()
+})
+
+// On a real network the flush after joining takes seconds. The proof used to go
+// out before it and the feed open after, so a message sent straight back was
+// marked seen without being kept, and history could not bring it again.
+test('PeerChat keeps the first message of a conversation, sent the moment it is accepted', async (t) => {
+  const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-first-dm-'))
+  t.after(() => rm(storagePath, { recursive: true, force: true }))
+  const sdk = createFakeSdk()
+  const service = await new PeerChatService({ sdk, storagePath }).start()
+  await service.completeOnboarding({ username: 'Alice' })
+
+  const frames = []
+  const bob = createFakePeer('aabbccdd', 'Bob', frames)
+  bob.rooms = []
+  service.peers.set(bob.connection, bob)
+  const dmKey = 'c6'.repeat(32)
+  await deliver(service, bob, { type: 'dm-invite', roomKey: dmKey, fromId: 'aabbccdd', fromUsername: 'Bob', toId: service.localId })
+
+  let release = () => {}
+  sdk.swarm.flush = () => new Promise((resolve) => { release = resolve })
+  const accepting = service.acceptDirectMessage({ roomKey: dmKey })
+  const proved = () => frames.some((frame) =>
+    frame.type === 'topics' && frame.rooms.some((entry) => entry.topic === wireRoom(dmKey)))
+  for (let i = 0; i < 100 && !proved(); i += 1) await new Promise((resolve) => setTimeout(resolve, 5))
+  assert.equal(proved(), true)
+
+  // Bob proves it back and says hello at once, and history brings it again.
+  await deliver(service, bob, {
+    type: 'topics',
+    rooms: [{ topic: wireRoom(dmKey), proof: roomProof(dmKey, bob.connection.handshakeHash, bob.key) }]
+  })
+  const hello = { room: wireRoom(dmKey), id: 'first-from-bob', sender: 'aabbccdd', sn: 'Bob', ...encryptPeerChatMessage('Hi!', dmKey), ts: Date.now() }
+  await deliver(service, bob, hello)
+  await deliver(service, bob, { ...hello, type: 'sync' })
+
+  release()
+  await accepting
+  const kept = service.feeds.get(dmKey).entries.filter((entry) => entry.id === 'first-from-bob')
+  assert.equal(kept.length, 1)
   await service.close()
 })
 
@@ -1178,6 +1374,7 @@ test('PeerChat finishes sync state for a connection that drops during history re
   peer.rooms = [room.roomKey]
   peer.syncedRooms = new Set()
   peer.syncingRooms = new Map()
+  service.rooms.get(room.roomKey).members = [{ id: peer.id, username: 'Desktop', bio: '', avatar: null, joinedAt: 1 }]
   peer.transport.send = (frame) => {
     if (JSON.parse(frame).type !== 'sync-done') return true
     peer.connection.destroyed = true
@@ -1367,7 +1564,7 @@ test('the person being removed is told, and keeps the rooms they are still in', 
   // It also took them offline in every other room the two of us share.
   const bans = frames.filter((frame) => frame.type === 'room-bans')
   assert.equal(bans.length, 1)
-  assert.equal(bans[0].roomKey, roomKey)
+  assert.equal(bans[0].room, wireRoom(roomKey))
   assert.deepEqual(bans[0].bans.map((ban) => ban.id), ['aabbccdd'])
   // And they keep the connection: it carries every room the two of you share,
   // so taking it down over one room took them offline in all of them.
@@ -1591,6 +1788,26 @@ test('somebody arriving is said out loud, by name', async (t) => {
   await service.close()
 })
 
+// A room opens by proof, and the profile goes out with it, ahead of the join.
+// The arrival still has to be said, once.
+test('somebody arriving is said once when their profile comes before their join', async (t) => {
+  const { service, roomKey } = await createRoomWithMember(t, 'peersky-peerchat-join-profile-')
+  const newcomer = createFakePeer('11223344', 'Eve')
+  newcomer.rooms = [roomKey]
+  service.peers.set(newcomer.connection, newcomer)
+
+  const notices = () => service.feeds.get(roomKey).entries
+    .filter((entry) => entry.type === 'system')
+    .map((entry) => entry.message)
+
+  await service.handlePeerMessage(newcomer, { type: 'profile', username: 'Eve', bio: '', avatar: null, rooms: [roomKey] })
+  await service.handlePeerMessage(newcomer, {
+    type: 'join', roomKey, peerId: '11223344', username: 'Eve', ts: Date.now()
+  })
+  assert.deepEqual(notices(), ['Eve joined'])
+  await service.close()
+})
+
 test('an arrival with no name given keeps the one we already have', async (t) => {
   const { service, roomKey } = await createRoomWithMember(t, 'peersky-peerchat-joinname-')
   const peer = createFakePeer('11223344', 'Eve', [])
@@ -1635,11 +1852,19 @@ function createFakeSdk (feeds = new Map(), publicKeyByte = 7) {
 }
 
 function createFakePeer (id, username, frames = []) {
-  const connection = { destroyed: false }
+  // Our side of a pretend connection: a handshake both ends share and the key
+  // this service proves its rooms with. Theirs starts with their short id, the
+  // way a real key does.
+  const connection = { destroyed: false, handshakeHash: Buffer.alloc(64, 9), publicKey: Buffer.alloc(32, 7) }
   return {
     active: true,
     connection,
     id,
+    key: id.repeat(8),
+    buffer: '',
+    pendingMessages: 0,
+    processing: Promise.resolve(),
+    lastReceivedAt: Date.now(),
     username,
     bio: '',
     avatar: null,

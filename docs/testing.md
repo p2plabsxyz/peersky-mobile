@@ -35,6 +35,10 @@ Protocol tests live in `test/protocol/` and cover behavior that should stay stab
 - `p2pmd-http.test.mjs` starts a real HTTP server with the shared P2PMD request handler and checks `/status`, `/doc`, `/doc/update`, `/doc/yjsstate`, `/preview`, `/presence`, and `/events`.
 - `p2pmd-peers.test.mjs` validates peer count, peer pruning, and line ownership used by gutter marks.
 - `p2pmd-preview.test.mjs` validates Markdown preview rendering, raw HTML escaping, and Hyper image URL rewriting.
+- `phone-backup.test.mjs` backs a real Hyper store up and restores it into a second phone folder, then opens it the ordinary way. It also covers wrong passphrases, damaged and cut-off files, path traversal, and transfers meant for another phone.
+- `link-device.test.mjs` restores desktop transfers built the way PeerSky Desktop builds them (`test/fixtures/desktop-transfer.mjs`), including tampered, expired and oversized ones.
+- `phone-transfer-publish.test.mjs` puts a transfer on a drive, replicates it to a second store, and clears it.
+- `link-device-safety.test.mjs` covers what keeps a backup or restore safe while it runs: the stores held shut, one job at a time, an interrupted restore undone on the next start, and streams that fail.
 
 ### Platform tests
 
