@@ -63,11 +63,12 @@ const MAX_ATTACHMENT_FRAME_BYTES = 16 * 1024 * 1024
 
 export const MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024 * 1024
 /**
- * Where framing takes over from the single seal.
+ * Where framing takes over from the single seal, in both apps.
  *
- * Desktop only reads PCA1 today, so anything it could already open is still
- * written that way and nothing that works now stops working. Past this, a file
- * was not sendable at all before, so there is nothing to keep compatible.
+ * Desktop used to read only PCA1, so anything it could open then is still
+ * written that way. Past this, a file was not sendable at all before, so there
+ * was nothing to keep compatible. Desktop now writes and reads PCA2 past the
+ * same line (lib/attachment-crypto.js in PeerChat).
  */
 export const MAX_SINGLE_SEAL_BYTES = 100 * 1024 * 1024
 const MAX_ATTACHMENT_LABEL = formatByteLimit(MAX_ATTACHMENT_BYTES)
@@ -453,7 +454,8 @@ export class AttachmentBlockStream extends Transform {
  * Reads either layout, chosen by the magic at the front.
  *
  * Both start with sixteen bytes, so a file is never ambiguous: "PCA1" is the
- * single seal every desktop build writes, "PCA2" is framed.
+ * single seal, "PCA2" is framed. Every desktop build writes PCA1 up to 100 MB,
+ * and older ones wrote it for bigger files too.
  */
 export class AttachmentDecryptStream extends Transform {
   constructor (roomKey) {

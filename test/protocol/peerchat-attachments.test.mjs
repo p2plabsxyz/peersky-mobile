@@ -375,6 +375,20 @@ test('a header split across chunks still reads', async () => {
   assert.deepEqual(await openFramed(parts), plaintext)
 })
 
+// What desktop PeerChat's sealAttachmentStream writes for this room key, these
+// 8 bytes and 8-byte frames. test/attachment-crypto.test.js in PeerChat pins the
+// same bytes, so a change that one side cannot read fails on the other.
+test('a framed attachment is the same bytes desktop seals and opens', async () => {
+  const plaintext = Buffer.from('PeerChat framed vector, both apps.')
+  const desktop = '50434132000000080102030405060708abb77278dba950a24b40e33ad546e0c4b794b4a5f4bb4df4226050ae9ff032776d30f7886536c431dcf737ab0abf92be003fa9a2d9ee02261e82c92aba69147f3c1a22e82e71ccd292b2574c05061353633cec9ab230c51db8584f9a6ed3c7303ee8b93cee2e7ddde84c3e46b89cba6efbd8'
+  const sealed = await sealFramed(plaintext, ROOM_KEY, {
+    frameBytes: 8,
+    baseNonce: Buffer.from('0102030405060708', 'hex')
+  })
+  assert.equal(Buffer.concat(sealed).toString('hex'), desktop)
+  assert.deepEqual(await openFramed([Buffer.from(desktop, 'hex')]), plaintext)
+})
+
 test('everything desktop can already open is still sealed the old way', () => {
   assert.equal(sealedAttachmentLength(1024), singleSealedLength(1024))
   assert.equal(sealedAttachmentLength(MAX_SINGLE_SEAL_BYTES), singleSealedLength(MAX_SINGLE_SEAL_BYTES))

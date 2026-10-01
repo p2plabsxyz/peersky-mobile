@@ -91,8 +91,10 @@ must therefore be considered part of the local threat model.
 
 PeerChat stores attachments in a dedicated Hyperdrive for each room. Before
 upload, file bytes are sealed with AES-256-GCM using a key derived from the room
-key and the opaque `PCA1` attachment format used by PeerSky Desktop. The real
-file name and size travel inside the encrypted chat message. Room members can
+key, in the attachment formats PeerSky Desktop uses too: `PCA1`, in one piece,
+up to 100 MB, and `PCA2`, a megabyte frame at a time, up to 2 GB. Both apps
+read both, and neither ever holds a framed file whole. The real file name and
+size travel inside the encrypted chat message. Room members can
 decrypt attachments because they hold the room key; obtaining the `hyper://`
 URL alone exposes only ciphertext. Legacy plaintext attachments remain readable
 for compatibility.
