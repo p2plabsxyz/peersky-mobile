@@ -39,6 +39,7 @@ import {
   RPC_P2PMD_ROOM_JOIN,
   RPC_P2PMD_ROOM_PUBLISH,
   RPC_P2PMD_ROOM_STATUS,
+  RPC_P2PMD_TAKE_NOTES,
   RPC_PEERCHAT_BLOCK,
   RPC_PEERCHAT_INIT,
   RPC_PEERCHAT_PROFILE_SET,
@@ -117,6 +118,7 @@ import {
   joinP2pmdRoom
 } from '../p2pmd/room.mjs'
 import { getMaxDocumentLength } from '../p2pmd/document.mjs'
+import { takeP2pmdNotes } from '../p2pmd/notes-transfer.mjs'
 import {
   inlineHyperPreviewImages,
   renderMarkdownPreview,
@@ -329,6 +331,14 @@ export async function routeRpcRequest (req) {
 
     if (req.command === RPC_P2PMD_ROOM_JOIN) {
       replyJson(req, await joinP2pmdRoom(parseJsonMessage(req.data)))
+      return
+    }
+
+    if (req.command === RPC_P2PMD_TAKE_NOTES) {
+      replyJson(req, takeP2pmdNotes({
+        documentsPath: getDefaultIdentityStoragePath(),
+        hyperStoragePath: getHyperStoragePath()
+      }))
       return
     }
 

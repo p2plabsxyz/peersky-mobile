@@ -1,10 +1,12 @@
 import { afterEach, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { EventEmitter } from 'node:events'
 import {
   connectHolesail,
   getHolesailStatus,
   startHolesailLive,
-  stopHolesail
+  stopHolesail,
+  waitForClientProxy
 } from '../../backend/holesail/session.mjs'
 
 describe('holesail session validation', () => {
@@ -53,5 +55,46 @@ describe('holesail session validation', () => {
     assert.equal(result.ok, false)
     assert.equal(result.error, 'Invalid holesail key. Use hs://... or an alphanumeric key.')
     assert.equal(getHolesailStatus().running, false)
+  })
+})
+
+// A join binds the port the room's host advertised, after ready() is done. A
+// port already taken here used to fail as an error nobody listened for, and
+// took the whole backend down.
+describe('holesail client proxy', () => {
+  const client = (port = 59677) => {
+    const proxy = new EventEmitter()
+    return { proxy, instance: { dht: { proxy, args: { port }, state: 'waiting' } } }
+  }
+
+  it('waits for the local end to listen', async () => {
+    const { proxy, instance } = client()
+    const waiting = waitForClientProxy(instance)
+    proxy.emit('listening')
+    assert.deepEqual(await waiting, { ok: true })
+  })
+
+  it('answers with the port when it is already in use, instead of crashing', async () => {
+    const { proxy, instance } = client(59677)
+    const waiting = waitForClientProxy(instance)
+    const busy = Object.assign(new Error('address already in use'), { code: 'EADDRINUSE' })
+    assert.doesNotThrow(() => proxy.emit('error', busy))
+    const result = await waiting
+    assert.equal(result.ok, false)
+    assert.equal(result.port, 59677)
+    assert.equal(result.error, busy)
+  })
+
+  it('never lets a later proxy error through', async () => {
+    const { proxy, instance } = client()
+    const waiting = waitForClientProxy(instance)
+    proxy.emit('listening')
+    await waiting
+    assert.doesNotThrow(() => proxy.emit('error', new Error('connection reset')))
+  })
+
+  it('has nothing to wait for without a TCP proxy', async () => {
+    assert.deepEqual(await waitForClientProxy({ dht: {} }), { ok: true })
+    assert.deepEqual(await waitForClientProxy(null), { ok: true })
   })
 })

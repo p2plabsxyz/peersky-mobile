@@ -201,12 +201,15 @@ import { useBrowserTabPreviews } from './tabs/useBrowserTabPreviews'
 import { isBrowserTabPreviewForPage } from './tabs/browser-tab-preview.mjs'
 import {
   formatP2pmdRoomHistoryKey,
+  markP2pmdRoomsShared,
+  mergeP2pmdRoomsFromDevice,
   normalizeP2pmdRoomKey,
   parseP2pmdNoteLink,
   readP2pmdRoomHistoryFile,
   recordP2pmdRoom,
   writeP2pmdRoomHistoryFile
 } from './p2pmd-room-history.mjs'
+import { subscribeP2pmdNotesShared } from './settings/p2pmd-shared-notes'
 import { describeP2pmdNote } from './p2pmd-note-title.mjs'
 import { MODAL_ORIENTATIONS } from './modal-orientations'
 import { shareLink } from './share'
@@ -231,6 +234,7 @@ import {
   RPC_P2PMD_ROOM_JOIN,
   RPC_P2PMD_ROOM_PUBLISH,
   RPC_P2PMD_ROOM_STATUS,
+  RPC_P2PMD_TAKE_NOTES,
   RPC_APP_BACKUP_PROGRESS,
   RPC_APP_PEERCHAT_CHANGED,
   RPC_PEERTUNES_START
@@ -263,6 +267,9 @@ type P2pmdRoomHistoryEntry = {
   role: 'host' | 'client'
   label: string
   lastOpenedAt: number
+  // On another of the person's devices too: joined there first, hosted here
+  // from this phone's copy only when nobody has it open.
+  shared?: boolean
 }
 
 type RpcResponse = {
@@ -288,6 +295,9 @@ type RpcResponse = {
   localUrl?: string
   room?: P2pmdRoom | null
   warning?: string | null
+  noHost?: boolean
+  notes?: P2pmdRoomHistoryEntry[]
+  name?: string
 }
 
 type BrowserSource =
@@ -648,6 +658,57 @@ export default function App () {
       cancelled = true
     }
   }, [browserPreferencesReady, contentBlockingReady])
+
+  // P2PMD notes another of this person's devices sent, left here by a Link
+  // Device restore. The backend keeps the text of each hosted one as this
+  // phone's copy first. The file goes only once the list is saved, so nothing
+  // is lost if the app stops in between.
+  useEffect(() => {
+    if (!identityStoragePath) return
+    const file = new File(Paths.document, 'p2pmd-incoming.json')
+    if (!file.exists) return
+    let cancelled = false
+
+    async function takeNotesFromDevice () {
+      try {
+        const response = await callRpc(RPC_P2PMD_TAKE_NOTES, {})
+        if (cancelled) return
+        const notes = response.ok && Array.isArray(response.notes) ? response.notes : []
+        if (notes.length > 0) {
+          const rooms = mergeP2pmdRoomsFromDevice(p2pmdRoomHistoryRef.current, notes) as P2pmdRoomHistoryEntry[]
+          if (!saveP2pmdRoomHistory(rooms)) return
+          p2pmdRoomHistoryRef.current = rooms
+          setP2pmdRoomHistory(rooms)
+        }
+        // The screen read the name when it mounted, so it is told too, or it
+        // asks for a name the other device already gave.
+        if (response.ok && response.name && !loadP2pmdPeerDisplayName() && saveP2pmdPeerDisplayName(response.name).ok) {
+          const name = loadP2pmdPeerDisplayName()
+          setP2pmdPeerDisplayName(name)
+          if (name) setP2pmdNameDraft(name)
+        }
+        file.delete()
+        if (notes.length > 0) {
+          setStatus(`Added ${notes.length} ${notes.length === 1 ? 'note' : 'notes'} from your other device`)
+        }
+      } catch (error) {
+        console.error('Failed taking notes from another device:', error)
+      }
+    }
+
+    void takeNotesFromDevice()
+    return () => {
+      cancelled = true
+    }
+  }, [identityStoragePath])
+
+  // Notes that just went to a desktop with their text (Link Device).
+  useEffect(() => subscribeP2pmdNotesShared((keys) => {
+    const rooms = markP2pmdRoomsShared(p2pmdRoomHistoryRef.current, keys) as P2pmdRoomHistoryEntry[]
+    if (rooms === p2pmdRoomHistoryRef.current || !saveP2pmdRoomHistory(rooms)) return
+    p2pmdRoomHistoryRef.current = rooms
+    setP2pmdRoomHistory(rooms)
+  }), [])
 
   useEffect(() => {
     if (!browserPreferencesReady) return
@@ -2353,7 +2414,9 @@ export default function App () {
     setP2pmdPeerDisplayName(loadP2pmdPeerDisplayName())
   }
 
-  async function onP2pmdRoomCreate (roomKey: string | null = null) {
+  // requireCopy: hosting a shared note nobody else has open, which only ever
+  // goes up from this phone's copy of it.
+  async function onP2pmdRoomCreate (roomKey: string | null = null, { requireCopy = false }: { requireCopy?: boolean } = {}) {
     const isReopening = Boolean(roomKey)
     ensureP2pmdPeerName()
     setIsLoading(true)
@@ -2370,6 +2433,7 @@ export default function App () {
     try {
       const response = await callRpc(RPC_P2PMD_ROOM_CREATE, {
         ...(roomKey ? { connector: roomKey } : {}),
+        ...(requireCopy ? { requireCopy: true } : {}),
         secure: true,
         udp: false
       })
@@ -2447,6 +2511,57 @@ export default function App () {
     } finally {
       setIsLoading(false)
     }
+  }
+
+  // A note on another of this person's devices too. It is joined there when
+  // that device has it open, so both edit the same note, and hosted from this
+  // phone's copy only when nobody answers.
+  async function onP2pmdSharedNoteOpen (roomKey: string) {
+    const looking = 'Looking for this note on your other devices...'
+    ensureP2pmdPeerName()
+    setIsLoading(true)
+    setStatus(looking)
+    setP2pmdRoom(null)
+    setP2pmdUrl(null)
+    setP2pmdParticipants(null)
+    setP2pmdViewMode('edit')
+    setP2pmdPublishUrl(null)
+    setP2pmdEditorHtml(null)
+    setP2pmdSetupError(null)
+    setP2pmdSyncStatus(looking)
+
+    let hostCopy = false
+    try {
+      const response = await callRpc(RPC_P2PMD_ROOM_JOIN, { key: roomKey, udp: false, probe: true })
+      if (response.ok && response.room) {
+        setP2pmdSetupError(null)
+        await loadP2pmdEditorHtml()
+        setP2pmdPeerDisplayName(loadP2pmdPeerDisplayName())
+        setP2pmdRoom(response.room)
+        setP2pmdUrl(response.room.localUrl)
+        rememberP2pmdRoom(response.room.key, 'host')
+        setP2pmdSyncStatus('Joining room page...')
+        setStatus('Joined the note on your other device')
+        return
+      }
+      if (response.noHost) {
+        hostCopy = true
+      } else {
+        const message = response.error || 'Failed opening the note'
+        setP2pmdSetupError(message)
+        setP2pmdSyncStatus('Ready')
+        setStatus(message)
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      setP2pmdSetupError(message)
+      setP2pmdSyncStatus('Ready')
+      setStatus(message)
+    } finally {
+      setIsLoading(false)
+    }
+
+    if (hostCopy) await onP2pmdRoomCreate(roomKey, { requireCopy: true })
   }
 
   function rememberP2pmdRoom (key: string, role: P2pmdRoomHistoryEntry['role'], label = '') {
@@ -4018,9 +4133,11 @@ export default function App () {
                                 tapFeedback()
                                 confirmForgetP2pmdRoom(room)
                               }}
-                              onPress={() => void (room.role === 'host'
-                                ? onP2pmdRoomCreate(room.key)
-                                : onP2pmdRoomJoin(room.key))}
+                              onPress={() => void (room.role !== 'host'
+                                ? onP2pmdRoomJoin(room.key)
+                                : room.shared
+                                  ? onP2pmdSharedNoteOpen(room.key)
+                                  : onP2pmdRoomCreate(room.key))}
                               style={({ pressed }) => [
                                 styles.p2pmdRecentRoom,
                                 p2pmdTheme?.p2pmdRecentRoom,

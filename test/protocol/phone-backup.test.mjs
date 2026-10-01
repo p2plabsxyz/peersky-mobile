@@ -372,12 +372,16 @@ describe('phone to phone transfer', () => {
     const key = 'ab'.repeat(32)
     const nonce = 'cd'.repeat(16)
 
-    assert.deepEqual(parsePairingCode(`peersky-identity:${key}?nonce=${nonce}&deviceType=mobile`), { encryptionPublicKey: key, nonce, deviceType: 'mobile', chat: false })
+    assert.deepEqual(parsePairingCode(`peersky-identity:${key}?nonce=${nonce}&deviceType=mobile`), { encryptionPublicKey: key, nonce, deviceType: 'mobile', chat: false, notes: false })
     // The desktop puts deviceType first.
-    assert.deepEqual(parsePairingCode(`peersky-identity:${key.toUpperCase()}?deviceType=desktop&nonce=${nonce}`), { encryptionPublicKey: key, nonce, deviceType: 'desktop', chat: false })
-    // A device that takes PeerChat in a transfer says so, this phone included.
+    assert.deepEqual(parsePairingCode(`peersky-identity:${key.toUpperCase()}?deviceType=desktop&nonce=${nonce}`), { encryptionPublicKey: key, nonce, deviceType: 'desktop', chat: false, notes: false })
+    // A device that takes PeerChat or P2PMD notes in a transfer says so, this
+    // phone included.
     assert.equal(parsePairingCode(`peersky-identity:${key}?deviceType=desktop&nonce=${nonce}&chat=1`).chat, true)
+    assert.equal(parsePairingCode(`peersky-identity:${key}?deviceType=desktop&nonce=${nonce}&chat=1`).notes, false)
+    assert.equal(parsePairingCode(`peersky-identity:${key}?deviceType=desktop&notes=1&nonce=${nonce}`).notes, true)
     assert.equal(parsePairingCode(createPairingCode(key, nonce, 'mobile')).chat, true)
+    assert.equal(parsePairingCode(createPairingCode(key, nonce, 'mobile')).notes, true)
     assert.equal(parsePairingCode('hyper://abc'), null)
     assert.throws(() => parsePairingCode(`peersky-identity:${key}?nonce=short`), /damaged/)
     assert.equal(createPairingCode(key, nonce, 'tablet'), '')

@@ -126,6 +126,24 @@ export async function connectHolesail ({
       throw error
     }
 
+    // The local end binds the port the host advertised only once ready() is
+    // done. A port already in use here then failed as an error event nobody
+    // listened for, and that took the whole backend down: a desktop on the
+    // same Mac as the simulator always holds it. Wait for the bind instead,
+    // and answer with what went wrong.
+    const bound = await waitForClientProxy(instance)
+    if (!bound.ok) {
+      session = null
+      mode = null
+      try {
+        await instance.close()
+      } catch {}
+      return {
+        ok: false,
+        error: `Port ${bound.port || 'for this note'} is already in use on this device, so the note cannot be joined from here right now.`
+      }
+    }
+
     mode = 'client'
 
     return {
@@ -133,6 +151,33 @@ export async function connectHolesail ({
       mode,
       info: session.info
     }
+  })
+}
+
+const CLIENT_PROXY_BIND_MS = 3000
+
+// Whether a client's local proxy came up. It stays with an error listener
+// for good, so a later failure is logged rather than thrown.
+export function waitForClientProxy (instance, timeoutMs = CLIENT_PROXY_BIND_MS) {
+  const client = instance?.dht
+  const proxy = client?.proxy
+  if (!proxy || typeof proxy.on !== 'function') return Promise.resolve({ ok: true })
+  proxy.on('error', (error) => {
+    console.error('[holesail] Local proxy error:', error?.message || error)
+  })
+  if (client.state === 'listening') return Promise.resolve({ ok: true })
+
+  return new Promise((resolve) => {
+    let settled = false
+    const finish = (result) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      resolve(result)
+    }
+    const timer = setTimeout(() => finish({ ok: true }), timeoutMs)
+    proxy.once('listening', () => finish({ ok: true }))
+    proxy.once('error', (error) => finish({ ok: false, error, port: client.args?.port }))
   })
 }
 

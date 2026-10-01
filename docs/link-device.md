@@ -17,7 +17,7 @@ Settings > Link Device moves everything PeerSky keeps on a phone to another devi
 | Bookmarks and favourites | Replaced | Added | Added to the desktop's bookmarks |
 | History and settings | Replaced | Not sent | Not sent |
 | PeerChat profile, rooms and messages | Replaced | The profile and rooms, as `name@mobile` | The profile and rooms, as `name@desktop` |
-| P2PMD notes, name and recent notes | Replaced | Not sent | Not sent |
+| P2PMD notes, name and recent notes | Replaced | The five recent notes, added, and the name if none is set | The same, to the desktop |
 | Drives: public, private and this-device-only | Replaced | Private drives adopted read-only | The private drive, readable there and read-only |
 | The key for private files | Replaced | Sent, and used for the phone's private uploads | Not sent: the desktop made it |
 
@@ -28,6 +28,18 @@ A phone backup restored somewhere, or a phone-to-phone transfer, carries the Hyp
 ## One phone per identity
 
 Two phones holding the same identity write the same chat feeds and split them. After moving to a new phone, remove your data from the old one. The sheet says so once a send is done.
+
+## P2PMD notes on your phone and desktops
+
+A desktop whose pairing code says `notes=1` gets this phone's five most recent notes and its P2PMD name, and a desktop sends its own the same way: this phone's code says `notes=1` too (`backend/p2pmd/notes-transfer.mjs`, the same rules as `notes-transfer.js` in P2PMD on the desktop).
+
+- A note this phone hosts goes with its text, from its copy in `hyper-sdk/p2pmd-rooms`. A note it only joined goes as one to join.
+- Only a private note (`hs://s000...`) can be hosted from a copy: its key is what the host's keys are made from. This phone makes every note private. A desktop makes them public unless Private is ticked, and a public note's address is the host's public key, so only that desktop can host it. It arrives here as a note to join while the desktop has it open.
+- Only the key, the name and the text travel. A drive address, a port or a hosting seed belongs to the device that made it: a copied desktop profile that kept a drive address sent every P2PMD write to a drive the new machine could not write to (P2PMD #18). None of them go, and the receiving side drops any field it does not know.
+- Nothing already there is replaced. A note already on the receiving device keeps its own copy, and a name already set stays.
+- A desktop's notes arrive in `p2pmd-incoming.json`. Once the backend is up, the app asks it to keep the text of each hosted note as this phone's copy, adds the notes to Recent notes, and removes the file only after the list is saved. The phone keeps up to ten copies, twice the five on the list, so five arriving cannot push out the copies of its own five.
+
+A note that went with its text is on both devices, and both open it the same way. Reopen looks for it on the other device first (`probe` on the join): if that device has it open, both edit the same note live. If nobody answers within a few seconds, the phone hosts its own copy. Without a copy, because the text of the notes together did not fit in 3 MB, it says so rather than putting up an empty note.
 
 ## PeerChat on your phone and desktops
 
@@ -79,7 +91,7 @@ On the desktop, Backup & Restore shows a pairing code with `deviceType=desktop`.
 
 It goes in the desktop's own transfer format (`backend/backup/desktop-sync.mjs`), so the desktop checks it with the code it already has for transfers:
 
-1. An inner zip holds `phone-tabs.json`, `phone-bookmarks.json`, `phone-private-drives.json` when there is a drive to share, `phone-peerchat.json` for PeerChat, and a `manifest.json` that says `"source": "mobile"` and lists each file's SHA-256.
+1. An inner zip holds `phone-tabs.json`, `phone-bookmarks.json`, `phone-private-drives.json` when there is a drive to share, `phone-peerchat.json` for PeerChat, `phone-p2pmd.json` for P2PMD notes when the desktop's code says `notes=1`, and a `manifest.json` that says `"source": "mobile"` and lists each file's SHA-256.
 2. That zip is encrypted with AES-256-GCM under a random key sealed to the desktop with `crypto_box_seal`. It is small, so bare-crypto's GCM in one piece is fine here. The zips are stored, not compressed (`backend/backup/zip-writer.mjs`).
 3. The manifest is signed with the phone's Ed25519 key over the same fields the desktop signs, with `targetDeviceType: 'desktop'`.
 4. The file is put on a drive at `/backup.zip`, so the drive's bare address works on the desktop too. The phone shows it as a QR code with **Copy link**, and the six characters.
@@ -99,6 +111,7 @@ What the phone keeps:
 - `tabs.json`, turned into `incoming-tabs.json`: a plain list the app adds to the open tabs on its next start. The desktop keeps tabs keyed by window, which the phone cannot read.
 - `bookmarks.json`, the same way, into `incoming-bookmarks.json`.
 - `peerchat-incoming.json`, the person's PeerChat. PeerChat takes it on its next start, as `name@mobile`, and deletes it.
+- `p2pmd-incoming.json`, the person's recent P2PMD notes, when this phone's code says `notes=1`. The app takes it once the backend is up (see P2PMD notes on your phone and desktops above).
 
 What it skips, from desktops that still send it: the desktop's own `hyper/` store, which nothing on the phone opens and which can run to gigabytes, and `lastOpened.json`, `peersky-chat-rooms.json`, `peersky-ports.json` and the desktop caches. An unknown file fails the restore; `device-key.json` is always refused.
 

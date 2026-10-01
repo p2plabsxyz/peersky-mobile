@@ -30,6 +30,8 @@ export const RPC_P2PMD_ROOM_PUBLISH = 24
 export const RPC_P2PMD_EDITOR_PAGE = 25
 export const RPC_P2PMD_PREVIEW = 26
 export const RPC_P2PMD_IMAGE_UPLOAD = 27
+// Notes another of the person's devices left here in a Link Device transfer.
+export const RPC_P2PMD_TAKE_NOTES = 28
 
 export const RPC_IDENTITY_GET_KEY = 30
 export const RPC_IDENTITY_RESTORE_FROM_HYPER = 31

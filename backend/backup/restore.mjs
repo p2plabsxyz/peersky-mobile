@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, w
 import { join } from 'node:path'
 import { readZipEntries } from './zip.mjs'
 import { PEERCHAT_INCOMING_FILE } from '../peerchat/device-link.mjs'
+import { P2PMD_INCOMING_FILE } from '../p2pmd/constants.mjs'
 import {
   convertDesktopBookmarks,
   convertDesktopTabs,
@@ -17,13 +18,15 @@ const RESTORE_JOURNAL = 'journal.json'
 const SKIP_ENTRIES = new Set(['manifest.json', 'manifest.mjson'])
 
 // What the phone keeps from a desktop identity transfer: the identity record,
-// the private drives, which private-drive-import adopts after the swap, and
-// the person's PeerChat, which PeerChat takes on its next start.
+// the private drives, which private-drive-import adopts after the swap, the
+// person's PeerChat, which PeerChat takes on its next start, and their recent
+// P2PMD notes, which the app takes once the backend is up.
 const KEPT_FILES = new Set([
   'peersky-identity.json',
   'privateHyperdrives.json',
   'private-drive-key.json',
-  PEERCHAT_INCOMING_FILE
+  PEERCHAT_INCOMING_FILE,
+  P2PMD_INCOMING_FILE
 ])
 const KEPT_DIRECTORIES = ['hyper-private']
 

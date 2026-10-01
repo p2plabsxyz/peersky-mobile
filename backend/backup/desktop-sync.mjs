@@ -16,14 +16,15 @@ import {
 } from './identity-transfer.mjs'
 import { isImportableUrl } from './browser-import.mjs'
 import { PHONE_PEERCHAT_FILE } from '../peerchat/device-link.mjs'
+import { PHONE_P2PMD_FILE } from '../p2pmd/constants.mjs'
 import { getPrivateDriveKeyRecord } from '../hyper/private-keys.mjs'
 import { createStoredZip } from './zip-writer.mjs'
 
 // What a phone sends to PeerSky Desktop: its open tabs, its bookmarks and
 // favourites, its private drive with the key to it, and, to a desktop whose
-// code says it takes it, the person's PeerChat (device-link.mjs). The rest of
-// a phone, its notes and stores, means nothing to the desktop, which keeps
-// those its own way.
+// code says it takes them, the person's PeerChat (device-link.mjs) and their
+// recent P2PMD notes (p2pmd/notes-transfer.mjs). The rest of a phone, its
+// stores, means nothing to the desktop, which keeps those its own way.
 //
 // It goes in the desktop's own transfer format, so the desktop checks it with
 // the code it already has: a zip of a signed manifest and a payload that is
@@ -96,6 +97,7 @@ export async function createDesktopTransfer ({
   deviceKeys,
   peerskyVersion = '',
   chat = null,
+  notes = null,
   ttlMs = DESKTOP_TRANSFER_TTL_MS,
   now = Date.now
 } = {}) {
@@ -107,7 +109,7 @@ export async function createDesktopTransfer ({
   }
 
   const sync = collectDesktopSync({ storagePath, syncedPrivatePath })
-  if (sync.tabs.length === 0 && sync.bookmarks.length === 0 && sync.privateDrives.length === 0 && !chat) {
+  if (sync.tabs.length === 0 && sync.bookmarks.length === 0 && sync.privateDrives.length === 0 && !chat && !notes) {
     const error = new Error('There are no open pages or bookmarks on this phone to send yet.')
     error.code = 'NOTHING_TO_SEND'
     throw error
@@ -122,6 +124,7 @@ export async function createDesktopTransfer ({
     files.push({ name: PHONE_PRIVATE_DRIVES_FILE, bytes: jsonBytes({ version: 1, drives: sync.privateDrives }) })
   }
   if (chat) files.push({ name: PHONE_PEERCHAT_FILE, bytes: jsonBytes(chat) })
+  if (notes) files.push({ name: PHONE_P2PMD_FILE, bytes: jsonBytes(notes) })
   const innerManifest = {
     version: DESKTOP_FORMAT_VERSION,
     peerskyVersion: String(peerskyVersion || ''),
@@ -195,7 +198,8 @@ export async function createDesktopTransfer ({
         tabs: sync.tabs.length,
         bookmarks: sync.bookmarks.length,
         privateDrives: sync.privateDrives.length,
-        chatRooms: chat ? chat.rooms.length : 0
+        chatRooms: chat ? chat.rooms.length : 0,
+        notes: notes ? notes.notes.length : 0
       }
     }
   } finally {

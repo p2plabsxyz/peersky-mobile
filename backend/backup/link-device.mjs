@@ -26,6 +26,7 @@ import { closeHyperOfflineDownloads } from '../hyper/offline-manager.mjs'
 import {
   closeHyperRuntime,
   getHyperRuntime,
+  getHyperStoragePath,
   getSyncedPrivateHyperStoragePath,
   holdHyperStores,
   withHyperRuntimeMaintenance,
@@ -34,6 +35,7 @@ import {
 } from '../hyper/runtime.mjs'
 import { hasPrivateDriveKey, resetPrivateDriveKeyCache } from '../hyper/private-keys.mjs'
 import { closePeerChatService, exportPeerChatTransfer } from '../peerchat/runtime.mjs'
+import { collectP2pmdNotes } from '../p2pmd/notes-transfer.mjs'
 import { notifyApp } from '../rpc/notify.mjs'
 import { RPC_APP_BACKUP_PROGRESS } from '../rpc/commands.mjs'
 
@@ -313,6 +315,16 @@ export function sendTransfer ({ pairingCode, peerskyVersion, platform } = {}) {
           return null
         })
         : null
+      // So do P2PMD notes. Never anything tied to this phone, such as a
+      // drive address: only keys, names and the text of notes it hosts.
+      let notes = null
+      if (toDesktop && target.notes) {
+        try {
+          notes = collectP2pmdNotes({ documentsPath: storagePath, hyperStoragePath: getHyperStoragePath() })
+        } catch (error) {
+          console.warn(`[link-device] P2PMD notes were not packed: ${error.message}`)
+        }
+      }
       const created = toDesktop
         ? await createDesktopTransfer({
           storagePath,
@@ -321,7 +333,8 @@ export function sendTransfer ({ pairingCode, peerskyVersion, platform } = {}) {
           target,
           deviceKeys,
           peerskyVersion,
-          chat
+          chat,
+          notes: notes?.transfer || null
         })
         : await withStoresClosed(() => createPhoneTransfer({
           storagePath,
@@ -362,7 +375,10 @@ export function sendTransfer ({ pairingCode, peerskyVersion, platform } = {}) {
         expiresAt: created.expiresAt,
         bytes: created.bytes,
         deviceType: target.deviceType,
-        sent: created.sent
+        sent: created.sent,
+        // Notes that went with their text. The app marks them shared, so this
+        // phone looks for them on the desktop before hosting them itself.
+        sharedNotes: notes?.shared || []
       }
     } finally {
       // The drive holds its own copy now.

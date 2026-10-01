@@ -53,6 +53,11 @@ test('what a backup holds is said the way a person would say it', () => {
     describeBackupContents(['incoming-tabs.json', 'peerchat-incoming.json', 'peersky-identity.json']),
     'Tabs and chats'
   )
+  // And their recent P2PMD notes.
+  assert.equal(
+    describeBackupContents(['incoming-tabs.json', 'p2pmd-incoming.json', 'peersky-identity.json']),
+    'Tabs and notes'
+  )
   assert.equal(describeBackupContents(['browser-bookmarks.json']), 'Bookmarks')
   assert.equal(describeBackupContents([]), '')
   assert.equal(describeBackupContents(undefined), '')

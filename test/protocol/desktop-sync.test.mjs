@@ -27,6 +27,7 @@ import {
   verifyIdentityTransferSignature
 } from '../../backend/backup/identity-transfer.mjs'
 import { PHONE_PEERCHAT_FILE } from '../../backend/peerchat/device-link.mjs'
+import { PHONE_P2PMD_FILE } from '../../backend/p2pmd/constants.mjs'
 
 const read = (path) => readFile(new URL(`../../${path}`, import.meta.url), 'utf8')
 
@@ -199,7 +200,7 @@ describe('what a phone sends a desktop', () => {
     })
 
     assert.equal(created.verificationCode, deriveVerificationCode(hex(phone.signing.publicKey), hex(desktop.publicKey), nonce))
-    assert.deepEqual(created.sent, { tabs: 2, bookmarks: 2, privateDrives: 0, chatRooms: 0 })
+    assert.deepEqual(created.sent, { tabs: 2, bookmarks: 2, privateDrives: 0, chatRooms: 0, notes: 0 })
     assert.equal(created.expiresAt, 1750000000000 + 15 * 60 * 1000)
     assert.equal(DESKTOP_TRANSFER_FILE_NAME, '/backup.zip')
 
@@ -278,6 +279,44 @@ describe('what a phone sends a desktop', () => {
     assert.equal(inner.files[PHONE_PEERCHAT_FILE], `sha256:${sha256(innerFiles.get(PHONE_PEERCHAT_FILE))}`)
     assert.deepEqual(JSON.parse(b4a.toString(innerFiles.get(PHONE_PEERCHAT_FILE))), chat)
   })
+
+  it('sends P2PMD notes when there are some, even with nothing else', async (t) => {
+    const storagePath = await tempDir(t)
+    const phone = deviceKeys()
+    const desktop = keyPair('box')
+    const notes = { version: 1, name: 'Bea', notes: [{ key: `hs://${'q'.repeat(52)}`, role: 'host', label: 'Note - Trip', content: '# Trip', updatedAt: 1, openedAt: 2 }] }
+    const outPath = join(storagePath, 'out.zip')
+    const created = await createDesktopTransfer({
+      storagePath,
+      syncedPrivatePath: join(storagePath, 'hyper-sdk-synced-private'),
+      outPath,
+      target: { encryptionPublicKey: hex(desktop.publicKey), nonce: '0'.repeat(32), deviceType: 'desktop', notes: true },
+      deviceKeys: phone,
+      notes
+    })
+    assert.equal(created.sent.notes, 1)
+    const { innerFiles } = openDesktopTransfer(readFileSync(outPath), desktop)
+    const inner = JSON.parse(b4a.toString(innerFiles.get(MANIFEST_NAME)))
+    assert.equal(inner.files[PHONE_P2PMD_FILE], `sha256:${sha256(innerFiles.get(PHONE_P2PMD_FILE))}`)
+    assert.deepEqual(JSON.parse(b4a.toString(innerFiles.get(PHONE_P2PMD_FILE))), notes)
+  })
+
+  it('sends no notes file to a desktop that was given none', async (t) => {
+    const storagePath = await tempDir(t)
+    seedBrowser(storagePath)
+    const desktop = keyPair('box')
+    const outPath = join(storagePath, 'out.zip')
+    const created = await createDesktopTransfer({
+      storagePath,
+      syncedPrivatePath: join(storagePath, 'hyper-sdk-synced-private'),
+      outPath,
+      target: { encryptionPublicKey: hex(desktop.publicKey), nonce: '0'.repeat(32), deviceType: 'desktop' },
+      deviceKeys: deviceKeys()
+    })
+    assert.equal(created.sent.notes, 0)
+    // A desktop refuses a file it does not know, which would lose the tabs too.
+    assert.equal(openDesktopTransfer(readFileSync(outPath), desktop).innerFiles.has(PHONE_P2PMD_FILE), false)
+  })
 })
 
 describe('sending from Link Device', () => {
@@ -289,6 +328,11 @@ describe('sending from Link Device', () => {
     assert.match(send, /toDesktop\s*\? await createDesktopTransfer\(/)
     // PeerChat only to a desktop whose code says it takes it.
     assert.match(send, /const chat = toDesktop && target\.chat/)
+    // P2PMD notes the same way, and the ones that went with their text come
+    // back for the app to mark shared.
+    assert.match(send, /if \(toDesktop && target\.notes\)/)
+    assert.match(send, /notes: notes\?\.transfer \|\| null/)
+    assert.match(send, /sharedNotes: notes\?\.shared \|\| \[\]/)
     assert.match(send, /: await withStoresClosed\(\(\) => createPhoneTransfer\(/)
     assert.match(send, /fileName: toDesktop \? DESKTOP_TRANSFER_FILE_NAME : TRANSFER_FILE_NAME/)
   })

@@ -52,6 +52,7 @@ import {
   toBareFsPath
 } from './link-device-state.mjs'
 import { type LinkDeviceProgress, subscribeLinkDeviceProgress } from './link-device-progress'
+import { emitP2pmdNotesShared } from './p2pmd-shared-notes'
 import ChevronRightIcon from '../../assets/icons/bootstrap/chevron-right.svg'
 import DisplayIcon from '../../assets/icons/bootstrap/display.svg'
 import DownloadIcon from '../../assets/icons/bootstrap/download.svg'
@@ -458,8 +459,9 @@ function SyncSheet ({
       toDesktop ? 'Send to PeerSky Desktop?' : 'Send this phone to the other one?',
       toDesktop
         ? 'It gets the pages open on this phone and your bookmarks, added to its own, and can open your private files.' +
-          // A desktop says in its code whether it takes PeerChat.
+          // A desktop says in its code whether it takes PeerChat and P2PMD notes.
           (/[?&]chat=1(&|$)/.test(code) ? ' PeerChat there takes your name and rooms.' : '') +
+          (/[?&]notes=1(&|$)/.test(code) ? ' P2PMD there gets your recent notes.' : '') +
           ' Nothing passes through a server.'
         : 'It gets everything on this phone: tabs, bookmarks, history, settings, chats, notes and files. Nothing passes through a server.',
       [
@@ -487,6 +489,7 @@ function SyncSheet ({
       }
       tapFeedback()
       setSending({ url: response.url, code: response.verificationCode, toDesktop })
+      if (toDesktop) emitP2pmdNotesShared(response.sharedNotes)
     } catch (sendError) {
       setError(errorMessage(sendError))
     } finally {
@@ -583,7 +586,7 @@ function SyncSheet ({
                 : (
                   <>
                     <Step number={1} text='On the other phone, open Link Device and tap Sync with another device. On PeerSky Desktop, open Backup & Restore.' />
-                    <Step number={2} text='Scan the code it shows. A phone gets everything on this one. The desktop gets your open pages, bookmarks and PeerChat rooms.' />
+                    <Step number={2} text='Scan the code it shows. A phone gets everything on this one. The desktop gets your open pages, bookmarks, PeerChat rooms and recent notes.' />
                   </>
                   )}
 
