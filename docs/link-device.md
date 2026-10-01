@@ -41,7 +41,9 @@ What goes (`backend/peerchat/device-link.mjs`, the same rules as `lib/device-lin
 
 A device takes PeerChat only when its pairing code says `chat=1`, which this phone's code does. An older app refuses files it does not know, so it is sent none.
 
-A name, bio or picture changed on one device reaches the others the next time they are in a room together. Every profile a device sends carries a proof: an HMAC-SHA256 with the link key over the name without its label, the bio, the picture's SHA-256, when they were set, and the labels it knows. A device takes a newer profile only with a proof it can check, so nobody else can rename a person's devices, and a name one of them holds does not count as taken. A room joined later on one device is not sent to the others: a new transfer or the room's link brings it.
+A name, bio or picture changed on one device reaches the others the next time they are in a room together. Every profile a device sends carries a proof: an HMAC-SHA256 with the link key over the name without its label, the bio, the picture's SHA-256, when they were set, the labels it knows and the sending device's network key. A device takes a newer profile only with a proof it can check on that same connection, so nobody else can rename a person's devices or pass a proof on as theirs, and a name one of them holds does not count as taken.
+
+Devices that have proved this to each other also send each other the rooms they are in, with their keys (`link-rooms`): a room joined on one device appears on the others that are online, or the next time they connect. A room left on a device stays left there, and is not taken back from the others until it is joined again. A direct conversation goes along once the other person has accepted it.
 
 ## Backup files
 
@@ -173,7 +175,7 @@ npm run test:runtime
 - `test/protocol/phone-backup.test.mjs`: a real Hyper store backed up and restored into a second phone folder, then opened the ordinary way, with the same swarm key, a writable drive, and PeerChat and P2PMD files where they were. Wrong passphrases, flipped bytes, cut-off and padded files, path traversal, transfers for another phone, another code, expired, or with a changed signature.
 - `test/protocol/link-device.test.mjs`: desktop transfers built the way the desktop builds them (`test/fixtures/desktop-transfer.mjs`): expired, wrong target, old code, flipped payload byte, forged manifest, a swapped payload, `device-key.json`, and a 24 MB transfer streamed from disk.
 - `test/protocol/phone-transfer-publish.test.mjs`: a transfer put on a drive, replicated to a second store, read back exactly, and cleared on both.
-- `test/protocol/peerchat-devices.test.mjs`: labels, a proof vector shared with PeerChat on the desktop, the PeerChat part of a transfer both ways, a rename taken only from the person's own device, and the names others send with their labels.
+- `test/protocol/peerchat-devices.test.mjs`: labels, a proof vector shared with PeerChat on the desktop, the PeerChat part of a transfer both ways, a rename taken only from the person's own device, a proof passed on by anyone else refused, rooms shared between the person's devices, and the names others send with their labels.
 - `test/protocol/link-device-safety.test.mjs`: the stores held shut, one job at a time, restore ids, an interrupted swap undone, a failing drive write, damaged and expanding deflate data, and which kind of file each flow accepts.
 - `test/protocol/desktop-sync.test.mjs`: what goes to a desktop, the transfer checked field by field and decrypted, and the stored zips read back by both zip readers.
 - `test/protocol/linked-private-key.test.mjs`: the desktop's key used for a new private drive and never swapped in for an old one, the phone's own drive never adopted back, and the Private prompt.

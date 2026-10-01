@@ -32,14 +32,20 @@ test('the proof is the same bytes PeerChat on the desktop makes', () => {
   // The same vector is in PeerChat's test/device-link.test.js.
   const link = { key: '0f'.repeat(32), origin: 'desktop', labels: ['mobile', 'desktop1'] }
   const profile = { username: 'ada', bio: 'hi there', avatar: 'data:image/png;base64,AAAA', at: 1750000000000 }
-  assert.deepEqual(makeProfileProof(link, profile), {
+  assert.deepEqual(makeProfileProof(link, profile, '0e'.repeat(32)), {
     id: '148e442780792da6ee08d733108a2207',
     name: 'ada',
     bio: 'hi there',
     at: 1750000000000,
     labels: ['desktop1', 'mobile'],
-    mac: '5d3454c2ce05fa2be61a73cc473ce1e2ae10f6a6099ab57cea95d38b3615ee64'
+    mac: 'd2c1d5265a5081255f224d5038103acd07098501a6035733cb243d3ff68e96fe'
   })
+  // Made by one device, it is nobody else's.
+  const proof = makeProfileProof(link, profile, '0e'.repeat(32))
+  assert.equal(checkProfileProof(link, proof, profile.avatar, '0e'.repeat(32)), true)
+  assert.equal(checkProfileProof(link, proof, profile.avatar, '0f'.repeat(32)), false)
+  assert.equal(checkProfileProof(link, proof, profile.avatar), false)
+  assert.equal(makeProfileProof(link, profile), null)
   assert.equal(linkId(link), '148e442780792da6ee08d733108a2207')
 })
 
@@ -151,7 +157,7 @@ test('sends its name with the label and a proof only the person\'s devices can c
   const profile = frames.find((frame) => frame.type === 'profile')
   assert.equal(profile.username, 'ada@mobile')
   assert.equal(profile.device, 'mobile')
-  assert.equal(checkProfileProof(link, profile.link, profile.avatar), true)
+  assert.equal(checkProfileProof(link, profile.link, profile.avatar, service.localKey), true)
   assert.equal(profile.link.name, 'ada')
 
   // Everything else it sends carries the label too.
@@ -172,7 +178,7 @@ test('takes a rename from the desktop, and from nobody else', async (t) => {
     username: 'adele',
     bio: 'new bio',
     avatar: null,
-    link: makeProfileProof({ ...link, labels: ['mobile', 'desktop1'] }, { username: 'adele', bio: 'new bio', avatar: null, at })
+    link: makeProfileProof({ ...link, labels: ['mobile', 'desktop1'] }, { username: 'adele', bio: 'new bio', avatar: null, at }, desktop.key)
   })
   const renamed = service.getProfile()
   assert.equal(renamed.username, 'adele')
@@ -192,12 +198,12 @@ test('takes a rename from the desktop, and from nobody else', async (t) => {
   await service.handlePeerMessage(stranger, {
     type: 'profile',
     username: 'mallory',
-    link: makeProfileProof(createLink('desktop'), { username: 'mallory', at: at + 60_000 })
+    link: makeProfileProof(createLink('desktop'), { username: 'mallory', at: at + 60_000 }, stranger.key)
   })
   await service.handlePeerMessage(desktop, {
     type: 'profile',
     username: 'ada',
-    link: makeProfileProof(link, { username: 'ada', at: at - 1 })
+    link: makeProfileProof(link, { username: 'ada', at: at - 1 }, desktop.key)
   })
   assert.equal(service.getProfile().username, 'adele')
   await service.close()
@@ -213,7 +219,7 @@ test('a name the person\'s own desktop has is not taken', async (t) => {
   await service.handlePeerMessage(desktop, {
     type: 'profile',
     username: 'adele',
-    link: makeProfileProof(link, { username: 'adele', at: Date.now() })
+    link: makeProfileProof(link, { username: 'adele', at: Date.now() }, desktop.key)
   })
   assert.equal(desktop.username, 'adele')
   assert.equal(service.setProfile({ username: 'adele' }).username, 'adele')
@@ -230,7 +236,7 @@ test('the person\'s other device gets the room\'s history since the person joine
   const stranger = createFakePeer('0c0c0c0c', 'grace')
   service.peers.set(desktop.connection, desktop)
   service.peers.set(stranger.connection, stranger)
-  await service.handlePeerMessage(desktop, { type: 'profile', username: 'ada@desktop1', link: makeProfileProof(link, { username: 'ada', at: 100 }) })
+  await service.handlePeerMessage(desktop, { type: 'profile', username: 'ada@desktop1', link: makeProfileProof(link, { username: 'ada', at: 100 }, desktop.key) })
   // Both first seen now, and history already sent from then.
   const now = Date.now()
   service.rooms.get(DESKTOP_ROOM).members = [
@@ -306,6 +312,91 @@ test('a room made on the phone keeps the time it was made as its join time', asy
   await restarted.close()
 })
 
+test('a proof made by another device and passed on renames nothing and opens no rooms', async (t) => {
+  const { service, link } = await linkedPhone(t)
+  const frames = []
+  const desktop = createFakePeer('0b0b0b0b', 'ada', frames)
+  const stranger = createFakePeer('0c0c0c0c', 'mallory', frames)
+  service.peers.set(stranger.connection, stranger)
+  // The desktop's own proof, seen in a shared room and sent on by somebody else.
+  await service.handlePeerMessage(stranger, {
+    type: 'profile',
+    username: 'eve',
+    link: makeProfileProof(link, { username: 'eve', at: Date.now() + 60_000 }, desktop.key)
+  })
+  await service.handlePeerMessage(stranger, { type: 'link-rooms', rooms: [{ roomKey: 'ab'.repeat(32), name: 'Not yours' }] })
+  assert.equal(service.getProfile().username, 'ada')
+  assert.equal(service.rooms.has('ab'.repeat(32)), false)
+  assert.equal(frames.some((frame) => frame.type === 'link-rooms'), false)
+  await service.close()
+})
+
+test('rooms go between the person\'s devices once one proves it is theirs', async (t) => {
+  const { service, link } = await linkedPhone(t)
+  const frames = []
+  const desktop = createFakePeer('0b0b0b0b', 'ada', frames)
+  service.peers.set(desktop.connection, desktop)
+  await service.handlePeerMessage(desktop, {
+    type: 'profile',
+    username: 'ada',
+    link: makeProfileProof(link, { username: 'ada', at: 100 }, desktop.key)
+  })
+  // Everything this phone is in, with the keys, once.
+  const offered = frames.find((frame) => frame.type === 'link-rooms')
+  assert.ok(offered.rooms.some((room) => room.roomKey === DESKTOP_ROOM))
+  await service.handlePeerMessage(desktop, {
+    type: 'profile',
+    username: 'ada',
+    link: makeProfileProof(link, { username: 'ada', at: 100 }, desktop.key)
+  })
+  assert.equal(frames.filter((frame) => frame.type === 'link-rooms').length, 1)
+
+  // A room the desktop is in comes here and is joined.
+  const shared = 'ee'.repeat(32)
+  await service.handlePeerMessage(desktop, { type: 'link-rooms', rooms: [{ roomKey: shared, name: 'Shared', createdAt: 10, joinedAt: 20 }] })
+  assert.equal(service.rooms.get(shared).name, 'Shared')
+  assert.equal(service.rooms.get(shared).joinedAt, 20)
+  assert.ok(service.sdk.joined.includes(derivePeerChatTopic(shared).toString('hex')))
+
+  // A room made here goes to the desktop.
+  frames.length = 0
+  const made = await service.createRoom({ name: 'Made here', username: 'ada' })
+  const sent = frames.find((frame) => frame.type === 'link-rooms')
+  assert.deepEqual(sent.rooms.map((room) => room.roomKey), [made.roomKey])
+  assert.equal(sent.rooms[0].creatorKey, service.localKey)
+
+  // Left here, it is not taken back.
+  await service.leaveRoom({ roomKey: shared })
+  await service.handlePeerMessage(desktop, { type: 'link-rooms', rooms: [{ roomKey: shared, name: 'Shared' }] })
+  assert.equal(service.rooms.has(shared), false)
+  await service.close()
+
+  // And that holds after a restart, until it is joined again.
+  const storagePath = service.storagePath
+  const restarted = await new PeerChatService({ sdk: createFakeSdk(), storagePath }).start()
+  const again = createFakePeer('0b0b0b0b', 'ada', [])
+  restarted.peers.set(again.connection, again)
+  await restarted.handlePeerMessage(again, { type: 'profile', username: 'ada', link: makeProfileProof(restarted.link, { username: 'ada', at: 100 }, again.key) })
+  await restarted.handlePeerMessage(again, { type: 'link-rooms', rooms: [{ roomKey: shared, name: 'Shared' }] })
+  assert.equal(restarted.rooms.has(shared), false)
+  await restarted.joinRoom({ roomKey: shared })
+  assert.equal(restarted.rooms.has(shared), true)
+  await restarted.close()
+})
+
+test('a direct conversation goes to the other devices only once accepted', async (t) => {
+  const { service, link } = await linkedPhone(t)
+  const frames = []
+  const desktop = createFakePeer('0b0b0b0b', 'ada', frames)
+  service.peers.set(desktop.connection, desktop)
+  const dm = 'dd'.repeat(32)
+  service.rooms.set(dm, { roomKey: dm, name: 'Ann', isDM: true, dmWith: '0a0b0c0d', pendingAcceptance: true, createdAt: 1, members: [] })
+  await service.handlePeerMessage(desktop, { type: 'profile', username: 'ada', link: makeProfileProof(link, { username: 'ada', at: 100 }, desktop.key) })
+  const offered = frames.find((frame) => frame.type === 'link-rooms')
+  assert.equal(offered.rooms.some((room) => room.roomKey === dm), false)
+  await service.close()
+})
+
 test('shows other people\'s labels as they send them', async (t) => {
   const { service } = await linkedPhone(t)
   const peer = createFakePeer('0e0e0e0e', '')
@@ -373,6 +464,8 @@ function createFakePeer (id, username, frames = []) {
     active: true,
     connection: { destroyed: false },
     id,
+    // The whole network key the connection was made with.
+    key: id.repeat(8),
     username,
     bio: '',
     avatar: null,
