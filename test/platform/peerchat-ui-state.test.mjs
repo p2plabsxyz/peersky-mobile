@@ -140,3 +140,21 @@ test('a long press offers a room its key and a direct message its answers', asyn
   assert.match(screen, /function reportMember \(member: PeerChatMember, from: PeerChatRoom \| null = activeRoom\)/)
   assert.match(screen, /reportMember\(peer, from\)/)
 })
+
+// The message list is inverted, and an inverted list lays each row's children
+// out bottom to top. Handed over as a fragment, the date divider and the
+// message were two children, so the divider landed under the first message of
+// its day. One View keeps them in reading order.
+test('the date divider sits above the first message of its day', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const screen = await readFile(new URL('../../app/peerchat/PeerChatScreen.tsx', import.meta.url), 'utf8')
+
+  const start = screen.indexOf('data={displayedMessages}')
+  const list = screen.slice(start, screen.indexOf('ListEmptyComponent=', start))
+  assert.ok(start > -1 && list.length > 0)
+  assert.match(list, /\n\s*inverted\n/)
+
+  const row = list.slice(list.indexOf('renderItem='))
+  assert.match(row, /return \(\s*<View>\s*\{!!dateLabel && dateLabel !== previousDateLabel && \(/)
+  assert.doesNotMatch(row, /return \(\s*<>/)
+})

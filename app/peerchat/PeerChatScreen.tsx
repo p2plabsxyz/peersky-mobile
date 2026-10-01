@@ -2216,7 +2216,7 @@ export function PeerChatScreen ({
               ? activeRoom.members.find((member) => member.id === item.sender)
               : null
             return (
-              <>
+              <View>
               {!!dateLabel && dateLabel !== previousDateLabel && (
                 <View accessibilityRole='text' style={styles.dateDivider}>
                   <View style={[styles.dateDividerLine, { backgroundColor: colors.border }]} />
@@ -2331,7 +2331,7 @@ export function PeerChatScreen ({
                 {formatMessageTime(item.timestamp)}
               </Text>
               </View>
-              </>
+              </View>
             )
           }}
           ListEmptyComponent={(
