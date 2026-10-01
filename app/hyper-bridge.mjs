@@ -65,9 +65,12 @@ export function createHyperBridgeScript (token) {
   }
 
   // A field name or filename goes inside a quoted string in the part header,
-  // so a quote or a newline in one would end that header early.
+  // so a quote or a newline in one would end that header early. Escapes in
+  // this script are doubled: it is a template literal, and a single \\n turned
+  // into a real line break inside a regex and a string, so the whole injected
+  // script stopped parsing on every page.
   const quoteField = (value) => String(value)
-    .replace(/\r?\n|\r/g, ' ')
+    .replace(/\\r?\\n|\\r/g, ' ')
     .replace(/"/g, '%22')
 
   // The browser builds this itself for an ordinary fetch, including the
@@ -82,14 +85,14 @@ export function createHyperBridgeScript (token) {
     for (const [name, value] of form.entries()) {
       const isFile = typeof Blob !== 'undefined' && value instanceof Blob
       const disposition = isFile
-        ? 'Content-Disposition: form-data; name="' + quoteField(name) + '"; filename="' + quoteField(value.name || 'blob') + '"\r\n' +
-          'Content-Type: ' + (value.type || 'application/octet-stream') + '\r\n\r\n'
-        : 'Content-Disposition: form-data; name="' + quoteField(name) + '"\r\n\r\n'
-      parts.push(encoder.encode('--' + boundary + '\r\n' + disposition))
+        ? 'Content-Disposition: form-data; name="' + quoteField(name) + '"; filename="' + quoteField(value.name || 'blob') + '"\\r\\n' +
+          'Content-Type: ' + (value.type || 'application/octet-stream') + '\\r\\n\\r\\n'
+        : 'Content-Disposition: form-data; name="' + quoteField(name) + '"\\r\\n\\r\\n'
+      parts.push(encoder.encode('--' + boundary + '\\r\\n' + disposition))
       parts.push(isFile ? new Uint8Array(await value.arrayBuffer()) : encoder.encode(String(value)))
-      parts.push(encoder.encode('\r\n'))
+      parts.push(encoder.encode('\\r\\n'))
     }
-    parts.push(encoder.encode('--' + boundary + '--\r\n'))
+    parts.push(encoder.encode('--' + boundary + '--\\r\\n'))
 
     let length = 0
     for (const part of parts) length += part.length
