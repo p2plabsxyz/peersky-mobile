@@ -29,7 +29,9 @@ import {
 const ROOM_KEY = 'ab'.repeat(32)
 
 test('PeerChat uses the desktop transport protocol and validates public inputs', () => {
-  assert.equal(PEERCHAT_PROTOCOL, 'peersky-chat/1')
+  // Version 2 proves rooms instead of handing over their keys; the desktop
+  // speaks the same, and a build on version 1 never opens a channel with it.
+  assert.equal(PEERCHAT_PROTOCOL, 'peersky-chat/2')
   assert.equal(normalizePeerChatRoomKey(ROOM_KEY.toUpperCase()), ROOM_KEY)
   assert.equal(normalizePeerChatRoomKey('not-a-room'), '')
   assert.equal(normalizePeerChatProfileName('  Alice   Mobile  '), 'Alice Mobile')

@@ -6,7 +6,10 @@ import {
 } from 'node:crypto'
 import b4a from 'b4a'
 
-export const PEERCHAT_PROTOCOL = 'peersky-chat/1'
+// Version 2 names rooms by topic and opens one to a peer only with a proof it
+// holds the key (room-proof.mjs). Version 1 sent the key itself to anyone who
+// turned up under a room's topic, so the two do not talk at all.
+export const PEERCHAT_PROTOCOL = 'peersky-chat/2'
 export const MAX_PEERCHAT_MESSAGE_BYTES = 64 * 1024
 export const MAX_PEERCHAT_FRAME_BYTES = 256 * 1024
 export const MAX_PEERCHAT_PROFILE_NAME_LENGTH = 50

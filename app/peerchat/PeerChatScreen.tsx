@@ -30,6 +30,7 @@ import {
   PEERCHAT_INTRO_POINTS,
   serializePeerChatIntroState
 } from './intro-state.mjs'
+import { PEERCHAT_QUESTIONS } from './questions.mjs'
 import {
   parsePeerChatUiState,
   PEERCHAT_UI_STATE_MAX_BYTES,
@@ -92,6 +93,7 @@ import {
   RPC_PEERCHAT_UNBLOCK
 } from '../../backend/rpc/commands.mjs'
 import BackIcon from '../../assets/icons/bootstrap/arrow-left.svg'
+import ChevronRightIcon from '../../assets/icons/bootstrap/chevron-right.svg'
 import ShareIcon from '../../assets/icons/bootstrap/share.svg'
 import CloseIcon from '../../assets/icons/bootstrap/x-lg.svg'
 import LatestIcon from '../../assets/icons/peerchat/arrow-down.svg'
@@ -1790,14 +1792,20 @@ export function PeerChatScreen ({
               </View>
             ))}
           </View>
+          {/*
+            What people ask, folded so the screen stays short. The button comes
+            after them, so whoever agrees has scrolled past every one.
+          */}
+          <Text style={[styles.introQuestionsTitle, { color: colors.text }]}>Questions people ask</Text>
+          <PeerChatQuestions colors={colors} />
+          <Pressable
+            accessibilityRole='button'
+            onPress={continueFromIntro}
+            style={[styles.introContinue, styles.introAgree, { backgroundColor: colors.accent }]}
+          >
+            <Text style={styles.introContinueText}>Agree and continue</Text>
+          </Pressable>
         </ScrollView>
-        <Pressable
-          accessibilityRole='button'
-          onPress={continueFromIntro}
-          style={[styles.introContinue, { backgroundColor: colors.accent }]}
-        >
-          <Text style={styles.introContinueText}>Continue</Text>
-        </Pressable>
       </View>
     )
   }
@@ -4034,87 +4042,47 @@ function PeerProfileModal ({
   )
 }
 
-// Written for someone who has never heard of peer to peer. Every entry is a
-// question a real person asks in the first week. The awkward ones, deleting a
-// message and deleting an account, get a straight answer rather than a dodge,
-// and each one leads with what you get before what you give up.
-const PEERCHAT_ABOUT = [
-  {
-    q: 'Do I need an account?',
-    a: 'No, and you never will. Pick a name and start chatting. It lives on this phone, not in anyone\u2019s database.'
-  },
-  {
-    q: 'What do you know about me?',
-    a: 'Nothing at all. No tracking, no analytics, no profile of you sitting on a server somewhere, because there is no server to sit on.'
-  },
-  {
-    q: 'Who can read my messages?',
-    a: 'Only the people in the room. Everything is locked with the room key before it leaves your phone, so anyone in between sees scrambled text.'
-  },
-  {
-    q: 'Are my chats secure?',
-    a: 'Everything is locked before it leaves your phone, pictures and files included, and only the people in the conversation hold the key. A room is locked with its room key, so whoever you send that to is in, and anyone else who comes across the room on the network sees nothing but scrambled text. A chat with one person gets its own key, made fresh for that conversation and handed over on a connection that already proved who they are, so it cannot be worked out from your name or your code. Two things it does not hide: your phone talks to theirs directly, so anyone in a conversation with you can see your network address, and a room key never expires, so whoever you gave it to can read that room for as long as they keep it.'
-  },
-  {
-    q: 'Where do my messages live?',
-    a: 'On the phones of the people you are talking to, and nowhere else. Your conversation belongs to the people in it.'
-  },
-  {
-    q: 'Why can I not delete a message?',
-    a: 'Once it arrives it is on their phone, and their phone is theirs. It works the way a text message does, so it is worth a second look before you send.'
-  },
-  {
-    q: 'Can I delete my account?',
-    a: 'There is no account to delete, which is the good news. Clearing PeerSky data wipes your name and chats from this phone. Anything you already sent stays with the people you sent it to.'
-  },
-  {
-    q: 'Why did messages stop arriving?',
-    a: 'Messages hop straight between phones, so both need to be awake. Open PeerChat and anything waiting comes through.'
-  },
-  {
-    q: 'Why can I not see older messages?',
-    a: 'You start fresh from the moment you join, so nobody\u2019s old conversation follows them around.'
-  },
-  {
-    q: 'How do people join my room?',
-    a: 'Send them the invite link or the room key. Anyone who has it can join, so share it the way you would a house key.'
-  },
-  {
-    q: 'Can somebody be removed from a room?',
-    a: 'Whoever made the room can remove anyone in it, and nobody else can. It lasts: they cannot come back. Every copy of PeerChat checks the removal came from the person who made the room, by the connection it arrived on, so it cannot be faked. What it cannot do is take the room key back. Somebody removed still has it, and could run a changed app and listen, so removal means every ordinary PeerChat stops passing their messages on rather than a lock they cannot pick. The three-strikes spam and abuse limit is separate, and that one is a five minute pause, not a removal.'
-  },
-  {
-    q: 'Can people send anything they like?',
-    a: 'Some things are blocked for everyone, with nothing to switch on. Nudity in pictures is refused before it is sent and again when it arrives, covering what you post, your profile picture, a room picture and anything inside a folder you upload. Text is filtered for abuse, slurs and adult links. A link that looks like a scam gets a warning under it. Violent or graphic pictures are not detected, so block and report are what to use for those.'
-  },
-  {
-    q: 'Someone is bothering me',
-    a: 'Open their profile and block them. Their direct messages stop right away, and you still share any rooms you are both in. Report sends a note to the people who build PeerChat.'
-  },
-  {
-    q: 'Can I use the same profile on my phone and my computer?',
-    a: 'One phone and one computer, and only one of them at a time. Messages arrive on whichever is running, not both, and writing from both splits your history in two. Moving to a new phone is a deliberate step: remove the identity from the old one first, in Settings.'
-  },
-  {
-    q: 'Does it work without internet?',
-    a: 'Yes, on the same WiFi. Phones find each other over the local network, so an outage does not stop a conversation.'
-  }
-]
+// Folded, one open at a time, so a long list stays a short screen. The list
+// itself is in questions.mjs, shared by the welcome screen and About.
+function PeerChatQuestions ({ colors }: { colors: typeof lightColors }) {
+  const [open, setOpen] = useState<string | null>(null)
+  return (
+    <View style={styles.questions}>
+      {PEERCHAT_QUESTIONS.map((entry) => {
+        const expanded = open === entry.q
+        return (
+          <View key={entry.q} style={[styles.question, { backgroundColor: colors.input }]}>
+            <Pressable
+              accessibilityRole='button'
+              accessibilityState={{ expanded }}
+              onPress={() => setOpen(expanded ? null : entry.q)}
+              style={styles.questionHeader}
+            >
+              <Text style={[styles.questionText, { color: colors.text }]}>{entry.q}</Text>
+              <ChevronRightIcon
+                width={14}
+                height={14}
+                color={colors.muted}
+                style={expanded ? styles.questionChevronOpen : null}
+              />
+            </Pressable>
+            {expanded && <Text style={[styles.questionAnswer, { color: colors.muted }]}>{entry.a}</Text>}
+          </View>
+        )
+      })}
+    </View>
+  )
+}
 
 function PeerChatAboutPage ({ colors }: { colors: typeof lightColors }) {
   return (
     <ScrollView contentContainerStyle={styles.profileSettings}>
       <Text style={[styles.aboutLead, { color: colors.text }]}>
-        PeerChat is chat between phones, and nothing more. No sign up, no company in the
-        middle, and nothing you send passes through a server.
+        PeerChat is chat straight between devices. No accounts, no servers, works
+        without internet, and every message is end to end encrypted.
       </Text>
 
-      {PEERCHAT_ABOUT.map((entry) => (
-        <View key={entry.q} style={[styles.aboutCard, { backgroundColor: colors.input }]}>
-          <Text style={[styles.aboutQuestion, { color: colors.text }]}>{entry.q}</Text>
-          <Text style={[styles.aboutText, { color: colors.muted }]}>{entry.a}</Text>
-        </View>
-      ))}
+      <PeerChatQuestions colors={colors} />
 
       <Text style={[styles.aboutVersion, { color: colors.muted }]}>
         Version {Constants.expoConfig?.version || 'unknown'}
@@ -4409,6 +4377,15 @@ const styles = StyleSheet.create({
     minHeight: 50
   },
   introContinueText: { color: '#ffffff', fontSize: 15, fontWeight: '900' },
+  introQuestionsTitle: { fontSize: 16, fontWeight: '900', marginBottom: 12, marginTop: 30 },
+  // Inside the scroll, under the questions, rather than pinned to the bottom.
+  introAgree: { marginBottom: 0, marginHorizontal: 0, marginTop: 26 },
+  questions: { gap: 8 },
+  question: { borderRadius: 12, overflow: 'hidden' },
+  questionHeader: { alignItems: 'center', flexDirection: 'row', gap: 10, paddingHorizontal: 14, paddingVertical: 13 },
+  questionText: { flex: 1, fontSize: 14, fontWeight: '700', lineHeight: 19 },
+  questionAnswer: { fontSize: 13, lineHeight: 19, paddingBottom: 14, paddingHorizontal: 14 },
+  questionChevronOpen: { transform: [{ rotate: '90deg' }] },
   onboardingScreen: { flex: 1 },
   onboardingContent: { flexGrow: 1, justifyContent: 'center', paddingHorizontal: 24, paddingVertical: 28 },
   onboardingLogo: { alignSelf: 'center', borderRadius: 18, height: 72, marginBottom: 16, width: 72 },
@@ -4600,11 +4577,8 @@ const styles = StyleSheet.create({
   linkWarning: { fontSize: 11, fontWeight: '700', marginTop: 6 },
   preferenceRow: { alignItems: 'center', borderRadius: 12, flexDirection: 'row', gap: 10, padding: 11 },
   settingsSection: { gap: 8, marginTop: 6 },
-  aboutCard: { borderRadius: 12, gap: 6, padding: 12 },
   aboutBack: { marginRight: 10, padding: 4 },
   aboutLead: { fontSize: 14, lineHeight: 21, marginBottom: 2 },
-  aboutQuestion: { fontSize: 14, fontWeight: '600' },
-  aboutText: { fontSize: 13, lineHeight: 19 },
   aboutVersion: { fontSize: 12, marginTop: 2, textAlign: 'center' },
   settingsSectionTitle: { fontSize: 12, fontWeight: '600', letterSpacing: 0.4, textTransform: 'uppercase' },
   preferenceCopy: { flex: 1 },

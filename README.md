@@ -34,8 +34,9 @@ on the same Wi-Fi find each other directly, so it keeps working with the
 internet down.
 
 **Apps that came with it.** A Hyperdrive file browser, P2PMD for notes and
-slides, PeerChat for encrypted rooms and direct messages, and PeerTunes for
-music from your own drives. Each has its own address:
+slides, PeerChat for end to end encrypted rooms and direct messages with no
+account and no server, and PeerTunes for music from your own drives. Each has
+its own address:
 
 ```
 peersky://p2p/hyperdrive/   peersky://p2p/p2pmd/   peersky://p2p/peerchat/

@@ -11,6 +11,7 @@ import test from 'node:test'
 
 import { PeerChatService } from '../../backend/peerchat/service.mjs'
 import { derivePeerChatTopic } from '../../backend/peerchat/protocol.mjs'
+import { roomProof } from '../../backend/peerchat/room-proof.mjs'
 import {
   checkProfileProof,
   createLink,
@@ -253,7 +254,7 @@ test('the person\'s other device gets the room\'s history since the person joine
   await service.close()
 })
 
-test('a join that comes before the peer lists its topics still counts, and gets the history', async (t) => {
+test('a join counts only once the peer has proved the room, and then gets the history', async (t) => {
   const { service } = await startService(t)
   await service.completeOnboarding({ username: 'grace' })
   const room = await service.createRoom({ name: 'Phone crew', username: 'grace' })
@@ -263,16 +264,26 @@ test('a join that comes before the peer lists its topics still counts, and gets 
   desktop.rooms = []
   service.peers.set(desktop.connection, desktop)
 
+  // A join naming the room is no proof: anyone can know a room's topic.
   await service.handlePeerMessage(desktop, { type: 'join', roomKey: room.roomKey, username: 'grace@desktop', ts: 1 })
-  assert.ok(desktop.rooms.includes(room.roomKey))
-  assert.equal(service.peerJoinedAt(room.roomKey, '0d0d0d0d'), 1)
-  assert.equal(frames.filter((frame) => frame.type === 'sync' && frame.roomKey === room.roomKey).length, 1)
-  // And this phone's own join, so they know when it joined.
-  assert.ok(frames.some((frame) => frame.type === 'join' && frame.roomKey === room.roomKey))
+  assert.equal(desktop.rooms.includes(room.roomKey), false)
+  assert.equal(service.peerJoinedAt(room.roomKey, '0d0d0d0d'), null)
 
-  // A key this phone does not hold is still nobody's business.
-  await service.handlePeerMessage(desktop, { type: 'join', roomKey: 'ee'.repeat(32), username: 'grace@desktop', ts: 1 })
-  assert.equal(desktop.rooms.includes('ee'.repeat(32)), false)
+  // The proof opens it, and this phone's own proofs go out before its join, so
+  // the other side never drops the join as coming from outside the room.
+  await service.handlePeerMessage(desktop, {
+    type: 'topics',
+    rooms: [{ topic: wire(room.roomKey), proof: roomProof(room.roomKey, desktop.connection.handshakeHash, desktop.key) }]
+  })
+  assert.ok(desktop.rooms.includes(room.roomKey))
+  const ours = frames.findIndex((frame) => frame.type === 'topics')
+  const join = frames.findIndex((frame) => frame.type === 'join' && frame.room === wire(room.roomKey))
+  assert.ok(ours !== -1 && join > ours, 'our proofs before our join')
+
+  // Their join counts now, and the history goes.
+  await service.handlePeerMessage(desktop, { type: 'join', roomKey: room.roomKey, username: 'grace@desktop', ts: 1 })
+  assert.equal(service.peerJoinedAt(room.roomKey, '0d0d0d0d'), 1)
+  assert.equal(frames.filter((frame) => frame.type === 'sync' && frame.room === wire(room.roomKey)).length, 1)
   await service.close()
 })
 
@@ -459,10 +470,14 @@ function createFakeSdk () {
   }
 }
 
+// How a room is named on the wire: by its topic, never its key.
+const wire = (roomKey) => derivePeerChatTopic(roomKey).toString('hex')
+
 function createFakePeer (id, username, frames = []) {
   return {
     active: true,
-    connection: { destroyed: false },
+    // A handshake both ends of the pretend connection share, and our key.
+    connection: { destroyed: false, handshakeHash: Buffer.alloc(64, 9), publicKey: Buffer.alloc(32, 7) },
     id,
     // The whole network key the connection was made with.
     key: id.repeat(8),

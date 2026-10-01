@@ -148,38 +148,75 @@ test('PeerChat offers the Android battery exemption after notifications are turn
   assert.match(offer, /Sleeping apps/)
 })
 
-test('PeerChat About answers the questions a first-time user actually asks', async () => {
-  const screen = await readFile(new URL('../../app/peerchat/PeerChatScreen.tsx', import.meta.url), 'utf8')
-  const about = screen.slice(
-    screen.indexOf('const PEERCHAT_ABOUT = ['),
-    screen.indexOf('function PeerChatMediaViewer')
-  )
+test('PeerChat answers the questions a first-time user actually asks', async () => {
+  const { PEERCHAT_QUESTIONS } = await import('../../app/peerchat/questions.mjs')
+  const answer = (pattern) => PEERCHAT_QUESTIONS.find(({ q }) => pattern.test(q))?.a || ''
+
+  // Asked the way a person asks: a question, in plain words.
+  for (const { q, a } of PEERCHAT_QUESTIONS) {
+    assert.match(q, /\?$/)
+    assert.ok(a.length > 0)
+    assert.doesNotMatch(`${q} ${a}`, /—/)
+  }
+
+  // What PeerChat is, said outright: no accounts, no servers, works without
+  // internet, end to end encrypted.
+  assert.match(answer(/need an account/), /Pick a name and start chatting/)
+  assert.match(answer(/where.s the server/), /There isn.t one/)
+  assert.match(answer(/read my messages/), /end to end encrypted/)
+  assert.match(answer(/without internet/), /Any local network will do/)
+
+  // Knowing where a room is on the network gets nobody in.
+  assert.match(answer(/stranger on the network/), /prove it holds the room.s key/)
+  assert.match(answer(/stranger on the network/), /never goes over the wire/)
 
   // The awkward ones get a straight answer rather than a dodge.
-  assert.match(about, /Why can I not delete a message\?/)
-  assert.match(about, /Can I delete my account\?/)
-  assert.match(about, /their phone is theirs/)
-  assert.match(about, /stays with the people you sent it to/)
+  assert.match(answer(/unsend/), /their phone is theirs/)
+  assert.match(answer(/delete my account/), /stays with the people you sent it to/)
+  assert.match(answer(/know about me/), /No tracking, no analytics/)
 
-  // Privacy is the reason to pick this over anything else, so it is asked
-  // outright rather than left to be inferred.
-  assert.match(about, /What do you know about me\?/)
-  assert.match(about, /No tracking, no analytics/)
-  assert.match(about, /Who can read my messages\?/)
+  // "How private is it" names what it does not hide, and a one to one chat
+  // says how it is locked.
+  assert.match(answer(/How private/), /can see your network address/)
+  assert.match(answer(/How private/), /a room key never expires/)
+  assert.match(answer(/one to one/), /made fresh for that conversation/)
+  assert.match(answer(/one to one/), /can.t be worked out from your name or your code/)
 
-  // "Is this secure" is the question the whole app rests on, so it names how a
-  // room is locked, how a one to one chat is locked, and what neither hides.
-  assert.match(about, /Are my chats secure\?/)
-  assert.match(about, /locked with its room key/)
-  assert.match(about, /its own key, made fresh for that conversation/)
-  assert.match(about, /cannot be worked out from your name or your code/)
-  assert.match(about, /can see your network address/)
-  assert.match(about, /a room key never expires/)
+  // The peer to peer facts a normal person trips over.
+  assert.match(answer(/message arrive/), /both of you need to be online/)
+  assert.match(answer(/older messages/), /start fresh from the moment you join/)
 
-  // And the peer to peer facts a normal person trips over.
-  assert.match(about, /both need to be awake/)
-  assert.match(about, /start fresh from the moment you join/)
-  assert.match(about, /same WiFi/)
+  // Several devices at once, each with its label.
+  assert.match(answer(/phone and my computer/), /as many computers as you like, all at the same time/)
+
+  // Reporting says what it sends.
+  assert.match(answer(/bothering me/), /room.s key in it/)
+})
+
+test('PeerChat shows the questions folded, on the welcome screen and in About', async () => {
+  const screen = await readFile(new URL('../../app/peerchat/PeerChatScreen.tsx', import.meta.url), 'utf8')
+
+  // One list for both places.
+  assert.match(screen, /import \{ PEERCHAT_QUESTIONS \} from '\.\/questions\.mjs'/)
+  assert.doesNotMatch(screen, /const PEERCHAT_ABOUT = \[/)
+
+  // On the welcome screen, under the four points, and the button comes after
+  // them inside the scroll, so whoever agrees has gone past every question.
+  const intro = screen.slice(screen.indexOf('if (showIntro) {'), screen.indexOf('if (isInitialized && !profile?.username)'))
+  assert.match(intro, /<PeerChatQuestions colors=\{colors\} \/>/)
+  assert.ok(intro.indexOf('PEERCHAT_INTRO_POINTS.map') < intro.indexOf('<PeerChatQuestions'))
+  assert.ok(intro.indexOf('<PeerChatQuestions') < intro.indexOf('Agree and continue'))
+  assert.ok(intro.indexOf('Agree and continue') < intro.indexOf('</ScrollView>'))
+
+  const about = screen.slice(screen.indexOf('function PeerChatAboutPage'), screen.indexOf('function PeerChatMediaViewer'))
+  assert.match(about, /<PeerChatQuestions colors=\{colors\} \/>/)
+  assert.match(about, /No accounts, no servers, works\s+without internet, and every message is end to end encrypted/)
+
+  // Folded: only the open question shows its answer, and a screen reader hears
+  // whether it is open.
+  const questions = screen.slice(screen.indexOf('function PeerChatQuestions'), screen.indexOf('function PeerChatAboutPage'))
+  assert.match(questions, /accessibilityState=\{\{ expanded \}\}/)
+  assert.match(questions, /\{expanded && <Text/)
 
   // Source code stays in settings, not buried in About.
   assert.doesNotMatch(about, /PEERCHAT_SOURCE_URL/)
@@ -187,7 +224,6 @@ test('PeerChat About answers the questions a first-time user actually asks', asy
 
   // Opened as its own page inside the sheet. A second modal over the settings
   // sheet is what crashed iOS.
-  assert.match(screen, /setSettingsPage\('about'\)/)
   assert.match(screen, /settingsPage === 'about' && \(\s*<PeerChatAboutPage/)
   assert.doesNotMatch(about, /<Modal/)
 })
