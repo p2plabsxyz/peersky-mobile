@@ -41,8 +41,18 @@ export function getP2pmdEditorRequestAction ({ url, isTopFrame = true }, editorU
   }
 }
 
-/** Android reports a page loaded from a string as about:blank, iOS as its base address. */
+/**
+ * iOS reports the page's own address. Android reports only the origin a
+ * message came from, or about:blank on a WebView too old to say. Nothing but
+ * the editor ever loads at the room's origin in this view, so that is enough.
+ */
 export function isP2pmdEditorMessage (reportedUrl, editorUrl) {
   const url = String(reportedUrl || '')
-  return url === '' || url === 'about:blank' || withoutHash(url) === withoutHash(editorUrl)
+  if (url === '' || url === 'about:blank') return true
+  if (withoutHash(url) === withoutHash(editorUrl)) return true
+  try {
+    return url === new URL(editorUrl).origin
+  } catch {
+    return false
+  }
 }

@@ -59,9 +59,25 @@ test('links go to a browser tab and other apps are never opened from a note', ()
 test('messages count only from the editor page', () => {
   assert.equal(isP2pmdEditorMessage(EDITOR, EDITOR), true)
   assert.equal(isP2pmdEditorMessage(`${EDITOR}#ieee-ref-2`, EDITOR), true)
-  // Android reports a page loaded from a string as about:blank.
+  // Android WebViews too old for message listeners say about:blank.
   assert.equal(isP2pmdEditorMessage('about:blank', EDITOR), true)
   assert.equal(isP2pmdEditorMessage('', EDITOR), true)
+  // The rest of Android names only the origin. Turning that away dropped every
+  // message from the editor: no preview, no publish, no status.
+  assert.equal(isP2pmdEditorMessage('http://127.0.0.1:53111', EDITOR), true)
+  assert.equal(isP2pmdEditorMessage('http://127.0.0.1:53112', EDITOR), false)
+  assert.equal(isP2pmdEditorMessage('http://localhost:53111', EDITOR), false)
+  assert.equal(isP2pmdEditorMessage('null', EDITOR), false)
   assert.equal(isP2pmdEditorMessage('http://127.0.0.1:53111/?role=client', EDITOR), false)
   assert.equal(isP2pmdEditorMessage('https://example.com/', EDITOR), false)
+  assert.equal(isP2pmdEditorMessage('https://example.com', EDITOR), false)
+  assert.equal(isP2pmdEditorMessage('http://127.0.0.1:53111', 'not a url'), false)
+})
+
+// react-native-webview hands Android messages to a WebMessageListener, whose
+// only word on where a message came from is the sender's origin.
+test('Android names the origin a message came from, not the page', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const webview = await readFile(new URL('../../node_modules/react-native-webview/android/src/main/java/com/reactnativecommunity/webview/RNCWebView.java', import.meta.url), 'utf8')
+  assert.match(webview, /RNCWebView\.this\.onMessage\(message\.getData\(\), sourceOrigin\.toString\(\)\)/)
 })
