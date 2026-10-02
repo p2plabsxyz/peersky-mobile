@@ -80,6 +80,28 @@ describe('mobile platform runtime configuration', () => {
     assert.equal(manifest.NSPrivacyTracking, false)
   })
 
+  // A WebView cannot list audio outputs, so PeerTunes' Bluetooth mark never
+  // showed on a phone. A native module reads the route instead, with no new
+  // permission on either system.
+  it('reads the audio route natively for the PeerTunes Bluetooth mark', async () => {
+    const appJson = JSON.parse(await readFile(repoFile('app.json'), 'utf8'))
+    assert.equal(hasExpoPlugin(appJson.expo?.plugins || [], './plugins/with-audio-route'), true)
+
+    const ios = await readFile(repoFile('plugins/templates/PeerSkyAudioRoute.m.template'), 'utf8')
+    assert.match(ios, /RCT_EXPORT_MODULE\(PeerSkyAudioRoute\)/)
+    assert.match(ios, /AVAudioSessionPortBluetoothA2DP/)
+    assert.match(ios, /currentRoute\.outputs/)
+
+    const android = await readFile(repoFile('plugins/templates/PeerSkyAudioRouteModule.kt.template'), 'utf8')
+    assert.match(android, /override fun getName\(\) = "PeerSkyAudioRoute"/)
+    assert.match(android, /getDevices\(AudioManager\.GET_DEVICES_OUTPUTS\)/)
+    assert.match(android, /TYPE_BLUETOOTH_A2DP/)
+    assert.doesNotMatch(android, /BLUETOOTH_CONNECT/)
+
+    const plugin = await readFile(repoFile('plugins/with-audio-route.js'), 'utf8')
+    assert.match(plugin, /add\(PeerSkyAudioRoutePackage\(\)\)/)
+  })
+
   it('keeps iOS local networking scoped to localhost support, not arbitrary HTTP', async () => {
     const appJson = JSON.parse(await readFile(repoFile('app.json'), 'utf8'))
     const ats = appJson.expo?.ios?.infoPlist?.NSAppTransportSecurity

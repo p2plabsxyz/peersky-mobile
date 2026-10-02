@@ -1,0 +1,39 @@
+#import <AVFoundation/AVFoundation.h>
+#import <React/RCTBridgeModule.h>
+
+// Whether sound is going somewhere wireless: Bluetooth, AirPlay or a car.
+// PeerTunes shows its Bluetooth mark from this, because a WebView cannot see
+// the audio outputs itself.
+@interface PeerSkyAudioRoute : NSObject <RCTBridgeModule>
+@end
+
+@implementation PeerSkyAudioRoute
+
+RCT_EXPORT_MODULE(PeerSkyAudioRoute)
+
++ (BOOL)requiresMainQueueSetup
+{
+  return NO;
+}
+
+RCT_EXPORT_METHOD(getRoute:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject)
+{
+  NSSet<AVAudioSessionPort> *wireless = [NSSet setWithObjects:
+    AVAudioSessionPortBluetoothA2DP,
+    AVAudioSessionPortBluetoothHFP,
+    AVAudioSessionPortBluetoothLE,
+    AVAudioSessionPortAirPlay,
+    AVAudioSessionPortCarAudio,
+    nil];
+  BOOL external = NO;
+  for (AVAudioSessionPortDescription *output in [AVAudioSession sharedInstance].currentRoute.outputs) {
+    if ([wireless containsObject:output.portType]) {
+      external = YES;
+      break;
+    }
+  }
+  resolve(@{ @"external": @(external) });
+}
+
+@end

@@ -93,9 +93,16 @@
     show($("sb-pause"), player.current() && !player.playing);
   });
 
-  // Show the bluetooth mark whenever sound is routed somewhere external.
+  // Show the bluetooth mark whenever sound is routed somewhere external. A host
+  // that can see the route, like PeerSky on a phone, says so in
+  // window.peerskyAudioRoute, because a WebView cannot list the outputs.
   async function updateBluetooth() {
     const el = $("sb-bt");
+    const route = window.peerskyAudioRoute;
+    if (route && typeof route.external === "boolean") {
+      show(el, route.external);
+      return;
+    }
     try {
       if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
         show(el, false);
@@ -111,6 +118,7 @@
   if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
     navigator.mediaDevices.addEventListener("devicechange", updateBluetooth);
   }
+  window.addEventListener("peersky-audio-route", updateBluetooth);
   player.addEventListener("state", updateBluetooth);
   updateBluetooth();
 
@@ -197,7 +205,7 @@
       while ((m = re.exec(s || ""))) {
         try {
           const u = decodeURIComponent(m[1]);
-          if (/^(hyper|https?):\/\//i.test(u) && !out.includes(u)) out.push(u);
+          if (PT.SOURCE_SCHEME.test(u) && !out.includes(u)) out.push(u);
         } catch {}
       }
     }
@@ -285,6 +293,9 @@
       splash.classList.add("bye");
       setTimeout(() => splash.remove(), 520);
     }, 650);
+
+    // A first visit hears what this is and how the wheel works before anything else.
+    if (!PT.welcomeSeen()) await PT.showWelcome();
 
     const shared = sharedSources();
     if (shared.length) {

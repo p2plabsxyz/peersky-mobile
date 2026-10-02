@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { AppState, Modal, Pressable, StyleSheet, Text, View } from 'react-native'
+import { AppState, Modal, NativeModules, Pressable, StyleSheet, Text, View } from 'react-native'
 import { CameraView, useCameraPermissions } from 'expo-camera'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { WebView } from 'react-native-webview'
 
 import {
   PEERTUNES_SCAN_BRIDGE_SCRIPT,
+  createAudioRouteScript,
   createPeerTunesPageUrl,
   isPeerTunesPageRequest,
   parsePeerTunesHapticRequest,
@@ -16,6 +17,9 @@ import {
 import { AppLoading } from '../AppLoading'
 import { MODAL_ORIENTATIONS } from '../modal-orientations'
 import { tapFeedback } from '../haptics'
+
+const audioRoute = NativeModules.PeerSkyAudioRoute as { getRoute: () => Promise<{ external: boolean }> } | undefined
+const AUDIO_ROUTE_POLL_MS = 3000
 
 type Props = {
   error: string | null
@@ -61,6 +65,27 @@ export function PeerTunesScreen ({
     })
     return () => subscription.remove()
   }, [onEnsureServer])
+
+  // The Bluetooth mark. The app looks at the audio route and tells the page
+  // whenever the answer changes, and again whenever the page loads.
+  const audioExternalRef = useRef<boolean | null>(null)
+  const pushAudioRoute = useCallback(async () => {
+    if (!audioRoute) return
+    try {
+      const { external } = await audioRoute.getRoute()
+      if (external === audioExternalRef.current) return
+      audioExternalRef.current = external
+      webViewRef.current?.injectJavaScript(createAudioRouteScript(external))
+    } catch {}
+  }, [])
+
+  useEffect(() => {
+    if (!localUrl || !audioRoute) return
+    const timer = setInterval(() => {
+      if (AppState.currentState === 'active') void pushAudioRoute()
+    }, AUDIO_ROUTE_POLL_MS)
+    return () => clearInterval(timer)
+  }, [localUrl, pushAudioRoute])
 
   // The page asks for a scan, native runs the camera and hands the text back.
   // WKWebView has no BarcodeDetector, and even where it does the native scanner
@@ -175,6 +200,10 @@ export function PeerTunesScreen ({
         return false
       }}
       onOpenWindow={(event) => onOpenUrl(event.nativeEvent.targetUrl)}
+      onLoadEnd={() => {
+        audioExternalRef.current = null
+        void pushAudioRoute()
+      }}
       onRenderProcessGone={() => recover('a renderer restart')}
       onContentProcessDidTerminate={() => recover('a renderer restart')}
       onError={(event) => {

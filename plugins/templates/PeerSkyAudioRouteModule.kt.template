@@ -1,0 +1,44 @@
+package __PACKAGE_NAME__
+
+import android.content.Context
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
+import com.facebook.react.bridge.Arguments
+import com.facebook.react.bridge.Promise
+import com.facebook.react.bridge.ReactApplicationContext
+import com.facebook.react.bridge.ReactContextBaseJavaModule
+import com.facebook.react.bridge.ReactMethod
+
+// Whether a Bluetooth output is connected. PeerTunes shows its Bluetooth mark
+// from this, because a WebView cannot see the audio outputs itself. Reading
+// device types needs no Bluetooth permission.
+class PeerSkyAudioRouteModule(
+  reactContext: ReactApplicationContext
+) : ReactContextBaseJavaModule(reactContext) {
+
+  override fun getName() = "PeerSkyAudioRoute"
+
+  @ReactMethod
+  fun getRoute(promise: Promise) {
+    try {
+      val audio = reactApplicationContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+      val external = audio.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any { it.type in WIRELESS_TYPES }
+      promise.resolve(Arguments.createMap().apply { putBoolean("external", external) })
+    } catch (error: Exception) {
+      promise.reject("AUDIO_ROUTE_FAILED", "Unable to read the audio route.", error)
+    }
+  }
+
+  companion object {
+    // BLE headset and speaker (26, 27) are API 31, BLE broadcast (30) API 33.
+    // On older systems no device ever reports them, so the plain numbers are
+    // safe everywhere.
+    private val WIRELESS_TYPES = setOf(
+      AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
+      AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+      26,
+      27,
+      30
+    )
+  }
+}

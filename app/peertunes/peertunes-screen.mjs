@@ -130,3 +130,11 @@ export function parsePeerTunesKeepOfflineRequest (raw) {
     return null
   }
 }
+
+/**
+ * Tells the page whether sound is going to a Bluetooth device, for its
+ * Bluetooth mark. A WebView cannot see the audio outputs itself.
+ */
+export function createAudioRouteScript (external) {
+  return `window.peerskyAudioRoute = { external: ${external === true} }; window.dispatchEvent(new Event('peersky-audio-route')); true;`
+}
