@@ -132,6 +132,7 @@ import { BrowserNavBar } from './BrowserNavBar'
 import { BrowserBackSwipe } from './BrowserBackSwipe'
 import { BrowserZoomSheet } from './BrowserZoomSheet'
 import { PublishedLinkSheet } from './PublishedLinkSheet'
+import { P2pmdNewNoteSheet } from './P2pmdNewNoteSheet'
 import { WelcomeScreen } from './WelcomeScreen'
 import { RestartRequiredScreen } from './RestartRequiredScreen'
 import { emitLinkDeviceProgress } from './settings/link-device-progress'
@@ -531,6 +532,7 @@ export default function App () {
   // does. The field starts on a fun one so "Get started" is one tap.
   const [p2pmdNameDraft, setP2pmdNameDraft] = useState(() => loadP2pmdPeerDisplayName() || createFunPeerName())
   const [isEditingP2pmdName, setIsEditingP2pmdName] = useState(false)
+  const [p2pmdNewNoteVisible, setP2pmdNewNoteVisible] = useState(false)
   const isP2pmdLandscapeSlides = p2pmdViewMode === 'slides' && browserWindowWidth > browserWindowHeight
   const [p2pmdSyncStatus, setP2pmdSyncStatus] = useState('Ready')
   const [p2pmdSetupError, setP2pmdSetupError] = useState<string | null>(null)
@@ -2528,7 +2530,12 @@ export default function App () {
 
   // requireCopy: hosting a shared note nobody else has open, which only ever
   // goes up from this phone's copy of it.
-  async function onP2pmdRoomCreate (roomKey: string | null = null, { requireCopy = false }: { requireCopy?: boolean } = {}) {
+  // A note this phone made reopens the way it was made: the backend can tell
+  // a public key from a private one, so only a new note says which it is.
+  async function onP2pmdRoomCreate (
+    roomKey: string | null = null,
+    { requireCopy = false, secure = true }: { requireCopy?: boolean, secure?: boolean } = {}
+  ) {
     const isReopening = Boolean(roomKey)
     ensureP2pmdPeerName()
     setIsLoading(true)
@@ -2546,7 +2553,7 @@ export default function App () {
       const response = await callRpc(RPC_P2PMD_ROOM_CREATE, {
         ...(roomKey ? { connector: roomKey } : {}),
         ...(requireCopy ? { requireCopy: true } : {}),
-        secure: true,
+        secure,
         udp: false
       })
 
@@ -4169,7 +4176,7 @@ export default function App () {
                           <View style={styles.p2pmdActionRow}>
                             <Pressable
                               style={[styles.p2pmdPrimaryAction, isBooting || isLoading ? styles.p2pmdActionDisabled : null]}
-                              onPress={() => void onP2pmdRoomCreate()}
+                              onPress={() => setP2pmdNewNoteVisible(true)}
                               disabled={isBooting || isLoading}
                             >
                               <Text style={styles.p2pmdPrimaryActionText}>Create Note</Text>
@@ -4182,6 +4189,15 @@ export default function App () {
                               <Text style={[styles.p2pmdTextActionText, p2pmdTheme?.p2pmdTextActionText]}>Refresh</Text>
                             </Pressable>
                           </View>
+                          <P2pmdNewNoteSheet
+                            visible={p2pmdNewNoteVisible}
+                            isDark={browserIsDark}
+                            onClose={() => setP2pmdNewNoteVisible(false)}
+                            onCreate={(isPrivate) => {
+                              setP2pmdNewNoteVisible(false)
+                              void onP2pmdRoomCreate(null, { secure: isPrivate })
+                            }}
+                          />
                           <View style={styles.p2pmdNameSummary}>
                             <Text numberOfLines={1} style={[styles.helperText, p2pmdTheme?.helperText, styles.p2pmdNameSummaryText]}>
                               You are <Text style={styles.p2pmdNameSummaryName}>{p2pmdPeerDisplayName}</Text>

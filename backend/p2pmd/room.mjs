@@ -21,6 +21,12 @@ import {
   deactivateP2pmdRoomSnapshot,
   loadP2pmdRoomSnapshot
 } from './snapshots.mjs'
+import {
+  createPublicNoteSeed,
+  findPublicNoteSeed,
+  isPublicNoteKey,
+  rememberPublicNoteSeed
+} from './public-notes.mjs'
 
 const JOIN_READY_ATTEMPTS = 12
 const JOIN_READY_DELAY_MS = 500
@@ -44,6 +50,25 @@ export async function createP2pmdRoom ({
   return withRoomTransition(async () => {
     await disconnectRoomInternal()
 
+    // A private note hosts from its own key. A public one hosts from the seed
+    // it was made from, which only the phone that made it keeps.
+    let hostKey = connector
+    let publicSeed = null
+    if (connector && isPublicNoteKey(connector)) {
+      publicSeed = findPublicNoteSeed(connector)
+      if (!publicSeed) {
+        return {
+          ok: false,
+          error: 'This phone can no longer host this public note. Only the phone that made a public note can host it.'
+        }
+      }
+      hostKey = publicSeed
+    } else if (!connector && !secure) {
+      publicSeed = createPublicNoteSeed()
+      hostKey = publicSeed
+    }
+    const isPrivate = !publicSeed
+
     if (connector) {
       const snapshot = loadP2pmdRoomSnapshot(connector)
       if (snapshot) {
@@ -64,8 +89,8 @@ export async function createP2pmdRoom ({
       const holesailResult = await startHolesailLive({
         host: serverResult.host,
         port: serverResult.port,
-        connector,
-        secure,
+        connector: hostKey,
+        secure: isPrivate,
         udp,
         log
       })
@@ -91,7 +116,7 @@ export async function createP2pmdRoom ({
         localUrl: serverResult.localUrl,
         host: serverResult.host,
         port: serverResult.port,
-        secure: Boolean(secure),
+        secure: isPrivate,
         udp: Boolean(udp)
       }
 
@@ -100,6 +125,15 @@ export async function createP2pmdRoom ({
         room = null
         resetDocumentState()
         return { ok: false, error: 'Unable to restore the original P2PMD room key.' }
+      }
+
+      // Without its seed a new public note could never be opened again, so it
+      // is kept before anyone is handed the key. Reopening one marks it used.
+      if (publicSeed && !rememberPublicNoteSeed(room.key, publicSeed) && !connector) {
+        await Promise.allSettled([stopHolesail(), stopP2pmdServer()])
+        room = null
+        resetDocumentState()
+        return { ok: false, error: 'Unable to keep this public note on the phone, so it was not opened.' }
       }
 
       activateP2pmdRoomSnapshot(room.key, getDocumentState())

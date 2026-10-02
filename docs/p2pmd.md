@@ -67,6 +67,13 @@ flowchart LR
 The host's server holds the document. A guest's editor makes the same requests
 to its own Holesail client, which carries them to the host.
 
+## Private and public notes
+
+Create Note asks one thing: private or public. Every new note starts private, the same as on the desktop. The desktop's UDP, host and port options are left off the phone.
+
+- **Private**: the key is a secret the host's keys are made from, so finding the note on the network lets nobody in. Only people you send the key to can open it, and any of your devices can host it from its copy.
+- **Public**: the key is the host's public key. Anyone with it can open the note, and the DHT nodes that store its announcement have it. Hosting from that key would make a different note, so the phone keeps the seed each public note came from in `hyper-sdk/p2pmd-public-notes.json` (the twenty used last) and reopens it from there. Link Device never sends the seed, so only this phone can host the note, and other devices get it as one to join.
+
 ## Safety notes
 
 - The editor runs only the app's code. yjs ships inside the page, so whoever hosts a room sends data, never scripts.
