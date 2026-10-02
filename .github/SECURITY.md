@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-Security fixes land in the latest release on the App Store and Google Play only. Keeping automatic app updates on is the best protection.
+Security fixes land in the latest release only: on the App Store, on Google Play, and as the APK on GitHub releases. Keeping automatic app updates on is the best protection.
 
 ## Reporting a vulnerability
 

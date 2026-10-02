@@ -73,6 +73,23 @@ this path:
 5. The resulting HTML is rendered by a WebView with its Hyper URL retained as
    the visible browser address.
 
+```mermaid
+sequenceDiagram
+  participant Shell as Browser shell
+  participant Worklet as Bare worklet
+  participant Peers as Hyper peers
+  participant View as WebView
+
+  Shell->>Worklet: RPC_HYPER_FETCH hyper://key/path
+  Worklet->>Peers: blocks it does not have on disk
+  Peers-->>Worklet: blocks, kept on disk
+  Worklet-->>Shell: HTML, small assets inlined, the rest as signed links
+  Shell->>View: render, the address bar keeps hyper://
+  View->>Worklet: images and media from 127.0.0.1, with Range
+  View->>Shell: the page calls fetch on a hyper:// URL, over postMessage
+  Shell->>Worklet: checked by page-access.mjs, a write asks first
+```
+
 Small assets may be inlined within configured count, size, and concurrency
 budgets. Streamable or larger media is served through the authenticated
 loopback server in `backend/hyper/asset-server.mjs`. The generated asset URLs

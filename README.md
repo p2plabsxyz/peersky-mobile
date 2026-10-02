@@ -22,10 +22,10 @@ There is a desktop version too, at [peersky.p2plabs.xyz](https://peersky.p2plabs
 
 ## What it does
 
-**Browsing.** Tabs that survive a restart, bookmarks, history, downloads, per-tab
-zoom and desktop view, and page sharing. Ads and trackers are blocked by the
-engine itself using EasyList and EasyPrivacy, with a snapshot bundled so you are
-protected before the first update lands.
+**Browsing.** Tabs that survive a restart, incognito tabs, bookmarks, history,
+downloads, per-tab zoom and desktop view, and page sharing. Ads and trackers
+are blocked by the engine itself using EasyList and EasyPrivacy, with a snapshot
+bundled so you are protected before the first update lands.
 
 **The peer-to-peer web.** `hyper://` pages are fetched by a Bare worklet and
 served to the WebView, images, scripts and media included. A page built on Hyper
@@ -52,6 +52,12 @@ private drives and tabs over from PeerSky Desktop.
 See [PRIVACY.md](PRIVACY.md) for exactly what leaves the phone and what does not.
 To report harmful public content, [open a report](https://github.com/p2plabsxyz/peersky-mobile/issues/new?template=content-report.yml).
 
+## Getting it
+
+Each [GitHub release](https://github.com/p2plabsxyz/peersky-mobile/releases)
+carries a signed Android APK and its SHA-256. The App Store and Google Play
+builds come from the same code.
+
 ## Running it
 
 ```sh
@@ -77,9 +83,10 @@ npm test          # the full suite
 
 ## Docs
 
-[docs/](docs/README.md) has the rest: how the browser shell is put together, how
-`hyper://` is fetched, how content blocking works per platform, and one page for
-each built-in app.
+[docs/](docs/README.md) has the rest, with diagrams: how the app and its Bare
+worklet fit together, how the browser shell works, how `hyper://` is fetched,
+how content blocking works per platform, and one page for each built-in app.
+[SECURITY.md](.github/SECURITY.md) says how to report a vulnerability.
 
 ## License
 

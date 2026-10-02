@@ -23,6 +23,7 @@ This mirrors the desktop direction at the protocol level: local HTTP endpoints e
 |---|---|---|
 | `/` or `/index.html` | `GET` | Mobile editor page |
 | `/status` | `GET` | Runtime status and peer list |
+| `/activity` | `GET` | Recent edits by peer, for the room's activity list |
 | `/doc` | `GET` | Current document state |
 | `/doc` | `POST` | Full document update |
 | `/doc/yjsstate` | `GET` | Full Yjs state for initial sync |
@@ -43,6 +44,28 @@ Previews are rendered by the app through its own bridge, not by the room's serve
 6. Local edits are sent to `/doc/update` as Yjs updates.
 7. Remote updates arrive through `/events` and are applied in the editor.
 8. Presence updates keep peer counts and gutter attribution metadata in sync.
+
+```mermaid
+flowchart LR
+  subgraph host["Phone hosting the note"]
+    heditor["Editor WebView"]
+    server["Room server<br/>127.0.0.1"]
+    live["Holesail, live"]
+  end
+
+  subgraph guest["A guest: phone or PeerSky Desktop"]
+    geditor["Editor"]
+    client["Holesail client<br/>127.0.0.1, its own port"]
+  end
+
+  heditor <-->|"/doc/yjsstate, /doc/update, /events"| server
+  live --- server
+  client <-->|"hs:// key, over HyperDHT"| live
+  geditor <-->|"the same requests"| client
+```
+
+The host's server holds the document. A guest's editor makes the same requests
+to its own Holesail client, which carries them to the host.
 
 ## Safety notes
 

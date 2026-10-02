@@ -65,6 +65,19 @@ own proofs before anything about a room, so its join never arrives first. Being
 found under a room's topic, or naming the room in a frame, counts for nothing.
 The desktop makes the same proof, and both pin one test vector.
 
+```mermaid
+sequenceDiagram
+  participant A as This phone
+  participant B as Another device
+  Note over A,B: found under the room's topic,<br/>on Hyperswarm or the same Wi-Fi
+  A->>B: Noise handshake
+  B->>A: Noise handshake
+  A->>B: for each room, its topic and an HMAC proof
+  B->>A: for each room, its topic and an HMAC proof
+  Note over A,B: a room opens on this connection<br/>only for a proof that checks out
+  A->>B: encrypted messages and feed sync for that room
+```
+
 The chat channel is `peersky-chat/2`. Version 1 sent the room key to anyone who
 turned up under a room's topic, so a room used with a version 1 build that has
 to stay private is worth recreating. The two versions do not open a channel

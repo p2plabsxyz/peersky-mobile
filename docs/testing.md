@@ -49,6 +49,7 @@ Platform tests live in `test/platform/` and check mobile runtime configuration.
 - Bare bundling is wired into native Android/iOS runs.
 - Bare import aliases stay explicit.
 - Backend shutdown paths log cleanup failures instead of silently swallowing them.
+- Content blocking converts and wires the filter lists on both platforms. `cover-your-tracks.test.mjs` replays the two tracker frames [Cover Your Tracks](https://coveryourtracks.eff.org/) loads against the shipped lists, and fails unless both of its blocking questions would answer Yes.
 
 ### Live integration tests
 
@@ -75,7 +76,7 @@ The socket implementation changes, but the request handling logic is shared:
 
 - document endpoints
 - Yjs update endpoints
-- preview endpoint
+- activity endpoint
 - presence endpoint
 - SSE event stream endpoint
 - validation and error responses

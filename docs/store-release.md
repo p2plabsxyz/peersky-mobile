@@ -87,6 +87,14 @@ pushed (or a release is made with a new tag on GitHub), signs it, and attaches
 to the release. The tag has to match
 `version` in `app.json`, so `v0.1.0` for 0.1.0, or the run stops.
 
+```mermaid
+flowchart LR
+  tag["Push tag v0.1.0"] --> checks["Tag matches app.json,<br/>signing secrets are set"]
+  checks --> build["bundle:bare, expo prebuild,<br/>gradle assembleRelease"]
+  build --> sign["apksigner,<br/>the release key"]
+  sign --> release["GitHub release<br/>PeerSky-v0.1.0.apk and .sha256"]
+```
+
 Phones only install an update signed with the same key as the copy they have,
 so the key is made once and kept:
 

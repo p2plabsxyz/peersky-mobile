@@ -85,6 +85,19 @@ Why not the desktop's zip and AES-GCM: every zip entry needs a CRC32, which the 
 4. The receiver scans that, downloads the file to disk, checks the signature, the nonce, the target key and the expiry, and decrypts it into staging.
 5. Both screens show the same six characters: the first three bytes of `sha256(source signing key, target key, nonce)`, which is how the desktop derives it too. Only when the person confirms they match does anything on the phone change.
 
+```mermaid
+sequenceDiagram
+  participant R as Receiving phone
+  participant S as Sending phone
+  R->>S: pairing code, scanned: its key, a nonce, deviceType=mobile
+  Note left of S: packs the stores,<br/>seals a random key to R,<br/>signs the manifest,<br/>puts the file on a new drive
+  S->>R: transfer code, scanned: a hyper:// link and six characters
+  S-->>R: the file, over the internet or the same Wi-Fi
+  Note right of R: checks signature, nonce,<br/>target and expiry,<br/>decrypts into staging
+  Note over R,S: both screens show the same six characters
+  Note right of R: restores only once<br/>the person says they match
+```
+
 The sender clears the transfer when its sheet is closed, or 15 minutes after it was made. Each send uses a new drive. Hyperdrive's `purge()` calls a method that does not exist in the hypercore release in use, so the file's blocks are cleared instead; the drive's index is kept, because clearing it leaves a drive that hangs whenever it is opened again. A send cut short by the app being killed leaves a marker, and the next start clears its drive.
 
 ## Phone to desktop

@@ -2,6 +2,28 @@
 
 PeerSky Mobile blocks network-level advertising and tracking requests before WebView sends them. Android evaluates HTTP and HTTPS subresource requests with Brave's Rust ad-blocking engine. iOS converts the supported EasyList and EasyPrivacy network-rule subset into native WebKit rules and attaches compiled `WKContentRuleList` instances before navigation. Main-frame navigation is not blocked.
 
+```mermaid
+flowchart TB
+  lists["EasyList and EasyPrivacy<br/>bundled at build time,<br/>refreshed after seven days"]
+
+  subgraph android["Android"]
+    engine["adblock-rust<br/>one ruleset for every WebView"]
+    client["PeerSkyWebViewClient<br/>shouldInterceptRequest"]
+  end
+
+  subgraph ios["iOS"]
+    convert["webkit-content-rules.mjs<br/>network rules to WebKit JSON"]
+    compiled["WKContentRuleListStore<br/>compiled once per snapshot"]
+    attached["Attached to every<br/>WKWebView before it loads"]
+  end
+
+  lists --> engine
+  lists --> convert
+  convert --> compiled --> attached
+  client -->|"URL, page, type"| engine
+  engine -->|"blocked: an empty 204"| client
+```
+
 PeerSky fetches and validates EasyList and EasyPrivacy at build time, then packages that snapshot so protection can initialize on a first launch without network access. The packaged files are copied into the app document directory, loaded natively, and checked automatically for refresh when older than seven days. Updates use only the fixed HTTPS sources below, enforce a 30-second timeout and a 12 MB decoded-size limit per list, and validate the Adblock header before activation. New snapshots become active only after the native engine accepts them, so malformed, partial, unavailable, or rejected updates keep the last known good rules.
 
 The Privacy settings page provides a global protection switch, the active filter-list status, and a manual update action. Turning protection off is persisted across launches. Manual update failures leave the current validated snapshot active and report the failure in Settings.
