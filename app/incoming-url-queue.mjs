@@ -1,13 +1,9 @@
 /**
- * Holds deep links until the browser has actually acted on one.
- *
- * A link can arrive before the browser screen is mounted, on a cold start, or
- * while it is being replaced. A listener living inside the browser missed
- * those, which is why an invite opened from Notes once brought PeerSky forward
- * and then did nothing.
- *
- * Delivering is not the same as handling here. A link stays queued until the
- * browser says it loaded it, so one that arrives moments before the screen goes
+ * Holds deep links until the browser has acted on one. A link can arrive
+ * before the browser screen is mounted or while it is being replaced, and a
+ * listener inside the browser missed those: an invite opened from Notes
+ * brought PeerSky forward and did nothing. A link stays queued until the
+ * browser says it loaded it, so one that lands just before the screen goes
  * away is replayed to the screen that replaces it.
  */
 

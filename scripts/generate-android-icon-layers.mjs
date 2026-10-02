@@ -1,14 +1,9 @@
 /**
  * Re-frames the adaptive icon layers so the launcher's mask cannot clip them.
- *
- * Android draws an adaptive icon on a 108dp canvas and then cuts a shape out
- * of it. Only a 66dp circle in the middle is guaranteed to survive, so the
- * artwork has to fit inside that circle and be centred on it. The source bird
- * is neither: it reaches about 60% of the canvas and sits a little left of
- * centre, which is why its beak and legs met the edge of the mask.
- *
- * Measuring the artwork rather than guessing a margin means this stays right
- * if the bird is ever redrawn.
+ * Android cuts a shape out of a 108dp canvas and only the middle 66dp circle
+ * is sure to survive. The source bird fills about 60% of the canvas, a little
+ * left of centre, so its beak and legs met the mask. The artwork is measured
+ * rather than given a fixed margin, so a redrawn bird still fits.
  */
 import { readFileSync, writeFileSync } from 'node:fs'
 import { PNG } from 'pngjs'

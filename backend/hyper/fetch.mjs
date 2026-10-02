@@ -337,17 +337,11 @@ async function getHyperFetch (runtime) {
 }
 
 /**
- * A second hypercore-fetch, the writable one.
- *
- * Reading a page and publishing from one need different instances: with
- * writable off, hypercore-fetch does not register the POST and PUT routes at
- * all, so the publish flow came back as "Load failed" no matter what reached
- * it. Keeping the reading instance read-only means a page being rendered still
- * cannot write anything by accident; only a request that came through the
- * bridge gets this.
- *
- * It is not a key to everything: hypercore-fetch still refuses any drive this
- * device does not hold the write key for.
+ * A second hypercore-fetch, the writable one. With writable off it registers
+ * no POST or PUT routes, so publishing failed with "Load failed". The reading
+ * instance stays read-only so a rendered page cannot write by accident, and
+ * only requests through the bridge get this one. It still refuses any drive
+ * this device has no write key for.
  */
 async function getHyperWriteFetch (runtime) {
   const existing = hyperWriteFetches.get(runtime)

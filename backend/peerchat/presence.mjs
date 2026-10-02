@@ -1,13 +1,9 @@
 /**
- * Who counts as being in a room, a moment after their connection goes.
- *
- * Hyperswarm drops and redials as a matter of course, and a phone waking, a
- * network changing or a laptop opening its lid all do it too. Counting only
- * live connections meant the peer count and the online dots flickered every
- * time, which in a room with a few hundred people is constant noise.
- *
- * A peer whose connection ends is held for a short while. Redial inside that
- * window and nothing on screen moved; stay away and they drop off as usual.
+ * Who still counts as in a room just after their connection drops. Hyperswarm
+ * drops and redials all the time (a phone waking, a network change, a laptop
+ * lid opening), and counting only live connections made the peer count and
+ * online dots flicker. A dropped peer is held for a grace period, so a redial
+ * inside it changes nothing on screen.
  */
 export const PEER_PRESENCE_GRACE_MS = 15000
 

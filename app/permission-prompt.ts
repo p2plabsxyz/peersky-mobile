@@ -9,15 +9,9 @@ export const LAN_PERMISSION_HELP = Platform.OS === 'ios'
   : 'PeerSky finds nearby devices over your local network. Check that Wi-Fi is on and that Nearby devices is allowed for PeerSky in Settings, with both devices on the same network.'
 
 /**
- * Ask again, or offer the way back.
- *
- * iOS shows a permission prompt once. After a refusal the system never shows
- * it again, so an app that only says "access is needed" leaves somebody who
- * tapped Don't Allow by accident with nowhere to go. Settings is the only way
- * back, and this offers to open it rather than expecting them to find it.
- *
- * Android re-prompts until "don't ask again", and reports that the same way,
- * so one path covers both.
+ * iOS shows a permission prompt only once, so after a refusal Settings is the
+ * only way back, and this offers to open it. Android re-prompts until "don't
+ * ask again" and reports that the same way, so one path covers both.
  */
 type PermissionAnswer = { granted: boolean, canAskAgain?: boolean }
 

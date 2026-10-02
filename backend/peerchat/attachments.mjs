@@ -34,24 +34,18 @@ const TAG_BYTES = 16
 const ENVELOPE_BYTES = MAGIC.byteLength + IV_BYTES + TAG_BYTES
 
 /**
- * PCA2, the framed layout.
+ * PCA2, the framed layout:
  *
  *   "PCA2" | frame size, uint32 big-endian | 8 random bytes
  *   then, repeatedly: one frame's ciphertext, then its 16-byte tag
  *
- * PCA1 seals a file in one piece, which is fine for a photo and impossible for
- * a film: bare's aes-256-gcm holds every byte until final(), and desktop's
- * WebCrypto is one shot too, so sending or opening cost twice the file in
- * memory. A phone has nowhere to put four gigabytes.
- *
- * Framing seals a megabyte at a time, so memory stays flat however big the
- * file is. Each frame's nonce is the 8 random bytes followed by its index, and
- * the last frame sets the top bit of that index, so frames cannot be reordered
- * and a truncated file cannot pass as a whole one. The header is the additional
- * data on every frame, so the frame size cannot be edited either.
- *
- * There is always a last frame, even when the file divides evenly, so the count
- * is floor(size / frame) + 1.
+ * PCA1 seals a file in one piece, and bare's aes-256-gcm and desktop WebCrypto
+ * both hold every byte until the end, so a film costs twice its size in memory.
+ * PCA2 seals a frame at a time. A frame's nonce is the 8 random bytes plus its
+ * index, with the top bit set on the last frame, so frames cannot be reordered
+ * and a truncated file fails. The header is every frame's additional data, so
+ * the frame size cannot be edited. There is always a last frame, even when the
+ * file divides evenly, so the count is floor(size / frame) + 1.
  */
 const FRAMED_MAGIC = b4a.from('PCA2')
 const FRAME_COUNTER_BYTES = 4

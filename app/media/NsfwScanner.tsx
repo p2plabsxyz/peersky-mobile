@@ -58,17 +58,11 @@ export async function scanMedia (asset: {
   if ((asset.size ?? 0) > MAX_SCANNED_BYTES) return MEDIA_UNSCANNED
   if (!liveWebView) return MEDIA_UNSCANNED
 
-  // Everything goes through the decoder, whether it arrived as a file or as
-  // bare bytes. Two reasons. It normalises whatever the platform can open into
-  // one JPEG, so an iPhone's HEIC is judged instead of waved through. And it
-  // shrinks the picture to the size the model wants before anything crosses
-  // the bridge.
-  //
-  // That second part is what P2PMD was failing on. Its editor hands over a
-  // whole photo as base64, and posting megabytes of it took longer than the
-  // scan timeout, which reads as unscanned and lets the picture through. A
-  // picked file was always resized first, which is why PeerChat looked fine
-  // while P2PMD did not.
+  // Files and bare bytes both go through the decoder. It turns anything the
+  // platform can open into one JPEG, so a HEIC is judged, not waved through,
+  // and shrinks it to the model's size before it crosses the bridge. P2PMD
+  // hands over whole photos as base64, and posting those at full size outlasted
+  // the scan timeout, so they went through unscanned.
   let scratch: File | null = null
   let base64 = ''
   try {

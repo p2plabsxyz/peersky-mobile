@@ -5,16 +5,10 @@ import { Animated, Easing, ImageBackground, StyleSheet } from 'react-native'
 const WALLPAPER = require('../assets/images/wallpaper-ten-lakes.jpg')
 
 /**
- * The home screen's wallpaper, the same one the desktop browser opens on.
- *
- * A photograph behind text is only a good idea with something between them.
- * The scrim is the theme's own background at most of its opacity, so the
- * labels keep the colour they already had and stay readable over the bright
- * part of the picture as well as the dark part.
- *
- * It fades in on the way here. Arriving home is usually the end of something,
- * closing a tab or burning the lot, and cutting straight to a photograph makes
- * that land hard. Opacity only, so nothing shifts or shows an edge.
+ * The home screen's wallpaper, the same one the desktop browser opens on, with
+ * a scrim between the photo and the labels. It fades in because arriving home
+ * usually follows closing a tab or burning the lot, and a hard cut to a photo
+ * lands hard. Opacity only, so nothing shifts or shows an edge.
  */
 export function BrowserHomeBackground ({
   bleed,

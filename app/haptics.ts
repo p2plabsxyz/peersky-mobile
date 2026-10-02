@@ -1,14 +1,9 @@
 import * as Haptics from 'expo-haptics'
 
 /**
- * A short tap you can feel.
- *
- * Holding something is a decision the phone should answer to, the way it does
- * everywhere else on iOS and Android. A press that only opens a sheet leaves
- * you unsure whether it registered until the sheet arrives.
- *
- * Nothing here is awaited and nothing throws: a buzz that fails is not worth
- * interrupting what the press was actually for.
+ * A short tap you can feel, so a long press answers at once, as it does
+ * elsewhere on iOS and Android, not only when its sheet arrives. Nothing here
+ * is awaited or throws: a failed buzz must not interrupt the press.
  */
 export type HapticWeight = 'light' | 'medium' | 'heavy'
 

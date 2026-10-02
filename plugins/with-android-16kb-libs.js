@@ -1,18 +1,11 @@
 const { withAppBuildGradle } = require('@expo/config-plugins')
 
-// react-native-bare-kit ships prebuilt addons for several versions of the same
-// native module and the Android source set packages all of them, whether the
-// Bare bundle links against them or not. libsodium-native.4.3.3.so is one of
-// those leftovers: nothing references it any more (the tree resolves a single
-// sodium-native 5.1.0 via the sodium-universal override in package.json) but it
-// is still copied into the APK.
-//
-// It matters because that one file is built with 4 KB LOAD segment alignment
-// while every other library in the APK is 16 KB. Google Play requires 16 KB
-// page size support, and on a 16 KB device Android drops the whole app into
-// page size compatibility mode over this single stale binary.
-//
-// Dropping it at packaging time is safe precisely because nothing links to it.
+// react-native-bare-kit packages prebuilt addons for every version of a native
+// module, linked or not. libsodium-native.4.3.3.so is a leftover: the tree
+// resolves only sodium-native 5.1.0 (the sodium-universal override in
+// package.json), so nothing links to it and dropping it is safe. It is the one
+// library with 4 KB LOAD alignment, which puts the whole app in page size
+// compatibility mode on a 16 KB device, and Google Play requires 16 KB support.
 // Remove this plugin once react-native-bare-kit stops shipping the old build.
 const EXCLUDED_LIBRARIES = ['**/libsodium-native.4.3.3.so']
 

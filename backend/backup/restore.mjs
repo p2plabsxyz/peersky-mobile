@@ -73,19 +73,14 @@ export function listStagedNames (stagingPath) {
 /**
  * Moves each staged top-level entry into storage, replacing what was there.
  * Entries in `replace` are cleared even when the restore has none of its own,
- * for data that only makes sense beside something being restored.
+ * for data that only makes sense beside something being restored. Nothing
+ * else is touched: storage is also the app's documents, with bookmarks,
+ * history, settings and downloads.
  *
- * Everything else in storage is left exactly where it is. This used to rename
- * the whole storage folder away and keep a short list of device files, and
- * that folder is the app's documents: bookmarks, history, settings and
- * downloads all went with it.
- *
- * All or nothing. A failed move puts back the ones already made. If the app
- * is killed part way, a journal written before the first move lets the next
- * start undo it (recoverInterruptedRestore). Once every entry is in place the
- * old copies are renamed to a trash folder, which is the step that marks the
- * restore finished: deleting them can take a while, and a crash during that
- * must not look like a restore to undo.
+ * All or nothing. A failed move puts back the ones already made, and a journal
+ * written before the first move lets the next start undo a killed restore
+ * (recoverInterruptedRestore). Renaming the old copies to a trash folder marks
+ * it finished, so a crash while deleting them is not undone as a restore.
  */
 export function commitStagedRestore ({ storagePath, stagingPath, names, replace = [] }) {
   if (!storagePath || !stagingPath || !Array.isArray(names) || !existsSync(stagingPath)) {

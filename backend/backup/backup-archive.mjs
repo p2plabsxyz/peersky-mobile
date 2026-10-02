@@ -1,16 +1,15 @@
 import { closeSync, fstatSync, openSync, readSync } from 'node:fs'
 import b4a from 'b4a'
 
-// What goes inside the encrypted payload: a plain run of records, each one a
-// little JSON header and then, for a file, its bytes.
+// The encrypted payload is a run of records, each a JSON header and then, for
+// a file, its bytes:
 //
 //   [u32 header length][header JSON][file bytes]
 //
 // Headers are { type: 'about' }, { type: 'dir', name }, { type: 'file', name,
-// size } and a closing { type: 'end' }. Sizes come from the header, so a file
-// streams straight to disk without being held in memory, and the end record
-// means a payload that stops early is noticed even if every frame before it
-// authenticated.
+// size } and a closing { type: 'end' }. The size in the header lets a file
+// stream straight to disk, and the end record catches a payload that stops
+// early even when every frame before it authenticated.
 const MAX_HEADER_BYTES = 16 * 1024
 const READ_CHUNK_BYTES = 256 * 1024
 const ENTRY_TYPES = new Set(['about', 'dir', 'file', 'end'])

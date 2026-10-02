@@ -119,14 +119,10 @@ export function renderMarkdownSlides (content) {
 }
 
 /**
- * Whether a document already reads as a deck.
- *
- * Deliberately self-contained: the editor page embeds this function's own
- * source so the check the browser runs is this exact code. It used to be a
- * separate regular expression, and when splitMarkdownSlides stopped requiring
- * a blank line after "---" the two drifted apart. A real deck then failed the
- * check and the editor offered to throw the document away and start from the
- * template.
+ * Whether a document already reads as a deck. Self-contained because the
+ * editor page embeds this function's source, so the browser runs this exact
+ * code. A separate regex once drifted from splitMarkdownSlides, and the editor
+ * offered to replace a real deck with the template.
  */
 export function hasSlideBreaks (content) {
   const lines = String(content).replace(/\r\n?/g, '\n').split('\n')

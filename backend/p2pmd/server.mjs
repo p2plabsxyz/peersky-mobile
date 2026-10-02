@@ -2744,8 +2744,8 @@ export function getP2pmdEditorPage () {
       function setTemplateMenuOpen(open) {
         if (!templateMenu) return
         // A client can only replace the document once the host has turned
-        // LaTeX mode on. Leaving the entries tappable made them look broken;
-        // greying them out says the same thing honestly.
+        // LaTeX mode on. Until then the entries are greyed out, since tappable
+        // ones that did nothing looked broken.
         if (open) {
           const allowed = roomRole === 'host' || latexModeEnabled
           for (const item of templateMenu.querySelectorAll('button[data-template]')) {

@@ -15,15 +15,12 @@ import sodium from 'sodium-native'
 //   payload              secretstream header, then frames of
 //                        [u32 length][ciphertext]
 //
-// Why not the desktop's zip: every zip entry needs a CRC32, there is no native
-// one on the phone, and a JavaScript one crawls through gigabytes of hyper
-// data. Why not its AES-GCM: bare-crypto's GCM holds the whole payload in
-// memory, twice. XChaCha20-Poly1305 secretstream encrypts one 64 KiB frame at
-// a time, authenticates every frame, and marks the last one, so a cut-off file
-// is caught rather than half restored.
-//
-// The manifest sits in a fixed area at the front so it can be written last,
-// once the payload's hash and signature exist, without copying the payload.
+// Not the desktop's zip: it needs a CRC32 per entry, the phone has no native
+// one, and a JavaScript one crawls through gigabytes. Not its AES-GCM:
+// bare-crypto's GCM holds the whole payload in memory, twice. Secretstream
+// seals one 64 KiB frame at a time and marks the last, so a cut-off file is
+// caught. The manifest's fixed area at the front lets it be written last, once
+// the payload's hash and signature exist, without copying the payload.
 export const BACKUP_FILE_MAGIC = 'PEERSKY-BACKUP\n'
 export const BACKUP_FILE_FORMAT = 1
 export const MANIFEST_AREA_BYTES = 16 * 1024

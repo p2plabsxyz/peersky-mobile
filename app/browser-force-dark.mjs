@@ -1,18 +1,12 @@
 export const FORCE_DARK_STYLE_ID = 'peersky-force-dark'
 
 /**
- * Dark mode on a site that never built one.
- *
- * Inverting the page and rotating the hue back is the only approach that works
- * on every site without knowing anything about it: no stylesheet to write, no
- * class names to guess. Pictures, video and anything drawn get inverted a
- * second time so they come back out the right way round.
- *
- * Two things it deliberately does not do. A page that is already dark is left
- * alone, because inverting it would turn it white, which is the opposite of
- * what was asked for. And an inverted page is checked again on the next load
- * rather than remembered, since the same site can be light on one page and
- * dark on the next.
+ * Dark mode on a site that never built one. Inverting the page and rotating
+ * the hue back works on any site without knowing its styles. Pictures, video
+ * and anything drawn are inverted again so they come out the right way round.
+ * A page that is already dark is left alone, since inverting it would turn it
+ * white, and every load is checked again because one site can have light and
+ * dark pages.
  */
 export function createForceDarkScript (enabled) {
   if (!enabled) return createForceDarkRemovalScript()

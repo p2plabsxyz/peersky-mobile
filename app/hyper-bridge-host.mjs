@@ -10,10 +10,8 @@ import {
 export const MAX_PENDING_HYPER_BRIDGE_REQUESTS = 8
 
 /**
- * Reads one message from a hyper:// page's patched fetch.
- *
- * Bodies arrive in pieces, so a message is either another piece or the last
- * one. Only the last carries the request out to the backend.
+ * Reads one message from a hyper:// page's patched fetch. Bodies arrive in
+ * pieces, and only the last piece sends the request to the backend.
  *
  * @returns {{ kind: 'ignore' }
  *   | { kind: 'buffered' }

@@ -68,14 +68,11 @@ export function verifyDesktopTransfer (manifest, { deviceKeys, expectedNonce, no
 }
 
 /**
- * Stages a desktop identity transfer from a file on disk.
- *
- * The desktop encrypts with AES-256-GCM, and bare-crypto only does GCM in one
- * piece, in memory. GCM is counter mode plus a tag, so the payload is
- * decrypted here as AES-256-CTR, starting at the counter GCM uses for the
- * first block, which streams. The tag is not what vouches for the bytes: the
- * SHA-256 of the encrypted payload is in the signed manifest, and the
- * decrypted result is only kept if that hash matches.
+ * Stages a desktop identity transfer from a file on disk. The desktop uses
+ * AES-256-GCM, which bare-crypto only does in one piece, in memory. GCM is
+ * counter mode plus a tag, so this streams AES-256-CTR from the counter GCM
+ * starts the payload at. The tag is not checked: the signed manifest holds the
+ * encrypted payload's SHA-256, and nothing is kept unless that matches.
  */
 export async function stageDesktopTransferFile ({
   filePath,

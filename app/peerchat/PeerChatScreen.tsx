@@ -1646,13 +1646,10 @@ export function PeerChatScreen ({
   }
 
   /**
-   * The picker is a view controller, and so is whatever asked which one.
-   * Presenting it while that is still on its way out asks iOS to do something
-   * it refuses: the presentation is dropped, the picker never appears, and its
-   * promise never settles, which left the attach button disabled with nothing
-   * on screen. This is the handover the profile and room sheets already use,
-   * driven by the sheet actually finishing rather than by a guess at how long
-   * that takes. Android stacks them fine and goes straight through.
+   * iOS drops a picker presented while the sheet that asked is still closing,
+   * and its promise never settles, which left the attach button disabled. So
+   * the picker waits for the sheet to finish, as the profile and room sheets
+   * do. Android stacks them fine and goes straight through.
    */
   function attachFrom (source: UploadSource) {
     if (!activeRoom || isBusy) return

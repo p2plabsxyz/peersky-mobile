@@ -1,15 +1,10 @@
-// A hyper:// page on the phone is HTML handed to a WebView that has never
-// heard of the scheme: there is no WKURLSchemeHandler for hyper://, so
-// fetch('hyper://...') from page script throws before it reaches anything.
-// Static assets survive because the backend inlines them as data: URIs before
-// the page loads, but the publish flow in docs/P2P.md is all runtime:
-//
-//   await fetch(`hyper://localhost/?key=myapp`, { method: 'POST' })
-//   await fetch(uploadUrl, { method: 'PUT', body: file })
-//
-// This patches fetch inside the page so those calls travel over the React
-// Native bridge to the backend's own hyper fetch and come back as a real
-// Response. Desktop does not need it; there hyper:// is a registered protocol.
+// The WebView has no handler for hyper:// (no WKURLSchemeHandler), so
+// fetch('hyper://...') in page script throws. Static assets work because the
+// backend inlines them as data: URIs, but publishing (docs/P2P.md) fetches at
+// runtime: a POST to hyper://localhost/?key=..., then a PUT of the file. This
+// patches fetch in the page so those calls go over the React Native bridge to
+// the backend's hyper fetch and come back as a real Response. Desktop has
+// hyper:// as a registered protocol and does not need it.
 
 export const HYPER_BRIDGE_REQUEST = 'peersky-hyper-fetch'
 export const HYPER_BRIDGE_CHUNK = 'peersky-hyper-fetch-chunk'

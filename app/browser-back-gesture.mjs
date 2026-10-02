@@ -34,14 +34,10 @@ const FLICK_VELOCITY = 0.3
 
 /**
  * How far in the edge chip is, 0 to 1, for a finger that has travelled dx.
- *
- * The page itself used to slide instead, which had two problems. A swipe that
- * was interrupted part way left the page slid, so the browser sat a quarter of
- * a screen to the right until something else re-rendered it. And what is behind
- * the page is not drawn, so the movement revealed nothing and only opened a
- * gap. An indicator answers the gesture without moving anything that can get
- * stuck, and it is full by COMPLETE_TRAVEL, so the screen and the release
- * agree about when the swipe has taken.
+ * Sliding the page instead left it a quarter screen to the right after an
+ * interrupted swipe, and only opened a gap, since nothing is drawn behind it.
+ * The chip is full at COMPLETE_TRAVEL, so the screen and the release agree on
+ * when the swipe has taken.
  */
 export function backSwipeProgress (dx) {
   const across = Number(dx) || 0

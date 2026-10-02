@@ -250,18 +250,13 @@ export async function pickUploadFolder (): Promise<UploadAsset[]> {
 /**
  * The one place every upload in the app passes through: PeerChat attachments,
  * Hyperdrive library files and P2PMD images. Picks the files, bounds how many,
- * and refuses the batch if anything in it is explicit. Screening the whole
- * batch before uploading any of it means a refusal never leaves half a send
- * behind.
+ * and screens the whole batch before uploading any, so a refusal never leaves
+ * half a send behind. Returns [] when the picker is cancelled, and throws a
+ * sentence worth showing when a file is refused.
  *
- * Returns an empty array when the picker was cancelled. Throws with a sentence
- * worth showing when a file is refused.
- */
-/**
- * @param screen Whether to run the classifier over the batch. A direct message
- *   goes to one person who can block the sender, so screening it protects
- *   nobody: the safeguard exists for rooms, where a picture lands in front of
- *   everyone at once before anyone can act.
+ * @param screen Whether to run the classifier. It is for rooms, where a picture
+ *   lands in front of everyone at once. A direct message goes to one person
+ *   who can block the sender, so screening it protects nobody.
  */
 export async function pickUploads ({
   multiple = false,
