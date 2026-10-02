@@ -7,16 +7,6 @@
     "scheme": "peersky",
     "icon": "./assets/images/icon.png",
     "userInterfaceStyle": "automatic",
-    "splash": {
-      "image": "./assets/images/splash.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#ffffff",
-      "dark": {
-        "image": "./assets/images/splash-dark.png",
-        "resizeMode": "contain",
-        "backgroundColor": "#18181b"
-      }
-    },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "xyz.p2plabs.peersky",
@@ -127,6 +117,19 @@
     "plugins": [
       [
         "expo-router"
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/images/logo-badge.png",
+          "imageWidth": 140,
+          "resizeMode": "contain",
+          "backgroundColor": "#f5f8ff",
+          "dark": {
+            "image": "./assets/images/logo-badge.png",
+            "backgroundColor": "#18181b"
+          }
+        }
       ],
       [
         "expo-build-properties",

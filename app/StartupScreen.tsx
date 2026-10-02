@@ -7,9 +7,8 @@ import { BROWSER_PALETTES } from './browser-appearance.mjs'
 // theme, so the badge is that something in both.
 const BADGE = require('../assets/images/logo-badge.png')
 
-
-// 140pt, the same as the launch image draws it on a three times screen, so the
-// moment the app takes over nothing moves.
+// 140pt, the imageWidth the launch screen draws the badge at in app.json, so
+// the moment the app takes over nothing moves.
 const BIRD_SIZE = 140
 
 /**

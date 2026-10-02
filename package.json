@@ -76,6 +76,7 @@
     "expo-print": "~55.0.19",
     "expo-router": "~55.0.17",
     "expo-sharing": "~55.0.22",
+    "expo-splash-screen": "~55.0.25",
     "expo-system-ui": "~55.0.20",
     "expo-video": "~55.0.21",
     "holesail": "^2.4.1",

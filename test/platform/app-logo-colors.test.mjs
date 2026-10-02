@@ -6,6 +6,7 @@ import {
   getAppLogoColor,
   normalizeAppLogoColor
 } from '../../app/app-logo-colors.mjs'
+import { BROWSER_PALETTES } from '../../app/browser-appearance.mjs'
 
 test('every colour is a usable option', () => {
   assert.ok(APP_LOGO_COLORS.length >= 2)
@@ -28,8 +29,8 @@ test('an unknown colour falls back rather than leaving the badge blank', () => {
 test('the startup screen is the launch image, still', async () => {
   const { readFile } = await import('node:fs/promises')
   const startup = await readFile(new URL('../../app/StartupScreen.tsx', import.meta.url), 'utf8')
-  const splash = await readFile(new URL('../../scripts/generate-splash.mjs', import.meta.url), 'utf8')
   const index = await readFile(new URL('../../app/index.tsx', import.meta.url), 'utf8')
+  const { expo } = JSON.parse(await readFile(new URL('../../app.json', import.meta.url), 'utf8'))
 
   // Anything the launch image does not also have is a visible change at the
   // handover, and anything that moves draws the eye to a wait.
@@ -42,14 +43,16 @@ test('the startup screen is the launch image, still', async () => {
   // One image, not one per theme. Only the screen behind it follows the theme.
   assert.equal((startup.match(/require\(/g) || []).length, 1)
 
-  // 140pt on a three times screen is 420 of a 1284 wide launch image.
-  const box = Number(/const BIRD_BOX = ([0-9]+)/.exec(splash)[1])
-  const width = Number(/const WIDTH = ([0-9]+)/.exec(splash)[1])
-  assert.equal(box / 3, 140)
-  assert.equal(width / 3, 428)
-  // The circle is drawn once, by generate-logo-variants, and both the launch
-  // image and the app read that one file.
-  assert.doesNotMatch(splash, /RING_WIDTH|coverage\(/)
+  // The launch screen draws the same badge, at the same size, on the same
+  // background as the screen that follows it.
+  const [, splash] = expo.plugins.find((plugin) => Array.isArray(plugin) && plugin[0] === 'expo-splash-screen')
+  assert.equal(splash.image, './assets/images/logo-badge.png')
+  assert.equal(splash.dark.image, './assets/images/logo-badge.png')
+  assert.equal(splash.imageWidth, 140)
+  assert.equal(splash.backgroundColor, BROWSER_PALETTES.light.shell)
+  assert.equal(splash.dark.backgroundColor, BROWSER_PALETTES.dark.shell)
+  // The old top level key left Android 12 and later showing the launcher icon.
+  assert.equal(expo.splash, undefined)
 
   // It has to come down on its own, or a failed boot is a screen you cannot
   // leave.
@@ -78,8 +81,4 @@ test('the bare bird launches, the tile sits among the other tiles', async () => 
   // The launch image shows the badge, so the screen that follows it does too.
   assert.match(startup, /logo-badge\.png/)
   assert.doesNotMatch(startup, /home-icon\.png/)
-
-  // Both launch images draw the same badge the app does.
-  const splash = await readFile(new URL('../../scripts/generate-splash.mjs', import.meta.url), 'utf8')
-  assert.match(splash, /const BADGE_FILE = 'assets\/images\/logo-badge\.png'/)
 })
