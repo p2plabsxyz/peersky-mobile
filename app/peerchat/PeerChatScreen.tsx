@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Constants from 'expo-constants'
+import * as Crypto from 'expo-crypto'
 import { File, Paths } from 'expo-file-system'
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator'
 import { useVideoPlayer, VideoView } from 'expo-video'
@@ -31,6 +32,7 @@ import {
   serializePeerChatIntroState
 } from './intro-state.mjs'
 import { PEERCHAT_QUESTIONS } from './questions.mjs'
+import { buildPeerChatReport, PEERCHAT_REPORT_EMAIL } from './report.mjs'
 import {
   parsePeerChatUiState,
   PEERCHAT_UI_STATE_MAX_BYTES,
@@ -632,8 +634,21 @@ export function PeerChatScreen ({
     // Same wait as a room invite: a request cannot be sent without a name.
     if (!requestedPeerId || !isInitialized || !profile?.username) return
     onRequestedPeerHandled?.()
-    void requestDirectMessage(requestedPeerId)
-  }, [isInitialized, onRequestedPeerHandled, profile?.username, requestedPeerId])
+    const existing = rooms.find((room) => room.isDM && room.dmWith === requestedPeerId)
+    if (existing) {
+      openRoom(existing)
+      return
+    }
+    // A link can come from anywhere, and a request shows them who you are.
+    Alert.alert(
+      'Send a message request?',
+      'They will see your name, bio and photo, and can accept it, decline it or block you.',
+      [
+        { text: 'Not now', style: 'cancel' },
+        { text: 'Send request', onPress: () => { void requestDirectMessage(requestedPeerId) } }
+      ]
+    )
+  }, [isInitialized, onRequestedPeerHandled, profile?.username, requestedPeerId, rooms])
 
   useEffect(() => {
     // A profile is needed to join anything, so an invite tapped by somebody who
@@ -648,10 +663,17 @@ export function PeerChatScreen ({
       return
     }
 
-    // An invite link for a room we are not in yet: join it, then open it, so
-    // tapping a link does the whole thing rather than landing on the list.
+    // An invite to a room we are not in yet. Joining shows everyone there your
+    // name, bio and photo, and a link can come from anywhere, so it asks.
     onRequestedRoomHandled()
-    void joinRoomByKey(requestedRoomKey)
+    Alert.alert(
+      'Join this chat?',
+      'Everyone in it will see your name, bio and photo, and can message you.',
+      [
+        { text: 'Not now', style: 'cancel' },
+        { text: 'Join', onPress: () => { void joinRoomByKey(requestedRoomKey) } }
+      ]
+    )
   }, [isInitialized, onRequestedRoomHandled, profile?.username, requestedRoomKey, rooms])
 
   useEffect(() => {
@@ -1369,27 +1391,26 @@ export function PeerChatScreen ({
     await unblockPeerId(member.id, member.username)
   }
 
-  // There is no server to receive a report, so it goes to the maintainers by
-  // email with enough context to act on.
-  function reportMember (member: PeerChatMember, from: PeerChatRoom | null = activeRoom) {
+  async function reportMember (member: PeerChatMember, from: PeerChatRoom | null = activeRoom) {
     setProfileTarget(null)
-    const subject = `PeerChat report: ${member.username}`
-    const body = [
-      `Reported user: ${member.username}`,
-      `Peer ID: ${member.id}`,
-      `Room: ${from?.name || 'unknown'}`,
-      `Room key: ${from?.roomKey || 'unknown'}`,
-      `Reported at: ${new Date().toISOString()}`,
-      '',
-      'What happened?',
-      '',
-      '',
-      'Please describe the behaviour above. PeerChat is peer to peer, so nobody',
-      'can remove content for you, but blocking stops their direct messages.'
-    ].join('\n')
-
-    const url = `mailto:contact@p2plabs.xyz?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
-    Linking.openURL(url).catch(() => onStatus('Unable to open your email app'))
+    const roomId = from?.roomKey
+      ? (await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, from.roomKey)).slice(0, 16)
+      : ''
+    const report = buildPeerChatReport({ member, roomName: from?.name, roomId })
+    Linking.openURL(report.url).catch(() => {
+      // No mail app set up. The report still has to be able to leave.
+      Alert.alert(
+        'No email app',
+        `Send this report to ${PEERCHAT_REPORT_EMAIL} from any email app.`,
+        [
+          { text: 'Close', style: 'cancel' },
+          {
+            text: 'Copy report',
+            onPress: () => Clipboard.setString(`To: ${PEERCHAT_REPORT_EMAIL}\nSubject: ${report.subject}\n\n${report.body}`)
+          }
+        ]
+      )
+    })
   }
 
   async function openInviteScanner () {

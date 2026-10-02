@@ -101,9 +101,21 @@ for compatibility.
 
 Link previews are optional and run only when the local user sends a public HTTP
 or HTTPS URL. Preview fetching rejects credentials, loopback, link-local, and
-private-network targets; validates every redirect; limits redirects and response
-bytes; and stops after a fixed time budget. Remote peers cannot use a received
-message to make this device fetch an arbitrary preview URL.
+private-network targets, including names that resolve to one; validates every
+redirect; limits redirects and response bytes; and stops after a fixed time
+budget. Remote peers cannot use a received message to make this device fetch an
+arbitrary preview URL.
+
+## Invite links and reports
+
+A room or message-request link can come from any web page, so opening one only
+asks: joining a room or sending a request shows the people there your name, bio
+and photo. Scanning a QR code is already a choice you made, so it goes ahead.
+
+A report goes to the maintainers by email. It names the room by the first 16 hex
+characters of the SHA-256 of its key, never the key, which would let whoever
+reads the email into the room and its whole history. If the phone has no mail
+app, the report can be copied instead.
 
 ## Notifications
 
