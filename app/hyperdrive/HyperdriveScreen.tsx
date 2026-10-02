@@ -504,7 +504,6 @@ export function HyperdriveScreen ({ offlineNetworkAllowed, isDark, isLandscape, 
           <Text style={[styles.appTitle, { color: palette.text }]}>Hyperdrive</Text>
           <Text style={[styles.helperText, { color: palette.muted }]}>Upload and fetch files over Hyper.</Text>
         </View>
-        <Text style={[styles.readyPill, { color: palette.pillText, backgroundColor: palette.pill }]}>ready</Text>
       </View>
 
       <View style={styles.setupBlock}>
@@ -874,10 +873,10 @@ function formatBytes (bytes: number) {
 }
 
 const lightPalette = {
-  background: '#f5f7fb', surface: '#ffffff', border: '#dce3ee', text: '#172033', muted: '#68758a', placeholder: '#8b96a8', accent: '#2f80ed', secondaryText: '#286fc9', fetch: '#dff5e9', fetchText: '#226346', notice: '#e5f2ff', noticeText: '#245d9d', pill: '#e5ecff', pillText: '#40558c', folder: '#68d7cb', file: '#e7edf6'
+  background: '#f5f7fb', surface: '#ffffff', border: '#dce3ee', text: '#172033', muted: '#68758a', placeholder: '#8b96a8', accent: '#2f80ed', secondaryText: '#286fc9', fetch: '#dff5e9', fetchText: '#226346', notice: '#e5f2ff', noticeText: '#245d9d', folder: '#68d7cb', file: '#e7edf6'
 }
 const darkPalette = {
-  background: '#1f2027', surface: '#262832', border: '#383b46', text: '#f1f2f7', muted: '#a2a8bb', placeholder: '#6f7484', accent: '#2f80ed', secondaryText: '#9ec5ff', fetch: '#1d513d', fetchText: '#c6f6df', notice: '#203a56', noticeText: '#c7e2ff', pill: '#30364a', pillText: '#cdd6ff', folder: '#68d7cb', file: '#30333f'
+  background: '#1f2027', surface: '#262832', border: '#383b46', text: '#f1f2f7', muted: '#a2a8bb', placeholder: '#6f7484', accent: '#2f80ed', secondaryText: '#9ec5ff', fetch: '#1d513d', fetchText: '#c6f6df', notice: '#203a56', noticeText: '#c7e2ff', folder: '#68d7cb', file: '#30333f'
 }
 
 const styles = StyleSheet.create({
@@ -888,7 +887,6 @@ const styles = StyleSheet.create({
   appIcon: { borderRadius: 10, height: 44, width: 44 },
   appHeaderCopy: { flex: 1, gap: 3 },
   appTitle: { fontSize: 18, fontWeight: '700' },
-  readyPill: { borderRadius: 999, fontSize: 12, fontWeight: '700', overflow: 'hidden', paddingHorizontal: 10, paddingVertical: 4 },
   helperText: { fontSize: 13, lineHeight: 19 },
   setupBlock: { gap: 10 },
   setupTitle: { fontSize: 15, fontWeight: '700' },
