@@ -79,6 +79,30 @@ the app and in `TERMS.md`.
   them. `REQUEST_INSTALL_PACKAGES`, storage access, overlays and the media
   playback service are blocked in `app.json`.
 
+## APK on GitHub releases
+
+`.github/workflows/release-apk.yml` builds the Android app when a `v*` tag is
+pushed (or a release is made with a new tag on GitHub), signs it, and attaches
+`PeerSky-<tag>.apk` (64-bit ARM, which every recent phone is) and its SHA-256
+to the release. The tag has to match
+`version` in `app.json`, so `v0.1.0` for 0.1.0, or the run stops.
+
+Phones only install an update signed with the same key as the copy they have,
+so the key is made once and kept:
+
+```bash
+keytool -genkeypair -v -keystore peersky-release.keystore -alias peersky -keyalg RSA -keysize 4096 -validity 10000
+```
+
+Add four repository secrets: `ANDROID_KEYSTORE_BASE64` (the output of
+`base64 -i peersky-release.keystore`), `ANDROID_KEYSTORE_PASSWORD`,
+`ANDROID_KEY_ALIAS` (`peersky` above) and `ANDROID_KEY_PASSWORD`. Without them
+the run stops before building. Back the keystore up somewhere safe: losing it
+means every APK user has to uninstall to move to the next one.
+
+Google Play re-signs with its own key, so a phone cannot switch between the
+Play copy and the GitHub APK without uninstalling first.
+
 ## After review
 
 - Answer reports within 24 hours, and remove people from P2P Republic from the
