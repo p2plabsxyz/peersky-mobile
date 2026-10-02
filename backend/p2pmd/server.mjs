@@ -1548,7 +1548,7 @@ export function getP2pmdEditorPage () {
     <div class="app-shell">
       <main class="editor-card">
         <div id="formatting-toolbar" role="toolbar" aria-label="Document">
-          <button type="button" data-format="slides" title="View as slides" aria-label="View as slides">
+          <button type="button" data-format="slides" title="View as slides" aria-label="View as slides" aria-pressed="false">
             <svg class="toolbar-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0a.5.5 0 0 1 .5.5V2h5A1.5 1.5 0 0 1 15 3.5v7A1.5 1.5 0 0 1 13.5 12H9.05l1.9 3.8a.5.5 0 0 1-.9.4L8.5 13h-1l-1.55 3.2a.5.5 0 0 1-.9-.4L7 12H2.5A1.5 1.5 0 0 1 1 10.5v-7A1.5 1.5 0 0 1 2.5 2h5V.5A.5.5 0 0 1 8 0M2.5 3a.5.5 0 0 0-.5.5v7a.5.5 0 0 0 .5.5h11a.5.5 0 0 0 .5-.5v-7a.5.5 0 0 0-.5-.5z"/></svg>
           </button>
           <div class="toolbar-divider" aria-hidden="true"></div>
@@ -1665,6 +1665,7 @@ export function getP2pmdEditorPage () {
       const slidesCounter = document.getElementById('slides-counter')
       const slidesProgress = document.getElementById('slides-progress-value')
       const formattingToolbar = document.getElementById('formatting-toolbar')
+      const slidesButton = formattingToolbar.querySelector('[data-format="slides"]')
       const latexModeButton = formattingToolbar.querySelector('[data-format="latex"]')
       const latexToolbarGroup = document.getElementById('latex-toolbar-group')
       const keyboardToolbar = document.getElementById('keyboard-toolbar')
@@ -1708,11 +1709,15 @@ export function getP2pmdEditorPage () {
       function noteSummaryFor(content) {
         return {
           head: String(content || '').slice(0, NOTE_HEAD_LENGTH),
-          slides: viewMode === 'slides'
+          slides: presenting
         }
       }
 
       let viewMode = 'edit'
+      // Whether this note is a deck, like desktop's View as Slides. It outlives
+      // a trip back to the editor, so Preview and Publish still treat the note
+      // as slides after an image or a fix is added there.
+      let presenting = false
       let previewRequestId = 0
       let currentSlideIndex = 0
       let slideTouchStart = null
@@ -2647,7 +2652,10 @@ export function getP2pmdEditorPage () {
 
       function createMarkdownBlock(content, start, end, markdown) {
         const prefix = start > 0 && content[start - 1] !== newline ? newline : ''
-        const suffix = end < content.length && content[end] !== newline ? newline : ''
+        let suffix = end < content.length && content[end] !== newline ? newline : ''
+        // A "---" right under the image would underline it as a heading instead
+        // of starting the next slide, so a blank line stays between them.
+        if (!suffix && content.slice(end + 1).split(newline, 1)[0] === '---') suffix = newline
         const text = prefix + markdown + suffix
         const cursor = start + text.length
 
@@ -2788,6 +2796,16 @@ export function getP2pmdEditorPage () {
         setViewMode('slides')
       }
 
+      // Pressed in the editor while the note is a deck, it makes it a note again.
+      function toggleSlides() {
+        if (presenting && viewMode === 'edit') {
+          presenting = false
+          slidesButton?.setAttribute('aria-pressed', 'false')
+          return
+        }
+        viewAsSlides()
+      }
+
       function applyFormatting(format) {
         const codeMarker = String.fromCharCode(96)
 
@@ -2801,7 +2819,7 @@ export function getP2pmdEditorPage () {
         else if (format === 'latex') setLatexMode(!latexModeEnabled)
         else if (format === 'inline-math') wrapSelection('$', '$')
         else if (format === 'block-math') wrapSelection('$$' + newline, newline + '$$')
-        else if (format === 'slides') viewAsSlides()
+        else if (format === 'slides') toggleSlides()
         else if (format === 'inline-code') wrapSelection(codeMarker, codeMarker)
         else if (format === 'code-block') {
           wrapSelection(codeMarker.repeat(3) + newline, newline + codeMarker.repeat(3))
@@ -3603,6 +3621,8 @@ export function getP2pmdEditorPage () {
           activeViewRenderTimer = null
         }
         viewMode = nextMode
+        if (viewMode === 'slides') presenting = true
+        slidesButton?.setAttribute('aria-pressed', String(presenting))
         if (viewMode === 'edit') activeViewRenderPending = false
         previewRequestId += 1
         document.body.classList.toggle('preview-mode', viewMode === 'preview')
@@ -3634,7 +3654,8 @@ export function getP2pmdEditorPage () {
       }
 
       function togglePreview() {
-        setViewMode(viewMode === 'edit' ? 'preview' : 'edit')
+        if (viewMode !== 'edit') setViewMode('edit')
+        else setViewMode(presenting ? 'slides' : 'preview')
       }
 
       // The app hands over a fresh nonce each time someone taps Publish, and
@@ -3643,7 +3664,7 @@ export function getP2pmdEditorPage () {
         notifyNative('p2pmd-publish-requested', {
           nonce,
           content: input.value,
-          mode: viewMode,
+          mode: presenting && hasSlideBreaks(input.value) ? 'slides' : 'note',
           latexModeEnabled
         })
       }
