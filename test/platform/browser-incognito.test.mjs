@@ -61,6 +61,16 @@ test('an incognito tab keeps no history, no preview and no cache', async () => {
   assert.match(menu, /<IncognitoIcon/)
 })
 
+// Publishing would save the site's answer in settings and leave drives behind.
+test('a hyper:// site cannot publish from an incognito tab', async () => {
+  const app = await read('app/index.tsx')
+  const bridge = app.slice(app.indexOf('function handleHyperBridgeMessage'), app.indexOf('function remountBrowserWebView'))
+  const refused = bridge.indexOf('if (isIncognitoTab(tabId)) {')
+  assert.ok(refused > 0)
+  assert.ok(refused < bridge.indexOf('decidePublishing(siteId)'))
+  assert.ok(refused > bridge.indexOf("message.method === 'GET'"))
+})
+
 // Android WebViews share one cookie jar. react-native-webview's own incognito
 // prop clears every cookie in it, which would sign people out of every normal
 // tab, so an incognito tab gets a WebView profile of its own instead.

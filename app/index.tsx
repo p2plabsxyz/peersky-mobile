@@ -1533,6 +1533,13 @@ export default function App () {
       return true
     }
 
+    // An incognito tab keeps nothing, and both the answer and the drives
+    // would outlive it.
+    if (isIncognitoTab(tabId)) {
+      settle({ error: 'Sites cannot publish from an incognito tab' })
+      return true
+    }
+
     // A write puts files on this phone and shares them, so the person decides,
     // once per site. A tab in the background cannot ask.
     if (browserTabsStateRef.current.activeTabId !== tabId) {

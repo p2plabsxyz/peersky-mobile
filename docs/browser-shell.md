@@ -123,6 +123,11 @@ starts from an empty profile. Profiles need Android System WebView 123 or
 later; on an older one the menu says to update it rather than opening a tab
 that would share cookies.
 
+A `hyper://` site cannot publish from an incognito tab: its answer would be
+saved in Permissions and its drives would stay on the phone. Drives opened in
+one still go through the app's Hyper node, which keeps their blocks like any
+other drive's until P2P data is cleared.
+
 ## Native generation
 
 Native browser code is generated during Expo prebuild by the tracked config
