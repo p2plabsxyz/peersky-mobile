@@ -1,8 +1,11 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { MAX_BACKUP_SIZE_BYTES } from '../../backend/backup/limits.mjs'
-import { readZipEntries } from '../../backend/backup/zip.mjs'
-import { readHyperBinaryResponse } from '../../backend/hyper/binary-response.mjs'
+import { openZipFile } from '../../backend/backup/zip-file.mjs'
+import { writeHyperResponseToFile } from '../../backend/hyper/binary-response.mjs'
 
 function createZipWithDeclaredSizes (sizes) {
   const centralEntries = sizes.map((size, index) => {
@@ -34,23 +37,39 @@ function createResponse (body) {
   }
 }
 
+// The archive goes to disk first, the way a transfer does, and is read from
+// there.
+function openZipBytes (t, bytes) {
+  const directory = mkdtempSync(join(tmpdir(), 'peersky-zip-limits-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  const filePath = join(directory, 'archive.zip')
+  writeFileSync(filePath, bytes)
+  return openZipFile(filePath)
+}
+
+function tempFile (t) {
+  const directory = mkdtempSync(join(tmpdir(), 'peersky-response-limits-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  return join(directory, 'download')
+}
+
 describe('backup input size limits', () => {
-  it('rejects an oversized ZIP entry before inflation', () => {
+  it('rejects an oversized ZIP entry before inflation', (t) => {
     assert.throws(
-      () => readZipEntries(createZipWithDeclaredSizes([MAX_BACKUP_SIZE_BYTES + 1])),
+      () => openZipBytes(t, createZipWithDeclaredSizes([MAX_BACKUP_SIZE_BYTES + 1])),
       /ZIP entry exceeds 2GB limit/
     )
   })
 
-  it('rejects ZIP entries whose declared total exceeds 2GB', () => {
+  it('rejects ZIP entries whose declared total exceeds 2GB', (t) => {
     const halfLimit = Math.floor(MAX_BACKUP_SIZE_BYTES / 2)
     assert.throws(
-      () => readZipEntries(createZipWithDeclaredSizes([halfLimit, halfLimit + 1])),
+      () => openZipBytes(t, createZipWithDeclaredSizes([halfLimit, halfLimit + 1])),
       /ZIP contents exceed 2GB limit/
     )
   })
 
-  it('rejects an oversized content-length before reading the response', async () => {
+  it('rejects an oversized content-length before reading the response', async (t) => {
     let bodyRead = false
     const response = createResponse(null)
     response.arrayBuffer = async () => {
@@ -59,17 +78,18 @@ describe('backup input size limits', () => {
     }
 
     await assert.rejects(
-      readHyperBinaryResponse(
+      writeHyperResponseToFile(
         response,
         { 'content-length': String(MAX_BACKUP_SIZE_BYTES + 1) },
-        response.url
+        response.url,
+        tempFile(t)
       ),
       /Response exceeds 2GB limit/
     )
     assert.equal(bodyRead, false)
   })
 
-  it('stops a reader stream when accumulated bytes exceed the limit', async () => {
+  it('stops a reader stream when accumulated bytes exceed the limit', async (t) => {
     const chunks = [new Uint8Array(4), new Uint8Array(4)]
     let cancelled = false
     const reader = {
@@ -85,18 +105,19 @@ describe('backup input size limits', () => {
     }
 
     await assert.rejects(
-      readHyperBinaryResponse(
+      writeHyperResponseToFile(
         createResponse({ getReader: () => reader }),
         {},
         'hyper://example/backup.zip',
-        7
+        tempFile(t),
+        { maxBytes: 7 }
       ),
       /Response exceeds 7 byte limit/
     )
     assert.equal(cancelled, true)
   })
 
-  it('limits async iterator and arrayBuffer response bodies', async () => {
+  it('limits async iterator and arrayBuffer response bodies', async (t) => {
     const iterableBody = {
       async * [Symbol.asyncIterator] () {
         yield new Uint8Array(4)
@@ -105,14 +126,14 @@ describe('backup input size limits', () => {
     }
 
     await assert.rejects(
-      readHyperBinaryResponse(createResponse(iterableBody), {}, '', 7),
+      writeHyperResponseToFile(createResponse(iterableBody), {}, '', tempFile(t), { maxBytes: 7 }),
       /Response exceeds 7 byte limit/
     )
 
     const response = createResponse(null)
     response.arrayBuffer = async () => new Uint8Array(8).buffer
     await assert.rejects(
-      readHyperBinaryResponse(response, {}, '', 7),
+      writeHyperResponseToFile(response, {}, '', tempFile(t), { maxBytes: 7 }),
       /Response exceeds 7 byte limit/
     )
   })

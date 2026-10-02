@@ -1,7 +1,11 @@
 import b4a from 'b4a'
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import { inflateRawSync } from 'node:zlib'
-import { MAX_BACKUP_SIZE_BYTES } from './limits.mjs'
+import { MAX_BACKUP_SIZE_BYTES } from '../../backend/backup/limits.mjs'
 
+// Reads a whole ZIP from memory, for tests that check what was written. The
+// app reads archives from disk with backend/backup/zip-file.mjs.
 const EOCD_SIGNATURE = 0x06054b50
 const CENTRAL_DIRECTORY_SIGNATURE = 0x02014b50
 const LOCAL_FILE_SIGNATURE = 0x04034b50
@@ -150,4 +154,17 @@ function copyBytes (bytes) {
   const out = new Uint8Array(bytes.byteLength)
   out.set(bytes)
   return out
+}
+
+/** Writes every file entry under directory, and says how many there were. */
+export function unzipInto (zipBytes, directory) {
+  let files = 0
+  for (const entry of readZipEntries(zipBytes)) {
+    if (entry.isDirectory || entry.name === 'manifest.json') continue
+    const target = join(directory, entry.name)
+    mkdirSync(dirname(target), { recursive: true })
+    writeFileSync(target, entry.bytes)
+    files += 1
+  }
+  return files
 }

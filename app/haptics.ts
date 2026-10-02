@@ -22,8 +22,3 @@ const STYLES: Record<HapticWeight, Haptics.ImpactFeedbackStyle> = {
 export function tapFeedback (weight: HapticWeight = 'light') {
   void Haptics.impactAsync(STYLES[weight] ?? STYLES.light).catch(() => {})
 }
-
-/** Moving between choices, rather than committing to one. */
-export function selectionFeedback () {
-  void Haptics.selectionAsync().catch(() => {})
-}

@@ -140,10 +140,6 @@ export function setUploadScanner (next: UploadScanner | null) {
   scanner = typeof next === 'function' ? next : null
 }
 
-export function hasUploadScanner () {
-  return scanner !== null
-}
-
 /**
  * For bytes that never came from the picker. P2PMD's editor hands its images
  * over from inside a WebView as base64, so there is no file to point at, but

@@ -25,7 +25,7 @@ import {
 } from './page-access.mjs'
 import { refreshHyperRuntimeNetwork } from './network-refresh.mjs'
 import { createHyperUrl, getHyperSearch, getHyperVisibility, parseHyperUrl } from './url.mjs'
-import { readHyperBinaryResponse, writeHyperResponseToFile } from './binary-response.mjs'
+import { writeHyperResponseToFile } from './binary-response.mjs'
 import { configureHyperReadTimeout } from './read-policy.mjs'
 
 let hyperFetches = new WeakMap()
@@ -280,39 +280,6 @@ async function cancelResponseBody (body) {
 
     if (typeof body.return === 'function') await body.return()
   } catch {}
-}
-
-export async function fetchHyperBinary ({
-  url,
-  method = 'GET',
-  retries = DEFAULT_HYPER_DISCOVERY_RETRIES,
-  retryDelay = DEFAULT_HYPER_DISCOVERY_RETRY_DELAY,
-  maxRetryDelay = DEFAULT_HYPER_DISCOVERY_MAX_RETRY_DELAY,
-  backoffFactor = 2
-} = {}) {
-  if (method.toUpperCase() !== 'GET') {
-    return { ok: false, error: 'Only GET is currently supported' }
-  }
-
-  const target = parseHyperUrl(url)
-  if (target.error) return { ok: false, error: target.error }
-  const requestUrl = createHyperUrl(target.driveAddress, target.pathname)
-
-  return withHyperRuntimeForAddress(target.driveAddress, async (runtime) => {
-    await prepareHyperRead(runtime, target.driveAddress)
-    const fetch = await getHyperFetch(runtime)
-
-    return withHyperRetry({
-      fetch,
-      url: requestUrl,
-      retries,
-      retryDelay,
-      maxRetryDelay,
-      backoffFactor,
-      beforeRetry: () => refreshHyperRuntimeNetwork(runtime),
-      readResponse: (response, headers) => readHyperBinaryResponse(response, headers, requestUrl)
-    })
-  })
 }
 
 /**

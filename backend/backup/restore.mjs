@@ -1,6 +1,5 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { readZipEntries } from './zip.mjs'
 import { PEERCHAT_INCOMING_FILE } from '../peerchat/device-link.mjs'
 import { P2PMD_INCOMING_FILE } from '../p2pmd/constants.mjs'
 import {
@@ -14,8 +13,6 @@ export const RESTORE_STAGING_DIR = '.peersky-restore-staging'
 export const RESTORE_PREVIOUS_DIR = '.peersky-restore-previous'
 export const RESTORE_TRASH_DIR = '.peersky-restore-trash'
 const RESTORE_JOURNAL = 'journal.json'
-
-const SKIP_ENTRIES = new Set(['manifest.json', 'manifest.mjson'])
 
 // What the phone keeps from a desktop identity transfer: the identity record,
 // the private drives, which private-drive-import adopts after the swap, the
@@ -63,53 +60,6 @@ export function classifyDesktopEntry (name) {
   if (CONVERTED_FILES.has(name)) return 'convert'
   if (IGNORED_FILES.has(name) || IGNORED_DIRECTORIES.includes(top)) return 'ignore'
   return 'unknown'
-}
-
-/**
- * Unpacks a decrypted desktop identity transfer into a staging folder. Nothing
- * on the phone changes until commitStagedRestore moves it into place.
- */
-export async function restoreIdentityFromBackup (innerZipBytes, stagingPath) {
-  const entries = readZipEntries(innerZipBytes)
-  let restoredFiles = 0
-
-  mkdirSync(stagingPath, { recursive: true })
-
-  for (const entry of entries) {
-    const safeName = normalizeZipEntryName(entry.name)
-    if (!safeName || SKIP_ENTRIES.has(safeName)) continue
-
-    const plainName = safeName.replace(/\/$/, '')
-    const action = classifyDesktopEntry(plainName)
-    if (action === 'refuse') throw new Error('Refusing to restore device-key.json from backup')
-    if (action === 'unknown') throw new Error(`Refusing to restore unknown file: ${plainName}`)
-    if (action === 'ignore') continue
-
-    if (entry.isDirectory) {
-      mkdirSync(join(stagingPath, plainName), { recursive: true })
-      continue
-    }
-
-    if (action === 'convert') {
-      const target = CONVERTED_FILES.get(plainName)
-      const converted = target.convert(entry.bytes)
-      if (!converted) continue
-      writeFileSync(join(stagingPath, target.name), converted)
-      restoredFiles += 1
-      continue
-    }
-
-    const targetPath = join(stagingPath, plainName)
-    mkdirSync(getDirName(targetPath), { recursive: true })
-    writeFileSync(targetPath, entry.bytes)
-    restoredFiles += 1
-  }
-
-  if (restoredFiles === 0) {
-    throw new Error('Decrypted backup did not contain any restorable files')
-  }
-
-  return { restoredFiles, names: listStagedNames(stagingPath) }
 }
 
 export function listStagedNames (stagingPath) {
@@ -235,26 +185,4 @@ function assertTopLevelName (name) {
     throw new Error(`Refusing to restore ${value || 'an unnamed entry'}`)
   }
   return value
-}
-
-function normalizeZipEntryName (name) {
-  const slashNormalized = String(name || '').replace(/\\/g, '/')
-  const isDirectory = slashNormalized.endsWith('/')
-  const normalized = slashNormalized.replace(/^\/+/, '').replace(/\/+$/, '')
-  if (!normalized) return ''
-
-  const parts = []
-  for (const part of normalized.split('/')) {
-    if (!part || part === '.') continue
-    if (part === '..') throw new Error('Backup contains illegal path traversal entries')
-    parts.push(part)
-  }
-
-  const safeName = parts.join('/')
-  return isDirectory ? `${safeName}/` : safeName
-}
-
-function getDirName (filepath) {
-  const separatorIndex = Math.max(filepath.lastIndexOf('/'), filepath.lastIndexOf('\\'))
-  return separatorIndex === -1 ? '.' : filepath.slice(0, separatorIndex)
 }

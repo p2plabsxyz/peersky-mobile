@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import Hyperdrive from 'hyperdrive'
 import { create as createSDK } from 'hyper-sdk'
 import z32 from 'z32'
-import { restoreIdentityFromBackup } from '../../backend/backup/restore.mjs'
+import { unzipInto } from '../fixtures/zip-reader.mjs'
 import {
   adoptTransferredPrivateDrive,
   extractTransferredPrivateDrive
@@ -48,8 +48,7 @@ describe('Cross-device private drive (desktop to mobile)', () => {
 
     const backupBytes = createBackupZip(desktopStore, registry)
 
-    const restored = await restoreIdentityFromBackup(backupBytes, mobileRestore)
-    assert.equal(restored.restoredFiles > 0, true)
+    assert.equal(unzipInto(backupBytes, mobileRestore) > 0, true)
     assert.equal(readFileSync(join(mobileRestore, 'privateHyperdrives.json'), 'utf8'), registry)
 
     const transferred = extractTransferredPrivateDrive(mobileRestore)
@@ -231,7 +230,7 @@ describe('Cross-device private drive (desktop to mobile)', () => {
       timestamp: 1700000000000,
       encrypted: true
     }])
-    await restoreIdentityFromBackup(createBackupZip(desktopStore, registry), mobileRestore)
+    unzipInto(createBackupZip(desktopStore, registry), mobileRestore)
     writeFileSync(join(mobileRestore, 'private-drive-key.json'), JSON.stringify({
       version: 3,
       key: encryptionKey.toString('hex'),

@@ -8,7 +8,7 @@ const source = await readFile(new URL('../../app/haptics.ts', import.meta.url), 
 // nothing here is awaited and nothing throws.
 test('a failed buzz never interrupts what the press was for', () => {
   assert.match(source, /void Haptics\.impactAsync\([\s\S]{0,40}\)\.catch\(\(\) => \{\}\)/)
-  assert.match(source, /void Haptics\.selectionAsync\(\)\.catch\(\(\) => \{\}\)/)
+  assert.doesNotMatch(source, /await Haptics/)
 })
 
 test('the three weights map onto the platform styles', () => {

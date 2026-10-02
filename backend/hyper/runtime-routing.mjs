@@ -3,7 +3,6 @@ import { join } from 'node:path'
 import z32 from 'z32'
 
 export const ADOPTED_CORESTORE_FILE = 'adopted-corestore.json'
-export const DEFAULT_ANNOUNCE = true
 
 // Adopted drives live in their OWN corestore directory, never overlaid onto
 // the phone's live hyper-sdk-synced-private store. Copying one Corestore's

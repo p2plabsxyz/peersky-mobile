@@ -25,28 +25,6 @@ const SCAN_TIMEOUT_MS = 20_000
 // tens of megabytes of base64 across the bridge would stall the app.
 const MAX_SCANNED_BYTES = 24 * 1024 * 1024
 
-type ScannerStatus = 'starting' | 'ready' | 'unavailable'
-
-// Read by the settings screen so the state is visible rather than guessed at.
-let currentStatus: ScannerStatus = 'starting'
-const statusListeners = new Set<(status: ScannerStatus) => void>()
-
-export function getMediaScannerStatus () {
-  return currentStatus
-}
-
-export function onMediaScannerStatus (listener: (status: ScannerStatus) => void) {
-  statusListeners.add(listener)
-  return () => {
-    statusListeners.delete(listener)
-  }
-}
-
-function setStatus (next: ScannerStatus) {
-  currentStatus = next
-  for (const listener of statusListeners) listener(next)
-}
-
 type Pending = {
   resolve: (verdict: string) => void
   timer: ReturnType<typeof setTimeout>
@@ -188,7 +166,6 @@ export const NsfwScanner = memo(function NsfwScanner () {
         // Without the model nothing can be judged. Uploads still work; they are
         // simply unscanned, which is what the gate already assumes.
         console.warn('[nsfw] could not stage the classifier:', error)
-        setStatus('unavailable')
       })
 
     return () => { cancelled = true }
@@ -228,13 +205,8 @@ export const NsfwScanner = memo(function NsfwScanner () {
           // Without this the classifier failing to start looks exactly like a
           // clean picture: silence, and every upload waved through.
           if (message.ready !== undefined) {
-            if (message.ready) {
-              console.log('[nsfw] classifier ready')
-              setStatus('ready')
-            } else {
-              console.warn('[nsfw] classifier failed to start:', message.error)
-              setStatus('unavailable')
-            }
+            if (message.ready) console.log('[nsfw] classifier ready')
+            else console.warn('[nsfw] classifier failed to start:', message.error)
             return
           }
 
@@ -244,7 +216,6 @@ export const NsfwScanner = memo(function NsfwScanner () {
         }}
         onError={(event) => {
           console.warn('[nsfw] classifier page failed:', event.nativeEvent.description)
-          setStatus('unavailable')
         }}
         ref={(instance) => { liveWebView = instance }}
         source={source}
