@@ -2,9 +2,8 @@ import { Linking } from 'react-native'
 
 import { createIncomingUrlQueue } from './incoming-url-queue.mjs'
 
-// Module scope on purpose: this has to outlive the browser screen, which
-// expo-router unmounts and remounts on its way through the unmatched route
-// whenever a peersky:// link arrives. See incoming-url-queue.mjs.
+// Module scope on purpose: this has to outlive the browser screen, and hear a
+// link that arrives before it mounts. See incoming-url-queue.mjs.
 const queue = createIncomingUrlQueue()
 
 Linking.addEventListener('url', (event) => queue.push(event.url))

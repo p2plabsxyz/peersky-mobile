@@ -1,12 +1,10 @@
 /**
  * Holds deep links until the browser has actually acted on one.
  *
- * expo-router renders a single screen through <Slot/>, and peersky://p2p/... is
- * not one of its routes. So a link arriving while the app is already open sends
- * the router to the unmatched route, which unmounts the browser, and the
- * redirect back mounts a fresh one. A listener living inside the browser was
- * torn down in that gap along with the state it had just set, which is why an
- * invite opened from Notes brought PeerSky forward and then did nothing.
+ * A link can arrive before the browser screen is mounted, on a cold start, or
+ * while it is being replaced. A listener living inside the browser missed
+ * those, which is why an invite opened from Notes once brought PeerSky forward
+ * and then did nothing.
  *
  * Delivering is not the same as handling here. A link stays queued until the
  * browser says it loaded it, so one that arrives moments before the screen goes

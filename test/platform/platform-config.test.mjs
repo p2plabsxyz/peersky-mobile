@@ -254,6 +254,15 @@ describe('mobile platform runtime configuration', () => {
     assert.match(indexSource, /settleIncomingUrl\(incomingUrl\)/)
   })
 
+  // expo-router parsed every incoming link's query with a decoder a crafted
+  // link could keep busy. The browser reads links itself, so the router is
+  // only ever told to show "/".
+  it('keeps system links away from expo-router', async () => {
+    const intent = await readFile(repoFile('app/+native-intent.ts'), 'utf8')
+    assert.match(intent, /export function redirectSystemPath \(\{ initial \}/)
+    assert.match(intent, /return initial \? '\/' : null/)
+  })
+
   it('listens for deep links outside the screen expo-router unmounts', async () => {
     const linksSource = await readFile(repoFile('app/incoming-links.ts'), 'utf8')
 
