@@ -631,8 +631,11 @@ export default function App () {
     }
   }, [browserPreferencesReady])
 
+  // Tabs come back without waiting for the filter rules: compiling them can
+  // take a minute after a list update, and no page loads before they are
+  // ready anyway, since web views wait for contentBlockingReady.
   useEffect(() => {
-    if (!browserPreferencesReady || !contentBlockingReady || browserSessionRestoreStartedRef.current) return
+    if (!browserPreferencesReady || browserSessionRestoreStartedRef.current) return
     browserSessionRestoreStartedRef.current = true
     let cancelled = false
 
@@ -681,7 +684,7 @@ export default function App () {
     return () => {
       cancelled = true
     }
-  }, [browserPreferencesReady, contentBlockingReady])
+  }, [browserPreferencesReady])
 
   // P2PMD notes another of this person's devices sent, left here by a Link
   // Device restore. The backend keeps the text of each hosted one as this
@@ -4365,7 +4368,14 @@ export default function App () {
                 <Text style={styles.browserRestoreText}>Restoring tab...</Text>
               </View>
               )
-            : null}
+            : !contentBlockingReady && isBrowserWebViewSource(browserSource)
+                ? (
+                  <View style={styles.browserRestorePage}>
+                    <ActivityIndicator size='small' color='#1f6fd1' />
+                    <Text style={styles.browserRestoreText}>Turning on tracker protection...</Text>
+                  </View>
+                  )
+                : null}
 
         {peertunesMounted && (
           <View
