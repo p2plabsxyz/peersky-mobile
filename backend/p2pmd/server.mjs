@@ -850,7 +850,6 @@ export function getP2pmdEditorPage () {
         overflow-y: auto;
         -webkit-overflow-scrolling: touch;
       }
-      h1 { margin: 0; font-size: 19px; letter-spacing: 0.01em; }
       p { line-height: 1.5; }
       code { color: var(--accent); }
       .app-shell {
@@ -967,6 +966,9 @@ export function getP2pmdEditorPage () {
         letter-spacing: -0.02em;
         line-height: 1.15;
       }
+      #preview h1 { margin: 0.7em 0 0.45em; font-size: 1.75em; }
+      #preview h2 { margin: 0.8em 0 0.4em; font-size: 1.4em; }
+      #preview h3 { margin: 0.8em 0 0.35em; font-size: 1.18em; }
       #preview > :first-child { margin-top: 0; }
       #preview > :last-child { margin-bottom: 0; }
       #preview pre {

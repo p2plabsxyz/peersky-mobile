@@ -91,6 +91,16 @@ describe('p2pmd mobile editor page routing', () => {
     assert.match(html, /if \(presenting && viewMode === 'edit'\) \{\s+presenting = false/)
   })
 
+  // A page-wide h1 rule left over from the editor's own header made a note's
+  // title smaller than its sections.
+  it('draws a note\'s headings largest first', () => {
+    const html = getP2pmdEditorPage()
+    const size = (tag) => Number(new RegExp(`#preview ${tag} \\{[^}]*font-size: ([0-9.]+)em`).exec(html)?.[1])
+
+    assert.doesNotMatch(html, /^\s*h1 \{/m)
+    assert.ok(size('h1') > size('h2') && size('h2') > size('h3'))
+  })
+
   it('keeps the blank line above a slide break when an image goes in', () => {
     const html = getP2pmdEditorPage()
     const source = html.slice(
