@@ -52,6 +52,15 @@ for (const [name, script] of Object.entries(scripts)) {
   test(`the ${name} script parses`, () => {
     assert.doesNotThrow(() => new vm.Script(script), name)
   })
+
+  // A \u0000 written once in a template literal is a real NUL in the script.
+  // Node reads past it. Android cuts the prop there, so the joined scripts all
+  // ended in the middle of a regex and none of them ran in a browser tab.
+  test(`the ${name} script carries no raw control characters`, () => {
+    const raw = Array.from(script, (character) => character.charCodeAt(0))
+      .filter((code) => (code < 32 && ![9, 10, 13].includes(code)) || (code >= 0x7f && code <= 0x9f))
+    assert.deepEqual(raw, [], name)
+  })
 }
 
 test('the scripts the browser injects before a page loads parse as one', () => {

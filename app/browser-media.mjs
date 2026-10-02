@@ -77,7 +77,7 @@ export function createBrowserMediaLongPressScript ({ token = '' } = {}) {
 
       function bridgeSafeUrl(value, protocols) {
         if (typeof value !== 'string' || value.length < 1 || value.length > maxUrlLength) return null;
-        if (/[\u0000-\u001f\u007f-\u009f]/.test(value)) return null;
+        if (/[\\u0000-\\u001f\\u007f-\\u009f]/.test(value)) return null;
 
         try {
           const parsed = new URL(value, document.baseURI);
