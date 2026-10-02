@@ -142,6 +142,13 @@ PeerChat metadata and writable room feeds live under the shared Hyper storage
 directory. PeerChat deliberately does not expose raw room feeds or room keys as
 ordinary named Hyperdrives in Settings.
 
+PeerChat settings has **Delete PeerChat profile**. It leaves every room, so each
+one hears this device go, then removes the room feeds, the attachment drives,
+the decrypted attachment cache and PeerChat's own state file, and PeerChat opens
+on the welcome screen again (`deletePeerChatProfile` in
+`backend/peerchat/runtime.mjs`). Messages already sent stay on the devices they
+reached.
+
 Settings -> P2P Data provides two relevant operations:
 
 - **Clear downloaded P2P cache** closes PeerChat before storage maintenance,

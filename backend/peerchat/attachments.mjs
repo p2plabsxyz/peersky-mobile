@@ -624,6 +624,11 @@ function normalizeFilename (value) {
   return Array.from(sanitized).slice(0, 160).join('')
 }
 
+export function getAttachmentCacheDirectory (suppliedStoragePath) {
+  const storagePath = suppliedStoragePath || getHyperStoragePath() || '.'
+  return `${String(storagePath).replace(/[/\\]+$/, '')}/${CACHE_DIRECTORY_NAME}`
+}
+
 function getAttachmentCachePath (roomKey, url, fileName, suppliedStoragePath) {
   const storagePath = suppliedStoragePath || getHyperStoragePath() || '.'
   const fingerprint = createHash('sha256').update(`${roomKey}:${url}`).digest('hex').slice(0, 24)

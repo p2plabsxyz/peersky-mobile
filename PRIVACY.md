@@ -1,6 +1,6 @@
 # PeerSky Mobile Privacy Policy
 
-Last updated: September 29, 2026
+Last updated: October 1, 2026
 
 PeerSky Mobile is a web and peer-to-peer browser. There are no accounts, no
 analytics and no servers of ours, so there is nowhere for us to collect anything
@@ -24,6 +24,8 @@ Peer-to-peer is the part worth understanding. Opening a `hyper://` address or us
 
 PeerChat rooms and direct messages are encrypted with a key only the people in them hold, and attachments with a key derived from it. Two honest limits: a room key is a shared secret, so anybody who has it can read that room including its past messages, and it never rotates, meaning somebody removed from a room still holds the key. What is encrypted is the content, not the fact that two devices are talking.
 
+Your PeerChat name, bio and photo are seen by everyone in the rooms you join. A new PeerChat profile starts in P2P Republic, a public room anyone can join, so people you do not know will see them there, along with your IP address while you are both online. You can leave it from the chat list at any time.
+
 Public Hyperdrive uploads are shared with the peer-to-peer network and can be accessed by anyone who has the corresponding Hyper URL. Private Hyperdrive uploads remain in isolated local app storage unless you choose to share or transfer that storage.
 
 ## Backups and Moving to Another Device
@@ -42,11 +44,21 @@ PeerSky may request camera, microphone, location, local-network, and file access
 
 PeerSky downloads EasyList and EasyPrivacy filter data to provide ad and tracker blocking. When you open an external app or service from PeerSky, that service handles data according to its own policy.
 
+## Reports
+
+Reporting someone in PeerChat opens an email to us, which you can read before you send it. It holds their name and short peer ID, the room's name and a hash of its key (never the key itself), and the message you reported, if you reported one. We use it only to act on the report, and we read every one within 24 hours. Nothing is sent unless you send that email.
+
+## Deleting Your Data
+
+There is no account on a server to delete. In PeerChat, Settings, Delete PeerChat profile removes your name, bio, photo, chats and keys from this device. Settings, P2P Data, Clear all P2P data removes everything peer-to-peer, and uninstalling PeerSky removes the rest. Messages you already sent stay on the devices of the people you sent them to, and we have no way to reach them.
+
 ## Children
 
-PeerSky provides unrestricted browser access and is not directed to children, and we collect nothing from anyone.
+PeerSky provides unrestricted browser access and is not directed to children, and we collect nothing from anyone. PeerChat is for people 16 and over.
 
 The peer-to-peer web has no moderator. Media is screened on the device before it is sent and again when it arrives, text is filtered for abuse and slurs, and adult domains are blocked in links. None of that replaces judgement about who you share a room key with.
+
+We do not tolerate child sexual abuse or exploitation in any form. Report it from inside PeerChat or to contact@p2plabs.xyz, and we report what we learn to the authorities, including the National Center for Missing and Exploited Children. Our rules are in the [Terms of Use](TERMS.md).
 
 ## Changes
 

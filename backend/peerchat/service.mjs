@@ -830,6 +830,18 @@ export class PeerChatService {
   }
 
   /**
+   * Leaves every room the normal way, so each one hears this device go, and
+   * hands back which rooms they were for their data to be removed afterwards.
+   */
+  async leaveAllRooms () {
+    const roomKeys = [...this.rooms.keys()]
+    for (const roomKey of roomKeys) {
+      await this.leaveRoom({ roomKey }).catch(() => {})
+    }
+    return roomKeys
+  }
+
+  /**
    * Forget a room on this device: its topic, its feed, its record.
    *
    * No leave announcement, because callers either send their own or are

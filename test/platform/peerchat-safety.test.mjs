@@ -29,3 +29,22 @@ test('someone blocked is not offered in Find people', () => {
   const directory = screen.slice(screen.indexOf('const directory = '), screen.indexOf('const myInviteUrl'))
   assert.match(directory, /!blockedPeers\.some\(\(blocked\) => blocked\.peerId === member\.id\)/)
 })
+
+// Making a profile in the app means being able to delete it in the app.
+test('a PeerChat profile can be deleted from PeerChat settings', async () => {
+  const commands = await import('../../backend/rpc/commands.mjs')
+  assert.equal(commands.RPC_PEERCHAT_DELETE_PROFILE, 73)
+  const values = Object.entries(commands)
+    .filter(([name]) => name.startsWith('RPC_') && !name.startsWith('RPC_APP_'))
+    .map(([, value]) => value)
+  assert.equal(new Set(values).size, values.length, 'every command number is its own')
+
+  const router = await readFile(new URL('../../backend/rpc/router.mjs', import.meta.url), 'utf8')
+  assert.match(router, /req\.command === RPC_PEERCHAT_DELETE_PROFILE\) \{\s+replyJson\(req, await deletePeerChatProfile\(\)\)/)
+
+  assert.match(screen, /onPress=\{confirmDeleteProfile\}/)
+  assert.match(screen, />Delete PeerChat profile</)
+  const confirm = screen.slice(screen.indexOf('function confirmDeleteProfile'), screen.indexOf('async function deleteProfile'))
+  assert.match(confirm, /This cannot be undone/)
+  assert.match(confirm, /style: 'destructive', onPress: \(\) => void deleteProfile\(\)/)
+})

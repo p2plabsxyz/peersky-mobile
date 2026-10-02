@@ -71,6 +71,9 @@ export const RPC_PEERCHAT_UNBLOCK = 67
 // Blocking above is a private decision; this one is the room's.
 export const RPC_PEERCHAT_ROOM_REMOVE_MEMBER = 71
 export const RPC_PEERCHAT_ROOM_RESTORE_MEMBER = 72
+// Everything PeerChat keeps on this device, gone, as App Review asks of any
+// app where people make a profile.
+export const RPC_PEERCHAT_DELETE_PROFILE = 73
 
 export const RPC_IDENTITY_REMOVE = 68
 

@@ -54,7 +54,7 @@ export const PEERCHAT_QUESTIONS = [
   },
   {
     q: 'How do I delete my account?',
-    a: 'There’s no account to delete, which is the good news. Clearing PeerSky data wipes your name and chats from this phone. Anything you already sent stays with the people you sent it to.'
+    a: 'There’s no account on a server, but you can delete your profile: in PeerChat settings, tap Delete PeerChat profile. Your name, chats and files are gone from this device, and every room sees you leave. Anything you already sent stays with the people you sent it to.'
   },
   {
     q: 'Why can’t I see older messages?',

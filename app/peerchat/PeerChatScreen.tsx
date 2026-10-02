@@ -29,6 +29,8 @@ import {
   parsePeerChatIntroState,
   PEERCHAT_INTRO_MAX_BYTES,
   PEERCHAT_INTRO_POINTS,
+  PEERCHAT_RULES,
+  PEERCHAT_TERMS_URL,
   serializePeerChatIntroState
 } from './intro-state.mjs'
 import { PEERCHAT_QUESTIONS } from './questions.mjs'
@@ -76,6 +78,7 @@ import {
   RPC_PEERCHAT_DM_ACCEPT,
   RPC_PEERCHAT_DM_CREATE,
   RPC_PEERCHAT_DM_REJECT,
+  RPC_PEERCHAT_DELETE_PROFILE,
   RPC_PEERCHAT_INIT,
   RPC_PEERCHAT_BLOCK,
   RPC_PEERCHAT_ONBOARD,
@@ -1409,6 +1412,40 @@ export function PeerChatScreen ({
     await unblockPeerId(member.id, member.username)
   }
 
+  // There is no account on a server, but a profile made here can be unmade
+  // here, everything that came with it included.
+  function confirmDeleteProfile () {
+    Alert.alert(
+      'Delete your PeerChat profile?',
+      'This removes your name, bio and photo, every chat with its messages and files, and your blocks from this device. Each room sees you leave. Messages you already sent stay with the people who got them. This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete', style: 'destructive', onPress: () => void deleteProfile() }
+      ]
+    )
+  }
+
+  async function deleteProfile () {
+    await runAction(async () => {
+      const response = await callRpc(RPC_PEERCHAT_DELETE_PROFILE, {})
+      if (!response.ok) throw new Error(response.error || 'Unable to delete your PeerChat profile.')
+      const fresh = await callRpc(RPC_PEERCHAT_INIT, {})
+      if (!mountedRef.current) return
+      setShowPeerChatSettings(false)
+      setActiveRoom(null)
+      setProfile(fresh.profile || null)
+      setProfileName('')
+      setProfileBio('')
+      setProfileAvatar(null)
+      setRooms(fresh.rooms || [])
+      setPendingDirectMessages(fresh.pendingDirectMessages || [])
+      setBlockedPeers(fresh.blockedPeers || [])
+      setComposer('')
+      versionRef.current = -1
+      onStatus('Your PeerChat profile was deleted from this device')
+    })
+  }
+
   async function reportMember (
     member: PeerChatMember,
     from: PeerChatRoom | null = activeRoom,
@@ -1870,12 +1907,33 @@ export function PeerChatScreen ({
           */}
           <Text style={[styles.introQuestionsTitle, { color: colors.text }]}>Questions people ask</Text>
           <PeerChatQuestions colors={colors} />
+          {/* Right above the button, so agreeing means having seen them. */}
+          <Text style={[styles.introQuestionsTitle, { color: colors.text }]}>The rules</Text>
+          <View style={[styles.introRules, { backgroundColor: colors.input }]}>
+            {PEERCHAT_RULES.map((rule) => (
+              <View key={rule} style={styles.introRuleRow}>
+                <Text style={[styles.introRuleText, { color: colors.text }]}>{'\u2022'}</Text>
+                <Text style={[styles.introRuleText, styles.introRuleBody, { color: colors.text }]}>{rule}</Text>
+              </View>
+            ))}
+            <Text style={[styles.introRuleText, { color: colors.muted }]}>
+              There is no tolerance for objectionable content or abusive users. Tapping I understand means you agree to these rules and the{' '}
+              <Text
+                accessibilityRole='link'
+                onPress={() => onOpenUrl(PEERCHAT_TERMS_URL)}
+                style={[styles.introRuleLink, { color: colors.accent }]}
+              >
+                full terms
+              </Text>
+              .
+            </Text>
+          </View>
           <Pressable
             accessibilityRole='button'
             onPress={continueFromIntro}
             style={[styles.introContinue, styles.introAgree, { backgroundColor: colors.accent }]}
           >
-            <Text style={styles.introContinueText}>Agree and continue</Text>
+            <Text style={styles.introContinueText}>I understand</Text>
           </Pressable>
         </ScrollView>
       </View>
@@ -3081,6 +3139,17 @@ export function PeerChatScreen ({
                       <Text style={[styles.attachmentMeta, { color: colors.muted }]}>Anyone can read how this works</Text>
                     </View>
                     <Text style={[styles.preferenceState, { color: colors.accent }]}>Open</Text>
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole='button'
+                    disabled={isBusy}
+                    onPress={confirmDeleteProfile}
+                    style={[styles.preferenceRow, { backgroundColor: colors.input }, isBusy ? styles.disabled : null]}
+                  >
+                    <View style={styles.preferenceCopy}>
+                      <Text style={[styles.memberName, { color: colors.danger }]}>Delete PeerChat profile</Text>
+                      <Text style={[styles.attachmentMeta, { color: colors.muted }]}>Your name, chats and files, gone from this device</Text>
+                    </View>
                   </Pressable>
                   {error && <Text accessibilityRole='alert' style={[styles.modalError, { color: colors.danger }]}>{error}</Text>}
                   {(profile?.username !== profileName.trim() ||
@@ -4462,8 +4531,13 @@ const styles = StyleSheet.create({
   },
   introContinueText: { color: '#ffffff', fontSize: 15, fontWeight: '900' },
   introQuestionsTitle: { fontSize: 16, fontWeight: '900', marginBottom: 12, marginTop: 30 },
-  // Inside the scroll, under the questions, rather than pinned to the bottom.
+  // Inside the scroll, under the rules, rather than pinned to the bottom.
   introAgree: { marginBottom: 0, marginHorizontal: 0, marginTop: 26 },
+  introRules: { borderRadius: 12, gap: 10, padding: 14 },
+  introRuleRow: { flexDirection: 'row', gap: 8 },
+  introRuleText: { fontSize: 13, lineHeight: 19 },
+  introRuleBody: { flex: 1 },
+  introRuleLink: { fontWeight: '700' },
   questions: { gap: 8 },
   question: { borderRadius: 12, overflow: 'hidden' },
   questionHeader: { alignItems: 'center', flexDirection: 'row', gap: 10, paddingHorizontal: 14, paddingVertical: 13 },
