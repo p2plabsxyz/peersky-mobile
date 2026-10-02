@@ -4083,9 +4083,6 @@ export default function App () {
                           A real-time peer-to-peer Markdown editor for writing notes and collaboration.
                         </Text>
                       </View>
-                      <Text style={[styles.roomPill, p2pmdTheme?.roomPill, p2pmdRoom ? styles.roomPillLive : null]}>
-                        {p2pmdRoom ? 'live' : 'ready'}
-                      </Text>
                     </View>
                     {!p2pmdPeerDisplayName || isEditingP2pmdName
                       ? (

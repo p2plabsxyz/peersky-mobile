@@ -1048,20 +1048,6 @@ export const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 15,
     fontWeight: '700'
-  },
-  roomPill: {
-    backgroundColor: '#30364a',
-    borderRadius: 999,
-    color: '#cdd6ff',
-    fontSize: 12,
-    fontWeight: '700',
-    overflow: 'hidden',
-    paddingHorizontal: 10,
-    paddingVertical: 4
-  },
-  roomPillLive: {
-    backgroundColor: '#2f80ed',
-    color: '#fff'
   }
 })
 
@@ -1116,7 +1102,6 @@ export const p2pmdLight = StyleSheet.create({
   emptyRoomTitle: { color: '#1f2a44' },
   fieldLabel: { color: '#687086' },
   sectionTitle: { color: '#1f2a44' },
-  roomPill: { backgroundColor: '#e5f0ff', color: '#1a5fb4' },
   // The page behind the whole tab. Left dark it frames the light content in
   // black down every edge.
   p2pmdAppContent: { backgroundColor: '#f5f8ff' }
