@@ -33,7 +33,7 @@ import {
   PEERCHAT_TERMS_URL,
   serializePeerChatIntroState
 } from './intro-state.mjs'
-import { PEERCHAT_QUESTIONS } from './questions.mjs'
+import { PEERCHAT_QUESTIONS, PEERCHAT_WELCOME_QUESTIONS } from './questions.mjs'
 import { buildPeerChatReport, PEERCHAT_REPORT_EMAIL } from './report.mjs'
 import {
   parsePeerChatUiState,
@@ -1906,7 +1906,7 @@ export function PeerChatScreen ({
             after them, so whoever agrees has scrolled past every one.
           */}
           <Text style={[styles.introQuestionsTitle, { color: colors.text }]}>Questions people ask</Text>
-          <PeerChatQuestions colors={colors} />
+          <PeerChatQuestions colors={colors} questions={PEERCHAT_WELCOME_QUESTIONS} />
           {/* Right above the button, so agreeing means having seen them. */}
           <Text style={[styles.introQuestionsTitle, { color: colors.text }]}>The rules</Text>
           <View style={[styles.introRules, { backgroundColor: colors.input }]}>
@@ -4197,11 +4197,17 @@ function PeerProfileModal ({
 
 // Folded, one open at a time, so a long list stays a short screen. The list
 // itself is in questions.mjs, shared by the welcome screen and About.
-function PeerChatQuestions ({ colors }: { colors: typeof lightColors }) {
+function PeerChatQuestions ({
+  colors,
+  questions = PEERCHAT_QUESTIONS
+}: {
+  colors: typeof lightColors
+  questions?: Array<{ q: string, a: string }>
+}) {
   const [open, setOpen] = useState<string | null>(null)
   return (
     <View style={styles.questions}>
-      {PEERCHAT_QUESTIONS.map((entry) => {
+      {questions.map((entry) => {
         const expanded = open === entry.q
         return (
           <View key={entry.q} style={[styles.question, { backgroundColor: colors.input }]}>

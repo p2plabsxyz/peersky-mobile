@@ -149,31 +149,42 @@ test('PeerChat offers the Android battery exemption after notifications are turn
 })
 
 test('PeerChat answers the questions a first-time user actually asks', async () => {
-  const { PEERCHAT_QUESTIONS } = await import('../../app/peerchat/questions.mjs')
+  const { PEERCHAT_QUESTIONS, PEERCHAT_USAGE_QUESTIONS, PEERCHAT_WELCOME_QUESTIONS } = await import('../../app/peerchat/questions.mjs')
   const answer = (pattern) => PEERCHAT_QUESTIONS.find(({ q }) => pattern.test(q))?.a || ''
 
   // Asked the way a person asks: a question, in plain words.
   for (const { q, a } of PEERCHAT_QUESTIONS) {
     assert.match(q, /\?$/)
     assert.ok(a.length > 0)
-    assert.doesNotMatch(`${q} ${a}`, /—/)
+    assert.doesNotMatch(`${q} ${a}`, /—|honestly/i)
+  }
+  assert.deepEqual(PEERCHAT_QUESTIONS, [...PEERCHAT_WELCOME_QUESTIONS, ...PEERCHAT_USAGE_QUESTIONS])
+
+  // Before using it: what it is, how it compares, what it costs and who
+  // makes it. Nothing about blocking people or deleting things yet.
+  for (const pattern of [/What is PeerChat/, /WhatsApp, Telegram or Signal/, /phone number or an email/, /friends find me/, /peer to peer mean/, /How private/, /really free/, /big files/, /phone and my computer/, /iPhone and Android/, /Who makes/]) {
+    assert.ok(PEERCHAT_WELCOME_QUESTIONS.some(({ q }) => pattern.test(q)), String(pattern))
+  }
+  for (const pattern of [/bothering me/, /delete my account/, /unsend/]) {
+    assert.ok(!PEERCHAT_WELCOME_QUESTIONS.some(({ q }) => pattern.test(q)), String(pattern))
   }
 
   // What PeerChat is, said outright: no accounts, no servers, works without
   // internet, end to end encrypted.
-  assert.match(answer(/need an account/), /Pick a name and start chatting/)
-  assert.match(answer(/where.s the server/), /There isn.t one/)
-  assert.match(answer(/read my messages/), /end to end encrypted/)
+  assert.match(answer(/phone number or an email/), /Pick a name and you.re in/)
+  assert.match(answer(/WhatsApp, Telegram or Signal/), /end to end encrypted/)
   assert.match(answer(/without internet/), /Any local network will do/)
+  assert.match(answer(/really free/), /no ads, no subscriptions/)
 
   // Knowing where a room is on the network gets nobody in.
   assert.match(answer(/stranger on the network/), /prove it holds the room.s key/)
   assert.match(answer(/stranger on the network/), /never goes over the wire/)
 
   // The awkward ones get a straight answer rather than a dodge.
-  assert.match(answer(/unsend/), /their phone is theirs/)
+  assert.match(answer(/unsend/), /their device is theirs/)
+  assert.match(answer(/delete my account/), /Delete PeerChat profile/)
   assert.match(answer(/delete my account/), /stays with the people you sent it to/)
-  assert.match(answer(/know about me/), /No tracking, no analytics/)
+  assert.match(answer(/How private/), /no tracking, no analytics/)
 
   // "How private is it" names what it does not hide, and a one to one chat
   // says how it is locked.
@@ -199,13 +210,13 @@ test('PeerChat shows the questions folded, on the welcome screen and in About', 
   const screen = await readFile(new URL('../../app/peerchat/PeerChatScreen.tsx', import.meta.url), 'utf8')
 
   // One list for both places.
-  assert.match(screen, /import \{ PEERCHAT_QUESTIONS \} from '\.\/questions\.mjs'/)
+  assert.match(screen, /import \{ PEERCHAT_QUESTIONS, PEERCHAT_WELCOME_QUESTIONS \} from '\.\/questions\.mjs'/)
   assert.doesNotMatch(screen, /const PEERCHAT_ABOUT = \[/)
 
   // On the welcome screen, under the four points, and the button comes after
   // them inside the scroll, so whoever agrees has gone past every question.
   const intro = screen.slice(screen.indexOf('if (showIntro) {'), screen.indexOf('if (isInitialized && !profile?.username)'))
-  assert.match(intro, /<PeerChatQuestions colors=\{colors\} \/>/)
+  assert.match(intro, /<PeerChatQuestions colors=\{colors\} questions=\{PEERCHAT_WELCOME_QUESTIONS\} \/>/)
   assert.ok(intro.indexOf('PEERCHAT_INTRO_POINTS.map') < intro.indexOf('<PeerChatQuestions'))
   assert.ok(intro.indexOf('<PeerChatQuestions') < intro.indexOf('>I understand<'))
   assert.ok(intro.indexOf('>I understand<') < intro.indexOf('</ScrollView>'))
