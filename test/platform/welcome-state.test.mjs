@@ -16,6 +16,7 @@ test('the marker is what decides, not a version', () => {
 // says what P2PMD is the first time it is opened there.
 test('an app welcome has a marker of its own that stays on this phone', () => {
   assert.equal(APP_WELCOME_FILE_NAMES.p2pmd, 'p2pmd-welcome-seen')
+  assert.equal(APP_WELCOME_FILE_NAMES.hyperdrive, 'hyperdrive-welcome-seen')
   for (const name of [WELCOME_FILE_NAME, ...Object.values(APP_WELCOME_FILE_NAMES)]) {
     assert.ok(!PHONE_BACKUP_FILES.includes(name), name)
   }

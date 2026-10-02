@@ -150,7 +150,7 @@ import { AppLoading } from './AppLoading'
 import { BrowserSiteInfoSheet } from './BrowserSiteInfoSheet'
 import { APP_WELCOME_FILE_NAMES, hasSeenWelcome, markWelcomeSeen, WELCOME_FILE_NAME } from './welcome-state.mjs'
 import { AppWelcome } from './AppWelcome'
-import { P2PMD_WELCOME } from './app-welcomes'
+import { HYPERDRIVE_WELCOME, P2PMD_WELCOME } from './app-welcomes'
 import { createFunPeerName } from '../backend/p2pmd/peer-names.mjs'
 import { tapFeedback } from './haptics'
 import {
@@ -376,6 +376,7 @@ export default function App () {
   // or the browser rather than one flashing into the other.
   const [showWelcome, setShowWelcome] = useState(() => !hasSeenWelcome(getWelcomeFile()))
   const [showP2pmdWelcome, setShowP2pmdWelcome] = useState(() => !hasSeenWelcome(getAppWelcomeFile('p2pmd')))
+  const [showHyperdriveWelcome, setShowHyperdriveWelcome] = useState(() => !hasSeenWelcome(getAppWelcomeFile('hyperdrive')))
   const [restartRequired, setRestartRequired] = useState(false)
   const [siteInfoVisible, setSiteInfoVisible] = useState(false)
   const isKeyboardVisible = useKeyboardVisible()
@@ -3025,6 +3026,8 @@ export default function App () {
   // in dark mode means the arrays below collapse to the base style.
   const p2pmdTheme = browserIsDark ? null : p2pmdLight
   const p2pmdPageColor = browserIsDark ? '#1f2027' : '#f5f8ff'
+  // The Hyperdrive screen's own page colour, so its welcome sits on the same.
+  const hyperdrivePageColor = browserIsDark ? '#1f2027' : '#f5f7fb'
 
   // Push the change into a page that is already open, since the setting can
   // be flipped while the editor is on screen.
@@ -3928,7 +3931,19 @@ export default function App () {
             </BrowserHomeBackground>
             )
           : browserSource.kind === 'app'
-            ? activeTab === 'hyper'
+            ? activeTab === 'hyper' && showHyperdriveWelcome
+              ? (
+                <AppWelcome
+                  content={HYPERDRIVE_WELCOME}
+                  isDark={browserIsDark}
+                  backgroundColor={hyperdrivePageColor}
+                  onDone={() => {
+                    markWelcomeSeen(getAppWelcomeFile('hyperdrive'))
+                    setShowHyperdriveWelcome(false)
+                  }}
+                />
+                )
+              : activeTab === 'hyper'
               ? (
                 <HyperdriveScreen
                   offlineNetworkAllowed={hyperOfflineNetworkAllowed}

@@ -11,7 +11,8 @@ export const WELCOME_FILE_NAME = 'welcome-seen'
 // A P2P app with a welcome of its own greets once, the first time it opens.
 // Like the browser's, the markers stay on the phone they were made on.
 export const APP_WELCOME_FILE_NAMES = Object.freeze({
-  p2pmd: 'p2pmd-welcome-seen'
+  p2pmd: 'p2pmd-welcome-seen',
+  hyperdrive: 'hyperdrive-welcome-seen'
 })
 
 export function hasSeenWelcome (file) {

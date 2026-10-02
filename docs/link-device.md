@@ -23,7 +23,7 @@ It is the only way PeerSky data moves. The app keeps it out of iCloud, computer 
 | Drives: public, private and this-device-only | Replaced | Private drives adopted read-only | The private drive, readable there and read-only |
 | The key for private files | Replaced | Sent, and used for the phone's private uploads | Not sent: the desktop made it |
 
-Never copied: `device-key.json` and `pairing-nonce.json` (this device's own keys), `welcome-seen` and `p2pmd-welcome-seen`, notification settings tied to this phone's permission, downloads, and the content blocking lists, which rebuild on their own.
+Never copied: `device-key.json` and `pairing-nonce.json` (this device's own keys), `welcome-seen`, `p2pmd-welcome-seen` and `hyperdrive-welcome-seen`, notification settings tied to this phone's permission, downloads, and the content blocking lists, which rebuild on their own.
 
 A phone backup restored somewhere, or a phone-to-phone transfer, carries the Hyper stores themselves (`hyper-sdk`, `hyper-sdk-private`, `hyper-sdk-synced-private`, `hyper-sdk-adopted`). That is what keeps the PeerChat identity, every chat, and every drive writable on the new phone: it moved, it was not copied read-only.
 

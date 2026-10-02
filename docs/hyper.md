@@ -2,7 +2,9 @@
 
 PeerSky Mobile runs Hyperdrive inside a Bare worklet. The browser can open
 `hyper://` pages and files, and the Hyperdrive app can publish, fetch, browse,
-and explicitly retain folders for offline use.
+and explicitly retain folders for offline use. The first time the app opens it
+says what it does in four lines, once per phone (`AppWelcome`, marker
+`hyperdrive-welcome-seen`).
 
 ## Supported URLs
 
