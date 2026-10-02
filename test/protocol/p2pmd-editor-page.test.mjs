@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { getP2pmdEditorPage } from '../../backend/p2pmd/server.mjs'
+import yjsBrowserScript from '../../backend/p2pmd/yjs-runtime.mjs'
 
 describe('p2pmd mobile editor page routing', () => {
   it('routes collaboration endpoints through the joined room base URL', () => {
@@ -10,9 +11,27 @@ describe('p2pmd mobile editor page routing', () => {
     assert.match(html, /fetch\(roomUrl\('\/doc\/update'\)/)
     assert.match(html, /fetch\(roomUrl\('\/doc\/yjsstate'\)\)/)
     assert.match(html, /new EventSource\(roomUrl\('\/events\?'/)
-    assert.match(html, /loadScript\(roomUrl\('\/lib\/yjs\.min\.js'\)\)/)
     assert.match(html, /withInitialRoomRetry/)
     assert.match(html, /INITIAL_ROOM_RETRY_ATTEMPTS/)
+  })
+
+  // Whoever hosts the room used to choose the editor's yjs, and with it the
+  // code that ran next to the app's bridge.
+  it('runs only its own code, never a script from the room', () => {
+    const html = getP2pmdEditorPage()
+
+    assert.ok(html.includes(yjsBrowserScript.replace(/<\/script/gi, '<\\/script')))
+    assert.doesNotMatch(html, /\/lib\/yjs\.min\.js/)
+    assert.doesNotMatch(html, /script\.src\s*=/)
+    assert.doesNotMatch(html, /<script[^>]+src=/i)
+    assert.match(html, /<meta name="referrer" content="no-referrer">/)
+  })
+
+  it('publishes only with the nonce the app handed over', () => {
+    const html = getP2pmdEditorPage()
+
+    assert.match(html, /function publishToHyper\(nonce\)/)
+    assert.match(html, /notifyNative\('p2pmd-publish-requested', \{\s+nonce,/)
   })
 
   it('keeps preview and Hyper image upload on the mobile native bridge', () => {

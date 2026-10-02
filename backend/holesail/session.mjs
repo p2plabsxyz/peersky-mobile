@@ -74,7 +74,9 @@ export async function connectHolesail ({
   key,
   port,
   host,
-  preferRemotePort = false,
+  // Listen on a port the system picks. P2PMD joins this way, because the port
+  // a room's host advertises can belong to another app on this phone.
+  anyPort = false,
   udp = false,
   log = false
 } = {}) {
@@ -82,9 +84,7 @@ export async function connectHolesail ({
     const targetKey = normalizeHolesailKey(key, false)
     if (!targetKey.ok) return targetKey
 
-    const targetPort = preferRemotePort && port === undefined
-      ? { ok: true, port: null }
-      : resolvePort(port, 8989)
+    const targetPort = anyPort ? { ok: true, port: 0 } : resolvePort(port, 8989)
     if (!targetPort.ok) return targetPort
 
     const targetHost = normalizeHost(host, '127.0.0.1')
@@ -98,16 +98,14 @@ export async function connectHolesail ({
 
     await stopSessionInternal()
 
-    const options = {
+    const instance = new Holesail({
       client: true,
       key: targetKey.key,
       udp: Boolean(udp),
       log: Boolean(log),
-      host: targetHost.host
-    }
-    if (targetPort.port !== null) options.port = targetPort.port
-
-    const instance = new Holesail(options)
+      host: targetHost.host,
+      port: targetPort.port
+    })
 
     session = instance
 
@@ -126,11 +124,9 @@ export async function connectHolesail ({
       throw error
     }
 
-    // The local end binds the port the host advertised only once ready() is
-    // done. A port already in use here then failed as an error event nobody
-    // listened for, and that took the whole backend down: a desktop on the
-    // same Mac as the simulator always holds it. Wait for the bind instead,
-    // and answer with what went wrong.
+    // The local end binds only once ready() is done. A port already in use
+    // then failed as an error event nobody listened for, and that took the
+    // whole backend down. Wait for the bind instead, and say what went wrong.
     const bound = await waitForClientProxy(instance)
     if (!bound.ok) {
       session = null
@@ -140,10 +136,13 @@ export async function connectHolesail ({
       } catch {}
       return {
         ok: false,
-        error: `Port ${bound.port || 'for this note'} is already in use on this device, so the note cannot be joined from here right now.`
+        error: bound.port
+          ? `Port ${bound.port} is already in use on this device.`
+          : 'That port is already in use on this device.'
       }
     }
 
+    if (anyPort) recordBoundPort(instance)
     mode = 'client'
 
     return {
@@ -152,6 +151,14 @@ export async function connectHolesail ({
       info: session.info
     }
   })
+}
+
+// Holesail reports the port it was given, 0 when the system picks one, so
+// read the real one back from the socket.
+export function recordBoundPort (instance) {
+  const client = instance?.dht
+  const port = client?.proxy?.address?.()?.port
+  if (client?.args && Number.isInteger(port) && port > 0) client.args.port = port
 }
 
 const CLIENT_PROXY_BIND_MS = 3000

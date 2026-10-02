@@ -213,6 +213,12 @@ import {
 } from './p2pmd-room-history.mjs'
 import { subscribeP2pmdNotesShared } from './settings/p2pmd-shared-notes'
 import { describeP2pmdNote } from './p2pmd-note-title.mjs'
+import {
+  createP2pmdEditorUrl,
+  createP2pmdNonce,
+  getP2pmdEditorRequestAction,
+  isP2pmdEditorMessage
+} from './p2pmd-editor.mjs'
 import { MODAL_ORIENTATIONS } from './modal-orientations'
 import { shareLink } from './share'
 import { p2pmdLight, styles } from './styles'
@@ -349,6 +355,7 @@ export default function App () {
   const browserMediaTokensRef = useRef(new Map<string, string>())
   const p2pmdWebViewRef = useRef<ComponentRef<typeof WebView> | null>(null)
   const p2pmdPublishInFlightRef = useRef(false)
+  const p2pmdPublishNonceRef = useRef<string | null>(null)
   const browserLoadSeqRef = useRef(0)
   const browserWebViewGenerationsRef = useRef(new Map<string, number>())
   const externalLinkPromptOpenRef = useRef(false)
@@ -2768,8 +2775,10 @@ export default function App () {
   function onP2pmdPublishToHyper () {
     if (p2pmdPublishInFlightRef.current) return
     setP2pmdSyncStatus('Publishing to Hyper...')
+    const nonce = createP2pmdNonce(Crypto.getRandomValues(new Uint8Array(16)))
+    p2pmdPublishNonceRef.current = nonce
     p2pmdWebViewRef.current?.injectJavaScript(
-      'window.__p2pmdPublishToHyper && window.__p2pmdPublishToHyper(); true;'
+      `window.__p2pmdPublishToHyper && window.__p2pmdPublishToHyper(${JSON.stringify(nonce)}); true;`
     )
   }
 
@@ -2922,6 +2931,8 @@ export default function App () {
           setP2pmdSyncStatus('Image uploaded')
           break
         case 'p2pmd-publish-requested':
+          if (!parsed.nonce || parsed.nonce !== p2pmdPublishNonceRef.current) break
+          p2pmdPublishNonceRef.current = null
           void publishP2pmdContentToHyper(
             parsed.content,
             parsed.mode,
@@ -2950,6 +2961,13 @@ export default function App () {
   useEffect(() => {
     p2pmdWebViewRef.current?.injectJavaScript(p2pmdThemeScript(browserIsDark))
   }, [browserIsDark])
+  const p2pmdEditorNonce = useMemo(
+    () => createP2pmdNonce(Crypto.getRandomValues(new Uint8Array(16))),
+    [p2pmdRoom?.key, p2pmdRoom?.role, p2pmdUrl]
+  )
+  // Starts the editor over from its own page. A reload would ask the room's
+  // server for it instead.
+  const [p2pmdEditorMount, setP2pmdEditorMount] = useState(0)
   const browserBookmarkActionAvailable = canBookmarkBrowserPage(
     browserSource.kind,
     browserCurrentUrl
@@ -3319,7 +3337,7 @@ export default function App () {
 
   if (activeTab === 'p2pmd' && p2pmdWorkspaceReady && p2pmdRoom && p2pmdUrl && p2pmdEditorHtml) {
     const p2pmdEditorRoomBaseUrl = p2pmdUrl.replace(/\/$/, '')
-    const p2pmdEditorBaseUrl = `${p2pmdEditorRoomBaseUrl}/?role=${encodeURIComponent(p2pmdRoom.role)}`
+    const p2pmdEditorBaseUrl = createP2pmdEditorUrl(p2pmdEditorRoomBaseUrl, p2pmdRoom.role, p2pmdEditorNonce)
     const p2pmdEditorHtmlWithRoomBase = p2pmdEditorHtml.replace(
       '<head>',
       `<head><script>window.__P2PMD_ROOM_BASE_URL__=${serializeInlineScriptValue(p2pmdEditorRoomBaseUrl)};window.__P2PMD_ROOM_KEY__=${serializeInlineScriptValue(p2pmdRoom.key)};window.__P2PMD_DISPLAY_NAME__=${serializeInlineScriptValue(p2pmdPeerDisplayName)};</script>`
@@ -3446,11 +3464,25 @@ export default function App () {
           </Pressable>
         </View>}
         <WebView
-          key={`${p2pmdRoom.role}:${p2pmdEditorBaseUrl}:${p2pmdEditorHtml.length}`}
+          key={`${p2pmdEditorBaseUrl}:${p2pmdEditorHtml.length}:${p2pmdEditorMount}`}
           ref={p2pmdWebViewRef}
           source={{
             html: p2pmdEditorHtmlWithRoomBase,
             baseUrl: p2pmdEditorBaseUrl
+          }}
+          // Only the editor's own page loads here. A link in a note opens in
+          // a browser tab, and nothing is handed to another app unasked.
+          originWhitelist={['*']}
+          onShouldStartLoadWithRequest={(request) => {
+            const action = getP2pmdEditorRequestAction(request, p2pmdEditorBaseUrl)
+            if (action === 'open') openBrowserUrlInNewTab(request.url)
+            return action === 'load'
+          }}
+          onOpenWindow={(event) => {
+            const { targetUrl } = event.nativeEvent
+            if (getP2pmdEditorRequestAction({ url: targetUrl }, p2pmdEditorBaseUrl) === 'open') {
+              openBrowserUrlInNewTab(targetUrl)
+            }
           }}
           // The page cannot see the browser's own light/dark/system setting,
           // so it is told. Set before first paint so the editor never flashes
@@ -3463,7 +3495,10 @@ export default function App () {
           cacheEnabled={false}
           textZoom={100}
           style={[styles.p2pmdWorkspaceWebView, p2pmdTheme?.p2pmdWorkspaceWebView]}
-          onMessage={(event) => onP2pmdWebViewMessage(event.nativeEvent.data)}
+          onMessage={(event) => {
+            if (!isP2pmdEditorMessage(event.nativeEvent.url, p2pmdEditorBaseUrl)) return
+            onP2pmdWebViewMessage(event.nativeEvent.data)
+          }}
           // iOS kills a backgrounded WKWebView's content process to reclaim
           // memory. The view comes back blank and stays blank, which is why an
           // open note looked empty after the phone had been locked and left
@@ -3471,11 +3506,11 @@ export default function App () {
           // the document lives in the room, not in the view.
           onContentProcessDidTerminate={() => {
             setStatus('Reloading the note after iOS reclaimed it')
-            p2pmdWebViewRef.current?.reload()
+            setP2pmdEditorMount((count) => count + 1)
           }}
           onRenderProcessGone={() => {
             setStatus('Reloading the note after the system reclaimed it')
-            p2pmdWebViewRef.current?.reload()
+            setP2pmdEditorMount((count) => count + 1)
           }}
           onError={(event) => {
             setStatus(`P2PMD WebView failed: ${event.nativeEvent.description}`)

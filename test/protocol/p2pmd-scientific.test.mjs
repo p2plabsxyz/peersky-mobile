@@ -56,4 +56,19 @@ describe('p2pmd scientific templates', () => {
     assert.doesNotMatch(source, /fit\.textContent\s*=/)
     assert.doesNotMatch(source, /remaining\.textContent\s*=/)
   })
+
+  // Older WebKit leaves "<" unescaped in attributes when it serializes, so
+  // cutting a paragraph's HTML on "<br>" could turn a link title into markup.
+  it('lays out authors and abstracts with DOM nodes, not HTML strings', async () => {
+    const source = await readFile(
+      new URL('../../backend/p2pmd/ieee-browser-entry.js', import.meta.url),
+      'utf8'
+    )
+
+    assert.doesNotMatch(source, /innerHTML\.split/)
+    assert.doesNotMatch(source, /innerHTML\s*=\s*\w+\.innerHTML/)
+    assert.doesNotMatch(source, /innerHTML\s*=\s*part\b/)
+    assert.match(source, /function splitLines \(paragraph\)/)
+    assert.match(source, /paragraph\.append\(\.\.\.part\)/)
+  })
 })

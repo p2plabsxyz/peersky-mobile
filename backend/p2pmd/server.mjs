@@ -692,12 +692,14 @@ export function getP2pmdEditorPage () {
   const serializedSlidesTemplate = JSON.stringify(P2PMD_SLIDES_TEMPLATE).replace(/</g, '\\u003c')
   const serializedFunNameWords = JSON.stringify([FUN_PEER_NAME_ADJECTIVES, FUN_PEER_NAME_ANIMALS]).replace(/</g, '\\u003c')
   const embeddedIeeeBrowserScript = ieeeBrowserScript.replace(/<\/script/gi, '<\\/script')
+  const embeddedYjsScript = yjsBrowserScript.replace(/<\/script/gi, '<\\/script')
 
   return `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="referrer" content="no-referrer">
     <title>P2PMD</title>
     <style>
       /* Dark is the default because the editor opens dark. Light is a full
@@ -1563,6 +1565,7 @@ export function getP2pmdEditorPage () {
       ${katexCss}
       ${P2PMD_SCIENTIFIC_STYLES}
     </style>
+    <script>${embeddedYjsScript}</script>
     <script>${embeddedIeeeBrowserScript}</script>
   </head>
   <body>
@@ -1829,23 +1832,10 @@ export function getP2pmdEditorPage () {
         throw lastError || new Error('Room request failed')
       }
 
-      function loadScript(src) {
-        return new Promise((resolve, reject) => {
-          const script = document.createElement('script')
-          script.src = src
-          script.onload = resolve
-          script.onerror = () => {
-            script.remove()
-            reject(new Error('Unable to load script: ' + src))
-          }
-          document.head.appendChild(script)
-        })
-      }
-
+      // yjs ships inside this page. It used to come from the room, which ran
+      // whatever script the room's host sent, next to the app's bridge.
       function loadYjsRuntime() {
-        if (window.Y) return Promise.resolve()
-
-        return withInitialRoomRetry(() => loadScript(roomUrl('/lib/yjs.min.js')))
+        return window.Y ? Promise.resolve() : Promise.reject(new Error('The editor is missing yjs'))
       }
 
       function getRoomRole() {
@@ -3671,8 +3661,11 @@ export function getP2pmdEditorPage () {
         setViewMode(viewMode === 'edit' ? 'preview' : 'edit')
       }
 
-      function publishToHyper() {
+      // The app hands over a fresh nonce each time someone taps Publish, and
+      // only publishes when it comes back.
+      function publishToHyper(nonce) {
         notifyNative('p2pmd-publish-requested', {
+          nonce,
           content: input.value,
           mode: viewMode,
           latexModeEnabled

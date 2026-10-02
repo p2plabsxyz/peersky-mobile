@@ -4,6 +4,7 @@ import { EventEmitter } from 'node:events'
 import {
   connectHolesail,
   getHolesailStatus,
+  recordBoundPort,
   startHolesailLive,
   stopHolesail,
   waitForClientProxy
@@ -58,9 +59,9 @@ describe('holesail session validation', () => {
   })
 })
 
-// A join binds the port the room's host advertised, after ready() is done. A
-// port already taken here used to fail as an error nobody listened for, and
-// took the whole backend down.
+// A join binds its local port after ready() is done. A port already taken
+// here used to fail as an error nobody listened for, and took the whole
+// backend down.
 describe('holesail client proxy', () => {
   const client = (port = 59677) => {
     const proxy = new EventEmitter()
@@ -96,5 +97,20 @@ describe('holesail client proxy', () => {
   it('has nothing to wait for without a TCP proxy', async () => {
     assert.deepEqual(await waitForClientProxy({ dht: {} }), { ok: true })
     assert.deepEqual(await waitForClientProxy(null), { ok: true })
+  })
+
+  it('reports the port the system picked', () => {
+    const { proxy, instance } = client(0)
+    proxy.address = () => ({ address: '127.0.0.1', family: 'IPv4', port: 53111 })
+    recordBoundPort(instance)
+    assert.equal(instance.dht.args.port, 53111)
+  })
+
+  it('leaves the port alone when the socket is not listening yet', () => {
+    const { proxy, instance } = client(0)
+    proxy.address = () => null
+    recordBoundPort(instance)
+    assert.equal(instance.dht.args.port, 0)
+    assert.doesNotThrow(() => recordBoundPort(null))
   })
 })

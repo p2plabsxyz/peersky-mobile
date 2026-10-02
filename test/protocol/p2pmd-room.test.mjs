@@ -1,66 +1,14 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { connectWithAdvertisedLoopbackPort } from '../../backend/p2pmd/connect.mjs'
+import { readFile } from 'node:fs/promises'
+
+const roomSource = await readFile(new URL('../../backend/p2pmd/room.mjs', import.meta.url), 'utf8')
 
 describe('p2pmd room connection', () => {
-  it('prefers the host-advertised Holesail port', async () => {
-    const calls = []
-    const expected = { ok: true }
-
-    const result = await connectWithAdvertisedLoopbackPort({
-      key: 'hs://room',
-      udp: false,
-      log: false,
-      connect: async (options) => {
-        calls.push(options)
-        return expected
-      }
-    })
-
-    assert.equal(result, expected)
-    assert.equal(calls.length, 1)
-    assert.equal(calls[0].preferRemotePort, true)
-    assert.equal(Object.hasOwn(calls[0], 'port'), false)
-  })
-
-  it('does not change ports when binding the advertised port throws', async () => {
-    const calls = []
-
-    await assert.rejects(
-      connectWithAdvertisedLoopbackPort({
-        key: 'hs://room',
-        udp: false,
-        log: false,
-        connect: async (options) => {
-          calls.push(options)
-          throw new Error('Port already in use')
-        }
-      }),
-      /Port already in use/
-    )
-
-    assert.equal(calls.length, 1)
-    assert.equal(calls[0].preferRemotePort, true)
-    assert.equal(Object.hasOwn(calls[0], 'port'), false)
-  })
-
-  it('preserves an advertised-port error result without retrying', async () => {
-    const calls = []
-    const expected = { ok: false, error: 'Advertised port unavailable' }
-
-    const result = await connectWithAdvertisedLoopbackPort({
-      key: 'hs://room',
-      udp: false,
-      log: false,
-      connect: async (options) => {
-        calls.push(options)
-        return expected
-      }
-    })
-
-    assert.equal(result, expected)
-    assert.equal(calls.length, 1)
-    assert.equal(calls[0].preferRemotePort, true)
-    assert.equal(Object.hasOwn(calls[0], 'port'), false)
+  // The port a room's host advertises can belong to another app on this
+  // phone. Taking it put the editor on that app's origin, PeerTunes' for one.
+  it('joins on a port the system picks, not the one the host advertises', () => {
+    assert.match(roomSource, /connectHolesail\(\{\s*key,\s*anyPort: true,/)
+    assert.doesNotMatch(roomSource, /preferRemotePort/)
   })
 })
