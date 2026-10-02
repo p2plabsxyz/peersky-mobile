@@ -26,6 +26,7 @@ import com.reactnativecommunity.webview.URLUtil
 import com.j256.simplemagic.ContentInfoUtil
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import androidx.webkit.WebViewFeature
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.FilterInputStream
@@ -163,6 +164,13 @@ class BrowserDownloadsModule(
       showToast("Too many downloads are already starting.")
       return false
     }
+  }
+
+  // Incognito tabs need WebView profiles, which come with Android System
+  // WebView 123 and later.
+  @ReactMethod
+  fun isPrivateBrowsingSupported(promise: Promise) {
+    promise.resolve(WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE))
   }
 
   @ReactMethod

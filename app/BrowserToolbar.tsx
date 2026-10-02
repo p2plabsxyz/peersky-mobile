@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { getBrowserAddressForUrl, MAX_BROWSER_URL_LENGTH } from './browser-shell.mjs'
 import { formatBrowserAddress } from './browser-appearance.mjs'
 import { getSiteSecurity, SITE_SECURITY } from './site-security.mjs'
+import IncognitoIcon from '../assets/icons/bootstrap/incognito.svg'
 import ShieldCheckIcon from '../assets/icons/bootstrap/shield-check.svg'
 import ShieldSlashIcon from '../assets/icons/bootstrap/shield-slash.svg'
 import { HistorySuggestions } from './history/HistorySuggestions'
@@ -33,6 +34,7 @@ type BrowserToolbarProps = {
   currentUrl: string
   historySuggestions: BrowserHistoryItem[]
   isDark: boolean
+  isIncognito?: boolean
   isLoading: boolean
   navigationKey: string
   pageActionAvailable: boolean
@@ -71,6 +73,7 @@ export function BrowserToolbar ({
   currentUrl,
   historySuggestions,
   isDark,
+  isIncognito = false,
   isLoading,
   navigationKey,
   pageActionAvailable,
@@ -140,6 +143,19 @@ export function BrowserToolbar ({
         onLayout={(event) => setBarHeight(event.nativeEvent.layout.height)}
       >
         <View style={[styles.browserAddressContainer, { backgroundColor: palette.address }]}>
+          {isIncognito && (
+            <View
+              accessible
+              accessibilityLabel='Incognito tab'
+              style={styles.browserSecurity}
+            >
+              <IncognitoIcon
+                width={ADDRESS_SECURITY_ICON_SIZE}
+                height={ADDRESS_SECURITY_ICON_SIZE}
+                color={addressActionIconColor}
+              />
+            </View>
+          )}
           {/* The one thing a padlock is for: whether anybody on the way can
               read this. Hidden while typing, where the address is being
               edited rather than describing a page. */}

@@ -5,9 +5,13 @@ import android.app.AlertDialog
 import android.os.Handler
 import android.os.Looper
 import android.text.format.Formatter
+import android.util.Log
 import android.view.MotionEvent
 import android.webkit.WebView
 import android.widget.Toast
+import androidx.webkit.ProfileStore
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
 import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.uimanager.annotations.ReactProp
 import com.facebook.react.uimanager.ThemedReactContext
@@ -23,6 +27,7 @@ class PeerSkyWebViewManager : RNCWebViewManager() {
   private val mediaLongPressTokens = WeakHashMap<WebView, String>()
   private val mediaLongPressPoints = WeakHashMap<WebView, TouchPoint>()
   private val contentBlockerBridges = WeakHashMap<WebView, PeerSkyContentBlockerBridge>()
+  private val privateWebViews = WeakHashMap<WebView, Boolean>()
 
   override fun getName() = "PeerSkyWebView"
 
@@ -34,6 +39,8 @@ class PeerSkyWebViewManager : RNCWebViewManager() {
           setMediaLongPressToken(view, value as? String)
         } else if (propName == "contentBlockingToken") {
           setContentBlockingToken(view, value as? String)
+        } else if (propName == "privateProfile") {
+          setPrivateProfile(view, value as? Boolean ?: false)
         } else {
           inheritedDelegate.setProperty(view, propName, value)
         }
@@ -55,6 +62,37 @@ class PeerSkyWebViewManager : RNCWebViewManager() {
   ) {
     super.addEventEmitters(context, view)
     view.webView.webViewClient = PeerSkyWebViewClient()
+  }
+
+  // Every WebView shares one cookie jar, cache and storage, so an incognito
+  // tab runs in a WebView profile of its own. It has to be set before the
+  // page loads, which is why it is a prop rather than a command. The first
+  // incognito tab after all of them closed starts from an empty profile.
+  @ReactProp(name = "privateProfile")
+  fun setPrivateProfile(wrapper: RNCWebViewWrapper, enabled: Boolean) {
+    if (!enabled || !WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)) return
+    val webView = wrapper.webView
+    if (privateWebViews.containsKey(webView)) return
+    try {
+      val store = ProfileStore.getInstance()
+      if (privateWebViews.isEmpty()) {
+        try {
+          store.deleteProfile(PRIVATE_PROFILE)
+        } catch (error: Exception) {
+          // Still held by a WebView on its way out. It is cleared next time.
+        }
+      }
+      store.getOrCreateProfile(PRIVATE_PROFILE)
+      WebViewCompat.setProfile(webView, PRIVATE_PROFILE)
+      privateWebViews[webView] = true
+    } catch (error: Exception) {
+      Log.w(TAG, "Unable to give an incognito tab its own profile", error)
+    }
+  }
+
+  override fun onDropViewInstance(view: RNCWebViewWrapper) {
+    privateWebViews.remove(view.webView)
+    super.onDropViewInstance(view)
   }
 
   @ReactProp(name = "mediaLongPressToken")
@@ -264,6 +302,8 @@ class PeerSkyWebViewManager : RNCWebViewManager() {
   }
 
   companion object {
+    private const val TAG = "PeerSkyWebView"
+    private const val PRIVATE_PROFILE = "peersky-incognito"
     private const val MESSAGE_TYPE = "peersky-browser-media-long-press"
     private const val MAX_URL_LENGTH = 8192
     private const val MAX_TITLE_LENGTH = 256

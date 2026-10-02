@@ -46,6 +46,7 @@ type BrowserNavBarProps = {
   onCloseMenu: () => void
   onForward: () => void
   onNewTab: () => void
+  onNewIncognitoTab: () => void
   onOpenBookmarks: () => void
   onOpenDownloads: () => void
   onOpenHistory: () => void
@@ -91,6 +92,7 @@ export function BrowserNavBar ({
   onCloseMenu,
   onForward,
   onNewTab,
+  onNewIncognitoTab,
   onOpenBookmarks,
   onOpenDownloads,
   onOpenHistory,
@@ -216,6 +218,7 @@ export function BrowserNavBar ({
           action?.()
         }}
         onNewTab={onNewTab}
+        onNewIncognitoTab={onNewIncognitoTab}
         onOpenBookmarks={onOpenBookmarks}
         onOpenDownloads={onOpenDownloads}
         onOpenHistory={onOpenHistory}

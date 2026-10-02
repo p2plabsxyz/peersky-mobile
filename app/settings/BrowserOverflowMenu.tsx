@@ -6,6 +6,7 @@ import CheckIcon from '../../assets/icons/bootstrap/check2.svg'
 import DisplayIcon from '../../assets/icons/bootstrap/display.svg'
 import DownloadIcon from '../../assets/icons/bootstrap/download.svg'
 import HistoryIcon from '../../assets/icons/bootstrap/clock-history.svg'
+import IncognitoIcon from '../../assets/icons/bootstrap/incognito.svg'
 import BookmarksIcon from '../../assets/icons/bootstrap/bookmarks.svg'
 import GearIcon from '../../assets/icons/bootstrap/gear.svg'
 import PlusIcon from '../../assets/icons/bootstrap/plus-lg.svg'
@@ -39,6 +40,7 @@ type BrowserOverflowMenuProps = {
   onClose: () => void
   onDismissed?: () => void
   onNewTab: () => void
+  onNewIncognitoTab?: () => void
   onOpenBookmarks: () => void
   onOpenDownloads: () => void
   onOpenHistory: () => void
@@ -66,6 +68,7 @@ export function BrowserOverflowMenu ({
   onClose,
   onDismissed,
   onNewTab,
+  onNewIncognitoTab,
   onOpenBookmarks,
   onOpenDownloads,
   onOpenHistory,
@@ -270,6 +273,19 @@ export function BrowserOverflowMenu ({
 
               <View style={[styles.group, { backgroundColor: cardColor }]}>
                 {withDividers([
+                  ...(onNewIncognitoTab
+                    ? [
+                      <MenuItem
+                        key='incognito'
+                        cardColor={cardColor}
+                        disabled={newTabDisabled}
+                        icon={<IncognitoIcon {...iconProps} />}
+                        isDark={isDark}
+                        label='New Incognito Tab'
+                        onPress={onNewIncognitoTab}
+                      />
+                      ]
+                    : []),
                   <MenuItem
                     key='bookmarks'
                     cardColor={cardColor}

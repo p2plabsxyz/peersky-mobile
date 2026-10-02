@@ -14,6 +14,7 @@ import {
   KeyboardAvoidingView,
   Linking,
   Modal,
+  NativeModules,
   Platform,
   Pressable,
   ScrollView,
@@ -332,6 +333,7 @@ type BrowserTab = {
   pageZoom: number
   webCanGoBack: boolean
   webCanGoForward: boolean
+  incognito?: boolean
 }
 
 type BrowserTabsState = {
@@ -442,6 +444,15 @@ export default function App () {
     removeHistoryItem: removeBrowserHistoryItem
   } = useBrowserHistory()
   const [browserDownloadsVisible, setBrowserDownloadsVisible] = useState(false)
+  // iOS always can. Android needs a System WebView with profiles.
+  const [privateBrowsingSupported, setPrivateBrowsingSupported] = useState(Platform.OS === 'ios')
+  useEffect(() => {
+    if (Platform.OS !== 'android') return
+    const downloads = NativeModules.BrowserDownloads as { isPrivateBrowsingSupported?: () => Promise<boolean> } | undefined
+    void downloads?.isPrivateBrowsingSupported?.()
+      .then((supported) => setPrivateBrowsingSupported(supported === true))
+      .catch(() => setPrivateBrowsingSupported(false))
+  }, [])
   const {
     downloads: browserDownloads,
     error: browserDownloadsError,
@@ -543,6 +554,8 @@ export default function App () {
     getEntryKey: (entry) => entry.url,
     isCurrentEntry: (tabId, entry) => {
       const tab = browserTabsStateRef.current.tabs.find((item) => item.id === tabId)
+      // No picture of an incognito page is ever written to disk.
+      if (tab?.incognito) return false
       const currentEntry = tab?.history[tab.historyIndex]
       return Boolean(
         currentEntry &&
@@ -1674,7 +1687,7 @@ export default function App () {
     )
   }
 
-  function createBrowserTab (targetUrl: string | null = null) {
+  function createBrowserTab (targetUrl: string | null = null, { incognito = false }: { incognito?: boolean } = {}) {
     if (browserTabsStateRef.current.tabs.length >= MAX_BROWSER_TABS) {
       setStatus('Maximum number of tabs reached')
       return false
@@ -1682,7 +1695,7 @@ export default function App () {
 
     browserUserInteractedRef.current = true
     cancelPendingBrowserLoad()
-    const nextState = addBrowserTabState(browserTabsStateRef.current) as BrowserTabsState
+    const nextState = addBrowserTabState(browserTabsStateRef.current, { incognito }) as BrowserTabsState
     const tab = nextState.tabs.find((item) => item.id === nextState.activeTabId)
 
     updateBrowserTabsState(nextState)
@@ -1706,6 +1719,22 @@ export default function App () {
   function onBrowserNewTab () {
     if (!createBrowserTab()) return
     setStatus('New tab')
+  }
+
+  function onBrowserNewIncognitoTab () {
+    if (!privateBrowsingSupported) {
+      Alert.alert(
+        'Incognito needs a newer WebView',
+        'Update Android System WebView from Google Play, then try again.'
+      )
+      return
+    }
+    if (!createBrowserTab(null, { incognito: true })) return
+    setStatus('New incognito tab')
+  }
+
+  function isIncognitoTab (tabId: string) {
+    return browserTabsStateRef.current.tabs.some((tab) => tab.id === tabId && tab.incognito === true)
   }
 
   function onBrowserToggleBookmark () {
@@ -1777,7 +1806,7 @@ export default function App () {
 
   function onBrowserMediaOpenInNewTab (targetUrl: string) {
     Keyboard.dismiss()
-    if (!createBrowserTab(targetUrl)) return
+    if (!createBrowserTab(targetUrl, { incognito: isIncognitoTab(browserTabsStateRef.current.activeTabId) })) return
     setStatus('Opened in new tab')
   }
 
@@ -1791,7 +1820,8 @@ export default function App () {
     updateBrowserTabsState((state) => addBackgroundBrowserTabState(
       state,
       targetUrl,
-      title || 'Media'
+      title || 'Media',
+      { incognito: isIncognitoTab(state.activeTabId) }
     ) as BrowserTabsState)
     setBrowserMediaTarget(null)
     setStatus('Opened in background tab')
@@ -2119,6 +2149,7 @@ export default function App () {
   }
 
   function recordCompletedBrowserVisit (tabId: string, url: string, title: string) {
+    if (isIncognitoTab(tabId)) return
     if (browserLastRecordedUrlsRef.current.get(tabId) === url) return
 
     browserLastRecordedUrlsRef.current.set(tabId, url)
@@ -2219,12 +2250,12 @@ export default function App () {
       (action.action === 'load-hyper' || action.action === 'commit-web') &&
       action.url
     ) {
-      if (createBrowserTab(action.url)) setStatus('Popup opened in new tab')
+      if (createBrowserTab(action.url, { incognito: isIncognitoTab(tabId) })) setStatus('Popup opened in new tab')
       return
     }
 
     if (action.action === 'allow' && (isWebUrl(targetUrl) || isHyperUrl(targetUrl))) {
-      if (createBrowserTab(targetUrl)) setStatus('Popup opened in new tab')
+      if (createBrowserTab(targetUrl, { incognito: isIncognitoTab(tabId) })) setStatus('Popup opened in new tab')
     }
   }
 
@@ -3418,6 +3449,7 @@ export default function App () {
             visible={browserMenuVisible}
             onClose={() => setBrowserMenuVisible(false)}
             onNewTab={onBrowserNewTab}
+            onNewIncognitoTab={onBrowserNewIncognitoTab}
             onOpenBookmarks={onBrowserOpenBookmarks}
             onOpenDownloads={onBrowserOpenDownloads}
             onOpenHistory={onBrowserOpenHistory}
@@ -3568,6 +3600,7 @@ export default function App () {
       address={browserAddress}
       currentUrl={browserCurrentUrl}
       isDark={browserIsDark}
+      isIncognito={browserTabsState.tabs.some((tab) => tab.id === browserTabsState.activeTabId && tab.incognito === true)}
       isLoading={browserIsLoading}
       historySuggestions={getBrowserHistorySuggestions(browserAddress)}
       navigationKey={`${browserTabsState.activeTabId}:${browserHistoryIndex}`}
@@ -3619,6 +3652,7 @@ export default function App () {
       onCloseMenu={() => setBrowserMenuVisible(false)}
       onForward={onBrowserForward}
       onNewTab={onBrowserNewTab}
+      onNewIncognitoTab={onBrowserNewIncognitoTab}
       onOpenBookmarks={onBrowserOpenBookmarks}
       onOpenDownloads={onBrowserOpenDownloads}
       onOpenHistory={onBrowserOpenHistory}
@@ -3668,7 +3702,7 @@ export default function App () {
       ),
       id: tab.id,
       isActive: tab.id === browserTabsState.activeTabId,
-      label: getBrowserTabLabel(tab),
+      label: tab.incognito ? `Incognito · ${getBrowserTabLabel(tab)}` : getBrowserTabLabel(tab),
       preview
     }
   })
@@ -4370,6 +4404,7 @@ export default function App () {
             browserMediaToken = createBrowserMediaToken(tokenBytes)
             browserMediaTokensRef.current.set(tab.id, browserMediaToken)
           }
+          const tabIncognito = tab.incognito === true
           const browserNativeConfig = peerSkyWebViewNativeConfig
             ? {
                 ...peerSkyWebViewNativeConfig,
@@ -4378,7 +4413,10 @@ export default function App () {
                     ? browserMediaToken
                     : null,
                   mediaLongPressToken: browserMediaToken
-                })
+                },
+                // Android shares one cookie jar between WebViews, so an
+                // incognito tab gets a WebView profile of its own instead.
+                Platform.OS === 'android' && tabIncognito ? { privateProfile: true } : {})
               }
             : undefined
           const browserAccessibilityScript = createBrowserAccessibilityScript({
@@ -4469,7 +4507,10 @@ export default function App () {
               // WKWebView only knows the page's history, which is why a search
               // result could not be swiped back to the home screen.
               allowsBackForwardNavigationGestures={false}
-              cacheEnabled={true}
+              cacheEnabled={!tabIncognito}
+              // iOS gives each incognito tab a data store that is never
+              // written to disk.
+              incognito={Platform.OS === 'ios' && tabIncognito}
               geolocationEnabled={true}
               mediaCapturePermissionGrantType='prompt'
               nativeConfig={browserNativeConfig}

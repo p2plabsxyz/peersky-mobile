@@ -14,7 +14,9 @@ export const BROWSER_PAGE_ZOOMS = [80, 90, 100, 110, 125, 150]
 export const DEFAULT_BROWSER_PAGE_ZOOM = 100
 export const DEFAULT_BROWSER_TAB_VIEW_MODE = 'grid'
 const SESSION_VERSION = 1
-export function createBrowserTab (id, title = 'New tab') {
+// An incognito tab keeps no history, no preview and no cookies past its own
+// session, and is never written into the saved session.
+export function createBrowserTab (id, title = 'New tab', { incognito = false } = {}) {
   return {
     id,
     title,
@@ -23,7 +25,8 @@ export function createBrowserTab (id, title = 'New tab') {
     historyIndex: 0,
     pageZoom: DEFAULT_BROWSER_PAGE_ZOOM,
     webCanGoBack: false,
-    webCanGoForward: false
+    webCanGoForward: false,
+    ...(incognito ? { incognito: true } : {})
   }
 }
 
@@ -49,11 +52,11 @@ export function isCurrentBrowserTabEntry (state, tabId, entry) {
   return currentEntry?.source.kind === 'web' && entry?.source.kind === 'web'
 }
 
-export function addBrowserTabState (state) {
+export function addBrowserTabState (state, { incognito = false } = {}) {
   if (state.tabs.length >= MAX_BROWSER_TABS) return state
 
   const id = `tab-${state.nextTabIndex}`
-  const tab = createBrowserTab(id)
+  const tab = createBrowserTab(id, 'New tab', { incognito })
 
   return {
     ...state,
@@ -63,9 +66,9 @@ export function addBrowserTabState (state) {
   }
 }
 
-export function addBackgroundBrowserTabState (state, url, title = 'New tab') {
+export function addBackgroundBrowserTabState (state, url, title = 'New tab', { incognito = false } = {}) {
   const previousActiveTabId = state.activeTabId
-  const nextState = addBrowserTabState(state)
+  const nextState = addBrowserTabState(state, { incognito })
   if (nextState === state) return state
 
   const normalizedUrl = normalizeBrowserTabUrl(url)
@@ -86,12 +89,17 @@ export function addBackgroundBrowserTabState (state, url, title = 'New tab') {
 }
 
 export function serializeBrowserTabsState (state) {
+  const kept = state.tabs.filter((tab) => !tab.incognito)
+  const tabs = kept.length > 0 ? kept : [createBrowserTab(`tab-${state.nextTabIndex}`)]
+  const activeTabId = tabs.some((tab) => tab.id === state.activeTabId)
+    ? state.activeTabId
+    : tabs[tabs.length - 1].id
   return JSON.stringify({
     version: SESSION_VERSION,
-    activeTabId: state.activeTabId,
-    nextTabIndex: state.nextTabIndex,
+    activeTabId,
+    nextTabIndex: state.nextTabIndex + (kept.length > 0 ? 0 : 1),
     viewMode: normalizeBrowserTabViewMode(state.viewMode),
-    tabs: state.tabs.map((tab) => {
+    tabs: tabs.map((tab) => {
       const retainedHistory = boundBrowserHistory(tab.history)
       const history = retainedHistory.map((entry) => {
         const url = normalizeBrowserTabUrl(entry?.url)
