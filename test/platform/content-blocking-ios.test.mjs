@@ -116,6 +116,10 @@ describe('iOS content blocking', () => {
     assert.match(blocker, /youtubei\/v1\/player\/ad_break/)
     assert.match(blocker, /youtube-nocookie/)
     assert.doesNotMatch(blocker, /\(\?:/)
+    // WebKit rejects any "|" in a url-filter, and one bad rule fails the list.
+    const youtubeRules = /NSString \*json = @"(.*)";/.exec(blocker)?.[1]
+    assert.ok(youtubeRules)
+    assert.doesNotMatch(youtubeRules, /\|/)
     assert.match(blocker, /youtubeAdBlockingEnabled && youtubeRuleList/)
     assert.match(blocker, /if \(enabled\) \{\s*for \(WKContentRuleList \*ruleList in ruleLists\)/)
     assert.doesNotMatch(blocker, /if \(!enabled\) return;/)
