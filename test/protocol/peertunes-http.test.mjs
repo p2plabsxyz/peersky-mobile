@@ -171,11 +171,18 @@ describe('PeerTunes loopback server with injectable Node server', () => {
     const rebound = await requestWithHeaders(localUrl, '/', { host: 'evil.example' })
     assert.equal(rebound.status, 403)
 
+    // Nor another server on this phone: a P2PMD room or a Holesail tunnel can
+    // be serving a page someone else wrote.
+    const otherLoopback = await requestWithHeaders(localUrl, '/', { origin: 'http://127.0.0.1:41999' })
+    assert.equal(otherLoopback.status, 403)
+
     // None of those reached the hyper layer.
     assert.deepEqual(fetchCalls, [])
 
     const sameOrigin = await requestWithHeaders(localUrl, '/', { 'sec-fetch-site': 'same-origin' })
     assert.equal(sameOrigin.status, 200)
+    const ownOrigin = await requestWithHeaders(localUrl, '/', { origin: localUrl })
+    assert.equal(ownOrigin.status, 200)
   })
 
   it('keeps proxied drive content unreadable by other sites and unrenderable', async () => {

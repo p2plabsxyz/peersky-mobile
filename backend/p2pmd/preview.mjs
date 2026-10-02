@@ -1,9 +1,11 @@
 import b4a from 'b4a'
+import { getMaxDocumentLength } from './document.mjs'
 import {
   assertRenderedMarkdownSize,
   createP2pmdMarkdownRenderer,
   renderP2pmdMarkdown
 } from './scientific.mjs'
+import { hasIeeeMarker } from './templates.mjs'
 
 const P2PMD_PREVIEW_IMAGE_SRC_PATTERN = /src="\/hyper\/file\?url=([^"]+)"/g
 const MAX_INLINE_PREVIEW_IMAGES = 5
@@ -29,6 +31,26 @@ markdownRenderer.renderer.rules.image = function (tokens, idx, options, env, sel
 
 export function renderMarkdownPreview (content) {
   return renderP2pmdMarkdown(markdownRenderer, content)
+}
+
+/** What the editor's preview shows: a note, a deck, or why it cannot. */
+export function renderP2pmdPreview ({ content, mode, latexModeEnabled } = {}) {
+  if (typeof content !== 'string') {
+    return { ok: false, error: 'Invalid Markdown content. Expected a string.' }
+  }
+  if (content.length > getMaxDocumentLength()) {
+    return { ok: false, error: 'Markdown is too large. Maximum size is 10 MB.' }
+  }
+  try {
+    if (mode === 'slides') return { ok: true, ...renderMarkdownSlides(content) }
+    return {
+      ok: true,
+      html: renderMarkdownPreview(content),
+      ieee: latexModeEnabled === true && hasIeeeMarker(content)
+    }
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) }
+  }
 }
 
 export function splitMarkdownSlides (content) {

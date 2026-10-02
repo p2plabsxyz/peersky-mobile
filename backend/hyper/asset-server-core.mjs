@@ -281,6 +281,9 @@ function sendProxyAssetHeaders (res, {
   res.setHeader('Cache-Control', headers['cache-control'] || 'public, max-age=300')
   res.setHeader('Content-Type', contentType)
   res.setHeader('X-Content-Type-Options', 'nosniff')
+  // Drive files are someone else's. Opened as a page, an HTML file would run
+  // on this loopback origin and could call the app's other local servers.
+  res.setHeader('Content-Security-Policy', 'sandbox')
   res.setHeader('Connection', 'close')
   if (downloadName) {
     res.setHeader(

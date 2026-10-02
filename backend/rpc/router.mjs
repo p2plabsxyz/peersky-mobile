@@ -117,15 +117,9 @@ import {
   getP2pmdRoomStatus,
   joinP2pmdRoom
 } from '../p2pmd/room.mjs'
-import { getMaxDocumentLength } from '../p2pmd/document.mjs'
 import { takeP2pmdNotes } from '../p2pmd/notes-transfer.mjs'
-import {
-  inlineHyperPreviewImages,
-  renderMarkdownPreview,
-  renderMarkdownSlides
-} from '../p2pmd/preview.mjs'
+import { inlineHyperPreviewImages, renderP2pmdPreview } from '../p2pmd/preview.mjs'
 import { getP2pmdEditorPage } from '../p2pmd/server.mjs'
-import { hasIeeeMarker } from '../p2pmd/templates.mjs'
 import { startPeerTunesServer } from '../peertunes/server.mjs'
 import { parseJsonMessage, replyJson } from './messages.mjs'
 import { getPeerChatService } from '../peerchat/runtime.mjs'
@@ -351,35 +345,10 @@ export async function routeRpcRequest (req) {
     }
 
     if (req.command === RPC_P2PMD_PREVIEW) {
-      const body = parseJsonMessage(req.data)
-      if (typeof body.content !== 'string') {
-        replyJson(req, {
-          ok: false,
-          error: 'Invalid Markdown content. Expected a string.'
-        })
-        return
-      }
-
-      if (body.content.length > getMaxDocumentLength()) {
-        replyJson(req, {
-          ok: false,
-          error: 'Markdown is too large. Maximum size is 10 MB.'
-        })
-        return
-      }
-
-      const rendered = body.mode === 'slides'
-        ? renderMarkdownSlides(body.content)
-        : {
-            html: renderMarkdownPreview(body.content),
-            ieee: body.latexModeEnabled === true && hasIeeeMarker(body.content)
-          }
-
-      replyJson(req, {
-        ok: true,
-        ...rendered,
-        html: await inlineHyperPreviewImages(rendered.html, readHyperFile)
-      })
+      const rendered = renderP2pmdPreview(parseJsonMessage(req.data))
+      replyJson(req, rendered.ok
+        ? { ...rendered, html: await inlineHyperPreviewImages(rendered.html, readHyperFile) }
+        : rendered)
       return
     }
 

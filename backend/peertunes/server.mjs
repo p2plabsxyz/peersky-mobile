@@ -1,14 +1,10 @@
 import b4a from 'b4a'
+import { isOwnLoopbackRequest } from '../loopback-request.mjs'
 import { streamHyperAsset } from '../hyper/asset-server-core.mjs'
 import { headersToObject } from '../hyper/assets.mjs'
 import { parseHyperUrl } from '../hyper/url.mjs'
 import { PEERTUNES_LOOPBACK_HOST, PEERTUNES_LOOPBACK_PORT } from './constants.mjs'
 import peertunesAssets from './peertunes-runtime.mjs'
-
-// Only this machine may talk to the server. Binding 127.0.0.1 is not enough on
-// its own: a DNS name that resolves to loopback would still reach us, so the
-// Host header has to name loopback too.
-const ALLOWED_HOSTNAMES = new Set(['127.0.0.1', 'localhost', '[::1]', '::1'])
 
 // A folder listing or playlist manifest is a small document. Anything larger is
 // either the wrong branch or an attempt to exhaust the worklet's heap, so it is
@@ -181,7 +177,7 @@ function handleRequest (req, res, { fetch, fetchRange, ensureGlobals, keepOfflin
     return
   }
 
-  if (!isLocalRequest(req)) {
+  if (!isOwnLoopbackRequest(req)) {
     sendText(res, 403, 'Forbidden')
     return
   }
@@ -369,33 +365,6 @@ function wantsJson (req) {
 function getRequestHeader (req, name) {
   const headers = req.headers || {}
   return headers[name] || headers[name.toLowerCase()] || headers[name.toUpperCase()] || null
-}
-
-function isLocalRequest (req) {
-  const host = getRequestHeader(req, 'host')
-  if (host) {
-    const hostname = String(host).replace(/:\d+$/, '').toLowerCase()
-    if (!ALLOWED_HOSTNAMES.has(hostname)) return false
-  }
-
-  // A same-origin GET sends no Origin, so anything that does send one is
-  // another site asking. Sec-Fetch-Site catches the no-cors loads an Origin
-  // header would miss, such as <audio src> pointed at us from a web page.
-  const origin = getRequestHeader(req, 'origin')
-  if (origin && !isLoopbackOrigin(origin)) return false
-
-  const fetchSite = String(getRequestHeader(req, 'sec-fetch-site') || '').toLowerCase()
-  if (fetchSite && fetchSite !== 'same-origin' && fetchSite !== 'none') return false
-
-  return true
-}
-
-function isLoopbackOrigin (origin) {
-  try {
-    return ALLOWED_HOSTNAMES.has(new URL(String(origin)).hostname.toLowerCase())
-  } catch {
-    return false
-  }
 }
 
 // The proxy carries bytes from an untrusted hyper drive. Two things must not

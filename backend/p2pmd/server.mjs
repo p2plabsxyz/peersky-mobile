@@ -1,4 +1,5 @@
 import { readHyperFile } from '../hyper/drive.mjs'
+import { isOwnLoopbackRequest } from '../loopback-request.mjs'
 import {
   applyDocumentUpdate,
   getEncodedDocumentState,
@@ -9,11 +10,11 @@ import {
 } from './document.mjs'
 import { P2PMD_LOOPBACK_HOST } from './constants.mjs'
 import { createPeerActivityStore, createPeerPresenceStore } from './peers.mjs'
-import { hasSlideBreaks, renderMarkdownPreview, renderMarkdownSlides } from './preview.mjs'
+import { hasSlideBreaks } from './preview.mjs'
 import ieeeBrowserScript from './ieee-runtime.mjs'
 import katexCss from './katex-runtime.mjs'
 import { P2PMD_SCIENTIFIC_STYLES } from './scientific.mjs'
-import { P2PMD_TEMPLATES, hasIeeeMarker } from './templates.mjs'
+import { P2PMD_TEMPLATES } from './templates.mjs'
 import { FUN_PEER_NAME_ADJECTIVES, FUN_PEER_NAME_ANIMALS } from './peer-names.mjs'
 import { scheduleP2pmdRoomSnapshot } from './snapshots.mjs'
 import yjsBrowserScript from './yjs-runtime.mjs'
@@ -175,8 +176,24 @@ async function getBareHttp () {
   return bareHttp
 }
 
+// Desktop P2PMD runs at peersky://p2p and reaches a room on this phone
+// through its own Holesail port.
+const DESKTOP_P2PMD_ORIGINS = ['peersky://p2p']
+
 function handleRequest (req, res) {
   const pathname = String(req.url || '/').split('?')[0]
+
+  // Remote peers arrive through Holesail on their own loopback port, so only a
+  // web page on another origin is turned away here.
+  if (!isOwnLoopbackRequest(req, { allowOrigins: DESKTOP_P2PMD_ORIGINS })) {
+    sendJson(res, 403, { ok: false, error: 'Forbidden' })
+    return
+  }
+  const origin = req.headers?.origin
+  if (origin) {
+    res.setHeader('Access-Control-Allow-Origin', origin)
+    res.setHeader('Vary', 'Origin')
+  }
 
   if (req.method === 'OPTIONS') {
     sendEmpty(res, 204)
@@ -307,46 +324,6 @@ function handleRequest (req, res) {
     return
   }
 
-  if (req.method === 'POST' && pathname === '/preview') {
-    readJsonBody(req)
-      .then((body) => {
-        if (typeof body.content !== 'string') {
-          sendJson(res, 400, {
-            ok: false,
-            error: 'Invalid Markdown content. Expected a string.'
-          })
-          return
-        }
-
-        if (body.content.length > getMaxDocumentLength()) {
-          sendJson(res, 413, {
-            ok: false,
-            error: 'Markdown is too large. Maximum size is 10 MB.'
-          })
-          return
-        }
-
-        const rendered = body.mode === 'slides'
-          ? renderMarkdownSlides(body.content)
-          : {
-              html: renderMarkdownPreview(body.content),
-              ieee: body.latexModeEnabled === true && hasIeeeMarker(body.content)
-            }
-
-        sendJson(res, 200, {
-          ok: true,
-          ...rendered
-        })
-      })
-      .catch((error) => {
-        sendJson(res, error.statusCode || 400, {
-          ok: false,
-          error: error.message
-        })
-      })
-    return
-  }
-
   if (req.method === 'GET' && pathname === '/events') {
     openEventStream(req, res)
     return
@@ -421,7 +398,6 @@ function sendEmpty (res, statusCode) {
 }
 
 function setCorsHeaders (res) {
-  res.setHeader('Access-Control-Allow-Origin', '*')
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
 }

@@ -32,7 +32,7 @@ Protocol tests live in `test/protocol/` and cover behavior that should stay stab
 - `hyper-url.test.mjs` validates `hyper://` parsing, malformed URL handling, and path traversal rejection.
 - `holesail-session.test.mjs` validates Holesail ports, keys, loopback host restrictions, and safe failure behavior.
 - `p2pmd-document.test.mjs` validates document state, Yjs update application, full-state sync, size limits, and subscribers.
-- `p2pmd-http.test.mjs` starts a real HTTP server with the shared P2PMD request handler and checks `/status`, `/doc`, `/doc/update`, `/doc/yjsstate`, `/preview`, `/presence`, and `/events`.
+- `p2pmd-http.test.mjs` starts a real HTTP server with the shared P2PMD request handler and checks `/status`, `/doc`, `/doc/update`, `/doc/yjsstate`, `/presence`, and `/events`, and that pages on other origins are turned away.
 - `p2pmd-peers.test.mjs` validates peer count, peer pruning, and line ownership used by gutter marks.
 - `p2pmd-preview.test.mjs` validates Markdown preview rendering, raw HTML escaping, and Hyper image URL rewriting.
 - `phone-backup.test.mjs` backs a real Hyper store up and restores it into a second phone folder, then opens it the ordinary way. It also covers wrong passphrases, damaged and cut-off files, path traversal, and transfers meant for another phone.

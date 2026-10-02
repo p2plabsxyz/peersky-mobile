@@ -120,7 +120,7 @@ test('a template button applies its template instead of formatting text', () => 
 test('the page checks for a deck with the renderer own function', () => {
   // A copy of the rule is how the editor came to offer to delete a real deck.
   // The page embeds hasSlideBreaks itself, so there is nothing to keep in sync.
-  assert.match(server, /import \{ hasSlideBreaks, renderMarkdownPreview, renderMarkdownSlides \}/)
+  assert.match(server, /import \{ hasSlideBreaks \} from '\.\/preview\.mjs'/)
   assert.match(server, /hasSlideBreaks\.toString\(\)/)
   assert.match(server, /if \(!hasSlideBreaks\(input\.value\)\)/)
   assert.doesNotMatch(server, /P2PMD_SLIDE_BREAK_PATTERN/)

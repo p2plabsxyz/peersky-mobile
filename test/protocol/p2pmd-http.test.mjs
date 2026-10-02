@@ -32,7 +32,7 @@ describe('p2pmd HTTP endpoints with injectable Node server', () => {
 
     assert.equal(statusResponse.status, 200)
     assert.equal(statusResponse.headers.get('content-type'), 'application/json; charset=utf-8')
-    assert.equal(statusResponse.headers.get('access-control-allow-origin'), '*')
+    assert.equal(statusResponse.headers.get('access-control-allow-origin'), null)
     assert.deepEqual(status, {
       ok: true,
       service: 'p2pmd',
@@ -45,6 +45,48 @@ describe('p2pmd HTTP endpoints with injectable Node server', () => {
     const optionsResponse = await fetch(`${localUrl}/status`, { method: 'OPTIONS' })
     assert.equal(optionsResponse.status, 204)
     assert.equal(optionsResponse.headers.get('access-control-allow-methods'), 'GET, POST, OPTIONS')
+  })
+
+  // The note was readable and writable by any page that found the port, with
+  // CORS open to every origin.
+  it('answers the editor and desktop P2PMD, and refuses other pages', async () => {
+    const { host } = new URL(localUrl)
+    const editor = await requestWithHeaders(localUrl, '/doc', { origin: localUrl, 'sec-fetch-site': 'same-origin' })
+    assert.equal(editor.status, 200)
+
+    // A phone or desktop joining through Holesail reaches the room on its own
+    // loopback port, which is what its Host and Origin then say.
+    const joiner = await requestWithHeaders(localUrl, '/doc', { host: '127.0.0.1:41999', origin: 'http://127.0.0.1:41999' })
+    assert.equal(joiner.status, 200)
+
+    const desktop = await requestWithHeaders(localUrl, '/doc', { origin: 'peersky://p2p', 'sec-fetch-site': 'cross-site' })
+    assert.equal(desktop.status, 200)
+    assert.equal(desktop.headers['access-control-allow-origin'], 'peersky://p2p')
+    const preflight = await requestWithHeaders(localUrl, '/doc', { origin: 'peersky://p2p' }, 'OPTIONS')
+    assert.equal(preflight.status, 204)
+    assert.equal(preflight.headers['access-control-allow-origin'], 'peersky://p2p')
+
+    for (const headers of [
+      { origin: 'https://evil.example' },
+      { origin: 'http://127.0.0.1:47317' },
+      { origin: 'null' },
+      { 'sec-fetch-site': 'cross-site' },
+      { host: 'evil.example' }
+    ]) {
+      const response = await requestWithHeaders(localUrl, '/doc', headers)
+      assert.equal(response.status, 403, JSON.stringify(headers))
+      assert.equal(response.headers['access-control-allow-origin'], undefined)
+    }
+    const write = await requestWithHeaders(localUrl, '/doc', { origin: 'https://evil.example', host }, 'POST', '{"content":"pwned"}')
+    assert.equal(write.status, 403)
+    assert.notEqual((await getJson(`${localUrl}/doc`)).content, 'pwned')
+  })
+
+  // Only the app renders previews, through its bridge. Over Holesail this was
+  // a way for any room member to keep the phone's one worker thread busy.
+  it('has no preview endpoint', async () => {
+    const response = await postJson(`${localUrl}/preview`, { content: '# Hi' })
+    assert.equal(response.status, 404)
   })
 
   it('stores and returns full document state through /doc', async () => {
@@ -129,66 +171,6 @@ describe('p2pmd HTTP endpoints with injectable Node server', () => {
     Y.applyUpdate(verifiedDoc, b4a.from(afterClientEdit.yjsState, 'base64'))
     assert.equal(verifiedDoc.getMap('settings').get('latexModeEnabled'), true)
     assert.match(verifiedDoc.getText('content').toString(), /Client edit/)
-  })
-
-  it('renders preview HTML and rejects invalid preview input', async () => {
-    const response = await postJson(`${localUrl}/preview`, {
-      content: '<script>alert(1)</script>\n\n![pic](hyper://example.com/pic.png)'
-    })
-    const body = await response.json()
-
-    assert.equal(response.status, 200)
-    assert.equal(body.ok, true)
-    assert.match(body.html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/)
-    assert.match(body.html, /src="\/hyper\/file\?url=hyper%3A%2F%2Fexample.com%2Fpic.png"/)
-
-    const invalidResponse = await postJson(`${localUrl}/preview`, { content: 42 })
-    const invalidBody = await invalidResponse.json()
-
-    assert.equal(invalidResponse.status, 400)
-    assert.equal(invalidBody.ok, false)
-    assert.equal(invalidBody.error, 'Invalid Markdown content. Expected a string.')
-
-    const excessiveLatexResponse = await postJson(`${localUrl}/preview`, {
-      content: Array.from({ length: 2001 }, () => '$x$').join(' ')
-    })
-    const excessiveLatexBody = await excessiveLatexResponse.json()
-
-    assert.equal(excessiveLatexResponse.status, 400)
-    assert.equal(excessiveLatexBody.ok, false)
-    assert.match(excessiveLatexBody.error, /too much LaTeX/)
-  })
-
-  it('renders desktop-compatible presentation slides', async () => {
-    const response = await postJson(`${localUrl}/preview`, {
-      content: '# First\n\n---\n\n# Second',
-      mode: 'slides'
-    })
-    const body = await response.json()
-
-    assert.equal(response.status, 200)
-    assert.equal(body.ok, true)
-    assert.equal(body.count, 2)
-    assert.match(body.html, /data-slide-index="0"/)
-    assert.match(body.html, /data-slide-index="1"/)
-  })
-
-  it('activates IEEE preview only for LaTeX-enabled marked documents', async () => {
-    const content = '<!-- ieee -->\n\n## Paper\n\n### Abstract\n\n$E = mc^2$'
-    const enabled = await postJson(`${localUrl}/preview`, {
-      content,
-      latexModeEnabled: true
-    })
-    const enabledBody = await enabled.json()
-    const disabled = await postJson(`${localUrl}/preview`, {
-      content,
-      latexModeEnabled: false
-    })
-    const disabledBody = await disabled.json()
-
-    assert.equal(enabledBody.ieee, true)
-    assert.equal(disabledBody.ieee, false)
-    assert.match(enabledBody.html, /class="katex"/)
   })
 
   it('tracks SSE peers and presence through real HTTP endpoints', async () => {
@@ -519,6 +501,20 @@ async function getJson (url) {
   const response = await fetch(url)
   assert.equal(response.status, 200)
   return response.json()
+}
+
+function requestWithHeaders (baseUrl, path, headers, method = 'GET', body = null) {
+  const { hostname, port } = new URL(baseUrl)
+  return new Promise((resolve, reject) => {
+    const request = http.request({ hostname, port, path, method, headers }, (response) => {
+      let text = ''
+      response.setEncoding('utf8')
+      response.on('data', (chunk) => { text += chunk })
+      response.on('end', () => resolve({ status: response.statusCode, headers: response.headers, body: text }))
+    })
+    request.on('error', reject)
+    request.end(body)
+  })
 }
 
 function postJson (url, body) {

@@ -85,6 +85,7 @@ describe('hyper media proxy server', () => {
       assert.equal(response.headers.get('content-type'), 'video/mp4')
       assert.equal(response.headers.get('accept-ranges'), 'bytes')
       assert.equal(response.headers.get('x-content-type-options'), 'nosniff')
+      assert.equal(response.headers.get('content-security-policy'), 'sandbox')
       assert.equal(response.headers.get('etag'), 'asset-etag')
       assert.equal(await response.text(), 'hello video')
       assert.equal(calls.length, 1)
