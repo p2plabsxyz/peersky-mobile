@@ -4,6 +4,7 @@ import { describe, test } from 'node:test'
 import { createRequire } from 'node:module'
 import {
   addDownloadUrlFingerprint,
+  describeBrowserDownload,
   findCompletedHyperDownload,
   getProxiedHyperUrl,
   MAX_BROWSER_DOWNLOADS,
@@ -17,6 +18,21 @@ const require = createRequire(import.meta.url)
 const downloadsPlugin = require('../../plugins/with-browser-downloads')
 
 describe('browser downloads', () => {
+  // iOS asks before a page's download is saved, naming the file and the site.
+  test('names a download for the prompt that asks first', () => {
+    assert.deepEqual(describeBrowserDownload('https://files.example.com/a/Report%20Q3.pdf?x=1'), {
+      name: 'Report Q3.pdf',
+      host: 'files.example.com'
+    })
+    assert.deepEqual(describeBrowserDownload('https://example.com/'), { name: 'download', host: 'example.com' })
+    assert.deepEqual(describeBrowserDownload('https://example.com/..%2F..%2Fetc'), { name: '.._.._etc', host: 'example.com' })
+    assert.deepEqual(describeBrowserDownload('not a url'), { name: 'download', host: '' })
+
+    const index = readFileSync(new URL('../../app/index.tsx', import.meta.url), 'utf8')
+    assert.match(index, /onFileDownload=\{\(event\) => confirmPageDownload\(event\.nativeEvent\.downloadUrl\)\}/)
+    assert.match(index, /'Download this file\?'/)
+  })
+
   test('accepts only safe HTTP download URLs', () => {
     assert.equal(normalizeBrowserDownloadUrl('https://example.com/file.pdf'), 'https://example.com/file.pdf')
     assert.equal(normalizeBrowserDownloadUrl('file:///private.txt'), null)
@@ -291,8 +307,10 @@ describe('browser downloads', () => {
     assert.match(moduleSource, /status != HttpURLConnection[.]HTTP_PARTIAL/)
     assert.match(moduleSource, /parseContentRangeStart\(responseRange\) != offset/)
     assert.match(moduleSource, /fun resumeDownload\(id: String, url: String, promise: Promise\)/)
-    assert.match(moduleSource, /packageManager[.]canRequestPackageInstalls\(\)/)
-    assert.match(moduleSource, /Settings[.]ACTION_MANAGE_UNKNOWN_APP_SOURCES/)
+    // No REQUEST_INSTALL_PACKAGES: an APK goes to the system's Downloads,
+    // which installs it after its own warning.
+    assert.match(moduleSource, /Intent\(DownloadManager[.]ACTION_VIEW_DOWNLOADS\)/)
+    assert.doesNotMatch(moduleSource, /canRequestPackageInstalls|ACTION_MANAGE_UNKNOWN_APP_SOURCES/)
     assert.match(moduleSource, /resolveMimeTypeFromFilename\(download[.]name, download[.]mimeType\)/)
     assert.doesNotMatch(moduleSource, /manager[.]remove\(downloadId\).*user-paused/s)
     assert.match(moduleSource, /getSharedPreferences/)
@@ -300,6 +318,10 @@ describe('browser downloads', () => {
     assert.match(webViewManagerSource, /setDownloadListener/)
     assert.match(webViewManagerSource, /queueDownload/)
     assert.match(webViewManagerSource, /Download service is unavailable[.]/)
+    // A page can start a download without a tap. It only queues on a yes.
+    assert.match(webViewManagerSource, /confirmDownload\(context, url, contentDisposition, mimeType, contentLength\) \{\s+downloads[.]queueDownload\(/)
+    assert.match(webViewManagerSource, /setTitle\("Download this file\?"\)/)
+    assert.match(webViewManagerSource, /setPositiveButton\("Download"\) \{ _, _ -> onConfirm\(\) \}/)
     assert.match(webViewManagerSource, /setOnLongClickListener/)
     assert.match(webViewManagerSource, /setOnTouchListener/)
     assert.match(webViewManagerSource, /MotionEvent[.]ACTION_DOWN/)

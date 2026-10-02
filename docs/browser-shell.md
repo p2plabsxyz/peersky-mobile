@@ -38,7 +38,9 @@ tested independently:
 - `app/bookmarks/` validates and stores bookmarks and their favicons.
 - `app/tabs/` captures and stores bounded tab previews.
 - `app/downloads/` tracks downloads and connects the browser to the native
-  download implementation.
+  download implementation. A download a page starts waits for the person to
+  say yes, and a downloaded APK opens in the system's Downloads, since PeerSky
+  does not hold the permission to install apps.
 
 Tab history stores restorable URLs instead of retaining generated Hyper or
 error HTML. On restoration, those URLs are fetched again. At most five browser

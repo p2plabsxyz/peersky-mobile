@@ -188,6 +188,17 @@ export function createUniqueDownloadFilename (name, existingNames) {
   return addFilenameSuffix(normalizedName, Date.now())
 }
 
+/** How a download prompt names a file: its name from the address, and the site. */
+export function describeBrowserDownload (url) {
+  try {
+    const parsed = new URL(url)
+    const segment = safeDecodeURIComponent(parsed.pathname.split('/').pop() || '')
+    return { name: normalizeLocalDownloadFilename(segment), host: parsed.hostname }
+  } catch {
+    return { name: 'download', host: '' }
+  }
+}
+
 export function addDownloadUrlFingerprint (name, url) {
   const normalizedName = normalizeLocalDownloadFilename(name)
 

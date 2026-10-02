@@ -81,13 +81,17 @@ describe('mobile platform runtime configuration', () => {
       'android.permission.CHANGE_WIFI_MULTICAST_STATE',
       'android.permission.FOREGROUND_SERVICE',
       'android.permission.FOREGROUND_SERVICE_REMOTE_MESSAGING',
-      'android.permission.RECORD_AUDIO',
-      'android.permission.REQUEST_INSTALL_PACKAGES'
+      'android.permission.RECORD_AUDIO'
     ])
-    assert.equal(
-      android?.blockedPermissions?.includes('android.permission.POST_NOTIFICATIONS') || false,
-      false
-    )
+    // Template and library permissions nothing in the app uses. Each one is a
+    // question a store review asks.
+    assert.deepEqual(android?.blockedPermissions, [
+      'android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK',
+      'android.permission.READ_EXTERNAL_STORAGE',
+      'android.permission.REQUEST_INSTALL_PACKAGES',
+      'android.permission.SYSTEM_ALERT_WINDOW',
+      'android.permission.WRITE_EXTERNAL_STORAGE'
+    ])
     assert.equal(android?.intentFilters?.length, 1)
     assert.deepEqual(android.intentFilters[0]?.category, ['BROWSABLE', 'DEFAULT'])
     assert.deepEqual(
@@ -138,6 +142,12 @@ describe('mobile platform runtime configuration', () => {
       }
     ])
     assert.equal(hasExpoPlugin(plugins, EXPO_AUDIO_PLUGIN), true)
+    // PeerTunes plays through its WebView. iOS keeps it going with the audio
+    // background mode; Android never starts expo-audio's media service, so it
+    // does not declare one Google Play would ask about.
+    const audioPlugin = plugins.find((plugin) => Array.isArray(plugin) && plugin[0] === EXPO_AUDIO_PLUGIN)
+    assert.equal(audioPlugin?.[1]?.enableBackgroundPlayback, false)
+    assert.deepEqual(appJson.expo?.ios?.infoPlist?.UIBackgroundModes, ['audio'])
     assert.equal(hasExpoPlugin(plugins, PEERCHAT_BACKGROUND_PLUGIN), true)
     assert.equal(appJson.expo?.android?.softwareKeyboardLayoutMode, 'resize')
     const backgroundPlugin = await readFile(repoFile('plugins/with-peerchat-background.js'), 'utf8')

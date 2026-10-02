@@ -1,8 +1,10 @@
 package __PACKAGE_NAME__
 
 import android.annotation.SuppressLint
+import android.app.AlertDialog
 import android.os.Handler
 import android.os.Looper
+import android.text.format.Formatter
 import android.view.MotionEvent
 import android.webkit.WebView
 import android.widget.Toast
@@ -12,6 +14,7 @@ import com.facebook.react.uimanager.ThemedReactContext
 import com.facebook.react.uimanager.ViewManagerDelegate
 import com.reactnativecommunity.webview.RNCWebViewManager
 import com.reactnativecommunity.webview.RNCWebViewWrapper
+import com.reactnativecommunity.webview.URLUtil
 import org.json.JSONObject
 import java.net.URI
 import java.util.WeakHashMap
@@ -85,7 +88,7 @@ class PeerSkyWebViewManager : RNCWebViewManager() {
         userAgent,
         contentDisposition,
         mimeType,
-        _ ->
+        contentLength ->
       val downloads = context.getNativeModule(BrowserDownloadsModule::class.java)
       if (downloads == null) {
         Toast.makeText(
@@ -95,12 +98,14 @@ class PeerSkyWebViewManager : RNCWebViewManager() {
         ).show()
         return@setDownloadListener
       }
-      downloads.queueDownload(
-        url,
-        userAgent,
-        contentDisposition,
-        mimeType
-      )
+      confirmDownload(context, url, contentDisposition, mimeType, contentLength) {
+        downloads.queueDownload(
+          url,
+          userAgent,
+          contentDisposition,
+          mimeType
+        )
+      }
     }
     wrapper.webView.setOnLongClickListener {
       handleLongPress(wrapper.webView)
@@ -123,6 +128,32 @@ class PeerSkyWebViewManager : RNCWebViewManager() {
       false
     }
     return wrapper
+  }
+
+  // A page can start a download without a tap, so nothing is saved until the
+  // person says yes.
+  private fun confirmDownload(
+    context: ThemedReactContext,
+    url: String,
+    contentDisposition: String?,
+    mimeType: String?,
+    contentLength: Long,
+    onConfirm: () -> Unit
+  ) {
+    val activity = context.currentActivity
+    if (activity == null || activity.isFinishing) return
+    val name = URLUtil.guessFileName(url, contentDisposition, mimeType)
+    val host = try { URI(url).host } catch (error: Exception) { null }
+    val details = listOfNotNull(
+      if (contentLength > 0) "$name, ${Formatter.formatShortFileSize(activity, contentLength)}" else name,
+      host?.let { "from $it" }
+    ).joinToString("\n")
+    AlertDialog.Builder(activity)
+      .setTitle("Download this file?")
+      .setMessage(details)
+      .setNegativeButton("Cancel", null)
+      .setPositiveButton("Download") { _, _ -> onConfirm() }
+      .show()
   }
 
   private fun handleLongPress(webView: WebView): Boolean {

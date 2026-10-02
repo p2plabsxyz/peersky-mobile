@@ -19,12 +19,14 @@ test('a plain no is not argued with', () => {
   assert.doesNotMatch(source, /if \(!permission\.granted\) offerPermissionSettings/)
 })
 
-test('the picker uses it for both the camera and the library', async () => {
+test('the picker asks for the camera, and never for the whole photo library', async () => {
   const gate = await readFile(new URL('../../app/media/upload-gate.ts', import.meta.url), 'utf8')
 
   assert.match(gate, /requestCameraPermissionsAsync\(\)/)
-  assert.match(gate, /requestMediaLibraryPermissionsAsync\(\)/)
-  assert.equal((gate.match(/ensurePermission\(\{/g) || []).length, 2)
+  // The system photo picker hands back only what was chosen and needs no
+  // permission, so asking for the library was a prompt with nothing behind it.
+  assert.doesNotMatch(gate, /requestMediaLibraryPermissionsAsync/)
+  assert.equal((gate.match(/ensurePermission\(\{/g) || []).length, 1)
   // And a refusal still stops the pick rather than opening an empty picker.
   assert.match(gate, /if \(!allowed\) throw new Error/)
 })

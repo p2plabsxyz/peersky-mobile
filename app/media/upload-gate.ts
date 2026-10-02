@@ -76,6 +76,9 @@ async function pickImages (
 ): Promise<ImagePicker.ImagePickerResult | null> {
   supersedePendingPick()
 
+  // The library needs no permission: the system photo picker runs outside the
+  // app and hands back only what was chosen. Asking for the whole library
+  // anyway is a prompt nobody needs and a question a store review asks.
   if (source === 'camera') {
     const allowed = await ensurePermission({
       request: () => ImagePicker.requestCameraPermissionsAsync(),
@@ -83,15 +86,6 @@ async function pickImages (
       message: 'PeerSky needs the camera to take a photo. Turn it on in Settings.'
     })
     if (!allowed) throw new Error('PeerSky needs camera access to take a photo.')
-  } else {
-    // Android asks for this; on iOS the picker runs out of process and needs
-    // nothing, so a granted answer comes straight back.
-    const allowed = await ensurePermission({
-      request: () => ImagePicker.requestMediaLibraryPermissionsAsync(),
-      title: 'Photo access is off',
-      message: 'PeerSky needs your photo library to attach a picture. Turn it on in Settings.'
-    })
-    if (!allowed) throw new Error('PeerSky needs photo access to attach a picture.')
   }
 
   const options: ImagePicker.ImagePickerOptions = {

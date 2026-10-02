@@ -174,6 +174,7 @@ import { getBrowserHistoryDocumentTitle } from './history/browser-history.mjs'
 import { useBrowserHistory } from './history/useBrowserHistory'
 import { DownloadsScreen } from './downloads/DownloadsScreen'
 import {
+  describeBrowserDownload,
   findCompletedHyperDownload,
   getProxiedHyperUrl
 } from './downloads/browser-downloads.mjs'
@@ -1794,6 +1795,20 @@ export default function App () {
     ) as BrowserTabsState)
     setBrowserMediaTarget(null)
     setStatus('Opened in background tab')
+  }
+
+  // A page can start a download without a tap, so nothing is saved until the
+  // person says yes. iOS asks here; Android asks in PeerSkyWebViewManager.
+  function confirmPageDownload (downloadUrl: string) {
+    const { name, host } = describeBrowserDownload(downloadUrl)
+    Alert.alert(
+      'Download this file?',
+      host ? `${name}\nfrom ${host}` : name,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Download', onPress: () => { void requestBrowserDownload(downloadUrl) } }
+      ]
+    )
   }
 
   async function onBrowserMediaDownload (targetUrl: string) {
@@ -4471,9 +4486,7 @@ export default function App () {
               }}
               onShouldStartLoadWithRequest={(request) => onBrowserShouldStartLoad(tab.id, entry, request)}
               onOpenWindow={(event) => onBrowserOpenWindow(tab.id, entry, event.nativeEvent.targetUrl)}
-              onFileDownload={(event) => {
-                void requestBrowserDownload(event.nativeEvent.downloadUrl)
-              }}
+              onFileDownload={(event) => confirmPageDownload(event.nativeEvent.downloadUrl)}
               scrollEventThrottle={200}
               onScroll={() => {
                 Keyboard.dismiss()
