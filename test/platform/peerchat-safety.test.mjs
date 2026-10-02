@@ -48,3 +48,15 @@ test('a PeerChat profile can be deleted from PeerChat settings', async () => {
   assert.match(confirm, /This cannot be undone/)
   assert.match(confirm, /style: 'destructive', onPress: \(\) => void deleteProfile\(\)/)
 })
+
+// A poll that read the room just before a send landed just after it, and took
+// the message off the screen until the next poll. The refresh the send asked
+// for was skipped because that poll was still running.
+test('a sent message is not taken back off the screen by an older poll', () => {
+  const refresh = screen.slice(screen.indexOf('const refreshRoom = useCallback'), screen.indexOf('const refreshRoomRef = useRef(refreshRoom)'))
+  assert.match(refresh, /if \(pollInFlightRef\.current\) \{\s+refreshAgainRef\.current = refreshAgainRef\.current \|\| force \|\| 'poll'/)
+  assert.match(refresh, /const stale = sentCountRef\.current !== sentBefore/)
+  assert.match(refresh, /if \(Array\.isArray\(response\.messages\) && !stale\)/)
+  assert.match(refresh, /if \(again && mountedRef\.current\) void refreshRoomRef\.current\(again === true\)/)
+  assert.match(screen, /sentCountRef\.current \+= 1\s+setMessages\(\(current\) => current\.some\(\(item\) => item\.id === response\.sent\?\.id\)/)
+})

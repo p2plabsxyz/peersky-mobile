@@ -100,6 +100,7 @@ export const MAX_PEERCHAT_TOTAL_STORAGE_BYTES = 128 * 1024 * 1024
 const LIVE_RATE_WINDOW_MS = 60_000
 const MAX_LIVE_MESSAGES_PER_WINDOW = 120
 const MAX_CONTROL_MESSAGES_PER_WINDOW = 60
+const MAX_TOPIC_FRAMES_PER_WINDOW = 120
 const MAX_INITIAL_SYNC_MESSAGES_PER_CONNECTION = 500
 const MAX_PENDING_MESSAGES_PER_CONNECTION = 256
 const MAX_RETURNED_ROOM_MEMBERS = 100
@@ -1075,7 +1076,7 @@ export class PeerChatService {
     if (
       peer.connection.destroyed ||
       now - peer.lastReceivedAt >= PEER_LIVENESS_TIMEOUT_MS ||
-      !this.sendToPeer(peer, { type: 'ping' })
+      (!this.sendToPeer(peer, { type: 'ping' }) && this.isPeerGone(peer))
     ) {
       this.disconnectPeer(peer)
       return false
@@ -1178,7 +1179,10 @@ export class PeerChatService {
     if (message.type === 'pong' || message.type === 'sync-done') return
 
     if (message.type === 'topics') {
-      if (!this.consumeControlRate(peer) || !Array.isArray(message.rooms)) return
+      // Proofs have their own budget. Counted with the rest, a desktop in many
+      // rooms used it up on connecting, and the proof for a new room was the
+      // one dropped, leaving that room shut on this connection.
+      if (!this.consumeTopicRate(peer) || !Array.isArray(message.rooms)) return
       peer.handshake = true
       const added = []
       for (const entry of message.rooms.slice(0, MAX_ANNOUNCED_TOPICS)) {
@@ -1432,7 +1436,10 @@ export class PeerChatService {
       if (this.rememberRoomMember(room, peer, message.ts)) this.schedulePersist()
       await this.appendJoinNotice(roomKey, peer, message, wasMember)
       this.sendRoomMeta(peer, roomKey)
-      await this.syncHistoryToPeerOnce(peer, roomKey)
+      // Not awaited. Sending our history waits on their side to drain, and
+      // while it waited nothing else they sent was read: a live message
+      // behind a long history was dropped once the queue filled.
+      this.syncHistoryToPeerOnce(peer, roomKey).catch(() => {})
       this.bumpVersion()
       return
     }
@@ -1555,6 +1562,17 @@ export class PeerChatService {
     }
     if (peer.controlRate.count >= MAX_CONTROL_MESSAGES_PER_WINDOW) return false
     peer.controlRate.count += 1
+    return true
+  }
+
+  consumeTopicRate (peer) {
+    const now = Date.now()
+    if (!peer.topicRate || now >= peer.topicRate.resetsAt) {
+      peer.topicRate = { count: 1, resetsAt: now + LIVE_RATE_WINDOW_MS }
+      return true
+    }
+    if (peer.topicRate.count >= MAX_TOPIC_FRAMES_PER_WINDOW) return false
+    peer.topicRate.count += 1
     return true
   }
 
@@ -2142,8 +2160,16 @@ export class PeerChatService {
     for (const peer of this.peers.values()) {
       if (!peer.rooms.includes(roomKey)) continue
       if (this.isPeerRemovedFromRoom(roomKey, peer)) continue
-      if (!this.sendToPeer(peer, { ...message, roomKey })) this.disconnectPeer(peer)
+      if (!this.sendToPeer(peer, { ...message, roomKey }) && this.isPeerGone(peer)) this.disconnectPeer(peer)
     }
+  }
+
+  // A send that returns false onto a full buffer is queued, not lost, and goes
+  // out when the buffer drains. Dropping the connection then threw the queued
+  // frame away with it, which is how the first message after connecting went
+  // missing: it was sent while the profile and history were still going out.
+  isPeerGone (peer) {
+    return !peer.transport || peer.transport.closed === true || peer.connection.destroyed === true
   }
 
   sendToPeer (peer, message) {

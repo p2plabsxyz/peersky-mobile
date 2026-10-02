@@ -364,6 +364,10 @@ export function PeerChatScreen ({
   const versionRef = useRef(-1)
   const activeRoomRef = useRef<PeerChatRoom | null>(null)
   const pollInFlightRef = useRef(false)
+  const refreshAgainRef = useRef<boolean | 'poll'>(false)
+  // How many of our own messages have gone out, so a snapshot read before one
+  // of them is known for stale.
+  const sentCountRef = useRef(0)
   const roomListPollInFlightRef = useRef(false)
   const actionInFlightRef = useRef(false)
   const isNearMessageBottomRef = useRef(true)
@@ -744,8 +748,15 @@ export function PeerChatScreen ({
 
   const refreshRoom = useCallback(async (force = false) => {
     const room = activeRoomRef.current
-    if (!room || pollInFlightRef.current) return
+    if (!room) return
+    // One already running may have read the room before a message was sent,
+    // so this one runs again after it rather than being dropped.
+    if (pollInFlightRef.current) {
+      refreshAgainRef.current = refreshAgainRef.current || force || 'poll'
+      return
+    }
     pollInFlightRef.current = true
+    const sentBefore = sentCountRef.current
 
     try {
       const response = await callRpc(RPC_PEERCHAT_SNAPSHOT, {
@@ -757,7 +768,11 @@ export function PeerChatScreen ({
 
       if (response.room) setActiveRoom(response.room)
       if (response.rooms) setRooms(response.rooms)
-      if (Array.isArray(response.messages)) {
+      // A snapshot read before our own message went out would take that
+      // message off the screen until the next poll. The refresh queued by the
+      // send brings a newer one.
+      const stale = sentCountRef.current !== sentBefore
+      if (Array.isArray(response.messages) && !stale) {
         const previousIds = observedMessageIdsRef.current
         if (previousIds && soundsEnabled) {
           const hasNewRemoteMessage = response.messages.some((message) => (
@@ -781,8 +796,13 @@ export function PeerChatScreen ({
       }
     } finally {
       pollInFlightRef.current = false
+      const again = refreshAgainRef.current
+      refreshAgainRef.current = false
+      if (again && mountedRef.current) void refreshRoomRef.current(again === true)
     }
   }, [callRpc, soundsEnabled])
+  const refreshRoomRef = useRef(refreshRoom)
+  refreshRoomRef.current = refreshRoom
 
   useEffect(() => {
     if (!activeRoom) return
@@ -1574,6 +1594,7 @@ export function PeerChatScreen ({
       setComposer('')
       setReplyTarget(null)
       if (response.sent) {
+        sentCountRef.current += 1
         setMessages((current) => current.some((item) => item.id === response.sent?.id)
           ? current
           : [...current, response.sent as PeerChatMessage])

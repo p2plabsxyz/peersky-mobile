@@ -1062,6 +1062,95 @@ test('PeerChat blocking hides a person in shared rooms too, and unblocking bring
   await service.close()
 })
 
+// A send onto a full buffer is queued, not lost. Treating it as a broken
+// connection dropped the socket and the queued message with it, which is how
+// the first message after connecting went missing.
+test('PeerChat keeps a connection whose buffer is only full', async (t) => {
+  const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-backpressure-'))
+  t.after(() => rm(storagePath, { recursive: true, force: true }))
+  const service = await new PeerChatService({ sdk: createFakeSdk(), storagePath }).start()
+  service.setProfile({ username: 'Bob', bio: '' })
+  await service.joinRoom({ roomKey: ROOM_KEY })
+
+  const queued = []
+  const peer = createFakePeer('ab12ab12', 'Alice')
+  peer.transport = { closed: false, send: (frame) => { queued.push(frame); return false } }
+  service.peers.set(peer.connection, peer)
+  let dropped = 0
+  service.disconnectPeer = () => { dropped += 1 }
+
+  await service.sendMessage({ roomKey: ROOM_KEY, message: 'First message' })
+  assert.equal(queued.length, 1)
+  assert.equal(dropped, 0)
+  assert.equal(service.checkPeerLiveness(peer), true)
+  assert.equal(dropped, 0)
+
+  // A connection that is really gone is still let go.
+  peer.transport.closed = true
+  await service.sendMessage({ roomKey: ROOM_KEY, message: 'Second message' })
+  assert.equal(dropped, 1)
+  await service.close()
+})
+
+test('PeerChat reads room proofs even after a burst of other control frames', async (t) => {
+  const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-proof-budget-'))
+  t.after(() => rm(storagePath, { recursive: true, force: true }))
+  const service = await new PeerChatService({ sdk: createFakeSdk(), storagePath }).start()
+  const otherRoomKey = 'cd'.repeat(32)
+  await service.joinRoom({ roomKey: ROOM_KEY, username: 'Alice' })
+  await service.joinRoom({ roomKey: otherRoomKey, username: 'Alice' })
+
+  const peer = createFakePeer('de'.repeat(4), 'Desktop')
+  peer.rooms = [ROOM_KEY]
+  service.peers.set(peer.connection, peer)
+  // The control budget is spent, the way a desktop in many rooms spends it
+  // on connecting.
+  peer.controlRate = { count: 10_000, resetsAt: Date.now() + 60_000 }
+  service.shareRoom = () => {}
+
+  await service.handlePeerMessage(peer, {
+    type: 'topics',
+    rooms: [{ topic: wireRoom(otherRoomKey), proof: roomProof(otherRoomKey, peer.connection.handshakeHash, peer.key) }]
+  })
+  assert.deepEqual(peer.rooms, [ROOM_KEY, otherRoomKey])
+  await service.close()
+})
+
+// Sending our history to someone who just joined waits on their side. Their
+// own frames kept arriving meanwhile and were not read, so a live message
+// behind a long history was dropped when the queue filled.
+test('PeerChat keeps reading a peer while its history goes out to them', async (t) => {
+  const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-sync-stall-'))
+  t.after(() => rm(storagePath, { recursive: true, force: true }))
+  const service = await new PeerChatService({ sdk: createFakeSdk(), storagePath }).start()
+  service.setProfile({ username: 'Bob', bio: '' })
+  const room = await service.joinRoom({ roomKey: ROOM_KEY })
+  await service.sendMessage({ roomKey: ROOM_KEY, message: 'Old message' })
+
+  const peer = createFakePeer('ab12ab12', 'Alice')
+  peer.rooms.push(room.roomKey)
+  service.peers.set(peer.connection, peer)
+  // Every send lands on a full buffer that never drains.
+  peer.connection.once = () => {}
+  peer.connection.off = () => {}
+  peer.transport = { closed: false, send: () => false }
+
+  const started = Date.now()
+  await service.handlePeerMessage(peer, { type: 'join', roomKey: ROOM_KEY, username: 'Alice', ts: 1 })
+  // The join is done with long before the history could drain (5 s).
+  assert.ok(Date.now() - started < 2000)
+  await service.handlePeerMessage(peer, {
+    id: 'live-after-join',
+    roomKey: ROOM_KEY,
+    sn: 'Alice',
+    ...encryptPeerChatMessage('Hello while you sync', ROOM_KEY),
+    ts: Date.now()
+  })
+  const messages = (await service.getSnapshot({ roomKey: ROOM_KEY, version: -1 })).messages.map((message) => message.message)
+  assert.ok(messages.includes('Hello while you sync'))
+  await service.close()
+})
+
 test('PeerChat restores malformed direct-message state as a regular room', async (t) => {
   const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-invalid-dm-'))
   t.after(() => rm(storagePath, { recursive: true, force: true }))
