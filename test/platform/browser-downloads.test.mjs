@@ -319,7 +319,11 @@ describe('browser downloads', () => {
     assert.match(webViewManagerSource, /queueDownload/)
     assert.match(webViewManagerSource, /Download service is unavailable[.]/)
     // A page can start a download without a tap. It only queues on a yes.
-    assert.match(webViewManagerSource, /confirmDownload\(context, url, contentDisposition, mimeType, contentLength\) \{\s+downloads[.]queueDownload\(/)
+    assert.match(webViewManagerSource, /confirmDownload\(context, name, url, contentLength\) \{\s+downloads[.]queueDownload\(/)
+    // The prompt names the file the way the download will, not Android's raw
+    // guess, which turned a .txt sent as octet-stream into .bin.
+    assert.match(webViewManagerSource, /val name = downloads[.]resolveFilename\(url, contentDisposition, mimeType\)/)
+    assert.doesNotMatch(webViewManagerSource, /URLUtil[.]guessFileName/)
     assert.match(webViewManagerSource, /setTitle\("Download this file\?"\)/)
     assert.match(webViewManagerSource, /setPositiveButton\("Download"\) \{ _, _ -> onConfirm\(\) \}/)
     assert.match(webViewManagerSource, /setOnLongClickListener/)

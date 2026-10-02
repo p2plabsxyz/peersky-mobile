@@ -18,7 +18,6 @@ import com.facebook.react.uimanager.ThemedReactContext
 import com.facebook.react.uimanager.ViewManagerDelegate
 import com.reactnativecommunity.webview.RNCWebViewManager
 import com.reactnativecommunity.webview.RNCWebViewWrapper
-import com.reactnativecommunity.webview.URLUtil
 import org.json.JSONObject
 import java.net.URI
 import java.util.WeakHashMap
@@ -136,7 +135,8 @@ class PeerSkyWebViewManager : RNCWebViewManager() {
         ).show()
         return@setDownloadListener
       }
-      confirmDownload(context, url, contentDisposition, mimeType, contentLength) {
+      val name = downloads.resolveFilename(url, contentDisposition, mimeType)
+      confirmDownload(context, name, url, contentLength) {
         downloads.queueDownload(
           url,
           userAgent,
@@ -172,15 +172,13 @@ class PeerSkyWebViewManager : RNCWebViewManager() {
   // person says yes.
   private fun confirmDownload(
     context: ThemedReactContext,
+    name: String,
     url: String,
-    contentDisposition: String?,
-    mimeType: String?,
     contentLength: Long,
     onConfirm: () -> Unit
   ) {
     val activity = context.currentActivity
     if (activity == null || activity.isFinishing) return
-    val name = URLUtil.guessFileName(url, contentDisposition, mimeType)
     val host = try { URI(url).host } catch (error: Exception) { null }
     val details = listOfNotNull(
       if (contentLength > 0) "$name, ${Formatter.formatShortFileSize(activity, contentLength)}" else name,

@@ -1340,7 +1340,9 @@ class BrowserDownloadsModule(
     )
   }
 
-  private fun resolveFilename(
+  // Also names the file in the prompt before a download, so what it says is
+  // what gets saved.
+  internal fun resolveFilename(
     url: String,
     contentDisposition: String?,
     mimeType: String?
