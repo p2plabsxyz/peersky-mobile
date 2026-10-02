@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { hasSeenWelcome, markWelcomeSeen, WELCOME_FILE_NAME } from '../../app/welcome-state.mjs'
+import { APP_WELCOME_FILE_NAMES, hasSeenWelcome, markWelcomeSeen, WELCOME_FILE_NAME } from '../../app/welcome-state.mjs'
+import { PHONE_BACKUP_FILES } from '../../backend/backup/phone-backup.mjs'
 
 // The screen says what PeerSky is, which does not change with a release, so it
 // is keyed on having been seen at all rather than on a version.
@@ -9,6 +10,15 @@ test('the marker is what decides, not a version', () => {
   assert.equal(WELCOME_FILE_NAME, 'welcome-seen')
   assert.equal(hasSeenWelcome({ exists: false }), false)
   assert.equal(hasSeenWelcome({ exists: true }), true)
+})
+
+// Each app greets once on each phone, so a phone set up from a backup still
+// says what P2PMD is the first time it is opened there.
+test('an app welcome has a marker of its own that stays on this phone', () => {
+  assert.equal(APP_WELCOME_FILE_NAMES.p2pmd, 'p2pmd-welcome-seen')
+  for (const name of [WELCOME_FILE_NAME, ...Object.values(APP_WELCOME_FILE_NAMES)]) {
+    assert.ok(!PHONE_BACKUP_FILES.includes(name), name)
+  }
 })
 
 test('storage that cannot be read does not mean a first run', () => {

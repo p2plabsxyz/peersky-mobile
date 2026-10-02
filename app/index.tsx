@@ -148,7 +148,9 @@ import {
 import { StartupScreen } from './StartupScreen'
 import { AppLoading } from './AppLoading'
 import { BrowserSiteInfoSheet } from './BrowserSiteInfoSheet'
-import { hasSeenWelcome, markWelcomeSeen, WELCOME_FILE_NAME } from './welcome-state.mjs'
+import { APP_WELCOME_FILE_NAMES, hasSeenWelcome, markWelcomeSeen, WELCOME_FILE_NAME } from './welcome-state.mjs'
+import { AppWelcome } from './AppWelcome'
+import { P2PMD_WELCOME } from './app-welcomes'
 import { createFunPeerName } from '../backend/p2pmd/peer-names.mjs'
 import { tapFeedback } from './haptics'
 import {
@@ -373,6 +375,7 @@ export default function App () {
   // Read once, synchronously, so the first frame is either the welcome screen
   // or the browser rather than one flashing into the other.
   const [showWelcome, setShowWelcome] = useState(() => !hasSeenWelcome(getWelcomeFile()))
+  const [showP2pmdWelcome, setShowP2pmdWelcome] = useState(() => !hasSeenWelcome(getAppWelcomeFile('p2pmd')))
   const [restartRequired, setRestartRequired] = useState(false)
   const [siteInfoVisible, setSiteInfoVisible] = useState(false)
   const isKeyboardVisible = useKeyboardVisible()
@@ -3968,7 +3971,19 @@ export default function App () {
                 // PeerTunes lives in the persistent layer below so music keeps
                 // playing when the user switches tabs. Nothing to draw here.
                 ? null
-                : (
+                : activeTab === 'p2pmd' && showP2pmdWelcome
+                  ? (
+                    <AppWelcome
+                      content={P2PMD_WELCOME}
+                      isDark={browserIsDark}
+                      backgroundColor={p2pmdPageColor}
+                      onDone={() => {
+                        markWelcomeSeen(getAppWelcomeFile('p2pmd'))
+                        setShowP2pmdWelcome(false)
+                      }}
+                    />
+                    )
+                  : (
               <ScrollView
                 style={[
                   styles.browserContentPage,
@@ -4840,6 +4855,10 @@ function serializeInlineScriptValue (value: string | null) {
 
 function getWelcomeFile () {
   return new File(Paths.document, WELCOME_FILE_NAME)
+}
+
+function getAppWelcomeFile (app: keyof typeof APP_WELCOME_FILE_NAMES) {
+  return new File(Paths.document, APP_WELCOME_FILE_NAMES[app])
 }
 
 function getBrowserSessionFile () {

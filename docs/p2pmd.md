@@ -6,6 +6,7 @@ This mirrors the desktop direction at the protocol level: local HTTP endpoints e
 
 ## Features
 
+- Say what P2PMD is the first time it opens, once per phone (`AppWelcome`, marker `p2pmd-welcome-seen`).
 - Start a local P2PMD HTTP server on loopback.
 - Create or join a Holesail-backed room.
 - Serve the mobile Markdown editor through WebView.
