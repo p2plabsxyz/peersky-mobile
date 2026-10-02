@@ -52,7 +52,8 @@ Unsupported Adblock modifiers, cosmetic rules, and regular-expression filters ar
 
 ## Scope and limitations
 
-- Network filtering applies to HTTP and HTTPS subresources. Top-level page navigation is intentionally allowed.
+- Network filtering applies to HTTP and HTTPS subresources and frames. Top-level page navigation is intentionally allowed. WebKit loads an iframe as a document, the same type as the page itself, so on iOS every filter with no type, or with `$subdocument`, also gets a rule for third-party documents: the page in the address bar is first party to itself, so only frames match it.
+- `test/platform/cover-your-tracks.test.mjs` replays the two tracker frames that [Cover Your Tracks](https://coveryourtracks.eff.org/) loads (`trackersimulator.org` and `eviltracker.net`) against the shipped lists, and fails unless both "Blocking tracking ads?" and "Blocking invisible trackers?" would answer Yes.
 - Hyper, PeerSky internal pages, localhost, Android emulator loopback, P2PMD, and Holesail traffic are excluded from filtering.
 - Android uses the network-rule support provided by the pinned `adblock-rust` engine.
 - iOS converts the supported network-rule subset to WebKit JSON. Unsupported modifiers and regex filters are skipped safely.

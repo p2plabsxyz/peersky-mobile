@@ -7,7 +7,7 @@ static NSString *const PeerSkyYoutubeRuleIdentifier = @"peersky-youtube-ad-break
 // a version here a converter fix never reaches anybody who already has the
 // app. Keep it in step with WEBKIT_RULE_FORMAT_VERSION in
 // app/privacy/webkit-content-rules.mjs.
-static NSString *const PeerSkyRuleFormatVersion = @"v2";
+static NSString *const PeerSkyRuleFormatVersion = @"v3";
 static const unsigned long long MaxRuleFileBytes = 48ULL * 1024ULL * 1024ULL;
 
 // WKContentRuleListStore initializes WebKit on first touch, and WebKit must be
