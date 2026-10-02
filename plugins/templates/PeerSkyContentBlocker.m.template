@@ -139,7 +139,9 @@ static void PeerSkyRunOnMain(dispatch_block_t block)
       if ([identifier hasPrefix:@"peersky-"] &&
           ![identifier hasPrefix:activePrefix] &&
           ![identifier isEqualToString:PeerSkyYoutubeRuleIdentifier]) {
-        [store removeContentRuleListForIdentifier:identifier completionHandler:nil];
+        // WebKit calls this handler without checking it, so a nil one crashed
+        // the app each time a filter-list update left old lists to clear.
+        [store removeContentRuleListForIdentifier:identifier completionHandler:^(NSError *error) {}];
       }
     }
   }];

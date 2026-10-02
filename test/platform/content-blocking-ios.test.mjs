@@ -109,6 +109,8 @@ describe('iOS content blocking', () => {
     assert.match(blocker, /addContentRuleList/)
     assert.match(blocker, /getAvailableContentRuleListIdentifiers/)
     assert.match(blocker, /removeContentRuleListForIdentifier/)
+    // WebKit calls the handler unchecked: a nil one crashed on every list update.
+    assert.doesNotMatch(blocker, /completionHandler:nil/)
     assert.match(blocker, /self[.]ruleLists = \[compiled copy\]/)
     assert.match(blocker, /peersky-youtube-ad-break-v3/)
     assert.match(blocker, /youtubei\/v1\/player\/ad_break/)
