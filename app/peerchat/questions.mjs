@@ -70,6 +70,6 @@ export const PEERCHAT_QUESTIONS = [
   },
   {
     q: 'Someone is bothering me. What can I do?',
-    a: 'Open their profile and block them. Their direct messages stop right away, and you still share any rooms you’re both in. Report opens an email to the people who build PeerChat, with that room’s key in it so they can see what happened.'
+    a: 'Press and hold one of their messages, or open their profile, and tap Block. Everything they send disappears for you, in every chat, and they can’t message you directly. Report sends the people who build PeerChat an email about it, with the message you reported.'
   }
 ]

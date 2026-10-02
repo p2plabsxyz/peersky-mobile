@@ -900,7 +900,7 @@ test('PeerChat opens a direct room for an offline peer and invites them on recon
   await service.close()
 })
 
-test('PeerChat blocking stops direct messages both ways and survives a restart', async (t) => {
+test('PeerChat blocking stops direct messages both ways, hides them, and survives a restart', async (t) => {
   const senderPath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-block-sender-'))
   const receiverPath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-block-receiver-'))
   t.after(() => rm(senderPath, { recursive: true, force: true }))
@@ -920,7 +920,7 @@ test('PeerChat blocking stops direct messages both ways and survives a restart',
   const senderPeer = createFakePeer(sender.localId, 'Alice', blockedFrames)
   receiver.peers.set(senderPeer.connection, senderPeer)
 
-  const blocked = receiver.blockPeer({ peerId: sender.localId, username: 'Alice' })
+  const blocked = await receiver.blockPeer({ peerId: sender.localId, username: 'Alice' })
   assert.equal(blocked.blockedPeers.length, 1)
   assert.equal(blocked.blockedPeers[0].username, 'Alice')
   assert.equal(receiver.isPeerBlocked(sender.localId), true)
@@ -965,7 +965,7 @@ test('PeerChat blocking stops direct messages both ways and survives a restart',
   Object.assign(receiver.rooms.get(directRoom.roomKey), { isDM: true, dmWith: sender.localId })
   senderPeer.rooms.push(directRoom.roomKey)
 
-  receiver.unblockPeer({ peerId: sender.localId })
+  await receiver.unblockPeer({ peerId: sender.localId })
   await receiver.handlePeerMessage(senderPeer, {
     id: 'allowed-dm-message',
     roomKey: directRoom.roomKey,
@@ -975,7 +975,7 @@ test('PeerChat blocking stops direct messages both ways and survives a restart',
   })
   assert.equal((await receiver.getSnapshot({ roomKey: directRoom.roomKey, version: -1 })).messages.length, 1)
 
-  receiver.blockPeer({ peerId: sender.localId, username: 'Alice' })
+  await receiver.blockPeer({ peerId: sender.localId, username: 'Alice' })
   await receiver.handlePeerMessage(senderPeer, {
     id: 'blocked-dm-message',
     roomKey: directRoom.roomKey,
@@ -983,9 +983,13 @@ test('PeerChat blocking stops direct messages both ways and survives a restart',
     ...encryptPeerChatMessage('After the block', directRoom.roomKey),
     ts: Date.now() + 1
   })
+  // Everything they sent is hidden, including what came before the block.
+  assert.equal((await receiver.getSnapshot({ roomKey: directRoom.roomKey, version: -1 })).messages.length, 0)
+  // Unblocking brings back what was kept. What arrived while blocked never was.
+  await receiver.unblockPeer({ peerId: sender.localId })
   const dmMessages = (await receiver.getSnapshot({ roomKey: directRoom.roomKey, version: -1 })).messages
-  assert.equal(dmMessages.length, 1)
-  assert.equal(dmMessages[0].message, 'Before the block')
+  assert.deepEqual(dmMessages.map((message) => message.message), ['Before the block'])
+  await receiver.blockPeer({ peerId: sender.localId, username: 'Alice' })
 
   await receiver.close()
   const restarted = await new PeerChatService({
@@ -995,14 +999,67 @@ test('PeerChat blocking stops direct messages both ways and survives a restart',
   assert.equal(restarted.isPeerBlocked(sender.localId), true)
   assert.equal(restarted.listBlockedPeers()[0].username, 'Alice')
 
-  const unblocked = restarted.unblockPeer({ peerId: sender.localId })
+  const unblocked = await restarted.unblockPeer({ peerId: sender.localId })
   assert.deepEqual(unblocked.blockedPeers, [])
   assert.equal(restarted.isPeerBlocked(sender.localId), false)
-  assert.throws(() => restarted.unblockPeer({ peerId: sender.localId }), /not blocked/)
-  assert.throws(() => restarted.blockPeer({ peerId: restarted.localId }), /cannot block yourself/)
+  await assert.rejects(restarted.unblockPeer({ peerId: sender.localId }), /not blocked/)
+  await assert.rejects(restarted.blockPeer({ peerId: restarted.localId }), /cannot block yourself/)
 
   await sender.close()
   await restarted.close()
+})
+
+// App Review asks that a block take the person's content out of view at once.
+// It used to stop direct messages only, and a blocked person kept talking in
+// every shared room.
+test('PeerChat blocking hides a person in shared rooms too, and unblocking brings them back', async (t) => {
+  const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-block-room-'))
+  t.after(() => rm(storagePath, { recursive: true, force: true }))
+  const service = await new PeerChatService({ sdk: createFakeSdk(new Map(), 21), storagePath }).start()
+  service.setProfile({ username: 'Bob', bio: '' })
+  const room = await service.joinRoom({ roomKey: ROOM_KEY })
+
+  const mallory = createFakePeer('ab12ab12', 'Mallory')
+  const carol = createFakePeer('cd34cd34', 'Carol')
+  for (const peer of [mallory, carol]) {
+    peer.rooms.push(room.roomKey)
+    service.peers.set(peer.connection, peer)
+  }
+  const say = (peer, id, text, ts) => service.handlePeerMessage(peer, {
+    id,
+    roomKey: room.roomKey,
+    sn: peer.username,
+    ...encryptPeerChatMessage(text, room.roomKey),
+    ts
+  })
+  const now = Date.now()
+  await say(carol, 'carol-1', 'Hello all', now)
+  await say(mallory, 'mallory-1', 'Something nasty', now + 1)
+
+  const before = (await service.getSnapshot({ roomKey: room.roomKey, version: -1 })).messages
+  assert.deepEqual(before.map((message) => message.message), ['Hello all', 'Something nasty'])
+
+  await service.blockPeer({ peerId: mallory.id, username: 'Mallory' })
+  const hidden = await service.getSnapshot({ roomKey: room.roomKey, version: -1 })
+  assert.deepEqual(hidden.messages.map((message) => message.message), ['Hello all'])
+  // The chat list stops quoting them as well.
+  assert.equal(hidden.room.lastMessage.message, 'Hello all')
+
+  // Nothing new from them shows, counts as unread, or would notify.
+  const unreadBefore = service.rooms.get(room.roomKey).unreadCount
+  await say(mallory, 'mallory-2', 'Still here', now + 2)
+  assert.equal(service.rooms.get(room.roomKey).unreadCount, unreadBefore)
+  assert.equal(service.publicRoom(service.rooms.get(room.roomKey)).lastMessage.message, 'Hello all')
+  assert.deepEqual(
+    (await service.getSnapshot({ roomKey: room.roomKey, version: -1 })).messages.map((message) => message.message),
+    ['Hello all']
+  )
+
+  await service.unblockPeer({ peerId: mallory.id })
+  const back = await service.getSnapshot({ roomKey: room.roomKey, version: -1 })
+  assert.deepEqual(back.messages.map((message) => message.message), ['Hello all', 'Something nasty', 'Still here'])
+  assert.equal(back.room.lastMessage.message, 'Still here')
+  await service.close()
 })
 
 test('PeerChat restores malformed direct-message state as a regular room', async (t) => {

@@ -196,9 +196,9 @@ export class PeerChatService {
     this.leftRooms = new Map()
     this.rooms = new Map()
     this.pendingDirectMessages = new Map()
-    // Blocking is deliberately narrow: it stops direct messages only. A blocked
-    // person stays visible in shared rooms, the way the messengers people
-    // already know behave.
+    // Blocking someone hides everything they send, in every room, and stops
+    // their direct messages and requests. It all stays on disk, so unblocking
+    // brings it back.
     this.blockedPeers = new Map()
     this.moderator = createPeerChatModerator()
     this.feeds = new Map()
@@ -588,7 +588,7 @@ export class PeerChatService {
     return [...this.blockedPeers.values()].sort((left, right) => right.blockedAt - left.blockedAt)
   }
 
-  blockPeer ({ peerId, username } = {}) {
+  async blockPeer ({ peerId, username } = {}) {
     const id = normalizePeerChatPeerId(peerId)
     if (!id) throw new Error('PeerChat peer not found.')
     if (id === this.localId) throw new Error('You cannot block yourself.')
@@ -608,6 +608,7 @@ export class PeerChatService {
       if (pending.fromId === id) this.pendingDirectMessages.delete(key)
     }
 
+    await this.refreshLastMessages()
     this.persistNow()
     this.bumpVersion()
     return {
@@ -617,12 +618,20 @@ export class PeerChatService {
     }
   }
 
-  unblockPeer ({ peerId } = {}) {
+  async unblockPeer ({ peerId } = {}) {
     const id = normalizePeerChatPeerId(peerId)
     if (!id || !this.blockedPeers.delete(id)) throw new Error('PeerChat peer is not blocked.')
+    await this.refreshLastMessages()
     this.persistNow()
     this.bumpVersion()
     return { blockedPeers: this.listBlockedPeers(), version: this.version }
+  }
+
+  // A room's preview line, worked out again after a block or an unblock.
+  async refreshLastMessages () {
+    for (const roomKey of this.rooms.keys()) {
+      if (this.feeds.has(roomKey)) await this.updateLastMessage(roomKey)
+    }
   }
 
   setRoomPinned ({ roomKey, pinned } = {}) {
@@ -2163,7 +2172,7 @@ export class PeerChatService {
     if (!room || this.activeRoomKey === roomKey) return
 
     const sender = String(entry?.sender || '').toLowerCase()
-    if (!sender || sender === this.localId) return
+    if (!sender || sender === this.localId || this.isPeerBlocked(sender)) return
     const timestamp = normalizePeerChatTimestamp(entry?.ts)
     if (timestamp <= (room.lastReadTs || 0)) return
 
@@ -2188,9 +2197,15 @@ export class PeerChatService {
     const room = this.rooms.get(roomKey)
     const feed = this.feeds.get(roomKey)
     if (!room || !feed || feed.length === 0) return
+    if (suppliedEntry && this.isPeerBlocked(suppliedEntry.sender)) return
 
     try {
-      const entry = suppliedEntry || await feed.get(feed.length - 1)
+      const entry = suppliedEntry || await this.lastVisibleEntry(feed)
+      if (!entry) {
+        room.lastMessage = null
+        this.schedulePersist()
+        return
+      }
       if (entry?.type === 'reaction' && entry.emoji) {
         const sender = String(entry.sender || '').slice(0, 200)
         room.lastMessage = {
@@ -2216,6 +2231,19 @@ export class PeerChatService {
     } catch {}
   }
 
+  // The newest entry that is not from someone blocked, looked for as far back
+  // as a room's history is ever read.
+  async lastVisibleEntry (feed) {
+    const firstIndex = Math.max(0, feed.length - MAX_RETURNED_ENTRIES)
+    for (let index = feed.length - 1; index >= firstIndex; index -= 1) {
+      try {
+        const entry = await feed.get(index)
+        if (!this.isPeerBlocked(entry?.sender)) return entry
+      } catch {}
+    }
+    return null
+  }
+
   async readMessages (roomKey) {
     const feed = this.feeds.get(roomKey)
     if (!feed) return []
@@ -2228,6 +2256,7 @@ export class PeerChatService {
       try {
         const entry = await feed.get(index)
         this.collectEntryAuthor(authors, entry)
+        if (this.isPeerBlocked(entry?.sender)) continue
         if (entry?.type === 'reaction') {
           this.collectReaction(reactions, entry)
           continue

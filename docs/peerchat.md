@@ -107,11 +107,18 @@ redirect; limits redirects and response bytes; and stops after a fixed time
 budget. Remote peers cannot use a received message to make this device fetch an
 arbitrary preview URL.
 
-## Invite links and reports
+## Invite links, blocking and reports
 
 A room or message-request link can come from any web page, so opening one only
 asks: joining a room or sending a request shows the people there your name, bio
 and photo. Scanning a QR code is already a choice you made, so it goes ahead.
+
+Press and hold a message, or open someone's profile, to report them or block
+them. A block hides everything that person sends, in every room, the moment it
+is made: their messages, reactions, unread counts, notifications and the chat
+list's preview line. It also stops their direct messages and requests, and
+takes them out of Find people. What they sent stays on disk, so unblocking
+brings it back. Blocking and reporting together is one tap.
 
 A report goes to the maintainers by email. It names the room by the first 16 hex
 characters of the SHA-256 of its key, never the key, which would let whoever

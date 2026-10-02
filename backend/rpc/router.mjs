@@ -435,7 +435,7 @@ export async function routeRpcRequest (req) {
       const peerChat = await getPeerChatService()
       replyJson(req, {
         ok: true,
-        ...peerChat.blockPeer(parseJsonMessage(req.data))
+        ...await peerChat.blockPeer(parseJsonMessage(req.data))
       })
       return
     }
@@ -444,7 +444,7 @@ export async function routeRpcRequest (req) {
       const peerChat = await getPeerChatService()
       replyJson(req, {
         ok: true,
-        ...peerChat.unblockPeer(parseJsonMessage(req.data))
+        ...await peerChat.unblockPeer(parseJsonMessage(req.data))
       })
       return
     }

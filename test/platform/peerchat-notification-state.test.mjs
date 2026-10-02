@@ -189,8 +189,10 @@ test('PeerChat answers the questions a first-time user actually asks', async () 
   // Several devices at once, each with its label.
   assert.match(answer(/phone and my computer/), /as many computers as you like, all at the same time/)
 
-  // Reporting says what it sends.
-  assert.match(answer(/bothering me/), /room.s key in it/)
+  // Blocking and reporting say what they do, and the room key stays out of it.
+  assert.match(answer(/bothering me/), /Everything they send disappears for you, in every chat/)
+  assert.match(answer(/bothering me/), /with the message you reported/)
+  assert.doesNotMatch(answer(/bothering me/), /key/)
 })
 
 test('PeerChat shows the questions folded, on the welcome screen and in About', async () => {

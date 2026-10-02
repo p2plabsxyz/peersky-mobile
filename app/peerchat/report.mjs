@@ -37,8 +37,9 @@ export function buildPeerChatReport ({ member, roomName = '', roomId = '', messa
     'What happened?',
     '',
     '',
-    'Please describe the behaviour above. PeerChat is peer to peer, so nobody',
-    'can remove content for you, but blocking stops their direct messages.'
+    'Please describe what happened above. PeerChat is peer to peer, so there is',
+    'no server to delete messages from, but blocking this person hides',
+    'everything they send on your device.'
   )
 
   const subject = `PeerChat report: ${name}`

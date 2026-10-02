@@ -63,8 +63,8 @@ test('find people offers your code and the welcome room as the directory', async
   // The directory is the welcome room's own member list, not a service.
   assert.match(screen, /rooms\.find\(\(room\) => room\.roomKey === PRE_JOINED_PEERCHAT_ROOM_KEY\)\?\.members/)
   assert.match(screen, /No directory/)
-  // You are not in your own search results.
-  assert.match(screen, /\.filter\(\(member\) => !member\.self\)/)
+  // You are not in your own search results, and nor is anyone you blocked.
+  assert.match(screen, /\.filter\(\(member\) => !member\.self && !blockedPeers\.some/)
 })
 
 test('a scanned code asks rather than joins, and both kinds of code work', async () => {

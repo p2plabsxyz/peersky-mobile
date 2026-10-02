@@ -450,9 +450,10 @@ export function PeerChatScreen ({
   // The welcome room is the only place everyone is, so its member list is the
   // nearest thing PeerChat has to a directory. Nothing is uploaded anywhere for
   // this: it is the same list the room already keeps.
+  // Someone blocked is not offered as a person to find.
   const directory = filterPeerChatMembers(
     (rooms.find((room) => room.roomKey === PRE_JOINED_PEERCHAT_ROOM_KEY)?.members || [])
-      .filter((member) => !member.self),
+      .filter((member) => !member.self && !blockedPeers.some((blocked) => blocked.peerId === member.id)),
     discoverQuery
   ) as PeerChatMember[]
   const myInviteUrl = buildPeerChatDirectInviteUrl(profile?.id || '')
@@ -1353,12 +1354,27 @@ export function PeerChatScreen ({
     return blockedPeers.some((blocked) => blocked.peerId === member.id)
   }
 
-  function confirmBlockPeer (member: PeerChatMember) {
+  // A block takes everything they send out of view at once. Blocking and
+  // reporting together is one tap, since someone worth blocking is often
+  // worth telling us about.
+  function confirmBlockPeer (
+    member: PeerChatMember,
+    from: PeerChatRoom | null = activeRoom,
+    message: PeerChatMessage | null = null
+  ) {
+    setProfileTarget(null)
     Alert.alert(
       `Block ${member.username}?`,
-      'Their direct messages stop, both ways, and they cannot send another request. You can unblock them in settings.',
+      'You will not see anything they send, in any chat, and they cannot message you directly. You can unblock them in PeerChat settings.',
       [
         { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Block and report',
+          onPress: () => {
+            void blockMember(member)
+            void reportMember(member, from, message)
+          }
+        },
         { text: 'Block', style: 'destructive', onPress: () => void blockMember(member) }
       ]
     )
@@ -1372,7 +1388,8 @@ export function PeerChatScreen ({
       if (!mountedRef.current) return
       setBlockedPeers(response.blockedPeers || [])
       setPendingDirectMessages(response.pendingDirectMessages || [])
-      onStatus(`Blocked direct messages from ${member.username}`)
+      versionRef.current = -1
+      onStatus(`Blocked ${member.username}`)
     })
   }
 
@@ -1383,6 +1400,7 @@ export function PeerChatScreen ({
       if (!response.ok) throw new Error(response.error || 'Unable to unblock this person.')
       if (!mountedRef.current) return
       setBlockedPeers(response.blockedPeers || [])
+      versionRef.current = -1
       onStatus(`Unblocked ${username}`)
     })
   }
@@ -1391,12 +1409,21 @@ export function PeerChatScreen ({
     await unblockPeerId(member.id, member.username)
   }
 
-  async function reportMember (member: PeerChatMember, from: PeerChatRoom | null = activeRoom) {
+  async function reportMember (
+    member: PeerChatMember,
+    from: PeerChatRoom | null = activeRoom,
+    message: PeerChatMessage | null = null
+  ) {
     setProfileTarget(null)
     const roomId = from?.roomKey
       ? (await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, from.roomKey)).slice(0, 16)
       : ''
-    const report = buildPeerChatReport({ member, roomName: from?.name, roomId })
+    const report = buildPeerChatReport({
+      member,
+      roomName: from?.name,
+      roomId,
+      message: message ? { text: message.message, ts: message.timestamp } : null
+    })
     Linking.openURL(report.url).catch(() => {
       // No mail app set up. The report still has to be able to leave.
       Alert.alert(
@@ -1725,6 +1752,30 @@ export function PeerChatScreen ({
 
   function showMessageInfo () {
     setIsMessageInfoVisible(true)
+  }
+
+  // Who sent a message, as a member, so it can be reported or blocked from
+  // the message itself.
+  function messageSender (message: PeerChatMessage): PeerChatMember {
+    const known = activeRoom?.members?.find((member) => member.id === message.sender)
+    return known || {
+      id: message.sender,
+      username: message.senderName || message.sender,
+      bio: '',
+      avatar: null,
+      self: false,
+      online: false
+    }
+  }
+
+  function reportMessage (message: PeerChatMessage) {
+    setMessageActionTarget(null)
+    void reportMember(messageSender(message), activeRoom, message)
+  }
+
+  function blockMessageSender (message: PeerChatMessage) {
+    setMessageActionTarget(null)
+    confirmBlockPeer(messageSender(message), activeRoom, message)
   }
 
   function sendReaction (messageId: string, emoji: string) {
@@ -2622,6 +2673,18 @@ export function PeerChatScreen ({
                       <Pressable accessibilityRole='button' onPress={showMessageInfo} style={styles.actionSheetAction}>
                         <Text style={[styles.actionSheetActionText, { color: colors.text }]}>Info</Text>
                       </Pressable>
+                      {!messageActionTarget.self && !messageActionTarget.system && (
+                        <>
+                          <Pressable accessibilityRole='button' onPress={() => reportMessage(messageActionTarget)} style={styles.actionSheetAction}>
+                            <Text style={[styles.actionSheetActionText, { color: colors.danger }]}>Report</Text>
+                          </Pressable>
+                          <Pressable accessibilityRole='button' onPress={() => blockMessageSender(messageActionTarget)} style={styles.actionSheetAction}>
+                            <Text style={[styles.actionSheetActionText, { color: colors.danger }]}>
+                              Block {messageActionTarget.senderName}
+                            </Text>
+                          </Pressable>
+                        </>
+                      )}
                       <Pressable accessibilityRole='button' onPress={() => setMessageActionTarget(null)} style={styles.actionSheetAction}>
                         <Text style={[styles.actionSheetActionText, { color: colors.accent }]}>Cancel</Text>
                       </Pressable>
@@ -2743,7 +2806,7 @@ export function PeerChatScreen ({
           colors={colors}
           isBlocked={isMemberBlocked(profileTarget)}
           member={profileTarget}
-          onBlock={blockMember}
+          onBlock={(member) => confirmBlockPeer(member)}
           onClose={() => setProfileTarget(null)}
           onDismiss={flushPendingModal}
           onMessage={(member) => {
@@ -2983,7 +3046,7 @@ export function PeerChatScreen ({
                         <View key={blocked.peerId} style={[styles.preferenceRow, { backgroundColor: colors.input }]}>
                           <View style={styles.preferenceCopy}>
                             <Text numberOfLines={1} style={[styles.memberName, { color: colors.text }]}>{blocked.username}</Text>
-                            <Text style={[styles.attachmentMeta, { color: colors.muted }]}>Their direct messages are blocked</Text>
+                            <Text style={[styles.attachmentMeta, { color: colors.muted }]}>Hidden everywhere, and cannot message you</Text>
                           </View>
                           <Pressable
                             accessibilityRole='button'
@@ -3298,7 +3361,7 @@ export function PeerChatScreen ({
         colors={colors}
         isBlocked={isMemberBlocked(profileTarget)}
         member={profileTarget}
-        onBlock={blockMember}
+        onBlock={(member) => confirmBlockPeer(member)}
         onClose={() => setProfileTarget(null)}
         onDismiss={flushPendingModal}
         onMessage={(member) => {
@@ -4037,14 +4100,14 @@ function PeerProfileModal ({
                 </Pressable>
                 <Pressable
                   accessibilityHint={isBlocked
-                    ? 'Lets this person send you direct messages again'
-                    : 'Stops direct messages from this person. They can still see you in shared rooms.'}
+                    ? 'Shows what this person sends again, and lets them message you'
+                    : 'Hides everything this person sends, in every chat, and stops their direct messages'}
                   accessibilityRole='button'
                   onPress={() => (isBlocked ? onUnblock(member) : onBlock(member))}
                   style={styles.peerProfileSecondary}
                 >
                   <Text style={[styles.peerProfileSecondaryText, { color: colors.danger }]}>
-                    {isBlocked ? 'Unblock' : 'Block direct messages'}
+                    {isBlocked ? 'Unblock' : 'Block'}
                   </Text>
                 </Pressable>
                 <Pressable

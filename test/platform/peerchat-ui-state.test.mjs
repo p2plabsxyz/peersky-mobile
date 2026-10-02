@@ -137,7 +137,7 @@ test('a long press offers a room its key and a direct message its answers', asyn
 
   // The report names the conversation it came from, which is the direct
   // message itself when there is no room open behind it.
-  assert.match(screen, /function reportMember \(member: PeerChatMember, from: PeerChatRoom \| null = activeRoom\)/)
+  assert.match(screen, /function reportMember \(\s+member: PeerChatMember,\s+from: PeerChatRoom \| null = activeRoom,/)
   assert.match(screen, /reportMember\(peer, from\)/)
 })
 
