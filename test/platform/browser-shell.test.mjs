@@ -6,6 +6,7 @@ import {
   getBrowserBackState,
   getBrowserForwardState,
   formatHyperSiteForPrompt,
+  getBrowserMessagePageUrl,
   getHyperBridgeSite,
   getBrowserRequestAction,
   getHyperSiteId,
@@ -309,9 +310,9 @@ describe('browser shell navigation helpers', () => {
     assert.equal(formatHyperSiteForPrompt(hex), `${hex.slice(0, 8)}…${hex.slice(-4)}`)
   })
 
-  // Android reports a page loaded from a string as about:blank, and iOS hyper
-  // pages have no base address at all. Only a real address elsewhere means the
-  // tab has left its site.
+  // iOS hyper pages have no base address at all, and Android names only the
+  // origin a message came from. Only an address elsewhere means the tab has
+  // left its site.
   test('lets a hyper tab use the bridge until it navigates somewhere else', () => {
     const site = 'ab'.repeat(32)
     const url = `hyper://${site}/index.html`
@@ -323,6 +324,30 @@ describe('browser shell navigation helpers', () => {
     assert.equal(getHyperBridgeSite({ url, reportedUrl: `hyper://${'cd'.repeat(32)}/`, isHyper: true }), null)
     assert.equal(getHyperBridgeSite({ url, reportedUrl: 'about:blank', isHyper: false }), null)
     assert.equal(getHyperBridgeSite({ url: 'https://example.com/', reportedUrl: '', isHyper: true }), null)
+  })
+
+  // What Android hands over, as seen on a phone: "hyper://" for every hyper://
+  // page, and the bare origin for a web page. Turning "hyper://" away refused
+  // every hyper:// request a page made there.
+  test('takes the origin Android reports for the page in the tab', () => {
+    const site = 'ab'.repeat(32)
+    const url = `hyper://${site}/notes/index.html`
+    assert.equal(getHyperBridgeSite({ url, reportedUrl: 'hyper://', isHyper: true }), site)
+    assert.equal(getHyperBridgeSite({ url, reportedUrl: 'https://evil.example', isHyper: true }), null)
+    assert.equal(getHyperBridgeSite({ url, reportedUrl: 'null', isHyper: true }), null)
+    assert.equal(getHyperBridgeSite({ url, reportedUrl: 'hyper://', isHyper: false }), null)
+
+    const page = 'https://example.com/blog/post.html?x=1'
+    assert.equal(getBrowserMessagePageUrl('https://example.com', page), page)
+    assert.equal(getBrowserMessagePageUrl('hyper://', url), url)
+    assert.equal(getBrowserMessagePageUrl('about:blank', page), page)
+    assert.equal(getBrowserMessagePageUrl('', page), page)
+    // iOS gives the address itself, which can be newer than the entry.
+    assert.equal(getBrowserMessagePageUrl('https://example.com/blog/next.html', page), 'https://example.com/blog/next.html')
+    // A message from somewhere else keeps its own origin.
+    assert.equal(getBrowserMessagePageUrl('https://ads.example', page), 'https://ads.example')
+    assert.equal(getBrowserMessagePageUrl('https://example.com:8443', page), 'https://example.com:8443')
+    assert.equal(getBrowserMessagePageUrl('hyper://', page), 'hyper://')
   })
 
   test('guards stale async hyper loads by sequence number', () => {

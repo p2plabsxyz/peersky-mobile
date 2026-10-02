@@ -44,6 +44,7 @@ import {
   getBrowserBackState,
   getBrowserForwardState,
   formatHyperSiteForPrompt,
+  getBrowserMessagePageUrl,
   getHyperBridgeSite,
   getBrowserRequestAction,
   getBrowserWebViewKey,
@@ -100,7 +101,7 @@ import {
   parseExternalAppLink
 } from './browser-permissions.mjs'
 import { getBrowserShortcutTitleFontSize } from './browser-home-layout.mjs'
-import { createHyperBridgeScript } from './hyper-bridge.mjs'
+import { createHyperBridgeScript, withHyperBridgeScript } from './hyper-bridge.mjs'
 import {
   createHyperBridgeReply,
   createHyperBridgeSettleScript,
@@ -1254,11 +1255,17 @@ export default function App () {
         ? response.url
         : nextUrl
 
+      const isMedia = Boolean(response.mediaType && response.mediaUrl)
+      const html = isMedia
+        ? createHyperMediaHtml(response)
+        : createHyperBrowserHtml(response, nextUrl, browserIsDark)
       const source: BrowserSource = {
         kind: 'hyper',
-        html: response.mediaType && response.mediaUrl
-          ? createHyperMediaHtml(response)
-          : createHyperBrowserHtml(response, nextUrl, browserIsDark),
+        // Android runs the before-load script after a page loaded from a
+        // string has run its own, so there the bridge comes in the page itself.
+        html: Platform.OS === 'android' && !isMedia
+          ? withHyperBridgeScript(html, getBrowserTabToken(browserTabsStateRef.current.activeTabId))
+          : html,
         baseUrl: nextUrl
       }
 
@@ -2348,6 +2355,15 @@ export default function App () {
     )
   }
 
+
+  function getBrowserTabToken (tabId: string) {
+    let token = browserMediaTokensRef.current.get(tabId)
+    if (!token) {
+      token = createBrowserMediaToken(Crypto.getRandomValues(new Uint8Array(BROWSER_MEDIA_TOKEN_LENGTH / 2)))
+      browserMediaTokensRef.current.set(tabId, token)
+    }
+    return token
+  }
 
   // expo-print takes markup, not a page address, so printing is a round trip:
   // ask the tab for what it rendered, then hand that to the dialog.
@@ -4403,12 +4419,7 @@ export default function App () {
           const isActive = tab.id === browserTabsState.activeTabId
           const tabPageZoom = normalizeBrowserPageZoom(tab.pageZoom)
           const tabDesktopView = tab.desktopView === true
-          let browserMediaToken = browserMediaTokensRef.current.get(tab.id)
-          if (!browserMediaToken) {
-            const tokenBytes = Crypto.getRandomValues(new Uint8Array(BROWSER_MEDIA_TOKEN_LENGTH / 2))
-            browserMediaToken = createBrowserMediaToken(tokenBytes)
-            browserMediaTokensRef.current.set(tab.id, browserMediaToken)
-          }
+          const browserMediaToken = getBrowserTabToken(tab.id)
           const tabIncognito = tab.incognito === true
           const browserNativeConfig = peerSkyWebViewNativeConfig
             ? {
@@ -4612,9 +4623,10 @@ export default function App () {
                   }
                 )) return
 
+                const pageUrl = getBrowserMessagePageUrl(event.nativeEvent.url, entry.url)
                 const mediaTarget = parseBrowserMediaMessage(
                   event.nativeEvent.data,
-                  event.nativeEvent.url || entry.url,
+                  pageUrl,
                   browserMediaToken
                 ) as BrowserMediaTarget | null
                 if (mediaTarget) {
@@ -4629,17 +4641,14 @@ export default function App () {
                   browserMediaToken
                 )
                 if (printHtml) {
-                  void printBrowserPage(printHtml, event.nativeEvent.url || entry.url)
+                  void printBrowserPage(printHtml, pageUrl)
                     .then((problem) => {
                       if (problem) Alert.alert('Unable to print', problem)
                     })
                   return
                 }
 
-                const favicon = parseBrowserFaviconMessage(
-                  event.nativeEvent.data,
-                  event.nativeEvent.url || entry.url
-                )
+                const favicon = parseBrowserFaviconMessage(event.nativeEvent.data, pageUrl)
                 if (favicon === undefined) return
 
                 // The tab list loads icons through the shared image cache, which

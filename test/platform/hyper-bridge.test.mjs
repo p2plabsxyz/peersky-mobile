@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import vm from 'node:vm'
+import { readFile } from 'node:fs/promises'
 import {
   createHyperBridgeScript,
   HYPER_BRIDGE_CHUNK,
   HYPER_BRIDGE_MAX_BODY_CHARACTERS,
-  HYPER_BRIDGE_REQUEST
+  HYPER_BRIDGE_REQUEST,
+  withHyperBridgeScript
 } from '../../app/hyper-bridge.mjs'
 import {
   createHyperBridgeReply,
@@ -210,6 +212,52 @@ test('a page that replaces JSON.stringify or postMessage later never sees the to
   assert.ok(!leaks.some((value) => String(value).includes(TOKEN)), 'the page saw the token')
   assert.equal(typeof context.__peerskyHyperBridge.settle, 'function')
   assert.equal(Object.isFrozen(context.__peerskyHyperBridge), true)
+})
+
+// Android runs the before-load script from onPageStarted. A page loaded from a
+// string has run its own scripts by then, even one at the end of <body>, so a
+// hyper:// page that fetched as it loaded had the browser's own fetch, which
+// knows nothing of hyper://.
+test('on Android the bridge is the first script in the page, and leaves no trace', () => {
+  const page = '<!DOCTYPE html>\n<html><head><script>window.pageRan = true</script></head><body></body></html>'
+  const html = withHyperBridgeScript(page, TOKEN)
+  assert.ok(html.startsWith('<!DOCTYPE html><script>'), 'the doctype stays first, or the page drops into quirks mode')
+  assert.ok(html.indexOf('__peerskyHyperBridge') < html.indexOf('window.pageRan'))
+  assert.ok(html.endsWith(page.slice('<!DOCTYPE html>'.length)))
+  assert.ok(withHyperBridgeScript('<p>no doctype</p>', TOKEN).startsWith('<script>'))
+
+  const inline = html.slice(html.indexOf('<script>') + '<script>'.length, html.indexOf('</script>'))
+  const removed = []
+  const context = vm.createContext({
+    URL,
+    TextEncoder,
+    btoa,
+    atob,
+    document: { baseURI: 'hyper://site/', currentScript: { remove: () => removed.push(true) } },
+    ReactNativeWebView: { postMessage () {} },
+    fetch: async () => { throw new Error('not hyper') }
+  })
+  context.window = context
+  vm.runInContext(inline, context)
+  assert.equal(typeof context.__peerskyHyperBridge.settle, 'function')
+  assert.equal(String(context.fetch).includes('isHyper'), true)
+  // Out of the page once it has run, so no later script reads the token in it.
+  assert.deepEqual(removed, [true])
+  // The copy the WebView injects on iOS finds it already there.
+  vm.runInContext(createHyperBridgeScript('b'.repeat(32)), context)
+  assert.equal(String(context.fetch).includes('isHyper'), true)
+})
+
+test('only Android pages carry the bridge, and every message reads its page one way', async () => {
+  const app = await readFile(new URL('../../app/index.tsx', import.meta.url), 'utf8')
+  assert.match(app, /html: Platform\.OS === 'android' && !isMedia\s+\? withHyperBridgeScript\(html, getBrowserTabToken\(browserTabsStateRef\.current\.activeTabId\)\)\s+: html/)
+  assert.match(app, /const pageUrl = getBrowserMessagePageUrl\(event\.nativeEvent\.url, entry\.url\)/)
+  assert.match(app, /printBrowserPage\(printHtml, pageUrl\)/)
+  assert.match(app, /parseBrowserFaviconMessage\(event\.nativeEvent\.data, pageUrl\)/)
+  // An error event names the address that failed in full; a message names
+  // only an origin on Android, so none of the message paths take it as is.
+  const onMessage = app.slice(app.indexOf('const pageUrl = getBrowserMessagePageUrl'), app.indexOf('onError={(event) => {', app.indexOf('const pageUrl = getBrowserMessagePageUrl')))
+  assert.doesNotMatch(onMessage, /event\.nativeEvent\.url \|\| entry\.url/)
 })
 
 // A page built on hyper commonly posts a form. The bridge refused outright,

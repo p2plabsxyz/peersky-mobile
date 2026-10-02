@@ -17,6 +17,22 @@ export const HYPER_BRIDGE_CHUNK_CHARACTERS = 256 * 1024
 export const HYPER_BRIDGE_MAX_BODY_CHARACTERS = 32 * 1024 * 1024
 
 /**
+ * The page with the bridge as its first script. Android runs a WebView's
+ * before-load script from onPageStarted, and by then a page loaded from a
+ * string has already run its own scripts, so a page that fetched hyper:// as
+ * it loaded got the browser's own fetch. The script takes itself out of the
+ * page once it has run, token and all.
+ */
+export function withHyperBridgeScript (html, token) {
+  const script = `<script>${createHyperBridgeScript(token)};document.currentScript&&document.currentScript.remove()</script>`
+  const source = String(html || '')
+  const doctype = /^\s*<!doctype[^>]*>/i.exec(source)
+  return doctype
+    ? `${doctype[0]}${script}${source.slice(doctype[0].length)}`
+    : `${script}${source}`
+}
+
+/**
  * @param {string} token Shared with the native side so a page cannot forge a
  *   reply into another page's pending request.
  */

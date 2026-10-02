@@ -17,7 +17,10 @@ A page served over `hyper://` can call `fetch('hyper://...')` the way it does
 on desktop. The phone has no protocol handler for that, so the call crosses
 the React Native bridge to the Bare worklet (`app/hyper-bridge.mjs`), and the
 backend applies a few rules to anything a page asks for
-(`backend/hyper/page-access.mjs`):
+(`backend/hyper/page-access.mjs`). iOS adds the bridge before the page loads.
+Android runs that script only after a page loaded from a string has run its
+own, so there the bridge is the page's first script, and it removes itself
+once it has run.
 
 - **Writes ask first.** The first time a site tries to create a drive or save a
   file, PeerSky asks whether it may publish. The answer is kept per site and can

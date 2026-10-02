@@ -272,17 +272,31 @@ export function getHyperSiteId (url) {
 }
 
 /**
+ * The page a tab's message came from. iOS reports the page's address, or
+ * about:blank for one loaded from a string. Android reports only the origin:
+ * https://example.com for any page on that site, and hyper:// for every
+ * hyper:// page. When that fits the tab's own entry, the entry says more.
+ */
+export function getBrowserMessagePageUrl (reportedUrl, entryUrl) {
+  const reported = String(reportedUrl || '')
+  if (!reported || reported.startsWith('about:')) return entryUrl
+  try {
+    const entry = new URL(entryUrl)
+    if (reported === (entry.protocol === 'hyper:' ? 'hyper://' : entry.origin)) return entryUrl
+  } catch {}
+  return reported
+}
+
+/**
  * The site a hyper:// tab's bridge request speaks for, or null when it may not
- * use the bridge. A WebView reports a page it loaded from a string as
- * about:blank, so only an address from somewhere else counts against the tab:
- * one that navigated off to the web.
+ * use the bridge: the page that sent it is somewhere else, such as a web page
+ * the tab navigated off to.
  */
 export function getHyperBridgeSite ({ url, reportedUrl = '', isHyper }) {
   const siteId = isHyper ? getHyperSiteId(url) : null
   if (!siteId) return null
-  const reported = String(reportedUrl || '').split('#')[0]
-  if (reported && !reported.startsWith('about:') && getHyperSiteId(reported) !== siteId) return null
-  return siteId
+  const page = getBrowserMessagePageUrl(String(reportedUrl || '').split('#')[0], url)
+  return getHyperSiteId(page) === siteId ? siteId : null
 }
 
 export function formatHyperSiteForPrompt (siteId) {
