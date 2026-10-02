@@ -364,6 +364,11 @@ async function getHyperWriteFetch (runtime) {
   return fetch
 }
 
+/** Looks for peers of the drive behind url again, as a retry does. */
+export function refreshHyperNetworkFor (url) {
+  return withHyperRuntimeForAddress(url, (runtime) => refreshHyperRuntimeNetwork(runtime))
+}
+
 export function routedHyperFetch (url, options) {
   return withHyperRuntimeForAddress(url, async (runtime) => {
     await prepareHyperRead(runtime, url)
