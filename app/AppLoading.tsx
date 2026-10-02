@@ -1,17 +1,15 @@
 import { useEffect, useRef } from 'react'
-import { Animated, Easing, Image, StyleSheet, Text, View } from 'react-native'
+import { Animated, Easing, Image, StyleSheet, View } from 'react-native'
 
 import { BROWSER_PALETTES } from './browser-appearance.mjs'
 
 const LOADING_ICONS = {
-  hyper: require('../assets/images/loading/hyperdrive.png'),
   p2pmd: require('../assets/images/loading/p2pmd.png'),
   peerchat: require('../assets/images/loading/peerchat.png'),
   peertunes: require('../assets/images/loading/peertunes.png')
 }
 
 const APP_NAMES = {
-  hyper: 'Hyperdrive',
   p2pmd: 'P2PMD',
   peerchat: 'PeerChat',
   peertunes: 'PeerTunes'
@@ -26,15 +24,7 @@ const SEGMENT_WIDTH = 36
  * An app on its way up: its own icon, held still, over a thin bar that moves.
  * The icon says which app without reading; the bar says it is still working.
  */
-export function AppLoading ({
-  app,
-  isDark,
-  message
-}: {
-  app: LoadingApp
-  isDark: boolean
-  message?: string
-}) {
+export function AppLoading ({ app, isDark }: { app: LoadingApp, isDark: boolean }) {
   const palette = isDark ? BROWSER_PALETTES.dark : BROWSER_PALETTES.light
   const appear = useRef(new Animated.Value(0)).current
   const sweep = useRef(new Animated.Value(0)).current
@@ -83,7 +73,6 @@ export function AppLoading ({
             ]}
           />
         </View>
-        {message ? <Text style={[styles.message, { color: palette.mutedText }]}>{message}</Text> : null}
       </Animated.View>
     </View>
   )
@@ -100,7 +89,6 @@ const styles = StyleSheet.create({
   // The artwork leaves a wide margin around the glyph, so the image is sized
   // well past the glyph it shows.
   icon: { height: 136, resizeMode: 'contain', width: 136 },
-  message: { fontSize: 14, marginTop: 8, textAlign: 'center' },
   segment: {
     borderRadius: 1.5,
     height: 3,

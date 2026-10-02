@@ -239,11 +239,6 @@ function handleRequest (req, res) {
     return
   }
 
-  if (req.method === 'GET' && pathname === '/lib/yjs.min.js') {
-    sendScript(res, 200, yjsBrowserScript)
-    return
-  }
-
   if (req.method === 'GET' && pathname === '/hyper/file') {
     const url = getQueryParam(req.url, 'url')
     readHyperFile({ url })
@@ -366,15 +361,6 @@ function sendHtml (res, statusCode, body) {
   res.statusCode = statusCode
   res.setHeader('Content-Type', 'text/html; charset=utf-8')
   res.setHeader('Cache-Control', 'no-store')
-  setCorsHeaders(res)
-  res.setHeader('Connection', 'close')
-  res.end(body)
-}
-
-function sendScript (res, statusCode, body) {
-  res.statusCode = statusCode
-  res.setHeader('Content-Type', 'application/javascript; charset=utf-8')
-  res.setHeader('Cache-Control', 'public, max-age=86400')
   setCorsHeaders(res)
   res.setHeader('Connection', 'close')
   res.end(body)

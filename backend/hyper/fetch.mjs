@@ -32,13 +32,6 @@ let hyperFetches = new WeakMap()
 let hyperWriteFetches = new WeakMap()
 
 export { stopHyperAssetServer } from './asset-server.mjs'
-export {
-  DEFAULT_HYPER_DISCOVERY_MAX_RETRY_DELAY,
-  DEFAULT_HYPER_DISCOVERY_RETRIES,
-  DEFAULT_HYPER_DISCOVERY_RETRY_DELAY,
-  isPeerDiscoveryError,
-  withHyperRetry
-} from './fetch-retry.mjs'
 
 export function resetHyperFetch () {
   hyperFetches = new WeakMap()

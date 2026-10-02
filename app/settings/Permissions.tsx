@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import {
   AppState,
   Linking,
-  Platform,
   Pressable,
   StyleSheet,
   Text,

@@ -12,7 +12,6 @@ import {
   Animated,
   Easing,
   Image,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -56,7 +55,6 @@ import TrashIcon from '../../assets/icons/bootstrap/trash.svg'
 import UniversalAccessIcon from '../../assets/icons/bootstrap/universal-access-circle.svg'
 import DisplayIcon from '../../assets/icons/bootstrap/display.svg'
 import DatabaseIcon from '../../assets/icons/bootstrap/database.svg'
-import { MODAL_ORIENTATIONS } from '../modal-orientations'
 import { LAN_PERMISSION_HELP, LAN_PERMISSION_TITLE, offerPermissionSettings } from '../permission-prompt'
 
 export type SettingsPage =
@@ -680,7 +678,7 @@ async function withTimeout<T> (promise: Promise<T>, timeoutMs: number) {
   try {
     return await Promise.race([
       promise,
-      new Promise<T>((resolve, reject) => {
+      new Promise<T>((_resolve, reject) => {
         timer = setTimeout(() => reject(new Error('LAN status request timed out')), timeoutMs)
       })
     ])
@@ -941,23 +939,10 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '800'
   },
-  placeholder: {
-    backgroundColor: '#ffffff',
-    borderBottomColor: '#e1e7f0',
-    borderBottomWidth: 1,
-    gap: 7,
-    paddingHorizontal: 20,
-    paddingVertical: 22
-  },
   placeholderTitle: {
     color: '#1f2a44',
     fontSize: 16,
     fontWeight: '800'
-  },
-  placeholderDescription: {
-    color: '#687086',
-    fontSize: 14,
-    lineHeight: 20
   },
   errorBanner: {
     backgroundColor: '#fff1f3',

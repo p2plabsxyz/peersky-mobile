@@ -3,11 +3,9 @@ import { printAsync } from 'expo-print'
 import { canPrintBrowserUrl, withPrintBaseHref } from './browser-print.mjs'
 
 export {
-  BROWSER_PRINT_MESSAGE_TYPE,
   canPrintBrowserUrl,
   createBrowserPrintScript,
-  parseBrowserPrintMessage,
-  withPrintBaseHref
+  parseBrowserPrintMessage
 } from './browser-print.mjs'
 
 export async function printBrowserPage (html: string, pageUrl: string): Promise<string | null> {

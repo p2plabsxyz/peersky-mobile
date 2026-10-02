@@ -11,7 +11,6 @@ import {
   deleteRegisteredP2pAppData,
   getExistingNamedDrive,
   listRegisteredP2pAppData,
-  resolveHyperdriveAppDriveName,
   resolveHyperdriveUploadTarget
 } from '../../backend/hyper/storage-core.mjs'
 
@@ -100,13 +99,6 @@ describe('Hyper app storage', () => {
       await store.close()
       await rm(storagePath, { recursive: true, force: true })
     }
-  })
-
-  test('uses one stable app drive unless a valid explicit name is provided', () => {
-    assert.equal(resolveHyperdriveAppDriveName(), 'hyperdrive')
-    assert.equal(resolveHyperdriveAppDriveName(''), 'hyperdrive')
-    assert.equal(resolveHyperdriveAppDriveName('custom-drive'), 'custom-drive')
-    assert.equal(resolveHyperdriveAppDriveName('../unsafe'), 'hyperdrive')
   })
 
   test('resolves public, private, and device-only Hyperdrive upload targets', () => {

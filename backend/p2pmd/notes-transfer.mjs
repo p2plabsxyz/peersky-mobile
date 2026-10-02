@@ -14,7 +14,7 @@ import b4a from 'b4a'
 import { P2PMD_INCOMING_FILE } from './constants.mjs'
 import { loadP2pmdRoomSnapshot, saveP2pmdRoomSnapshot } from './snapshots.mjs'
 
-export { P2PMD_INCOMING_FILE, PHONE_P2PMD_FILE } from './constants.mjs'
+export { P2PMD_INCOMING_FILE } from './constants.mjs'
 
 export const P2PMD_NOTES_TRANSFER_VERSION = 1
 // The recent list shows five, here and on the desktop.

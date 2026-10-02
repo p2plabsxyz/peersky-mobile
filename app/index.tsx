@@ -486,8 +486,6 @@ export default function App () {
   const [pendingIncomingUrl, setPendingIncomingUrl] = useState<string | null>(null)
   const [browserCanGoBack, setBrowserCanGoBack] = useState(false)
   const [browserCanGoForward, setBrowserCanGoForward] = useState(false)
-  const [browserWebCanGoBack, setBrowserWebCanGoBack] = useState(false)
-  const [browserWebCanGoForward, setBrowserWebCanGoForward] = useState(false)
   const [browserIsLoading, setBrowserIsLoading] = useState(false)
   const [activeTab, setActiveTab] = useState<RuntimeTab>('hyper')
   const [requestedPeerChatRoomKey, setRequestedPeerChatRoomKey] = useState<string | null>(null)
@@ -1010,14 +1008,6 @@ export default function App () {
           : activeTab?.webCanGoForward || false
       }) as BrowserTabsState
     })
-
-    if (typeof nextState.webCanGoBack === 'boolean') {
-      setBrowserWebCanGoBack(nextState.webCanGoBack)
-    }
-
-    if (typeof nextState.webCanGoForward === 'boolean') {
-      setBrowserWebCanGoForward(nextState.webCanGoForward)
-    }
   }
 
   function updateBrowserTabTitle (tabId: string, title: string) {
@@ -1673,8 +1663,6 @@ export default function App () {
     setBrowserSource(entry.source)
     setBrowserCanGoBack(tab.historyIndex > 0)
     setBrowserCanGoForward(tab.history.length > tab.historyIndex + 1)
-    setBrowserWebCanGoBack(tab.webCanGoBack)
-    setBrowserWebCanGoForward(tab.webCanGoForward)
     setBrowserTitle(normalizeBrowserTabTitle(tab.title || getBrowserEntryTitle(entry)))
     setBrowserFavicon(
       entry.source.kind === 'web' || entry.source.kind === 'hyper'

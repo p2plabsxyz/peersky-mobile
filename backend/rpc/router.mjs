@@ -3,7 +3,6 @@ import {
   RPC_HOLESAIL_START_LIVE,
   RPC_HOLESAIL_STATUS,
   RPC_HOLESAIL_STOP,
-  RPC_HYPER_CREATE_DRIVE,
   RPC_HYPER_FETCH,
   RPC_HYPER_INIT,
   RPC_HYPER_LIBRARY_LIST,
@@ -85,7 +84,7 @@ import {
   stopOutgoingTransfer
 } from '../backup/link-device.mjs'
 
-import { createDrive, publishMarkdownDocument, readHyperFile, uploadHyperFile } from '../hyper/drive.mjs'
+import { publishMarkdownDocument, readHyperFile, uploadHyperFile } from '../hyper/drive.mjs'
 import { listHyperdriveLocation, uploadHyperdriveFile } from '../hyper/library.mjs'
 import { fetchHyper } from '../hyper/fetch.mjs'
 import {
@@ -147,11 +146,6 @@ export async function routeRpcRequest (req) {
 
     if (req.command === RPC_HYPER_FETCH) {
       replyJson(req, await fetchHyper(parseJsonMessage(req.data)))
-      return
-    }
-
-    if (req.command === RPC_HYPER_CREATE_DRIVE) {
-      replyJson(req, await createDrive(parseJsonMessage(req.data)))
       return
     }
 
