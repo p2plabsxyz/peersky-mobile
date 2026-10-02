@@ -4644,7 +4644,9 @@ export default function App () {
                 )
                 if (favicon === undefined) return
 
-                if (favicon) {
+                // The tab list loads icons through the shared image cache, which
+                // is on disk, so an incognito page's icon is never handed to it.
+                if (favicon && !tab.incognito) {
                   browserFaviconsRef.current.set(tab.id, favicon)
                 } else {
                   browserFaviconsRef.current.delete(tab.id)

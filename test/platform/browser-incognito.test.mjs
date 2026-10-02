@@ -54,6 +54,7 @@ test('an incognito tab keeps no history, no preview and no cache', async () => {
   assert.match(app, /\/\/ No picture of an incognito page is ever written to disk\.\s+if \(tab\?\.incognito\) return false/)
   assert.match(app, /cacheEnabled=\{!tabIncognito\}/)
   assert.match(app, /incognito=\{Platform\.OS === 'ios' && tabIncognito\}/)
+  assert.match(app, /if \(favicon && !tab\.incognito\) \{\s+browserFaviconsRef\.current\.set/)
   assert.match(app, /Platform\.OS === 'android' && tabIncognito \? \{ privateProfile: true \} : \{\}/)
 
   const menu = await read('app/settings/BrowserOverflowMenu.tsx')
