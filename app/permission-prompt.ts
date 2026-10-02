@@ -1,4 +1,12 @@
-import { Alert, Linking } from 'react-native'
+import { Alert, Linking, Platform } from 'react-native'
+
+// Both systems ask once for the local network and remember the answer. iOS
+// keeps it under the app's own entry; Android with the permissions for nearby
+// devices. Wi-Fi off looks the same from in here, so both say so.
+export const LAN_PERMISSION_TITLE = 'Nearby devices cannot be found'
+export const LAN_PERMISSION_HELP = Platform.OS === 'ios'
+  ? 'PeerSky finds nearby devices over your local network. If that was turned down, switch Local Network back on for PeerSky in Settings. Wi-Fi also has to be on, and both devices on the same network.'
+  : 'PeerSky finds nearby devices over your local network. Check that Wi-Fi is on and that Nearby devices is allowed for PeerSky in Settings, with both devices on the same network.'
 
 /**
  * Ask again, or offer the way back.

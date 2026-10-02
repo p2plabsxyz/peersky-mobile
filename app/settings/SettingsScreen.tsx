@@ -57,7 +57,7 @@ import UniversalAccessIcon from '../../assets/icons/bootstrap/universal-access-c
 import DisplayIcon from '../../assets/icons/bootstrap/display.svg'
 import DatabaseIcon from '../../assets/icons/bootstrap/database.svg'
 import { MODAL_ORIENTATIONS } from '../modal-orientations'
-import { offerPermissionSettings } from '../permission-prompt'
+import { LAN_PERMISSION_HELP, LAN_PERMISSION_TITLE, offerPermissionSettings } from '../permission-prompt'
 
 export type SettingsPage =
   | 'main'
@@ -195,14 +195,6 @@ type SettingsScreenProps = {
 
 const REPOSITORY_URL = 'https://github.com/p2plabsxyz/peersky-mobile'
 const LICENSE_URL = `${REPOSITORY_URL}/blob/main/LICENSE`
-// Both systems ask once and remember the answer. iOS puts it under the app's
-// own entry; Android keeps it with the permissions for nearby devices, and
-// needs Wi-Fi on for any of it to work.
-const LAN_PERMISSION_TITLE = 'Nearby devices cannot be found'
-const LAN_PERMISSION_HELP = Platform.OS === 'ios'
-  ? 'PeerSky finds nearby devices over your local network. If that was turned down, switch Local Network back on for PeerSky in Settings. Wi-Fi also has to be on, and both devices on the same network.'
-  : 'PeerSky finds nearby devices over your local network. Check that Wi-Fi is on and that Nearby devices is allowed for PeerSky in Settings, with both devices on the same network.'
-
 const FEEDBACK_EMAIL = 'contact@p2plabs.xyz'
 
 const SETTINGS_PAGES: Array<{

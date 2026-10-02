@@ -8,7 +8,9 @@ import {
   Text,
   View
 } from 'react-native'
+import { RPC_HYPER_LAN_STATUS } from '../../backend/rpc/commands.mjs'
 import { BROWSER_PALETTES } from '../browser-appearance.mjs'
+import { LAN_PERMISSION_HELP, LAN_PERMISSION_TITLE, offerPermissionSettings } from '../permission-prompt'
 import {
   hasPeerChatNotificationPermission,
   requestPeerChatNotificationPermission
@@ -26,6 +28,7 @@ type PermissionsProps = {
   externalLinkBehavior: ExternalLinkBehavior
   persistenceError: string | null
   publishingSites: Record<string, PublishingDecision>
+  onCallRpc: (command: number, payload: Record<string, unknown>) => Promise<{ ok: boolean, lan?: { available?: boolean } }>
   onExternalLinkBehaviorChange: (behavior: ExternalLinkBehavior) => void
   onPublishingSiteChange: (siteId: string, decision: PublishingDecision | null) => void
 }
@@ -34,6 +37,7 @@ export function Permissions ({
   externalLinkBehavior,
   persistenceError,
   publishingSites,
+  onCallRpc,
   onExternalLinkBehaviorChange,
   onPublishingSiteChange
 }: PermissionsProps) {
@@ -41,6 +45,9 @@ export function Permissions ({
   const [actionError, setActionError] = useState<string | null>(null)
   const [isRequestingNotifications, setIsRequestingNotifications] = useState(false)
   const [notificationsAllowed, setNotificationsAllowed] = useState<boolean | null>(null)
+  // There is no asking for the local network directly. Whether nearby
+  // discovery is running is the answer, refused or Wi-Fi off alike.
+  const [localNetworkWorks, setLocalNetworkWorks] = useState<boolean | null>(null)
 
   useEffect(() => {
     let active = true
@@ -54,6 +61,12 @@ export function Permissions ({
           setNotificationsAllowed(false)
         }
       }
+      try {
+        const response = await onCallRpc(RPC_HYPER_LAN_STATUS, {})
+        if (active) setLocalNetworkWorks(response.ok && response.lan?.available === true)
+      } catch {
+        if (active) setLocalNetworkWorks(false)
+      }
     }
 
     void refreshPermission()
@@ -65,7 +78,7 @@ export function Permissions ({
       active = false
       subscription.remove()
     }
-  }, [])
+  }, [onCallRpc])
 
   async function openAppSettings () {
     setActionError(null)
@@ -124,6 +137,19 @@ export function Permissions ({
           disabled={isRequestingNotifications || notificationsAllowed === null}
           isDark={isDark}
           onPress={() => void requestNotifications()}
+        />
+        <PermissionRow
+          title='Local network'
+          description={localNetworkWorks === false
+            ? 'Nearby devices cannot reach PeerSky right now. Local network access may be turned off for PeerSky, or Wi-Fi is off.'
+            : 'Lets nearby PeerSky devices find this one and connect to it over Wi-Fi, with no internet needed.'}
+          action={localNetworkWorks === null ? 'Checking...' : localNetworkWorks ? 'Allowed' : 'Turn on'}
+          disabled={localNetworkWorks === null}
+          isDark={isDark}
+          onPress={() => {
+            if (localNetworkWorks) void openAppSettings()
+            else offerPermissionSettings(LAN_PERMISSION_TITLE, LAN_PERMISSION_HELP)
+          }}
         />
       </SettingsSection>
 

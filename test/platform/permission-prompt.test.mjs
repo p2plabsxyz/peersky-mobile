@@ -43,9 +43,18 @@ test('a failed local discovery explains itself and offers settings', async () =>
   assert.match(settings, /offerPermissionSettings\(LAN_PERMISSION_TITLE, LAN_PERMISSION_HELP\)/)
 
   // Each system keeps the switch somewhere different, so the words differ.
-  assert.match(settings, /Platform\.OS === 'ios'/)
-  assert.match(settings, /Local Network back on for PeerSky/)
-  assert.match(settings, /Nearby devices is allowed for PeerSky/)
+  assert.match(source, /Platform\.OS === 'ios'/)
+  assert.match(source, /Local Network back on for PeerSky/)
+  assert.match(source, /Nearby devices is allowed for PeerSky/)
   // And Wi-Fi being off looks identical from in here, so both say so.
-  assert.equal((settings.match(/Wi-Fi/g) || []).length >= 2, true)
+  assert.equal((source.match(/Wi-Fi/g) || []).length >= 2, true)
+})
+
+// Permissions lists the local network beside the camera and notifications, and
+// a refusal there offers the way back to Settings.
+test('the local network has its own row in Permissions', async () => {
+  const permissions = await readFile(new URL('../../app/settings/Permissions.tsx', import.meta.url), 'utf8')
+  assert.match(permissions, /title='Local network'/)
+  assert.match(permissions, /onCallRpc\(RPC_HYPER_LAN_STATUS, \{\}\)/)
+  assert.match(permissions, /else offerPermissionSettings\(LAN_PERMISSION_TITLE, LAN_PERMISSION_HELP\)/)
 })
