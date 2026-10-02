@@ -1,4 +1,4 @@
-import { type ComponentRef, useEffect, useMemo, useRef, useState } from 'react'
+import { type ComponentRef, type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
@@ -3134,8 +3134,11 @@ export default function App () {
     return <RestartRequiredScreen isDark={browserIsDark} />
   }
 
+  // Full-screen pages sit on top of the browser instead of replacing it, so
+  // every tab, PeerTunes and an open note stay alive underneath.
+  let browserOverlay: ReactNode = null
   if (browserBookmarksVisible) {
-    return (
+    browserOverlay = (
       <SafeAreaView
         {...browserBackGesture.panHandlers}
         style={[styles.browserShell, { backgroundColor: browserChrome.shell }]}
@@ -3170,8 +3173,8 @@ export default function App () {
     )
   }
 
-  if (browserHistoryVisible) {
-    return (
+  if (!browserOverlay && browserHistoryVisible) {
+    browserOverlay = (
       <SafeAreaView
         {...browserBackGesture.panHandlers}
         style={[styles.browserShell, { backgroundColor: browserChrome.shell }]}
@@ -3210,8 +3213,8 @@ export default function App () {
     )
   }
 
-  if (browserDownloadsVisible) {
-    return (
+  if (!browserOverlay && browserDownloadsVisible) {
+    browserOverlay = (
       <SafeAreaView
         {...browserBackGesture.panHandlers}
         style={[styles.browserShell, { backgroundColor: browserChrome.shell }]}
@@ -3244,11 +3247,10 @@ export default function App () {
     )
   }
 
-  if (browserSettingsVisible) {
+  if (!browserOverlay && browserSettingsVisible) {
     // The screen keeps its own page state, so it has to be remounted to land
     // somewhere other than the top.
-
-    return (
+    browserOverlay = (
       <SafeAreaView
         {...browserBackGesture.panHandlers}
         style={[styles.browserShell, { backgroundColor: browserChrome.shell }]}
@@ -3350,7 +3352,7 @@ export default function App () {
     )
   }
 
-  if (activeTab === 'p2pmd' && p2pmdWorkspaceReady && p2pmdRoom && p2pmdUrl && p2pmdEditorHtml) {
+  if (!browserOverlay && activeTab === 'p2pmd' && p2pmdWorkspaceReady && p2pmdRoom && p2pmdUrl && p2pmdEditorHtml) {
     const p2pmdEditorRoomBaseUrl = p2pmdUrl.replace(/\/$/, '')
     const p2pmdEditorBaseUrl = createP2pmdEditorUrl(p2pmdEditorRoomBaseUrl, p2pmdRoom.role, p2pmdEditorNonce)
     const p2pmdEditorHtmlWithRoomBase = p2pmdEditorHtml.replace(
@@ -3358,7 +3360,7 @@ export default function App () {
       `<head><script>window.__P2PMD_ROOM_BASE_URL__=${serializeInlineScriptValue(p2pmdEditorRoomBaseUrl)};window.__P2PMD_ROOM_KEY__=${serializeInlineScriptValue(p2pmdRoom.key)};window.__P2PMD_DISPLAY_NAME__=${serializeInlineScriptValue(p2pmdPeerDisplayName)};</script>`
     )
 
-    return (
+    browserOverlay = (
       <SafeAreaView style={[styles.p2pmdWorkspace, p2pmdTheme?.p2pmdWorkspace]} edges={['top', 'left', 'right', 'bottom']}>
         <StatusBar
           hidden={isP2pmdLandscapeSlides}
@@ -3699,12 +3701,16 @@ export default function App () {
     )
   }
 
-  return (
+  const browser = (
     // No left or right safe-area edge on purpose. Insetting the whole shell
     // left the toolbar stopping short of both screen edges in landscape, with
     // the page colour showing beside it. The chrome fills the screen and keeps
     // its own contents clear of the notch instead.
-    <View style={[styles.browserShell, { backgroundColor: browserChrome.shell }]}>
+    <View
+      accessibilityElementsHidden={browserOverlay !== null}
+      importantForAccessibility={browserOverlay ? 'no-hide-descendants' : 'auto'}
+      style={[styles.browserShell, { backgroundColor: browserChrome.shell }]}
+    >
         <StatusBar
           backgroundColor={browserTopInsetColor}
           barStyle={browserIsDark ? 'light-content' : 'dark-content'}
@@ -4679,6 +4685,15 @@ export default function App () {
           edges={['bottom']}
           style={[styles.browserSystemInset, { backgroundColor: browserBottomInsetColor }]}
         />
+    </View>
+  )
+
+  // One shape whether a page is open or not, so opening one never remounts
+  // the browser underneath.
+  return (
+    <View style={styles.browserShellContent}>
+      {browser}
+      {browserOverlay && <View style={StyleSheet.absoluteFill}>{browserOverlay}</View>}
     </View>
   )
 }

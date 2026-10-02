@@ -124,7 +124,7 @@ describe('one Link Device job at a time', () => {
     const app = await read('app/index.tsx')
     const restart = app.indexOf('if (restartRequired) {')
     assert.ok(restart > 0)
-    for (const screen of ['if (browserBookmarksVisible) {', 'if (browserHistoryVisible) {', 'if (browserDownloadsVisible) {', 'if (browserSettingsVisible) {', 'if (!browserSessionReady) {', 'if (showWelcome) {']) {
+    for (const screen of ['if (browserBookmarksVisible) {', 'browserHistoryVisible) {', 'browserDownloadsVisible) {', 'browserSettingsVisible) {', 'if (!browserSessionReady) {', 'if (showWelcome) {']) {
       assert.ok(app.indexOf(screen) > restart, `${screen} is checked before the restart screen`)
     }
 
