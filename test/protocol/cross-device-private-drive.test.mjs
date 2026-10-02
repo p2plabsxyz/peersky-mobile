@@ -78,7 +78,7 @@ describe('Cross-device private drive (desktop to mobile)', () => {
 
     // Adopted stores live in their own directory (hyper-sdk-adopted), never
     // overlaid onto the phone's synced-private store. The adopted drive must
-    // reopen and read from there — read-only, so the phone cannot append to a
+    // reopen and read from there, read-only, so the phone cannot append to a
     // drive it would then silently diverge from.
     const adoptedStore = adoptedStoragePathFor(syncedStore)
     const mobile = await createSDK({

@@ -60,6 +60,26 @@ describe('mobile platform runtime configuration', () => {
     assert.match(ios, /UIApplicationDidFinishLaunchingNotification/)
   })
 
+  // Apple refuses a build that uses a required-reason API without saying why.
+  // Bare stats files and reads the clock, React Native keeps user defaults,
+  // and a backup checks free space before it writes.
+  it('declares why it uses each required-reason API, and that it collects nothing', async () => {
+    const appJson = JSON.parse(await readFile(repoFile('app.json'), 'utf8'))
+    const manifest = appJson.expo?.ios?.privacyManifests
+    const reasons = Object.fromEntries(manifest.NSPrivacyAccessedAPITypes.map((entry) => [
+      entry.NSPrivacyAccessedAPIType.replace('NSPrivacyAccessedAPICategory', ''),
+      entry.NSPrivacyAccessedAPITypeReasons
+    ]))
+    assert.deepEqual(reasons, {
+      FileTimestamp: ['C617.1', '0A2A.1', '3B52.1'],
+      UserDefaults: ['CA92.1'],
+      DiskSpace: ['E174.1', '85F4.1'],
+      SystemBootTime: ['35F9.1']
+    })
+    assert.deepEqual(manifest.NSPrivacyCollectedDataTypes, [])
+    assert.equal(manifest.NSPrivacyTracking, false)
+  })
+
   it('keeps iOS local networking scoped to localhost support, not arbitrary HTTP', async () => {
     const appJson = JSON.parse(await readFile(repoFile('app.json'), 'utf8'))
     const ats = appJson.expo?.ios?.infoPlist?.NSAppTransportSecurity
