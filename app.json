@@ -110,6 +110,7 @@
       "./plugins/with-peerchat-background",
       "./plugins/with-peersky-share",
       "./plugins/with-app-icons",
+      "./plugins/with-no-device-backup",
       [
         "expo-notifications",
         {

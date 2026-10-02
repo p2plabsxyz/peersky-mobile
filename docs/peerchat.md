@@ -82,10 +82,11 @@ promised to be anonymous. Peer discovery can also reveal network metadata to
 the underlying P2P stack.
 
 Room keys, profile information, recent-room metadata, and local preferences are
-stored in the app-private PeerSky data directory. The current mobile build does
-not protect room keys with Android Keystore or iOS Keychain hardware-backed
-encryption. Device access, app-data backups, and rooted or jailbroken devices
-must therefore be considered part of the local threat model.
+stored in the app-private PeerSky data directory, which is kept out of iCloud,
+computer and Google backups and out of Android's phone-to-phone copy. The current
+mobile build does not protect room keys with Android Keystore or iOS Keychain
+hardware-backed encryption, so device access and rooted or jailbroken devices
+are part of the local threat model.
 
 ## Attachments and link previews
 

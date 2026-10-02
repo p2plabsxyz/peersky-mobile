@@ -1,0 +1,22 @@
+#import <Foundation/Foundation.h>
+#import <UIKit/UIKit.h>
+
+// Device keys, chats and every P2P store live in Documents. An iCloud or
+// computer backup carried them onto whatever phone it was restored to, which
+// then wrote to the same feeds as this one and forked them. Link Device and
+// the app's own encrypted backup are how they move instead.
+__attribute__((constructor))
+static void PeerSkyExcludeDocumentsFromBackup(void) {
+  [[NSNotificationCenter defaultCenter]
+    addObserverForName:UIApplicationDidFinishLaunchingNotification
+                object:nil
+                 queue:nil
+            usingBlock:^(NSNotification *notification) {
+    NSURL *documents = [[NSFileManager defaultManager] URLsForDirectory:NSDocumentDirectory
+                                                               inDomains:NSUserDomainMask].firstObject;
+    NSError *error = nil;
+    if (documents && ![documents setResourceValue:@YES forKey:NSURLIsExcludedFromBackupKey error:&error]) {
+      NSLog(@"[PeerSky] Could not keep Documents out of backups: %@", error);
+    }
+  }];
+}

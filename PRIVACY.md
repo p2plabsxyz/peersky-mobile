@@ -32,6 +32,8 @@ Link Device in Settings can move your data to another device or save it as a bac
 
 A move goes straight from one device to the other, the same way PeerChat does, and is encrypted so that only the receiving device can open it. Both screens show the same six characters to compare before anything is replaced. A backup file is encrypted with a passphrase you choose. It goes wherever you send it, and anyone who has both the file and the passphrase can open it, so keep the passphrase to yourself. Nobody, including us, can recover a forgotten one.
 
+PeerSky keeps its data out of your phone's own backups: iCloud and computer backups on iPhone and iPad, and Google backups and phone-to-phone copies on Android. They would carry your keys onto another phone without asking, and that phone would then write to the same chats as this one. Use Link Device instead.
+
 ## Device Permissions
 
 PeerSky may request camera, microphone, location, local-network, and file access when needed for a feature or when a website requests access. Each is asked for when it is first needed, and the app works without any of them. You can deny or revoke these permissions in your device settings, and where a refusal cannot be reversed from inside the app, PeerSky offers to open those settings for you.

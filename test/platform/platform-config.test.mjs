@@ -38,6 +38,28 @@ describe('mobile platform runtime configuration', () => {
     assert.doesNotMatch(plugin, /192\.168\./)
   })
 
+  // Restoring a backup onto another phone gave it this phone's keys, and it
+  // then wrote to the same feeds. iCloud also got every cached P2P store.
+  it('keeps keys, chats and P2P stores out of OS backups', async () => {
+    const appJson = JSON.parse(await readFile(repoFile('app.json'), 'utf8'))
+    assert.equal(hasExpoPlugin(appJson.expo?.plugins || [], './plugins/with-no-device-backup'), true)
+
+    const plugin = await readFile(repoFile('plugins/with-no-device-backup.js'), 'utf8')
+    assert.match(plugin, /attributes\['android:allowBackup'\] = 'false'/)
+    assert.match(plugin, /attributes\['android:dataExtractionRules'\] = '@xml\/data_extraction_rules'/)
+    for (const section of ['cloud-backup', 'device-transfer']) {
+      const rules = plugin.slice(plugin.indexOf(`<${section}>`), plugin.indexOf(`</${section}>`))
+      for (const domain of ['root', 'file', 'database', 'sharedpref', 'external']) {
+        assert.match(rules, new RegExp(`<exclude domain="${domain}" path="\\." />`), `${section} ${domain}`)
+      }
+    }
+
+    const ios = await readFile(repoFile('plugins/templates/PeerSkyBackupExclusion.m.template'), 'utf8')
+    assert.match(ios, /NSDocumentDirectory/)
+    assert.match(ios, /setResourceValue:@YES forKey:NSURLIsExcludedFromBackupKey/)
+    assert.match(ios, /UIApplicationDidFinishLaunchingNotification/)
+  })
+
   it('keeps iOS local networking scoped to localhost support, not arbitrary HTTP', async () => {
     const appJson = JSON.parse(await readFile(repoFile('app.json'), 'utf8'))
     const ats = appJson.expo?.ios?.infoPlist?.NSAppTransportSecurity

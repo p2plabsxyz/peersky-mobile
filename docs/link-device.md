@@ -2,6 +2,8 @@
 
 Settings > Link Device moves everything PeerSky keeps on a phone to another device, and keeps a backup file for when a phone is lost. Nothing goes through a server: one device hands the data straight to the other, encrypted so only that device can open it.
 
+It is the only way PeerSky data moves. The app keeps it out of iCloud, computer and Google backups and out of Android's phone-to-phone copy (`plugins/with-no-device-backup.js`), which would restore this phone's keys onto another one that then writes to the same feeds.
+
 ## The screen
 
 - **This device**, then **Sync with another device**: one sheet for both directions. *Receive here* shows this phone's pairing code; *Send from here* is for scanning the other device's. The scan decides what happens either way: a pairing code (`peersky-identity:`) means "send this phone there", and a `hyper://` code is a transfer another device has ready for this one. A desktop's pairing code sends the tabs and bookmarks to that desktop.
