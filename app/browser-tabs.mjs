@@ -375,6 +375,17 @@ export function suspendInactiveBrowserTabsState (state, liveTabIds) {
   return changed ? { ...state, tabs } : state
 }
 
+/**
+ * Whether any open tab has this built-in app in its history. PeerTunes keeps
+ * playing from a player out of sight while one does, and stops when none does:
+ * kept for the whole session, it played on after its tab was closed.
+ */
+export function isAppInBrowserTabs (state, app) {
+  return state.tabs.some((tab) => tab.history.some((entry) => (
+    entry?.source?.kind === 'app' && entry.source.app === app
+  )))
+}
+
 export function closeBrowserTabState (state, tabId) {
   const tabIndex = state.tabs.findIndex((tab) => tab.id === tabId)
   if (tabIndex < 0) return state

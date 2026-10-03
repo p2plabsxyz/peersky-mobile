@@ -64,6 +64,7 @@ import {
   closeBrowserTabState,
   createBrowserTabsState,
   DEFAULT_BROWSER_PAGE_ZOOM,
+  isAppInBrowserTabs,
   isCurrentBrowserTabEntry,
   MAX_BROWSER_TABS,
   normalizeBrowserPageZoom,
@@ -525,6 +526,9 @@ export default function App () {
   const [peertunesLaunchSuffix, setPeertunesLaunchSuffix] = useState('')
   const [peertunesError, setPeertunesError] = useState<string | null>(null)
   const [peertunesMounted, setPeertunesMounted] = useState(false)
+  // Closing PeerTunes' tab, or burning the lot, is closing PeerTunes: the
+  // player out of sight goes with it, and so does the music.
+  if (peertunesMounted && !isAppInBrowserTabs(browserTabsState, 'peertunes')) setPeertunesMounted(false)
   const [browserHomeMounted, setBrowserHomeMounted] = useState(false)
   // Mounted the first time home shows and kept from then on.
   if (browserSource.kind === 'home' && !browserHomeMounted) setBrowserHomeMounted(true)
