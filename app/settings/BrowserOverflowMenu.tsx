@@ -23,8 +23,13 @@ import { MODAL_ORIENTATIONS } from '../modal-orientations'
 const MENU_ICON_SIZE = 22
 const CARD_ICON_SIZE = 26
 const MENU_ICON_STROKE_WIDTH = 0.35
-const OPEN_MS = 260
-const CLOSE_MS = 190
+// The sheet rises from fully below the screen and settles slowly at the end,
+// the way a system sheet does. It used to start half way up and arrive almost
+// at once, which read as the menu snapping open.
+const OPEN_MS = 380
+const CLOSE_MS = 220
+const OPEN_EASING = Easing.bezier(0.2, 0.8, 0.2, 1)
+const CLOSE_EASING = Easing.bezier(0.4, 0, 1, 1)
 
 type BrowserOverflowMenuProps = {
   bookmarkActionAvailable?: boolean
@@ -95,7 +100,7 @@ export function BrowserOverflowMenu ({
   useEffect(() => {
     const animation = Animated.timing(open, {
       duration: visible ? OPEN_MS : CLOSE_MS,
-      easing: visible ? Easing.out(Easing.cubic) : Easing.in(Easing.cubic),
+      easing: visible ? OPEN_EASING : CLOSE_EASING,
       toValue: visible ? 1 : 0,
       useNativeDriver: true
     })
@@ -233,7 +238,7 @@ export function BrowserOverflowMenu ({
                 transform: [{
                   translateY: open.interpolate({
                     inputRange: [0, 1],
-                    outputRange: [windowHeight * 0.5, 0]
+                    outputRange: [windowHeight, 0]
                   })
                 }]
               }
