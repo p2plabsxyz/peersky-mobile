@@ -133,6 +133,7 @@ import { BrowserBackSwipe } from './BrowserBackSwipe'
 import { BrowserZoomSheet } from './BrowserZoomSheet'
 import { PublishedLinkSheet } from './PublishedLinkSheet'
 import { P2pmdNewNoteSheet } from './P2pmdNewNoteSheet'
+import PencilSquareIcon from '../assets/icons/bootstrap/pencil-square.svg'
 import { WelcomeScreen } from './WelcomeScreen'
 import { RestartRequiredScreen } from './RestartRequiredScreen'
 import { emitLinkDeviceProgress } from './settings/link-device-progress'
@@ -537,6 +538,13 @@ export default function App () {
   const [p2pmdNameDraft, setP2pmdNameDraft] = useState(() => loadP2pmdPeerDisplayName() || createFunPeerName())
   const [isEditingP2pmdName, setIsEditingP2pmdName] = useState(false)
   const [p2pmdNewNoteVisible, setP2pmdNewNoteVisible] = useState(false)
+
+  // Opening P2PMD picks up a note the backend is still running, so a note that
+  // outlived the screen is never left hosting where nobody can see it.
+  useEffect(() => {
+    if (activeTab !== 'p2pmd' || browserSource.kind !== 'app' || p2pmdRoom || isBooting || !rpcRef.current) return
+    void reattachRunningP2pmdRoom()
+  }, [activeTab, browserSource.kind, isBooting])
   const isP2pmdLandscapeSlides = p2pmdViewMode === 'slides' && browserWindowWidth > browserWindowHeight
   const [p2pmdSyncStatus, setP2pmdSyncStatus] = useState('Ready')
   const [p2pmdSetupError, setP2pmdSetupError] = useState<string | null>(null)
@@ -2744,39 +2752,24 @@ export default function App () {
     rememberP2pmdRoom(room.key, known?.role || room.role, label)
   }
 
-  async function onP2pmdRoomRefresh () {
-    setIsLoading(true)
-    setStatus('Reading P2PMD room status...')
-
+  // A note the backend still runs after the screen lost track of it comes
+  // back by itself when P2PMD opens. It used to wait for a Refresh button.
+  async function reattachRunningP2pmdRoom () {
     try {
       const response = await callRpc(RPC_P2PMD_ROOM_STATUS, {})
+      if (!response.running || !response.room) return
 
-      if (response.running && response.room) {
-        await loadP2pmdEditorHtml()
-        setP2pmdPeerDisplayName(loadP2pmdPeerDisplayName())
-        setP2pmdRoom(response.room)
-        setP2pmdUrl(response.room.localUrl)
-        setP2pmdParticipants(null)
-        setP2pmdViewMode('edit')
-        setP2pmdPublishUrl(null)
-        setP2pmdSetupError(null)
-        setP2pmdSyncStatus('Ready')
-      } else {
-        setP2pmdRoom(null)
-        setP2pmdUrl(null)
-        setP2pmdParticipants(null)
-        setP2pmdViewMode('edit')
-        setP2pmdPublishUrl(null)
-        setP2pmdEditorHtml(null)
-        setP2pmdSetupError(null)
-        setP2pmdSyncStatus('Ready')
-      }
-
-      setStatus(response.running ? 'P2PMD room is running' : 'No P2PMD room is running')
+      await loadP2pmdEditorHtml()
+      setP2pmdPeerDisplayName(loadP2pmdPeerDisplayName())
+      setP2pmdRoom(response.room)
+      setP2pmdUrl(response.room.localUrl)
+      setP2pmdParticipants(null)
+      setP2pmdViewMode('edit')
+      setP2pmdPublishUrl(null)
+      setP2pmdSetupError(null)
+      setP2pmdSyncStatus('Ready')
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : String(error))
-    } finally {
-      setIsLoading(false)
+      console.warn('[p2pmd] Could not check for a running note:', error)
     }
   }
 
@@ -4205,18 +4198,12 @@ export default function App () {
                           </Text>
                           <View style={styles.p2pmdActionRow}>
                             <Pressable
-                              style={[styles.p2pmdPrimaryAction, isBooting || isLoading ? styles.p2pmdActionDisabled : null]}
+                              style={[styles.p2pmdPrimaryAction, styles.p2pmdCreateAction, isBooting || isLoading ? styles.p2pmdActionDisabled : null]}
                               onPress={() => setP2pmdNewNoteVisible(true)}
                               disabled={isBooting || isLoading}
                             >
+                              <PencilSquareIcon width={18} height={18} color='#ffffff' />
                               <Text style={styles.p2pmdPrimaryActionText}>Create Note</Text>
-                            </Pressable>
-                            <Pressable
-                              style={[styles.p2pmdTextAction, p2pmdTheme?.p2pmdTextAction, isBooting || isLoading ? styles.p2pmdActionDisabled : null]}
-                              onPress={() => void onP2pmdRoomRefresh()}
-                              disabled={isBooting || isLoading}
-                            >
-                              <Text style={[styles.p2pmdTextActionText, p2pmdTheme?.p2pmdTextActionText]}>Refresh</Text>
                             </Pressable>
                           </View>
                           <P2pmdNewNoteSheet

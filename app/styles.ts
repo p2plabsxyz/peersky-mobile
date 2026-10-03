@@ -862,6 +862,10 @@ export const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '800'
   },
+  p2pmdCreateAction: {
+    flexDirection: 'row',
+    gap: 8
+  },
   p2pmdActionHint: {
     color: '#dbeafe',
     fontSize: 11,

@@ -28,3 +28,14 @@ test('the choice reaches the backend, and reopening keeps how a note was made', 
   // A recent note reopens by its key alone; the backend knows public from private.
   assert.match(app, /: onP2pmdRoomCreate\(room\.key\)\)\}/)
 })
+
+// Refresh only ever picked up a note the backend was still running. Opening
+// P2PMD does that now, so the start screen is one button with an icon.
+test('the start screen has Create Note alone, and picks up a running note itself', async () => {
+  const app = await read('app/index.tsx')
+  const start = app.slice(app.indexOf('Start a collaborative note'), app.indexOf('<P2pmdNewNoteSheet'))
+  assert.match(start, /<PencilSquareIcon width=\{18\} height=\{18\} color='#ffffff' \/>\s+<Text style=\{styles\.p2pmdPrimaryActionText\}>Create Note<\/Text>/)
+  assert.doesNotMatch(start, />Refresh</)
+  assert.doesNotMatch(app, /onP2pmdRoomRefresh/)
+  assert.match(app, /if \(activeTab !== 'p2pmd' \|\| browserSource\.kind !== 'app' \|\| p2pmdRoom \|\| isBooting \|\| !rpcRef\.current\) return\s+void reattachRunningP2pmdRoom\(\)/)
+})
