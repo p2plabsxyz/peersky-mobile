@@ -39,7 +39,8 @@ import {
   parsePeerChatUiState,
   PEERCHAT_UI_STATE_MAX_BYTES,
   recordRecentEmoji,
-  serializePeerChatUiState
+  serializePeerChatUiState,
+  setPeerChatDraft
 } from './ui-state.mjs'
 import { assessLink, describeLinkRisk, extractFirstLink, LINK_SUSPICIOUS } from './link-safety.mjs'
 import { shareLink } from '../share'
@@ -309,15 +310,14 @@ type LandingAction = 'create' | 'join' | null
 
 type PeerChatUiState = {
   activeRoomKey: string | null
-  draftRoomKey: string | null
-  draft: string
+  // What you had typed and not sent, per chat.
+  drafts: Record<string, string>
   recentEmojis: string[]
 }
 
 const EMPTY_UI_STATE: PeerChatUiState = {
   activeRoomKey: null,
-  draftRoomKey: null,
-  draft: '',
+  drafts: {},
   recentEmojis: []
 }
 
@@ -375,6 +375,7 @@ export function PeerChatScreen ({
   const roomOpenedAtRef = useRef(0)
   const mountedRef = useRef(true)
   const composerRoomKeyRef = useRef<string | null>(null)
+  const draftsRef = useRef<Record<string, string>>({})
   const uiStateRef = useRef<PeerChatUiState>(EMPTY_UI_STATE)
   const uiStateRestoredRef = useRef(false)
   const [isIntroReady, setIsIntroReady] = useState(false)
@@ -607,10 +608,12 @@ export function PeerChatScreen ({
   useEffect(() => {
     if (!uiStateRestoredRef.current) return
 
+    if (composerRoomKeyRef.current) {
+      draftsRef.current = setPeerChatDraft(draftsRef.current, composerRoomKeyRef.current, composer)
+    }
     const nextState = {
       activeRoomKey: activeRoom?.roomKey || null,
-      draftRoomKey: composer ? composerRoomKeyRef.current : null,
-      draft: composer,
+      drafts: draftsRef.current,
       recentEmojis
     }
     uiStateRef.current = nextState
@@ -722,15 +725,16 @@ export function PeerChatScreen ({
     if (!isInitialized || !restoredUiState || uiStateRestoredRef.current) return
 
     const roomKeys = new Set(rooms.map((room) => room.roomKey))
-    const draftRoomKey = restoredUiState.draftRoomKey && roomKeys.has(restoredUiState.draftRoomKey)
-      ? restoredUiState.draftRoomKey
-      : null
+    const drafts = Object.fromEntries(
+      Object.entries(restoredUiState.drafts || {}).filter(([roomKey]) => roomKeys.has(roomKey))
+    )
     const restoredRoom = restoredUiState.activeRoomKey
       ? rooms.find((room) => room.roomKey === restoredUiState.activeRoomKey) || null
       : null
 
-    composerRoomKeyRef.current = draftRoomKey
-    setComposer(draftRoomKey ? restoredUiState.draft : '')
+    draftsRef.current = drafts
+    composerRoomKeyRef.current = restoredRoom?.roomKey || null
+    setComposer(restoredRoom ? drafts[restoredRoom.roomKey] || '' : '')
     if (restoredRoom) {
       versionRef.current = -1
       observedMessageIdsRef.current = null
@@ -742,8 +746,7 @@ export function PeerChatScreen ({
     setRecentEmojis(restoredUiState.recentEmojis || [])
     uiStateRef.current = {
       activeRoomKey: restoredRoom?.roomKey || null,
-      draftRoomKey,
-      draft: draftRoomKey ? restoredUiState.draft : '',
+      drafts,
       recentEmojis: restoredUiState.recentEmojis || []
     }
     uiStateRestoredRef.current = true
@@ -1062,7 +1065,8 @@ export function PeerChatScreen ({
     // Whatever was over the list belongs to the list. A sheet left open sat on
     // top of the room you had just opened.
     setIsRequestsOpen(false)
-    if (composerRoomKeyRef.current !== room.roomKey) setComposer('')
+    // Each chat keeps what you had typed in it until you send it.
+    if (composerRoomKeyRef.current !== room.roomKey) setComposer(draftsRef.current[room.roomKey] || '')
     composerRoomKeyRef.current = room.roomKey
     versionRef.current = -1
     observedMessageIdsRef.current = null
@@ -1463,6 +1467,8 @@ export function PeerChatScreen ({
       setRooms(fresh.rooms || [])
       setPendingDirectMessages(fresh.pendingDirectMessages || [])
       setBlockedPeers(fresh.blockedPeers || [])
+      draftsRef.current = {}
+      composerRoomKeyRef.current = null
       setComposer('')
       versionRef.current = -1
       onStatus('Your PeerChat profile was deleted from this device')
@@ -1749,6 +1755,7 @@ export function PeerChatScreen ({
       if (!response.ok) throw new Error(response.error || 'Unable to leave PeerChat room.')
       if (!mountedRef.current) return
       setRooms((current) => current.filter((item) => item.roomKey !== room.roomKey))
+      draftsRef.current = setPeerChatDraft(draftsRef.current, room.roomKey, '')
       if (composerRoomKeyRef.current === room.roomKey) {
         composerRoomKeyRef.current = null
         setComposer('')

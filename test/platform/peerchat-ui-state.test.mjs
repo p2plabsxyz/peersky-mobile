@@ -3,11 +3,13 @@ import test from 'node:test'
 
 import {
   parsePeerChatUiState,
+  PEERCHAT_MAX_DRAFTS,
   PEERCHAT_RECENT_EMOJI_MAX,
   recordRecentEmoji,
   PEERCHAT_DRAFT_MAX_CHARACTERS,
   PEERCHAT_UI_STATE_MAX_BYTES,
-  serializePeerChatUiState
+  serializePeerChatUiState,
+  setPeerChatDraft
 } from '../../app/peerchat/ui-state.mjs'
 
 const ROOM_A = 'ab'.repeat(32)
@@ -16,44 +18,93 @@ const ROOM_B = 'cd'.repeat(32)
 test('PeerChat UI state restores an active room and its draft', () => {
   const restored = parsePeerChatUiState(serializePeerChatUiState({
     activeRoomKey: ROOM_A,
-    draftRoomKey: ROOM_A,
-    draft: 'Unsent message'
+    drafts: { [ROOM_A]: 'Unsent message' }
   }))
 
   assert.deepEqual(restored, {
     activeRoomKey: ROOM_A,
-    draftRoomKey: ROOM_A,
-    draft: 'Unsent message',
+    drafts: { [ROOM_A]: 'Unsent message' },
+    recentEmojis: []
+  })
+})
+
+// There was one draft for the whole app, so opening another chat threw away
+// what you had typed in the last one.
+test('every chat keeps its own draft until it is sent', () => {
+  let drafts = setPeerChatDraft({}, ROOM_A, 'for A')
+  drafts = setPeerChatDraft(drafts, ROOM_B, 'for B')
+  assert.deepEqual(drafts, { [ROOM_B]: 'for B', [ROOM_A]: 'for A' })
+  // Newest first, so a full file drops the oldest.
+  assert.deepEqual(Object.keys(setPeerChatDraft(drafts, ROOM_A, 'for A again')), [ROOM_A, ROOM_B])
+  // Sending empties the composer, and that removes the draft.
+  assert.deepEqual(setPeerChatDraft(drafts, ROOM_B, ''), { [ROOM_A]: 'for A' })
+  assert.deepEqual(setPeerChatDraft(drafts, 'not a room', 'x'), drafts)
+
+  const restored = parsePeerChatUiState(serializePeerChatUiState({ activeRoomKey: null, drafts }))
+  assert.deepEqual(restored.drafts, drafts)
+})
+
+test('the drafts are bounded in number and in size', () => {
+  let drafts = {}
+  for (let index = 0; index < PEERCHAT_MAX_DRAFTS + 5; index += 1) {
+    drafts = setPeerChatDraft(drafts, index.toString(16).padStart(64, '0'), `draft ${index}`)
+  }
+  assert.equal(Object.keys(drafts).length, PEERCHAT_MAX_DRAFTS)
+  assert.equal(drafts[(PEERCHAT_MAX_DRAFTS + 4).toString(16).padStart(64, '0')], `draft ${PEERCHAT_MAX_DRAFTS + 4}`)
+
+  const big = 'x'.repeat(PEERCHAT_DRAFT_MAX_CHARACTERS)
+  const many = Object.fromEntries(Array.from({ length: 10 }, (_, index) => [index.toString(16).padStart(64, 'a'), big]))
+  const serialized = serializePeerChatUiState({ activeRoomKey: null, drafts: many })
+  assert.ok(serialized.length <= PEERCHAT_UI_STATE_MAX_BYTES)
+  // The newest are the ones kept.
+  assert.ok(Object.keys(JSON.parse(serialized).drafts)[0] === Object.keys(many)[0])
+})
+
+test('a file from before drafts were per chat keeps its one draft', () => {
+  assert.deepEqual(parsePeerChatUiState(JSON.stringify({
+    version: 1,
+    activeRoomKey: ROOM_A,
+    draftRoomKey: ROOM_B,
+    draft: 'Unsent'
+  })), {
+    activeRoomKey: ROOM_A,
+    drafts: { [ROOM_B]: 'Unsent' },
     recentEmojis: []
   })
 })
 
 test('PeerChat UI state rejects malformed room keys and stale draft metadata', () => {
   assert.deepEqual(parsePeerChatUiState(JSON.stringify({
-    version: 1,
+    version: 2,
     activeRoomKey: 'invalid',
-    draftRoomKey: ROOM_B,
-    draft: ''
+    drafts: { [ROOM_B]: '', invalid: 'x' }
   })), {
     activeRoomKey: null,
-    draftRoomKey: null,
-    draft: '',
+    drafts: {},
     recentEmojis: []
   })
   assert.equal(parsePeerChatUiState('{invalid').activeRoomKey, null)
-  assert.equal(parsePeerChatUiState('x'.repeat(PEERCHAT_UI_STATE_MAX_BYTES + 1)).draft, '')
+  assert.deepEqual(parsePeerChatUiState('x'.repeat(PEERCHAT_UI_STATE_MAX_BYTES + 1)).drafts, {})
 })
 
 test('PeerChat UI state bounds persisted Unicode drafts without splitting characters', () => {
   const oversized = '😀'.repeat(PEERCHAT_DRAFT_MAX_CHARACTERS + 1)
   const restored = parsePeerChatUiState(serializePeerChatUiState({
     activeRoomKey: ROOM_A,
-    draftRoomKey: ROOM_A,
-    draft: oversized
+    drafts: { [ROOM_A]: oversized }
   }))
 
-  assert.equal(Array.from(restored.draft).length, PEERCHAT_DRAFT_MAX_CHARACTERS)
-  assert.equal(restored.draft.endsWith('😀'), true)
+  assert.equal(Array.from(restored.drafts[ROOM_A]).length, PEERCHAT_DRAFT_MAX_CHARACTERS)
+  assert.equal(restored.drafts[ROOM_A].endsWith('😀'), true)
+})
+
+test('the screen puts back a chat\'s draft when it opens', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const screen = await readFile(new URL('../../app/peerchat/PeerChatScreen.tsx', import.meta.url), 'utf8')
+  assert.match(screen, /if \(composerRoomKeyRef\.current !== room\.roomKey\) setComposer\(draftsRef\.current\[room\.roomKey\] \|\| ''\)/)
+  assert.match(screen, /draftsRef\.current = setPeerChatDraft\(draftsRef\.current, composerRoomKeyRef\.current, composer\)/)
+  // Leaving a chat for good takes its draft with it.
+  assert.match(screen, /draftsRef\.current = setPeerChatDraft\(draftsRef\.current, room\.roomKey, ''\)/)
 })
 
 // Desktop keeps a Recent row at the top of its emoji panel. The phone had no
@@ -89,8 +140,7 @@ test('PeerChat recent emojis survive a round trip', () => {
   const recents = recordRecentEmoji([], '\u{1F389}')
   const restored = parsePeerChatUiState(serializePeerChatUiState({
     activeRoomKey: null,
-    draftRoomKey: null,
-    draft: '',
+    drafts: {},
     recentEmojis: recents
   }))
 
