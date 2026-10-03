@@ -4789,7 +4789,8 @@ const styles = StyleSheet.create({
   mentionSuggestionText: { fontSize: 12, fontWeight: '800' },
   cancelReply: { alignItems: 'center', height: 28, justifyContent: 'center', width: 28 },
   cancelReplyText: { fontSize: 18, fontWeight: '700' },
-  composer: { alignItems: 'flex-end', borderTopWidth: 1, flexDirection: 'row', gap: 8, padding: 10 },
+  // The buttons stay level with the middle of the box as it grows.
+  composer: { alignItems: 'center', borderTopWidth: 1, flexDirection: 'row', gap: 8, padding: 10 },
   attachButton: { alignItems: 'center', borderRadius: 20, height: 42, justifyContent: 'center', width: 42 },
   attachButtonText: { fontSize: 27, fontWeight: '400', lineHeight: 29 },
   emojiButton: { alignItems: 'center', borderRadius: 20, height: 42, justifyContent: 'center', width: 42 },

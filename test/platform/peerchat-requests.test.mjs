@@ -96,3 +96,8 @@ test('Find people lists nobody until a name is typed', () => {
   assert.match(screen, /: \[\]\n/)
   assert.match(screen, /Type a name to find someone in Peer-to-Peer Republic/)
 })
+
+// A long message grows the box; the buttons beside it stay in its middle.
+test('the composer keeps its buttons centred on the message box', () => {
+  assert.match(screen, /composer: \{ alignItems: 'center',/)
+})
