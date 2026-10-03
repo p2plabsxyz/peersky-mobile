@@ -457,12 +457,15 @@ export function PeerChatScreen ({
   // The welcome room is the only place everyone is, so its member list is the
   // nearest thing PeerChat has to a directory. Nothing is uploaded anywhere for
   // this: it is the same list the room already keeps.
-  // Someone blocked is not offered as a person to find.
-  const directory = filterPeerChatMembers(
-    (rooms.find((room) => room.roomKey === PRE_JOINED_PEERCHAT_ROOM_KEY)?.members || [])
-      .filter((member) => !member.self && !blockedPeers.some((blocked) => blocked.peerId === member.id)),
-    discoverQuery
-  ) as PeerChatMember[]
+  // Someone blocked is not offered as a person to find. Nobody is listed
+  // until a name is typed: finding one person needs no list of everyone.
+  const directory = discoverQuery.trim()
+    ? filterPeerChatMembers(
+      (rooms.find((room) => room.roomKey === PRE_JOINED_PEERCHAT_ROOM_KEY)?.members || [])
+        .filter((member) => !member.self && !blockedPeers.some((blocked) => blocked.peerId === member.id)),
+      discoverQuery
+    ) as PeerChatMember[]
+    : []
   const myInviteUrl = buildPeerChatDirectInviteUrl(profile?.id || '')
   const visibleMembers = filterPeerChatMembers(
     activeRoom?.members || [],
@@ -3516,9 +3519,9 @@ export function PeerChatScreen ({
 
               <Text style={[styles.roomInfoTitle, { color: colors.text }]}>Search people</Text>
               <Text style={[styles.helper, { color: colors.muted }]}>
-                Everyone in Peer-to-Peer Republic, which is the room everyone
-                joins, so it doubles as the place to find somebody. No directory
-                is kept anywhere: this is the room's own member list.
+                Type a name to find someone in Peer-to-Peer Republic, the room
+                everyone joins. No directory is kept anywhere: this searches the
+                room's own member list.
               </Text>
               <TextInput
                 autoCapitalize='none'
@@ -3558,10 +3561,8 @@ export function PeerChatScreen ({
                   <Text style={[styles.memberMessage, { color: colors.accent }]}>Message</Text>
                 </Pressable>
               ))}
-              {directory.length === 0 && (
-                <Text style={[styles.helper, { color: colors.muted }]}>
-                  {discoverQuery.trim() ? 'Nobody by that name.' : 'Nobody else here yet.'}
-                </Text>
+              {directory.length === 0 && discoverQuery.trim() !== '' && (
+                <Text style={[styles.helper, { color: colors.muted }]}>Nobody by that name.</Text>
               )}
             </ScrollView>
           </SafeAreaView>

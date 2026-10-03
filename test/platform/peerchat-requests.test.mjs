@@ -89,3 +89,10 @@ test('the sheets are rendered where their buttons are', () => {
 test('the chat list does not count itself next to the requests button', () => {
   assert.doesNotMatch(screen, /roomCount/)
 })
+
+// Finding one person needs a name, not a list of everyone in the public room.
+test('Find people lists nobody until a name is typed', () => {
+  assert.match(screen, /const directory = discoverQuery\.trim\(\)\s+\? filterPeerChatMembers\(/)
+  assert.match(screen, /: \[\]\n/)
+  assert.match(screen, /Type a name to find someone in Peer-to-Peer Republic/)
+})
