@@ -42,28 +42,29 @@ test('the welcome screen explains itself without jargon', async () => {
   const { readFile } = await import('node:fs/promises')
   const screen = await readFile(new URL('../../app/WelcomeScreen.tsx', import.meta.url), 'utf8')
 
-  assert.match(screen, /A peer to peer, surveillance free browser\./)
+  assert.match(screen, /A browser that works for you, not for advertisers\./)
   // A scheme nobody has typed before is not an explanation, and "nobody in the
   // middle" reads as a riddle rather than a promise.
   assert.doesNotMatch(screen, /hyper:\/\//)
   assert.doesNotMatch(screen, /nobody in the middle/)
-  assert.match(screen, /We know nothing about you/)
-  // The blocking card was already right and stays as it was.
+  assert.match(screen, /We collect nothing about you, so there is nothing to sell/)
   assert.match(screen, /No ads, no trackers, no account/)
 })
 
-// What makes PeerSky different is read first; ordinary websites, the part
-// nobody needs convincing of, come last.
-test('the welcome screen leads with device to device and ends with the web', async () => {
+// What PeerSky stands for is read first; ordinary websites, the part nobody
+// needs convincing of, come late, and the code anyone can check comes last.
+test('the welcome screen leads with what PeerSky stands for', async () => {
   const { readFile } = await import('node:fs/promises')
   const screen = await readFile(new URL('../../app/WelcomeScreen.tsx', import.meta.url), 'utf8')
-  const titles = [...screen.matchAll(/title: '([^']+)'/g)].map((match) => match[1])
+  const cards = screen.slice(screen.indexOf('const QUALITIES'), screen.indexOf('const PEERSKY_WELCOME'))
+  const titles = [...cards.matchAll(/title: '([^']+)'/g)].map((match) => match[1])
 
   assert.deepEqual(titles, [
-    'Share data device to device',
-    'We know nothing about you',
-    'No ads, no trackers, no account',
-    'Works with every website'
+    'You are not the product',
+    'Device to device',
+    'Your data stays yours',
+    'The whole web, minus the junk',
+    'Free and open source'
   ])
   assert.match(screen, /There is no server\. Your phone is the server\./)
   // The old card needed a second read to follow.
