@@ -65,6 +65,19 @@ npm install
 npm run ios       # or: npm run android
 ```
 
+On an iPhone, the app and its home screen widgets share an App Group, which
+Apple has to know about before either can be signed. `npm run ios` cannot
+tell Xcode to arrange that: Expo only lets Xcode change provisioning when it
+picks the signing team itself, and the widgets need `ios.appleTeamId` set. So
+the first build onto a phone, and the first after a capability changes, goes
+through Xcode once, signed in to the team's Apple ID:
+
+```sh
+xcodebuild -workspace ios/PeerSky.xcworkspace -scheme PeerSky -configuration Debug -destination generic/platform=iOS -allowProvisioningUpdates REGISTER_APP_GROUPS=YES build
+```
+
+Building from Xcode itself does the same. After that, `npm run ios` works.
+
 Android needs the Rust toolchain for content blocking once:
 
 ```sh
