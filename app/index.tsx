@@ -80,6 +80,7 @@ import {
 } from './browser-tabs.mjs'
 import {
   createBrowserResetSession,
+  getListReturnScreen,
   getSettingsReturnPage,
   resolveBrowserStartupSession
 } from './browser-session.mjs'
@@ -401,6 +402,12 @@ export default function App () {
     page: SettingsPage
     tabId: string
     url: string
+  } | null>(null)
+  // The same for a page opened from Bookmarks or History.
+  const listReturnRef = useRef<{
+    screen: 'bookmarks' | 'history'
+    tabId: string
+    historyIndex: number
   } | null>(null)
   const [browserCurrentUrl, setBrowserCurrentUrl] = useState(BROWSER_HOME_URL)
   const [browserTitle, setBrowserTitle] = useState('New tab')
@@ -1554,6 +1561,16 @@ export default function App () {
       setBrowserSettingsVisible(true)
       return
     }
+    const listReturnScreen = getListReturnScreen(listReturnRef.current, {
+      tabId,
+      historyIndex: activeBrowserTab.historyIndex
+    })
+    if (listReturnScreen) {
+      listReturnRef.current = null
+      if (listReturnScreen === 'bookmarks') setBrowserBookmarksVisible(true)
+      else setBrowserHistoryVisible(true)
+      return
+    }
 
     const nextState = getBrowserBackState({
       history: activeBrowserTab.history,
@@ -2131,6 +2148,18 @@ export default function App () {
   function onBrowserOpenBookmarks () {
     setBrowserMenuVisible(false)
     setBrowserBookmarksVisible(true)
+  }
+
+  // A page opened from Bookmarks or History goes into the entry after this
+  // one, and back from it returns to the list it came from first.
+  function openFromList (screen: 'bookmarks' | 'history', targetUrl: string) {
+    const tabsState = browserTabsStateRef.current
+    const tab = tabsState.tabs.find((candidate) => candidate.id === tabsState.activeTabId)
+    settingsReturnRef.current = null
+    listReturnRef.current = tab
+      ? { screen, tabId: tab.id, historyIndex: tab.historyIndex + 1 }
+      : null
+    void loadBrowserUrl(targetUrl)
   }
 
   function onBrowserOpenDownloads () {
@@ -3373,7 +3402,7 @@ export default function App () {
             onClose={() => setBrowserBookmarksVisible(false)}
             onOpen={(targetUrl) => {
               setBrowserBookmarksVisible(false)
-              void loadBrowserUrl(targetUrl)
+              openFromList('bookmarks', targetUrl)
             }}
             onRemove={(targetUrl) => {
               if (removeBrowserBookmark(targetUrl)) setStatus('Bookmark removed')
@@ -3413,7 +3442,7 @@ export default function App () {
             onOpen={(targetUrl) => {
               setBrowserHistoryVisible(false)
               setActiveTab('hyper')
-              void loadBrowserUrl(targetUrl)
+              openFromList('history', targetUrl)
             }}
             onRemove={(item) => {
               if (removeBrowserHistoryItem(item)) setStatus('History entry removed')
@@ -3538,6 +3567,7 @@ export default function App () {
             onResetTabs={onBrowserResetTabs}
             onOpenUrl={(targetUrl, fromPage) => {
               closeBrowserSettings()
+              listReturnRef.current = null
               settingsReturnRef.current = !fromPage || fromPage === 'main'
                 ? null
                 : {

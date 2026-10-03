@@ -35,6 +35,22 @@ export function getSettingsReturnPage (pending, { tabId, url }) {
   return pending.page
 }
 
+/**
+ * The screen to reopen when going back from a page opened from Bookmarks or
+ * History, or null for ordinary back.
+ *
+ * They sit over the browser like settings, so back from a bookmark skipped
+ * them. This goes by the history entry the page went into rather than its
+ * address, since a bookmark often redirects (twitter.com to x.com) and the
+ * entry then holds the new one. Follow a link, or switch tabs, and back is
+ * ordinary again.
+ */
+export function getListReturnScreen (pending, { tabId, historyIndex }) {
+  if (!pending?.screen) return null
+  if (pending.tabId !== tabId || pending.historyIndex !== historyIndex) return null
+  return pending.screen
+}
+
 function normalizeReturnUrl (url) {
   const value = String(url || '')
   try {

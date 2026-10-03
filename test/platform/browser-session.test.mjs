@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 import {
   createBrowserResetSession,
+  getListReturnScreen,
   getSettingsReturnPage,
   resolveBrowserStartupSession
 } from '../../app/browser-session.mjs'
@@ -112,6 +113,37 @@ describe('browser session lifecycle', () => {
       getSettingsReturnPage(pending, { tabId: 'tab-1', url: 'https://peersky.p2plabs.xyz/download' }),
       null
     )
+  })
+
+  // Bookmarks sits over the browser like settings, so swiping back from a
+  // bookmark skipped it and landed on whatever the tab showed before.
+  test('back returns to Bookmarks or History from the page opened there', () => {
+    const pending = { screen: 'bookmarks', tabId: 'tab-1', historyIndex: 3 }
+
+    assert.equal(getListReturnScreen(pending, { tabId: 'tab-1', historyIndex: 3 }), 'bookmarks')
+    // Followed a link from there: back belongs to history again.
+    assert.equal(getListReturnScreen(pending, { tabId: 'tab-1', historyIndex: 4 }), null)
+    // Went back past it.
+    assert.equal(getListReturnScreen(pending, { tabId: 'tab-1', historyIndex: 2 }), null)
+    assert.equal(getListReturnScreen(pending, { tabId: 'tab-2', historyIndex: 3 }), null)
+    assert.equal(getListReturnScreen(null, { tabId: 'tab-1', historyIndex: 3 }), null)
+    assert.equal(
+      getListReturnScreen({ ...pending, screen: 'history' }, { tabId: 'tab-1', historyIndex: 3 }),
+      'history'
+    )
+  })
+
+  test('a list remembers the entry the page goes into, so a redirect still counts', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const app = await readFile(new URL('../../app/index.tsx', import.meta.url), 'utf8')
+    const open = app.slice(app.indexOf('function openFromList'), app.indexOf('void loadBrowserUrl(targetUrl)', app.indexOf('function openFromList')))
+    assert.match(open, /historyIndex: tab\.historyIndex \+ 1/)
+    assert.match(app, /onOpen=\{\(targetUrl\) => \{\n\s+setBrowserBookmarksVisible\(false\)\n\s+openFromList\('bookmarks', targetUrl\)/)
+    assert.match(app, /openFromList\('history', targetUrl\)/)
+    // Checked before history is walked, the same as settings.
+    const back = app.slice(app.indexOf('function onBrowserBack'), app.indexOf('getBrowserBackState({', app.indexOf('function onBrowserBack')))
+    assert.match(back, /getListReturnScreen\(listReturnRef\.current/)
+    assert.match(back, /setBrowserBookmarksVisible\(true\)/)
   })
 
   test('every settings page that opens a link reports which page it was', async () => {
