@@ -709,6 +709,11 @@ export const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '800'
   },
+  p2pmdMetaIconButton: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 11
+  },
   p2pmdWorkspaceWebView: {
     backgroundColor: '#202128',
     flex: 1

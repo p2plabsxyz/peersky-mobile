@@ -134,6 +134,7 @@ import { BrowserZoomSheet } from './BrowserZoomSheet'
 import { PublishedLinkSheet } from './PublishedLinkSheet'
 import { P2pmdNewNoteSheet } from './P2pmdNewNoteSheet'
 import PencilSquareIcon from '../assets/icons/bootstrap/pencil-square.svg'
+import ShareIcon from '../assets/icons/bootstrap/share.svg'
 import { WelcomeScreen } from './WelcomeScreen'
 import { RestartRequiredScreen } from './RestartRequiredScreen'
 import { emitLinkDeviceProgress } from './settings/link-device-progress'
@@ -3511,18 +3512,20 @@ export default function App () {
             </Text>
           </View>
           <Pressable
+            accessibilityLabel='Share note'
+            accessibilityRole='button'
+            style={[styles.p2pmdMetaButton, p2pmdTheme?.p2pmdMetaButton, styles.p2pmdMetaIconButton]}
+            onPress={() => void onP2pmdShareRoom()}
+            disabled={isBooting || isLoading}
+          >
+            <ShareIcon width={16} height={16} color={browserIsDark ? '#f1f2f7' : '#1f2a44'} />
+          </Pressable>
+          <Pressable
             style={[styles.p2pmdMetaButton, p2pmdTheme?.p2pmdMetaButton]}
             onPress={onP2pmdPublishToHyper}
             disabled={isBooting || isLoading || isP2pmdPublishing}
           >
             <Text style={[styles.p2pmdMetaButtonText, p2pmdTheme?.p2pmdMetaButtonText]}>Publish</Text>
-          </Pressable>
-          <Pressable
-            style={[styles.p2pmdMetaButton, p2pmdTheme?.p2pmdMetaButton]}
-            onPress={() => void onP2pmdShareRoom()}
-            disabled={isBooting || isLoading}
-          >
-            <Text style={[styles.p2pmdMetaButtonText, p2pmdTheme?.p2pmdMetaButtonText]}>Share</Text>
           </Pressable>
           <Pressable
             style={[styles.p2pmdMetaButton, p2pmdTheme?.p2pmdMetaButton, styles.p2pmdMetaButtonDanger, p2pmdTheme?.p2pmdMetaButtonDanger]}

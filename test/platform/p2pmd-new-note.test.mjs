@@ -39,3 +39,11 @@ test('the start screen has Create Note alone, and picks up a running note itself
   assert.doesNotMatch(app, /onP2pmdRoomRefresh/)
   assert.match(app, /if \(activeTab !== 'p2pmd' \|\| browserSource\.kind !== 'app' \|\| p2pmdRoom \|\| isBooting \|\| !rpcRef\.current\) return\s+void reattachRunningP2pmdRoom\(\)/)
 })
+
+test('the note header shares from an icon before Publish', async () => {
+  const app = await read('app/index.tsx')
+  const share = app.indexOf("accessibilityLabel='Share note'")
+  const publish = app.indexOf('>Publish</Text>')
+  assert.ok(share > 0 && share < publish)
+  assert.match(app.slice(share, publish), /<ShareIcon width=\{16\} height=\{16\}/)
+})
