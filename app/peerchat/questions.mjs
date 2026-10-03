@@ -33,7 +33,7 @@ export const PEERCHAT_WELCOME_QUESTIONS = [
   },
   {
     q: 'Can I send big files?',
-    a: 'Yes, up to 2 GB each: photos, videos, documents, anything. They’re encrypted like your messages, and your friends download them from your device, so keep PeerSky open until they have it.'
+    a: 'Yes, any size your phone has room for: photos, films, whole folders zipped up. Nothing is uploaded to a server and squeezed. Your friends download it straight from your device, encrypted like your messages, so keep PeerSky open until they have it.'
   },
   {
     q: 'Can I use it on my phone and my computer?',

@@ -106,9 +106,18 @@ are part of the local threat model.
 PeerChat stores attachments in a dedicated Hyperdrive for each room. Before
 upload, file bytes are sealed with AES-256-GCM using a key derived from the room
 key, in the attachment formats PeerSky Desktop uses too: `PCA1`, in one piece,
-up to 100 MB, and `PCA2`, a megabyte frame at a time, up to 2 GB. Both apps
-read both, and neither ever holds a framed file whole. The real file name and
-size travel inside the encrypted chat message. Room members can
+up to 100 MB, and `PCA2`, a megabyte frame at a time, for anything bigger.
+Both apps read both, and neither ever holds a framed file whole. The real file
+name and size travel inside the encrypted chat message.
+
+There is no size limit of PeerChat's own, as in Keet: a file is as big as the
+devices at both ends have room for. Sharing keeps a sealed copy on the sender's
+phone for the room to download from, and opening one keeps the downloaded
+blocks and the opened copy, so the phone checks for that much room first, plus
+512 MB to spare, and says how much it needs when there is not enough. Pictures
+and videos up to 100 MB load in the chat by themselves on both apps. Anything
+bigger waits for a tap, with its size shown, so a huge file never fills a phone
+on its own. Room members can
 decrypt attachments because they hold the room key; obtaining the `hyper://`
 URL alone exposes only ciphertext. Legacy plaintext attachments remain readable
 for compatibility.
