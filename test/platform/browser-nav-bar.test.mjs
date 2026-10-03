@@ -104,3 +104,8 @@ describe('peerchat onboarding', () => {
     assert.match(screen, /introContinue: \{[\s\S]{0,400}marginBottom: 28/)
   })
 })
+
+// Searches need a space bar, which iOS's URL keyboard leaves off its letters.
+test('the address bar types searches as easily as addresses', () => {
+  assert.match(toolbar, /keyboardType=\{Platform\.OS === 'ios' \? 'web-search' : 'url'\}/)
+})

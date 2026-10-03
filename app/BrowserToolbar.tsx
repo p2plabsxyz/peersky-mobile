@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ActivityIndicator, Keyboard, Pressable, StyleSheet, TextInput, View } from 'react-native'
+import { ActivityIndicator, Keyboard, Platform, Pressable, StyleSheet, TextInput, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { getBrowserAddressForUrl, MAX_BROWSER_URL_LENGTH } from './browser-shell.mjs'
 import { formatBrowserAddress } from './browser-appearance.mjs'
@@ -199,7 +199,10 @@ export function BrowserToolbar ({
             ]}
             autoCapitalize='none'
             autoCorrect={false}
-            keyboardType='url'
+            // The bar takes searches as well as addresses. iOS's URL keyboard
+            // has no space bar on its letters, so it gets Safari's web search
+            // keyboard: a space, a full stop and Go.
+            keyboardType={Platform.OS === 'ios' ? 'web-search' : 'url'}
             returnKeyType='go'
             maxLength={MAX_BROWSER_URL_LENGTH}
             selection={isAddressFocused ? undefined : { start: 0, end: 0 }}
