@@ -62,6 +62,7 @@ import {
   openPeerChatBatterySettings
 } from './background-service'
 import { playPeerChatSound } from './sounds'
+import { formatPeerChatMessage } from './message-format.mjs'
 import {
   createPeerChatEmojiEntries,
   filterPeerChatEmojiEntries,
@@ -99,6 +100,7 @@ import {
   RPC_PEERCHAT_UNBLOCK
 } from '../../backend/rpc/commands.mjs'
 import BackIcon from '../../assets/icons/bootstrap/arrow-left.svg'
+import CopyIcon from '../../assets/icons/bootstrap/copy.svg'
 import ChevronRightIcon from '../../assets/icons/bootstrap/chevron-right.svg'
 import ShareIcon from '../../assets/icons/bootstrap/share.svg'
 import CloseIcon from '../../assets/icons/bootstrap/x-lg.svg'
@@ -160,6 +162,21 @@ type PeerChatReactionSummary = {
   count: number
   self: boolean
 }
+
+type PeerChatMessageSpan = {
+  text: string
+  bold: boolean
+  italic: boolean
+  strike: boolean
+  code: boolean
+  link: string | null
+  mention: boolean
+}
+
+type PeerChatMessageBlock =
+  | { type: 'code', text: string }
+  | { type: 'heading', level: 1 | 2 | 3, spans: PeerChatMessageSpan[] }
+  | { type: 'paragraph', spans: PeerChatMessageSpan[] }
 
 function countOthersReactions (message: { reactions?: PeerChatReactionSummary[] }) {
   return (message.reactions || []).reduce((total, reaction) => total + reaction.count - (reaction.self ? 1 : 0), 0)
@@ -1817,6 +1834,12 @@ export function PeerChatScreen ({
     })
   }
 
+  function copyMessageCode (code: string) {
+    Clipboard.setString(code)
+    tapFeedback()
+    onStatus('Code copied')
+  }
+
   function copyMessageText (message: PeerChatMessage) {
     Clipboard.setString(message.message)
     setMessageActionTarget(null)
@@ -2488,17 +2511,20 @@ export function PeerChatScreen ({
                     )
                   : (
                     <>
-                      <Text style={[styles.messageText, { color: colors.text }]}>
-                        {renderMessageText(
-                          item.message,
-                          [profile?.username || '', ...activeRoom.members.map((member) => member.username)],
-                          colors.text,
-                          colors.accent,
-                          colors.accent,
-                          openMessageLink,
-                          setLinkActionTarget
-                        )}
-                      </Text>
+                      {renderMessageText(
+                        item.message,
+                        [profile?.username || '', ...activeRoom.members.map((member) => member.username)],
+                        colors,
+                        {
+                          onCopyCode: copyMessageCode,
+                          onHold: () => {
+                            tapFeedback()
+                            showMessageActions(item)
+                          },
+                          onHoldLink: setLinkActionTarget,
+                          onOpenLink: openMessageLink
+                        }
+                      )}
                       <PeerChatLinkCard
                         colors={colors}
                         message={item.message}
@@ -4418,45 +4444,124 @@ function getRoomInitials (name: string) {
   return name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || 'PC'
 }
 
+// # is the largest. Kept close to the message size: a chat bubble is not a page.
+const HEADING_STYLES = {
+  1: { fontSize: 19, fontWeight: '800' as const, lineHeight: 24 },
+  2: { fontSize: 17, fontWeight: '800' as const, lineHeight: 22 },
+  3: { fontSize: 15, fontWeight: '800' as const, lineHeight: 20 }
+}
+
+// Paragraphs and headings are runs of styled text. Code is set apart and can
+// be copied: a fenced block has its own button, and a tap on inline code
+// copies it. A long press anywhere still opens the message's actions.
 function renderMessageText (
   message: string,
   usernames: string[],
-  textColor: string,
-  mentionColor: string,
-  linkColor: string,
-  onOpenLink: (url: string) => void,
-  onHoldLink: (url: string) => void
+  colors: typeof lightColors,
+  handlers: {
+    onCopyCode: (code: string) => void
+    onHold: () => void
+    onHoldLink: (url: string) => void
+    onOpenLink: (url: string) => void
+  }
 ) {
-  return splitPeerChatMessageParts(message, usernames).map((part, index) => {
-    if (part.link) {
-      return (
-        <Text
-          key={`${index}-${part.text}`}
-          accessibilityHint='Long press to copy this link'
-          accessibilityRole='link'
-          style={{ color: linkColor, textDecorationLine: 'underline' }}
-          onPress={() => onOpenLink(part.link as string)}
-          // A link claims the touch, so the bubble underneath never sees a
-          // long press on it. Without this, holding a link opened it.
-          onLongPress={() => {
-            tapFeedback()
-            onHoldLink(part.link as string)
-          }}
-        >
-          {part.text}
-        </Text>
-      )
-    }
+  const blocks = formatPeerChatMessage(message, usernames) as PeerChatMessageBlock[]
+  return (
+    <View style={styles.messageBody}>
+      {blocks.map((block, index) => {
+        if (block.type === 'code') {
+          return (
+            <View key={`code-${index}`} style={[styles.codeBlock, { backgroundColor: colors.input, borderColor: colors.border }]}>
+              <View style={styles.codeBlockHeader}>
+                <Text style={[styles.codeBlockLabel, { color: colors.muted }]}>Code</Text>
+                <Pressable
+                  accessibilityLabel='Copy code'
+                  accessibilityRole='button'
+                  hitSlop={8}
+                  onLongPress={handlers.onHold}
+                  onPress={() => handlers.onCopyCode(block.text)}
+                  style={({ pressed }) => [styles.codeBlockCopy, pressed ? styles.disabled : null]}
+                >
+                  <CopyIcon width={13} height={13} color={colors.accent} />
+                  <Text style={[styles.codeBlockCopyText, { color: colors.accent }]}>Copy</Text>
+                </Pressable>
+              </View>
+              <Text selectable style={[styles.codeText, { color: colors.text }]}>{block.text}</Text>
+            </View>
+          )
+        }
+        return (
+          <Text
+            key={`${block.type}-${index}`}
+            style={[
+              styles.messageText,
+              block.type === 'heading' ? HEADING_STYLES[block.level] : null,
+              { color: colors.text }
+            ]}
+          >
+            {block.spans.map((span, spanIndex) => renderMessageSpan(span, spanIndex, colors, handlers))}
+          </Text>
+        )
+      })}
+    </View>
+  )
+}
 
+function renderMessageSpan (
+  span: PeerChatMessageSpan,
+  index: number,
+  colors: typeof lightColors,
+  handlers: {
+    onCopyCode: (code: string) => void
+    onHold: () => void
+    onHoldLink: (url: string) => void
+    onOpenLink: (url: string) => void
+  }
+) {
+  const style = [
+    span.bold || span.mention ? styles.messageBold : null,
+    span.italic ? styles.messageItalic : null,
+    span.strike ? styles.messageStrike : null
+  ]
+  if (span.code) {
     return (
       <Text
-        key={`${index}-${part.text}`}
-        style={{ color: part.mention ? mentionColor : textColor, fontWeight: part.mention ? '800' : '400' }}
+        key={`${index}-code`}
+        accessibilityHint='Copies this code. Long press for message actions'
+        accessibilityRole='button'
+        onLongPress={handlers.onHold}
+        onPress={() => handlers.onCopyCode(span.text)}
+        style={[style, styles.inlineCode, { backgroundColor: colors.input, color: colors.text }]}
       >
-        {part.text}
+        {span.text}
       </Text>
     )
-  })
+  }
+  if (span.link) {
+    const link = span.link
+    return (
+      <Text
+        key={`${index}-link`}
+        accessibilityHint='Long press to copy this link'
+        accessibilityRole='link'
+        style={[style, { color: colors.accent, textDecorationLine: span.strike ? 'underline line-through' : 'underline' }]}
+        onPress={() => handlers.onOpenLink(link)}
+        // A link claims the touch, so the bubble underneath never sees a
+        // long press on it. Without this, holding a link opened it.
+        onLongPress={() => {
+          tapFeedback()
+          handlers.onHoldLink(link)
+        }}
+      >
+        {span.text}
+      </Text>
+    )
+  }
+  return (
+    <Text key={`${index}-text`} style={[style, span.mention ? { color: colors.accent } : null]}>
+      {span.text}
+    </Text>
+  )
 }
 
 function getMentionCandidates (
@@ -4788,6 +4893,17 @@ const styles = StyleSheet.create({
   reactionText: { fontSize: 12 },
   senderName: { fontSize: 11, fontWeight: '800' },
   messageText: { fontSize: 14, lineHeight: 19 },
+  messageBody: { gap: 6 },
+  messageBold: { fontWeight: '800' },
+  messageItalic: { fontStyle: 'italic' },
+  messageStrike: { textDecorationLine: 'line-through' },
+  inlineCode: { fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', fontSize: 13 },
+  codeBlock: { borderRadius: 8, borderWidth: StyleSheet.hairlineWidth, gap: 4, paddingBottom: 8, paddingHorizontal: 10, paddingTop: 6 },
+  codeBlockHeader: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' },
+  codeBlockLabel: { fontSize: 11, fontWeight: '700', letterSpacing: 0.4, textTransform: 'uppercase' },
+  codeBlockCopy: { alignItems: 'center', flexDirection: 'row', gap: 4, paddingVertical: 2 },
+  codeBlockCopyText: { fontSize: 12, fontWeight: '800' },
+  codeText: { fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', fontSize: 12.5, lineHeight: 18 },
   attachmentCard: { alignItems: 'center', borderRadius: 10, borderWidth: 1, flexDirection: 'row', gap: 9, minWidth: 190, padding: 9 },
   inlineMediaCard: { borderRadius: 10, borderWidth: 1, maxWidth: 260, overflow: 'hidden', width: 240 },
   mediaNotice: { alignItems: 'center', gap: 4, justifyContent: 'center', minHeight: 110, padding: 12 },
