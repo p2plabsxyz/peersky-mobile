@@ -20,6 +20,29 @@ function readJpegSize (buffer) {
   throw new Error('No JPEG frame header found')
 }
 
+// The average step of the first quantization table, the one for brightness.
+// Larger steps throw more away: a camera saves at about 5, a squeezed copy
+// at 20 and up.
+function readJpegLumaStep (buffer) {
+  let offset = 2
+  while (offset < buffer.length) {
+    if (buffer[offset] !== 0xff) {
+      offset++
+      continue
+    }
+    if (buffer[offset + 1] === 0xdb) {
+      const wide = buffer[offset + 4] >> 4
+      let total = 0
+      for (let index = 0; index < 64; index++) {
+        total += wide ? buffer.readUInt16BE(offset + 5 + index * 2) : buffer[offset + 5 + index]
+      }
+      return total / 64
+    }
+    offset += 2 + buffer.readUInt16BE(offset + 2)
+  }
+  throw new Error('No JPEG quantization table found')
+}
+
 describe('home wallpaper', () => {
   test('the picture reaches the glass, the shortcuts keep the notch', async () => {
     const background = await readFile(
@@ -66,16 +89,21 @@ describe('home wallpaper', () => {
     assert.match(index, /const browserBottomInsetColor = browserToolbarColor$/m)
   })
 
-  test('the wallpaper is sharp enough to look at and small enough to ship', async () => {
+  test('the wallpaper is the desktop photo at full quality', async () => {
     const url = new URL('../../assets/images/wallpaper-ten-lakes.jpg', import.meta.url)
     const file = await stat(url)
-    const { height, width } = readJpegSize(await readFile(url))
+    const buffer = await readFile(url)
+    const { height, width } = readJpegSize(buffer)
 
     // A phone turns, and cover then scales the picture to the long edge either
     // way. Cropping it to portrait made landscape stretch it twice over. Both
     // dimensions have to clear the long edge of a phone screen instead.
     assert.ok(width >= 2800, `wallpaper is only ${width} wide`)
     assert.ok(height >= 2300, `wallpaper is only ${height} tall`)
-    assert.ok(file.size < 1300 * 1024, `wallpaper is ${Math.round(file.size / 1024)}KB`)
+    // The same file the desktop ships. A copy squeezed to half its size went
+    // soft in the sky and the water.
+    const step = readJpegLumaStep(buffer)
+    assert.ok(step < 8, `wallpaper was saved again at a quantization step of ${step}`)
+    assert.ok(file.size < 3 * 1024 * 1024, `wallpaper is ${Math.round(file.size / 1024)}KB`)
   })
 })
