@@ -50,3 +50,19 @@ test('the burning bird is the everyday bird in flame colours', async () => {
   const generator = await read('scripts/generate-burn-bird.mjs')
   assert.match(generator, /const SOURCE = new URL\('assets\/images\/logo\.png', root\)/)
 })
+
+// The flames were two jagged paths stretched to the screen: they read as big
+// triangles. Each flame is now its own curved shape at a fixed size, repeated
+// across wider screens rather than stretched, and flickering on its own beat.
+test('the fire is made of flames, not stretched triangles', async () => {
+  const animation = await read('app/BurnAnimation.tsx')
+  for (const name of ['FLAME', 'FLAME_HEART']) {
+    const path = animation.match(new RegExp(`const ${name} = '([^']+)'`))?.[1] || ''
+    assert.match(path, /^M[\d. ]+( C[\d. ]+)+ Z$/, `${name} is made of curves`)
+  }
+  assert.match(animation, /const TILE_WIDTH = 393/)
+  assert.match(animation, /Math\.ceil\(width \/ TILE_WIDTH\)/)
+  assert.doesNotMatch(animation, /<Svg[^>]*preserveAspectRatio='none'[^>]*viewBox='0 0 100 140'/)
+  assert.match(animation, /const beats = useRef\(\[0, 1, 2\]\.map/)
+  assert.match(animation, /transformOrigin: 'bottom'/)
+})

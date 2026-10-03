@@ -7,7 +7,7 @@ import {
   useWindowDimensions,
   View
 } from 'react-native'
-import Svg, { Defs, LinearGradient, Path, Stop } from 'react-native-svg'
+import Svg, { Defs, LinearGradient, Path, Rect, Stop } from 'react-native-svg'
 
 import { tapFeedback } from './haptics'
 
@@ -15,47 +15,53 @@ import { tapFeedback } from './haptics'
 const BURN_BIRD = require('../assets/images/burn-bird.png')
 
 const BIRD_SIZE = 168
-const RISE_MS = 620
-const HOLD_MS = 240
-const FADE_MS = 420
+const RISE_MS = 650
+const HOLD_MS = 420
+const FADE_MS = 450
 
-// Two walls of flame, drawn in a 100 by 140 box and stretched to the screen.
-// Each tongue is [from x, peak x, peak y, to x, foot y]. They are uneven on
-// purpose: a row of equal peaks reads as a pattern, not as fire.
-const FRONT_FLAMES = flamePath([
-  [0, 8, 12, 16, 44], [16, 25, 2, 34, 40], [34, 41, 18, 49, 44],
-  [49, 58, 0, 66, 41], [66, 74, 14, 82, 45], [82, 91, 4, 100, 42]
-])
-const BACK_FLAMES = flamePath([
-  [0, 5, 4, 12, 36], [12, 20, 16, 28, 34], [28, 35, 0, 43, 33], [43, 51, 12, 59, 35],
-  [59, 67, 2, 75, 33], [75, 83, 14, 91, 35], [91, 96, 6, 100, 30]
-])
+// One flame in a 100 by 140 box: a round belly, a tip that leans and curls,
+// and a smaller tongue breaking away on one side. The heart is its hot core.
+const FLAME = 'M50 3 C55 23 71 35 81 53 C93 75 94 101 82 119 C72 133 61 138 50 138 C33 138 16 128 11 108 C5 86 15 67 27 55 C28 67 32 74 38 78 C35 60 40 46 45 33 C47 23 49 13 50 3 Z'
+const FLAME_HEART = 'M52 58 C56 72 68 82 70 99 C72 117 62 131 50 131 C37 131 28 121 29 107 C30 95 36 89 41 83 C42 91 45 96 49 99 C47 85 48 71 52 58 Z'
+const FLAME_WIDTH_PER_HEIGHT = 100 / 140
 
-// Round at the foot and curling to a point, so it licks rather than spikes.
-function flamePath (tongues: Array<[number, number, number, number, number]>) {
-  let path = `M0 ${tongues[0][4]}`
-  let footY = tongues[0][4]
-  for (const [fromX, peakX, peakY, toX, toY] of tongues) {
-    path += ` C${fromX + 2.5} ${footY - 12} ${peakX - 3.5} ${peakY + 14} ${peakX} ${peakY}`
-    path += ` C${peakX + 1.5} ${peakY + 16} ${toX - 2.5} ${toY - 10} ${toX} ${toY}`
-    footY = toY
-  }
-  return `${path} L100 140 L0 140 Z`
-}
+// Laid out for a 393 point wide phone and repeated across anything wider, so
+// an iPad gets more flames rather than bigger ones. Each is [middle across
+// the tile, height in points, leans the other way, which flicker it follows].
+// Uneven on purpose: a row of equal flames reads as a pattern, not as fire.
+const TILE_WIDTH = 393
+type Flame = [middle: number, height: number, mirrored: boolean, beat: number]
+const BACK_ROW: Flame[] = [
+  [10, 150, false, 0], [70, 175, true, 1], [130, 140, false, 2], [195, 182, true, 0],
+  [260, 150, false, 1], [322, 172, true, 2], [385, 148, false, 0]
+]
+const FRONT_ROW: Flame[] = [
+  [0, 112, true, 1], [52, 130, false, 2], [108, 104, true, 0], [162, 136, false, 1],
+  [218, 114, true, 2], [272, 128, false, 0], [330, 108, true, 1], [386, 122, false, 2]
+]
+// Where the fire's body starts once it is up, as a share of the screen.
+const FIRE_TOP = 0.3
+// Sparks: [across the tile, size, how far up it drifts, which beat carries it].
+const SPARKS: Array<[number, number, number, number]> = [
+  [30, 4, 190, 0], [88, 3, 150, 1], [140, 5, 230, 2], [204, 3, 170, 0],
+  [250, 4, 210, 1], [300, 3, 160, 2], [352, 5, 200, 0], [176, 3, 260, 2]
+]
 
 /**
- * What burning the tabs looks like: a wall of flame rises over the screen, the
- * bird turns up in it in a temper, and when it clears the tabs are gone.
+ * What burning the tabs looks like: a fire rises over the screen, its flames
+ * flickering, the bird turns up in it in a temper, and when it clears the tabs
+ * are gone.
  *
- * `onBurn` runs once the flames cover the screen, so the old tabs are never
- * seen going. With Reduce Motion on there is nothing to watch: it burns at once.
+ * `onBurn` runs once the fire covers the screen, so the old tabs are never seen
+ * going. With Reduce Motion on there is nothing to watch: it burns at once.
  */
 export function BurnAnimation ({ onBurn, onDone }: { onBurn: () => void, onDone: () => void }) {
   const { height, width } = useWindowDimensions()
   const rise = useRef(new Animated.Value(0)).current
   const bird = useRef(new Animated.Value(0)).current
   const shake = useRef(new Animated.Value(0)).current
-  const flicker = useRef(new Animated.Value(0)).current
+  const beats = useRef([0, 1, 2].map(() => new Animated.Value(0))).current
+  const drifts = useRef([0, 1, 2].map(() => new Animated.Value(0))).current
   const fade = useRef(new Animated.Value(1)).current
   const callbacks = useRef({ onBurn, onDone })
   callbacks.current = { onBurn, onDone }
@@ -63,10 +69,16 @@ export function BurnAnimation ({ onBurn, onDone }: { onBurn: () => void, onDone:
   useEffect(() => {
     let active = true
     let animation: Animated.CompositeAnimation | null = null
-    const flickering = Animated.loop(Animated.sequence([
-      Animated.timing(flicker, { duration: 140, easing: Easing.inOut(Easing.quad), toValue: 1, useNativeDriver: true }),
-      Animated.timing(flicker, { duration: 160, easing: Easing.inOut(Easing.quad), toValue: 0, useNativeDriver: true })
-    ]))
+    // Three flickers of different lengths, so no two flames keep step.
+    const flickering = Animated.parallel(beats.map((beat, index) => Animated.loop(Animated.sequence([
+      Animated.timing(beat, { duration: 260 + index * 70, easing: Easing.inOut(Easing.quad), toValue: 1, useNativeDriver: true }),
+      Animated.timing(beat, { duration: 300 + index * 60, easing: Easing.inOut(Easing.quad), toValue: 0, useNativeDriver: true })
+    ]))))
+    const drifting = Animated.parallel(drifts.map((drift, index) => Animated.loop(Animated.sequence([
+      Animated.delay(index * 230),
+      Animated.timing(drift, { duration: 900, easing: Easing.out(Easing.quad), toValue: 1, useNativeDriver: true }),
+      Animated.timing(drift, { duration: 0, toValue: 0, useNativeDriver: true })
+    ]))))
 
     void AccessibilityInfo.isReduceMotionEnabled()
       .catch(() => false)
@@ -79,6 +91,7 @@ export function BurnAnimation ({ onBurn, onDone }: { onBurn: () => void, onDone:
         }
 
         flickering.start()
+        drifting.start()
         animation = Animated.sequence([
           Animated.parallel([
             Animated.timing(rise, { duration: RISE_MS, easing: Easing.out(Easing.cubic), toValue: 1, useNativeDriver: true }),
@@ -107,6 +120,7 @@ export function BurnAnimation ({ onBurn, onDone }: { onBurn: () => void, onDone:
           animation = Animated.timing(fade, { duration: FADE_MS, easing: Easing.in(Easing.quad), toValue: 0, useNativeDriver: true })
           animation.start(() => {
             flickering.stop()
+            drifting.stop()
             if (active) callbacks.current.onDone()
           })
         })
@@ -116,13 +130,12 @@ export function BurnAnimation ({ onBurn, onDone }: { onBurn: () => void, onDone:
       active = false
       animation?.stop()
       flickering.stop()
+      drifting.stop()
     }
-  }, [bird, fade, flicker, rise, shake])
+  }, [beats, bird, drifts, fade, rise, shake])
 
-  // Risen, the tongues lick at the top of the screen over embers dark enough
-  // that nothing of the old tabs shows between them.
-  const wallHeight = height * 1.25
-  const climb = (start: number, end: number) => rise.interpolate({ inputRange: [0, 1], outputRange: [start, end] })
+  const fireTop = Math.round(height * FIRE_TOP)
+  const tiles = Array.from({ length: Math.ceil(width / TILE_WIDTH) }, (_, index) => index * TILE_WIDTH)
 
   return (
     <Animated.View
@@ -132,28 +145,62 @@ export function BurnAnimation ({ onBurn, onDone }: { onBurn: () => void, onDone:
     >
       <Animated.View style={[StyleSheet.absoluteFill, styles.scorch, { opacity: rise }]} />
       <Animated.View
-        style={[styles.wall, {
-          height: wallHeight,
-          transform: [
-            { translateY: climb(height, -height * 0.1) },
-            { scaleY: flicker.interpolate({ inputRange: [0, 1], outputRange: [1, 1.04] }) }
-          ],
-          width
+        style={[StyleSheet.absoluteFill, {
+          transform: [{ translateY: rise.interpolate({ inputRange: [0, 1], outputRange: [height, 0] }) }]
         }]}
       >
-        <Flames id='back' path={BACK_FLAMES} stops={['#ffb347', '#ff6a1a', '#b5170e', '#4a0905']} />
-      </Animated.View>
-      <Animated.View
-        style={[styles.wall, {
-          height: wallHeight,
-          transform: [
-            { translateY: climb(height * 1.08, -height * 0.02) },
-            { scaleY: flicker.interpolate({ inputRange: [0, 1], outputRange: [1.03, 1] }) }
-          ],
-          width
-        }]}
-      >
-        <Flames id='front' path={FRONT_FLAMES} stops={['#fff1a8', '#ffc533', '#f0551b', '#8f1409']} />
+        {tiles.map((left) => BACK_ROW.map(([middle, size, mirrored, beat], index) => (
+          <FlickeringFlame
+            key={`back-${left}-${index}`}
+            beat={beats[beat]}
+            bottom={fireTop + size * 0.3}
+            id={`back-${left}-${index}`}
+            middle={left + middle}
+            mirrored={mirrored}
+            size={size}
+            stops={['#ff6a1a', '#d9361a', '#d9361a']}
+          />
+        )))}
+        <View style={[styles.body, { top: fireTop }]}>
+          <Svg height='100%' preserveAspectRatio='none' viewBox='0 0 10 100' width='100%'>
+            <Defs>
+              <LinearGradient id='burn-body' x1='0' x2='0' y1='0' y2='1'>
+                <Stop offset='0' stopColor='#ff8a24' />
+                <Stop offset='0.16' stopColor='#ff5f17' />
+                <Stop offset='0.55' stopColor='#c21d0e' />
+                <Stop offset='1' stopColor='#4a0805' />
+              </LinearGradient>
+            </Defs>
+            <Rect fill='url(#burn-body)' height='100' width='10' />
+          </Svg>
+        </View>
+        {tiles.map((left) => SPARKS.map(([across, size, drift, beat], index) => (
+          <Animated.View
+            key={`spark-${left}-${index}`}
+            style={[styles.spark, {
+              borderRadius: size / 2,
+              height: size,
+              left: left + across,
+              opacity: drifts[beat].interpolate({ inputRange: [0, 0.15, 1], outputRange: [0, 1, 0] }),
+              top: fireTop + 40,
+              transform: [{ translateY: drifts[beat].interpolate({ inputRange: [0, 1], outputRange: [0, -drift] }) }],
+              width: size
+            }]}
+          />
+        )))}
+        {tiles.map((left) => FRONT_ROW.map(([middle, size, mirrored, beat], index) => (
+          <FlickeringFlame
+            key={`front-${left}-${index}`}
+            beat={beats[beat]}
+            bottom={fireTop + size * 0.42}
+            heart
+            id={`front-${left}-${index}`}
+            middle={left + middle}
+            mirrored={mirrored}
+            size={size}
+            stops={['#ffb43a', '#ff9a2c', '#ff8a24']}
+          />
+        )))}
       </Animated.View>
       <View pointerEvents='none' style={[StyleSheet.absoluteFill, styles.centre]}>
         <Animated.Image
@@ -171,26 +218,64 @@ export function BurnAnimation ({ onBurn, onDone }: { onBurn: () => void, onDone:
   )
 }
 
-function Flames ({ id, path, stops }: { id: string, path: string, stops: [string, string, string, string] }) {
+type FlickeringFlameProps = {
+  beat: Animated.Value
+  bottom: number
+  heart?: boolean
+  id: string
+  middle: number
+  mirrored: boolean
+  size: number
+  stops: [string, string, string]
+}
+
+// Stretches and sways from its foot, the way a flame does, never as a block.
+function FlickeringFlame ({ beat, bottom, heart = false, id, middle, mirrored, size, stops }: FlickeringFlameProps) {
+  const flameWidth = size * FLAME_WIDTH_PER_HEIGHT
+  const lean = mirrored ? -1 : 1
   return (
-    <Svg height='100%' preserveAspectRatio='none' viewBox='0 0 100 140' width='100%'>
-      <Defs>
-        <LinearGradient id={`flame-${id}`} x1='0' x2='0' y1='0' y2='1'>
-          <Stop offset='0' stopColor={stops[0]} />
-          <Stop offset='0.16' stopColor={stops[1]} />
-          <Stop offset='0.42' stopColor={stops[2]} />
-          <Stop offset='0.9' stopColor={stops[3]} />
-        </LinearGradient>
-      </Defs>
-      <Path d={path} fill={`url(#flame-${id})`} />
-    </Svg>
+    <Animated.View
+      style={[styles.flame, {
+        height: size,
+        left: middle - flameWidth / 2,
+        top: bottom - size,
+        transform: [
+          { translateX: beat.interpolate({ inputRange: [0, 1], outputRange: [-1.5 * lean, 1.5 * lean] }) },
+          { scaleY: beat.interpolate({ inputRange: [0, 1], outputRange: mirrored ? [1.07, 0.94] : [0.94, 1.07] }) },
+          { scaleX: beat.interpolate({ inputRange: [0, 1], outputRange: [1.02, 0.97] }) }
+        ],
+        width: flameWidth
+      }]}
+    >
+      <Svg height='100%' style={mirrored ? styles.mirrored : null} viewBox='0 0 100 140' width='100%'>
+        <Defs>
+          <LinearGradient id={`flame-${id}`} x1='0' x2='0' y1='0' y2='1'>
+            <Stop offset='0' stopColor={stops[0]} />
+            <Stop offset='0.7' stopColor={stops[1]} />
+            <Stop offset='1' stopColor={stops[2]} />
+          </LinearGradient>
+          {heart && (
+            <LinearGradient id={`heart-${id}`} x1='0' x2='0' y1='0' y2='1'>
+              <Stop offset='0' stopColor='#fff3b0' />
+              <Stop offset='0.55' stopColor='#ffd447' />
+              <Stop offset='1' stopColor='#ff9a2c' />
+            </LinearGradient>
+          )}
+        </Defs>
+        <Path d={FLAME} fill={`url(#flame-${id})`} />
+        {heart && <Path d={FLAME_HEART} fill={`url(#heart-${id})`} />}
+      </Svg>
+    </Animated.View>
   )
 }
 
 const styles = StyleSheet.create({
   overlay: { zIndex: 1000 },
   scorch: { backgroundColor: '#1c0703' },
-  wall: { left: 0, position: 'absolute', top: 0 },
+  body: { bottom: 0, left: 0, position: 'absolute', right: 0 },
+  flame: { position: 'absolute', transformOrigin: 'bottom' },
+  mirrored: { transform: [{ scaleX: -1 }] },
+  spark: { backgroundColor: '#ffd36b', position: 'absolute' },
   centre: { alignItems: 'center', justifyContent: 'center' },
   bird: { height: BIRD_SIZE, width: BIRD_SIZE }
 })
