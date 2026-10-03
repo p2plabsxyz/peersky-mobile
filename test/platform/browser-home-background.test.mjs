@@ -100,7 +100,10 @@ describe('home wallpaper', () => {
     assert.match(styles, /browserHomeLayerHidden: \{\s+opacity: 0\s+\}/)
   })
 
-  test('the picture sits behind a scrim, not behind bare text', async () => {
+  // A tint over the whole photo washed it out. Only the part behind the
+  // shortcuts is shaded now, fading out below them, and the labels carry their
+  // own contrast. The icons stay as they are whatever the wallpaper.
+  test('the picture is shaded only behind the shortcuts, not all over', async () => {
     const background = await readFile(
       new URL('../../app/BrowserHomeBackground.tsx', import.meta.url),
       'utf8'
@@ -108,15 +111,23 @@ describe('home wallpaper', () => {
     const index = await readFile(new URL('../../app/index.tsx', import.meta.url), 'utf8')
 
     assert.match(background, /resizeMode='cover'/)
-    assert.match(background, /backgroundColor: scrim/)
-    // Not the same number in both: a white veil flattens a photograph in a
-    // way a dark one does not, so matching the numbers does not match the
-    // look. The labels carry their own contrast instead.
-    assert.match(index, /rgba\(24, 24, 27, 0\.35\)/)
-    assert.match(index, /rgba\(255, 255, 255, 0\.14\)/)
+    assert.doesNotMatch(background, /scrim/)
+    assert.match(background, /const VEIL_HEIGHT = 460/)
+    assert.match(background, /<Stop offset='1' stopColor=\{shade\} stopOpacity=\{0\} \/>/)
+    assert.match(background, /pointerEvents='none'/)
+    // Not the same number in both: a white shade flattens a photograph in a
+    // way a dark one does not.
+    assert.match(background, /const strength = isDark \? 0\.55 : 0\.4/)
+    assert.match(index, /<BrowserHomeBackground isDark=\{browserIsDark\}>/)
+    assert.doesNotMatch(index, /rgba\(24, 24, 27, 0\.35\)/)
+
     const styles = await readFile(new URL('../../app/styles.ts', import.meta.url), 'utf8')
     assert.match(styles, /browserShortcutTitleOnLight[\s\S]{0,140}textShadowRadius: 5/)
     assert.match(styles, /browserShortcutTitleOnDark[\s\S]{0,140}textShadowRadius: 5/)
+    // Favourites sit on the same photograph, so their labels get the shadow too.
+    const favourites = await readFile(new URL('../../app/favourites/BrowserFavourites.tsx', import.meta.url), 'utf8')
+    assert.match(favourites, /style=\{\[styles\.browserShortcutTitle, titleStyle, \{ color: palette\.text \}\]\}/)
+    assert.match(index, /titleStyle=\{browserIsDark \? styles\.browserShortcutTitleOnDark : styles\.browserShortcutTitleOnLight\}/)
   })
 
   test('the picture runs down to the navigation bar', async () => {

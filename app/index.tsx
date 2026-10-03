@@ -4036,9 +4036,7 @@ export default function App () {
             pointerEvents={browserSource.kind === 'home' ? 'auto' : 'none'}
             style={[styles.browserHomeLayer, browserSource.kind === 'home' ? null : styles.browserHomeLayerHidden]}
           >
-            <BrowserHomeBackground
-              scrim={browserIsDark ? 'rgba(24, 24, 27, 0.35)' : 'rgba(255, 255, 255, 0.14)'}
-            >
+            <BrowserHomeBackground isDark={browserIsDark}>
               <ScrollView
                 style={styles.browserContentPage}
                 contentContainerStyle={[
@@ -4095,6 +4093,7 @@ export default function App () {
                 <BrowserFavourites
                   favourites={browserFavourites}
                   palette={browserChrome}
+                  titleStyle={browserIsDark ? styles.browserShortcutTitleOnDark : styles.browserShortcutTitleOnLight}
                   onOpen={(targetUrl) => void loadBrowserUrl(targetUrl)}
                   onRemove={onBrowserRemoveFavourite}
                 />
