@@ -41,7 +41,9 @@ export function HistorySuggestions ({
       position === 'bottom' ? styles.attachedBelow : styles.attachedAbove,
       {
         backgroundColor: background,
-        borderColor: palette.border,
+        // The hairline in the light border colour all but vanished on a white
+        // page. The muted text colour, faded, shows on light and dark alike.
+        borderColor: `${palette.mutedText}66`,
         // Padding, not a margin: the panel still reaches both screen edges
         // like the bar does, and only the rows step in, so a clock lines up
         // with where the address field starts rather than with the notch.
@@ -88,14 +90,19 @@ const styles = StyleSheet.create({
     zIndex: 20
   },
   // Only the far edge is drawn. The edge meeting the bar, and both sides, are
-  // the bar's own, so the two read as one surface that grew.
+  // the bar's own, so the two read as one surface that grew. A hairline: a
+  // full point read as a heavy rule across the page.
   attachedBelow: {
     borderBottomLeftRadius: 0,
     borderBottomRightRadius: 0,
-    borderTopWidth: 1
+    borderTopWidth: StyleSheet.hairlineWidth,
+    // Above the bar, its shadow fell down onto the bar and drew a second line
+    // where the two meet. It goes up onto the page instead.
+    elevation: 0,
+    shadowOffset: { width: 0, height: -4 }
   },
   attachedAbove: {
-    borderBottomWidth: 1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
     borderTopLeftRadius: 0,
     borderTopRightRadius: 0
   },
