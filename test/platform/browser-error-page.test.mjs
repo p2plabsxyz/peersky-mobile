@@ -20,6 +20,10 @@ describe('a page that would not load', () => {
     // hex, so those describe themselves instead.
     const key = `hyper://${'a'.repeat(64)}/`
     assert.doesNotMatch(describeBrowserError(key, 'Not Found').body, /aaaa/)
+    // Said at the start of a sentence, it starts with a capital, and it says
+    // what a key is rather than repeating "this address".
+    assert.match(describeBrowserError(key, 'Not Found').body, /^This drive answered, but there is nothing at this address\./)
+    assert.match(describeBrowserError(key, 'Request timed out').body, /^This drive did not answer in time\./)
   })
 
   // The two blocks WebKit names. The first is the device's own filter, which
