@@ -311,6 +311,24 @@ describe('mobile platform runtime configuration', () => {
     assert.match(indexSource, /settleIncomingUrl\(incomingUrl\)/)
   })
 
+  // A link that started the app counted as something done in it, and the
+  // restore skips last time's tabs once anything has been done. Opening a
+  // link with PeerSky closed left one tab, and the next save lost the rest.
+  it('keeps last time\'s tabs when a link starts the app, and opens the link over them', async () => {
+    const indexSource = await readFile(repoFile('app/index.tsx'), 'utf8')
+    const subscriber = indexSource.slice(
+      indexSource.indexOf('useEffect(() => subscribeToIncomingUrls('),
+      indexSource.indexOf('if (!browserSessionReady || !pendingHomeShortcutUrl) return')
+    )
+    assert.doesNotMatch(subscriber, /browserUserInteractedRef\.current = true/)
+    assert.match(subscriber, /setPendingIncomingUrl\(url\)/)
+    // The link goes in front of the restored page, and the page does not
+    // load over it afterwards.
+    assert.match(indexSource, /setPendingRestoredUrl\(null\)\s+void loadBrowserUrl\(incomingUrl\)/)
+    assert.match(indexSource, /if \(!pendingRestoredUrl\) return\s+\/\/[^\n]*\n\s+\/\/[^\n]*\n\s+if \(pendingIncomingUrl\) return/)
+    assert.match(indexSource, /\}, \[isBooting, pendingIncomingUrl, pendingRestoredUrl\]\)/)
+  })
+
   // expo-router parsed every incoming link's query with a decoder a crafted
   // link could keep busy. The browser reads links itself, so the router is
   // only ever told to show "/".

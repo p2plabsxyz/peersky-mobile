@@ -844,7 +844,9 @@ export default function App () {
       return
     }
 
-    browserUserInteractedRef.current = true
+    // It waits for last time's tabs, like a quick action. Counted as
+    // something done in the app, a link that started it opened the app with
+    // every tab from last time gone.
     setPendingIncomingUrl(url)
   }), [])
 
@@ -919,6 +921,9 @@ export default function App () {
     setBrowserSettingsVisible(false)
     setBrowserSettingsInitialPage(undefined)
     setBrowserTabsVisible(false)
+    // In front of whatever this tab was about to bring back, which stays
+    // behind it in the tab's history.
+    setPendingRestoredUrl(null)
     void loadBrowserUrl(incomingUrl)
   }, [browserSessionReady, pendingIncomingUrl])
 
@@ -940,6 +945,9 @@ export default function App () {
 
   useEffect(() => {
     if (!pendingRestoredUrl) return
+    // A link that opened the app goes in front of the restored page, not
+    // under it. Loaded after the link, the page took the link's place.
+    if (pendingIncomingUrl) return
     // Built-in apps talk to the Bare worklet as soon as they open, so they have
     // to wait for it exactly like hyper:// does. Without this a restored
     // PeerTunes tab hit "Worklet is not ready" on every cold start.
@@ -950,7 +958,7 @@ export default function App () {
     const restoredUrl = pendingRestoredUrl
     setPendingRestoredUrl(null)
     void loadRestoredBrowserUrl(restoredUrl)
-  }, [isBooting, pendingRestoredUrl])
+  }, [isBooting, pendingIncomingUrl, pendingRestoredUrl])
 
   function updateBrowserTabsState (
     update: BrowserTabsState | ((state: BrowserTabsState) => BrowserTabsState)
