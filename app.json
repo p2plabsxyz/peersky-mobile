@@ -133,7 +133,7 @@
           "backgroundColor": "#f5f8ff",
           "dark": {
             "image": "./assets/images/logo.png",
-            "backgroundColor": "#52525b"
+            "backgroundColor": "#2f2f34"
           }
         }
       ],

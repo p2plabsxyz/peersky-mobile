@@ -43,7 +43,7 @@ test('the startup screen is the launch image, still', async () => {
   // One image, not one per theme. Only the screen behind it follows the theme.
   assert.equal((startup.match(/require\(/g) || []).length, 1)
   // Its black outline vanished on near black, so dark is a grey.
-  assert.match(startup, /export const STARTUP_DARK_BACKGROUND = '#52525b'/)
+  assert.match(startup, /export const STARTUP_DARK_BACKGROUND = '#2f2f34'/)
 
   // The launch screen draws the same bird, at the same size, on the same
   // background as the screen that follows it.
@@ -52,7 +52,7 @@ test('the startup screen is the launch image, still', async () => {
   assert.equal(splash.dark.image, './assets/images/logo.png')
   assert.equal(splash.imageWidth, 200)
   assert.equal(splash.backgroundColor, BROWSER_PALETTES.light.shell)
-  assert.equal(splash.dark.backgroundColor, '#52525b')
+  assert.equal(splash.dark.backgroundColor, '#2f2f34')
   // The old top level key left Android 12 and later showing the launcher icon.
   assert.equal(expo.splash, undefined)
 

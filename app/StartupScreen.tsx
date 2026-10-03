@@ -11,8 +11,9 @@ const BIRD = require('../assets/images/logo.png')
 const BIRD_SIZE = 200
 
 // The bird is drawn with black outlines, which disappear on near black. A
-// dark grey keeps them, and the launch screen uses the same one.
-export const STARTUP_DARK_BACKGROUND = '#52525b'
+// dark grey keeps them, only a little lighter than the browser's dark shell so
+// the handover is not a flash, and the launch screen uses the same one.
+export const STARTUP_DARK_BACKGROUND = '#2f2f34'
 
 /**
  * What the app shows while it is coming up.
