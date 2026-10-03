@@ -61,6 +61,23 @@ describe('home wallpaper', () => {
     assert.doesNotMatch(background, /bleed/)
   })
 
+  test('the keyboard cuts the picture off instead of scaling it', async () => {
+    const background = await readFile(
+      new URL('../../app/BrowserHomeBackground.tsx', import.meta.url),
+      'utf8'
+    )
+
+    // Sized to the space it was given, the photo zoomed every time the
+    // keyboard came up and that space got shorter. It keeps the tallest
+    // height seen at this width now, and a new width starts over.
+    assert.match(background, /current && current\.width === layout\.width && current\.height >= layout\.height\s+\? current\s+: \{ height: layout\.height, width: layout\.width \}/)
+    assert.match(background, /style=\{\[styles\.wallpaper, frame \? \{ height: frame\.height \} : styles\.wallpaperFill\]\}/)
+    assert.match(background, /<View style=\{styles\.background\} onLayout=\{onLayout\}>/)
+    // Pinned to the top, so the bottom is what gets cut off.
+    assert.match(background, /wallpaper: \{ left: 0, position: 'absolute', top: 0, width: '100%' \}/)
+    assert.match(background, /background: \{ flex: 1, overflow: 'hidden' \}/)
+  })
+
   test('coming back home shows the home screen as it was, without a flash', async () => {
     const background = await readFile(
       new URL('../../app/BrowserHomeBackground.tsx', import.meta.url),
