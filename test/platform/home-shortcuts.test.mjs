@@ -4,7 +4,7 @@ import { createRequire } from 'node:module'
 import { describe, test } from 'node:test'
 import { gunzipSync } from 'node:zlib'
 
-import { HOME_SHORTCUTS, parseHomeShortcutUrl } from '../../app/home-shortcuts.mjs'
+import { HOME_SHORTCUTS, parseHomeShortcut } from '../../app/home-shortcuts.mjs'
 
 const require = createRequire(import.meta.url)
 const plugin = require('../../plugins/with-home-shortcuts')
@@ -39,9 +39,9 @@ function runMod (mod, modResults) {
 describe('quick actions on the app icon', () => {
   test('reads each one from its link, and nothing else', () => {
     for (const name of HOME_SHORTCUTS) {
-      assert.equal(parseHomeShortcutUrl(`peersky://shortcut/${name}`), name)
+      assert.deepEqual(parseHomeShortcut(`peersky://shortcut/${name}`), { name })
     }
-    assert.equal(parseHomeShortcutUrl(' PEERSKY://shortcut/New-Tab/ '), 'new-tab')
+    assert.deepEqual(parseHomeShortcut(' PEERSKY://shortcut/New-Tab/ '), { name: 'new-tab' })
     for (const url of [
       'peersky://shortcut/',
       'peersky://shortcut/close-all',
@@ -51,7 +51,33 @@ describe('quick actions on the app icon', () => {
       null,
       undefined
     ]) {
-      assert.equal(parseHomeShortcutUrl(url), null, String(url))
+      assert.equal(parseHomeShortcut(url), null, String(url))
+    }
+  })
+
+  // The widgets: a search, an app from the row, a bookmark.
+  test('reads what a widget opens, and only an address it may open', () => {
+    assert.deepEqual(parseHomeShortcut('peersky://shortcut/search'), { name: 'search' })
+    // As the widget writes it: everything but the unreserved characters.
+    const widgetLink = (target) => `peersky://shortcut/open?url=${encodeURIComponent(target).replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)}`
+    for (const target of [
+      'peersky://p2p/peerchat/',
+      'https://example.com/a?b=1&c=two+three#top',
+      'hyper://abc123/song.mp3'
+    ]) {
+      assert.deepEqual(parseHomeShortcut(widgetLink(target)), { name: 'open', target }, target)
+    }
+    for (const url of [
+      'peersky://shortcut/open',
+      'peersky://shortcut/open?url=',
+      'peersky://shortcut/open?url=javascript%3Aalert(1)',
+      'peersky://shortcut/open?url=file%3A%2F%2F%2Fetc%2Fpasswd',
+      'peersky://shortcut/open?url=peersky%3A%2F%2Fshortcut%2Fpaste',
+      'peersky://shortcut/open?url=%E0%A4%A',
+      `peersky://shortcut/open?url=${encodeURIComponent('https://example.com/' + 'a'.repeat(5000))}`,
+      'peersky://shortcut/search?url=https%3A%2F%2Fexample.com'
+    ]) {
+      assert.equal(parseHomeShortcut(url), null, url)
     }
   })
 
@@ -99,14 +125,17 @@ describe('quick actions on the app icon', () => {
   // Marked as something done in the app, a quick action that started it
   // opened the app without the tabs from last time.
   test('go on top of last time\'s tabs', () => {
-    assert.match(app, /if \(parseHomeShortcutUrl\(url\)\) \{\s+setPendingHomeShortcutUrl\(url\)\s+return\s+\}/)
+    assert.match(app, /if \(parseHomeShortcut\(url\)\) \{\s+setPendingHomeShortcutUrl\(url\)\s+return\s+\}/)
     assert.match(app, /if \(!browserSessionReady \|\| !pendingHomeShortcutUrl\) return/)
   })
 
   test('each does what it says', () => {
-    assert.match(app, /shortcut === 'new-tab'\) \{\s+setBrowserSettingsVisible\(false\)\s+onBrowserNewTab\(\)/)
-    assert.match(app, /shortcut === 'incognito'\) \{\s+setBrowserSettingsVisible\(false\)\s+onBrowserNewIncognitoTab\(\)/)
-    assert.match(app, /shortcut === 'app-icon'\) \{[^}]*setBrowserSettingsInitialPage\('appearance'\)\s+setBrowserSettingsVisible\(true\)/)
+    assert.match(app, /shortcut\?\.name === 'new-tab'\) \{\s+setBrowserSettingsVisible\(false\)\s+onBrowserNewTab\(\)/)
+    assert.match(app, /shortcut\?\.name === 'incognito'\) \{\s+setBrowserSettingsVisible\(false\)\s+onBrowserNewIncognitoTab\(\)/)
+    assert.match(app, /shortcut\?\.name === 'app-icon'\) \{[^}]*setBrowserSettingsInitialPage\('appearance'\)\s+setBrowserSettingsVisible\(true\)/)
+    // The search widget: a start page tab will do, and the cursor goes in.
+    assert.match(app, /shortcut\?\.name === 'search'\) \{[\s\S]{0,260}if \(browserSource\.kind !== 'home' \|\| isIncognitoTab\(browserTabsStateRef\.current\.activeTabId\)\) \{\s+onBrowserNewTab\(\)\s+\}\s+setBrowserAddressFocusRequest\(\(count\) => count \+ 1\)/)
+    assert.match(app, /shortcut\?\.name === 'open' && shortcut\.target\) \{\s+setBrowserSettingsVisible\(false\)\s+openWidgetTarget\(shortcut\.target\)/)
     // A new tab loads its address as given, so "example.com" failed to load
     // until it went through the address bar's rules first.
     assert.match(app, /const target = normalizeBrowserAddress\(\s+value,/)

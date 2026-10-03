@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { AppState, DeviceEventEmitter, Modal, NativeModules, Platform, Pressable, StyleSheet, Text, View } from 'react-native'
+import { AppState, DeviceEventEmitter, Modal, NativeEventEmitter, NativeModules, Platform, Pressable, StyleSheet, Text, View } from 'react-native'
 import { CameraView, useCameraPermissions } from 'expo-camera'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { WebView } from 'react-native-webview'
 
 import {
   PEERTUNES_MEDIA_BRIDGE_SCRIPT,
+  PEERTUNES_MEDIA_REPORT_SCRIPT,
   PEERTUNES_SCAN_BRIDGE_SCRIPT,
   createAudioRouteScript,
   createPeerTunesMediaCommandScript,
@@ -21,6 +22,7 @@ import { AppLoading } from '../AppLoading'
 import { PAUSE_ALL_MEDIA_SCRIPT } from '../browser-media.mjs'
 import { MODAL_ORIENTATIONS } from '../modal-orientations'
 import { tapFeedback } from '../haptics'
+import { forgetPeerTunesWidgetState, idlePeerTunesWidget, updatePeerTunesWidget } from '../widgets'
 
 const audioRoute = NativeModules.PeerSkyAudioRoute as {
   getRoute: () => Promise<{ external: boolean }>
@@ -28,11 +30,18 @@ const audioRoute = NativeModules.PeerSkyAudioRoute as {
   setNowPlaying?: (playing: boolean, title: string, artist: string) => void
   clearNowPlaying?: () => void
 } | undefined
-// iOS hands a WebView's media to the system itself.
-const PEERTUNES_BEFORE_LOAD_SCRIPT = Platform.OS === 'android'
-  ? `${PEERTUNES_SCAN_BRIDGE_SCRIPT}\n${PEERTUNES_MEDIA_BRIDGE_SCRIPT}`
-  : PEERTUNES_SCAN_BRIDGE_SCRIPT
+// What is playing, for the Android media session and the iOS home screen
+// widget. iOS gives a WebView's media to Control Center itself.
+const PEERTUNES_BEFORE_LOAD_SCRIPT = `${PEERTUNES_SCAN_BRIDGE_SCRIPT}\n${PEERTUNES_MEDIA_BRIDGE_SCRIPT}`
+// Android's media session sends its buttons as plain device events. On iOS
+// the widget's buttons come through the module, which only sends them while
+// something listens through it.
+const mediaCommandEvents = Platform.OS === 'ios' && NativeModules.PeerSkyAudioRoute
+  ? new NativeEventEmitter(NativeModules.PeerSkyAudioRoute)
+  : DeviceEventEmitter
 const AUDIO_ROUTE_POLL_MS = 3000
+// Long enough for the page to have started or stopped the song.
+const MEDIA_REPORT_DELAY_MS = 800
 
 type Props = {
   error: string | null
@@ -79,21 +88,32 @@ export function PeerTunesScreen ({
     return () => subscription.remove()
   }, [onEnsureServer])
 
-  // Buttons on earbuds or in a car come back from the media session as
+  // Buttons on earbuds, in a car or on the home screen widget come back as
   // commands for the page. A swipe away pauses it, since the app can stay
   // running for PeerChat with nothing left on screen to stop the music.
   useEffect(() => {
-    const commands = DeviceEventEmitter.addListener('PeerSkyMediaCommand', (command: unknown) => {
+    let reportTimer: ReturnType<typeof setTimeout> | null = null
+    const commands = mediaCommandEvents.addListener('PeerSkyMediaCommand', (command: unknown) => {
       const script = createPeerTunesMediaCommandScript(command)
-      if (script) webViewRef.current?.injectJavaScript(script)
+      if (!script) return
+      webViewRef.current?.injectJavaScript(script)
+      // The widget showed the press before the page acted on it. Ask the page
+      // what it is doing now, so the widget ends up right either way.
+      forgetPeerTunesWidgetState()
+      if (reportTimer) clearTimeout(reportTimer)
+      reportTimer = setTimeout(() => {
+        webViewRef.current?.injectJavaScript(PEERTUNES_MEDIA_REPORT_SCRIPT)
+      }, MEDIA_REPORT_DELAY_MS)
     })
     const removed = DeviceEventEmitter.addListener('PeerSkyTaskRemoved', () => {
       webViewRef.current?.injectJavaScript(PAUSE_ALL_MEDIA_SCRIPT)
     })
     return () => {
+      if (reportTimer) clearTimeout(reportTimer)
       commands.remove()
       removed.remove()
       audioRoute?.clearNowPlaying?.()
+      idlePeerTunesWidget()
     }
   }, [])
 
@@ -201,6 +221,7 @@ export function PeerTunesScreen ({
         const nowPlaying = parsePeerTunesNowPlaying(event.nativeEvent.data)
         if (nowPlaying) {
           audioRoute?.setNowPlaying?.(nowPlaying.playing, nowPlaying.title, nowPlaying.artist)
+          updatePeerTunesWidget(nowPlaying)
           return
         }
         const weight = parsePeerTunesHapticRequest(event.nativeEvent.data)

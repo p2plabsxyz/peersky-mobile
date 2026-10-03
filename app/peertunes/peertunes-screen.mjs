@@ -143,6 +143,10 @@ export function createAudioRouteScript (external) {
 // system, so play and pause from earbuds had nowhere to go. This keeps the
 // page's own Media Session handlers where the app can call them, and says what
 // is playing so the app's media session can tell the system.
+// Big enough for the medium widget's cover at three times, small enough to
+// hand across as text.
+const COVER_THUMB_SIZE = 256
+
 export const PEERTUNES_MEDIA_BRIDGE_SCRIPT = `(function () {
   if (window.__peerskyMediaCommand) return;
   var handlers = {};
@@ -172,6 +176,40 @@ export const PEERTUNES_MEDIA_BRIDGE_SCRIPT = `(function () {
   }
 
   var last = '';
+  // The cover, drawn small for the home screen widget, which cannot load the
+  // page's own address for it. Made once for each cover.
+  var coverSrc = '';
+  var coverThumb = '';
+  function coverFor (metadata) {
+    var artwork = metadata && metadata.artwork;
+    var src = artwork && artwork.length ? String(artwork[artwork.length - 1].src || '') : '';
+    if (src === coverSrc) return coverThumb;
+    coverSrc = src;
+    coverThumb = '';
+    if (!src) return '';
+    var image = new Image();
+    image.onload = function () {
+      if (coverSrc !== src) return;
+      try {
+        var side = Math.min(image.naturalWidth, image.naturalHeight);
+        if (!side) return;
+        var canvas = document.createElement('canvas');
+        canvas.width = ${COVER_THUMB_SIZE};
+        canvas.height = ${COVER_THUMB_SIZE};
+        canvas.getContext('2d').drawImage(
+          image,
+          (image.naturalWidth - side) / 2, (image.naturalHeight - side) / 2, side, side,
+          0, 0, ${COVER_THUMB_SIZE}, ${COVER_THUMB_SIZE}
+        );
+        coverThumb = canvas.toDataURL('image/jpeg', 0.8);
+      } catch (e) {
+        coverThumb = '';
+      }
+      report();
+    };
+    image.src = src;
+    return '';
+  }
   function isPlaying () {
     var media = document.querySelectorAll('audio, video');
     for (var i = 0; i < media.length; i++) {
@@ -186,7 +224,9 @@ export const PEERTUNES_MEDIA_BRIDGE_SCRIPT = `(function () {
       type: 'peertunes-now-playing',
       playing: isPlaying(),
       title: String(metadata.title || ''),
-      artist: String(metadata.artist || '')
+      artist: String(metadata.artist || ''),
+      album: String(metadata.album || ''),
+      artwork: coverFor(metadata)
     });
     if (state === last) return;
     last = state;
@@ -215,6 +255,13 @@ export const PEERTUNES_MEDIA_BRIDGE_SCRIPT = `(function () {
     document.addEventListener(name, soon, true);
   });
 
+  // Says what is playing even when nothing changed: the widget shows a button
+  // press before the page acts on it, and this puts it right either way.
+  window.__peerskyMediaReport = function () {
+    last = '';
+    report();
+  };
+
   // The page's own handler when it set one, so next and previous move through
   // its queue. Otherwise the media on the page.
   window.__peerskyMediaCommand = function (name) {
@@ -234,8 +281,12 @@ export const PEERTUNES_MEDIA_BRIDGE_SCRIPT = `(function () {
   };
 })(); true;`
 
+export const PEERTUNES_MEDIA_REPORT_SCRIPT = 'window.__peerskyMediaReport && window.__peerskyMediaReport(); true;'
+
 const MEDIA_COMMANDS = new Set(['play', 'pause', 'nexttrack', 'previoustrack'])
 const MAX_NOW_PLAYING_TEXT = 200
+// The cover thumbnail is a few tens of kilobytes. Far past that it is not one.
+const MAX_NOW_PLAYING_ARTWORK = 300 * 1024
 
 // What the page says is playing, or null when the message is something else.
 export function parsePeerTunesNowPlaying (raw) {
@@ -245,7 +296,12 @@ export function parsePeerTunesNowPlaying (raw) {
     return {
       playing: parsed.playing === true,
       title: cleanNowPlayingText(parsed.title),
-      artist: cleanNowPlayingText(parsed.artist)
+      artist: cleanNowPlayingText(parsed.artist),
+      album: cleanNowPlayingText(parsed.album),
+      // Checked again where it is written: readArtworkBase64.
+      artwork: typeof parsed.artwork === 'string' && parsed.artwork.length <= MAX_NOW_PLAYING_ARTWORK
+        ? parsed.artwork
+        : ''
     }
   } catch {
     return null

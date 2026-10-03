@@ -386,6 +386,21 @@ export function isAppInBrowserTabs (state, app) {
   )))
 }
 
+/**
+ * The tab a built-in app is open in now, or null. Tapping the app on a home
+ * screen widget goes back to it rather than opening it a second time. An
+ * incognito tab is left alone, and a tab restored from last time counts by
+ * the address it will load.
+ */
+export function findBrowserTabShowingApp (state, app) {
+  return state.tabs.find((tab) => {
+    if (tab.incognito) return false
+    const entry = tab.history[tab.historyIndex]
+    if (entry?.source?.kind === 'app') return entry.source.app === app
+    return entry?.source?.kind === 'restore' && getRuntimeAppFromUrl(entry.url) === app
+  }) || null
+}
+
 export function closeBrowserTabState (state, tabId) {
   const tabIndex = state.tabs.findIndex((tab) => tab.id === tabId)
   if (tabIndex < 0) return state

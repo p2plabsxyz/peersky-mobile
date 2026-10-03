@@ -1,11 +1,19 @@
 #import <AVFoundation/AVFoundation.h>
 #import <React/RCTBridgeModule.h>
+#import <React/RCTEventEmitter.h>
 
 // Whether sound is going somewhere wireless: Bluetooth, AirPlay or a car.
 // PeerTunes shows its Bluetooth mark from this, because a WebView cannot see
 // the audio outputs itself.
-@interface PeerSkyAudioRoute : NSObject <RCTBridgeModule>
+//
+// It also passes on the buttons of the PeerTunes home screen widget. They
+// run in the app as audio App Intents (targets/widgets/_shared), which post
+// PeerSkyMediaCommand, and the page gets them the way Android's media session
+// buttons reach it.
+@interface PeerSkyAudioRoute : RCTEventEmitter <RCTBridgeModule>
 @end
+
+static NSString *const PeerSkyMediaCommandName = @"PeerSkyMediaCommand";
 
 @implementation PeerSkyAudioRoute
 
@@ -14,6 +22,31 @@ RCT_EXPORT_MODULE(PeerSkyAudioRoute)
 + (BOOL)requiresMainQueueSetup
 {
   return NO;
+}
+
+- (NSArray<NSString *> *)supportedEvents
+{
+  return @[PeerSkyMediaCommandName];
+}
+
+- (void)startObserving
+{
+  [[NSNotificationCenter defaultCenter] addObserver:self
+                                           selector:@selector(handleMediaCommand:)
+                                               name:PeerSkyMediaCommandName
+                                             object:nil];
+}
+
+- (void)stopObserving
+{
+  [[NSNotificationCenter defaultCenter] removeObserver:self name:PeerSkyMediaCommandName object:nil];
+}
+
+- (void)handleMediaCommand:(NSNotification *)notification
+{
+  id command = notification.userInfo[@"command"];
+  if (![command isKindOfClass:[NSString class]]) return;
+  [self sendEventWithName:PeerSkyMediaCommandName body:command];
 }
 
 RCT_EXPORT_METHOD(getRoute:(RCTPromiseResolveBlock)resolve

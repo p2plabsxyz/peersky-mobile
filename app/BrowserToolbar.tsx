@@ -27,11 +27,16 @@ const TOOLBAR_ICON_STROKE_WIDTH = 0.35
 
 // Matches browserToolbar's own paddingHorizontal.
 const TOOLBAR_SIDE_PADDING = 14
+// Long enough for a new tab to settle and for the app to be in front when a
+// widget opened it. The keyboard does not come up for a window that is not.
+const FOCUS_REQUEST_DELAY_MS = 350
 
 type BrowserToolbarProps = {
   activeTabId: string
   address: string
   currentUrl: string
+  // Each new value puts the cursor in the box: the search widget.
+  focusRequest?: number
   historySuggestions: BrowserHistoryItem[]
   isDark: boolean
   isIncognito?: boolean
@@ -71,6 +76,7 @@ export function BrowserToolbar ({
   activeTabId,
   address,
   currentUrl,
+  focusRequest = 0,
   historySuggestions,
   isDark,
   isIncognito = false,
@@ -108,6 +114,13 @@ export function BrowserToolbar ({
     Keyboard.dismiss()
     setIsAddressFocused(false)
   }, [activeTabId, navigationKey])
+
+  // After the blur above, which a new tab sets off in the same render.
+  useEffect(() => {
+    if (!focusRequest) return
+    const timer = setTimeout(() => addressInputRef.current?.focus(), FOCUS_REQUEST_DELAY_MS)
+    return () => clearTimeout(timer)
+  }, [focusRequest])
 
   return (
     // The bar and the list it opens are siblings in a stack with no padding of

@@ -65,6 +65,7 @@ import {
   closeBrowserTabState,
   createBrowserTabsState,
   DEFAULT_BROWSER_PAGE_ZOOM,
+  findBrowserTabShowingApp,
   isAppInBrowserTabs,
   isCurrentBrowserTabEntry,
   MAX_BROWSER_TABS,
@@ -196,7 +197,8 @@ import { HyperdriveScreen } from './hyperdrive/HyperdriveScreen'
 import { canUseNetworkForOfflineHyper } from './hyperdrive/offline-network.mjs'
 import { PeerChatScreen, type PeerChatResponse } from './peerchat/PeerChatScreen'
 import { settleIncomingUrl, subscribeToIncomingUrls } from './incoming-links'
-import { parseHomeShortcutUrl } from './home-shortcuts.mjs'
+import { parseHomeShortcut } from './home-shortcuts.mjs'
+import { idlePeerTunesWidget, updateBrowserWidget } from './widgets'
 import { parsePeerChatDirectInvite, parsePeerChatInvite } from './peerchat/peerchat-invite.mjs'
 import { screenUploadBytes } from './media/upload-gate'
 import { isUsableImageType, sniffBase64ImageType } from './media/media-moderation.mjs'
@@ -447,6 +449,14 @@ export default function App () {
     removeBookmark: removeBrowserBookmark,
     toggleBookmark: toggleBrowserBookmark
   } = useBrowserBookmarks()
+  // The large home screen widget lists the newest few.
+  useEffect(() => {
+    if (browserBookmarksReady) updateBrowserWidget(browserBookmarks)
+  }, [browserBookmarks, browserBookmarksReady])
+  // A fresh start has no player page yet, whatever the widget showed last.
+  useEffect(() => {
+    idlePeerTunesWidget()
+  }, [])
   const {
     favourites: browserFavourites,
     isReady: browserFavouritesReady,
@@ -504,6 +514,8 @@ export default function App () {
   const [browserHistoryVisible, setBrowserHistoryVisible] = useState(false)
   const [pendingRestoredUrl, setPendingRestoredUrl] = useState<string | null>(null)
   const [pendingHomeShortcutUrl, setPendingHomeShortcutUrl] = useState<string | null>(null)
+  // Counts up each time the search widget asks for the cursor in the box.
+  const [browserAddressFocusRequest, setBrowserAddressFocusRequest] = useState(0)
   const [pendingIncomingUrl, setPendingIncomingUrl] = useState<string | null>(null)
   const [browserCanGoBack, setBrowserCanGoBack] = useState(false)
   const [browserCanGoForward, setBrowserCanGoForward] = useState(false)
@@ -811,10 +823,10 @@ export default function App () {
   }, [])
 
   useEffect(() => subscribeToIncomingUrls((url) => {
-    // A quick action from the app icon. It waits for last time's tabs and
-    // goes on top of them. Counted as something done in the app, it opened
-    // the app without them.
-    if (parseHomeShortcutUrl(url)) {
+    // A quick action from the app icon, or a tap on a widget. It waits for
+    // last time's tabs and goes on top of them. Counted as something done in
+    // the app, it opened the app without them.
+    if (parseHomeShortcut(url)) {
       setPendingHomeShortcutUrl(url)
       return
     }
@@ -839,7 +851,7 @@ export default function App () {
   useEffect(() => {
     if (!browserSessionReady || !pendingHomeShortcutUrl) return
     const shortcutUrl = pendingHomeShortcutUrl
-    const shortcut = parseHomeShortcutUrl(shortcutUrl)
+    const shortcut = parseHomeShortcut(shortcutUrl)
     setPendingHomeShortcutUrl(null)
     settleIncomingUrl(shortcutUrl)
     setBrowserBookmarksVisible(false)
@@ -847,17 +859,28 @@ export default function App () {
     setBrowserHistoryVisible(false)
     setBrowserMenuVisible(false)
     setBrowserTabsVisible(false)
-    if (shortcut === 'new-tab') {
+    if (shortcut?.name === 'new-tab') {
       setBrowserSettingsVisible(false)
       onBrowserNewTab()
-    } else if (shortcut === 'incognito') {
+    } else if (shortcut?.name === 'search') {
+      setBrowserSettingsVisible(false)
+      // A tab already on the start page will do, unless it is incognito.
+      // Anything else stays as it was, under a new tab.
+      if (browserSource.kind !== 'home' || isIncognitoTab(browserTabsStateRef.current.activeTabId)) {
+        onBrowserNewTab()
+      }
+      setBrowserAddressFocusRequest((count) => count + 1)
+    } else if (shortcut?.name === 'open' && shortcut.target) {
+      setBrowserSettingsVisible(false)
+      openWidgetTarget(shortcut.target)
+    } else if (shortcut?.name === 'incognito') {
       setBrowserSettingsVisible(false)
       onBrowserNewIncognitoTab()
-    } else if (shortcut === 'app-icon') {
+    } else if (shortcut?.name === 'app-icon') {
       // Where the colours of the logo, and so of the app icon, are picked.
       setBrowserSettingsInitialPage('appearance')
       setBrowserSettingsVisible(true)
-    } else if (shortcut === 'paste') {
+    } else if (shortcut?.name === 'paste') {
       setBrowserSettingsVisible(false)
       // The copied address or words, in a new tab. A new tab loads what it is
       // given as it is, so they become an address or a search first, as the
@@ -1821,6 +1844,19 @@ export default function App () {
   function openBrowserUrlInNewTab (targetUrl: string) {
     if (createBrowserTab(targetUrl)) return
     void loadBrowserUrl(targetUrl)
+  }
+
+  // A tap on a home screen widget. An app goes back to the tab it is open in,
+  // if there is one. Anything else opens in a new tab over what was there.
+  function openWidgetTarget (targetUrl: string) {
+    const app = getRuntimeAppFromUrl(targetUrl)
+    if (!app && !isWebUrl(targetUrl) && !isHyperUrl(targetUrl)) return
+    const tab = app ? findBrowserTabShowingApp(browserTabsStateRef.current, app) : null
+    if (tab) {
+      onBrowserSwitchTab(tab.id)
+      return
+    }
+    openBrowserUrlInNewTab(targetUrl)
   }
 
   function onBrowserNewTab () {
@@ -3743,6 +3779,7 @@ export default function App () {
       activeTabId={browserTabsState.activeTabId}
       address={browserAddress}
       currentUrl={browserCurrentUrl}
+      focusRequest={browserAddressFocusRequest}
       isDark={browserIsDark}
       isIncognito={browserTabsState.tabs.some((tab) => tab.id === browserTabsState.activeTabId && tab.incognito === true)}
       isLoading={browserIsLoading}
