@@ -10,6 +10,25 @@ export function describeBrowserError (targetUrl, message) {
   const site = describeSite(targetUrl)
   const detail = String(message || '').trim()
 
+  // WebKit's words for a filter on the device itself: Screen Time's Content
+  // and Privacy Restrictions, or one a school or workplace installed. It stops
+  // the page in Safari too, and nothing in PeerSky can let it through, so the
+  // page says where the switch is instead of "check your connection".
+  if (/blocked by a content filter/i.test(detail)) {
+    return {
+      title: 'This device blocked this page',
+      body: `A content filter on this device stopped ${site}, the same one Safari follows. It is set in Settings, Screen Time, Content & Privacy Restrictions, or by whoever manages this device.`
+    }
+  }
+
+  // And for PeerSky's own ad and tracker lists.
+  if (/blocked by a content blocker/i.test(detail)) {
+    return {
+      title: 'Tracker protection blocked this page',
+      body: `${site} is on the ad and tracker lists PeerSky blocks. You can turn tracker protection off in Settings, Privacy.`
+    }
+  }
+
   if (/\b(404|not found)\b/i.test(detail)) {
     return {
       title: 'This page is missing',

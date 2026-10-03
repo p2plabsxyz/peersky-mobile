@@ -22,6 +22,19 @@ describe('a page that would not load', () => {
     assert.doesNotMatch(describeBrowserError(key, 'Not Found').body, /aaaa/)
   })
 
+  // The two blocks WebKit names. The first is the device's own filter, which
+  // a user took for a PeerSky fault, so the page says where it is set.
+  test('a page the device or tracker protection blocked says which one', () => {
+    const filtered = describeBrowserError('https://www.example.com/watch', 'The URL was blocked by a content filter')
+    assert.equal(filtered.title, 'This device blocked this page')
+    assert.match(filtered.body, /^A content filter on this device stopped example\.com/)
+    assert.match(filtered.body, /Settings, Screen Time, Content & Privacy Restrictions/)
+
+    const blocked = describeBrowserError('https://ads.example.com/', 'The URL was blocked by a content blocker')
+    assert.equal(blocked.title, 'Tracker protection blocked this page')
+    assert.match(blocked.body, /Settings, Privacy/)
+  })
+
   test('a peer address that nobody is seeding says so', () => {
     const { title, body } = describeBrowserError(`hyper://${'b'.repeat(64)}/`, 'No peers found')
 
