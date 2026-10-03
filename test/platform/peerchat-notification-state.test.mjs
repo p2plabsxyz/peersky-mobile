@@ -160,21 +160,31 @@ test('PeerChat answers the questions a first-time user actually asks', async () 
   }
   assert.deepEqual(PEERCHAT_QUESTIONS, [...PEERCHAT_WELCOME_QUESTIONS, ...PEERCHAT_USAGE_QUESTIONS])
 
-  // Before using it: what it is, how it compares, what it costs and who
-  // makes it. Nothing about blocking people or deleting things yet.
-  for (const pattern of [/What is PeerChat/, /WhatsApp, Telegram or Signal/, /phone number or an email/, /friends find me/, /peer to peer mean/, /How private/, /really free/, /big files/, /phone and my computer/, /iPhone and Android/, /Who makes/]) {
+  // Before using it: what it is, where chats live, who can read them, how it
+  // works offline and on a computer, and what it costs. Nothing about
+  // blocking people or deleting things yet.
+  for (const pattern of [/What is PeerChat/, /Where do my chats live/, /Who can read my messages/, /need an account/, /find my friends/, /without internet/, /on my computer/, /big a file/, /WhatsApp or Signal/, /catch/]) {
     assert.ok(PEERCHAT_WELCOME_QUESTIONS.some(({ q }) => pattern.test(q)), String(pattern))
   }
   for (const pattern of [/bothering me/, /delete my account/, /unsend/]) {
     assert.ok(!PEERCHAT_WELCOME_QUESTIONS.some(({ q }) => pattern.test(q)), String(pattern))
   }
+  // A PeerChat question, in PeerChat's words. "Is it on iPhone and Android?"
+  // was another chat app's, and someone reading it inside the app has the
+  // answer in their hand.
+  for (const pattern of [/iPhone and Android/, /Who owns/, /phone number to use/, /share large files/]) {
+    assert.ok(!PEERCHAT_QUESTIONS.some(({ q }) => pattern.test(q)), String(pattern))
+  }
 
   // What PeerChat is, said outright: no accounts, no servers, works without
   // internet, end to end encrypted.
-  assert.match(answer(/phone number or an email/), /Pick a name and you.re in/)
-  assert.match(answer(/WhatsApp, Telegram or Signal/), /end to end encrypted/)
+  assert.match(answer(/need an account/), /Pick a name and you.re in/)
+  assert.match(answer(/WhatsApp or Signal/), /end to end encrypted/)
   assert.match(answer(/without internet/), /Any local network will do/)
-  assert.match(answer(/really free/), /no ads, no subscriptions/)
+  assert.match(answer(/without internet/), /find each other and talk directly/)
+  assert.match(answer(/catch/), /no ads, no subscriptions/)
+  assert.match(answer(/catch/), /P2P Labs/)
+  assert.match(answer(/big a file/), /Any size your phone has room for/)
 
   // Knowing where a room is on the network gets nobody in.
   assert.match(answer(/stranger on the network/), /prove it holds the room.s key/)
@@ -184,12 +194,12 @@ test('PeerChat answers the questions a first-time user actually asks', async () 
   assert.match(answer(/unsend/), /their device is theirs/)
   assert.match(answer(/delete my account/), /Delete PeerChat profile/)
   assert.match(answer(/delete my account/), /stays with the people you sent it to/)
-  assert.match(answer(/How private/), /no tracking, no analytics/)
+  assert.match(answer(/Who can read my messages/), /no tracking, no analytics/)
 
-  // "How private is it" names what it does not hide, and a one to one chat
-  // says how it is locked.
-  assert.match(answer(/How private/), /can see your network address/)
-  assert.match(answer(/How private/), /a room key never expires/)
+  // "Who can read my messages" names what it does not hide, and a one to one
+  // chat says how it is locked.
+  assert.match(answer(/Who can read my messages/), /can see your network address/)
+  assert.match(answer(/Who can read my messages/), /a room key never expires/)
   assert.match(answer(/one to one/), /made fresh for that conversation/)
   assert.match(answer(/one to one/), /can.t be worked out from your name or your code/)
 
@@ -197,8 +207,9 @@ test('PeerChat answers the questions a first-time user actually asks', async () 
   assert.match(answer(/message arrive/), /both of you need to be online/)
   assert.match(answer(/older messages/), /start fresh from the moment you join/)
 
-  // Several devices at once, each with its label.
-  assert.match(answer(/phone and my computer/), /as many computers as you like, all at the same time/)
+  // On a computer too, and several devices at once, each with its label.
+  assert.match(answer(/on my computer/), /Mac, Windows and Linux/)
+  assert.match(answer(/on my computer/), /as many computers as you like, all at the same time/)
 
   // Blocking and reporting say what they do, and the room key stays out of it.
   assert.match(answer(/bothering me/), /Everything they send disappears for you, in every chat/)
