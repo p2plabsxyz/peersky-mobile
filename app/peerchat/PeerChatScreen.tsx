@@ -1361,7 +1361,9 @@ export function PeerChatScreen ({
         throw new Error(response.error || 'Unable to create PeerChat room.')
       }
       if (!mountedRef.current) return
-      setRooms((current) => [response.room as PeerChatRoom, ...current])
+      // In the backend's order, pinned rooms first. Put at the very top, the
+      // new room moved down on the next refresh, under a finger reaching for it.
+      setRooms((current) => response.rooms || [response.room as PeerChatRoom, ...current])
       setRoomName('')
       setRoomBio('')
       setRoomLink('')
@@ -1387,7 +1389,7 @@ export function PeerChatScreen ({
         throw new Error(response.error || 'Unable to join PeerChat room.')
       }
       if (!mountedRef.current) return
-      setRooms((current) => [
+      setRooms((current) => response.rooms || [
         response.room as PeerChatRoom,
         ...current.filter((room) => room.roomKey !== response.room?.roomKey)
       ])
@@ -1582,7 +1584,7 @@ export function PeerChatScreen ({
         throw new Error(response.error || 'Unable to join PeerChat room.')
       }
       if (!mountedRef.current) return
-      setRooms((current) => [
+      setRooms((current) => response.rooms || [
         response.room as PeerChatRoom,
         ...current.filter((room) => room.roomKey !== response.room?.roomKey)
       ])

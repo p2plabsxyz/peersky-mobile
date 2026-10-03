@@ -219,3 +219,15 @@ test('room details show the room picture to everyone, not only the host', async 
   assert.match(member, /<Image\s+accessibilityLabel=\{`Picture of \$\{activeRoom\.name\}`\}\s+source=\{\{ uri: activeRoom\.avatar \}\}/)
   assert.match(member, /getRoomInitials\(activeRoom\.name\)/)
 })
+
+// A new room went to the very top of the list, then moved below the pinned
+// rooms on the next refresh, right where a finger was reaching for it.
+test('a created or joined room takes its place in the list at once', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const screen = await readFile(new URL('../../app/peerchat/PeerChatScreen.tsx', import.meta.url), 'utf8')
+  const router = await readFile(new URL('../../backend/rpc/router.mjs', import.meta.url), 'utf8')
+  assert.match(router, /const room = await peerChat\.createRoom\(parseJsonMessage\(req\.data\)\)[\s\S]{0,200}replyJson\(req, \{ ok: true, room, rooms: peerChat\.listRooms\(\) \}\)/)
+  assert.match(router, /const room = await peerChat\.joinRoom\(parseJsonMessage\(req\.data\)\)\s+replyJson\(req, \{ ok: true, room, rooms: peerChat\.listRooms\(\) \}\)/)
+  assert.match(screen, /setRooms\(\(current\) => response\.rooms \|\| \[response\.room as PeerChatRoom, \.\.\.current\]\)/)
+  assert.equal((screen.match(/setRooms\(\(current\) => response\.rooms \|\| \[\n/g) || []).length, 2)
+})

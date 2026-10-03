@@ -396,19 +396,17 @@ export async function routeRpcRequest (req) {
 
     if (req.command === RPC_PEERCHAT_ROOM_CREATE) {
       const peerChat = await getPeerChatService()
-      replyJson(req, {
-        ok: true,
-        room: await peerChat.createRoom(parseJsonMessage(req.data))
-      })
+      const room = await peerChat.createRoom(parseJsonMessage(req.data))
+      // The list in its own order, so the new room sits where the next
+      // refresh will put it rather than jumping there under a finger.
+      replyJson(req, { ok: true, room, rooms: peerChat.listRooms() })
       return
     }
 
     if (req.command === RPC_PEERCHAT_ROOM_JOIN) {
       const peerChat = await getPeerChatService()
-      replyJson(req, {
-        ok: true,
-        room: await peerChat.joinRoom(parseJsonMessage(req.data))
-      })
+      const room = await peerChat.joinRoom(parseJsonMessage(req.data))
+      replyJson(req, { ok: true, room, rooms: peerChat.listRooms() })
       return
     }
 
