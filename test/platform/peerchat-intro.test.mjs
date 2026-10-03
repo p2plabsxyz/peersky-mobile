@@ -32,7 +32,9 @@ test('PeerChat intro completion accepts only its current versioned marker', () =
 // objectionable content or abusive users before they can post anything.
 test('PeerChat states its rules, and the terms they come from', async () => {
   const { readFile } = await import('node:fs/promises')
-  assert.match(PEERCHAT_RULES.join(' '), /under 18, ever/)
+  // Said plainly: an age in the rule read as if adults were fair game.
+  assert.match(PEERCHAT_RULES.join(' '), /No sexual content or nudity, ever\./)
+  assert.doesNotMatch(PEERCHAT_RULES.join(' '), /under 18/)
   assert.match(PEERCHAT_RULES.join(' '), /report them\. We read every report within 24 hours/)
   assert.match(PEERCHAT_RULES.join(' '), /P2P Republic, a public room anyone can join/)
   assert.equal(PEERCHAT_TERMS_URL, 'https://github.com/p2plabsxyz/peersky-mobile/blob/main/TERMS.md')

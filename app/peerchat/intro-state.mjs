@@ -10,9 +10,9 @@ export const PEERCHAT_INTRO_POINTS = [
 // Agreed to before anything else, so everyone has seen them. The full text is
 // TERMS.md, and App Review asks that people agree to it in the app.
 export const PEERCHAT_RULES = [
-  'No sexual content involving anyone under 18, ever. We report it to the authorities.',
+  'No sexual content or nudity, ever.',
   'No threats, harassment, bullying or hate.',
-  'No nudity, spam, scams, or other people’s private details.',
+  'No spam, scams, or other people’s private details.',
   'Block anyone who bothers you and report them. We read every report within 24 hours.',
   'You start in P2P Republic, a public room anyone can join. You can leave it from the chat list.'
 ]
