@@ -3818,8 +3818,14 @@ export default function App () {
         <KeyboardAvoidingView
           behavior='padding'
           enabled={
-            browserPreferences.addressBarPosition === 'bottom' ||
-            (browserSource.kind === 'app' && activeTab === 'peerchat')
+            // Android reports a keyboard that has gone away a little above the
+            // bottom, so the padding stayed: a band of page colour under the
+            // navigation bar until the next keyboard. Off while there is none.
+            (Platform.OS === 'ios' || isKeyboardVisible) &&
+            (
+              browserPreferences.addressBarPosition === 'bottom' ||
+              (browserSource.kind === 'app' && activeTab === 'peerchat')
+            )
           }
           style={styles.browserShellContent}
         >

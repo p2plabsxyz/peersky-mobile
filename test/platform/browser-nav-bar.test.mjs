@@ -75,6 +75,17 @@ describe('chrome polish', () => {
   })
 })
 
+describe('the bottom of the screen on Android', () => {
+  test('no band of page colour stays under the navigation bar after the keyboard', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const index = await readFile(new URL('../../app/index.tsx', import.meta.url), 'utf8')
+
+    // Android reports a closed keyboard a little above the bottom of the
+    // screen, and the padding for it stayed behind under the navigation bar.
+    assert.match(index, /enabled=\{\s+\/\/[^\n]*\n(?:\s+\/\/[^\n]*\n)*\s+\(Platform\.OS === 'ios' \|\| isKeyboardVisible\) &&/)
+  })
+})
+
 describe('peerchat onboarding', () => {
   test('the continue button keeps its gap when the keyboard opens', async () => {
     const { readFile } = await import('node:fs/promises')
