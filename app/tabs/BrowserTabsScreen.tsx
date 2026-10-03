@@ -105,6 +105,32 @@ export function BrowserTabsScreen ({
   // the active tab can swap the whole screen, and only the caller knows when.
   const closeTab = (tabId: string) => onCloseTab(tabId)
 
+  // Tabs stay in the order they were opened, newest last, as in Chrome and
+  // Safari, and the screen opens on the tab you are on. A long list used to
+  // open at the oldest tab, which looked like the newest had gone missing.
+  const listRef = useRef<FlatList<BrowserTabManagerItem>>(null)
+  const scrolledToActiveRef = useRef(false)
+  const scrollRetriesRef = useRef(0)
+  const activeIndex = items.findIndex((item) => item.isActive)
+  const activeRow = activeIndex < 0 ? 0 : isList ? activeIndex : Math.floor(activeIndex / 2)
+
+  useEffect(() => {
+    if (!visible) scrolledToActiveRef.current = false
+  }, [visible])
+
+  useEffect(() => {
+    scrolledToActiveRef.current = false
+  }, [viewMode])
+
+  function scrollToActiveTab () {
+    if (scrolledToActiveRef.current) return
+    scrolledToActiveRef.current = true
+    scrollRetriesRef.current = 0
+    if (activeRow > 0) {
+      listRef.current?.scrollToIndex({ index: activeRow, viewPosition: 0.5, animated: false })
+    }
+  }
+
   return (
     <Modal
       supportedOrientations={MODAL_ORIENTATIONS}
@@ -172,8 +198,18 @@ export function BrowserTabsScreen ({
         </View>
 
         <FlatList
+          ref={listRef}
           key={`browser-tabs-${viewMode}`}
           data={items}
+          onLayout={scrollToActiveTab}
+          onScrollToIndexFailed={({ index, averageItemLength }) => {
+            // Rows past the first few are not measured yet: jump near the row,
+            // then once it is drawn, centre it.
+            listRef.current?.scrollToOffset({ offset: averageItemLength * index, animated: false })
+            if (scrollRetriesRef.current++ < 2) {
+              setTimeout(() => listRef.current?.scrollToIndex({ index, viewPosition: 0.5, animated: false }), 60)
+            }
+          }}
           keyExtractor={(item) => item.id}
           numColumns={isList ? 1 : 2}
           initialNumToRender={6}

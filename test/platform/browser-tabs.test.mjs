@@ -416,3 +416,23 @@ describe('tabs from another device', () => {
     assert.equal(appendIncomingBrowserTabs(state, null), state)
   })
 })
+
+// Chrome and Safari keep tabs in the order they were opened, newest last, and
+// open the tab screen on the tab you are on.
+describe('tab order', () => {
+  test('a new tab, in front or behind, goes after the others', () => {
+    let state = createBrowserTabsState()
+    state = addBrowserTabState(state)
+    state = addBackgroundBrowserTabState(state, 'https://example.com/', 'Example')
+    assert.deepEqual(state.tabs.map((tab) => tab.id), ['tab-1', 'tab-2', 'tab-3'])
+    assert.equal(state.activeTabId, 'tab-2')
+  })
+
+  test('the tab screen opens scrolled to the active tab', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const screen = await readFile(new URL('../../app/tabs/BrowserTabsScreen.tsx', import.meta.url), 'utf8')
+    assert.match(screen, /const activeRow = activeIndex < 0 \? 0 : isList \? activeIndex : Math\.floor\(activeIndex \/ 2\)/)
+    assert.match(screen, /onLayout=\{scrollToActiveTab\}/)
+    assert.match(screen, /scrollToIndex\(\{ index: activeRow, viewPosition: 0\.5, animated: false \}\)/)
+  })
+})
