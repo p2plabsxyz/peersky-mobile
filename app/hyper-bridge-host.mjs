@@ -70,18 +70,31 @@ export function readHyperBridgeMessage (raw, { token, pending }) {
 /**
  * Turns a backend hyper fetch reply into what the page's Response is built
  * from. A body that is not text crosses back as base64.
+ *
+ * A reply with a status is an answer, a 404 or a 500 included, and fetch()
+ * resolves with it as it does on desktop. It threw instead, so a page that
+ * checks response.ok never got to, and a failed publish said only "request
+ * failed". Only a request that got no answer at all throws.
+ *
+ * Images, sound and video come back as a signed link to the phone's asset
+ * server rather than a body. The page reads them from there.
  */
 export function createHyperBridgeReply (response) {
-  if (!response || response.ok === false) {
+  const status = Number(response?.status)
+  const answered = Number.isSafeInteger(status) && status >= 100 && status <= 599
+  if (!response || (response.ok === false && !answered)) {
     return { error: String(response?.error || 'hyper:// request failed') }
   }
 
+  const assetUrl = [response.mediaUrl, response.downloadUrl]
+    .find((value) => typeof value === 'string' && /^http:\/\/127\.0\.0\.1:\d+\//.test(value))
   return {
-    status: Number.isSafeInteger(response.status) ? response.status : 200,
+    status: answered ? status : 200,
     statusText: String(response.statusText || ''),
     headers: response.headers && typeof response.headers === 'object' ? response.headers : {},
-    body: String(response.body ?? ''),
-    base64: response.base64 === true
+    body: String(response.body ?? (response.ok === false ? response.error || '' : '')),
+    base64: response.base64 === true,
+    ...(assetUrl ? { assetUrl } : {})
   }
 }
 

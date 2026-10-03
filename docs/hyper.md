@@ -24,6 +24,25 @@ Android runs that script only after a page loaded from a string has run its
 own, so there the bridge is the page's first script, and it removes itself
 once it has run.
 
+What goes over the bridge, checked with a site published from a desktop and
+opened on both phones:
+
+- `fetch()` with relative or absolute addresses. A missing file answers 404
+  with a response, as on desktop, rather than throwing.
+- `XMLHttpRequest` to `hyper://`, which jQuery, axios and older pages use.
+- Publishing: `POST hyper://localhost/?key=name`, then `PUT` a file, or `PUT`
+  a `FormData` with one `file` field per file to save several at once
+  (`backend/hyper/form-data.mjs` reads those for hypercore-fetch).
+- Images, sound and video. The page's own markup is rewritten before it loads.
+  An address set from script later, or added with `innerHTML`, gets the same
+  signed link (see below), and so does `fetch()` of an image or a video.
+
+One difference on iOS: WebKit will not render a page whose base address uses a
+scheme it does not know, so the page carries its address in a `<base>` tag and
+`location` reads `about:blank`. Relative links, `fetch()` and
+`document.baseURI` all resolve against the drive. Script that builds addresses
+from `location.href` does not. Android pages see their `hyper://` address.
+
 - **Writes ask first.** The first time a site tries to create a drive or save a
   file, PeerSky asks whether it may publish. The answer is kept per site and can
   be changed in Settings, under Permissions. A tab in the background cannot ask.

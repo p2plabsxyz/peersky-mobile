@@ -284,3 +284,131 @@ test('a form posts over hyper, with the boundary the body was written with', asy
   // And the other shapes still carry the type they imply.
   assert.match(script, /application\/x-www-form-urlencoded;charset=UTF-8/)
 })
+
+// A missing file is an answer, not a failure. fetch() threw on it instead, so
+// a page checking response.ok never got to, and a failed publish said only
+// "request failed" with the reason lost.
+test('a 404 or a 500 comes back as a response, with what the drive said', () => {
+  assert.deepEqual(createHyperBridgeReply({ ok: false, status: 404, statusText: 'Not Found', error: 'Not Found' }), {
+    status: 404,
+    statusText: 'Not Found',
+    headers: {},
+    body: 'Not Found',
+    base64: false
+  })
+  const failed = createHyperBridgeReply({ ok: false, status: 500, body: 'TypeError: request.formData is not a function' })
+  assert.equal(failed.status, 500)
+  assert.match(failed.body, /formData/)
+})
+
+test('images, sound and video carry their signed asset link, and only a local one', () => {
+  const local = 'http://127.0.0.1:41234/asset?token=abc&url=hyper%3A%2F%2Fd%2Fa.png'
+  assert.equal(createHyperBridgeReply({ ok: true, status: 200, mediaUrl: local }).assetUrl, local)
+  assert.equal(createHyperBridgeReply({ ok: true, status: 200, downloadUrl: local }).assetUrl, local)
+  assert.equal(createHyperBridgeReply({ ok: true, status: 200, mediaUrl: 'https://elsewhere.example/a.png' }).assetUrl, undefined)
+})
+
+// Enough of a page to run the bridge in, with an XMLHttpRequest and an image
+// element shaped like the browser's, and a native side that answers.
+function createBridgePage (answer) {
+  const nativeFetches = []
+  class FakeXHR extends EventTarget {
+    open (method, url) { this.opened = { method, url }; this.readyState = 1 }
+    send () { this.sentNatively = true }
+    setRequestHeader () {}
+    abort () {}
+    getResponseHeader () { return null }
+    getAllResponseHeaders () { return '' }
+    dispatchEvent (event) {
+      const handler = this['on' + event.type]
+      if (typeof handler === 'function') handler.call(this, event)
+      return super.dispatchEvent(event)
+    }
+  }
+  class FakeImage extends EventTarget {}
+  Object.defineProperty(FakeImage.prototype, 'src', {
+    configurable: true,
+    enumerable: true,
+    get () { return this._src || '' },
+    set (value) { this._src = String(value) }
+  })
+  const context = vm.createContext({
+    URL,
+    TextEncoder,
+    Blob,
+    Response,
+    Event,
+    EventTarget,
+    btoa,
+    atob,
+    JSON,
+    Promise,
+    setTimeout,
+    document: { baseURI: 'hyper://site/' },
+    XMLHttpRequest: FakeXHR,
+    HTMLImageElement: FakeImage,
+    fetch: async (url, init) => { nativeFetches.push({ url, init }); return new Response('native') }
+  })
+  context.window = context
+  context.ReactNativeWebView = {
+    postMessage (text) {
+      const message = JSON.parse(text)
+      if (message.type !== 'peersky-hyper-fetch') return
+      Promise.resolve(answer(message)).then((reply) => {
+        context.window.__peerskyHyperBridge.settle(TOKEN, message.id, reply)
+      })
+    }
+  }
+  vm.runInContext(createHyperBridgeScript(TOKEN), context)
+  return { context, FakeImage, FakeXHR, nativeFetches }
+}
+
+const tick = () => new Promise((resolve) => setTimeout(resolve, 10))
+
+test('XMLHttpRequest to hyper:// goes over the bridge, and any other stays the browser\'s', async () => {
+  const page = createBridgePage((message) => ({
+    status: 200,
+    statusText: 'OK',
+    headers: { 'Content-Type': 'application/json' },
+    body: message.url.endsWith('data.json') ? '{"message":"fetch works"}' : ''
+  }))
+  const xhr = new page.context.XMLHttpRequest()
+  const seen = []
+  xhr.onreadystatechange = () => seen.push(xhr.readyState)
+  const loaded = new Promise((resolve) => { xhr.onload = resolve })
+  xhr.open('GET', 'data.json')
+  xhr.send()
+  await loaded
+  assert.equal(xhr.status, 200)
+  assert.equal(JSON.parse(xhr.responseText).message, 'fetch works')
+  assert.equal(xhr.responseURL, 'hyper://site/data.json')
+  assert.equal(xhr.getResponseHeader('Content-Type'), 'application/json')
+  assert.deepEqual(seen, [4])
+  assert.equal(xhr.sentNatively, undefined)
+
+  const web = new page.context.XMLHttpRequest()
+  web.open('GET', 'https://example.com/a')
+  web.send()
+  assert.equal(web.sentNatively, true)
+  assert.equal(web.opened.url, 'https://example.com/a')
+})
+
+test('an image given a hyper:// address from script loads from its signed link', async () => {
+  const signed = 'http://127.0.0.1:41234/asset?token=t&url=hyper%3A%2F%2Fsite%2Fbird.png'
+  const page = createBridgePage(() => ({ status: 200, headers: {}, body: '', assetUrl: signed }))
+  const image = new page.FakeImage()
+  image.src = 'bird.png'
+  assert.equal(image.src, '')
+  await tick()
+  assert.equal(image.src, signed)
+  image.src = 'https://example.com/x.png'
+  assert.equal(image.src, 'https://example.com/x.png')
+})
+
+test('fetching an image from a page reads it from its signed link', async () => {
+  const signed = 'http://127.0.0.1:41234/asset?token=t&url=hyper%3A%2F%2Fsite%2Fbird.png'
+  const page = createBridgePage(() => ({ status: 200, headers: {}, body: '', assetUrl: signed }))
+  const response = await page.context.window.fetch('bird.png')
+  assert.equal(await response.text(), 'native')
+  assert.equal(page.nativeFetches[0].url, signed)
+})

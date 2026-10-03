@@ -243,12 +243,194 @@ export function createHyperBridgeScript (token) {
       throw new TypeError(result && result.error ? result.error : 'hyper:// request failed')
     }
 
+    // Images, sound and video come from the phone's asset server, by a link
+    // signed for this one file, instead of crossing the bridge as text.
+    if (result.assetUrl && (method === 'GET' || method === 'HEAD')) {
+      return nativeFetch(result.assetUrl, { method, headers })
+    }
+
     const payload = result.base64 ? fromBase64(result.body) : (result.body || '')
     return new Response(payload, {
       status: result.status || 200,
       statusText: result.statusText || '',
       headers: result.headers || {}
     })
+  }
+
+  // An image or a video pointed at a hyper:// address from script, or added
+  // with innerHTML. The engine cannot load hyper://, so the element gets the
+  // same signed link fetch() would. The page's own markup is rewritten before
+  // it loads; this is for what script adds after.
+  const loadable = async (url) => {
+    const result = await request(url, { method: 'GET', headers: {} }, '')
+    if (!result || result.error || result.status >= 400) return null
+    if (result.assetUrl) return result.assetUrl
+    const headers = result.headers || {}
+    const type = headers['content-type'] || headers['Content-Type'] || ''
+    const payload = result.base64 ? fromBase64(result.body) : (result.body || '')
+    return URL.createObjectURL(new Blob([payload], { type }))
+  }
+
+  const pendingSource = new WeakMap()
+  const pointAt = (element, setter, value) => {
+    const target = absolute(String(value))
+    pendingSource.set(element, target)
+    loadable(target).then((url) => {
+      if (pendingSource.get(element) !== target) return
+      pendingSource.delete(element)
+      if (url) setter.call(element, url)
+      else element.dispatchEvent(new Event('error'))
+    }, () => {
+      if (pendingSource.get(element) === target) element.dispatchEvent(new Event('error'))
+    })
+  }
+
+  const patchSource = (Element, property) => {
+    const proto = Element && Element.prototype
+    const descriptor = proto && Object.getOwnPropertyDescriptor(proto, property)
+    if (!descriptor || !descriptor.set || !descriptor.get) return
+    Object.defineProperty(proto, property, {
+      configurable: true,
+      enumerable: descriptor.enumerable,
+      get () { return descriptor.get.call(this) },
+      set (value) {
+        if (value !== null && value !== undefined && isHyper(String(value))) {
+          pointAt(this, descriptor.set, value)
+          return
+        }
+        pendingSource.delete(this)
+        descriptor.set.call(this, value)
+      }
+    })
+  }
+  patchSource(window.HTMLImageElement, 'src')
+  patchSource(window.HTMLMediaElement, 'src')
+  patchSource(window.HTMLSourceElement, 'src')
+  patchSource(window.HTMLVideoElement, 'poster')
+
+  const SOURCES = 'img[src],audio[src],video[src],source[src],video[poster]'
+  const fixSources = (element) => {
+    if (!element || element.nodeType !== 1 || !element.getAttribute) return
+    for (const property of ['src', 'poster']) {
+      const value = element.getAttribute(property)
+      if (value && property in element && isHyper(value)) element[property] = value
+    }
+  }
+  if (typeof MutationObserver === 'function') {
+    new MutationObserver((records) => {
+      for (const record of records) {
+        if (record.type === 'attributes') {
+          fixSources(record.target)
+          continue
+        }
+        for (const node of record.addedNodes) {
+          if (node.nodeType !== 1) continue
+          if (node.matches && node.matches(SOURCES)) fixSources(node)
+          if (node.querySelectorAll) node.querySelectorAll(SOURCES).forEach(fixSources)
+        }
+      }
+    }).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ['src', 'poster'] })
+  }
+
+  // XMLHttpRequest to hyper://, as jQuery, axios and older pages use, goes
+  // the same way as fetch. Anything else is the browser's own.
+  const NativeXHR = window.XMLHttpRequest
+  if (NativeXHR) {
+    const proto = NativeXHR.prototype
+    const nativeOpen = proto.open
+    const nativeSend = proto.send
+    const nativeSetRequestHeader = proto.setRequestHeader
+    const nativeAbort = proto.abort
+    const nativeGetResponseHeader = proto.getResponseHeader
+    const nativeGetAllResponseHeaders = proto.getAllResponseHeaders
+    const hyperRequests = new WeakMap()
+
+    const fire = (xhr, type) => {
+      xhr.dispatchEvent(type !== 'readystatechange' && typeof ProgressEvent === 'function'
+        ? new ProgressEvent(type)
+        : new Event(type))
+    }
+    const finish = (xhr, outcome, result) => {
+      const define = (name, value) => Object.defineProperty(xhr, name, { configurable: true, get: () => value })
+      define('readyState', 4)
+      define('status', result.status)
+      define('statusText', result.statusText)
+      define('response', result.response)
+      define('responseText', result.text)
+      define('responseURL', result.url)
+      fire(xhr, 'readystatechange')
+      fire(xhr, outcome)
+      fire(xhr, 'loadend')
+    }
+
+    proto.open = function (method, url, ...rest) {
+      const address = String(url)
+      if (!isHyper(address)) {
+        hyperRequests.delete(this)
+        return nativeOpen.call(this, method, url, ...rest)
+      }
+      hyperRequests.set(this, { method: String(method || 'GET').toUpperCase(), url: absolute(address), headers: {}, aborted: false, responseHeaders: null })
+      // Opened on nothing, so the object is in the state the page expects and
+      // setRequestHeader, responseType and the rest behave.
+      return nativeOpen.call(this, method, 'about:blank', ...rest)
+    }
+    proto.setRequestHeader = function (name, value) {
+      const pending = hyperRequests.get(this)
+      if (!pending) return nativeSetRequestHeader.call(this, name, value)
+      pending.headers[String(name)] = String(value)
+    }
+    proto.getResponseHeader = function (name) {
+      const pending = hyperRequests.get(this)
+      if (!pending) return nativeGetResponseHeader.call(this, name)
+      const headers = pending.responseHeaders || {}
+      const value = headers[String(name).toLowerCase()]
+      return value === undefined ? null : value
+    }
+    proto.getAllResponseHeaders = function () {
+      const pending = hyperRequests.get(this)
+      if (!pending) return nativeGetAllResponseHeaders.call(this)
+      return Object.entries(pending.responseHeaders || {}).map(([name, value]) => name + ': ' + value + '\\r\\n').join('')
+    }
+    proto.abort = function () {
+      const pending = hyperRequests.get(this)
+      if (!pending) return nativeAbort.call(this)
+      if (pending.aborted) return
+      pending.aborted = true
+      finish(this, 'abort', { status: 0, statusText: '', response: null, text: '', url: '' })
+    }
+    proto.send = function (body) {
+      const pending = hyperRequests.get(this)
+      if (!pending) return nativeSend.call(this, body)
+      const xhr = this
+      const init = { method: pending.method, headers: pending.headers }
+      if (body !== undefined && body !== null && pending.method !== 'GET' && pending.method !== 'HEAD') init.body = body
+      fire(xhr, 'loadstart')
+      window.fetch(pending.url, init).then(async (response) => {
+        if (pending.aborted) return
+        const type = xhr.responseType || ''
+        const headers = {}
+        response.headers.forEach((value, name) => { headers[String(name).toLowerCase()] = value })
+        pending.responseHeaders = headers
+        let text = ''
+        let value
+        if (type === 'arraybuffer') value = await response.arrayBuffer()
+        else if (type === 'blob') value = await response.blob()
+        else {
+          text = await response.text()
+          if (type === 'json') {
+            try { value = JSON.parse(text) } catch { value = null }
+          } else if (type === 'document' && typeof DOMParser === 'function') {
+            value = new DOMParser().parseFromString(text, 'text/html')
+          } else {
+            value = text
+          }
+        }
+        finish(xhr, 'load', { status: response.status, statusText: response.statusText, response: value, text, url: pending.url })
+      }, () => {
+        if (pending.aborted) return
+        finish(xhr, 'error', { status: 0, statusText: '', response: null, text: '', url: '' })
+      })
+    }
   }
 })()`
 }
