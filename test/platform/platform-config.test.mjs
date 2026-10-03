@@ -143,6 +143,10 @@ describe('mobile platform runtime configuration', () => {
     assert.match(infoPlist?.NSCameraUsageDescription, /website you visit/i)
     assert.match(infoPlist?.NSLocationWhenInUseUsageDescription, /website you visit/i)
     assert.match(infoPlist?.NSMicrophoneUsageDescription, /website you visit/i)
+    // Long-pressing a picture on a page and choosing Save to Photos asks only
+    // to add to the library with this. Without it iOS asked for the whole
+    // library, with the attach-a-picture reason, and the save did not happen.
+    assert.match(infoPlist?.NSPhotoLibraryAddUsageDescription, /Save to Photos/)
     assert.equal(infoPlist?.ITSAppUsesNonExemptEncryption, true)
   })
 
