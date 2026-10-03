@@ -61,12 +61,15 @@ test('the welcome screen leads with what PeerSky stands for', async () => {
 
   assert.deepEqual(titles, [
     'You are not the product',
+    'Everything in one app',
     'Device to device',
     'Your data stays yours',
     'The whole web, minus the junk',
     'Free and open source'
   ])
   assert.match(screen, /There is no server\. Your phone is the server\./)
+  // The apps are built in, so one app does what would otherwise take five.
+  assert.match(screen, /Browser, chat, shared notes, music and file sharing, all built in\. One app instead of five/)
   // The old card needed a second read to follow.
   assert.doesNotMatch(screen, /Every site, plus peer to peer ones/)
 })
