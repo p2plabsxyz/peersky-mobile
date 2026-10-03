@@ -2314,7 +2314,7 @@ export function PeerChatScreen ({
           <Text style={[styles.dmStatus, { color: colors.danger, backgroundColor: colors.surface }]}>
             {blockedTheDirectMessage
               ? 'You blocked this person. Unblock them in PeerChat settings to message them again.'
-              : 'This peer blocked your direct messages. Open their profile and tap Message to ask again.'}
+              : 'This peer blocked your direct messages.'}
           </Text>
         )}
 
