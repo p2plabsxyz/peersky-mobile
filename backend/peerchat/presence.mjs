@@ -50,6 +50,15 @@ export function createPeerPresence ({ graceMs = PEER_PRESENCE_GRACE_MS } = {}) {
       return expiresAt !== undefined && expiresAt > now
     },
 
+    /** Held in any room: someone mid-redial is still online. */
+    isPresentAnywhere (peerId, now = Date.now()) {
+      for (const room of lingering.values()) {
+        const expiresAt = room.get(peerId)
+        if (expiresAt !== undefined && expiresAt > now) return true
+      }
+      return false
+    },
+
     /**
      * When the next held peer stops counting, so a caller can refresh then.
      * Nothing else changes at that moment, so without it the count would sit

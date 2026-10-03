@@ -459,6 +459,28 @@ test('messages from the person\'s other devices are theirs, and a chat with one 
   await restarted.close()
 })
 
+// Online is a person, not a room. Someone whose connection had opened a
+// direct message but not yet Peer-to-Peer Republic showed online in one and
+// offline in the other at the same time.
+test('a person is online or not the same way in every room and direct message', async (t) => {
+  const { service } = await linkedPhone(t)
+  const grace = createFakePeer('0c0c0c0c', 'grace')
+  grace.rooms = [DESKTOP_DM]
+  service.peers.set(grace.connection, grace)
+  service.rooms.set(DESKTOP_DM, { roomKey: DESKTOP_DM, name: 'grace', isDM: true, dmWith: '0c0c0c0c', members: [] })
+  service.rooms.get(DESKTOP_ROOM).members = [{ id: '0c0c0c0c', username: 'grace', bio: '', avatar: null }]
+
+  const inRoom = service.listRoomMembers(DESKTOP_ROOM).find((member) => member.id === '0c0c0c0c')
+  assert.equal(inRoom.online, true)
+  assert.equal(service.publicRoom(service.rooms.get(DESKTOP_DM)).dmOnline, true)
+
+  service.peers.delete(grace.connection)
+  assert.equal(service.isPeerOnline('0c0c0c0c'), false)
+  assert.equal(service.publicRoom(service.rooms.get(DESKTOP_DM)).dmOnline, false)
+  assert.equal(service.listRoomMembers(DESKTOP_ROOM).find((member) => member.id === '0c0c0c0c').online, false)
+  await service.close()
+})
+
 // A phone that took a desktop's PeerChat: 'ada@mobile' in DESKTOP_ROOM.
 async function linkedPhone (t) {
   const storagePath = await tempDir(t)

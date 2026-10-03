@@ -218,6 +218,8 @@ type PeerChatRoom = {
   moderation: PeerChatModeration
   lastMessage: PeerChatLastMessage | null
   peerCount: number
+  // A direct message's other person, connected at all.
+  dmOnline?: boolean
   unreadCount: number
   unreadMentions: number
   lastReadTs: number
@@ -2094,7 +2096,7 @@ export function PeerChatScreen ({
               <Text numberOfLines={1} style={[styles.chatTitle, { color: colors.text }]}>{activeRoom.name}</Text>
               <Text style={[
                 styles.connectionText,
-                { color: activeRoom.connectionState === 'connected' ? colors.success : colors.muted }
+                { color: isRoomOnline(activeRoom) ? colors.success : colors.muted }
               ]}>
                 {formatRoomConnection(activeRoom)}
               </Text>
@@ -3499,7 +3501,7 @@ export function PeerChatScreen ({
                 </Text>
               </View>
             )}
-            <Text style={[styles.roomPeerCount, { color: item.peerCount > 0 ? colors.success : colors.muted }]}>
+            <Text style={[styles.roomPeerCount, { color: (item.isDM ? isRoomOnline(item) : item.peerCount > 0) ? colors.success : colors.muted }]}>
               {formatRoomConnection(item, true)}
             </Text>
           </View>
@@ -4631,12 +4633,19 @@ function formatRoomCreatedAt (timestamp: number) {
   return ` on ${new Date(timestamp).toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' })}`
 }
 
+function isRoomOnline (room: PeerChatRoom) {
+  return room.isDM && typeof room.dmOnline === 'boolean'
+    ? room.dmOnline
+    : room.connectionState === 'connected'
+}
+
 function formatRoomConnection (room: PeerChatRoom, compact = false) {
   if (room.connectionState === 'connecting') return 'Connecting...'
   if (room.connectionState === 'syncing') return 'Syncing...'
   // A direct message has exactly one other person in it, so counting them
-  // reads as a stray number. Either they are there or they are not.
-  if (room.isDM) return room.connectionState === 'connected' ? 'Online' : 'Offline'
+  // reads as a stray number. Either they are there or they are not, the same
+  // as their dot in any room.
+  if (room.isDM) return isRoomOnline(room) ? 'Online' : 'Offline'
   if (room.connectionState === 'connected') {
     return compact
       ? `${room.peerCount} online`

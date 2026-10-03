@@ -2438,6 +2438,8 @@ export class PeerChatService {
       avatar: room.avatar || null,
       isDM: room.isDM === true,
       dmWith: room.dmWith || null,
+      // The same answer the person's dot gives everywhere else.
+      ...(room.isDM === true && { dmOnline: this.isPeerOnline(room.dmWith) }),
       pendingAcceptance: room.pendingAcceptance === true,
       rejected: room.rejected === true,
       isHost: room.isHost === true,
@@ -2663,6 +2665,15 @@ export class PeerChatService {
     return { ok: true, room: this.publicRoom(room), rooms: this.listRooms() }
   }
 
+  isPeerOnline (peerId) {
+    const id = normalizePeerChatPeerId(peerId)
+    if (!id) return false
+    for (const peer of this.peers.values()) {
+      if (normalizePeerChatPeerId(peer.id) === id && !peer.connection?.destroyed) return true
+    }
+    return this.presence.isPresentAnywhere(id)
+  }
+
   countRoomPeers (roomKey) {
     const peerIds = []
     for (const peer of this.peers.values()) {
@@ -2721,11 +2732,14 @@ export class PeerChatService {
       if (this.isPeerIdRemovedFromRoom(roomKey, id)) members.delete(id)
     }
 
-    // Someone mid-redial is still here as far as the room is concerned, so
-    // their dot does not blink off and on again.
+    // Online is a person, not a room. One connection carries every room two
+    // people share, and a room can open on it a moment after another, so
+    // counting only this room showed someone online in a direct message and
+    // offline in Peer-to-Peer Republic at the same time. Someone mid-redial
+    // still counts, so their dot does not blink off and on again.
     for (const member of members.values()) {
       if (member.online || member.self) continue
-      if (this.presence.isPresent(roomKey, member.id)) member.online = true
+      if (this.isPeerOnline(member.id)) member.online = true
     }
     return collapsePeerChatMembers([...members.values()]).sort((left, right) => {
       if (left.self !== right.self) return left.self ? -1 : 1
