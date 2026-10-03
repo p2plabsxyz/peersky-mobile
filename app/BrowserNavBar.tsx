@@ -184,7 +184,7 @@ export function BrowserNavBar ({
       {/* Close every tab and clear what browsing left behind, in one press. */}
       <NavButton
         icon={FireIcon}
-        label='Burn tabs and cached data'
+        label='Burn tabs, history and cached data'
         palette={palette}
         onPress={() => navigate(onBurnTabs)}
       />

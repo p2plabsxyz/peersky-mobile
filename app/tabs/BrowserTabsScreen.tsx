@@ -166,7 +166,7 @@ export function BrowserTabsScreen ({
                 : <ListIcon {...actionIconProps} />}
             </Pressable>
             <Pressable
-              accessibilityLabel='Burn tabs and cached data'
+              accessibilityLabel='Burn tabs, history and cached data'
               accessibilityRole='button'
               style={styles.browserTabsBurnButton}
               onPress={onBurnTabs}

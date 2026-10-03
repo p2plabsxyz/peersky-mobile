@@ -16,6 +16,11 @@ test('the tabs are burned under the flames, not before them', async () => {
   const burn = app.slice(app.indexOf('function burnBrowserTabs'), app.indexOf('function onBrowserCloseAllTabs'))
   assert.match(burn, /clearBrowserWebViewData\(webView\)/)
   assert.match(burn, /onBrowserResetTabs\(\)/)
+  // History goes with it, as DuckDuckGo's Fire Button and Firefox Focus do,
+  // and the question says so before anything burns.
+  assert.match(burn, /const historyCleared = clearBrowserHistory\(\)/)
+  assert.match(confirm, /'Burn tabs, history and cached data\?'/)
+  assert.match(confirm, /deletes your browsing and search history and cached website files\. Bookmarks and downloads stay\./)
   assert.match(app, /<BurnAnimation onBurn=\{burnBrowserTabs\} onDone=\{\(\) => setBrowserBurning\(false\)\} \/>/)
 })
 

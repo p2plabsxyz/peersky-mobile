@@ -2244,10 +2244,12 @@ export default function App () {
     return { previewCacheCleared, sessionSaved }
   }
 
+  // Like DuckDuckGo's Fire Button and Firefox Focus, history goes too, so
+  // nothing is left to say where you have been or what you searched for.
   function onBrowserBurnTabs () {
     Alert.alert(
-      'Burn tabs and cached data?',
-      'This closes every open tab and clears cached website files.',
+      'Burn tabs, history and cached data?',
+      'This closes every tab and deletes your browsing and search history and cached website files. Bookmarks and downloads stay.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -2268,14 +2270,17 @@ export default function App () {
       clearBrowserWebViewData(webView)
     }
     const { previewCacheCleared, sessionSaved } = onBrowserResetTabs()
+    const historyCleared = clearBrowserHistory()
     setBrowserTabsVisible(false)
     setBrowserTitle('New tab')
     setStatus(
       !sessionSaved
         ? 'Tabs burned, but the fresh session could not be saved'
-        : !previewCacheCleared
-          ? 'Tabs burned, but preview cache could not be cleared'
-          : 'Tabs and cached data cleared'
+        : !historyCleared
+          ? 'Tabs burned, but history could not be cleared'
+          : !previewCacheCleared
+            ? 'Tabs burned, but preview cache could not be cleared'
+            : 'Tabs, history and cached data cleared'
     )
   }
 

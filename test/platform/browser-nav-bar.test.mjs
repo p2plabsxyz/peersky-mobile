@@ -10,7 +10,7 @@ describe('browser chrome layout', () => {
   test('five slots: two that change, then burn, tabs and the menu', () => {
     assert.match(navBar, /label='Go back'/)
     assert.match(navBar, /label='Go forward'/)
-    assert.match(navBar, /label='Burn tabs and cached data'/)
+    assert.match(navBar, /label='Burn tabs, history and cached data'/)
     assert.match(navBar, /Open tabs, \$\{tabCount\} open/)
     assert.match(navBar, /<BrowserOverflowMenu[\s>]/)
   })
