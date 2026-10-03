@@ -3487,22 +3487,22 @@ export function PeerChatScreen ({
             </Text>
           </View>
           <View style={styles.roomMeta}>
+            <Text style={[styles.roomTime, { color: colors.muted }]}>{formatRoomTime(item)}</Text>
             <View style={styles.roomStateRow}>
+              {item.unreadCount > 0 && (
+                <View style={[styles.unreadBadge, { backgroundColor: colors.accent }]}>
+                  <Text style={styles.unreadBadgeText}>
+                    {item.unreadMentions > 0 ? '@ ' : ''}{item.unreadCount}
+                  </Text>
+                </View>
+              )}
               {item.isMuted && (
                 <MuteIcon width={ROOM_STATE_ICON_SIZE} height={ROOM_STATE_ICON_SIZE} color={colors.muted} />
               )}
               {item.isPinned && (
                 <PinIcon width={ROOM_STATE_ICON_SIZE} height={ROOM_STATE_ICON_SIZE} color={colors.accent} />
               )}
-              <Text style={[styles.roomTime, { color: colors.muted }]}>{formatRoomTime(item)}</Text>
             </View>
-            {item.unreadCount > 0 && (
-              <View style={[styles.unreadBadge, { backgroundColor: colors.accent }]}>
-                <Text style={styles.unreadBadgeText}>
-                  {item.unreadMentions > 0 ? '@ ' : ''}{item.unreadCount}
-                </Text>
-              </View>
-            )}
             <Text style={[styles.roomPeerCount, { color: (item.isDM ? isRoomOnline(item) : item.peerCount > 0) ? colors.success : colors.muted }]}>
               {formatRoomConnection(item, true)}
             </Text>
@@ -4813,10 +4813,11 @@ const styles = StyleSheet.create({
   roomTitle: { flexShrink: 1, fontSize: 15, fontWeight: '800' },
   roomPreview: { fontSize: 12 },
   roomMeta: { alignItems: 'flex-end', gap: 5 },
-  roomStateRow: { alignItems: 'center', flexDirection: 'row', gap: 5 },
-  // Line height matched to the pin and mute icons beside it, so centring the
-  // row lines the three up exactly rather than centring boxes of two heights.
-  roomTime: { fontSize: 10, lineHeight: ROOM_STATE_ICON_SIZE },
+  // Under the time: the unread count, then mute, then pin. Its height is kept
+  // when it is empty and the pin comes last, so every row ends the same and
+  // pins line up down the list whatever the time or count beside them.
+  roomStateRow: { alignItems: 'center', flexDirection: 'row', gap: 5, minHeight: 18 },
+  roomTime: { fontSize: 10, lineHeight: ROOM_STATE_ICON_SIZE, minHeight: ROOM_STATE_ICON_SIZE },
   roomPeerCount: { fontSize: 11, fontWeight: '700' },
   unreadBadge: { alignItems: 'center', borderRadius: 10, justifyContent: 'center', minWidth: 20, paddingHorizontal: 6, paddingVertical: 2 },
   unreadBadgeText: { color: '#ffffff', fontSize: 10, fontWeight: '900' },
