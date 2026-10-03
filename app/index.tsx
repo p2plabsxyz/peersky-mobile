@@ -7,6 +7,7 @@ import {
   BackHandler,
   Button,
   Clipboard,
+  DeviceEventEmitter,
   Image,
   Keyboard,
   LayoutAnimation,
@@ -165,6 +166,7 @@ import {
 } from './BrowserMediaSheet'
 import {
   BROWSER_MEDIA_TOKEN_LENGTH,
+  PAUSE_ALL_MEDIA_SCRIPT,
   createBrowserMediaToken,
   createBrowserMediaLongPressScript,
   parseBrowserMediaMessage
@@ -1475,6 +1477,17 @@ export default function App () {
     setBrowserTitle(getBrowserEntryTitle(entry))
     setActiveTab(entry.source.kind === 'app' ? entry.source.app : 'hyper')
   }
+
+  // Android keeps the app running for PeerChat after a swipe away, and a tab
+  // went on playing with nothing left on screen to stop it.
+  useEffect(() => {
+    const subscription = DeviceEventEmitter.addListener('PeerSkyTaskRemoved', () => {
+      for (const webView of browserWebViewRefs.current.values()) {
+        webView?.injectJavaScript(PAUSE_ALL_MEDIA_SCRIPT)
+      }
+    })
+    return () => subscription.remove()
+  }, [])
 
   // Half-sent uploads, per tab. A body crosses the bridge in pieces because
   // postMessage carries text, so the pieces are held until the last one lands.

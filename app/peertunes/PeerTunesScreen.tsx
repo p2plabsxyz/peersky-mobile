@@ -1,24 +1,37 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { AppState, Modal, NativeModules, Pressable, StyleSheet, Text, View } from 'react-native'
+import { AppState, DeviceEventEmitter, Modal, NativeModules, Platform, Pressable, StyleSheet, Text, View } from 'react-native'
 import { CameraView, useCameraPermissions } from 'expo-camera'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { WebView } from 'react-native-webview'
 
 import {
+  PEERTUNES_MEDIA_BRIDGE_SCRIPT,
   PEERTUNES_SCAN_BRIDGE_SCRIPT,
   createAudioRouteScript,
+  createPeerTunesMediaCommandScript,
   createPeerTunesPageUrl,
   isPeerTunesPageRequest,
   parsePeerTunesHapticRequest,
   parsePeerTunesKeepOfflineRequest,
+  parsePeerTunesNowPlaying,
   parsePeerTunesScanRequest,
   serializeScanResult
 } from './peertunes-screen.mjs'
 import { AppLoading } from '../AppLoading'
+import { PAUSE_ALL_MEDIA_SCRIPT } from '../browser-media.mjs'
 import { MODAL_ORIENTATIONS } from '../modal-orientations'
 import { tapFeedback } from '../haptics'
 
-const audioRoute = NativeModules.PeerSkyAudioRoute as { getRoute: () => Promise<{ external: boolean }> } | undefined
+const audioRoute = NativeModules.PeerSkyAudioRoute as {
+  getRoute: () => Promise<{ external: boolean }>
+  // Android only: the media session headset buttons talk to.
+  setNowPlaying?: (playing: boolean, title: string, artist: string) => void
+  clearNowPlaying?: () => void
+} | undefined
+// iOS hands a WebView's media to the system itself.
+const PEERTUNES_BEFORE_LOAD_SCRIPT = Platform.OS === 'android'
+  ? `${PEERTUNES_SCAN_BRIDGE_SCRIPT}\n${PEERTUNES_MEDIA_BRIDGE_SCRIPT}`
+  : PEERTUNES_SCAN_BRIDGE_SCRIPT
 const AUDIO_ROUTE_POLL_MS = 3000
 
 type Props = {
@@ -65,6 +78,24 @@ export function PeerTunesScreen ({
     })
     return () => subscription.remove()
   }, [onEnsureServer])
+
+  // Buttons on earbuds or in a car come back from the media session as
+  // commands for the page. A swipe away pauses it, since the app can stay
+  // running for PeerChat with nothing left on screen to stop the music.
+  useEffect(() => {
+    const commands = DeviceEventEmitter.addListener('PeerSkyMediaCommand', (command: unknown) => {
+      const script = createPeerTunesMediaCommandScript(command)
+      if (script) webViewRef.current?.injectJavaScript(script)
+    })
+    const removed = DeviceEventEmitter.addListener('PeerSkyTaskRemoved', () => {
+      webViewRef.current?.injectJavaScript(PAUSE_ALL_MEDIA_SCRIPT)
+    })
+    return () => {
+      commands.remove()
+      removed.remove()
+      audioRoute?.clearNowPlaying?.()
+    }
+  }, [])
 
   // The Bluetooth mark. The app looks at the audio route and tells the page
   // whenever the answer changes, and again whenever the page loads.
@@ -165,8 +196,13 @@ export function PeerTunesScreen ({
       // This view only ever shows the loopback app, so pin it. The navigation
       // handler below is the real gate; this is the second layer behind it.
       originWhitelist={[localUrl]}
-      injectedJavaScriptBeforeContentLoaded={PEERTUNES_SCAN_BRIDGE_SCRIPT}
+      injectedJavaScriptBeforeContentLoaded={PEERTUNES_BEFORE_LOAD_SCRIPT}
       onMessage={(event) => {
+        const nowPlaying = parsePeerTunesNowPlaying(event.nativeEvent.data)
+        if (nowPlaying) {
+          audioRoute?.setNowPlaying?.(nowPlaying.playing, nowPlaying.title, nowPlaying.artist)
+          return
+        }
         const weight = parsePeerTunesHapticRequest(event.nativeEvent.data)
         if (weight) {
           tapFeedback(weight)

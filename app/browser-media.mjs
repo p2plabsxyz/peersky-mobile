@@ -9,6 +9,10 @@ const MEDIA_KINDS = new Set(['image', 'video', 'link'])
 const MEDIA_PROTOCOLS = new Set(['http:', 'https:'])
 const LINK_PROTOCOLS = new Set(['http:', 'https:', 'hyper:', 'peersky:'])
 
+// Every sound on a page stops. For when the app is swiped away but kept
+// running for PeerChat, and nothing on screen is left to stop it.
+export const PAUSE_ALL_MEDIA_SCRIPT = "document.querySelectorAll('audio, video').forEach(function (media) { try { media.pause(); } catch (e) {} }); true;"
+
 export function createBrowserMediaToken (bytes) {
   if (!(bytes instanceof Uint8Array) || bytes.byteLength !== BROWSER_MEDIA_TOKEN_LENGTH / 2) {
     throw new TypeError('Browser media token requires 16 random bytes')

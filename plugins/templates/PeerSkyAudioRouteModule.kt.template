@@ -1,22 +1,67 @@
 package __PACKAGE_NAME__
 
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
+import android.media.MediaMetadata
+import android.media.session.MediaSession
+import android.media.session.PlaybackState
+import androidx.core.content.ContextCompat
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
+import com.facebook.react.bridge.UiThreadUtil
 
 // Whether a Bluetooth output is connected. PeerTunes shows its Bluetooth mark
 // from this, because a WebView cannot see the audio outputs itself. Reading
 // device types needs no Bluetooth permission.
+//
+// Also PeerTunes' media session. A WebView never hands its audio to Android,
+// so play and pause from earbuds or a car had nowhere to go. The page says
+// what is playing, this session says so to the system, and the buttons come
+// back to the page as commands.
 class PeerSkyAudioRouteModule(
   reactContext: ReactApplicationContext
 ) : ReactContextBaseJavaModule(reactContext) {
 
+  private var mediaSession: MediaSession? = null
+
+  // The PeerChat service keeps the app running after a swipe away, and
+  // PeerTunes kept playing with nothing on screen to stop it.
+  private val taskRemovedReceiver = object : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+      reactApplicationContext.emitDeviceEvent(TASK_REMOVED_EVENT, null)
+    }
+  }
+
   override fun getName() = "PeerSkyAudioRoute"
+
+  override fun initialize() {
+    super.initialize()
+    try {
+      ContextCompat.registerReceiver(
+        reactApplicationContext,
+        taskRemovedReceiver,
+        IntentFilter("${reactApplicationContext.packageName}$TASK_REMOVED_ACTION"),
+        ContextCompat.RECEIVER_NOT_EXPORTED
+      )
+    } catch (error: Exception) {
+    }
+  }
+
+  override fun invalidate() {
+    try {
+      reactApplicationContext.unregisterReceiver(taskRemovedReceiver)
+    } catch (error: Exception) {
+    }
+    UiThreadUtil.runOnUiThread { releaseMediaSession() }
+    super.invalidate()
+  }
 
   @ReactMethod
   fun getRoute(promise: Promise) {
@@ -29,7 +74,73 @@ class PeerSkyAudioRouteModule(
     }
   }
 
+  @ReactMethod
+  fun setNowPlaying(playing: Boolean, title: String?, artist: String?) {
+    UiThreadUtil.runOnUiThread {
+      try {
+        val session = mediaSession ?: MediaSession(reactApplicationContext, "PeerTunes").also {
+          it.setCallback(object : MediaSession.Callback() {
+            override fun onPlay() = command("play")
+            override fun onPause() = command("pause")
+            override fun onStop() = command("pause")
+            override fun onSkipToNext() = command("nexttrack")
+            override fun onSkipToPrevious() = command("previoustrack")
+          })
+          mediaSession = it
+        }
+        session.setMetadata(
+          MediaMetadata.Builder()
+            .putString(MediaMetadata.METADATA_KEY_TITLE, title.orEmpty())
+            .putString(MediaMetadata.METADATA_KEY_ARTIST, artist.orEmpty())
+            .build()
+        )
+        session.setPlaybackState(
+          PlaybackState.Builder()
+            .setActions(MEDIA_ACTIONS)
+            .setState(
+              if (playing) PlaybackState.STATE_PLAYING else PlaybackState.STATE_PAUSED,
+              PlaybackState.PLAYBACK_POSITION_UNKNOWN,
+              if (playing) 1f else 0f
+            )
+            .build()
+        )
+        session.isActive = true
+      } catch (error: Exception) {
+      }
+    }
+  }
+
+  @ReactMethod
+  fun clearNowPlaying() {
+    UiThreadUtil.runOnUiThread { releaseMediaSession() }
+  }
+
+  private fun command(name: String) {
+    reactApplicationContext.emitDeviceEvent(COMMAND_EVENT, name)
+  }
+
+  private fun releaseMediaSession() {
+    mediaSession?.let {
+      it.isActive = false
+      it.release()
+    }
+    mediaSession = null
+  }
+
   companion object {
+    private const val COMMAND_EVENT = "PeerSkyMediaCommand"
+    private const val TASK_REMOVED_EVENT = "PeerSkyTaskRemoved"
+    // Sent by PeerChatBackgroundService, after the package name.
+    const val TASK_REMOVED_ACTION = ".TASK_REMOVED"
+
+    private const val MEDIA_ACTIONS =
+      PlaybackState.ACTION_PLAY or
+        PlaybackState.ACTION_PAUSE or
+        PlaybackState.ACTION_PLAY_PAUSE or
+        PlaybackState.ACTION_STOP or
+        PlaybackState.ACTION_SKIP_TO_NEXT or
+        PlaybackState.ACTION_SKIP_TO_PREVIOUS
+
     // BLE headset and speaker (26, 27) are API 31, BLE broadcast (30) API 33.
     // On older systems no device ever reports them, so the plain numbers are
     // safe everywhere.

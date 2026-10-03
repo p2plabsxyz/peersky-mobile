@@ -61,9 +61,12 @@ class PeerChatBackgroundService : Service() {
     super.onDestroy()
   }
 
-  // A swipe-away of the task should not take the connection with it.
+  // A swipe-away of the task should not take the connection with it. It should
+  // take the music: this service keeps the app running, so PeerTunes went on
+  // playing with nothing left on screen to stop it. The app pauses it.
   override fun onTaskRemoved(rootIntent: Intent?) {
     super.onTaskRemoved(rootIntent)
+    sendBroadcast(Intent("$packageName.TASK_REMOVED").setPackage(packageName))
     if (!isWanted(this)) return
     try {
       startForegroundService(Intent(this, PeerChatBackgroundService::class.java))
