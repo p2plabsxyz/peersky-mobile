@@ -26,6 +26,7 @@ import {
 import { refreshHyperRuntimeNetwork } from './network-refresh.mjs'
 import { createHyperUrl, getHyperSearch, getHyperVisibility, parseHyperUrl } from './url.mjs'
 import { writeHyperResponseToFile } from './binary-response.mjs'
+import { parseMultipartFormData } from './form-data.mjs'
 import { configureHyperReadTimeout } from './read-policy.mjs'
 
 let hyperFetches = new WeakMap()
@@ -539,6 +540,11 @@ class BareRequest {
 
   async arrayBuffer () {
     return uint8ArrayToArrayBuffer(await bodyToUint8Array(this.body))
+  }
+
+  // hypercore-fetch reads a FormData upload, several files at once, with this.
+  async formData () {
+    return parseMultipartFormData(await bodyToUint8Array(this.body), this.headers.get('content-type'))
   }
 }
 
