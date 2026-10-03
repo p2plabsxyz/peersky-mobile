@@ -144,6 +144,7 @@ import { WelcomeScreen } from './WelcomeScreen'
 import { RestartRequiredScreen } from './RestartRequiredScreen'
 import { emitLinkDeviceProgress } from './settings/link-device-progress'
 import { BrowserHomeBackground } from './BrowserHomeBackground'
+import { BurnAnimation } from './BurnAnimation'
 import { applyAppIcon } from './app-icon'
 import { useKeyboardVisible } from './use-keyboard-visible'
 import {
@@ -532,6 +533,7 @@ export default function App () {
   // player out of sight goes with it, and so does the music.
   if (peertunesMounted && !isAppInBrowserTabs(browserTabsState, 'peertunes')) setPeertunesMounted(false)
   const [browserHomeMounted, setBrowserHomeMounted] = useState(false)
+  const [browserBurning, setBrowserBurning] = useState(false)
   // Mounted the first time home shows and kept from then on.
   if (browserSource.kind === 'home' && !browserHomeMounted) setBrowserHomeMounted(true)
   const [peerChatRevision, setPeerChatRevision] = useState(0)
@@ -2151,22 +2153,28 @@ export default function App () {
           text: 'Burn',
           style: 'destructive',
           onPress: () => {
-            for (const webView of browserWebViewRefs.current.values()) {
-              clearBrowserWebViewData(webView)
-            }
-            const { previewCacheCleared, sessionSaved } = onBrowserResetTabs()
+            // The flames go up first and the tabs go under their cover.
             setBrowserTabsVisible(false)
-            setBrowserTitle('New tab')
-            setStatus(
-              !sessionSaved
-                ? 'Tabs burned, but the fresh session could not be saved'
-                : !previewCacheCleared
-                  ? 'Tabs burned, but preview cache could not be cleared'
-                  : 'Tabs and cached data cleared'
-            )
+            setBrowserBurning(true)
           }
         }
       ]
+    )
+  }
+
+  function burnBrowserTabs () {
+    for (const webView of browserWebViewRefs.current.values()) {
+      clearBrowserWebViewData(webView)
+    }
+    const { previewCacheCleared, sessionSaved } = onBrowserResetTabs()
+    setBrowserTabsVisible(false)
+    setBrowserTitle('New tab')
+    setStatus(
+      !sessionSaved
+        ? 'Tabs burned, but the fresh session could not be saved'
+        : !previewCacheCleared
+          ? 'Tabs burned, but preview cache could not be cleared'
+          : 'Tabs and cached data cleared'
     )
   }
 
@@ -4881,6 +4889,9 @@ export default function App () {
     <View style={styles.browserShellContent}>
       {browser}
       {browserOverlay && <View style={StyleSheet.absoluteFill}>{browserOverlay}</View>}
+      {browserBurning && (
+        <BurnAnimation onBurn={burnBrowserTabs} onDone={() => setBrowserBurning(false)} />
+      )}
     </View>
   )
 }
