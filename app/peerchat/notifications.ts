@@ -131,6 +131,16 @@ export async function setPeerChatBadgeCount (count: number) {
   return Notifications.setBadgeCountAsync(Math.max(0, Math.trunc(count)))
 }
 
+/** The count on the app icon now, as last set, or 0 when it cannot be read. */
+export async function getPeerChatBadgeCount () {
+  try {
+    const count = await Notifications.getBadgeCountAsync()
+    return Number.isFinite(count) && count > 0 ? Math.trunc(count) : 0
+  } catch {
+    return 0
+  }
+}
+
 export function addPeerChatNotificationResponseListener (listener: (roomKey: string) => void) {
   let handledIdentifier = ''
   const handleResponse = (response: Notifications.NotificationResponse | null) => {

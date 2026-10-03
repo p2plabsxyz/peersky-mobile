@@ -131,6 +131,24 @@ test('PeerChat keeps its swarm announce fresh while the app sits in the backgrou
   assert.ok(value >= 5 * 60 * 1000, 'refreshing this often would drain the battery')
 })
 
+// The count on the app icon went blank every time PeerSky opened, because the
+// runtime starting up set it to 0, and stayed blank if you left before the
+// first check. The messages were still unread. It stays until their room is
+// opened, and the PeerChat shortcut starts from it rather than from nothing.
+test('the unread count stays on the app icon until the chat is opened', async () => {
+  const hook = await readFile(new URL('../../app/peerchat/usePeerChatNotifications.ts', import.meta.url), 'utf8')
+  assert.doesNotMatch(hook, /setPeerChatBadgeCount\(0\)/)
+  assert.doesNotMatch(hook, /setUnreadTotal\(0\)/)
+  const starting = hook.slice(hook.indexOf('if (!isReady || isRuntimeReady) return'), hook.indexOf('if (!isReady || !isRuntimeReady) {'))
+  assert.match(starting, /badgeCountRef\.current = -1/)
+  assert.match(hook, /void getPeerChatBadgeCount\(\)\.then\(\(count\) => \{\s+if \(!cancelled && badgeCountRef\.current === -1 && count > 0\) setUnreadTotal\(count\)/)
+
+  // A room's count only clears when that room is opened, and it is saved.
+  const service = await readFile(new URL('../../backend/peerchat/service.mjs', import.meta.url), 'utf8')
+  const open = service.slice(service.indexOf('  setActiveRoom ({ roomKey } = {}) {'), service.indexOf('  async getSnapshot ('))
+  assert.match(open, /room\.unreadCount = 0[\s\S]*this\.schedulePersist\(\)/)
+})
+
 test('PeerChat offers the Android battery exemption after notifications are turned on', async () => {
   const screen = await readFile(new URL('../../app/peerchat/PeerChatScreen.tsx', import.meta.url), 'utf8')
   const offer = screen.slice(
