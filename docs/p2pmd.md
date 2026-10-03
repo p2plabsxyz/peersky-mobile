@@ -39,7 +39,7 @@ Previews are rendered by the app through its own bridge, not by the room's serve
 
 1. React Native sends an RPC command to create or join a P2PMD room.
 2. The Bare backend starts the local P2PMD HTTP server on `127.0.0.1`.
-3. Holesail exposes or connects the local server through an `hs://` key. A phone that joins listens on a port it picks itself, never the one the host advertises.
+3. Holesail exposes or connects the local server through an `hs://` key. Each note keeps one port, as on the desktop: the host reopens it on the port it had before, and a phone that joins listens on the port it used for that note last, or else the one the host advertises. If that port is taken on the phone, or is one another server in the app keeps (PeerTunes' 47317), the system picks one instead. The ports are kept in `hyper-sdk/p2pmd-ports.json`, for the thirty notes used last.
 4. The WebView shows the app's own editor page, with the room's local address as its base.
 5. The editor loads initial state from `/doc/yjsstate`.
 6. Local edits are sent to `/doc/update` as Yjs updates.
@@ -56,7 +56,7 @@ flowchart LR
 
   subgraph guest["A guest: phone or PeerSky Desktop"]
     geditor["Editor"]
-    client["Holesail client<br/>127.0.0.1, its own port"]
+    client["Holesail client<br/>127.0.0.1, the host's port"]
   end
 
   heditor <-->|"/doc/yjsstate, /doc/update, /events"| server
