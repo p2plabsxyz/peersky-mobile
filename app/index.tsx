@@ -196,6 +196,7 @@ import { HyperdriveScreen } from './hyperdrive/HyperdriveScreen'
 import { canUseNetworkForOfflineHyper } from './hyperdrive/offline-network.mjs'
 import { PeerChatScreen, type PeerChatResponse } from './peerchat/PeerChatScreen'
 import { settleIncomingUrl, subscribeToIncomingUrls } from './incoming-links'
+import { parseHomeShortcutUrl } from './home-shortcuts.mjs'
 import { parsePeerChatDirectInvite, parsePeerChatInvite } from './peerchat/peerchat-invite.mjs'
 import { screenUploadBytes } from './media/upload-gate'
 import { isUsableImageType, sniffBase64ImageType } from './media/media-moderation.mjs'
@@ -502,6 +503,7 @@ export default function App () {
   const [browserBookmarksVisible, setBrowserBookmarksVisible] = useState(false)
   const [browserHistoryVisible, setBrowserHistoryVisible] = useState(false)
   const [pendingRestoredUrl, setPendingRestoredUrl] = useState<string | null>(null)
+  const [pendingHomeShortcutUrl, setPendingHomeShortcutUrl] = useState<string | null>(null)
   const [pendingIncomingUrl, setPendingIncomingUrl] = useState<string | null>(null)
   const [browserCanGoBack, setBrowserCanGoBack] = useState(false)
   const [browserCanGoForward, setBrowserCanGoForward] = useState(false)
@@ -809,6 +811,14 @@ export default function App () {
   }, [])
 
   useEffect(() => subscribeToIncomingUrls((url) => {
+    // A quick action from the app icon. It waits for last time's tabs and
+    // goes on top of them. Counted as something done in the app, it opened
+    // the app without them.
+    if (parseHomeShortcutUrl(url)) {
+      setPendingHomeShortcutUrl(url)
+      return
+    }
+
     // peersky:// is our own scheme and is registered for deep links, so a
     // shared link like peersky://p2p/peertunes/#playlist=... arrives here.
     // Only accept the ones that name a built-in app, not any peersky:// text.
@@ -825,6 +835,53 @@ export default function App () {
     browserUserInteractedRef.current = true
     setPendingIncomingUrl(url)
   }), [])
+
+  useEffect(() => {
+    if (!browserSessionReady || !pendingHomeShortcutUrl) return
+    const shortcutUrl = pendingHomeShortcutUrl
+    const shortcut = parseHomeShortcutUrl(shortcutUrl)
+    setPendingHomeShortcutUrl(null)
+    settleIncomingUrl(shortcutUrl)
+    setBrowserBookmarksVisible(false)
+    setBrowserDownloadsVisible(false)
+    setBrowserHistoryVisible(false)
+    setBrowserMenuVisible(false)
+    setBrowserTabsVisible(false)
+    if (shortcut === 'new-tab') {
+      setBrowserSettingsVisible(false)
+      onBrowserNewTab()
+    } else if (shortcut === 'incognito') {
+      setBrowserSettingsVisible(false)
+      onBrowserNewIncognitoTab()
+    } else if (shortcut === 'app-icon') {
+      // Where the colours of the logo, and so of the app icon, are picked.
+      setBrowserSettingsInitialPage('appearance')
+      setBrowserSettingsVisible(true)
+    } else if (shortcut === 'paste') {
+      setBrowserSettingsVisible(false)
+      // The copied address or words, in a new tab. A new tab loads what it is
+      // given as it is, so they become an address or a search first, as the
+      // address bar does.
+      void Clipboard.getString().then((text) => {
+        const value = text.trim()
+        if (!value) {
+          setStatus('Nothing to paste')
+          onBrowserNewTab()
+          return
+        }
+        const target = normalizeBrowserAddress(
+          value,
+          browserPreferences.searchEngine,
+          browserPreferences.customSearchUrl
+        )
+        if (target.length > MAX_BROWSER_URL_LENGTH) {
+          setStatus('That is too long to open')
+          return
+        }
+        if (!createBrowserTab(target)) void loadBrowserUrl(target)
+      }).catch(() => setStatus('Unable to read what was copied'))
+    }
+  }, [browserSessionReady, pendingHomeShortcutUrl])
 
   useEffect(() => {
     if (!browserSessionReady || !pendingIncomingUrl) return

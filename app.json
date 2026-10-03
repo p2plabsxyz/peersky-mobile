@@ -155,6 +155,7 @@
       "./plugins/with-app-icons",
       "./plugins/with-no-device-backup",
       "./plugins/with-audio-route",
+      "./plugins/with-home-shortcuts",
       [
         "expo-notifications",
         {
