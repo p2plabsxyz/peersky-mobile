@@ -20,7 +20,7 @@ test('the three weights map onto the platform styles', () => {
 // Holding something is a decision the phone should answer to.
 test('every long press in the app answers back', async () => {
   const files = [
-    ['../../app/peerchat/PeerChatScreen.tsx', 3],
+    ['../../app/peerchat/PeerChatScreen.tsx', 7],
     ['../../app/hyperdrive/HyperdriveScreen.tsx', 1],
     ['../../app/index.tsx', 1]
   ]
@@ -29,7 +29,9 @@ test('every long press in the app answers back', async () => {
     const text = await readFile(new URL(file, import.meta.url), 'utf8')
     const holds = (text.match(/onLongPress=/g) || []).length
     const buzzes = (text.match(/tapFeedback\(/g) || []).length
+    // An attachment's holds share one handler, which buzzes for all of them.
+    const shared = (text.match(/onLongPress=\{onShowActions\}/g) || []).length
     assert.equal(holds, expected, `${file} gained a long press`)
-    assert.ok(buzzes >= holds, `${file} has a long press that says nothing`)
+    assert.ok(buzzes >= holds - shared + Math.min(shared, 1), `${file} has a long press that says nothing`)
   }
 })

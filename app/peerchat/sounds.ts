@@ -4,7 +4,7 @@ import { playAndroidPeerChatSound } from './background-service'
 
 const SOUND_RELEASE_TIMEOUT_MS = 5000
 
-export function playPeerChatSound (kind: 'send' | 'receive', source: AudioSource | string | number) {
+export function playPeerChatSound (kind: 'send' | 'receive' | 'pop', source: AudioSource | string | number) {
   if (playAndroidPeerChatSound(kind)) return
   let player: ReturnType<typeof createAudioPlayer> | null = null
   let subscription: { remove: () => void } | null = null

@@ -161,6 +161,10 @@ type PeerChatReactionSummary = {
   self: boolean
 }
 
+function countOthersReactions (message: { reactions?: PeerChatReactionSummary[] }) {
+  return (message.reactions || []).reduce((total, reaction) => total + reaction.count - (reaction.self ? 1 : 0), 0)
+}
+
 type PeerChatReply = {
   id: string
   sender: string
@@ -372,6 +376,8 @@ export function PeerChatScreen ({
   const actionInFlightRef = useRef(false)
   const isNearMessageBottomRef = useRef(true)
   const observedMessageIdsRef = useRef<Set<string> | null>(null)
+  // Other people's reactions on each message, so a new one can pop.
+  const observedReactionsRef = useRef<Map<string, number>>(new Map())
   const roomOpenedAtRef = useRef(0)
   const mountedRef = useRef(true)
   const composerRoomKeyRef = useRef<string | null>(null)
@@ -787,11 +793,19 @@ export function PeerChatScreen ({
             !previousIds.has(message.id) &&
             message.timestamp >= roomOpenedAtRef.current
           ))
+          // Someone reacting in the open chat pops, as it does on desktop.
+          const previousReactions = observedReactionsRef.current
+          const hasNewReaction = response.messages.some((message) => (
+            (previousReactions.get(message.id) ?? Infinity) < countOthersReactions(message)
+          ))
           if (hasNewRemoteMessage) {
             playPeerChatSound('receive', require('../../assets/sounds/peerchat/receive.mp3'))
+          } else if (hasNewReaction) {
+            playPeerChatSound('pop', require('../../assets/sounds/peerchat/pop.mp3'))
           }
         }
         observedMessageIdsRef.current = new Set(response.messages.map((message) => message.id))
+        observedReactionsRef.current = new Map(response.messages.map((message) => [message.id, countOthersReactions(message)]))
         setMessages(response.messages)
       }
       if (Number.isSafeInteger(response.version)) versionRef.current = response.version as number
@@ -1857,6 +1871,9 @@ export function PeerChatScreen ({
       })
       if (!response.ok) throw new Error(response.error || 'Unable to update PeerChat reaction.')
       if (!mountedRef.current) return
+      if (soundsEnabled && currentEmoji !== emoji) {
+        playPeerChatSound('pop', require('../../assets/sounds/peerchat/pop.mp3'))
+      }
       versionRef.current = -1
       await refreshRoom(true)
     })
@@ -2460,6 +2477,10 @@ export function PeerChatScreen ({
                       onCallRpc={callRpc}
                       onOpenLocalFile={onOpenLocalFile}
                       onOpenUrl={onOpenUrl}
+                      onShowActions={() => {
+                        tapFeedback()
+                        showMessageActions(item)
+                      }}
                       onStatus={onStatus}
                       roomKey={activeRoom.roomKey}
                       onViewMedia={setMediaTarget}
@@ -3926,6 +3947,7 @@ function PeerChatAttachment ({
   onCallRpc,
   onOpenLocalFile,
   onOpenUrl,
+  onShowActions,
   onStatus,
   roomKey,
   onViewMedia
@@ -3935,6 +3957,9 @@ function PeerChatAttachment ({
   onCallRpc: (command: number, data?: object) => Promise<PeerChatResponse>
   onOpenLocalFile: (uri: string, name: string) => Promise<boolean>
   onOpenUrl: (url: string) => void
+  // A picture fills its bubble and claims the touch, so holding it has to
+  // open the message's actions itself. Only the bubble's thin edge did.
+  onShowActions: () => void
   onStatus: (message: string) => void
   roomKey: string
   onViewMedia: (target: PeerChatMediaTarget) => void
@@ -4039,6 +4064,7 @@ function PeerChatAttachment ({
           <Pressable
             accessibilityHint='Shows a picture the check hid'
             accessibilityRole='button'
+            onLongPress={onShowActions}
             onPress={() => {
               revealedAttachments.add(item.message)
               setIsRevealed(true)
@@ -4056,8 +4082,9 @@ function PeerChatAttachment ({
   if (mediaUrl && mediaKind === 'image') {
     return (
       <Pressable
-        accessibilityHint='Opens this image full screen'
+        accessibilityHint='Opens this image full screen. Long press for message actions'
         accessibilityRole='imagebutton'
+        onLongPress={onShowActions}
         onPress={() => onViewMedia({
           kind: 'image',
           label: item.fileName || 'Image attachment',
@@ -4076,8 +4103,9 @@ function PeerChatAttachment ({
       <View style={[styles.inlineMediaCard, { borderColor: colors.muted }]}>
         <PeerChatVideo mediaUrl={mediaUrl} />
         <Pressable
-          accessibilityHint='Opens this video full screen'
+          accessibilityHint='Opens this video full screen. Long press for message actions'
           accessibilityRole='button'
+          onLongPress={onShowActions}
           onPress={() => onViewMedia({
             kind: 'video',
             label: item.fileName || 'Video attachment',
@@ -4092,9 +4120,10 @@ function PeerChatAttachment ({
 
   return (
     <Pressable
-      accessibilityHint='Opens this Hyperdrive attachment'
+      accessibilityHint='Opens this Hyperdrive attachment. Long press for message actions'
       accessibilityRole='link'
       disabled={isOpening}
+      onLongPress={onShowActions}
       onPress={() => void openAttachment()}
       style={[styles.attachmentCard, { backgroundColor: colors.input, borderColor: colors.muted }]}
     >
