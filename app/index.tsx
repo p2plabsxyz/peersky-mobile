@@ -1832,6 +1832,10 @@ export default function App () {
       if (entry.source.app === 'peertunes') {
         setPeertunesMounted(true)
         setPeertunesLaunchSuffix(getRuntimeAppLaunchSuffix(entry.url))
+        // A PeerTunes tab coming back, after a restart or from the tab list,
+        // needs its server as much as one just opened. Nothing asked for it,
+        // so it spun until reloaded. Asking again for a running one is free.
+        void ensurePeerTunesServer()
       }
     } else {
       setActiveTab('hyper')

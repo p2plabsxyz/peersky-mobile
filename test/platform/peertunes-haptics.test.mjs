@@ -116,3 +116,15 @@ test('PeerTunes on the phone is told which p2p links it can read', async () => {
   const { HYPER_BRIDGE_SCRIPT } = await import('../../backend/peertunes/server.mjs')
   assert.ok(HYPER_BRIDGE_SCRIPT.includes('window.peerskyProtocols=["hyper"]'))
 })
+
+// Coming back up on a PeerTunes tab, or switching to one, mounted the player
+// with no server address and nothing asked for one, so it spun until the page
+// was reloaded. Opening it fresh was the only path that started the server.
+test('a PeerTunes tab coming back asks for its server too', async () => {
+  const app = await readFile(new URL('../../app/index.tsx', import.meta.url), 'utf8')
+  const apply = app.slice(app.indexOf('function applyBrowserTab'), app.indexOf('function createBrowserTab'))
+  assert.match(apply, /if \(entry\.source\.app === 'peertunes'\) \{\s+setPeertunesMounted\(true\)\s+setPeertunesLaunchSuffix\(getRuntimeAppLaunchSuffix\(entry\.url\)\)[\s\S]{0,300}void ensurePeerTunesServer\(\)/)
+  // Asking a running server again just gives its address back.
+  const server = await readFile(new URL('../../backend/peertunes/server.mjs', import.meta.url), 'utf8')
+  assert.match(server, /if \(server && serverInfo\) \{\s+return \{\s+ok: true,\s+running: true,/)
+})
