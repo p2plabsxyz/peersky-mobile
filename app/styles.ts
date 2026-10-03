@@ -469,6 +469,18 @@ export const styles = StyleSheet.create({
   browserContentPage: {
     flex: 1
   },
+  // Over the padding that keeps pages off the notch, so the wallpaper reaches
+  // the glass in landscape.
+  browserHomeLayer: {
+    bottom: 0,
+    left: 0,
+    position: 'absolute',
+    right: 0,
+    top: 0
+  },
+  browserHomeLayerHidden: {
+    opacity: 0
+  },
   browserWebViewLayer: {
     bottom: 0,
     left: 0,

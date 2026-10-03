@@ -524,6 +524,9 @@ export default function App () {
   const [peertunesLaunchSuffix, setPeertunesLaunchSuffix] = useState('')
   const [peertunesError, setPeertunesError] = useState<string | null>(null)
   const [peertunesMounted, setPeertunesMounted] = useState(false)
+  const [browserHomeMounted, setBrowserHomeMounted] = useState(false)
+  // Mounted the first time home shows and kept from then on.
+  if (browserSource.kind === 'home' && !browserHomeMounted) setBrowserHomeMounted(true)
   const [peerChatRevision, setPeerChatRevision] = useState(0)
   const [p2pmdRoom, setP2pmdRoom] = useState<P2pmdRoom | null>(null)
   const [p2pmdEditorHtml, setP2pmdEditorHtml] = useState<string | null>(null)
@@ -3835,6 +3838,82 @@ export default function App () {
           ]}
           onTouchStart={browserSource.kind === 'app' && activeTab === 'peerchat' ? undefined : Keyboard.dismiss}
         >
+        {browserHomeMounted && (
+          // Kept once drawn and hidden while anything else is open. Built
+          // again on every return, the wallpaper and the icons flashed in.
+          <View
+            accessibilityElementsHidden={browserSource.kind !== 'home'}
+            importantForAccessibility={browserSource.kind === 'home' ? 'auto' : 'no-hide-descendants'}
+            pointerEvents={browserSource.kind === 'home' ? 'auto' : 'none'}
+            style={[styles.browserHomeLayer, browserSource.kind === 'home' ? null : styles.browserHomeLayerHidden]}
+          >
+            <BrowserHomeBackground
+              scrim={browserIsDark ? 'rgba(24, 24, 27, 0.35)' : 'rgba(255, 255, 255, 0.14)'}
+            >
+              <ScrollView
+                style={styles.browserContentPage}
+                contentContainerStyle={[
+                  styles.browserHome,
+                  // The layer reaches the glass, so the shortcuts step in
+                  // themselves to clear the notch in landscape.
+                  {
+                    paddingLeft: BROWSER_HOME_PADDING + browserInsets.left,
+                    paddingRight: BROWSER_HOME_PADDING + browserInsets.right
+                  }
+                ]}
+                keyboardDismissMode='on-drag'
+              >
+                <View style={styles.browserShortcutGrid}>
+                  {BROWSER_HOME_SHORTCUTS.map((app) => (
+                    <Pressable
+                      key={app.id}
+                      style={styles.browserShortcut}
+                      onPress={() => void loadBrowserUrl(app.url)}
+                    >
+                      <View style={styles.browserShortcutIconFrame}>
+                        <View style={[
+                          styles.browserShortcutIcon,
+                          app.iconSource ? null : getRuntimeAppIconStyle(app.id)
+                        ]}>
+                          {app.iconSource
+                            ? <Image source={app.iconSource} style={styles.browserShortcutIconImage} />
+                            : <Text style={styles.browserShortcutIconText}>{app.icon}</Text>}
+                        </View>
+                        {app.id === 'peerchat' && peerChatNotifications.unreadTotal > 0 && (
+                          <View style={styles.browserShortcutBadge}>
+                            <Text style={styles.browserShortcutBadgeText}>
+                              {peerChatNotifications.unreadTotal > 99 ? '99+' : peerChatNotifications.unreadTotal}
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+                      <Text
+                        numberOfLines={2}
+                        style={[
+                          styles.browserShortcutTitle,
+                          // The labels carry their own contrast now, so the
+                          // wallpaper does not have to be washed out to hold
+                          // them.
+                          browserIsDark ? styles.browserShortcutTitleOnDark : styles.browserShortcutTitleOnLight,
+                          { color: browserChrome.text, fontSize: browserShortcutTitleFontSize }
+                        ]}
+                      >
+                        {app.title}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+                <BrowserFavourites
+                  favourites={browserFavourites}
+                  palette={browserChrome}
+                  onOpen={(targetUrl) => void loadBrowserUrl(targetUrl)}
+                  onRemove={onBrowserRemoveFavourite}
+                />
+              </ScrollView>
+            </BrowserHomeBackground>
+          </View>
+        )}
+
         {browserSource.kind === 'p2p'
           ? (
             <ScrollView
@@ -3878,73 +3957,7 @@ export default function App () {
             </ScrollView>
             )
           : browserSource.kind === 'home'
-          ? (
-            <BrowserHomeBackground
-              bleed={{ left: browserInsets.left, right: browserInsets.right }}
-              scrim={browserIsDark ? 'rgba(24, 24, 27, 0.35)' : 'rgba(255, 255, 255, 0.14)'}
-            >
-            <ScrollView
-              style={styles.browserContentPage}
-              contentContainerStyle={[
-                styles.browserHome,
-                // Put back what the wallpaper bled through, so the shortcuts
-                // still clear the notch in landscape.
-                {
-                  paddingLeft: BROWSER_HOME_PADDING + browserInsets.left,
-                  paddingRight: BROWSER_HOME_PADDING + browserInsets.right
-                }
-              ]}
-              keyboardDismissMode='on-drag'
-            >
-              <View style={styles.browserShortcutGrid}>
-                {BROWSER_HOME_SHORTCUTS.map((app) => (
-                  <Pressable
-                    key={app.id}
-                    style={styles.browserShortcut}
-                    onPress={() => void loadBrowserUrl(app.url)}
-                  >
-                    <View style={styles.browserShortcutIconFrame}>
-                      <View style={[
-                        styles.browserShortcutIcon,
-                        app.iconSource ? null : getRuntimeAppIconStyle(app.id)
-                      ]}>
-                        {app.iconSource
-                          ? <Image source={app.iconSource} style={styles.browserShortcutIconImage} />
-                          : <Text style={styles.browserShortcutIconText}>{app.icon}</Text>}
-                      </View>
-                      {app.id === 'peerchat' && peerChatNotifications.unreadTotal > 0 && (
-                        <View style={styles.browserShortcutBadge}>
-                          <Text style={styles.browserShortcutBadgeText}>
-                            {peerChatNotifications.unreadTotal > 99 ? '99+' : peerChatNotifications.unreadTotal}
-                          </Text>
-                        </View>
-                      )}
-                    </View>
-                    <Text
-                      numberOfLines={2}
-                      style={[
-                        styles.browserShortcutTitle,
-                        // The labels carry their own contrast now, so the
-                        // wallpaper does not have to be washed out to hold
-                        // them.
-                        browserIsDark ? styles.browserShortcutTitleOnDark : styles.browserShortcutTitleOnLight,
-                        { color: browserChrome.text, fontSize: browserShortcutTitleFontSize }
-                      ]}
-                    >
-                      {app.title}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
-              <BrowserFavourites
-                favourites={browserFavourites}
-                palette={browserChrome}
-                onOpen={(targetUrl) => void loadBrowserUrl(targetUrl)}
-                onRemove={onBrowserRemoveFavourite}
-              />
-            </ScrollView>
-            </BrowserHomeBackground>
-            )
+          ? null
           : browserSource.kind === 'app'
             ? activeTab === 'hyper' && showHyperdriveWelcome
               ? (

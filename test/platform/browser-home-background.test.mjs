@@ -51,11 +51,36 @@ describe('home wallpaper', () => {
     )
     const index = await readFile(new URL('../../app/index.tsx', import.meta.url), 'utf8')
 
+    const styles = await readFile(new URL('../../app/styles.ts', import.meta.url), 'utf8')
+
     // The page steps in around the notch, which in landscape left a band of
-    // shell down each side of the photograph.
-    assert.match(background, /marginLeft: -bleed\.left, marginRight: -bleed\.right/)
+    // shell down each side of the photograph. The home screen is a layer
+    // pinned to all four sides instead, which sits over that padding.
+    assert.match(styles, /browserHomeLayer: \{\s+bottom: 0,\s+left: 0,\s+position: 'absolute',\s+right: 0,\s+top: 0\s+\}/)
     assert.match(index, /paddingLeft: BROWSER_HOME_PADDING \+ browserInsets\.left/)
-    assert.match(index, /bleed=\{\{ left: browserInsets\.left, right: browserInsets\.right \}\}/)
+    assert.doesNotMatch(background, /bleed/)
+  })
+
+  test('coming back home shows the home screen as it was, without a flash', async () => {
+    const background = await readFile(
+      new URL('../../app/BrowserHomeBackground.tsx', import.meta.url),
+      'utf8'
+    )
+    const index = await readFile(new URL('../../app/index.tsx', import.meta.url), 'utf8')
+    const styles = await readFile(new URL('../../app/styles.ts', import.meta.url), 'utf8')
+
+    // Built again on every return, the photo and the icons were decoded
+    // again, and they faded in on top of that.
+    assert.doesNotMatch(background, /Animated/)
+    assert.match(background, /fadeDuration=\{0\}/)
+    assert.match(index, /if \(browserSource\.kind === 'home' && !browserHomeMounted\) setBrowserHomeMounted\(true\)/)
+    assert.match(index, /\{browserHomeMounted && \(/)
+    assert.match(index, /: browserSource\.kind === 'home'\s+\? null/)
+    // Out of sight and out of reach while a page is open.
+    assert.match(index, /pointerEvents=\{browserSource\.kind === 'home' \? 'auto' : 'none'\}/)
+    assert.match(index, /importantForAccessibility=\{browserSource\.kind === 'home' \? 'auto' : 'no-hide-descendants'\}/)
+    assert.match(index, /styles\.browserHomeLayer, browserSource\.kind === 'home' \? null : styles\.browserHomeLayerHidden/)
+    assert.match(styles, /browserHomeLayerHidden: \{\s+opacity: 0\s+\}/)
   })
 
   test('the picture sits behind a scrim, not behind bare text', async () => {

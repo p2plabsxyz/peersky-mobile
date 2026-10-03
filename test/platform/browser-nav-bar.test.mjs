@@ -73,19 +73,6 @@ describe('chrome polish', () => {
     assert.match(toolbar, /const seamColor = isAddressFocused \? 'transparent' : palette\.border/)
     assert.equal((toolbar.match(/StyleSheet\.hairlineWidth/g) || []).length, 2)
   })
-
-  test('arriving home fades rather than cuts', async () => {
-    const { readFile } = await import('node:fs/promises')
-    const background = await readFile(
-      new URL('../../app/BrowserHomeBackground.tsx', import.meta.url),
-      'utf8'
-    )
-
-    // Burning every tab lands here, and cutting straight to a photograph makes
-    // that land hard. Opacity only: a transform would show an edge.
-    assert.match(background, /opacity: enter/)
-    assert.doesNotMatch(background, /scale|translateY/)
-  })
 })
 
 describe('peerchat onboarding', () => {
