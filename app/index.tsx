@@ -368,6 +368,7 @@ export default function App () {
   const browserFaviconsRef = useRef(new Map<string, string>())
   const browserLastRecordedUrlsRef = useRef(new Map<string, string>())
   const browserMediaTokensRef = useRef(new Map<string, string>())
+  const browserIncognitoSessionRef = useRef<string | null>(null)
   const p2pmdWebViewRef = useRef<ComponentRef<typeof WebView> | null>(null)
   const p2pmdPublishInFlightRef = useRef(false)
   const p2pmdPublishNonceRef = useRef<string | null>(null)
@@ -2381,6 +2382,21 @@ export default function App () {
   }
 
 
+  // One for each run of incognito tabs: kept while any is open, new once the
+  // last one has closed. The native side keeps one store per session, so a
+  // WebView built again for the same tab, as going back does, keeps the tab's
+  // cookies instead of starting empty.
+  function getBrowserIncognitoSession (tabs: BrowserTab[]) {
+    if (!tabs.some((tab) => tab.incognito === true)) {
+      browserIncognitoSessionRef.current = null
+    } else if (!browserIncognitoSessionRef.current) {
+      browserIncognitoSessionRef.current = createBrowserMediaToken(
+        Crypto.getRandomValues(new Uint8Array(BROWSER_MEDIA_TOKEN_LENGTH / 2))
+      )
+    }
+    return browserIncognitoSessionRef.current
+  }
+
   function getBrowserTabToken (tabId: string) {
     let token = browserMediaTokensRef.current.get(tabId)
     if (!token) {
@@ -3024,6 +3040,7 @@ export default function App () {
 
   const canBrowserGoBack = browserCanGoBack
   const canBrowserGoForward = browserCanGoForward
+  const browserIncognitoSession = getBrowserIncognitoSession(browserTabsState.tabs)
   const browserIsDark = resolveBrowserDarkMode(browserPreferences.theme, systemColorScheme)
   const browserChrome = getBrowserPalette(browserIsDark)
   // P2PMD is written dark, so light is a set of overrides laid on top. Null
@@ -4517,9 +4534,9 @@ export default function App () {
                     : null,
                   mediaLongPressToken: browserMediaToken
                 },
-                // Android shares one cookie jar between WebViews, so an
-                // incognito tab gets a WebView profile of its own instead.
-                Platform.OS === 'android' && tabIncognito ? { privateProfile: true } : {})
+                // Incognito cookies live apart from normal tabs, in one store
+                // (on Android a WebView profile) for each run of incognito tabs.
+                tabIncognito && browserIncognitoSession ? { incognitoSession: browserIncognitoSession } : {})
               }
             : undefined
           const browserAccessibilityScript = createBrowserAccessibilityScript({

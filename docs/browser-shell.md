@@ -130,15 +130,17 @@ entries, no tab preview on disk, no HTTP cache, and it is never written into
 the saved session, so it is gone when the app closes. Links and popups opened
 from it stay incognito, and the address bar and tab list mark it.
 
-Cookies and site storage are kept apart from normal tabs. iOS gives each
-incognito tab a WebKit data store that is never written to disk. Android
-WebViews all share one cookie jar, and react-native-webview's own `incognito`
-prop empties it, signing people out of every normal tab, so instead an
-incognito tab runs in a WebView profile of its own (`privateProfile` in
-`PeerSkyWebViewManager`). The first incognito tab after all of them closed
-starts from an empty profile. Profiles need Android System WebView 123 or
-later; on an older one the menu says to update it rather than opening a tab
-that would share cookies.
+Cookies and site storage are kept apart from normal tabs. The app names a
+session for each run of incognito tabs (`incognitoSession` in
+`PeerSkyWebViewManager`), kept while any of them is open and replaced once the
+last one closes. On iOS a session is one WebKit data store that is never
+written to disk. Android WebViews all share one cookie jar, and
+react-native-webview's own `incognito` prop empties it, signing people out of
+every normal tab, so there a session is a WebView profile of its own, and the
+profiles of earlier sessions are deleted. Going back builds a new WebView, and
+the session is what lets it keep the tab's cookies. Profiles need Android
+System WebView 123 or later; on an older one the menu says to update it rather
+than opening a tab that would share cookies.
 
 A `hyper://` site cannot publish from an incognito tab: its answer would be
 saved in Permissions and its drives would stay on the phone. Drives opened in

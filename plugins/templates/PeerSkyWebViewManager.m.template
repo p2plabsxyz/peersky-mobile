@@ -9,13 +9,41 @@
 @end
 
 @interface PeerSkyWebViewImpl : RNCWebViewImpl
+@property (nonatomic, copy) NSString *incognitoSession;
 @end
+
+// Incognito tabs share one store for as long as any of them is open, the way
+// they share one WebView profile on Android. react-native-webview gave every
+// WebView a new empty store, and going back builds a new WebView, so each step
+// back lost the tab's cookies: a sign-in, or a setting changed on the site.
+// A new session, after the last incognito tab closed, starts a new store.
+static NSString *PeerSkyIncognitoSession;
+static WKWebsiteDataStore *PeerSkyIncognitoStore;
+
+static BOOL PeerSkyIsIncognitoSession(NSString *session)
+{
+  if (session.length != 32) return NO;
+  NSCharacterSet *hex = [NSCharacterSet characterSetWithCharactersInString:@"0123456789abcdef"];
+  return [session rangeOfCharacterFromSet:hex.invertedSet].location == NSNotFound;
+}
+
+static WKWebsiteDataStore *PeerSkyIncognitoStoreForSession(NSString *session)
+{
+  if (!PeerSkyIncognitoStore || ![PeerSkyIncognitoSession isEqualToString:session]) {
+    PeerSkyIncognitoSession = [session copy];
+    PeerSkyIncognitoStore = [WKWebsiteDataStore nonPersistentDataStore];
+  }
+  return PeerSkyIncognitoStore;
+}
 
 @implementation PeerSkyWebViewImpl
 
 - (WKWebViewConfiguration *)setUpWkWebViewConfig
 {
   WKWebViewConfiguration *configuration = [super setUpWkWebViewConfig];
+  if (self.incognito && PeerSkyIsIncognitoSession(self.incognitoSession)) {
+    configuration.websiteDataStore = PeerSkyIncognitoStoreForSession(self.incognitoSession);
+  }
   [[PeerSkyContentBlocker shared] configureWebView:configuration];
   return configuration;
 }
@@ -28,6 +56,8 @@
 @implementation PeerSkyWebViewManager
 
 RCT_EXPORT_MODULE(PeerSkyWebView)
+
+RCT_EXPORT_VIEW_PROPERTY(incognitoSession, NSString)
 
 - (UIView *)view
 {

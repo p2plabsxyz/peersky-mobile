@@ -26,7 +26,7 @@ class PeerSkyWebViewManager : RNCWebViewManager() {
   private val mediaLongPressTokens = WeakHashMap<WebView, String>()
   private val mediaLongPressPoints = WeakHashMap<WebView, TouchPoint>()
   private val contentBlockerBridges = WeakHashMap<WebView, PeerSkyContentBlockerBridge>()
-  private val privateWebViews = WeakHashMap<WebView, Boolean>()
+  private val privateWebViews = WeakHashMap<WebView, String>()
 
   override fun getName() = "PeerSkyWebView"
 
@@ -38,8 +38,8 @@ class PeerSkyWebViewManager : RNCWebViewManager() {
           setMediaLongPressToken(view, value as? String)
         } else if (propName == "contentBlockingToken") {
           setContentBlockingToken(view, value as? String)
-        } else if (propName == "privateProfile") {
-          setPrivateProfile(view, value as? Boolean ?: false)
+        } else if (propName == "incognitoSession") {
+          setIncognitoSession(view, value as? String)
         } else {
           inheritedDelegate.setProperty(view, propName, value)
         }
@@ -63,29 +63,39 @@ class PeerSkyWebViewManager : RNCWebViewManager() {
     view.webView.webViewClient = PeerSkyWebViewClient()
   }
 
-  // Every WebView shares one cookie jar, cache and storage, so an incognito
-  // tab runs in a WebView profile of its own. It has to be set before the
-  // page loads, which is why it is a prop rather than a command. The first
-  // incognito tab after all of them closed starts from an empty profile.
-  @ReactProp(name = "privateProfile")
-  fun setPrivateProfile(wrapper: RNCWebViewWrapper, enabled: Boolean) {
-    if (!enabled || !WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)) return
+  // Every WebView shares one cookie jar, cache and storage, so incognito tabs
+  // run in a WebView profile of their own. It has to be set before the page
+  // loads, which is why it is a prop rather than a command. The app names a
+  // session for each run of incognito tabs and keeps it while any is open, so
+  // a WebView built again for the same tab, as going back does, finds its
+  // cookies. Guessing a new run from no incognito WebView being left emptied
+  // the profile whenever the old WebView went before the new one came.
+  @ReactProp(name = "incognitoSession")
+  fun setIncognitoSession(wrapper: RNCWebViewWrapper, session: String?) {
+    if (!isValidToken(session) || !WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)) return
     val webView = wrapper.webView
     if (privateWebViews.containsKey(webView)) return
+    val profile = "$PRIVATE_PROFILE-$session"
     try {
       val store = ProfileStore.getInstance()
-      if (privateWebViews.isEmpty()) {
-        try {
-          store.deleteProfile(PRIVATE_PROFILE)
-        } catch (error: Exception) {
-          // Still held by a WebView on its way out. It is cleared next time.
-        }
-      }
-      store.getOrCreateProfile(PRIVATE_PROFILE)
-      WebViewCompat.setProfile(webView, PRIVATE_PROFILE)
-      privateWebViews[webView] = true
+      store.getOrCreateProfile(profile)
+      WebViewCompat.setProfile(webView, profile)
+      privateWebViews[webView] = profile
+      deleteEarlierPrivateProfiles(store, profile)
     } catch (error: Exception) {
       Log.w(TAG, "Unable to give an incognito tab its own profile", error)
+    }
+  }
+
+  // Profiles from earlier runs. One still held by a WebView on its way out
+  // stays until the next incognito tab opens.
+  private fun deleteEarlierPrivateProfiles(store: ProfileStore, current: String) {
+    for (name in store.allProfileNames) {
+      if (!name.startsWith(PRIVATE_PROFILE) || name == current) continue
+      try {
+        store.deleteProfile(name)
+      } catch (error: Exception) {
+      }
     }
   }
 
