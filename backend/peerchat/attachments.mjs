@@ -65,6 +65,12 @@ const MAX_ATTACHMENT_FRAME_BYTES = 16 * 1024 * 1024
  */
 export const FREE_SPACE_RESERVE_BYTES = 512 * 1024 * 1024
 /**
+ * Only files this big are checked. A photo is not what fills a phone, and iOS
+ * leaves the space it can clear on demand out of what it reports, so a nearly
+ * full iPhone would refuse to show a 200 KB picture for want of the reserve.
+ */
+export const FREE_SPACE_CHECK_FROM_BYTES = 100 * 1024 * 1024
+/**
  * Where framing takes over from the single seal, in both apps.
  *
  * Desktop used to read only PCA1, so anything it could open then is still
@@ -148,6 +154,7 @@ function usesFraming (byteLength, options = {}) {
 
 // What stops a file the phone has no room for, or null when there is room.
 function checkRoom (directory, neededBytes, action, options = {}) {
+  if (neededBytes < FREE_SPACE_CHECK_FROM_BYTES) return null
   const needed = neededBytes + FREE_SPACE_RESERVE_BYTES
   const free = typeof options.freeBytes === 'function'
     ? options.freeBytes(directory)

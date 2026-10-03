@@ -12,6 +12,7 @@ import {
   AttachmentBlockStream,
   AttachmentDecryptStream,
   AttachmentFrameEncryptStream,
+  FREE_SPACE_CHECK_FROM_BYTES,
   FREE_SPACE_RESERVE_BYTES,
   MAX_SINGLE_SEAL_BYTES,
   framedSealedLength,
@@ -312,6 +313,42 @@ test('a file is opened only if there is room for it', async () => {
   })
   assert.equal(refused.ok, false)
   assert.match(refused.error, /^This phone needs 6\.5 GB free to open this file, and has 4\.0 GB\.$/)
+})
+
+// iOS leaves the space it can clear on demand out of what it reports, so a
+// nearly full iPhone can look short of the reserve. A photo must still open.
+test('a picture opens and shares whatever free space the phone reports', async () => {
+  const kb = 1024
+  const nearlyFull = () => 40 * 1024 * 1024
+  const opened = await openPeerChatAttachment({
+    roomKey: ROOM_KEY,
+    url: 'hyper://' + 'a'.repeat(52) + '/1-abc.bin',
+    fileName: 'photo.jpg',
+    fileSize: 200 * kb,
+    encrypted: true
+  }, {
+    storagePath: '/tmp/peerchat-room-check',
+    freeBytes: nearlyFull,
+    runtime: {
+      async getDrive () {
+        return {
+          async entry () { return { value: { blob: { byteLength: 200 * kb + 4 + 12 + 16 } } } },
+          createReadStream () { throw new Error('reached the download') }
+        }
+      }
+    }
+  })
+  assert.equal(opened.ok, false)
+  assert.equal(opened.error, 'reached the download')
+
+  const shared = await uploadPeerChatAttachment({
+    roomKey: ROOM_KEY,
+    fileUri: 'file:///var/mobile/Library/Caches/imagepicker/photo.jpg',
+    byteLength: 200 * kb
+  }, { runtime: { async getDrive () { throw new Error('reached the drive') } }, storagePath: '/tmp/peerchat-room-check', freeBytes: nearlyFull })
+  assert.equal(shared.ok, false)
+  assert.equal(shared.error, 'reached the drive')
+  assert.equal(FREE_SPACE_CHECK_FROM_BYTES, 100 * 1024 * 1024)
 })
 
 // PCA1 seals a file in one piece on both sides, so sending or opening one costs
