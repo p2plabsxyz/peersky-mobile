@@ -1269,6 +1269,16 @@ export function PeerChatScreen ({
     )
   }
 
+  // A room's picture was only ever shown small in Room info, with no way to
+  // see it full size as desktop does.
+  function viewRoomPicture (name: string, picture: string | null) {
+    if (!picture) return
+    replaceModal(
+      () => setShowRoomInfo(false),
+      () => setMediaTarget({ kind: 'image', label: name, uri: picture })
+    )
+  }
+
   function openHeaderDetails () {
     if (!activeRoom?.isDM) {
       setShowRoomInfo(true)
@@ -2178,16 +2188,34 @@ export function PeerChatScreen ({
             {activeRoom.isHost
               ? (
                 <>
-                  <Pressable
-                    accessibilityRole='button'
-                    onPress={() => chooseAvatar(editRoomAvatar, setEditRoomAvatar)}
-                    style={styles.avatarEditor}
-                  >
+                  <View style={styles.avatarEditor}>
                     {editRoomAvatar
-                      ? <Image source={{ uri: editRoomAvatar }} style={styles.avatarEditorImage} />
-                      : <View style={[styles.avatarEditorImage, { backgroundColor: colors.accentSoft }]} />}
-                    <Text style={[styles.memberMessage, { color: colors.accent }]}>Change room image</Text>
-                  </Pressable>
+                      ? (
+                        <Pressable
+                          accessibilityHint='Shows the picture full size'
+                          accessibilityLabel={`Picture of ${editRoomName.trim() || activeRoom.name}`}
+                          accessibilityRole='imagebutton'
+                          onPress={() => viewRoomPicture(editRoomName.trim() || activeRoom.name, editRoomAvatar)}
+                        >
+                          <Image source={{ uri: editRoomAvatar }} style={styles.avatarEditorImage} />
+                        </Pressable>
+                        )
+                      : (
+                        <Pressable
+                          accessibilityLabel='Choose a room image'
+                          accessibilityRole='button'
+                          onPress={() => chooseAvatar(editRoomAvatar, setEditRoomAvatar)}
+                        >
+                          <View style={[styles.avatarEditorImage, { backgroundColor: colors.accentSoft }]} />
+                        </Pressable>
+                        )}
+                    <Pressable
+                      accessibilityRole='button'
+                      onPress={() => chooseAvatar(editRoomAvatar, setEditRoomAvatar)}
+                    >
+                      <Text style={[styles.memberMessage, { color: colors.accent }]}>Change room image</Text>
+                    </Pressable>
+                  </View>
                   <TextInput
                     maxLength={80}
                     onChangeText={setEditRoomName}
@@ -2232,11 +2260,14 @@ export function PeerChatScreen ({
                   <View style={styles.roomInfoIdentity}>
                     {activeRoom.avatar
                       ? (
-                        <Image
+                        <Pressable
+                          accessibilityHint='Shows the picture full size'
                           accessibilityLabel={`Picture of ${activeRoom.name}`}
-                          source={{ uri: activeRoom.avatar }}
-                          style={styles.roomInfoAvatar}
-                        />
+                          accessibilityRole='imagebutton'
+                          onPress={() => viewRoomPicture(activeRoom.name, activeRoom.avatar)}
+                        >
+                          <Image source={{ uri: activeRoom.avatar }} style={styles.roomInfoAvatar} />
+                        </Pressable>
                         )
                       : (
                         <View style={[styles.roomInfoAvatar, styles.roomInfoAvatarFallback, { backgroundColor: colors.accentSoft }]}>

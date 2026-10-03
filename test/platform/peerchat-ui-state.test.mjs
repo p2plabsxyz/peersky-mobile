@@ -215,9 +215,26 @@ test('room details show the room picture to everyone, not only the host', async 
   const { readFile } = await import('node:fs/promises')
   const screen = await readFile(new URL('../../app/peerchat/PeerChatScreen.tsx', import.meta.url), 'utf8')
   const details = screen.slice(screen.indexOf('visible={showRoomInfo}'), screen.indexOf('{!activeRoom.isDM && (\n              <View style={styles.roomProvenance}>'))
-  const member = details.slice(details.indexOf(': ('))
-  assert.match(member, /<Image\s+accessibilityLabel=\{`Picture of \$\{activeRoom\.name\}`\}\s+source=\{\{ uri: activeRoom\.avatar \}\}/)
+  const member = details.slice(details.indexOf("Only the host's editor showed the room's picture"))
+  assert.match(member, /accessibilityLabel=\{`Picture of \$\{activeRoom\.name\}`\}/)
+  assert.match(member, /<Image source=\{\{ uri: activeRoom\.avatar \}\} style=\{styles\.roomInfoAvatar\} \/>/)
   assert.match(member, /getRoomInitials\(activeRoom\.name\)/)
+})
+
+// A room's picture only ever showed small, with no way to see it full size as
+// desktop allows. Tapping it now opens the viewer, for the host too, whose
+// "Change room image" stays its own button.
+test('tapping a room picture shows it full size', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const screen = await readFile(new URL('../../app/peerchat/PeerChatScreen.tsx', import.meta.url), 'utf8')
+  const view = screen.slice(screen.indexOf('function viewRoomPicture'), screen.indexOf('function openHeaderDetails'))
+  // Room info is a modal of its own, so it closes before the viewer opens.
+  assert.match(view, /replaceModal\(\s+\(\) => setShowRoomInfo\(false\),\s+\(\) => setMediaTarget\(\{ kind: 'image', label: name, uri: picture \}\)/)
+
+  const details = screen.slice(screen.indexOf('visible={showRoomInfo}'), screen.indexOf('{!activeRoom.isDM && (\n              <View style={styles.roomProvenance}>'))
+  assert.match(details, /onPress=\{\(\) => viewRoomPicture\(activeRoom\.name, activeRoom\.avatar\)\}/)
+  assert.match(details, /onPress=\{\(\) => viewRoomPicture\(editRoomName\.trim\(\) \|\| activeRoom\.name, editRoomAvatar\)\}/)
+  assert.match(details, /<Pressable\s+accessibilityRole='button'\s+onPress=\{\(\) => chooseAvatar\(editRoomAvatar, setEditRoomAvatar\)\}\s+>\s+<Text style=\{\[styles\.memberMessage, \{ color: colors\.accent \}\]\}>Change room image<\/Text>/)
 })
 
 // A new room went to the very top of the list, then moved below the pinned
