@@ -57,9 +57,10 @@ describe('public notes this phone made', () => {
     assert.equal(findPublicNoteSeed(privateKey('a'), hyperStoragePath), null)
   })
 
-  it('keeps the twenty used last, so a note on the recent list stays openable', async (t) => {
+  it('keeps the thirty used last, so a note on the recent list stays openable', async (t) => {
     const { hyperStoragePath } = await storage(t)
-    const letters = 'abcdefghijklmnopqrstuv'.split('')
+    // Thirty-two notes, one more than the store keeps plus one reopened.
+    const letters = 'abcdefghijklmnopqrstuvwxyz012345'.split('')
     const seeds = {}
     for (const letter of letters) {
       seeds[letter] = createPublicNoteSeed()
@@ -72,9 +73,9 @@ describe('public notes this phone made', () => {
     assert.equal(findPublicNoteSeed(publicKey('a'), hyperStoragePath), seeds.a)
     assert.equal(findPublicNoteSeed(publicKey('b'), hyperStoragePath), null)
     assert.equal(findPublicNoteSeed(publicKey('c'), hyperStoragePath), null)
-    assert.equal(findPublicNoteSeed(publicKey('v'), hyperStoragePath), seeds.v)
+    assert.equal(findPublicNoteSeed(publicKey('5'), hyperStoragePath), seeds['5'])
     const stored = JSON.parse(readFileSync(join(hyperStoragePath, 'p2pmd-public-notes.json'), 'utf8'))
-    assert.equal(Object.keys(stored.notes).length, 20)
+    assert.equal(Object.keys(stored.notes).length, 30)
   })
 
   it('reads a damaged file as empty instead of failing', async (t) => {

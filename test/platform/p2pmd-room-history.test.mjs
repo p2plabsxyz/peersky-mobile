@@ -1,13 +1,16 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 import {
+  filterP2pmdRoomHistory,
   formatP2pmdRoomHistoryKey,
+  isPrivateP2pmdNoteKey,
   markP2pmdRoomsShared,
   MAX_P2PMD_ROOM_HISTORY_FILE_BYTES,
   MAX_P2PMD_RECENT_ROOMS,
   mergeP2pmdRoomsFromDevice,
   normalizeP2pmdRoomKey,
   parseP2pmdNoteLink,
+  P2PMD_RECENT_SEARCH_AFTER,
   parseP2pmdRoomHistory,
   readP2pmdRoomHistoryFile,
   recordP2pmdRoom,
@@ -30,11 +33,12 @@ describe('P2PMD room history', () => {
     )
   })
 
-  test('deduplicates reopened rooms and bounds the list like desktop', () => {
+  test('deduplicates reopened rooms and bounds the list', () => {
+    const characters = 'abcdefghijklmnopqrstuvwxyz0123456789'
     let rooms = []
     for (let index = 0; index < MAX_P2PMD_RECENT_ROOMS + 2; index++) {
       rooms = recordP2pmdRoom(rooms, {
-        key: roomKey(String.fromCharCode(97 + index)),
+        key: roomKey(characters[index]),
         role: index === 0 ? 'host' : 'client',
         lastOpenedAt: index
       })
@@ -178,13 +182,15 @@ describe('P2PMD notes on another device too', () => {
     ])
   })
 
-  test('keeps the five most recent after taking a desktop\'s', () => {
+  // With thirty on the list, a desktop's five no longer push out this
+  // phone's own five.
+  test('keeps every note after taking a desktop\'s, newest first', () => {
     const rooms = ['a', 'b', 'c', 'd', 'e'].map((character, index) => ({ key: roomKey(character), role: 'host', label: '', lastOpenedAt: index }))
     const incoming = ['v', 'w', 'x', 'y', 'z'].map((character, index) => ({ key: roomKey(character), role: 'client', label: '', lastOpenedAt: 10 + index }))
 
     assert.deepEqual(
       mergeP2pmdRoomsFromDevice(rooms, incoming).map((room) => room.key),
-      ['z', 'y', 'x', 'w', 'v'].map(roomKey)
+      ['z', 'y', 'x', 'w', 'v', 'e', 'd', 'c', 'b', 'a'].map(roomKey)
     )
   })
 
@@ -244,3 +250,47 @@ function createMemoryFile () {
     }
   }
 }
+
+// Five was fine until people kept notes for longer. Thirty fit, and past ten
+// a name finds one faster than scrolling.
+describe('a longer list of recent notes', () => {
+  test('keeps thirty, and searches past ten', () => {
+    assert.equal(MAX_P2PMD_RECENT_ROOMS, 30)
+    assert.equal(P2PMD_RECENT_SEARCH_AFTER, 10)
+    // Thirty entries with the longest labels still fit the file.
+    const rooms = Array.from({ length: 30 }, (_, index) => ({
+      key: `hs://s000${String(index).padStart(2, '0').repeat(26)}`,
+      role: 'host',
+      label: '\u{1F600}'.repeat(64),
+      lastOpenedAt: index
+    }))
+    assert.ok(new TextEncoder().encode(serializeP2pmdRoomHistory(rooms)).byteLength < MAX_P2PMD_ROOM_HISTORY_FILE_BYTES)
+  })
+
+  test('finds a note by its name or its key, in any case', () => {
+    const rooms = [
+      { key: roomKey('a'), label: 'Note - Trip plans' },
+      { key: roomKey('b'), label: 'Slides - Pitch' },
+      { key: 'hs://s000zz', label: '' }
+    ]
+    assert.deepEqual(filterP2pmdRoomHistory(rooms, 'trip').map((room) => room.key), [roomKey('a')])
+    assert.deepEqual(filterP2pmdRoomHistory(rooms, 'SLIDES').map((room) => room.key), [roomKey('b')])
+    assert.deepEqual(filterP2pmdRoomHistory(rooms, 's000zz').map((room) => room.key), ['hs://s000zz'])
+    assert.equal(filterP2pmdRoomHistory(rooms, '  '), rooms)
+  })
+
+  test('tells a private note from a public one by its key', () => {
+    assert.equal(isPrivateP2pmdNoteKey(`hs://s000${'a'.repeat(52)}`), true)
+    assert.equal(isPrivateP2pmdNoteKey(`hs://0000${'a'.repeat(52)}`), false)
+    assert.equal(isPrivateP2pmdNoteKey(null), false)
+  })
+
+  test('each row starts with a lock or a globe, and the box shows past ten', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const app = await readFile(new URL('../../app/index.tsx', import.meta.url), 'utf8')
+    assert.match(app, /\{p2pmdRoomHistory\.length > P2PMD_RECENT_SEARCH_AFTER && \(\s+<TextInput\s+accessibilityLabel='Search recent notes'/)
+    assert.match(app, /const PrivacyIcon = isPrivate \? ShieldLockIcon : GlobeIcon/)
+    const row = app.slice(app.indexOf('const PrivacyIcon'), app.indexOf("{room.role === 'host' ? 'Reopen' : 'Join'}"))
+    assert.ok(row.indexOf('<PrivacyIcon') < row.indexOf('styles.p2pmdRecentRoomKey'))
+  })
+})

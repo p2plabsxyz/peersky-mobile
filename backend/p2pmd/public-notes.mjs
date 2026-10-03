@@ -16,9 +16,9 @@ import { getHyperStoragePath } from '../hyper/runtime.mjs'
 // ever reads them: Link Device sends a note's key, name and text, never this.
 const FILE_NAME = 'p2pmd-public-notes.json'
 const MAX_FILE_BYTES = 64 * 1024
-// The recent list shows five notes, and opening one counts as using it, so
-// every public note on the list is among the last twenty used.
-const MAX_PUBLIC_NOTES = 20
+// The recent list keeps thirty notes, and opening one counts as using it, so
+// every public note on the list is among the last thirty used.
+const MAX_PUBLIC_NOTES = 30
 
 export function isPublicNoteKey (key) {
   return typeof key === 'string' && /^hs:\/\/0000[a-z0-9]{32,252}$/i.test(key.trim())

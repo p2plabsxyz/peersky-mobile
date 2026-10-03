@@ -136,6 +136,8 @@ import { P2pmdNewNoteSheet } from './P2pmdNewNoteSheet'
 import { getP2pmdSyncDisplay } from './p2pmd-sync-status.mjs'
 import PencilSquareIcon from '../assets/icons/bootstrap/pencil-square.svg'
 import ShareIcon from '../assets/icons/bootstrap/share.svg'
+import GlobeIcon from '../assets/icons/bootstrap/globe.svg'
+import ShieldLockIcon from '../assets/icons/bootstrap/shield-lock.svg'
 import { WelcomeScreen } from './WelcomeScreen'
 import { RestartRequiredScreen } from './RestartRequiredScreen'
 import { emitLinkDeviceProgress } from './settings/link-device-progress'
@@ -211,11 +213,14 @@ import { BrowserTabsScreen } from './tabs/BrowserTabsScreen'
 import { useBrowserTabPreviews } from './tabs/useBrowserTabPreviews'
 import { isBrowserTabPreviewForPage } from './tabs/browser-tab-preview.mjs'
 import {
+  filterP2pmdRoomHistory,
   formatP2pmdRoomHistoryKey,
+  isPrivateP2pmdNoteKey,
   markP2pmdRoomsShared,
   mergeP2pmdRoomsFromDevice,
   normalizeP2pmdRoomKey,
   parseP2pmdNoteLink,
+  P2PMD_RECENT_SEARCH_AFTER,
   readP2pmdRoomHistoryFile,
   recordP2pmdRoom,
   writeP2pmdRoomHistoryFile
@@ -540,6 +545,7 @@ export default function App () {
   const [p2pmdNameDraft, setP2pmdNameDraft] = useState(() => loadP2pmdPeerDisplayName() || createFunPeerName())
   const [isEditingP2pmdName, setIsEditingP2pmdName] = useState(false)
   const [p2pmdNewNoteVisible, setP2pmdNewNoteVisible] = useState(false)
+  const [p2pmdRecentQuery, setP2pmdRecentQuery] = useState('')
 
   // Opening P2PMD picks up a note the backend is still running, so a note that
   // outlived the screen is never left hosting where nobody can see it.
@@ -3021,6 +3027,12 @@ export default function App () {
   // in dark mode means the arrays below collapse to the base style.
   const p2pmdTheme = browserIsDark ? null : p2pmdLight
   const p2pmdPageColor = browserIsDark ? '#1f2027' : '#f5f8ff'
+  // The search box shows once the list is long enough to need one, and a
+  // query left in it while the list was shorter does not hide anything.
+  const p2pmdRecentShown = filterP2pmdRoomHistory(
+    p2pmdRoomHistory,
+    p2pmdRoomHistory.length > P2PMD_RECENT_SEARCH_AFTER ? p2pmdRecentQuery : ''
+  ) as P2pmdRoomHistoryEntry[]
   // The Hyperdrive screen's own page colour, so its welcome sits on the same.
   const hyperdrivePageColor = browserIsDark ? '#1f2027' : '#f5f7fb'
 
@@ -4313,10 +4325,30 @@ export default function App () {
                       {p2pmdRoomHistory.length > 0 && (
                         <View style={styles.p2pmdRecentRooms}>
                           <Text style={[styles.fieldLabel, p2pmdTheme?.fieldLabel]}>Recent notes</Text>
-                          {p2pmdRoomHistory.map((room) => (
+                          {p2pmdRoomHistory.length > P2PMD_RECENT_SEARCH_AFTER && (
+                            <TextInput
+                              accessibilityLabel='Search recent notes'
+                              autoCapitalize='none'
+                              autoCorrect={false}
+                              clearButtonMode='while-editing'
+                              onChangeText={setP2pmdRecentQuery}
+                              placeholder='Search notes'
+                              placeholderTextColor='#6f7484'
+                              returnKeyType='search'
+                              style={[styles.input, styles.p2pmdInput, p2pmdTheme?.p2pmdInput]}
+                              value={p2pmdRecentQuery}
+                            />
+                          )}
+                          {p2pmdRecentShown.length === 0 && (
+                            <Text style={[styles.helperText, p2pmdTheme?.helperText]}>No notes by that name.</Text>
+                          )}
+                          {p2pmdRecentShown.map((room) => {
+                            const isPrivate = isPrivateP2pmdNoteKey(room.key)
+                            const PrivacyIcon = isPrivate ? ShieldLockIcon : GlobeIcon
+                            return (
                             <Pressable
                               key={room.key}
-                              accessibilityLabel={`Reopen P2PMD note ${room.label || formatP2pmdRoomHistoryKey(room.key)}`}
+                              accessibilityLabel={`Reopen ${isPrivate ? 'private' : 'public'} P2PMD note ${room.label || formatP2pmdRoomHistoryKey(room.key)}`}
                               accessibilityRole='button'
                               disabled={isBooting || isLoading}
                               accessibilityHint='Press and hold to remove this note from the list'
@@ -4336,6 +4368,7 @@ export default function App () {
                                 isBooting || isLoading ? styles.p2pmdActionDisabled : null
                               ]}
                             >
+                              <PrivacyIcon width={16} height={16} color={browserIsDark ? '#9aa3b8' : '#687086'} />
                               <Text numberOfLines={1} style={[styles.p2pmdRecentRoomKey, p2pmdTheme?.p2pmdRecentRoomKey]}>
                                 {room.label || formatP2pmdRoomHistoryKey(room.key)}
                               </Text>
@@ -4343,7 +4376,8 @@ export default function App () {
                                 {room.role === 'host' ? 'Reopen' : 'Join'}
                               </Text>
                             </Pressable>
-                          ))}
+                            )
+                          })}
                           <Pressable
                             accessibilityLabel='Manage stored note data'
                             accessibilityRole='button'
