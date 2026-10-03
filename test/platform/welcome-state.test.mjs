@@ -42,7 +42,8 @@ test('the welcome screen explains itself without jargon', async () => {
   const { readFile } = await import('node:fs/promises')
   const screen = await readFile(new URL('../../app/WelcomeScreen.tsx', import.meta.url), 'utf8')
 
-  assert.match(screen, /A browser that works for you, not for advertisers\./)
+  assert.match(screen, /Your peer-to-peer, local-first, surveillance-free browser\./)
+  assert.doesNotMatch(screen, /not for advertisers/)
   // A scheme nobody has typed before is not an explanation, and "nobody in the
   // middle" reads as a riddle rather than a promise.
   assert.doesNotMatch(screen, /hyper:\/\//)
@@ -51,25 +52,27 @@ test('the welcome screen explains itself without jargon', async () => {
   assert.match(screen, /No ads, no trackers, no account/)
 })
 
-// What PeerSky stands for is read first; ordinary websites, the part nobody
-// needs convincing of, come late, and the code anyone can check comes last.
-test('the welcome screen leads with what PeerSky stands for', async () => {
+// Device to device leads, as the thing nothing else does. The web card went:
+// the ads and trackers it promised to block are said in the card about not
+// being the product. The last card says anyone can read and improve the code.
+test('the welcome screen leads with device to device', async () => {
   const { readFile } = await import('node:fs/promises')
   const screen = await readFile(new URL('../../app/WelcomeScreen.tsx', import.meta.url), 'utf8')
   const cards = screen.slice(screen.indexOf('const QUALITIES'), screen.indexOf('const PEERSKY_WELCOME'))
   const titles = [...cards.matchAll(/title: '([^']+)'/g)].map((match) => match[1])
 
   assert.deepEqual(titles, [
+    'Device to device',
     'You are not the product',
     'Everything in one app',
-    'Device to device',
     'Your data stays yours',
-    'The whole web, minus the junk',
     'Free and open source'
   ])
   assert.match(screen, /There is no server\. Your phone is the server\./)
   // The apps are built in, so one app does what would otherwise take five.
   assert.match(screen, /Browser, chat, shared notes, music and file sharing, all built in\. One app instead of five/)
+  assert.match(screen, /Anyone can read the code and improve it\./)
+  assert.doesNotMatch(screen, /every promise on this screen|minus the junk|GlobeIcon/)
   // The old card needed a second read to follow.
   assert.doesNotMatch(screen, /Every site, plus peer to peer ones/)
 })
