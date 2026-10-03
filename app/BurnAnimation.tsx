@@ -17,7 +17,10 @@ const BURN_BIRD = require('../assets/images/burn-bird.png')
 const BIRD_SIZE = 168
 const RISE_MS = 650
 const HOLD_MS = 420
-const FADE_MS = 450
+const LEAVE_MS = 900
+// Below the fire's body, embers fading to nothing, so the screen comes back
+// from the bottom up as the fire leaves rather than under a hard edge.
+const TAIL = 220
 
 // One flame in a 100 by 140 box: a round belly, a tip that leans and curls,
 // and a smaller tongue breaking away on one side. The heart is its hot core.
@@ -48,21 +51,21 @@ const SPARKS: Array<[number, number, number, number]> = [
 ]
 
 /**
- * What burning the tabs looks like: a fire rises over the screen, its flames
- * flickering, the bird turns up in it in a temper, and when it clears the tabs
- * are gone.
+ * What burning the tabs looks like: a fire comes up from the bottom of the
+ * screen, its flames flickering, the bird turns up in it in a temper, and the
+ * fire goes on up and off the top, leaving the tabs gone behind it.
  *
  * `onBurn` runs once the fire covers the screen, so the old tabs are never seen
  * going. With Reduce Motion on there is nothing to watch: it burns at once.
  */
 export function BurnAnimation ({ onBurn, onDone }: { onBurn: () => void, onDone: () => void }) {
   const { height, width } = useWindowDimensions()
-  const rise = useRef(new Animated.Value(0)).current
+  // 0 below the screen, 1 covering it, 2 gone off the top.
+  const travel = useRef(new Animated.Value(0)).current
   const bird = useRef(new Animated.Value(0)).current
   const shake = useRef(new Animated.Value(0)).current
   const beats = useRef([0, 1, 2].map(() => new Animated.Value(0))).current
   const drifts = useRef([0, 1, 2].map(() => new Animated.Value(0))).current
-  const fade = useRef(new Animated.Value(1)).current
   const callbacks = useRef({ onBurn, onDone })
   callbacks.current = { onBurn, onDone }
 
@@ -94,7 +97,7 @@ export function BurnAnimation ({ onBurn, onDone }: { onBurn: () => void, onDone:
         drifting.start()
         animation = Animated.sequence([
           Animated.parallel([
-            Animated.timing(rise, { duration: RISE_MS, easing: Easing.out(Easing.cubic), toValue: 1, useNativeDriver: true }),
+            Animated.timing(travel, { duration: RISE_MS, easing: Easing.out(Easing.cubic), toValue: 1, useNativeDriver: true }),
             Animated.sequence([
               Animated.delay(RISE_MS * 0.35),
               Animated.spring(bird, { friction: 5, tension: 120, toValue: 1, useNativeDriver: true })
@@ -117,7 +120,8 @@ export function BurnAnimation ({ onBurn, onDone }: { onBurn: () => void, onDone:
             callbacks.current.onDone()
             return
           }
-          animation = Animated.timing(fade, { duration: FADE_MS, easing: Easing.in(Easing.quad), toValue: 0, useNativeDriver: true })
+          // On up and away, gathering speed, rather than fading where it stood.
+          animation = Animated.timing(travel, { duration: LEAVE_MS, easing: Easing.in(Easing.quad), toValue: 2, useNativeDriver: true })
           animation.start(() => {
             flickering.stop()
             drifting.stop()
@@ -132,23 +136,44 @@ export function BurnAnimation ({ onBurn, onDone }: { onBurn: () => void, onDone:
       flickering.stop()
       drifting.stop()
     }
-  }, [beats, bird, drifts, fade, rise, shake])
+  }, [beats, bird, drifts, shake, travel])
 
   const fireTop = Math.round(height * FIRE_TOP)
+  const bodyHeight = height - fireTop + TAIL
+  // How far the fire goes to be off the top, all of it, tail included.
+  const leave = -(fireTop + bodyHeight)
+  // Where the body's colours sit when it covers the screen, the tail below.
+  const shown = (height - fireTop) / bodyHeight
   const tiles = Array.from({ length: Math.ceil(width / TILE_WIDTH) }, (_, index) => index * TILE_WIDTH)
 
   return (
     <Animated.View
       accessibilityLabel='Burning tabs'
       accessibilityLiveRegion='polite'
-      style={[StyleSheet.absoluteFill, styles.overlay, { opacity: fade }]}
+      pointerEvents='none'
+      style={[StyleSheet.absoluteFill, styles.overlay]}
     >
-      <Animated.View style={[StyleSheet.absoluteFill, styles.scorch, { opacity: rise }]} />
+      {/* Darkens the whole screen as the fire comes up. Once it covers the
+          screen, the dark goes with the fire instead, above its flames, so the
+          screen comes back from the bottom as the fire leaves. */}
       <Animated.View
-        style={[StyleSheet.absoluteFill, {
-          transform: [{ translateY: rise.interpolate({ inputRange: [0, 1], outputRange: [height, 0] }) }]
+        style={[StyleSheet.absoluteFill, styles.scorch, {
+          opacity: travel.interpolate({ inputRange: [0, 1, 1.001, 2], outputRange: [0, 1, 0, 0] })
+        }]}
+      />
+      <Animated.View
+        style={[styles.fire, {
+          height: fireTop + bodyHeight,
+          transform: [{ translateY: travel.interpolate({ inputRange: [0, 1, 2], outputRange: [height, 0, leave] }) }]
         }]}
       >
+        <Animated.View
+          style={[styles.scorch, styles.trail, {
+            height: height + fireTop,
+            opacity: travel.interpolate({ inputRange: [0, 0.999, 1, 2], outputRange: [0, 0, 1, 1] }),
+            top: -height
+          }]}
+        />
         {tiles.map((left) => BACK_ROW.map(([middle, size, mirrored, beat], index) => (
           <FlickeringFlame
             key={`back-${left}-${index}`}
@@ -161,14 +186,15 @@ export function BurnAnimation ({ onBurn, onDone }: { onBurn: () => void, onDone:
             stops={['#ff6a1a', '#d9361a', '#d9361a']}
           />
         )))}
-        <View style={[styles.body, { top: fireTop }]}>
+        <View style={[styles.body, { height: bodyHeight, top: fireTop }]}>
           <Svg height='100%' preserveAspectRatio='none' viewBox='0 0 10 100' width='100%'>
             <Defs>
               <LinearGradient id='burn-body' x1='0' x2='0' y1='0' y2='1'>
                 <Stop offset='0' stopColor='#ff8a24' />
-                <Stop offset='0.16' stopColor='#ff5f17' />
-                <Stop offset='0.55' stopColor='#c21d0e' />
-                <Stop offset='1' stopColor='#4a0805' />
+                <Stop offset={0.16 * shown} stopColor='#ff5f17' />
+                <Stop offset={0.55 * shown} stopColor='#c21d0e' />
+                <Stop offset={shown} stopColor='#4a0805' />
+                <Stop offset='1' stopColor='#4a0805' stopOpacity={0} />
               </LinearGradient>
             </Defs>
             <Rect fill='url(#burn-body)' height='100' width='10' />
@@ -208,7 +234,9 @@ export function BurnAnimation ({ onBurn, onDone }: { onBurn: () => void, onDone:
           style={[styles.bird, {
             opacity: bird.interpolate({ inputRange: [0, 0.2, 1], outputRange: [0, 1, 1] }),
             transform: [
-              { scale: Animated.multiply(bird.interpolate({ inputRange: [0, 1], outputRange: [0.3, 1] }), fade.interpolate({ inputRange: [0, 1], outputRange: [1.35, 1] })) },
+              // Up and away with the fire.
+              { translateY: travel.interpolate({ inputRange: [0, 1, 2], outputRange: [0, 0, leave] }) },
+              { scale: Animated.multiply(bird.interpolate({ inputRange: [0, 1], outputRange: [0.3, 1] }), travel.interpolate({ inputRange: [0, 1, 2], outputRange: [1, 1, 1.15] })) },
               { rotate: shake.interpolate({ inputRange: [-1, 1], outputRange: ['-7deg', '7deg'] }) }
             ]
           }]}
@@ -272,7 +300,9 @@ function FlickeringFlame ({ beat, bottom, heart = false, id, middle, mirrored, s
 const styles = StyleSheet.create({
   overlay: { zIndex: 1000 },
   scorch: { backgroundColor: '#1c0703' },
-  body: { bottom: 0, left: 0, position: 'absolute', right: 0 },
+  fire: { left: 0, position: 'absolute', right: 0, top: 0 },
+  trail: { left: 0, position: 'absolute', right: 0 },
+  body: { left: 0, position: 'absolute', right: 0 },
   flame: { position: 'absolute', transformOrigin: 'bottom' },
   mirrored: { transform: [{ scaleX: -1 }] },
   spark: { backgroundColor: '#ffd36b', position: 'absolute' },

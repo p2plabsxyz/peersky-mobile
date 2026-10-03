@@ -34,6 +34,19 @@ test('the burn happens once the flames are up, and at once with Reduce Motion', 
   assert.match(animation, /require\('\.\.\/assets\/images\/burn-bird\.png'\)/)
 })
 
+// The fire faded out where it stood. Now it comes up from the bottom and goes
+// on up and off the top, with the bird, and the screen comes back behind it.
+test('the fire comes up from the bottom and leaves off the top', async () => {
+  const animation = await read('app/BurnAnimation.tsx')
+  assert.match(animation, /const leave = -\(fireTop \+ bodyHeight\)/)
+  assert.match(animation, /translateY: travel\.interpolate\(\{ inputRange: \[0, 1, 2\], outputRange: \[height, 0, leave\] \}\)/)
+  assert.match(animation, /translateY: travel\.interpolate\(\{ inputRange: \[0, 1, 2\], outputRange: \[0, 0, leave\] \}\)/)
+  assert.match(animation, /Animated\.timing\(travel, \{ duration: LEAVE_MS, easing: Easing\.in\(Easing\.quad\), toValue: 2/)
+  assert.doesNotMatch(animation, /opacity: fade/)
+  // Its tail thins to nothing, so there is no hard edge as the screen returns.
+  assert.match(animation, /<Stop offset='1' stopColor='#4a0805' stopOpacity=\{0\} \/>/)
+})
+
 // The everyday bird, angry and on fire: same outline, so the same shape, and
 // none of its blue left.
 test('the burning bird is the everyday bird in flame colours', async () => {
