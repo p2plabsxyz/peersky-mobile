@@ -36,21 +36,23 @@ test('the startup screen is the launch image, still', async () => {
   // handover, and anything that moves draws the eye to a wait.
   assert.doesNotMatch(startup, /Animated|ActivityIndicator|Easing/)
   assert.doesNotMatch(startup, /PeerSky</)
-  assert.match(startup, /const BIRD_SIZE = 140/)
-  // One badge for both themes: the bird alone is drawn with black outlines
-  // and needs something behind it whichever background it lands on.
-  assert.match(startup, /logo-badge\.png/)
+  assert.match(startup, /const BIRD_SIZE = 200/)
+  // The bird on its own, with nothing round it.
+  assert.match(startup, /logo\.png/)
+  assert.doesNotMatch(startup, /logo-badge\.png/)
   // One image, not one per theme. Only the screen behind it follows the theme.
   assert.equal((startup.match(/require\(/g) || []).length, 1)
+  // Its black outline vanished on near black, so dark is a grey.
+  assert.match(startup, /export const STARTUP_DARK_BACKGROUND = '#52525b'/)
 
-  // The launch screen draws the same badge, at the same size, on the same
+  // The launch screen draws the same bird, at the same size, on the same
   // background as the screen that follows it.
   const [, splash] = expo.plugins.find((plugin) => Array.isArray(plugin) && plugin[0] === 'expo-splash-screen')
-  assert.equal(splash.image, './assets/images/logo-badge.png')
-  assert.equal(splash.dark.image, './assets/images/logo-badge.png')
-  assert.equal(splash.imageWidth, 140)
+  assert.equal(splash.image, './assets/images/logo.png')
+  assert.equal(splash.dark.image, './assets/images/logo.png')
+  assert.equal(splash.imageWidth, 200)
   assert.equal(splash.backgroundColor, BROWSER_PALETTES.light.shell)
-  assert.equal(splash.dark.backgroundColor, BROWSER_PALETTES.dark.shell)
+  assert.equal(splash.dark.backgroundColor, '#52525b')
   // The old top level key left Android 12 and later showing the launcher icon.
   assert.equal(expo.splash, undefined)
 
@@ -78,7 +80,26 @@ test('the bare bird launches, the tile sits among the other tiles', async () => 
   // The tab strip and the home grid are full of tiles, and a loose bird among
   // them reads as a missing icon rather than a different one.
   assert.match(apps, /BROWSER_HOME_ICON[^\n]*home-icon\.png/)
-  // The launch image shows the badge, so the screen that follows it does too.
-  assert.match(startup, /logo-badge\.png/)
+  // The launch image shows the bare bird, so the screen that follows it does too.
+  assert.match(startup, /logo\.png/)
   assert.doesNotMatch(startup, /home-icon\.png/)
+})
+
+// Android crops its launch picture to the middle 192dp circle of a 288dp
+// square, and draws the image at imageWidth in the middle of that square.
+test('the launch bird clears the circle Android crops it to', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const { PNG } = await import('pngjs')
+  const { expo } = JSON.parse(await readFile(new URL('../../app.json', import.meta.url), 'utf8'))
+  const [, splash] = expo.plugins.find((plugin) => Array.isArray(plugin) && plugin[0] === 'expo-splash-screen')
+  const image = PNG.sync.read(await readFile(new URL(`../../${splash.image.replace('./', '')}`, import.meta.url)))
+  const middle = image.width / 2
+  let reach = 0
+  for (let y = 0; y < image.height; y++) {
+    for (let x = 0; x < image.width; x++) {
+      if (image.data[(y * image.width + x) * 4 + 3] <= 8) continue
+      reach = Math.max(reach, Math.hypot(x + 0.5 - middle, y + 0.5 - middle))
+    }
+  }
+  assert.ok(reach / image.width * splash.imageWidth < 96, `the bird reaches ${(reach / image.width * splash.imageWidth).toFixed(1)}dp`)
 })
