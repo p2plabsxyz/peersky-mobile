@@ -186,4 +186,17 @@ describe('home screen widgets', () => {
     const widgets = await read('app/widgets.ts')
     assert.match(widgets, /requireOptionalNativeModule<[\s\S]*?>\('PeerSkyWidgetStorage'\)/)
   })
+
+  // A song comes in as a report without its cover and then one with it. A
+  // reload for each meant the second could be refused in the background, so
+  // the cover only showed after pressing next. One reload once they settle.
+  test('reload the widget once the reports for a song settle, not for each', async () => {
+    const widgets = await read('app/widgets.ts')
+    const reload = widgets.slice(widgets.indexOf('function reload'), widgets.indexOf('/** The bookmarks'))
+    assert.match(widgets, /const RELOAD_SETTLE_MS = 400/)
+    assert.match(reload, /if \(pending\) clearTimeout\(pending\)/)
+    assert.match(reload, /setTimeout\(\(\) => \{\s+pendingReloads\.delete\(kind\)\s+try \{\s+widgets\.reload\(kind\)/)
+    // Every caller goes through it.
+    assert.equal((widgets.match(/widgets\??\.reload\(/g) || []).length, 1)
+  })
 })

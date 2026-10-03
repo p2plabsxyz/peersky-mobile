@@ -42,10 +42,24 @@ function write (key: string, value: string) {
   }
 }
 
+// A song arrives as two or three reports close together: what is playing,
+// then its cover once the page has drawn it small. Each used to reload the
+// widget, and iOS grants an app in the background few reloads, so a song
+// started from the widget could keep the coverless one until the next press.
+// One reload, once the reports settle, carries the cover the first time.
+const RELOAD_SETTLE_MS = 400
+const pendingReloads = new Map<string, ReturnType<typeof setTimeout>>()
+
 function reload (kind: string) {
-  try {
-    widgets?.reload(kind)
-  } catch {}
+  if (!widgets) return
+  const pending = pendingReloads.get(kind)
+  if (pending) clearTimeout(pending)
+  pendingReloads.set(kind, setTimeout(() => {
+    pendingReloads.delete(kind)
+    try {
+      widgets.reload(kind)
+    } catch {}
+  }, RELOAD_SETTLE_MS))
 }
 
 /** The bookmarks the large PeerSky widget lists. */
