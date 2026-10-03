@@ -69,7 +69,9 @@ subscribeToDocumentUpdates(({ document, origin, update }) => {
   broadcastEvent('update', JSON.stringify(document))
 })
 
-export async function startP2pmdServer () {
+// preferredPort: the one this note was on before, so its address stays the
+// same. If something else has it now, the system picks another.
+export async function startP2pmdServer ({ preferredPort = null } = {}) {
   return withServerTransition(async () => {
     if (server && serverInfo) {
       return {
@@ -79,10 +81,19 @@ export async function startP2pmdServer () {
       }
     }
 
-    const instance = createP2pmdHttpServer({ httpImpl: await getBareHttp() })
+    const httpImpl = await getBareHttp()
+    let instance = createP2pmdHttpServer({ httpImpl })
 
     try {
-      const address = await listen(instance)
+      let address
+      try {
+        address = await listen(instance, preferredPort || 0)
+      } catch (error) {
+        if (!preferredPort) throw error
+        try { instance.close() } catch {}
+        instance = createP2pmdHttpServer({ httpImpl })
+        address = await listen(instance, 0)
+      }
       const port = typeof address === 'object' && address ? address.port : null
 
       if (!Number.isInteger(port) || port < 1) {
@@ -330,7 +341,7 @@ function handleRequest (req, res) {
   })
 }
 
-function listen (instance) {
+function listen (instance, port = 0) {
   return new Promise((resolve, reject) => {
     const onError = (error) => {
       instance.off('listening', onListening)
@@ -343,7 +354,7 @@ function listen (instance) {
 
     instance.once('error', onError)
     instance.once('listening', onListening)
-    instance.listen(0, P2PMD_LOOPBACK_HOST)
+    instance.listen(port, P2PMD_LOOPBACK_HOST)
   })
 }
 

@@ -6,6 +6,7 @@ import {
   stopHolesail
 } from '../holesail/session.mjs'
 import { P2PMD_LOOPBACK_HOST } from './constants.mjs'
+import { findNotePort, isUsableNotePort, rememberNotePort } from './note-ports.mjs'
 import {
   getP2pmdServerStatus,
   startP2pmdServer,
@@ -82,7 +83,8 @@ export async function createP2pmdRoom ({
       }
     }
 
-    const serverResult = await startP2pmdServer()
+    // The port this note was on before, so its address survives a restart.
+    const serverResult = await startP2pmdServer({ preferredPort: connector ? findNotePort(connector) : null })
     if (!serverResult.ok) return serverResult
 
     try {
@@ -137,6 +139,7 @@ export async function createP2pmdRoom ({
       }
 
       activateP2pmdRoomSnapshot(room.key, getDocumentState())
+      rememberNotePort(room.key, room.port)
 
       return {
         ok: true,
@@ -166,13 +169,7 @@ export async function joinP2pmdRoom ({
   return withRoomTransition(async () => {
     await disconnectRoomInternal()
 
-    const holesailResult = await connectHolesail({
-      key,
-      anyPort: true,
-      udp,
-      log
-    })
-
+    const holesailResult = await connectOnNotePort({ key, udp, log })
     if (!holesailResult.ok) return holesailResult
 
     const roomKey = holesailResult.info?.url
@@ -204,6 +201,7 @@ export async function joinP2pmdRoom ({
       warning = `Holesail proxy is listening, but the room did not answer readiness checks yet. The editor will keep retrying. (${getErrorMessage(error)})`
     }
 
+    rememberNotePort(roomKey, boundPort)
     room = {
       key: roomKey,
       role: 'client',
@@ -221,6 +219,20 @@ export async function joinP2pmdRoom ({
       warning
     }
   })
+}
+
+/**
+ * Joins on the port this phone had the note on before, or else the one its
+ * host advertises, as the desktop does: one address on every device. If that
+ * port is taken here, or belongs to another server in the app, the system
+ * picks one instead.
+ */
+async function connectOnNotePort ({ key, udp, log }) {
+  const saved = findNotePort(key)
+  const preferred = await connectHolesail({ key, port: saved, hostPort: true, udp, log })
+  if (preferred.ok && isUsableNotePort(preferred.info?.port)) return preferred
+  if (preferred.ok) await stopHolesail()
+  return connectHolesail({ key, anyPort: true, udp, log })
 }
 
 export function getP2pmdRoomStatus () {

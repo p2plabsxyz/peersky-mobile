@@ -74,9 +74,13 @@ export async function connectHolesail ({
   key,
   port,
   host,
-  // Listen on a port the system picks. P2PMD joins this way, because the port
-  // a room's host advertises can belong to another app on this phone.
+  // Listen on a port the system picks, for when the port a host advertises
+  // belongs to something else on this phone.
   anyPort = false,
+  // Listen on the port the host advertises, as the desktop does, so a note's
+  // address reads the same on every device. Holesail takes it from the DHT
+  // record when it is given no port.
+  hostPort = false,
   udp = false,
   log = false
 } = {}) {
@@ -84,7 +88,11 @@ export async function connectHolesail ({
     const targetKey = normalizeHolesailKey(key, false)
     if (!targetKey.ok) return targetKey
 
-    const targetPort = anyPort ? { ok: true, port: 0 } : resolvePort(port, 8989)
+    const targetPort = anyPort
+      ? { ok: true, port: 0 }
+      : hostPort && (port === undefined || port === null)
+        ? { ok: true, port: undefined }
+        : resolvePort(port, 8989)
     if (!targetPort.ok) return targetPort
 
     const targetHost = normalizeHost(host, '127.0.0.1')
