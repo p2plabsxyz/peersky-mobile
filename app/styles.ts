@@ -692,6 +692,12 @@ export const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700'
   },
+  p2pmdUnsavedDot: {
+    backgroundColor: '#f5a524',
+    borderRadius: 4,
+    height: 8,
+    width: 8
+  },
   p2pmdMetaButton: {
     backgroundColor: '#30364a',
     borderColor: '#4c5675',

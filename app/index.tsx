@@ -133,6 +133,7 @@ import { BrowserBackSwipe } from './BrowserBackSwipe'
 import { BrowserZoomSheet } from './BrowserZoomSheet'
 import { PublishedLinkSheet } from './PublishedLinkSheet'
 import { P2pmdNewNoteSheet } from './P2pmdNewNoteSheet'
+import { getP2pmdSyncDisplay } from './p2pmd-sync-status.mjs'
 import PencilSquareIcon from '../assets/icons/bootstrap/pencil-square.svg'
 import ShareIcon from '../assets/icons/bootstrap/share.svg'
 import { WelcomeScreen } from './WelcomeScreen'
@@ -3406,6 +3407,7 @@ export default function App () {
 
   if (!browserOverlay && activeTab === 'p2pmd' && p2pmdWorkspaceReady && p2pmdRoom && p2pmdUrl && p2pmdEditorHtml) {
     const p2pmdEditorRoomBaseUrl = p2pmdUrl.replace(/\/$/, '')
+    const p2pmdSyncDisplay = getP2pmdSyncDisplay(p2pmdSyncStatus)
     const p2pmdEditorBaseUrl = createP2pmdEditorUrl(p2pmdEditorRoomBaseUrl, p2pmdRoom.role, p2pmdEditorNonce)
     const p2pmdEditorHtmlWithRoomBase = p2pmdEditorHtml.replace(
       '<head>',
@@ -3489,6 +3491,9 @@ export default function App () {
               <Text numberOfLines={1} ellipsizeMode='middle' style={[styles.p2pmdWorkspaceKey, p2pmdTheme?.p2pmdWorkspaceKey]}>
                 {p2pmdRoom.key}
               </Text>
+              {p2pmdSyncDisplay.kind === 'dot' && (
+                <View accessible accessibilityLabel='Unsaved changes' style={styles.p2pmdUnsavedDot} />
+              )}
             </View>
             <Text numberOfLines={1} ellipsizeMode='middle' style={[styles.p2pmdWorkspaceUrl, p2pmdTheme?.p2pmdWorkspaceUrl]}>
               {p2pmdRoom.localUrl}
@@ -3507,9 +3512,11 @@ export default function App () {
                 <Text style={[styles.p2pmdPublishedUrlAction, p2pmdTheme?.p2pmdPublishedUrlAction]}>Share</Text>
               </Pressable>
             )}
-            <Text numberOfLines={1} style={[styles.p2pmdWorkspaceSyncStatus, p2pmdTheme?.p2pmdWorkspaceSyncStatus]}>
-              {p2pmdSyncStatus}
-            </Text>
+            {p2pmdSyncDisplay.kind === 'text' && (
+              <Text numberOfLines={1} style={[styles.p2pmdWorkspaceSyncStatus, p2pmdTheme?.p2pmdWorkspaceSyncStatus]}>
+                {p2pmdSyncDisplay.text}
+              </Text>
+            )}
           </View>
           <Pressable
             accessibilityLabel='Share note'

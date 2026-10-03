@@ -91,12 +91,13 @@ test('nothing with a colour is left without a light value by accident', async ()
     .matchAll(/^ {2}([a-zA-Z0-9]+):/gm)].map((m) => m[1]))
 
   // These stay as they are on purpose: white sitting on an accent fill reads
-  // the same either way, and a camera viewfinder is dark in both themes.
+  // the same either way, a camera viewfinder is dark in both themes, and the
+  // amber unsaved dot shows on either background.
   const deliberate = new Set([
     'p2pmdPreviewButton', 'p2pmdPreviewButtonText', 'p2pmdEyeIcon', 'p2pmdEyeIconDot',
     'p2pmdPencilBody', 'p2pmdPencilTip', 'p2pmdPrimaryAction', 'p2pmdPrimaryActionText',
     'p2pmdActionHint', 'p2pmdScanner', 'p2pmdScanCorner', 'p2pmdScanHint',
-    'p2pmdScannerCloseText'
+    'p2pmdScannerCloseText', 'p2pmdUnsavedDot'
   ])
 
   const unthemed = [...base.matchAll(/^ {2}(p2pmd[A-Za-z]+): \{(.*?)^ {2}\},?$/gms)]
