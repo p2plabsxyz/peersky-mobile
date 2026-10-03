@@ -21,6 +21,13 @@ reviewers. Go through it once per release.
   `app.json` for finding PeerSky devices on the same Wi-Fi. Apple has to grant
   it to the team first ([request it here](https://developer.apple.com/contact/request/networking-multicast)),
   or signing fails.
+- **App Group and the widgets.** The home screen widgets (`targets/widgets`)
+  are their own target, `xyz.p2plabs.peersky.widgets`, and read what the app
+  leaves for them in the App Group `group.xyz.p2plabs.peersky`. Both bundle IDs
+  need the App Groups capability with that group, under team `PP6D6HB667`
+  (`ios.appleTeamId` in `app.json`). Xcode's automatic signing registers them
+  on the first device build (the target sets `REGISTER_APP_GROUPS`); otherwise
+  add them in the developer portal before building. The widgets need iOS 17.
 - **App Privacy.** Data Not Collected. There are no analytics, no accounts and
   no servers. Peers see each other's IP address because devices connect
   directly; that is not collection by us.
