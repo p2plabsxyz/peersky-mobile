@@ -19,6 +19,7 @@
     "preios": "npm run bundle:bare",
     "ios": "expo run:ios",
     "lint": "standard",
+    "postinstall": "patch-package",
     "test": "npm run test:bundle && npm run test:runtime",
     "test:runtime": "node --test ./test/protocol/*.test.mjs ./test/platform/*.test.mjs",
     "test:bundle": "npm run bundle:bare",
@@ -105,6 +106,7 @@
     "babel-preset-expo": "~55.0.8",
     "bare-pack": "^2.0.1",
     "esbuild": "^0.28.1",
+    "patch-package": "^8.0.1",
     "react-native-svg-transformer": "^1.5.3",
     "standard": "^17.1.0",
     "typescript": "^5.3.3"

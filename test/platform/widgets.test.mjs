@@ -166,6 +166,19 @@ describe('home screen widgets', () => {
     assert.ok(defaults.NSPrivacyAccessedAPITypeReasons.includes('1C8F.1'))
   })
 
+  // apple-targets 5.0.0 crashed on any prebuild without --clean once the
+  // widget target existed: unhooking the old configuration list cleared the
+  // target's own pointer to it, and the next line read it. Patched on install.
+  test('update the widget target on a prebuild without --clean', async () => {
+    const packageJson = JSON.parse(await read('package.json'))
+    assert.equal(packageJson.scripts.postinstall, 'patch-package')
+    const version = JSON.parse(await read('node_modules/@bacons/apple-targets/package.json')).version
+    const patch = await read(`patches/@bacons+apple-targets+${version}.patch`)
+    assert.match(patch, /const existingConfigurationList = targetToUpdate\.props\.buildConfigurationList;/)
+    const installed = await read('node_modules/@bacons/apple-targets/build/with-xcode-changes.js')
+    assert.match(installed, /ref\.removeReference\(existingConfigurationList\.uuid\);\s+\}\);\s+existingConfigurationList\.removeFromProject\(\);/)
+  })
+
   test('keep the large widget\'s list and the player state current', async () => {
     const app = await read('app/index.tsx')
     assert.match(app, /if \(browserBookmarksReady\) updateBrowserWidget\(browserBookmarks\)/)
