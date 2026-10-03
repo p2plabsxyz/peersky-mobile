@@ -2183,7 +2183,24 @@ export function PeerChatScreen ({
                 )
               : (
                 <>
-                  <Text style={[styles.roomInfoTitle, { color: colors.text }]}>{activeRoom.name}</Text>
+                  {/* Only the host's editor showed the room's picture, so
+                      everyone else opened the details and never saw it. */}
+                  <View style={styles.roomInfoIdentity}>
+                    {activeRoom.avatar
+                      ? (
+                        <Image
+                          accessibilityLabel={`Picture of ${activeRoom.name}`}
+                          source={{ uri: activeRoom.avatar }}
+                          style={styles.roomInfoAvatar}
+                        />
+                        )
+                      : (
+                        <View style={[styles.roomInfoAvatar, styles.roomInfoAvatarFallback, { backgroundColor: colors.accentSoft }]}>
+                          <Text style={[styles.roomInfoAvatarText, { color: colors.accent }]}>{getRoomInitials(activeRoom.name)}</Text>
+                        </View>
+                        )}
+                    <Text style={[styles.roomInfoTitle, { color: colors.text }]}>{activeRoom.name}</Text>
+                  </View>
                   {!!activeRoom.bio && <Text style={[styles.helper, { color: colors.muted }]}>{activeRoom.bio}</Text>}
                   {!!activeRoom.link && (
                     <Pressable accessibilityRole='link' onPress={() => onOpenUrl(activeRoom.link)}>
@@ -4677,6 +4694,10 @@ const styles = StyleSheet.create({
   roomInfo: { gap: 10, padding: 16 },
   roomProvenance: { alignItems: 'stretch', gap: 7 },
   roomInfoTitle: { fontSize: 15, fontWeight: '800' },
+  roomInfoIdentity: { alignItems: 'center', gap: 10, paddingVertical: 6 },
+  roomInfoAvatar: { borderRadius: 40, height: 80, width: 80 },
+  roomInfoAvatarFallback: { alignItems: 'center', justifyContent: 'center' },
+  roomInfoAvatarText: { fontSize: 28, fontWeight: '800' },
   roomInfoLink: { fontSize: 12, textDecorationLine: 'underline' },
   roomInfoSave: { alignItems: 'center', alignSelf: 'center', borderRadius: 9, minHeight: 38, justifyContent: 'center', paddingHorizontal: 14 },
   profileModalRoot: { alignItems: 'center', flex: 1, justifyContent: 'center', paddingHorizontal: 24 },

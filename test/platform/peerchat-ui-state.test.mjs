@@ -208,3 +208,14 @@ test('the date divider sits above the first message of its day', async () => {
   assert.match(row, /return \(\s*<View>\s*\{!!dateLabel && dateLabel !== previousDateLabel && \(/)
   assert.doesNotMatch(row, /return \(\s*<>/)
 })
+
+// Only the host's editor showed the room's picture, so everyone else opened
+// the details and never saw it. Desktop shows it to everyone.
+test('room details show the room picture to everyone, not only the host', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const screen = await readFile(new URL('../../app/peerchat/PeerChatScreen.tsx', import.meta.url), 'utf8')
+  const details = screen.slice(screen.indexOf('visible={showRoomInfo}'), screen.indexOf('{!activeRoom.isDM && (\n              <View style={styles.roomProvenance}>'))
+  const member = details.slice(details.indexOf(': ('))
+  assert.match(member, /<Image\s+accessibilityLabel=\{`Picture of \$\{activeRoom\.name\}`\}\s+source=\{\{ uri: activeRoom\.avatar \}\}/)
+  assert.match(member, /getRoomInitials\(activeRoom\.name\)/)
+})
