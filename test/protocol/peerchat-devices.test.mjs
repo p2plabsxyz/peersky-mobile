@@ -420,6 +420,45 @@ test('shows other people\'s labels as they send them', async (t) => {
   await service.close()
 })
 
+// Each device has its own key, so a chat with your own desktop had two sides
+// and the desktop's messages showed as someone else's. They are yours now,
+// as in a chat with yourself elsewhere.
+test('messages from the person\'s other devices are theirs, and a chat with one is with You', async (t) => {
+  const { service, link } = await linkedPhone(t)
+  const desktop = createFakePeer('0b0b0b0b', 'ada')
+  service.peers.set(desktop.connection, desktop)
+  const stranger = 'feedbeef'
+
+  assert.equal(service.isOwnDevice(service.localId), true)
+  assert.equal(service.isOwnDevice('0b0b0b0b'), false)
+  await service.handlePeerMessage(desktop, {
+    type: 'profile',
+    username: 'ada',
+    link: makeProfileProof(link, { username: 'ada', at: 1 }, desktop.key)
+  })
+  assert.equal(service.isOwnDevice('0B0B0B0B'), true)
+  assert.equal(service.isOwnDevice(stranger), false)
+
+  service.rooms.set(DESKTOP_DM, { roomKey: DESKTOP_DM, name: 'ada@desktop1', isDM: true, dmWith: '0b0b0b0b', members: [] })
+  service.rooms.set(ROOM, { roomKey: ROOM, name: 'grace', isDM: true, dmWith: stranger, members: [] })
+  assert.equal(service.publicRoom(service.rooms.get(DESKTOP_DM)).name, 'You')
+  assert.equal(service.publicRoom(service.rooms.get(ROOM)).name, 'grace')
+  service.rooms.delete(ROOM)
+
+  // Kept across a restart, before the desktop is heard from again.
+  service.persistNow()
+  const saved = JSON.parse(await readFile(service.stateFilePath, 'utf8'))
+  assert.deepEqual(saved.siblings, ['0b0b0b0b'])
+  await service.close()
+  const restarted = await new PeerChatService({ sdk: createFakeSdk(), storagePath: service.storagePath }).start()
+  assert.equal(restarted.isOwnDevice('0b0b0b0b'), true)
+
+  // A transfer that brings another person's link leaves none of them.
+  restarted.applyTransfer(normalizeTransfer(makeTransfer({ link: createLink('desktop'), label: 'mobile', profile: null, rooms: [] })))
+  assert.equal(restarted.isOwnDevice('0b0b0b0b'), false)
+  await restarted.close()
+})
+
 // A phone that took a desktop's PeerChat: 'ada@mobile' in DESKTOP_ROOM.
 async function linkedPhone (t) {
   const storagePath = await tempDir(t)

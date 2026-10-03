@@ -84,6 +84,8 @@ import { checkRoomProof, roomProof } from './room-proof.mjs'
 const MAX_ROOMS = 50
 const MAX_BLOCKED_PEERS = 500
 const MAX_LEFT_ROOMS = 1000
+// A person's own devices. Links are made for a few, so this is generous.
+const MAX_SIBLINGS = 16
 // Desktop keys its member list by peer id. Packed by size rather than by
 // count: one frame carrying everyone's data-url picture passes the frame cap
 // once roughly nine of them have one, and an oversized line is dropped whole.
@@ -189,7 +191,8 @@ export class PeerChatService {
     this.device = { label: '' }
     this.link = null
     // Peers whose profile carried a proof made with the link: this person's
-    // other devices.
+    // other devices. Kept, so their messages are still this person's after a
+    // restart, before they have been seen again.
     this.siblings = new Set()
     // Rooms this phone left or was removed from, by when. Another of the
     // person's devices offering one back is ignored until it is joined again
@@ -1214,7 +1217,10 @@ export class PeerChatService {
           checkProfileProof(this.link, message.link, message.avatar || null, peer.key)) {
         const first = !peer.sibling
         peer.sibling = true
-        this.siblings.add(peer.id)
+        if (!this.siblings.has(peer.id) && this.siblings.size < MAX_SIBLINGS) {
+          this.siblings.add(peer.id)
+          this.schedulePersist()
+        }
         this.takeSiblingProfile(message.link, message.avatar || null)
         // Every room this phone is in, once per connection.
         if (first) this.sendRoomsToSibling(peer, this.sharedRoomEntries())
@@ -1807,6 +1813,8 @@ export class PeerChatService {
   applyTransfer (transfer) {
     const sameLink = Boolean(this.link) && linkId(this.link) === linkId(transfer.link)
     if (!sameLink) {
+      // Devices proven with the old link are not this person's any more.
+      this.siblings.clear()
       this.link = { ...transfer.link, labels: mergeLabels(transfer.link.labels, [transfer.label]) }
       this.device = { label: transfer.label }
       if (transfer.profile) this.adoptProfile(transfer.profile)
@@ -2210,7 +2218,8 @@ export class PeerChatService {
     if (!room || this.activeRoomKey === roomKey) return
 
     const sender = String(entry?.sender || '').toLowerCase()
-    if (!sender || sender === this.localId || this.isPeerBlocked(sender)) return
+    // What you wrote on another of your devices is not news to you.
+    if (!sender || this.isOwnDevice(sender) || this.isPeerBlocked(sender)) return
     const timestamp = normalizePeerChatTimestamp(entry?.ts)
     if (timestamp <= (room.lastReadTs || 0)) return
 
@@ -2395,8 +2404,15 @@ export class PeerChatService {
       }) || {}),
       replyTo: normalizePeerChatReply(entry.replyTo),
       timestamp: normalizePeerChatTimestamp(entry.ts),
-      self: sender.toLowerCase() === this.localId
+      // From this person's other devices too, so a chat with yourself, or a
+      // room you write in from the desktop, reads as one side.
+      self: this.isOwnDevice(sender)
     }
+  }
+
+  isOwnDevice (peerId) {
+    const id = normalizePeerChatPeerId(peerId)
+    return Boolean(id) && (id === this.localId || this.siblings.has(id))
   }
 
   entryToSystemMessage (entry) {
@@ -2415,7 +2431,8 @@ export class PeerChatService {
     const peerCount = this.countRoomPeers(room.roomKey)
     return {
       roomKey: room.roomKey,
-      name: room.name,
+      // A direct chat with another of your devices is a chat with yourself.
+      name: room.isDM && room.dmWith && this.isOwnDevice(room.dmWith) ? 'You' : room.name,
       bio: room.bio || '',
       link: room.link || '',
       avatar: room.avatar || null,
@@ -2816,6 +2833,10 @@ export class PeerChatService {
       }
       this.device = { label: normalizeLabel(parsed?.device?.label) }
       this.link = normalizeLink(parsed?.link)
+      for (const value of this.link && Array.isArray(parsed?.siblings) ? parsed.siblings.slice(0, MAX_SIBLINGS) : []) {
+        const id = normalizePeerChatPeerId(value)
+        if (id && id !== this.localId) this.siblings.add(id)
+      }
       for (const [roomKey, at] of Object.entries(parsed?.leftRooms && typeof parsed.leftRooms === 'object' ? parsed.leftRooms : {})) {
         const key = normalizePeerChatRoomKey(roomKey)
         if (key && Number.isSafeInteger(at) && at > 0 && this.leftRooms.size < MAX_LEFT_ROOMS) this.leftRooms.set(key, at)
@@ -2922,6 +2943,7 @@ export class PeerChatService {
         device: this.device,
         link: this.link,
         leftRooms: Object.fromEntries(this.leftRooms),
+        siblings: [...this.siblings].slice(0, MAX_SIBLINGS),
         rooms: [...this.rooms.values()],
         pendingDirectMessages: this.listPendingDirectMessages(),
         blockedPeers: this.listBlockedPeers()
