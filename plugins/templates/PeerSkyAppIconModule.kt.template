@@ -1,6 +1,7 @@
 package __PACKAGE_NAME__
 
 import android.content.ComponentName
+import android.content.Context
 import android.content.pm.PackageManager
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
@@ -100,9 +101,37 @@ class PeerSkyAppIconModule(
         )
       }
 
+      moveBadgeToCurrentIcon()
       promise.resolve(true)
     } catch (error: Exception) {
       promise.reject("failed", error.message, error)
+    }
+  }
+
+  /**
+   * expo-notifications puts the unread count on the launcher icon through
+   * ShortcutBadger, which looks up the app's launcher entry once and keeps it.
+   * After a switch that entry is the alias just turned off, so the PeerChat
+   * count vanished until the app was restarted. Forgetting it makes the next
+   * count find the new alias, and the current count is put back there now.
+   * Neither library offers this, hence reflection; if either changes, the
+   * count comes back with the next message instead.
+   */
+  private fun moveBadgeToCurrentIcon() {
+    try {
+      val badger = Class.forName("me.leolin.shortcutbadger.ShortcutBadger")
+      for (field in listOf("sShortcutBadger", "sComponentName")) {
+        badger.getDeclaredField(field).apply { isAccessible = true }.set(null, null)
+      }
+
+      val helper = Class.forName("expo.modules.notifications.badge.BadgeHelper")
+      val count = helper.getMethod("getBadgeCount").invoke(helper.getField("INSTANCE").get(null)) as Int
+      if (count > 0) {
+        badger
+          .getMethod("applyCount", Context::class.java, Int::class.javaPrimitiveType)
+          .invoke(null, reactApplicationContext.applicationContext, count)
+      }
+    } catch (error: Exception) {
     }
   }
 

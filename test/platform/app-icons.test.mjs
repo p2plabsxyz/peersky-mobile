@@ -138,4 +138,26 @@ describe('adaptive icon layers', () => {
     // And it must never stop the app starting.
     assert.match(repair, /catch \(error: Exception\)/)
   })
+
+  // The badge library keeps the launcher entry it first counted on, which a
+  // switch turns off, so the PeerChat count vanished until a restart.
+  test('the unread count moves to the new icon', async () => {
+    const module = await readFile(
+      new URL('../../plugins/templates/PeerSkyAppIconModule.kt.template', import.meta.url),
+      'utf8'
+    )
+    const setIcon = module.slice(module.indexOf('fun setIcon'), module.indexOf('private fun moveBadgeToCurrentIcon'))
+    assert.match(setIcon, /DONT_KILL_APP\s+\)\s+\}\s+moveBadgeToCurrentIcon\(\)\s+promise\.resolve\(true\)/)
+
+    const move = module.slice(module.indexOf('private fun moveBadgeToCurrentIcon'), module.indexOf('companion object'))
+    assert.match(move, /listOf\("sShortcutBadger", "sComponentName"\)/)
+    assert.match(move, /Class\.forName\("expo\.modules\.notifications\.badge\.BadgeHelper"\)/)
+    assert.match(move, /if \(count > 0\) \{/)
+    // A change in either library must not fail the switch itself.
+    assert.match(move, /catch \(error: Exception\)/)
+
+    // Release builds keep class and field names, which this looks up by name.
+    const gradle = await readFile(new URL('../../app.json', import.meta.url), 'utf8')
+    assert.doesNotMatch(gradle, /enableMinifyInReleaseBuilds|enableProguardInReleaseBuilds/)
+  })
 })
