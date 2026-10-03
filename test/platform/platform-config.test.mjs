@@ -338,6 +338,33 @@ describe('mobile platform runtime configuration', () => {
     assert.match(intent, /return initial \? '\/' : null/)
   })
 
+  // Only peersky:// was registered, so a hyper:// QR code scanned with the
+  // camera, or a hyper:// link tapped in another app, never reached PeerSky.
+  it('opens hyper:// links from the camera and other apps on both systems', async () => {
+    const plugin = require('../../plugins/with-hyper-links')
+    const appJson = JSON.parse(await readFile(repoFile('app.json'), 'utf8'))
+    assert.equal(hasExpoPlugin(appJson.expo.plugins, './plugins/with-hyper-links'), true)
+    // One scheme in app.json: expo-linking warns on every start about a list.
+    assert.equal(appJson.expo.scheme, 'peersky')
+
+    const infoPlist = plugin.addHyperSchemeToInfoPlist({ CFBundleURLTypes: [{ CFBundleURLSchemes: ['peersky'] }] })
+    assert.deepEqual(infoPlist.CFBundleURLTypes.map((type) => type.CFBundleURLSchemes), [['peersky'], ['hyper']])
+    assert.deepEqual(plugin.addHyperSchemeToInfoPlist(infoPlist), infoPlist)
+
+    const manifest = { manifest: { application: [{ activity: [{ $: { 'android:name': '.MainActivity' }, 'intent-filter': [] }] }] } }
+    plugin.addHyperIntentFilter(manifest)
+    plugin.addHyperIntentFilter(manifest)
+    const filters = manifest.manifest.application[0].activity[0]['intent-filter']
+    assert.equal(filters.length, 1)
+    assert.deepEqual(filters[0].action.map((item) => item.$['android:name']), ['android.intent.action.VIEW'])
+    assert.deepEqual(filters[0].category.map((item) => item.$['android:name']), ['android.intent.category.DEFAULT', 'android.intent.category.BROWSABLE'])
+    assert.deepEqual(filters[0].data.map((item) => item.$['android:scheme']), ['hyper'])
+
+    // And the app takes them once they arrive.
+    const indexSource = await readFile(repoFile('app/index.tsx'), 'utf8')
+    assert.match(indexSource, /\(!isWebUrl\(url\) && !isHyperUrl\(url\) && !isInternalAppUrl\)/)
+  })
+
   it('listens for deep links outside the screen expo-router unmounts', async () => {
     const linksSource = await readFile(repoFile('app/incoming-links.ts'), 'utf8')
 

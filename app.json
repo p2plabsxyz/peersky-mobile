@@ -161,6 +161,7 @@
       "./plugins/with-no-device-backup",
       "./plugins/with-audio-route",
       "./plugins/with-home-shortcuts",
+      "./plugins/with-hyper-links",
       "@bacons/apple-targets",
       [
         "expo-notifications",
