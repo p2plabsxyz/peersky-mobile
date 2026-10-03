@@ -4559,7 +4559,10 @@ export default function App () {
                 },
                 // Incognito cookies live apart from normal tabs, in one store
                 // (on Android a WebView profile) for each run of incognito tabs.
-                tabIncognito && browserIncognitoSession ? { incognitoSession: browserIncognitoSession } : {})
+                tabIncognito && browserIncognitoSession ? { incognitoSession: browserIncognitoSession } : {},
+                // Pages are told dark is preferred, so a site's own dark theme
+                // wins over the inverting script.
+                Platform.OS === 'ios' ? { forceDarkScheme: browserPreferences.forceDarkWebsites } : {})
               }
             : undefined
           const browserAccessibilityScript = createBrowserAccessibilityScript({

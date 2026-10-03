@@ -10,6 +10,7 @@
 
 @interface PeerSkyWebViewImpl : RNCWebViewImpl
 @property (nonatomic, copy) NSString *incognitoSession;
+@property (nonatomic, assign) BOOL forceDarkScheme;
 @end
 
 // Incognito tabs share one store for as long as any of them is open, the way
@@ -38,6 +39,15 @@ static WKWebsiteDataStore *PeerSkyIncognitoStoreForSession(NSString *session)
 
 @implementation PeerSkyWebViewImpl
 
+// With Force dark mode on, pages are told the reader prefers dark, so a site
+// with a dark theme of its own, like YouTube, uses it. Only sites without one
+// are left to the inverting script, which does worse on a site built to change.
+- (void)setForceDarkScheme:(BOOL)forceDarkScheme
+{
+  _forceDarkScheme = forceDarkScheme;
+  self.overrideUserInterfaceStyle = forceDarkScheme ? UIUserInterfaceStyleDark : UIUserInterfaceStyleUnspecified;
+}
+
 - (WKWebViewConfiguration *)setUpWkWebViewConfig
 {
   WKWebViewConfiguration *configuration = [super setUpWkWebViewConfig];
@@ -58,6 +68,7 @@ static WKWebsiteDataStore *PeerSkyIncognitoStoreForSession(NSString *session)
 RCT_EXPORT_MODULE(PeerSkyWebView)
 
 RCT_EXPORT_VIEW_PROPERTY(incognitoSession, NSString)
+RCT_EXPORT_VIEW_PROPERTY(forceDarkScheme, BOOL)
 
 - (UIView *)view
 {
