@@ -83,36 +83,31 @@ describe('adaptive icon layers', () => {
       const image = PNG.sync.read(
         await readFile(new URL(`../../assets/app-icons/android/${layer}.png`, import.meta.url))
       )
-      let minX = image.width
-      let minY = image.height
-      let maxX = -1
-      let maxY = -1
+      const middle = image.width / 2
+      let weight = 0
+      let sumX = 0
+      let sumY = 0
+      let radius = 0
       for (let y = 0; y < image.height; y++) {
         for (let x = 0; x < image.width; x++) {
-          if (image.data[(y * image.width + x) * 4 + 3] <= 8) continue
-          if (x < minX) minX = x
-          if (x > maxX) maxX = x
-          if (y < minY) minY = y
-          if (y > maxY) maxY = y
+          const alpha = image.data[(y * image.width + x) * 4 + 3]
+          if (alpha <= 8) continue
+          weight += alpha
+          sumX += (x + 0.5) * alpha
+          sumY += (y + 0.5) * alpha
+          radius = Math.max(radius, Math.hypot(x + 0.5 - middle, y + 0.5 - middle))
         }
       }
 
-      const centerX = (minX + maxX + 1) / 2
-      const centerY = (minY + maxY + 1) / 2
-      let radius = 0
-      for (let y = minY; y <= maxY; y++) {
-        for (let x = minX; x <= maxX; x++) {
-          if (image.data[(y * image.width + x) * 4 + 3] <= 8) continue
-          radius = Math.max(radius, Math.hypot(x + 0.5 - centerX, y + 0.5 - centerY))
-        }
-      }
-
+      // Measured from the middle of the canvas, where the mask is.
       assert.ok(
         radius / image.width <= safeRadius,
         `${layer} reaches ${(radius / image.width * 100).toFixed(1)}% of the canvas`
       )
-      assert.ok(Math.abs(centerX - image.width / 2) < 2, `${layer} is off centre horizontally`)
-      assert.ok(Math.abs(centerY - image.height / 2) < 2, `${layer} is off centre vertically`)
+      // Centred on its weight. Centred on its box, the thin legs below the
+      // body pulled the box down and the bird sat high in the circle.
+      assert.ok(Math.abs(sumX / weight - middle) < 2, `${layer} is off centre horizontally`)
+      assert.ok(Math.abs(sumY / weight - middle) < 2, `${layer} is off centre vertically`)
     }
   })
 

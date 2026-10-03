@@ -4,6 +4,9 @@
  * is sure to survive. The source bird fills about 60% of the canvas, a little
  * left of centre, so its beak and legs met the mask. The artwork is measured
  * rather than given a fixed margin, so a redrawn bird still fits.
+ *
+ * It is centred on its weight, not its box. The legs are thin lines below the
+ * body, so the middle of the box sat under the body and the bird looked high.
  */
 import { readFileSync, writeFileSync } from 'node:fs'
 import { PNG } from 'pngjs'
@@ -24,24 +27,16 @@ for (const layer of LAYERS) {
   const out = new PNG({ width: SIZE, height: SIZE })
   out.data.fill(0)
 
-  // Scale so the furthest visible pixel lands on the safe circle, then centre
-  // on the middle of the canvas rather than on the middle of the source.
+  // Scale so the furthest visible pixel lands on the safe circle, measured
+  // from the bird's weight, and put that weight in the middle of the canvas.
   const scale = SAFE_RADIUS / bounds.radius
-  const width = bounds.width * scale
-  const height = bounds.height * scale
-  const left = (SIZE - width) / 2
-  const top = (SIZE - height) / 2
 
   for (let y = 0; y < SIZE; y++) {
     for (let x = 0; x < SIZE; x++) {
-      const u = (x + 0.5 - left) / width
-      const v = (y + 0.5 - top) / height
-      if (u < 0 || u >= 1 || v < 0 || v >= 1) continue
-      const pixel = sample(
-        source,
-        bounds.minX + u * bounds.width,
-        bounds.minY + v * bounds.height
-      )
+      const sourceX = bounds.centerX + (x + 0.5 - SIZE / 2) / scale
+      const sourceY = bounds.centerY + (y + 0.5 - SIZE / 2) / scale
+      if (sourceX < 0 || sourceX >= source.width || sourceY < 0 || sourceY >= source.height) continue
+      const pixel = sample(source, sourceX, sourceY)
       const index = (y * SIZE + x) * 4
       out.data[index] = pixel[0]
       out.data[index + 1] = pixel[1]
@@ -58,39 +53,36 @@ for (const layer of LAYERS) {
   )
 }
 
-// The visible artwork: its box, and how far its furthest pixel sits from the
-// centre of that box.
+// The visible artwork: where its weight sits, by opacity, and how far its
+// furthest pixel is from there.
 function measure (image) {
-  let minX = image.width
-  let minY = image.height
-  let maxX = -1
-  let maxY = -1
+  let weight = 0
+  let sumX = 0
+  let sumY = 0
 
   for (let y = 0; y < image.height; y++) {
     for (let x = 0; x < image.width; x++) {
-      if (image.data[(y * image.width + x) * 4 + 3] <= 8) continue
-      if (x < minX) minX = x
-      if (x > maxX) maxX = x
-      if (y < minY) minY = y
-      if (y > maxY) maxY = y
+      const alpha = image.data[(y * image.width + x) * 4 + 3]
+      if (alpha <= 8) continue
+      weight += alpha
+      sumX += (x + 0.5) * alpha
+      sumY += (y + 0.5) * alpha
     }
   }
 
-  const centerX = (minX + maxX + 1) / 2
-  const centerY = (minY + maxY + 1) / 2
+  const centerX = sumX / weight
+  const centerY = sumY / weight
   let radius = 0
-  for (let y = minY; y <= maxY; y++) {
-    for (let x = minX; x <= maxX; x++) {
+  for (let y = 0; y < image.height; y++) {
+    for (let x = 0; x < image.width; x++) {
       if (image.data[(y * image.width + x) * 4 + 3] <= 8) continue
       radius = Math.max(radius, Math.hypot(x + 0.5 - centerX, y + 0.5 - centerY))
     }
   }
 
   return {
-    minX,
-    minY,
-    width: maxX - minX + 1,
-    height: maxY - minY + 1,
+    centerX,
+    centerY,
     radius,
     offsetX: centerX - image.width / 2,
     offsetY: centerY - image.height / 2
