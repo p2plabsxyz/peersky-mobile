@@ -54,7 +54,7 @@ describe('PeerTunes loopback server with injectable Node server', () => {
   it('serves scripts, styles and svg assets with their content types', async () => {
     const cases = [
       ['/js/main.js', 'text/javascript; charset=utf-8', /window\.PT/],
-      ['/css/style.css', 'text/css; charset=utf-8', /\.clickwheel/],
+      ['/css/style.css', 'text/css; charset=utf-8', /\.wheel \{/],
       ['/assets/default-cover.svg', 'image/svg+xml', /<svg/],
       ['/manifest.webmanifest', 'application/manifest+json', /"PeerTunes"/]
     ]
