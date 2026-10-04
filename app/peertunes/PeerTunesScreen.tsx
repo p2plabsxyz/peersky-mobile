@@ -216,6 +216,9 @@ export function PeerTunesScreen ({
       // This view only ever shows the loopback app, so pin it. The navigation
       // handler below is the real gate; this is the second layer behind it.
       originWhitelist={[localUrl]}
+      // Left unset, react-native-webview gives iOS a deceleration of 0, and a
+      // swipe through the library stopped the moment the finger lifted.
+      decelerationRate='normal'
       injectedJavaScriptBeforeContentLoaded={PEERTUNES_BEFORE_LOAD_SCRIPT}
       onMessage={(event) => {
         const nowPlaying = parsePeerTunesNowPlaying(event.nativeEvent.data)
