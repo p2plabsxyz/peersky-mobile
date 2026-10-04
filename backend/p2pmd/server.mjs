@@ -733,7 +733,11 @@ export function getP2pmdEditorPage () {
         --ui-font: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         --editor-font: "FontWithASyntaxHighlighter", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
         --editor-font-size: 16px;
-        --editor-line-height: 24.8px;
+        /* Whole pixels: WebKit draws a textarea's lines at a whole number of
+           pixels, so at 24.8px the note's lines were 24px apart while the line
+           numbers beside them were 24.8px, and the numbers slid 0.8px further
+           down with every line. */
+        --editor-line-height: 24px;
       }
 
       /* The app tells the page which theme it is in, because the browser has

@@ -193,7 +193,12 @@ describe('p2pmd mobile editor page routing', () => {
     const html = getP2pmdEditorPage()
 
     assert.match(html, /--editor-font-size: 16px/)
-    assert.match(html, /--editor-line-height: 24[.]8px/)
+    // WebKit draws a textarea's lines a whole number of pixels apart, so a
+    // fractional line height moved the numbers off their lines, 0.8px more on
+    // each one at 24.8px.
+    const lineHeight = html.match(/--editor-line-height: ([0-9.]+)px/)[1]
+    assert.equal(Number(lineHeight), Math.round(Number(lineHeight)))
+    assert.match(html, /--editor-line-height: 24px/)
     assert.match(html, /#line-gutter[\s\S]*font: var\(--editor-font-size\)\/var\(--editor-line-height\)/)
     assert.match(html, /[.]gutter-line[\s\S]*min-height: var\(--editor-line-height\)/)
     assert.match(html, /textarea[\s\S]*font: var\(--editor-font-size\)\/var\(--editor-line-height\)/)
