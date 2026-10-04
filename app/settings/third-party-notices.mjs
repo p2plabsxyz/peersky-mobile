@@ -2,16 +2,25 @@
 // scripts/generate-third-party-notices.mjs writes. Kept apart from the screen
 // so a test can check the shipped file the way the app reads it.
 
+// Sections whose libraries ship on one platform only. Each app lists its own,
+// and the App Store turns down an iOS app that names other mobile platforms.
+const PLATFORM_ONLY_SECTIONS = { ios: 'ios', android: 'android', rust: 'android' }
+
 /**
  * The sections of the licenses screen, each item with its license text,
- * or an error when the file is not what the generator writes.
+ * or an error when the file is not what the generator writes. Given a
+ * platform, sections for the other platform are left out.
  */
-export function parseThirdPartyNotices (text) {
+export function parseThirdPartyNotices (text, platform) {
   const parsed = JSON.parse(text)
   if (parsed?.version !== 1 || !Array.isArray(parsed.sections) || !Array.isArray(parsed.texts)) {
     throw new Error('The licenses file is not one PeerSky can read.')
   }
-  const sections = parsed.sections.map((section) => ({
+  const shipped = parsed.sections.filter((section) => {
+    const only = PLATFORM_ONLY_SECTIONS[section.id]
+    return !platform || !only || only === platform
+  })
+  const sections = shipped.map((section) => ({
     id: String(section.id),
     title: String(section.title),
     data: section.items.map((item) => {

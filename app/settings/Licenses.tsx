@@ -1,5 +1,5 @@
 import { Asset } from 'expo-asset'
-import { File } from 'expo-file-system'
+import { File, Paths } from 'expo-file-system'
 import { memo, useCallback, useEffect, useState } from 'react'
 import { ActivityIndicator, Platform, Pressable, SectionList, StyleSheet, Text, View } from 'react-native'
 import { BROWSER_PALETTES } from '../browser-appearance.mjs'
@@ -21,14 +21,29 @@ type NoticeSection = {
   data: Notice[]
 }
 
+const COPY_PREFIX = 'third-party-notices-'
+
 // Licenses ask that their text travels with the app, so the list ships inside
 // it and opens with no network. It is a .txt asset, read when this page opens,
-// so its 2 MB of text stays out of the JavaScript bundle.
+// so its 2 MB of text stays out of the JavaScript bundle. On iOS the asset
+// stays in the app bundle, which expo-file-system copies from but will not
+// read ("Missing permission"), so the page reads a copy in the cache, named by
+// the asset's hash so a new version of the app makes a new one.
 async function loadThirdPartyNotices () {
-  const asset = Asset.fromModule(require('../../assets/licenses/third-party-notices.txt'))
-  await asset.downloadAsync()
-  const file = new File(asset.localUri || asset.uri)
-  return parseThirdPartyNotices(await file.text()) as { sections: NoticeSection[], count: number }
+  const asset = await Asset.fromModule(require('../../assets/licenses/third-party-notices.txt')).downloadAsync()
+  if (!asset.localUri) throw new Error('The licenses file is missing from the app.')
+  const copy = new File(Paths.cache, `${COPY_PREFIX}${asset.hash || 'bundled'}.txt`)
+  for (const item of Paths.cache.list()) {
+    if (item instanceof File && item.name.startsWith(COPY_PREFIX) && item.name !== copy.name) item.delete()
+  }
+  if (!copy.exists) new File(asset.localUri).copy(copy)
+  try {
+    return parseThirdPartyNotices(await copy.text(), Platform.OS) as { sections: NoticeSection[], count: number }
+  } catch (error) {
+    // A copy cut short is made again next time.
+    copy.delete()
+    throw error
+  }
 }
 
 export function Licenses ({ onOpenUrl }: { onOpenUrl: (url: string) => void }) {

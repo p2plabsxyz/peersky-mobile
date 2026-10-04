@@ -54,42 +54,42 @@
     "url": "https://github.com/muan/emojilib"
   },
   {
-    "name": "StevenBlack/hosts (porn-only list)",
+    "name": "StevenBlack/hosts",
     "license": "MIT",
     "copyright": "2023 Steven Black",
     "url": "https://github.com/StevenBlack/hosts"
   },
   {
-    "name": "hostsVN adult list",
+    "name": "bigdargon/hostsVN",
     "license": "MIT",
     "copyright": "2026 BigDargon",
     "url": "https://github.com/bigdargon/hostsVN"
   },
   {
-    "name": "pornhosts",
+    "name": "Clefspeare13/pornhosts",
     "license": "MIT",
     "copyright": "Clefspeare13 and contributors",
     "url": "https://github.com/Clefspeare13/pornhosts"
   },
   {
-    "name": "Sinfonietta hostfiles (porn and snuff)",
+    "name": "Sinfonietta/hostfiles",
     "license": "MIT",
     "copyright": "2016 Sinfonietta",
     "url": "https://github.com/Sinfonietta/hostfiles"
   },
   {
-    "name": "host-sources (pornography)",
+    "name": "brijrajparmar27/host-sources",
     "license": "CC-BY-4.0",
     "copyright": "brijrajparmar27",
     "url": "https://github.com/brijrajparmar27/host-sources",
-    "notice": "PeerChat blocks links to adult sites with domains that include host-sources (pornography) by brijrajparmar27, https://github.com/brijrajparmar27/host-sources, licensed under the Creative Commons Attribution 4.0 International License, https://creativecommons.org/licenses/by/4.0/. StevenBlack/hosts merged it with other lists, and PeerChat keeps only the domain names."
+    "notice": "PeerChat blocks links to adult sites with domains that include the host-sources list by brijrajparmar27, https://github.com/brijrajparmar27/host-sources, licensed under the Creative Commons Attribution 4.0 International License, https://creativecommons.org/licenses/by/4.0/. StevenBlack/hosts merged it with other lists, and PeerChat keeps only the domain names."
   },
   {
-    "name": "Tiuxo hostlist (pornography)",
+    "name": "tiuxo/hosts",
     "license": "CC-BY-4.0",
     "copyright": "tiuxo",
     "url": "https://github.com/tiuxo/hosts",
-    "notice": "PeerChat blocks links to adult sites with domains that include the Tiuxo hostlist (pornography) by tiuxo, https://github.com/tiuxo/hosts, licensed under the Creative Commons Attribution 4.0 International License, https://creativecommons.org/licenses/by/4.0/. StevenBlack/hosts merged it with other lists, and PeerChat keeps only the domain names."
+    "notice": "PeerChat blocks links to adult sites with domains that include the hosts list by tiuxo, https://github.com/tiuxo/hosts, licensed under the Creative Commons Attribution 4.0 International License, https://creativecommons.org/licenses/by/4.0/. StevenBlack/hosts merged it with other lists, and PeerChat keeps only the domain names."
   },
   {
     "name": "List of offensive words",

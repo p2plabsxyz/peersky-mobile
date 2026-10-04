@@ -63,7 +63,7 @@ test('it credits the lists, models and media the app carries', async () => {
     'Heroicons',
     'qrcode-generator',
     'emojilib',
-    'StevenBlack/hosts (porn-only list)',
+    'StevenBlack/hosts',
     'List of offensive words',
     'PeerChat sounds',
     'Start page wallpaper'
@@ -80,6 +80,39 @@ test('nothing in the app is under a copyleft license', async () => {
     const license = item.license.replace(/\(chosen from [^)]*\)/, '')
     assert.doesNotMatch(license, /\b(A|L)?GPL\b/i, item.name)
   }
+})
+
+// Each app lists the libraries it ships, and App Store guideline 2.3.10 turns
+// down an iOS app that names other mobile platforms.
+test('each app lists only its own platform', async () => {
+  const text = await read('assets/licenses/third-party-notices.txt')
+  const all = parseThirdPartyNotices(text)
+  const ios = parseThirdPartyNotices(text, 'ios')
+  const android = parseThirdPartyNotices(text, 'android')
+  const ids = (notices) => notices.sections.map((section) => section.id)
+
+  assert.deepEqual(ids(ios), ['peersky', 'app', 'engine', 'runtime', 'ios', 'content'])
+  assert.deepEqual(ids(android), ['peersky', 'app', 'engine', 'runtime', 'android', 'rust', 'content'])
+  for (const section of ios.sections) {
+    assert.doesNotMatch(section.title, /android|google play/i)
+    for (const item of section.data) assert.doesNotMatch(`${item.name} ${item.url}`, /android|google play/i, item.name)
+  }
+  const size = (notices, id) => notices.sections.find((section) => section.id === id)?.data.length || 0
+  assert.equal(ios.count, all.count - size(all, 'android') - size(all, 'rust'))
+  assert.equal(android.count, all.count - size(all, 'ios'))
+
+  const screen = await read('app/settings/Licenses.tsx')
+  assert.match(screen, /parseThirdPartyNotices\(await copy\.text\(\), Platform\.OS\)/)
+})
+
+// On iOS the asset stays inside the app bundle, which expo-file-system copies
+// from but will not read, so the screen first showed "Missing permission".
+test('the screen reads its own copy of the list, not the app bundle', async () => {
+  const screen = await read('app/settings/Licenses.tsx')
+  assert.match(screen, /new File\(Paths\.cache, `\$\{COPY_PREFIX\}\$\{asset\.hash \|\| 'bundled'\}\.txt`\)/)
+  assert.match(screen, /new File\(asset\.localUri\)\.copy\(copy\)/)
+  assert.match(screen, /await copy\.text\(\)/)
+  assert.doesNotMatch(screen, /new File\(asset\.localUri[^)]*\)\.text\(\)|asset\.uri\)/)
 })
 
 // A few notices run to hundreds of thousands of characters, which one text
