@@ -24,6 +24,15 @@ describe('p2pmd scientific templates', () => {
     assert.match(getP2pmdTemplate('technical-doc-md').content, /\| Endpoint \| Method \| Purpose \|/)
   })
 
+  // A template that shows an image from the web tells that site who opened
+  // it, and the image's licence travels with every note made from it.
+  it('loads nothing from the web', () => {
+    for (const template of P2PMD_TEMPLATES) {
+      assert.doesNotMatch(template.content, /!\[[^\]]*\]\(\s*https?:/i, template.id)
+      assert.doesNotMatch(template.content, /<img[^>]+src=["']?https?:/i, template.id)
+    }
+  })
+
   it('requires the IEEE marker at the start of a document', () => {
     assert.equal(hasIeeeMarker('  <!-- ieee -->\n\n# Paper'), true)
     assert.equal(hasIeeeMarker('# Paper\n\n<!-- ieee -->'), false)

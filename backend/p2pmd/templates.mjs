@@ -58,7 +58,12 @@ where $N_{ops}$ is total operations, $\\Delta t$ is elapsed time, and $\\eta$ is
 
 Lorem ipsum dolor sit amet, consectetur adipiscing elit. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
 
-![Fig. 1: Server-based network topology](https://upload.wikimedia.org/wikipedia/commons/thumb/f/fb/Server-based-network.svg/1280px-Server-based-network.svg.png)
+\`\`\`
+          Server
+        /   |    \\
+  Client  Client  Client
+\`\`\`
+*Fig. 1: Server-based network topology*
 
 \`\`\`
 Client --> Gateway --> Scheduler
