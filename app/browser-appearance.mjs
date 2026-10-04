@@ -37,6 +37,18 @@ export function resolveBrowserDarkMode (theme, systemColorScheme) {
   return systemColorScheme === 'dark'
 }
 
+/**
+ * The status bar's colour. Set to one colour, iOS kept it through a switch
+ * between light and dark in the system's settings, so it stayed dark on a dark
+ * page until PeerSky restarted. Following the system, iOS now picks it
+ * ('default'), and turns it with the system. A theme chosen in PeerSky still
+ * sets it, and Android always gets one, since its 'default' is light.
+ */
+export function getBrowserStatusBarStyle (platform, theme, isDark) {
+  if (platform === 'ios' && theme !== 'dark' && theme !== 'light') return 'default'
+  return isDark ? 'light-content' : 'dark-content'
+}
+
 export function formatBrowserAddress (address, showFullAddress) {
   const value = String(address || '')
   if (

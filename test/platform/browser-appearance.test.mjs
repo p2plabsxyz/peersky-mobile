@@ -4,10 +4,26 @@ import { describe, test } from 'node:test'
 import {
   BROWSER_PALETTES,
   formatBrowserAddress,
+  getBrowserStatusBarStyle,
   resolveBrowserDarkMode
 } from '../../app/browser-appearance.mjs'
 
 describe('browser appearance helpers', () => {
+  // A status bar set to one colour on iOS missed the system's switch between
+  // light and dark until PeerSky restarted. Following the system, iOS picks.
+  test('lets iOS colour the status bar when PeerSky follows the system', async () => {
+    assert.equal(getBrowserStatusBarStyle('ios', 'system', true), 'default')
+    assert.equal(getBrowserStatusBarStyle('ios', 'system', false), 'default')
+    assert.equal(getBrowserStatusBarStyle('ios', 'dark', true), 'light-content')
+    assert.equal(getBrowserStatusBarStyle('ios', 'light', false), 'dark-content')
+    assert.equal(getBrowserStatusBarStyle('android', 'system', true), 'light-content')
+    assert.equal(getBrowserStatusBarStyle('android', 'system', false), 'dark-content')
+
+    const app = await readFile(new URL('../../app/index.tsx', import.meta.url), 'utf8')
+    assert.doesNotMatch(app, /barStyle=\{browserIsDark/)
+    assert.equal(app.match(/barStyle=\{browserStatusBarStyle\}/g).length, 6)
+  })
+
   test('resolves explicit and system themes', () => {
     assert.equal(resolveBrowserDarkMode('dark', 'light'), true)
     assert.equal(resolveBrowserDarkMode('light', 'dark'), false)

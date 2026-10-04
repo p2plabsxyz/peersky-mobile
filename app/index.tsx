@@ -92,6 +92,7 @@ import {
 } from './browser-html.mjs'
 import {
   getBrowserPalette,
+  getBrowserStatusBarStyle,
   resolveBrowserDarkMode
 } from './browser-appearance.mjs'
 import { createBrowserAccessibilityScript } from './browser-accessibility.mjs'
@@ -3267,6 +3268,7 @@ export default function App () {
   const canBrowserGoForward = browserCanGoForward
   const browserIncognitoSession = getBrowserIncognitoSession(browserTabsState.tabs)
   const browserIsDark = resolveBrowserDarkMode(browserPreferences.theme, systemColorScheme)
+  const browserStatusBarStyle = getBrowserStatusBarStyle(Platform.OS, browserPreferences.theme, browserIsDark)
   const browserChrome = getBrowserPalette(browserIsDark)
   // P2PMD is written dark, so light is a set of overrides laid on top. Null
   // in dark mode means the arrays below collapse to the base style.
@@ -3456,7 +3458,7 @@ export default function App () {
       >
         <StatusBar
           backgroundColor={browserChrome.shell}
-          barStyle={browserIsDark ? 'light-content' : 'dark-content'}
+          barStyle={browserStatusBarStyle}
         />
         <View style={styles.browserShellContent}>
           <BookmarksScreen
@@ -3492,7 +3494,7 @@ export default function App () {
       >
         <StatusBar
           backgroundColor={browserChrome.shell}
-          barStyle={browserIsDark ? 'light-content' : 'dark-content'}
+          barStyle={browserStatusBarStyle}
         />
         <View style={styles.browserShellContent}>
           <HistoryScreen
@@ -3532,7 +3534,7 @@ export default function App () {
       >
         <StatusBar
           backgroundColor={browserChrome.shell}
-          barStyle={browserIsDark ? 'light-content' : 'dark-content'}
+          barStyle={browserStatusBarStyle}
         />
         <View style={styles.browserShellContent}>
           <DownloadsScreen
@@ -3569,7 +3571,7 @@ export default function App () {
       >
         <StatusBar
           backgroundColor={browserIsDark ? browserChrome.surface : browserChrome.shell}
-          barStyle={browserIsDark ? 'light-content' : 'dark-content'}
+          barStyle={browserStatusBarStyle}
         />
         <SafeAreaView
           edges={['top']}
@@ -3678,7 +3680,7 @@ export default function App () {
         <StatusBar
           hidden={isP2pmdLandscapeSlides}
           backgroundColor={browserIsDark ? '#1f2027' : '#ffffff'}
-          barStyle={browserIsDark ? 'light-content' : 'dark-content'}
+          barStyle={browserStatusBarStyle}
         />
         {!isP2pmdLandscapeSlides && <View style={[styles.p2pmdWorkspaceHeader, p2pmdTheme?.p2pmdWorkspaceHeader]}>
           <Text style={[styles.p2pmdWorkspaceTitle, p2pmdTheme?.p2pmdWorkspaceTitle]}>P2PMD</Text>
@@ -4039,7 +4041,7 @@ export default function App () {
     >
         <StatusBar
           backgroundColor={browserTopInsetColor}
-          barStyle={browserIsDark ? 'light-content' : 'dark-content'}
+          barStyle={browserStatusBarStyle}
         />
         <SafeAreaView
           edges={['top']}
