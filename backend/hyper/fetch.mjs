@@ -8,6 +8,7 @@ import {
   inlineHyperAssets
 } from './assets.mjs'
 import { startHyperAssetServer } from './asset-server.mjs'
+import { BLOCKED_DRIVE_MESSAGE, isBlockedDrive } from './blocked-drives.mjs'
 import {
   DEFAULT_HYPER_DISCOVERY_MAX_RETRY_DELAY,
   DEFAULT_HYPER_DISCOVERY_RETRIES,
@@ -81,6 +82,7 @@ export async function fetchHyper ({
 
   const target = parseHyperUrl(url)
   if (target.error) return { ok: false, error: target.error }
+  if (isBlockedDrive(target.driveAddress)) return { ok: false, status: 451, error: BLOCKED_DRIVE_MESSAGE }
   // Creating a named drive is hyper://localhost/?key=myapp, so the query has to
   // survive the trip. Reads never carried one.
   const requestUrl = createHyperUrl(target.driveAddress, target.pathname) + getHyperSearch(url)

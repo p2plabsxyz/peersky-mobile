@@ -68,4 +68,4 @@ This policy may be updated as PeerSky changes. The latest version is published i
 
 ## Contact
 
-For privacy questions or content-removal requests, email contact@p2plabs.xyz. To report harmful public content, [open a Report harmful content issue](https://github.com/p2plabsxyz/peersky-mobile/issues/new?template=content-report.yml).
+For privacy questions or content-removal requests, email contact@p2plabs.xyz. Copyright notices go to the same address; what to include is in the [Terms of Use](TERMS.md#copyright). To report harmful public content, [open a Report harmful content issue](https://github.com/p2plabsxyz/peersky-mobile/issues/new?template=content-report.yml).

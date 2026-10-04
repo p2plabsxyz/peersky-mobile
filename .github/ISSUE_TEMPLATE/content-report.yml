@@ -6,6 +6,8 @@ body:
     attributes:
       value: |
         Do not include private keys, passwords, personal addresses, or illegal media in this report. For sensitive reports, email contact@p2plabs.xyz instead.
+
+        For a copyright complaint, email contact@p2plabs.xyz as the [Terms of Use](https://github.com/p2plabsxyz/peersky-mobile/blob/main/TERMS.md#copyright) describe. A notice carries your name and address, which do not belong in a public issue.
   - type: input
     id: url
     attributes:

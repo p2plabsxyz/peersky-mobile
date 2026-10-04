@@ -41,6 +41,7 @@ import {
 } from './storage-core.mjs'
 import { refreshHyperRuntimeNetwork } from './network-refresh.mjs'
 import { shareDriveOpens } from './shared-drive-opens.mjs'
+import { blockReportedDrives } from './blocked-drives.mjs'
 import {
   decodesWithKey,
   linkedPrivateDriveKeyFor,
@@ -272,6 +273,7 @@ export async function getHyperRuntime () {
     storagePath = getHyperSdkStoragePath()
     sdkOpening = createSDK({ storage: storagePath })
       .then(shareDriveOpens)
+      .then(blockReportedDrives)
       .then(async (runtime) => {
         await startLANDiscovery(runtime)
         sdk = runtime
