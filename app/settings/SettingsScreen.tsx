@@ -29,6 +29,7 @@ import { DataClearing } from './DataClearing'
 import { General } from './General'
 import { Permissions } from './Permissions'
 import { Privacy } from './Privacy'
+import { Licenses } from './Licenses'
 import { P2PStorage } from './P2PStorage'
 import {
   SettingCopy,
@@ -69,6 +70,7 @@ export type SettingsPage =
   | 'link-device'
   | 'lan-discovery'
   | 'about'
+  | 'licenses'
 
 type StorageFileItem = {
   name: string
@@ -192,7 +194,6 @@ type SettingsScreenProps = {
 }
 
 const REPOSITORY_URL = 'https://github.com/p2plabsxyz/peersky-mobile'
-const LICENSE_URL = `${REPOSITORY_URL}/blob/main/LICENSE`
 const FEEDBACK_EMAIL = 'contact@p2plabs.xyz'
 
 const SETTINGS_PAGES: Array<{
@@ -294,6 +295,18 @@ export function SettingsScreen(props: SettingsScreenProps) {
         onOpenPage={(nextPage) => changePage(nextPage, 1)}
       />
     )
+  } else if (page === 'licenses') {
+    // A long list of its own, so it scrolls itself rather than inside the
+    // page's ScrollView.
+    content = (
+      <SettingsSubpage
+        title='Open-source licenses'
+        scrollable={false}
+        onBack={() => changePage('about', -1)}
+      >
+        <Licenses onOpenUrl={openUrl} />
+      </SettingsSubpage>
+    )
   } else {
     content = (
       <SettingsSubpage
@@ -324,7 +337,9 @@ export function SettingsScreen(props: SettingsScreenProps) {
           />
         )}
         {page === 'lan-discovery' && <LANDiscoveryTest onCallRpc={props.onCallRpc} />}
-        {page === 'about' && <AboutSettings onOpenUrl={openUrl} />}
+        {page === 'about' && (
+          <AboutSettings onOpenUrl={openUrl} onOpenLicenses={() => changePage('licenses', 1)} />
+        )}
       </SettingsSubpage>
     )
   }
@@ -355,7 +370,8 @@ export function SettingsScreen(props: SettingsScreenProps) {
     transition.stopAnimation()
     transition.setValue(reduceMotion ? 1 : 0)
     setTransitionDirection(-1)
-    setPage('main')
+    // The licenses open from About, so back returns there.
+    setPage(pageRef.current === 'licenses' ? 'about' : 'main')
     return true
   }, [props.closeOnBack, props.initialPage, reduceMotion, transition])
 
@@ -477,10 +493,12 @@ function SettingsHome({
 function SettingsSubpage({
   title,
   onBack,
+  scrollable = true,
   children
 }: {
   title: string
   onBack: () => void
+  scrollable?: boolean
   children: React.ReactNode
 }) {
   const isDark = useSettingsDarkMode()
@@ -503,9 +521,13 @@ function SettingsSubpage({
         </Pressable>
         <Text style={[styles.subpageTitle, isDark ? darkStyles.primaryText : null]}>{title}</Text>
       </View>
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
-        {children}
-      </ScrollView>
+      {scrollable
+        ? (
+          <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
+            {children}
+          </ScrollView>
+          )
+        : <View style={styles.scroll}>{children}</View>}
     </View>
   )
 }
@@ -688,7 +710,13 @@ async function withTimeout<T> (promise: Promise<T>, timeoutMs: number) {
 }
 
 
-function AboutSettings({ onOpenUrl }: { onOpenUrl: (url: string) => void }) {
+function AboutSettings({
+  onOpenUrl,
+  onOpenLicenses
+}: {
+  onOpenUrl: (url: string) => void
+  onOpenLicenses: () => void
+}) {
   const isDark = useSettingsDarkMode()
   // One address for everything: feedback, a bug, or content that needs taking
   // down. A GitHub account is not a fair thing to ask for any of those. The
@@ -714,7 +742,7 @@ function AboutSettings({ onOpenUrl }: { onOpenUrl: (url: string) => void }) {
             color={isDark ? BROWSER_PALETTES.dark.mutedText : '#8190a7'}
           />
         </Pressable>
-        <Pressable accessibilityRole='link' style={styles.linkRow} onPress={() => onOpenUrl(LICENSE_URL)}>
+        <Pressable accessibilityRole='button' style={styles.linkRow} onPress={onOpenLicenses}>
           <Text style={[styles.linkText, isDark ? darkStyles.primaryText : null]}>Open-source licenses</Text>
           <ChevronRightIcon
             width={16}

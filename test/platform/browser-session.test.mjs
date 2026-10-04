@@ -159,8 +159,8 @@ describe('browser session lifecycle', () => {
     // props.onOpenUrl is the raw one and names no page, so back from the link
     // lands wherever the tab was before instead of back in settings.
     assert.doesNotMatch(settings, /onOpenUrl=\{props\.onOpenUrl\}/)
-    // One per page that has a link on it: privacy, p2p storage, link device
-    // and about.
-    assert.equal((settings.match(/onOpenUrl=\{openUrl\}/g) || []).length, 4)
+    // One per page that has a link on it: privacy, p2p storage, link device,
+    // about and the open-source licenses.
+    assert.equal((settings.match(/onOpenUrl=\{openUrl\}/g) || []).length, 5)
   })
 })
