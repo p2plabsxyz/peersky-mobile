@@ -210,20 +210,20 @@ test('the date divider sits above the first message of its day', async () => {
 })
 
 // Only the host's editor showed the room's picture, so everyone else opened
-// the details and never saw it. Desktop shows it to everyone.
+// the details and never saw it. Desktop shows it to everyone, and now the
+// details are the same for everyone, the host too.
 test('room details show the room picture to everyone, not only the host', async () => {
   const { readFile } = await import('node:fs/promises')
   const screen = await readFile(new URL('../../app/peerchat/PeerChatScreen.tsx', import.meta.url), 'utf8')
   const details = screen.slice(screen.indexOf('visible={showRoomInfo}'), screen.indexOf('{!activeRoom.isDM && (\n              <View style={styles.roomProvenance}>'))
-  const member = details.slice(details.indexOf("Only the host's editor showed the room's picture"))
-  assert.match(member, /accessibilityLabel=\{`Picture of \$\{activeRoom\.name\}`\}/)
-  assert.match(member, /<Image source=\{\{ uri: activeRoom\.avatar \}\} style=\{styles\.roomInfoAvatar\} \/>/)
-  assert.match(member, /getRoomInitials\(activeRoom\.name\)/)
+  assert.doesNotMatch(details, /isHost/)
+  assert.match(details, /accessibilityLabel=\{`Picture of \$\{activeRoom\.name\}`\}/)
+  assert.match(details, /<Image source=\{\{ uri: activeRoom\.avatar \}\} style=\{styles\.roomInfoAvatar\} \/>/)
+  assert.match(details, /getRoomInitials\(activeRoom\.name\)/)
 })
 
 // A room's picture only ever showed small, with no way to see it full size as
-// desktop allows. Tapping it now opens the viewer, for the host too, whose
-// "Change room image" stays its own button.
+// desktop allows. Tapping it now opens the viewer.
 test('tapping a room picture shows it full size', async () => {
   const { readFile } = await import('node:fs/promises')
   const screen = await readFile(new URL('../../app/peerchat/PeerChatScreen.tsx', import.meta.url), 'utf8')
@@ -233,8 +233,6 @@ test('tapping a room picture shows it full size', async () => {
 
   const details = screen.slice(screen.indexOf('visible={showRoomInfo}'), screen.indexOf('{!activeRoom.isDM && (\n              <View style={styles.roomProvenance}>'))
   assert.match(details, /onPress=\{\(\) => viewRoomPicture\(activeRoom\.name, activeRoom\.avatar\)\}/)
-  assert.match(details, /onPress=\{\(\) => viewRoomPicture\(editRoomName\.trim\(\) \|\| activeRoom\.name, editRoomAvatar\)\}/)
-  assert.match(details, /<Pressable\s+accessibilityRole='button'\s+onPress=\{\(\) => chooseAvatar\(editRoomAvatar, setEditRoomAvatar\)\}\s+>\s+<Text style=\{\[styles\.memberMessage, \{ color: colors\.accent \}\]\}>Change room image<\/Text>/)
 })
 
 // A new room went to the very top of the list, then moved below the pinned
@@ -247,4 +245,14 @@ test('a created or joined room takes its place in the list at once', async () =>
   assert.match(router, /const room = await peerChat\.joinRoom\(parseJsonMessage\(req\.data\)\)\s+replyJson\(req, \{ ok: true, room, rooms: peerChat\.listRooms\(\) \}\)/)
   assert.match(screen, /setRooms\(\(current\) => response\.rooms \|\| \[response\.room as PeerChatRoom, \.\.\.current\]\)/)
   assert.equal((screen.match(/setRooms\(\(current\) => response\.rooms \|\| \[\n/g) || []).length, 2)
+})
+
+// Desktop says so on its create form, and the phone said nothing, then offered
+// an editor whose changes no device took.
+test('a group says what cannot change once it is made, and nobody edits it later', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const screen = await readFile(new URL('../../app/peerchat/PeerChatScreen.tsx', import.meta.url), 'utf8')
+  assert.match(screen, /Group name, picture, description and link cannot be edited after creation\./)
+  assert.match(screen, /Settings are fixed once the group is created\./)
+  assert.doesNotMatch(screen, /Save room details|saveRoomDetails|RPC_PEERCHAT_ROOM_UPDATE/)
 })

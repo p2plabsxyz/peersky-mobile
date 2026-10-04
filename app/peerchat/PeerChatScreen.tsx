@@ -91,7 +91,6 @@ import {
   RPC_PEERCHAT_ROOM_MUTE,
   RPC_PEERCHAT_ROOM_PIN,
   RPC_PEERCHAT_ROOM_REMOVE_MEMBER,
-  RPC_PEERCHAT_ROOM_UPDATE,
   RPC_PEERCHAT_ROOMS,
   RPC_PEERCHAT_REACT,
   RPC_PEERCHAT_SET_ACTIVE,
@@ -458,10 +457,6 @@ export function PeerChatScreen ({
   const [showRoomInfo, setShowRoomInfo] = useState(false)
   const pendingModalRef = useRef<(() => void) | null>(null)
   const pendingModalTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const [editRoomName, setEditRoomName] = useState('')
-  const [editRoomBio, setEditRoomBio] = useState('')
-  const [editRoomLink, setEditRoomLink] = useState('')
-  const [editRoomAvatar, setEditRoomAvatar] = useState<string | null>(null)
   const [memberSearchQuery, setMemberSearchQuery] = useState('')
   const [showComposerEmoji, setShowComposerEmoji] = useState(false)
   const [emojiSearchQuery, setEmojiSearchQuery] = useState('')
@@ -1109,10 +1104,6 @@ export function PeerChatScreen ({
     setIsSearching(false)
     setSearchQuery('')
     setShowRoomInfo(false)
-    setEditRoomName(room.name)
-    setEditRoomBio(room.bio || '')
-    setEditRoomLink(room.link || '')
-    setEditRoomAvatar(room.avatar || null)
     setMemberSearchQuery('')
     setShowComposerEmoji(false)
     setEmojiSearchQuery('')
@@ -1135,31 +1126,6 @@ export function PeerChatScreen ({
   function resetMessageScrollState () {
     isNearMessageBottomRef.current = true
     setShowScrollToLatest(false)
-  }
-
-  function saveRoomDetails () {
-    if (!activeRoom?.isHost || isBusy) return
-    void runAction(async () => {
-      const response = await callRpc(RPC_PEERCHAT_ROOM_UPDATE, {
-        roomKey: activeRoom.roomKey,
-        name: editRoomName,
-        bio: editRoomBio,
-        link: editRoomLink,
-        avatar: editRoomAvatar
-      })
-      if (!response.ok || !response.room || !response.rooms) {
-        throw new Error(response.error || 'Unable to save room details.')
-      }
-      if (!mountedRef.current) return
-      setActiveRoom(response.room)
-      setRooms(response.rooms)
-      setEditRoomName(response.room.name)
-      setEditRoomBio(response.room.bio || '')
-      setEditRoomLink(response.room.link || '')
-      setEditRoomAvatar(response.room.avatar || null)
-      setShowRoomInfo(false)
-      onStatus('PeerChat room details saved')
-    })
   }
 
   /**
@@ -2185,108 +2151,38 @@ export function PeerChatScreen ({
                 keyboardShouldPersistTaps='handled'
                 contentContainerStyle={styles.roomInfo}
               >
-            {activeRoom.isHost
-              ? (
-                <>
-                  <View style={styles.avatarEditor}>
-                    {editRoomAvatar
-                      ? (
-                        <Pressable
-                          accessibilityHint='Shows the picture full size'
-                          accessibilityLabel={`Picture of ${editRoomName.trim() || activeRoom.name}`}
-                          accessibilityRole='imagebutton'
-                          onPress={() => viewRoomPicture(editRoomName.trim() || activeRoom.name, editRoomAvatar)}
-                        >
-                          <Image source={{ uri: editRoomAvatar }} style={styles.avatarEditorImage} />
-                        </Pressable>
-                        )
-                      : (
-                        <Pressable
-                          accessibilityLabel='Choose a room image'
-                          accessibilityRole='button'
-                          onPress={() => chooseAvatar(editRoomAvatar, setEditRoomAvatar)}
-                        >
-                          <View style={[styles.avatarEditorImage, { backgroundColor: colors.accentSoft }]} />
-                        </Pressable>
-                        )}
-                    <Pressable
-                      accessibilityRole='button'
-                      onPress={() => chooseAvatar(editRoomAvatar, setEditRoomAvatar)}
-                    >
-                      <Text style={[styles.memberMessage, { color: colors.accent }]}>Change room image</Text>
-                    </Pressable>
-                  </View>
-                  <TextInput
-                    maxLength={80}
-                    onChangeText={setEditRoomName}
-                    placeholder='Room name'
-                    placeholderTextColor={colors.muted}
-                    style={[styles.input, { backgroundColor: colors.input, color: colors.text }]}
-                    value={editRoomName}
-                  />
-                  <TextInput
-                    maxLength={300}
-                    multiline
-                    onChangeText={setEditRoomBio}
-                    placeholder='Room description (optional)'
-                    placeholderTextColor={colors.muted}
-                    style={[styles.input, styles.bioInput, { backgroundColor: colors.input, color: colors.text }]}
-                    value={editRoomBio}
-                  />
-                  <TextInput
-                    autoCapitalize='none'
-                    autoCorrect={false}
-                    maxLength={512}
-                    onChangeText={setEditRoomLink}
-                    placeholder='https:// link (optional)'
-                    placeholderTextColor={colors.muted}
-                    style={[styles.input, { backgroundColor: colors.input, color: colors.text }]}
-                    value={editRoomLink}
-                  />
+            {/* The same for everyone, the person who made the room too: its
+                name, picture, description and link are set once, when it is
+                made, as on the desktop. No device takes a change to them
+                later. */}
+            <View style={styles.roomInfoIdentity}>
+              {activeRoom.avatar
+                ? (
                   <Pressable
-                    accessibilityRole='button'
-                    disabled={!editRoomName.trim() || isBusy}
-                    onPress={saveRoomDetails}
-                    style={[styles.roomInfoSave, { backgroundColor: colors.accent }, !editRoomName.trim() || isBusy ? styles.disabled : null]}
+                    accessibilityHint='Shows the picture full size'
+                    accessibilityLabel={`Picture of ${activeRoom.name}`}
+                    accessibilityRole='imagebutton'
+                    onPress={() => viewRoomPicture(activeRoom.name, activeRoom.avatar)}
                   >
-                    <Text style={styles.profileSaveText}>Save room details</Text>
+                    <Image source={{ uri: activeRoom.avatar }} style={styles.roomInfoAvatar} />
                   </Pressable>
-                </>
-                )
-              : (
-                <>
-                  {/* Only the host's editor showed the room's picture, so
-                      everyone else opened the details and never saw it. */}
-                  <View style={styles.roomInfoIdentity}>
-                    {activeRoom.avatar
-                      ? (
-                        <Pressable
-                          accessibilityHint='Shows the picture full size'
-                          accessibilityLabel={`Picture of ${activeRoom.name}`}
-                          accessibilityRole='imagebutton'
-                          onPress={() => viewRoomPicture(activeRoom.name, activeRoom.avatar)}
-                        >
-                          <Image source={{ uri: activeRoom.avatar }} style={styles.roomInfoAvatar} />
-                        </Pressable>
-                        )
-                      : (
-                        <View style={[styles.roomInfoAvatar, styles.roomInfoAvatarFallback, { backgroundColor: colors.accentSoft }]}>
-                          <Text style={[styles.roomInfoAvatarText, { color: colors.accent }]}>{getRoomInitials(activeRoom.name)}</Text>
-                        </View>
-                        )}
-                    <Text style={[styles.roomInfoTitle, { color: colors.text }]}>{activeRoom.name}</Text>
+                  )
+                : (
+                  <View style={[styles.roomInfoAvatar, styles.roomInfoAvatarFallback, { backgroundColor: colors.accentSoft }]}>
+                    <Text style={[styles.roomInfoAvatarText, { color: colors.accent }]}>{getRoomInitials(activeRoom.name)}</Text>
                   </View>
-                  {!!activeRoom.bio && <Text style={[styles.helper, { color: colors.muted }]}>{activeRoom.bio}</Text>}
-                  {!!activeRoom.link && (
-                    <Pressable accessibilityRole='link' onPress={() => onOpenUrl(activeRoom.link)}>
-                      <Text numberOfLines={1} style={[styles.roomInfoLink, { color: colors.accent }]}>{activeRoom.link}</Text>
-                    </Pressable>
                   )}
-                  {!activeRoom.bio && !activeRoom.link && (
-                    <Text style={[styles.helper, { color: colors.muted }]}>No room details shared.</Text>
-                  )}
-                </>
-                )}
+              <Text style={[styles.roomInfoTitle, { color: colors.text }]}>{activeRoom.name}</Text>
+            </View>
+            {!!activeRoom.bio && <Text style={[styles.helper, { color: colors.muted }]}>{activeRoom.bio}</Text>}
+            {!!activeRoom.link && (
+              <Pressable accessibilityRole='link' onPress={() => onOpenUrl(activeRoom.link)}>
+                <Text numberOfLines={1} style={[styles.roomInfoLink, { color: colors.accent }]}>{activeRoom.link}</Text>
+              </Pressable>
+            )}
+            {!activeRoom.bio && !activeRoom.link && (
+              <Text style={[styles.helper, { color: colors.muted }]}>No room details shared.</Text>
+            )}
             {!activeRoom.isDM && (
               <View style={styles.roomProvenance}>
                 <Text style={[styles.helper, { color: colors.muted }]}>
@@ -3364,7 +3260,13 @@ export function PeerChatScreen ({
                 placeholderTextColor={colors.muted}
                 style={[styles.input, styles.createActionInput, { backgroundColor: colors.input, color: colors.text }]}
               />
+              <Text style={[styles.helper, { color: colors.muted }]}>
+                Group name, picture, description and link cannot be edited after creation.
+              </Text>
               <Text style={[styles.actionSectionTitle, { color: colors.text }]}>Room moderation</Text>
+              <Text style={[styles.helper, { color: colors.muted }]}>
+                Settings are fixed once the group is created.
+              </Text>
               <Pressable
                 accessibilityRole='switch'
                 accessibilityState={{ checked: roomAbuseFilter }}
