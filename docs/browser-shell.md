@@ -147,6 +147,20 @@ saved in Permissions and its drives would stay on the phone. Drives opened in
 one still go through the app's Hyper node, which keeps their blocks like any
 other drive's until P2P data is cleared.
 
+A download from an incognito tab never sends the cookies normal tabs share,
+which would tell the site who it is. On Android it sends the tab's own, from
+its profile, while the tab is open. On iOS it sends none: the tab's WebKit
+store cannot be read from outside the WebView.
+
+## Camera, microphone and location
+
+A site asks before it gets the camera, the microphone or the location, with
+its own address in the question. iOS shows WebKit's prompt. On Android the
+app asks, through a patch to react-native-webview
+(`patches/react-native-webview+13.16.0.patch`): as shipped, the library gave
+them to any site once the app held the Android permission, as it does after a
+QR code scan.
+
 ## Native generation
 
 Native browser code is generated during Expo prebuild by the tracked config
