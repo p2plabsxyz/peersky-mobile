@@ -11,7 +11,70 @@
 @interface PeerSkyWebViewImpl : RNCWebViewImpl
 @property (nonatomic, copy) NSString *incognitoSession;
 @property (nonatomic, assign) BOOL forceDarkScheme;
+- (NSString *)hyperPageForURL:(NSURL *)url;
 @end
+
+static NSString *PeerSkyWithoutFragment(NSURL *url)
+{
+  NSURLComponents *components = [NSURLComponents componentsWithURL:url resolvingAgainstBaseURL:NO];
+  components.fragment = nil;
+  return components.URL.absoluteString ?: @"";
+}
+
+// A hyper:// page is loaded from the string the app fetched, under its own
+// address, as on Android, so location, relative links and storage belong to
+// that address rather than to about:blank. WebKit only renders a string under
+// an address whose scheme it can load, and this handler is what lets it load
+// hyper://. A page that asks for its own address again, as a script setting
+// location to it does, gets the same page. A page reaches the rest of its
+// drive through the app's bridge and the files inlined into it, so anything
+// else asked for here is not found, which is also what Android answers.
+@interface PeerSkyHyperSchemeHandler : NSObject <WKURLSchemeHandler>
+@end
+
+@implementation PeerSkyHyperSchemeHandler
+
+- (void)webView:(WKWebView *)webView startURLSchemeTask:(id<WKURLSchemeTask>)task
+{
+  NSURLRequest *request = task.request;
+  NSString *html = nil;
+  if ([request.URL isEqual:request.mainDocumentURL]) {
+    for (UIView *view = webView.superview; view; view = view.superview) {
+      if ([view isKindOfClass:[PeerSkyWebViewImpl class]]) {
+        html = [(PeerSkyWebViewImpl *)view hyperPageForURL:request.URL];
+        break;
+      }
+    }
+  }
+  NSData *body = [(html ?: @"Not found") dataUsingEncoding:NSUTF8StringEncoding];
+  NSHTTPURLResponse *response = [[NSHTTPURLResponse alloc]
+    initWithURL:request.URL
+    statusCode:html ? 200 : 404
+    HTTPVersion:@"HTTP/1.1"
+    headerFields:@{
+      @"Content-Type": html ? @"text/html; charset=utf-8" : @"text/plain; charset=utf-8",
+      @"Content-Length": [NSString stringWithFormat:@"%lu", (unsigned long)body.length]
+    }];
+  [task didReceiveResponse:response];
+  [task didReceiveData:body];
+  [task didFinish];
+}
+
+- (void)webView:(WKWebView *)webView stopURLSchemeTask:(id<WKURLSchemeTask>)task
+{
+}
+
+@end
+
+static PeerSkyHyperSchemeHandler *PeerSkySharedHyperSchemeHandler(void)
+{
+  static PeerSkyHyperSchemeHandler *handler;
+  static dispatch_once_t once;
+  dispatch_once(&once, ^{
+    handler = [PeerSkyHyperSchemeHandler new];
+  });
+  return handler;
+}
 
 // Incognito tabs share one store for as long as any of them is open, the way
 // they share one WebView profile on Android. react-native-webview gave every
@@ -55,7 +118,22 @@ static WKWebsiteDataStore *PeerSkyIncognitoStoreForSession(NSString *session)
     configuration.websiteDataStore = PeerSkyIncognitoStoreForSession(self.incognitoSession);
   }
   [[PeerSkyContentBlocker shared] configureWebView:configuration];
+  if (![configuration urlSchemeHandlerForURLScheme:@"hyper"]) {
+    [configuration setURLSchemeHandler:PeerSkySharedHyperSchemeHandler() forURLScheme:@"hyper"];
+  }
   return configuration;
+}
+
+// The page this WebView shows from a string, when the address asked for is
+// the one it was loaded under.
+- (NSString *)hyperPageForURL:(NSURL *)url
+{
+  id html = self.source[@"html"];
+  id base = self.source[@"baseUrl"];
+  if (![html isKindOfClass:[NSString class]] || ![base isKindOfClass:[NSString class]]) return nil;
+  NSURL *baseURL = [NSURL URLWithString:base];
+  if (!baseURL || !url) return nil;
+  return [PeerSkyWithoutFragment(baseURL) isEqualToString:PeerSkyWithoutFragment(url)] ? html : nil;
 }
 
 @end

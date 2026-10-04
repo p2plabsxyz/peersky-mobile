@@ -14,9 +14,7 @@ describe('browser HTML helpers', () => {
       headers: { 'content-type': 'text/html' }
     }, 'hyper://site/')
 
-    // The base tag goes first so relative URLs resolve against it, and it is
-    // what keeps hyper:// pages rendering on iOS, where WKWebView refuses a
-    // baseUrl with an unknown scheme.
+    // The base tag goes first so relative URLs resolve against it.
     assert.match(rendered, /<head><base href="hyper:\/\/site\/" \/><meta name="viewport"/)
     assert.match(rendered, /<body>Page<\/body>/)
 

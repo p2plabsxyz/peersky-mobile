@@ -299,6 +299,32 @@ describe('browser shell navigation helpers', () => {
     }
   })
 
+  // iOS reports a hyper:// page's own load, from the string the app fetched
+  // under its address, as a navigation. Taken over, it loaded the page again,
+  // and again.
+  test('lets a hyper:// page load under its own address, and keeps links and reloads for the app', () => {
+    const page = `hyper://${'ab'.repeat(32)}/docs/index.html`
+    const own = (requestUrl, navigationType, more = {}) => getBrowserRequestAction({
+      requestUrl,
+      currentSourceKind: 'hyper',
+      currentUrl: page,
+      navigationType,
+      ...more
+    })
+    assert.deepEqual(own(page, 'other'), { action: 'allow' })
+    assert.deepEqual(own(`${page}#install`, 'other'), { action: 'allow' })
+    // A link to it, a reload, a form or history still goes through the app.
+    for (const navigationType of ['click', 'reload', 'formsubmit', 'backforward', undefined]) {
+      assert.deepEqual(own(page, navigationType), { action: 'load-hyper', url: page })
+    }
+    // Another page, a web page's tab, or a frame never gets through.
+    const other = `hyper://${'cd'.repeat(32)}/`
+    assert.deepEqual(own(other, 'other'), { action: 'load-hyper', url: other })
+    assert.deepEqual(own(page, 'other', { currentSourceKind: 'web' }), { action: 'load-hyper', url: page })
+    assert.deepEqual(own(page, 'other', { currentUrl: '' }), { action: 'load-hyper', url: page })
+    assert.deepEqual(own(page, 'other', { isTopFrame: false }), { action: 'block' })
+  })
+
   test('knows a hyper site by its host, for the publishing permission', () => {
     const hex = 'ab'.repeat(32)
     const z32 = 'y'.repeat(52)
@@ -310,9 +336,10 @@ describe('browser shell navigation helpers', () => {
     assert.equal(formatHyperSiteForPrompt(hex), `${hex.slice(0, 8)}…${hex.slice(-4)}`)
   })
 
-  // iOS hyper pages have no base address at all, and Android names only the
-  // origin a message came from. Only an address elsewhere means the tab has
-  // left its site.
+  // iOS hyper pages had no address at all before PeerSkyWebView handled
+  // hyper://, and a build from before still says about:blank. Android names
+  // only the origin a message came from. Only an address elsewhere means the
+  // tab has left its site.
   test('lets a hyper tab use the bridge until it navigates somewhere else', () => {
     const site = 'ab'.repeat(32)
     const url = `hyper://${site}/index.html`

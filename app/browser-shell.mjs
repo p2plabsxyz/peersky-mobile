@@ -107,6 +107,15 @@ export function isHyperUrl (targetUrl) {
   return /^hyper:\/\//i.test(String(targetUrl || ''))
 }
 
+// One page, whatever part of it the address points at.
+function pageAddress (value) {
+  return String(value || '').split('#')[0]
+}
+
+function isSameHyperDocument (url, currentUrl) {
+  return Boolean(currentUrl) && pageAddress(url) === pageAddress(currentUrl)
+}
+
 export function getBrowserWebViewKey (tabId, sourceKind) {
   return `${tabId}:${sourceKind}`
 }
@@ -207,7 +216,13 @@ export function getBrowserForwardState (state) {
   return buildBrowserState(state.history, state.historyIndex + 1)
 }
 
-export function getBrowserRequestAction ({ requestUrl, currentSourceKind, isTopFrame = true }) {
+export function getBrowserRequestAction ({
+  requestUrl,
+  currentSourceKind,
+  currentUrl = '',
+  navigationType = '',
+  isTopFrame = true
+}) {
   const url = String(requestUrl || '')
 
   if (url.length > MAX_BROWSER_URL_LENGTH) {
@@ -222,6 +237,16 @@ export function getBrowserRequestAction ({ requestUrl, currentSourceKind, isTopF
     // A hyper:// frame cannot load in place, and turning it into a navigation
     // let any embed or ad take the whole tab to a page of its choosing.
     if (!isTopFrame) return { action: 'block' }
+    // The page itself, loaded from the string the app fetched under its own
+    // address. iOS reports that load like any other, and taking it over would
+    // load the page again, and again. A link or a reload is still the app's.
+    if (
+      currentSourceKind === 'hyper' &&
+      navigationType === 'other' &&
+      isSameHyperDocument(url, currentUrl)
+    ) {
+      return { action: 'allow' }
+    }
     return { action: 'load-hyper', url }
   }
 

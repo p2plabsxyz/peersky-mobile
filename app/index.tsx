@@ -2364,7 +2364,7 @@ export default function App () {
   function onBrowserShouldStartLoad (
     tabId: string,
     expectedEntry: BrowserHistoryEntry,
-    request: { url?: string, isTopFrame?: boolean }
+    request: { url?: string, isTopFrame?: boolean, navigationType?: string }
   ) {
     const currentTab = browserTabsStateRef.current.tabs.find((tab) => tab.id === tabId)
     if (!currentTab || currentTab.history[currentTab.historyIndex] !== expectedEntry) return false
@@ -2372,6 +2372,8 @@ export default function App () {
     const action = getBrowserRequestAction({
       requestUrl: request.url,
       currentSourceKind: expectedEntry.source.kind,
+      currentUrl: expectedEntry.source.kind === 'hyper' ? expectedEntry.source.baseUrl : '',
+      navigationType: request.navigationType,
       isTopFrame: request.isTopFrame !== false
     })
     const isActive = browserTabsStateRef.current.activeTabId === tabId
@@ -4784,12 +4786,12 @@ export default function App () {
                 ? { uri: entry.source.uri }
                 : {
                     html: entry.source.html,
-                    // iOS refuses to render HTML whose baseUrl uses an unknown
-                    // scheme, so hyper:// pages came up blank there. The base is
-                    // carried by a <base href> tag in the document instead.
-                    baseUrl: entry.source.kind === 'hyper' && Platform.OS !== 'ios'
-                      ? entry.source.baseUrl
-                      : undefined
+                    // A hyper:// page is shown under its own address, so its
+                    // location, links and storage are its own. iOS renders it
+                    // only because PeerSkyWebView handles hyper:// (see
+                    // PeerSkyWebViewManager.m.template); before that it was
+                    // about:blank there.
+                    baseUrl: entry.source.kind === 'hyper' ? entry.source.baseUrl : undefined
                   }}
               allowsFullscreenVideo={true}
               // WKWebView refuses inline HTML5 video on iPhone unless this is

@@ -37,11 +37,14 @@ opened on both phones:
   An address set from script later, or added with `innerHTML`, gets the same
   signed link (see below), and so does `fetch()` of an image or a video.
 
-One difference on iOS: WebKit will not render a page whose base address uses a
-scheme it does not know, so the page carries its address in a `<base>` tag and
-`location` reads `about:blank`. Relative links, `fetch()` and
-`document.baseURI` all resolve against the drive. Script that builds addresses
-from `location.href` does not. Android pages see their `hyper://` address.
+Pages see their own `hyper://` address in `location` on both platforms. WebKit
+only renders a page under an address whose scheme it can load, so on iOS the
+browser's WebView has a handler for `hyper://`
+(`plugins/templates/PeerSkyWebViewManager.m.template`). It answers a page's own
+address with the page, as when a script sets `location` to it, and anything
+else with 404: the rest of a drive reaches the page through the bridge and the
+signed links above, the same as on Android. Before this, iOS pages read
+`about:blank` from `location`.
 
 - **Writes ask first.** The first time a site tries to create a drive or save a
   file, PeerSky asks whether it may publish. The answer is kept per site and can
