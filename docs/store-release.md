@@ -73,9 +73,17 @@ the app and in `TERMS.md`.
   PeerChat, the app in the background, a message arriving, and the ongoing
   notification. Nothing else declares a foreground service type: the media
   playback one is blocked, because PeerTunes plays through its WebView.
-- **Data safety.** No data collected or shared. Data is encrypted in transit.
-  People can delete their data in the app (Delete PeerChat profile, and Settings,
-  P2P Data, Clear all P2P data).
+- **Data safety.** We collect and share nothing ourselves, but the QR scanner
+  on Android is Google's ML Kit (through expo-camera), and ML Kit sends Google
+  its own diagnostics: device model and OS version, the app's package and
+  version, a per-installation identifier, latency and error codes. Google says
+  it is encrypted in transit and not passed on
+  ([ML Kit data disclosure](https://developers.google.com/ml-kit/android-data-disclosure)).
+  Declare it as collected, not shared, for analytics: App info and performance
+  (Diagnostics) and Device or other IDs. The iOS app has no ML Kit, so App
+  Privacy stays Data Not Collected. People can delete their data
+  in the app (Delete PeerChat profile, and Settings, P2P Data, Clear all P2P
+  data).
 - **Child safety standards.** Social apps have to publish them. Point to
   `TERMS.md` (PeerChat rules) and the Children section of `PRIVACY.md`, with
   contact@p2plabs.xyz as the point of contact.
