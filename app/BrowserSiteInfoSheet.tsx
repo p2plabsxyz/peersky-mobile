@@ -17,13 +17,9 @@ type BrowserSiteInfoSheetProps = {
 }
 
 /**
- * What the shield in the address bar means, in words.
- *
- * Content blocking is stated rather than counted. On iOS the rules are compiled
- * into WebKit, which refuses those requests inside the engine and reports
- * nothing back, and on Android the native client answers them without telling
- * anyone. Neither platform hands out a number, so a number here would be
- * invented, and an invented one on a privacy screen is worse than none.
+ * What the shield in the address bar means, in words. Blocking is stated, not
+ * counted: iOS blocks inside WebKit and Android in the native client, and
+ * neither reports a number, so any count here would be made up.
  */
 export function BrowserSiteInfoSheet ({
   blockingEnabled,

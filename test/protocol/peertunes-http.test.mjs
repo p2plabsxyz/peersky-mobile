@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import http from 'node:http'
+import { readFile } from 'node:fs/promises'
 import * as commands from '../../backend/rpc/commands.mjs'
 import {
   HYPER_BRIDGE_SCRIPT,
@@ -16,15 +17,15 @@ describe('PeerTunes loopback server with injectable Node server', () => {
   let server
   let localUrl
   let fetchCalls
-  let keptOffline
+  let refreshed
 
   beforeEach(async () => {
     fetchCalls = []
-    keptOffline = []
+    refreshed = []
     server = createPeerTunesHttpServer({
       httpImpl: http,
       fetch: createFakeHyperFetch(fetchCalls),
-      keepOffline: (url) => keptOffline.push(url)
+      refreshNetwork: async (url) => { refreshed.push(url) }
     })
     localUrl = await listen(server)
   })
@@ -171,11 +172,18 @@ describe('PeerTunes loopback server with injectable Node server', () => {
     const rebound = await requestWithHeaders(localUrl, '/', { host: 'evil.example' })
     assert.equal(rebound.status, 403)
 
+    // Nor another server on this phone: a P2PMD room or a Holesail tunnel can
+    // be serving a page someone else wrote.
+    const otherLoopback = await requestWithHeaders(localUrl, '/', { origin: 'http://127.0.0.1:41999' })
+    assert.equal(otherLoopback.status, 403)
+
     // None of those reached the hyper layer.
     assert.deepEqual(fetchCalls, [])
 
     const sameOrigin = await requestWithHeaders(localUrl, '/', { 'sec-fetch-site': 'same-origin' })
     assert.equal(sameOrigin.status, 200)
+    const ownOrigin = await requestWithHeaders(localUrl, '/', { origin: localUrl })
+    assert.equal(ownOrigin.status, 200)
   })
 
   it('keeps proxied drive content unreadable by other sites and unrenderable', async () => {
@@ -310,26 +318,26 @@ describe('PeerTunes loopback server with injectable Node server', () => {
     assert.equal(fetchCalls.length, 1)
   })
 
-  it('pins an imported folder for offline as soon as its listing is served', async () => {
-    // Importing a playlist is exactly this request, so this is the moment the
-    // tracks get kept. An offline music app that only streams is not offline.
-    const folder = 'hyper://abc/music/'
-    const response = await fetch(`${localUrl}/hyper/asset?url=${encodeURIComponent(folder)}`, {
+  // A drive this phone has never read says "Peers Not Found" until a peer
+  // connects. The first add of a new drive used to fail on that, and the
+  // second worked.
+  it('waits for peers on a drive it has not read before', async () => {
+    const response = await fetch(`${localUrl}/hyper/asset?url=${encodeURIComponent('hyper://cold/')}`, {
       headers: { accept: 'application/json' }
     })
 
     assert.equal(response.status, 200)
-    assert.deepEqual(keptOffline, [folder])
+    assert.deepEqual(await response.json(), ['Found.mp3'])
+    assert.equal(fetchCalls.filter((call) => call.url === 'hyper://cold/').length, 3)
+    assert.deepEqual(refreshed, ['hyper://cold/', 'hyper://cold/'])
+  })
 
-    // Playing a track must not pin anything on its own; the folder already did.
-    await fetch(`${localUrl}/hyper/asset?url=${encodeURIComponent('hyper://abc/music/01 Song.mp3')}`)
-    assert.deepEqual(keptOffline, [folder])
-
-    // And a listing that failed upstream pins nothing.
-    await fetch(`${localUrl}/hyper/asset?url=${encodeURIComponent('hyper://abc/missing/')}`, {
-      headers: { accept: 'application/json' }
-    })
-    assert.deepEqual(keptOffline, [folder])
+  // Starting a download of the whole folder from here competed with the reads
+  // an import was still making, and nested folders came back empty. The page
+  // asks for it once the import is done.
+  it('never starts a download on its own when a listing is served', async () => {
+    const source = await readFile(new URL('../../backend/peertunes/server.mjs', import.meta.url), 'utf8')
+    assert.doesNotMatch(source, /keepHyperOffline|keepOffline/)
   })
 
   it('refuses a listing that would not fit in memory', async () => {
@@ -441,6 +449,26 @@ function createFakeHyperFetch (calls) {
           'content-length': String(bytes.byteLength)
         }),
         body: (async function * () { yield bytes })()
+      }
+    }
+
+    if (url === 'hyper://cold/') {
+      const attempt = calls.filter((call) => call.url === url).length
+      if (attempt < 3) {
+        return {
+          ok: false,
+          status: 404,
+          statusText: 'Not Found',
+          headers: new Headers(),
+          body: (async function * () { yield new TextEncoder().encode('Peers Not Found') })()
+        }
+      }
+      return {
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        headers: new Headers({ 'content-type': 'application/json; charset=utf-8' }),
+        text: async () => JSON.stringify(['Found.mp3'])
       }
     }
 

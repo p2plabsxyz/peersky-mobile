@@ -76,6 +76,8 @@ export function BrowserMediaSheet ({
           <WebView
             javaScriptEnabled={false}
             originWhitelist={['http://*', 'https://*']}
+            // Left unset, a swipe stops dead on iOS.
+            decelerationRate='normal'
             source={{ uri: target.mediaUrl }}
             style={styles.previewWebView}
           />

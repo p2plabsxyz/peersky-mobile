@@ -11,6 +11,7 @@ export const DEFAULT_BROWSER_PREFERENCES = {
   enforceManualPageZoom: false,
   externalLinkBehavior: 'ask',
   forceDarkWebsites: false,
+  publishingSites: {},
   searchEngine: 'duckduckgo',
   showFullAddress: false,
   theme: 'system',
@@ -19,6 +20,8 @@ export const DEFAULT_BROWSER_PREFERENCES = {
 }
 
 export const ADDRESS_BAR_POSITIONS = ['top', 'bottom']
+export const PUBLISHING_DECISIONS = ['allow', 'block']
+export const MAX_PUBLISHING_SITES = 200
 export const BROWSER_THEMES = ['system', 'light', 'dark']
 export const WEBSITE_TEXT_SCALES = [80, 100, 120, 150]
 
@@ -61,6 +64,7 @@ export function parseBrowserPreferences (serialized) {
     forceDarkWebsites: typeof value?.forceDarkWebsites === 'boolean'
       ? value.forceDarkWebsites
       : DEFAULT_BROWSER_PREFERENCES.forceDarkWebsites,
+    publishingSites: normalizePublishingSites(value?.publishingSites),
     searchEngine: SEARCH_ENGINES.some((engine) => engine.id === value?.searchEngine)
       ? value.searchEngine
       : DEFAULT_BROWSER_PREFERENCES.searchEngine,
@@ -77,6 +81,20 @@ export function parseBrowserPreferences (serialized) {
       ? value.youtubeAdBlockingEnabled
       : DEFAULT_BROWSER_PREFERENCES.youtubeAdBlockingEnabled
   }
+}
+
+/**
+ * Which hyper:// sites may publish from this phone, by the host in their
+ * address, as the person answered when each one first asked.
+ */
+export function normalizePublishingSites (value) {
+  const sites = {}
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return sites
+  for (const [siteId, decision] of Object.entries(value)) {
+    if (Object.keys(sites).length >= MAX_PUBLISHING_SITES) break
+    if (/^([0-9a-f]{64}|[a-z0-9]{52})$/.test(siteId) && PUBLISHING_DECISIONS.includes(decision)) sites[siteId] = decision
+  }
+  return sites
 }
 
 export function serializeBrowserPreferences (preferences) {

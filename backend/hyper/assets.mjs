@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto'
 import b4a from 'b4a'
 
 export const MAX_INLINE_ASSETS = 32
@@ -155,10 +156,19 @@ export function rewriteHyperDownloadAttributes (html, baseUrl, assetBaseUrl, aut
   })
 }
 
+/**
+ * The asset server's secret never reaches a page. Each link carries a
+ * signature over its own address instead, so a page can fetch what it was
+ * handed and nothing else: not another drive, and not a private one.
+ */
+export function signHyperAssetUrl (secret, assetUrl) {
+  return createHmac('sha256', String(secret)).update(String(assetUrl)).digest('hex')
+}
+
 export function createProxyAssetUrl (assetBaseUrl, assetUrl, authToken, downloadName) {
   if (!authToken) throw new Error('Missing Hyper asset proxy token')
   const params = [
-    `token=${encodeURIComponent(authToken)}`,
+    `token=${signHyperAssetUrl(authToken, assetUrl)}`,
     `url=${encodeURIComponent(assetUrl)}`
   ]
   if (downloadName !== undefined) {

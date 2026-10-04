@@ -1,12 +1,10 @@
 # Holesail runtime (mobile)
 
-PeerSky Mobile includes a minimal Holesail runtime inside the Bare worklet for protocol-level testing and integration. This document explains what is included, how the app communicates with the runtime, and how to run a practical smoke test.
-
-> Scope: this is Holesail protocol/runtime integration only. It is not the final p2pmd app UX.
+PeerSky Mobile runs Holesail inside the Bare worklet. P2PMD notes travel over it: the phone hosting a note runs a live session in front of its room server, and each guest runs a client session. This page covers the tunnel itself; [P2PMD](p2pmd.md) covers the editor.
 
 The runtime check page at `peersky://holesail/` exists in development builds
 only. It is not listed on `peersky://p2p`, and a release build does not answer
-the address. The tunnel itself still ships: P2PMD notes travel over it.
+the address.
 
 ## What is implemented
 
@@ -53,11 +51,11 @@ the address. The tunnel itself still ships: P2PMD notes travel over it.
 
 ## Architecture (key files)
 
-- `backend/backend.mjs` - Bare entry and shutdown lifecycle
+- `backend/main.mjs` - worklet startup and shutdown
 - `backend/rpc/commands.mjs` - RPC command IDs
 - `backend/rpc/router.mjs` - RPC command routing
 - `backend/holesail/session.mjs` - Holesail session lifecycle + validation + transition guard
-- `app/index.tsx` - RN runtime test UI (Holesail tab)
+- `app/index.tsx` - the runtime check page, development builds only
 
 ## RPC / API contract
 
@@ -82,6 +80,3 @@ the address. The tunnel itself still ships: P2PMD notes travel over it.
 - Session transitions are serialized via a transition guard.
 - This prevents overlapping `start/connect/stop` calls from leaking or racing multiple sessions.
 - On startup/connect failures, partial session state is cleared before bubbling the error.
-
-> [!IMPORTANT]
-> This Holesail runtime is currently intended for protocol verification and staged integration work. Keep production hardening, automated tests, and final UX/p2pmd wiring as follow-up milestones.

@@ -3,16 +3,12 @@ import { PRE_JOINED_PEERCHAT_ROOM_KEY } from './rooms.mjs'
 /**
  * Who may remove people from a room, and who has been removed.
  *
- * There is no server, so "removed" can only mean what every honest client
- * agrees to do. What makes that safe rather than a free-for-all is that a
- * connection already proves who is on the other end: hyperswarm's handshake
- * gives each side the other's public key. So a removal can be checked against
- * the connection it arrived on, with no signing to build.
- *
- * The room's own record of the creator is only the first 8 characters of that
- * key. Thirty-two bits is short enough to grind a matching key for in minutes,
- * so it is a display name, never the thing a removal is checked against. The
- * full key is.
+ * With no server, "removed" is what every honest client agrees to do. The
+ * hyperswarm handshake gives each side the other's public key, so a removal is
+ * checked against the connection it arrived on, with no signing needed. The
+ * room records only the first 8 characters of the creator's key, and a match
+ * for 32 bits can be ground in minutes, so that is only for display. Removals
+ * check the full key.
  */
 
 const CREATOR_KEY_PATTERN = /^[a-f0-9]{64}$/
@@ -22,15 +18,11 @@ const PEER_ID_PATTERN = /^[a-f0-9]{8}$/
 export const MAX_PEERCHAT_ROOM_BANS = 512
 
 /**
- * Creator keys that ship with the app.
- *
- * P2P Republic already existed before any of this, so its record carries only
- * the short creator id, and nothing announced over the network could be trusted
- * to fill the rest in. Pinning it here settles that for every copy of PeerSky
- * at once: no guessing, no first-one-to-arrive-wins.
- *
- * A public key is public. It is what peers hand each other on every connection,
- * and pinning only works if it ships, so this belongs in the source.
+ * Creator keys that ship with the app. P2P Republic predates creator keys, so
+ * its record has only the short id. Nothing announced over the network can be
+ * trusted to fill in the rest, so the key is pinned here rather than taken from
+ * whoever announces first. A public key is safe in the source: peers hand it
+ * to each other on every connection.
  */
 export const PINNED_PEERCHAT_CREATOR_KEYS = Object.freeze({
   // Read off the device that runs P2P Republic with scripts/creator-key.mjs in

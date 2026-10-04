@@ -1,6 +1,7 @@
 #import <React/RCTBridgeModule.h>
 #import <LinkPresentation/LinkPresentation.h>
 #import <UIKit/UIKit.h>
+#import <objc/runtime.h>
 
 // iOS builds the header of the share sheet from the item being shared. For a
 // plain string it has nothing to draw, and for a hyper:// link it cannot fetch
@@ -72,6 +73,30 @@
 
 @end
 
+// Answers the promise once the Files picker closes, whichever way it closes.
+// Kept alive by the picker it serves, which holds no strong delegate itself.
+@interface PeerSkySaveToFilesDelegate : NSObject <UIDocumentPickerDelegate>
+@property (nonatomic, copy) RCTPromiseResolveBlock resolve;
+@end
+
+@implementation PeerSkySaveToFilesDelegate
+
+- (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls
+{
+  if (self.resolve) self.resolve(@{ @"action": @"saved" });
+  self.resolve = nil;
+}
+
+- (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)controller
+{
+  if (self.resolve) self.resolve(@{ @"action": @"cancelled" });
+  self.resolve = nil;
+}
+
+@end
+
+static char PeerSkySaveToFilesDelegateKey;
+
 @interface PeerSkyShare : NSObject <RCTBridgeModule>
 @end
 
@@ -132,6 +157,36 @@ RCT_EXPORT_METHOD(share:(NSString *)text
     };
 
     [presenter presentViewController:sheet animated:YES completion:nil];
+  });
+}
+
+// A download saved into Files, wherever the reader picks: On My iPhone, iCloud
+// Drive, or anywhere else. The app's own folder stays out of Files, since it
+// holds the identity and the drives.
+RCT_EXPORT_METHOD(saveToFiles:(NSString *)fileUri
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+{
+  NSURL *url = [NSURL URLWithString:fileUri];
+  if (!url.isFileURL || ![NSFileManager.defaultManager fileExistsAtPath:url.path]) {
+    reject(@"missing_file", @"That download is no longer on this phone.", nil);
+    return;
+  }
+
+  dispatch_async(dispatch_get_main_queue(), ^{
+    UIViewController *presenter = [PeerSkyShare topViewController];
+    if (!presenter) {
+      reject(@"no_presenter", @"No view controller to present from.", nil);
+      return;
+    }
+
+    UIDocumentPickerViewController *picker =
+      [[UIDocumentPickerViewController alloc] initForExportingURLs:@[url] asCopy:YES];
+    PeerSkySaveToFilesDelegate *delegate = [PeerSkySaveToFilesDelegate new];
+    delegate.resolve = resolve;
+    picker.delegate = delegate;
+    objc_setAssociatedObject(picker, &PeerSkySaveToFilesDelegateKey, delegate, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    [presenter presentViewController:picker animated:YES completion:nil];
   });
 }
 

@@ -1,6 +1,5 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { readZipEntries } from './zip.mjs'
 import { PEERCHAT_INCOMING_FILE } from '../peerchat/device-link.mjs'
 import { P2PMD_INCOMING_FILE } from '../p2pmd/constants.mjs'
 import {
@@ -14,8 +13,6 @@ export const RESTORE_STAGING_DIR = '.peersky-restore-staging'
 export const RESTORE_PREVIOUS_DIR = '.peersky-restore-previous'
 export const RESTORE_TRASH_DIR = '.peersky-restore-trash'
 const RESTORE_JOURNAL = 'journal.json'
-
-const SKIP_ENTRIES = new Set(['manifest.json', 'manifest.mjson'])
 
 // What the phone keeps from a desktop identity transfer: the identity record,
 // the private drives, which private-drive-import adopts after the swap, the
@@ -65,53 +62,6 @@ export function classifyDesktopEntry (name) {
   return 'unknown'
 }
 
-/**
- * Unpacks a decrypted desktop identity transfer into a staging folder. Nothing
- * on the phone changes until commitStagedRestore moves it into place.
- */
-export async function restoreIdentityFromBackup (innerZipBytes, stagingPath) {
-  const entries = readZipEntries(innerZipBytes)
-  let restoredFiles = 0
-
-  mkdirSync(stagingPath, { recursive: true })
-
-  for (const entry of entries) {
-    const safeName = normalizeZipEntryName(entry.name)
-    if (!safeName || SKIP_ENTRIES.has(safeName)) continue
-
-    const plainName = safeName.replace(/\/$/, '')
-    const action = classifyDesktopEntry(plainName)
-    if (action === 'refuse') throw new Error('Refusing to restore device-key.json from backup')
-    if (action === 'unknown') throw new Error(`Refusing to restore unknown file: ${plainName}`)
-    if (action === 'ignore') continue
-
-    if (entry.isDirectory) {
-      mkdirSync(join(stagingPath, plainName), { recursive: true })
-      continue
-    }
-
-    if (action === 'convert') {
-      const target = CONVERTED_FILES.get(plainName)
-      const converted = target.convert(entry.bytes)
-      if (!converted) continue
-      writeFileSync(join(stagingPath, target.name), converted)
-      restoredFiles += 1
-      continue
-    }
-
-    const targetPath = join(stagingPath, plainName)
-    mkdirSync(getDirName(targetPath), { recursive: true })
-    writeFileSync(targetPath, entry.bytes)
-    restoredFiles += 1
-  }
-
-  if (restoredFiles === 0) {
-    throw new Error('Decrypted backup did not contain any restorable files')
-  }
-
-  return { restoredFiles, names: listStagedNames(stagingPath) }
-}
-
 export function listStagedNames (stagingPath) {
   try {
     return readdirSync(stagingPath).filter((name) => !name.startsWith('.')).sort()
@@ -123,19 +73,14 @@ export function listStagedNames (stagingPath) {
 /**
  * Moves each staged top-level entry into storage, replacing what was there.
  * Entries in `replace` are cleared even when the restore has none of its own,
- * for data that only makes sense beside something being restored.
+ * for data that only makes sense beside something being restored. Nothing
+ * else is touched: storage is also the app's documents, with bookmarks,
+ * history, settings and downloads.
  *
- * Everything else in storage is left exactly where it is. This used to rename
- * the whole storage folder away and keep a short list of device files, and
- * that folder is the app's documents: bookmarks, history, settings and
- * downloads all went with it.
- *
- * All or nothing. A failed move puts back the ones already made. If the app
- * is killed part way, a journal written before the first move lets the next
- * start undo it (recoverInterruptedRestore). Once every entry is in place the
- * old copies are renamed to a trash folder, which is the step that marks the
- * restore finished: deleting them can take a while, and a crash during that
- * must not look like a restore to undo.
+ * All or nothing. A failed move puts back the ones already made, and a journal
+ * written before the first move lets the next start undo a killed restore
+ * (recoverInterruptedRestore). Renaming the old copies to a trash folder marks
+ * it finished, so a crash while deleting them is not undone as a restore.
  */
 export function commitStagedRestore ({ storagePath, stagingPath, names, replace = [] }) {
   if (!storagePath || !stagingPath || !Array.isArray(names) || !existsSync(stagingPath)) {
@@ -235,26 +180,4 @@ function assertTopLevelName (name) {
     throw new Error(`Refusing to restore ${value || 'an unnamed entry'}`)
   }
   return value
-}
-
-function normalizeZipEntryName (name) {
-  const slashNormalized = String(name || '').replace(/\\/g, '/')
-  const isDirectory = slashNormalized.endsWith('/')
-  const normalized = slashNormalized.replace(/^\/+/, '').replace(/\/+$/, '')
-  if (!normalized) return ''
-
-  const parts = []
-  for (const part of normalized.split('/')) {
-    if (!part || part === '.') continue
-    if (part === '..') throw new Error('Backup contains illegal path traversal entries')
-    parts.push(part)
-  }
-
-  const safeName = parts.join('/')
-  return isDirectory ? `${safeName}/` : safeName
-}
-
-function getDirName (filepath) {
-  const separatorIndex = Math.max(filepath.lastIndexOf('/'), filepath.lastIndexOf('\\'))
-  return separatorIndex === -1 ? '.' : filepath.slice(0, separatorIndex)
 }

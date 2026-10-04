@@ -3,7 +3,6 @@ import {
   RPC_HOLESAIL_START_LIVE,
   RPC_HOLESAIL_STATUS,
   RPC_HOLESAIL_STOP,
-  RPC_HYPER_CREATE_DRIVE,
   RPC_HYPER_FETCH,
   RPC_HYPER_INIT,
   RPC_HYPER_LIBRARY_LIST,
@@ -48,6 +47,7 @@ import {
   RPC_PEERCHAT_ROOMS,
   RPC_PEERCHAT_SNAPSHOT,
   RPC_PEERCHAT_UNBLOCK,
+  RPC_PEERCHAT_DELETE_PROFILE,
   RPC_PEERCHAT_ROOM_REMOVE_MEMBER,
   RPC_PEERCHAT_ROOM_RESTORE_MEMBER,
   RPC_PEERCHAT_SEND,
@@ -84,7 +84,7 @@ import {
   stopOutgoingTransfer
 } from '../backup/link-device.mjs'
 
-import { createDrive, publishMarkdownDocument, readHyperFile, uploadHyperFile } from '../hyper/drive.mjs'
+import { publishMarkdownDocument, readHyperFile, uploadHyperFile } from '../hyper/drive.mjs'
 import { listHyperdriveLocation, uploadHyperdriveFile } from '../hyper/library.mjs'
 import { fetchHyper } from '../hyper/fetch.mjs'
 import {
@@ -117,18 +117,12 @@ import {
   getP2pmdRoomStatus,
   joinP2pmdRoom
 } from '../p2pmd/room.mjs'
-import { getMaxDocumentLength } from '../p2pmd/document.mjs'
 import { takeP2pmdNotes } from '../p2pmd/notes-transfer.mjs'
-import {
-  inlineHyperPreviewImages,
-  renderMarkdownPreview,
-  renderMarkdownSlides
-} from '../p2pmd/preview.mjs'
+import { inlineHyperPreviewImages, renderP2pmdPreview } from '../p2pmd/preview.mjs'
 import { getP2pmdEditorPage } from '../p2pmd/server.mjs'
-import { hasIeeeMarker } from '../p2pmd/templates.mjs'
 import { startPeerTunesServer } from '../peertunes/server.mjs'
 import { parseJsonMessage, replyJson } from './messages.mjs'
-import { getPeerChatService } from '../peerchat/runtime.mjs'
+import { deletePeerChatProfile, getPeerChatService } from '../peerchat/runtime.mjs'
 import { openPeerChatAttachment, uploadPeerChatAttachment } from '../peerchat/attachments.mjs'
 
 export async function routeRpcRequest (req) {
@@ -152,11 +146,6 @@ export async function routeRpcRequest (req) {
 
     if (req.command === RPC_HYPER_FETCH) {
       replyJson(req, await fetchHyper(parseJsonMessage(req.data)))
-      return
-    }
-
-    if (req.command === RPC_HYPER_CREATE_DRIVE) {
-      replyJson(req, await createDrive(parseJsonMessage(req.data)))
       return
     }
 
@@ -351,35 +340,10 @@ export async function routeRpcRequest (req) {
     }
 
     if (req.command === RPC_P2PMD_PREVIEW) {
-      const body = parseJsonMessage(req.data)
-      if (typeof body.content !== 'string') {
-        replyJson(req, {
-          ok: false,
-          error: 'Invalid Markdown content. Expected a string.'
-        })
-        return
-      }
-
-      if (body.content.length > getMaxDocumentLength()) {
-        replyJson(req, {
-          ok: false,
-          error: 'Markdown is too large. Maximum size is 10 MB.'
-        })
-        return
-      }
-
-      const rendered = body.mode === 'slides'
-        ? renderMarkdownSlides(body.content)
-        : {
-            html: renderMarkdownPreview(body.content),
-            ieee: body.latexModeEnabled === true && hasIeeeMarker(body.content)
-          }
-
-      replyJson(req, {
-        ok: true,
-        ...rendered,
-        html: await inlineHyperPreviewImages(rendered.html, readHyperFile)
-      })
+      const rendered = renderP2pmdPreview(parseJsonMessage(req.data))
+      replyJson(req, rendered.ok
+        ? { ...rendered, html: await inlineHyperPreviewImages(rendered.html, readHyperFile) }
+        : rendered)
       return
     }
 
@@ -432,19 +396,17 @@ export async function routeRpcRequest (req) {
 
     if (req.command === RPC_PEERCHAT_ROOM_CREATE) {
       const peerChat = await getPeerChatService()
-      replyJson(req, {
-        ok: true,
-        room: await peerChat.createRoom(parseJsonMessage(req.data))
-      })
+      const room = await peerChat.createRoom(parseJsonMessage(req.data))
+      // The list in its own order, so the new room sits where the next
+      // refresh will put it rather than jumping there under a finger.
+      replyJson(req, { ok: true, room, rooms: peerChat.listRooms() })
       return
     }
 
     if (req.command === RPC_PEERCHAT_ROOM_JOIN) {
       const peerChat = await getPeerChatService()
-      replyJson(req, {
-        ok: true,
-        room: await peerChat.joinRoom(parseJsonMessage(req.data))
-      })
+      const room = await peerChat.joinRoom(parseJsonMessage(req.data))
+      replyJson(req, { ok: true, room, rooms: peerChat.listRooms() })
       return
     }
 
@@ -466,7 +428,7 @@ export async function routeRpcRequest (req) {
       const peerChat = await getPeerChatService()
       replyJson(req, {
         ok: true,
-        ...peerChat.blockPeer(parseJsonMessage(req.data))
+        ...await peerChat.blockPeer(parseJsonMessage(req.data))
       })
       return
     }
@@ -475,8 +437,13 @@ export async function routeRpcRequest (req) {
       const peerChat = await getPeerChatService()
       replyJson(req, {
         ok: true,
-        ...peerChat.unblockPeer(parseJsonMessage(req.data))
+        ...await peerChat.unblockPeer(parseJsonMessage(req.data))
       })
+      return
+    }
+
+    if (req.command === RPC_PEERCHAT_DELETE_PROFILE) {
+      replyJson(req, await deletePeerChatProfile())
       return
     }
 

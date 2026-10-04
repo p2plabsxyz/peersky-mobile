@@ -43,6 +43,9 @@ export function attachPeerChatTransport (connection, onMessage, options = {}) {
     get opened () {
       return channel.opened
     },
+    get closed () {
+      return channel.closed || connection.destroyed
+    },
     ready () {
       return channel.fullyOpened()
     },

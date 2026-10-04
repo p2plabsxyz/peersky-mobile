@@ -87,6 +87,9 @@ class PeerSkyWebViewClient : RNCWebViewClient() {
         it.key.lowercase(Locale.ROOT) to it.value
       }
       val accept = headers["accept"]?.lowercase(Locale.ROOT).orEmpty()
+      // Main frames never get here, so a page is a frame. Its Accept header
+      // also lists image types, and it used to be filtered as an image.
+      if (accept.startsWith("text/html")) return "subdocument"
       if (accept.contains("javascript")) return "script"
       if (accept.contains("text/css")) return "stylesheet"
       if (accept.contains("image/")) return "image"

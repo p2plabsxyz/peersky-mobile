@@ -1,13 +1,7 @@
-// Flags links that look like a scam so the preview can say so.
-//
-// Deliberately heuristics rather than a blocklist. Phishing domains are
-// disposable by design and a bundled list is stale within hours, which is
-// exactly the window that matters. These signals stay true no matter how new
-// the domain is.
-//
-// Judged by the reader at render time, never carried on the wire. A sender
-// could strip a flag they set themselves, the same reason media is screened
-// again on arrival.
+// Flags links that look like a scam so the preview can say so. Heuristics, not
+// a blocklist: phishing domains live for hours, and a bundled list is stale by
+// then. Judged by the reader at render time and never sent, since a sender
+// could strip a flag they set themselves.
 
 export const LINK_OK = 'ok'
 // A shortener is not dishonest, it just hides the destination. Calling that a

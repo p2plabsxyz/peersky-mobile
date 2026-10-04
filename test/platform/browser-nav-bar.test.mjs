@@ -10,7 +10,7 @@ describe('browser chrome layout', () => {
   test('five slots: two that change, then burn, tabs and the menu', () => {
     assert.match(navBar, /label='Go back'/)
     assert.match(navBar, /label='Go forward'/)
-    assert.match(navBar, /label='Burn tabs and cached data'/)
+    assert.match(navBar, /label='Burn tabs, history and cached data'/)
     assert.match(navBar, /Open tabs, \$\{tabCount\} open/)
     assert.match(navBar, /<BrowserOverflowMenu[\s>]/)
   })
@@ -73,18 +73,16 @@ describe('chrome polish', () => {
     assert.match(toolbar, /const seamColor = isAddressFocused \? 'transparent' : palette\.border/)
     assert.equal((toolbar.match(/StyleSheet\.hairlineWidth/g) || []).length, 2)
   })
+})
 
-  test('arriving home fades rather than cuts', async () => {
+describe('the bottom of the screen on Android', () => {
+  test('no band of page colour stays under the navigation bar after the keyboard', async () => {
     const { readFile } = await import('node:fs/promises')
-    const background = await readFile(
-      new URL('../../app/BrowserHomeBackground.tsx', import.meta.url),
-      'utf8'
-    )
+    const index = await readFile(new URL('../../app/index.tsx', import.meta.url), 'utf8')
 
-    // Burning every tab lands here, and cutting straight to a photograph makes
-    // that land hard. Opacity only: a transform would show an edge.
-    assert.match(background, /opacity: enter/)
-    assert.doesNotMatch(background, /scale|translateY/)
+    // Android reports a closed keyboard a little above the bottom of the
+    // screen, and the padding for it stayed behind under the navigation bar.
+    assert.match(index, /enabled=\{\s+\/\/[^\n]*\n(?:\s+\/\/[^\n]*\n)*\s+\(Platform\.OS === 'ios' \|\| isKeyboardVisible\) &&/)
   })
 })
 
@@ -103,4 +101,9 @@ describe('peerchat onboarding', () => {
     assert.match(screen, /onboardingScreen: \{ flex: 1 \}/)
     assert.match(screen, /introContinue: \{[\s\S]{0,400}marginBottom: 28/)
   })
+})
+
+// Searches need a space bar, which iOS's URL keyboard leaves off its letters.
+test('the address bar types searches as easily as addresses', () => {
+  assert.match(toolbar, /keyboardType=\{Platform\.OS === 'ios' \? 'web-search' : 'url'\}/)
 })

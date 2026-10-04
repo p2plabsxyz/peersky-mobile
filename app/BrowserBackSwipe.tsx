@@ -8,14 +8,10 @@ const CHIP_SIZE = 44
 const CHIP_TRAVEL = 28
 
 /**
- * The chip that answers an edge swipe.
- *
- * The page used to slide with the finger. A swipe interrupted before it landed
- * never got the offset back, so the browser sat a quarter of a screen to the
- * right afterwards, which is what showed up as a shifted page after typing in
- * the address bar. Nothing underneath this moves, so there is no offset left to
- * get stuck, and an arrow coming in from the edge is what the gesture looks
- * like everywhere else on the phone.
+ * The chip that answers an edge swipe. Sliding the page instead left it a
+ * quarter screen to the right after an interrupted swipe (the shifted page
+ * after typing in the address bar). Nothing under this moves, so nothing can
+ * get stuck, and an arrow from the edge is how the gesture looks elsewhere.
  */
 export function BrowserBackSwipe ({
   background,

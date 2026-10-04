@@ -20,6 +20,12 @@ describe('browser menu', () => {
     assert.match(menu, /transform: \[\{\s*\n\s*translateY: open\.interpolate/)
   })
 
+  test('the sheet rises from below the screen and settles slowly', () => {
+    assert.match(menu, /outputRange: \[windowHeight, 0\]/)
+    assert.match(menu, /const OPEN_MS = 380/)
+    assert.match(menu, /easing: visible \? OPEN_EASING : CLOSE_EASING/)
+  })
+
   test('two big actions, then grouped rows', () => {
     assert.match(menu, /<BigAction[\s\S]{0,400}label='New Tab'/)
     assert.match(menu, /<BigAction[\s\S]{0,400}label='Settings'/)

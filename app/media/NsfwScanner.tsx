@@ -25,28 +25,6 @@ const SCAN_TIMEOUT_MS = 20_000
 // tens of megabytes of base64 across the bridge would stall the app.
 const MAX_SCANNED_BYTES = 24 * 1024 * 1024
 
-type ScannerStatus = 'starting' | 'ready' | 'unavailable'
-
-// Read by the settings screen so the state is visible rather than guessed at.
-let currentStatus: ScannerStatus = 'starting'
-const statusListeners = new Set<(status: ScannerStatus) => void>()
-
-export function getMediaScannerStatus () {
-  return currentStatus
-}
-
-export function onMediaScannerStatus (listener: (status: ScannerStatus) => void) {
-  statusListeners.add(listener)
-  return () => {
-    statusListeners.delete(listener)
-  }
-}
-
-function setStatus (next: ScannerStatus) {
-  currentStatus = next
-  for (const listener of statusListeners) listener(next)
-}
-
 type Pending = {
   resolve: (verdict: string) => void
   timer: ReturnType<typeof setTimeout>
@@ -80,17 +58,11 @@ export async function scanMedia (asset: {
   if ((asset.size ?? 0) > MAX_SCANNED_BYTES) return MEDIA_UNSCANNED
   if (!liveWebView) return MEDIA_UNSCANNED
 
-  // Everything goes through the decoder, whether it arrived as a file or as
-  // bare bytes. Two reasons. It normalises whatever the platform can open into
-  // one JPEG, so an iPhone's HEIC is judged instead of waved through. And it
-  // shrinks the picture to the size the model wants before anything crosses
-  // the bridge.
-  //
-  // That second part is what P2PMD was failing on. Its editor hands over a
-  // whole photo as base64, and posting megabytes of it took longer than the
-  // scan timeout, which reads as unscanned and lets the picture through. A
-  // picked file was always resized first, which is why PeerChat looked fine
-  // while P2PMD did not.
+  // Files and bare bytes both go through the decoder. It turns anything the
+  // platform can open into one JPEG, so a HEIC is judged, not waved through,
+  // and shrinks it to the model's size before it crosses the bridge. P2PMD
+  // hands over whole photos as base64, and posting those at full size outlasted
+  // the scan timeout, so they went through unscanned.
   let scratch: File | null = null
   let base64 = ''
   try {
@@ -188,7 +160,6 @@ export const NsfwScanner = memo(function NsfwScanner () {
         // Without the model nothing can be judged. Uploads still work; they are
         // simply unscanned, which is what the gate already assumes.
         console.warn('[nsfw] could not stage the classifier:', error)
-        setStatus('unavailable')
       })
 
     return () => { cancelled = true }
@@ -228,13 +199,8 @@ export const NsfwScanner = memo(function NsfwScanner () {
           // Without this the classifier failing to start looks exactly like a
           // clean picture: silence, and every upload waved through.
           if (message.ready !== undefined) {
-            if (message.ready) {
-              console.log('[nsfw] classifier ready')
-              setStatus('ready')
-            } else {
-              console.warn('[nsfw] classifier failed to start:', message.error)
-              setStatus('unavailable')
-            }
+            if (message.ready) console.log('[nsfw] classifier ready')
+            else console.warn('[nsfw] classifier failed to start:', message.error)
             return
           }
 
@@ -244,7 +210,6 @@ export const NsfwScanner = memo(function NsfwScanner () {
         }}
         onError={(event) => {
           console.warn('[nsfw] classifier page failed:', event.nativeEvent.description)
-          setStatus('unavailable')
         }}
         ref={(instance) => { liveWebView = instance }}
         source={source}

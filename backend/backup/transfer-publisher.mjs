@@ -33,15 +33,11 @@ export async function publishTransferFile (runtime, { driveName, filePath, fileN
 }
 
 /**
- * Clears a transfer's data from this device and stops announcing it. Used by
- * the sender once the transfer is over, and by the receiver for the copy it
- * fetched.
- *
- * Hyperdrive's purge would be the obvious call, but in the hypercore release
- * in use it calls a method that does not exist. So the file's blocks are
- * cleared instead, which is where the space is. The drive's index is kept: it
- * is a few kilobytes, and clearing it leaves a drive that hangs forever when
- * anything opens it again, waiting for blocks nobody has.
+ * Clears a transfer's data from this device and stops announcing it, for the
+ * sender once the transfer is over and for the receiver's fetched copy.
+ * Hyperdrive's purge calls a method missing from the hypercore release in use,
+ * so the file's blocks are cleared instead. The index stays: it is a few KB,
+ * and a drive without it hangs forever on open, waiting for blocks nobody has.
  */
 export async function purgeTransferDrive (runtime, nameOrUrl) {
   const drive = await runtime.getDrive(nameOrUrl, { autoJoin: false })

@@ -3,11 +3,10 @@ import { createInflateRaw } from 'node:zlib'
 import b4a from 'b4a'
 import { MAX_BACKUP_SIZE_BYTES } from './limits.mjs'
 
-// zip.mjs reads an archive that is already in memory. A desktop transfer can
-// be hundreds of megabytes, and holding it, inflating it and decrypting it in
-// memory meant several copies at once, which a phone does not survive. This
-// reads the same archives straight from disk: the directory with positional
-// reads, and each entry as a stream.
+// Reads an archive straight from disk: the directory with positional reads,
+// and each entry as a stream. A desktop transfer can be hundreds of megabytes,
+// and holding, inflating and decrypting it in memory meant several copies at
+// once, which a phone does not survive.
 const EOCD_SIGNATURE = 0x06054b50
 const CENTRAL_DIRECTORY_SIGNATURE = 0x02014b50
 const LOCAL_FILE_SIGNATURE = 0x04034b50

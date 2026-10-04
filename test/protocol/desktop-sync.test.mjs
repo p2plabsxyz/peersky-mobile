@@ -8,7 +8,7 @@ import { join } from 'node:path'
 import b4a from 'b4a'
 import sodium from 'sodium-native'
 import { crc32, createStoredZip } from '../../backend/backup/zip-writer.mjs'
-import { readZipEntries } from '../../backend/backup/zip.mjs'
+import { readZipEntries } from '../fixtures/zip-reader.mjs'
 import { openZipFile } from '../../backend/backup/zip-file.mjs'
 import {
   collectDesktopSync,

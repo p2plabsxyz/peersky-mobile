@@ -20,6 +20,23 @@ describe('a page that would not load', () => {
     // hex, so those describe themselves instead.
     const key = `hyper://${'a'.repeat(64)}/`
     assert.doesNotMatch(describeBrowserError(key, 'Not Found').body, /aaaa/)
+    // Said at the start of a sentence, it starts with a capital, and it says
+    // what a key is rather than repeating "this address".
+    assert.match(describeBrowserError(key, 'Not Found').body, /^This drive answered, but there is nothing at this address\./)
+    assert.match(describeBrowserError(key, 'Request timed out').body, /^This drive did not answer in time\./)
+  })
+
+  // The two blocks WebKit names. The first is the device's own filter, which
+  // a user took for a PeerSky fault, so the page says where it is set.
+  test('a page the device or tracker protection blocked says which one', () => {
+    const filtered = describeBrowserError('https://www.example.com/watch', 'The URL was blocked by a content filter')
+    assert.equal(filtered.title, 'This device blocked this page')
+    assert.match(filtered.body, /^A content filter on this device stopped example\.com/)
+    assert.match(filtered.body, /Settings, Screen Time, Content & Privacy Restrictions/)
+
+    const blocked = describeBrowserError('https://ads.example.com/', 'The URL was blocked by a content blocker')
+    assert.equal(blocked.title, 'Tracker protection blocked this page')
+    assert.match(blocked.body, /Settings, Privacy/)
   })
 
   test('a peer address that nobody is seeding says so', () => {

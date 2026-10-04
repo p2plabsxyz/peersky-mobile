@@ -1,17 +1,14 @@
 // One person on several devices. Each device keeps its own network key, so
-// each is its own member in a room, told apart by a fixed label after the
-// name: "ada" on the device the name was made on, then "ada@mobile",
-// "ada@desktop1". The label never changes and cannot be edited. There is one
-// phone; moving to a new phone takes this one's place.
+// each is its own room member, told apart by a fixed label after the name:
+// "ada" where the name was made, then "ada@mobile", "ada@desktop1". There is
+// one phone; a new phone takes this one's place.
 //
-// A link is a secret the person's devices share. It travels only inside the
-// sealed, code-checked transfers between them. A profile carries a proof made
-// with it and the network key of the device sending it, so one of the person's
-// devices takes a new name, and the rooms it is in, from another, and nobody
-// else can: a proof forwarded by someone else fails on their connection.
-//
-// PeerChat on the desktop keeps the same rules in lib/device-link.js. Both
-// have to agree on every byte of the proof.
+// A link is a secret the person's devices share, sent only inside their
+// sealed, code-checked transfers. A profile carries a proof made with it over
+// the sender's network key, so only the person's own devices can take a name
+// and its rooms from each other: a forwarded proof fails on the forwarder's
+// connection. Desktop PeerChat has the same rules in lib/device-link.js, and
+// the proof must match byte for byte.
 import { createHash, createHmac, randomBytes } from 'node:crypto'
 import b4a from 'b4a'
 

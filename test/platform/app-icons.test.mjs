@@ -83,36 +83,31 @@ describe('adaptive icon layers', () => {
       const image = PNG.sync.read(
         await readFile(new URL(`../../assets/app-icons/android/${layer}.png`, import.meta.url))
       )
-      let minX = image.width
-      let minY = image.height
-      let maxX = -1
-      let maxY = -1
+      const middle = image.width / 2
+      let weight = 0
+      let sumX = 0
+      let sumY = 0
+      let radius = 0
       for (let y = 0; y < image.height; y++) {
         for (let x = 0; x < image.width; x++) {
-          if (image.data[(y * image.width + x) * 4 + 3] <= 8) continue
-          if (x < minX) minX = x
-          if (x > maxX) maxX = x
-          if (y < minY) minY = y
-          if (y > maxY) maxY = y
+          const alpha = image.data[(y * image.width + x) * 4 + 3]
+          if (alpha <= 8) continue
+          weight += alpha
+          sumX += (x + 0.5) * alpha
+          sumY += (y + 0.5) * alpha
+          radius = Math.max(radius, Math.hypot(x + 0.5 - middle, y + 0.5 - middle))
         }
       }
 
-      const centerX = (minX + maxX + 1) / 2
-      const centerY = (minY + maxY + 1) / 2
-      let radius = 0
-      for (let y = minY; y <= maxY; y++) {
-        for (let x = minX; x <= maxX; x++) {
-          if (image.data[(y * image.width + x) * 4 + 3] <= 8) continue
-          radius = Math.max(radius, Math.hypot(x + 0.5 - centerX, y + 0.5 - centerY))
-        }
-      }
-
+      // Measured from the middle of the canvas, where the mask is.
       assert.ok(
         radius / image.width <= safeRadius,
         `${layer} reaches ${(radius / image.width * 100).toFixed(1)}% of the canvas`
       )
-      assert.ok(Math.abs(centerX - image.width / 2) < 2, `${layer} is off centre horizontally`)
-      assert.ok(Math.abs(centerY - image.height / 2) < 2, `${layer} is off centre vertically`)
+      // Centred on its weight. Centred on its box, the thin legs below the
+      // body pulled the box down and the bird sat high in the circle.
+      assert.ok(Math.abs(sumX / weight - middle) < 2, `${layer} is off centre horizontally`)
+      assert.ok(Math.abs(sumY / weight - middle) < 2, `${layer} is off centre vertically`)
     }
   })
 
@@ -142,5 +137,27 @@ describe('adaptive icon layers', () => {
     assert.match(repair, /COMPONENT_ENABLED_STATE_ENABLED/)
     // And it must never stop the app starting.
     assert.match(repair, /catch \(error: Exception\)/)
+  })
+
+  // The badge library keeps the launcher entry it first counted on, which a
+  // switch turns off, so the PeerChat count vanished until a restart.
+  test('the unread count moves to the new icon', async () => {
+    const module = await readFile(
+      new URL('../../plugins/templates/PeerSkyAppIconModule.kt.template', import.meta.url),
+      'utf8'
+    )
+    const setIcon = module.slice(module.indexOf('fun setIcon'), module.indexOf('private fun moveBadgeToCurrentIcon'))
+    assert.match(setIcon, /DONT_KILL_APP\s+\)\s+\}\s+moveBadgeToCurrentIcon\(\)\s+promise\.resolve\(true\)/)
+
+    const move = module.slice(module.indexOf('private fun moveBadgeToCurrentIcon'), module.indexOf('companion object'))
+    assert.match(move, /listOf\("sShortcutBadger", "sComponentName"\)/)
+    assert.match(move, /Class\.forName\("expo\.modules\.notifications\.badge\.BadgeHelper"\)/)
+    assert.match(move, /if \(count > 0\) \{/)
+    // A change in either library must not fail the switch itself.
+    assert.match(move, /catch \(error: Exception\)/)
+
+    // Release builds keep class and field names, which this looks up by name.
+    const gradle = await readFile(new URL('../../app.json', import.meta.url), 'utf8')
+    assert.doesNotMatch(gradle, /enableMinifyInReleaseBuilds|enableProguardInReleaseBuilds/)
   })
 })

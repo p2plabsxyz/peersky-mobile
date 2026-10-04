@@ -6,7 +6,7 @@ import {
   stopHolesail
 } from '../holesail/session.mjs'
 import { P2PMD_LOOPBACK_HOST } from './constants.mjs'
-import { connectWithAdvertisedLoopbackPort } from './connect.mjs'
+import { findNotePort, isUsableNotePort, rememberNotePort } from './note-ports.mjs'
 import {
   getP2pmdServerStatus,
   startP2pmdServer,
@@ -22,6 +22,12 @@ import {
   deactivateP2pmdRoomSnapshot,
   loadP2pmdRoomSnapshot
 } from './snapshots.mjs'
+import {
+  createPublicNoteSeed,
+  findPublicNoteSeed,
+  isPublicNoteKey,
+  rememberPublicNoteSeed
+} from './public-notes.mjs'
 
 const JOIN_READY_ATTEMPTS = 12
 const JOIN_READY_DELAY_MS = 500
@@ -45,6 +51,25 @@ export async function createP2pmdRoom ({
   return withRoomTransition(async () => {
     await disconnectRoomInternal()
 
+    // A private note hosts from its own key. A public one hosts from the seed
+    // it was made from, which only the phone that made it keeps.
+    let hostKey = connector
+    let publicSeed = null
+    if (connector && isPublicNoteKey(connector)) {
+      publicSeed = findPublicNoteSeed(connector)
+      if (!publicSeed) {
+        return {
+          ok: false,
+          error: 'This phone can no longer host this public note. Only the phone that made a public note can host it.'
+        }
+      }
+      hostKey = publicSeed
+    } else if (!connector && !secure) {
+      publicSeed = createPublicNoteSeed()
+      hostKey = publicSeed
+    }
+    const isPrivate = !publicSeed
+
     if (connector) {
       const snapshot = loadP2pmdRoomSnapshot(connector)
       if (snapshot) {
@@ -58,15 +83,16 @@ export async function createP2pmdRoom ({
       }
     }
 
-    const serverResult = await startP2pmdServer()
+    // The port this note was on before, so its address survives a restart.
+    const serverResult = await startP2pmdServer({ preferredPort: connector ? findNotePort(connector) : null })
     if (!serverResult.ok) return serverResult
 
     try {
       const holesailResult = await startHolesailLive({
         host: serverResult.host,
         port: serverResult.port,
-        connector,
-        secure,
+        connector: hostKey,
+        secure: isPrivate,
         udp,
         log
       })
@@ -92,7 +118,7 @@ export async function createP2pmdRoom ({
         localUrl: serverResult.localUrl,
         host: serverResult.host,
         port: serverResult.port,
-        secure: Boolean(secure),
+        secure: isPrivate,
         udp: Boolean(udp)
       }
 
@@ -103,7 +129,17 @@ export async function createP2pmdRoom ({
         return { ok: false, error: 'Unable to restore the original P2PMD room key.' }
       }
 
+      // Without its seed a new public note could never be opened again, so it
+      // is kept before anyone is handed the key. Reopening one marks it used.
+      if (publicSeed && !rememberPublicNoteSeed(room.key, publicSeed) && !connector) {
+        await Promise.allSettled([stopHolesail(), stopP2pmdServer()])
+        room = null
+        resetDocumentState()
+        return { ok: false, error: 'Unable to keep this public note on the phone, so it was not opened.' }
+      }
+
       activateP2pmdRoomSnapshot(room.key, getDocumentState())
+      rememberNotePort(room.key, room.port)
 
       return {
         ok: true,
@@ -133,13 +169,7 @@ export async function joinP2pmdRoom ({
   return withRoomTransition(async () => {
     await disconnectRoomInternal()
 
-    const holesailResult = await connectWithAdvertisedLoopbackPort({
-      connect: connectHolesail,
-      key,
-      udp,
-      log
-    })
-
+    const holesailResult = await connectOnNotePort({ key, udp, log })
     if (!holesailResult.ok) return holesailResult
 
     const roomKey = holesailResult.info?.url
@@ -171,6 +201,7 @@ export async function joinP2pmdRoom ({
       warning = `Holesail proxy is listening, but the room did not answer readiness checks yet. The editor will keep retrying. (${getErrorMessage(error)})`
     }
 
+    rememberNotePort(roomKey, boundPort)
     room = {
       key: roomKey,
       role: 'client',
@@ -188,6 +219,20 @@ export async function joinP2pmdRoom ({
       warning
     }
   })
+}
+
+/**
+ * Joins on the port this phone had the note on before, or else the one its
+ * host advertises, as the desktop does: one address on every device. If that
+ * port is taken here, or belongs to another server in the app, the system
+ * picks one instead.
+ */
+async function connectOnNotePort ({ key, udp, log }) {
+  const saved = findNotePort(key)
+  const preferred = await connectHolesail({ key, port: saved, hostPort: true, udp, log })
+  if (preferred.ok && isUsableNotePort(preferred.info?.port)) return preferred
+  if (preferred.ok) await stopHolesail()
+  return connectHolesail({ key, anyPort: true, udp, log })
 }
 
 export function getP2pmdRoomStatus () {

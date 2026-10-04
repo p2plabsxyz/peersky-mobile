@@ -18,7 +18,8 @@ import {
   rewriteHyperDownloadAttributes,
   rewriteHyperMediaAttributes,
   shouldInlineAsset,
-  shouldProxyMediaAsset
+  shouldProxyMediaAsset,
+  signHyperAssetUrl
 } from '../../backend/hyper/assets.mjs'
 
 const baseUrl = 'hyper://example.com/docs/index.html'
@@ -50,24 +51,30 @@ test('rewrites hyper media references to the local streaming proxy', () => {
   const html = '<video src="./clip.mp4" poster="./poster.png"></video><a href="./song.mp3">play</a><img src="./logo.png">'
   const rewritten = rewriteHyperMediaAttributes(html, baseUrl, assetBaseUrl, assetAuthToken)
 
-  assert.match(rewritten, /<video src="http:\/\/127\.0\.0\.1:45123\/asset\?token=test-hyper-asset-token-0123456789abcdef&url=hyper%3A%2F%2Fexample\.com%2Fdocs%2Fclip\.mp4" poster="\.\/poster\.png"><\/video>/)
-  assert.match(rewritten, /<a href="http:\/\/127\.0\.0\.1:45123\/asset\?token=test-hyper-asset-token-0123456789abcdef&url=hyper%3A%2F%2Fexample\.com%2Fdocs%2Fsong\.mp3">play<\/a>/)
+  assert.match(rewritten, /<video src="http:\/\/127\.0\.0\.1:45123\/asset\?token=[0-9a-f]{64}&url=hyper%3A%2F%2Fexample\.com%2Fdocs%2Fclip\.mp4" poster="\.\/poster\.png"><\/video>/)
+  assert.match(rewritten, /<a href="http:\/\/127\.0\.0\.1:45123\/asset\?token=[0-9a-f]{64}&url=hyper%3A%2F%2Fexample\.com%2Fdocs%2Fsong\.mp3">play<\/a>/)
   assert.match(rewritten, /<img src="\.\/logo\.png">/)
 })
 
-test('builds encoded proxy asset URLs', () => {
+test('builds encoded proxy asset URLs, signed for that one address', () => {
+  const assetUrl = 'hyper://example.com/video.mp4?x=1'
+  const signature = signHyperAssetUrl(assetAuthToken, assetUrl)
+  assert.match(signature, /^[0-9a-f]{64}$/)
+  assert.notEqual(signature, signHyperAssetUrl(assetAuthToken, 'hyper://example.com/other.mp4'))
   assert.equal(
-    createProxyAssetUrl('http://127.0.0.1:3000', 'hyper://example.com/video.mp4?x=1', assetAuthToken),
-    'http://127.0.0.1:3000/asset?token=test-hyper-asset-token-0123456789abcdef&url=hyper%3A%2F%2Fexample.com%2Fvideo.mp4%3Fx%3D1'
+    createProxyAssetUrl('http://127.0.0.1:3000', assetUrl, assetAuthToken),
+    `http://127.0.0.1:3000/asset?token=${signature}&url=hyper%3A%2F%2Fexample.com%2Fvideo.mp4%3Fx%3D1`
   )
+  // The secret itself never appears in a link a page can see.
+  assert.ok(!createProxyAssetUrl('http://127.0.0.1:3000', assetUrl, assetAuthToken).includes(assetAuthToken))
 })
 
 test('rewrites explicit hyper downloads to the local streaming proxy', () => {
   const html = '<a download="report.pdf" href="./files/report.pdf">Download</a><a download href=./plain.txt>Plain</a><a href="./page.html">Page</a>'
   const rewritten = rewriteHyperDownloadAttributes(html, baseUrl, 'http://127.0.0.1:45123', assetAuthToken)
 
-  assert.match(rewritten, /href="http:\/\/127\.0\.0\.1:45123\/asset\?token=test-hyper-asset-token-0123456789abcdef&url=hyper%3A%2F%2Fexample\.com%2Fdocs%2Ffiles%2Freport\.pdf&download=1&name=report\.pdf"/)
-  assert.match(rewritten, /href=http:\/\/127\.0\.0\.1:45123\/asset\?token=test-hyper-asset-token-0123456789abcdef&url=hyper%3A%2F%2Fexample\.com%2Fdocs%2Fplain\.txt&download=1/)
+  assert.match(rewritten, /href="http:\/\/127\.0\.0\.1:45123\/asset\?token=[0-9a-f]{64}&url=hyper%3A%2F%2Fexample\.com%2Fdocs%2Ffiles%2Freport\.pdf&download=1&name=report\.pdf"/)
+  assert.match(rewritten, /href=http:\/\/127\.0\.0\.1:45123\/asset\?token=[0-9a-f]{64}&url=hyper%3A%2F%2Fexample\.com%2Fdocs%2Fplain\.txt&download=1/)
   assert.match(rewritten, /<a href="\.\/page\.html">Page<\/a>/)
 })
 

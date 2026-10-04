@@ -212,7 +212,7 @@ export function Privacy ({
         </View>
       </SettingsSection>
 
-      <SettingsSection title='Privacy policy'>
+      <SettingsSection title='Privacy policy and terms'>
         <Pressable
           accessibilityLabel='Open PeerSky privacy policy'
           accessibilityRole='link'
@@ -222,6 +222,22 @@ export function Privacy ({
           <SettingCopy
             title='Read privacy policy'
             description='Learn how PeerSky handles browser and device data.'
+          />
+          <ChevronRightIcon
+            width={16}
+            height={16}
+            color={isDark ? BROWSER_PALETTES.dark.mutedText : '#8190a7'}
+          />
+        </Pressable>
+        <Pressable
+          accessibilityLabel='Open PeerSky terms of use'
+          accessibilityRole='link'
+          style={styles.linkRow}
+          onPress={() => onOpenUrl('https://github.com/p2plabsxyz/peersky-mobile/blob/main/TERMS.md')}
+        >
+          <SettingCopy
+            title='Read terms of use'
+            description='The rules for PeerChat, and how reports are handled.'
           />
           <ChevronRightIcon
             width={16}

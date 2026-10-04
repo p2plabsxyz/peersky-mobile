@@ -12,7 +12,6 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
-import android.provider.Settings
 import android.util.Log
 import android.webkit.CookieManager
 import android.webkit.MimeTypeMap
@@ -27,6 +26,7 @@ import com.reactnativecommunity.webview.URLUtil
 import com.j256.simplemagic.ContentInfoUtil
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import androidx.webkit.WebViewFeature
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.FilterInputStream
@@ -164,6 +164,13 @@ class BrowserDownloadsModule(
       showToast("Too many downloads are already starting.")
       return false
     }
+  }
+
+  // Incognito tabs need WebView profiles, which come with Android System
+  // WebView 123 and later.
+  @ReactMethod
+  fun isPrivateBrowsingSupported(promise: Promise) {
+    promise.resolve(WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE))
   }
 
   @ReactMethod
@@ -548,7 +555,8 @@ class BrowserDownloadsModule(
     val values = ContentValues().apply {
       put(MediaStore.MediaColumns.DISPLAY_NAME, name)
       put(MediaStore.MediaColumns.MIME_TYPE, mimeType ?: "application/octet-stream")
-      put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+      // A PeerSky folder of its own in Downloads, as the Files app shows it.
+      put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/PeerSky")
       put(MediaStore.MediaColumns.IS_PENDING, 1)
     }
     return reactApplicationContext.contentResolver.insert(
@@ -785,22 +793,21 @@ class BrowserDownloadsModule(
   }
 
   private fun openContentUri(uri: Uri, mimeType: String, promise: Promise) {
-    if (mimeType == APK_MIME_TYPE && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
-      !reactApplicationContext.packageManager.canRequestPackageInstalls()
-    ) {
+    // PeerSky does not hold the permission to install apps, so an APK opens in
+    // the system's Downloads, which installs it after its own warning.
+    if (mimeType == APK_MIME_TYPE) {
       try {
-        reactApplicationContext.startActivity(Intent(
-          Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
-          Uri.parse("package:" + reactApplicationContext.packageName)
-        ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) })
+        reactApplicationContext.startActivity(
+          Intent(DownloadManager.ACTION_VIEW_DOWNLOADS).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+        )
         Toast.makeText(
           reactApplicationContext,
-          "Allow app installs, then tap the APK again.",
+          "Tap the APK in Downloads to install it.",
           Toast.LENGTH_LONG
         ).show()
         promise.resolve(true)
       } catch (error: ActivityNotFoundException) {
-        Log.w(TAG, "Unable to open app install settings", error)
+        Log.w(TAG, "Unable to open Downloads", error)
         promise.resolve(false)
       }
       return
@@ -810,12 +817,8 @@ class BrowserDownloadsModule(
       setDataAndType(uri, mimeType)
       addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
-    val launchIntent = if (mimeType == APK_MIME_TYPE) {
-      viewIntent
-    } else {
-      Intent.createChooser(viewIntent, "Open with").apply {
-        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
-      }
+    val launchIntent = Intent.createChooser(viewIntent, "Open with").apply {
+      addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
     try {
       reactApplicationContext.startActivity(launchIntent)
@@ -1338,7 +1341,9 @@ class BrowserDownloadsModule(
     )
   }
 
-  private fun resolveFilename(
+  // Also names the file in the prompt before a download, so what it says is
+  // what gets saved.
+  internal fun resolveFilename(
     url: String,
     contentDisposition: String?,
     mimeType: String?

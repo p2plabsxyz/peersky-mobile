@@ -2,7 +2,9 @@
 
 PeerSky Mobile runs Hyperdrive inside a Bare worklet. The browser can open
 `hyper://` pages and files, and the Hyperdrive app can publish, fetch, browse,
-and explicitly retain folders for offline use.
+and explicitly retain folders for offline use. The first time the app opens it
+says what it does in four lines, once per phone (`AppWelcome`, marker
+`hyperdrive-welcome-seen`).
 
 ## Supported URLs
 
@@ -10,6 +12,54 @@ and explicitly retain folders for offline use.
 - `hyper://<drive-key>/<path>` opens a file or directory in that drive.
 - DNS-style Hyper aliases, such as `hyper://agregore.mauve.moe/`, are resolved
   by the Hyper runtime.
+
+## What a hyper:// page can do
+
+A page served over `hyper://` can call `fetch('hyper://...')` the way it does
+on desktop. The phone has no protocol handler for that, so the call crosses
+the React Native bridge to the Bare worklet (`app/hyper-bridge.mjs`), and the
+backend applies a few rules to anything a page asks for
+(`backend/hyper/page-access.mjs`). iOS adds the bridge before the page loads.
+Android runs that script only after a page loaded from a string has run its
+own, so there the bridge is the page's first script, and it removes itself
+once it has run.
+
+What goes over the bridge, checked with a site published from a desktop and
+opened on both phones:
+
+- `fetch()` with relative or absolute addresses. A missing file answers 404
+  with a response, as on desktop, rather than throwing.
+- `XMLHttpRequest` to `hyper://`, which jQuery, axios and older pages use.
+- Publishing: `POST hyper://localhost/?key=name`, then `PUT` a file, or `PUT`
+  a `FormData` with one `file` field per file to save several at once
+  (`backend/hyper/form-data.mjs` reads those for hypercore-fetch).
+- Images, sound and video. The page's own markup is rewritten before it loads.
+  An address set from script later, or added with `innerHTML`, gets the same
+  signed link (see below), and so does `fetch()` of an image or a video.
+
+Pages see their own `hyper://` address in `location` on both platforms. WebKit
+only renders a page under an address whose scheme it can load, so on iOS the
+browser's WebView has a handler for `hyper://`
+(`plugins/templates/PeerSkyWebViewManager.m.template`). It answers a page's own
+address with the page, as when a script sets `location` to it, and anything
+else with 404: the rest of a drive reaches the page through the bridge and the
+signed links above, the same as on Android. Before this, iOS pages read
+`about:blank` from `location`.
+
+- **Writes ask first.** The first time a site tries to create a drive or save a
+  file, PeerSky asks whether it may publish. The answer is kept per site and can
+  be changed in Settings, under Permissions. A tab in the background cannot ask.
+- **A page's drives are its own.** `hyper://localhost/?key=name` from a page
+  gets a drive named after that site as well as `name`, so `?key=p2pmd` from a
+  page is never P2PMD's drive, and two sites asking for the same name never
+  share one. A page writes only to drives it created.
+- **Private drives stay private.** A page cannot read this phone's private
+  drive, the drives adopted from a desktop, or the device-only one, unless it is
+  a page inside that same drive.
+- **Asset links are signed.** Images, media and downloads in a page load from a
+  local server on `127.0.0.1`. Each link carries a signature over its own
+  address, so a page can load what it was given and cannot use one link to
+  reach another file.
 
 ## Cached reads
 
@@ -81,9 +131,9 @@ download can be paused, resumed, or removed.
 
 Hyperdrive uploads support three visibility modes:
 
-- **Public** — written to the announced `hyperdrive-public` drive. Anyone with the URL can read it and browse the rest of that drive.
-- **Private** — written to the `hyperdrive-private` drive, encrypted at the block level using a 32-byte `encryptionKey` (`hyperdrive@13.3.3` passes it to `hypercore@11.35.2`, which does block encryption). The drive is announced and replicated (the synced store runs `autoJoin: false`, `doReplicate: true`), so any device that holds the key can open it. The key is the one PeerSky Desktop sends with its identity through Link Device, so the desktop can open the phone's private files. Until a desktop has sent one, choosing Private asks to link the desktop first. The drive's key is kept in `private-drive-key.json` inside the synced private storage (`hyper-sdk-synced-private`), taken from the desktop's key at the top of Documents the first time the drive is opened.
-- **This device only** — written to the isolated `hyperdrive-device` drive with discovery and replication disabled (`autoJoin: false`, `doReplicate: false`). It never leaves the phone, so it is the right choice when nothing should leave the device at all.
+- **Public**: written to the announced `hyperdrive-public` drive. Anyone with the URL can read it and browse the rest of that drive.
+- **Private**: written to the `hyperdrive-private` drive, encrypted at the block level using a 32-byte `encryptionKey` (`hyperdrive@13.3.3` passes it to `hypercore@11.35.2`, which does block encryption). The drive is announced and replicated (the synced store runs `autoJoin: false`, `doReplicate: true`), so any device that holds the key can open it. The key is the one PeerSky Desktop sends with its identity through Link Device, so the desktop can open the phone's private files. Until a desktop has sent one, choosing Private asks to link the desktop first. The drive's key is kept in `private-drive-key.json` inside the synced private storage (`hyper-sdk-synced-private`), taken from the desktop's key at the top of Documents the first time the drive is opened.
+- **This device only**: written to the isolated `hyperdrive-device` drive with discovery and replication disabled (`autoJoin: false`, `doReplicate: false`). It never leaves the phone, so it is the right choice when nothing should leave the device at all.
 
 > [!NOTE]
 > The key starts on the desktop. A desktop identity transfer carries it to the phone, along with the desktop's private drives, which the phone adopts read-only. Sending the phone's tabs and bookmarks to the desktop from Link Device also tells the desktop the phone's private drive address, and the desktop adds it to its own private drives, read-only. A phone that made a private drive before it was linked keeps that drive's own key, so that drive opens on the phone only. See `docs/link-device.md`.

@@ -22,6 +22,10 @@ describe('browser preferences', () => {
       enforceManualPageZoom: true,
       externalLinkBehavior: 'allow',
       forceDarkWebsites: true,
+      publishingSites: {
+        ['a'.repeat(64)]: 'allow',
+        ['b'.repeat(52)]: 'block'
+      },
       searchEngine: 'custom',
       showFullAddress: true,
       theme: 'dark',
@@ -33,6 +37,19 @@ describe('browser preferences', () => {
       parseBrowserPreferences(serializeBrowserPreferences(preferences)),
       preferences
     )
+  })
+
+  test('keeps only real hyper sites and real answers for publishing', () => {
+    const parsed = parseBrowserPreferences({
+      publishingSites: {
+        ['a'.repeat(64)]: 'allow',
+        'example.com': 'allow',
+        ['c'.repeat(64)]: 'maybe',
+        ['d'.repeat(52)]: 'block'
+      }
+    })
+    assert.deepEqual(parsed.publishingSites, { ['a'.repeat(64)]: 'allow', ['d'.repeat(52)]: 'block' })
+    assert.deepEqual(parseBrowserPreferences({ publishingSites: ['allow'] }).publishingSites, {})
   })
 
   test('rejects unsupported preference values independently', () => {

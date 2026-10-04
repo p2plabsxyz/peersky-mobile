@@ -1,16 +1,12 @@
-// Invite links for PeerChat, matching the desktop format so a link shared from
-// either side opens on the other.
+// PeerChat invite links, in the desktop's format so either side opens them:
 //
 //   peersky://p2p/peerchat/#room=<64 hex room key>   a room
 //   peersky://p2p/peerchat/#dm=<8 hex peer id>       one person
 //
-// A room key is the capability for that room, so anyone holding the link is in.
-// A peer id is not a capability: it only says who to ask, and the person on the
-// other end still has to accept the request. That is why one is 64 characters
-// of secret and the other is the same short id the member list already shows.
-//
-// The key rides in the fragment rather than the path, so the browser shell
-// treats it as a launch suffix on the built-in app instead of a new route.
+// A room key is the room's capability: anyone with the link is in. A peer id
+// only says who to ask, and that person still has to accept, so it can be the
+// short id the member list already shows. Both ride in the fragment, so the
+// browser shell treats them as a launch suffix on the built-in app.
 export const PEERCHAT_INVITE_BASE = 'peersky://p2p/peerchat/'
 
 const ROOM_KEY_RE = /^[a-f0-9]{64}$/i

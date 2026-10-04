@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import { ActivityIndicator, Keyboard, Pressable, StyleSheet, TextInput, View } from 'react-native'
+import { ActivityIndicator, Keyboard, Platform, Pressable, StyleSheet, TextInput, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { getBrowserAddressForUrl, MAX_BROWSER_URL_LENGTH } from './browser-shell.mjs'
 import { formatBrowserAddress } from './browser-appearance.mjs'
 import { getSiteSecurity, SITE_SECURITY } from './site-security.mjs'
+import IncognitoIcon from '../assets/icons/bootstrap/incognito.svg'
 import ShieldCheckIcon from '../assets/icons/bootstrap/shield-check.svg'
 import ShieldSlashIcon from '../assets/icons/bootstrap/shield-slash.svg'
 import { HistorySuggestions } from './history/HistorySuggestions'
@@ -26,13 +27,19 @@ const TOOLBAR_ICON_STROKE_WIDTH = 0.35
 
 // Matches browserToolbar's own paddingHorizontal.
 const TOOLBAR_SIDE_PADDING = 14
+// Long enough for a new tab to settle and for the app to be in front when a
+// widget opened it. The keyboard does not come up for a window that is not.
+const FOCUS_REQUEST_DELAY_MS = 350
 
 type BrowserToolbarProps = {
   activeTabId: string
   address: string
   currentUrl: string
+  // Each new value puts the cursor in the box: the search widget.
+  focusRequest?: number
   historySuggestions: BrowserHistoryItem[]
   isDark: boolean
+  isIncognito?: boolean
   isLoading: boolean
   navigationKey: string
   pageActionAvailable: boolean
@@ -69,8 +76,10 @@ export function BrowserToolbar ({
   activeTabId,
   address,
   currentUrl,
+  focusRequest = 0,
   historySuggestions,
   isDark,
+  isIncognito = false,
   isLoading,
   navigationKey,
   pageActionAvailable,
@@ -106,6 +115,13 @@ export function BrowserToolbar ({
     setIsAddressFocused(false)
   }, [activeTabId, navigationKey])
 
+  // After the blur above, which a new tab sets off in the same render.
+  useEffect(() => {
+    if (!focusRequest) return
+    const timer = setTimeout(() => addressInputRef.current?.focus(), FOCUS_REQUEST_DELAY_MS)
+    return () => clearTimeout(timer)
+  }, [focusRequest])
+
   return (
     // The bar and the list it opens are siblings in a stack with no padding of
     // its own, so "sit on the bar's edge" is the bar's measured height and
@@ -140,6 +156,19 @@ export function BrowserToolbar ({
         onLayout={(event) => setBarHeight(event.nativeEvent.layout.height)}
       >
         <View style={[styles.browserAddressContainer, { backgroundColor: palette.address }]}>
+          {isIncognito && (
+            <View
+              accessible
+              accessibilityLabel='Incognito tab'
+              style={styles.browserSecurity}
+            >
+              <IncognitoIcon
+                width={ADDRESS_SECURITY_ICON_SIZE}
+                height={ADDRESS_SECURITY_ICON_SIZE}
+                color={addressActionIconColor}
+              />
+            </View>
+          )}
           {/* The one thing a padlock is for: whether anybody on the way can
               read this. Hidden while typing, where the address is being
               edited rather than describing a page. */}
@@ -183,7 +212,10 @@ export function BrowserToolbar ({
             ]}
             autoCapitalize='none'
             autoCorrect={false}
-            keyboardType='url'
+            // The bar takes searches as well as addresses. iOS's URL keyboard
+            // has no space bar on its letters, so it gets Safari's web search
+            // keyboard: a space, a full stop and Go.
+            keyboardType={Platform.OS === 'ios' ? 'web-search' : 'url'}
             returnKeyType='go'
             maxLength={MAX_BROWSER_URL_LENGTH}
             selection={isAddressFocused ? undefined : { start: 0, end: 0 }}

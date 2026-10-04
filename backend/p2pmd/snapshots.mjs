@@ -12,9 +12,10 @@ import { getHyperStoragePath } from '../hyper/runtime.mjs'
 
 const MAX_DOCUMENT_LENGTH = 10 * 1024 * 1024
 const MAX_SNAPSHOT_FILE_BYTES = (MAX_DOCUMENT_LENGTH * 4) + (1024 * 1024)
-// Twice the five recent notes: a desktop's five arriving in a Link Device
-// transfer must not push out the copies of this phone's own five.
-const MAX_SNAPSHOTS = 10
+// One copy for each of the thirty recent notes, plus room for the five a
+// desktop sends in a Link Device transfer, so those arriving never push out
+// the copies of this phone's own notes.
+const MAX_SNAPSHOTS = 35
 const SNAPSHOT_DELAY_MS = 200
 
 let activeRoomKey = null

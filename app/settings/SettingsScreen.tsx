@@ -12,7 +12,6 @@ import {
   Animated,
   Easing,
   Image,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -41,6 +40,7 @@ import type {
   AddressBarPosition,
   BrowserTheme,
   ExternalLinkBehavior,
+  PublishingDecision,
   SearchEngine,
   WebsiteTextScale
 } from './useBrowserPreferences'
@@ -55,8 +55,7 @@ import TrashIcon from '../../assets/icons/bootstrap/trash.svg'
 import UniversalAccessIcon from '../../assets/icons/bootstrap/universal-access-circle.svg'
 import DisplayIcon from '../../assets/icons/bootstrap/display.svg'
 import DatabaseIcon from '../../assets/icons/bootstrap/database.svg'
-import { MODAL_ORIENTATIONS } from '../modal-orientations'
-import { offerPermissionSettings } from '../permission-prompt'
+import { LAN_PERMISSION_HELP, LAN_PERMISSION_TITLE, offerPermissionSettings } from '../permission-prompt'
 
 export type SettingsPage =
   | 'main'
@@ -160,6 +159,7 @@ type SettingsScreenProps = {
   isDark: boolean
   offlineNetworkAllowed: boolean
   persistenceError: string | null
+  publishingSites: Record<string, PublishingDecision>
   searchEngine: SearchEngine
   showFullAddress: boolean
   theme: BrowserTheme
@@ -178,6 +178,7 @@ type SettingsScreenProps = {
   onDownloadOnlyOnWifiChange: (enabled: boolean) => void
   onEnforceManualPageZoomChange: (enabled: boolean) => void
   onExternalLinkBehaviorChange: (behavior: ExternalLinkBehavior) => void
+  onPublishingSiteChange: (siteId: string, decision: PublishingDecision | null) => void
   onFilterListsUpdated: () => void
   onSearchEngineChange: (searchEngine: SearchEngine) => void
   onShowFullAddressChange: (enabled: boolean) => void
@@ -192,14 +193,6 @@ type SettingsScreenProps = {
 
 const REPOSITORY_URL = 'https://github.com/p2plabsxyz/peersky-mobile'
 const LICENSE_URL = `${REPOSITORY_URL}/blob/main/LICENSE`
-// Both systems ask once and remember the answer. iOS puts it under the app's
-// own entry; Android keeps it with the permissions for nearby devices, and
-// needs Wi-Fi on for any of it to work.
-const LAN_PERMISSION_TITLE = 'Nearby devices cannot be found'
-const LAN_PERMISSION_HELP = Platform.OS === 'ios'
-  ? 'PeerSky finds nearby devices over your local network. If that was turned down, switch Local Network back on for PeerSky in Settings. Wi-Fi also has to be on, and both devices on the same network.'
-  : 'PeerSky finds nearby devices over your local network. Check that Wi-Fi is on and that Nearby devices is allowed for PeerSky in Settings, with both devices on the same network.'
-
 const FEEDBACK_EMAIL = 'contact@p2plabs.xyz'
 
 const SETTINGS_PAGES: Array<{
@@ -685,7 +678,7 @@ async function withTimeout<T> (promise: Promise<T>, timeoutMs: number) {
   try {
     return await Promise.race([
       promise,
-      new Promise<T>((resolve, reject) => {
+      new Promise<T>((_resolve, reject) => {
         timer = setTimeout(() => reject(new Error('LAN status request timed out')), timeoutMs)
       })
     ])
@@ -946,23 +939,10 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '800'
   },
-  placeholder: {
-    backgroundColor: '#ffffff',
-    borderBottomColor: '#e1e7f0',
-    borderBottomWidth: 1,
-    gap: 7,
-    paddingHorizontal: 20,
-    paddingVertical: 22
-  },
   placeholderTitle: {
     color: '#1f2a44',
     fontSize: 16,
     fontWeight: '800'
-  },
-  placeholderDescription: {
-    color: '#687086',
-    fontSize: 14,
-    lineHeight: 20
   },
   errorBanner: {
     backgroundColor: '#fff1f3',

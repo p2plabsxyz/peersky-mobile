@@ -14,6 +14,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import ArrowLeftIcon from '../../assets/icons/bootstrap/arrow-left.svg'
 import CheckIcon from '../../assets/icons/bootstrap/check2.svg'
 import DownloadIcon from '../../assets/icons/bootstrap/download.svg'
+import FolderIcon from '../../assets/icons/bootstrap/folder.svg'
 import ReloadIcon from '../../assets/icons/bootstrap/arrow-clockwise.svg'
 import PauseIcon from '../../assets/icons/bootstrap/pause-fill.svg'
 import PlayIcon from '../../assets/icons/bootstrap/play-fill.svg'
@@ -43,6 +44,7 @@ type DownloadsScreenProps = {
   onRefresh: () => void
   onRemove: (id: string) => void
   onRetry: (download: BrowserDownload) => Promise<unknown>
+  onSaveToFiles?: (id: string) => void
 }
 
 export function DownloadsScreen ({
@@ -55,7 +57,8 @@ export function DownloadsScreen ({
   onPause,
   onRefresh,
   onRemove,
-  onRetry
+  onRetry,
+  onSaveToFiles
 }: DownloadsScreenProps) {
   const palette = isDark ? BROWSER_PALETTES.dark : BROWSER_PALETTES.light
   const [sort, setSort] = useState<DownloadSort>('newest')
@@ -186,6 +189,17 @@ export function DownloadsScreen ({
                     {pausingDownloadId === download.id
                       ? <ActivityIndicator size='small' color={palette.accent} />
                       : <PauseIcon width={22} height={22} color={palette.accent} />}
+                  </Pressable>
+                )}
+                {download.status === 'complete' && Platform.OS === 'ios' && onSaveToFiles && (
+                  <Pressable
+                    accessibilityLabel={`Save ${download.name} to Files`}
+                    accessibilityRole='button'
+                    hitSlop={8}
+                    style={({ pressed }) => [styles.downloadAction, pressed ? styles.pressed : null]}
+                    onPress={() => onSaveToFiles(download.id)}
+                  >
+                    <FolderIcon width={20} height={20} color={palette.accent} />
                   </Pressable>
                 )}
                 {['failed', 'paused'].includes(download.status) && download.sourceUrl && (

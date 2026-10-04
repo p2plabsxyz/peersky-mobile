@@ -1,48 +1,83 @@
 export const PEERCHAT_UI_STATE_MAX_BYTES = 300 * 1024
 export const PEERCHAT_DRAFT_MAX_CHARACTERS = 64 * 1024
+// One unsent message per chat. There used to be one for the whole app, so
+// opening another chat threw away what you had typed in the last one.
+export const PEERCHAT_MAX_DRAFTS = 30
 // Same depth as desktop, so a phone and a laptop remember about as much.
 export const PEERCHAT_RECENT_EMOJI_MAX = 24
 
 const EMPTY_STATE = Object.freeze({
   activeRoomKey: null,
-  draftRoomKey: null,
-  draft: '',
+  drafts: Object.freeze({}),
   recentEmojis: []
 })
 
 export function parsePeerChatUiState (serialized) {
   if (typeof serialized !== 'string' || serialized.length > PEERCHAT_UI_STATE_MAX_BYTES) {
-    return { ...EMPTY_STATE }
+    return { ...EMPTY_STATE, drafts: {} }
   }
 
   try {
     const stored = JSON.parse(serialized)
-    if (stored?.version !== 1) return { ...EMPTY_STATE }
+    // Version 1 kept a single draft for a single room.
+    const drafts = stored?.version === 2
+      ? stored.drafts
+      : stored?.version === 1 && typeof stored.draftRoomKey === 'string'
+        ? { [stored.draftRoomKey]: stored.draft }
+        : null
+    if (!drafts) return { ...EMPTY_STATE, drafts: {} }
 
-    const activeRoomKey = normalizeRoomKey(stored.activeRoomKey)
-    const draftRoomKey = normalizeRoomKey(stored.draftRoomKey)
-    const draft = normalizeDraft(stored.draft)
     return {
-      activeRoomKey,
-      draftRoomKey: draft ? draftRoomKey : null,
-      draft: draftRoomKey ? draft : '',
+      activeRoomKey: normalizeRoomKey(stored.activeRoomKey),
+      drafts: normalizeDrafts(drafts),
       recentEmojis: normalizeRecentEmojis(stored.recentEmojis)
     }
   } catch {
-    return { ...EMPTY_STATE }
+    return { ...EMPTY_STATE, drafts: {} }
   }
 }
 
-export function serializePeerChatUiState ({ activeRoomKey, draftRoomKey, draft, recentEmojis }) {
-  const normalizedDraft = normalizeDraft(draft)
-  const normalizedDraftRoomKey = normalizeRoomKey(draftRoomKey)
-  return JSON.stringify({
-    version: 1,
+export function serializePeerChatUiState ({ activeRoomKey, drafts, recentEmojis }) {
+  const state = {
+    version: 2,
     activeRoomKey: normalizeRoomKey(activeRoomKey),
-    draftRoomKey: normalizedDraft ? normalizedDraftRoomKey : null,
-    draft: normalizedDraftRoomKey ? normalizedDraft : '',
+    drafts: normalizeDrafts(drafts),
     recentEmojis: normalizeRecentEmojis(recentEmojis)
-  })
+  }
+  // The newest come first, so when everything will not fit it is the oldest
+  // drafts that are left out.
+  let serialized = JSON.stringify(state)
+  const keys = Object.keys(state.drafts)
+  while (serialized.length > PEERCHAT_UI_STATE_MAX_BYTES && keys.length > 0) {
+    delete state.drafts[keys.pop()]
+    serialized = JSON.stringify(state)
+  }
+  return serialized
+}
+
+/**
+ * The drafts with this room's text in it, newest first. Empty text removes the
+ * room's draft.
+ */
+export function setPeerChatDraft (drafts, roomKey, text) {
+  const key = normalizeRoomKey(roomKey)
+  const rest = Object.entries(normalizeDrafts(drafts)).filter(([room]) => room !== key)
+  const draft = normalizeDraft(text)
+  if (!key) return Object.fromEntries(rest)
+  return normalizeDrafts(Object.fromEntries(draft ? [[key, draft], ...rest] : rest))
+}
+
+function normalizeDrafts (value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  const drafts = {}
+  for (const [roomKey, text] of Object.entries(value)) {
+    const key = normalizeRoomKey(roomKey)
+    const draft = normalizeDraft(text)
+    if (!key || !draft || key in drafts) continue
+    drafts[key] = draft
+    if (Object.keys(drafts).length >= PEERCHAT_MAX_DRAFTS) break
+  }
+  return drafts
 }
 
 /** Most recently used first, no repeats, capped. */

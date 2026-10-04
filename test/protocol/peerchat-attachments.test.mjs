@@ -12,7 +12,8 @@ import {
   AttachmentBlockStream,
   AttachmentDecryptStream,
   AttachmentFrameEncryptStream,
-  MAX_ATTACHMENT_BYTES,
+  FREE_SPACE_CHECK_FROM_BYTES,
+  FREE_SPACE_RESERVE_BYTES,
   MAX_SINGLE_SEAL_BYTES,
   framedSealedLength,
   sealedAttachmentLength,
@@ -261,15 +262,93 @@ test('a one-shot cipher still uploads and opens, in blocks a drive accepts', asy
   assert.deepEqual(await readFile(new URL(opened.localUri)), plaintext)
 })
 
-test('a file past what a phone can seal is refused by name, not by crypto error', async () => {
+// No limit of its own, as in Keet. What stops a file is room: this phone keeps
+// a sealed copy of what it shares, so a file it has no room for is refused,
+// in plain words, before anything is written.
+test('a file of any size is shared if there is room for it, and refused in plain words if not', async () => {
+  const gb = 1024 * 1024 * 1024
+  const big = 5 * gb
+  const noDrive = { async getDrive () { throw new Error('should not reach the drive') } }
+
   const refused = await uploadPeerChatAttachment({
     roomKey: ROOM_KEY,
     fileUri: 'file:///var/mobile/Library/Caches/imagepicker/huge.mov',
-    byteLength: MAX_ATTACHMENT_BYTES + 1
-  }, { runtime: { async getDrive () { throw new Error('should not reach the drive') } } })
-
+    byteLength: big
+  }, { runtime: noDrive, storagePath: '/tmp/peerchat-room-check', freeBytes: () => 3 * gb })
   assert.equal(refused.ok, false)
-  assert.equal(refused.error, 'PeerChat attachments must be 2 GB or smaller.')
+  assert.match(refused.error, /^This phone needs 5\.5 GB free to share this file, and has 3\.0 GB\.$/)
+
+  // With room, a file past the old 2 GB line goes on to the drive.
+  const reached = await uploadPeerChatAttachment({
+    roomKey: ROOM_KEY,
+    fileUri: 'file:///var/mobile/Library/Caches/imagepicker/huge.mov',
+    byteLength: big
+  }, { runtime: noDrive, storagePath: '/tmp/peerchat-room-check', freeBytes: () => big * 2 })
+  assert.equal(reached.ok, false)
+  assert.equal(reached.error, 'should not reach the drive')
+  assert.equal(FREE_SPACE_RESERVE_BYTES, 512 * 1024 * 1024)
+})
+
+// Opening keeps what came down and the opened copy, so a file too big for this
+// phone, or a message claiming one, is refused before a byte is fetched.
+test('a file is opened only if there is room for it', async () => {
+  const gb = 1024 * 1024 * 1024
+  const refused = await openPeerChatAttachment({
+    roomKey: ROOM_KEY,
+    url: 'hyper://' + 'a'.repeat(52) + '/1-abc.bin',
+    fileName: 'film.mp4',
+    fileSize: 3 * gb,
+    encrypted: true
+  }, {
+    storagePath: '/tmp/peerchat-room-check',
+    freeBytes: () => 4 * gb,
+    runtime: {
+      async getDrive () {
+        return {
+          async entry () { return { value: { blob: { byteLength: framedSealedLength(3 * gb) } } } },
+          createReadStream () { throw new Error('should not download') }
+        }
+      }
+    }
+  })
+  assert.equal(refused.ok, false)
+  assert.match(refused.error, /^This phone needs 6\.5 GB free to open this file, and has 4\.0 GB\.$/)
+})
+
+// iOS leaves the space it can clear on demand out of what it reports, so a
+// nearly full iPhone can look short of the reserve. A photo must still open.
+test('a picture opens and shares whatever free space the phone reports', async () => {
+  const kb = 1024
+  const nearlyFull = () => 40 * 1024 * 1024
+  const opened = await openPeerChatAttachment({
+    roomKey: ROOM_KEY,
+    url: 'hyper://' + 'a'.repeat(52) + '/1-abc.bin',
+    fileName: 'photo.jpg',
+    fileSize: 200 * kb,
+    encrypted: true
+  }, {
+    storagePath: '/tmp/peerchat-room-check',
+    freeBytes: nearlyFull,
+    runtime: {
+      async getDrive () {
+        return {
+          async entry () { return { value: { blob: { byteLength: 200 * kb + 4 + 12 + 16 } } } },
+          createReadStream () { throw new Error('reached the download') }
+        }
+      }
+    }
+  })
+  assert.equal(opened.ok, false)
+  assert.equal(opened.error, 'reached the download')
+
+  const shared = await uploadPeerChatAttachment({
+    roomKey: ROOM_KEY,
+    fileUri: 'file:///var/mobile/Library/Caches/imagepicker/photo.jpg',
+    byteLength: 200 * kb
+  }, { runtime: { async getDrive () { throw new Error('reached the drive') } }, storagePath: '/tmp/peerchat-room-check', freeBytes: nearlyFull })
+  assert.equal(shared.ok, false)
+  assert.equal(shared.error, 'reached the drive')
+  assert.equal(FREE_SPACE_CHECK_FROM_BYTES, 100 * 1024 * 1024)
 })
 
 // PCA1 seals a file in one piece on both sides, so sending or opening one costs
@@ -509,15 +588,16 @@ test('a stored size that no sealing could produce is refused', async () => {
 })
 
 // The wait on an upload used to be a flat three minutes, which was plenty for a
-// photo and would have given up on every film the 2 GB limit now allows.
+// photo and would have given up on every film.
 test('the upload wait grows with the file', async () => {
-  const { MAX_ATTACHMENT_BYTES: limit } = await import('../../backend/peerchat/attachments.mjs')
+  const limit = 2 * 1024 * 1024 * 1024
   const { UPLOAD_TIMEOUT_MS, getPeerChatUploadTimeout } =
     await import('../../app/peerchat/attachment-timeout.mjs')
 
   assert.equal(getPeerChatUploadTimeout(0), UPLOAD_TIMEOUT_MS)
   assert.equal(getPeerChatUploadTimeout(1024 * 1024), UPLOAD_TIMEOUT_MS + 300)
   assert.ok(getPeerChatUploadTimeout(500 * 1024 * 1024) > 5 * 60 * 1000)
-  // Ten minutes of headroom for the largest file the room will take.
+  // Ten minutes of headroom for a 2 GB film, and it keeps growing past that.
   assert.ok(getPeerChatUploadTimeout(limit) > 10 * 60 * 1000)
+  assert.ok(getPeerChatUploadTimeout(limit * 4) > getPeerChatUploadTimeout(limit) * 3)
 })

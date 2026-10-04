@@ -10,7 +10,6 @@ import {
   renderP2pmdMarkdown
 } from '../p2pmd/scientific.mjs'
 import { hasIeeeMarker } from '../p2pmd/templates.mjs'
-import { resolveHyperdriveAppDriveName } from './storage-core.mjs'
 import { recordHyperArchive } from './archive.mjs'
 
 const MAX_HYPER_FILE_BYTES = 10 * 1024 * 1024
@@ -32,33 +31,6 @@ let publishTransition = Promise.resolve()
 let imageUploadWindowStartedAt = 0
 let imageUploadCount = 0
 let imageUploadBytes = 0
-
-export async function createDrive ({ name } = {}) {
-  return withHyperRuntimeOperation(async (runtime) => {
-    const driveName = resolveHyperdriveAppDriveName(name)
-
-    const drive = await runtime.getDrive(driveName)
-    const indexPath = '/index.html'
-    const hasIndex = await drive.exists(indexPath)
-
-    if (!hasIndex) {
-      const html = `<!doctype html>
-<meta charset="utf-8" />
-<title>PeerSky Mobile Hyperdrive</title>
-<h1>PeerSky Mobile Hyperdrive</h1>
-<p>This drive was created from the mobile Bare worklet.</p>
-`
-      await drive.put(indexPath, b4a.from(html))
-    }
-
-    return {
-      ok: true,
-      status: 200,
-      statusText: 'OK',
-      url: `hyper://${drive.id}/`
-    }
-  })
-}
 
 export async function uploadHyperFile ({
   name,

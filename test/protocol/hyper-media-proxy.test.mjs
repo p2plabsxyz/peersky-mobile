@@ -2,8 +2,10 @@ import assert from 'node:assert/strict'
 import http from 'node:http'
 import { describe, test } from 'node:test'
 import { createHyperAssetServer } from '../../backend/hyper/asset-server-core.mjs'
+import { signHyperAssetUrl } from '../../backend/hyper/assets.mjs'
 
 const ASSET_AUTH_TOKEN = 'test-hyper-asset-token-0123456789abcdef'
+const signed = (url) => `token=${signHyperAssetUrl(ASSET_AUTH_TOKEN, url)}&url=${encodeURIComponent(url)}`
 
 describe('hyper media proxy server', () => {
   test('serves OPTIONS preflight without calling hyper fetch', async () => {
@@ -18,7 +20,7 @@ describe('hyper media proxy server', () => {
     })
 
     await withServer(server, async (localUrl) => {
-      const response = await fetch(`${localUrl}/asset?token=${ASSET_AUTH_TOKEN}&url=${encodeURIComponent('hyper://example.com/video.mp4')}`, {
+      const response = await fetch(`${localUrl}/asset?${signed('hyper://example.com/video.mp4')}`, {
         method: 'OPTIONS'
       })
 
@@ -39,7 +41,7 @@ describe('hyper media proxy server', () => {
     })
 
     await withServer(server, async (localUrl) => {
-      const post = await fetch(`${localUrl}/asset?token=${ASSET_AUTH_TOKEN}&url=${encodeURIComponent('hyper://example.com/video.mp4')}`, { method: 'POST' })
+      const post = await fetch(`${localUrl}/asset?${signed('hyper://example.com/video.mp4')}`, { method: 'POST' })
       assert.equal(post.status, 405)
       assert.equal(await post.text(), 'Method not allowed')
 
@@ -47,11 +49,11 @@ describe('hyper media proxy server', () => {
       assert.equal(missingUrl.status, 400)
       assert.equal(await missingUrl.text(), 'Missing asset url')
 
-      const invalidUrl = await fetch(`${localUrl}/asset?token=${ASSET_AUTH_TOKEN}&url=${encodeURIComponent('https://example.com/video.mp4')}`)
+      const invalidUrl = await fetch(`${localUrl}/asset?${signed('https://example.com/video.mp4')}`)
       assert.equal(invalidUrl.status, 400)
       assert.match(await invalidUrl.text(), /Only hyper:\/\/ URLs are supported|Invalid URL/)
 
-      const notFound = await fetch(`${localUrl}/other?token=${ASSET_AUTH_TOKEN}&url=${encodeURIComponent('hyper://example.com/video.mp4')}`)
+      const notFound = await fetch(`${localUrl}/other?${signed('hyper://example.com/video.mp4')}`)
       assert.equal(notFound.status, 404)
       assert.equal(await notFound.text(), 'Not found')
     })
@@ -77,12 +79,13 @@ describe('hyper media proxy server', () => {
 
     await withServer(server, async (localUrl) => {
       const assetUrl = 'hyper://example.com/video.mp4'
-      const response = await fetch(`${localUrl}/asset?token=${ASSET_AUTH_TOKEN}&url=${encodeURIComponent(assetUrl)}`)
+      const response = await fetch(`${localUrl}/asset?${signed(assetUrl)}`)
 
       assert.equal(response.status, 200)
       assert.equal(response.headers.get('content-type'), 'video/mp4')
       assert.equal(response.headers.get('accept-ranges'), 'bytes')
       assert.equal(response.headers.get('x-content-type-options'), 'nosniff')
+      assert.equal(response.headers.get('content-security-policy'), 'sandbox')
       assert.equal(response.headers.get('etag'), 'asset-etag')
       assert.equal(await response.text(), 'hello video')
       assert.equal(calls.length, 1)
@@ -118,7 +121,7 @@ describe('hyper media proxy server', () => {
     })
 
     await withServer(server, async (localUrl) => {
-      const response = await fetch(`${localUrl}/asset?token=${ASSET_AUTH_TOKEN}&url=${encodeURIComponent('hyper://example.com/video.mp4')}`)
+      const response = await fetch(`${localUrl}/asset?${signed('hyper://example.com/video.mp4')}`)
       assert.equal(await response.text(), 'firstsecond')
       assert.deepEqual(writeArgumentCounts, [1, 1])
     })
@@ -147,7 +150,7 @@ describe('hyper media proxy server', () => {
     })
 
     await withServer(server, async (localUrl) => {
-      const response = await fetch(`${localUrl}/asset?token=${ASSET_AUTH_TOKEN}&url=${encodeURIComponent('hyper://example.com/audio.ogg')}`, {
+      const response = await fetch(`${localUrl}/asset?${signed('hyper://example.com/audio.ogg')}`, {
         method: 'HEAD'
       })
 
@@ -179,7 +182,7 @@ describe('hyper media proxy server', () => {
     })
 
     await withServer(server, async (localUrl) => {
-      const response = await fetch(`${localUrl}/asset?token=${ASSET_AUTH_TOKEN}&url=${encodeURIComponent('hyper://example.com/video.mp4')}`, {
+      const response = await fetch(`${localUrl}/asset?${signed('hyper://example.com/video.mp4')}`, {
         headers: { Range: 'bytes=0-3' }
       })
 
@@ -213,7 +216,7 @@ describe('hyper media proxy server', () => {
 
     await withServer(server, async (localUrl) => {
       const assetUrl = 'hyper://example.com/large-video.mp4'
-      const response = await fetch(`${localUrl}/asset?token=${ASSET_AUTH_TOKEN}&url=${encodeURIComponent(assetUrl)}`)
+      const response = await fetch(`${localUrl}/asset?${signed(assetUrl)}`)
 
       assert.equal(response.status, 200)
       assert.equal(response.headers.get('content-length'), String(8 * 1024 * 1024))
@@ -264,7 +267,7 @@ describe('hyper media proxy server', () => {
 
     await withServer(server, async (localUrl) => {
       const assetUrl = 'hyper://example.com/large-video.mp4'
-      const response = await fetch(`${localUrl}/asset?token=${ASSET_AUTH_TOKEN}&url=${encodeURIComponent(assetUrl)}`, {
+      const response = await fetch(`${localUrl}/asset?${signed(assetUrl)}`, {
         headers: { Range: 'bytes=0-' }
       })
 
@@ -306,7 +309,7 @@ describe('hyper media proxy server', () => {
 
     await withServer(server, async (localUrl) => {
       const assetUrl = 'hyper://example.com/song.mp3'
-      await fetch(`${localUrl}/asset?token=${ASSET_AUTH_TOKEN}&url=${encodeURIComponent(assetUrl)}`, {
+      await fetch(`${localUrl}/asset?${signed(assetUrl)}`, {
         headers: { Range: 'bytes=0-1000' }
       })
 
@@ -342,7 +345,7 @@ describe('hyper media proxy server', () => {
 
     await withServer(server, async (localUrl) => {
       const assetUrl = 'hyper://example.com/cached-video.mp4'
-      const response = await fetch(`${localUrl}/asset?token=${ASSET_AUTH_TOKEN}&url=${encodeURIComponent(assetUrl)}`, {
+      const response = await fetch(`${localUrl}/asset?${signed(assetUrl)}`, {
         headers: { Range: 'bytes=0-' }
       })
 
@@ -397,7 +400,7 @@ describe('hyper media proxy server', () => {
 
     await withServer(server, async (localUrl) => {
       const assetUrl = 'hyper://example.com/large-video.mp4'
-      const response = await fetch(`${localUrl}/asset?token=${ASSET_AUTH_TOKEN}&url=${encodeURIComponent(assetUrl)}`, {
+      const response = await fetch(`${localUrl}/asset?${signed(assetUrl)}`, {
         headers: { Range: `bytes=${4 * 1024 * 1024}-` }
       })
 
@@ -421,7 +424,7 @@ describe('hyper media proxy server', () => {
     })
 
     await withServer(server, async (localUrl) => {
-      const response = await fetch(`${localUrl}/asset?token=${ASSET_AUTH_TOKEN}&url=${encodeURIComponent('hyper://example.com/video.mp4')}`, {
+      const response = await fetch(`${localUrl}/asset?${signed('hyper://example.com/video.mp4')}`, {
         headers: { Range: 'bytes=0-1,2-3' }
       })
 
@@ -444,7 +447,7 @@ describe('hyper media proxy server', () => {
     })
 
     await withServer(failingServer, async (localUrl) => {
-      const response = await fetch(`${localUrl}/asset?token=${ASSET_AUTH_TOKEN}&url=${encodeURIComponent('hyper://example.com/missing.mp4')}`)
+      const response = await fetch(`${localUrl}/asset?${signed('hyper://example.com/missing.mp4')}`)
       assert.equal(response.status, 404)
       assert.equal(await response.text(), 'Missing asset')
     })
@@ -462,7 +465,7 @@ describe('hyper media proxy server', () => {
     })
 
     await withServer(bufferedServer, async (localUrl) => {
-      const response = await fetch(`${localUrl}/asset?token=${ASSET_AUTH_TOKEN}&url=${encodeURIComponent('hyper://example.com/buffered.mp4')}`)
+      const response = await fetch(`${localUrl}/asset?${signed('hyper://example.com/buffered.mp4')}`)
       assert.equal(response.status, 502)
       assert.equal(await response.text(), 'Hyper asset response is not streamable')
     })
@@ -480,7 +483,7 @@ describe('hyper media proxy server', () => {
 
     await withServer(server, async (localUrl) => {
       try {
-        const result = await requestWithNodeHttp(`${localUrl}/asset?token=${ASSET_AUTH_TOKEN}&url=${encodeURIComponent('hyper://example.com/broken.mp4')}`)
+        const result = await requestWithNodeHttp(`${localUrl}/asset?${signed('hyper://example.com/broken.mp4')}`)
         assert.equal(result.statusCode, 200)
         assert.equal(result.aborted, true)
       } catch (error) {
@@ -518,7 +521,7 @@ describe('hyper media proxy server', () => {
     })
 
     await withServer(server, async (localUrl) => {
-      await abortAfterFirstChunk(`${localUrl}/asset?token=${ASSET_AUTH_TOKEN}&url=${encodeURIComponent('hyper://example.com/large-video.mp4')}`)
+      await abortAfterFirstChunk(`${localUrl}/asset?${signed('hyper://example.com/large-video.mp4')}`)
       await waitFor(() => upstreamCancelled)
       assert.equal(upstreamCancelled, true)
     })
@@ -536,14 +539,14 @@ describe('hyper media proxy server', () => {
 
     await withServer(server, async (localUrl) => {
       const assetUrl = 'hyper://example.com/photo.jpg'
-      const response = await fetch(`${localUrl}/asset?token=${ASSET_AUTH_TOKEN}&url=${encodeURIComponent(assetUrl)}`)
+      const response = await fetch(`${localUrl}/asset?${signed(assetUrl)}`)
 
       assert.equal(response.headers.get('content-type'), 'image/jpeg')
       assert.equal(await response.text(), 'image')
     })
   })
 
-  test('rejects missing and incorrect asset tokens before calling hyper fetch', async () => {
+  test('rejects a missing, wrong or borrowed signature before calling hyper fetch', async () => {
     let calls = 0
     const server = createHyperAssetServer({
       httpImpl: http,
@@ -558,11 +561,17 @@ describe('hyper media proxy server', () => {
       const assetUrl = encodeURIComponent('hyper://example.com/video.mp4')
       const missingToken = await fetch(`${localUrl}/asset?url=${assetUrl}`)
       const incorrectToken = await fetch(`${localUrl}/asset?token=incorrect-token&url=${assetUrl}`)
+      // The secret itself is never a valid token, and a page handed the link
+      // to one file cannot reuse its signature for another.
+      const rawSecret = await fetch(`${localUrl}/asset?token=${ASSET_AUTH_TOKEN}&url=${assetUrl}`)
+      const borrowed = await fetch(
+        `${localUrl}/asset?token=${signHyperAssetUrl(ASSET_AUTH_TOKEN, 'hyper://example.com/other.mp4')}&url=${assetUrl}`
+      )
 
-      assert.equal(missingToken.status, 401)
-      assert.equal(await missingToken.text(), 'Unauthorized')
-      assert.equal(incorrectToken.status, 401)
-      assert.equal(await incorrectToken.text(), 'Unauthorized')
+      for (const response of [missingToken, incorrectToken, rawSecret, borrowed]) {
+        assert.equal(response.status, 401)
+        assert.equal(await response.text(), 'Unauthorized')
+      }
       assert.equal(calls, 0)
     })
   })
@@ -583,7 +592,7 @@ describe('hyper media proxy server', () => {
     await withServer(server, async (localUrl) => {
       const assetUrl = 'hyper://example.com/report.pdf'
       const response = await fetch(
-        `${localUrl}/asset?token=${ASSET_AUTH_TOKEN}&url=${encodeURIComponent(assetUrl)}&download=1&name=${encodeURIComponent('report.pdf')}`
+        `${localUrl}/asset?${signed(assetUrl)}&download=1&name=${encodeURIComponent('report.pdf')}`
       )
 
       assert.equal(response.status, 200)
@@ -616,7 +625,7 @@ describe('hyper media proxy server', () => {
     await withServer(server, async (localUrl) => {
       const assetUrl = 'hyper://example.com/large-video.mp4'
       const response = await fetch(
-        `${localUrl}/asset?token=${ASSET_AUTH_TOKEN}&url=${encodeURIComponent(assetUrl)}&download=1&name=large-video.mp4`
+        `${localUrl}/asset?${signed(assetUrl)}&download=1&name=large-video.mp4`
       )
 
       assert.equal((await response.arrayBuffer()).byteLength, byteLength)

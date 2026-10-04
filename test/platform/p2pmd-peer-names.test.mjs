@@ -61,7 +61,8 @@ test('P2PMD asks for a name first and starts from a fun one', async () => {
   assert.match(tab, /Choose a name to get started/)
   assert.match(tab, /setP2pmdNameDraft\(createFunPeerName\(\)\)/)
   // Create and join only show once a name is saved.
-  assert.ok(tab.indexOf('Choose a name to get started') < tab.indexOf('onP2pmdRoomCreate()'))
+  const create = tab.indexOf('setP2pmdNewNoteVisible(true)')
+  assert.ok(create > 0 && tab.indexOf('Choose a name to get started') < create)
 
   // A recent note or a link skips the card, and still gets a real name.
   for (const handler of ['async function onP2pmdRoomCreate', 'async function onP2pmdRoomJoin']) {

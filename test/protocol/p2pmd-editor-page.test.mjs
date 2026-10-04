@@ -1,6 +1,8 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { getP2pmdEditorPage } from '../../backend/p2pmd/server.mjs'
+import { splitMarkdownSlides } from '../../backend/p2pmd/preview.mjs'
+import yjsBrowserScript from '../../backend/p2pmd/yjs-runtime.mjs'
 
 describe('p2pmd mobile editor page routing', () => {
   it('routes collaboration endpoints through the joined room base URL', () => {
@@ -10,9 +12,27 @@ describe('p2pmd mobile editor page routing', () => {
     assert.match(html, /fetch\(roomUrl\('\/doc\/update'\)/)
     assert.match(html, /fetch\(roomUrl\('\/doc\/yjsstate'\)\)/)
     assert.match(html, /new EventSource\(roomUrl\('\/events\?'/)
-    assert.match(html, /loadScript\(roomUrl\('\/lib\/yjs\.min\.js'\)\)/)
     assert.match(html, /withInitialRoomRetry/)
     assert.match(html, /INITIAL_ROOM_RETRY_ATTEMPTS/)
+  })
+
+  // Whoever hosts the room used to choose the editor's yjs, and with it the
+  // code that ran next to the app's bridge.
+  it('runs only its own code, never a script from the room', () => {
+    const html = getP2pmdEditorPage()
+
+    assert.ok(html.includes(yjsBrowserScript.replace(/<\/script/gi, '<\\/script')))
+    assert.doesNotMatch(html, /\/lib\/yjs\.min\.js/)
+    assert.doesNotMatch(html, /script\.src\s*=/)
+    assert.doesNotMatch(html, /<script[^>]+src=/i)
+    assert.match(html, /<meta name="referrer" content="no-referrer">/)
+  })
+
+  it('publishes only with the nonce the app handed over', () => {
+    const html = getP2pmdEditorPage()
+
+    assert.match(html, /function publishToHyper\(nonce\)/)
+    assert.match(html, /notifyNative\('p2pmd-publish-requested', \{\s+nonce,/)
   })
 
   it('keeps preview and Hyper image upload on the mobile native bridge', () => {
@@ -34,7 +54,7 @@ describe('p2pmd mobile editor page routing', () => {
     assert.match(html, /# Welcome to Your Presentation/)
     assert.match(html, /This will clear your notes and give you a slides template[.] Continue[?]/)
     assert.match(html, /replaceDocumentRange\(0, input[.]value[.]length, slidesTemplate, 0, 0\)/)
-    assert.match(html, /else if \(format === 'slides'\) viewAsSlides\(\)/)
+    assert.match(html, /else if \(format === 'slides'\) toggleSlides\(\)/)
     assert.match(html, /callNativeBridge\('preview', \{\s+content: input\.value,\s+mode: 'slides'/)
     assert.match(html, /notifyNative\('p2pmd-view-mode', \{ mode: viewMode \}\)/)
     assert.match(html, /slidesPreview\.addEventListener\('touchstart'/)
@@ -55,6 +75,46 @@ describe('p2pmd mobile editor page routing', () => {
     assert.match(html, /slidesExit\.addEventListener\('click', \(\) => setViewMode\('edit'\)\)/)
     assert.match(html, /id="slides-progress-value"/)
     assert.match(html, /mode: viewMode/)
+  })
+
+  // The bar is hidden over the deck, so adding an image means going back to
+  // the editor. That used to make Preview show one long page and Publish send
+  // the deck as a note.
+  it('keeps a deck a deck while it is being edited', () => {
+    const html = getP2pmdEditorPage()
+
+    assert.match(html, /aria-label="View as slides" aria-pressed="false"/)
+    assert.match(html, /if \(viewMode === 'slides'\) presenting = true/)
+    assert.match(html, /else setViewMode\(presenting \? 'slides' : 'preview'\)/)
+    assert.match(html, /mode: presenting && hasSlideBreaks\(input\.value\) \? 'slides' : 'note'/)
+    assert.match(html, /slides: presenting/)
+    assert.match(html, /if \(presenting && viewMode === 'edit'\) \{\s+presenting = false/)
+  })
+
+  // A page-wide h1 rule left over from the editor's own header made a note's
+  // title smaller than its sections.
+  it('draws a note\'s headings largest first', () => {
+    const html = getP2pmdEditorPage()
+    const size = (tag) => Number(new RegExp(`#preview ${tag} \\{[^}]*font-size: ([0-9.]+)em`).exec(html)?.[1])
+
+    assert.doesNotMatch(html, /^\s*h1 \{/m)
+    assert.ok(size('h1') > size('h2') && size('h2') > size('h3'))
+  })
+
+  it('keeps the blank line above a slide break when an image goes in', () => {
+    const html = getP2pmdEditorPage()
+    const source = html.slice(
+      html.indexOf('function createMarkdownBlock('),
+      html.indexOf('function replaceUploadPlaceholder(')
+    )
+    // eslint-disable-next-line no-new-func
+    const createMarkdownBlock = new Function('newline', `${source}; return createMarkdownBlock`)('\n')
+    const deck = '# One\n\n---\n\n# Two'
+    const blankLine = deck.indexOf('\n\n---') + 1
+    const block = createMarkdownBlock(deck, blankLine, blankLine, '![cat](hyper://abc/cat.png)')
+    const next = deck.slice(0, blankLine) + block.text + deck.slice(blankLine)
+
+    assert.deepEqual(splitMarkdownSlides(next), ['# One\n![cat](hyper://abc/cat.png)', '# Two'])
   })
 
   it('provides synchronized LaTeX mode and scientific templates', () => {

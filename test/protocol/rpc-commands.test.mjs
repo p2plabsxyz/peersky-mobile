@@ -2,7 +2,6 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { test } from 'node:test'
 import {
-  RPC_HYPER_CREATE_DRIVE,
   RPC_HYPER_FETCH,
   RPC_HYPER_INIT,
   RPC_HYPER_LIBRARY_LIST,
@@ -46,7 +45,6 @@ test('Hyper storage and LAN discovery use distinct RPC command IDs', () => {
   const commands = [
     RPC_HYPER_INIT,
     RPC_HYPER_FETCH,
-    RPC_HYPER_CREATE_DRIVE,
     RPC_HYPER_STORAGE_LIST,
     RPC_HYPER_STORAGE_DELETE_APP,
     RPC_HYPER_STORAGE_CLEAR_CACHE,
@@ -63,7 +61,7 @@ test('Hyper storage and LAN discovery use distinct RPC command IDs', () => {
     RPC_HYPER_OFFLINE_REMOVE
   ]
 
-  assert.deepEqual(commands, [1, 2, 3, 4, 5, 6, 7, 8, 9, 14, 15, 60, 61, 62, 63, 64, 65])
+  assert.deepEqual(commands, [1, 2, 4, 5, 6, 7, 8, 9, 14, 15, 60, 61, 62, 63, 64, 65])
   assert.equal(new Set(commands).size, commands.length)
 })
 

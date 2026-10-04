@@ -1,7 +1,6 @@
 import type { ImageSourcePropType } from 'react-native'
 
 import {
-  INTERNAL_APPS as INTERNAL_APP_REGISTRY,
   P2P_APPS as P2P_APP_REGISTRY,
   canUseP2pAppPageActions as canUseP2pAppRegistryPageActions,
   getRuntimeAppFromUrl as getRuntimeAppFromRegistryUrl,
@@ -39,8 +38,6 @@ type InternalAppEntry = {
 function withIcon (app: InternalAppEntry) {
   return { ...app, iconSource: INTERNAL_APP_ICONS[app.id] }
 }
-
-export const INTERNAL_APPS = (INTERNAL_APP_REGISTRY as InternalAppEntry[]).map(withIcon)
 
 // The apps a person can open. Holesail is left out: it is a development tool.
 export const P2P_APPS = (P2P_APP_REGISTRY as InternalAppEntry[]).map(withIcon)

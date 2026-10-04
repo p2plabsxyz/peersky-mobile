@@ -1,15 +1,9 @@
 /**
- * The bird for a page that would not load.
- *
- * Takes a drawing of the bird with its eye shut, lifts it off whatever
- * background it was drawn on, and hangs a tear off the low corner of the eye.
- *
- * The source is the circular badge, so most of this is removing the badge: the
- * ring and the colour behind it come away in the order they surround the bird,
- * outside first, so nothing ever floods into the bird's own black outline.
- *
- * Where the eye is comes from measuring the artwork rather than a constant, as
- * fractions of the bird's own box, so the same numbers hold at any size.
+ * The bird for a page that would not load: the badge drawing with its eye
+ * shut, lifted off its background, with a tear at the low corner of the eye.
+ * The ring and the colour behind the bird come away outside first, so no flood
+ * reaches the bird's own black outline. The eye's position is a fraction of
+ * the bird's measured box, so the same numbers hold at any size.
  */
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { PNG } from 'pngjs'
@@ -148,15 +142,10 @@ function closeEye (image, box) {
 }
 
 /**
- * A tear running from the eye.
- *
- * Width and length are set separately, because the two say different things: a
- * narrow one reads as a tear and a wide one as a bubble, while the length is
- * what makes it look like it is falling. Tying them to one radius meant
- * thinning it also made it short, and it came out a dot.
- *
- * The bottom is a half circle and everything above it curves in to a point
- * that meets the lid.
+ * A tear running from the eye: a half circle at the bottom, curving in to a
+ * point at the lid. Width and length are set separately. Narrow reads as a
+ * tear and wide as a bubble, while length makes it fall, and tying both to
+ * one radius made a thin tear come out as a dot.
  */
 function drawTear (image, box) {
   const eyeWidth = box.width * EYE.width

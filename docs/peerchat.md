@@ -65,6 +65,19 @@ own proofs before anything about a room, so its join never arrives first. Being
 found under a room's topic, or naming the room in a frame, counts for nothing.
 The desktop makes the same proof, and both pin one test vector.
 
+```mermaid
+sequenceDiagram
+  participant A as This phone
+  participant B as Another device
+  Note over A,B: found under the room's topic,<br/>on Hyperswarm or the same Wi-Fi
+  A->>B: Noise handshake
+  B->>A: Noise handshake
+  A->>B: for each room, its topic and an HMAC proof
+  B->>A: for each room, its topic and an HMAC proof
+  Note over A,B: a room opens on this connection<br/>only for a proof that checks out
+  A->>B: encrypted messages and feed sync for that room
+```
+
 The chat channel is `peersky-chat/2`. Version 1 sent the room key to anyone who
 turned up under a room's topic, so a room used with a version 1 build that has
 to stay private is worth recreating. The two versions do not open a channel
@@ -82,28 +95,57 @@ promised to be anonymous. Peer discovery can also reveal network metadata to
 the underlying P2P stack.
 
 Room keys, profile information, recent-room metadata, and local preferences are
-stored in the app-private PeerSky data directory. The current mobile build does
-not protect room keys with Android Keystore or iOS Keychain hardware-backed
-encryption. Device access, app-data backups, and rooted or jailbroken devices
-must therefore be considered part of the local threat model.
+stored in the app-private PeerSky data directory, which is kept out of iCloud,
+computer and Google backups and out of Android's phone-to-phone copy. The current
+mobile build does not protect room keys with Android Keystore or iOS Keychain
+hardware-backed encryption, so device access and rooted or jailbroken devices
+are part of the local threat model.
 
 ## Attachments and link previews
 
 PeerChat stores attachments in a dedicated Hyperdrive for each room. Before
 upload, file bytes are sealed with AES-256-GCM using a key derived from the room
 key, in the attachment formats PeerSky Desktop uses too: `PCA1`, in one piece,
-up to 100 MB, and `PCA2`, a megabyte frame at a time, up to 2 GB. Both apps
-read both, and neither ever holds a framed file whole. The real file name and
-size travel inside the encrypted chat message. Room members can
+up to 100 MB, and `PCA2`, a megabyte frame at a time, for anything bigger.
+Both apps read both, and neither ever holds a framed file whole. The real file
+name and size travel inside the encrypted chat message.
+
+There is no size limit of PeerChat's own, as in Keet: a file is as big as the
+devices at both ends have room for. Sharing keeps a sealed copy on the sender's
+phone for the room to download from, and opening one keeps the downloaded
+blocks and the opened copy, so the phone checks for that much room first, plus
+512 MB to spare, and says how much it needs when there is not enough. Pictures
+and videos up to 100 MB load in the chat by themselves on both apps. Anything
+bigger waits for a tap, with its size shown, so a huge file never fills a phone
+on its own. Room members can
 decrypt attachments because they hold the room key; obtaining the `hyper://`
 URL alone exposes only ciphertext. Legacy plaintext attachments remain readable
 for compatibility.
 
 Link previews are optional and run only when the local user sends a public HTTP
 or HTTPS URL. Preview fetching rejects credentials, loopback, link-local, and
-private-network targets; validates every redirect; limits redirects and response
-bytes; and stops after a fixed time budget. Remote peers cannot use a received
-message to make this device fetch an arbitrary preview URL.
+private-network targets, including names that resolve to one; validates every
+redirect; limits redirects and response bytes; and stops after a fixed time
+budget. Remote peers cannot use a received message to make this device fetch an
+arbitrary preview URL.
+
+## Invite links, blocking and reports
+
+A room or message-request link can come from any web page, so opening one only
+asks: joining a room or sending a request shows the people there your name, bio
+and photo. Scanning a QR code is already a choice you made, so it goes ahead.
+
+Press and hold a message, or open someone's profile, to report them or block
+them. A block hides everything that person sends, in every room, the moment it
+is made: their messages, reactions, unread counts, notifications and the chat
+list's preview line. It also stops their direct messages and requests, and
+takes them out of Find people. What they sent stays on disk, so unblocking
+brings it back. Blocking and reporting together is one tap.
+
+A report goes to the maintainers by email. It names the room by the first 16 hex
+characters of the SHA-256 of its key, never the key, which would let whoever
+reads the email into the room and its whole history. If the phone has no mail
+app, the report can be copied instead.
 
 ## Notifications
 
@@ -121,6 +163,13 @@ suspends PeerSky because PeerChat deliberately has no centralized push server.
 PeerChat metadata and writable room feeds live under the shared Hyper storage
 directory. PeerChat deliberately does not expose raw room feeds or room keys as
 ordinary named Hyperdrives in Settings.
+
+PeerChat settings has **Delete PeerChat profile**. It leaves every room, so each
+one hears this device go, then removes the room feeds, the attachment drives,
+the decrypted attachment cache and PeerChat's own state file, and PeerChat opens
+on the welcome screen again (`deletePeerChatProfile` in
+`backend/peerchat/runtime.mjs`). Messages already sent stay on the devices they
+reached.
 
 Settings -> P2P Data provides two relevant operations:
 

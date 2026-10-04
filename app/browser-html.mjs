@@ -199,11 +199,10 @@ ${body}
 `
 }
 
-// WKWebView will not render HTML loaded with a baseUrl whose scheme it does not
-// know, so hyper:// pages came up blank on iOS while Android was happy. Carry
-// the base in the document instead, which both engines honour for resolving
-// relative links and which keeps hyper:// URLs intact for the navigation
-// interceptor.
+// Relative links on a hyper:// page resolve against its own address. The
+// WebView is given that address as the page's base URL too (on iOS through
+// PeerSkyWebView's hyper:// handler); the tag says the same in the document,
+// which keeps hyper:// URLs intact for the navigation interceptor.
 function ensureBaseHref (html, targetUrl) {
   if (!targetUrl || /<base\s[^>]*href=/i.test(html)) return html
 

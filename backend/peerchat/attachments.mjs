@@ -24,6 +24,7 @@ import {
 } from '../hyper/runtime.mjs'
 import { normalizePickedLocalFile } from '../hyper/local-file.mjs'
 import { createHyperUrl, parseHyperUrl } from '../hyper/url.mjs'
+import { formatStorageSize, getFreeBytes } from '../storage-space.mjs'
 import { normalizePeerChatRoomKey } from './protocol.mjs'
 
 const ATTACHMENT_KEY_CONTEXT = 'peersky-chat:attachment:'
@@ -34,24 +35,18 @@ const TAG_BYTES = 16
 const ENVELOPE_BYTES = MAGIC.byteLength + IV_BYTES + TAG_BYTES
 
 /**
- * PCA2, the framed layout.
+ * PCA2, the framed layout:
  *
  *   "PCA2" | frame size, uint32 big-endian | 8 random bytes
  *   then, repeatedly: one frame's ciphertext, then its 16-byte tag
  *
- * PCA1 seals a file in one piece, which is fine for a photo and impossible for
- * a film: bare's aes-256-gcm holds every byte until final(), and desktop's
- * WebCrypto is one shot too, so sending or opening cost twice the file in
- * memory. A phone has nowhere to put four gigabytes.
- *
- * Framing seals a megabyte at a time, so memory stays flat however big the
- * file is. Each frame's nonce is the 8 random bytes followed by its index, and
- * the last frame sets the top bit of that index, so frames cannot be reordered
- * and a truncated file cannot pass as a whole one. The header is the additional
- * data on every frame, so the frame size cannot be edited either.
- *
- * There is always a last frame, even when the file divides evenly, so the count
- * is floor(size / frame) + 1.
+ * PCA1 seals a file in one piece, and bare's aes-256-gcm and desktop WebCrypto
+ * both hold every byte until the end, so a film costs twice its size in memory.
+ * PCA2 seals a frame at a time. A frame's nonce is the 8 random bytes plus its
+ * index, with the top bit set on the last frame, so frames cannot be reordered
+ * and a truncated file fails. The header is every frame's additional data, so
+ * the frame size cannot be edited. There is always a last frame, even when the
+ * file divides evenly, so the count is floor(size / frame) + 1.
  */
 const FRAMED_MAGIC = b4a.from('PCA2')
 const FRAME_COUNTER_BYTES = 4
@@ -61,7 +56,20 @@ const FINAL_FRAME_FLAG = 0x80000000
 export const ATTACHMENT_FRAME_BYTES = 1024 * 1024
 const MAX_ATTACHMENT_FRAME_BYTES = 16 * 1024 * 1024
 
-export const MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024 * 1024
+/**
+ * No size limit of its own, as in Keet: a file is as big as the devices at
+ * both ends have room for. Sharing keeps a sealed copy on this phone for the
+ * room to download from, and opening one keeps what came down and the opened
+ * copy, so each first checks for that much room, and leaves this much over
+ * for the phone itself.
+ */
+export const FREE_SPACE_RESERVE_BYTES = 512 * 1024 * 1024
+/**
+ * Only files this big are checked. A photo is not what fills a phone, and iOS
+ * leaves the space it can clear on demand out of what it reports, so a nearly
+ * full iPhone would refuse to show a 200 KB picture for want of the reserve.
+ */
+export const FREE_SPACE_CHECK_FROM_BYTES = 100 * 1024 * 1024
 /**
  * Where framing takes over from the single seal, in both apps.
  *
@@ -71,7 +79,6 @@ export const MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024 * 1024
  * same line (lib/attachment-crypto.js in PeerChat).
  */
 export const MAX_SINGLE_SEAL_BYTES = 100 * 1024 * 1024
-const MAX_ATTACHMENT_LABEL = formatByteLimit(MAX_ATTACHMENT_BYTES)
 const MAX_SINGLE_SEAL_LABEL = formatByteLimit(MAX_SINGLE_SEAL_BYTES)
 // hyperblobs writes every chunk it is handed as one hypercore block, and
 // hypercore refuses a block over 15 MB. Bare has no streaming aes-256-gcm:
@@ -143,6 +150,18 @@ function usesFraming (byteLength, options = {}) {
     ? options.singleSealLimit
     : MAX_SINGLE_SEAL_BYTES
   return byteLength > limit
+}
+
+// What stops a file the phone has no room for, or null when there is room.
+function checkRoom (directory, neededBytes, action, options = {}) {
+  if (neededBytes < FREE_SPACE_CHECK_FROM_BYTES) return null
+  const needed = neededBytes + FREE_SPACE_RESERVE_BYTES
+  const free = typeof options.freeBytes === 'function'
+    ? options.freeBytes(directory)
+    : getFreeBytes(directory)
+  // When the phone cannot say, the write itself is what fails.
+  if (free === null || free >= needed) return null
+  return `This phone needs ${formatStorageSize(needed)} free to ${action} this file, and has ${formatStorageSize(free)}.`
 }
 
 function formatByteLimit (bytes) {
@@ -217,9 +236,13 @@ export async function uploadPeerChatAttachment ({
   if (!normalizedRoomKey) return { ok: false, error: 'Invalid PeerChat room key.' }
   const localFile = normalizePickedLocalFile(fileUri, byteLength)
   if (!localFile) return { ok: false, error: 'Invalid attachment file.' }
-  if (localFile.byteLength > MAX_ATTACHMENT_BYTES) {
-    return { ok: false, error: `PeerChat attachments must be ${MAX_ATTACHMENT_LABEL} or smaller.` }
-  }
+  const room = checkRoom(
+    options.storagePath || getHyperStoragePath(),
+    sealedAttachmentLength(localFile.byteLength, options),
+    'share',
+    options
+  )
+  if (room) return { ok: false, error: room }
 
   return withUploadTransition(async () => {
     try {
@@ -266,9 +289,6 @@ export async function openPeerChatAttachment ({
   if (!normalizedName) return { ok: false, error: 'Invalid attachment name.' }
   if (encrypted !== true) return { ok: false, error: 'Attachment is not marked as encrypted.' }
   const expectedSize = Number.isSafeInteger(fileSize) && fileSize >= 0 ? fileSize : null
-  if (expectedSize !== null && expectedSize > MAX_ATTACHMENT_BYTES) {
-    return { ok: false, error: `PeerChat attachments must be ${MAX_ATTACHMENT_LABEL} or smaller.` }
-  }
 
   const openingKey = `${normalizedRoomKey}:${url}`
   const pending = pendingOpens.get(openingKey)
@@ -280,9 +300,6 @@ export async function openPeerChatAttachment ({
     const storedSize = entry?.value?.blob?.byteLength
     if (!Number.isSafeInteger(storedSize) || storedSize < 1) {
       throw new Error('PeerChat attachment was not found.')
-    }
-    if (storedSize > framedSealedLength(MAX_ATTACHMENT_BYTES)) {
-      throw new Error('PeerChat attachment is too large.')
     }
 
     const outputSize = expectedSize !== null ? expectedSize : storedSize - ENVELOPE_BYTES
@@ -307,6 +324,10 @@ export async function openPeerChatAttachment ({
     if (existsSync(cachePath) && statSync(cachePath).size === outputSize) {
       return { ok: true, localUri: toFileUri(cachePath), byteLength: outputSize }
     }
+    // Asked before a byte comes down, so a file too big for this phone, or a
+    // message claiming one, cannot fill it.
+    const room = checkRoom(getDirName(cachePath), storedSize + outputSize, 'open', options)
+    if (room) throw new Error(room)
 
     mkdirSync(getDirName(cachePath), { recursive: true })
     const temporaryPath = `${cachePath}.partial`
@@ -622,6 +643,11 @@ function normalizeFilename (value) {
     .replace(/[/\\?#]/g, '-')
     .replace(/^[. -]+|[. ]+$/g, '')
   return Array.from(sanitized).slice(0, 160).join('')
+}
+
+export function getAttachmentCacheDirectory (suppliedStoragePath) {
+  const storagePath = suppliedStoragePath || getHyperStoragePath() || '.'
+  return `${String(storagePath).replace(/[/\\]+$/, '')}/${CACHE_DIRECTORY_NAME}`
 }
 
 function getAttachmentCachePath (roomKey, url, fileName, suppliedStoragePath) {

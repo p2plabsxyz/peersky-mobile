@@ -2,18 +2,20 @@ import { useEffect, useState } from 'react'
 import {
   AppState,
   Linking,
-  Platform,
   Pressable,
   StyleSheet,
   Text,
   View
 } from 'react-native'
+import { RPC_HYPER_LAN_STATUS } from '../../backend/rpc/commands.mjs'
 import { BROWSER_PALETTES } from '../browser-appearance.mjs'
+import { LAN_PERMISSION_HELP, LAN_PERMISSION_TITLE, offerPermissionSettings } from '../permission-prompt'
 import {
   hasPeerChatNotificationPermission,
   requestPeerChatNotificationPermission
 } from '../peerchat/notifications'
-import type { ExternalLinkBehavior } from './useBrowserPreferences'
+import { formatHyperSiteForPrompt } from '../browser-shell.mjs'
+import type { ExternalLinkBehavior, PublishingDecision } from './useBrowserPreferences'
 import {
   ChoiceGroup,
   SettingCopy,
@@ -24,18 +26,27 @@ import {
 type PermissionsProps = {
   externalLinkBehavior: ExternalLinkBehavior
   persistenceError: string | null
+  publishingSites: Record<string, PublishingDecision>
+  onCallRpc: (command: number, payload: Record<string, unknown>) => Promise<{ ok: boolean, lan?: { available?: boolean } }>
   onExternalLinkBehaviorChange: (behavior: ExternalLinkBehavior) => void
+  onPublishingSiteChange: (siteId: string, decision: PublishingDecision | null) => void
 }
 
 export function Permissions ({
   externalLinkBehavior,
   persistenceError,
-  onExternalLinkBehaviorChange
+  publishingSites,
+  onCallRpc,
+  onExternalLinkBehaviorChange,
+  onPublishingSiteChange
 }: PermissionsProps) {
   const isDark = useSettingsDarkMode()
   const [actionError, setActionError] = useState<string | null>(null)
   const [isRequestingNotifications, setIsRequestingNotifications] = useState(false)
   const [notificationsAllowed, setNotificationsAllowed] = useState<boolean | null>(null)
+  // There is no asking for the local network directly. Whether nearby
+  // discovery is running is the answer, refused or Wi-Fi off alike.
+  const [localNetworkWorks, setLocalNetworkWorks] = useState<boolean | null>(null)
 
   useEffect(() => {
     let active = true
@@ -49,6 +60,12 @@ export function Permissions ({
           setNotificationsAllowed(false)
         }
       }
+      try {
+        const response = await onCallRpc(RPC_HYPER_LAN_STATUS, {})
+        if (active) setLocalNetworkWorks(response.ok && response.lan?.available === true)
+      } catch {
+        if (active) setLocalNetworkWorks(false)
+      }
     }
 
     void refreshPermission()
@@ -60,7 +77,7 @@ export function Permissions ({
       active = false
       subscription.remove()
     }
-  }, [])
+  }, [onCallRpc])
 
   async function openAppSettings () {
     setActionError(null)
@@ -120,6 +137,19 @@ export function Permissions ({
           isDark={isDark}
           onPress={() => void requestNotifications()}
         />
+        <PermissionRow
+          title='Local network'
+          description={localNetworkWorks === false
+            ? 'Nearby devices cannot reach PeerSky right now. Local network access may be turned off for PeerSky, or Wi-Fi is off.'
+            : 'Lets nearby PeerSky devices find this one and connect to it over Wi-Fi, with no internet needed.'}
+          action={localNetworkWorks === null ? 'Checking...' : localNetworkWorks ? 'Allowed' : 'Turn on'}
+          disabled={localNetworkWorks === null}
+          isDark={isDark}
+          onPress={() => {
+            if (localNetworkWorks) void openAppSettings()
+            else offerPermissionSettings(LAN_PERMISSION_TITLE, LAN_PERMISSION_HELP)
+          }}
+        />
       </SettingsSection>
 
       <SettingsSection title='External app links'>
@@ -139,6 +169,28 @@ export function Permissions ({
           Controls links that open email (mailto:), phone (tel:), messaging (sms:), and map (geo:) apps. Web and Hyper links continue to open in PeerSky. Always allow skips confirmation, so only enable it if you trust the sites you visit.
         </Text>
       </View>
+
+      <SettingsSection title='Publishing from sites'>
+        {Object.keys(publishingSites).length === 0
+          ? (
+            <View style={[styles.permissionRow, isDark ? styles.permissionRowDark : null]}>
+              <SettingCopy
+                title='No site has asked yet'
+                description='A hyper:// site asks before it creates drives on this phone or saves files to them. Your answers show up here.'
+              />
+            </View>
+            )
+          : Object.entries(publishingSites).map(([siteId, decision]) => (
+            <PermissionRow
+              key={siteId}
+              title={`hyper://${formatHyperSiteForPrompt(siteId)}`}
+              description={decision === 'allow' ? 'Can publish from this phone.' : 'Blocked from publishing.'}
+              action='Forget'
+              isDark={isDark}
+              onPress={() => onPublishingSiteChange(siteId, null)}
+            />
+          ))}
+      </SettingsSection>
     </View>
   )
 }

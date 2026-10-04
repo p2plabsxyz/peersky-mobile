@@ -38,16 +38,19 @@ describe('iOS content blocking', () => {
       '/tracker-[0-9]+/'
     ].join('\n'))
 
-    assert.equal(rules.length, 1)
-    assert.deepEqual(rules[0].trigger['if-domain'], ['*example.com'])
-    assert.deepEqual(rules[0].trigger['unless-domain'], ['*private.example.com'])
+    // The rule and its frame twin, both scoped to the same pages.
+    assert.equal(rules.length, 2)
+    for (const rule of rules) {
+      assert.deepEqual(rule.trigger['if-domain'], ['*example.com'])
+      assert.deepEqual(rule.trigger['unless-domain'], ['*private.example.com'])
+    }
   })
 
   test('bounds output and keeps exceptions after blocking rules', () => {
     const rules = convertFilterListToWebKitRules([
-      '@@||allow.example^',
-      '||one.example^',
-      '||two.example^'
+      '@@||allow.example^$script',
+      '||one.example^$script',
+      '||two.example^$script'
     ].join('\n'), { maxRules: 2 })
 
     assert.equal(rules.length, 2)
@@ -68,7 +71,8 @@ describe('iOS content blocking', () => {
     })
 
     assert.equal(MAX_WEBKIT_RULES_PER_LIST, 150_000)
-    assert.equal(rules.length, 45_001)
+    // Each filter with no type also gets a rule for third-party frames.
+    assert.equal(rules.length, 90_002)
     assert.equal(yields.length, 4)
 
     const chunks = await serializeWebKitContentRuleChunks(rules.slice(0, 3), {
@@ -105,11 +109,17 @@ describe('iOS content blocking', () => {
     assert.match(blocker, /addContentRuleList/)
     assert.match(blocker, /getAvailableContentRuleListIdentifiers/)
     assert.match(blocker, /removeContentRuleListForIdentifier/)
+    // WebKit calls the handler unchecked: a nil one crashed on every list update.
+    assert.doesNotMatch(blocker, /completionHandler:nil/)
     assert.match(blocker, /self[.]ruleLists = \[compiled copy\]/)
     assert.match(blocker, /peersky-youtube-ad-break-v3/)
     assert.match(blocker, /youtubei\/v1\/player\/ad_break/)
     assert.match(blocker, /youtube-nocookie/)
     assert.doesNotMatch(blocker, /\(\?:/)
+    // WebKit rejects any "|" in a url-filter, and one bad rule fails the list.
+    const youtubeRules = /NSString \*json = @"(.*)";/.exec(blocker)?.[1]
+    assert.ok(youtubeRules)
+    assert.doesNotMatch(youtubeRules, /\|/)
     assert.match(blocker, /youtubeAdBlockingEnabled && youtubeRuleList/)
     assert.match(blocker, /if \(enabled\) \{\s*for \(WKContentRuleList \*ruleList in ruleLists\)/)
     assert.doesNotMatch(blocker, /if \(!enabled\) return;/)
@@ -134,6 +144,30 @@ describe('iOS content blocking', () => {
   // fetch on every page", which is what stopped YouTube playing: the player
   // loaded, read the duration, then waited forever on media that comes from
   // googlevideo.com over fetch.
+  // An iframe loads as a document, so rules that left documents out let every
+  // tracker that comes in a frame through, including the two Cover Your Tracks
+  // checks for.
+  test('blocks third-party frames but never the page itself', () => {
+    const [plain, frame] = convertFilterListToWebKitRules('||ads.example^')
+    assert.equal(plain.trigger['resource-type'].includes('document'), false)
+    assert.deepEqual(frame.trigger['resource-type'], ['document'])
+    assert.deepEqual(frame.trigger['load-type'], ['third-party'])
+    assert.equal(frame.trigger['url-filter'], plain.trigger['url-filter'])
+
+    const subdocument = convertFilterListToWebKitRules('||frames.example^$subdocument,domain=news.example')
+    assert.equal(subdocument.length, 1)
+    assert.deepEqual(subdocument[0].trigger['resource-type'], ['document'])
+    assert.deepEqual(subdocument[0].trigger['if-domain'], ['*news.example'])
+
+    const exception = convertFilterListToWebKitRules('@@||widgets.example^')
+    assert.deepEqual(exception.map((rule) => rule.action.type), ['ignore-previous-rules', 'ignore-previous-rules'])
+
+    for (const typed of ['||ads.example^$script', '||ads.example^$~subdocument', '||ads.example^$first-party']) {
+      const rules = convertFilterListToWebKitRules(typed)
+      assert.equal(rules.some((rule) => rule.trigger['resource-type'].includes('document')), false, typed)
+    }
+  })
+
   test('skips $ping rather than widening it to every fetch', () => {
     const rules = convertFilterListToWebKitRules([
       '*$ping,third-party',

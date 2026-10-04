@@ -42,16 +42,11 @@ export function normalizePeerChatPeerId (value) {
 }
 
 /**
- * The earliest creation time anybody in a room reports for it.
- *
- * Nothing used to share this, so every device stamped the moment it joined and
- * a room whose messages start in April read as created in September on a phone
- * that arrived then. A room cannot have been created after the first person who
- * was in it, so the earliest plausible answer wins and everyone converges on it
- * without anything being hardcoded.
- *
- * A time in the future is nonsense and is ignored, which is also what stops a
- * peer with a wrong clock dragging the date forward.
+ * The earliest creation time anybody in a room reports for it. On its own a
+ * device only knows when it joined. A room cannot be newer than its first
+ * member, so the earliest plausible time wins and everyone converges on it. A
+ * time in the future is ignored, so a peer with a wrong clock cannot drag the
+ * date forward.
  */
 export function earliestPeerChatRoomCreatedAt (current, announced, now = Date.now()) {
   const currentAt = Number.isSafeInteger(current) && current > 0 ? current : 0

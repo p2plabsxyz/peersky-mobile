@@ -1,6 +1,6 @@
 # PeerTunes (mobile)
 
-PeerSky Mobile ships PeerTunes, the iPod style player for local and `hyper://` music, as a built-in app at `peersky://p2p/peertunes/`. The app itself is the static web app from [p2plabsxyz/peertunes](https://github.com/p2plabsxyz/peertunes), vendored unmodified. The Bare runtime serves it from a loopback HTTP server and proxies its `hyper://` reads, because a WebView page cannot fetch `hyper://` on its own.
+PeerSky Mobile ships PeerTunes, the click-wheel player for local and `hyper://` music, as a built-in app at `peersky://p2p/peertunes/`. The app itself is the static web app from [p2plabsxyz/peertunes](https://github.com/p2plabsxyz/peertunes), vendored unmodified. The Bare runtime serves it from a loopback HTTP server and proxies its `hyper://` reads, because a WebView page cannot fetch `hyper://` on its own.
 
 ## How the app gets its files
 
@@ -9,10 +9,11 @@ PeerSky Mobile ships PeerTunes, the iPod style player for local and `hyper://` m
 - `backend/peertunes/server.mjs` serves the files on `127.0.0.1` and injects a one line bridge into `index.html`:
 
 ```js
+window.peerskyProtocols = ['hyper']
 window.peerskyHyperAsset = (url) => '/hyper/asset?url=' + encodeURIComponent(url)
 ```
 
-PeerTunes checks for that global and routes folder listings, tag reads and audio playback through it. The path is relative, so the page never sees a proxy token.
+PeerTunes checks for those globals. `peerskyHyperAsset` routes folder listings, tag reads and audio playback through the proxy, and the path is relative, so the page never sees a proxy token. `peerskyProtocols` tells it the phone reads `hyper://` only.
 
 To update the app, replace the files under `assets/peertunes/`, update `manifest.json`, and run `npm run generate:peertunes-runtime`.
 
@@ -31,6 +32,12 @@ Everything else answers `404`, and any write method answers `405`. PeerTunes pro
 2. The backend starts the loopback server on the fixed port `47317` and falls back to a random port if that one is taken.
 3. React Native opens the local URL in a WebView. A share link such as `peersky://p2p/peertunes/#playlist=hyper%3A%2F%2F...` passes its fragment through, so the app can offer to import or play the playlist.
 4. Inside the page, `hyper://` reads go to `/hyper/asset`, which uses the read-only Hyper fetch from `backend/hyper/fetch.mjs`.
+
+A drive the phone has never read answers its first listing with 404 "Peers Not Found" until a peer connects. The proxy waits that out the way the browser does, with a network refresh and a growing delay between tries (about six seconds in all), so the first add of a new drive works. A folder listing never starts a download on its own: PeerTunes asks for the drive to be kept on the device once an import has finished, through `window.peerskyKeepOffline`. Starting it earlier competed with the listings the import was still reading, and nested folders came back empty.
+
+## The Bluetooth mark
+
+A WebView cannot list audio outputs, so the app reads the route natively (`plugins/with-audio-route.js`: `AVAudioSession.currentRoute` on iOS, `AudioManager.getDevices` on Android, neither needing a permission). `PeerTunesScreen` checks it every few seconds and whenever the page loads, and sets `window.peerskyAudioRoute = { external }` with a `peersky-audio-route` event when the answer changes. PeerTunes prefers that over its own guess.
 
 The port is fixed on purpose. The WebView origin is `host:port`, and the music library lives in that origin's IndexedDB, so a stable port is what keeps the library between launches. When the fallback port is used the app still works, but that session's library does not carry over.
 
@@ -51,7 +58,7 @@ LAN discovery is wired into the shared Hyper SDK in `backend/hyper/runtime.mjs`,
 
 ## Background playback
 
-`expo-audio` runs with `enableBackgroundPlayback` and iOS declares the `audio` background mode, so playback continues when PeerSky leaves the foreground. The page publishes track, artist, album and artwork through the Media Session API, which is what the system player shows.
+PeerTunes plays through its WebView. iOS declares the `audio` background mode in `app.json`, so playback continues when PeerSky leaves the foreground. Android's WebView keeps playing on its own, so the app declares no media playback service there (`expo-audio` runs with `enableBackgroundPlayback: false`, and the permission is blocked). The page publishes track, artist, album and artwork through the Media Session API, which is what the system player shows.
 
 ## Safety notes
 

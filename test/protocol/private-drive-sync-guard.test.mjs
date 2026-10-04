@@ -200,7 +200,7 @@ describe('Encrypted private drive sync guards', () => {
     const syncedStore = join(root, 'synced')
     const adoptedStore = adoptedStoragePathFor(syncedStore)
 
-    // Phone side: the app's order — open the store FIRST, then write the key
+    // Phone side: the app's order. Open the store FIRST, then write the key
     // record (the CORESTORE marker must exist before the key file is written,
     // otherwise tmpFixStorage moves the unknown file into db/), then open the
     // encrypted drive with that same key.

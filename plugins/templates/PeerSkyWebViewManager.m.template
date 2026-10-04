@@ -6,18 +6,255 @@
 
 @interface RNCWebViewImpl (PeerSkyConfiguration)
 - (WKWebViewConfiguration *)setUpWkWebViewConfig;
+- (void)webView:(WKWebView *)webView
+  decidePolicyForNavigationAction:(WKNavigationAction *)navigationAction
+                  decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler;
 @end
+
+// WebKit's own value, used by Firefox for iOS too: load the page here without
+// first handing the address to an app that claims it.
+static const WKNavigationActionPolicy PeerSkyAllowWithoutOpeningApp = (WKNavigationActionPolicy)(WKNavigationActionPolicyAllow + 2);
 
 @interface PeerSkyWebViewImpl : RNCWebViewImpl
+@property (nonatomic, copy) NSString *incognitoSession;
+@property (nonatomic, assign) BOOL forceDarkScheme;
+@property (nonatomic, assign) BOOL hyperSession;
+- (NSString *)hyperPageForURL:(NSURL *)url;
 @end
 
+static NSString *PeerSkyWithoutFragment(NSURL *url)
+{
+  NSURLComponents *components = [NSURLComponents componentsWithURL:url resolvingAgainstBaseURL:NO];
+  components.fragment = nil;
+  return components.URL.absoluteString ?: @"";
+}
+
+// A hyper:// page is loaded from the string the app fetched, under its own
+// address, as on Android, so location, relative links and storage belong to
+// that address rather than to about:blank. WebKit only renders a string under
+// an address whose scheme it can load, and this handler is what lets it load
+// hyper://. A page that asks for its own address again, as a script setting
+// location to it does, gets the same page. A page reaches the rest of its
+// drive through the app's bridge and the files inlined into it, so anything
+// else asked for here is not found, which is also what Android answers.
+@interface PeerSkyHyperSchemeHandler : NSObject <WKURLSchemeHandler>
+@end
+
+@implementation PeerSkyHyperSchemeHandler
+
+- (void)webView:(WKWebView *)webView startURLSchemeTask:(id<WKURLSchemeTask>)task
+{
+  NSURLRequest *request = task.request;
+  NSString *html = nil;
+  if ([request.URL isEqual:request.mainDocumentURL]) {
+    for (UIView *view = webView.superview; view; view = view.superview) {
+      if ([view isKindOfClass:[PeerSkyWebViewImpl class]]) {
+        html = [(PeerSkyWebViewImpl *)view hyperPageForURL:request.URL];
+        break;
+      }
+    }
+  }
+  NSData *body = [(html ?: @"Not found") dataUsingEncoding:NSUTF8StringEncoding];
+  NSHTTPURLResponse *response = [[NSHTTPURLResponse alloc]
+    initWithURL:request.URL
+    statusCode:html ? 200 : 404
+    HTTPVersion:@"HTTP/1.1"
+    headerFields:@{
+      @"Content-Type": html ? @"text/html; charset=utf-8" : @"text/plain; charset=utf-8",
+      @"Content-Length": [NSString stringWithFormat:@"%lu", (unsigned long)body.length]
+    }];
+  [task didReceiveResponse:response];
+  [task didReceiveData:body];
+  [task didFinish];
+}
+
+- (void)webView:(WKWebView *)webView stopURLSchemeTask:(id<WKURLSchemeTask>)task
+{
+}
+
+@end
+
+static PeerSkyHyperSchemeHandler *PeerSkySharedHyperSchemeHandler(void)
+{
+  static PeerSkyHyperSchemeHandler *handler;
+  static dispatch_once_t once;
+  dispatch_once(&once, ^{
+    handler = [PeerSkyHyperSchemeHandler new];
+  });
+  return handler;
+}
+
+// Incognito tabs share one store for as long as any of them is open, the way
+// they share one WebView profile on Android. react-native-webview gave every
+// WebView a new empty store, and going back builds a new WebView, so each step
+// back lost the tab's cookies: a sign-in, or a setting changed on the site.
+// A new session, after the last incognito tab closed, starts a new store.
+static NSString *PeerSkyIncognitoSession;
+static WKWebsiteDataStore *PeerSkyIncognitoStore;
+
+static BOOL PeerSkyIsIncognitoSession(NSString *session)
+{
+  if (session.length != 32) return NO;
+  NSCharacterSet *hex = [NSCharacterSet characterSetWithCharactersInString:@"0123456789abcdef"];
+  return [session rangeOfCharacterFromSet:hex.invertedSet].location == NSNotFound;
+}
+
+// Pages from hyper:// keep their storage for as long as the app runs, in a
+// store of their own. WebKit lists no website data for a scheme it does not
+// know, so none of theirs could be cleared site by site: written to the
+// shared store on disk, it would outlive every burn. A burn lets this go.
+static WKWebsiteDataStore *PeerSkyHyperSessionStore;
+
+static WKWebsiteDataStore *PeerSkyHyperSessionStoreShared(void)
+{
+  if (!PeerSkyHyperSessionStore) PeerSkyHyperSessionStore = [WKWebsiteDataStore nonPersistentDataStore];
+  return PeerSkyHyperSessionStore;
+}
+
+static WKWebsiteDataStore *PeerSkyIncognitoStoreForSession(NSString *session)
+{
+  if (!PeerSkyIncognitoStore || ![PeerSkyIncognitoSession isEqualToString:session]) {
+    PeerSkyIncognitoSession = [session copy];
+    PeerSkyIncognitoStore = [WKWebsiteDataStore nonPersistentDataStore];
+  }
+  return PeerSkyIncognitoStore;
+}
+
 @implementation PeerSkyWebViewImpl
+
+// With Force dark mode on, pages are told the reader prefers dark, so a site
+// with a dark theme of its own, like YouTube, uses it. Only sites without one
+// are left to the inverting script, which does worse on a site built to change.
+- (void)setForceDarkScheme:(BOOL)forceDarkScheme
+{
+  _forceDarkScheme = forceDarkScheme;
+  self.overrideUserInterfaceStyle = forceDarkScheme ? UIUserInterfaceStyleDark : UIUserInterfaceStyleUnspecified;
+}
 
 - (WKWebViewConfiguration *)setUpWkWebViewConfig
 {
   WKWebViewConfiguration *configuration = [super setUpWkWebViewConfig];
+  if (self.incognito && PeerSkyIsIncognitoSession(self.incognitoSession)) {
+    configuration.websiteDataStore = PeerSkyIncognitoStoreForSession(self.incognitoSession);
+  } else if (self.hyperSession) {
+    configuration.websiteDataStore = PeerSkyHyperSessionStoreShared();
+  }
   [[PeerSkyContentBlocker shared] configureWebView:configuration];
+  if (![configuration urlSchemeHandlerForURLScheme:@"hyper"]) {
+    [configuration setURLSchemeHandler:PeerSkySharedHyperSchemeHandler() forURLScheme:@"hyper"];
+  }
   return configuration;
+}
+
+// The page this WebView shows from a string, when the address asked for is
+// the one it was loaded under.
+- (NSString *)hyperPageForURL:(NSURL *)url
+{
+  id html = self.source[@"html"];
+  id base = self.source[@"baseUrl"];
+  if (![html isKindOfClass:[NSString class]] || ![base isKindOfClass:[NSString class]]) return nil;
+  NSURL *baseURL = [NSURL URLWithString:base];
+  if (!baseURL || !url) return nil;
+  return [PeerSkyWithoutFragment(baseURL) isEqualToString:PeerSkyWithoutFragment(url)] ? html : nil;
+}
+
+// WebKit hands an address an app claims, like a GitHub link, to that app on
+// any load it is allowed, including a tab opened, restored or typed. A GitHub
+// link that opened a new tab therefore opened the GitHub app and the tab both.
+// Now only a tap opens the app, as in Safari: on a link that would open a new
+// tab, the app is tried first and the tab opens only if no app took it, and
+// every other load stays in the browser.
+- (void)webView:(WKWebView *)webView
+  decidePolicyForNavigationAction:(WKNavigationAction *)navigationAction
+                  decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler
+{
+  NSURL *url = navigationAction.request.URL;
+  BOOL tapped = navigationAction.navigationType == WKNavigationTypeLinkActivated;
+  BOOL https = [url.scheme.lowercaseString isEqualToString:@"https"];
+
+  if (tapped && https && navigationAction.targetFrame == nil) {
+    __weak PeerSkyWebViewImpl *weakSelf = self;
+    [UIApplication.sharedApplication openURL:url
+                                     options:@{ UIApplicationOpenURLOptionUniversalLinksOnly: @YES }
+                           completionHandler:^(BOOL opened) {
+      PeerSkyWebViewImpl *strongSelf = weakSelf;
+      if (opened || !strongSelf) {
+        decisionHandler(WKNavigationActionPolicyCancel);
+        return;
+      }
+      [strongSelf passNavigationAction:navigationAction toWebView:webView tapped:tapped decisionHandler:decisionHandler];
+    }];
+    return;
+  }
+
+  [self passNavigationAction:navigationAction toWebView:webView tapped:tapped decisionHandler:decisionHandler];
+}
+
+- (void)passNavigationAction:(WKNavigationAction *)navigationAction
+                   toWebView:(WKWebView *)webView
+                      tapped:(BOOL)tapped
+             decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler
+{
+  [super webView:webView decidePolicyForNavigationAction:navigationAction decisionHandler:^(WKNavigationActionPolicy policy) {
+    decisionHandler(policy == WKNavigationActionPolicyAllow && !tapped ? PeerSkyAllowWithoutOpeningApp : policy);
+  }];
+}
+
+@end
+
+// Burning tabs clears what websites kept on the phone. react-native-webview's
+// clearCache does it for every origin in the shared store, which takes the
+// app's own pages with it: PeerTunes keeps its library in IndexedDB at
+// http://127.0.0.1, so a burn emptied the library while the songs stayed in
+// their drives. Everything but the app's own loopback pages is cleared, and
+// the incognito and hyper:// stores are let go too.
+@interface PeerSkyBrowserData : NSObject <RCTBridgeModule>
+@end
+
+@implementation PeerSkyBrowserData
+
+RCT_EXPORT_MODULE(PeerSkyBrowserData)
+
++ (BOOL)requiresMainQueueSetup
+{
+  return NO;
+}
+
+RCT_EXPORT_METHOD(clearSiteData:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+{
+  dispatch_async(dispatch_get_main_queue(), ^{
+    PeerSkyIncognitoStore = nil;
+    PeerSkyIncognitoSession = nil;
+    PeerSkyHyperSessionStore = nil;
+
+    NSSet<NSString *> *types = [NSSet setWithArray:@[
+      WKWebsiteDataTypeMemoryCache,
+      WKWebsiteDataTypeOfflineWebApplicationCache,
+      WKWebsiteDataTypeFetchCache,
+      WKWebsiteDataTypeDiskCache,
+      WKWebsiteDataTypeSessionStorage,
+      WKWebsiteDataTypeLocalStorage,
+      WKWebsiteDataTypeWebSQLDatabases,
+      WKWebsiteDataTypeIndexedDBDatabases
+    ]];
+    NSSet<NSString *> *appOwn = [NSSet setWithArray:@[ @"127.0.0.1", @"localhost" ]];
+    WKWebsiteDataStore *store = [WKWebsiteDataStore defaultDataStore];
+    [store fetchDataRecordsOfTypes:types completionHandler:^(NSArray<WKWebsiteDataRecord *> *records) {
+      NSMutableArray<WKWebsiteDataRecord *> *sites = [NSMutableArray array];
+      NSUInteger kept = 0;
+      for (WKWebsiteDataRecord *record in records) {
+        if ([appOwn containsObject:record.displayName.lowercaseString]) {
+          kept += 1;
+        } else {
+          [sites addObject:record];
+        }
+      }
+      [store removeDataOfTypes:types forDataRecords:sites completionHandler:^{
+        resolve(@{ @"cleared": @(sites.count), @"kept": @(kept) });
+      }];
+    }];
+  });
 }
 
 @end
@@ -28,6 +265,10 @@
 @implementation PeerSkyWebViewManager
 
 RCT_EXPORT_MODULE(PeerSkyWebView)
+
+RCT_EXPORT_VIEW_PROPERTY(incognitoSession, NSString)
+RCT_EXPORT_VIEW_PROPERTY(forceDarkScheme, BOOL)
+RCT_EXPORT_VIEW_PROPERTY(hyperSession, BOOL)
 
 - (UIView *)view
 {

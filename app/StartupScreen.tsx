@@ -2,15 +2,18 @@ import { Image, StyleSheet, View } from 'react-native'
 
 import { BROWSER_PALETTES } from './browser-appearance.mjs'
 
-// The circle, the same mark the app wears on the home screen. The bird on its
-// own is drawn with black outlines and needs something behind it in either
-// theme, so the badge is that something in both.
-const BADGE = require('../assets/images/logo-badge.png')
+// The bird on its own, the same picture the launch screen draws.
+const BIRD = require('../assets/images/logo.png')
 
+// 200pt, the imageWidth the launch screen draws it at in app.json, so the
+// moment the app takes over nothing moves. Android crops its launch picture to
+// a circle in the middle of the image, and at this size the bird still clears it.
+const BIRD_SIZE = 200
 
-// 140pt, the same as the launch image draws it on a three times screen, so the
-// moment the app takes over nothing moves.
-const BIRD_SIZE = 140
+// The bird is drawn with black outlines, which disappear on near black. A
+// dark grey keeps them, only a little lighter than the browser's dark shell so
+// the handover is not a flash, and the launch screen uses the same one.
+export const STARTUP_DARK_BACKGROUND = '#2f2f34'
 
 /**
  * What the app shows while it is coming up.
@@ -20,11 +23,11 @@ const BIRD_SIZE = 140
  * the launch image does not also have is a visible change at the handover.
  */
 export function StartupScreen ({ isDark }: { isDark: boolean }) {
-  const palette = isDark ? BROWSER_PALETTES.dark : BROWSER_PALETTES.light
+  const backgroundColor = isDark ? STARTUP_DARK_BACKGROUND : BROWSER_PALETTES.light.shell
 
   return (
-    <View style={[styles.screen, { backgroundColor: palette.shell }]}>
-      <Image source={BADGE} style={styles.bird} />
+    <View style={[styles.screen, { backgroundColor }]}>
+      <Image source={BIRD} style={styles.bird} />
     </View>
   )
 }

@@ -6,6 +6,7 @@ This mirrors the desktop direction at the protocol level: local HTTP endpoints e
 
 ## Features
 
+- Say what P2PMD is the first time it opens, once per phone (`AppWelcome`, marker `p2pmd-welcome-seen`).
 - Start a local P2PMD HTTP server on loopback.
 - Create or join a Holesail-backed room.
 - Serve the mobile Markdown editor through WebView.
@@ -23,28 +24,63 @@ This mirrors the desktop direction at the protocol level: local HTTP endpoints e
 |---|---|---|
 | `/` or `/index.html` | `GET` | Mobile editor page |
 | `/status` | `GET` | Runtime status and peer list |
+| `/activity` | `GET` | Recent edits by peer, for the room's activity list |
 | `/doc` | `GET` | Current document state |
 | `/doc` | `POST` | Full document update |
 | `/doc/yjsstate` | `GET` | Full Yjs state for initial sync |
 | `/doc/update` | `POST` | Incremental Yjs update |
 | `/presence` | `POST` | Peer cursor and line attribution metadata |
 | `/events` | `GET` | SSE stream for peers, document updates, and peer list |
-| `/preview` | `POST` | Markdown-to-HTML preview rendering |
 | `/hyper/file` | `GET` | Read Hyper file content for preview assets |
+
+Previews are rendered by the app through its own bridge, not by the room's server.
 
 ## Runtime flow
 
 1. React Native sends an RPC command to create or join a P2PMD room.
 2. The Bare backend starts the local P2PMD HTTP server on `127.0.0.1`.
-3. Holesail exposes or connects the local server through an `hs://` key.
-4. The React Native WebView opens the local editor URL.
+3. Holesail exposes or connects the local server through an `hs://` key. Each note keeps one port, as on the desktop: the host reopens it on the port it had before, and a phone that joins listens on the port it used for that note last, or else the one the host advertises. If that port is taken on the phone, or is one another server in the app keeps (PeerTunes' 47317), the system picks one instead. The ports are kept in `hyper-sdk/p2pmd-ports.json`, for the thirty notes used last.
+4. The WebView shows the app's own editor page, with the room's local address as its base.
 5. The editor loads initial state from `/doc/yjsstate`.
 6. Local edits are sent to `/doc/update` as Yjs updates.
 7. Remote updates arrive through `/events` and are applied in the editor.
 8. Presence updates keep peer counts and gutter attribution metadata in sync.
 
+```mermaid
+flowchart LR
+  subgraph host["Phone hosting the note"]
+    heditor["Editor WebView"]
+    server["Room server<br/>127.0.0.1"]
+    live["Holesail, live"]
+  end
+
+  subgraph guest["A guest: phone or PeerSky Desktop"]
+    geditor["Editor"]
+    client["Holesail client<br/>127.0.0.1, the host's port"]
+  end
+
+  heditor <-->|"/doc/yjsstate, /doc/update, /events"| server
+  live --- server
+  client <-->|"hs:// key, over HyperDHT"| live
+  geditor <-->|"the same requests"| client
+```
+
+The host's server holds the document. A guest's editor makes the same requests
+to its own Holesail client, which carries them to the host.
+
+## Private and public notes
+
+Create Note asks one thing: private or public. Every new note starts private, the same as on the desktop. The desktop's UDP, host and port options are left off the phone.
+
+- **Private**: the key is a secret the host's keys are made from, so finding the note on the network lets nobody in. Only people you send the key to can open it, and any of your devices can host it from its copy.
+- **Public**: the key is the host's public key. Anyone with it can open the note, and the DHT nodes that store its announcement have it. Hosting from that key would make a different note, so the phone keeps the seed each public note came from in `hyper-sdk/p2pmd-public-notes.json` (the thirty used last) and reopens it from there. Link Device never sends the seed, so only this phone can host the note, and other devices get it as one to join.
+
 ## Safety notes
 
+- The editor runs only the app's code. yjs ships inside the page, so whoever hosts a room sends data, never scripts.
+- The editor WebView loads nothing but the editor. Links in a note open in a browser tab, and other apps are never opened from it.
+- The app acts on editor messages only when they come from the editor page, and publishes only with a nonce it handed over when you tapped Publish.
+- The room's server answers the editor and desktop P2PMD (`peersky://p2p`), and turns away pages on any other origin, other loopback servers included.
 - The local server binds to loopback only.
 - Android cleartext HTTP is scoped to localhost/127.0.0.1 through network security config.
 - Raw HTML is disabled in Markdown preview because preview HTML is injected into the page.

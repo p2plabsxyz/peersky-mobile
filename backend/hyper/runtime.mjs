@@ -40,6 +40,13 @@ import {
   HYPERDRIVE_PRIVATE_DRIVE_NAME
 } from './storage-core.mjs'
 import { refreshHyperRuntimeNetwork } from './network-refresh.mjs'
+import { shareDriveOpens } from './shared-drive-opens.mjs'
+import {
+  decodesWithKey,
+  linkedPrivateDriveKeyFor,
+  rememberLinkedPrivateDrive,
+  resetLinkedPrivateDrivesCache
+} from './linked-private-drives.mjs'
 import { getDefaultIdentityStoragePath } from '../backup/device-keys.mjs'
 
 let sdk = null
@@ -59,6 +66,8 @@ let adoptedSdk = null
 let adoptedSdkOpening = null
 let adoptedStoragePath = null
 const syncedPrivateDrivesById = new Map()
+const linkedPrivateDrivesById = new Map()
+const adoptingLinkedDrives = new Map()
 const privateDriveWarnings = new Map()
 let networkRefresh = null
 const runtimeCoordinator = createRuntimeCoordinator()
@@ -79,7 +88,9 @@ export function withHyperRuntimeForAddress (address, task) {
   return runtimeCoordinator.runOperation(async () => {
     await learnSyncedPrivateDriveId()
     if (isDeviceOnlyHyperdriveAddress(address)) return task(await getPrivateHyperRuntime())
-    if (isSyncedPrivateHyperdriveAddress(address)) return task(withPrivateDriveKeys(await getSyncedPrivateHyperRuntime()))
+    if (isSyncedPrivateHyperdriveAddress(address) || isLinkedPrivateHyperdriveAddress(address)) {
+      return task(withPrivateDriveKeys(await getSyncedPrivateHyperRuntime()))
+    }
     return task(await getHyperRuntime())
   })
 }
@@ -142,7 +153,85 @@ export async function getKeyedPrivateHyperdrive (address) {
   if (id === getSyncedPrivateDriveId()) return getSyncedPrivateHyperdrive()
   const storage = syncedPrivateStoragePath || (typeof Bare !== 'undefined' ? getSyncedPrivateHyperSdkStoragePath() : null)
   if (isAdoptedSyncedPrivateDrive(storage, id)) return getSyncedPrivateHyperdriveForId(id)
+  const key = linkedPrivateDriveKeyFor(getDefaultIdentityStoragePath(), id, privateDriveKeyCandidates())
+  if (key) return getLinkedPrivateHyperdrive(id, key)
   return null
+}
+
+// The keys this phone can open private drives with: the one a desktop sent when
+// it linked, and the phone's own. They are one key unless the phone had made
+// its own before it was linked.
+function privateDriveKeyCandidates () {
+  const keys = []
+  const linked = linkedPrivateDriveKey(getDefaultIdentityStoragePath())
+  if (linked) keys.push(linked)
+  const storage = syncedPrivateStoragePath || (typeof Bare !== 'undefined' ? getSyncedPrivateHyperSdkStoragePath() : null)
+  const record = storage ? getPrivateDriveKeyRecord(storage) : { ok: false }
+  const own = record.ok && record.encrypted ? record.key : null
+  if (own && !keys.some((key) => b4a.equals(key, own))) keys.push(own)
+  return keys
+}
+
+/** A private drive a linked device made after the link, found to open here. */
+export function isLinkedPrivateHyperdriveAddress (address) {
+  const id = normalizeDriveAddressId(address)
+  if (!id) return false
+  return linkedPrivateDriveKeyFor(getDefaultIdentityStoragePath(), id, privateDriveKeyCandidates()) !== null
+}
+
+// Opened in the synced private store, which replicates, and announced under
+// the drive's own topic, since that store joins nothing by itself: the device
+// that made the drive is found there.
+async function openLinkedPrivateHyperdrive (id, key) {
+  const runtime = await getSyncedPrivateHyperRuntime()
+  const drive = new Hyperdrive(runtime.corestore, b4a.from(id, 'hex'), { encryptionKey: key })
+  await drive.ready()
+  if (!drive.core.discovery) await runtime.joinCore(drive.core)
+  return drive
+}
+
+function getLinkedPrivateHyperdrive (id, key) {
+  if (linkedPrivateDrivesById.has(id)) return linkedPrivateDrivesById.get(id)
+  const opening = openLinkedPrivateHyperdrive(id, key)
+  linkedPrivateDrivesById.set(id, opening)
+  opening.catch(() => { if (linkedPrivateDrivesById.get(id) === opening) linkedPrivateDrivesById.delete(id) })
+  return opening
+}
+
+/**
+ * A drive the public store could only read as ciphertext, tried with this
+ * phone's private keys. One that decodes its first block is the key: the drive
+ * is remembered, and later reads go to the private store. False when none
+ * does, or no copy of it came back in time.
+ */
+export function adoptLinkedPrivateDriveIfReadable (address, { timeout = 15000 } = {}) {
+  const id = normalizeDriveAddressId(address)
+  if (!id) return Promise.resolve(false)
+  // A page asks for several files at once, and they share one try.
+  if (!adoptingLinkedDrives.has(id)) {
+    const adopting = runtimeCoordinator.runOperation(() => findLinkedPrivateDriveKey(id, timeout))
+      .catch(() => false)
+    adoptingLinkedDrives.set(id, adopting)
+    adopting.finally(() => adoptingLinkedDrives.delete(id))
+  }
+  return adoptingLinkedDrives.get(id)
+}
+
+// The keys are tried on the copy the public store holds, which has the first
+// block already. Opened in the private store to try, a drive that is not ours
+// would stay in a store Link Device copies to the next device.
+async function findLinkedPrivateDriveKey (id, timeout) {
+  if (isLinkedPrivateHyperdriveAddress(id)) return true
+  const keys = privateDriveKeyCandidates()
+  if (keys.length === 0) return false
+  const runtime = await getHyperRuntime()
+  const driveKey = b4a.from(id, 'hex')
+  for (const key of keys) {
+    if (await decodesWithKey(runtime.corestore, driveKey, key, timeout)) {
+      return rememberLinkedPrivateDrive(getDefaultIdentityStoragePath(), id, key)
+    }
+  }
+  return false
 }
 
 export function withHyperRuntimeMaintenance (task, prepare) {
@@ -182,6 +271,7 @@ export async function getHyperRuntime () {
   if (!sdkOpening) {
     storagePath = getHyperSdkStoragePath()
     sdkOpening = createSDK({ storage: storagePath })
+      .then(shareDriveOpens)
       .then(async (runtime) => {
         await startLANDiscovery(runtime)
         sdk = runtime
@@ -204,7 +294,7 @@ export async function getPrivateHyperRuntime () {
   if (!deviceOnlySdkOpening) {
     deviceOnlyStoragePath = getPrivateHyperSdkStoragePath()
     deviceOnlySdkOpening = initializeRuntimeCandidate(
-      () => createSDK(createPrivateHyperRuntimeOptions(deviceOnlyStoragePath)),
+      () => createSDK(createPrivateHyperRuntimeOptions(deviceOnlyStoragePath)).then(shareDriveOpens),
       async (runtime) => {
         const drive = await getExistingNamedDrive(runtime, {
           driveName: HYPERDRIVE_DEVICE_DRIVE_NAME,
@@ -231,7 +321,7 @@ export async function getSyncedPrivateHyperRuntime () {
   if (!syncedPrivateSdkOpening) {
     syncedPrivateStoragePath = getSyncedPrivateHyperSdkStoragePath()
     syncedPrivateSdkOpening = initializeRuntimeCandidate(
-      () => createSDK(createSyncedPrivateHyperRuntimeOptions(syncedPrivateStoragePath)),
+      () => createSDK(createSyncedPrivateHyperRuntimeOptions(syncedPrivateStoragePath)).then(shareDriveOpens),
       async (runtime) => {
         const drive = await getSyncedPrivateHyperdrive(runtime)
         rememberSyncedPrivateHyperdrive(drive)
@@ -357,7 +447,7 @@ export async function getAdoptedPrivateHyperRuntime () {
         // only writer keys, and the phone must never append to a drive it can
         // then diverge from. Reads of the copied cores keep working.
         corestoreOpts: { allowBackup: true, readOnly: true }
-      }),
+      }).then(shareDriveOpens),
       async (runtime) => {
         adoptedSdk = runtime
       }
@@ -411,6 +501,17 @@ export function isSyncedPrivateHyperdriveAddress (address) {
 
 export function isDeviceOnlyHyperdriveAddress (address) {
   return isDeviceOnlyHyperdriveAddressInternal(address)
+}
+
+/**
+ * This phone's private drive, one adopted from a desktop, one a linked device
+ * made since, or the device-only one.
+ */
+export async function isPrivateHyperAddress (address) {
+  await learnSyncedPrivateDriveId()
+  return isSyncedPrivateHyperdriveAddressInternal(address) ||
+    isLinkedPrivateHyperdriveAddress(address) ||
+    isDeviceOnlyHyperdriveAddressInternal(address)
 }
 
 export function getHyperStoragePath () {
@@ -482,10 +583,12 @@ export async function closeHyperRuntime () {
     syncedPrivateDrive = null
     syncedPrivateDriveOpening = null
     syncedPrivateDrivesById.clear()
+    linkedPrivateDrivesById.clear()
     privateDriveWarnings.clear()
     deviceOnlyDriveId = null
     syncedPrivateDriveId = null
     resetPrivateDriveKeyCache()
+    resetLinkedPrivateDrivesCache()
     networkRefresh = null
     resetLANDiscovery()
   }

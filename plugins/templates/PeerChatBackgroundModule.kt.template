@@ -71,6 +71,7 @@ class PeerChatBackgroundModule(
         }
         soundIds["send"] = pool.load(reactApplicationContext, R.raw.peerchat_send, 1)
         soundIds["receive"] = pool.load(reactApplicationContext, R.raw.peerchat_receive, 1)
+        soundIds["pop"] = pool.load(reactApplicationContext, R.raw.peerchat_pop, 1)
       }
   }
 

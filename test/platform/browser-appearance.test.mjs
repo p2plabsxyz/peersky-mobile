@@ -80,8 +80,16 @@ describe('popups attached to the toolbar', () => {
     assert.match(source, /paddingLeft: insets\.left/)
     assert.match(source, /paddingRight: insets\.right/)
     assert.doesNotMatch(source, /borderWidth: 1/)
-    assert.match(source, /attachedBelow: \{\n\s+borderBottomLeftRadius: 0,\n\s+borderBottomRightRadius: 0,\n\s+borderTopWidth: 1\n\s+\}/)
-    assert.match(source, /attachedAbove: \{\n\s+borderBottomWidth: 1,\n\s+borderTopLeftRadius: 0,\n\s+borderTopRightRadius: 0\n\s+\}/)
+    // The far edge is a hairline: a full point read as a heavy rule. In the
+    // light border colour a hairline all but vanished on a white page.
+    assert.match(source, /borderColor: `\$\{palette\.mutedText\}66`/)
+    assert.match(source, /attachedBelow: \{\n\s+borderBottomLeftRadius: 0,\n\s+borderBottomRightRadius: 0,\n\s+borderTopWidth: StyleSheet\.hairlineWidth,/)
+    assert.match(source, /attachedAbove: \{\n\s+borderBottomWidth: StyleSheet\.hairlineWidth,\n\s+borderTopLeftRadius: 0,\n\s+borderTopRightRadius: 0\n\s+\}/)
+    // Above a bar at the bottom, the shadow goes up onto the page. Cast down,
+    // it lay across the bar as a second line where the two meet.
+    const below = source.slice(source.indexOf('attachedBelow: {'), source.indexOf('attachedAbove: {'))
+    assert.match(below, /shadowOffset: \{ width: 0, height: -4 \}/)
+    assert.match(below, /elevation: 0/)
   })
 
   test('the history suggestions still hang off the toolbar', async () => {

@@ -1,47 +1,60 @@
-import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
+import { StyleSheet } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 
+import { AppWelcome, type AppWelcomeContent } from './AppWelcome'
 import { BROWSER_PALETTES } from './browser-appearance.mjs'
-import GlobeIcon from '../assets/icons/bootstrap/globe.svg'
 import DatabaseIcon from '../assets/icons/bootstrap/database.svg'
-import ShieldLockIcon from '../assets/icons/bootstrap/shield-lock.svg'
+import FileCodeIcon from '../assets/icons/bootstrap/file-code.svg'
+import GridIcon from '../assets/icons/bootstrap/grid.svg'
 import PeopleIcon from '../assets/icons/bootstrap/people.svg'
+import ShieldCheckIcon from '../assets/icons/bootstrap/shield-check.svg'
 
-const PEERSKY_ICON = require('../assets/images/logo.png')
-
-// Four things worth knowing before the first page loads, and nothing else. A
-// tour is something to escape from; this is one screen with one button.
-//
-// Device to device goes first because it is the one thing no other browser
-// does, and each card is short enough to take in at a glance. Ordinary
-// websites go last: they are the part nobody needs convincing of.
+// What PeerSky stands for, before the first page loads: one screen, five
+// short promises, one button. Device to device leads, as the thing nothing
+// else does, and each card is short enough to take in at a glance.
 const QUALITIES = [
   {
     id: 'together',
     Icon: PeopleIcon,
-    title: 'Share data device to device',
-    body: 'Chats, notes and music go straight between phones. There is no server. Your phone is the server.'
+    title: 'Device to device',
+    body: 'What you share goes straight between phones and computers. There is no server. Your phone is the server.'
+  },
+  {
+    id: 'product',
+    Icon: ShieldCheckIcon,
+    title: 'You are not the product',
+    body: 'No ads, no trackers, no account. We collect nothing about you, so there is nothing to sell.'
+  },
+  {
+    id: 'everything',
+    Icon: GridIcon,
+    title: 'Everything in one app',
+    body: 'Browser, chat, shared notes, music and file sharing, all built in. One app instead of five, with more on the way.'
   },
   {
     id: 'yours',
     Icon: DatabaseIcon,
-    title: 'We know nothing about you',
-    body: 'Your tabs, chats and files stay on this phone. They are yours, not ours.'
+    title: 'Your data stays yours',
+    body: 'Everything lives on this phone first, and keeps working over a local network even when the internet is down.'
   },
   {
-    id: 'clean',
-    Icon: ShieldLockIcon,
-    title: 'No ads, no trackers, no account',
-    body: 'Blocked before a page can load them. Nothing to sign up for.'
-  },
-  {
-    id: 'web',
-    Icon: GlobeIcon,
-    title: 'Works with every website',
-    body: 'Normal sites work as usual. PeerSky also opens sites that live on people’s devices instead of servers.'
+    id: 'open',
+    Icon: FileCodeIcon,
+    title: 'Free and open source',
+    body: 'Anyone can read the code and improve it.'
   }
 ]
 
+const PEERSKY_WELCOME: AppWelcomeContent = {
+  icon: require('../assets/images/logo.png'),
+  title: 'PeerSky',
+  lead: 'Your peer-to-peer, local-first, surveillance-free browser.',
+  points: QUALITIES,
+  action: 'Start exploring'
+}
+
+// The same screen the P2P apps greet with, full screen and with the same
+// lines rising in one after another.
 export function WelcomeScreen ({ isDark, onDone }: { isDark: boolean, onDone: () => void }) {
   const palette = isDark ? BROWSER_PALETTES.dark : BROWSER_PALETTES.light
 
@@ -50,82 +63,11 @@ export function WelcomeScreen ({ isDark, onDone }: { isDark: boolean, onDone: ()
       edges={['top', 'left', 'right', 'bottom']}
       style={[styles.screen, { backgroundColor: palette.shell }]}
     >
-      <ScrollView contentContainerStyle={styles.content}>
-        <Image source={PEERSKY_ICON} style={styles.logo} />
-        <Text style={[styles.title, { color: palette.text }]}>PeerSky</Text>
-        <Text style={[styles.lead, { color: palette.mutedText }]}>
-          A peer to peer, surveillance free browser.
-        </Text>
-
-        <View style={styles.qualities}>
-          {QUALITIES.map(({ id, Icon, title, body }) => (
-            <View key={id} style={styles.quality}>
-              <View style={[styles.qualityIcon, { backgroundColor: palette.selectedBackground }]}>
-                <Icon width={20} height={20} color={palette.selectedControl} />
-              </View>
-              <View style={styles.qualityCopy}>
-                <Text style={[styles.qualityTitle, { color: palette.text }]}>{title}</Text>
-                <Text style={[styles.qualityBody, { color: palette.mutedText }]}>{body}</Text>
-              </View>
-            </View>
-          ))}
-        </View>
-      </ScrollView>
-
-      <Pressable
-        accessibilityRole='button'
-        accessibilityLabel='Start browsing'
-        onPress={onDone}
-        style={({ pressed }) => [styles.start, pressed ? styles.startPressed : null]}
-      >
-        <Text style={styles.startText}>Start browsing</Text>
-      </Pressable>
+      <AppWelcome content={PEERSKY_WELCOME} isDark={isDark} backgroundColor={palette.shell} onDone={onDone} />
     </SafeAreaView>
   )
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1 },
-  content: {
-    flexGrow: 1,
-    justifyContent: 'center',
-    paddingHorizontal: 26,
-    paddingVertical: 32
-  },
-  logo: { alignSelf: 'center', height: 86, width: 86 },
-  title: {
-    fontSize: 30,
-    fontWeight: '900',
-    marginTop: 14,
-    textAlign: 'center'
-  },
-  lead: {
-    fontSize: 15,
-    lineHeight: 21,
-    marginTop: 8,
-    textAlign: 'center'
-  },
-  qualities: { gap: 22, marginTop: 32 },
-  quality: { flexDirection: 'row', gap: 14 },
-  qualityIcon: {
-    alignItems: 'center',
-    borderRadius: 12,
-    height: 42,
-    justifyContent: 'center',
-    width: 42
-  },
-  qualityCopy: { flex: 1, gap: 4 },
-  qualityTitle: { fontSize: 15, fontWeight: '800' },
-  qualityBody: { fontSize: 13, lineHeight: 19 },
-  start: {
-    alignItems: 'center',
-    backgroundColor: '#1f6fd1',
-    borderRadius: 14,
-    justifyContent: 'center',
-    marginBottom: 10,
-    marginHorizontal: 26,
-    minHeight: 52
-  },
-  startPressed: { opacity: 0.8 },
-  startText: { color: '#ffffff', fontSize: 16, fontWeight: '800' }
+  screen: { flex: 1 }
 })

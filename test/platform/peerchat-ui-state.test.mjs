@@ -3,11 +3,13 @@ import test from 'node:test'
 
 import {
   parsePeerChatUiState,
+  PEERCHAT_MAX_DRAFTS,
   PEERCHAT_RECENT_EMOJI_MAX,
   recordRecentEmoji,
   PEERCHAT_DRAFT_MAX_CHARACTERS,
   PEERCHAT_UI_STATE_MAX_BYTES,
-  serializePeerChatUiState
+  serializePeerChatUiState,
+  setPeerChatDraft
 } from '../../app/peerchat/ui-state.mjs'
 
 const ROOM_A = 'ab'.repeat(32)
@@ -16,44 +18,93 @@ const ROOM_B = 'cd'.repeat(32)
 test('PeerChat UI state restores an active room and its draft', () => {
   const restored = parsePeerChatUiState(serializePeerChatUiState({
     activeRoomKey: ROOM_A,
-    draftRoomKey: ROOM_A,
-    draft: 'Unsent message'
+    drafts: { [ROOM_A]: 'Unsent message' }
   }))
 
   assert.deepEqual(restored, {
     activeRoomKey: ROOM_A,
-    draftRoomKey: ROOM_A,
-    draft: 'Unsent message',
+    drafts: { [ROOM_A]: 'Unsent message' },
+    recentEmojis: []
+  })
+})
+
+// There was one draft for the whole app, so opening another chat threw away
+// what you had typed in the last one.
+test('every chat keeps its own draft until it is sent', () => {
+  let drafts = setPeerChatDraft({}, ROOM_A, 'for A')
+  drafts = setPeerChatDraft(drafts, ROOM_B, 'for B')
+  assert.deepEqual(drafts, { [ROOM_B]: 'for B', [ROOM_A]: 'for A' })
+  // Newest first, so a full file drops the oldest.
+  assert.deepEqual(Object.keys(setPeerChatDraft(drafts, ROOM_A, 'for A again')), [ROOM_A, ROOM_B])
+  // Sending empties the composer, and that removes the draft.
+  assert.deepEqual(setPeerChatDraft(drafts, ROOM_B, ''), { [ROOM_A]: 'for A' })
+  assert.deepEqual(setPeerChatDraft(drafts, 'not a room', 'x'), drafts)
+
+  const restored = parsePeerChatUiState(serializePeerChatUiState({ activeRoomKey: null, drafts }))
+  assert.deepEqual(restored.drafts, drafts)
+})
+
+test('the drafts are bounded in number and in size', () => {
+  let drafts = {}
+  for (let index = 0; index < PEERCHAT_MAX_DRAFTS + 5; index += 1) {
+    drafts = setPeerChatDraft(drafts, index.toString(16).padStart(64, '0'), `draft ${index}`)
+  }
+  assert.equal(Object.keys(drafts).length, PEERCHAT_MAX_DRAFTS)
+  assert.equal(drafts[(PEERCHAT_MAX_DRAFTS + 4).toString(16).padStart(64, '0')], `draft ${PEERCHAT_MAX_DRAFTS + 4}`)
+
+  const big = 'x'.repeat(PEERCHAT_DRAFT_MAX_CHARACTERS)
+  const many = Object.fromEntries(Array.from({ length: 10 }, (_, index) => [index.toString(16).padStart(64, 'a'), big]))
+  const serialized = serializePeerChatUiState({ activeRoomKey: null, drafts: many })
+  assert.ok(serialized.length <= PEERCHAT_UI_STATE_MAX_BYTES)
+  // The newest are the ones kept.
+  assert.ok(Object.keys(JSON.parse(serialized).drafts)[0] === Object.keys(many)[0])
+})
+
+test('a file from before drafts were per chat keeps its one draft', () => {
+  assert.deepEqual(parsePeerChatUiState(JSON.stringify({
+    version: 1,
+    activeRoomKey: ROOM_A,
+    draftRoomKey: ROOM_B,
+    draft: 'Unsent'
+  })), {
+    activeRoomKey: ROOM_A,
+    drafts: { [ROOM_B]: 'Unsent' },
     recentEmojis: []
   })
 })
 
 test('PeerChat UI state rejects malformed room keys and stale draft metadata', () => {
   assert.deepEqual(parsePeerChatUiState(JSON.stringify({
-    version: 1,
+    version: 2,
     activeRoomKey: 'invalid',
-    draftRoomKey: ROOM_B,
-    draft: ''
+    drafts: { [ROOM_B]: '', invalid: 'x' }
   })), {
     activeRoomKey: null,
-    draftRoomKey: null,
-    draft: '',
+    drafts: {},
     recentEmojis: []
   })
   assert.equal(parsePeerChatUiState('{invalid').activeRoomKey, null)
-  assert.equal(parsePeerChatUiState('x'.repeat(PEERCHAT_UI_STATE_MAX_BYTES + 1)).draft, '')
+  assert.deepEqual(parsePeerChatUiState('x'.repeat(PEERCHAT_UI_STATE_MAX_BYTES + 1)).drafts, {})
 })
 
 test('PeerChat UI state bounds persisted Unicode drafts without splitting characters', () => {
   const oversized = '😀'.repeat(PEERCHAT_DRAFT_MAX_CHARACTERS + 1)
   const restored = parsePeerChatUiState(serializePeerChatUiState({
     activeRoomKey: ROOM_A,
-    draftRoomKey: ROOM_A,
-    draft: oversized
+    drafts: { [ROOM_A]: oversized }
   }))
 
-  assert.equal(Array.from(restored.draft).length, PEERCHAT_DRAFT_MAX_CHARACTERS)
-  assert.equal(restored.draft.endsWith('😀'), true)
+  assert.equal(Array.from(restored.drafts[ROOM_A]).length, PEERCHAT_DRAFT_MAX_CHARACTERS)
+  assert.equal(restored.drafts[ROOM_A].endsWith('😀'), true)
+})
+
+test('the screen puts back a chat\'s draft when it opens', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const screen = await readFile(new URL('../../app/peerchat/PeerChatScreen.tsx', import.meta.url), 'utf8')
+  assert.match(screen, /if \(composerRoomKeyRef\.current !== room\.roomKey\) setComposer\(draftsRef\.current\[room\.roomKey\] \|\| ''\)/)
+  assert.match(screen, /draftsRef\.current = setPeerChatDraft\(draftsRef\.current, composerRoomKeyRef\.current, composer\)/)
+  // Leaving a chat for good takes its draft with it.
+  assert.match(screen, /draftsRef\.current = setPeerChatDraft\(draftsRef\.current, room\.roomKey, ''\)/)
 })
 
 // Desktop keeps a Recent row at the top of its emoji panel. The phone had no
@@ -89,8 +140,7 @@ test('PeerChat recent emojis survive a round trip', () => {
   const recents = recordRecentEmoji([], '\u{1F389}')
   const restored = parsePeerChatUiState(serializePeerChatUiState({
     activeRoomKey: null,
-    draftRoomKey: null,
-    draft: '',
+    drafts: {},
     recentEmojis: recents
   }))
 
@@ -137,7 +187,7 @@ test('a long press offers a room its key and a direct message its answers', asyn
 
   // The report names the conversation it came from, which is the direct
   // message itself when there is no room open behind it.
-  assert.match(screen, /function reportMember \(member: PeerChatMember, from: PeerChatRoom \| null = activeRoom\)/)
+  assert.match(screen, /function reportMember \(\s+member: PeerChatMember,\s+from: PeerChatRoom \| null = activeRoom,/)
   assert.match(screen, /reportMember\(peer, from\)/)
 })
 
@@ -157,4 +207,61 @@ test('the date divider sits above the first message of its day', async () => {
   const row = list.slice(list.indexOf('renderItem='))
   assert.match(row, /return \(\s*<View>\s*\{!!dateLabel && dateLabel !== previousDateLabel && \(/)
   assert.doesNotMatch(row, /return \(\s*<>/)
+})
+
+// Only the host's editor showed the room's picture, so everyone else opened
+// the details and never saw it. Desktop shows it to everyone, and now the
+// details are the same for everyone, the host too.
+test('room details show the room picture to everyone, not only the host', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const screen = await readFile(new URL('../../app/peerchat/PeerChatScreen.tsx', import.meta.url), 'utf8')
+  const details = screen.slice(screen.indexOf('visible={showRoomInfo}'), screen.indexOf('{!activeRoom.isDM && (\n              <View style={styles.roomProvenance}>'))
+  assert.doesNotMatch(details, /isHost/)
+  assert.match(details, /accessibilityLabel=\{`Picture of \$\{activeRoom\.name\}`\}/)
+  assert.match(details, /<Image source=\{\{ uri: activeRoom\.avatar \}\} style=\{styles\.roomInfoAvatar\} \/>/)
+  assert.match(details, /getRoomInitials\(activeRoom\.name\)/)
+})
+
+// A room's picture only ever showed small, with no way to see it full size as
+// desktop allows. Tapping it now opens the viewer.
+test('tapping a room picture shows it full size', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const screen = await readFile(new URL('../../app/peerchat/PeerChatScreen.tsx', import.meta.url), 'utf8')
+  const view = screen.slice(screen.indexOf('function viewRoomPicture'), screen.indexOf('function openHeaderDetails'))
+  // Room info is a modal of its own, so it closes before the viewer opens.
+  assert.match(view, /replaceModal\(\s+\(\) => setShowRoomInfo\(false\),\s+\(\) => setMediaTarget\(\{ kind: 'image', label: name, uri: picture \}\)/)
+
+  const details = screen.slice(screen.indexOf('visible={showRoomInfo}'), screen.indexOf('{!activeRoom.isDM && (\n              <View style={styles.roomProvenance}>'))
+  assert.match(details, /onPress=\{\(\) => viewRoomPicture\(activeRoom\.name, activeRoom\.avatar\)\}/)
+})
+
+// A new room went to the very top of the list, then moved below the pinned
+// rooms on the next refresh, right where a finger was reaching for it.
+test('a created or joined room takes its place in the list at once', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const screen = await readFile(new URL('../../app/peerchat/PeerChatScreen.tsx', import.meta.url), 'utf8')
+  const router = await readFile(new URL('../../backend/rpc/router.mjs', import.meta.url), 'utf8')
+  assert.match(router, /const room = await peerChat\.createRoom\(parseJsonMessage\(req\.data\)\)[\s\S]{0,200}replyJson\(req, \{ ok: true, room, rooms: peerChat\.listRooms\(\) \}\)/)
+  assert.match(router, /const room = await peerChat\.joinRoom\(parseJsonMessage\(req\.data\)\)\s+replyJson\(req, \{ ok: true, room, rooms: peerChat\.listRooms\(\) \}\)/)
+  assert.match(screen, /setRooms\(\(current\) => response\.rooms \|\| \[response\.room as PeerChatRoom, \.\.\.current\]\)/)
+  assert.equal((screen.match(/setRooms\(\(current\) => response\.rooms \|\| \[\n/g) || []).length, 2)
+})
+
+// Desktop says so on its create form, and the phone said nothing, then offered
+// an editor whose changes no device took.
+test('a group says what cannot change once it is made, and nobody edits it later', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const screen = await readFile(new URL('../../app/peerchat/PeerChatScreen.tsx', import.meta.url), 'utf8')
+  assert.match(screen, /Group name, picture, description and link cannot be edited after creation\./)
+  assert.match(screen, /Settings are fixed once the group is created\./)
+  assert.doesNotMatch(screen, /Save room details|saveRoomDetails|RPC_PEERCHAT_ROOM_UPDATE/)
+})
+
+// Find had nowhere to scan someone's code, though that is where people go
+// looking for someone to add.
+test('Find people scans a code from beside its search', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const screen = await readFile(new URL('../../app/peerchat/PeerChatScreen.tsx', import.meta.url), 'utf8')
+  assert.match(screen, /onPress=\{\(\) => replaceModal\(\(\) => setIsDiscoverOpen\(false\), \(\) => \{ void openInviteScanner\(\) \}\)\}/)
+  assert.match(screen, /<QrScanIcon width=\{20\} height=\{20\} color=\{colors\.accent\} \/>/)
 })

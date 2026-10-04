@@ -1,4 +1,4 @@
-import { Image, Pressable, Text, View } from 'react-native'
+import { Image, Pressable, type StyleProp, Text, type TextStyle, View } from 'react-native'
 
 import { styles } from '../styles'
 import type { BrowserFavourite } from './useBrowserFavourites'
@@ -13,11 +13,14 @@ import type { BrowserFavourite } from './useBrowserFavourites'
 export function BrowserFavourites ({
   favourites,
   palette,
+  titleStyle,
   onOpen,
   onRemove
 }: {
   favourites: BrowserFavourite[]
   palette: { button: string, mutedText: string, text: string }
+  // The same shadow as the apps' labels, which sit on the same photograph.
+  titleStyle?: StyleProp<TextStyle>
   onOpen: (url: string) => void
   onRemove: (favourite: BrowserFavourite) => void
 }) {
@@ -53,7 +56,7 @@ export function BrowserFavourites ({
           </View>
           <Text
             numberOfLines={2}
-            style={[styles.browserShortcutTitle, { color: palette.text }]}
+            style={[styles.browserShortcutTitle, titleStyle, { color: palette.text }]}
           >
             {favourite.title}
           </Text>

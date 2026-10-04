@@ -29,6 +29,14 @@ const META_TAG_RE = /<meta[^>]*>/gi
 
 const NODE_DNS = globalThis.process?.getBuiltinModule?.('dns') || null
 
+// Bare has no process.getBuiltinModule, and the check used to be skipped
+// there, which is where the phone runs it.
+async function loadDns () {
+  if (NODE_DNS) return NODE_DNS
+  const module = await import('bare-dns')
+  return module.default || module
+}
+
 // A hostname can be public-looking yet resolve to an internal address
 // (169.254.169.254, 127.0.0.1, ...). Literal host checks can't see that, so
 // this validates the list of addresses a name resolves to as well. It is not
@@ -37,17 +45,16 @@ const NODE_DNS = globalThis.process?.getBuiltinModule?.('dns') || null
 function makeLookup (options) {
   if (typeof options.lookupFn === 'function') return options.lookupFn
   // An injected fetchFn already stands in for the network layer, so resolving
-  // against real DNS would only make unit tests flaky. When fetching for real,
-  // resolve through Node's DNS when available; the browser has no hook here,
-  // so the guard is best-effort there.
-  if (options.fetchFn === undefined && NODE_DNS) {
-    return (hostname) => new Promise((resolve) => {
-      NODE_DNS.lookup(hostname, { all: true, verbatim: true }, (err, addresses) => {
-        resolve(err ? [] : addresses.map((a) => a.address))
+  // against real DNS would only make unit tests flaky.
+  if (options.fetchFn !== undefined) return null
+  return async (hostname) => {
+    const dns = await loadDns()
+    return new Promise((resolve) => {
+      dns.lookup(hostname, { all: true, verbatim: true }, (err, addresses) => {
+        resolve(err || !Array.isArray(addresses) ? [] : addresses.map((a) => a.address))
       })
     })
   }
-  return null
 }
 
 async function hostResolvesPublic (url, lookupFn) {

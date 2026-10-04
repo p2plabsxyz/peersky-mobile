@@ -1,6 +1,7 @@
 package __PACKAGE_NAME__
 
 import android.content.ComponentName
+import android.content.Context
 import android.content.pm.PackageManager
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
@@ -8,12 +9,9 @@ import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 
 /**
- * Changing the launcher icon.
- *
- * Android has no API for this. What it has is activity-alias: one entry per
- * icon, all but one disabled, and the launcher draws whichever is enabled. So
- * switching means enabling the alias you want and disabling the rest, in that
- * order, because a moment with none enabled is a moment the app is missing
+ * Changes the launcher icon. Android has no API for this, only one
+ * activity-alias per icon with all but one disabled. Switching enables the new
+ * alias before disabling the rest, since with none enabled the app is missing
  * from the launcher.
  */
 class PeerSkyAppIconModule(
@@ -23,14 +21,11 @@ class PeerSkyAppIconModule(
   override fun getName() = "PeerSkyAppIcon"
 
   /**
-   * Undoes the damage an earlier build did.
-   *
-   * That version hid the launcher entry by disabling MainActivity itself,
-   * which also stopped anything starting the app by class name: the dev
-   * launcher, and any deep link. A device that ran it keeps that setting
-   * through reinstalls, because component state belongs to the package and
-   * not to the APK, and adb cannot undo it either since only the app may
-   * change its own components. So the app does it, once, on the way up.
+   * Re-enables MainActivity. An earlier build disabled it to hide the launcher
+   * entry, which broke anything starting the app by class name (the dev
+   * launcher, deep links). Component state belongs to the package, so it
+   * survives reinstalls, and adb cannot reset it because only the app may
+   * change its own components.
    */
   override fun initialize() {
     super.initialize()
@@ -106,9 +101,37 @@ class PeerSkyAppIconModule(
         )
       }
 
+      moveBadgeToCurrentIcon()
       promise.resolve(true)
     } catch (error: Exception) {
       promise.reject("failed", error.message, error)
+    }
+  }
+
+  /**
+   * expo-notifications puts the unread count on the launcher icon through
+   * ShortcutBadger, which looks up the app's launcher entry once and keeps it.
+   * After a switch that entry is the alias just turned off, so the PeerChat
+   * count vanished until the app was restarted. Forgetting it makes the next
+   * count find the new alias, and the current count is put back there now.
+   * Neither library offers this, hence reflection; if either changes, the
+   * count comes back with the next message instead.
+   */
+  private fun moveBadgeToCurrentIcon() {
+    try {
+      val badger = Class.forName("me.leolin.shortcutbadger.ShortcutBadger")
+      for (field in listOf("sShortcutBadger", "sComponentName")) {
+        badger.getDeclaredField(field).apply { isAccessible = true }.set(null, null)
+      }
+
+      val helper = Class.forName("expo.modules.notifications.badge.BadgeHelper")
+      val count = helper.getMethod("getBadgeCount").invoke(helper.getField("INSTANCE").get(null)) as Int
+      if (count > 0) {
+        badger
+          .getMethod("applyCount", Context::class.java, Int::class.javaPrimitiveType)
+          .invoke(null, reactApplicationContext.applicationContext, count)
+      }
+    } catch (error: Exception) {
     }
   }
 

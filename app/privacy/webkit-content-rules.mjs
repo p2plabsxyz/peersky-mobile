@@ -5,7 +5,7 @@ export const MAX_WEBKIT_RULES_PER_LIST = 150_000
 // caches are keyed by the filter-list snapshot, which does not move when the
 // converter does. Keep it in step with PeerSkyRuleFormatVersion in
 // plugins/templates/PeerSkyContentBlocker.m.template.
-export const WEBKIT_RULE_FORMAT_VERSION = 2
+export const WEBKIT_RULE_FORMAT_VERSION = 3
 
 const DEFAULT_BATCH_SIZE = 500
 
@@ -29,7 +29,6 @@ const RESOURCE_TYPE_OPTIONS = new Map([
   ['object', 'raw'],
   ['object-subrequest', 'raw'],
   ['xmlhttprequest', 'raw'],
-  ['subdocument', 'raw'],
   ['websocket', 'raw'],
   ['other', 'raw']
 ])
@@ -58,9 +57,9 @@ export function convertFilterListToWebKitRules (
 
   for (const rawLine of contents.split(/\r?\n/)) {
     if (blocking.length + exceptions.length >= maxRules * 2) break
-    const rule = convertLine(rawLine)
-    if (!rule) continue
-    ;(rule.action.type === 'ignore-previous-rules' ? exceptions : blocking).push(rule)
+    for (const rule of convertLine(rawLine)) {
+      ;(rule.action.type === 'ignore-previous-rules' ? exceptions : blocking).push(rule)
+    }
   }
 
   const keptExceptions = exceptions.slice(0, maxRules)
@@ -85,8 +84,7 @@ export async function convertFilterListToWebKitRulesAsync (
 
   for (let index = 0; index < lines.length; index++) {
     if (blocking.length + exceptions.length >= maxRules * 2) break
-    const rule = convertLine(lines[index])
-    if (rule) {
+    for (const rule of convertLine(lines[index])) {
       ;(rule.action.type === 'ignore-previous-rules' ? exceptions : blocking).push(rule)
     }
     if ((index + 1) % batchSize === 0) await yieldControl()
@@ -122,30 +120,27 @@ export function serializeWebKitContentRules (contents, options) {
 
 function convertLine (rawLine) {
   const line = rawLine.trim()
-  if (!line || line.length > MAX_FILTER_LINE_LENGTH) return null
-  if (line.startsWith('!') || line.startsWith('[')) return null
-  if (line.includes('##') || line.includes('#@#') || line.includes('#?#')) return null
+  if (!line || line.length > MAX_FILTER_LINE_LENGTH) return []
+  if (line.startsWith('!') || line.startsWith('[')) return []
+  if (line.includes('##') || line.includes('#@#') || line.includes('#?#')) return []
 
   const exception = line.startsWith('@@')
   const body = exception ? line.slice(2) : line
   const separator = body.lastIndexOf('$')
   const pattern = separator >= 0 ? body.slice(0, separator) : body
   const optionText = separator >= 0 ? body.slice(separator + 1) : ''
-  const trigger = createTrigger(pattern, optionText)
-  if (!trigger) return null
+  const type = exception ? 'ignore-previous-rules' : 'block'
 
-  return {
-    trigger,
-    action: {
-      type: exception ? 'ignore-previous-rules' : 'block'
-    }
-  }
+  return createTriggers(pattern, optionText).map((trigger) => ({ trigger, action: { type } }))
 }
 
-function createTrigger (pattern, optionText) {
-  if (!pattern || (pattern.startsWith('/') && pattern.endsWith('/'))) return null
+function createTriggers (pattern, optionText) {
+  if (!pattern || (pattern.startsWith('/') && pattern.endsWith('/'))) return []
 
   const resourceTypes = new Set(DEFAULT_RESOURCE_TYPES)
+  // An iframe, which WebKit loads as a document rather than as any of the
+  // types above. A filter with no type covers frames too.
+  let frames = true
   let hasPositiveResourceType = false
   let loadType = null
   let ifDomain = null
@@ -156,12 +151,14 @@ function createTrigger (pattern, optionText) {
     const option = (negated ? rawOption.slice(1) : rawOption).toLowerCase()
     const resourceType = RESOURCE_TYPE_OPTIONS.get(option)
 
-    if (resourceType) {
+    if (resourceType || option === 'subdocument') {
       if (!hasPositiveResourceType && !negated) {
         resourceTypes.clear()
+        frames = false
         hasPositiveResourceType = true
       }
-      if (negated) resourceTypes.delete(resourceType)
+      if (option === 'subdocument') frames = !negated
+      else if (negated) resourceTypes.delete(resourceType)
       else resourceTypes.add(resourceType)
       continue
     }
@@ -176,7 +173,7 @@ function createTrigger (pattern, optionText) {
     }
     if (option.startsWith('domain=')) {
       const domains = parseDomains(option.slice('domain='.length))
-      if (!domains) return null
+      if (!domains) return []
       ifDomain = domains.included
       unlessDomain = domains.excluded
       continue
@@ -184,22 +181,40 @@ function createTrigger (pattern, optionText) {
     if (SAFE_FLAG_OPTIONS.has(option) && !negated) continue
 
     // Unsupported modifiers are skipped rather than weakened into broader rules.
-    return null
+    return []
   }
 
-  if (resourceTypes.size === 0) return null
   const urlFilter = createUrlFilter(pattern)
-  if (!urlFilter || urlFilter.length > MAX_URL_FILTER_LENGTH) return null
+  if (!urlFilter || urlFilter.length > MAX_URL_FILTER_LENGTH) return []
 
-  const trigger = {
-    'url-filter': urlFilter,
-    'url-filter-is-case-sensitive': false,
-    'resource-type': [...resourceTypes]
+  const triggers = []
+  const withScope = (trigger) => {
+    if (loadType) trigger['load-type'] = loadType
+    if (ifDomain?.length) trigger['if-domain'] = ifDomain
+    if (unlessDomain?.length) trigger['unless-domain'] = unlessDomain
+    return trigger
   }
-  if (loadType) trigger['load-type'] = loadType
-  if (ifDomain?.length) trigger['if-domain'] = ifDomain
-  if (unlessDomain?.length) trigger['unless-domain'] = unlessDomain
-  return trigger
+  if (resourceTypes.size > 0) {
+    triggers.push(withScope({
+      'url-filter': urlFilter,
+      'url-filter-is-case-sensitive': false,
+      'resource-type': [...resourceTypes]
+    }))
+  }
+  // A document is also the page typed into the address bar, which is never
+  // blocked. That page is first party to itself, so a third-party document
+  // can only be a frame. A first-party-only filter has no frame rule.
+  if (frames && loadType?.[0] !== 'first-party') {
+    triggers.push({
+      ...withScope({
+        'url-filter': urlFilter,
+        'url-filter-is-case-sensitive': false,
+        'resource-type': ['document']
+      }),
+      'load-type': ['third-party']
+    })
+  }
+  return triggers
 }
 
 function parseDomains (value) {

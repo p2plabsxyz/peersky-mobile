@@ -4,7 +4,7 @@ type PeerChatBackgroundModule = {
   setEnabled: (enabled: boolean) => Promise<void>
   isIgnoringBatteryOptimizations: () => Promise<boolean>
   openBatteryOptimizationSettings: () => Promise<void>
-  playSound: (kind: 'send' | 'receive') => void
+  playSound: (kind: 'send' | 'receive' | 'pop') => void
   addListener: (eventName: string) => void
   removeListeners: (count: number) => void
 }
@@ -50,7 +50,7 @@ export function addPeerChatBackgroundTickListener (listener: () => void) {
   return new NativeEventEmitter(module as never).addListener(BACKGROUND_TICK_EVENT, listener)
 }
 
-export function playAndroidPeerChatSound (kind: 'send' | 'receive') {
+export function playAndroidPeerChatSound (kind: 'send' | 'receive' | 'pop') {
   if (Platform.OS !== 'android') return false
   const module = getPeerChatBackgroundModule()
   if (!module?.playSound) return false

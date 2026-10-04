@@ -7,17 +7,32 @@ export const PEERCHAT_INTRO_POINTS = [
   'Works with no internet at all. Any local network will do, even a phone hotspot. When the internet is cut off, or never reached you in the first place, PeerChat keeps working.'
 ]
 
+// Agreed to before anything else, so everyone has seen them. The full text is
+// TERMS.md, and App Review asks that people agree to it in the app.
+export const PEERCHAT_RULES = [
+  'No sexual content or nudity, ever.',
+  'No threats, harassment, bullying or hate.',
+  'No spam, scams, or other people’s private details.',
+  'Block anyone who bothers you and report them. We read every report within 24 hours.',
+  'You start in P2P Republic, a public room anyone can join. You can leave it from the chat list.'
+]
+
+export const PEERCHAT_TERMS_URL = 'https://github.com/p2plabsxyz/peersky-mobile/blob/main/TERMS.md'
+
+// Version 2 added the rules, so everyone who agreed before sees them once.
+const PEERCHAT_INTRO_VERSION = 2
+
 export function parsePeerChatIntroState (serialized) {
   if (typeof serialized !== 'string' || serialized.length > PEERCHAT_INTRO_MAX_BYTES) return false
 
   try {
     const stored = JSON.parse(serialized)
-    return stored?.version === 1 && stored?.completed === true
+    return stored?.version === PEERCHAT_INTRO_VERSION && stored?.completed === true
   } catch {
     return false
   }
 }
 
 export function serializePeerChatIntroState () {
-  return JSON.stringify({ version: 1, completed: true })
+  return JSON.stringify({ version: PEERCHAT_INTRO_VERSION, completed: true })
 }
