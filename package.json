@@ -81,9 +81,9 @@
     "expo-splash-screen": "~55.0.25",
     "expo-system-ui": "~55.0.20",
     "expo-video": "~55.0.21",
-    "holesail": "^2.4.1",
     "hyper-sdk": "^6.2.2",
     "hypercore-fetch": "^10.2.0",
+    "hyperdht": "^6.32.0",
     "katex": "^0.16.47",
     "markdown-it": "^14.3.2",
     "protomux": "^3.11.0",
@@ -98,7 +98,8 @@
     "react-native-view-shot": "4.0.3",
     "react-native-webview": "13.16.0",
     "sodium-native": "^5.1.0",
-    "yjs": "^13.6.31"
+    "yjs": "^13.6.31",
+    "z32": "^1.1.0"
   },
   "devDependencies": {
     "@types/b4a": "^1.6.5",
@@ -106,6 +107,7 @@
     "babel-preset-expo": "~55.0.8",
     "bare-pack": "^2.0.1",
     "esbuild": "^0.28.1",
+    "holesail": "^2.4.1",
     "patch-package": "^8.0.1",
     "react-native-svg-transformer": "^1.5.3",
     "standard": "^17.1.0",

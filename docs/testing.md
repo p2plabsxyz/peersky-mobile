@@ -31,6 +31,7 @@ Protocol tests live in `test/protocol/` and cover behavior that should stay stab
 
 - `hyper-url.test.mjs` validates `hyper://` parsing, malformed URL handling, and path traversal rejection.
 - `holesail-session.test.mjs` validates Holesail ports, keys, loopback host restrictions, and safe failure behavior.
+- `note-tunnel.test.mjs` checks the phone's tunnel makes the same keys and addresses as Holesail, and joins and is joined by Holesail's own classes on a local hyperdht test network.
 - `p2pmd-document.test.mjs` validates document state, Yjs update application, full-state sync, size limits, and subscribers.
 - `p2pmd-http.test.mjs` starts a real HTTP server with the shared P2PMD request handler and checks `/status`, `/doc`, `/doc/update`, `/doc/yjsstate`, `/presence`, and `/events`, and that pages on other origins are turned away.
 - `p2pmd-peers.test.mjs` validates peer count, peer pruning, and line ownership used by gutter marks.
@@ -65,6 +66,8 @@ This test starts:
 2. A Holesail live/server session in one child process.
 3. A Holesail client session in another child process.
 4. A fetch through the client proxy to prove TCP traffic passes through the tunnel.
+
+It then checks the phone against the Holesail package the desktop runs, over the live network: Holesail joining a note the phone hosts, and the phone joining a note Holesail hosts.
 
 The child processes are needed because the mobile Holesail runtime keeps one active session per runtime, matching the app design.
 

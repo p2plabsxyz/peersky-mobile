@@ -1,6 +1,7 @@
-import Holesail from 'holesail'
+import { TunnelGuest, TunnelHost } from './tunnel.mjs'
 
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost'])
+const UDP_UNSUPPORTED = 'PeerSky shares notes over TCP only.'
 
 let session = null
 let mode = null
@@ -11,10 +12,11 @@ export async function startHolesailLive ({
   host,
   connector,
   secure = true,
-  udp = false,
-  log = false
+  udp = false
 } = {}) {
   return withSessionTransition(async () => {
+    if (udp) return { ok: false, error: UDP_UNSUPPORTED }
+
     const livePort = resolvePort(port, 8989)
     if (!livePort.ok) return livePort
 
@@ -33,20 +35,17 @@ export async function startHolesailLive ({
 
     await stopSessionInternal()
 
-    const instance = new Holesail({
-      server: true,
+    const instance = new TunnelHost({
+      key: connectorKey.key,
       secure: Boolean(secure),
-      udp: Boolean(udp),
-      log: Boolean(log),
       port: livePort.port,
-      host: liveHost.host,
-      key: connectorKey.key
+      host: liveHost.host
     })
 
     session = instance
 
     try {
-      await instance.ready()
+      await instance.open()
     } catch (error) {
       session = null
       mode = null
@@ -78,13 +77,13 @@ export async function connectHolesail ({
   // belongs to something else on this phone.
   anyPort = false,
   // Listen on the port the host advertises, as the desktop does, so a note's
-  // address reads the same on every device. Holesail takes it from the DHT
-  // record when it is given no port.
+  // address reads the same on every device. The host's record has it.
   hostPort = false,
-  udp = false,
-  log = false
+  udp = false
 } = {}) {
   return withSessionTransition(async () => {
+    if (udp) return { ok: false, error: UDP_UNSUPPORTED }
+
     const targetKey = normalizeHolesailKey(key, false)
     if (!targetKey.ok) return targetKey
 
@@ -104,21 +103,23 @@ export async function connectHolesail ({
       }
     }
 
-    await stopSessionInternal()
+    let instance
+    try {
+      instance = new TunnelGuest({
+        key: targetKey.key,
+        host: targetHost.host,
+        port: targetPort.port
+      })
+    } catch {
+      return { ok: false, error: 'Invalid holesail key. Use hs://... or an alphanumeric key.' }
+    }
 
-    const instance = new Holesail({
-      client: true,
-      key: targetKey.key,
-      udp: Boolean(udp),
-      log: Boolean(log),
-      host: targetHost.host,
-      port: targetPort.port
-    })
+    await stopSessionInternal()
 
     session = instance
 
     try {
-      await instance.ready()
+      await instance.open()
     } catch (error) {
       session = null
       mode = null
@@ -129,28 +130,20 @@ export async function connectHolesail ({
         console.error('[holesail] Failed to close session after connect error:', closeError)
       }
 
+      // A port already in use here is an answer, not a crash.
+      if (error?.code === 'EADDRINUSE') {
+        return {
+          ok: false,
+          error: Number.isInteger(error.port) && error.port > 0
+            ? `Port ${error.port} is already in use on this device.`
+            : 'That port is already in use on this device.'
+        }
+      }
+      if (error?.code === 'UDP_NOTE') return { ok: false, error: error.message }
+
       throw error
     }
 
-    // The local end binds only once ready() is done. A port already in use
-    // then failed as an error event nobody listened for, and that took the
-    // whole backend down. Wait for the bind instead, and say what went wrong.
-    const bound = await waitForClientProxy(instance)
-    if (!bound.ok) {
-      session = null
-      mode = null
-      try {
-        await instance.close()
-      } catch {}
-      return {
-        ok: false,
-        error: bound.port
-          ? `Port ${bound.port} is already in use on this device.`
-          : 'That port is already in use on this device.'
-      }
-    }
-
-    if (anyPort) recordBoundPort(instance)
     mode = 'client'
 
     return {
@@ -158,41 +151,6 @@ export async function connectHolesail ({
       mode,
       info: session.info
     }
-  })
-}
-
-// Holesail reports the port it was given, 0 when the system picks one, so
-// read the real one back from the socket.
-export function recordBoundPort (instance) {
-  const client = instance?.dht
-  const port = client?.proxy?.address?.()?.port
-  if (client?.args && Number.isInteger(port) && port > 0) client.args.port = port
-}
-
-const CLIENT_PROXY_BIND_MS = 3000
-
-// Whether a client's local proxy came up. It stays with an error listener
-// for good, so a later failure is logged rather than thrown.
-export function waitForClientProxy (instance, timeoutMs = CLIENT_PROXY_BIND_MS) {
-  const client = instance?.dht
-  const proxy = client?.proxy
-  if (!proxy || typeof proxy.on !== 'function') return Promise.resolve({ ok: true })
-  proxy.on('error', (error) => {
-    console.error('[holesail] Local proxy error:', error?.message || error)
-  })
-  if (client.state === 'listening') return Promise.resolve({ ok: true })
-
-  return new Promise((resolve) => {
-    let settled = false
-    const finish = (result) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      resolve(result)
-    }
-    const timer = setTimeout(() => finish({ ok: true }), timeoutMs)
-    proxy.once('listening', () => finish({ ok: true }))
-    proxy.once('error', (error) => finish({ ok: false, error, port: client.args?.port }))
   })
 }
 

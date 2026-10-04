@@ -5,6 +5,9 @@ import http from 'node:http'
 import net from 'node:net'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
+// What the desktop runs. The phone carries its own implementation of the
+// protocol, so these check the two still meet over the live network.
+import Holesail from 'holesail'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const SERVER_FIXTURE = resolve(__dirname, '../fixtures/holesail-live-server.mjs')
@@ -14,12 +17,15 @@ const FETCH_ATTEMPTS = 30
 const FETCH_DELAY_MS = 500
 
 const children = new Set()
+const holesails = new Set()
 let originServer = null
 
 describe('live Holesail tunnel integration', () => {
   afterEach(async () => {
     await Promise.all(Array.from(children, stopChild))
     children.clear()
+    await Promise.allSettled(Array.from(holesails, (holesail) => holesail.close()))
+    holesails.clear()
 
     if (originServer) {
       await closeServer(originServer)
@@ -49,6 +55,43 @@ describe('live Holesail tunnel integration', () => {
     assert.equal(response.status, 200)
     assert.match(body, new RegExp(TEST_TOKEN))
     assert.match(body, /path=\/proof\?via=holesail/)
+  })
+
+  it('is joined by the desktop\'s Holesail when the phone hosts', { timeout: 120000 }, async () => {
+    const origin = await startOriginServer(TEST_TOKEN)
+    originServer = origin.server
+
+    const serverChild = forkFixture(SERVER_FIXTURE, [String(origin.port)])
+    const serverReady = await waitForChildMessage(serverChild, 'ready', 60000)
+    const roomKey = serverReady.info?.url
+    assert.match(roomKey, /^hs:\/\/s000/)
+
+    const proxyPort = await getAvailablePort()
+    const theirs = new Holesail({ client: true, key: roomKey, port: proxyPort, host: '127.0.0.1' })
+    holesails.add(theirs)
+    await theirs.ready()
+
+    const response = await fetchWithRetry(`http://127.0.0.1:${proxyPort}/proof?via=desktop-join`)
+    assert.match(await response.text(), new RegExp(TEST_TOKEN))
+  })
+
+  it('joins a note the desktop\'s Holesail hosts', { timeout: 120000 }, async () => {
+    const origin = await startOriginServer(TEST_TOKEN)
+    originServer = origin.server
+
+    const theirs = new Holesail({ server: true, secure: true, port: origin.port, host: '127.0.0.1' })
+    holesails.add(theirs)
+    await theirs.ready()
+    const roomKey = theirs.info.url
+    assert.match(roomKey, /^hs:\/\/s000/)
+
+    const proxyPort = await getAvailablePort()
+    const clientChild = forkFixture(CLIENT_FIXTURE, [roomKey, String(proxyPort)])
+    const clientReady = await waitForChildMessage(clientChild, 'ready', 60000)
+    assert.equal(clientReady.info?.port, proxyPort)
+
+    const response = await fetchWithRetry(`http://127.0.0.1:${proxyPort}/proof?via=phone-join`)
+    assert.match(await response.text(), new RegExp(TEST_TOKEN))
   })
 })
 
