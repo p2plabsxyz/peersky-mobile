@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import b4a from 'b4a'
+import Hyperbee from 'hyperbee'
 import Hyperdrive from 'hyperdrive'
 import { create as createSDK } from 'hyper-sdk'
 import { discoveryKey, randomBytes } from 'hypercore-crypto'
@@ -27,6 +28,25 @@ function replicate (a, b) {
   return () => { left.destroy(); right.destroy() }
 }
 
+// A private drive the desktop made, as the public store sees it without the
+// key: its first block fetched, and reading it as a header failed. That block
+// is random bytes, which now and then read as a header after all and leave
+// nothing to test, so a drive like that is made again.
+async function makeUnreadablePrivateDrive (desktop, publicStore, key) {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const made = new Hyperdrive(desktop.corestore.namespace(`private-${attempt}`), null, { encryptionKey: key })
+    await made.ready()
+    await made.put('/app-icon.png', b4a.from('picture bytes'))
+    const seen = new Hyperdrive(publicStore.corestore.namespace(`seen-${attempt}`), made.key)
+    await seen.ready()
+    await seen.core.get(0, { timeout: 5000 })
+    const failure = await seen.db.getHeader({ wait: false }).then(() => null, (error) => error)
+    if (failure) return { made, seen, failure }
+    await seen.close()
+  }
+  throw new Error('every drive read as a header without its key')
+}
+
 // A desktop linked to this phone made a private drive after the link. The phone
 // had its key, but not the drive's address, so it read the drive from the
 // public store, without the key: ciphertext, and a decoding error on screen.
@@ -41,18 +61,12 @@ test('a private drive reads as ciphertext without its key and opens with it', as
 
   const desktop = await createSDK({ storage: join(root, 'desktop'), swarmOpts: SWARM_OFF, autoJoin: false })
   sdks.push(desktop)
-  const made = new Hyperdrive(desktop.corestore.namespace('private'), null, { encryptionKey: key })
-  await made.ready()
-  await made.put('/app-icon.png', b4a.from('picture bytes'))
 
   // The public store: no key, so the first block is not a header it can read.
   const publicStore = await createSDK({ storage: join(root, 'public'), swarmOpts: SWARM_OFF, autoJoin: false })
   sdks.push(publicStore)
   const stopPublic = replicate(desktop, publicStore)
-  const seenPublicly = new Hyperdrive(publicStore.corestore, made.key)
-  await seenPublicly.ready()
-  await seenPublicly.core.get(0, { timeout: 5000 })
-  const failure = await seenPublicly.db.getHeader({ wait: false }).then(() => null, (error) => error)
+  const { made, failure } = await makeUnreadablePrivateDrive(desktop, publicStore, key)
   stopPublic()
   assert.ok(failure, 'read without the key should fail')
   assert.equal(isUnreadableDriveError(failure), true, String(failure?.message))
@@ -77,10 +91,17 @@ test('a private drive reads as ciphertext without its key and opens with it', as
   const otherPhone = await createSDK({ storage: join(root, 'other'), swarmOpts: SWARM_OFF, autoJoin: false })
   sdks.push(otherPhone)
   const stopOther = replicate(desktop, otherPhone)
-  const stranger = new Hyperdrive(otherPhone.corestore, made.key, { encryptionKey: randomBytes(32) })
-  await stranger.ready()
-  await stranger.core.get(0, { timeout: 5000 }).catch(() => {})
-  const refused = await stranger.db.getHeader({ wait: false }).then(() => null, (error) => error)
+  // A wrong key reads random bytes too, which now and then read as a header
+  // after all, so it is a wrong key that shows it. Read through a session, as
+  // the probe does: a drive that failed to open would keep the core.
+  let refused = null
+  for (let attempt = 0; !refused && attempt < 20; attempt++) {
+    const session = otherPhone.corestore.get({ key: made.key, encryption: { key: randomBytes(32) } })
+    const bee = new Hyperbee(session)
+    refused = await bee.getHeader({ wait: true, timeout: 5000 }).then(() => null, (error) => error)
+    await bee.close()
+    await session.close()
+  }
   stopOther()
   assert.ok(refused, 'read with another key should fail')
   assert.equal(isUnreadableDriveError(refused), true)
@@ -104,18 +125,12 @@ test('a key is tried on the public copy, with nothing kept for one that does not
 
   const desktop = await createSDK({ storage: join(root, 'desktop'), swarmOpts: SWARM_OFF, autoJoin: false })
   sdks.push(desktop)
-  const made = new Hyperdrive(desktop.corestore.namespace('private'), null, { encryptionKey: key })
-  await made.ready()
-  await made.put('/app-icon.png', b4a.from('picture bytes'))
 
   const publicStore = await createSDK({ storage: join(root, 'public'), swarmOpts: SWARM_OFF, autoJoin: false })
   const privateStore = await createSDK({ storage: join(root, 'private'), swarmOpts: SWARM_OFF, autoJoin: false })
   sdks.push(publicStore, privateStore)
   stops.push(replicate(desktop, publicStore))
-  const seen = new Hyperdrive(publicStore.corestore.namespace('seen'), made.key)
-  await seen.ready()
-  await seen.core.get(0, { timeout: 5000 })
-  const failure = await seen.db.getHeader({ wait: false }).then(() => null, (error) => error)
+  const { made, seen, failure } = await makeUnreadablePrivateDrive(desktop, publicStore, key)
   assert.equal(failure?.code, 'DECODING_ERROR', String(failure))
   // With that block here, as after a restart, opening the drive fails, and
   // the drive that failed keeps its core.

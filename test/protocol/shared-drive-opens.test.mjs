@@ -94,11 +94,16 @@ test('a later open of a drive that did not decode fails at once, rather than nev
   left.pipe(right).pipe(left)
   stop = () => { left.destroy(); right.destroy() }
 
-  const made = new Hyperdrive(desktop.corestore.namespace('private'), null, { encryptionKey: randomBytes(32) })
+  // To a device without its key, such a drive starts with a block that is not
+  // a drive's header. A real encrypted block is random bytes, which now and
+  // then read as a header after all, so this one never can.
+  const made = desktop.corestore.get({ name: 'private-drive' })
   await made.ready()
-  await made.put('/app-icon.png', b4a.from('picture bytes'))
-  // Held open, so the block it fetched is the one the drive opens with.
+  await made.append(b4a.from([0x07, 0x07]))
+  // Held open, so the block it fetched is the one the drive opens with, and
+  // brought up to date first, so the store knows how long the drive is.
   const core = phone.corestore.get({ key: made.key })
+  await core.update({ wait: true })
   await core.get(0, { timeout: 5000 })
 
   const address = `hyper://${z32.encode(made.key)}/`
