@@ -6,7 +6,14 @@
 
 @interface RNCWebViewImpl (PeerSkyConfiguration)
 - (WKWebViewConfiguration *)setUpWkWebViewConfig;
+- (void)webView:(WKWebView *)webView
+  decidePolicyForNavigationAction:(WKNavigationAction *)navigationAction
+                  decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler;
 @end
+
+// WebKit's own value, used by Firefox for iOS too: load the page here without
+// first handing the address to an app that claims it.
+static const WKNavigationActionPolicy PeerSkyAllowWithoutOpeningApp = (WKNavigationActionPolicy)(WKNavigationActionPolicyAllow + 2);
 
 @interface PeerSkyWebViewImpl : RNCWebViewImpl
 @property (nonatomic, copy) NSString *incognitoSession;
@@ -149,6 +156,48 @@ static WKWebsiteDataStore *PeerSkyIncognitoStoreForSession(NSString *session)
   NSURL *baseURL = [NSURL URLWithString:base];
   if (!baseURL || !url) return nil;
   return [PeerSkyWithoutFragment(baseURL) isEqualToString:PeerSkyWithoutFragment(url)] ? html : nil;
+}
+
+// WebKit hands an address an app claims, like a GitHub link, to that app on
+// any load it is allowed, including a tab opened, restored or typed. A GitHub
+// link that opened a new tab therefore opened the GitHub app and the tab both.
+// Now only a tap opens the app, as in Safari: on a link that would open a new
+// tab, the app is tried first and the tab opens only if no app took it, and
+// every other load stays in the browser.
+- (void)webView:(WKWebView *)webView
+  decidePolicyForNavigationAction:(WKNavigationAction *)navigationAction
+                  decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler
+{
+  NSURL *url = navigationAction.request.URL;
+  BOOL tapped = navigationAction.navigationType == WKNavigationTypeLinkActivated;
+  BOOL https = [url.scheme.lowercaseString isEqualToString:@"https"];
+
+  if (tapped && https && navigationAction.targetFrame == nil) {
+    __weak PeerSkyWebViewImpl *weakSelf = self;
+    [UIApplication.sharedApplication openURL:url
+                                     options:@{ UIApplicationOpenURLOptionUniversalLinksOnly: @YES }
+                           completionHandler:^(BOOL opened) {
+      PeerSkyWebViewImpl *strongSelf = weakSelf;
+      if (opened || !strongSelf) {
+        decisionHandler(WKNavigationActionPolicyCancel);
+        return;
+      }
+      [strongSelf passNavigationAction:navigationAction toWebView:webView tapped:tapped decisionHandler:decisionHandler];
+    }];
+    return;
+  }
+
+  [self passNavigationAction:navigationAction toWebView:webView tapped:tapped decisionHandler:decisionHandler];
+}
+
+- (void)passNavigationAction:(WKNavigationAction *)navigationAction
+                   toWebView:(WKWebView *)webView
+                      tapped:(BOOL)tapped
+             decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler
+{
+  [super webView:webView decidePolicyForNavigationAction:navigationAction decisionHandler:^(WKNavigationActionPolicy policy) {
+    decisionHandler(policy == WKNavigationActionPolicyAllow && !tapped ? PeerSkyAllowWithoutOpeningApp : policy);
+  }];
 }
 
 @end
