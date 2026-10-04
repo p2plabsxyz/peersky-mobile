@@ -256,3 +256,12 @@ test('a group says what cannot change once it is made, and nobody edits it later
   assert.match(screen, /Settings are fixed once the group is created\./)
   assert.doesNotMatch(screen, /Save room details|saveRoomDetails|RPC_PEERCHAT_ROOM_UPDATE/)
 })
+
+// Find had nowhere to scan someone's code, though that is where people go
+// looking for someone to add.
+test('Find people scans a code from beside its search', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const screen = await readFile(new URL('../../app/peerchat/PeerChatScreen.tsx', import.meta.url), 'utf8')
+  assert.match(screen, /onPress=\{\(\) => replaceModal\(\(\) => setIsDiscoverOpen\(false\), \(\) => \{ void openInviteScanner\(\) \}\)\}/)
+  assert.match(screen, /<QrScanIcon width=\{20\} height=\{20\} color=\{colors\.accent\} \/>/)
+})

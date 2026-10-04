@@ -103,6 +103,7 @@ import CopyIcon from '../../assets/icons/bootstrap/copy.svg'
 import ChevronRightIcon from '../../assets/icons/bootstrap/chevron-right.svg'
 import ShareIcon from '../../assets/icons/bootstrap/share.svg'
 import CloseIcon from '../../assets/icons/bootstrap/x-lg.svg'
+import QrScanIcon from '../../assets/icons/bootstrap/qr-code-scan.svg'
 import LatestIcon from '../../assets/icons/peerchat/arrow-down.svg'
 import MuteIcon from '../../assets/icons/peerchat/mute.svg'
 import PinIcon from '../../assets/icons/peerchat/pin.svg'
@@ -3531,17 +3532,32 @@ export function PeerChatScreen ({
                 everyone joins. No directory is kept anywhere: this searches the
                 room's own member list.
               </Text>
-              <TextInput
-                autoCapitalize='none'
-                autoCorrect={false}
-                maxLength={PEERCHAT_SEARCH_QUERY_MAX_CHARACTERS}
-                onChangeText={setDiscoverQuery}
-                placeholder='Search by name'
-                placeholderTextColor={colors.muted}
-                returnKeyType='search'
-                style={[styles.input, { backgroundColor: colors.input, color: colors.text }]}
-                value={discoverQuery}
-              />
+              <View style={styles.discoverSearchRow}>
+                <TextInput
+                  autoCapitalize='none'
+                  autoCorrect={false}
+                  maxLength={PEERCHAT_SEARCH_QUERY_MAX_CHARACTERS}
+                  onChangeText={setDiscoverQuery}
+                  placeholder='Search by name'
+                  placeholderTextColor={colors.muted}
+                  returnKeyType='search'
+                  style={[styles.input, styles.discoverSearchInput, { backgroundColor: colors.input, color: colors.text }]}
+                  value={discoverQuery}
+                />
+                {/* Someone's code, scanned: a message request to them. A room's
+                    code joins the room, the same as from Join. */}
+                <Pressable
+                  accessibilityHint='Scans a PeerChat code: a person gets a message request, a room is joined'
+                  accessibilityLabel='Scan a code'
+                  accessibilityRole='button'
+                  disabled={isBusy}
+                  hitSlop={6}
+                  onPress={() => replaceModal(() => setIsDiscoverOpen(false), () => { void openInviteScanner() })}
+                  style={[styles.discoverScanButton, { backgroundColor: colors.input }, isBusy ? styles.disabled : null]}
+                >
+                  <QrScanIcon width={20} height={20} color={colors.accent} />
+                </Pressable>
+              </View>
               {directory.map((member) => (
                 <Pressable
                   accessibilityHint={`Sends ${member.username} a message request`}
@@ -4924,5 +4940,8 @@ const styles = StyleSheet.create({
   actionSheetDivider: { height: StyleSheet.hairlineWidth, marginVertical: 12 },
   actionSheetDetails: { fontSize: 14, lineHeight: 20, minHeight: 48, paddingVertical: 8 },
   actionSheetAction: { justifyContent: 'center', minHeight: 48, paddingHorizontal: 4 },
-  actionSheetActionText: { fontSize: 16, fontWeight: '600' }
+  actionSheetActionText: { fontSize: 16, fontWeight: '600' },
+  discoverSearchRow: { alignItems: 'center', flexDirection: 'row', gap: 8 },
+  discoverSearchInput: { flex: 1 },
+  discoverScanButton: { alignItems: 'center', borderRadius: 12, height: 44, justifyContent: 'center', width: 44 }
 })
