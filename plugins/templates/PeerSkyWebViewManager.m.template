@@ -11,6 +11,7 @@
 @interface PeerSkyWebViewImpl : RNCWebViewImpl
 @property (nonatomic, copy) NSString *incognitoSession;
 @property (nonatomic, assign) BOOL forceDarkScheme;
+@property (nonatomic, assign) BOOL hyperSession;
 - (NSString *)hyperPageForURL:(NSURL *)url;
 @end
 
@@ -91,6 +92,18 @@ static BOOL PeerSkyIsIncognitoSession(NSString *session)
   return [session rangeOfCharacterFromSet:hex.invertedSet].location == NSNotFound;
 }
 
+// Pages from hyper:// keep their storage for as long as the app runs, in a
+// store of their own. WebKit lists no website data for a scheme it does not
+// know, so none of theirs could be cleared site by site: written to the
+// shared store on disk, it would outlive every burn. A burn lets this go.
+static WKWebsiteDataStore *PeerSkyHyperSessionStore;
+
+static WKWebsiteDataStore *PeerSkyHyperSessionStoreShared(void)
+{
+  if (!PeerSkyHyperSessionStore) PeerSkyHyperSessionStore = [WKWebsiteDataStore nonPersistentDataStore];
+  return PeerSkyHyperSessionStore;
+}
+
 static WKWebsiteDataStore *PeerSkyIncognitoStoreForSession(NSString *session)
 {
   if (!PeerSkyIncognitoStore || ![PeerSkyIncognitoSession isEqualToString:session]) {
@@ -116,6 +129,8 @@ static WKWebsiteDataStore *PeerSkyIncognitoStoreForSession(NSString *session)
   WKWebViewConfiguration *configuration = [super setUpWkWebViewConfig];
   if (self.incognito && PeerSkyIsIncognitoSession(self.incognitoSession)) {
     configuration.websiteDataStore = PeerSkyIncognitoStoreForSession(self.incognitoSession);
+  } else if (self.hyperSession) {
+    configuration.websiteDataStore = PeerSkyHyperSessionStoreShared();
   }
   [[PeerSkyContentBlocker shared] configureWebView:configuration];
   if (![configuration urlSchemeHandlerForURLScheme:@"hyper"]) {
@@ -138,6 +153,63 @@ static WKWebsiteDataStore *PeerSkyIncognitoStoreForSession(NSString *session)
 
 @end
 
+// Burning tabs clears what websites kept on the phone. react-native-webview's
+// clearCache does it for every origin in the shared store, which takes the
+// app's own pages with it: PeerTunes keeps its library in IndexedDB at
+// http://127.0.0.1, so a burn emptied the library while the songs stayed in
+// their drives. Everything but the app's own loopback pages is cleared, and
+// the incognito and hyper:// stores are let go too.
+@interface PeerSkyBrowserData : NSObject <RCTBridgeModule>
+@end
+
+@implementation PeerSkyBrowserData
+
+RCT_EXPORT_MODULE(PeerSkyBrowserData)
+
++ (BOOL)requiresMainQueueSetup
+{
+  return NO;
+}
+
+RCT_EXPORT_METHOD(clearSiteData:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+{
+  dispatch_async(dispatch_get_main_queue(), ^{
+    PeerSkyIncognitoStore = nil;
+    PeerSkyIncognitoSession = nil;
+    PeerSkyHyperSessionStore = nil;
+
+    NSSet<NSString *> *types = [NSSet setWithArray:@[
+      WKWebsiteDataTypeMemoryCache,
+      WKWebsiteDataTypeOfflineWebApplicationCache,
+      WKWebsiteDataTypeFetchCache,
+      WKWebsiteDataTypeDiskCache,
+      WKWebsiteDataTypeSessionStorage,
+      WKWebsiteDataTypeLocalStorage,
+      WKWebsiteDataTypeWebSQLDatabases,
+      WKWebsiteDataTypeIndexedDBDatabases
+    ]];
+    NSSet<NSString *> *appOwn = [NSSet setWithArray:@[ @"127.0.0.1", @"localhost" ]];
+    WKWebsiteDataStore *store = [WKWebsiteDataStore defaultDataStore];
+    [store fetchDataRecordsOfTypes:types completionHandler:^(NSArray<WKWebsiteDataRecord *> *records) {
+      NSMutableArray<WKWebsiteDataRecord *> *sites = [NSMutableArray array];
+      NSUInteger kept = 0;
+      for (WKWebsiteDataRecord *record in records) {
+        if ([appOwn containsObject:record.displayName.lowercaseString]) {
+          kept += 1;
+        } else {
+          [sites addObject:record];
+        }
+      }
+      [store removeDataOfTypes:types forDataRecords:sites completionHandler:^{
+        resolve(@{ @"cleared": @(sites.count), @"kept": @(kept) });
+      }];
+    }];
+  });
+}
+
+@end
+
 @interface PeerSkyWebViewManager : RNCWebViewManager
 @end
 
@@ -147,6 +219,7 @@ RCT_EXPORT_MODULE(PeerSkyWebView)
 
 RCT_EXPORT_VIEW_PROPERTY(incognitoSession, NSString)
 RCT_EXPORT_VIEW_PROPERTY(forceDarkScheme, BOOL)
+RCT_EXPORT_VIEW_PROPERTY(hyperSession, BOOL)
 
 - (UIView *)view
 {

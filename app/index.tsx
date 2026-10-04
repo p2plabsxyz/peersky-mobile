@@ -95,7 +95,7 @@ import {
 } from './browser-appearance.mjs'
 import { createBrowserAccessibilityScript } from './browser-accessibility.mjs'
 import { createForceDarkScript } from './browser-force-dark.mjs'
-import { clearBrowserWebViewData } from './browser-data.mjs'
+import { clearWebsiteData } from './browser-data.mjs'
 import {
   canPromptExternalLink,
   formatExternalLinkForPrompt,
@@ -2299,9 +2299,12 @@ export default function App () {
   }
 
   function burnBrowserTabs () {
-    for (const webView of browserWebViewRefs.current.values()) {
-      clearBrowserWebViewData(webView)
-    }
+    // Every website's data, never the app's own pages: see clearWebsiteData.
+    clearWebsiteData({
+      platform: Platform.OS,
+      browserData: NativeModules.PeerSkyBrowserData,
+      webViews: browserWebViewRefs.current.values()
+    })
     const { previewCacheCleared, sessionSaved } = onBrowserResetTabs()
     const historyCleared = clearBrowserHistory()
     setBrowserTabsVisible(false)
@@ -4712,7 +4715,10 @@ export default function App () {
                 tabIncognito && browserIncognitoSession ? { incognitoSession: browserIncognitoSession } : {},
                 // Pages are told dark is preferred, so a site's own dark theme
                 // wins over the inverting script.
-                Platform.OS === 'ios' ? { forceDarkScheme: browserPreferences.forceDarkWebsites } : {})
+                Platform.OS === 'ios' ? { forceDarkScheme: browserPreferences.forceDarkWebsites } : {},
+                // A hyper:// page keeps what it stores for as long as the app
+                // runs, apart from websites, so burning the tabs clears it too.
+                Platform.OS === 'ios' && entry.source.kind === 'hyper' ? { hyperSession: true } : {})
               }
             : undefined
           const browserAccessibilityScript = createBrowserAccessibilityScript({

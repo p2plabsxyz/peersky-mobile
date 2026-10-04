@@ -105,6 +105,9 @@ test('an incognito tab keeps its cookies when going back builds a new WebView', 
   assert.match(manager, /RCT_EXPORT_VIEW_PROPERTY\(incognitoSession, NSString\)/)
   assert.match(manager, /if \(!PeerSkyIncognitoStore \|\| !\[PeerSkyIncognitoSession isEqualToString:session\]\) \{\s+PeerSkyIncognitoSession = \[session copy\];\s+PeerSkyIncognitoStore = \[WKWebsiteDataStore nonPersistentDataStore\];/)
   assert.match(manager, /if \(self\.incognito && PeerSkyIsIncognitoSession\(self\.incognitoSession\)\) \{\s+configuration\.websiteDataStore = PeerSkyIncognitoStoreForSession\(self\.incognitoSession\);/)
-  // Still never the default store, which is on disk.
-  assert.doesNotMatch(manager, /defaultDataStore/)
+  // Still never the default store, which is on disk. Burning clears that store
+  // by name, so this is about where a WebView is set up.
+  const setUp = manager.slice(manager.indexOf('- (WKWebViewConfiguration *)setUpWkWebViewConfig'), manager.indexOf('- (NSString *)hyperPageForURL'))
+  assert.match(setUp, /setUpWkWebViewConfig/)
+  assert.doesNotMatch(setUp, /defaultDataStore/)
 })

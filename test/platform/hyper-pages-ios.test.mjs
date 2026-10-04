@@ -31,3 +31,18 @@ test('a hyper:// page is shown under its own address on both platforms', async (
   // The page's own load is let through, and nothing else changes.
   assert.match(app, /currentUrl: expectedEntry\.source\.kind === 'hyper' \? expectedEntry\.source\.baseUrl : '',\s+navigationType: request\.navigationType,/)
 })
+
+// WebKit lists no website data for a scheme it does not know, so a burn could
+// not clear what a hyper:// site stored on disk. Its pages keep their storage
+// in a store of their own for the run of the app, and a burn lets it go.
+test('a hyper:// page keeps its storage apart, in memory, and a burn drops it', async () => {
+  const manager = await read('plugins/templates/PeerSkyWebViewManager.m.template')
+  assert.match(manager, /RCT_EXPORT_VIEW_PROPERTY\(hyperSession, BOOL\)/)
+  assert.match(manager, /if \(!PeerSkyHyperSessionStore\) PeerSkyHyperSessionStore = \[WKWebsiteDataStore nonPersistentDataStore\];/)
+  // Incognito wins: an incognito hyper:// tab keeps to the incognito store.
+  assert.match(manager, /configuration\.websiteDataStore = PeerSkyIncognitoStoreForSession\(self\.incognitoSession\);\s+\} else if \(self\.hyperSession\) \{\s+configuration\.websiteDataStore = PeerSkyHyperSessionStoreShared\(\);/)
+  assert.match(manager, /PeerSkyIncognitoSession = nil;\s+PeerSkyHyperSessionStore = nil;/)
+
+  const app = await read('app/index.tsx')
+  assert.match(app, /Platform\.OS === 'ios' && entry\.source\.kind === 'hyper' \? \{ hyperSession: true \} : \{\}/)
+})

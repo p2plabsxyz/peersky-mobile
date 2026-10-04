@@ -11,10 +11,10 @@ test('the tabs are burned under the flames, not before them', async () => {
   const app = await read('app/index.tsx')
   const confirm = app.slice(app.indexOf('function onBrowserBurnTabs'), app.indexOf('function burnBrowserTabs'))
   assert.match(confirm, /setBrowserTabsVisible\(false\)\s+setBrowserBurning\(true\)/)
-  assert.doesNotMatch(confirm, /onBrowserResetTabs|clearBrowserWebViewData/)
+  assert.doesNotMatch(confirm, /onBrowserResetTabs|clearWebsiteData/)
 
   const burn = app.slice(app.indexOf('function burnBrowserTabs'), app.indexOf('function onBrowserCloseAllTabs'))
-  assert.match(burn, /clearBrowserWebViewData\(webView\)/)
+  assert.match(burn, /clearWebsiteData\(\{/)
   assert.match(burn, /onBrowserResetTabs\(\)/)
   // History goes with it, as DuckDuckGo's Fire Button and Firefox Focus do,
   // and the question says so before anything burns.
