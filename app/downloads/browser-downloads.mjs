@@ -86,7 +86,8 @@ export function normalizeBrowserDownloads (downloads) {
       totalBytes,
       createdAt,
       reason,
-      sourceUrl: sourceUrl || undefined
+      sourceUrl: sourceUrl || undefined,
+      ...(download.incognito === true && { incognito: true })
     })
     normalized.sort(compareNewest)
     if (normalized.length > MAX_BROWSER_DOWNLOADS) normalized.pop()

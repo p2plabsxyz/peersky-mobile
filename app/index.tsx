@@ -2031,7 +2031,7 @@ export default function App () {
       host ? `${name}\nfrom ${host}` : name,
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Download', onPress: () => startBrowserDownload(downloadUrl) }
+        { text: 'Download', onPress: () => startBrowserDownload(downloadUrl, tabId) }
       ]
     )
   }
@@ -2059,14 +2059,14 @@ export default function App () {
     }
   }
 
-  function startBrowserDownload (downloadUrl: string) {
-    void requestBrowserDownload(downloadUrl)
+  function startBrowserDownload (downloadUrl: string, tabId: string | null) {
+    void requestBrowserDownload(downloadUrl, { incognito: tabId !== null && isIncognitoTab(tabId) })
     setBrowserMenuVisible(false)
     setBrowserDownloadsVisible(true)
   }
 
-  function onBrowserMediaDownload (targetUrl: string) {
-    startBrowserDownload(targetUrl)
+  function onBrowserMediaDownload (targetUrl: string, tabId: string | null) {
+    startBrowserDownload(targetUrl, tabId)
   }
 
   async function retryBrowserDownload (download: BrowserDownload) {
@@ -5086,7 +5086,7 @@ export default function App () {
           isDark={browserIsDark}
           target={browserMediaTarget}
           onClose={() => setBrowserMediaTarget(null)}
-          onDownload={(targetUrl) => void onBrowserMediaDownload(targetUrl)}
+          onDownload={(targetUrl) => void onBrowserMediaDownload(targetUrl, browserMediaTarget?.tabId ?? null)}
           onOpenInBackgroundTab={onBrowserMediaOpenInBackgroundTab}
           onOpenInNewTab={onBrowserMediaOpenInNewTab}
           onShare={(targetUrl, title) => void onBrowserMediaShare(targetUrl, title)}

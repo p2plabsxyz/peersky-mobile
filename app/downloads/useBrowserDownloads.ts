@@ -23,6 +23,8 @@ export type BrowserDownload = {
   createdAt: number
   reason?: string
   sourceUrl?: string
+  // Started in an incognito tab, so a retry sends none of the shared cookies.
+  incognito?: boolean
 }
 
 type BrowserDownloadsNativeModule = {
@@ -32,7 +34,7 @@ type BrowserDownloadsNativeModule = {
   removeDownload: (id: string) => Promise<boolean>
   pauseDownload: (id: string) => Promise<boolean>
   resumeDownload: (id: string, url: string) => Promise<boolean>
-  requestDownload: (url: string) => Promise<boolean>
+  requestDownload: (url: string, incognito: boolean) => Promise<boolean>
 }
 
 const androidDownloads = NativeModules.BrowserDownloads as BrowserDownloadsNativeModule | undefined
@@ -105,7 +107,9 @@ export function useBrowserDownloads ({ enabled = false } = {}) {
     }
   }, [enabled, refresh])
 
-  async function requestDownload (url: string) {
+  // An incognito tab's download sends none of the cookies every other tab
+  // shares, which would tell the site who it is.
+  async function requestDownload (url: string, { incognito = false }: { incognito?: boolean } = {}) {
     const normalizedUrl = normalizeBrowserDownloadUrl(url)
     if (!normalizedUrl) {
       setError('This download URL is not supported.')
@@ -114,7 +118,7 @@ export function useBrowserDownloads ({ enabled = false } = {}) {
 
     if (Platform.OS === 'android') {
       try {
-        const accepted = await getAndroidDownloads().requestDownload(normalizedUrl)
+        const accepted = await getAndroidDownloads().requestDownload(normalizedUrl, incognito)
         setError(accepted ? null : 'Unable to start this download.')
         return accepted
       } catch (downloadError) {
@@ -143,7 +147,8 @@ export function useBrowserDownloads ({ enabled = false } = {}) {
         downloadedBytes: 0,
         totalBytes: 0,
         createdAt: Date.now(),
-        sourceUrl: normalizedUrl
+        sourceUrl: normalizedUrl,
+        ...(incognito && { incognito: true })
       },
       task: null
     }
@@ -152,7 +157,7 @@ export function useBrowserDownloads ({ enabled = false } = {}) {
 
     const stagingDirectory = getIosDownloadStagingDirectory()
     try {
-      const cookieHeader = await CookieManager.getCookieHeader(normalizedUrl, true)
+      const cookieHeader = incognito ? null : await CookieManager.getCookieHeader(normalizedUrl, true)
       stagingDirectory.create({ intermediates: true, idempotent: true })
       transfer.task = createDownloadResumable(
         normalizedUrl,
@@ -340,7 +345,7 @@ export function useBrowserDownloads ({ enabled = false } = {}) {
       }
     }
 
-    const accepted = await requestDownload(normalizedUrl)
+    const accepted = await requestDownload(normalizedUrl, { incognito: download.incognito === true })
     if (!accepted) return false
 
     await removeDownload(download.id)

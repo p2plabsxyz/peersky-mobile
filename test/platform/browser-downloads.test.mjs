@@ -101,8 +101,36 @@ describe('browser downloads', () => {
     assert.match(app, /onSaveToFiles=\{\(downloadId\) => void saveBrowserDownloadToFiles\(downloadId\)\}/)
     // Asked for from a page or the media viewer, a file opens Downloads, where
     // its progress shows.
-    assert.match(app, /function startBrowserDownload \(downloadUrl: string\) \{\s+void requestBrowserDownload\(downloadUrl\)\s+setBrowserMenuVisible\(false\)\s+setBrowserDownloadsVisible\(true\)/)
-    assert.match(app, /function onBrowserMediaDownload \(targetUrl: string\) \{\s+startBrowserDownload\(targetUrl\)/)
+    assert.match(app, /function startBrowserDownload \(downloadUrl: string, tabId: string \| null\) \{\s+void requestBrowserDownload\(downloadUrl, \{ incognito: tabId !== null && isIncognitoTab\(tabId\) \}\)\s+setBrowserMenuVisible\(false\)\s+setBrowserDownloadsVisible\(true\)/)
+    assert.match(app, /function onBrowserMediaDownload \(targetUrl: string, tabId: string \| null\) \{\s+startBrowserDownload\(targetUrl, tabId\)/)
+  })
+
+  // A download from an incognito tab sent the cookies every other tab shares,
+  // which told the site who was on the other end.
+  test('an incognito tab\'s download sends none of the shared cookies', () => {
+    const app = readFileSync(new URL('../../app/index.tsx', import.meta.url), 'utf8')
+    assert.match(app, /\{ text: 'Download', onPress: \(\) => startBrowserDownload\(downloadUrl, tabId\) \}/)
+    assert.match(app, /onDownload=\{\(targetUrl\) => void onBrowserMediaDownload\(targetUrl, browserMediaTarget\?\.tabId \?\? null\)\}/)
+
+    const hook = readFileSync(new URL('../../app/downloads/useBrowserDownloads.ts', import.meta.url), 'utf8')
+    assert.match(hook, /const cookieHeader = incognito \? null : await CookieManager\.getCookieHeader\(normalizedUrl, true\)/)
+    assert.match(hook, /getAndroidDownloads\(\)\.requestDownload\(normalizedUrl, incognito\)/)
+    assert.match(hook, /await requestDownload\(normalizedUrl, \{ incognito: download\.incognito === true \}\)/)
+
+    const manager = readFileSync(new URL('../../plugins/templates/PeerSkyWebViewManager.kt.template', import.meta.url), 'utf8')
+    assert.match(manager, /val incognito = privateWebViews\.containsKey\(wrapper\.webView\)/)
+    assert.match(manager, /mimeType,\s+incognito,\s+incognitoCookies\s+\)/)
+    const module = readFileSync(new URL('../../plugins/templates/BrowserDownloadsModule.kt.template', import.meta.url), 'utf8')
+    // The shared jar is reached only through the one rule that leaves it out
+    // for an incognito tab.
+    assert.equal(module.match(/CookieManager\.getInstance\(\)/g).length, 1)
+    assert.match(module, /downloadCookieJar\(incognito, incognitoCookies\) \{ CookieManager\.getInstance\(\) \}/)
+    assert.match(module, /\.put\("incognito", download\.incognito\)/)
+
+    const [kept] = normalizeBrowserDownloads([{ id: 'r-1', name: 'a.pdf', status: 'failed', createdAt: 1, incognito: true }])
+    assert.equal(kept.incognito, true)
+    const [plain] = normalizeBrowserDownloads([{ id: 'r-2', name: 'b.pdf', status: 'failed', createdAt: 1, incognito: 'yes' }])
+    assert.equal('incognito' in plain, false)
   })
 
   test('accepts only safe HTTP download URLs', () => {
@@ -334,10 +362,10 @@ describe('browser downloads', () => {
     assert.match(moduleSource, /package xyz\.test\.browser/)
     assert.match(moduleSource, /@ReactModule\(name = BrowserDownloadsModule[.]NAME\)/)
     assert.match(moduleSource, /const val NAME = "BrowserDownloads"/)
-    assert.match(moduleSource, /fun requestDownload\(url: String, promise: Promise\)/)
+    assert.match(moduleSource, /fun requestDownload\(url: String, incognito: Boolean, promise: Promise\)/)
     assert.match(moduleSource, /sourceUrl = url/)
     assert.match(moduleSource, /record[.]putString\("sourceUrl", it\)/)
-    assert.match(moduleSource, /promise[.]resolve\(queueDownload\(url, null, null, null\)\)/)
+    assert.match(moduleSource, /promise[.]resolve\(queueDownload\(url, null, null, null, incognito\)\)/)
     assert.match(moduleSource, /fun openDownload\(id: String, promise: Promise\)/)
     // In a PeerSky folder of Download, not loose among every other app's files.
     assert.match(moduleSource, /put\(MediaStore\.MediaColumns\.RELATIVE_PATH, Environment\.DIRECTORY_DOWNLOADS \+ "\/PeerSky"\)/)

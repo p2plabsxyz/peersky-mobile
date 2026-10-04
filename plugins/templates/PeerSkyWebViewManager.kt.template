@@ -7,6 +7,7 @@ import android.os.Looper
 import android.text.format.Formatter
 import android.util.Log
 import android.view.MotionEvent
+import android.webkit.CookieManager
 import android.webkit.WebView
 import android.widget.Toast
 import androidx.webkit.ProfileStore
@@ -99,6 +100,14 @@ class PeerSkyWebViewManager : RNCWebViewManager() {
     }
   }
 
+  // The cookies of an incognito tab's own profile, which its downloads send
+  // instead of the ones every other tab shares.
+  private fun profileCookies(webView: WebView): CookieManager? = try {
+    WebViewCompat.getProfile(webView).cookieManager
+  } catch (error: Exception) {
+    null
+  }
+
   override fun onDropViewInstance(view: RNCWebViewWrapper) {
     privateWebViews.remove(view.webView)
     super.onDropViewInstance(view)
@@ -146,12 +155,17 @@ class PeerSkyWebViewManager : RNCWebViewManager() {
         return@setDownloadListener
       }
       val name = downloads.resolveFilename(url, contentDisposition, mimeType)
+      val incognito = privateWebViews.containsKey(wrapper.webView)
+      // Read now: the profile is only reachable from the UI thread.
+      val incognitoCookies = if (incognito) profileCookies(wrapper.webView) else null
       confirmDownload(context, name, url, contentLength) {
         downloads.queueDownload(
           url,
           userAgent,
           contentDisposition,
-          mimeType
+          mimeType,
+          incognito,
+          incognitoCookies
         )
       }
     }
