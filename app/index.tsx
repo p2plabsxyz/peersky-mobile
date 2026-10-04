@@ -373,6 +373,8 @@ export default function App () {
   const workletGenerationRef = useRef(0)
   const appStateRef = useRef(AppState.currentState)
   const browserWebViewRefs = useRef(new Map<string, ComponentRef<typeof WebView>>())
+  // What a WebView reports as a page starts to load.
+  const browserLoadStartsRef = useRef(new WeakSet<object>())
   const browserFaviconsRef = useRef(new Map<string, string>())
   const browserLastRecordedUrlsRef = useRef(new Map<string, string>())
   const browserMediaTokensRef = useRef(new Map<string, string>())
@@ -4851,7 +4853,8 @@ export default function App () {
                   scheduleBrowserTabPreview(tab.id, entry)
                 }
               }}
-              onLoadStart={() => {
+              onLoadStart={(event) => {
+                browserLoadStartsRef.current.add(event.nativeEvent)
                 browserFaviconsRef.current.delete(tab.id)
                 setBrowserMediaTarget((current) => current?.tabId === tab.id ? null : current)
                 if (
@@ -4876,8 +4879,14 @@ export default function App () {
                 if (entry.source.kind !== 'web') return
                 if (!isCurrentBrowserTabEntry(browserTabsStateRef.current, tab.id, entry)) return
                 if (!isWebUrl(navigationState.url) || navigationState.url.length > MAX_BROWSER_URL_LENGTH) return
+                // A page that has only started to load is not there yet. iOS
+                // reports the start with loading false, since the page being
+                // left is done, and read as a page that had landed, a link on
+                // the first page in a tab looked like that page redirecting:
+                // the new page took its place, and back skipped it.
+                const loading = navigationState.loading || browserLoadStartsRef.current.has(navigationState)
 
-                if (!navigationState.loading) {
+                if (!loading) {
                   recordCompletedBrowserVisit(
                     tab.id,
                     navigationState.url,
@@ -4892,12 +4901,12 @@ export default function App () {
                   }, {
                     canGoBack: navigationState.canGoBack,
                     canGoForward: navigationState.canGoForward,
-                    loading: navigationState.loading
+                    loading
                   }, tab.id)
                   const title = normalizeBrowserTabTitle(navigationState.title || navigationState.url)
                   setBrowserTitle(title)
                   updateBrowserTabTitle(tab.id, title)
-                  setBrowserIsLoading(navigationState.loading)
+                  setBrowserIsLoading(loading)
                 } else {
                   syncBackgroundBrowserTab(tab.id, entry, navigationState)
                 }

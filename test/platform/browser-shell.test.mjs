@@ -602,3 +602,18 @@ test('the p2p address lists the built-in apps', async () => {
     assert.equal(getBrowserBackState(state).currentUrl, search)
   })
 })
+
+// iOS reports a link's page as it starts with loading false, since the page
+// being left is done, and with no back entry when that page is the first in
+// the tab. Taken as a page that had landed, it looked like the first page
+// redirecting: the new page took its place, and back skipped it.
+test('a link on the first page in a tab keeps that page behind it on iOS', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const app = await readFile(new URL('../../app/index.tsx', import.meta.url), 'utf8')
+  assert.match(app, /onLoadStart=\{\(event\) => \{\s+browserLoadStartsRef\.current\.add\(event\.nativeEvent\)/)
+  const start = app.indexOf('onNavigationStateChange={(navigationState) => {')
+  const change = app.slice(start, app.indexOf('onMessage={(event) => {', start))
+  assert.match(change, /const loading = navigationState\.loading \|\| browserLoadStartsRef\.current\.has\(navigationState\)/)
+  assert.doesNotMatch(change, /navigationState\.loading(?! \|\|)/)
+  assert.match(change, /canGoForward: navigationState\.canGoForward,\s+loading\s+\}, tab\.id\)/)
+})
