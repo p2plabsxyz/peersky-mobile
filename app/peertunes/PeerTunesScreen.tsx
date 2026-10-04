@@ -21,6 +21,7 @@ import {
 import { AppLoading } from '../AppLoading'
 import { PAUSE_ALL_MEDIA_SCRIPT } from '../browser-media.mjs'
 import { MODAL_ORIENTATIONS } from '../modal-orientations'
+import { WEBVIEW_DECELERATION_RATE } from '../webview-scroll.mjs'
 import { tapFeedback } from '../haptics'
 import { forgetPeerTunesWidgetState, idlePeerTunesWidget, updatePeerTunesWidget } from '../widgets'
 
@@ -218,7 +219,7 @@ export function PeerTunesScreen ({
       originWhitelist={[localUrl]}
       // Left unset, react-native-webview gives iOS a deceleration of 0, and a
       // swipe through the library stopped the moment the finger lifted.
-      decelerationRate='normal'
+      decelerationRate={WEBVIEW_DECELERATION_RATE}
       injectedJavaScriptBeforeContentLoaded={PEERTUNES_BEFORE_LOAD_SCRIPT}
       onMessage={(event) => {
         const nowPlaying = parsePeerTunesNowPlaying(event.nativeEvent.data)

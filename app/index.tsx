@@ -208,6 +208,7 @@ import { NsfwScanner } from './media/NsfwScanner'
 import { usePeerChatNotifications } from './peerchat/usePeerChatNotifications'
 import { PeerTunesScreen } from './peertunes/PeerTunesScreen'
 import { peerSkyWebViewNativeConfig } from './downloads/PeerSkyWebView'
+import { WEBVIEW_DECELERATION_RATE } from './webview-scroll.mjs'
 import {
   initializeContentBlocking,
   setContentBlockingEnabled as applyContentBlockingEnabled,
@@ -3830,7 +3831,7 @@ export default function App () {
           // inline on iPhone without this.
           allowsInlineMediaPlayback={true}
           // Left unset, a swipe stops dead on iOS (see the browser WebView).
-          decelerationRate='normal'
+          decelerationRate={WEBVIEW_DECELERATION_RATE}
           cacheEnabled={false}
           textZoom={100}
           style={[styles.p2pmdWorkspaceWebView, p2pmdTheme?.p2pmdWorkspaceWebView]}
@@ -4865,7 +4866,7 @@ export default function App () {
               // Safari's glide. Left unset, react-native-webview hands iOS a
               // rate of 0 at the start of every drag, so a swipe stopped dead
               // the moment the finger lifted.
-              decelerationRate='normal'
+              decelerationRate={WEBVIEW_DECELERATION_RATE}
               // The edge swipe is recognised by the app, not WKWebView, so
               // that one gesture walks the browser's own history everywhere.
               // WKWebView only knows the page's history, which is why a search
