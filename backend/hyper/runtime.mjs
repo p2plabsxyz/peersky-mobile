@@ -40,6 +40,7 @@ import {
   HYPERDRIVE_PRIVATE_DRIVE_NAME
 } from './storage-core.mjs'
 import { refreshHyperRuntimeNetwork } from './network-refresh.mjs'
+import { shareDriveOpens } from './shared-drive-opens.mjs'
 import {
   decodesWithKey,
   linkedPrivateDriveKeyFor,
@@ -270,6 +271,7 @@ export async function getHyperRuntime () {
   if (!sdkOpening) {
     storagePath = getHyperSdkStoragePath()
     sdkOpening = createSDK({ storage: storagePath })
+      .then(shareDriveOpens)
       .then(async (runtime) => {
         await startLANDiscovery(runtime)
         sdk = runtime
@@ -292,7 +294,7 @@ export async function getPrivateHyperRuntime () {
   if (!deviceOnlySdkOpening) {
     deviceOnlyStoragePath = getPrivateHyperSdkStoragePath()
     deviceOnlySdkOpening = initializeRuntimeCandidate(
-      () => createSDK(createPrivateHyperRuntimeOptions(deviceOnlyStoragePath)),
+      () => createSDK(createPrivateHyperRuntimeOptions(deviceOnlyStoragePath)).then(shareDriveOpens),
       async (runtime) => {
         const drive = await getExistingNamedDrive(runtime, {
           driveName: HYPERDRIVE_DEVICE_DRIVE_NAME,
@@ -319,7 +321,7 @@ export async function getSyncedPrivateHyperRuntime () {
   if (!syncedPrivateSdkOpening) {
     syncedPrivateStoragePath = getSyncedPrivateHyperSdkStoragePath()
     syncedPrivateSdkOpening = initializeRuntimeCandidate(
-      () => createSDK(createSyncedPrivateHyperRuntimeOptions(syncedPrivateStoragePath)),
+      () => createSDK(createSyncedPrivateHyperRuntimeOptions(syncedPrivateStoragePath)).then(shareDriveOpens),
       async (runtime) => {
         const drive = await getSyncedPrivateHyperdrive(runtime)
         rememberSyncedPrivateHyperdrive(drive)
@@ -445,7 +447,7 @@ export async function getAdoptedPrivateHyperRuntime () {
         // only writer keys, and the phone must never append to a drive it can
         // then diverge from. Reads of the copied cores keep working.
         corestoreOpts: { allowBackup: true, readOnly: true }
-      }),
+      }).then(shareDriveOpens),
       async (runtime) => {
         adoptedSdk = runtime
       }
