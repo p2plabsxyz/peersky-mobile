@@ -2055,3 +2055,53 @@ class FakeFeed extends EventEmitter {
 function cloneFeeds (feeds) {
   return new Map([...feeds].map(([name, feed]) => [name, new FakeFeed(structuredClone(feed.entries))]))
 }
+
+// The other person's room-meta for a direct chat describes it as they see it,
+// named and pictured after us. Taking a missing picture or bio from it put our
+// own on the chat of anyone who had none, until their next profile put it back.
+test('PeerChat keeps a direct chat\'s picture and bio the other person\'s, whatever their room-meta says', async (t) => {
+  const senderPath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-dm-meta-sender-'))
+  const receiverPath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-dm-meta-receiver-'))
+  t.after(() => rm(senderPath, { recursive: true, force: true }))
+  t.after(() => rm(receiverPath, { recursive: true, force: true }))
+
+  const sender = await new PeerChatService({ sdk: createFakeSdk(new Map(), 21), storagePath: senderPath }).start()
+  const receiver = await new PeerChatService({ sdk: createFakeSdk(new Map(), 22), storagePath: receiverPath }).start()
+  sender.setProfile({ username: 'PeerChat', bio: '' })
+  receiver.setProfile({ username: 'Akhilesh', bio: 'Captain', avatar: CAROL_AVATAR })
+
+  const inviteFrames = []
+  const senderViewOfReceiver = createFakePeer(receiver.localId, 'Akhilesh', inviteFrames)
+  sender.peers.set(senderViewOfReceiver.connection, senderViewOfReceiver)
+  const outgoing = await sender.createDirectMessage({
+    peerId: receiver.localId,
+    username: 'Akhilesh',
+    bio: 'Captain',
+    avatar: CAROL_AVATAR
+  })
+
+  const senderPeer = createFakePeer(sender.localId, 'PeerChat')
+  senderPeer.transport = { send: () => true, close () {} }
+  receiver.peers.set(senderPeer.connection, senderPeer)
+  await receiver.handlePeerMessage(senderPeer, inviteFrames.find((frame) => frame.type === 'dm-invite'))
+  await receiver.acceptDirectMessage({ roomKey: outgoing.room.roomKey })
+  senderPeer.rooms = [outgoing.room.roomKey]
+
+  // Their side of the room is named and pictured after us.
+  const metaFrames = []
+  const viewer = createFakePeer(receiver.localId, 'Akhilesh', metaFrames)
+  viewer.rooms = [outgoing.room.roomKey]
+  sender.sendRoomMeta(viewer, outgoing.room.roomKey)
+  const meta = metaFrames.find((frame) => frame.type === 'room-meta')
+  assert.equal(meta?.avatar, CAROL_AVATAR)
+  await deliver(receiver, senderPeer, meta)
+
+  const chat = receiver.listRooms().find((room) => room.roomKey === outgoing.room.roomKey)
+  assert.equal(chat.isDM, true)
+  assert.equal(chat.name, 'PeerChat')
+  assert.equal(chat.avatar, null, 'our own picture never becomes theirs')
+  assert.equal(chat.bio, '', 'nor our bio')
+
+  await sender.close()
+  await receiver.close()
+})

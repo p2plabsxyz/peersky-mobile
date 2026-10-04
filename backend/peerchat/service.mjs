@@ -1352,6 +1352,12 @@ export class PeerChatService {
     if (message.type === 'room-meta') {
       if (!this.consumeControlRate(peer)) return
       const room = this.rooms.get(roomKey)
+      // A direct message's name, bio and picture are the other person's, and
+      // come from their profile. Their room-meta describes this room as they
+      // see it, which is after us: a missing picture taken from it put our own
+      // picture on their chat whenever they had none, until their next profile
+      // put it back. The desktop has always skipped these.
+      if (room?.isDM) return
       if (!room?.isHost) {
         const placeholder = `${roomKey.slice(0, 8)}...`
         const incomingName = normalizePeerChatRoomName(message.name, '')
