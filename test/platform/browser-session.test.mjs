@@ -140,10 +140,13 @@ describe('browser session lifecycle', () => {
     assert.match(open, /historyIndex: tab\.historyIndex \+ 1/)
     assert.match(app, /onOpen=\{\(targetUrl\) => \{\n\s+setBrowserBookmarksVisible\(false\)\n\s+openFromList\('bookmarks', targetUrl\)/)
     assert.match(app, /openFromList\('history', targetUrl\)/)
-    // Checked before history is walked, the same as settings.
-    const back = app.slice(app.indexOf('function onBrowserBack'), app.indexOf('getBrowserBackState({', app.indexOf('function onBrowserBack')))
-    assert.match(back, /getListReturnScreen\(listReturnRef\.current/)
-    assert.match(back, /setBrowserBookmarksVisible\(true\)/)
+    // Back shows the list again and steps the tab back under it, the same as
+    // settings, so closing the list lands where it was opened from. Left on
+    // the page, it took another back to get there.
+    const start = app.indexOf('function onBrowserBack')
+    const back = app.slice(start, app.indexOf('\n  }\n', start))
+    assert.match(back, /if \(listReturnScreen\) \{\s+listReturnRef\.current = null\s+stepBack\(\)\s+if \(listReturnScreen === 'bookmarks'\) setBrowserBookmarksVisible\(true\)/)
+    assert.match(back, /if \(settingsReturnPage\) \{\s+settingsReturnRef\.current = null\s+stepBack\(\)/)
   })
 
   test('every settings page that opens a link reports which page it was', async () => {

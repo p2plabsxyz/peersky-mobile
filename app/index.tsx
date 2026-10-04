@@ -1547,16 +1547,33 @@ export default function App () {
     const currentEntry = activeBrowserTab?.history[activeBrowserTab.historyIndex]
     if (!activeBrowserTab || !currentEntry) return
 
-    // Settings is a sheet, not a history entry, so back from a page it opened
-    // used to land on whatever the tab was showing before. Only while that
-    // page is still the one on screen, in the tab it opened in: navigate on,
-    // or switch tabs, and back is ordinary again.
+    const nextState = getBrowserBackState({
+      history: activeBrowserTab.history,
+      historyIndex: activeBrowserTab.historyIndex
+    })
+    const stepBack = () => {
+      if (!nextState) return
+      const entry = nextState.history[nextState.historyIndex]
+      remountBrowserWebView(tabId)
+      applyBrowserState(nextState)
+      setBrowserTitle(getBrowserEntryTitle(entry))
+      setActiveTab(entry.source.kind === 'app' ? entry.source.app : 'hyper')
+    }
+
+    // Settings, Bookmarks and History are sheets over the tab, not entries in
+    // it. Back from a page one of them opened shows it again, and the tab
+    // steps back under it too, so closing it lands where it was opened from.
+    // Left on the page, closing Bookmarks showed that page again and it took
+    // another back to get home. Only while that page is still the one on
+    // screen, in the tab it opened in: navigate on, or switch tabs, and back is
+    // ordinary again.
     const settingsReturnPage = getSettingsReturnPage(settingsReturnRef.current, {
       tabId,
       url: currentEntry.url
     })
     if (settingsReturnPage) {
       settingsReturnRef.current = null
+      stepBack()
       setBrowserSettingsInitialPage(settingsReturnPage)
       setBrowserSettingsVisible(true)
       return
@@ -1567,22 +1584,13 @@ export default function App () {
     })
     if (listReturnScreen) {
       listReturnRef.current = null
+      stepBack()
       if (listReturnScreen === 'bookmarks') setBrowserBookmarksVisible(true)
       else setBrowserHistoryVisible(true)
       return
     }
 
-    const nextState = getBrowserBackState({
-      history: activeBrowserTab.history,
-      historyIndex: activeBrowserTab.historyIndex
-    })
-    if (!nextState) return
-
-    const entry = nextState.history[nextState.historyIndex]
-    remountBrowserWebView(tabId)
-    applyBrowserState(nextState)
-    setBrowserTitle(getBrowserEntryTitle(entry))
-    setActiveTab(entry.source.kind === 'app' ? entry.source.app : 'hyper')
+    stepBack()
   }
 
   // Android keeps the app running for PeerChat after a swipe away, and a tab
