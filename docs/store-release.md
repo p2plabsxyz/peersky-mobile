@@ -1,8 +1,8 @@
 # Releasing to the App Store and Google Play
 
 The code covers what the stores check in the binary. This page is what only a
-person can do, in App Store Connect and the Play Console, and what to tell the
-reviewers. Go through it once per release.
+person can do, in App Store Connect and the Play Console. Go through it once per
+release.
 
 ## Before building
 
@@ -14,6 +14,10 @@ reviewers. Go through it once per release.
   Expo upgrade that brings it. On EAS, pin an Xcode 26 image.
 - Bump `version` in `app.json` for a new store version. EAS increments build
   numbers.
+- After adding or removing a dependency, run
+  `node scripts/generate-third-party-notices.mjs` to refresh the list under
+  Settings, About, Open-source licenses. Its header says when it also needs
+  fresh source maps or an inventory of native libraries.
 
 ## App Store Connect
 
@@ -43,27 +47,6 @@ reviewers. Go through it once per release.
   rules say 16 and over.
 - **URLs.** Privacy policy: `PRIVACY.md` on GitHub. Support: the repository, or
   contact@p2plabs.xyz.
-
-## Notes for the App Review team
-
-Paste something like this into App Review Information:
-
-> PeerSky is a web and peer-to-peer browser. There is no sign-in. PeerChat (the
-> chat icon on the home screen) connects devices directly, with no server.
-> A new PeerChat profile joins P2P Republic, a public room, so you can see other
-> people's messages without a second device.
->
-> User-generated content safeguards (Guideline 1.2): before chatting, people
-> agree to the rules and terms of use, which have no tolerance for objectionable
-> content or abusive users. Messages are filtered for abuse, slurs and adult
-> links, and nude pictures are refused on the device. Press and hold any message
-> to Report it or Block its sender; a block hides everything that person sends,
-> at once, everywhere. Reports reach contact@p2plabs.xyz and are read within 24
-> hours, and we remove abusive people from P2P Republic. PeerChat settings has
-> Delete PeerChat profile.
-
-Someone has to read contact@p2plabs.xyz every day. That 24 hour promise is in
-the app and in `TERMS.md`.
 
 ## Google Play Console
 
@@ -130,7 +113,9 @@ Play copy and the GitHub APK without uninstalling first.
 
 ## After review
 
-- Answer reports within 24 hours, and remove people from P2P Republic from the
-  device that runs it when they break the rules.
+- Answer reports and copyright notices within 24 hours, and remove people from
+  P2P Republic from the device that runs it when they break the rules.
+- A valid copyright notice for a `hyper://` address goes on the list in
+  `backend/hyper/blocked-drives.mjs` in the next release.
 - Keep `PRIVACY.md` and `TERMS.md` in step with what the app does. The app links
   to both on GitHub.
