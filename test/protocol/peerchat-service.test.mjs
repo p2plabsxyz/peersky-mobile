@@ -2105,3 +2105,48 @@ test('PeerChat keeps a direct chat\'s picture and bio the other person\'s, whate
   await sender.close()
   await receiver.close()
 })
+
+// Forwarding: a message sent on from another chat carries fwd, from the phone
+// as from the desktop, so either side shows it as forwarded.
+test('PeerChat marks a forwarded message on the way out, keeps the mark from a peer, and shows it', async (t) => {
+  const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-forward-'))
+  t.after(() => rm(storagePath, { recursive: true, force: true }))
+  const frames = []
+  const service = await new PeerChatService({ sdk: createFakeSdk(), storagePath }).start()
+  const room = await service.createRoom({ name: 'Team', username: 'Alice' })
+  const peer = createFakePeer('desktop-peer', 'Desktop', frames)
+  peer.rooms = [room.roomKey]
+  service.peers.set(peer.connection, peer)
+
+  const sent = await service.sendMessage({ roomKey: room.roomKey, message: 'Worth reading', forwarded: true })
+  assert.equal(sent.forwarded, true)
+  assert.equal(frames.find((frame) => frame.id === sent.id)?.fwd, true)
+  const typed = await service.sendMessage({ roomKey: room.roomKey, message: 'Typed here' })
+  assert.equal(typed.forwarded, undefined)
+  assert.equal(frames.find((frame) => frame.id === typed.id)?.fwd, undefined)
+
+  // A desktop's forwarded message arrives marked, and nothing else does.
+  await service.handlePeerMessage(peer, {
+    id: 'from-desktop-forwarded',
+    roomKey: room.roomKey,
+    sn: 'Desktop',
+    ...encryptPeerChatMessage('Passed along', room.roomKey),
+    fwd: true,
+    ts: Date.now() + 1
+  })
+  await service.handlePeerMessage(peer, {
+    id: 'from-desktop-typed',
+    roomKey: room.roomKey,
+    sn: 'Desktop',
+    ...encryptPeerChatMessage('Said here', room.roomKey),
+    fwd: 'yes',
+    ts: Date.now() + 2
+  })
+  const { messages } = await service.getSnapshot({ roomKey: room.roomKey, version: -1 })
+  const byId = (id) => messages.find((message) => message.id === id)
+  assert.equal(byId('from-desktop-forwarded')?.forwarded, true)
+  assert.equal(byId('from-desktop-typed')?.forwarded, undefined, 'only true counts')
+  assert.equal(byId(sent.id)?.forwarded, true)
+  assert.equal(byId(typed.id)?.forwarded, undefined)
+  await service.close()
+})

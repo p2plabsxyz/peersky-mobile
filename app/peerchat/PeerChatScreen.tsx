@@ -73,6 +73,8 @@ import {
   createPeerChatAvatarDataUrl,
   MAX_PEERCHAT_AVATAR_FILE_BYTES
 } from './avatar.mjs'
+import { forwardableText, forwardTexts } from './forwarding.mjs'
+import { PressPop } from './PressPop'
 import {
   RPC_HYPER_FETCH,
   RPC_PEERCHAT_ATTACHMENT_OPEN,
@@ -142,6 +144,8 @@ type PeerChatMessage = {
   fileEnc?: boolean
   preview?: PeerChatLinkPreview | null
   system?: boolean
+  // Sent on from another chat, and shown so.
+  forwarded?: boolean
 }
 
 type PeerChatModeration = {
@@ -435,6 +439,10 @@ export function PeerChatScreen ({
   const [composer, setComposer] = useState('')
   const [replyTarget, setReplyTarget] = useState<PeerChatReply | null>(null)
   const [messageActionTarget, setMessageActionTarget] = useState<PeerChatMessage | null>(null)
+  // Messages picked to forward, by id, or null when nothing is being picked.
+  const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string> | null>(null)
+  const [isForwardOpen, setIsForwardOpen] = useState(false)
+  const [forwardQuery, setForwardQuery] = useState('')
   const [linkActionTarget, setLinkActionTarget] = useState<string | null>(null)
   const [isAttachSheetOpen, setIsAttachSheetOpen] = useState(false)
   const [isRequestsOpen, setIsRequestsOpen] = useState(false)
@@ -657,13 +665,23 @@ export function PeerChatScreen ({
   useEffect(() => {
     if (!activeRoom) return
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (selectedMessageIds) {
+        setSelectedMessageIds(null)
+        return true
+      }
       setActiveRoom(null)
       setIsSearching(false)
       setSearchQuery('')
       return true
     })
     return () => subscription.remove()
-  }, [activeRoom])
+  }, [activeRoom, selectedMessageIds])
+
+  // Picking belongs to the room it started in.
+  useEffect(() => {
+    setSelectedMessageIds(null)
+    setIsForwardOpen(false)
+  }, [activeRoom?.roomKey])
 
   useEffect(() => {
     // Same wait as a room invite: a request cannot be sent without a name.
@@ -1805,6 +1823,53 @@ export function PeerChatScreen ({
     setMessageActionTarget(message)
   }
 
+  // Forwarding: messages are picked in the open chat, then sent on to another
+  // as new messages of yours, each marked as forwarded, the same as on the
+  // desktop. Only words travel: a file is sealed to the chat it was sent to.
+  function startSelectingMessages (message: PeerChatMessage) {
+    setMessageActionTarget(null)
+    setSelectedMessageIds(new Set(forwardableText(message) ? [message.id] : []))
+  }
+
+  function toggleSelectedMessage (message: PeerChatMessage) {
+    if (!forwardableText(message)) {
+      onStatus('Only text can be forwarded. Files and pictures stay in their chat.')
+      return
+    }
+    tapFeedback()
+    setSelectedMessageIds((current) => {
+      const next = new Set(current || [])
+      if (next.has(message.id)) next.delete(message.id)
+      else next.add(message.id)
+      return next
+    })
+  }
+
+  function forwardSelectedMessages (target: PeerChatRoom) {
+    const texts = forwardTexts(messages, selectedMessageIds || new Set())
+    setIsForwardOpen(false)
+    setSelectedMessageIds(null)
+    if (!texts.length || isBusy) return
+    openRoom(target)
+    void runAction(async () => {
+      for (const text of texts) {
+        const response = await callRpc(RPC_PEERCHAT_SEND, {
+          roomKey: target.roomKey,
+          message: text,
+          forwarded: true
+        })
+        // A chat's filters apply to what is forwarded into it, as to anything
+        // typed there. The rest wait rather than arrive out of order.
+        if (!response.ok) throw new Error(response.error || 'Unable to forward that message.')
+      }
+      if (!mountedRef.current) return
+      versionRef.current = -1
+      await refreshRoom(true)
+      if (soundsEnabled) playPeerChatSound('send', require('../../assets/sounds/peerchat/send.mp3'))
+      onStatus(texts.length === 1 ? 'Message forwarded' : `${texts.length} messages forwarded`)
+    })
+  }
+
   function replyToMessage (message: PeerChatMessage) {
     setMessageActionTarget(null)
     setReplyTarget({
@@ -2380,19 +2445,31 @@ export function PeerChatScreen ({
                 </View>
               )}
               <View style={[styles.messageRow, item.self ? styles.messageRowSelf : null, item.system ? styles.systemMessageRow : null]}>
-              <Pressable
-                accessibilityHint='Long press for message actions'
+              <PressPop
+                accessibilityHint={selectedMessageIds
+                  ? selectedMessageIds.has(item.id) ? 'Picked to forward. Tap to leave it out' : 'Tap to pick it to forward'
+                  : 'Long press for message actions'}
                 accessibilityRole={item.system ? 'text' : 'button'}
+                accessibilityState={selectedMessageIds ? { selected: selectedMessageIds.has(item.id) } : undefined}
                 disabled={item.system}
+                onPress={selectedMessageIds ? () => toggleSelectedMessage(item) : undefined}
                 onLongPress={() => {
                   if (item.system) return
+                  if (selectedMessageIds) {
+                    toggleSelectedMessage(item)
+                    return
+                  }
                   tapFeedback()
                   showMessageActions(item)
                 }}
+                // While picking, a tap picks: links, names and files in the
+                // message wait until picking ends.
+                pointerEvents={selectedMessageIds ? 'box-only' : 'auto'}
                 style={[
                   styles.messageBubble,
                   item.system ? styles.systemMessage : null,
-                  { backgroundColor: item.system ? colors.input : item.self ? colors.selfBubble : colors.peerBubble }
+                  { backgroundColor: item.system ? colors.input : item.self ? colors.selfBubble : colors.peerBubble },
+                  selectedMessageIds?.has(item.id) ? [styles.messageBubblePicked, { borderColor: colors.accent }] : null
                 ]}
               >
                 {!item.self && !item.system && (
@@ -2413,6 +2490,9 @@ export function PeerChatScreen ({
                       <Text style={[styles.senderName, { color: colors.accent }]}>{item.senderName}</Text>
                     </View>
                   </Pressable>
+                )}
+                {item.forwarded && (
+                  <Text style={[styles.forwardedLabel, { color: colors.muted }]}>Forwarded</Text>
                 )}
                 {item.replyTo && (
                   <View style={[styles.quotedReply, { borderLeftColor: colors.accent, backgroundColor: colors.input }]}>
@@ -2465,7 +2545,7 @@ export function PeerChatScreen ({
                       />
                     </>
                     )}
-              </Pressable>
+              </PressPop>
               {item.reactions && item.reactions.length > 0 && (
                 <View style={[styles.reactionRow, item.self ? styles.reactionRowSelf : null]}>
                   {item.reactions.map((reaction) => (
@@ -2638,6 +2718,33 @@ export function PeerChatScreen ({
             />
           </View>
         )}
+        {selectedMessageIds
+          ? (
+            <View style={[styles.composer, { borderTopColor: colors.border }]}>
+              <Pressable
+                accessibilityRole='button'
+                onPress={() => setSelectedMessageIds(null)}
+                style={[styles.selectBarButton, { backgroundColor: colors.input }]}
+              >
+                <Text style={[styles.selectBarButtonText, { color: colors.text }]}>Cancel</Text>
+              </Pressable>
+              <Text accessibilityLiveRegion='polite' style={[styles.selectBarCount, { color: colors.muted }]}>
+                {selectedMessageIds.size} selected
+              </Text>
+              <Pressable
+                accessibilityRole='button'
+                disabled={selectedMessageIds.size === 0 || isBusy}
+                onPress={() => {
+                  setForwardQuery('')
+                  setIsForwardOpen(true)
+                }}
+                style={[styles.selectBarButton, { backgroundColor: colors.accent }, selectedMessageIds.size === 0 || isBusy ? styles.disabled : null]}
+              >
+                <Text style={[styles.selectBarButtonText, { color: '#ffffff' }]}>Forward</Text>
+              </Pressable>
+            </View>
+            )
+          : (
         <View style={[styles.composer, { borderTopColor: colors.border }]}> 
           <Pressable
             accessibilityLabel='Choose emoji'
@@ -2690,6 +2797,78 @@ export function PeerChatScreen ({
             <SendIcon width={20} height={20} color='#ffffff' />
           </Pressable>
         </View>
+            )}
+        <Modal
+          supportedOrientations={MODAL_ORIENTATIONS}
+          animationType='fade'
+          onRequestClose={() => setIsForwardOpen(false)}
+          statusBarTranslucent
+          transparent
+          visible={isForwardOpen}
+        >
+          <KeyboardAvoidingView behavior='padding' style={styles.roomInfoModalRoot}>
+            <Pressable
+              accessibilityLabel='Close forward'
+              accessibilityRole='button'
+              onPress={() => setIsForwardOpen(false)}
+              style={styles.roomInfoBackdrop}
+            />
+            <SafeAreaView
+              edges={['bottom', 'left', 'right']}
+              style={[styles.roomInfoPanel, { backgroundColor: colors.surface }]}
+            >
+              <View style={[styles.roomInfoHeader, { borderBottomColor: colors.border }]}>
+                <Text style={[styles.roomInfoHeading, { color: colors.text }]}>Forward to</Text>
+                <Pressable
+                  accessibilityLabel='Close forward'
+                  accessibilityRole='button'
+                  hitSlop={8}
+                  onPress={() => setIsForwardOpen(false)}
+                >
+                  <CloseIcon width={18} height={18} color={colors.muted} />
+                </Pressable>
+              </View>
+              <ScrollView keyboardShouldPersistTaps='handled' contentContainerStyle={styles.discoverBody}>
+                <TextInput
+                  autoCapitalize='none'
+                  autoCorrect={false}
+                  maxLength={PEERCHAT_SEARCH_QUERY_MAX_CHARACTERS}
+                  onChangeText={setForwardQuery}
+                  placeholder='Search chats'
+                  placeholderTextColor={colors.muted}
+                  returnKeyType='search'
+                  style={[styles.input, { backgroundColor: colors.input, color: colors.text }]}
+                  value={forwardQuery}
+                />
+                {rooms
+                  .filter((room) => !room.pendingAcceptance && !room.rejected &&
+                    (!forwardQuery.trim() || room.name.toLowerCase().includes(forwardQuery.trim().toLowerCase())))
+                  .map((room) => (
+                    <Pressable
+                      accessibilityHint={`Forwards the picked messages to ${room.name}`}
+                      accessibilityRole='button'
+                      key={room.roomKey}
+                      onPress={() => forwardSelectedMessages(room)}
+                      style={[styles.memberRow, { backgroundColor: colors.input }]}
+                    >
+                      <View style={styles.memberAvatarWrap}>
+                        {room.avatar
+                          ? <Image source={{ uri: room.avatar }} style={styles.memberAvatar} />
+                          : (
+                            <View style={[styles.memberAvatarFallback, { backgroundColor: colors.accentSoft }]}>
+                              <Text style={[styles.memberAvatarText, { color: colors.accent }]}>{getRoomInitials(room.name)}</Text>
+                            </View>
+                            )}
+                      </View>
+                      <View style={styles.memberCopy}>
+                        <Text numberOfLines={1} style={[styles.memberName, { color: colors.text }]}>{room.name}</Text>
+                      </View>
+                    </Pressable>
+                  ))}
+              </ScrollView>
+            </SafeAreaView>
+          </KeyboardAvoidingView>
+        </Modal>
         <Modal
           supportedOrientations={MODAL_ORIENTATIONS}
           animationType='fade'
@@ -2751,6 +2930,9 @@ export function PeerChatScreen ({
                       </Pressable>
                       <Pressable accessibilityRole='button' onPress={() => copyMessageText(messageActionTarget)} style={styles.actionSheetAction}>
                         <Text style={[styles.actionSheetActionText, { color: colors.text }]}>Copy text</Text>
+                      </Pressable>
+                      <Pressable accessibilityRole='button' onPress={() => startSelectingMessages(messageActionTarget)} style={styles.actionSheetAction}>
+                        <Text style={[styles.actionSheetActionText, { color: colors.text }]}>Select</Text>
                       </Pressable>
                       <Pressable accessibilityRole='button' onPress={showMessageInfo} style={styles.actionSheetAction}>
                         <Text style={[styles.actionSheetActionText, { color: colors.text }]}>Info</Text>
@@ -4941,6 +5123,11 @@ const styles = StyleSheet.create({
   actionSheetDetails: { fontSize: 14, lineHeight: 20, minHeight: 48, paddingVertical: 8 },
   actionSheetAction: { justifyContent: 'center', minHeight: 48, paddingHorizontal: 4 },
   actionSheetActionText: { fontSize: 16, fontWeight: '600' },
+  forwardedLabel: { fontSize: 12, fontStyle: 'italic', marginBottom: 2 },
+  messageBubblePicked: { borderWidth: 2 },
+  selectBarButton: { alignItems: 'center', borderRadius: 20, justifyContent: 'center', minHeight: 42, paddingHorizontal: 16 },
+  selectBarButtonText: { fontSize: 15, fontWeight: '700' },
+  selectBarCount: { flex: 1, fontSize: 14, textAlign: 'center' },
   discoverSearchRow: { alignItems: 'center', flexDirection: 'row', gap: 8 },
   discoverSearchInput: { flex: 1 },
   discoverScanButton: { alignItems: 'center', borderRadius: 12, height: 44, justifyContent: 'center', width: 44 }

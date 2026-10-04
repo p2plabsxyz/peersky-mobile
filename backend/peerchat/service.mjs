@@ -723,7 +723,7 @@ export class PeerChatService {
     }
   }
 
-  async sendMessage ({ roomKey, message, replyTo, fileName, fileSize, fileEnc, preview }) {
+  async sendMessage ({ roomKey, message, replyTo, fileName, fileSize, fileEnc, preview, forwarded }) {
     const normalizedRoomKey = normalizePeerChatRoomKey(roomKey)
     const room = this.rooms.get(normalizedRoomKey)
     if (!room) throw new Error('PeerChat room not found.')
@@ -783,6 +783,9 @@ export class PeerChatService {
       ...encrypted,
       ...(normalizedReply && { replyTo: normalizedReply }),
       ...(attachment || {}),
+      // Sent on from another chat: shown as forwarded on every side. A build
+      // without this shows it as an ordinary message.
+      ...(forwarded === true && { fwd: true }),
       ts: Date.now()
     }
 
@@ -1550,6 +1553,7 @@ export class PeerChatService {
       ...safeEncrypted,
       ...(normalizedReply && { replyTo: normalizedReply }),
       ...(attachment || {}),
+      ...(message.fwd === true && { fwd: true }),
       ts: normalizePeerChatTimestamp(message.ts)
     }
     await this.appendEntry(roomKey, entry)
@@ -2409,6 +2413,7 @@ export class PeerChatService {
         fileEnc: entry.fileEnc
       }) || {}),
       replyTo: normalizePeerChatReply(entry.replyTo),
+      ...(entry.fwd === true && { forwarded: true }),
       timestamp: normalizePeerChatTimestamp(entry.ts),
       // From this person's other devices too, so a chat with yourself, or a
       // room you write in from the desktop, reads as one side.
