@@ -71,7 +71,9 @@ describe('mobile platform runtime configuration', () => {
       entry.NSPrivacyAccessedAPITypeReasons
     ]))
     assert.deepEqual(reasons, {
-      FileTimestamp: ['C617.1', '0A2A.1', '3B52.1'],
+      // Not 0A2A.1: Apple keeps that one for SDKs that wrap the API, and
+      // expo-file-system declares it in its own manifest.
+      FileTimestamp: ['C617.1', '3B52.1'],
       // 1C8F.1: the App Group defaults the home screen widgets read.
       UserDefaults: ['CA92.1', '1C8F.1'],
       DiskSpace: ['E174.1', '85F4.1'],
