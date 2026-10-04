@@ -1,0 +1,48 @@
+diff --git a/node_modules/react-native-bare-kit/android/link.mjs b/node_modules/react-native-bare-kit/android/link.mjs
+index 0d603ca..4a84df6 100644
+--- a/node_modules/react-native-bare-kit/android/link.mjs
++++ b/node_modules/react-native-bare-kit/android/link.mjs
+@@ -1,12 +1,18 @@
++import fs from 'fs'
+ import path from 'path'
+ import { fileURLToPath } from 'url'
+ import link from 'bare-link'
+ 
+ const __filename = fileURLToPath(import.meta.url)
+ 
++// bare-link never removes what it linked before, so an add-on of a package
++// the app no longer depends on stayed in the app. Start from an empty folder.
++const out = path.join(__filename, '..', 'src', 'main', 'addons')
++fs.rmSync(out, { recursive: true, force: true })
++
+ for await (const resource of link(path.join(__filename, '..', '..', '..', '..'), {
+   hosts: ['android-arm64', 'android-arm', 'android-ia32', 'android-x64'],
+-  out: path.join(__filename, '..', 'src', 'main', 'addons')
++  out
+ })) {
+   console.log('Wrote', resource)
+ }
+diff --git a/node_modules/react-native-bare-kit/ios/link.mjs b/node_modules/react-native-bare-kit/ios/link.mjs
+index 44124a2..867d324 100644
+--- a/node_modules/react-native-bare-kit/ios/link.mjs
++++ b/node_modules/react-native-bare-kit/ios/link.mjs
+@@ -1,12 +1,18 @@
++import fs from 'fs'
+ import path from 'path'
+ import { fileURLToPath } from 'url'
+ import link from 'bare-link'
+ 
+ const __filename = fileURLToPath(import.meta.url)
+ 
++// bare-link never removes what it linked before, so an add-on of a package
++// the app no longer depends on stayed in the app. Start from an empty folder.
++const out = path.join(__filename, '..', 'addons')
++fs.rmSync(out, { recursive: true, force: true })
++
+ for await (const resource of link(path.join(__filename, '..', '..', '..', '..'), {
+   hosts: ['ios-arm64', 'ios-arm64-simulator', 'ios-x64-simulator'],
+-  out: path.join(__filename, '..', 'addons')
++  out
+ })) {
+   console.log('Wrote', resource)
+ }
