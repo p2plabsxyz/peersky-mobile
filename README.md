@@ -5,106 +5,98 @@
 <h1 align="center">PeerSky Mobile</h1>
 
 <div align="center">
+    <img src="https://img.shields.io/github/actions/workflow/status/p2plabsxyz/peersky-mobile/ci.yml" alt="GitHub Actions Workflow Status">
+    <img src="https://img.shields.io/badge/Platform-iOS%20%7C%20Android-black.svg" alt="platform">
     <a href="https://mastodon.social/@peersky"><img src="https://img.shields.io/mastodon/follow/113323887574214930" alt="Mastodon Follow"></a>
     <a href="https://deepwiki.com/p2plabsxyz/peersky-mobile"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki"></a>
     <a href="https://standardjs.com"><img src="https://img.shields.io/badge/code_style-standard-brightgreen.svg" alt="JavaScript Style Guide"></a>
 </div>
 
-A peer-to-peer browser for your phone. It opens the ordinary web, and it opens
-`hyper://` too, where pages come from other people's devices rather than from a
-company's servers. No account, no analytics, and nothing about you kept anywhere
-you cannot reach.
+📱 [Download](https://peersky.p2plabs.xyz/) 📜 [Docs](./docs/) 🔒 [Privacy](./PRIVACY.md)
 
-Built with [Bare](https://github.com/holepunchto/bare),
-[Expo](https://expo.dev) and
-[React Native WebView](https://github.com/react-native-webview/react-native-webview).
-There is a desktop version too, at [peersky.p2plabs.xyz](https://peersky.p2plabs.xyz/).
+PeerSky Mobile is the peer-to-peer browser for your phone. The everyday web works as usual, and alongside it your phone becomes a node (a server for the network), so pages, files, chats and notes can travel straight between devices instead of through one company's server. It comes with its own apps: chat, shared notes, file sharing and a music player. There is no account, nothing about you is collected, and devices on the same Wi-Fi keep talking even when the internet is down.
 
-## What it does
+We are building a surveillance-free internet where you own your tools, your data, and your connections, and where no single company can shut you out. Our vision is to save the internet, one peer at a time.
 
-**Browsing.** Tabs that survive a restart, incognito tabs, bookmarks, history,
-downloads, per-tab zoom and desktop view, and page sharing. Ads and trackers
-are blocked by the engine itself using EasyList and EasyPrivacy, with a snapshot
-bundled so you are protected before the first update lands.
+## Development
 
-**The peer-to-peer web.** `hyper://` pages are fetched by a Bare worklet and
-served to the WebView, images, scripts and media included. A page built on Hyper
-can publish and upload from the phone the same way it does on desktop, once you
-let that site publish. Devices
-on the same Wi-Fi find each other directly, so it keeps working with the
-internet down.
+### Node.js and npm Setup
 
-**Apps that came with it.** A Hyperdrive file browser, P2PMD for notes and
-slides, PeerChat for end to end encrypted rooms and direct messages with no
-account and no server, and PeerTunes for music from your own drives. Each has
-its own address:
+Please refer to the [Node.js official documentation](https://nodejs.org/) to install Node.js. Once installed, npm (Node Package Manager) will be available, allowing you to run commands like `npx` and `npm`.
 
-```
-peersky://p2p/hyperdrive/   peersky://p2p/p2pmd/   peersky://p2p/peerchat/
-peersky://p2p/peertunes/
-```
+- **npm**: Comes bundled with Node.js. Verify installation by running:
+  ```bash
+  node -v
+  npm -v
+  ```
 
-**Your data.** Everything lives on the device. P2P storage is listed per app so
-you can see what is there and remove it. Link Device moves it all to another
-phone, device to device, or into a passphrase-locked backup file, and brings
-private drives and tabs over from PeerSky Desktop.
+You also need Xcode for iOS, or Android Studio for Android.
 
-See [PRIVACY.md](PRIVACY.md) for exactly what leaves the phone and what does not.
-To report harmful public content, [open a report](https://github.com/p2plabsxyz/peersky-mobile/issues/new?template=content-report.yml).
+### Install dependencies
 
-## Getting it
-
-Each [GitHub release](https://github.com/p2plabsxyz/peersky-mobile/releases)
-carries a signed Android APK and its SHA-256. The App Store and Google Play
-builds come from the same code.
-
-## Running it
-
-```sh
+```bash
 npm install
-npm run ios       # or: npm run android
 ```
 
-On an iPhone, the app and its home screen widgets share an App Group, which
-Apple has to know about before either can be signed. `npm run ios` cannot
-tell Xcode to arrange that: Expo only lets Xcode change provisioning when it
-picks the signing team itself, and the widgets need `ios.appleTeamId` set. So
-the first build onto a phone, and the first after a capability changes, goes
-through Xcode once, signed in to the team's Apple ID:
+### Start the app
 
-```sh
-xcodebuild -workspace ios/PeerSky.xcworkspace -scheme PeerSky -configuration Debug -destination generic/platform=iOS -allowProvisioningUpdates REGISTER_APP_GROUPS=YES build
+```bash
+npm run ios
 ```
 
-Building from Xcode itself does the same. After that, `npm run ios` works.
-
-Android needs the Rust toolchain for content blocking once:
-
-```sh
-npm run setup:content-blocking
+```bash
+npm run android
 ```
 
-EAS Android builds run that automatically through the `eas-build-pre-install`
-hook; iOS skips it. Builds fetch and validate the current filter lists before
-bundling them, so the first build needs network access. The app itself starts
-blocking offline.
+The first iPhone build goes through Xcode once, and Android needs a one-time setup for the ad blocker. Both are in [Building](./docs/building.md).
 
-```sh
-npm run lint      # StandardJS, with npx standard --fix to repair
-npm test          # the full suite
+### Build
+
+Pushing a version tag builds a signed Android APK and attaches it to a GitHub release. The App Store and Google Play builds come from the same code. What to do in the store consoles is in [Releasing](./docs/store-release.md).
+
+### Linting
+
+This project uses [StandardJS](https://standardjs.com) for code style. To check for lint errors:
+
+[![js-standard-style](https://cdn.rawgit.com/feross/standard/master/badge.svg)](https://github.com/feross/standard)
+
+```bash
+npm run lint
 ```
 
-## Docs
+To auto-fix lint errors:
 
-[docs/](docs/README.md) has the rest, with diagrams: how the app and its Bare
-worklet fit together, how the browser shell works, how `hyper://` is fetched,
-how content blocking works per platform, and one page for each built-in app.
-[SECURITY.md](.github/SECURITY.md) says how to report a vulnerability.
+```bash
+npx standard --fix
+```
+
+### Testing
+
+Run all tests:
+
+```bash
+npm test
+```
+
+Run specific test suites:
+
+```bash
+npm run test:runtime        # Protocol, app and native code tests
+npm run test:bundle         # Builds the peer-to-peer backend bundle
+npm run test:holesail:live  # P2PMD tunnel over the real network
+```
+
+`npm test` builds the backend bundle and then runs every test against it.
+
+For detailed testing documentation, see [Testing Guide](./docs/testing.md).
+
+## Contribute
+
+- Thanks for your interest in contributing to PeerSky Mobile. There are many ways you can contribute to the project.
+- To start, take a few minutes to read the "[contribution guide](https://github.com/p2plabsxyz/peersky-mobile/blob/main/.github/CONTRIBUTING.md)".
+- We look forward to your [pull requests](https://github.com/p2plabsxyz/peersky-mobile/pulls) and / or involvement in our [issues page](https://github.com/p2plabsxyz/peersky-mobile/issues).
+- To report a security problem, see [SECURITY.md](./.github/SECURITY.md). To report harmful public content, [open a report](https://github.com/p2plabsxyz/peersky-mobile/issues/new?template=content-report.yml).
 
 ## License
 
-MIT
-
-Bootstrapped from the [bare-expo](https://github.com/holepunchto/bare-expo)
-template by Holepunch, using
-[react-native-bare-kit](https://github.com/holepunchto/react-native-bare-kit).
+PeerSky Mobile is licensed under the [MIT License](https://github.com/p2plabsxyz/peersky-mobile/blob/main/LICENSE). It started from Holepunch's [bare-expo](https://github.com/holepunchto/bare-expo) template.

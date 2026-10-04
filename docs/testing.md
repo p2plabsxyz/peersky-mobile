@@ -1,4 +1,4 @@
-﻿# Testing guide
+# Testing guide
 
 PeerSky Mobile uses Node's built-in test runner for protocol and platform checks. The default test command is intentionally deterministic: it covers runtime behavior, validation, endpoint contracts, and bundle generation without requiring a device or public network tunnel.
 
