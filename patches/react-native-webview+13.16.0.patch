@@ -1,0 +1,100 @@
+diff --git a/node_modules/react-native-webview/android/src/main/java/com/reactnativecommunity/webview/RNCWebChromeClient.java b/node_modules/react-native-webview/android/src/main/java/com/reactnativecommunity/webview/RNCWebChromeClient.java
+index 07f73fd..6629ab6 100644
+--- a/node_modules/react-native-webview/android/src/main/java/com/reactnativecommunity/webview/RNCWebChromeClient.java
++++ b/node_modules/react-native-webview/android/src/main/java/com/reactnativecommunity/webview/RNCWebChromeClient.java
+@@ -3,6 +3,7 @@ package com.reactnativecommunity.webview;
+ import android.Manifest;
+ import android.annotation.TargetApi;
+ import android.app.Activity;
++import android.app.AlertDialog;
+ import android.content.pm.PackageManager;
+ import android.net.Uri;
+ import android.os.Build;
+@@ -142,8 +143,77 @@ public class RNCWebChromeClient extends WebChromeClient implements LifecycleEven
+         UIManagerHelper.getEventDispatcherForReactTag(this.mWebView.getThemedReactContext(), reactTag).dispatchEvent(new TopLoadingProgressEvent(reactTag, event));
+     }
+ 
++    // PeerSky: a site asks before it gets the camera, the microphone or the
++    // location. As shipped, any site got them without a word once the app held
++    // the Android permission, as it does after a QR code scan.
+     @Override
+     public void onPermissionRequest(final PermissionRequest request) {
++        boolean camera = false;
++        boolean microphone = false;
++        for (String resource : request.getResources()) {
++            if (resource.equals(PermissionRequest.RESOURCE_VIDEO_CAPTURE)) camera = true;
++            if (resource.equals(PermissionRequest.RESOURCE_AUDIO_CAPTURE)) microphone = true;
++        }
++        if (!camera && !microphone) {
++            answerPermissionRequest(request);
++            return;
++        }
++        String what = camera && microphone ? "Camera and microphone" : camera ? "Camera" : "Microphone";
++        askSite(what, request.getOrigin() == null ? "" : request.getOrigin().toString(),
++            () -> {
++                try {
++                    answerPermissionRequest(request);
++                } catch (IllegalStateException ignored) {
++                    // The page took the request back while it was asked.
++                }
++            },
++            () -> {
++                try {
++                    request.deny();
++                } catch (IllegalStateException ignored) {
++                    // The page took the request back while it was asked.
++                }
++            });
++    }
++
++    @Override
++    public void onGeolocationPermissionsShowPrompt(String origin, GeolocationPermissions.Callback callback) {
++        askSite("Location", origin,
++            () -> answerGeolocationPrompt(origin, callback),
++            () -> callback.invoke(origin, false, false));
++    }
++
++    // Asks with the site's own address, as the desktop does. Anything but
++    // Allow, including no window to ask in, refuses.
++    private void askSite(String what, String origin, Runnable allow, Runnable block) {
++        Activity activity = this.mWebView.getThemedReactContext().getCurrentActivity();
++        if (activity == null || activity.isFinishing()) {
++            block.run();
++            return;
++        }
++        Uri uri = Uri.parse(origin);
++        String site = uri.getHost() != null && !uri.getHost().isEmpty() ? uri.getHost() : origin;
++        activity.runOnUiThread(() -> {
++            final boolean[] answered = { false };
++            new AlertDialog.Builder(activity)
++                .setTitle("Allow \"" + what + "\"?")
++                .setMessage(site)
++                .setNegativeButton("Block", (dialog, which) -> {
++                    answered[0] = true;
++                    block.run();
++                })
++                .setPositiveButton("Allow", (dialog, which) -> {
++                    answered[0] = true;
++                    allow.run();
++                })
++                .setOnDismissListener((dialog) -> {
++                    if (!answered[0]) block.run();
++                })
++                .show();
++        });
++    }
++
++    private void answerPermissionRequest(final PermissionRequest request) {
+ 
+         grantedPermissions = new ArrayList<>();
+ 
+@@ -193,8 +263,7 @@ public class RNCWebChromeClient extends WebChromeClient implements LifecycleEven
+     }
+ 
+ 
+-    @Override
+-    public void onGeolocationPermissionsShowPrompt(String origin, GeolocationPermissions.Callback callback) {
++    private void answerGeolocationPrompt(String origin, GeolocationPermissions.Callback callback) {
+ 
+         if (ContextCompat.checkSelfPermission(this.mWebView.getThemedReactContext(), Manifest.permission.ACCESS_FINE_LOCATION)
+                 != PackageManager.PERMISSION_GRANTED) {
