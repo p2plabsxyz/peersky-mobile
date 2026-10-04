@@ -255,7 +255,7 @@ export function Privacy ({
         >
           <SettingCopy
             title='Read terms of use'
-            description='The rules for PeerChat, and how reports are handled.'
+            description='The rules for PeerChat, how reports are handled, and how to send a copyright notice.'
           />
           <ChevronRightIcon
             width={16}
