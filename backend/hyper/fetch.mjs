@@ -14,7 +14,12 @@ import {
   DEFAULT_HYPER_DISCOVERY_RETRY_DELAY,
   withHyperRetry
 } from './fetch-retry.mjs'
-import { isPrivateHyperAddress, withHyperRuntimeForAddress } from './runtime.mjs'
+import {
+  adoptLinkedPrivateDriveIfReadable,
+  isPrivateHyperAddress,
+  withHyperRuntimeForAddress
+} from './runtime.mjs'
+import { isUnreadableDriveError, PRIVATE_DRIVE_ERROR } from './linked-private-drives.mjs'
 import { normalizeDriveAddressId } from './runtime-routing.mjs'
 import {
   isNamedDriveRequest,
@@ -103,7 +108,7 @@ export async function fetchHyper ({
     return { ok: false, status: 403, error: 'A page cannot read private drives' }
   }
 
-  return withHyperRuntimeForAddress(target.driveAddress, async (runtime) => {
+  const read = () => withHyperRuntimeForAddress(target.driveAddress, async (runtime) => {
     await prepareHyperRead(runtime, target.driveAddress)
     const fetch = await getHyperFetch(runtime)
 
@@ -183,6 +188,20 @@ export async function fetchHyper ({
 
     return result
   })
+
+  const result = await read()
+  // A private drive a linked device made after the link reads as ciphertext
+  // from the public store, which came back as a decoding error. Tried with this
+  // phone's private keys: one that opens it routes it to the private store from
+  // now on, and it is read again, as it is when another of its files read at
+  // the same time got there first. A device that is not linked gets told what
+  // the drive is.
+  if (result?.ok === false && isUnreadableDriveError(result.error)) {
+    if (await isPrivateHyperAddress(target.driveAddress) ||
+      await adoptLinkedPrivateDriveIfReadable(target.driveAddress)) return read()
+    return { ok: false, status: 403, error: PRIVATE_DRIVE_ERROR }
+  }
+  return result
 }
 
 /**
