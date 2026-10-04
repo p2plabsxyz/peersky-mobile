@@ -178,10 +178,10 @@ test('the injected page script declares the bridge and patches fetch', () => {
   assert.ok(script.includes(JSON.stringify(TOKEN)))
 })
 
-// The token travelled out through whatever JSON.stringify and postMessage the
-// page had at the time, so a page that replaced either one read it, and with it
-// could forge bridge, media and print messages.
-test('a page that replaces JSON.stringify or postMessage later never sees the token', async () => {
+// The token travelled out through whatever JSON.stringify, postMessage and
+// Object.assign the page had at the time, so a page that replaced one read it,
+// and with it could forge bridge, media and print messages.
+test('a page that replaces JSON.stringify, postMessage or Object.assign later never sees the token', async () => {
   const sent = []
   const leaks = []
   const context = vm.createContext({
@@ -201,6 +201,9 @@ test('a page that replaces JSON.stringify or postMessage later never sees the to
     JSON.stringify = (value) => { leaks.push(value && value.token); return '{}' }
     window.ReactNativeWebView.postMessage = (text) => leaks.push(text)
     Object.prototype.toJSON = function () { leaks.push(this.token); return {} }
+    const realAssign = Object.assign
+    Object.assign = (target, ...sources) => { sources.forEach((source) => leaks.push(source && source.token)); return realAssign(target, ...sources) }
+    Object.create = () => ({ get token () { return undefined }, set token (value) { leaks.push(value) } })
     try { window.__peerskyHyperBridge = { settle () {} } } catch {}
     try { window.__peerskyPostNative = () => {} } catch {}
     window.fetch('hyper://site/data.json')

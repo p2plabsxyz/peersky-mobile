@@ -46,14 +46,17 @@ export function createHyperBridgeScript (token) {
   let nextId = 0
 
   // Taken before any page script runs. A page that later replaced
-  // JSON.stringify or postMessage was handed the token with every message.
-  // A copy with no prototype gives a page's Object.prototype.toJSON nothing to
-  // catch either. The media and print scripts send through the same function.
+  // JSON.stringify, Object.assign or postMessage was handed the token with
+  // every message. A copy with no prototype gives a page's
+  // Object.prototype.toJSON nothing to catch either. The media and print
+  // scripts send through the same function.
   const stringify = JSON.stringify
+  const assign = Object.assign
+  const create = Object.create
   const channel = window.ReactNativeWebView
   const postToNative = channel && channel.postMessage.bind(channel)
   const postSealed = (payload) => {
-    if (postToNative) postToNative(stringify(Object.assign(Object.create(null), payload)))
+    if (postToNative) postToNative(stringify(assign(create(null), payload)))
   }
   Object.defineProperty(window, '__peerskyPostNative', {
     value: Object.freeze(postSealed),
