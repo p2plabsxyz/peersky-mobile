@@ -5,6 +5,7 @@ import { createRequire } from 'node:module'
 import {
   addDownloadUrlFingerprint,
   describeBrowserDownload,
+  downloadFilenameFromHeaders,
   findCompletedHyperDownload,
   getProxiedHyperUrl,
   MAX_BROWSER_DOWNLOADS,
@@ -13,6 +14,7 @@ import {
   normalizeBrowserDownloadUrl,
   sortBrowserDownloads
 } from '../../app/downloads/browser-downloads.mjs'
+import { BROWSER_HOME_URL, getFileHandoffAction } from '../../app/browser-shell.mjs'
 
 const require = createRequire(import.meta.url)
 const downloadsPlugin = require('../../plugins/with-browser-downloads')
@@ -29,8 +31,78 @@ describe('browser downloads', () => {
     assert.deepEqual(describeBrowserDownload('not a url'), { name: 'download', host: '' })
 
     const index = readFileSync(new URL('../../app/index.tsx', import.meta.url), 'utf8')
-    assert.match(index, /onFileDownload=\{\(event\) => confirmPageDownload\(event\.nativeEvent\.downloadUrl\)\}/)
     assert.match(index, /'Download this file\?'/)
+  })
+
+  // A link that opens in a new tab, or an address typed in, can be a file. The
+  // WebView loads nothing for it, and the tab was left blank.
+  test('a tab that only went to a file goes back to where it was', () => {
+    const fileUrl = 'https://example.com/a.zip'
+    const home = { url: BROWSER_HOME_URL, source: { kind: 'home' } }
+    const page = { url: 'https://example.com/', source: { kind: 'web', uri: 'https://example.com/' } }
+    const file = { url: fileUrl, source: { kind: 'web', uri: fileUrl } }
+
+    // A new tab for the file has nothing to go back to, so it closes, even
+    // when the file came through a redirect.
+    assert.deepEqual(getFileHandoffAction({ history: [file], historyIndex: 0, fileUrl, showedPage: false }), { action: 'close-tab' })
+    assert.deepEqual(getFileHandoffAction({ history: [file], historyIndex: 0, fileUrl, showedPage: true }), { action: 'close-tab' })
+    assert.deepEqual(getFileHandoffAction({ history: [file], historyIndex: 0, fileUrl: 'https://cdn.example.net/a.zip', showedPage: false }), { action: 'close-tab' })
+    // Typed in from home: home again, with no file ahead of it.
+    const fromHome = getFileHandoffAction({ history: [home, file], historyIndex: 1, fileUrl, showedPage: false })
+    assert.deepEqual(fromHome.state.history, [home])
+    assert.equal(fromHome.state.canGoForward, false)
+    // Typed in over a page that is still on screen: that page, under its own
+    // address.
+    const overPage = getFileHandoffAction({ history: [home, page, file], historyIndex: 2, fileUrl: `${fileUrl}#top`, showedPage: true })
+    assert.equal(overPage.action, 'back')
+    assert.equal(overPage.state.currentUrl, page.url)
+    // A link on a page: the page is still there, and so is the tab.
+    assert.deepEqual(getFileHandoffAction({ history: [page], historyIndex: 0, fileUrl, showedPage: true }), { action: 'stay' })
+    assert.deepEqual(getFileHandoffAction({ history: [home, page], historyIndex: 1, fileUrl, showedPage: true }), { action: 'stay' })
+
+    const index = readFileSync(new URL('../../app/index.tsx', import.meta.url), 'utf8')
+    // A WebView has shown a page once one has finished in it. It is known by
+    // its native view tag: the WebView's ref is a new object as it renders,
+    // so a page tapped to a file looked like a blank tab and went back.
+    assert.match(index, /onLoadEnd=\{\(event\) => \{\s+const webViewTag = getNativeViewTag\(event\)\s+if \(webViewTag !== null\) browserWebViewsShowingPageRef\.current\.add\(webViewTag\)/)
+    assert.match(index, /onFileDownload=\{\(event\) => confirmPageDownload\(event\.nativeEvent\.downloadUrl, tab\.id, getNativeViewTag\(event\)\)\}/)
+    // A tab closed for its file goes back to the tab that opened it.
+    assert.match(index, /browserTabOpenersRef\.current\.set\(browserTabsStateRef\.current\.activeTabId, openerTabId\)/)
+    assert.match(index, /onBrowserCloseTab\(tabId, browserTabOpenersRef\.current\.get\(tabId\)\)/)
+  })
+
+  // iOS fetches a page's file itself now, so it names the file the way the
+  // server says.
+  test('names a download from Content-Disposition, RFC 5987 first, or from its address', () => {
+    const named = (disposition) => downloadFilenameFromHeaders({ 'Content-Disposition': disposition }, 'https://x.test/a')
+    assert.equal(named("attachment; filename*=UTF-8''Report%20Q3.pdf; filename=\"fallback.pdf\""), 'Report Q3.pdf')
+    assert.equal(downloadFilenameFromHeaders({ 'content-disposition': 'attachment; filename="notes.txt"' }, 'https://x.test/a'), 'notes.txt')
+    assert.equal(named('attachment; filename=plain.zip'), 'plain.zip')
+    // A path in the name leads nowhere but Downloads.
+    assert.equal(named('attachment; filename="../../etc/passwd"'), 'passwd')
+    assert.equal(downloadFilenameFromHeaders({}, 'https://files.example.com/a/Report%20Q3.pdf?x=1'), 'Report Q3.pdf')
+    assert.equal(downloadFilenameFromHeaders(undefined, 'https://example.com/'), 'download')
+  })
+
+  // On iOS a download showed nothing until it was done, then sat in Downloads
+  // with nothing to do with it, since the app's own folder stays out of Files.
+  test('an iOS download shows its progress and can be saved to Files', () => {
+    const hook = readFileSync(new URL('../../app/downloads/useBrowserDownloads.ts', import.meta.url), 'utf8')
+    assert.match(hook, /createDownloadResumable\(/)
+    assert.match(hook, /downloadedBytes: totalBytesWritten,/)
+    assert.match(hook, /const result = await PeerSkyShare\.saveToFiles\(id\)/)
+    const screen = readFileSync(new URL('../../app/downloads/DownloadsScreen.tsx', import.meta.url), 'utf8')
+    assert.match(screen, /\{download\.status === 'complete' && Platform\.OS === 'ios' && onSaveToFiles && \(/)
+    const share = readFileSync(new URL('../../plugins/templates/PeerSkyShareModule.m.template', import.meta.url), 'utf8')
+    assert.match(share, /RCT_EXPORT_METHOD\(saveToFiles:/)
+    // A copy, so the download stays in PeerSky as well.
+    assert.match(share, /initForExportingURLs:@\[url\] asCopy:YES/)
+    const app = readFileSync(new URL('../../app/index.tsx', import.meta.url), 'utf8')
+    assert.match(app, /onSaveToFiles=\{\(downloadId\) => void saveBrowserDownloadToFiles\(downloadId\)\}/)
+    // Asked for from a page or the media viewer, a file opens Downloads, where
+    // its progress shows.
+    assert.match(app, /function startBrowserDownload \(downloadUrl: string\) \{\s+void requestBrowserDownload\(downloadUrl\)\s+setBrowserMenuVisible\(false\)\s+setBrowserDownloadsVisible\(true\)/)
+    assert.match(app, /function onBrowserMediaDownload \(targetUrl: string\) \{\s+startBrowserDownload\(targetUrl\)/)
   })
 
   test('accepts only safe HTTP download URLs', () => {
@@ -267,6 +339,8 @@ describe('browser downloads', () => {
     assert.match(moduleSource, /record[.]putString\("sourceUrl", it\)/)
     assert.match(moduleSource, /promise[.]resolve\(queueDownload\(url, null, null, null\)\)/)
     assert.match(moduleSource, /fun openDownload\(id: String, promise: Promise\)/)
+    // In a PeerSky folder of Download, not loose among every other app's files.
+    assert.match(moduleSource, /put\(MediaStore\.MediaColumns\.RELATIVE_PATH, Environment\.DIRECTORY_DOWNLOADS \+ "\/PeerSky"\)/)
     assert.match(moduleSource, /fun pauseDownload\(id: String, promise: Promise\)/)
     assert.match(moduleSource, /DownloadManager[.]COLUMN_REASON/)
     assert.match(moduleSource, /resolveDownloadMetadata/)

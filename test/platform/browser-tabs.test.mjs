@@ -70,6 +70,19 @@ describe('browser tab state helpers', () => {
     assert.equal(state.activeTabId, 'tab-2')
   })
 
+  test('closing a tab goes back to the tab that opened it, while that is open', () => {
+    let state = createBrowserTabsState()
+    state = addBrowserTabState(state)
+    state = addBrowserTabState({ ...addBrowserTabState(state), activeTabId: 'tab-1' })
+
+    assert.equal(state.activeTabId, 'tab-4')
+    assert.equal(closeBrowserTabState(state, 'tab-4', 'tab-1').activeTabId, 'tab-1')
+    // Its opener is gone: the neighbour, as before.
+    assert.equal(closeBrowserTabState(state, 'tab-4', 'tab-9').activeTabId, 'tab-3')
+    // A tab that is not on screen goes without moving the one that is.
+    assert.equal(closeBrowserTabState(state, 'tab-2', 'tab-1').activeTabId, 'tab-4')
+  })
+
   test('closing the last tab opens a fresh home tab', () => {
     const state = closeBrowserTabState(createBrowserTabsState(), 'tab-1')
     const active = getActiveBrowserTab(state)

@@ -43,7 +43,8 @@ test('a link opened from an incognito tab stays incognito', async () => {
   assert.equal(state.tabs.at(-1).incognito, true)
 
   const app = await read('app/index.tsx')
-  assert.match(app, /createBrowserTab\(action\.url, \{ incognito: isIncognitoTab\(tabId\) \}\)/)
+  assert.match(app, /openPopupTab\(action\.url, tabId\)/)
+  assert.match(app, /createBrowserTab\(targetUrl, \{ incognito: isIncognitoTab\(openerTabId\) \}\)/)
   assert.match(app, /createBrowserTab\(targetUrl, \{ incognito: isIncognitoTab\(browserTabsStateRef\.current\.activeTabId\) \}\)/)
 })
 

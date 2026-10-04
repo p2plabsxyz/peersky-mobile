@@ -401,7 +401,9 @@ export function findBrowserTabShowingApp (state, app) {
   }) || null
 }
 
-export function closeBrowserTabState (state, tabId) {
+// Closing the tab on screen shows its neighbour, or returnTo, the tab that
+// opened it, while that is still open.
+export function closeBrowserTabState (state, tabId, returnTo) {
   const tabIndex = state.tabs.findIndex((tab) => tab.id === tabId)
   if (tabIndex < 0) return state
 
@@ -416,8 +418,9 @@ export function closeBrowserTabState (state, tabId) {
   }
 
   const tabs = state.tabs.filter((tab) => tab.id !== tabId)
+  const opener = tabs.find((tab) => tab.id === returnTo)
   const activeTabId = state.activeTabId === tabId
-    ? tabs[Math.max(0, tabIndex - 1)].id
+    ? (opener || tabs[Math.max(0, tabIndex - 1)]).id
     : state.activeTabId
 
   return {

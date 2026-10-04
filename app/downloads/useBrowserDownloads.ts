@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import CookieManager from '@preeternal/react-native-cookie-manager'
 import { Directory, File, Paths } from 'expo-file-system'
+import { createDownloadResumable, type DownloadResumable } from 'expo-file-system/legacy'
 import * as Sharing from 'expo-sharing'
 import { NativeModules, Platform } from 'react-native'
 import {
   addDownloadUrlFingerprint,
   createUniqueDownloadFilename,
+  describeBrowserDownload,
+  downloadFilenameFromHeaders,
   normalizeBrowserDownloads,
   normalizeBrowserDownloadUrl
 } from './browser-downloads.mjs'
@@ -35,12 +38,27 @@ type BrowserDownloadsNativeModule = {
 const androidDownloads = NativeModules.BrowserDownloads as BrowserDownloadsNativeModule | undefined
 const MAX_CONCURRENT_IOS_DOWNLOADS = 3
 const DOWNLOAD_POLL_INTERVAL_MS = 1500
+const IOS_PROGRESS_REFRESH_MS = 250
+const IOS_TRANSFER_PREFIX = 'ios-transfer:'
+
+// An iOS download on its way, or one that failed. Only this run of the app
+// knows about these; finished files are read back from their folder.
+type IosTransfer = {
+  record: BrowserDownload
+  task: DownloadResumable | null
+}
+
+const { PeerSkyShare } = NativeModules as {
+  PeerSkyShare?: { saveToFiles?: (uri: string) => Promise<{ action: string }> }
+}
 
 export function useBrowserDownloads ({ enabled = false } = {}) {
   const [downloads, setDownloads] = useState<BrowserDownload[]>([])
   const [isReady, setIsReady] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const activeIosDownloads = useRef(new Set<string>())
+  const iosTransfers = useRef(new Map<string, IosTransfer>())
+  const progressTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const refreshSequence = useRef(0)
 
   const refresh = useCallback(async () => {
@@ -48,7 +66,10 @@ export function useBrowserDownloads ({ enabled = false } = {}) {
     try {
       const records = Platform.OS === 'android'
         ? await getAndroidDownloads().getDownloads()
-        : listIosDownloads()
+        : [
+            ...Array.from(iosTransfers.current.values(), ({ record }) => record),
+            ...listIosDownloads()
+          ]
       const normalized = normalizeBrowserDownloads(records) as BrowserDownload[]
       if (sequence !== refreshSequence.current) return normalized
 
@@ -110,24 +131,95 @@ export function useBrowserDownloads ({ enabled = false } = {}) {
     }
 
     activeIosDownloads.current.add(normalizedUrl)
+    // Listed, with its progress, from the moment it starts. It used to show
+    // up only once it had finished, so a large file looked like nothing at all.
+    const id = `${IOS_TRANSFER_PREFIX}${normalizedUrl}`
+    const transfer: IosTransfer = {
+      record: {
+        id,
+        name: describeBrowserDownload(normalizedUrl).name,
+        status: 'running',
+        size: 0,
+        downloadedBytes: 0,
+        totalBytes: 0,
+        createdAt: Date.now(),
+        sourceUrl: normalizedUrl
+      },
+      task: null
+    }
+    iosTransfers.current.set(id, transfer)
+    void refresh()
+
     const stagingDirectory = getIosDownloadStagingDirectory()
     try {
       const cookieHeader = await CookieManager.getCookieHeader(normalizedUrl, true)
       stagingDirectory.create({ intermediates: true, idempotent: true })
-      const stagedFile = await File.downloadFileAsync(normalizedUrl, stagingDirectory, {
-        headers: cookieHeader ? { Cookie: cookieHeader } : undefined
-      })
-      const savedFile = moveIosDownloadIntoPlace(stagedFile, normalizedUrl)
+      transfer.task = createDownloadResumable(
+        normalizedUrl,
+        new File(stagingDirectory, 'download').uri,
+        { headers: cookieHeader ? { Cookie: cookieHeader } : undefined },
+        ({ totalBytesWritten, totalBytesExpectedToWrite }) => {
+          transfer.record = {
+            ...transfer.record,
+            downloadedBytes: totalBytesWritten,
+            totalBytes: Math.max(0, totalBytesExpectedToWrite)
+          }
+          scheduleProgressRefresh()
+        }
+      )
+      const result = await transfer.task.downloadAsync()
+      if (!result) throw new Error('The download was cancelled')
+      if (result.status < 200 || result.status >= 300) throw new Error(`The server answered ${result.status}`)
+
+      const stagedFile = new File(result.uri)
+      const namedFile = new File(stagingDirectory, downloadFilenameFromHeaders(result.headers, normalizedUrl))
+      stagedFile.move(namedFile)
+      const savedFile = moveIosDownloadIntoPlace(namedFile, normalizedUrl)
       persistIosDownloadSource(savedFile.uri, normalizedUrl)
+      iosTransfers.current.delete(id)
       await refresh()
       return true
     } catch (downloadError) {
+      // Removed while it ran: nothing to report.
+      if (iosTransfers.current.get(id) !== transfer) return false
       console.error('Failed downloading file:', downloadError)
+      transfer.task = null
+      transfer.record = { ...transfer.record, status: 'failed', reason: 'network-error' }
       setError('Unable to download this file.')
+      await refresh()
       return false
     } finally {
       if (stagingDirectory.exists) stagingDirectory.delete()
       activeIosDownloads.current.delete(normalizedUrl)
+    }
+  }
+
+  function scheduleProgressRefresh () {
+    if (progressTimer.current) return
+    progressTimer.current = setTimeout(() => {
+      progressTimer.current = null
+      void refresh()
+    }, IOS_PROGRESS_REFRESH_MS)
+  }
+
+  useEffect(() => () => {
+    if (progressTimer.current) clearTimeout(progressTimer.current)
+  }, [])
+
+  // iOS keeps the app's folder out of Files, since it holds the identity and
+  // the drives, so a download goes to Files where the reader picks.
+  async function saveToFiles (id: string) {
+    if (Platform.OS !== 'ios' || typeof PeerSkyShare?.saveToFiles !== 'function') {
+      return openDownload(id)
+    }
+    try {
+      const result = await PeerSkyShare.saveToFiles(id)
+      setError(null)
+      return result?.action === 'saved'
+    } catch (saveError) {
+      console.error('Failed saving download to Files:', saveError)
+      setError('Unable to save this download to Files.')
+      return false
     }
   }
 
@@ -137,6 +229,10 @@ export function useBrowserDownloads ({ enabled = false } = {}) {
         if (!await getAndroidDownloads().removeDownload(id)) {
           throw new Error('Download was not removed')
         }
+      } else if (id.startsWith(IOS_TRANSFER_PREFIX)) {
+        const transfer = iosTransfers.current.get(id)
+        iosTransfers.current.delete(id)
+        await transfer?.task?.cancelAsync().catch(() => {})
       } else {
         const file = new File(id)
         if (file.exists) file.delete()
@@ -262,7 +358,8 @@ export function useBrowserDownloads ({ enabled = false } = {}) {
     refresh,
     removeDownload,
     requestDownload,
-    retryDownload
+    retryDownload,
+    saveToFiles
   }
 }
 

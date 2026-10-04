@@ -216,6 +216,22 @@ export function getBrowserForwardState (state) {
   return buildBrowserState(state.history, state.historyIndex + 1)
 }
 
+// A file goes to Downloads and the WebView loads nothing in its place. A tab
+// that went to one from no page at all sat there blank, and one sent to it
+// from the address bar named the file over the page it still showed. So the
+// file's entry goes and the tab is back where it was. A tab that only ever
+// held the file has nowhere to go back to, and closes.
+export function getFileHandoffAction ({ history, historyIndex, fileUrl, showedPage }) {
+  const entry = history[historyIndex]
+  const entryIsFile = entry?.source?.kind === 'web' && pageAddress(entry.url) === pageAddress(fileUrl)
+  if (showedPage && !entryIsFile) return { action: 'stay' }
+  if (history.length === 1) return { action: 'close-tab' }
+  if (historyIndex > 0) {
+    return { action: 'back', state: buildBrowserState(history.slice(0, historyIndex), historyIndex - 1) }
+  }
+  return { action: 'stay' }
+}
+
 export function getBrowserRequestAction ({
   requestUrl,
   currentSourceKind,

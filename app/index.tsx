@@ -44,6 +44,7 @@ import {
   commitBrowserEntryState,
   getBrowserBackState,
   getBrowserForwardState,
+  getFileHandoffAction,
   formatHyperSiteForPrompt,
   getBrowserMessagePageUrl,
   getHyperBridgeSite,
@@ -373,6 +374,11 @@ export default function App () {
   const workletGenerationRef = useRef(0)
   const appStateRef = useRef(AppState.currentState)
   const browserWebViewRefs = useRef(new Map<string, ComponentRef<typeof WebView>>())
+  // The WebViews that have finished a page, by native view tag. One that
+  // hands a file over before that has nothing on screen.
+  const browserWebViewsShowingPageRef = useRef(new Set<number>())
+  // The tab that a page's new window was opened from.
+  const browserTabOpenersRef = useRef(new Map<string, string>())
   // What a WebView reports as a page starts to load.
   const browserLoadStartsRef = useRef(new WeakSet<object>())
   const browserFaviconsRef = useRef(new Map<string, string>())
@@ -502,7 +508,8 @@ export default function App () {
     refresh: refreshBrowserDownloads,
     removeDownload: removeBrowserDownload,
     requestDownload: requestBrowserDownload,
-    retryDownload: retryBrowserDownloadFromSource
+    retryDownload: retryBrowserDownloadFromSource,
+    saveToFiles: saveBrowserDownloadToFiles
   } = useBrowserDownloads({ enabled: browserDownloadsVisible })
   const browserTabsStateRef = useRef(browserTabsState)
   const browserSessionReadyRef = useRef(false)
@@ -2011,25 +2018,55 @@ export default function App () {
 
   // A page can start a download without a tap, so nothing is saved until the
   // person says yes. iOS asks here; Android asks in PeerSkyWebViewManager.
-  function confirmPageDownload (downloadUrl: string) {
+  // A file, not a page: the WebView hands it over and loads nothing more, so
+  // the tab stops showing a page on its way. Once the file is wanted, Downloads
+  // opens on it, where its progress shows, rather than leaving a tab that looks
+  // stuck loading.
+  function confirmPageDownload (downloadUrl: string, tabId: string, webViewTag: number | null) {
+    setBrowserIsLoading(false)
+    leaveFileHandoff(tabId, downloadUrl, webViewTag)
     const { name, host } = describeBrowserDownload(downloadUrl)
     Alert.alert(
       'Download this file?',
       host ? `${name}\nfrom ${host}` : name,
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Download', onPress: () => { void requestBrowserDownload(downloadUrl) } }
+        { text: 'Download', onPress: () => startBrowserDownload(downloadUrl) }
       ]
     )
   }
 
-  async function onBrowserMediaDownload (targetUrl: string) {
-    const accepted = await requestBrowserDownload(targetUrl)
-    setStatus(
-      accepted
-        ? Platform.OS === 'ios' ? 'Download saved' : 'Download requested'
-        : 'Unable to start download'
-    )
+  // A link that opens in a new tab, or an address typed in, can turn out to be
+  // a file, and the tab was left blank. See getFileHandoffAction.
+  function leaveFileHandoff (tabId: string, fileUrl: string, webViewTag: number | null) {
+    const tab = browserTabsStateRef.current.tabs.find((item) => item.id === tabId)
+    if (!tab) return
+    const handoff = getFileHandoffAction({
+      history: tab.history,
+      historyIndex: tab.historyIndex,
+      fileUrl,
+      // Not knowing which WebView it was, take it that a page is showing.
+      showedPage: webViewTag === null || browserWebViewsShowingPageRef.current.has(webViewTag)
+    })
+    if (handoff.action === 'close-tab') {
+      onBrowserCloseTab(tabId, browserTabOpenersRef.current.get(tabId))
+    } else if (handoff.state && browserTabsStateRef.current.activeTabId === tabId) {
+      const entry = handoff.state.history[handoff.state.historyIndex]
+      remountBrowserWebView(tabId)
+      applyBrowserState(handoff.state)
+      setBrowserTitle(getBrowserEntryTitle(entry))
+      setActiveTab(entry.source.kind === 'app' ? entry.source.app : 'hyper')
+    }
+  }
+
+  function startBrowserDownload (downloadUrl: string) {
+    void requestBrowserDownload(downloadUrl)
+    setBrowserMenuVisible(false)
+    setBrowserDownloadsVisible(true)
+  }
+
+  function onBrowserMediaDownload (targetUrl: string) {
+    startBrowserDownload(targetUrl)
   }
 
   async function retryBrowserDownload (download: BrowserDownload) {
@@ -2209,13 +2246,13 @@ export default function App () {
     setStatus('Tab switched')
   }
 
-  function onBrowserCloseTab (tabId: string) {
+  function onBrowserCloseTab (tabId: string, returnTo?: string) {
     browserUserInteractedRef.current = true
     const currentTabsState = browserTabsStateRef.current
     const isClosingActive = tabId === currentTabsState.activeTabId
     if (isClosingActive) cancelPendingBrowserLoad()
 
-    const nextState = closeBrowserTabState(currentTabsState, tabId) as BrowserTabsState
+    const nextState = closeBrowserTabState(currentTabsState, tabId, returnTo) as BrowserTabsState
     const tab = nextState.tabs.find((item) => item.id === nextState.activeTabId)
 
     // Closing the active tab next to a live note lands on the note, and that
@@ -2238,6 +2275,7 @@ export default function App () {
     browserFaviconsRef.current.delete(tabId)
     browserLastRecordedUrlsRef.current.delete(tabId)
     browserMediaTokensRef.current.delete(tabId)
+    browserTabOpenersRef.current.delete(tabId)
     hyperBridgePendingRef.current.delete(tabId)
     browserWebViewGenerationsRef.current.delete(tabId)
     setBrowserWebViewGenerations((current) => {
@@ -2460,13 +2498,20 @@ export default function App () {
       (action.action === 'load-hyper' || action.action === 'commit-web') &&
       action.url
     ) {
-      if (createBrowserTab(action.url, { incognito: isIncognitoTab(tabId) })) setStatus('Popup opened in new tab')
+      openPopupTab(action.url, tabId)
       return
     }
 
     if (action.action === 'allow' && (isWebUrl(targetUrl) || isHyperUrl(targetUrl))) {
-      if (createBrowserTab(targetUrl, { incognito: isIncognitoTab(tabId) })) setStatus('Popup opened in new tab')
+      openPopupTab(targetUrl, tabId)
     }
+  }
+
+  // The new tab remembers its opener, to go back to if it was only for a file.
+  function openPopupTab (targetUrl: string, openerTabId: string) {
+    if (!createBrowserTab(targetUrl, { incognito: isIncognitoTab(openerTabId) })) return
+    browserTabOpenersRef.current.set(browserTabsStateRef.current.activeTabId, openerTabId)
+    setStatus('Popup opened in new tab')
   }
 
   function openExternalAppLink (targetUrl: string) {
@@ -3500,6 +3545,7 @@ export default function App () {
             onRefresh={() => void refreshBrowserDownloads()}
             onRemove={(downloadId) => void removeBrowserDownload(downloadId)}
             onRetry={retryBrowserDownload}
+            onSaveToFiles={(downloadId) => void saveBrowserDownloadToFiles(downloadId)}
           />
         </View>
         <BrowserBackSwipe
@@ -4851,7 +4897,7 @@ export default function App () {
               }}
               onShouldStartLoadWithRequest={(request) => onBrowserShouldStartLoad(tab.id, entry, request)}
               onOpenWindow={(event) => onBrowserOpenWindow(tab.id, entry, event.nativeEvent.targetUrl)}
-              onFileDownload={(event) => confirmPageDownload(event.nativeEvent.downloadUrl)}
+              onFileDownload={(event) => confirmPageDownload(event.nativeEvent.downloadUrl, tab.id, getNativeViewTag(event))}
               scrollEventThrottle={200}
               onScroll={() => {
                 Keyboard.dismiss()
@@ -4871,7 +4917,9 @@ export default function App () {
                   setBrowserIsLoading(true)
                 }
               }}
-              onLoadEnd={() => {
+              onLoadEnd={(event) => {
+                const webViewTag = getNativeViewTag(event)
+                if (webViewTag !== null) browserWebViewsShowingPageRef.current.add(webViewTag)
                 if (
                   browserTabsStateRef.current.activeTabId === tab.id &&
                   isCurrentBrowserTabEntry(browserTabsStateRef.current, tab.id, entry)
@@ -5189,6 +5237,14 @@ function isBrowserWebViewSource (
   source: BrowserSource
 ): source is Extract<BrowserSource, { kind: 'web' | 'hyper' | 'error' }> {
   return source.kind === 'web' || source.kind === 'hyper' || source.kind === 'error'
+}
+
+// The native view an event came from. React Native adds its tag to every
+// event, and a view keeps its tag for as long as it lives. A ref will not do:
+// the WebView hands out a new one as it renders.
+function getNativeViewTag (event: { nativeEvent: object }) {
+  const tag = (event.nativeEvent as { target?: unknown }).target
+  return typeof tag === 'number' ? tag : null
 }
 
 function getBrowserEntryTitle (entry: BrowserHistoryEntry) {

@@ -199,6 +199,25 @@ export function describeBrowserDownload (url) {
   }
 }
 
+/**
+ * The name a server gives a download in Content-Disposition, RFC 5987's
+ * filename* first, or else the name from its address.
+ */
+export function downloadFilenameFromHeaders (headers, url) {
+  const disposition = Object.entries(headers || {})
+    .find(([name]) => String(name).toLowerCase() === 'content-disposition')?.[1]
+  const value = typeof disposition === 'string' ? disposition : ''
+  const extended = value.match(/filename\*\s*=\s*([^']*)'[^']*'([^;]+)/i)
+  if (extended) {
+    const name = safeDecodeURIComponent(extended[2].trim().replace(/^"|"$/g, ''))
+    if (name.trim()) return normalizeLocalDownloadFilename(name.split(/[\\/]/).pop())
+  }
+  const plain = value.match(/filename\s*=\s*(?:"([^"]*)"|([^;]+))/i)
+  const name = plain ? (plain[1] ?? plain[2] ?? '').trim() : ''
+  if (name) return normalizeLocalDownloadFilename(name.split(/[\\/]/).pop())
+  return describeBrowserDownload(url).name
+}
+
 export function addDownloadUrlFingerprint (name, url) {
   const normalizedName = normalizeLocalDownloadFilename(name)
 
