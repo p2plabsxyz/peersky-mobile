@@ -182,7 +182,7 @@ test('PeerChat answers the questions a first-time user actually asks', async () 
   // peer to peer means, how it works offline, on desktop and on several
   // devices, and what it costs. Nothing about blocking people or deleting
   // things yet.
-  for (const pattern of [/What is PeerChat/, /compare with WhatsApp, Telegram or Signal/, /phone number or email/, /friends find me/, /peer to peer mean/, /How does it work without internet/, /How private/, /What does it cost/, /big files/, /available on desktop/, /phone and my computer/, /Who makes PeerChat/]) {
+  for (const pattern of [/What is PeerChat/, /compare with WhatsApp, Telegram or Signal/, /phone number or email/, /friends find me/, /peer to peer mean/, /How does it work without internet/, /How private/, /Who can see my IP address/, /What does it cost/, /big files/, /available on desktop/, /phone and my computer/, /Who makes PeerChat/]) {
     assert.ok(PEERCHAT_WELCOME_QUESTIONS.some(({ q }) => pattern.test(q)), String(pattern))
   }
   for (const pattern of [/bothering me/, /delete my account/, /unsend/]) {
@@ -196,6 +196,12 @@ test('PeerChat answers the questions a first-time user actually asks', async () 
   }
   // Offline is explained once, with the welcome questions.
   assert.equal(PEERCHAT_QUESTIONS.filter(({ q }) => /without internet/.test(q)).length, 1)
+
+  // Straight about addresses: peers see it, as servers do in other apps, and a
+  // VPN is what keeps it from all of them.
+  assert.match(answer(/IP address/), /people you chat with/)
+  assert.match(answer(/IP address/), /even Signal’s servers see your IP address/)
+  assert.match(answer(/IP address/), /turn on a VPN/)
 
   // What PeerChat is, said outright: no accounts, no servers, works without
   // internet, end to end encrypted.
