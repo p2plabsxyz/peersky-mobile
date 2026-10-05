@@ -1,6 +1,7 @@
 import { Animated, StyleSheet } from 'react-native'
 
 import BackArrowIcon from '../assets/icons/bootstrap/arrow-left.svg'
+import ForwardArrowIcon from '../assets/icons/bootstrap/arrow-right.svg'
 
 const CHIP_SIZE = 44
 // Starts just off the edge and slides to its resting place, the way the system
@@ -16,12 +17,17 @@ const CHIP_TRAVEL = 28
 export function BrowserBackSwipe ({
   background,
   color,
+  direction = 'back',
   progress
 }: {
   background: string
   color: string
+  // Forward comes in from the right edge, as its swipe does.
+  direction?: 'back' | 'forward'
   progress: Animated.Value
 }) {
+  const forward = direction === 'forward'
+  const ArrowIcon = forward ? ForwardArrowIcon : BackArrowIcon
   return (
     <Animated.View
       // Purely an indicator. Taking touches here would fight the gesture that
@@ -29,6 +35,7 @@ export function BrowserBackSwipe ({
       pointerEvents='none'
       style={[
         styles.chip,
+        forward ? styles.chipForward : styles.chipBack,
         {
           backgroundColor: background,
           opacity: progress,
@@ -36,7 +43,7 @@ export function BrowserBackSwipe ({
             {
               translateX: progress.interpolate({
                 inputRange: [0, 1],
-                outputRange: [-CHIP_TRAVEL, 0]
+                outputRange: [forward ? CHIP_TRAVEL : -CHIP_TRAVEL, 0]
               })
             },
             {
@@ -49,7 +56,7 @@ export function BrowserBackSwipe ({
         }
       ]}
     >
-      <BackArrowIcon width={20} height={20} color={color} />
+      <ArrowIcon width={20} height={20} color={color} />
     </Animated.View>
   )
 }
@@ -61,7 +68,6 @@ const styles = StyleSheet.create({
     elevation: 6,
     height: CHIP_SIZE,
     justifyContent: 'center',
-    left: 8,
     marginTop: -CHIP_SIZE / 2,
     position: 'absolute',
     shadowColor: '#10131a',
@@ -71,5 +77,7 @@ const styles = StyleSheet.create({
     top: '50%',
     width: CHIP_SIZE,
     zIndex: 30
-  }
+  },
+  chipBack: { left: 8 },
+  chipForward: { right: 8 }
 })

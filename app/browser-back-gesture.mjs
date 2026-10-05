@@ -51,3 +51,35 @@ export function shouldCompleteBackSwipe ({ dx, vx }) {
   const speed = Number(vx) || 0
   return across > COMPLETE_TRAVEL || (across > FLICK_TRAVEL && speed > FLICK_VELOCITY)
 }
+
+// Forward is the same gesture from the other side: a drag that starts against
+// the right edge and pulls left. Only back had one, so a page you had come back
+// from could only be reached again with the toolbar arrow.
+
+/** Whether a touch began close enough to the right edge to start a forward swipe. */
+export function startsAtForwardEdge (startX, width) {
+  const x = Number(startX)
+  const edge = Number(width)
+  return Number.isFinite(x) && Number.isFinite(edge) && edge > 0 &&
+    x <= edge && x >= edge - BACK_EDGE_WIDTH
+}
+
+/**
+ * Whether a movement from the right edge is the forward gesture.
+ *
+ * @param {{ startX: number, width: number, dx: number, dy: number }} gesture
+ */
+export function isForwardEdgeSwipe ({ startX, width, dx, dy }) {
+  if (!startsAtForwardEdge(startX, width)) return false
+  return isBackEdgeSwipe({ startX: 0, dx: -(Number(dx) || 0), dy })
+}
+
+/** How far in the forward chip is, 0 to 1, for a finger that has travelled dx. */
+export function forwardSwipeProgress (dx) {
+  return backSwipeProgress(-(Number(dx) || 0))
+}
+
+/** Whether a released forward swipe should go forward or spring home. */
+export function shouldCompleteForwardSwipe ({ dx, vx }) {
+  return shouldCompleteBackSwipe({ dx: -(Number(dx) || 0), vx: -(Number(vx) || 0) })
+}

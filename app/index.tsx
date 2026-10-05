@@ -115,8 +115,11 @@ import {
 } from './hyper-bridge-host.mjs'
 import {
   backSwipeProgress,
+  forwardSwipeProgress,
   isBackEdgeSwipe,
-  shouldCompleteBackSwipe
+  isForwardEdgeSwipe,
+  shouldCompleteBackSwipe,
+  shouldCompleteForwardSwipe
 } from './browser-back-gesture.mjs'
 import {
   BROWSER_HOME_ICON,
@@ -3385,13 +3388,20 @@ export default function App () {
   // recognised here and walks the browser's own history instead. Scoped to the
   // left edge so it never fights a list or the horizontal toolbars.
   const browserBackSwipe = useRef(new Animated.Value(0)).current
+  const browserForwardSwipe = useRef(new Animated.Value(0)).current
+  // Which way the swipe under the finger goes, decided by the edge it began at.
+  const browserSwipeDirectionRef = useRef<'back' | 'forward'>('back')
+  const browserCanGoForwardRef = useRef(false)
+  const browserWindowWidthRef = useRef(browserWindowWidth)
+  browserWindowWidthRef.current = browserWindowWidth
   const peerChatGoBackRef = useRef<(() => boolean) | null>(null)
   const browserSettingsGoBackRef = useRef<(() => boolean) | null>(null)
   const [peerChatRoomOpen, setPeerChatRoomOpen] = useState(false)
   const browserBackGestureStartRef = useRef(0)
   const browserCanGoBackRef = useRef(false)
   const goBrowserBackRef = useRef(goBrowserBack)
-  const browserBackAvailable =
+  // Something over the page that back closes first.
+  const browserOverPage =
     Boolean(browserMediaTarget) ||
     browserZoomVisible ||
     browserMenuVisible ||
@@ -3400,10 +3410,27 @@ export default function App () {
     browserHistoryVisible ||
     browserDownloadsVisible ||
     browserSettingsVisible ||
-    peerChatRoomOpen ||
-    canBrowserGoBack
+    peerChatRoomOpen
+  const browserBackAvailable = browserOverPage || canBrowserGoBack
   browserCanGoBackRef.current = browserBackAvailable
   goBrowserBackRef.current = goBrowserBack
+  // Forward only ever means the page you came back from. With a sheet or a
+  // screen open over the browser there is nothing ahead to go to.
+  browserCanGoForwardRef.current = canBrowserGoForward && !browserOverPage
+  const goBrowserForwardRef = useRef(onBrowserForward)
+  goBrowserForwardRef.current = onBrowserForward
+  const claimBrowserEdgeSwipe = (gesture: { dx: number, dy: number }) => {
+    const startX = browserBackGestureStartRef.current
+    if (browserCanGoBackRef.current && isBackEdgeSwipe({ startX, dx: gesture.dx, dy: gesture.dy })) {
+      browserSwipeDirectionRef.current = 'back'
+      return true
+    }
+    if (browserCanGoForwardRef.current && isForwardEdgeSwipe({ startX, width: browserWindowWidthRef.current, dx: gesture.dx, dy: gesture.dy })) {
+      browserSwipeDirectionRef.current = 'forward'
+      return true
+    }
+    return false
+  }
   const browserBackGesture = useMemo(() => PanResponder.create({
     onStartShouldSetPanResponderCapture: (event) => {
       browserBackGestureStartRef.current = event.nativeEvent.pageX
@@ -3412,42 +3439,51 @@ export default function App () {
     // Claimed on capture, before the touch reaches whatever is underneath. A
     // WebView takes every touch it is given, which is why the swipe worked on
     // the React Native screens and nowhere else.
-    onMoveShouldSetPanResponderCapture: (_event, gesture) => (
-      browserCanGoBackRef.current &&
-      isBackEdgeSwipe({ startX: browserBackGestureStartRef.current, dx: gesture.dx, dy: gesture.dy })
-    ),
-    onMoveShouldSetPanResponder: (_event, gesture) => (
-      browserCanGoBackRef.current &&
-      isBackEdgeSwipe({ startX: browserBackGestureStartRef.current, dx: gesture.dx, dy: gesture.dy })
-    ),
+    onMoveShouldSetPanResponderCapture: (_event, gesture) => claimBrowserEdgeSwipeRef.current(gesture),
+    onMoveShouldSetPanResponder: (_event, gesture) => claimBrowserEdgeSwipeRef.current(gesture),
     // A scroll view underneath asks for the gesture back the moment the finger
     // drifts; letting it have one halfway through a swipe is what made it
     // need two or three tries elsewhere.
     onPanResponderTerminationRequest: () => false,
     // A chip left over from the last swipe would otherwise animate away under
     // the new one.
-    onPanResponderGrant: () => browserBackSwipe.stopAnimation(),
+    onPanResponderGrant: () => {
+      browserBackSwipe.stopAnimation()
+      browserForwardSwipe.stopAnimation()
+    },
     onPanResponderMove: (_event, gesture) => {
-      browserBackSwipe.setValue(backSwipeProgress(gesture.dx))
+      if (browserSwipeDirectionRef.current === 'forward') {
+        browserForwardSwipe.setValue(forwardSwipeProgress(gesture.dx))
+      } else {
+        browserBackSwipe.setValue(backSwipeProgress(gesture.dx))
+      }
     },
     onPanResponderRelease: (_event, gesture) => {
       // The step happens now and the chip fades over the page that follows,
       // rather than the page waiting on an animation to finish.
-      if (shouldCompleteBackSwipe(gesture)) goBrowserBackRef.current()
+      if (browserSwipeDirectionRef.current === 'forward') {
+        if (shouldCompleteForwardSwipe(gesture)) goBrowserForwardRef.current()
+      } else if (shouldCompleteBackSwipe(gesture)) {
+        goBrowserBackRef.current()
+      }
       settleBrowserBackSwipe()
     },
     onPanResponderTerminate: settleBrowserBackSwipe
-  }), [browserBackSwipe])
+  }), [browserBackSwipe, browserForwardSwipe])
+  const claimBrowserEdgeSwipeRef = useRef(claimBrowserEdgeSwipe)
+  claimBrowserEdgeSwipeRef.current = claimBrowserEdgeSwipe
 
   // Always lands on nothing, whether the fade ran or something cut it short.
   // Skipping the reset on an interrupted animation is what used to leave the
   // browser sitting to the right of where it belonged.
   function settleBrowserBackSwipe () {
-    Animated.timing(browserBackSwipe, {
-      duration: 160,
-      toValue: 0,
-      useNativeDriver: true
-    }).start(() => browserBackSwipe.setValue(0))
+    for (const chip of [browserBackSwipe, browserForwardSwipe]) {
+      Animated.timing(chip, {
+        duration: 160,
+        toValue: 0,
+        useNativeDriver: true
+      }).start(() => chip.setValue(0))
+    }
   }
 
   // The note workspace replaces the entire browser when it renders, so the
@@ -5139,6 +5175,12 @@ export default function App () {
           background={browserChrome.surface}
           color={browserChrome.text}
           progress={browserBackSwipe}
+        />
+        <BrowserBackSwipe
+          background={browserChrome.surface}
+          color={browserChrome.text}
+          direction='forward'
+          progress={browserForwardSwipe}
         />
 
         {browserPreferences.addressBarPosition === 'bottom' && browserToolbar}
