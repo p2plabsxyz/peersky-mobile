@@ -6,6 +6,7 @@ import { createBrowserAccessibilityScript } from '../../app/browser-accessibilit
 import { createForceDarkRemovalScript, createForceDarkScript } from '../../app/browser-force-dark.mjs'
 import { createBrowserMediaLongPressScript } from '../../app/browser-media.mjs'
 import { createBrowserPrintScript } from '../../app/browser-print.mjs'
+import { createPullRefreshScript } from '../../app/browser-pull-refresh.mjs'
 import { combineBrowserInjectedScripts, createBrowserFaviconScript } from '../../app/bookmarks/browser-favicon.mjs'
 import { createHyperBridgeScript } from '../../app/hyper-bridge.mjs'
 import { createHyperBridgeSettleScript } from '../../app/hyper-bridge-host.mjs'
@@ -45,6 +46,7 @@ const scripts = {
   favicon: createBrowserFaviconScript(),
   'media long press': createBrowserMediaLongPressScript({ token: TOKEN }),
   print: createBrowserPrintScript(TOKEN),
+  'pull to refresh': createPullRefreshScript(TOKEN),
   'PeerTunes bridge': PEERTUNES_SCAN_BRIDGE_SCRIPT
 }
 

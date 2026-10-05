@@ -16,6 +16,7 @@ import {
   Linking,
   Modal,
   NativeModules,
+  PixelRatio,
   Platform,
   Pressable,
   ScrollView,
@@ -139,6 +140,13 @@ import { useBrowserPreferences } from './settings/useBrowserPreferences'
 import { BrowserToolbar } from './BrowserToolbar'
 import { BrowserNavBar } from './BrowserNavBar'
 import { BrowserBackSwipe } from './BrowserBackSwipe'
+import { BrowserPullRefresh } from './BrowserPullRefresh'
+import {
+  createPullRefreshScript,
+  parsePullRefreshMessage,
+  pullRefreshOffset,
+  shouldReloadOnRelease
+} from './browser-pull-refresh.mjs'
 import { BrowserZoomSheet } from './BrowserZoomSheet'
 import { PublishedLinkSheet } from './PublishedLinkSheet'
 import { hasLinkedIdentity } from './hyperdrive/linked-identity'
@@ -1787,6 +1795,12 @@ export default function App () {
       return
     }
 
+    reloadBrowserPage()
+  }
+
+  // Reloads whatever the tab shows. The address bar's button stops a page that
+  // is still loading instead; a pull always reloads.
+  function reloadBrowserPage () {
     if (browserSource.kind === 'web') {
       cancelPendingBrowserLoad()
       browserWebViewRefs.current.get(browserTabsState.activeTabId)?.reload()
@@ -3508,6 +3522,50 @@ export default function App () {
   const activeBrowserDesktopView = browserTabsState.tabs
     .find((tab) => tab.id === browserTabsState.activeTabId)?.desktopView === true
 
+  // Android's pull to refresh: the page reports the pull (browser-pull-refresh)
+  // and this moves the card and reloads. iOS does it in the WebView.
+  const browserPullOffset = useRef(new Animated.Value(0)).current
+  const [browserPullRefreshing, setBrowserPullRefreshing] = useState(false)
+  const browserPullSawLoadingRef = useRef(false)
+  const browserPullTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  function settleBrowserPull () {
+    if (browserPullTimerRef.current) clearTimeout(browserPullTimerRef.current)
+    browserPullTimerRef.current = null
+    setBrowserPullRefreshing(false)
+    Animated.timing(browserPullOffset, { duration: 200, toValue: 0, useNativeDriver: true }).start()
+  }
+
+  function onBrowserPull (pull: { phase: string, distance: number }) {
+    if (browserPullRefreshing) return
+    if (pull.phase === 'move') {
+      browserPullOffset.setValue(pullRefreshOffset(pull.distance))
+      return
+    }
+    if (pull.phase !== 'end' || !shouldReloadOnRelease(pull.distance)) {
+      settleBrowserPull()
+      return
+    }
+    browserUserInteractedRef.current = true
+    browserPullSawLoadingRef.current = false
+    setBrowserPullRefreshing(true)
+    Animated.timing(browserPullOffset, { duration: 150, toValue: pullRefreshOffset(80), useNativeDriver: true }).start()
+    reloadBrowserPage()
+    // Gone once the page has loaded again, or after a while if it never says.
+    browserPullTimerRef.current = setTimeout(settleBrowserPull, 8000)
+  }
+
+  useEffect(() => {
+    if (!browserPullRefreshing) return
+    if (browserIsLoading) {
+      browserPullSawLoadingRef.current = true
+      return
+    }
+    if (!browserPullSawLoadingRef.current) return
+    const timer = setTimeout(settleBrowserPull, 250)
+    return () => clearTimeout(timer)
+  }, [browserIsLoading, browserPullRefreshing])
+
   // One definition of "back", so the Android button, the toolbar arrow and the
   // edge swipe cannot disagree about what the step before this one was.
   function goBrowserBack () {
@@ -4933,6 +4991,7 @@ export default function App () {
             browserAccessibilityScript,
             browserMediaScript,
             browserContentBlockingScript,
+            Platform.OS === 'android' ? createPullRefreshScript(browserMediaToken) : '',
             // After the page has drawn, so the check for a site that is already
             // dark reads the site's own background rather than an empty one.
             createForceDarkScript(browserPreferences.forceDarkWebsites),
@@ -5004,6 +5063,9 @@ export default function App () {
               // WKWebView only knows the page's history, which is why a search
               // result could not be swiped back to the home screen.
               allowsBackForwardNavigationGestures={false}
+              // Pull down at the top to reload, with the system's own spinner.
+              // Android's WebView has none, so its page reports the pull.
+              pullToRefreshEnabled={Platform.OS === 'ios'}
               cacheEnabled={!tabIncognito}
               // iOS gives each incognito tab a data store that is never
               // written to disk.
@@ -5102,6 +5164,14 @@ export default function App () {
                 if ((browserWebViewGenerationsRef.current.get(tab.id) || 0) !== webViewGeneration) return
                 if (!isCurrentBrowserTabEntry(browserTabsStateRef.current, tab.id, entry)) return
 
+                if (Platform.OS === 'android') {
+                  const pull = parsePullRefreshMessage(event.nativeEvent.data, browserMediaToken, PixelRatio.get())
+                  if (pull) {
+                    if (browserTabsStateRef.current.activeTabId === tab.id) onBrowserPull(pull)
+                    return
+                  }
+                }
+
                 if (handleHyperBridgeMessage(
                   tab.id,
                   event.nativeEvent.data,
@@ -5179,6 +5249,14 @@ export default function App () {
           )
         })}
 
+        {Platform.OS === 'android' && (browserSource.kind === 'web' || browserSource.kind === 'hyper') && (
+          <BrowserPullRefresh
+            background={browserChrome.surface}
+            color={browserChrome.text}
+            offset={browserPullOffset}
+            refreshing={browserPullRefreshing}
+          />
+        )}
         </View>
         <BrowserBackSwipe
           background={browserChrome.surface}
