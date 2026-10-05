@@ -56,7 +56,7 @@ There is no account on a server to delete. In PeerChat, Settings, Delete PeerCha
 
 ## Children
 
-PeerSky provides unrestricted browser access and is not directed to children, and we collect nothing from anyone. PeerChat is for people 16 and over.
+PeerSky provides unrestricted browser access and is not directed to children, and we collect nothing from anyone.
 
 The peer-to-peer web has no moderator. Media is screened on the device before it is sent and again when it arrives, text is filtered for abuse and slurs, and adult domains are blocked in links. None of that replaces judgement about who you share a room key with.
 

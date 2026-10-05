@@ -43,8 +43,7 @@ release.
   Answer the questions that way, and file whatever your country requires for
   mass-market encryption.
 - **Age rating.** Unrestricted web access and user-generated content (PeerChat)
-  both get answered yes, which puts PeerSky in the top age band. PeerChat's own
-  rules say 16 and over.
+  both get answered yes, which puts PeerSky in the top age band.
 - **URLs.** Privacy policy: `PRIVACY.md` on GitHub. Support: the repository, or
   contact@p2plabs.xyz.
 

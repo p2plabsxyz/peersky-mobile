@@ -19,8 +19,6 @@ objectionable content or abusive users. Do not send or post:
 - Someone else's private information, or messages pretending to be someone else.
 - Anything else that is illegal where you or the people you talk to live.
 
-You need to be at least 16 to use PeerChat.
-
 ## When someone breaks them
 
 - PeerChat filters messages for abuse, slurs and adult links, and refuses nude
