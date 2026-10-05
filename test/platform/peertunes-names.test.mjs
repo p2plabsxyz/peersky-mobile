@@ -16,3 +16,21 @@ test('PeerTunes does not use Apple product names', async () => {
   const runtime = await readFile(new URL('../../backend/peertunes/peertunes-runtime.mjs', import.meta.url), 'utf8')
   assert.doesNotMatch(runtime, /\bipod\b|click ?wheel|cover ?flow/i)
 })
+
+// Nor its exact details: the wheel's top shows a menu glyph, not MENU, and
+// the center button is a rounded square inside the round wheel.
+test('the PeerTunes wheel is not the iPod wheel', async () => {
+  const read = (path) => readFile(new URL(`../../assets/peertunes/${path}`, import.meta.url), 'utf8')
+  const [html, main, css, welcome, icons] = await Promise.all([
+    read('index.html'), read('js/main.js'), read('css/style.css'), read('js/welcome.js'), read('assets/icons.js')
+  ])
+  assert.match(html, /<span class="wz wz-menu" data-btn="menu"><\/span>/)
+  assert.match(main, /document\.querySelector\("\.wz-menu"\)\.innerHTML = PT\.icons\.menu;/)
+  assert.match(icons, /menu: `<svg viewBox="0 0 14 12">/)
+  for (const text of [html, welcome]) assert.doesNotMatch(text, /MENU/)
+  const center = css.slice(css.indexOf('.wheel-center {'), css.indexOf('}', css.indexOf('.wheel-center {')))
+  assert.match(center, /border-radius: 34%;/)
+  const welcomeCenter = css.slice(css.indexOf('.wl-center {'), css.indexOf('}', css.indexOf('.wl-center {')))
+  assert.match(welcomeCenter, /border-radius: 34%;/)
+  assert.match(welcome, /data-icon="menu"/)
+})
