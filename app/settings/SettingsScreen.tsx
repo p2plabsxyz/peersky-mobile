@@ -188,6 +188,10 @@ type SettingsScreenProps = {
   onWebsiteTextScaleChange: (scale: WebsiteTextScale) => void
   onYoutubeAdBlockingEnabledChange: (enabled: boolean) => void
   onResetTabs: () => void
+  // P2P Data deleted P2PMD's notes; false when Recent notes could not be cleared.
+  onP2pmdDataDeleted: () => boolean
+  // P2P Data removed offline folders, so PeerTunes drops songs from them.
+  onOfflineFoldersChanged: () => void
   onOpenUrl: (url: string, fromPage?: SettingsPage) => void
   onOpenHyperItem: (item: { name: string, source: 'fetched' | 'published', url: string }) => void
   onRestartRequired: () => void
@@ -324,8 +328,10 @@ export function SettingsScreen(props: SettingsScreenProps) {
             offlineNetworkAllowed={props.offlineNetworkAllowed}
             onCallRpc={props.onCallRpc}
             onDownloadOnlyOnWifiChange={props.onDownloadOnlyOnWifiChange}
+            onOfflineFoldersChanged={props.onOfflineFoldersChanged}
             onOpenItem={props.onOpenHyperItem}
             onOpenUrl={openUrl}
+            onP2pmdDataDeleted={props.onP2pmdDataDeleted}
           />
         )}
         {page === 'permissions' && <Permissions {...props} />}

@@ -14,6 +14,7 @@ import {
   isPeerTunesPageRequest,
   parsePeerTunesHapticRequest,
   parsePeerTunesKeepOfflineRequest,
+  parsePeerTunesKeptFoldersRequest,
   parsePeerTunesNowPlaying,
   parsePeerTunesScanRequest,
   serializeScanResult
@@ -51,6 +52,9 @@ type Props = {
   localUrl: string | null
   onEnsureServer: () => void
   onKeepOffline: (url: string) => Promise<{ ok: boolean, status?: string, error?: string }>
+  onKeptFolders: (urls: string[]) => Promise<{ ok: boolean, kept?: string[], error?: string }>
+  // Goes up each time folders are removed in Settings, P2P Data.
+  offlineFoldersVersion: number
   onOpenUrl: (url: string) => void
   onStatus: (message: string) => void
 }
@@ -62,6 +66,8 @@ export function PeerTunesScreen ({
   localUrl,
   onEnsureServer,
   onKeepOffline,
+  onKeptFolders,
+  offlineFoldersVersion,
   onOpenUrl,
   onStatus
 }: Props) {
@@ -168,6 +174,27 @@ export function PeerTunesScreen ({
     )
   }, [onKeepOffline])
 
+  // The page asks which of its folders are still kept on the device, and
+  // drops the songs of any that were removed.
+  const keptFolders = useCallback(async (requestId: string, urls: string[]) => {
+    let answer: { ok: boolean, kept?: string[], error?: string }
+    try {
+      answer = await onKeptFolders(urls)
+    } catch (error) {
+      answer = { ok: false, error: error instanceof Error ? error.message : String(error) }
+    }
+    webViewRef.current?.injectJavaScript(
+      `window.__peerskyResolveScan(${serializeScanResult(requestId)}, ${serializeScanResult(answer)}); true;`
+    )
+  }, [onKeptFolders])
+
+  // Folders removed while PeerTunes is open: it checks again, so their songs
+  // leave the library without a reload.
+  useEffect(() => {
+    if (!offlineFoldersVersion) return
+    webViewRef.current?.injectJavaScript('window.PT && window.PT.syncKeptFolders && window.PT.syncKeptFolders(); true;')
+  }, [offlineFoldersVersion])
+
   const beginScan = useCallback(async (requestId: string) => {
     const permission = cameraPermission?.granted
       ? cameraPermission
@@ -236,6 +263,11 @@ export function PeerTunesScreen ({
         const keep = parsePeerTunesKeepOfflineRequest(event.nativeEvent.data)
         if (keep) {
           void keepOffline(keep.requestId, keep.url)
+          return
+        }
+        const kept = parsePeerTunesKeptFoldersRequest(event.nativeEvent.data)
+        if (kept) {
+          void keptFolders(kept.requestId, kept.urls)
           return
         }
         const requestId = parsePeerTunesScanRequest(event.nativeEvent.data)

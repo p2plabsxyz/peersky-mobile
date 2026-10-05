@@ -208,6 +208,7 @@ import { isUsableImageType, sniffBase64ImageType } from './media/media-moderatio
 import { NsfwScanner } from './media/NsfwScanner'
 import { usePeerChatNotifications } from './peerchat/usePeerChatNotifications'
 import { PeerTunesScreen } from './peertunes/PeerTunesScreen'
+import { keptFolderUrls } from './peertunes/peertunes-screen.mjs'
 import { peerSkyWebViewNativeConfig } from './downloads/PeerSkyWebView'
 import { WEBVIEW_DECELERATION_RATE } from './webview-scroll.mjs'
 import {
@@ -330,6 +331,8 @@ type RpcResponse = {
   warning?: string | null
   noHost?: boolean
   notes?: P2pmdRoomHistoryEntry[]
+  // Offline folders, from RPC_HYPER_OFFLINE_LIST.
+  items?: unknown[]
   name?: string
 }
 
@@ -560,6 +563,9 @@ export default function App () {
   const [peertunesUrl, setPeertunesUrl] = useState<string | null>(null)
   const [peertunesLaunchSuffix, setPeertunesLaunchSuffix] = useState('')
   const [peertunesError, setPeertunesError] = useState<string | null>(null)
+  // Goes up when folders are removed in Settings, P2P Data, so PeerTunes
+  // drops the songs that came from them.
+  const [offlineFoldersVersion, setOfflineFoldersVersion] = useState(0)
   const [peertunesMounted, setPeertunesMounted] = useState(false)
   // Closing PeerTunes' tab, or burning the lot, is closing PeerTunes: the
   // player out of sight goes with it, and so does the music.
@@ -1493,6 +1499,18 @@ export default function App () {
       const status = (response.item as { status?: string } | undefined)?.status
       if (status === 'waiting-for-wifi') setStatus('Offline download waiting for Wi-Fi')
       return { ok: true, status }
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  }
+
+  // Which of the PeerTunes page's folders are still kept on the device.
+  async function peerTunesKeptFolders (urls: string[]) {
+    try {
+      const response = await callRpc(RPC_HYPER_OFFLINE_LIST, {})
+      if (!response.ok) return { ok: false, error: response.error || 'Unable to read offline folders.' }
+      const items = Array.isArray(response.items) ? response.items as { driveKey?: string, path?: string }[] : []
+      return { ok: true, kept: keptFolderUrls(urls, items) }
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : String(error) }
     }
@@ -2948,6 +2966,15 @@ export default function App () {
     if (hostCopy) await onP2pmdRoomCreate(roomKey, { requireCopy: true })
   }
 
+  // Settings, P2P Data deleted P2PMD's notes from this device, so its Recent
+  // notes would only lead to notes that are gone.
+  function forgetP2pmdRecents () {
+    if (!saveP2pmdRoomHistory([])) return false
+    p2pmdRoomHistoryRef.current = []
+    setP2pmdRoomHistory([])
+    return true
+  }
+
   function rememberP2pmdRoom (key: string, role: P2pmdRoomHistoryEntry['role'], label = '') {
     const rooms = recordP2pmdRoom(p2pmdRoomHistoryRef.current, { key, role, label }) as P2pmdRoomHistoryEntry[]
     if (rooms === p2pmdRoomHistoryRef.current) return
@@ -3633,6 +3660,8 @@ export default function App () {
             onWebsiteTextScaleChange={setWebsiteTextScale}
             onYoutubeAdBlockingEnabledChange={onYoutubeAdBlockingEnabledChange}
             onResetTabs={onBrowserResetTabs}
+            onP2pmdDataDeleted={forgetP2pmdRecents}
+            onOfflineFoldersChanged={() => setOfflineFoldersVersion((version) => version + 1)}
             onOpenUrl={(targetUrl, fromPage) => {
               closeBrowserSettings()
               listReturnRef.current = null
@@ -4739,6 +4768,8 @@ export default function App () {
               localUrl={peertunesUrl}
               onEnsureServer={() => void ensurePeerTunesServer()}
               onKeepOffline={keepPeerTunesFolderOffline}
+              onKeptFolders={peerTunesKeptFolders}
+              offlineFoldersVersion={offlineFoldersVersion}
               onOpenUrl={(targetUrl) => openBrowserUrlInNewTab(targetUrl)}
               onStatus={setStatus}
             />

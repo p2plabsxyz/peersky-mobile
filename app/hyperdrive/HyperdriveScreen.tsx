@@ -42,6 +42,7 @@ import {
 } from './recents.mjs'
 import {
   loadHyperdriveRecents,
+  onHyperdriveRecentsCleared,
   persistHyperdriveRecents
 } from './recents-store'
 import { MODAL_ORIENTATIONS } from '../modal-orientations'
@@ -100,6 +101,8 @@ const RECENT_FILTERS: Array<{ id: RecentFilter, label: string }> = [
 
 export function HyperdriveScreen ({ offlineNetworkAllowed, isDark, isLandscape, onCallRpc, onOpenItem, onOpenLinkDevice, onOpenUrl, onStatus }: Props) {
   const [recents, setRecents] = useState<HyperdriveItem[]>(loadHyperdriveRecents)
+  // Settings, P2P Data clears recents with this screen still open underneath.
+  useEffect(() => onHyperdriveRecentsCleared(() => setRecents(loadHyperdriveRecents())), [])
   const [items, setItems] = useState<HyperdriveItem[] | null>(null)
   const [location, setLocation] = useState<HyperdriveItem | null>(null)
   const [listingTruncated, setListingTruncated] = useState(false)

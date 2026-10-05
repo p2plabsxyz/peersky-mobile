@@ -34,11 +34,15 @@ export function isPeerTunesPageRequest (requestUrl, localUrl) {
 // a promise; native runs the camera and resolves it.
 export const PEERTUNES_SCAN_BRIDGE_SCRIPT = `(function () {
   var pending = {};
-  // One reply channel for both, keyed by the id that went out.
+  // One reply channel for every request, keyed by the id that went out. A
+  // scan answers with text; keeping a folder and checking folders answer with
+  // an object, which this used to turn into null, so "Keep On This Device"
+  // always said it could not.
   window.__peerskyResolveScan = function (id, value) {
     var resolve = pending[id];
     if (!resolve) return;
     delete pending[id];
+    if (value && typeof value === 'object') return resolve(value);
     resolve(typeof value === 'string' && value ? value : null);
   };
   // A page inside a WebView cannot reach the taptic engine, so it asks. One
@@ -63,6 +67,20 @@ export const PEERTUNES_SCAN_BRIDGE_SCRIPT = `(function () {
         type: 'peertunes-keep-offline',
         requestId: id,
         url: String(url || '')
+      }));
+    });
+  };
+  // Which of these hyper folders PeerSky still keeps on the device. A folder
+  // removed in Settings, P2P Data is no longer among them, and its songs go.
+  window.peerskyKeptFolders = function (urls) {
+    return new Promise(function (resolve) {
+      if (!window.ReactNativeWebView) return resolve(null);
+      var id = 'kept-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+      pending[id] = resolve;
+      window.ReactNativeWebView.postMessage(JSON.stringify({
+        type: 'peertunes-kept-folders',
+        requestId: id,
+        urls: Array.isArray(urls) ? urls.map(String) : []
       }));
     });
   };
@@ -129,6 +147,47 @@ export function parsePeerTunesKeepOfflineRequest (raw) {
   } catch {
     return null
   }
+}
+
+const MAX_KEPT_FOLDER_URLS = 500
+
+// The folders a page asks about, or null when the message is not that request.
+export function parsePeerTunesKeptFoldersRequest (raw) {
+  try {
+    const parsed = JSON.parse(String(raw || ''))
+    if (parsed?.type !== 'peertunes-kept-folders') return null
+    const requestId = parsed.requestId
+    if (!/^kept-[\w-]{1,64}$/.test(String(requestId))) return null
+    if (!Array.isArray(parsed.urls)) return null
+    const urls = parsed.urls
+      .filter((url) => typeof url === 'string' && /^hyper:\/\//i.test(url) && url.length <= 2048)
+      .slice(0, MAX_KEPT_FOLDER_URLS)
+    return { requestId, urls }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Which of a page's folder addresses an offline folder still covers. The
+ * offline list keeps a drive key and a folder path; a page's address is the
+ * one it asked to keep, so the two meet in the same key form. A folder kept
+ * under another spelling of its key is simply not reported, which keeps its
+ * songs rather than dropping them.
+ * @param {string[]} urls
+ * @param {{ driveKey?: string, path?: string }[]} items
+ */
+export function keptFolderUrls (urls, items) {
+  const folders = (Array.isArray(items) ? items : [])
+    .filter((item) => typeof item?.driveKey === 'string' && typeof item?.path === 'string')
+    .map((item) => `hyper://${item.driveKey.toLowerCase()}${item.path.endsWith('/') ? item.path : `${item.path}/`}`)
+  return urls.filter((url) => {
+    const match = /^hyper:\/\/([^/?#]+)(\/[^?#]*)?/i.exec(url)
+    if (!match) return false
+    const path = match[2] || '/'
+    const folder = `hyper://${match[1].toLowerCase()}${path.endsWith('/') ? path : `${path}/`}`
+    return folders.some((kept) => folder.startsWith(kept))
+  })
 }
 
 /**
