@@ -35,6 +35,7 @@ type BrowserNavBarProps = {
   palette: {
     border: string
     mutedText: string
+    seam: string
     shell: string
     surface: string
   }
@@ -133,7 +134,7 @@ export function BrowserNavBar ({
         styles.browserNavBar,
         {
           backgroundColor: isDark ? palette.surface : palette.shell,
-          borderTopColor: palette.border,
+          borderTopColor: palette.seam,
           // With the address bar directly above, its own top edge is the only
           // seam this chrome needs. A second line between the two bars cuts
           // them apart.

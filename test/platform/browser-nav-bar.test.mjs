@@ -70,7 +70,7 @@ describe('chrome polish', () => {
     // visible every time you tap the address bar.
     assert.doesNotMatch(toolbar, /borderBottomWidth: isAddressFocused/)
     assert.doesNotMatch(toolbar, /borderTopWidth: isAddressFocused/)
-    assert.match(toolbar, /const seamColor = isAddressFocused \? 'transparent' : palette\.border/)
+    assert.match(toolbar, /const seamColor = isAddressFocused \? 'transparent' : palette\.seam/)
     assert.equal((toolbar.match(/StyleSheet\.hairlineWidth/g) || []).length, 2)
   })
 })

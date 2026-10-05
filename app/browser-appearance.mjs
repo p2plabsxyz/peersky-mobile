@@ -8,6 +8,9 @@ export const BROWSER_PALETTES = {
     button: '#27272a',
     mutedText: '#9ca3af',
     selectedBackground: '#3f3f46',
+    // The hairline between the page and the bars: there, but only just, the
+    // way DuckDuckGo draws it. The border grey above read as a rule.
+    seam: '#323237',
     selectedControl: '#e5e7eb',
     shell: '#18181b',
     surface: '#27272a',
@@ -20,6 +23,7 @@ export const BROWSER_PALETTES = {
     button: '#e8f0fb',
     mutedText: '#687086',
     selectedBackground: '#edf5ff',
+    seam: '#e6ebf3',
     selectedControl: '#1f6fd1',
     shell: '#f5f8ff',
     surface: '#ffffff',

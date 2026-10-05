@@ -49,6 +49,7 @@ type BrowserToolbarProps = {
     border: string
     button: string
     mutedText: string
+    seam: string
     shell: string
     surface: string
     text: string
@@ -107,7 +108,7 @@ export function BrowserToolbar ({
   const toolbarBackground = isDark ? palette.surface : palette.shell
   // The suggestion list sits flush on this edge, so a line between them makes
   // it read as a separate card rather than the address bar opening out.
-  const seamColor = isAddressFocused ? 'transparent' : palette.border
+  const seamColor = isAddressFocused ? 'transparent' : palette.seam
 
   useEffect(() => {
     addressInputRef.current?.blur()
