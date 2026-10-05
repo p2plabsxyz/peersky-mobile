@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { getP2pmdEditorPage } from '../../backend/p2pmd/server.mjs'
 import { splitMarkdownSlides } from '../../backend/p2pmd/preview.mjs'
 import yjsBrowserScript from '../../backend/p2pmd/yjs-runtime.mjs'
+import * as Y from 'yjs'
 
 describe('p2pmd mobile editor page routing', () => {
   it('routes collaboration endpoints through the joined room base URL', () => {
@@ -203,7 +204,7 @@ describe('p2pmd mobile editor page routing', () => {
     assert.match(html, /[.]gutter-line[\s\S]*min-height: var\(--editor-line-height\)/)
     assert.match(html, /textarea[\s\S]*font: var\(--editor-font-size\)\/var\(--editor-line-height\)/)
     assert.match(html, /const oldText = ydoc && ytext [^\n]+ getYTextSnapshot\(\) : lastInputContent/)
-    assert.match(html, /const change = diffTextChange\(oldText, newText\)/)
+    assert.match(html, /const change = diffTextChange\(oldText, newText, caret\)/)
     assert.match(html, /const gutterUpdate = markEditedLines\(oldText, newText\)/)
     assert.match(html, /applyTextDiff\(ytext, oldText, newText, Y_ORIGIN_LOCAL_INPUT, change\)/)
     assert.match(html, /if \(gutterUpdate\) renderLineGutter\(gutterUpdate\)/)
@@ -230,5 +231,50 @@ describe('p2pmd mobile editor page routing', () => {
     assert.match(html, /ytextSnapshot[.]length === ytext[.]length/)
     assert.match(html, /ytextSnapshot = ytext[.]toString\(\)/)
     assert.match(html, /String\(peer[.]name \|\| ''\)[.]trim\(\)[.]charAt\(0\) \|\| '[?]'/)
+  })
+
+  // Two people writing at once: one types a new line at the end of a line
+  // near the bottom while the other types at the very end. The line has to
+  // stay where it was typed. It used to be placed after the note's last line
+  // break, in among the other person's typing.
+  it('keeps typed text where the caret was, with someone typing elsewhere', () => {
+    const html = getP2pmdEditorPage()
+    const source = html.slice(html.indexOf('function diffTextChange('), html.indexOf('function applyTextDiff('))
+    // eslint-disable-next-line no-new-func
+    const diffTextChange = new Function(`${source}; return diffTextChange`)()
+
+    // A line break typed before another one: the caret says which.
+    assert.deepEqual(diffTextChange('a\n', 'a\nb\n', 3), { prefix: 1, oldSuffix: 1, newSuffix: 3 })
+    assert.deepEqual(diffTextChange('a\n', 'a\nb\n'), { prefix: 2, oldSuffix: 2, newSuffix: 4 })
+    // Backspace on the first of two line breaks.
+    assert.deepEqual(diffTextChange('a\n\nb', 'a\nb', 1), { prefix: 1, oldSuffix: 2, newSuffix: 1 })
+    // A word replaced, as autocorrect does, and a caret that does not fit the
+    // change: the ends are trimmed as before.
+    assert.deepEqual(diffTextChange('teh cat', 'the cat', 3), { prefix: 1, oldSuffix: 3, newSuffix: 3 })
+    assert.deepEqual(diffTextChange('a\n', 'a\nb\n', 0), { prefix: 2, oldSuffix: 2, newSuffix: 4 })
+
+    for (const [first, second] of [[1, 2], [2, 1]]) {
+      const base = new Y.Doc()
+      base.getText('t').insert(0, 'L1\nL2\n')
+      const alice = new Y.Doc()
+      const bob = new Y.Doc()
+      alice.clientID = first
+      bob.clientID = second
+      Y.applyUpdate(alice, Y.encodeStateAsUpdate(base))
+      Y.applyUpdate(bob, Y.encodeStateAsUpdate(base))
+
+      // Alice adds a line after L2, Bob types at the end, at the same time.
+      const before = alice.getText('t').toString()
+      const after = 'L1\nL2\nL3 alice\n'
+      const { prefix, oldSuffix, newSuffix } = diffTextChange(before, after, 'L1\nL2\nL3 alice'.length)
+      alice.getText('t').delete(prefix, oldSuffix - prefix)
+      alice.getText('t').insert(prefix, after.slice(prefix, newSuffix))
+      bob.getText('t').insert(bob.getText('t').length, 'bob at the end')
+
+      Y.applyUpdate(alice, Y.encodeStateAsUpdate(bob))
+      Y.applyUpdate(bob, Y.encodeStateAsUpdate(alice))
+      assert.equal(alice.getText('t').toString(), 'L1\nL2\nL3 alice\nbob at the end')
+      assert.equal(bob.getText('t').toString(), alice.getText('t').toString())
+    }
   })
 })

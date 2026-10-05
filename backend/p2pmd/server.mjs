@@ -2365,7 +2365,26 @@ export function getP2pmdEditorPage () {
         }
       }
 
-      function diffTextChange(oldText, newText) {
+      // Trimming what matches at both ends finds what changed, but not always
+      // where: a line break typed next to another one could be either, and the
+      // CRDT keeps the place it is given. Trimming picked the later one, so a
+      // line typed just before a note's last line break went after it, into
+      // whatever someone else was typing at the end. Typing leaves the caret
+      // right after what was typed, or where text was deleted, so when the
+      // caret fits the change it says where.
+      function diffTextChange(oldText, newText, caret = null) {
+        const grown = newText.length - oldText.length
+        if (Number.isInteger(caret) && caret >= 0 && caret <= newText.length && grown !== 0) {
+          if (grown > 0 && caret >= grown) {
+            const at = caret - grown
+            if (newText.startsWith(oldText.slice(0, at)) && newText.endsWith(oldText.slice(at))) {
+              return { prefix: at, oldSuffix: at, newSuffix: caret }
+            }
+          } else if (grown < 0 && oldText.startsWith(newText.slice(0, caret)) && oldText.endsWith(newText.slice(caret))) {
+            return { prefix: caret, oldSuffix: caret - grown, newSuffix: caret }
+          }
+        }
+
         let prefix = 0
         const minLength = Math.min(oldText.length, newText.length)
         while (prefix < minLength && oldText[prefix] === newText[prefix]) prefix += 1
@@ -2437,7 +2456,8 @@ export function getP2pmdEditorPage () {
         markLocalPeerTyping()
         const newText = input.value
         const oldText = ydoc && ytext ? getYTextSnapshot() : lastInputContent
-        const change = diffTextChange(oldText, newText)
+        const caret = input.selectionStart === input.selectionEnd ? input.selectionStart : null
+        const change = diffTextChange(oldText, newText, caret)
         const gutterUpdate = markEditedLines(oldText, newText)
         lastInputContent = newText
         if (gutterUpdate) renderLineGutter(gutterUpdate)
