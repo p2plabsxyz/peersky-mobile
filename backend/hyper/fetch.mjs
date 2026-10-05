@@ -30,7 +30,7 @@ import {
   rememberPageDrive
 } from './page-access.mjs'
 import { refreshHyperRuntimeNetwork } from './network-refresh.mjs'
-import { createHyperUrl, getHyperSearch, getHyperVisibility, parseHyperUrl } from './url.mjs'
+import { createHyperUrl, getHyperSearch, getHyperVisibility, parseHyperUrl, toHyperFetchUrl } from './url.mjs'
 import { writeHyperResponseToFile } from './binary-response.mjs'
 import { parseMultipartFormData } from './form-data.mjs'
 import { configureHyperReadTimeout } from './read-policy.mjs'
@@ -378,11 +378,13 @@ export function refreshHyperNetworkFor (url) {
   return withHyperRuntimeForAddress(url, (runtime) => refreshHyperRuntimeNetwork(runtime))
 }
 
+// What the media links and PeerTunes read through. A song or a picture with
+// "&" or "," in its name would not load until the address was respelled.
 export function routedHyperFetch (url, options) {
   return withHyperRuntimeForAddress(url, async (runtime) => {
     await prepareHyperRead(runtime, url)
     const fetch = await getHyperFetch(runtime)
-    return fetch(url, options)
+    return fetch(toHyperFetchUrl(url), options)
   })
 }
 
