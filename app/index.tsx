@@ -139,6 +139,7 @@ import { BrowserBackSwipe } from './BrowserBackSwipe'
 import { BrowserZoomSheet } from './BrowserZoomSheet'
 import { PublishedLinkSheet } from './PublishedLinkSheet'
 import { hasLinkedIdentity } from './hyperdrive/linked-identity'
+import { useHyperNetworkRefresh } from './useHyperNetworkRefresh'
 import { P2pmdNewNoteSheet } from './P2pmdNewNoteSheet'
 import { getP2pmdSyncDisplay } from './p2pmd-sync-status.mjs'
 import PencilSquareIcon from '../assets/icons/bootstrap/pencil-square.svg'
@@ -546,6 +547,7 @@ export default function App () {
   const [activeTab, setActiveTab] = useState<RuntimeTab>('hyper')
   const [requestedPeerChatRoomKey, setRequestedPeerChatRoomKey] = useState<string | null>(null)
   const [requestedPeerChatPeerId, setRequestedPeerChatPeerId] = useState<string | null>(null)
+  useHyperNetworkRefresh(Boolean(identityStoragePath), () => callRpc(RPC_HYPER_REFRESH, {}))
   const peerChatNotifications = usePeerChatNotifications({
     isPeerChatVisible: browserSource.kind === 'app' && activeTab === 'peerchat',
     isRuntimeReady: Boolean(identityStoragePath),
