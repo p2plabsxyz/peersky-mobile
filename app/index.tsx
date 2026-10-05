@@ -456,6 +456,7 @@ export default function App () {
     setSearchEngine,
     setShowFullAddress,
     setTheme,
+    setToolbarButton,
     setWebsiteTextScale,
     setYoutubeAdBlockingEnabled
   } = useBrowserPreferences()
@@ -3713,6 +3714,7 @@ export default function App () {
             searchEngine={browserPreferences.searchEngine}
             showFullAddress={browserPreferences.showFullAddress}
             theme={browserPreferences.theme}
+            toolbarButton={browserPreferences.toolbarButton}
             websiteTextScale={browserPreferences.websiteTextScale}
             youtubeAdBlockingEnabled={browserPreferences.youtubeAdBlockingEnabled}
             storagePath={identityStoragePath}
@@ -3724,6 +3726,7 @@ export default function App () {
               void applyAppIcon(color)
             }}
             onForceDarkWebsitesChange={setForceDarkWebsites}
+            onToolbarButtonChange={setToolbarButton}
             onCallRpc={(command, data = {}) => callRpc(command, data)}
             onContentBlockingEnabledChange={onContentBlockingEnabledChange}
             onClose={closeBrowserSettings}
@@ -4060,10 +4063,16 @@ export default function App () {
       // above, so the navigation bar does not draw a second one.
       showTopBorder={browserPreferences.addressBarPosition === 'top'}
       tabCount={browserTabsState.tabs.length}
+      toolbarButton={browserPreferences.toolbarButton}
       onBack={onBrowserBack}
       onBurnTabs={onBrowserBurnTabs}
       onCloseMenu={() => setBrowserMenuVisible(false)}
       onForward={onBrowserForward}
+      onGoHome={() => {
+        browserUserInteractedRef.current = true
+        cancelPendingBrowserLoad()
+        openBrowserHome()
+      }}
       onNewTab={onBrowserNewTab}
       onNewIncognitoTab={onBrowserNewIncognitoTab}
       onOpenBookmarks={onBrowserOpenBookmarks}

@@ -2,10 +2,14 @@ import { Pressable, StyleSheet, Switch, Text, View } from 'react-native'
 import { AppLogo } from '../AppLogo'
 import { APP_LOGO_COLORS } from '../app-logo-colors.mjs'
 import { BROWSER_PALETTES } from '../browser-appearance.mjs'
+import { TOOLBAR_BUTTON_ICONS } from '../toolbar-button-icons'
+import { TOOLBAR_BUTTONS } from '../toolbar-button.mjs'
 import type {
   AddressBarPosition,
-  BrowserTheme
+  BrowserTheme,
+  ToolbarButton
 } from './useBrowserPreferences'
+import ChevronRightIcon from '../../assets/icons/bootstrap/chevron-right.svg'
 import {
   ChoiceGroup,
   SettingCopy,
@@ -19,8 +23,10 @@ type AppearanceProps = {
   persistenceError: string | null
   showFullAddress: boolean
   theme: BrowserTheme
+  toolbarButton: ToolbarButton
   onAddressBarPositionChange: (position: AddressBarPosition) => void
   onAppLogoColorChange: (color: string) => void
+  onOpenToolbarButton: () => void
   onShowFullAddressChange: (enabled: boolean) => void
   onThemeChange: (theme: BrowserTheme) => void
 }
@@ -31,12 +37,16 @@ export function Appearance ({
   persistenceError,
   showFullAddress,
   theme,
+  toolbarButton,
   onAddressBarPositionChange,
   onAppLogoColorChange,
+  onOpenToolbarButton,
   onShowFullAddressChange,
   onThemeChange
 }: AppearanceProps) {
   const isDark = useSettingsDarkMode()
+  const ToolbarIcon = TOOLBAR_BUTTON_ICONS[toolbarButton] || TOOLBAR_BUTTON_ICONS.burn
+  const toolbarTitle = TOOLBAR_BUTTONS.find((button) => button.id === toolbarButton)?.title || 'Burn Tabs and Data'
 
   return (
     <View style={[styles.page, isDark ? styles.pageDark : null]}>
@@ -114,6 +124,21 @@ export function Appearance ({
           })}
         </View>
       </SettingsSection>
+
+      {/* The button in the middle of the bar at the bottom, the burn button
+          unless another is chosen. */}
+      <SettingsSection title='Toolbar button'>
+        <Pressable
+          accessibilityRole='button'
+          accessibilityLabel={`Toolbar button, ${toolbarTitle}`}
+          style={({ pressed }) => [styles.settingRow, pressed ? styles.logoPressed : null]}
+          onPress={onOpenToolbarButton}
+        >
+          <ToolbarIcon width={22} height={22} color={isDark ? '#f1f2f7' : '#1f2a44'} />
+          <Text style={[styles.toolbarTitle, isDark ? styles.toolbarTitleDark : null]}>{toolbarTitle}</Text>
+          <ChevronRightIcon width={16} height={16} color={isDark ? '#aab4c8' : '#687086'} />
+        </Pressable>
+      </SettingsSection>
     </View>
   )
 }
@@ -138,6 +163,8 @@ const styles = StyleSheet.create({
   logoRingSelected: { borderColor: '#1f6fd1' },
   logoRingSelectedDark: { borderColor: '#7eb2ee' },
   logoLabel: { color: '#687086', fontSize: 12, fontWeight: '700' },
+  toolbarTitle: { color: '#1f2a44', flex: 1, fontSize: 15, fontWeight: '600' },
+  toolbarTitleDark: { color: '#f1f2f7' },
   logoLabelDark: { color: '#aab4c8' },
   page: {
     backgroundColor: '#f5f8fc',

@@ -5,12 +5,14 @@ import { Keyboard, Platform, Pressable, StyleSheet, Text, View } from 'react-nat
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { BrowserOverflowMenu } from './settings/BrowserOverflowMenu'
+import type { ToolbarButton } from './settings/useBrowserPreferences'
 import { styles } from './styles'
+import { TOOLBAR_BUTTON_ACTIVE_ICONS, TOOLBAR_BUTTON_ICONS } from './toolbar-button-icons'
+import { burnsFromMenu } from './toolbar-button.mjs'
 import BackIcon from '../assets/icons/bootstrap/arrow-left.svg'
 import ForwardIcon from '../assets/icons/bootstrap/arrow-right.svg'
 import BookmarksIcon from '../assets/icons/bootstrap/bookmarks.svg'
 import DisplayIcon from '../assets/icons/bootstrap/display.svg'
-import FireIcon from '../assets/icons/bootstrap/fire.svg'
 
 // The same weight as the address bar's own icons, so the two bars read as
 // one set of controls.
@@ -42,10 +44,14 @@ type BrowserNavBarProps = {
   shareActionAvailable: boolean
   showTopBorder: boolean
   tabCount: number
+  // What sits in the middle of the bar: the burn button unless another was
+  // chosen in Settings > Appearance.
+  toolbarButton: ToolbarButton
   onBack: () => void
   onBurnTabs: () => void
   onCloseMenu: () => void
   onForward: () => void
+  onGoHome: () => void
   onNewTab: () => void
   onNewIncognitoTab: () => void
   onOpenBookmarks: () => void
@@ -88,10 +94,12 @@ export function BrowserNavBar ({
   shareActionAvailable,
   showTopBorder,
   tabCount,
+  toolbarButton,
   onBack,
   onBurnTabs,
   onCloseMenu,
   onForward,
+  onGoHome,
   onNewTab,
   onNewIncognitoTab,
   onOpenBookmarks,
@@ -127,6 +135,37 @@ export function BrowserNavBar ({
     Keyboard.dismiss()
     action()
   }
+
+  // The middle button, whichever it is. Off, like back and forward, when it has
+  // nothing to act on here: sharing an app screen, bookmarking the home page.
+  const middle: Record<ToolbarButton, { label: string, disabled?: boolean, active?: boolean, onPress: () => void }> = {
+    bookmark: {
+      label: isBookmarked ? 'Remove bookmark' : 'Add bookmark',
+      active: isBookmarked,
+      disabled: !bookmarkActionAvailable || bookmarksDisabled,
+      onPress: onToggleBookmark
+    },
+    favourite: {
+      label: isFavourited ? 'Remove favourite' : 'Add favourite',
+      active: isFavourited,
+      disabled: !bookmarkActionAvailable || favouritesDisabled,
+      onPress: onToggleFavourite
+    },
+    bookmarks: { label: 'Bookmarks', disabled: bookmarksDisabled, onPress: onOpenBookmarks },
+    burn: { label: 'Burn tabs, history and cached data', onPress: onBurnTabs },
+    downloads: { label: 'Downloads', onPress: onOpenDownloads },
+    history: { label: 'History', onPress: onOpenHistory },
+    home: { label: 'Home', disabled: isHome, onPress: onGoHome },
+    incognito: { label: 'New incognito tab', disabled: newTabDisabled, onPress: onNewIncognitoTab },
+    'new-tab': { label: 'New tab', disabled: newTabDisabled, onPress: onNewTab },
+    settings: { label: 'Settings', onPress: onOpenSettings },
+    share: { label: 'Share', disabled: !shareActionAvailable, onPress: onSharePage },
+    zoom: { label: 'Zoom', disabled: !shareActionAvailable, onPress: onOpenZoom }
+  }
+  const middleAction = middle[toolbarButton] || middle.burn
+  const middleIcon = (middleAction.active && TOOLBAR_BUTTON_ACTIVE_ICONS[toolbarButton]) ||
+    TOOLBAR_BUTTON_ICONS[toolbarButton] ||
+    TOOLBAR_BUTTON_ICONS.burn
 
   return (
     <View
@@ -182,12 +221,14 @@ export function BrowserNavBar ({
           </>
           )}
 
-      {/* Close every tab and clear what browsing left behind, in one press. */}
+      {/* Close every tab and clear what browsing left behind, in one press,
+          unless another button was chosen for this place. */}
       <NavButton
-        icon={FireIcon}
-        label='Burn tabs, history and cached data'
+        disabled={middleAction.disabled}
+        icon={middleIcon}
+        label={middleAction.label}
         palette={palette}
-        onPress={() => navigate(onBurnTabs)}
+        onPress={() => navigate(middleAction.onPress)}
       />
 
       <Pressable
@@ -218,6 +259,8 @@ export function BrowserNavBar ({
           pendingMenuActionRef.current = null
           action?.()
         }}
+        // With another button in its place on the bar, burning moves here.
+        {...(burnsFromMenu(toolbarButton) ? { onBurnTabs: () => afterMenuCloses(onBurnTabs) } : {})}
         onNewTab={onNewTab}
         onNewIncognitoTab={onNewIncognitoTab}
         onOpenBookmarks={onOpenBookmarks}

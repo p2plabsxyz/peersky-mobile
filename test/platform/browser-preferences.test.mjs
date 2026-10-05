@@ -29,6 +29,7 @@ describe('browser preferences', () => {
       searchEngine: 'custom',
       showFullAddress: true,
       theme: 'dark',
+      toolbarButton: 'new-tab',
       websiteTextScale: 150,
       youtubeAdBlockingEnabled: false
     }
@@ -37,6 +38,15 @@ describe('browser preferences', () => {
       parseBrowserPreferences(serializeBrowserPreferences(preferences)),
       preferences
     )
+  })
+
+  // The middle of the bottom bar: the burn button unless another is chosen,
+  // and the burn button again for anything this build does not know.
+  test('keeps the toolbar button to the ones the bar can show', () => {
+    assert.equal(parseBrowserPreferences({}).toolbarButton, 'burn')
+    assert.equal(parseBrowserPreferences({ toolbarButton: 'zoom' }).toolbarButton, 'zoom')
+    assert.equal(parseBrowserPreferences({ toolbarButton: 'launch-rockets' }).toolbarButton, 'burn')
+    assert.equal(parseBrowserPreferences({ toolbarButton: 42 }).toolbarButton, 'burn')
   })
 
   test('keeps only real hyper sites and real answers for publishing', () => {

@@ -24,6 +24,7 @@ import { BROWSER_PALETTES } from '../browser-appearance.mjs'
 import { RPC_HYPER_LAN_STATUS } from '../../backend/rpc/commands.mjs'
 import { LinkDeviceSettings } from './LinkDevice'
 import { Appearance } from './Appearance'
+import { ToolbarButtonSettings } from './ToolbarButton'
 import { Accessibility } from './Accessibility'
 import { DataClearing } from './DataClearing'
 import { General } from './General'
@@ -43,6 +44,7 @@ import type {
   ExternalLinkBehavior,
   PublishingDecision,
   SearchEngine,
+  ToolbarButton,
   WebsiteTextScale
 } from './useBrowserPreferences'
 import ArrowLeftIcon from '../../assets/icons/bootstrap/arrow-left.svg'
@@ -71,6 +73,7 @@ export type SettingsPage =
   | 'lan-discovery'
   | 'about'
   | 'licenses'
+  | 'toolbar-button'
 
 type StorageFileItem = {
   name: string
@@ -165,6 +168,7 @@ type SettingsScreenProps = {
   searchEngine: SearchEngine
   showFullAddress: boolean
   theme: BrowserTheme
+  toolbarButton: ToolbarButton
   websiteTextScale: WebsiteTextScale
   youtubeAdBlockingEnabled: boolean
   storagePath: string
@@ -185,6 +189,7 @@ type SettingsScreenProps = {
   onSearchEngineChange: (searchEngine: SearchEngine) => void
   onShowFullAddressChange: (enabled: boolean) => void
   onThemeChange: (theme: BrowserTheme) => void
+  onToolbarButtonChange: (button: ToolbarButton) => void
   onWebsiteTextScaleChange: (scale: WebsiteTextScale) => void
   onYoutubeAdBlockingEnabledChange: (enabled: boolean) => void
   onResetTabs: () => void
@@ -299,6 +304,15 @@ export function SettingsScreen(props: SettingsScreenProps) {
         onOpenPage={(nextPage) => changePage(nextPage, 1)}
       />
     )
+  } else if (page === 'toolbar-button') {
+    content = (
+      <SettingsSubpage
+        title='Toolbar Button'
+        onBack={() => changePage('appearance', -1)}
+      >
+        <ToolbarButtonSettings selected={props.toolbarButton} onSelect={props.onToolbarButtonChange} />
+      </SettingsSubpage>
+    )
   } else if (page === 'licenses') {
     // A long list of its own, so it scrolls itself rather than inside the
     // page's ScrollView.
@@ -319,7 +333,9 @@ export function SettingsScreen(props: SettingsScreenProps) {
       >
         {page === 'general' && <General {...props} />}
         {page === 'accessibility' && <Accessibility {...props} />}
-        {page === 'appearance' && <Appearance {...props} />}
+        {page === 'appearance' && (
+          <Appearance {...props} onOpenToolbarButton={() => changePage('toolbar-button', 1)} />
+        )}
         {page === 'data-clearing' && <DataClearing {...props} />}
         {page === 'privacy' && <Privacy {...props} onOpenUrl={openUrl} />}
         {page === 'p2p-storage' && (
@@ -376,8 +392,11 @@ export function SettingsScreen(props: SettingsScreenProps) {
     transition.stopAnimation()
     transition.setValue(reduceMotion ? 1 : 0)
     setTransitionDirection(-1)
-    // The licenses open from About, so back returns there.
-    setPage(pageRef.current === 'licenses' ? 'about' : 'main')
+    // The licenses open from About, and the toolbar button from Appearance, so
+    // back returns there.
+    setPage(pageRef.current === 'licenses'
+      ? 'about'
+      : pageRef.current === 'toolbar-button' ? 'appearance' : 'main')
     return true
   }, [props.closeOnBack, props.initialPage, reduceMotion, transition])
 

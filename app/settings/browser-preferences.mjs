@@ -1,6 +1,7 @@
 import { DEFAULT_APP_LOGO_COLOR, normalizeAppLogoColor } from '../app-logo-colors.mjs'
 import { EXTERNAL_LINK_BEHAVIORS } from '../browser-permissions.mjs'
 import { normalizeCustomSearchUrl } from '../browser-shell.mjs'
+import { DEFAULT_TOOLBAR_BUTTON, normalizeToolbarButton } from '../toolbar-button.mjs'
 
 export const DEFAULT_BROWSER_PREFERENCES = {
   addressBarPosition: 'top',
@@ -15,6 +16,7 @@ export const DEFAULT_BROWSER_PREFERENCES = {
   searchEngine: 'duckduckgo',
   showFullAddress: false,
   theme: 'system',
+  toolbarButton: DEFAULT_TOOLBAR_BUTTON,
   websiteTextScale: 100,
   youtubeAdBlockingEnabled: true
 }
@@ -74,6 +76,7 @@ export function parseBrowserPreferences (serialized) {
     theme: BROWSER_THEMES.includes(value?.theme)
       ? value.theme
       : DEFAULT_BROWSER_PREFERENCES.theme,
+    toolbarButton: normalizeToolbarButton(value?.toolbarButton),
     websiteTextScale: WEBSITE_TEXT_SCALES.includes(value?.websiteTextScale)
       ? value.websiteTextScale
       : DEFAULT_BROWSER_PREFERENCES.websiteTextScale,

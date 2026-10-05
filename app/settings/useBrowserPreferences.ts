@@ -19,6 +19,19 @@ export type BrowserTheme = 'system' | 'light' | 'dark'
 export type ExternalLinkBehavior = 'ask' | 'allow' | 'block'
 export type WebsiteTextScale = 80 | 100 | 120 | 150
 export type PublishingDecision = 'allow' | 'block'
+export type ToolbarButton =
+  | 'bookmark'
+  | 'favourite'
+  | 'bookmarks'
+  | 'burn'
+  | 'downloads'
+  | 'history'
+  | 'home'
+  | 'incognito'
+  | 'new-tab'
+  | 'settings'
+  | 'share'
+  | 'zoom'
 
 export type AppLogoColor = string
 
@@ -35,6 +48,7 @@ export type BrowserPreferences = {
   searchEngine: SearchEngine
   showFullAddress: boolean
   theme: BrowserTheme
+  toolbarButton: ToolbarButton
   websiteTextScale: WebsiteTextScale
   youtubeAdBlockingEnabled: boolean
 }
@@ -142,6 +156,9 @@ export function useBrowserPreferences () {
     },
     setTheme: (theme: BrowserTheme) => {
       return updatePreferences({ theme })
+    },
+    setToolbarButton: (toolbarButton: ToolbarButton) => {
+      return updatePreferences({ toolbarButton })
     },
     setWebsiteTextScale: (websiteTextScale: WebsiteTextScale) => {
       return updatePreferences({ websiteTextScale })

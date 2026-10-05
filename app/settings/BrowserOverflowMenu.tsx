@@ -5,6 +5,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import CheckIcon from '../../assets/icons/bootstrap/check2.svg'
 import DisplayIcon from '../../assets/icons/bootstrap/display.svg'
 import DownloadIcon from '../../assets/icons/bootstrap/download.svg'
+import FireIcon from '../../assets/icons/bootstrap/fire.svg'
 import HistoryIcon from '../../assets/icons/bootstrap/clock-history.svg'
 import IncognitoIcon from '../../assets/icons/bootstrap/incognito.svg'
 import BookmarksIcon from '../../assets/icons/bootstrap/bookmarks.svg'
@@ -42,6 +43,8 @@ type BrowserOverflowMenuProps = {
   newTabDisabled?: boolean
   shareActionAvailable?: boolean
   visible: boolean
+  // Only when the burn button is not on the bar.
+  onBurnTabs?: () => void
   onClose: () => void
   onDismissed?: () => void
   onNewTab: () => void
@@ -70,6 +73,7 @@ export function BrowserOverflowMenu ({
   newTabDisabled = false,
   shareActionAvailable = false,
   visible,
+  onBurnTabs,
   onClose,
   onDismissed,
   onNewTab,
@@ -315,7 +319,19 @@ export function BrowserOverflowMenu ({
                     isDark={isDark}
                     label='Downloads'
                     onPress={onOpenDownloads}
-                  />
+                  />,
+                  ...(onBurnTabs
+                    ? [
+                      <MenuItem
+                        key='burn'
+                        cardColor={cardColor}
+                        icon={<FireIcon {...iconProps} />}
+                        isDark={isDark}
+                        label='Burn Tabs and Data'
+                        onPress={onBurnTabs}
+                      />
+                      ]
+                    : [])
                 ], palette.border)}
               </View>
             </ScrollView>
