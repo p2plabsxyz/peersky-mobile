@@ -277,4 +277,51 @@ describe('p2pmd mobile editor page routing', () => {
       assert.equal(bob.getText('t').toString(), alice.getText('t').toString())
     }
   })
+
+  // The host crashes right after typing and comes back from its last save,
+  // while the others kept writing. Before, the host could never take their
+  // later edits, and the note stayed split until someone noticed.
+  it('catches a host restarted from an older save up with the peers', () => {
+    const html = getP2pmdEditorPage()
+    const source = html.slice(html.indexOf('function compareWithHost('), html.indexOf('let syncingWithHost'))
+    // eslint-disable-next-line no-new-func
+    const compareWithHost = new Function(`${source}; return compareWithHost`)()
+    const text = (doc) => doc.getText('content').toString()
+    const copy = (from, clientID) => {
+      const doc = new Y.Doc()
+      doc.clientID = clientID
+      Y.applyUpdate(doc, Y.encodeStateAsUpdate(from))
+      return doc
+    }
+
+    const host = new Y.Doc()
+    host.clientID = 1
+    host.getText('content').insert(0, 'L1\n')
+    const saved = Y.encodeStateAsUpdate(host)
+    host.getText('content').insert(3, 'L2 typed before the crash\n')
+    const phone = copy(host, 2)
+    phone.getText('content').insert(text(phone).length, 'L3 from the phone while the host was away\n')
+
+    const restarted = new Y.Doc()
+    restarted.clientID = 3
+    Y.applyUpdate(restarted, saved)
+    // What the phone used to send on reconnecting builds on what the host lost.
+    Y.applyUpdate(restarted, Y.encodeStateAsUpdate(phone, Y.encodeStateVector(host)))
+    assert.equal(text(restarted), 'L1\n')
+
+    const { shared, missing } = compareWithHost(Y, phone, Y.encodeStateAsUpdate(restarted))
+    assert.equal(shared, true)
+    Y.applyUpdate(restarted, missing)
+    assert.equal(text(restarted), 'L1\nL2 typed before the crash\nL3 from the phone while the host was away\n')
+
+    // Nothing to send when the host has it all, and a note the host started
+    // again from its text is left alone rather than written out twice.
+    assert.deepEqual(compareWithHost(Y, copy(restarted, 4), Y.encodeStateAsUpdate(restarted)), { shared: true, missing: null })
+    const fresh = new Y.Doc()
+    fresh.getText('content').insert(0, 'L1\n')
+    assert.deepEqual(compareWithHost(Y, phone, Y.encodeStateAsUpdate(fresh)), { shared: false, missing: null })
+
+    // It runs on every connection, the first one and every reconnect.
+    assert.match(html, /source[.]onopen = \(\) => \{[^}]*\}\s*void syncWithHost\(\)/)
+  })
 })

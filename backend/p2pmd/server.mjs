@@ -3304,6 +3304,46 @@ export function getP2pmdEditorPage () {
         }
       }
 
+      // A reconnect can find the host restarted from an older save, without
+      // edits this phone already has. Updates sent after that build on them,
+      // so the host could never apply them and the note split in two: the host
+      // on one copy, everyone else on another. On every connection the two
+      // compare, and this phone takes what the host has and sends what it
+      // lacks. Only between copies of the same note: a host that started the
+      // note again from its text shares no history with it, and sending
+      // everything would write the note out twice.
+      //
+      // Mirrors compareWithHost in the p2pmd repo's yjs-sync.js.
+      function compareWithHost(Y, doc, hostState) {
+        const hostVector = Y.encodeStateVectorFromUpdate(hostState)
+        const host = Y.decodeStateVector(hostVector)
+        const local = Y.decodeStateVector(Y.encodeStateVector(doc))
+        const shared = local.size === 0 || host.size === 0 || [...local.keys()].some((client) => host.has(client))
+        if (!shared) return { shared: false, missing: null }
+        const missing = Y.encodeStateAsUpdate(doc, hostVector)
+        // An update with nothing in it is two empty lists.
+        return { shared: true, missing: missing.byteLength > 2 ? missing : null }
+      }
+
+      let syncingWithHost = false
+
+      async function syncWithHost() {
+        if (syncingWithHost || !ydoc || !window.Y) return
+        syncingWithHost = true
+        try {
+          const response = await fetch(roomUrl('/doc/yjsstate'))
+          const body = await response.json()
+          if (!response.ok || typeof body.yjsState !== 'string') return
+          const { shared, missing } = compareWithHost(window.Y, ydoc, base64ToBytes(body.yjsState))
+          if (!shared) return
+          queueRemoteYjsUpdate(body.yjsState)
+          if (missing) pendingUpdate = pendingUpdate ? window.Y.mergeUpdates([pendingUpdate, missing]) : missing
+        } catch {} finally {
+          syncingWithHost = false
+        }
+        if (pendingUpdate) flushYjsUpdate()
+      }
+
       async function flushYjsUpdate() {
         if (!pendingUpdate) return
 
@@ -3708,7 +3748,7 @@ export function getP2pmdEditorPage () {
             clearTimeout(reconnectTimer)
             reconnectTimer = null
           }
-          if (pendingUpdate) flushYjsUpdate()
+          void syncWithHost()
         }
 
         source.addEventListener('peers', (event) => {
