@@ -2619,7 +2619,7 @@ export class PeerChatService {
     room.bans = normalizePeerChatRoomBans(bans)
     for (const ban of room.bans) {
       if (before.has(ban.id)) continue
-      this.appendRemovalNotice(roomKey, ban.id, '').catch(() => {})
+      this.appendRemovalNotice(roomKey, ban.id, ban.name).catch(() => {})
     }
     // Anyone the creator has let back in stops being filtered out of the list.
     room.members = (room.members || []).filter((member) => (
@@ -2649,7 +2649,8 @@ export class PeerChatService {
       .find((peer) => peer.id === id && peer.rooms.includes(normalized))
     const name = (room.members || []).find((member) => member.id === id)?.username ||
       connected?.username || id
-    room.bans = addPeerChatRoomBan(room.bans, { id, key: connected?.key || '' })
+    // The name goes with the removal, for anyone in the room who never met them.
+    room.bans = addPeerChatRoomBan(room.bans, { id, key: connected?.key || '', name })
     room.members = (room.members || []).filter((member) => member.id !== id)
 
     await this.appendRemovalNotice(normalized, id, name)

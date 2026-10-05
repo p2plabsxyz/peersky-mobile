@@ -16,6 +16,8 @@ const PEER_ID_PATTERN = /^[a-f0-9]{8}$/
 // A room holds its own removals. Well past what a real room needs, and small
 // enough that a peer cannot grow one unboundedly by relaying.
 export const MAX_PEERCHAT_ROOM_BANS = 512
+const BAN_NAME_MAX_LENGTH = 50
+const BAN_NAME_PATTERN = /^[A-Za-z0-9]+(?: [A-Za-z0-9]+)*$/
 
 /**
  * Creator keys that ship with the app. P2P Republic predates creator keys, so
@@ -105,10 +107,14 @@ export function normalizePeerChatRoomBans (value) {
     if (!PEER_ID_PATTERN.test(id)) continue
 
     const at = Number.isSafeInteger(entry?.at) && entry.at > 0 ? entry.at : 0
+    const name = normalizeBanName(entry?.name)
     const existing = byId.get(id)
     // A full key is worth more than a short id, so it wins the slot.
-    if (existing && (!key || existing.key)) continue
-    byId.set(id, { id, key, at })
+    if (existing && (!key || existing.key)) {
+      if (!existing.name && name) existing.name = name
+      continue
+    }
+    byId.set(id, { id, key, at, name: name || existing?.name || '' })
 
     if (byId.size >= MAX_PEERCHAT_ROOM_BANS) break
   }
@@ -116,7 +122,16 @@ export function normalizePeerChatRoomBans (value) {
   return [...byId.values()]
 }
 
-export function addPeerChatRoomBan (bans, { id, key, at = Date.now() }) {
+// The name the creator knew them by, so a device that never met them says who
+// was removed instead of eight letters of their key. The same rule as a
+// profile name, so nothing else can ride in on it.
+function normalizeBanName (value) {
+  if (typeof value !== 'string') return ''
+  const name = value.trim().replace(/\s+/g, ' ')
+  return name.length <= BAN_NAME_MAX_LENGTH && BAN_NAME_PATTERN.test(name) ? name : ''
+}
+
+export function addPeerChatRoomBan (bans, { id, key, at = Date.now(), name = '' }) {
   const normalizedKey = normalizePeerChatCreatorKey(key)
   const normalizedId = normalizedKey
     ? peerIdForCreatorKey(normalizedKey)
@@ -124,7 +139,7 @@ export function addPeerChatRoomBan (bans, { id, key, at = Date.now() }) {
   if (!PEER_ID_PATTERN.test(normalizedId)) return normalizePeerChatRoomBans(bans)
 
   return normalizePeerChatRoomBans([
-    { id: normalizedId, key: normalizedKey, at },
+    { id: normalizedId, key: normalizedKey, at, name },
     ...(Array.isArray(bans) ? bans : [])
   ])
 }
