@@ -224,6 +224,8 @@ type PeerChatRoom = {
   peerCount: number
   // A direct message's other person, connected at all.
   dmOnline?: boolean
+  // And away: their app in the background, or their computer idle.
+  dmIdle?: boolean
   unreadCount: number
   unreadMentions: number
   lastReadTs: number
@@ -238,6 +240,8 @@ type PeerChatMember = {
   avatar: string | null
   self: boolean
   online: boolean
+  // Online but away: their app in the background, or their computer idle.
+  idle?: boolean
 }
 
 type PeerChatMediaTarget = {
@@ -2140,7 +2144,7 @@ export function PeerChatScreen ({
               <Text numberOfLines={1} style={[styles.chatTitle, { color: colors.text }]}>{activeRoom.name}</Text>
               <Text style={[
                 styles.connectionText,
-                { color: isRoomOnline(activeRoom) ? colors.success : colors.muted }
+                { color: isRoomIdle(activeRoom) ? colors.idleText : isRoomOnline(activeRoom) ? colors.success : colors.muted }
               ]}>
                 {formatRoomConnection(activeRoom)}
               </Text>
@@ -2301,12 +2305,12 @@ export function PeerChatScreen ({
                             <Text style={[styles.memberAvatarText, { color: colors.accent }]}>{getRoomInitials(member.username)}</Text>
                           </View>
                           )}
-                      <View style={[styles.onlineDot, { backgroundColor: member.online ? colors.success : colors.muted }]} />
+                      <View style={[styles.onlineDot, { backgroundColor: memberDotColor(member, colors) }]} />
                     </View>
                     <View style={styles.memberCopy}>
                       <Text style={[styles.memberName, { color: colors.text }]}>{member.username}</Text>
                       <Text numberOfLines={1} style={[styles.attachmentMeta, { color: colors.muted }]}>
-                        {member.bio || (member.online ? 'Online' : 'Offline')}
+                        {member.bio || formatMemberPresence(member)}
                       </Text>
                     </View>
                     <Text style={[styles.memberMessage, { color: member.self ? colors.muted : colors.accent }]}>
@@ -3619,7 +3623,7 @@ export function PeerChatScreen ({
                 <PinIcon width={ROOM_STATE_ICON_SIZE} height={ROOM_STATE_ICON_SIZE} color={colors.accent} />
               )}
             </View>
-            <Text style={[styles.roomPeerCount, { color: (item.isDM ? isRoomOnline(item) : item.peerCount > 0) ? colors.success : colors.muted }]}>
+            <Text style={[styles.roomPeerCount, { color: isRoomIdle(item) ? colors.idleText : (item.isDM ? isRoomOnline(item) : item.peerCount > 0) ? colors.success : colors.muted }]}>
               {formatRoomConnection(item, true)}
             </Text>
           </View>
@@ -3756,12 +3760,12 @@ export function PeerChatScreen ({
                           <Text style={[styles.memberAvatarText, { color: colors.accent }]}>{getRoomInitials(member.username)}</Text>
                         </View>
                         )}
-                    <View style={[styles.onlineDot, { backgroundColor: member.online ? colors.success : colors.muted }]} />
+                    <View style={[styles.onlineDot, { backgroundColor: memberDotColor(member, colors) }]} />
                   </View>
                   <View style={styles.memberCopy}>
                     <Text style={[styles.memberName, { color: colors.text }]}>{member.username}</Text>
                     <Text numberOfLines={1} style={[styles.attachmentMeta, { color: colors.muted }]}>
-                      {member.bio || (member.online ? 'Online' : 'Offline')}
+                      {member.bio || formatMemberPresence(member)}
                     </Text>
                   </View>
                   <Text style={[styles.memberMessage, { color: colors.accent }]}>Message</Text>
@@ -4376,8 +4380,8 @@ function PeerProfileModal ({
                   )}
             </Pressable>
             <Text style={[styles.peerProfileName, { color: colors.text }]}>{member.username}</Text>
-            <Text style={[styles.peerProfileStatus, { color: member.online ? colors.success : colors.muted }]}>
-              {member.self ? 'You' : member.online ? 'Online' : 'Offline'}
+            <Text style={[styles.peerProfileStatus, { color: member.self ? colors.success : memberTextColor(member, colors) }]}>
+              {member.self ? 'You' : formatMemberPresence(member)}
             </Text>
             <Text style={[styles.peerProfileBio, { color: colors.muted }]}>
               {member.bio || 'No bio shared.'}
@@ -4772,13 +4776,34 @@ function isRoomOnline (room: PeerChatRoom) {
     : room.connectionState === 'connected'
 }
 
+// A direct message's other person is online but away. A group only counts who
+// is online, away or not.
+function isRoomIdle (room: PeerChatRoom) {
+  return room.isDM && room.dmIdle === true && isRoomOnline(room)
+}
+
+function formatMemberPresence (member: PeerChatMember) {
+  if (!member.online) return 'Offline'
+  return member.idle ? 'Idle' : 'Online'
+}
+
+function memberDotColor (member: PeerChatMember, colors: typeof lightColors) {
+  if (!member.online) return colors.muted
+  return member.idle ? colors.idle : colors.success
+}
+
+function memberTextColor (member: PeerChatMember, colors: typeof lightColors) {
+  if (!member.online) return colors.muted
+  return member.idle ? colors.idleText : colors.success
+}
+
 function formatRoomConnection (room: PeerChatRoom, compact = false) {
   if (room.connectionState === 'connecting') return 'Connecting...'
   if (room.connectionState === 'syncing') return 'Syncing...'
   // A direct message has exactly one other person in it, so counting them
   // reads as a stray number. Either they are there or they are not, the same
   // as their dot in any room.
-  if (room.isDM) return isRoomOnline(room) ? 'Online' : 'Offline'
+  if (room.isDM) return isRoomIdle(room) ? 'Idle' : isRoomOnline(room) ? 'Online' : 'Offline'
   if (room.connectionState === 'connected') {
     return compact
       ? `${room.peerCount} online`
@@ -4810,6 +4835,9 @@ const darkColors = {
   accent: '#62a5ff',
   accentSoft: '#243b5c',
   success: '#6fd5a5',
+  // Away: a yellow dot, and the same yellow for the word.
+  idle: '#f0b232',
+  idleText: '#f0b232',
   danger: '#ff8278',
   selfBubble: '#234b78',
   peerBubble: '#2c2f38'
@@ -4825,6 +4853,9 @@ const lightColors = {
   accent: '#1f6fd1',
   accentSoft: '#e5f0ff',
   success: '#23845d',
+  // Away: a yellow dot, and a darker yellow for the word so it reads on white.
+  idle: '#e5a50a',
+  idleText: '#9a6700',
   danger: '#c43d35',
   selfBubble: '#dcecff',
   peerBubble: '#eceef2'

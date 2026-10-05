@@ -73,6 +73,9 @@ export const RPC_PEERCHAT_ROOM_RESTORE_MEMBER = 72
 // Everything PeerChat keeps on this device, gone, as App Review asks of any
 // app where people make a profile.
 export const RPC_PEERCHAT_DELETE_PROFILE = 73
+// { idle } as the app goes to the background and comes back, so people in a
+// room see this phone as away.
+export const RPC_PEERCHAT_PRESENCE = 74
 
 export const RPC_IDENTITY_REMOVE = 68
 

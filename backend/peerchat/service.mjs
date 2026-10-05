@@ -103,6 +103,9 @@ const LIVE_RATE_WINDOW_MS = 60_000
 const MAX_LIVE_MESSAGES_PER_WINDOW = 120
 const MAX_CONTROL_MESSAGES_PER_WINDOW = 60
 const MAX_TOPIC_FRAMES_PER_WINDOW = 120
+// Its own budget, so a burst of room traffic on connecting cannot crowd out
+// the one frame that says whether someone is away.
+const MAX_PRESENCE_FRAMES_PER_WINDOW = 30
 const MAX_INITIAL_SYNC_MESSAGES_PER_CONNECTION = 500
 const MAX_PENDING_MESSAGES_PER_CONNECTION = 256
 const MAX_RETURNED_ROOM_MEMBERS = 100
@@ -216,6 +219,11 @@ export class PeerChatService {
     this.pendingPeers = new Map()
     this.presence = createPeerPresence()
     this.presenceTimer = null
+    // Away: the app in the background here. Each person in a room with us
+    // hears it, and we hear theirs. A desktop is away when its screen is
+    // locked, it is asleep or idle, or another app is in front for a while.
+    this.idle = false
+    this.idlePeerIds = new Set()
     this.seenIds = new Set()
     this.activeRoomKey = null
     this.version = 0
@@ -1061,6 +1069,9 @@ export class PeerChatService {
     this.pendingPeers.delete(peer.connection)
     this.peers.set(peer.connection, peer)
     this.rememberPeerPresence(peer)
+    // Whether they are away comes again on this connection, once a room opens
+    // on it. Until then they are here, which is all an older build can be.
+    this.idlePeerIds.delete(normalizePeerChatPeerId(peer.id))
     this.bumpVersion()
 
     // Our proofs, and any invite waiting on this person. Nothing about a room,
@@ -1208,8 +1219,26 @@ export class PeerChatService {
       // The other side ignores rooms already open, so it settles.
       this.shareTopics(peer)
       this.sendProfile(peer)
+      if (!peer.presenceShared) {
+        peer.presenceShared = true
+        this.sendPresence(peer)
+      }
       for (const roomKey of added) this.shareRoom(peer, roomKey)
       if (peer.active) this.rememberPeerPresence(peer)
+      this.bumpVersion()
+      return
+    }
+
+    // Whether they are away, from someone in a room with us. An older build
+    // drops this, since it names no room and carries no message.
+    if (message.type === 'presence') {
+      if (!peer.rooms.length || !this.consumePresenceRate(peer)) return
+      const peerId = normalizePeerChatPeerId(peer.id)
+      if (!peerId) return
+      const idle = message.state === 'idle'
+      if (idle === this.idlePeerIds.has(peerId)) return
+      if (idle) this.idlePeerIds.add(peerId)
+      else this.idlePeerIds.delete(peerId)
       this.bumpVersion()
       return
     }
@@ -1578,6 +1607,17 @@ export class PeerChatService {
     }
     if (peer.controlRate.count >= MAX_CONTROL_MESSAGES_PER_WINDOW) return false
     peer.controlRate.count += 1
+    return true
+  }
+
+  consumePresenceRate (peer) {
+    const now = Date.now()
+    if (!peer.presenceRate || now >= peer.presenceRate.resetsAt) {
+      peer.presenceRate = { count: 1, resetsAt: now + LIVE_RATE_WINDOW_MS }
+      return true
+    }
+    if (peer.presenceRate.count >= MAX_PRESENCE_FRAMES_PER_WINDOW) return false
+    peer.presenceRate.count += 1
     return true
   }
 
@@ -2450,7 +2490,7 @@ export class PeerChatService {
       isDM: room.isDM === true,
       dmWith: room.dmWith || null,
       // The same answer the person's dot gives everywhere else.
-      ...(room.isDM === true && { dmOnline: this.isPeerOnline(room.dmWith) }),
+      ...(room.isDM === true && { dmOnline: this.isPeerOnline(room.dmWith), dmIdle: this.isPeerIdle(room.dmWith) }),
       pendingAcceptance: room.pendingAcceptance === true,
       rejected: room.rejected === true,
       isHost: room.isHost === true,
@@ -2677,6 +2717,30 @@ export class PeerChatService {
     return { ok: true, room: this.publicRoom(room), rooms: this.listRooms() }
   }
 
+  /**
+   * Away from the app, or back. Only peers in a room with us hear it: anyone
+   * who knows one of our topics gets as far as a connection, and whether this
+   * phone is in someone's hand is not theirs to know.
+   */
+  setIdle (idle) {
+    const next = idle === true
+    if (next === this.idle) return
+    this.idle = next
+    for (const peer of this.peers.values()) {
+      if (peer.rooms.length) this.sendPresence(peer)
+    }
+  }
+
+  sendPresence (peer) {
+    this.sendToPeer(peer, { type: 'presence', state: this.idle ? 'idle' : 'active' })
+  }
+
+  // Online, and said they are away. A group still counts them as online.
+  isPeerIdle (peerId) {
+    const id = normalizePeerChatPeerId(peerId)
+    return Boolean(id) && this.idlePeerIds.has(id) && this.isPeerOnline(id)
+  }
+
   isPeerOnline (peerId) {
     const id = normalizePeerChatPeerId(peerId)
     if (!id) return false
@@ -2750,12 +2814,15 @@ export class PeerChatService {
     // offline in Peer-to-Peer Republic at the same time. Someone mid-redial
     // still counts, so their dot does not blink off and on again.
     for (const member of members.values()) {
-      if (member.online || member.self) continue
-      if (this.isPeerOnline(member.id)) member.online = true
+      if (member.self) continue
+      if (!member.online && this.isPeerOnline(member.id)) member.online = true
+      if (member.online && this.idlePeerIds.has(member.id)) member.idle = true
     }
+    // You, then whoever is here, then whoever is away, then everyone else.
     return collapsePeerChatMembers([...members.values()]).sort((left, right) => {
       if (left.self !== right.self) return left.self ? -1 : 1
       if (left.online !== right.online) return left.online ? -1 : 1
+      if (Boolean(left.idle) !== Boolean(right.idle)) return left.idle ? 1 : -1
       return left.username.localeCompare(right.username)
     })
   }

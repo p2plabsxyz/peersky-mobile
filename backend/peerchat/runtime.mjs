@@ -10,6 +10,18 @@ let service = null
 let serviceOpening = null
 let serviceClosing = null
 let serviceGeneration = 0
+// Whether the app is in the background, kept here so a PeerChat that opens
+// later starts out knowing.
+let idle = false
+
+/**
+ * Away from the app or back, from the app's own state. It never opens
+ * PeerChat for someone who does not use it.
+ */
+export function setPeerChatIdle (value) {
+  idle = value === true
+  service?.setIdle(idle)
+}
 
 export async function getPeerChatService () {
   if (serviceClosing) await serviceClosing
@@ -33,6 +45,7 @@ export async function getPeerChatService () {
         // A restore puts what it brings in the identity folder.
         incomingPath: join(getDefaultIdentityStoragePath(), PEERCHAT_INCOMING_FILE)
       })
+      nextService.setIdle(idle)
       try {
         await nextService.start()
       } catch (error) {

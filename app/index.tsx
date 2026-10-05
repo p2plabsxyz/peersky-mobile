@@ -284,6 +284,7 @@ import {
   RPC_P2PMD_TAKE_NOTES,
   RPC_APP_BACKUP_PROGRESS,
   RPC_APP_PEERCHAT_CHANGED,
+  RPC_PEERCHAT_PRESENCE,
   RPC_PEERTUNES_START
 } from '../backend/rpc/commands.mjs'
 
@@ -858,6 +859,12 @@ export default function App () {
           console.warn('Unable to refresh Hyper networking:', error)
         })
       }
+      // People in a PeerChat room see this phone as away while the app is in
+      // the background, a yellow dot and Idle. Not on inactive: iOS passes
+      // through it for Control Center or the app switcher, and comes back.
+      if ((nextState === 'background' || nextState === 'active') && rpcRef.current) {
+        void callRpc(RPC_PEERCHAT_PRESENCE, { idle: nextState === 'background' }).catch(() => {})
+      }
     })
 
     return () => subscription.remove()
@@ -1049,6 +1056,8 @@ export default function App () {
       if (!initResponse.ok) {
         throw new Error(initResponse.error || 'Unable to initialize Hyper')
       }
+      // A backend started with the app already behind another one starts away.
+      void callRpc(RPC_PEERCHAT_PRESENCE, { idle: appStateRef.current === 'background' }).catch(() => {})
 
       setIdentityStoragePath(Paths.document?.uri ? toBareFsPath(Paths.document.uri) : storageDir)
       const lanStatus = initResponse.lan?.available

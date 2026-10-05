@@ -48,6 +48,7 @@ import {
   RPC_PEERCHAT_SNAPSHOT,
   RPC_PEERCHAT_UNBLOCK,
   RPC_PEERCHAT_DELETE_PROFILE,
+  RPC_PEERCHAT_PRESENCE,
   RPC_PEERCHAT_ROOM_REMOVE_MEMBER,
   RPC_PEERCHAT_ROOM_RESTORE_MEMBER,
   RPC_PEERCHAT_SEND,
@@ -122,7 +123,7 @@ import { inlineHyperPreviewImages, renderP2pmdPreview } from '../p2pmd/preview.m
 import { getP2pmdEditorPage } from '../p2pmd/server.mjs'
 import { startPeerTunesServer } from '../peertunes/server.mjs'
 import { parseJsonMessage, replyJson } from './messages.mjs'
-import { deletePeerChatProfile, getPeerChatService } from '../peerchat/runtime.mjs'
+import { deletePeerChatProfile, getPeerChatService, setPeerChatIdle } from '../peerchat/runtime.mjs'
 import { openPeerChatAttachment, uploadPeerChatAttachment } from '../peerchat/attachments.mjs'
 
 export async function routeRpcRequest (req) {
@@ -444,6 +445,13 @@ export async function routeRpcRequest (req) {
 
     if (req.command === RPC_PEERCHAT_DELETE_PROFILE) {
       replyJson(req, await deletePeerChatProfile())
+      return
+    }
+
+    // Never opens PeerChat: someone who does not use it has nobody to tell.
+    if (req.command === RPC_PEERCHAT_PRESENCE) {
+      setPeerChatIdle(parseJsonMessage(req.data).idle === true)
+      replyJson(req, { ok: true })
       return
     }
 

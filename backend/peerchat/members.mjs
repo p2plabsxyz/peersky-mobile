@@ -22,5 +22,7 @@ export function collapsePeerChatMembers (members) {
 function prefers (candidate, existing) {
   if (candidate.self !== existing.self) return candidate.self === true
   if (candidate.online !== existing.online) return candidate.online === true
+  // Away on one device and here on another is here.
+  if (candidate.online && !candidate.idle !== !existing.idle) return !candidate.idle
   return false
 }
