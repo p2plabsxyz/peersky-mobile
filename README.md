@@ -18,6 +18,15 @@ PeerSky Mobile is the peer-to-peer browser for your phone. The everyday web work
 
 We are building a surveillance-free internet where you own your tools, your data, and your connections, and where no single company can shut you out. Our vision is to save the internet, one peer at a time.
 
+## Roadmap
+
+- [ ] Local LLM search
+- [ ] Web Monetization
+- [ ] Translations for the whole app
+- [ ] PeerChat
+  - [ ] Blind peers for messages
+  - [ ] Voice and video calls
+
 ## Development
 
 ### Node.js and npm Setup
