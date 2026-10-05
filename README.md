@@ -1,5 +1,5 @@
 <p align="center">
-    <img align="center" src="/assets/images/logo-adaptive.png" width="200" height="200"></img>
+    <img align="center" src="/assets/images/logo.png" width="200" height="200"></img>
 </p>
 
 <h1 align="center">PeerSky Mobile</h1>
@@ -8,7 +8,7 @@
     <img src="https://img.shields.io/github/actions/workflow/status/p2plabsxyz/peersky-mobile/ci.yml" alt="GitHub Actions Workflow Status">
     <img src="https://img.shields.io/badge/Platform-iOS%20%7C%20Android-black.svg" alt="platform">
     <a href="https://mastodon.social/@peersky"><img src="https://img.shields.io/mastodon/follow/113323887574214930" alt="Mastodon Follow"></a>
-    <a href="https://deepwiki.com/p2plabsxyz/peersky-mobile"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki"></a>
+    <a href="https://deepwiki.com/p2plabsxyz/peersky-mobile"><img src="https://img.shields.io/badge/Ask-DeepWiki-blue.svg" alt="Ask DeepWiki"></a>
     <a href="https://standardjs.com"><img src="https://img.shields.io/badge/code_style-standard-brightgreen.svg" alt="JavaScript Style Guide"></a>
 </div>
 
