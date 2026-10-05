@@ -138,6 +138,7 @@ import { BrowserNavBar } from './BrowserNavBar'
 import { BrowserBackSwipe } from './BrowserBackSwipe'
 import { BrowserZoomSheet } from './BrowserZoomSheet'
 import { PublishedLinkSheet } from './PublishedLinkSheet'
+import { hasLinkedIdentity } from './hyperdrive/linked-identity'
 import { P2pmdNewNoteSheet } from './P2pmdNewNoteSheet'
 import { getP2pmdSyncDisplay } from './p2pmd-sync-status.mjs'
 import PencilSquareIcon from '../assets/icons/bootstrap/pencil-square.svg'
@@ -393,6 +394,7 @@ export default function App () {
   const p2pmdWebViewRef = useRef<ComponentRef<typeof WebView> | null>(null)
   const p2pmdPublishInFlightRef = useRef(false)
   const p2pmdPublishNonceRef = useRef<string | null>(null)
+  const p2pmdPublishVisibilityRef = useRef<'public' | 'private'>('public')
   const browserLoadSeqRef = useRef(0)
   const browserWebViewGenerationsRef = useRef(new Map<string, number>())
   const externalLinkPromptOpenRef = useRef(false)
@@ -610,6 +612,7 @@ export default function App () {
   const [isP2pmdPublishing, setIsP2pmdPublishing] = useState(false)
   const [p2pmdPublishSheet, setP2pmdPublishSheet] = useState<'note' | 'slides' | null>(null)
   const p2pmdPublishedModeRef = useRef<'note' | 'slides'>('note')
+  const [p2pmdPublishedVisibility, setP2pmdPublishedVisibility] = useState<'public' | 'private'>('public')
   const shouldShowRuntimeStatus = activeTab === 'holesail'
   const {
     clearAllPreviews: clearAllBrowserTabPreviews,
@@ -3118,9 +3121,50 @@ export default function App () {
 
   function onP2pmdPublishToHyper () {
     if (p2pmdPublishInFlightRef.current) return
+    Alert.alert(
+      'Who can open it?',
+      'Public: anyone with the link can open it, straight from this phone.\n\nPrivate: encrypted, so only your linked devices, the ones that share your identity, can open it.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Private', onPress: chooseP2pmdPrivatePublish },
+        { text: 'Public', onPress: () => requestP2pmdPublish('public') }
+      ],
+      { cancelable: true }
+    )
+  }
+
+  // Same rule as Hyperdrive's private files: the note is encrypted with the
+  // key the desktop sends with your identity. Before that, no other device
+  // could open it, so there is nothing private to publish to yet.
+  function chooseP2pmdPrivatePublish () {
+    if (hasLinkedIdentity()) {
+      requestP2pmdPublish('private')
+      return
+    }
+    Alert.alert(
+      'Link PeerSky Desktop first',
+      'A private note is encrypted with your identity\'s key, so only your linked devices can open it. Bring your identity over in Link Device, then publish again.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Link Device',
+          onPress: () => {
+            setBrowserSettingsInitialPage('link-device')
+            setBrowserSettingsCloseOnBack(true)
+            setBrowserSettingsVisible(true)
+          }
+        }
+      ],
+      { cancelable: true }
+    )
+  }
+
+  function requestP2pmdPublish (visibility: 'public' | 'private') {
+    if (p2pmdPublishInFlightRef.current) return
     setP2pmdSyncStatus('Publishing to Hyper...')
     const nonce = createP2pmdNonce(Crypto.getRandomValues(new Uint8Array(16)))
     p2pmdPublishNonceRef.current = nonce
+    p2pmdPublishVisibilityRef.current = visibility
     p2pmdWebViewRef.current?.injectJavaScript(
       `window.__p2pmdPublishToHyper && window.__p2pmdPublishToHyper(${JSON.stringify(nonce)}); true;`
     )
@@ -3129,7 +3173,8 @@ export default function App () {
   async function publishP2pmdContentToHyper (
     content: unknown,
     mode: unknown,
-    latexModeEnabled: unknown
+    latexModeEnabled: unknown,
+    visibility: 'public' | 'private'
   ) {
     if (p2pmdPublishInFlightRef.current) return
 
@@ -3146,13 +3191,15 @@ export default function App () {
       const response = await callRpc(RPC_P2PMD_ROOM_PUBLISH, {
         content,
         mode: mode === 'slides' ? 'slides' : 'note',
-        latexModeEnabled: latexModeEnabled === true
+        latexModeEnabled: latexModeEnabled === true,
+        visibility
       })
 
       if (!response.ok || typeof response.url !== 'string') {
         throw new Error(response.error || 'Unable to publish document to Hyper')
       }
 
+      setP2pmdPublishedVisibility(visibility)
       setP2pmdPublishUrl(response.url)
       setP2pmdSyncStatus('Published to Hyper')
       setStatus(`P2PMD published: ${response.url}`)
@@ -3280,7 +3327,8 @@ export default function App () {
           void publishP2pmdContentToHyper(
             parsed.content,
             parsed.mode,
-            parsed.latexModeEnabled
+            parsed.latexModeEnabled,
+            p2pmdPublishVisibilityRef.current
           )
           break
         default:
@@ -3901,9 +3949,13 @@ export default function App () {
 
         <PublishedLinkSheet
           isDark={browserIsDark}
-          message='Share it with other peers! It loads straight from this phone, so keep PeerSky open while they open it.'
+          message={p2pmdPublishedVisibility === 'private'
+            ? 'Only your linked devices can open it. It is encrypted, and loads straight from this phone, so keep PeerSky open while they open it.'
+            : 'Share it with other peers! It loads straight from this phone, so keep PeerSky open while they open it.'}
           shareTitle={p2pmdPublishSheet === 'slides' ? 'Published P2PMD presentation' : 'Published P2PMD note'}
-          title={p2pmdPublishSheet === 'slides' ? 'Your slides are live' : 'Your note is live'}
+          title={p2pmdPublishedVisibility === 'private'
+            ? (p2pmdPublishSheet === 'slides' ? 'Your private slides are ready' : 'Your private note is ready')
+            : (p2pmdPublishSheet === 'slides' ? 'Your slides are live' : 'Your note is live')}
           url={p2pmdPublishUrl}
           visible={p2pmdPublishSheet !== null}
           onClose={() => setP2pmdPublishSheet(null)}

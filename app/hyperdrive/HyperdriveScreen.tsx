@@ -17,7 +17,6 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { CameraView, useCameraPermissions } from 'expo-camera'
-import { File, Paths } from 'expo-file-system'
 import { pickUploadFolder, pickUploads, type UploadAsset } from '../media/upload-gate'
 import ArrowLeftIcon from '../../assets/icons/bootstrap/arrow-left.svg'
 import ChevronRightIcon from '../../assets/icons/bootstrap/chevron-right.svg'
@@ -48,7 +47,7 @@ import {
 import { MODAL_ORIENTATIONS } from '../modal-orientations'
 import { tapFeedback } from '../haptics'
 import { PublishedLinkSheet } from '../PublishedLinkSheet'
-import { isLinkedPrivateKey, LINKED_PRIVATE_KEY_FILE } from './private-upload.mjs'
+import { hasLinkedIdentity } from './linked-identity'
 
 const hyperdriveIcon = require('../../assets/images/hyperdrive.png')
 
@@ -851,15 +850,6 @@ function formatRecentMeta (item: HyperdriveItem) {
   const details = visibility ? `${source} - ${visibility}` : source
   if (!item.openedAt) return details
   return `${details} - ${new Date(item.openedAt).toLocaleDateString()}`
-}
-
-function hasLinkedIdentity () {
-  try {
-    const file = new File(Paths.document, LINKED_PRIVATE_KEY_FILE)
-    return file.exists && isLinkedPrivateKey(file.textSync())
-  } catch {
-    return false
-  }
 }
 
 function getUploadSuccessMessage (visibility: UploadVisibility, _item: HyperdriveItem) {

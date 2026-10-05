@@ -1,5 +1,12 @@
 import b4a from 'b4a'
-import { withHyperRuntimeOperation } from './runtime.mjs'
+import {
+  getSyncedPrivateHyperdrive,
+  rememberSyncedPrivateHyperdrive,
+  withHyperRuntimeOperation,
+  withSyncedPrivateHyperRuntimeOperation
+} from './runtime.mjs'
+import { linkedPrivateDriveKey } from './private-keys.mjs'
+import { getDefaultIdentityStoragePath } from '../backup/device-keys.mjs'
 import { parseHyperUrl } from './url.mjs'
 import { splitMarkdownSlides } from '../p2pmd/preview.mjs'
 import ieeeBrowserScript from '../p2pmd/ieee-runtime.mjs'
@@ -16,6 +23,11 @@ const MAX_HYPER_FILE_BYTES = 10 * 1024 * 1024
 const MAX_HYPER_IMAGE_BYTES = 5 * 1024 * 1024
 const HYPER_READ_TIMEOUT_MS = 15000
 const P2PMD_DRIVE_NAME = 'p2pmd'
+// A private note goes in the phone's private drive, where Hyperdrive keeps its
+// private files, in a folder of its own. It is encrypted with the key the
+// desktop sent with your identity, so only your linked devices can read it.
+const PRIVATE_NOTE_PATH = '/p2pmd/index.html'
+const LINK_IDENTITY_FIRST = 'Link PeerSky Desktop first. A private note is encrypted with your identity\'s key, so only your linked devices can open it.'
 const IMAGE_UPLOAD_WINDOW_MS = 60 * 1000
 const MAX_IMAGE_UPLOADS_PER_WINDOW = 5
 const MAX_IMAGE_UPLOAD_BYTES_PER_WINDOW = 10 * 1024 * 1024
@@ -72,7 +84,8 @@ export async function uploadHyperFile ({
   })
 }
 
-export async function publishMarkdownDocument ({ content, mode, latexModeEnabled } = {}) {
+export async function publishMarkdownDocument ({ content, mode, latexModeEnabled, visibility } = {}, options = {}) {
+  const isPrivate = visibility === 'private'
   if (typeof content !== 'string') {
     return {
       ok: false,
@@ -86,6 +99,11 @@ export async function publishMarkdownDocument ({ content, mode, latexModeEnabled
       ok: false,
       error: 'Markdown is too large. Maximum size is 10 MB.'
     }
+  }
+  // Without a linked identity the private drive's key is this phone's own,
+  // and no other device could open the note.
+  if (isPrivate && !(options.hasLinkedIdentity || hasLinkedIdentity)()) {
+    return { ok: false, error: LINK_IDENTITY_FIRST }
   }
 
   return withPublishTransition(async () => {
@@ -109,12 +127,32 @@ export async function publishMarkdownDocument ({ content, mode, latexModeEnabled
       }
     }
 
-    return withHyperRuntimeOperation(async (runtime) => {
+    const recordArchive = options.recordArchive || recordHyperArchive
+    if (isPrivate) {
+      return runOnSyncedPrivateRuntime(options, async () => {
+        const drive = await (options.getSyncedPrivateDrive || getSyncedPrivateHyperdrive)()
+        rememberSyncedPrivateHyperdrive(drive)
+
+        await drive.put(PRIVATE_NOTE_PATH, published)
+
+        const url = `hyper://${drive.id}${PRIVATE_NOTE_PATH}`
+        await recordArchive({
+          url,
+          name: 'P2PMD (private)',
+          source: 'published',
+          appId: 'p2pmd'
+        })
+
+        return { ok: true, url, visibility: 'private' }
+      })
+    }
+
+    return runOnPublicRuntime(options, async (runtime) => {
       const drive = await runtime.getDrive(P2PMD_DRIVE_NAME)
 
       await drive.put('/index.html', published)
 
-      await recordHyperArchive({
+      await recordArchive({
         url: `hyper://${drive.id}/`,
         name: 'P2PMD',
         source: 'published',
@@ -123,10 +161,29 @@ export async function publishMarkdownDocument ({ content, mode, latexModeEnabled
 
       return {
         ok: true,
-        url: `hyper://${drive.id}/`
+        url: `hyper://${drive.id}/`,
+        visibility: 'public'
       }
     })
   })
+}
+
+function hasLinkedIdentity () {
+  try {
+    return linkedPrivateDriveKey(getDefaultIdentityStoragePath()) !== null
+  } catch {
+    return false
+  }
+}
+
+function runOnPublicRuntime (options, task) {
+  if (options.runtime) return task(options.runtime)
+  return withHyperRuntimeOperation(task)
+}
+
+function runOnSyncedPrivateRuntime (options, task) {
+  if (options.getSyncedPrivateDrive) return task(null)
+  return withSyncedPrivateHyperRuntimeOperation(task)
 }
 
 export async function readHyperFile ({ url } = {}) {
