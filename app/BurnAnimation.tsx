@@ -15,9 +15,12 @@ import { tapFeedback } from './haptics'
 const BURN_BIRD = require('../assets/images/burn-bird.png')
 
 const BIRD_SIZE = 168
+// How long the fire takes to come up the screen. It keeps that speed on up and
+// off the top.
 const RISE_MS = 650
-const HOLD_MS = 420
-const LEAVE_MS = 900
+// How far up the fire is when the tabs burn: the screen is all but covered, so
+// they go under it rather than in view.
+const BURN_AT = 0.85
 // Below the fire's body, embers fading to nothing, so the screen comes back
 // from the bottom up as the fire leaves rather than under a hard edge.
 const TAIL = 220
@@ -68,10 +71,24 @@ export function BurnAnimation ({ onBurn, onDone }: { onBurn: () => void, onDone:
   const drifts = useRef([0, 1, 2].map(() => new Animated.Value(0))).current
   const callbacks = useRef({ onBurn, onDone })
   callbacks.current = { onBurn, onDone }
+  const fireTop = Math.round(height * FIRE_TOP)
+  const bodyHeight = height - fireTop + TAIL
+  // How far the fire goes to be off the top, all of it, tail included.
+  const leave = -(fireTop + bodyHeight)
+  // The two legs of the trip, up the screen and off the top, in points.
+  const legs = useRef({ rise: height, away: -leave })
+  legs.current = { rise: height, away: -leave }
 
   useEffect(() => {
     let active = true
     let animation: Animated.CompositeAnimation | null = null
+    let burnTimer: ReturnType<typeof setTimeout> | null = null
+    let burned = false
+    const burn = () => {
+      if (burned || !active) return
+      burned = true
+      callbacks.current.onBurn()
+    }
     // Three flickers of different lengths, so no two flames keep step.
     const flickering = Animated.parallel(beats.map((beat, index) => Animated.loop(Animated.sequence([
       Animated.timing(beat, { duration: 260 + index * 70, easing: Easing.inOut(Easing.quad), toValue: 1, useNativeDriver: true }),
@@ -95,53 +112,47 @@ export function BurnAnimation ({ onBurn, onDone }: { onBurn: () => void, onDone:
 
         flickering.start()
         drifting.start()
-        animation = Animated.sequence([
-          Animated.parallel([
-            Animated.timing(travel, { duration: RISE_MS, easing: Easing.out(Easing.cubic), toValue: 1, useNativeDriver: true }),
-            Animated.sequence([
-              Animated.delay(RISE_MS * 0.35),
-              Animated.spring(bird, { friction: 5, tension: 120, toValue: 1, useNativeDriver: true })
-            ]),
-            Animated.sequence([
-              Animated.delay(RISE_MS * 0.45),
-              Animated.timing(shake, { duration: 70, toValue: 1, useNativeDriver: true }),
-              Animated.timing(shake, { duration: 70, toValue: -1, useNativeDriver: true }),
-              Animated.timing(shake, { duration: 70, toValue: 0.6, useNativeDriver: true }),
-              Animated.timing(shake, { duration: 70, toValue: 0, useNativeDriver: true })
-            ])
-          ]),
-          Animated.delay(HOLD_MS)
-        ])
+        // Up the screen and off the top at one speed, as one animation on the
+        // native side. It used to slow to a stop, wait, and set off again, and
+        // the wait grew with the burn itself: the second half could only start
+        // once the JS thread was done closing tabs and clearing data.
+        const { rise, away } = legs.current
+        const riseShare = rise / (rise + away)
+        const steady = (time: number) => time <= riseShare
+          ? time / riseShare / 2
+          : 0.5 + (time - riseShare) / (1 - riseShare) / 2
+        animation = Animated.timing(travel, { duration: RISE_MS / riseShare, easing: steady, toValue: 2, useNativeDriver: true })
+        Animated.sequence([
+          Animated.delay(RISE_MS * 0.35),
+          Animated.spring(bird, { friction: 5, tension: 120, toValue: 1, useNativeDriver: true })
+        ]).start()
+        Animated.sequence([
+          Animated.delay(RISE_MS * 0.45),
+          Animated.timing(shake, { duration: 70, toValue: 1, useNativeDriver: true }),
+          Animated.timing(shake, { duration: 70, toValue: -1, useNativeDriver: true }),
+          Animated.timing(shake, { duration: 70, toValue: 0.6, useNativeDriver: true }),
+          Animated.timing(shake, { duration: 70, toValue: 0, useNativeDriver: true })
+        ]).start()
         setTimeout(() => { if (active) tapFeedback('heavy') }, RISE_MS * 0.45)
-        animation.start(({ finished }) => {
-          if (!active) return
-          callbacks.current.onBurn()
-          if (!finished) {
-            callbacks.current.onDone()
-            return
-          }
-          // On up and away, gathering speed, rather than fading where it stood.
-          animation = Animated.timing(travel, { duration: LEAVE_MS, easing: Easing.in(Easing.quad), toValue: 2, useNativeDriver: true })
-          animation.start(() => {
-            flickering.stop()
-            drifting.stop()
-            if (active) callbacks.current.onDone()
-          })
+        burnTimer = setTimeout(burn, RISE_MS * BURN_AT)
+        animation.start(() => {
+          // In case the fire got there before the timer did.
+          burn()
+          flickering.stop()
+          drifting.stop()
+          if (active) callbacks.current.onDone()
         })
       })
 
     return () => {
       active = false
+      if (burnTimer) clearTimeout(burnTimer)
       animation?.stop()
       flickering.stop()
       drifting.stop()
     }
   }, [beats, bird, drifts, shake, travel])
 
-  const fireTop = Math.round(height * FIRE_TOP)
-  const bodyHeight = height - fireTop + TAIL
-  // How far the fire goes to be off the top, all of it, tail included.
-  const leave = -(fireTop + bodyHeight)
   // Where the body's colours sit when it covers the screen, the tail below.
   const shown = (height - fireTop) / bodyHeight
   const tiles = Array.from({ length: Math.ceil(width / TILE_WIDTH) }, (_, index) => index * TILE_WIDTH)

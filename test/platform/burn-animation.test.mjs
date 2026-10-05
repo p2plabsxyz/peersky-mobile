@@ -27,8 +27,11 @@ test('the tabs are burned under the flames, not before them', async () => {
 test('the burn happens once the flames are up, and at once with Reduce Motion', async () => {
   const animation = await read('app/BurnAnimation.tsx')
   assert.match(animation, /if \(reduceMotion\) \{\s+callbacks\.current\.onBurn\(\)\s+callbacks\.current\.onDone\(\)/)
-  // Burned whether or not the animation got to finish.
-  assert.match(animation, /animation\.start\(\(\{ finished \}\) => \{\s+if \(!active\) return\s+callbacks\.current\.onBurn\(\)/)
+  // Under cover of the fire, and once: the timer and the end of the animation
+  // both ask for it.
+  assert.match(animation, /burnTimer = setTimeout\(burn, RISE_MS \* BURN_AT\)/)
+  assert.match(animation, /const BURN_AT = 0\.85/)
+  assert.match(animation, /if \(burned \|\| !active\) return\s+burned = true\s+callbacks\.current\.onBurn\(\)/)
   // Opaque behind the flames, so the old tabs never show between tongues.
   assert.match(animation, /scorch: \{ backgroundColor: '#1c0703' \}/)
   assert.match(animation, /require\('\.\.\/assets\/images\/burn-bird\.png'\)/)
@@ -41,7 +44,12 @@ test('the fire comes up from the bottom and leaves off the top', async () => {
   assert.match(animation, /const leave = -\(fireTop \+ bodyHeight\)/)
   assert.match(animation, /translateY: travel\.interpolate\(\{ inputRange: \[0, 1, 2\], outputRange: \[height, 0, leave\] \}\)/)
   assert.match(animation, /translateY: travel\.interpolate\(\{ inputRange: \[0, 1, 2\], outputRange: \[0, 0, leave\] \}\)/)
-  assert.match(animation, /Animated\.timing\(travel, \{ duration: LEAVE_MS, easing: Easing\.in\(Easing\.quad\), toValue: 2/)
+  // Without stopping at the top: one animation from below the screen to off
+  // it, at the speed it comes up. It used to stop, wait, and set off again, and
+  // the wait grew with the burn, which ran on the JS thread before the second
+  // half could start.
+  assert.match(animation, /Animated\.timing\(travel, \{ duration: RISE_MS \/ riseShare, easing: steady, toValue: 2, useNativeDriver: true \}\)/)
+  assert.doesNotMatch(animation, /HOLD_MS|LEAVE_MS|Animated\.delay\(HOLD/)
   assert.doesNotMatch(animation, /opacity: fade/)
   // Its tail thins to nothing, so there is no hard edge as the screen returns.
   assert.match(animation, /<Stop offset='1' stopColor='#4a0805' stopOpacity=\{0\} \/>/)
