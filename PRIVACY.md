@@ -1,6 +1,6 @@
 # PeerSky Mobile Privacy Policy
 
-Last updated: October 1, 2026
+Last updated: October 6, 2026
 
 PeerSky Mobile is a web and peer-to-peer browser. There are no accounts, no
 analytics and no servers of ours, so there is nowhere for us to collect anything
@@ -9,6 +9,13 @@ to, or that you use the app at all.
 
 This policy explains what the app handles, where it goes, and the parts that are
 not perfect.
+
+## What We Do See
+
+The App Store and Google Play show us how many times PeerSky was downloaded, and
+crash reports from people who agreed on their phone to share them with app
+developers. Apple and Google collect these under their own privacy policies, and
+neither tells us who you are.
 
 ## Data Stored on Your Device
 
@@ -49,6 +56,8 @@ PeerSky downloads EasyList and EasyPrivacy filter data to provide ad and tracker
 ## Reports
 
 Reporting someone in PeerChat opens an email to us, which you can read before you send it. It holds their name and short peer ID, the room's name and a hash of its key (never the key itself), and the message you reported, if you reported one. We use it only to act on the report, and we read every one within 24 hours. Nothing is sent unless you send that email.
+
+We delete a report email once we have acted on it, and within 90 days at the latest, unless the law requires us to keep it longer, as it does for a child safety report we pass to the authorities. Ask at contact@p2plabs.xyz and we delete yours sooner.
 
 ## Deleting Your Data
 
