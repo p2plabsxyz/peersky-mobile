@@ -1408,6 +1408,70 @@ test('PeerChat sends an invite to one key only, and holds it while two keys shar
   await service.close()
 })
 
+// A personal link carries the whole key, so its request goes to that key while
+// another shares the short id, and it never opens someone else's conversation.
+test('PeerChat sends a request from a link to the key the link names', async (t) => {
+  const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-dm-link-key-'))
+  t.after(() => rm(storagePath, { recursive: true, force: true }))
+  const service = await new PeerChatService({ sdk: createFakeSdk(), storagePath }).start()
+  await service.completeOnboarding({ username: 'Alice' })
+  // Your own link is made from your whole key, which your id starts.
+  assert.equal(service.getProfile().key, service.localKey)
+  assert.equal(service.getProfile().key.slice(0, 8), service.getProfile().id)
+
+  const bobFrames = []
+  const impostorFrames = []
+  const bob = createFakePeer('aabbccdd', 'Bob', bobFrames)
+  const impostor = createFakePeer('aabbccdd', 'Bob', impostorFrames)
+  impostor.key = `aabbccdd${'ee'.repeat(28)}`
+  service.peers.set(bob.connection, bob)
+  service.peers.set(impostor.connection, impostor)
+
+  const { room } = await service.createDirectMessage({ peerKey: bob.key.toUpperCase(), username: 'Bob' })
+  assert.equal(room.dmWith, 'aabbccdd')
+  assert.equal(room.dmWithKey, bob.key)
+  assert.equal(bobFrames.filter((frame) => frame.type === 'dm-invite').length, 1)
+  assert.equal(impostorFrames.some((frame) => frame.type === 'dm-invite'), false)
+
+  // The impostor's link names its own key, and the conversation is Bob's.
+  await assert.rejects(service.createDirectMessage({ peerKey: impostor.key }), /someone else with this id/)
+  assert.equal(impostorFrames.some((frame) => frame.type === 'dm-invite'), false)
+  assert.equal(service.rooms.get(room.roomKey).dmWithKey, bob.key)
+  // Bob's link again is the same conversation.
+  assert.equal((await service.createDirectMessage({ peerKey: bob.key })).room.roomKey, room.roomKey)
+  // Your own link asks nobody.
+  await assert.rejects(service.createDirectMessage({ peerKey: service.localKey }), /Choose another peer/)
+  await service.close()
+})
+
+test('PeerChat sends a request still waiting on a shared short id to the key a link names', async (t) => {
+  const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-dm-link-bind-'))
+  t.after(() => rm(storagePath, { recursive: true, force: true }))
+  const service = await new PeerChatService({ sdk: createFakeSdk(), storagePath }).start()
+  await service.completeOnboarding({ username: 'Alice' })
+
+  const bobFrames = []
+  const impostorFrames = []
+  const bob = createFakePeer('aabbccdd', 'Bob', bobFrames)
+  const impostor = createFakePeer('aabbccdd', 'Bob', impostorFrames)
+  impostor.key = `aabbccdd${'ee'.repeat(28)}`
+  service.peers.set(bob.connection, bob)
+  service.peers.set(impostor.connection, impostor)
+
+  // Picked from a list by short id, so it waits on the two keys.
+  const { room } = await service.createDirectMessage({ peerId: 'aabbccdd', username: 'Bob' })
+  assert.equal(bobFrames.some((frame) => frame.type === 'dm-invite'), false)
+  assert.equal(room.dmWithKey, null)
+
+  // Bob's link settles it.
+  const linked = await service.createDirectMessage({ peerKey: bob.key })
+  assert.equal(linked.room.roomKey, room.roomKey)
+  assert.equal(linked.room.dmWithKey, bob.key)
+  assert.equal(bobFrames.filter((frame) => frame.type === 'dm-invite').length, 1)
+  assert.equal(impostorFrames.some((frame) => frame.type === 'dm-invite'), false)
+  await service.close()
+})
+
 test('PeerChat answers a request at the key it came from, and keeps that key across a restart', async (t) => {
   const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-dm-from-key-'))
   t.after(() => rm(storagePath, { recursive: true, force: true }))

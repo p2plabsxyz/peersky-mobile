@@ -97,8 +97,10 @@ with each other.
 A direct message's key is the one key that crosses the wire, inside the invite,
 to the one person it is for. It goes to their full public key, recorded when the
 conversation starts and checked on every answer, never to the 8-character peer
-id, which is short enough to grind. While two connected keys share that id, the
-invite waits.
+id, which is short enough to grind. A personal link or QR code carries the full
+key, so a request from one goes to that key alone. A request started from a
+member list, or from an older link with only the 8-character id, goes to the one
+connected key with that id, and while two share it, the invite waits.
 
 Messages are encrypted before they are appended to a room feed or sent to a
 peer. Sender names, timestamps, reactions, and other routing metadata are not

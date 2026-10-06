@@ -6,10 +6,11 @@ import { buildPeerChatAppInviteMessage, buildPeerChatDirectInviteUrl } from '../
 
 test('Find invites friends to install PeerChat, with your own link to message you once they are set up', async () => {
   const install = "I'm inviting you to install PeerSky! Here is the link:\nhttps://peersky.p2plabs.xyz/mobile"
-  const mine = buildPeerChatDirectInviteUrl('1a2b3c4d')
+  const key = `1a2b3c4d${'9f'.repeat(28)}`
+  const mine = buildPeerChatDirectInviteUrl(key)
   assert.equal(
     buildPeerChatAppInviteMessage(mine),
-    `${install}\n\nThen open this PeerChat link to message me:\npeersky://p2p/peerchat/#dm=1a2b3c4d`
+    `${install}\n\nThen open this PeerChat link to message me:\npeersky://p2p/peerchat/#dm=${key}`
   )
   // No name yet, so no link of your own: the install link alone.
   assert.equal(buildPeerChatAppInviteMessage(''), install)
@@ -25,5 +26,5 @@ test('Find invites friends to install PeerChat, with your own link to message yo
   assert.match(screen, /await shareLink\(\{ title: 'Invite friends to PeerChat', message: buildPeerChatAppInviteMessage\(myInviteUrl\), plain: true \}\)/)
   const wrapper = await readFile(new URL('../../app/share.ts', import.meta.url), 'utf8')
   assert.match(wrapper, /if \(!plain && hasNativeShareIcon\(\)\) \{/)
-  assert.match(screen, /const myInviteUrl = buildPeerChatDirectInviteUrl\(profile\?\.id \|\| ''\)/)
+  assert.match(screen, /const myInviteUrl = buildPeerChatDirectInviteUrl\(profile\?\.key \|\| ''\)/)
 })

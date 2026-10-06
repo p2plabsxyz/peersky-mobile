@@ -118,8 +118,10 @@ import {
   buildPeerChatAppInviteMessage,
   buildPeerChatDirectInviteUrl,
   buildPeerChatInviteUrl,
+  isPeerChatDirectRoomFor,
   parsePeerChatDirectInvite,
-  parsePeerChatInvite
+  parsePeerChatInvite,
+  splitPeerChatDirectPeer
 } from './peerchat-invite.mjs'
 import { PRE_JOINED_PEERCHAT_ROOM_KEY } from '../../backend/peerchat/rooms.mjs'
 import { QrCodeView } from '../settings/QrCodeView'
@@ -209,6 +211,8 @@ type PeerChatRoom = {
   avatar: string | null
   isDM: boolean
   dmWith: string | null
+  // The whole key of the person a direct message is with, once known.
+  dmWithKey?: string | null
   pendingAcceptance: boolean
   rejected: boolean
   blockedByPeer: boolean
@@ -253,6 +257,8 @@ type PeerChatMediaTarget = {
 
 type PeerChatProfile = {
   id: string
+  // The whole key the id is the start of, for this person's own link.
+  key?: string
   username: string
   bio: string
   avatar: string | null
@@ -310,6 +316,7 @@ type PeerChatScreenProps = {
   onStatus: (message: string) => void
   soundsEnabled: boolean
   requestedRoomKey: string | null
+  // The person a link names: their whole key, or the short id of an older link.
   requestedPeerId?: string | null
   onRequestedPeerHandled?: () => void
 }
@@ -501,7 +508,7 @@ export function PeerChatScreen ({
       discoverQuery
     ) as PeerChatMember[]
     : []
-  const myInviteUrl = buildPeerChatDirectInviteUrl(profile?.id || '')
+  const myInviteUrl = buildPeerChatDirectInviteUrl(profile?.key || '')
   const visibleMembers = filterPeerChatMembers(
     activeRoom?.members || [],
     memberSearchQuery
@@ -692,7 +699,7 @@ export function PeerChatScreen ({
     // Same wait as a room invite: a request cannot be sent without a name.
     if (!requestedPeerId || !isInitialized || !profile?.username) return
     onRequestedPeerHandled?.()
-    const existing = rooms.find((room) => room.isDM && room.dmWith === requestedPeerId)
+    const existing = rooms.find((room) => isPeerChatDirectRoomFor(room, requestedPeerId))
     if (existing) {
       openRoom(existing)
       return
@@ -1155,11 +1162,16 @@ export function PeerChatScreen ({
   /**
    * Asking one person for a direct message, from a scanned code or a link.
    *
+   * A code names their whole key, and the request goes to that key alone. An
+   * older one has only the short id, which the request goes by instead.
+   *
    * Their name comes from whatever the welcome room already knows, and falls
    * back to the id, because a code can be scanned before their profile has
    * reached this device.
    */
-  async function requestDirectMessage (peerId: string) {
+  async function requestDirectMessage (peer: string) {
+    const { id: peerId, key: peerKey } = splitPeerChatDirectPeer(peer)
+    if (!peerId) return
     if (peerId === profile?.id) {
       onStatus('That is your own code')
       return
@@ -1169,6 +1181,7 @@ export function PeerChatScreen ({
     await runAction(async () => {
       const response = await callRpc(RPC_PEERCHAT_DM_CREATE, {
         peerId,
+        peerKey,
         username: known?.username || peerId,
         bio: known?.bio || '',
         avatar: known?.avatar || null
@@ -1558,9 +1571,9 @@ export function PeerChatScreen ({
 
     // A room QR and a personal one look the same to a camera, so both are
     // tried. A personal one sends a request rather than joining anything.
-    const peerId = parsePeerChatDirectInvite(value)
-    if (peerId) {
-      void requestDirectMessage(peerId)
+    const peer = parsePeerChatDirectInvite(value)
+    if (peer) {
+      void requestDirectMessage(peer)
       return
     }
 

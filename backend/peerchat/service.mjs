@@ -263,6 +263,8 @@ export class PeerChatService {
   getProfile () {
     return {
       id: this.localId,
+      // The whole key, for this person's own link and QR code.
+      key: this.localKey,
       username: this.profile.username || '',
       bio: this.profile.bio || '',
       avatar: this.profile.avatar || null,
@@ -459,17 +461,21 @@ export class PeerChatService {
       .slice(0, MAX_PENDING_DIRECT_MESSAGES)
   }
 
-  async createDirectMessage ({ peerId, username, bio, avatar } = {}) {
+  async createDirectMessage ({ peerId, peerKey, username, bio, avatar } = {}) {
     this.ensureProfile()
-    const normalizedPeerId = normalizePeerChatPeerId(peerId)
+    // A link names the whole key. A member picked from a list, and an older
+    // link, give only the short id it starts with.
+    const normalizedPeerKey = normalizeDeviceKey(peerKey)
+    const normalizedPeerId = normalizedPeerKey ? normalizedPeerKey.slice(0, 8) : normalizePeerChatPeerId(peerId)
     if (!normalizedPeerId || normalizedPeerId === this.localId) throw new Error('Choose another peer.')
     if (this.isPeerBlocked(normalizedPeerId)) throw new Error('Unblock this person before messaging them.')
 
     // An offline peer is allowed. activatePeer re-sends the invite the moment
     // they connect, so the room opens now and waits rather than failing. The
-    // invite carries the key, so it goes to the one key behind the short id;
-    // with two keys sharing it, it waits until only one is there.
-    const peer = this.peerWithKey(soleKeyFor(this.peers.values(), normalizedPeerId))
+    // invite carries the key, so it goes to one key: the one a link names, or
+    // else the only one behind the short id; with two keys sharing it, it
+    // waits until only one is there.
+    const peer = this.peerWithKey(normalizedPeerKey || soleKeyFor(this.peers.values(), normalizedPeerId))
     const known = peer || this.findKnownMember(normalizedPeerId)
 
     // One conversation per person, found by who it is with. The key used to be
@@ -485,6 +491,7 @@ export class PeerChatService {
       room = this.createDirectRoom({
         roomKey,
         peerId: normalizedPeerId,
+        peerKey: normalizedPeerKey,
         username: normalizeMemberName(username) || known?.username || normalizedPeerId,
         bio: normalizePeerChatBio(bio ?? known?.bio),
         avatar: normalizePeerChatAvatar(avatar ?? known?.avatar),
@@ -493,6 +500,14 @@ export class PeerChatService {
       this.rooms.set(roomKey, room)
     } else if (!room.isDM || room.dmWith !== normalizedPeerId) {
       throw new Error('PeerChat direct-message room is invalid.')
+    } else if (normalizedPeerKey && room.dmWithKey && room.dmWithKey !== normalizedPeerKey) {
+      // Someone else whose key starts the same way. One conversation per short
+      // id is what the rest of PeerChat goes by, so this one is not opened.
+      throw new Error('You already message someone else with this id.')
+    } else if (normalizedPeerKey && !room.dmWithKey && room.pendingAcceptance) {
+      // A request that has gone to nobody yet goes to the key in the link.
+      // Nothing can be written in it before it is accepted.
+      room.dmWithKey = normalizedPeerKey
     }
     // Asking again clears both. A block that could never be retried would make
     // the other side's unblock meaningless, and if they are still blocking us
@@ -2553,6 +2568,7 @@ export class PeerChatService {
       avatar: room.avatar || null,
       isDM: room.isDM === true,
       dmWith: room.dmWith || null,
+      dmWithKey: room.dmWithKey || null,
       // The same answer the person's dot gives everywhere else.
       ...(room.isDM === true && { dmOnline: this.isPeerOnline(room.dmWith), dmIdle: this.isPeerIdle(room.dmWith) }),
       pendingAcceptance: room.pendingAcceptance === true,
