@@ -57,7 +57,7 @@ PeerSky downloads EasyList and EasyPrivacy filter data to provide ad and tracker
 
 Reporting someone in PeerChat opens an email to us, which you can read before you send it. It holds their name and short peer ID, the room's name and a hash of its key (never the key itself), and the message you reported, if you reported one. We use it only to act on the report, and we read every one within 24 hours. Nothing is sent unless you send that email.
 
-We delete a report email once we have acted on it, and within 90 days at the latest, unless the law requires us to keep it longer, as it does for a child safety report we pass to the authorities. Ask at contact@p2plabs.xyz and we delete yours sooner.
+If you sent us a report, ask at contact@p2plabs.xyz and we delete it, unless the law requires us to keep it.
 
 ## Deleting Your Data
 
