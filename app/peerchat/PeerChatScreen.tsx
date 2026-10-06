@@ -1823,12 +1823,12 @@ export function PeerChatScreen ({
     }
   }
 
-  // A link to install PeerChat, sent through any app: Messages, Mail, WhatsApp.
+  // A link to install PeerSky, sent through any app: Messages, Mail, WhatsApp.
   // Your own link comes with it, so opening it once they are set up sends you
-  // a message request.
+  // a message request. Plain text: see shareLink.
   async function inviteFriends () {
     try {
-      await shareLink({ title: 'Invite friends to PeerChat', message: buildPeerChatAppInviteMessage(myInviteUrl) })
+      await shareLink({ title: 'Invite friends to PeerChat', message: buildPeerChatAppInviteMessage(myInviteUrl), plain: true })
     } catch (cause) {
       if (!mountedRef.current) return
       const message = cause instanceof Error ? cause.message : String(cause)

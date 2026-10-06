@@ -18,11 +18,15 @@ export function hasNativeShareIcon () {
 /**
  * Shares a link or message. Same shape as Share.share, minus the options
  * nobody here passes.
+ *
+ * @param plain Text for someone to read, shared without the icon header.
+ *   WhatsApp kept only the link from an invite shared with it, while Reminders
+ *   and Copy got all of it; plain text is how other apps share an invite.
  */
-export async function shareLink ({ message, title = '' }: { message: string, title?: string }) {
+export async function shareLink ({ message, title = '', plain = false }: { message: string, title?: string, plain?: boolean }) {
   if (!message) return
 
-  if (hasNativeShareIcon()) {
+  if (!plain && hasNativeShareIcon()) {
     try {
       await PeerSkyShare?.share(message, title)
       return

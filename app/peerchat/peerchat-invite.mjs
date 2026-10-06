@@ -16,10 +16,10 @@ export const PEERCHAT_INVITE_BASE = 'peersky://p2p/peerchat/'
 export const PEERCHAT_APP_INVITE_URL = 'https://peersky.p2plabs.xyz/mobile'
 
 export function buildPeerChatAppInviteMessage (directInviteUrl = '') {
-  const message = `I'm inviting you to install PeerChat! Here is the link:\n${PEERCHAT_APP_INVITE_URL}`
+  const message = `I'm inviting you to install PeerSky! Here is the link:\n${PEERCHAT_APP_INVITE_URL}`
   // No name yet means no link of your own yet.
   if (!parsePeerChatDirectInvite(directInviteUrl)) return message
-  return `${message}\n\nThen open this link to message me:\n${directInviteUrl}`
+  return `${message}\n\nThen open this PeerChat link to message me:\n${directInviteUrl}`
 }
 
 const ROOM_KEY_RE = /^[a-f0-9]{64}$/i
