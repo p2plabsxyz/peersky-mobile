@@ -85,7 +85,7 @@ export const PEERCHAT_USAGE_QUESTIONS = [
   },
   {
     q: 'Can people send anything they like?',
-    a: 'In groups, some things are blocked for everyone, with nothing to switch on. Nudity in pictures is refused before it’s sent and again when it arrives. Text is filtered for abuse, slurs and adult links, and a link that looks like a scam gets a warning. Violent or graphic pictures aren’t detected, so block and report are there for those.'
+    a: 'In groups, some things are blocked for everyone, with nothing to switch on. Nudity in pictures is refused before it’s sent and again when it arrives. Text is filtered for abuse, slurs and adult links, and a link that looks like a scam gets a warning.'
   },
   {
     q: 'Someone is bothering me. What can I do?',

@@ -244,6 +244,13 @@ test('PeerChat answers the questions a first-time user actually asks', async () 
   assert.match(answer(/bothering me/), /Everything they send disappears for you, in every chat/)
   assert.match(answer(/bothering me/), /with the message you reported/)
   assert.doesNotMatch(answer(/bothering me/), /key/)
+
+  // What the filters catch, never what they miss: a list of gaps is a guide
+  // for whoever wants to get something past them.
+  for (const { a } of PEERCHAT_QUESTIONS) {
+    assert.doesNotMatch(a, /(aren|isn).t detected|not detected|can.t (detect|tell)|undetected/i)
+  }
+  assert.match(answer(/send anything they like/), /Nudity in pictures is refused/)
 })
 
 test('PeerChat shows the questions folded, on the welcome screen and in About', async () => {
