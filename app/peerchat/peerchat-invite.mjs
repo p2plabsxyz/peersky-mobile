@@ -9,6 +9,19 @@
 // browser shell treats them as a launch suffix on the built-in app.
 export const PEERCHAT_INVITE_BASE = 'peersky://p2p/peerchat/'
 
+// "Invite friends to PeerChat" in Find: a message to send through any app on
+// the phone, for someone who does not have PeerSky yet. Your own link goes
+// after it: opened once they have set PeerChat up, it sends you a message
+// request, so the two of you find each other without scanning anything.
+export const PEERCHAT_APP_INVITE_URL = 'https://peersky.p2plabs.xyz/mobile'
+
+export function buildPeerChatAppInviteMessage (directInviteUrl = '') {
+  const message = `I'm inviting you to install PeerChat! Here is the link:\n${PEERCHAT_APP_INVITE_URL}`
+  // No name yet means no link of your own yet.
+  if (!parsePeerChatDirectInvite(directInviteUrl)) return message
+  return `${message}\n\nThen open this link to message me:\n${directInviteUrl}`
+}
+
 const ROOM_KEY_RE = /^[a-f0-9]{64}$/i
 
 export function buildPeerChatInviteUrl (roomKey) {

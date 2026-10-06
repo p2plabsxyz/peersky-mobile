@@ -115,6 +115,7 @@ import SettingsIcon from '../../assets/icons/peerchat/settings.svg'
 import { CameraView, useCameraPermissions } from 'expo-camera'
 import { getPeerChatUploadTimeout } from './attachment-timeout.mjs'
 import {
+  buildPeerChatAppInviteMessage,
   buildPeerChatDirectInviteUrl,
   buildPeerChatInviteUrl,
   parsePeerChatDirectInvite,
@@ -1814,6 +1815,20 @@ export function PeerChatScreen ({
         title: `Join ${activeRoom.name} on PeerChat`,
         message: buildPeerChatInviteUrl(activeRoom.roomKey) || activeRoom.roomKey
       })
+    } catch (cause) {
+      if (!mountedRef.current) return
+      const message = cause instanceof Error ? cause.message : String(cause)
+      setError(message)
+      onStatus(message)
+    }
+  }
+
+  // A link to install PeerChat, sent through any app: Messages, Mail, WhatsApp.
+  // Your own link comes with it, so opening it once they are set up sends you
+  // a message request.
+  async function inviteFriends () {
+    try {
+      await shareLink({ title: 'Invite friends to PeerChat', message: buildPeerChatAppInviteMessage(myInviteUrl) })
     } catch (cause) {
       if (!mountedRef.current) return
       const message = cause instanceof Error ? cause.message : String(cause)
@@ -3744,6 +3759,15 @@ export function PeerChatScreen ({
                   <QrScanIcon width={20} height={20} color={colors.accent} />
                 </Pressable>
               </View>
+              <Pressable
+                accessibilityHint='Opens the share sheet with a link to install PeerChat'
+                accessibilityRole='button'
+                onPress={() => { void inviteFriends() }}
+                style={({ pressed }) => [styles.discoverInviteRow, { backgroundColor: pressed ? colors.accentSoft : colors.input }]}
+              >
+                <ShareIcon width={17} height={17} color={colors.accent} />
+                <Text style={[styles.discoverInviteText, { color: colors.accent }]}>Invite friends to PeerChat</Text>
+              </Pressable>
               {directory.map((member) => (
                 <Pressable
                   accessibilityHint={`Sends ${member.username} a message request`}
@@ -5161,5 +5185,7 @@ const styles = StyleSheet.create({
   selectBarCount: { flex: 1, fontSize: 14, textAlign: 'center' },
   discoverSearchRow: { alignItems: 'center', flexDirection: 'row', gap: 8 },
   discoverSearchInput: { flex: 1 },
-  discoverScanButton: { alignItems: 'center', borderRadius: 12, height: 44, justifyContent: 'center', width: 44 }
+  discoverScanButton: { alignItems: 'center', borderRadius: 12, height: 44, justifyContent: 'center', width: 44 },
+  discoverInviteRow: { alignItems: 'center', borderRadius: 12, flexDirection: 'row', gap: 10, minHeight: 44, paddingHorizontal: 14 },
+  discoverInviteText: { fontSize: 14, fontWeight: '800' }
 })
