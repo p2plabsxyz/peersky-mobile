@@ -44,6 +44,17 @@ Important files:
 - `backend/peerchat/moderation.mjs`: local content and spam enforcement.
 - `backend/peerchat/runtime.mjs`: shared-runtime service initialization and cleanup.
 
+## Moderation
+
+Each phone and desktop filters what it sends and what it receives, on its own.
+In a group, a message with threats, slurs or an adult-domain link is held back
+and a notice takes its place, and a picture that looks explicit is refused
+before it is sent. A direct message skips the text filters: it is between two
+people, and either can block the other. The spam limit still applies there, and
+a picture that looks explicit arrives hidden behind a warning the reader can
+open. Whether a room is a direct message is worked out on each device, never
+taken from a peer, so no room setting can switch a group's filters off.
+
 ## Room-key security
 
 The room key is both an invitation and the secret needed to decrypt room

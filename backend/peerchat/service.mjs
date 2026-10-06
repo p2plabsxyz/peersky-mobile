@@ -759,19 +759,19 @@ export class PeerChatService {
       {
         allowKick: false,
         checkSpam: false,
-        settings: room.moderation
+        settings: this.moderationFor(room)
       }
     )
     if (!moderation.allowed) {
       throw new Error(`Message blocked: ${moderation.reason}. Please rephrase it.`)
     }
 
-    let normalizedPreview = this.sanitizeModeratedPreview(preview, room.moderation)
+    let normalizedPreview = this.sanitizeModeratedPreview(preview, this.moderationFor(room))
     if (!normalizedPreview && this.profile.linkPreview !== false) {
       const previewUrl = extractFirstHttpUrl(normalizedMessage)
-      if (previewUrl && !checkPeerChatContent(previewUrl, room.moderation).flagged) {
+      if (previewUrl && !checkPeerChatContent(previewUrl, this.moderationFor(room)).flagged) {
         const resolved = await resolveLinkPreview(previewUrl)
-        normalizedPreview = this.sanitizeModeratedPreview(resolved, room.moderation)
+        normalizedPreview = this.sanitizeModeratedPreview(resolved, this.moderationFor(room))
       }
     }
     const encodedPayload = encodeMessagePayload(normalizedMessage, normalizedPreview)
@@ -1552,9 +1552,9 @@ export class PeerChatService {
     const normalizedMessage = normalizePeerChatMessage(decodedPayload.text)
     if (!normalizedMessage) return
     const moderation = isSync
-      ? checkPeerChatContent(normalizedMessage, room.moderation)
+      ? checkPeerChatContent(normalizedMessage, this.moderationFor(room))
       : this.moderator.checkMessage(peer.id, roomKey, normalizedMessage, {
-        settings: room.moderation
+        settings: this.moderationFor(room)
       })
     if (moderation.flagged || moderation.allowed === false) {
       await this.appendModerationNotice(roomKey, message.id, peer, {
@@ -1564,7 +1564,7 @@ export class PeerChatService {
       return
     }
 
-    const safePreview = this.sanitizeModeratedPreview(decodedPayload.preview, room.moderation)
+    const safePreview = this.sanitizeModeratedPreview(decodedPayload.preview, this.moderationFor(room))
     const safePlaintext = encodeMessagePayload(normalizedMessage, safePreview)
     const safeEncrypted = safePlaintext === plaintext
       ? { ct: message.ct, iv: message.iv, tag: message.tag }
@@ -2028,6 +2028,14 @@ export class PeerChatService {
       createdByName: room.createdByName || (room.isHost ? this.myName() : ''),
       moderation: normalizePeerChatModeration(room.moderation)
     })
+  }
+
+  // What a room's messages are checked against. directMessage is never stored
+  // or sent: a room says nothing about it, a direct message just is one.
+  moderationFor (room) {
+    return room?.isDM === true
+      ? { ...DEFAULT_PEERCHAT_MODERATION, directMessage: true }
+      : room?.moderation
   }
 
   sanitizeModeratedPreview (preview, settings) {
