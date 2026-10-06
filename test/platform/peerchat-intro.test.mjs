@@ -35,14 +35,22 @@ test('PeerChat states its rules, and the terms they come from', async () => {
   // Said plainly: an age in the rule read as if adults were fair game.
   assert.match(PEERCHAT_RULES.join(' '), /No sexual content or nudity, ever\./)
   assert.doesNotMatch(PEERCHAT_RULES.join(' '), /under 18/)
-  assert.match(PEERCHAT_RULES.join(' '), /report them\. We read every report within 24 hours/)
+  assert.match(PEERCHAT_RULES.join(' '), /report them\. We read every report\./)
   assert.match(PEERCHAT_RULES.join(' '), /P2P Republic, a public room anyone can join/)
   assert.equal(PEERCHAT_TERMS_URL, 'https://github.com/p2plabsxyz/peersky-mobile/blob/main/TERMS.md')
 
   const terms = await readFile(new URL('../../TERMS.md', import.meta.url), 'utf8')
   assert.match(terms, /There is no tolerance for\nobjectionable content or abusive users/)
-  assert.match(terms, /contact@p2plabs\.xyz and we read every one within 24 hours/)
+  assert.match(terms, /contact@p2plabs\.xyz and we read every one\./)
   assert.doesNotMatch(terms, /—/)
+
+  // Every report is read, but no deadline is promised: a small team cannot
+  // keep one. App Review's 24 hours stays an internal note in
+  // docs/store-release.md.
+  const privacy = await readFile(new URL('../../PRIVACY.md', import.meta.url), 'utf8')
+  for (const text of [PEERCHAT_RULES.join(' '), terms, privacy]) {
+    assert.doesNotMatch(text, /24 hours/)
+  }
 
   const screen = await readFile(new URL('../../app/peerchat/PeerChatScreen.tsx', import.meta.url), 'utf8')
   const intro = screen.slice(screen.indexOf('if (showIntro) {'), screen.indexOf('if (isInitialized && !profile?.username)'))

@@ -55,7 +55,7 @@ PeerSky downloads EasyList and EasyPrivacy filter data to provide ad and tracker
 
 ## Reports
 
-Reporting someone in PeerChat opens an email to us, which you can read before you send it. It holds their name and short peer ID, the room's name and a hash of its key (never the key itself), and the message you reported, if you reported one. We use it only to act on the report, and we read every one within 24 hours. Nothing is sent unless you send that email.
+Reporting someone in PeerChat opens an email to us, which you can read before you send it. It holds their name and short peer ID, the room's name and a hash of its key (never the key itself), and the message you reported, if you reported one. We use it only to act on the report, and we read every one. Nothing is sent unless you send that email.
 
 If you sent us a report, ask at contact@p2plabs.xyz and we delete it, unless the law requires us to keep it.
 

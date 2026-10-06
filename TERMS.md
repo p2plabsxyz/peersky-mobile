@@ -1,6 +1,6 @@
 # PeerSky Terms of Use
 
-Last updated: October 4, 2026
+Last updated: October 6, 2026
 
 PeerSky is a free, open source browser from P2P Labs, with PeerChat, P2PMD and
 PeerTunes built in. By using it you agree to these terms. They are short on
@@ -26,7 +26,7 @@ objectionable content or abusive users. Do not send or post:
 - You can block anyone. Everything they send disappears for you, in every chat,
   and they can no longer message you directly.
 - You can report anyone, or a single message, from inside the app. Reports go to
-  contact@p2plabs.xyz and we read every one within 24 hours.
+  contact@p2plabs.xyz and we read every one.
 - In P2P Republic, the public room we run, we remove anyone who breaks these
   rules. Whoever creates any other room can remove people from it too.
 - PeerChat has no server, so nobody, us included, can delete a message from a
@@ -66,7 +66,7 @@ email contact@p2plabs.xyz with "Copyright" in the subject, and include:
 Please do not use the public issue form on GitHub for this, since a notice
 carries your name and address.
 
-We read every notice within 24 hours. For a valid one:
+We read every notice. For a valid one:
 
 - In P2P Republic, the public room we run, we remove whoever shared it, and
   anyone who shares it again.

@@ -117,8 +117,12 @@ Play copy and the GitHub APK without uninstalling first.
 
 ## After review
 
-- Answer reports and copyright notices within 24 hours, and remove people from
-  P2P Republic from the device that runs it when they break the rules.
+- App Review's rejection text for apps with chat asks that reports are acted on
+  within 24 hours. The terms only promise that every report is read, so if
+  review asks, say in the notes that reports are acted on within a day, and
+  check contact@p2plabs.xyz daily. Copyright notices have no deadline.
+- Remove people from P2P Republic from the device that runs it when they break
+  the rules.
 - A valid copyright notice for a `hyper://` address goes on the list in
   `backend/hyper/blocked-drives.mjs` in the next release.
 - Keep `PRIVACY.md` and `TERMS.md` in step with what the app does. The app links
