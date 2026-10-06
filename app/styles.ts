@@ -567,6 +567,25 @@ export const styles = StyleSheet.create({
     backgroundColor: '#1d513d',
     color: '#c6f6df'
   },
+  // Beside the local URL rather than in the header, which holds the tabs.
+  p2pmdWorkspaceRoleInline: {
+    flexShrink: 0,
+    fontSize: 9,
+    paddingHorizontal: 6,
+    paddingVertical: 2
+  },
+  p2pmdWorkspaceUrlRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 6,
+    minWidth: 0
+  },
+  p2pmdTabsButton: {
+    alignItems: 'center',
+    height: 38,
+    justifyContent: 'center',
+    width: 30
+  },
   p2pmdPreviewButton: {
     backgroundColor: '#2f80ed',
     borderRadius: 12,
@@ -665,6 +684,7 @@ export const styles = StyleSheet.create({
   },
   p2pmdWorkspaceUrl: {
     color: '#a2a8bb',
+    flexShrink: 1,
     fontFamily: 'monospace',
     fontSize: 11,
     minWidth: 0

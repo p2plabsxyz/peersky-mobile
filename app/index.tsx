@@ -93,6 +93,7 @@ import {
   createHyperMediaHtml
 } from './browser-html.mjs'
 import {
+  BROWSER_PALETTES,
   getBrowserPalette,
   getBrowserStatusBarStyle,
   resolveBrowserDarkMode
@@ -3858,9 +3859,13 @@ export default function App () {
     )
   }
 
-  if (!browserOverlay && activeTab === 'p2pmd' && p2pmdWorkspaceReady && p2pmdRoom && p2pmdUrl && p2pmdEditorHtml) {
+  // The tab list is drawn in the browser underneath, so the note steps aside
+  // while it is open, as it does for any other tab.
+  if (!browserOverlay && !browserTabsVisible && activeTab === 'p2pmd' && p2pmdWorkspaceReady && p2pmdRoom && p2pmdUrl && p2pmdEditorHtml) {
     const p2pmdEditorRoomBaseUrl = p2pmdUrl.replace(/\/$/, '')
     const p2pmdSyncDisplay = getP2pmdSyncDisplay(p2pmdSyncStatus)
+    // The same colour as the menu's dots beside it.
+    const p2pmdHeaderIconColor = browserIsDark ? BROWSER_PALETTES.dark.mutedText : '#1f2a44'
     const p2pmdEditorBaseUrl = createP2pmdEditorUrl(p2pmdEditorRoomBaseUrl, p2pmdRoom.role, p2pmdEditorNonce)
     const p2pmdEditorHtmlWithRoomBase = p2pmdEditorHtml.replace(
       '<head>',
@@ -3876,9 +3881,6 @@ export default function App () {
         />
         {!isP2pmdLandscapeSlides && <View style={[styles.p2pmdWorkspaceHeader, p2pmdTheme?.p2pmdWorkspaceHeader]}>
           <Text style={[styles.p2pmdWorkspaceTitle, p2pmdTheme?.p2pmdWorkspaceTitle]}>P2PMD</Text>
-          <Text style={[styles.p2pmdWorkspaceRole, p2pmdTheme?.p2pmdWorkspaceRole, p2pmdRoom.role === 'host' ? [styles.p2pmdWorkspaceRoleHost, p2pmdTheme?.p2pmdWorkspaceRoleHost] : null]}>
-            {p2pmdRoom.role}
-          </Text>
           <Pressable
             accessibilityRole='button'
             accessibilityLabel={`Peers: ${p2pmdParticipants ?? 'unknown'}`}
@@ -3916,6 +3918,21 @@ export default function App () {
               </Text>
             </View>
           </Pressable>
+          {/* The tabs, as on the toolbar. A note fills the screen, and the way
+              to another tab was the menu's New tab and then the tab list. */}
+          <Pressable
+            accessibilityLabel={`Open tabs, ${browserTabsState.tabs.length} open`}
+            accessibilityRole='button'
+            style={styles.p2pmdTabsButton}
+            onPress={() => {
+              browserUserInteractedRef.current = true
+              setBrowserTabsVisible(true)
+            }}
+          >
+            <View style={[styles.browserTabCountIcon, { borderColor: p2pmdHeaderIconColor }]}>
+              <Text style={[styles.browserTabCountText, { color: p2pmdHeaderIconColor }]}>{browserTabsState.tabs.length}</Text>
+            </View>
+          </Pressable>
           <BrowserOverflowMenu
             bookmarkActionAvailable={false}
             bookmarksDisabled={!browserBookmarksReady}
@@ -3948,9 +3965,14 @@ export default function App () {
                 <View accessible accessibilityLabel='Unsaved changes' style={styles.p2pmdUnsavedDot} />
               )}
             </View>
-            <Text numberOfLines={1} ellipsizeMode='middle' style={[styles.p2pmdWorkspaceUrl, p2pmdTheme?.p2pmdWorkspaceUrl]}>
-              {p2pmdRoom.localUrl}
-            </Text>
+            <View style={styles.p2pmdWorkspaceUrlRow}>
+              <Text numberOfLines={1} ellipsizeMode='middle' style={[styles.p2pmdWorkspaceUrl, p2pmdTheme?.p2pmdWorkspaceUrl]}>
+                {p2pmdRoom.localUrl}
+              </Text>
+              <Text style={[styles.p2pmdWorkspaceRole, styles.p2pmdWorkspaceRoleInline, p2pmdTheme?.p2pmdWorkspaceRole, p2pmdRoom.role === 'host' ? [styles.p2pmdWorkspaceRoleHost, p2pmdTheme?.p2pmdWorkspaceRoleHost] : null]}>
+                {p2pmdRoom.role}
+              </Text>
+            </View>
             {p2pmdPublishUrl && (
               <Pressable
                 accessibilityHint='Shows the published link to share or copy'
