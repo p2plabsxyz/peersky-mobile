@@ -86,6 +86,11 @@ pushed (or a release is made with a new tag on GitHub), signs it, and attaches
 to the release. The tag has to match
 `version` in `app.json`, so `v0.1.0` for 0.1.0, or the run stops.
 
+The release notes start with that checksum and the command to check a
+download against it, `openssl sha256 PeerSky-<tag>.apk`. A release made by
+hand on GitHub keeps its own notes under the checksum, and running the workflow
+again replaces the checksum and nothing else.
+
 ```mermaid
 flowchart LR
   tag["Push tag v0.1.0"] --> checks["Tag matches app.json,<br/>signing secrets are set"]
