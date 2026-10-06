@@ -210,3 +210,37 @@ RCT_EXPORT_METHOD(saveToFiles:(NSString *)fileUri
 }
 
 @end
+
+// React Native closes a <Modal> by asking the modal's own view controller to
+// dismiss itself. A view controller that is presenting something of its own,
+// such as a share sheet opened from inside the modal, dismisses only that, so
+// the emptied modal stayed over the app and took every tap. It happened when a
+// link changed the screen under PeerChat's Find panel while the invite's share
+// sheet was still up. The view controller that presented the modal takes down
+// the modal and everything above it. React Native's core is prebuilt, so its
+// source cannot be patched; this swaps that one method when the app loads.
+@interface PeerSkyModalDismissal : NSObject
+@end
+
+@implementation PeerSkyModalDismissal
+
++ (void)load
+{
+  Class modalClass = NSClassFromString(@"RCTModalHostViewComponentView");
+  SEL selector = NSSelectorFromString(@"dismissViewController:animated:completion:");
+  Method method = modalClass ? class_getInstanceMethod(modalClass, selector) : NULL;
+  if (!method) return;
+
+  typedef void (*PeerSkyDismissImp)(id, SEL, UIViewController *, BOOL, void (^)(void));
+  PeerSkyDismissImp original = (PeerSkyDismissImp)method_getImplementation(method);
+  method_setImplementation(method, imp_implementationWithBlock(^(id host, UIViewController *modal, BOOL animated, void (^completion)(void)) {
+    UIViewController *presenter = modal.presentingViewController;
+    if (presenter && modal.presentedViewController) {
+      [presenter dismissViewControllerAnimated:animated completion:completion];
+      return;
+    }
+    original(host, selector, modal, animated, completion);
+  }));
+}
+
+@end
