@@ -52,6 +52,7 @@ import { notifyApp } from '../rpc/notify.mjs'
 import { attachPeerChatTransport } from './transport.mjs'
 import { createPeerPresence } from './presence.mjs'
 import { collapsePeerChatMembers } from './members.mjs'
+import { nameNotice } from './notice-names.mjs'
 import {
   acceptsPeerChatCreatorKey,
   addPeerChatRoomBan,
@@ -332,6 +333,7 @@ export class PeerChatService {
     const welcomeRoom = this.rooms.get(PRE_JOINED_PEERCHAT_ROOM_KEY)
     if (welcomeRoom) welcomeRoom.lastMessage = null
     this.schedulePersist()
+    this.announceJoins()
 
     return { profile, rooms: this.listRooms() }
   }
@@ -1474,7 +1476,9 @@ export class PeerChatService {
       const wasMember = Boolean(
         (room?.members || []).find((member) => member.id === peer.id)?.joinedAt
       )
-      if (message.username) peer.username = normalizeMemberName(message.username) || peer.username
+      // An id is no name: phones sent theirs before they had one.
+      const announcedName = normalizeMemberName(message.username)
+      if (announcedName && announcedName !== peer.id) peer.username = announcedName
       if (Object.hasOwn(message, 'bio')) peer.bio = normalizePeerChatBio(message.bio)
       if (Object.hasOwn(message, 'avatar')) peer.avatar = normalizePeerChatAvatar(message.avatar)
       if (this.rememberRoomMember(room, peer, message.ts)) this.schedulePersist()
@@ -1732,18 +1736,38 @@ export class PeerChatService {
     if (this.isPeerRemovedFromRoom(roomKey, peer)) return
 
     this.shareMembers(peer, roomKey)
+    this.sendJoin(peer, roomKey)
+    this.syncHistoryToPeerOnce(peer, roomKey).catch(() => {})
+  }
+
+  // Only with a name. Onboarding joins the welcome room before the name is
+  // saved, and this used to go out with the phone's id in its place, which
+  // every desktop then wrote into the room as "ac368f46 joined".
+  sendJoin (peer, roomKey) {
+    const name = this.myName()
+    if (!name) return
     this.sendToPeer(peer, {
       type: 'join',
       roomKey,
       peerId: this.localId,
-      username: this.myName() || this.localId,
+      username: name,
       bio: this.profile.bio || '',
       avatar: this.profile.avatar || null,
       // By topic, like the room itself: an id is sent as it is.
       id: `${wireTopic(roomKey)}-${this.localId}-join-${Date.now()}`,
       ts: roomJoinTime(this.rooms.get(roomKey))
     })
-    this.syncHistoryToPeerOnce(peer, roomKey).catch(() => {})
+  }
+
+  // Once there is a name, everyone already connected hears the join that was
+  // held back, as desktop does when its profile is saved.
+  announceJoins () {
+    for (const peer of this.peers.values()) {
+      for (const roomKey of peer.rooms) {
+        if (!this.rooms.has(roomKey) || this.isPeerRemovedFromRoom(roomKey, peer)) continue
+        this.sendJoin(peer, roomKey)
+      }
+    }
   }
 
   announceRoom (roomKey) {
@@ -2359,7 +2383,8 @@ export class PeerChatService {
           continue
         }
         if (entry?.type === 'system' && entry?.moderationNotice === true) {
-          messages.push(this.entryToSystemMessage(entry))
+          const notice = this.entryToSystemMessage(entry)
+          if (notice) messages.push(notice)
           continue
         }
         if (!entry?.ct) continue
@@ -2461,17 +2486,48 @@ export class PeerChatService {
     }
   }
 
+  // A person's name from what this phone has heard, never their id again.
+  nameForPeer (peerId) {
+    const id = normalizePeerChatPeerId(peerId)
+    if (!id) return ''
+    if (id === this.localId) return this.myName()
+    const real = (value) => {
+      const name = normalizeMemberName(value)
+      return name && name !== id ? name : ''
+    }
+    for (const peer of this.peers.values()) {
+      if (normalizePeerChatPeerId(peer.id) === id && real(peer.username)) return real(peer.username)
+    }
+    for (const room of this.rooms.values()) {
+      const name = real(room.members?.find((member) => member.id === id)?.username)
+      if (name) return name
+    }
+    return ''
+  }
+
+  isMemberName (name) {
+    if (this.myName() === name) return true
+    for (const room of this.rooms.values()) {
+      if (room.members?.some((member) => member.username === name && member.id !== name)) return true
+    }
+    return false
+  }
+
   isOwnDevice (peerId) {
     const id = normalizePeerChatPeerId(peerId)
     return Boolean(id) && (id === this.localId || this.siblings.has(id))
   }
 
+  // A line written with an id where the name belongs reads with the name, or
+  // not at all when the person never took one.
   entryToSystemMessage (entry) {
+    const message = nameNotice(String(entry.message || ''), (id) => this.nameForPeer(id), (name) => this.isMemberName(name))
+    if (!message) return null
     return {
       id: String(entry.id || ''),
       sender: '',
       senderName: 'PeerChat',
-      message: String(entry.message || '').slice(0, 500),
+      message: message.slice(0, 500),
       timestamp: normalizePeerChatTimestamp(entry.ts),
       self: false,
       system: true
@@ -2578,14 +2634,19 @@ export class PeerChatService {
    */
   async appendJoinNotice (roomKey, peer, message, wasMember) {
     if (wasMember) return
+    const realName = (value) => {
+      const name = normalizeMemberName(value)
+      return name && name !== peer.id ? name : ''
+    }
+    const name = realName(message.username) ||
+      realName(peer.username) ||
+      realName(this.rooms.get(roomKey)?.members?.find((member) => member.id === peer.id)?.username)
+    // Someone without a name yet is not in the conversation. Asked before the
+    // line's id is taken, so their join with a name still gets one.
+    if (!name) return
     const id = `${wireTopic(roomKey)}-${peer.id}-join-${message.ts || Date.now()}`
     if (!this.trackMessageId(typeof message.id === 'string' ? message.id : id)) return
     if (!this.feeds.has(roomKey)) return
-
-    const name = normalizeMemberName(message.username) ||
-      normalizeMemberName(peer.username) ||
-      this.rooms.get(roomKey)?.members?.find((member) => member.id === peer.id)?.username ||
-      peer.id
     try {
       await this.appendEntry(roomKey, {
         id,
