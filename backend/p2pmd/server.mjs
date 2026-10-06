@@ -29,6 +29,19 @@ const peerActivity = createPeerActivityStore()
 const editActivityTimers = new Map()
 let keepaliveInterval = null
 const EDIT_ACTIVITY_DEBOUNCE_MS = 1200
+// Typing and cursor moves come several times a second from each person, and
+// the people list carries everyone in the note, so sending it on each one grew
+// with the square of the room. It goes out four times a second, and less often
+// in a big room: once a second at 100 people. Joins and leaves go out at once.
+const PEER_LIST_INTERVAL_MS = 250
+const PEER_LIST_MS_PER_PERSON = 10
+// The whole note as text, which an editor reads line authors from. Edits go
+// out as Yjs changes the moment they land; the whole note with each one as
+// well grew with the note and the room.
+const DOCUMENT_BROADCAST_MS = 500
+const DOCUMENT_MS_PER_PERSON = 20
+let peerStateTimer = null
+let documentBroadcastTimer = null
 const P2PMD_SLIDES_TEMPLATE = `# Welcome to Your Presentation
 
 Your first slide content goes here
@@ -66,8 +79,16 @@ subscribeToDocumentUpdates(({ document, origin, update }) => {
   if (origin !== 'line-attribution-update') {
     broadcastEvent('yjsupdate', update)
   }
-  broadcastEvent('update', JSON.stringify(document))
+  scheduleDocumentBroadcast()
 })
+
+function scheduleDocumentBroadcast () {
+  if (documentBroadcastTimer) return
+  documentBroadcastTimer = setTimeout(() => {
+    documentBroadcastTimer = null
+    if (eventClients.size > 0) broadcastEvent('update', JSON.stringify(getDocumentState()))
+  }, Math.max(DOCUMENT_BROADCAST_MS, eventClients.size * DOCUMENT_MS_PER_PERSON))
+}
 
 // preferredPort: the one this note was on before, so its address stays the
 // same. If something else has it now, the system picks another.
@@ -227,7 +248,7 @@ function handleRequest (req, res) {
     readJsonBody(req)
       .then((body) => {
         upsertPeerPresence(body)
-        broadcastPeerState()
+        schedulePeerStateBroadcast()
         sendJson(res, 200, {
           ok: true,
           peers: getPeerCount()
@@ -296,7 +317,7 @@ function handleRequest (req, res) {
         const result = applyDocumentUpdate(body.update, body.lineAttributions ?? body.lineAuthors)
         if (result.ok) {
           const peerKey = upsertPeerPresence(body)
-          broadcastPeerState()
+          schedulePeerStateBroadcast()
           scheduleEditActivity(peerKey, body)
         }
         sendJson(res, result.ok ? 200 : 400, result)
@@ -316,7 +337,7 @@ function handleRequest (req, res) {
         const result = updateDocumentState(body.content, body.lineAttributions ?? body.lineAuthors)
         if (result.ok) {
           const peerKey = upsertPeerPresence(body)
-          broadcastPeerState()
+          schedulePeerStateBroadcast()
           scheduleEditActivity(peerKey, body)
         }
         sendJson(res, result.ok ? 200 : 400, result)
@@ -517,8 +538,20 @@ function prunePeerPresence (peerKey) {
 }
 
 function broadcastPeerState () {
+  if (peerStateTimer) {
+    clearTimeout(peerStateTimer)
+    peerStateTimer = null
+  }
   broadcastEvent('peers', String(getPeerCount()))
-  broadcastEvent('peerlist', JSON.stringify(getPeerList()))
+  broadcastEvent('peerlist', JSON.stringify(peerPresence.takePeerListUpdate(getActivePeerKeys())))
+}
+
+function schedulePeerStateBroadcast () {
+  if (peerStateTimer) return
+  peerStateTimer = setTimeout(() => {
+    peerStateTimer = null
+    broadcastPeerState()
+  }, Math.max(PEER_LIST_INTERVAL_MS, eventClients.size * PEER_LIST_MS_PER_PERSON))
 }
 
 function broadcastActivity (activity) {
@@ -593,7 +626,7 @@ function scheduleEditActivity (peerKey, payload = {}) {
     }))
     if (activePeer) {
       upsertPeerPresence({ ...activePeer, isTyping: false })
-      broadcastPeerState()
+      schedulePeerStateBroadcast()
     }
   }, EDIT_ACTIVITY_DEBOUNCE_MS)
   editActivityTimers.set(peerKey, timer)
@@ -602,6 +635,10 @@ function scheduleEditActivity (peerKey, payload = {}) {
 function resetPeerState () {
   for (const timer of editActivityTimers.values()) clearTimeout(timer)
   editActivityTimers.clear()
+  if (peerStateTimer) clearTimeout(peerStateTimer)
+  if (documentBroadcastTimer) clearTimeout(documentBroadcastTimer)
+  peerStateTimer = null
+  documentBroadcastTimer = null
   peerPresence.clear()
   peerActivity.clear()
 }

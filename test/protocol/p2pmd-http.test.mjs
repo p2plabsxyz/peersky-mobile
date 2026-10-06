@@ -451,6 +451,48 @@ describe('p2pmd HTTP endpoints with injectable Node server', () => {
     assert.equal(status.peerList.some((peer) => peer.clientId === 'device-c'), true)
   })
 
+  // A note is for a team, up to about 100 people. The whole note and the
+  // whole people list went to everyone on every keystroke and cursor move:
+  // 100 people, 10 of them typing, was 426 MB a second out of the phone.
+  it('sends each edit at once, but the whole note and the people list only a few times a second', async () => {
+    await postJson(`${localUrl}/doc`, { content: 'Line 1', clientId: 'phone-host', role: 'host', name: 'Phone' })
+    const watcher = pump(await openEventStream(`${localUrl}/events?clientId=watcher&role=client&name=Watcher`))
+    activeStreams.add(watcher)
+    const typistStream = pump(await openEventStream(`${localUrl}/events?clientId=typist&role=client&name=Typist`))
+    activeStreams.add(typistStream)
+    await delay(800)
+    const count = (name) => parseSseEvents(watcher.buffer).filter((event) => event.event === name).length
+    const before = { yjsupdate: count('yjsupdate'), update: count('update'), peerlist: count('peerlist') }
+
+    const typist = new Y.Doc()
+    Y.applyUpdate(typist, b4a.from((await getJson(`${localUrl}/doc/yjsstate`)).yjsState, 'base64'))
+    const text = typist.getText('content')
+    for (let i = 0; i < 10; i += 1) {
+      const vector = Y.encodeStateVector(typist)
+      text.insert(text.length, String(i))
+      const response = await postJson(`${localUrl}/doc/update`, {
+        update: b4a.toString(Y.encodeStateAsUpdate(typist, vector), 'base64'),
+        clientId: 'typist',
+        role: 'client',
+        name: 'Typist',
+        cursorLine: 1,
+        cursorColumn: i + 7
+      })
+      assert.equal(response.status, 200)
+      const presence = await postJson(`${localUrl}/presence`, { clientId: 'typist', role: 'client', name: 'Typist', isTyping: true, cursorLine: 1, cursorColumn: i + 7 })
+      assert.equal(presence.status, 200)
+    }
+    await delay(900)
+
+    assert.equal(count('yjsupdate') - before.yjsupdate, 10)
+    assert.ok(count('peerlist') - before.peerlist <= 3, `${count('peerlist') - before.peerlist} people lists`)
+    assert.ok(count('update') - before.update <= 2, `${count('update') - before.update} whole notes`)
+    const notes = parseSseEvents(watcher.buffer).filter((event) => event.event === 'update')
+    assert.equal(JSON.parse(notes.at(-1).data).content, 'Line 10123456789')
+    const lists = parseSseEvents(watcher.buffer).filter((event) => event.event === 'peerlist')
+    assert.equal(JSON.parse(lists.at(-1).data).find((peer) => peer.clientId === 'typist').cursorColumn, 16)
+  })
+
   it('returns useful errors for bad JSON and unknown endpoints', async () => {
     const badJsonResponse = await fetch(`${localUrl}/doc`, {
       method: 'POST',
@@ -634,6 +676,22 @@ async function waitForSseEvent (stream, eventName, predicate, timeoutMs = 3000) 
   }
 
   throw new Error(`Timed out waiting for matching SSE event: ${eventName}`)
+}
+
+// Reads a stream into its buffer as events come, so counting them never
+// leaves a read pending that would drop what it got.
+function pump (stream) {
+  const decoder = new TextDecoder()
+  ;(async () => {
+    try {
+      for (;;) {
+        const { value, done } = await stream.reader.read()
+        if (done) break
+        stream.buffer += decoder.decode(value, { stream: true })
+      }
+    } catch {}
+  })()
+  return stream
 }
 
 function parseSseEvents (payload) {

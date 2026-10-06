@@ -171,6 +171,38 @@ describe('p2pmd peer activity', () => {
   })
 })
 
+describe('p2pmd people list for a whole room', () => {
+  // An editor sends all of its lines with every edit and cursor move, and the
+  // list goes to everyone in the note, so a person's line authors go out again
+  // only when they change.
+  it('puts someone\'s line authors in the list for everyone only when they changed', () => {
+    const store = createPeerPresenceStore({ now: createClock() })
+    const authors = { 1: { name: 'Desktop', color: '#59a6ff' }, 2: { name: 'Desktop', color: '#59a6ff' } }
+    const desktop = store.upsert({ clientId: 'desktop-peer', role: 'client', name: 'Desktop', color: '#59a6ff', lineAttributions: authors })
+    const phone = store.upsert({ clientId: 'phone-host', role: 'host', name: 'Phone', color: '#f2d35b' })
+    const active = new Set([desktop, phone])
+    const desktopIn = (list) => list.find((peer) => peer.clientId === 'desktop-peer')
+
+    assert.deepEqual(Object.keys(desktopIn(store.takePeerListUpdate(active)).lineAttributions), ['1', '2'])
+
+    // The same lines with a cursor move: where they are, not who wrote what.
+    store.upsert({ clientId: 'desktop-peer', role: 'client', cursorLine: 2, lineAttributions: authors })
+    const quiet = desktopIn(store.takePeerListUpdate(active))
+    assert.equal(quiet.lineAttributions, null)
+    assert.equal(quiet.cursorLine, 2)
+    // Whoever connects gets the whole list, authors and all.
+    assert.deepEqual(Object.keys(desktopIn(store.getPeerList(active)).lineAttributions), ['1', '2'])
+
+    store.upsert({ clientId: 'desktop-peer', role: 'client', lineAttributions: { ...authors, 3: { name: 'Desktop', color: '#59a6ff' } } })
+    assert.deepEqual(Object.keys(desktopIn(store.takePeerListUpdate(active)).lineAttributions), ['1', '2', '3'])
+
+    // Losing a line to someone else is a change too.
+    store.upsert({ clientId: 'phone-host', role: 'host', lineAttributions: { 3: { name: 'Phone', color: '#f2d35b' } } })
+    assert.deepEqual(Object.keys(desktopIn(store.takePeerListUpdate(active)).lineAttributions), ['1', '2'])
+    assert.equal(desktopIn(store.takePeerListUpdate(active)).lineAttributions, null)
+  })
+})
+
 function createClock () {
   let value = 1000
   return () => value++

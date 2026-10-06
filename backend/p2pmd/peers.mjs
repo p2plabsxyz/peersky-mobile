@@ -1,6 +1,16 @@
 export function createPeerPresenceStore ({ now = Date.now } = {}) {
   const peers = new Map()
   let nextPeerId = 1
+  // How far each person's line authors have changed, and how far the last
+  // list sent to everyone went. An editor sends all of its lines every time,
+  // so only a real change goes out again.
+  const attributionVersions = new Map()
+
+  function markAttributionsChanged (peerKey) {
+    const entry = attributionVersions.get(peerKey) || { version: 0, sent: 0 }
+    entry.version += 1
+    attributionVersions.set(peerKey, entry)
+  }
 
   function upsert (payload) {
     if (!payload || typeof payload !== 'object') return null
@@ -18,6 +28,11 @@ export function createPeerPresenceStore ({ now = Date.now } = {}) {
       removeLineAttributionsFromOtherPeers(clientId, lineAttributions)
     }
 
+    const nextLineAttributions = lineAttributions || previous?.lineAttributions || null
+    if (!previous || JSON.stringify(nextLineAttributions) !== JSON.stringify(previous.lineAttributions || null)) {
+      markAttributionsChanged(clientId)
+    }
+
     peers.set(clientId, {
       id: previous?.id || peers.size + 1,
       role: normalizePeerRole(payload.role),
@@ -30,7 +45,7 @@ export function createPeerPresenceStore ({ now = Date.now } = {}) {
       selectionEnd: normalizeOptionalNumber(payload.selectionEnd, previous?.selectionEnd),
       latexModeEnabled: typeof payload.latexModeEnabled === 'boolean' ? payload.latexModeEnabled : null,
       isTyping: typeof payload.isTyping === 'boolean' ? payload.isTyping : previous?.isTyping === true,
-      lineAttributions: lineAttributions || previous?.lineAttributions || null,
+      lineAttributions: nextLineAttributions,
       joinedAt: previous?.joinedAt || timestamp,
       updatedAt: timestamp
     })
@@ -41,11 +56,13 @@ export function createPeerPresenceStore ({ now = Date.now } = {}) {
   function prune (peerKey, activePeerKeys) {
     if (!peerKey) return false
     if (activePeerKeys?.has(peerKey)) return false
+    attributionVersions.delete(peerKey)
     return peers.delete(peerKey)
   }
 
   function clear () {
     peers.clear()
+    attributionVersions.clear()
     nextPeerId = 1
   }
 
@@ -53,6 +70,19 @@ export function createPeerPresenceStore ({ now = Date.now } = {}) {
     return Array.from(peers.entries())
       .filter(([peerKey]) => !activePeerKeys || activePeerKeys.has(peerKey))
       .map(([, peer]) => peer)
+  }
+
+  // The list as it goes out to everyone: each person's line authors only when
+  // they changed since the last one. Editors merge a list into what they
+  // have, so a list without someone's authors takes nothing away. Whoever
+  // connects is sent getPeerList, with everyone's.
+  function takePeerListUpdate (activePeerKeys) {
+    return getPeerList(activePeerKeys).map((peer) => {
+      const entry = attributionVersions.get(peer.clientId)
+      const unsent = !entry || entry.version !== entry.sent
+      if (entry) entry.sent = entry.version
+      return unsent ? peer : { ...peer, lineAttributions: null }
+    })
   }
 
   function getPeerCount (activePeerKeys) {
@@ -72,9 +102,13 @@ export function createPeerPresenceStore ({ now = Date.now } = {}) {
     for (const [peerKey, peer] of peers.entries()) {
       if (peerKey === clientId || !peer.lineAttributions) continue
 
+      let removed = false
       for (const line of editedLines) {
+        if (!Object.prototype.hasOwnProperty.call(peer.lineAttributions, line)) continue
         delete peer.lineAttributions[line]
+        removed = true
       }
+      if (removed) markAttributionsChanged(peerKey)
 
       if (Object.keys(peer.lineAttributions).length === 0) {
         peer.lineAttributions = null
@@ -87,6 +121,7 @@ export function createPeerPresenceStore ({ now = Date.now } = {}) {
     prune,
     clear,
     getPeerList,
+    takePeerListUpdate,
     getPeerCount
   }
 }
