@@ -101,6 +101,69 @@ describe('browser history', () => {
     assert.deepEqual(getBrowserHistorySuggestions(duplicates, 'example'), [duplicates[0]])
   })
 
+  // Typing "youtube" offered the last video watched, not youtube.com.
+  test('a site whose name starts with what was typed comes first, as its home page', () => {
+    const items = [
+      { url: 'https://www.youtube.com/watch?v=b', title: 'Second video', visitedAt: 9 },
+      { url: 'https://duckduckgo.com/?q=youtube+music', title: 'youtube music at DuckDuckGo', visitedAt: 8 },
+      { url: 'https://www.youtube.com/watch?v=a', title: 'First video', visitedAt: 7 },
+      { url: 'https://www.youtube.com/', title: 'YouTube', visitedAt: 6 }
+    ]
+    assert.deepEqual(getBrowserHistorySuggestions(items, 'youtube').map((item) => item.url), [
+      'https://www.youtube.com/',
+      'https://www.youtube.com/watch?v=b',
+      'https://www.youtube.com/watch?v=a',
+      'https://duckduckgo.com/?q=youtube+music'
+    ])
+    assert.deepEqual(getBrowserHistorySuggestions(items, 'you')[0], { url: 'https://www.youtube.com/', title: 'YouTube', visitedAt: 9 })
+    for (const typed of ['YouTube', 'youtube.com', 'youtube.com/', 'www.youtube', 'https://www.you']) {
+      assert.equal(getBrowserHistorySuggestions(items, typed)[0].url, 'https://www.youtube.com/', typed)
+    }
+    // A path is past the site's name.
+    assert.equal(getBrowserHistorySuggestions(items, 'youtube.com/watch')[0].url, 'https://www.youtube.com/watch?v=b')
+
+    // YouTube on a phone.
+    const phone = [
+      { url: 'https://m.youtube.com/watch?v=wqaHXqadvb0', title: 'Yosemite in 4K', visitedAt: 3 },
+      { url: 'https://mobile.de/cars', title: 'Cars', visitedAt: 2 }
+    ]
+    assert.deepEqual(getBrowserHistorySuggestions(phone, 'youtube')[0], { url: 'https://m.youtube.com/', title: 'youtube.com', visitedAt: 3 })
+    assert.deepEqual(getBrowserHistorySuggestions(phone, 'mob')[0], { url: 'https://mobile.de/', title: 'mobile.de', visitedAt: 2 })
+
+    // Last opened at m., but mostly at www: www is offered, and its home page
+    // is not listed again further down.
+    const mixed = [{ url: 'https://m.youtube.com/', title: 'YouTube', visitedAt: 10 }, ...items]
+    assert.deepEqual(getBrowserHistorySuggestions(mixed, 'youtube').map((item) => item.url), [
+      'https://www.youtube.com/',
+      'https://www.youtube.com/watch?v=b',
+      'https://www.youtube.com/watch?v=a',
+      'https://duckduckgo.com/?q=youtube+music'
+    ])
+    assert.equal(getBrowserHistorySuggestions(mixed, 'youtube')[0].visitedAt, 10)
+  })
+
+  test('the site with more pages in history comes before the others, and a home never opened still shows', () => {
+    const items = [
+      { url: 'https://google.com/search?q=a', title: 'a', visitedAt: 5 },
+      { url: 'https://github.com/p2plabsxyz/peersky-browser', title: 'peersky-browser', visitedAt: 4 },
+      { url: 'http://github.com/p2plabsxyz', title: 'p2plabsxyz', visitedAt: 3 },
+      { url: 'https://www.github.com/notifications', title: 'Notifications', visitedAt: 2 },
+      { url: 'hyper://gardens.example/notes/', title: 'Notes', visitedAt: 1 }
+    ]
+    const found = getBrowserHistorySuggestions(items, 'g')
+    assert.deepEqual(found.slice(0, 3), [
+      // http, https and www are one site, shown as it was last opened.
+      { url: 'https://github.com/', title: 'github.com', visitedAt: 4 },
+      { url: 'https://google.com/', title: 'google.com', visitedAt: 5 },
+      { url: 'hyper://gardens.example/', title: 'gardens.example', visitedAt: 1 }
+    ])
+    assert.equal(found.length, 5)
+    assert.deepEqual(getBrowserHistorySuggestions(items, 'gardens').map((item) => item.url), [
+      'hyper://gardens.example/',
+      'hyper://gardens.example/notes/'
+    ])
+  })
+
   test('normalizes Unicode titles and removes formatting controls', () => {
     const [item] = addBrowserHistoryItem([], {
       url: 'https://example.com/',
