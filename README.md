@@ -10,6 +10,7 @@
     <a href="https://mastodon.social/@peersky"><img src="https://img.shields.io/mastodon/follow/113323887574214930" alt="Mastodon Follow"></a>
     <a href="https://deepwiki.com/p2plabsxyz/peersky-mobile"><img src="https://img.shields.io/badge/Ask-DeepWiki-blue.svg" alt="Ask DeepWiki"></a>
     <a href="https://standardjs.com"><img src="https://img.shields.io/badge/code_style-standard-brightgreen.svg" alt="JavaScript Style Guide"></a>
+    <img src="/banner.png" width="800" alt="PeerSky Mobile on Android: the home page, PeerChat, P2PMD, PeerTunes, Hyperdrive and the web">
 </div>
 
 📱 [Download](https://peersky.p2plabs.xyz/) 📜 [Docs](./docs/) 🔒 [Privacy](./PRIVACY.md)
