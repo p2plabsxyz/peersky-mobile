@@ -66,6 +66,21 @@ export function addBrowserTabState (state, { incognito = false } = {}) {
   }
 }
 
+// A tab opened for a link starts on that link, blank while it loads, with the
+// address bar saying so. It started on the home page, and a hyper:// site
+// takes a moment to fetch, so the home page showed before the site.
+export function addOpeningBrowserTabState (state, url, { incognito = false } = {}) {
+  const nextState = addBrowserTabState(state, { incognito })
+  if (nextState === state) return state
+
+  const normalizedUrl = normalizeBrowserTabUrl(url)
+  if (normalizedUrl === BROWSER_HOME_URL) return nextState
+  return updateBrowserTabState(nextState, nextState.activeTabId, {
+    history: [{ url: normalizedUrl, source: { kind: 'restore', url: normalizedUrl, opening: true } }],
+    historyIndex: 0
+  })
+}
+
 export function addBackgroundBrowserTabState (state, url, title = 'New tab', { incognito = false } = {}) {
   const previousActiveTabId = state.activeTabId
   const nextState = addBrowserTabState(state, { incognito })

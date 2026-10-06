@@ -62,6 +62,7 @@ import {
 import {
   addBackgroundBrowserTabState,
   addBrowserTabState,
+  addOpeningBrowserTabState,
   appendIncomingBrowserTabs,
   BROWSER_PAGE_ZOOMS,
   closeBrowserTabState,
@@ -357,7 +358,8 @@ type BrowserSource =
   | { kind: 'web', uri: string }
   | { kind: 'hyper', html: string, baseUrl: string }
   | { kind: 'error', html: string }
-  | { kind: 'restore', url: string }
+  // opening: a tab just opened for a link, blank until the page is there.
+  | { kind: 'restore', url: string, opening?: boolean }
 
 type BrowserHistoryEntry = {
   url: string
@@ -1923,7 +1925,9 @@ export default function App () {
 
     browserUserInteractedRef.current = true
     cancelPendingBrowserLoad()
-    const nextState = addBrowserTabState(browserTabsStateRef.current, { incognito }) as BrowserTabsState
+    const nextState = (targetUrl
+      ? addOpeningBrowserTabState(browserTabsStateRef.current, targetUrl, { incognito })
+      : addBrowserTabState(browserTabsStateRef.current, { incognito })) as BrowserTabsState
     const tab = nextState.tabs.find((item) => item.id === nextState.activeTabId)
 
     updateBrowserTabsState(nextState)
@@ -3406,6 +3410,9 @@ export default function App () {
   const browserPageActionAvailable = browserBookmarkActionAvailable || (
     browserSource.kind === 'app' &&
     canUseP2pAppPageActions(browserSource.app, browserCurrentUrl)
+  ) || (
+    // A tab opened for a link spins where reload goes until its page is there.
+    browserSource.kind === 'restore' && browserSource.opening === true && browserIsLoading
   )
   // A web page gets its edge swipe from WKWebView. peersky:// pages are React
   // Native screens with no web history behind them, so the same gesture is
@@ -4902,12 +4909,15 @@ export default function App () {
               </ScrollView>
               )
           : browserSource.kind === 'restore'
-            ? (
-              <View style={styles.browserRestorePage}>
-                <ActivityIndicator size='small' color='#1f6fd1' />
-                <Text style={styles.browserRestoreText}>Restoring tab...</Text>
-              </View>
-              )
+            ? browserSource.opening
+              // A page on its way: blank, with the address bar showing it load.
+              ? <View style={[styles.browserRestorePage, { backgroundColor: browserChrome.surface }]} />
+              : (
+                <View style={styles.browserRestorePage}>
+                  <ActivityIndicator size='small' color='#1f6fd1' />
+                  <Text style={styles.browserRestoreText}>Restoring tab...</Text>
+                </View>
+                )
             : !contentBlockingReady && isBrowserWebViewSource(browserSource)
                 ? (
                   <View style={styles.browserRestorePage}>

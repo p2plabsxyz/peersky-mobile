@@ -4,6 +4,7 @@ import { BROWSER_HOME_URL } from '../../app/browser-shell.mjs'
 import {
   addBackgroundBrowserTabState,
   addBrowserTabState,
+  addOpeningBrowserTabState,
   appendIncomingBrowserTabs,
   closeBrowserTabState,
   createBrowserTabsState,
@@ -242,6 +243,27 @@ describe('browser tab state helpers', () => {
       url: 'https://example.com/image.jpg',
       source: { kind: 'restore', url: 'https://example.com/image.jpg' }
     })
+  })
+
+  // A hyper:// link from PeerChat showed the home page until the site came.
+  test('a tab opened for a link starts on that link, blank while it loads', async () => {
+    const state = addOpeningBrowserTabState(createBrowserTabsState(), 'hyper://abc/')
+    assert.equal(state.activeTabId, 'tab-2')
+    assert.deepEqual(state.tabs[1].history, [{
+      url: 'hyper://abc/',
+      source: { kind: 'restore', url: 'hyper://abc/', opening: true }
+    }])
+    assert.equal(state.tabs[1].historyIndex, 0)
+
+    const home = addOpeningBrowserTabState(createBrowserTabsState(), BROWSER_HOME_URL)
+    assert.deepEqual(home.tabs[1].history[0], { url: BROWSER_HOME_URL, source: { kind: 'home' } })
+
+    const { readFile } = await import('node:fs/promises')
+    const app = await readFile(new URL('../../app/index.tsx', import.meta.url), 'utf8')
+    assert.match(app, /\? addOpeningBrowserTabState\(browserTabsStateRef\.current, targetUrl, \{ incognito \}\)/)
+    assert.match(app, /\? browserSource\.opening\s+\/\/ [^\n]+\n\s+\? <View style=\{\[styles\.browserRestorePage, \{ backgroundColor: browserChrome\.surface \}\]\} \/>/)
+    // The address bar's spinner shows while it loads.
+    assert.match(app, /browserSource\.kind === 'restore' && browserSource\.opening === true && browserIsLoading/)
   })
 
   test('bounds remote-controlled tab titles', () => {
