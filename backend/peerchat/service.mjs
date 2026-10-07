@@ -493,7 +493,7 @@ export class PeerChatService {
     // where they are.
     if (!normalizedPeerKey && !this.findDirectRoomKey(normalizedPeerId)) {
       const existing = this.isOwnDevice(normalizedPeerId)
-        ? this.chatWithYourself()
+        ? this.chatWithYourself(normalizedPeerId)
         : this.chatWithPersonOf(normalizedPeerId, normalizeMemberName(username) || this.nameForPeer(normalizedPeerId))
       if (existing) return { room: this.publicRoom(existing), rooms: this.listRooms(), version: this.version }
     }
@@ -2185,11 +2185,14 @@ export class PeerChatService {
     })
   }
 
-  // Your chat with yourself. Your devices all join it, so messaging any of them
-  // opens it rather than starting another one.
-  chatWithYourself () {
+  // Your chat with yourself, when the device you are messaging is in it. Your
+  // devices all join it, so messaging any of them opens it rather than
+  // starting another one. One it is not in, such as a chat with a reinstalled
+  // phone's old key, would never reach it.
+  chatWithYourself (peerId) {
     return [...this.rooms.values()].find((room) => (
-      room.isDM && room.dmWith && this.isOwnDevice(room.dmWith) && !room.pendingAcceptance
+      room.isDM && room.dmWith && this.isOwnDevice(room.dmWith) && !room.pendingAcceptance &&
+      (room.members || []).some((member) => member.id === peerId)
     )) || null
   }
 

@@ -50,8 +50,21 @@ test('PeerChat opens your chat with ada when you message ada@mobile, and asks no
   service.siblings.add('0d0d0d0d')
   service.siblings.add('0f0f0f0f')
   const yours = 'fe'.repeat(32)
-  service.rooms.set(yours, { roomKey: yours, name: 'ada', isDM: true, dmWith: '0d0d0d0d', pendingAcceptance: false, createdAt: 1, members: [] })
+  service.rooms.set(yours, {
+    roomKey: yours,
+    name: 'ada',
+    isDM: true,
+    dmWith: '0d0d0d0d',
+    pendingAcceptance: false,
+    createdAt: 1,
+    members: [{ id: '0f0f0f0f', username: 'grace@desktop1', bio: '', avatar: null }]
+  })
   assert.equal((await service.createDirectMessage({ peerId: '0f0f0f0f', username: 'grace@desktop1' })).room.roomKey, yours)
+  // Not one your device is missing from, as with a reinstalled phone's old key.
+  service.siblings.add('0a1b2c3d')
+  const fresh = await service.createDirectMessage({ peerId: '0a1b2c3d', username: 'grace@mobile' })
+  assert.notEqual(fresh.room.roomKey, yours)
+  service.rooms.delete(fresh.room.roomKey)
   service.rooms.delete(yours)
   service.siblings.clear()
 
