@@ -37,11 +37,16 @@ release.
 - **App Privacy.** Data Not Collected. There are no analytics, no accounts and
   no servers. Peers see each other's IP address because devices connect
   directly; that is not collection by us.
-- **Export compliance.** `ITSAppUsesNonExemptEncryption` is `true`. PeerSky
+- **Export compliance.** `ITSAppUsesNonExemptEncryption` is `false`. PeerSky
   uses standard encryption (Noise and libsodium for connections, AES-GCM for
-  attachments, Argon2id for backup passphrases) and no proprietary algorithms.
-  Answer the questions that way, and file whatever your country requires for
-  mass-market encryption.
+  attachments, Argon2id for backup passphrases), no proprietary algorithms, and
+  all of it is published as open source. The US export rules leave publicly
+  available encryption out
+  ([BIS](https://www.bis.gov/learn-support/encryption-controls/encryption-items-not-subject-to-ear)),
+  and only non-standard cryptography needs a notice to BIS, so there is nothing
+  to file. With `true`, App Store Connect refuses the upload (ITMS-90592) until
+  it has approved encryption documentation and the build carries its code as
+  `ITSEncryptionExportComplianceCode`.
 - **Age rating.** Unrestricted web access and user-generated content (PeerChat)
   both get answered yes, which puts PeerSky in the top age band.
 - **URLs.** Privacy policy: `PRIVACY.md` on GitHub. Support: the repository, or

@@ -150,7 +150,10 @@ describe('mobile platform runtime configuration', () => {
     // to add to the library with this. Without it iOS asked for the whole
     // library, with the attach-a-picture reason, and the save did not happen.
     assert.match(infoPlist?.NSPhotoLibraryAddUsageDescription, /Save to Photos/)
-    assert.equal(infoPlist?.ITSAppUsesNonExemptEncryption, true)
+    // All of PeerSky's encryption is standard and published as open source,
+    // which US export rules leave out. Saying true makes App Store Connect
+    // refuse the upload (ITMS-90592) until it has approved documentation.
+    assert.equal(infoPlist?.ITSAppUsesNonExemptEncryption, false)
   })
 
   it('includes store build profiles and user-facing policy links', async () => {
