@@ -8,6 +8,7 @@ import PlusIcon from '../assets/icons/bootstrap/plus-lg.svg'
 import ShareIcon from '../assets/icons/bootstrap/arrow-bar-up.svg'
 import XIcon from '../assets/icons/bootstrap/x-circle.svg'
 import { BROWSER_PALETTES } from './browser-appearance.mjs'
+import { WEBVIEW_DECELERATION_RATE } from './webview-scroll.mjs'
 import { isDownloadableBrowserMediaUrl } from './browser-media.mjs'
 import { MODAL_ORIENTATIONS } from './modal-orientations'
 
@@ -76,6 +77,8 @@ export function BrowserMediaSheet ({
           <WebView
             javaScriptEnabled={false}
             originWhitelist={['http://*', 'https://*']}
+            // Left unset, a swipe stops dead on iOS.
+            decelerationRate={WEBVIEW_DECELERATION_RATE}
             source={{ uri: target.mediaUrl }}
             style={styles.previewWebView}
           />

@@ -73,6 +73,13 @@ class BrowserDownloadsModuleTest {
     assertFalse(PeerSkyContentBlockerBridge.isAuthorizedToken(null, null))
   }
 
+  @Test
+  fun sendsAnIncognitoTabsCookiesOnlyAndNeverTheSharedOnes() {
+    assertEquals("shared", BrowserDownloadsModule.downloadCookieJar(false, null) { "shared" })
+    assertEquals("tab", BrowserDownloadsModule.downloadCookieJar(true, "tab") { "shared" })
+    assertEquals(null, BrowserDownloadsModule.downloadCookieJar(true, null) { "shared" })
+  }
+
   private fun isAndroidPackage(vararg entries: String): Boolean {
     return BrowserDownloadsModule.isAndroidPackage(
       ByteArrayInputStream(archiveBytes(*entries))

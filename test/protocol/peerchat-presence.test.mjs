@@ -92,3 +92,13 @@ test('nothing is held for a peer with no id yet', () => {
   presence.markAbsent('', 'a', 0)
   assert.equal(presence.nextExpiryAt(0), null)
 })
+
+// A held peer is online wherever they are a member, not only in the room
+// whose connection dropped.
+test('someone mid-redial is online in every room, until the grace runs out', () => {
+  const presence = createPeerPresence()
+  presence.markAbsent(ROOM, 'a', 0)
+  assert.equal(presence.isPresentAnywhere('a', 100), true)
+  assert.equal(presence.isPresentAnywhere('b', 100), false)
+  assert.equal(presence.isPresentAnywhere('a', PEER_PRESENCE_GRACE_MS), false)
+})

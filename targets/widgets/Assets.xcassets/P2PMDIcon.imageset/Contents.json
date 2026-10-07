@@ -1,0 +1,12 @@
+{
+  "images" : [
+    {
+      "filename" : "p2pmd.png",
+      "idiom" : "universal"
+    }
+  ],
+  "info" : {
+    "author" : "xcode",
+    "version" : 1
+  }
+}

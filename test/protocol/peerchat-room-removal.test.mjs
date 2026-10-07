@@ -190,7 +190,14 @@ test('a removal is said out loud in the room, by everyone who honours it', () =>
   const receive = service.slice(service.indexOf('receiveRoomBans (roomKey, peer, bans)'), service.indexOf('enforceRoomBans (roomKey)'))
   assert.match(receive, /const before = new Set\(/)
   assert.match(receive, /if \(before\.has\(ban\.id\)\) continue/)
-  assert.match(receive, /this\.appendRemovalNotice\(roomKey, ban\.id, ''\)/)
+  assert.match(receive, /this\.appendRemovalNotice\(roomKey, ban\.id, ban\.name\)/)
+})
+
+test('a removal says who it was by the name the creator gave', () => {
+  const remove = service.slice(service.indexOf('async removeRoomMember ('), service.indexOf('async restoreRoomMember ('))
+  assert.match(remove, /addPeerChatRoomBan\(room\.bans, \{ id, key: connected\?\.key \|\| '', name \}\)/)
+  const receive = service.slice(service.indexOf('receiveRoomBans (roomKey, peer, bans)'), service.indexOf('enforceRoomBans (roomKey)'))
+  assert.match(receive, /this\.appendRemovalNotice\(roomKey, ban\.id, ban\.name\)/)
 })
 
 test('a removed person cannot get back in through somebody else s history', () => {

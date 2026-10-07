@@ -1,0 +1,15 @@
+node_modules/@bacons/apple-targets
+node_modules/@expo/dom-webview
+node_modules/@expo/log-box
+node_modules/expo-dev-client
+node_modules/expo-dev-launcher
+node_modules/expo-dev-menu
+node_modules/expo-dev-menu-interface
+node_modules/expo-image
+node_modules/expo-image-loader
+node_modules/expo-json-utils
+node_modules/expo-manifests
+node_modules/expo-splash-screen
+node_modules/expo-system-ui
+node_modules/expo-updates-interface
+node_modules/expo/node_modules/expo-keep-awake

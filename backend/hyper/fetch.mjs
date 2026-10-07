@@ -8,29 +8,37 @@ import {
   inlineHyperAssets
 } from './assets.mjs'
 import { startHyperAssetServer } from './asset-server.mjs'
+import { BLOCKED_DRIVE_MESSAGE, isBlockedDrive } from './blocked-drives.mjs'
 import {
   DEFAULT_HYPER_DISCOVERY_MAX_RETRY_DELAY,
   DEFAULT_HYPER_DISCOVERY_RETRIES,
   DEFAULT_HYPER_DISCOVERY_RETRY_DELAY,
   withHyperRetry
 } from './fetch-retry.mjs'
-import { withHyperRuntimeForAddress } from './runtime.mjs'
+import {
+  adoptLinkedPrivateDriveIfReadable,
+  isPrivateHyperAddress,
+  withHyperRuntimeForAddress
+} from './runtime.mjs'
+import { isUnreadableDriveError, PRIVATE_DRIVE_ERROR } from './linked-private-drives.mjs'
+import { normalizeDriveAddressId } from './runtime-routing.mjs'
+import {
+  isNamedDriveRequest,
+  namespacePageDriveRequest,
+  pageMayWriteTo,
+  pageSiteId,
+  rememberPageDrive
+} from './page-access.mjs'
 import { refreshHyperRuntimeNetwork } from './network-refresh.mjs'
-import { createHyperUrl, getHyperSearch, getHyperVisibility, parseHyperUrl } from './url.mjs'
-import { readHyperBinaryResponse, writeHyperResponseToFile } from './binary-response.mjs'
+import { createHyperUrl, getHyperSearch, getHyperVisibility, parseHyperUrl, toHyperFetchUrl } from './url.mjs'
+import { writeHyperResponseToFile } from './binary-response.mjs'
+import { parseMultipartFormData } from './form-data.mjs'
 import { configureHyperReadTimeout } from './read-policy.mjs'
 
 let hyperFetches = new WeakMap()
 let hyperWriteFetches = new WeakMap()
 
 export { stopHyperAssetServer } from './asset-server.mjs'
-export {
-  DEFAULT_HYPER_DISCOVERY_MAX_RETRY_DELAY,
-  DEFAULT_HYPER_DISCOVERY_RETRIES,
-  DEFAULT_HYPER_DISCOVERY_RETRY_DELAY,
-  isPeerDiscoveryError,
-  withHyperRetry
-} from './fetch-retry.mjs'
 
 export function resetHyperFetch () {
   hyperFetches = new WeakMap()
@@ -50,11 +58,17 @@ const HYPER_WRITE_METHODS = new Set(['POST', 'PUT'])
 // refusing outright.
 const PUBLIC_VISIBILITY = new Set(['', 'public'])
 
+/**
+ * @param {object} options
+ * @param {string|null} [options.page] The hyper:// page that asked, when the
+ *   request came through the page bridge rather than from the app itself.
+ */
 export async function fetchHyper ({
   url,
   method = 'GET',
   body = null,
   headers: requestHeaders = null,
+  page = null,
   inlineAssets = false,
   retries = DEFAULT_HYPER_DISCOVERY_RETRIES,
   retryDelay = DEFAULT_HYPER_DISCOVERY_RETRY_DELAY,
@@ -68,9 +82,15 @@ export async function fetchHyper ({
 
   const target = parseHyperUrl(url)
   if (target.error) return { ok: false, error: target.error }
+  if (isBlockedDrive(target.driveAddress)) return { ok: false, status: 451, error: BLOCKED_DRIVE_MESSAGE }
   // Creating a named drive is hyper://localhost/?key=myapp, so the query has to
   // survive the trip. Reads never carried one.
   const requestUrl = createHyperUrl(target.driveAddress, target.pathname) + getHyperSearch(url)
+
+  const pageSite = page === null ? null : pageSiteId(page)
+  if (page !== null && !pageSite) {
+    return { ok: false, status: 403, error: 'Only a hyper:// page can make hyper:// requests' }
+  }
 
   if (HYPER_WRITE_METHODS.has(normalizedMethod)) {
     return writeHyper({
@@ -78,11 +98,19 @@ export async function fetchHyper ({
       requestUrl,
       method: normalizedMethod,
       body,
-      headers: requestHeaders
+      headers: requestHeaders,
+      pageSite
     })
   }
 
-  return withHyperRuntimeForAddress(target.driveAddress, async (runtime) => {
+  // A link to someone's private drive can reach a page, and the phone holds
+  // the keys that open it. Only that drive's own pages may read it.
+  if (pageSite && normalizeDriveAddressId(target.driveAddress) !== pageSite &&
+    await isPrivateHyperAddress(target.driveAddress)) {
+    return { ok: false, status: 403, error: 'A page cannot read private drives' }
+  }
+
+  const read = () => withHyperRuntimeForAddress(target.driveAddress, async (runtime) => {
     await prepareHyperRead(runtime, target.driveAddress)
     const fetch = await getHyperFetch(runtime)
 
@@ -162,6 +190,20 @@ export async function fetchHyper ({
 
     return result
   })
+
+  const result = await read()
+  // A private drive a linked device made after the link reads as ciphertext
+  // from the public store, which came back as a decoding error. Tried with this
+  // phone's private keys: one that opens it routes it to the private store from
+  // now on, and it is read again, as it is when another of its files read at
+  // the same time got there first. A device that is not linked gets told what
+  // the drive is.
+  if (result?.ok === false && isUnreadableDriveError(result.error)) {
+    if (await isPrivateHyperAddress(target.driveAddress) ||
+      await adoptLinkedPrivateDriveIfReadable(target.driveAddress)) return read()
+    return { ok: false, status: 403, error: PRIVATE_DRIVE_ERROR }
+  }
+  return result
 }
 
 /**
@@ -170,10 +212,19 @@ export async function fetchHyper ({
  * Nothing here is retried. A read can be attempted again because it has no
  * effect; repeating a write could upload a file twice.
  */
-async function writeHyper ({ target, requestUrl, method, body, headers }) {
+async function writeHyper ({ target, requestUrl, method, body, headers, pageSite = null }) {
   const visibility = getHyperVisibility(requestUrl)
   if (!PUBLIC_VISIBILITY.has(visibility)) {
     return { ok: false, error: `Only public uploads work from a page. Use the Hyperdrive app for ${visibility} ones.` }
+  }
+
+  const namedDrive = Boolean(pageSite) && isNamedDriveRequest(requestUrl, method)
+  if (namedDrive) {
+    const namespaced = namespacePageDriveRequest(requestUrl, pageSite)
+    if (namespaced.error) return { ok: false, status: 400, error: namespaced.error }
+    requestUrl = namespaced.url
+  } else if (pageSite && !pageMayWriteTo(pageSite, target.driveAddress)) {
+    return { ok: false, status: 403, error: 'A page can only write to drives it created' }
   }
 
   return withHyperRuntimeForAddress(target.driveAddress, async (runtime) => {
@@ -188,13 +239,15 @@ async function writeHyper ({ target, requestUrl, method, body, headers }) {
     })
 
     const responseHeaders = headersToObject(response.headers)
+    const responseText = await response.text()
+    if (namedDrive && response.ok) rememberPageDrive(pageSite, responseText)
     return {
       ok: response.ok,
       status: response.status,
       statusText: response.statusText,
       url: response.url || requestUrl,
       headers: responseHeaders,
-      body: await response.text()
+      body: responseText
     }
   })
 }
@@ -242,39 +295,6 @@ async function cancelResponseBody (body) {
 
     if (typeof body.return === 'function') await body.return()
   } catch {}
-}
-
-export async function fetchHyperBinary ({
-  url,
-  method = 'GET',
-  retries = DEFAULT_HYPER_DISCOVERY_RETRIES,
-  retryDelay = DEFAULT_HYPER_DISCOVERY_RETRY_DELAY,
-  maxRetryDelay = DEFAULT_HYPER_DISCOVERY_MAX_RETRY_DELAY,
-  backoffFactor = 2
-} = {}) {
-  if (method.toUpperCase() !== 'GET') {
-    return { ok: false, error: 'Only GET is currently supported' }
-  }
-
-  const target = parseHyperUrl(url)
-  if (target.error) return { ok: false, error: target.error }
-  const requestUrl = createHyperUrl(target.driveAddress, target.pathname)
-
-  return withHyperRuntimeForAddress(target.driveAddress, async (runtime) => {
-    await prepareHyperRead(runtime, target.driveAddress)
-    const fetch = await getHyperFetch(runtime)
-
-    return withHyperRetry({
-      fetch,
-      url: requestUrl,
-      retries,
-      retryDelay,
-      maxRetryDelay,
-      backoffFactor,
-      beforeRetry: () => refreshHyperRuntimeNetwork(runtime),
-      readResponse: (response, headers) => readHyperBinaryResponse(response, headers, requestUrl)
-    })
-  })
 }
 
 /**
@@ -332,17 +352,11 @@ async function getHyperFetch (runtime) {
 }
 
 /**
- * A second hypercore-fetch, the writable one.
- *
- * Reading a page and publishing from one need different instances: with
- * writable off, hypercore-fetch does not register the POST and PUT routes at
- * all, so the publish flow came back as "Load failed" no matter what reached
- * it. Keeping the reading instance read-only means a page being rendered still
- * cannot write anything by accident; only a request that came through the
- * bridge gets this.
- *
- * It is not a key to everything: hypercore-fetch still refuses any drive this
- * device does not hold the write key for.
+ * A second hypercore-fetch, the writable one. With writable off it registers
+ * no POST or PUT routes, so publishing failed with "Load failed". The reading
+ * instance stays read-only so a rendered page cannot write by accident, and
+ * only requests through the bridge get this one. It still refuses any drive
+ * this device has no write key for.
  */
 async function getHyperWriteFetch (runtime) {
   const existing = hyperWriteFetches.get(runtime)
@@ -359,11 +373,18 @@ async function getHyperWriteFetch (runtime) {
   return fetch
 }
 
+/** Looks for peers of the drive behind url again, as a retry does. */
+export function refreshHyperNetworkFor (url) {
+  return withHyperRuntimeForAddress(url, (runtime) => refreshHyperRuntimeNetwork(runtime))
+}
+
+// What the media links and PeerTunes read through. A song or a picture with
+// "&" or "," in its name would not load until the address was respelled.
 export function routedHyperFetch (url, options) {
   return withHyperRuntimeForAddress(url, async (runtime) => {
     await prepareHyperRead(runtime, url)
     const fetch = await getHyperFetch(runtime)
-    return fetch(url, options)
+    return fetch(toHyperFetchUrl(url), options)
   })
 }
 
@@ -542,6 +563,11 @@ class BareRequest {
 
   async arrayBuffer () {
     return uint8ArrayToArrayBuffer(await bodyToUint8Array(this.body))
+  }
+
+  // hypercore-fetch reads a FormData upload, several files at once, with this.
+  async formData () {
+    return parseMultipartFormData(await bodyToUint8Array(this.body), this.headers.get('content-type'))
   }
 }
 

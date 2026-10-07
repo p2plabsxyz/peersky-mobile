@@ -5,7 +5,11 @@ import {
   commitBrowserEntryState,
   getBrowserBackState,
   getBrowserForwardState,
+  formatHyperSiteForPrompt,
+  getBrowserMessagePageUrl,
+  getHyperBridgeSite,
   getBrowserRequestAction,
+  getHyperSiteId,
   getBrowserWebViewKey,
   getHyperDriveListingUrl,
   getSearchUrl,
@@ -283,6 +287,96 @@ describe('browser shell navigation helpers', () => {
     assert.deepEqual(getBrowserRequestAction({ requestUrl: 'https://example.com', currentSourceKind: 'web' }), { action: 'allow' })
   })
 
+  test('a hyper:// frame never takes the whole tab with it', () => {
+    // An ad or embed pointing at hyper:// used to become a full navigation, so
+    // any page could send the tab to a hyper site of its choosing.
+    for (const currentSourceKind of ['web', 'hyper']) {
+      assert.deepEqual(getBrowserRequestAction({
+        requestUrl: 'hyper://somewhere/',
+        currentSourceKind,
+        isTopFrame: false
+      }), { action: 'block' })
+    }
+  })
+
+  // iOS reports a hyper:// page's own load, from the string the app fetched
+  // under its address, as a navigation. Taken over, it loaded the page again,
+  // and again.
+  test('lets a hyper:// page load under its own address, and keeps links and reloads for the app', () => {
+    const page = `hyper://${'ab'.repeat(32)}/docs/index.html`
+    const own = (requestUrl, navigationType, more = {}) => getBrowserRequestAction({
+      requestUrl,
+      currentSourceKind: 'hyper',
+      currentUrl: page,
+      navigationType,
+      ...more
+    })
+    assert.deepEqual(own(page, 'other'), { action: 'allow' })
+    assert.deepEqual(own(`${page}#install`, 'other'), { action: 'allow' })
+    // A link to it, a reload, a form or history still goes through the app.
+    for (const navigationType of ['click', 'reload', 'formsubmit', 'backforward', undefined]) {
+      assert.deepEqual(own(page, navigationType), { action: 'load-hyper', url: page })
+    }
+    // Another page, a web page's tab, or a frame never gets through.
+    const other = `hyper://${'cd'.repeat(32)}/`
+    assert.deepEqual(own(other, 'other'), { action: 'load-hyper', url: other })
+    assert.deepEqual(own(page, 'other', { currentSourceKind: 'web' }), { action: 'load-hyper', url: page })
+    assert.deepEqual(own(page, 'other', { currentUrl: '' }), { action: 'load-hyper', url: page })
+    assert.deepEqual(own(page, 'other', { isTopFrame: false }), { action: 'block' })
+  })
+
+  test('knows a hyper site by its host, for the publishing permission', () => {
+    const hex = 'ab'.repeat(32)
+    const z32 = 'y'.repeat(52)
+    assert.equal(getHyperSiteId(`hyper://${hex}/app/index.html`), hex)
+    assert.equal(getHyperSiteId(`hyper://${z32.toUpperCase()}/`), z32)
+    assert.equal(getHyperSiteId('hyper://localhost/?key=x'), null)
+    assert.equal(getHyperSiteId('https://example.com/'), null)
+    assert.equal(getHyperSiteId('about:blank'), null)
+    assert.equal(formatHyperSiteForPrompt(hex), `${hex.slice(0, 8)}…${hex.slice(-4)}`)
+  })
+
+  // iOS hyper pages had no address at all before PeerSkyWebView handled
+  // hyper://, and a build from before still says about:blank. Android names
+  // only the origin a message came from. Only an address elsewhere means the
+  // tab has left its site.
+  test('lets a hyper tab use the bridge until it navigates somewhere else', () => {
+    const site = 'ab'.repeat(32)
+    const url = `hyper://${site}/index.html`
+    assert.equal(getHyperBridgeSite({ url, reportedUrl: 'about:blank', isHyper: true }), site)
+    assert.equal(getHyperBridgeSite({ url, reportedUrl: '', isHyper: true }), site)
+    assert.equal(getHyperBridgeSite({ url, reportedUrl: `hyper://${site}/other#top`, isHyper: true }), site)
+    assert.equal(getHyperBridgeSite({ url, reportedUrl: 'about:blank#/route', isHyper: true }), site)
+    assert.equal(getHyperBridgeSite({ url, reportedUrl: 'https://evil.example/', isHyper: true }), null)
+    assert.equal(getHyperBridgeSite({ url, reportedUrl: `hyper://${'cd'.repeat(32)}/`, isHyper: true }), null)
+    assert.equal(getHyperBridgeSite({ url, reportedUrl: 'about:blank', isHyper: false }), null)
+    assert.equal(getHyperBridgeSite({ url: 'https://example.com/', reportedUrl: '', isHyper: true }), null)
+  })
+
+  // What Android hands over, as seen on a phone: "hyper://" for every hyper://
+  // page, and the bare origin for a web page. Turning "hyper://" away refused
+  // every hyper:// request a page made there.
+  test('takes the origin Android reports for the page in the tab', () => {
+    const site = 'ab'.repeat(32)
+    const url = `hyper://${site}/notes/index.html`
+    assert.equal(getHyperBridgeSite({ url, reportedUrl: 'hyper://', isHyper: true }), site)
+    assert.equal(getHyperBridgeSite({ url, reportedUrl: 'https://evil.example', isHyper: true }), null)
+    assert.equal(getHyperBridgeSite({ url, reportedUrl: 'null', isHyper: true }), null)
+    assert.equal(getHyperBridgeSite({ url, reportedUrl: 'hyper://', isHyper: false }), null)
+
+    const page = 'https://example.com/blog/post.html?x=1'
+    assert.equal(getBrowserMessagePageUrl('https://example.com', page), page)
+    assert.equal(getBrowserMessagePageUrl('hyper://', url), url)
+    assert.equal(getBrowserMessagePageUrl('about:blank', page), page)
+    assert.equal(getBrowserMessagePageUrl('', page), page)
+    // iOS gives the address itself, which can be newer than the entry.
+    assert.equal(getBrowserMessagePageUrl('https://example.com/blog/next.html', page), 'https://example.com/blog/next.html')
+    // A message from somewhere else keeps its own origin.
+    assert.equal(getBrowserMessagePageUrl('https://ads.example', page), 'https://ads.example')
+    assert.equal(getBrowserMessagePageUrl('https://example.com:8443', page), 'https://example.com:8443')
+    assert.equal(getBrowserMessagePageUrl('hyper://', page), 'hyper://')
+  })
+
   test('guards stale async hyper loads by sequence number', () => {
     assert.equal(isStaleBrowserLoad(1, 2), true)
     assert.equal(isStaleBrowserLoad(2, 2), false)
@@ -507,4 +601,19 @@ test('the p2p address lists the built-in apps', async () => {
     assert.deepEqual(state.history.map((entry) => entry.url), [BROWSER_HOME_URL, search, result])
     assert.equal(getBrowserBackState(state).currentUrl, search)
   })
+})
+
+// iOS reports a link's page as it starts with loading false, since the page
+// being left is done, and with no back entry when that page is the first in
+// the tab. Taken as a page that had landed, it looked like the first page
+// redirecting: the new page took its place, and back skipped it.
+test('a link on the first page in a tab keeps that page behind it on iOS', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const app = await readFile(new URL('../../app/index.tsx', import.meta.url), 'utf8')
+  assert.match(app, /onLoadStart=\{\(event\) => \{\s+browserLoadStartsRef\.current\.add\(event\.nativeEvent\)/)
+  const start = app.indexOf('onNavigationStateChange={(navigationState) => {')
+  const change = app.slice(start, app.indexOf('onMessage={(event) => {', start))
+  assert.match(change, /const loading = navigationState\.loading \|\| browserLoadStartsRef\.current\.has\(navigationState\)/)
+  assert.doesNotMatch(change, /navigationState\.loading(?! \|\|)/)
+  assert.match(change, /canGoForward: navigationState\.canGoForward,\s+loading\s+\}, tab\.id\)/)
 })

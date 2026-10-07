@@ -1,0 +1,115 @@
+[
+  {
+    "name": "EasyList and EasyPrivacy",
+    "version": "snapshot",
+    "license": "CC-BY-SA-3.0",
+    "copyright": "The EasyList authors",
+    "url": "https://easylist.to/",
+    "textFile": "assets/content-blocking/LICENSE"
+  },
+  {
+    "name": "NSFWJS",
+    "version": "4.4.0",
+    "license": "MIT",
+    "copyright": "2019 Infinite Red, Inc.",
+    "url": "https://github.com/infinitered/nsfwjs"
+  },
+  {
+    "name": "nsfw_model (MobileNetV2)",
+    "version": "NSFWJS 4.4.0",
+    "license": "MIT",
+    "copyright": "2020 The nsfw_model Developers",
+    "url": "https://github.com/GantMan/nsfw_model"
+  },
+  {
+    "name": "TensorFlow.js",
+    "version": "4.22.0",
+    "license": "Apache-2.0",
+    "copyright": "Google LLC",
+    "url": "https://github.com/tensorflow/tfjs"
+  },
+  {
+    "name": "Bootstrap Icons",
+    "license": "MIT",
+    "copyright": "The Bootstrap Authors",
+    "url": "https://icons.getbootstrap.com/",
+    "textFile": "assets/icons/bootstrap/LICENSE"
+  },
+  {
+    "name": "Heroicons",
+    "license": "MIT",
+    "copyright": "Tailwind Labs, Inc.",
+    "url": "https://heroicons.com/"
+  },
+  {
+    "name": "qrcode-generator",
+    "license": "MIT",
+    "copyright": "2009 Kazuhiko Arase",
+    "url": "https://github.com/kazuhikoarase/qrcode-generator"
+  },
+  {
+    "name": "emojilib",
+    "license": "MIT",
+    "copyright": "2014 Mu-An Chiou",
+    "url": "https://github.com/muan/emojilib"
+  },
+  {
+    "name": "StevenBlack/hosts",
+    "license": "MIT",
+    "copyright": "2023 Steven Black",
+    "url": "https://github.com/StevenBlack/hosts"
+  },
+  {
+    "name": "bigdargon/hostsVN",
+    "license": "MIT",
+    "copyright": "2026 BigDargon",
+    "url": "https://github.com/bigdargon/hostsVN"
+  },
+  {
+    "name": "Clefspeare13/pornhosts",
+    "license": "MIT",
+    "copyright": "Clefspeare13 and contributors",
+    "url": "https://github.com/Clefspeare13/pornhosts"
+  },
+  {
+    "name": "Sinfonietta/hostfiles",
+    "license": "MIT",
+    "copyright": "2016 Sinfonietta",
+    "url": "https://github.com/Sinfonietta/hostfiles"
+  },
+  {
+    "name": "brijrajparmar27/host-sources",
+    "license": "CC-BY-4.0",
+    "copyright": "brijrajparmar27",
+    "url": "https://github.com/brijrajparmar27/host-sources",
+    "notice": "PeerChat blocks links to adult sites with domains that include the host-sources list by brijrajparmar27, https://github.com/brijrajparmar27/host-sources, licensed under the Creative Commons Attribution 4.0 International License, https://creativecommons.org/licenses/by/4.0/. StevenBlack/hosts merged it with other lists, and PeerChat keeps only the domain names."
+  },
+  {
+    "name": "tiuxo/hosts",
+    "license": "CC-BY-4.0",
+    "copyright": "tiuxo",
+    "url": "https://github.com/tiuxo/hosts",
+    "notice": "PeerChat blocks links to adult sites with domains that include the hosts list by tiuxo, https://github.com/tiuxo/hosts, licensed under the Creative Commons Attribution 4.0 International License, https://creativecommons.org/licenses/by/4.0/. StevenBlack/hosts merged it with other lists, and PeerChat keeps only the domain names."
+  },
+  {
+    "name": "List of offensive words",
+    "license": "Credit",
+    "copyright": "Luis von Ahn, Carnegie Mellon University",
+    "url": "https://www.cs.cmu.edu/~biglou/resources/",
+    "notice": "PeerChat's word filter starts from Luis von Ahn's list of offensive words, published by his research group at Carnegie Mellon University, https://www.cs.cmu.edu/~biglou/resources/. PeerChat took out words that are not offensive on their own."
+  },
+  {
+    "name": "PeerChat sounds",
+    "license": "Pixabay Content License",
+    "copyright": "Pixabay",
+    "url": "https://pixabay.com/",
+    "notice": "The send, receive and pop sounds in PeerChat come from Pixabay, https://pixabay.com/, and are used under the Pixabay Content License, https://pixabay.com/service/license-summary/."
+  },
+  {
+    "name": "Start page wallpaper",
+    "license": "Used with permission",
+    "copyright": "Akhilesh Thite",
+    "url": "",
+    "notice": "Granite Lake on the Ten Lakes Trail, Yosemite National Park. Photo by Akhilesh Thite, who gave it to PeerSky."
+  }
+]

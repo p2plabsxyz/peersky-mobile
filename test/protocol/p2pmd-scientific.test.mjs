@@ -24,6 +24,15 @@ describe('p2pmd scientific templates', () => {
     assert.match(getP2pmdTemplate('technical-doc-md').content, /\| Endpoint \| Method \| Purpose \|/)
   })
 
+  // A template that shows an image from the web tells that site who opened
+  // it, and the image's licence travels with every note made from it.
+  it('loads nothing from the web', () => {
+    for (const template of P2PMD_TEMPLATES) {
+      assert.doesNotMatch(template.content, /!\[[^\]]*\]\(\s*https?:/i, template.id)
+      assert.doesNotMatch(template.content, /<img[^>]+src=["']?https?:/i, template.id)
+    }
+  })
+
   it('requires the IEEE marker at the start of a document', () => {
     assert.equal(hasIeeeMarker('  <!-- ieee -->\n\n# Paper'), true)
     assert.equal(hasIeeeMarker('# Paper\n\n<!-- ieee -->'), false)
@@ -55,5 +64,20 @@ describe('p2pmd scientific templates', () => {
     assert.match(source, /range\.cloneContents\(\)/)
     assert.doesNotMatch(source, /fit\.textContent\s*=/)
     assert.doesNotMatch(source, /remaining\.textContent\s*=/)
+  })
+
+  // Older WebKit leaves "<" unescaped in attributes when it serializes, so
+  // cutting a paragraph's HTML on "<br>" could turn a link title into markup.
+  it('lays out authors and abstracts with DOM nodes, not HTML strings', async () => {
+    const source = await readFile(
+      new URL('../../backend/p2pmd/ieee-browser-entry.js', import.meta.url),
+      'utf8'
+    )
+
+    assert.doesNotMatch(source, /innerHTML\.split/)
+    assert.doesNotMatch(source, /innerHTML\s*=\s*\w+\.innerHTML/)
+    assert.doesNotMatch(source, /innerHTML\s*=\s*part\b/)
+    assert.match(source, /function splitLines \(paragraph\)/)
+    assert.match(source, /paragraph\.append\(\.\.\.part\)/)
   })
 })

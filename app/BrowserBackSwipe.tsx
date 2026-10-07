@@ -1,6 +1,7 @@
 import { Animated, StyleSheet } from 'react-native'
 
 import BackArrowIcon from '../assets/icons/bootstrap/arrow-left.svg'
+import ForwardArrowIcon from '../assets/icons/bootstrap/arrow-right.svg'
 
 const CHIP_SIZE = 44
 // Starts just off the edge and slides to its resting place, the way the system
@@ -8,24 +9,25 @@ const CHIP_SIZE = 44
 const CHIP_TRAVEL = 28
 
 /**
- * The chip that answers an edge swipe.
- *
- * The page used to slide with the finger. A swipe interrupted before it landed
- * never got the offset back, so the browser sat a quarter of a screen to the
- * right afterwards, which is what showed up as a shifted page after typing in
- * the address bar. Nothing underneath this moves, so there is no offset left to
- * get stuck, and an arrow coming in from the edge is what the gesture looks
- * like everywhere else on the phone.
+ * The chip that answers an edge swipe. Sliding the page instead left it a
+ * quarter screen to the right after an interrupted swipe (the shifted page
+ * after typing in the address bar). Nothing under this moves, so nothing can
+ * get stuck, and an arrow from the edge is how the gesture looks elsewhere.
  */
 export function BrowserBackSwipe ({
   background,
   color,
+  direction = 'back',
   progress
 }: {
   background: string
   color: string
+  // Forward comes in from the right edge, as its swipe does.
+  direction?: 'back' | 'forward'
   progress: Animated.Value
 }) {
+  const forward = direction === 'forward'
+  const ArrowIcon = forward ? ForwardArrowIcon : BackArrowIcon
   return (
     <Animated.View
       // Purely an indicator. Taking touches here would fight the gesture that
@@ -33,6 +35,7 @@ export function BrowserBackSwipe ({
       pointerEvents='none'
       style={[
         styles.chip,
+        forward ? styles.chipForward : styles.chipBack,
         {
           backgroundColor: background,
           opacity: progress,
@@ -40,7 +43,7 @@ export function BrowserBackSwipe ({
             {
               translateX: progress.interpolate({
                 inputRange: [0, 1],
-                outputRange: [-CHIP_TRAVEL, 0]
+                outputRange: [forward ? CHIP_TRAVEL : -CHIP_TRAVEL, 0]
               })
             },
             {
@@ -53,7 +56,7 @@ export function BrowserBackSwipe ({
         }
       ]}
     >
-      <BackArrowIcon width={20} height={20} color={color} />
+      <ArrowIcon width={20} height={20} color={color} />
     </Animated.View>
   )
 }
@@ -65,7 +68,6 @@ const styles = StyleSheet.create({
     elevation: 6,
     height: CHIP_SIZE,
     justifyContent: 'center',
-    left: 8,
     marginTop: -CHIP_SIZE / 2,
     position: 'absolute',
     shadowColor: '#10131a',
@@ -75,5 +77,7 @@ const styles = StyleSheet.create({
     top: '50%',
     width: CHIP_SIZE,
     zIndex: 30
-  }
+  },
+  chipBack: { left: 8 },
+  chipForward: { right: 8 }
 })

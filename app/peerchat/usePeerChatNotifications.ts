@@ -15,6 +15,7 @@ import {
 import {
   hasPeerChatNotificationPermission,
   addPeerChatNotificationResponseListener,
+  getPeerChatBadgeCount,
   presentPeerChatNotification,
   preparePeerChatNotifications,
   requestPeerChatNotificationPermission,
@@ -93,6 +94,17 @@ export function usePeerChatNotifications ({
     return () => subscription.remove()
   }, [])
 
+  // The app icon still holds the last count, and the messages it counts are
+  // still unread until their room is opened. Show it on the PeerChat shortcut
+  // from the start, rather than nothing until the first check comes back.
+  useEffect(() => {
+    let cancelled = false
+    void getPeerChatBadgeCount().then((count) => {
+      if (!cancelled && badgeCountRef.current === -1 && count > 0) setUnreadTotal(count)
+    })
+    return () => { cancelled = true }
+  }, [])
+
   useEffect(() => {
     try {
       if (PREFERENCES_FILE.exists &&
@@ -153,18 +165,14 @@ export function usePeerChatNotifications ({
     })
   }, [isReady, isRuntimeReady, preferences.notifications, roomCount])
 
+  // While the runtime is starting, or restarting, nothing is known about the
+  // rooms. The count on the app icon and the shortcut is left as it was: the
+  // messages are still unread. Zeroing it here blanked the icon every time
+  // PeerSky opened, and it stayed blank if you left before the first check.
   useEffect(() => {
     if (!isReady || isRuntimeReady) return
     previousRoomsRef.current = null
-    badgeCountRef.current = 0
-    setRoomCount(0)
-    setUnreadTotal(0)
-    void setPeerChatBadgeCount(0).catch((error) => {
-      if (!badgeWarningRef.current) {
-        badgeWarningRef.current = true
-        console.warn('Unable to clear PeerChat badge:', error)
-      }
-    })
+    badgeCountRef.current = -1
   }, [isReady, isRuntimeReady])
 
   useEffect(() => {

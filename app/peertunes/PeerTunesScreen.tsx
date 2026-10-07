@@ -1,21 +1,49 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { AppState, Modal, Pressable, StyleSheet, Text, View } from 'react-native'
+import { AppState, DeviceEventEmitter, Modal, NativeEventEmitter, NativeModules, Platform, Pressable, StyleSheet, Text, View } from 'react-native'
 import { CameraView, useCameraPermissions } from 'expo-camera'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { WebView } from 'react-native-webview'
 
 import {
+  PEERTUNES_MEDIA_BRIDGE_SCRIPT,
+  PEERTUNES_MEDIA_REPORT_SCRIPT,
   PEERTUNES_SCAN_BRIDGE_SCRIPT,
+  createAudioRouteScript,
+  createPeerTunesMediaCommandScript,
   createPeerTunesPageUrl,
   isPeerTunesPageRequest,
   parsePeerTunesHapticRequest,
   parsePeerTunesKeepOfflineRequest,
+  parsePeerTunesKeptFoldersRequest,
+  parsePeerTunesNowPlaying,
   parsePeerTunesScanRequest,
   serializeScanResult
 } from './peertunes-screen.mjs'
 import { AppLoading } from '../AppLoading'
+import { PAUSE_ALL_MEDIA_SCRIPT } from '../browser-media.mjs'
 import { MODAL_ORIENTATIONS } from '../modal-orientations'
+import { WEBVIEW_DECELERATION_RATE } from '../webview-scroll.mjs'
 import { tapFeedback } from '../haptics'
+import { forgetPeerTunesWidgetState, idlePeerTunesWidget, updatePeerTunesWidget } from '../widgets'
+
+const audioRoute = NativeModules.PeerSkyAudioRoute as {
+  getRoute: () => Promise<{ external: boolean }>
+  // Android only: the media session headset buttons talk to.
+  setNowPlaying?: (playing: boolean, title: string, artist: string) => void
+  clearNowPlaying?: () => void
+} | undefined
+// What is playing, for the Android media session and the iOS home screen
+// widget. iOS gives a WebView's media to Control Center itself.
+const PEERTUNES_BEFORE_LOAD_SCRIPT = `${PEERTUNES_SCAN_BRIDGE_SCRIPT}\n${PEERTUNES_MEDIA_BRIDGE_SCRIPT}`
+// Android's media session sends its buttons as plain device events. On iOS
+// the widget's buttons come through the module, which only sends them while
+// something listens through it.
+const mediaCommandEvents = Platform.OS === 'ios' && NativeModules.PeerSkyAudioRoute
+  ? new NativeEventEmitter(NativeModules.PeerSkyAudioRoute)
+  : DeviceEventEmitter
+const AUDIO_ROUTE_POLL_MS = 3000
+// Long enough for the page to have started or stopped the song.
+const MEDIA_REPORT_DELAY_MS = 800
 
 type Props = {
   error: string | null
@@ -24,6 +52,9 @@ type Props = {
   localUrl: string | null
   onEnsureServer: () => void
   onKeepOffline: (url: string) => Promise<{ ok: boolean, status?: string, error?: string }>
+  onKeptFolders: (urls: string[]) => Promise<{ ok: boolean, kept?: string[], error?: string }>
+  // Goes up each time folders are removed in Settings, P2P Data.
+  offlineFoldersVersion: number
   onOpenUrl: (url: string) => void
   onStatus: (message: string) => void
 }
@@ -35,6 +66,8 @@ export function PeerTunesScreen ({
   localUrl,
   onEnsureServer,
   onKeepOffline,
+  onKeptFolders,
+  offlineFoldersVersion,
   onOpenUrl,
   onStatus
 }: Props) {
@@ -61,6 +94,56 @@ export function PeerTunesScreen ({
     })
     return () => subscription.remove()
   }, [onEnsureServer])
+
+  // Buttons on earbuds, in a car or on the home screen widget come back as
+  // commands for the page. A swipe away pauses it, since the app can stay
+  // running for PeerChat with nothing left on screen to stop the music.
+  useEffect(() => {
+    let reportTimer: ReturnType<typeof setTimeout> | null = null
+    const commands = mediaCommandEvents.addListener('PeerSkyMediaCommand', (command: unknown) => {
+      const script = createPeerTunesMediaCommandScript(command)
+      if (!script) return
+      webViewRef.current?.injectJavaScript(script)
+      // The widget showed the press before the page acted on it. Ask the page
+      // what it is doing now, so the widget ends up right either way.
+      forgetPeerTunesWidgetState()
+      if (reportTimer) clearTimeout(reportTimer)
+      reportTimer = setTimeout(() => {
+        webViewRef.current?.injectJavaScript(PEERTUNES_MEDIA_REPORT_SCRIPT)
+      }, MEDIA_REPORT_DELAY_MS)
+    })
+    const removed = DeviceEventEmitter.addListener('PeerSkyTaskRemoved', () => {
+      webViewRef.current?.injectJavaScript(PAUSE_ALL_MEDIA_SCRIPT)
+    })
+    return () => {
+      if (reportTimer) clearTimeout(reportTimer)
+      commands.remove()
+      removed.remove()
+      audioRoute?.clearNowPlaying?.()
+      idlePeerTunesWidget()
+    }
+  }, [])
+
+  // The Bluetooth mark. The app looks at the audio route and tells the page
+  // whenever the answer changes, and again whenever the page loads.
+  const audioExternalRef = useRef<boolean | null>(null)
+  const pushAudioRoute = useCallback(async () => {
+    if (!audioRoute) return
+    try {
+      const { external } = await audioRoute.getRoute()
+      if (external === audioExternalRef.current) return
+      audioExternalRef.current = external
+      webViewRef.current?.injectJavaScript(createAudioRouteScript(external))
+    } catch {}
+  }, [])
+
+  useEffect(() => {
+    if (!localUrl || !audioRoute) return
+    const timer = setInterval(() => {
+      if (AppState.currentState === 'active') void pushAudioRoute()
+    }, AUDIO_ROUTE_POLL_MS)
+    return () => clearInterval(timer)
+  }, [localUrl, pushAudioRoute])
 
   // The page asks for a scan, native runs the camera and hands the text back.
   // WKWebView has no BarcodeDetector, and even where it does the native scanner
@@ -90,6 +173,27 @@ export function PeerTunesScreen ({
       `window.__peerskyResolveScan(${serializeScanResult(requestId)}, ${serializeScanResult(answer)}); true;`
     )
   }, [onKeepOffline])
+
+  // The page asks which of its folders are still kept on the device, and
+  // drops the songs of any that were removed.
+  const keptFolders = useCallback(async (requestId: string, urls: string[]) => {
+    let answer: { ok: boolean, kept?: string[], error?: string }
+    try {
+      answer = await onKeptFolders(urls)
+    } catch (error) {
+      answer = { ok: false, error: error instanceof Error ? error.message : String(error) }
+    }
+    webViewRef.current?.injectJavaScript(
+      `window.__peerskyResolveScan(${serializeScanResult(requestId)}, ${serializeScanResult(answer)}); true;`
+    )
+  }, [onKeptFolders])
+
+  // Folders removed while PeerTunes is open: it checks again, so their songs
+  // leave the library without a reload.
+  useEffect(() => {
+    if (!offlineFoldersVersion) return
+    webViewRef.current?.injectJavaScript('window.PT && window.PT.syncKeptFolders && window.PT.syncKeptFolders(); true;')
+  }, [offlineFoldersVersion])
 
   const beginScan = useCallback(async (requestId: string) => {
     const permission = cameraPermission?.granted
@@ -140,8 +244,17 @@ export function PeerTunesScreen ({
       // This view only ever shows the loopback app, so pin it. The navigation
       // handler below is the real gate; this is the second layer behind it.
       originWhitelist={[localUrl]}
-      injectedJavaScriptBeforeContentLoaded={PEERTUNES_SCAN_BRIDGE_SCRIPT}
+      // Left unset, react-native-webview gives iOS a deceleration of 0, and a
+      // swipe through the library stopped the moment the finger lifted.
+      decelerationRate={WEBVIEW_DECELERATION_RATE}
+      injectedJavaScriptBeforeContentLoaded={PEERTUNES_BEFORE_LOAD_SCRIPT}
       onMessage={(event) => {
+        const nowPlaying = parsePeerTunesNowPlaying(event.nativeEvent.data)
+        if (nowPlaying) {
+          audioRoute?.setNowPlaying?.(nowPlaying.playing, nowPlaying.title, nowPlaying.artist)
+          updatePeerTunesWidget(nowPlaying)
+          return
+        }
         const weight = parsePeerTunesHapticRequest(event.nativeEvent.data)
         if (weight) {
           tapFeedback(weight)
@@ -150,6 +263,11 @@ export function PeerTunesScreen ({
         const keep = parsePeerTunesKeepOfflineRequest(event.nativeEvent.data)
         if (keep) {
           void keepOffline(keep.requestId, keep.url)
+          return
+        }
+        const kept = parsePeerTunesKeptFoldersRequest(event.nativeEvent.data)
+        if (kept) {
+          void keptFolders(kept.requestId, kept.urls)
           return
         }
         const requestId = parsePeerTunesScanRequest(event.nativeEvent.data)
@@ -175,6 +293,10 @@ export function PeerTunesScreen ({
         return false
       }}
       onOpenWindow={(event) => onOpenUrl(event.nativeEvent.targetUrl)}
+      onLoadEnd={() => {
+        audioExternalRef.current = null
+        void pushAudioRoute()
+      }}
       onRenderProcessGone={() => recover('a renderer restart')}
       onContentProcessDidTerminate={() => recover('a renderer restart')}
       onError={(event) => {

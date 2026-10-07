@@ -1,11 +1,16 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
+import { readFile } from 'node:fs/promises'
 import {
   BACK_EDGE_WIDTH,
   backSwipeProgress,
+  forwardSwipeProgress,
   isBackEdgeSwipe,
+  isForwardEdgeSwipe,
   shouldCompleteBackSwipe,
-  startsAtBackEdge
+  shouldCompleteForwardSwipe,
+  startsAtBackEdge,
+  startsAtForwardEdge
 } from '../../app/browser-back-gesture.mjs'
 
 // Swiping back worked on web pages, where WKWebView handles it, and nowhere
@@ -82,4 +87,39 @@ test('a small hesitant drag springs home instead', () => {
 
 test('a drag that reverses does not go back', () => {
   assert.equal(shouldCompleteBackSwipe({ dx: -80, vx: -1 }), false)
+})
+
+// Forward had no swipe at all, so a page you had come back from could only be
+// reached again with the toolbar arrow. It is the back swipe mirrored: from the
+// right edge, pulling left.
+test('a drag from the right edge pulling left goes forward', () => {
+  assert.equal(isForwardEdgeSwipe({ startX: 384, width: 390, dx: -40, dy: 5 }), true)
+  assert.equal(startsAtForwardEdge(390 - BACK_EDGE_WIDTH, 390), true)
+  assert.equal(startsAtForwardEdge(390 - BACK_EDGE_WIDTH - 1, 390), false)
+})
+
+test('the right edge does not go forward the wrong way, or while scrolling', () => {
+  assert.equal(isForwardEdgeSwipe({ startX: 384, width: 390, dx: 40, dy: 0 }), false)
+  assert.equal(isForwardEdgeSwipe({ startX: 384, width: 390, dx: -8, dy: 70 }), false)
+  assert.equal(isForwardEdgeSwipe({ startX: 200, width: 390, dx: -60, dy: 0 }), false)
+  assert.equal(isForwardEdgeSwipe({ startX: 384, width: 0, dx: -60, dy: 0 }), false)
+  // The left edge is still back's, and nothing else.
+  assert.equal(isForwardEdgeSwipe({ startX: 4, width: 390, dx: -60, dy: 0 }), false)
+})
+
+test('a forward swipe fills its chip and lets go like the back one', () => {
+  assert.equal(forwardSwipeProgress(-32), backSwipeProgress(32))
+  assert.equal(forwardSwipeProgress(40), 0)
+  assert.equal(shouldCompleteForwardSwipe({ dx: -70, vx: 0 }), true)
+  assert.equal(shouldCompleteForwardSwipe({ dx: -30, vx: -0.5 }), true)
+  assert.equal(shouldCompleteForwardSwipe({ dx: -20, vx: 0 }), false)
+  assert.equal(shouldCompleteForwardSwipe({ dx: 70, vx: 0.5 }), false)
+})
+
+test('the browser takes the forward swipe only when there is a page ahead', async () => {
+  const app = await readFile(new URL('../../app/index.tsx', import.meta.url), 'utf8')
+  assert.match(app, /browserCanGoForwardRef\.current = canBrowserGoForward && !browserOverPage/)
+  assert.match(app, /isForwardEdgeSwipe\(\{ startX, width: browserWindowWidthRef\.current, dx: gesture\.dx, dy: gesture\.dy \}\)/)
+  assert.match(app, /if \(shouldCompleteForwardSwipe\(gesture\)\) goBrowserForwardRef\.current\(\)/)
+  assert.match(app, /direction='forward'\s+progress=\{browserForwardSwipe\}/)
 })

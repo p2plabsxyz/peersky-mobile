@@ -1,24 +1,12 @@
-// P2PMD notes going to another of this person's devices, and notes coming
-// from one.
+// P2PMD notes sent to, or taken from, another of this person's devices. Keep
+// in step with notes-transfer.js in desktop P2PMD (same JSON, version 1).
 //
-// Only what means the same thing on every device travels: a note's key, the
-// name it is listed under, and, for a note this phone hosts, its text. A
-// drive address, a port or a seed belongs to the device that made it. A
-// copied desktop profile that kept one sent every write to a drive the new
-// machine could not write to (p2pmd#18), so none of them go, and none are
-// taken.
-//
-// A note this phone hosts goes with its text, and both devices then open it
-// the same way: they join it if the other one has it open, and only when
-// nobody does, they host their own copy. That takes a private note: its key
-// (hs://s000...) is what the host's keys are made from, so any device holding
-// it hosts the same note. A note that is not private, as a desktop makes them
-// unless asked, has the host's public key in its address, and only the device
-// that made it can ever host it. That one, like a note this phone only
-// joined, goes as a note to join.
-//
-// Mirror of notes-transfer.js in P2PMD on the desktop. Both read and write
-// the same JSON, version 1. Keep them in step.
+// Only a note's key, its listed name and, for a private note this phone
+// hosts, its text travel. A drive address, port or seed belongs to one
+// device: a copied desktop profile that kept one wrote to a drive the new
+// machine could not write to (p2pmd#18). A private note's key (hs://s000...)
+// is what the host's keys are made from, so either device can host it, or
+// join it when the other has it open. Any other note goes as a note to join.
 
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -26,7 +14,7 @@ import b4a from 'b4a'
 import { P2PMD_INCOMING_FILE } from './constants.mjs'
 import { loadP2pmdRoomSnapshot, saveP2pmdRoomSnapshot } from './snapshots.mjs'
 
-export { P2PMD_INCOMING_FILE, PHONE_P2PMD_FILE } from './constants.mjs'
+export { P2PMD_INCOMING_FILE } from './constants.mjs'
 
 export const P2PMD_NOTES_TRANSFER_VERSION = 1
 // The recent list shows five, here and on the desktop.

@@ -4,7 +4,6 @@ import crypto from 'node:crypto'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { deflateRawSync } from 'node:zlib'
 import sodium from 'sodium-native'
 import z32 from 'z32'
 import { createMobilePairingCode } from '../../app/settings/identity-pairing.mjs'
@@ -12,7 +11,7 @@ import { verifyIdentityTransferSignature } from '../../backend/backup/identity-t
 import { extractTransferredPrivateDrive, adoptTransferredPrivateDrive } from '../../backend/backup/private-drive-import.mjs'
 import { resetPrivateDriveKeyCache, getPrivateDriveKeyRecord } from '../../backend/hyper/private-keys.mjs'
 import { adoptedStoragePathFor, readSyncedPrivateAdoptedDrives } from '../../backend/hyper/runtime-routing.mjs'
-import { commitStagedRestore, restoreIdentityFromBackup, RESTORE_STAGING_DIR } from '../../backend/backup/restore.mjs'
+import { commitStagedRestore, RESTORE_STAGING_DIR } from '../../backend/backup/restore.mjs'
 import { stageDesktopTransferFile } from '../../backend/backup/desktop-transfer.mjs'
 import { createDesktopTransfer, createDeviceKeys, wrapDesktopTransfer } from '../fixtures/desktop-transfer.mjs'
 
@@ -26,79 +25,6 @@ function canonicalJson (value) {
 
 function toHex (buf) {
   return Buffer.from(buf).toString('hex')
-}
-
-function createDirectoryZip (name) {
-  const nameBytes = Buffer.from(name)
-  const centralDirectory = Buffer.alloc(46 + nameBytes.length)
-  centralDirectory.writeUInt32LE(0x02014b50, 0)
-  centralDirectory.writeUInt16LE(nameBytes.length, 28)
-  nameBytes.copy(centralDirectory, 46)
-
-  const endOfCentralDirectory = Buffer.alloc(22)
-  endOfCentralDirectory.writeUInt32LE(0x06054b50, 0)
-  endOfCentralDirectory.writeUInt16LE(1, 8)
-  endOfCentralDirectory.writeUInt16LE(1, 10)
-  endOfCentralDirectory.writeUInt32LE(centralDirectory.length, 12)
-
-  return Buffer.concat([centralDirectory, endOfCentralDirectory])
-}
-
-function createFileZip (name, contents) {
-  const nameBytes = Buffer.from(name)
-  const contentBytes = Buffer.from(contents)
-  const localHeader = Buffer.alloc(30 + nameBytes.length)
-  localHeader.writeUInt32LE(0x04034b50, 0)
-  localHeader.writeUInt32LE(contentBytes.length, 18)
-  localHeader.writeUInt32LE(contentBytes.length, 22)
-  localHeader.writeUInt16LE(nameBytes.length, 26)
-  nameBytes.copy(localHeader, 30)
-
-  const centralDirectory = Buffer.alloc(46 + nameBytes.length)
-  centralDirectory.writeUInt32LE(0x02014b50, 0)
-  centralDirectory.writeUInt32LE(contentBytes.length, 20)
-  centralDirectory.writeUInt32LE(contentBytes.length, 24)
-  centralDirectory.writeUInt16LE(nameBytes.length, 28)
-  nameBytes.copy(centralDirectory, 46)
-
-  const endOfCentralDirectory = Buffer.alloc(22)
-  endOfCentralDirectory.writeUInt32LE(0x06054b50, 0)
-  endOfCentralDirectory.writeUInt16LE(1, 8)
-  endOfCentralDirectory.writeUInt16LE(1, 10)
-  endOfCentralDirectory.writeUInt32LE(centralDirectory.length, 12)
-  endOfCentralDirectory.writeUInt32LE(localHeader.length + contentBytes.length, 16)
-
-  return Buffer.concat([localHeader, contentBytes, centralDirectory, endOfCentralDirectory])
-}
-
-function createDeflatedFileZip (name, contents) {
-  const nameBytes = Buffer.from(name)
-  const contentBytes = Buffer.from(contents)
-  const compressedBytes = deflateRawSync(contentBytes)
-  const localHeader = Buffer.alloc(30 + nameBytes.length)
-  localHeader.writeUInt32LE(0x04034b50, 0)
-  localHeader.writeUInt16LE(8, 8)
-  localHeader.writeUInt32LE(compressedBytes.length, 18)
-  localHeader.writeUInt32LE(contentBytes.length, 22)
-  localHeader.writeUInt16LE(nameBytes.length, 26)
-  nameBytes.copy(localHeader, 30)
-
-  const centralDirectory = Buffer.alloc(46 + nameBytes.length)
-  centralDirectory.writeUInt32LE(0x02014b50, 0)
-  centralDirectory.writeUInt16LE(8, 10)
-  centralDirectory.writeUInt32LE(compressedBytes.length, 20)
-  centralDirectory.writeUInt32LE(contentBytes.length, 24)
-  centralDirectory.writeUInt16LE(nameBytes.length, 28)
-  nameBytes.copy(centralDirectory, 46)
-
-  const endOfCentralDirectory = Buffer.alloc(22)
-  endOfCentralDirectory.writeUInt32LE(0x06054b50, 0)
-  endOfCentralDirectory.writeUInt16LE(1, 8)
-  endOfCentralDirectory.writeUInt16LE(1, 10)
-  endOfCentralDirectory.writeUInt32LE(centralDirectory.length, 12)
-  endOfCentralDirectory.writeUInt32LE(localHeader.length + compressedBytes.length, 16)
-
-  return Buffer.concat([localHeader, compressedBytes, centralDirectory, endOfCentralDirectory])
 }
 
 // A phone waiting for a desktop transfer: its keys, the code it is showing,
@@ -314,34 +240,32 @@ describe('Link Device Identity Transfer', () => {
     assert.ok(restored.equals(large))
   })
 
-  it('Entry named ../../evil throws', async () => {
-    const storagePath = mkdtempSync(join(tmpdir(), 'peersky-restore-'))
+  it('Entry named ../../evil throws', async (t) => {
+    const phone = createPhoneReceiver(t)
+    const { bytes } = createDesktopTransfer({
+      files: [
+        { name: 'peersky-identity.json', data: '{}' },
+        { name: 'hyper/../../evil/' }
+      ],
+      targetEncryptionPublicKey: phone.publicKey,
+      nonce: phone.nonce
+    })
 
-    try {
-      await assert.rejects(
-        restoreIdentityFromBackup(createDirectoryZip('hyper/../../evil/'), storagePath),
-        /illegal path traversal/
-      )
-    } finally {
-      rmSync(storagePath, { recursive: true, force: true })
-    }
+    await assert.rejects(phone.stage(bytes), /illegal path traversal/)
   })
 
-  it('Restores peersky-identity.json from a desktop mobile backup', async () => {
-    const storagePath = mkdtempSync(join(tmpdir(), 'peersky-restore-'))
+  it('Restores peersky-identity.json from a desktop transfer', async (t) => {
+    const phone = createPhoneReceiver(t)
     const identity = JSON.stringify({ identityId: 'test-identity' })
+    const { bytes } = createDesktopTransfer({
+      files: [{ name: 'peersky-identity.json', data: identity }],
+      targetEncryptionPublicKey: phone.publicKey,
+      nonce: phone.nonce
+    })
 
-    try {
-      const result = await restoreIdentityFromBackup(
-        createFileZip('peersky-identity.json', identity),
-        storagePath
-      )
-
-      assert.equal(result.restoredFiles, 1)
-      assert.equal(readFileSync(join(storagePath, 'peersky-identity.json'), 'utf8'), identity)
-    } finally {
-      rmSync(storagePath, { recursive: true, force: true })
-    }
+    const result = await phone.stage(bytes)
+    assert.equal(result.restoredFiles, 1)
+    assert.equal(readFileSync(join(phone.stagingPath, 'peersky-identity.json'), 'utf8'), identity)
   })
 
   it('Entry named device-key.json is refused', async (t) => {
@@ -359,54 +283,45 @@ describe('Link Device Identity Transfer', () => {
     assert.equal(existsSync(phone.stagingPath), false)
   })
 
-  it('restores an identity backup larger than 50 MB', async () => {
-    const storagePath = mkdtempSync(join(tmpdir(), 'peersky-large-restore-'))
+  it('restores a desktop transfer larger than 50 MB', async (t) => {
+    const phone = createPhoneReceiver(t)
     const size = 50 * 1024 * 1024 + 1
+    const { bytes } = createDesktopTransfer({
+      files: [{ name: 'hyper-private/large-core', data: Buffer.alloc(size) }],
+      targetEncryptionPublicKey: phone.publicKey,
+      nonce: phone.nonce
+    })
 
-    try {
-      const result = await restoreIdentityFromBackup(
-        createDeflatedFileZip('hyper-private/large-core', Buffer.alloc(size)),
-        storagePath
-      )
-
-      assert.equal(result.restoredFiles, 1)
-      assert.equal(statSync(join(storagePath, 'hyper-private/large-core')).size, size)
-    } finally {
-      rmSync(storagePath, { recursive: true, force: true })
-    }
+    const result = await phone.stage(bytes)
+    assert.equal(result.restoredFiles, 1)
+    assert.equal(statSync(join(phone.stagingPath, 'hyper-private/large-core')).size, size)
   })
 
-  it('restores desktop private-hyper corestore from an identity transfer', async () => {
-    const storagePath = mkdtempSync(join(tmpdir(), 'peersky-hyper-private-restore-'))
+  it('restores desktop private-hyper corestore from an identity transfer', async (t) => {
+    const phone = createPhoneReceiver(t)
+    const { bytes } = createDesktopTransfer({
+      files: [{ name: 'hyper-private/CORESTORE', data: 'corestore' }],
+      targetEncryptionPublicKey: phone.publicKey,
+      nonce: phone.nonce
+    })
 
-    try {
-      const result = await restoreIdentityFromBackup(
-        createFileZip('hyper-private/CORESTORE', 'corestore'),
-        storagePath
-      )
-
-      assert.equal(result.restoredFiles, 1)
-      assert.equal(readFileSync(join(storagePath, 'hyper-private/CORESTORE'), 'utf8'), 'corestore')
-    } finally {
-      rmSync(storagePath, { recursive: true, force: true })
-    }
+    const result = await phone.stage(bytes)
+    assert.equal(result.restoredFiles, 1)
+    assert.equal(readFileSync(join(phone.stagingPath, 'hyper-private/CORESTORE'), 'utf8'), 'corestore')
   })
 
-  it('restores privateHyperdrives.json from an identity transfer', async () => {
-    const storagePath = mkdtempSync(join(tmpdir(), 'peersky-private-registry-restore-'))
+  it('restores privateHyperdrives.json from an identity transfer', async (t) => {
+    const phone = createPhoneReceiver(t)
     const registry = JSON.stringify([{ name: 'private', url: 'hyper://entry', timestamp: 1 }])
+    const { bytes } = createDesktopTransfer({
+      files: [{ name: 'privateHyperdrives.json', data: registry }],
+      targetEncryptionPublicKey: phone.publicKey,
+      nonce: phone.nonce
+    })
 
-    try {
-      const result = await restoreIdentityFromBackup(
-        createFileZip('privateHyperdrives.json', registry),
-        storagePath
-      )
-
-      assert.equal(result.restoredFiles, 1)
-      assert.equal(readFileSync(join(storagePath, 'privateHyperdrives.json'), 'utf8'), registry)
-    } finally {
-      rmSync(storagePath, { recursive: true, force: true })
-    }
+    const result = await phone.stage(bytes)
+    assert.equal(result.restoredFiles, 1)
+    assert.equal(readFileSync(join(phone.stagingPath, 'privateHyperdrives.json'), 'utf8'), registry)
   })
 
   it('adopts a transferred private drive key from a restored backup', () => {

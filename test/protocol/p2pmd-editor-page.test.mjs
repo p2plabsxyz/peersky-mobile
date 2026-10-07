@@ -1,6 +1,9 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { getP2pmdEditorPage } from '../../backend/p2pmd/server.mjs'
+import { splitMarkdownSlides } from '../../backend/p2pmd/preview.mjs'
+import yjsBrowserScript from '../../backend/p2pmd/yjs-runtime.mjs'
+import * as Y from 'yjs'
 
 describe('p2pmd mobile editor page routing', () => {
   it('routes collaboration endpoints through the joined room base URL', () => {
@@ -10,9 +13,27 @@ describe('p2pmd mobile editor page routing', () => {
     assert.match(html, /fetch\(roomUrl\('\/doc\/update'\)/)
     assert.match(html, /fetch\(roomUrl\('\/doc\/yjsstate'\)\)/)
     assert.match(html, /new EventSource\(roomUrl\('\/events\?'/)
-    assert.match(html, /loadScript\(roomUrl\('\/lib\/yjs\.min\.js'\)\)/)
     assert.match(html, /withInitialRoomRetry/)
     assert.match(html, /INITIAL_ROOM_RETRY_ATTEMPTS/)
+  })
+
+  // Whoever hosts the room used to choose the editor's yjs, and with it the
+  // code that ran next to the app's bridge.
+  it('runs only its own code, never a script from the room', () => {
+    const html = getP2pmdEditorPage()
+
+    assert.ok(html.includes(yjsBrowserScript.replace(/<\/script/gi, '<\\/script')))
+    assert.doesNotMatch(html, /\/lib\/yjs\.min\.js/)
+    assert.doesNotMatch(html, /script\.src\s*=/)
+    assert.doesNotMatch(html, /<script[^>]+src=/i)
+    assert.match(html, /<meta name="referrer" content="no-referrer">/)
+  })
+
+  it('publishes only with the nonce the app handed over', () => {
+    const html = getP2pmdEditorPage()
+
+    assert.match(html, /function publishToHyper\(nonce\)/)
+    assert.match(html, /notifyNative\('p2pmd-publish-requested', \{\s+nonce,/)
   })
 
   it('keeps preview and Hyper image upload on the mobile native bridge', () => {
@@ -34,7 +55,7 @@ describe('p2pmd mobile editor page routing', () => {
     assert.match(html, /# Welcome to Your Presentation/)
     assert.match(html, /This will clear your notes and give you a slides template[.] Continue[?]/)
     assert.match(html, /replaceDocumentRange\(0, input[.]value[.]length, slidesTemplate, 0, 0\)/)
-    assert.match(html, /else if \(format === 'slides'\) viewAsSlides\(\)/)
+    assert.match(html, /else if \(format === 'slides'\) toggleSlides\(\)/)
     assert.match(html, /callNativeBridge\('preview', \{\s+content: input\.value,\s+mode: 'slides'/)
     assert.match(html, /notifyNative\('p2pmd-view-mode', \{ mode: viewMode \}\)/)
     assert.match(html, /slidesPreview\.addEventListener\('touchstart'/)
@@ -55,6 +76,46 @@ describe('p2pmd mobile editor page routing', () => {
     assert.match(html, /slidesExit\.addEventListener\('click', \(\) => setViewMode\('edit'\)\)/)
     assert.match(html, /id="slides-progress-value"/)
     assert.match(html, /mode: viewMode/)
+  })
+
+  // The bar is hidden over the deck, so adding an image means going back to
+  // the editor. That used to make Preview show one long page and Publish send
+  // the deck as a note.
+  it('keeps a deck a deck while it is being edited', () => {
+    const html = getP2pmdEditorPage()
+
+    assert.match(html, /aria-label="View as slides" aria-pressed="false"/)
+    assert.match(html, /if \(viewMode === 'slides'\) presenting = true/)
+    assert.match(html, /else setViewMode\(presenting \? 'slides' : 'preview'\)/)
+    assert.match(html, /mode: presenting && hasSlideBreaks\(input\.value\) \? 'slides' : 'note'/)
+    assert.match(html, /slides: presenting/)
+    assert.match(html, /if \(presenting && viewMode === 'edit'\) \{\s+presenting = false/)
+  })
+
+  // A page-wide h1 rule left over from the editor's own header made a note's
+  // title smaller than its sections.
+  it('draws a note\'s headings largest first', () => {
+    const html = getP2pmdEditorPage()
+    const size = (tag) => Number(new RegExp(`#preview ${tag} \\{[^}]*font-size: ([0-9.]+)em`).exec(html)?.[1])
+
+    assert.doesNotMatch(html, /^\s*h1 \{/m)
+    assert.ok(size('h1') > size('h2') && size('h2') > size('h3'))
+  })
+
+  it('keeps the blank line above a slide break when an image goes in', () => {
+    const html = getP2pmdEditorPage()
+    const source = html.slice(
+      html.indexOf('function createMarkdownBlock('),
+      html.indexOf('function replaceUploadPlaceholder(')
+    )
+    // eslint-disable-next-line no-new-func
+    const createMarkdownBlock = new Function('newline', `${source}; return createMarkdownBlock`)('\n')
+    const deck = '# One\n\n---\n\n# Two'
+    const blankLine = deck.indexOf('\n\n---') + 1
+    const block = createMarkdownBlock(deck, blankLine, blankLine, '![cat](hyper://abc/cat.png)')
+    const next = deck.slice(0, blankLine) + block.text + deck.slice(blankLine)
+
+    assert.deepEqual(splitMarkdownSlides(next), ['# One\n![cat](hyper://abc/cat.png)', '# Two'])
   })
 
   it('provides synchronized LaTeX mode and scientific templates', () => {
@@ -133,12 +194,17 @@ describe('p2pmd mobile editor page routing', () => {
     const html = getP2pmdEditorPage()
 
     assert.match(html, /--editor-font-size: 16px/)
-    assert.match(html, /--editor-line-height: 24[.]8px/)
+    // WebKit draws a textarea's lines a whole number of pixels apart, so a
+    // fractional line height moved the numbers off their lines, 0.8px more on
+    // each one at 24.8px.
+    const lineHeight = html.match(/--editor-line-height: ([0-9.]+)px/)[1]
+    assert.equal(Number(lineHeight), Math.round(Number(lineHeight)))
+    assert.match(html, /--editor-line-height: 24px/)
     assert.match(html, /#line-gutter[\s\S]*font: var\(--editor-font-size\)\/var\(--editor-line-height\)/)
     assert.match(html, /[.]gutter-line[\s\S]*min-height: var\(--editor-line-height\)/)
     assert.match(html, /textarea[\s\S]*font: var\(--editor-font-size\)\/var\(--editor-line-height\)/)
     assert.match(html, /const oldText = ydoc && ytext [^\n]+ getYTextSnapshot\(\) : lastInputContent/)
-    assert.match(html, /const change = diffTextChange\(oldText, newText\)/)
+    assert.match(html, /const change = diffTextChange\(oldText, newText, caret\)/)
     assert.match(html, /const gutterUpdate = markEditedLines\(oldText, newText\)/)
     assert.match(html, /applyTextDiff\(ytext, oldText, newText, Y_ORIGIN_LOCAL_INPUT, change\)/)
     assert.match(html, /if \(gutterUpdate\) renderLineGutter\(gutterUpdate\)/)
@@ -165,5 +231,97 @@ describe('p2pmd mobile editor page routing', () => {
     assert.match(html, /ytextSnapshot[.]length === ytext[.]length/)
     assert.match(html, /ytextSnapshot = ytext[.]toString\(\)/)
     assert.match(html, /String\(peer[.]name \|\| ''\)[.]trim\(\)[.]charAt\(0\) \|\| '[?]'/)
+  })
+
+  // Two people writing at once: one types a new line at the end of a line
+  // near the bottom while the other types at the very end. The line has to
+  // stay where it was typed. It used to be placed after the note's last line
+  // break, in among the other person's typing.
+  it('keeps typed text where the caret was, with someone typing elsewhere', () => {
+    const html = getP2pmdEditorPage()
+    const source = html.slice(html.indexOf('function diffTextChange('), html.indexOf('function applyTextDiff('))
+    // eslint-disable-next-line no-new-func
+    const diffTextChange = new Function(`${source}; return diffTextChange`)()
+
+    // A line break typed before another one: the caret says which.
+    assert.deepEqual(diffTextChange('a\n', 'a\nb\n', 3), { prefix: 1, oldSuffix: 1, newSuffix: 3 })
+    assert.deepEqual(diffTextChange('a\n', 'a\nb\n'), { prefix: 2, oldSuffix: 2, newSuffix: 4 })
+    // Backspace on the first of two line breaks.
+    assert.deepEqual(diffTextChange('a\n\nb', 'a\nb', 1), { prefix: 1, oldSuffix: 2, newSuffix: 1 })
+    // A word replaced, as autocorrect does, and a caret that does not fit the
+    // change: the ends are trimmed as before.
+    assert.deepEqual(diffTextChange('teh cat', 'the cat', 3), { prefix: 1, oldSuffix: 3, newSuffix: 3 })
+    assert.deepEqual(diffTextChange('a\n', 'a\nb\n', 0), { prefix: 2, oldSuffix: 2, newSuffix: 4 })
+
+    for (const [first, second] of [[1, 2], [2, 1]]) {
+      const base = new Y.Doc()
+      base.getText('t').insert(0, 'L1\nL2\n')
+      const alice = new Y.Doc()
+      const bob = new Y.Doc()
+      alice.clientID = first
+      bob.clientID = second
+      Y.applyUpdate(alice, Y.encodeStateAsUpdate(base))
+      Y.applyUpdate(bob, Y.encodeStateAsUpdate(base))
+
+      // Alice adds a line after L2, Bob types at the end, at the same time.
+      const before = alice.getText('t').toString()
+      const after = 'L1\nL2\nL3 alice\n'
+      const { prefix, oldSuffix, newSuffix } = diffTextChange(before, after, 'L1\nL2\nL3 alice'.length)
+      alice.getText('t').delete(prefix, oldSuffix - prefix)
+      alice.getText('t').insert(prefix, after.slice(prefix, newSuffix))
+      bob.getText('t').insert(bob.getText('t').length, 'bob at the end')
+
+      Y.applyUpdate(alice, Y.encodeStateAsUpdate(bob))
+      Y.applyUpdate(bob, Y.encodeStateAsUpdate(alice))
+      assert.equal(alice.getText('t').toString(), 'L1\nL2\nL3 alice\nbob at the end')
+      assert.equal(bob.getText('t').toString(), alice.getText('t').toString())
+    }
+  })
+
+  // The host crashes right after typing and comes back from its last save,
+  // while the others kept writing. Before, the host could never take their
+  // later edits, and the note stayed split until someone noticed.
+  it('catches a host restarted from an older save up with the peers', () => {
+    const html = getP2pmdEditorPage()
+    const source = html.slice(html.indexOf('function compareWithHost('), html.indexOf('let syncingWithHost'))
+    // eslint-disable-next-line no-new-func
+    const compareWithHost = new Function(`${source}; return compareWithHost`)()
+    const text = (doc) => doc.getText('content').toString()
+    const copy = (from, clientID) => {
+      const doc = new Y.Doc()
+      doc.clientID = clientID
+      Y.applyUpdate(doc, Y.encodeStateAsUpdate(from))
+      return doc
+    }
+
+    const host = new Y.Doc()
+    host.clientID = 1
+    host.getText('content').insert(0, 'L1\n')
+    const saved = Y.encodeStateAsUpdate(host)
+    host.getText('content').insert(3, 'L2 typed before the crash\n')
+    const phone = copy(host, 2)
+    phone.getText('content').insert(text(phone).length, 'L3 from the phone while the host was away\n')
+
+    const restarted = new Y.Doc()
+    restarted.clientID = 3
+    Y.applyUpdate(restarted, saved)
+    // What the phone used to send on reconnecting builds on what the host lost.
+    Y.applyUpdate(restarted, Y.encodeStateAsUpdate(phone, Y.encodeStateVector(host)))
+    assert.equal(text(restarted), 'L1\n')
+
+    const { shared, missing } = compareWithHost(Y, phone, Y.encodeStateAsUpdate(restarted))
+    assert.equal(shared, true)
+    Y.applyUpdate(restarted, missing)
+    assert.equal(text(restarted), 'L1\nL2 typed before the crash\nL3 from the phone while the host was away\n')
+
+    // Nothing to send when the host has it all, and a note the host started
+    // again from its text is left alone rather than written out twice.
+    assert.deepEqual(compareWithHost(Y, copy(restarted, 4), Y.encodeStateAsUpdate(restarted)), { shared: true, missing: null })
+    const fresh = new Y.Doc()
+    fresh.getText('content').insert(0, 'L1\n')
+    assert.deepEqual(compareWithHost(Y, phone, Y.encodeStateAsUpdate(fresh)), { shared: false, missing: null })
+
+    // It runs on every connection, the first one and every reconnect.
+    assert.match(html, /source[.]onopen = \(\) => \{[^}]*\}\s*void syncWithHost\(\)/)
   })
 })

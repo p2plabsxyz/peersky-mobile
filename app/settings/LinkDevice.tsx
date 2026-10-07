@@ -111,15 +111,11 @@ export function LinkDeviceSettings ({ onCallRpc, onRestartRequired, onOpenUrl }:
   onCallRpcRef.current = onCallRpc
   const call = useCallback<CallRpc>((command, data = {}) => onCallRpcRef.current(command, data), [])
 
-  // Everything that replaces or deletes data goes through here. The app is
-  // swapped for the restart screen first, and only then is the data replaced:
-  // the screens on show hold the old data, and PeerChat writes what it holds
-  // as it closes, which used to land over the restored files.
-  //
-  // Android can quit itself. iOS cannot: BackHandler.exitApp is a no-op
-  // there, and calling exit() reads as a crash to Apple. The restart screen
-  // stays up until the app is started again, on both, because on newer
-  // Android exitApp only sends the app to the background.
+  // Everything that replaces or deletes data goes through here. The restart
+  // screen replaces the app first, because the screens on show hold the old
+  // data and PeerChat writes what it holds as it closes, over restored files.
+  // It stays up until a relaunch: iOS cannot quit (exitApp is a no-op, and
+  // exit() reads as a crash to Apple) and newer Android only backgrounds.
   const replaceData = useCallback(async (command: number, data: object, failureTitle: string) => {
     // The sheet goes first. On iOS a sheet still up when the screens under it
     // are swapped for the restart screen can stay stuck over it.

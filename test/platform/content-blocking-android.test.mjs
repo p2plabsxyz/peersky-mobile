@@ -146,6 +146,10 @@ describe('Android content blocking', () => {
     assert.match(initializer, /activateState: activateFilterListState/)
     assert.match(initializer, /discardState: discardFilterListState/)
     assert.match(appSource, /!contentBlockingReady/)
+    // Pages wait for the rules; the browser and its restored tabs do not.
+    assert.match(appSource, /if \(!browserPreferencesReady \|\| browserSessionRestoreStartedRef\.current\) return/)
+    assert.match(appSource, /if \(!contentBlockingReady\) return null/)
+    assert.match(appSource, /Turning on tracker protection\.\.\./)
     assert.match(appSource, /onReady: \(\) =>/)
     assert.match(appSource, /Browsing without ad and tracker protection/)
     assert.doesNotMatch(appSource, /setContentBlockingAttempt/)

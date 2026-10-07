@@ -20,16 +20,13 @@ import { PHONE_P2PMD_FILE } from '../p2pmd/constants.mjs'
 import { getPrivateDriveKeyRecord } from '../hyper/private-keys.mjs'
 import { createStoredZip } from './zip-writer.mjs'
 
-// What a phone sends to PeerSky Desktop: its open tabs, its bookmarks and
-// favourites, its private drive with the key to it, and, to a desktop whose
-// code says it takes them, the person's PeerChat (device-link.mjs) and their
-// recent P2PMD notes (p2pmd/notes-transfer.mjs). The rest of a phone, its
-// stores, means nothing to the desktop, which keeps those its own way.
-//
-// It goes in the desktop's own transfer format, so the desktop checks it with
-// the code it already has: a zip of a signed manifest and a payload that is
-// AES-256-GCM encrypted with a key sealed to the desktop. Both screens show
-// the same six characters, derived the same way as every other transfer.
+// What a phone sends to PeerSky Desktop: open tabs, bookmarks, favourites, its
+// private drive with the key and, if the desktop's code asks for them, PeerChat
+// (device-link.mjs) and recent P2PMD notes (p2pmd/notes-transfer.mjs). The
+// phone's stores mean nothing to a desktop. It uses the desktop's own transfer
+// format, a zip of a signed manifest and an AES-256-GCM payload under a key
+// sealed to the desktop, so the desktop checks it with code it already has.
+// The six characters are derived as for any other transfer.
 export const DESKTOP_SYNC_SOURCE = 'mobile'
 export const PHONE_TABS_FILE = 'phone-tabs.json'
 export const PHONE_BOOKMARKS_FILE = 'phone-bookmarks.json'

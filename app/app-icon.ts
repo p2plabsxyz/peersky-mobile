@@ -30,7 +30,3 @@ export async function applyAppIcon (color: string): Promise<boolean> {
     return false
   }
 }
-
-export function canChangeAppIcon () {
-  return Boolean(nativeAppIcon) && ['android', 'ios'].includes(Platform.OS)
-}

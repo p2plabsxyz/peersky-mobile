@@ -1,11 +1,8 @@
 /**
- * How long to wait on an attachment upload before giving up on it.
- *
- * A safety net, not a deadline: the upload streams into a Hyperdrive and always
- * answers in the ordinary case, and this only exists so a stall cannot leave the
- * composer stuck busy with no way out. Which means it has to leave room for the
- * largest file a room will take. A flat three minutes was right while an
- * attachment was a photo and would have failed every film.
+ * How long to wait on an attachment upload before giving up. It is a safety
+ * net against a stall leaving the composer stuck busy, not a deadline, and has
+ * to leave room for the largest file a room takes. A flat three minutes was
+ * fine for photos and would cut off every film.
  */
 export const UPLOAD_TIMEOUT_MS = 3 * 60 * 1000
 // Sealing and hashing a megabyte takes a few milliseconds on a phone. This is

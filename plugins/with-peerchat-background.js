@@ -60,7 +60,8 @@ module.exports = function withPeerChatBackground (config) {
     fs.mkdirSync(rawDirectory, { recursive: true })
     for (const [sourceName, targetName] of [
       ['send.mp3', 'peerchat_send.mp3'],
-      ['receive.mp3', 'peerchat_receive.mp3']
+      ['receive.mp3', 'peerchat_receive.mp3'],
+      ['pop.mp3', 'peerchat_pop.mp3']
     ]) {
       fs.copyFileSync(
         path.join(__dirname, '..', 'assets/sounds/peerchat', sourceName),

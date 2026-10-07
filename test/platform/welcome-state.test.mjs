@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { hasSeenWelcome, markWelcomeSeen, WELCOME_FILE_NAME } from '../../app/welcome-state.mjs'
+import { APP_WELCOME_FILE_NAMES, hasSeenWelcome, markWelcomeSeen, WELCOME_FILE_NAME } from '../../app/welcome-state.mjs'
+import { PHONE_BACKUP_FILES } from '../../backend/backup/phone-backup.mjs'
 
 // The screen says what PeerSky is, which does not change with a release, so it
 // is keyed on having been seen at all rather than on a version.
@@ -9,6 +10,16 @@ test('the marker is what decides, not a version', () => {
   assert.equal(WELCOME_FILE_NAME, 'welcome-seen')
   assert.equal(hasSeenWelcome({ exists: false }), false)
   assert.equal(hasSeenWelcome({ exists: true }), true)
+})
+
+// Each app greets once on each phone, so a phone set up from a backup still
+// says what P2PMD is the first time it is opened there.
+test('an app welcome has a marker of its own that stays on this phone', () => {
+  assert.equal(APP_WELCOME_FILE_NAMES.p2pmd, 'p2pmd-welcome-seen')
+  assert.equal(APP_WELCOME_FILE_NAMES.hyperdrive, 'hyperdrive-welcome-seen')
+  for (const name of [WELCOME_FILE_NAME, ...Object.values(APP_WELCOME_FILE_NAMES)]) {
+    assert.ok(!PHONE_BACKUP_FILES.includes(name), name)
+  }
 })
 
 test('storage that cannot be read does not mean a first run', () => {
@@ -31,30 +42,37 @@ test('the welcome screen explains itself without jargon', async () => {
   const { readFile } = await import('node:fs/promises')
   const screen = await readFile(new URL('../../app/WelcomeScreen.tsx', import.meta.url), 'utf8')
 
-  assert.match(screen, /A peer to peer, surveillance free browser\./)
+  assert.match(screen, /Your peer-to-peer, local-first, surveillance-free browser\./)
+  assert.doesNotMatch(screen, /not for advertisers/)
   // A scheme nobody has typed before is not an explanation, and "nobody in the
   // middle" reads as a riddle rather than a promise.
   assert.doesNotMatch(screen, /hyper:\/\//)
   assert.doesNotMatch(screen, /nobody in the middle/)
-  assert.match(screen, /We know nothing about you/)
-  // The blocking card was already right and stays as it was.
+  assert.match(screen, /We collect nothing about you, so there is nothing to sell/)
   assert.match(screen, /No ads, no trackers, no account/)
 })
 
-// What makes PeerSky different is read first; ordinary websites, the part
-// nobody needs convincing of, come last.
-test('the welcome screen leads with device to device and ends with the web', async () => {
+// Device to device leads, as the thing nothing else does. The web card went:
+// the ads and trackers it promised to block are said in the card about not
+// being the product. The last card says anyone can read and improve the code.
+test('the welcome screen leads with device to device', async () => {
   const { readFile } = await import('node:fs/promises')
   const screen = await readFile(new URL('../../app/WelcomeScreen.tsx', import.meta.url), 'utf8')
-  const titles = [...screen.matchAll(/title: '([^']+)'/g)].map((match) => match[1])
+  const cards = screen.slice(screen.indexOf('const QUALITIES'), screen.indexOf('const PEERSKY_WELCOME'))
+  const titles = [...cards.matchAll(/title: '([^']+)'/g)].map((match) => match[1])
 
   assert.deepEqual(titles, [
-    'Share data device to device',
-    'We know nothing about you',
-    'No ads, no trackers, no account',
-    'Works with every website'
+    'Device to device',
+    'You are not the product',
+    'Everything in one app',
+    'Your data stays yours',
+    'Free and open source'
   ])
   assert.match(screen, /There is no server\. Your phone is the server\./)
+  // The apps are built in, so one app does what would otherwise take five.
+  assert.match(screen, /Browser, chat, shared notes, music and file sharing, all built in\. One app instead of five/)
+  assert.match(screen, /Anyone can read the code and improve it\./)
+  assert.doesNotMatch(screen, /every promise on this screen|minus the junk|GlobeIcon/)
   // The old card needed a second read to follow.
   assert.doesNotMatch(screen, /Every site, plus peer to peer ones/)
 })

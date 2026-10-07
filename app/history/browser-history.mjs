@@ -72,6 +72,11 @@ export function removeBrowserHistoryItem (items, value) {
   return [...items.slice(0, index), ...items.slice(index + 1)]
 }
 
+// Typing "youtube" offered the last video watched there, a whole address,
+// where other browsers offer youtube.com. A site whose name starts with what
+// was typed now comes first, as its home page, the site with the most pages in
+// history before the others. Pages on those sites follow, then anything else
+// that matches, newest first.
 export function getBrowserHistorySuggestions (
   items,
   query,
@@ -80,23 +85,87 @@ export function getBrowserHistorySuggestions (
   const normalizedQuery = String(query || '').trim().toLowerCase()
   if (!normalizedQuery || !Number.isSafeInteger(limit) || limit < 1) return []
 
-  const suggestions = []
+  const prefix = getSitePrefix(normalizedQuery)
+  const sites = new Map()
+  const sitePages = []
+  const otherPages = []
   const seenUrls = new Set()
 
   for (const item of items) {
-    if (
-      seenUrls.has(item.url) || !(
-        item.url.toLowerCase().includes(normalizedQuery) ||
-        item.title.toLowerCase().includes(normalizedQuery)
-      )
-    ) continue
-
+    if (seenUrls.has(item.url)) continue
     seenUrls.add(item.url)
-    suggestions.push(item)
-    if (suggestions.length >= Math.min(limit, MAX_BROWSER_HISTORY_SUGGESTIONS)) break
+
+    const site = prefix ? getSite(item.url) : null
+    if (site?.name.startsWith(prefix)) {
+      // Items are newest first, so the first seen is the last visited.
+      if (!sites.has(site.key)) {
+        sites.set(site.key, { name: site.name, pages: 0, visitedAt: item.visitedAt, homes: new Map() })
+      }
+      const known = sites.get(site.key)
+      known.pages++
+      if (!known.homes.has(site.home)) known.homes.set(site.home, { url: site.home, pages: 0, title: '' })
+      const home = known.homes.get(site.home)
+      home.pages++
+      if (site.isHome && !home.title) home.title = item.title
+      // A home page is offered as the site, under whichever address.
+      if (!site.isHome) sitePages.push(item)
+      continue
+    }
+
+    if (
+      item.url.toLowerCase().includes(normalizedQuery) ||
+      item.title.toLowerCase().includes(normalizedQuery)
+    ) otherPages.push(item)
   }
 
-  return suggestions
+  const homes = [...sites.values()]
+    .sort((a, b) => b.pages - a.pages || b.visitedAt - a.visitedAt)
+    .map((site) => {
+      // One site under www, m or neither, over http or https: the address
+      // used most is the one offered, the newest when it is a tie.
+      const addresses = [...site.homes.values()]
+      const home = addresses.reduce((best, address) => (address.pages > best.pages ? address : best))
+      const title = home.title || addresses.find((address) => address.title)?.title || site.name
+      return { url: home.url, title, visitedAt: site.visitedAt }
+    })
+
+  return [...homes, ...sitePages, ...otherPages]
+    .slice(0, Math.min(limit, MAX_BROWSER_HISTORY_SUGGESTIONS))
+}
+
+// What was typed, as the start of a site's name: "https://www.you" is "you".
+// Anything with a path or a space in it is not a site name.
+function getSitePrefix (query) {
+  const value = query
+    .replace(/^(?:https?|hyper):\/\//, '')
+    .replace(/^www\./, '')
+    .replace(/\/$/, '')
+  return value && !/[\s/?#]/.test(value) ? value : null
+}
+
+// www.youtube.com, m.youtube.com and youtube.com are one site, over http or
+// https. YouTube on a phone is m.youtube.com, so a bare www was not enough.
+// mobile.de keeps its name: what is left has to be a name too.
+function getSiteName (host) {
+  const name = host.toLowerCase()
+  const rest = name.replace(/^(?:www|m|mobile)\./, '')
+  return rest !== name && rest.includes('.') ? rest : name
+}
+
+function getSite (url) {
+  let parsed
+  try {
+    parsed = new URL(url)
+  } catch {
+    return null
+  }
+
+  const isWeb = parsed.protocol === 'https:' || parsed.protocol === 'http:'
+  if (!parsed.host || (!isWeb && parsed.protocol !== 'hyper:')) return null
+
+  const name = getSiteName(parsed.host)
+  const home = `${parsed.protocol}//${parsed.host}/`
+  return { key: `${isWeb ? 'web' : 'hyper'} ${name}`, name, home, isHome: url === home }
 }
 
 export function mergeBrowserHistoryItems (restored, pending) {

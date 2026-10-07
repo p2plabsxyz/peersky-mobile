@@ -1,6 +1,7 @@
 import { type ComponentRef, useEffect, useRef, useState } from 'react'
 import {
   Alert,
+  NativeModules,
   Platform,
   Pressable,
   StyleSheet,
@@ -9,7 +10,7 @@ import {
 } from 'react-native'
 import { WebView } from 'react-native-webview'
 import { BROWSER_PALETTES } from '../browser-appearance.mjs'
-import { clearBrowserWebViewData } from '../browser-data.mjs'
+import { clearWebsiteData } from '../browser-data.mjs'
 import {
   SettingCopy,
   SettingsSection,
@@ -78,7 +79,12 @@ export function DataClearing ({
     if (clearStartedRef.current) return
     clearStartedRef.current = true
 
-    if (!clearBrowserWebViewData(clearWebViewRef.current)) {
+    // Websites only: the app's own pages, like PeerTunes' library, stay.
+    if (!clearWebsiteData({
+      platform: Platform.OS,
+      browserData: NativeModules.PeerSkyBrowserData,
+      webViews: [clearWebViewRef.current]
+    })) {
       clearStartedRef.current = false
       failClearing('The browser cache could not be accessed. Please try again.')
       return

@@ -38,6 +38,73 @@ describe('mobile platform runtime configuration', () => {
     assert.doesNotMatch(plugin, /192\.168\./)
   })
 
+  // Restoring a backup onto another phone gave it this phone's keys, and it
+  // then wrote to the same feeds. iCloud also got every cached P2P store.
+  it('keeps keys, chats and P2P stores out of OS backups', async () => {
+    const appJson = JSON.parse(await readFile(repoFile('app.json'), 'utf8'))
+    assert.equal(hasExpoPlugin(appJson.expo?.plugins || [], './plugins/with-no-device-backup'), true)
+
+    const plugin = await readFile(repoFile('plugins/with-no-device-backup.js'), 'utf8')
+    assert.match(plugin, /attributes\['android:allowBackup'\] = 'false'/)
+    assert.match(plugin, /attributes\['android:dataExtractionRules'\] = '@xml\/data_extraction_rules'/)
+    for (const section of ['cloud-backup', 'device-transfer']) {
+      const rules = plugin.slice(plugin.indexOf(`<${section}>`), plugin.indexOf(`</${section}>`))
+      for (const domain of ['root', 'file', 'database', 'sharedpref', 'external']) {
+        assert.match(rules, new RegExp(`<exclude domain="${domain}" path="\\." />`), `${section} ${domain}`)
+      }
+    }
+
+    const ios = await readFile(repoFile('plugins/templates/PeerSkyBackupExclusion.m.template'), 'utf8')
+    assert.match(ios, /NSDocumentDirectory/)
+    assert.match(ios, /setResourceValue:@YES forKey:NSURLIsExcludedFromBackupKey/)
+    assert.match(ios, /UIApplicationDidFinishLaunchingNotification/)
+  })
+
+  // Apple refuses a build that uses a required-reason API without saying why.
+  // Bare stats files and reads the clock, React Native keeps user defaults,
+  // and a backup checks free space before it writes.
+  it('declares why it uses each required-reason API, and that it collects nothing', async () => {
+    const appJson = JSON.parse(await readFile(repoFile('app.json'), 'utf8'))
+    const manifest = appJson.expo?.ios?.privacyManifests
+    const reasons = Object.fromEntries(manifest.NSPrivacyAccessedAPITypes.map((entry) => [
+      entry.NSPrivacyAccessedAPIType.replace('NSPrivacyAccessedAPICategory', ''),
+      entry.NSPrivacyAccessedAPITypeReasons
+    ]))
+    assert.deepEqual(reasons, {
+      // Not 0A2A.1: Apple keeps that one for SDKs that wrap the API, and
+      // expo-file-system declares it in its own manifest.
+      FileTimestamp: ['C617.1', '3B52.1'],
+      // 1C8F.1: the App Group defaults the home screen widgets read.
+      UserDefaults: ['CA92.1', '1C8F.1'],
+      DiskSpace: ['E174.1', '85F4.1'],
+      SystemBootTime: ['35F9.1']
+    })
+    assert.deepEqual(manifest.NSPrivacyCollectedDataTypes, [])
+    assert.equal(manifest.NSPrivacyTracking, false)
+  })
+
+  // A WebView cannot list audio outputs, so PeerTunes' Bluetooth mark never
+  // showed on a phone. A native module reads the route instead, with no new
+  // permission on either system.
+  it('reads the audio route natively for the PeerTunes Bluetooth mark', async () => {
+    const appJson = JSON.parse(await readFile(repoFile('app.json'), 'utf8'))
+    assert.equal(hasExpoPlugin(appJson.expo?.plugins || [], './plugins/with-audio-route'), true)
+
+    const ios = await readFile(repoFile('plugins/templates/PeerSkyAudioRoute.m.template'), 'utf8')
+    assert.match(ios, /RCT_EXPORT_MODULE\(PeerSkyAudioRoute\)/)
+    assert.match(ios, /AVAudioSessionPortBluetoothA2DP/)
+    assert.match(ios, /currentRoute\.outputs/)
+
+    const android = await readFile(repoFile('plugins/templates/PeerSkyAudioRouteModule.kt.template'), 'utf8')
+    assert.match(android, /override fun getName\(\) = "PeerSkyAudioRoute"/)
+    assert.match(android, /getDevices\(AudioManager\.GET_DEVICES_OUTPUTS\)/)
+    assert.match(android, /TYPE_BLUETOOTH_A2DP/)
+    assert.doesNotMatch(android, /BLUETOOTH_CONNECT/)
+
+    const plugin = await readFile(repoFile('plugins/with-audio-route.js'), 'utf8')
+    assert.match(plugin, /add\(PeerSkyAudioRoutePackage\(\)\)/)
+  })
+
   it('keeps iOS local networking scoped to localhost support, not arbitrary HTTP', async () => {
     const appJson = JSON.parse(await readFile(repoFile('app.json'), 'utf8'))
     const ats = appJson.expo?.ios?.infoPlist?.NSAppTransportSecurity
@@ -59,13 +126,17 @@ describe('mobile platform runtime configuration', () => {
       'android.permission.CHANGE_WIFI_MULTICAST_STATE',
       'android.permission.FOREGROUND_SERVICE',
       'android.permission.FOREGROUND_SERVICE_REMOTE_MESSAGING',
-      'android.permission.RECORD_AUDIO',
-      'android.permission.REQUEST_INSTALL_PACKAGES'
+      'android.permission.RECORD_AUDIO'
     ])
-    assert.equal(
-      android?.blockedPermissions?.includes('android.permission.POST_NOTIFICATIONS') || false,
-      false
-    )
+    // Template and library permissions nothing in the app uses. Each one is a
+    // question a store review asks.
+    assert.deepEqual(android?.blockedPermissions, [
+      'android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK',
+      'android.permission.READ_EXTERNAL_STORAGE',
+      'android.permission.REQUEST_INSTALL_PACKAGES',
+      'android.permission.SYSTEM_ALERT_WINDOW',
+      'android.permission.WRITE_EXTERNAL_STORAGE'
+    ])
     assert.equal(android?.intentFilters?.length, 1)
     assert.deepEqual(android.intentFilters[0]?.category, ['BROWSABLE', 'DEFAULT'])
     assert.deepEqual(
@@ -75,6 +146,10 @@ describe('mobile platform runtime configuration', () => {
     assert.match(infoPlist?.NSCameraUsageDescription, /website you visit/i)
     assert.match(infoPlist?.NSLocationWhenInUseUsageDescription, /website you visit/i)
     assert.match(infoPlist?.NSMicrophoneUsageDescription, /website you visit/i)
+    // Long-pressing a picture on a page and choosing Save to Photos asks only
+    // to add to the library with this. Without it iOS asked for the whole
+    // library, with the attach-a-picture reason, and the save did not happen.
+    assert.match(infoPlist?.NSPhotoLibraryAddUsageDescription, /Save to Photos/)
     assert.equal(infoPlist?.ITSAppUsesNonExemptEncryption, true)
   })
 
@@ -96,6 +171,9 @@ describe('mobile platform runtime configuration', () => {
     assert.match(settings, /Send feedback/)
     assert.doesNotMatch(settings, /Report harmful content/)
     assert.match(privacyPolicy, /contact@p2plabs[.]xyz/)
+    // The Play data safety form declares what ML Kit sends Google from the
+    // Android QR scanner, so the policy has to say it too, or the two disagree.
+    assert.match(privacyPolicy, /Google's ML Kit/)
     assert.match(privacyPolicy, /issues\/new[?]template=content-report[.]yml/)
     assert.match(contentReport, /name: Report harmful content/)
   })
@@ -116,6 +194,12 @@ describe('mobile platform runtime configuration', () => {
       }
     ])
     assert.equal(hasExpoPlugin(plugins, EXPO_AUDIO_PLUGIN), true)
+    // PeerTunes plays through its WebView. iOS keeps it going with the audio
+    // background mode; Android never starts expo-audio's media service, so it
+    // does not declare one Google Play would ask about.
+    const audioPlugin = plugins.find((plugin) => Array.isArray(plugin) && plugin[0] === EXPO_AUDIO_PLUGIN)
+    assert.equal(audioPlugin?.[1]?.enableBackgroundPlayback, false)
+    assert.deepEqual(appJson.expo?.ios?.infoPlist?.UIBackgroundModes, ['audio'])
     assert.equal(hasExpoPlugin(plugins, PEERCHAT_BACKGROUND_PLUGIN), true)
     assert.equal(appJson.expo?.android?.softwareKeyboardLayoutMode, 'resize')
     const backgroundPlugin = await readFile(repoFile('plugins/with-peerchat-background.js'), 'utf8')
@@ -230,6 +314,60 @@ describe('mobile platform runtime configuration', () => {
     // The browser says when it has dealt with one, so a link that arrived on
     // the way to expo-router's unmatched route is not lost with the screen.
     assert.match(indexSource, /settleIncomingUrl\(incomingUrl\)/)
+  })
+
+  // A link that started the app counted as something done in it, and the
+  // restore skips last time's tabs once anything has been done. Opening a
+  // link with PeerSky closed left one tab, and the next save lost the rest.
+  it('keeps last time\'s tabs when a link starts the app, and opens the link over them', async () => {
+    const indexSource = await readFile(repoFile('app/index.tsx'), 'utf8')
+    const subscriber = indexSource.slice(
+      indexSource.indexOf('useEffect(() => subscribeToIncomingUrls('),
+      indexSource.indexOf('if (!browserSessionReady || !pendingHomeShortcutUrl) return')
+    )
+    assert.doesNotMatch(subscriber, /browserUserInteractedRef\.current = true/)
+    assert.match(subscriber, /setPendingIncomingUrl\(url\)/)
+    // The link goes in front of the restored page, and the page does not
+    // load over it afterwards.
+    assert.match(indexSource, /setPendingRestoredUrl\(null\)\s+void loadBrowserUrl\(incomingUrl\)/)
+    assert.match(indexSource, /if \(!pendingRestoredUrl\) return\s+\/\/[^\n]*\n\s+\/\/[^\n]*\n\s+if \(pendingIncomingUrl\) return/)
+    assert.match(indexSource, /\}, \[isBooting, pendingIncomingUrl, pendingRestoredUrl\]\)/)
+  })
+
+  // expo-router parsed every incoming link's query with a decoder a crafted
+  // link could keep busy. The browser reads links itself, so the router is
+  // only ever told to show "/".
+  it('keeps system links away from expo-router', async () => {
+    const intent = await readFile(repoFile('app/+native-intent.ts'), 'utf8')
+    assert.match(intent, /export function redirectSystemPath \(\{ initial \}/)
+    assert.match(intent, /return initial \? '\/' : null/)
+  })
+
+  // Only peersky:// was registered, so a hyper:// QR code scanned with the
+  // camera, or a hyper:// link tapped in another app, never reached PeerSky.
+  it('opens hyper:// links from the camera and other apps on both systems', async () => {
+    const plugin = require('../../plugins/with-hyper-links')
+    const appJson = JSON.parse(await readFile(repoFile('app.json'), 'utf8'))
+    assert.equal(hasExpoPlugin(appJson.expo.plugins, './plugins/with-hyper-links'), true)
+    // One scheme in app.json: expo-linking warns on every start about a list.
+    assert.equal(appJson.expo.scheme, 'peersky')
+
+    const infoPlist = plugin.addHyperSchemeToInfoPlist({ CFBundleURLTypes: [{ CFBundleURLSchemes: ['peersky'] }] })
+    assert.deepEqual(infoPlist.CFBundleURLTypes.map((type) => type.CFBundleURLSchemes), [['peersky'], ['hyper']])
+    assert.deepEqual(plugin.addHyperSchemeToInfoPlist(infoPlist), infoPlist)
+
+    const manifest = { manifest: { application: [{ activity: [{ $: { 'android:name': '.MainActivity' }, 'intent-filter': [] }] }] } }
+    plugin.addHyperIntentFilter(manifest)
+    plugin.addHyperIntentFilter(manifest)
+    const filters = manifest.manifest.application[0].activity[0]['intent-filter']
+    assert.equal(filters.length, 1)
+    assert.deepEqual(filters[0].action.map((item) => item.$['android:name']), ['android.intent.action.VIEW'])
+    assert.deepEqual(filters[0].category.map((item) => item.$['android:name']), ['android.intent.category.DEFAULT', 'android.intent.category.BROWSABLE'])
+    assert.deepEqual(filters[0].data.map((item) => item.$['android:scheme']), ['hyper'])
+
+    // And the app takes them once they arrive.
+    const indexSource = await readFile(repoFile('app/index.tsx'), 'utf8')
+    assert.match(indexSource, /\(!isWebUrl\(url\) && !isHyperUrl\(url\) && !isInternalAppUrl\)/)
   })
 
   it('listens for deep links outside the screen expo-router unmounts', async () => {

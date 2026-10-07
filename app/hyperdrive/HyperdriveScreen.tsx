@@ -17,7 +17,6 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { CameraView, useCameraPermissions } from 'expo-camera'
-import { File, Paths } from 'expo-file-system'
 import { pickUploadFolder, pickUploads, type UploadAsset } from '../media/upload-gate'
 import ArrowLeftIcon from '../../assets/icons/bootstrap/arrow-left.svg'
 import ChevronRightIcon from '../../assets/icons/bootstrap/chevron-right.svg'
@@ -42,12 +41,13 @@ import {
 } from './recents.mjs'
 import {
   loadHyperdriveRecents,
+  onHyperdriveRecentsCleared,
   persistHyperdriveRecents
 } from './recents-store'
 import { MODAL_ORIENTATIONS } from '../modal-orientations'
 import { tapFeedback } from '../haptics'
 import { PublishedLinkSheet } from '../PublishedLinkSheet'
-import { isLinkedPrivateKey, LINKED_PRIVATE_KEY_FILE } from './private-upload.mjs'
+import { hasLinkedIdentity } from './linked-identity'
 
 const hyperdriveIcon = require('../../assets/images/hyperdrive.png')
 
@@ -100,6 +100,8 @@ const RECENT_FILTERS: Array<{ id: RecentFilter, label: string }> = [
 
 export function HyperdriveScreen ({ offlineNetworkAllowed, isDark, isLandscape, onCallRpc, onOpenItem, onOpenLinkDevice, onOpenUrl, onStatus }: Props) {
   const [recents, setRecents] = useState<HyperdriveItem[]>(loadHyperdriveRecents)
+  // Settings, P2P Data clears recents with this screen still open underneath.
+  useEffect(() => onHyperdriveRecentsCleared(() => setRecents(loadHyperdriveRecents())), [])
   const [items, setItems] = useState<HyperdriveItem[] | null>(null)
   const [location, setLocation] = useState<HyperdriveItem | null>(null)
   const [listingTruncated, setListingTruncated] = useState(false)
@@ -504,7 +506,6 @@ export function HyperdriveScreen ({ offlineNetworkAllowed, isDark, isLandscape, 
           <Text style={[styles.appTitle, { color: palette.text }]}>Hyperdrive</Text>
           <Text style={[styles.helperText, { color: palette.muted }]}>Upload and fetch files over Hyper.</Text>
         </View>
-        <Text style={[styles.readyPill, { color: palette.pillText, backgroundColor: palette.pill }]}>ready</Text>
       </View>
 
       <View style={styles.setupBlock}>
@@ -851,15 +852,6 @@ function formatRecentMeta (item: HyperdriveItem) {
   return `${details} - ${new Date(item.openedAt).toLocaleDateString()}`
 }
 
-function hasLinkedIdentity () {
-  try {
-    const file = new File(Paths.document, LINKED_PRIVATE_KEY_FILE)
-    return file.exists && isLinkedPrivateKey(file.textSync())
-  } catch {
-    return false
-  }
-}
-
 function getUploadSuccessMessage (visibility: UploadVisibility, _item: HyperdriveItem) {
   if (visibility === 'device') return 'Stored on this device only. It never syncs. A backup from Settings > Link Device keeps a copy if this phone is lost.'
   if (visibility === 'private') return 'Encrypted. The link is safe to share, and only your linked devices can open it.'
@@ -874,10 +866,10 @@ function formatBytes (bytes: number) {
 }
 
 const lightPalette = {
-  background: '#f5f7fb', surface: '#ffffff', border: '#dce3ee', text: '#172033', muted: '#68758a', placeholder: '#8b96a8', accent: '#2f80ed', secondaryText: '#286fc9', fetch: '#dff5e9', fetchText: '#226346', notice: '#e5f2ff', noticeText: '#245d9d', pill: '#e5ecff', pillText: '#40558c', folder: '#68d7cb', file: '#e7edf6'
+  background: '#f5f7fb', surface: '#ffffff', border: '#dce3ee', text: '#172033', muted: '#68758a', placeholder: '#8b96a8', accent: '#2f80ed', secondaryText: '#286fc9', fetch: '#dff5e9', fetchText: '#226346', notice: '#e5f2ff', noticeText: '#245d9d', folder: '#68d7cb', file: '#e7edf6'
 }
 const darkPalette = {
-  background: '#1f2027', surface: '#262832', border: '#383b46', text: '#f1f2f7', muted: '#a2a8bb', placeholder: '#6f7484', accent: '#2f80ed', secondaryText: '#9ec5ff', fetch: '#1d513d', fetchText: '#c6f6df', notice: '#203a56', noticeText: '#c7e2ff', pill: '#30364a', pillText: '#cdd6ff', folder: '#68d7cb', file: '#30333f'
+  background: '#1f2027', surface: '#262832', border: '#383b46', text: '#f1f2f7', muted: '#a2a8bb', placeholder: '#6f7484', accent: '#2f80ed', secondaryText: '#9ec5ff', fetch: '#1d513d', fetchText: '#c6f6df', notice: '#203a56', noticeText: '#c7e2ff', folder: '#68d7cb', file: '#30333f'
 }
 
 const styles = StyleSheet.create({
@@ -888,7 +880,6 @@ const styles = StyleSheet.create({
   appIcon: { borderRadius: 10, height: 44, width: 44 },
   appHeaderCopy: { flex: 1, gap: 3 },
   appTitle: { fontSize: 18, fontWeight: '700' },
-  readyPill: { borderRadius: 999, fontSize: 12, fontWeight: '700', overflow: 'hidden', paddingHorizontal: 10, paddingVertical: 4 },
   helperText: { fontSize: 13, lineHeight: 19 },
   setupBlock: { gap: 10 },
   setupTitle: { fontSize: 15, fontWeight: '700' },

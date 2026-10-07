@@ -1,6 +1,8 @@
+import { rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { getHyperRuntime, getHyperStoragePath } from '../hyper/runtime.mjs'
 import { getDefaultIdentityStoragePath } from '../backup/device-keys.mjs'
+import { attachmentDriveName, getAttachmentCacheDirectory } from './attachments.mjs'
 import { PEERCHAT_INCOMING_FILE } from './device-link.mjs'
 import { PeerChatService } from './service.mjs'
 
@@ -8,6 +10,18 @@ let service = null
 let serviceOpening = null
 let serviceClosing = null
 let serviceGeneration = 0
+// Whether the app is in the background, kept here so a PeerChat that opens
+// later starts out knowing.
+let idle = false
+
+/**
+ * Away from the app or back, from the app's own state. It never opens
+ * PeerChat for someone who does not use it.
+ */
+export function setPeerChatIdle (value) {
+  idle = value === true
+  service?.setIdle(idle)
+}
 
 export async function getPeerChatService () {
   if (serviceClosing) await serviceClosing
@@ -31,6 +45,7 @@ export async function getPeerChatService () {
         // A restore puts what it brings in the identity folder.
         incomingPath: join(getDefaultIdentityStoragePath(), PEERCHAT_INCOMING_FILE)
       })
+      nextService.setIdle(idle)
       try {
         await nextService.start()
       } catch (error) {
@@ -94,5 +109,43 @@ export async function closePeerChatService () {
     await closing
   } finally {
     if (serviceClosing === closing) serviceClosing = null
+  }
+}
+
+/**
+ * Removes everything PeerChat keeps on this device: the profile, every room
+ * with its messages and attachments, requests and blocks. Each room hears that
+ * this device left. What was already sent stays with the people it reached,
+ * and the next PeerChat to open here starts from the welcome screen.
+ */
+export async function deletePeerChatProfile ({
+  getService = getPeerChatService,
+  closeService = closePeerChatService,
+  removeFile = (path) => rmSync(path, { recursive: true, force: true })
+} = {}) {
+  const peerChat = await getService()
+  const { sdk, stateFilePath, storagePath } = peerChat
+  const roomKeys = await peerChat.leaveAllRooms()
+  await closeService()
+
+  for (const roomKey of roomKeys) await purgePeerChatRoom(sdk, roomKey)
+  removeFile(stateFilePath)
+  removeFile(getAttachmentCacheDirectory(storagePath))
+  return { ok: true }
+}
+
+async function purgePeerChatRoom (sdk, roomKey) {
+  try {
+    const feed = sdk.corestore.get({ name: `chat-${roomKey}` })
+    await feed.ready()
+    await feed.purge()
+  } catch (error) {
+    console.warn('[peerchat] Could not remove a room feed:', error?.message || error)
+  }
+  try {
+    const drive = await sdk.getDrive(attachmentDriveName(roomKey))
+    await drive.purge()
+  } catch (error) {
+    console.warn('[peerchat] Could not remove a room drive:', error?.message || error)
   }
 }

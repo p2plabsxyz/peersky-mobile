@@ -177,7 +177,7 @@
         const screen = this._screenFromRoute(entry.r);
         if (!screen) break;
         if (typeof entry.pos === "number") {
-          if (screen.name === "coverflow") screen.idx = entry.pos;
+          if (screen.name === "covers") screen.idx = entry.pos;
           else screen.sel = entry.pos;
         }
         this.stack.push(screen);
@@ -190,7 +190,7 @@
       const key = r[0], arg = r[1];
       switch (key) {
         case "music": return this.lib.count ? this.musicScreen() : null;
-        case "cover": return this.lib.getAlbums().length ? this.coverFlowScreen() : null;
+        case "cover": return this.lib.getAlbums().length ? this.coverScreen() : null;
         case "album": return this.lib.album(arg) ? this.albumScreen(arg) : null;
         case "artists": return this.lib.count ? this.artistsScreen() : null;
         case "artist": return this.lib.artist(arg) ? this.artistScreen(arg) : null;
@@ -477,7 +477,7 @@
         refreshOnLibrary: true,
         rows: () => (ui.lib.count === 0 ? [] : [
           { label: "Playlists", chevron: true, action: () => ui.push(ui.playlistsScreen()) },
-          { label: "Albums", chevron: true, action: () => ui.push(ui.coverFlowScreen()) },
+          { label: "Albums", chevron: true, action: () => ui.push(ui.coverScreen()) },
           { label: "Artists", chevron: true, action: () => ui.push(ui.artistsScreen()) },
           { label: "Songs", chevron: true, action: () => ui.push(ui.songsScreen()) },
           { label: "Genres", chevron: true, action: () => ui.push(ui.genresScreen()) },
@@ -486,13 +486,13 @@
       });
     }
 
-    // ---------- cover flow ----------
+    // ---------- album covers ----------
 
-    coverFlowScreen() {
+    coverScreen() {
       const ui = this;
       return {
-        name: "coverflow",
-        title: "Cover Flow",
+        name: "covers",
+        title: "Albums",
         route: ["cover"],
         refreshOnLibrary: true,
         idx: 0,
@@ -948,6 +948,7 @@
           { label: "Artists", value: String(ui.lib.getArtists().length) },
           { label: "Sources", value: String(ui.lib.sources.length) },
           { label: "Made for PeerSky", value: "hyper://" },
+          { label: "How to Use", chevron: true, action: () => PT.showWelcome() },
         ],
       });
     }
@@ -1149,7 +1150,7 @@
           ];
           if (phone) uploads.reverse();
           return [
-            { label: "Open URL…", sub: "hyper:// https://", chevron: true, action: () => ui.push(ui.urlScreen()) },
+            { label: "Open URL…", sub: PT.P2P_SCHEMES.includes("ipfs") ? "hyper:// ipfs:// https://" : "hyper:// https://", chevron: true, action: () => ui.push(ui.urlScreen()) },
             ...uploads,
             {
               label: "Zipify Tunes…", sub: "download a playlist to your device first",
@@ -1186,6 +1187,7 @@
       if (!url) return;
       const res = await window.peerskyKeepOffline(url).catch(() => null);
       if (res && res.ok) {
+        this.lib.markSourceKept(url).catch(() => {});
         this.dialog({
           msg: res.status === "waiting-for-wifi" ? "Waiting for Wi-Fi" : "Downloading",
           sub: res.status === "waiting-for-wifi"
@@ -1295,7 +1297,7 @@
             <div class="cap">Load music from a URL</div>
             <input type="url" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="hyper://…">
             <button type="button" class="urlscan">${PT.icons.qr}<span>Scan QR Code</span></button>
-            <div class="hint">Point it at a hyper:// drive folder with songs, or a direct audio link. Press the center button or Enter to sync.</div>`;
+            <div class="hint">Point it at a hyper:// drive folder with songs${PT.P2P_SCHEMES.includes("ipfs") ? ", an ipfs:// folder," : ""} or a direct audio link. Press the center button or Enter to sync.</div>`;
           page.appendChild(box);
           this.input = box.querySelector("input");
           this.input.addEventListener("keydown", (e) => {
@@ -1323,7 +1325,7 @@
     }
 
     // Point the camera at a QR code holding a music URL or a share link.
-    // Runs inside the LCD, so the iPod look survives.
+    // Runs inside the LCD, so the player's look survives.
     scanScreen(onResult) {
       const ui = this;
       let stream = null;
@@ -1380,7 +1382,7 @@
               return;
             }
             this.note.textContent = scanned
-              ? "That QR code is not a hyper:// or https:// link."
+              ? "That QR code is not a link PeerTunes can play."
               : "Nothing scanned. Type the URL instead.";
             return;
           }
@@ -1478,15 +1480,19 @@
         failed = err || new Error("sync failed");
       }
       if (failed) {
-        const schemeMatch = /^(hyper):/i.exec(failed.url || "");
+        const schemeMatch = /^(hyper|ipfs|ipns):/i.exec(failed.url || "");
         const p2p = !!schemeMatch;
         const scheme = schemeMatch ? schemeMatch[1].toLowerCase() : "";
         if (failed.code === "UNREACHABLE" && p2p) {
-          // PeerTunes only ever runs inside PeerSky, which does speak hyper://,
-          // so an unreachable drive means nobody is seeding it right now.
+          // Inside PeerSky the protocol works, so nothing answering means
+          // nobody is seeding it right now.
+          const inPeerSky = /^(hyper|ipfs|ipns|peersky):$/i.test(location.protocol) ||
+            typeof window.peerskyHyperAsset === "function";
           this.dialog({
             msg: "Can't reach that URL",
-            sub: `Nothing answered on ${scheme}://. Nobody may be seeding it right now, or the link may be wrong.`,
+            sub: inPeerSky
+              ? `Nothing answered on ${scheme}://. Nobody may be seeding it right now, or the link may be wrong.`
+              : `This browser does not speak ${scheme}://. Open PeerTunes inside PeerSky, or use an http link here.`,
             buttons: [{ label: "OK" }],
           });
         } else if (failed.code === "EMPTY") {
@@ -1499,18 +1505,19 @@
           this.dialog({ msg: "Could not sync", sub: "Check the URL and try again.", buttons: [{ label: "OK" }] });
         }
       } else {
-        const { added, found } = result;
+        const { added, found, partial } = result;
         const already = Math.max(0, found - added);
         // "Added 1 song" after a sync of eighteen reads as a failure. It was
         // true and useless: the other seventeen were already here from a run
         // that had been interrupted. Say what is in the library now as well.
+        const notes = [];
+        if (already) notes.push(`${already} of ${found} ${already === 1 ? "was" : "were"} already in your library`);
+        if (partial) notes.push("Some folders did not answer yet, so Rescan Sources later");
         this.dialog({
           msg: added
             ? `Added ${added} song${added === 1 ? "" : "s"}`
             : found ? "Already up to date" : "No new songs found",
-          sub: already
-            ? `${already} of ${found} ${already === 1 ? "was" : "were"} already in your library`
-            : "",
+          sub: notes.join(". "),
           buttons: [{ label: "OK" }],
         });
       }
@@ -1539,6 +1546,11 @@
             label: "Clicker", value: s.clicker ? "On" : "Off",
             action: () => { s.clicker = !s.clicker; ui.wheel.clicker = s.clicker; commit(); },
           },
+          // The buzz on each turn of the wheel, apart from its sound.
+          ...(PT.Wheel.canHaptic() ? [{
+            label: "Haptics", value: s.haptics ? "On" : "Off",
+            action: () => { s.haptics = !s.haptics; ui.wheel.haptics = s.haptics; commit(); },
+          }] : []),
           {
             label: "Shell", value: s.shell === "black" ? "Black" : "Silver",
             action: () => {

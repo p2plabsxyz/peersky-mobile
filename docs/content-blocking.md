@@ -2,6 +2,28 @@
 
 PeerSky Mobile blocks network-level advertising and tracking requests before WebView sends them. Android evaluates HTTP and HTTPS subresource requests with Brave's Rust ad-blocking engine. iOS converts the supported EasyList and EasyPrivacy network-rule subset into native WebKit rules and attaches compiled `WKContentRuleList` instances before navigation. Main-frame navigation is not blocked.
 
+```mermaid
+flowchart TB
+  lists["EasyList and EasyPrivacy<br/>bundled at build time,<br/>refreshed after seven days"]
+
+  subgraph android["Android"]
+    engine["adblock-rust<br/>one ruleset for every WebView"]
+    client["PeerSkyWebViewClient<br/>shouldInterceptRequest"]
+  end
+
+  subgraph ios["iOS"]
+    convert["webkit-content-rules.mjs<br/>network rules to WebKit JSON"]
+    compiled["WKContentRuleListStore<br/>compiled once per snapshot"]
+    attached["Attached to every<br/>WKWebView before it loads"]
+  end
+
+  lists --> engine
+  lists --> convert
+  convert --> compiled --> attached
+  client -->|"URL, page, type"| engine
+  engine -->|"blocked: an empty 204"| client
+```
+
 PeerSky fetches and validates EasyList and EasyPrivacy at build time, then packages that snapshot so protection can initialize on a first launch without network access. The packaged files are copied into the app document directory, loaded natively, and checked automatically for refresh when older than seven days. Updates use only the fixed HTTPS sources below, enforce a 30-second timeout and a 12 MB decoded-size limit per list, and validate the Adblock header before activation. New snapshots become active only after the native engine accepts them, so malformed, partial, unavailable, or rejected updates keep the last known good rules.
 
 The Privacy settings page provides a global protection switch, the active filter-list status, and a manual update action. Turning protection off is persisted across launches. Manual update failures leave the current validated snapshot active and report the failure in Settings.
@@ -52,7 +74,8 @@ Unsupported Adblock modifiers, cosmetic rules, and regular-expression filters ar
 
 ## Scope and limitations
 
-- Network filtering applies to HTTP and HTTPS subresources. Top-level page navigation is intentionally allowed.
+- Network filtering applies to HTTP and HTTPS subresources and frames. Top-level page navigation is intentionally allowed. WebKit loads an iframe as a document, the same type as the page itself, so on iOS every filter with no type, or with `$subdocument`, also gets a rule for third-party documents: the page in the address bar is first party to itself, so only frames match it.
+- `test/platform/cover-your-tracks.test.mjs` replays the two tracker frames that [Cover Your Tracks](https://coveryourtracks.eff.org/) loads (`trackersimulator.org` and `eviltracker.net`) against the shipped lists, and fails unless both "Blocking tracking ads?" and "Blocking invisible trackers?" would answer Yes.
 - Hyper, PeerSky internal pages, localhost, Android emulator loopback, P2PMD, and Holesail traffic are excluded from filtering.
 - Android uses the network-rule support provided by the pinned `adblock-rust` engine.
 - iOS converts the supported network-rule subset to WebKit JSON. Unsupported modifiers and regex filters are skipped safely.

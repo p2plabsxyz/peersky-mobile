@@ -73,6 +73,20 @@ export function createHyperUrl (driveAddress, pathname) {
   return `${driveAddress.slice(0, -1)}${encodedPath}`
 }
 
+/**
+ * A hyper:// address as hypercore-fetch has to be given it.
+ *
+ * Pages escape a name with encodeURIComponent, so "Safe & Sound.mp3" arrives
+ * as "Safe%20%26%20Sound.mp3". decodeURI leaves the %26 as it is, and the
+ * file looked up was "Safe %26 Sound.mp3", which is not there. Anything that
+ * is not a hyper:// address with a drive is passed on unchanged.
+ */
+export function toHyperFetchUrl (url) {
+  const target = parseHyperUrl(url)
+  if (target.error || target.driveAddress === 'default') return url
+  return createHyperUrl(target.driveAddress, target.pathname) + getHyperSearch(url)
+}
+
 function getRawHyperPath (url) {
   const withoutProtocol = url.slice('hyper://'.length)
   const slashIndex = withoutProtocol.indexOf('/')

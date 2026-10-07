@@ -38,7 +38,9 @@ tested independently:
 - `app/bookmarks/` validates and stores bookmarks and their favicons.
 - `app/tabs/` captures and stores bounded tab previews.
 - `app/downloads/` tracks downloads and connects the browser to the native
-  download implementation.
+  download implementation. A download a page starts waits for the person to
+  say yes, and a downloaded APK opens in the system's Downloads, since PeerSky
+  does not hold the permission to install apps.
 
 Tab history stores restorable URLs instead of retaining generated Hyper or
 error HTML. On restoration, those URLs are fetched again. At most five browser
@@ -70,6 +72,23 @@ this path:
    `backend/hyper/assets.mjs`.
 5. The resulting HTML is rendered by a WebView with its Hyper URL retained as
    the visible browser address.
+
+```mermaid
+sequenceDiagram
+  participant Shell as Browser shell
+  participant Worklet as Bare worklet
+  participant Peers as Hyper peers
+  participant View as WebView
+
+  Shell->>Worklet: RPC_HYPER_FETCH hyper://key/path
+  Worklet->>Peers: blocks it does not have on disk
+  Peers-->>Worklet: blocks, kept on disk
+  Worklet-->>Shell: HTML, small assets inlined, the rest as signed links
+  Shell->>View: render, the address bar keeps hyper://
+  View->>Worklet: images and media from 127.0.0.1, with Range
+  View->>Shell: the page calls fetch on a hyper:// URL, over postMessage
+  Shell->>Worklet: checked by page-access.mjs, a write asks first
+```
 
 Small assets may be inlined within configured count, size, and concurrency
 budgets. Streamable or larger media is served through the authenticated
@@ -103,6 +122,44 @@ Network-level ad and tracker blocking is initialized before restored WebViews
 are mounted. Android evaluates requests in the custom WebView client. iOS uses
 compiled WebKit content rules. See [Ads and tracker blocking](content-blocking.md)
 for setup, update behavior, and platform limitations.
+
+## Incognito tabs
+
+**New Incognito Tab** in the menu opens a tab that keeps nothing: no history
+entries, no tab preview on disk, no HTTP cache, and it is never written into
+the saved session, so it is gone when the app closes. Links and popups opened
+from it stay incognito, and the address bar and tab list mark it.
+
+Cookies and site storage are kept apart from normal tabs. The app names a
+session for each run of incognito tabs (`incognitoSession` in
+`PeerSkyWebViewManager`), kept while any of them is open and replaced once the
+last one closes. On iOS a session is one WebKit data store that is never
+written to disk. Android WebViews all share one cookie jar, and
+react-native-webview's own `incognito` prop empties it, signing people out of
+every normal tab, so there a session is a WebView profile of its own, and the
+profiles of earlier sessions are deleted. Going back builds a new WebView, and
+the session is what lets it keep the tab's cookies. Profiles need Android
+System WebView 123 or later; on an older one the menu says to update it rather
+than opening a tab that would share cookies.
+
+A `hyper://` site cannot publish from an incognito tab: its answer would be
+saved in Permissions and its drives would stay on the phone. Drives opened in
+one still go through the app's Hyper node, which keeps their blocks like any
+other drive's until P2P data is cleared.
+
+A download from an incognito tab never sends the cookies normal tabs share,
+which would tell the site who it is. On Android it sends the tab's own, from
+its profile, while the tab is open. On iOS it sends none: the tab's WebKit
+store cannot be read from outside the WebView.
+
+## Camera, microphone and location
+
+A site asks before it gets the camera, the microphone or the location, with
+its own address in the question. iOS shows WebKit's prompt. On Android the
+app asks, through a patch to react-native-webview
+(`patches/react-native-webview+13.16.0.patch`): as shipped, the library gave
+them to any site once the app held the Android permission, as it does after a
+QR code scan.
 
 ## Native generation
 

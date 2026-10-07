@@ -1,14 +1,11 @@
 import b4a from 'b4a'
+import { isOwnLoopbackRequest } from '../loopback-request.mjs'
 import { streamHyperAsset } from '../hyper/asset-server-core.mjs'
+import { isPeerDiscoveryError } from '../hyper/fetch-retry.mjs'
 import { headersToObject } from '../hyper/assets.mjs'
 import { parseHyperUrl } from '../hyper/url.mjs'
 import { PEERTUNES_LOOPBACK_HOST, PEERTUNES_LOOPBACK_PORT } from './constants.mjs'
 import peertunesAssets from './peertunes-runtime.mjs'
-
-// Only this machine may talk to the server. Binding 127.0.0.1 is not enough on
-// its own: a DNS name that resolves to loopback would still reach us, so the
-// Host header has to name loopback too.
-const ALLOWED_HOSTNAMES = new Set(['127.0.0.1', 'localhost', '[::1]', '::1'])
 
 // A folder listing or playlist manifest is a small document. Anything larger is
 // either the wrong branch or an attempt to exhaust the worklet's heap, so it is
@@ -24,6 +21,10 @@ const MAX_UPSTREAM_ERROR_BYTES = 8 * 1024
 // makes real progress rather than just rolling the dice again.
 const LISTING_ATTEMPTS = 3
 const LISTING_RETRY_DELAY_MS = 400
+// A drive this phone has never read answers 404 "Peers Not Found" until a peer
+// connects. The browser waits that out, and this did not, so the first add of
+// a new drive failed and the second one worked.
+const DISCOVERY_RETRY_DELAYS_MS = [250, 500, 1000, 2000, 2000]
 
 // Content types the proxy will hand back as-is. Everything else is forced to
 // application/octet-stream, because a hyper drive is untrusted input and the
@@ -43,14 +44,15 @@ const STATIC_CONTENT_TYPES = {
 // PeerTunes looks for this global and sends its hyper:// reads through it,
 // because the WebView cannot fetch hyper:// on its own. The path is relative,
 // so the page never handles a proxy token.
-export const HYPER_BRIDGE_SCRIPT = '<script>window.peerskyHyperAsset=function(url){return"/hyper/asset?url="+encodeURIComponent(String(url))}</script>'
+// peerskyProtocols: the phone reads hyper:// only, so PeerTunes offers no other
+// p2p link.
+export const HYPER_BRIDGE_SCRIPT = '<script>window.peerskyProtocols=["hyper"];window.peerskyHyperAsset=function(url){return"/hyper/asset?url="+encodeURIComponent(String(url))}</script>'
 
 let server = null
 let serverInfo = null
 let serverTransition = Promise.resolve()
 let bareHttp = null
 let hyperFetchModule = null
-let offlineModule = null
 
 export async function startPeerTunesServer () {
   return withServerTransition(async () => {
@@ -63,12 +65,13 @@ export async function startPeerTunesServer () {
     }
 
     const httpImpl = await getBareHttp()
-    const { ensureFetchGlobals, routedHyperFetch, routedHyperRangeFetch } = await getHyperFetchModule()
+    const { ensureFetchGlobals, refreshHyperNetworkFor, routedHyperFetch, routedHyperRangeFetch } = await getHyperFetchModule()
     const options = {
       httpImpl,
       fetch: routedHyperFetch,
       fetchRange: routedHyperRangeFetch,
-      ensureGlobals: ensureFetchGlobals
+      ensureGlobals: ensureFetchGlobals,
+      refreshNetwork: refreshHyperNetworkFor
     }
 
     let bound
@@ -131,7 +134,7 @@ export function createPeerTunesHttpServer ({
   fetch,
   fetchRange,
   ensureGlobals = () => {},
-  keepOffline = keepAssetOffline
+  refreshNetwork = async () => {}
 } = {}) {
   if (!httpImpl?.createServer) {
     throw new Error('PeerTunes HTTP server requires an HTTP implementation.')
@@ -141,7 +144,7 @@ export function createPeerTunesHttpServer ({
   }
 
   return httpImpl.createServer((req, res) => {
-    handleRequest(req, res, { fetch, fetchRange, ensureGlobals, keepOffline })
+    handleRequest(req, res, { fetch, fetchRange, ensureGlobals, refreshNetwork })
   })
 }
 
@@ -174,14 +177,14 @@ export function injectHyperBridge (html) {
   return `${source.slice(0, insertAt)}${HYPER_BRIDGE_SCRIPT}${source.slice(insertAt)}`
 }
 
-function handleRequest (req, res, { fetch, fetchRange, ensureGlobals, keepOffline }) {
+function handleRequest (req, res, { fetch, fetchRange, ensureGlobals, refreshNetwork }) {
   const requestUrl = parseRequestUrl(req.url)
   if (!requestUrl) {
     sendText(res, 400, 'Bad request')
     return
   }
 
-  if (!isLocalRequest(req)) {
+  if (!isOwnLoopbackRequest(req)) {
     sendText(res, 403, 'Forbidden')
     return
   }
@@ -197,7 +200,7 @@ function handleRequest (req, res, { fetch, fetchRange, ensureGlobals, keepOfflin
   }
 
   if (requestUrl.pathname === '/hyper/asset') {
-    serveHyperAsset(req, res, { fetch, fetchRange, ensureGlobals, keepOffline }, requestUrl.searchParams.get('url'))
+    serveHyperAsset(req, res, { fetch, fetchRange, ensureGlobals, refreshNetwork }, requestUrl.searchParams.get('url'))
       .catch((error) => sendError(req, res, error))
     return
   }
@@ -211,7 +214,7 @@ function handleRequest (req, res, { fetch, fetchRange, ensureGlobals, keepOfflin
   sendStaticAsset(req, res, asset)
 }
 
-async function serveHyperAsset (req, res, { fetch, fetchRange, ensureGlobals, keepOffline }, assetUrl) {
+async function serveHyperAsset (req, res, { fetch, fetchRange, ensureGlobals, refreshNetwork }, assetUrl) {
   if (!assetUrl) {
     sendText(res, 400, 'Missing asset url')
     return
@@ -228,7 +231,7 @@ async function serveHyperAsset (req, res, { fetch, fetchRange, ensureGlobals, ke
   // Folder listings and playlist manifests are small documents. Forwarding
   // Accept lets hypercore-fetch answer a folder with its JSON listing.
   if (wantsJson(req)) {
-    const response = await fetchListing(fetch, assetUrl, req, res)
+    const response = await fetchListing(fetch, assetUrl, req, res, refreshNetwork)
     if (!response) return
 
     const headers = headersToObject(response.headers)
@@ -239,7 +242,6 @@ async function serveHyperAsset (req, res, { fetch, fetchRange, ensureGlobals, ke
 
     const body = await readTextWithLimit(response, MAX_JSON_BODY_BYTES)
     sendText(res, 200, body, headers['content-type'] || 'application/json; charset=utf-8')
-    keepOffline(assetUrl)
     return
   }
 
@@ -333,27 +335,6 @@ async function getBareHttp () {
 // Importing a playlist means reading its folder listing, so that is when the
 // tracks get pinned for offline. Fire and forget: a failure here must not break
 // the import, and the download runs in the background.
-function keepAssetOffline (assetUrl) {
-  getOfflineModule()
-    .then(({ keepHyperOffline }) => keepHyperOffline({ url: assetUrl, wait: false }))
-    .then((result) => {
-      if (!result?.ok) {
-        console.warn('[peertunes] Unable to keep offline:', result?.error || 'unknown error')
-      }
-    })
-    .catch((error) => {
-      console.warn('[peertunes] Unable to keep offline:', error?.message || error)
-    })
-}
-
-async function getOfflineModule () {
-  if (!offlineModule) {
-    offlineModule = await import('../hyper/offline-manager.mjs')
-  }
-
-  return offlineModule
-}
-
 async function getHyperFetchModule () {
   if (!hyperFetchModule) {
     hyperFetchModule = await import('../hyper/fetch.mjs')
@@ -369,33 +350,6 @@ function wantsJson (req) {
 function getRequestHeader (req, name) {
   const headers = req.headers || {}
   return headers[name] || headers[name.toLowerCase()] || headers[name.toUpperCase()] || null
-}
-
-function isLocalRequest (req) {
-  const host = getRequestHeader(req, 'host')
-  if (host) {
-    const hostname = String(host).replace(/:\d+$/, '').toLowerCase()
-    if (!ALLOWED_HOSTNAMES.has(hostname)) return false
-  }
-
-  // A same-origin GET sends no Origin, so anything that does send one is
-  // another site asking. Sec-Fetch-Site catches the no-cors loads an Origin
-  // header would miss, such as <audio src> pointed at us from a web page.
-  const origin = getRequestHeader(req, 'origin')
-  if (origin && !isLoopbackOrigin(origin)) return false
-
-  const fetchSite = String(getRequestHeader(req, 'sec-fetch-site') || '').toLowerCase()
-  if (fetchSite && fetchSite !== 'same-origin' && fetchSite !== 'none') return false
-
-  return true
-}
-
-function isLoopbackOrigin (origin) {
-  try {
-    return ALLOWED_HOSTNAMES.has(new URL(String(origin)).hostname.toLowerCase())
-  } catch {
-    return false
-  }
 }
 
 // The proxy carries bytes from an untrusted hyper drive. Two things must not
@@ -427,10 +381,12 @@ function safeProxyContentType (value) {
   return PROXYABLE_CONTENT_TYPES.test(contentType) ? contentType : 'application/octet-stream'
 }
 
-async function fetchListing (fetch, assetUrl, req, res) {
+async function fetchListing (fetch, assetUrl, req, res, refreshNetwork) {
   let failure = null
+  let slowReads = 0
+  let discoveries = 0
 
-  for (let attempt = 0; attempt < LISTING_ATTEMPTS; attempt++) {
+  while (true) {
     if (req.aborted || res.destroyed) return null
 
     const response = await fetch(assetUrl, { headers: { accept: 'application/json' } })
@@ -440,12 +396,21 @@ async function fetchListing (fetch, assetUrl, req, res) {
     // missing block, an empty folder. Throwing that away left every failure
     // looking like "can't reach that URL", which is unusable when a folder
     // fails on one device and works on another.
-    failure = createHttpError(response.status || 502, await describeUpstreamFailure(response))
+    const detail = await describeUpstreamFailure(response)
+    failure = createHttpError(response.status || 502, detail)
 
-    // A 404 is an answer, not a hiccup. Only slow or incomplete reads are
-    // worth another go.
-    if (response.status === 404) break
-    if (attempt < LISTING_ATTEMPTS - 1) await delay(LISTING_RETRY_DELAY_MS)
+    // A 404 is an answer, unless it means nobody has been found to ask yet.
+    if (response.status === 404) {
+      if (!isPeerDiscoveryError(detail) || discoveries >= DISCOVERY_RETRY_DELAYS_MS.length) break
+      await refreshNetwork(assetUrl).catch(() => {})
+      await delay(DISCOVERY_RETRY_DELAYS_MS[discoveries++])
+      continue
+    }
+
+    // Slow or incomplete reads keep the blocks they did fetch, so another go
+    // makes progress.
+    if (++slowReads >= LISTING_ATTEMPTS) break
+    await delay(LISTING_RETRY_DELAY_MS)
   }
 
   throw failure

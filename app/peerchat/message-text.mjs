@@ -7,8 +7,9 @@ const VALID_USERNAME = /^[A-Za-z0-9]+(?: [A-Za-z0-9]+)*$/
 const MESSAGE_LINK = /(?:https?|hs|hyper|ipfs|ipns|peersky|bt|bittorrent):\/\/[^\s<>"']+|magnet:\?[^\s<>"']+|[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g
 
 // Trailing punctuation belongs to the sentence, not the address. A link at the
-// end of "see hyper://key/index.html." keeps the dot out of what gets opened.
-const TRAILING_PUNCTUATION = /[.,;:!?)\]}'"]+$/
+// end of "see hyper://key/index.html." keeps the dot out of what gets opened,
+// and one in **bold** or ~struck out~ keeps the closing marks.
+const TRAILING_PUNCTUATION = /[.,;:!?)\]}'"*~]+$/
 
 /** Splits a message into plain, mention and link runs, in reading order. */
 export function splitPeerChatMessageParts (message, usernames) {

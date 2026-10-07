@@ -12,7 +12,6 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
-import android.provider.Settings
 import android.util.Log
 import android.webkit.CookieManager
 import android.webkit.MimeTypeMap
@@ -27,6 +26,7 @@ import com.reactnativecommunity.webview.URLUtil
 import com.j256.simplemagic.ContentInfoUtil
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import androidx.webkit.WebViewFeature
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.FilterInputStream
@@ -74,6 +74,9 @@ class BrowserDownloadsModule(
   private val downloadRequestTimes = ArrayDeque<Long>()
   private val recordsLock = Any()
   private val transferControls = ConcurrentHashMap<String, TransferControl>()
+  // The cookies of the incognito tabs that started downloads still under way.
+  // Kept only while the app runs, never written down.
+  private val incognitoCookieJars = ConcurrentHashMap<String, CookieManager>()
   private val downloadCompleteReceiver = object : BroadcastReceiver() {
     override fun onReceive(context: Context?, intent: Intent?) {
       if (intent?.action != DownloadManager.ACTION_DOWNLOAD_COMPLETE) return
@@ -123,7 +126,9 @@ class BrowserDownloadsModule(
     url: String,
     userAgent: String?,
     contentDisposition: String?,
-    mimeType: String?
+    mimeType: String?,
+    incognito: Boolean = false,
+    incognitoCookies: CookieManager? = null
   ): Boolean {
     if (!isHttpUrl(url)) {
       showToast("This download URL is not supported.")
@@ -141,13 +146,15 @@ class BrowserDownloadsModule(
             url,
             userAgent,
             contentDisposition,
-            mimeType
+            mimeType,
+            incognito,
+            incognitoCookies
           )
           val enqueued = synchronized(admissionLock) {
             if (!hasDownloadCapacity()) {
               false
             } else {
-              enqueueDownload(url, userAgent, metadata)
+              enqueueDownload(url, userAgent, metadata, incognito, incognitoCookies)
               true
             }
           }
@@ -166,9 +173,16 @@ class BrowserDownloadsModule(
     }
   }
 
+  // Incognito tabs need WebView profiles, which come with Android System
+  // WebView 123 and later.
   @ReactMethod
-  fun requestDownload(url: String, promise: Promise) {
-    promise.resolve(queueDownload(url, null, null, null))
+  fun isPrivateBrowsingSupported(promise: Promise) {
+    promise.resolve(WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE))
+  }
+
+  @ReactMethod
+  fun requestDownload(url: String, incognito: Boolean, promise: Promise) {
+    promise.resolve(queueDownload(url, null, null, null, incognito))
   }
 
   @ReactMethod
@@ -263,6 +277,7 @@ class BrowserDownloadsModule(
             record.putDouble("createdAt", download.createdAt.toDouble())
             record.putString("sourceUrl", download.sourceUrl)
             download.reason?.let { record.putString("reason", it) }
+            if (download.incognito) record.putBoolean("incognito", true)
             result.pushMap(record)
           }
           promise.resolve(result)
@@ -455,7 +470,9 @@ class BrowserDownloadsModule(
     initialUrl: String,
     userAgent: String?,
     initialContentDisposition: String?,
-    initialMimeType: String?
+    initialMimeType: String?,
+    incognito: Boolean,
+    incognitoCookies: CookieManager?
   ): DownloadMetadata {
     var currentUrl = initialUrl
     var contentDisposition = initialContentDisposition
@@ -483,8 +500,7 @@ class BrowserDownloadsModule(
         if (!userAgent.isNullOrBlank()) {
           connection.setRequestProperty("User-Agent", userAgent)
         }
-        CookieManager.getInstance().getCookie(currentUrl)
-          ?.takeIf { it.isNotBlank() }
+        cookieHeaderFor(currentUrl, incognito, incognitoCookies)
           ?.let { connection.setRequestProperty("Cookie", it) }
 
         val status = connection.responseCode
@@ -520,7 +536,9 @@ class BrowserDownloadsModule(
   private fun enqueueDownload(
     url: String,
     userAgent: String?,
-    metadata: DownloadMetadata
+    metadata: DownloadMetadata,
+    incognito: Boolean,
+    incognitoCookies: CookieManager?
   ) {
     val download = synchronized(recordsLock) {
       val uniqueName = createUniquePublicFilename(metadata.name)
@@ -535,11 +553,13 @@ class BrowserDownloadsModule(
         sourceUrl = url,
         mimeType = metadata.mimeType,
         contentUri = contentUri.toString(),
-        userAgent = userAgent
+        userAgent = userAgent,
+        incognito = incognito
       )
       saveResumableDownloads(loadResumableDownloads() + record)
       record
     }
+    if (incognitoCookies != null) incognitoCookieJars[download.id] = incognitoCookies
     startResumableDownload(download.id)
     showToast("Downloading " + download.name)
   }
@@ -548,7 +568,8 @@ class BrowserDownloadsModule(
     val values = ContentValues().apply {
       put(MediaStore.MediaColumns.DISPLAY_NAME, name)
       put(MediaStore.MediaColumns.MIME_TYPE, mimeType ?: "application/octet-stream")
-      put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+      // A PeerSky folder of its own in Downloads, as the Files app shows it.
+      put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/PeerSky")
       put(MediaStore.MediaColumns.IS_PENDING, 1)
     }
     return reactApplicationContext.contentResolver.insert(
@@ -591,7 +612,14 @@ class BrowserDownloadsModule(
         } ?: return
       }
       val offset = initial.downloadedBytes
-      connection = openDownloadConnection(initial.sourceUrl, offset, initial.userAgent, control)
+      connection = openDownloadConnection(
+        initial.sourceUrl,
+        offset,
+        initial.userAgent,
+        control,
+        initial.incognito,
+        incognitoCookieJars[id]
+      )
       control.connection = connection
 
       val status = connection.responseCode
@@ -716,7 +744,9 @@ class BrowserDownloadsModule(
     initialUrl: String,
     offset: Long,
     userAgent: String?,
-    control: TransferControl
+    control: TransferControl,
+    incognito: Boolean,
+    incognitoCookies: CookieManager?
   ): HttpURLConnection {
     var currentUrl = initialUrl
     for (attempt in 0..MAX_REDIRECTS) {
@@ -729,8 +759,7 @@ class BrowserDownloadsModule(
       connection.setRequestProperty("Accept-Encoding", "identity")
       userAgent?.takeIf { it.isNotBlank() }
         ?.let { connection.setRequestProperty("User-Agent", it) }
-      CookieManager.getInstance().getCookie(currentUrl)
-        ?.takeIf { it.isNotBlank() }
+      cookieHeaderFor(currentUrl, incognito, incognitoCookies)
         ?.let { connection.setRequestProperty("Cookie", it) }
       if (offset > 0) connection.setRequestProperty("Range", "bytes=" + offset + "-")
 
@@ -785,22 +814,21 @@ class BrowserDownloadsModule(
   }
 
   private fun openContentUri(uri: Uri, mimeType: String, promise: Promise) {
-    if (mimeType == APK_MIME_TYPE && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
-      !reactApplicationContext.packageManager.canRequestPackageInstalls()
-    ) {
+    // PeerSky does not hold the permission to install apps, so an APK opens in
+    // the system's Downloads, which installs it after its own warning.
+    if (mimeType == APK_MIME_TYPE) {
       try {
-        reactApplicationContext.startActivity(Intent(
-          Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
-          Uri.parse("package:" + reactApplicationContext.packageName)
-        ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) })
+        reactApplicationContext.startActivity(
+          Intent(DownloadManager.ACTION_VIEW_DOWNLOADS).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+        )
         Toast.makeText(
           reactApplicationContext,
-          "Allow app installs, then tap the APK again.",
+          "Tap the APK in Downloads to install it.",
           Toast.LENGTH_LONG
         ).show()
         promise.resolve(true)
       } catch (error: ActivityNotFoundException) {
-        Log.w(TAG, "Unable to open app install settings", error)
+        Log.w(TAG, "Unable to open Downloads", error)
         promise.resolve(false)
       }
       return
@@ -810,12 +838,8 @@ class BrowserDownloadsModule(
       setDataAndType(uri, mimeType)
       addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
-    val launchIntent = if (mimeType == APK_MIME_TYPE) {
-      viewIntent
-    } else {
-      Intent.createChooser(viewIntent, "Open with").apply {
-        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
-      }
+    val launchIntent = Intent.createChooser(viewIntent, "Open with").apply {
+      addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
     try {
       reactApplicationContext.startActivity(launchIntent)
@@ -828,6 +852,7 @@ class BrowserDownloadsModule(
 
   private fun removeResumableDownload(id: String, promise: Promise) {
     try {
+      incognitoCookieJars.remove(id)
       transferControls[id]?.let { control ->
         control.cancelled = true
         control.connection?.disconnect()
@@ -1004,7 +1029,8 @@ class BrowserDownloadsModule(
             sourceUrl = sourceUrl,
             mimeType = normalizeMimeType(item.optString("mimeType", "")),
             contentUri = contentUri,
-            userAgent = item.optString("userAgent", "").takeIf { it.length <= MAX_USER_AGENT_LENGTH }
+            userAgent = item.optString("userAgent", "").takeIf { it.length <= MAX_USER_AGENT_LENGTH },
+            incognito = item.optBoolean("incognito", false)
           )
         )
       }
@@ -1031,6 +1057,7 @@ class BrowserDownloadsModule(
           .put("mimeType", download.mimeType)
           .put("contentUri", download.contentUri)
           .put("userAgent", download.userAgent)
+          .put("incognito", download.incognito)
       )
     }
     preferences().edit().putString(RESUMABLE_DOWNLOADS_KEY, json.toString()).apply()
@@ -1338,7 +1365,9 @@ class BrowserDownloadsModule(
     )
   }
 
-  private fun resolveFilename(
+  // Also names the file in the prompt before a download, so what it says is
+  // what gets saved.
+  internal fun resolveFilename(
     url: String,
     contentDisposition: String?,
     mimeType: String?
@@ -1470,8 +1499,22 @@ class BrowserDownloadsModule(
     val sourceUrl: String,
     val mimeType: String?,
     val contentUri: String,
-    val userAgent: String?
+    val userAgent: String?,
+    val incognito: Boolean = false
   )
+
+  // The Cookie header for one request of a download. An incognito tab's
+  // download sends that tab's cookies while the tab is open, and never the
+  // ones every other tab shares, which would tell the site who it is.
+  private fun cookieHeaderFor(url: String, incognito: Boolean, incognitoCookies: CookieManager?): String? =
+    try {
+      downloadCookieJar(incognito, incognitoCookies) { CookieManager.getInstance() }
+        ?.getCookie(url)
+        ?.takeIf { it.isNotBlank() }
+    } catch (error: Exception) {
+      // The incognito profile went with the last incognito tab.
+      null
+    }
 
   private class TransferControl {
     @Volatile var paused = false
@@ -1507,6 +1550,9 @@ class BrowserDownloadsModule(
 
   companion object {
     const val NAME = "BrowserDownloads"
+
+    internal fun <T> downloadCookieJar(incognito: Boolean, incognitoJar: T?, sharedJar: () -> T): T? =
+      if (incognito) incognitoJar else sharedJar()
     private const val MAX_DOWNLOADS = 200
     private const val MAX_DOWNLOAD_URL_LENGTH = 8192
     private const val MAX_INSPECTED_DOWNLOADS = 1000

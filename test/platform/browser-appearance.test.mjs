@@ -4,10 +4,26 @@ import { describe, test } from 'node:test'
 import {
   BROWSER_PALETTES,
   formatBrowserAddress,
+  getBrowserStatusBarStyle,
   resolveBrowserDarkMode
 } from '../../app/browser-appearance.mjs'
 
 describe('browser appearance helpers', () => {
+  // A status bar set to one colour on iOS missed the system's switch between
+  // light and dark until PeerSky restarted. Following the system, iOS picks.
+  test('lets iOS colour the status bar when PeerSky follows the system', async () => {
+    assert.equal(getBrowserStatusBarStyle('ios', 'system', true), 'default')
+    assert.equal(getBrowserStatusBarStyle('ios', 'system', false), 'default')
+    assert.equal(getBrowserStatusBarStyle('ios', 'dark', true), 'light-content')
+    assert.equal(getBrowserStatusBarStyle('ios', 'light', false), 'dark-content')
+    assert.equal(getBrowserStatusBarStyle('android', 'system', true), 'light-content')
+    assert.equal(getBrowserStatusBarStyle('android', 'system', false), 'dark-content')
+
+    const app = await readFile(new URL('../../app/index.tsx', import.meta.url), 'utf8')
+    assert.doesNotMatch(app, /barStyle=\{browserIsDark/)
+    assert.equal(app.match(/barStyle=\{browserStatusBarStyle\}/g).length, 6)
+  })
+
   test('resolves explicit and system themes', () => {
     assert.equal(resolveBrowserDarkMode('dark', 'light'), true)
     assert.equal(resolveBrowserDarkMode('light', 'dark'), false)
@@ -24,11 +40,29 @@ describe('browser appearance helpers', () => {
       button: '#27272a',
       mutedText: '#9ca3af',
       selectedBackground: '#3f3f46',
+      seam: '#323237',
       selectedControl: '#e5e7eb',
       shell: '#18181b',
       surface: '#27272a',
       text: '#ffffff'
     })
+  })
+
+  // The line between the page and the bars was the border grey, and read as a
+  // rule across the screen. DuckDuckGo's is there but only just: a hairline a
+  // shade off the bar it sits on.
+  test('draws the seam above the bars a shade off the bar, not as a rule', async () => {
+    const level = (hex) => {
+      const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16))
+      return r * 0.299 + g * 0.587 + b * 0.114
+    }
+    const dark = BROWSER_PALETTES.dark
+    const light = BROWSER_PALETTES.light
+    assert.ok(Math.abs(level(dark.seam) - level(dark.surface)) < 14)
+    assert.ok(Math.abs(level(dark.seam) - level(dark.surface)) < Math.abs(level(dark.border) - level(dark.surface)))
+    assert.ok(Math.abs(level(light.seam) - level(light.shell)) < 18)
+    const navBar = await readFile(new URL('../../app/BrowserNavBar.tsx', import.meta.url), 'utf8')
+    assert.match(navBar, /borderTopColor: palette\.seam,/)
   })
 
   test('shows a site address without path details when requested', () => {
@@ -54,7 +88,7 @@ describe('popups attached to the toolbar', () => {
     assert.match(toolbar, /setBarHeight\(event\.nativeEvent\.layout\.height\)/)
     // The seam belongs to whichever panel is open, not to both, but it keeps
     // its width either way so nothing below it moves.
-    assert.match(toolbar, /const seamColor = isAddressFocused \? 'transparent' : palette\.border/)
+    assert.match(toolbar, /const seamColor = isAddressFocused \? 'transparent' : palette\.seam/)
   })
 
   test('the suggestion list sits on the toolbar edge', async () => {
@@ -80,8 +114,16 @@ describe('popups attached to the toolbar', () => {
     assert.match(source, /paddingLeft: insets\.left/)
     assert.match(source, /paddingRight: insets\.right/)
     assert.doesNotMatch(source, /borderWidth: 1/)
-    assert.match(source, /attachedBelow: \{\n\s+borderBottomLeftRadius: 0,\n\s+borderBottomRightRadius: 0,\n\s+borderTopWidth: 1\n\s+\}/)
-    assert.match(source, /attachedAbove: \{\n\s+borderBottomWidth: 1,\n\s+borderTopLeftRadius: 0,\n\s+borderTopRightRadius: 0\n\s+\}/)
+    // The far edge is a hairline: a full point read as a heavy rule. In the
+    // light border colour a hairline all but vanished on a white page.
+    assert.match(source, /borderColor: `\$\{palette\.mutedText\}66`/)
+    assert.match(source, /attachedBelow: \{\n\s+borderBottomLeftRadius: 0,\n\s+borderBottomRightRadius: 0,\n\s+borderTopWidth: StyleSheet\.hairlineWidth,/)
+    assert.match(source, /attachedAbove: \{\n\s+borderBottomWidth: StyleSheet\.hairlineWidth,\n\s+borderTopLeftRadius: 0,\n\s+borderTopRightRadius: 0\n\s+\}/)
+    // Above a bar at the bottom, the shadow goes up onto the page. Cast down,
+    // it lay across the bar as a second line where the two meet.
+    const below = source.slice(source.indexOf('attachedBelow: {'), source.indexOf('attachedAbove: {'))
+    assert.match(below, /shadowOffset: \{ width: 0, height: -4 \}/)
+    assert.match(below, /elevation: 0/)
   })
 
   test('the history suggestions still hang off the toolbar', async () => {

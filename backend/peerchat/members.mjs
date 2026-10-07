@@ -1,14 +1,8 @@
 /**
- * One row per person, not one per key.
- *
- * A peer id is derived from a device's key, so somebody who reinstalls, or who
- * joins from a phone as well as a laptop, arrives as a new member with the same
- * name. The room remembers both, and the list then shows them twice or three
- * times over with the same picture.
- *
- * Desktop has always collapsed the list by name. This is the same rule, applied
- * where the list is built so the count, the search and the mentions all agree
- * with what is on screen.
+ * One row per person, not one per key. A peer id comes from a device's key, so
+ * a reinstall or a second device shows up as another member with the same
+ * name. Desktop collapses the list by name too. Doing it where the list is
+ * built keeps the count, search and mentions in line with what is on screen.
  */
 export function collapsePeerChatMembers (members) {
   const byName = new Map()
@@ -28,5 +22,7 @@ export function collapsePeerChatMembers (members) {
 function prefers (candidate, existing) {
   if (candidate.self !== existing.self) return candidate.self === true
   if (candidate.online !== existing.online) return candidate.online === true
+  // Away on one device and here on another is here.
+  if (candidate.online && !candidate.idle !== !existing.idle) return !candidate.idle
   return false
 }

@@ -75,3 +75,12 @@ test('nothing shares around the wrapper', async () => {
     assert.doesNotMatch(source, /\bShare\.share\(/, `${file.pathname} still calls Share.share`)
   }
 })
+
+test('a modal that closes with a share sheet still over it takes the sheet down with it', () => {
+  // React Native asked the modal's own view controller to dismiss itself, and
+  // one that is presenting a share sheet dismisses only the sheet. The empty
+  // modal stayed over the app and took every tap after a link changed screens.
+  assert.match(objc, /NSClassFromString\(@"RCTModalHostViewComponentView"\)/)
+  assert.match(objc, /NSSelectorFromString\(@"dismissViewController:animated:completion:"\)/)
+  assert.match(objc, /if \(presenter && modal\.presentedViewController\) \{\s+\[presenter dismissViewControllerAnimated:animated completion:completion\];\s+return;\s+\}\s+original\(host, selector, modal, animated, completion\);/)
+})

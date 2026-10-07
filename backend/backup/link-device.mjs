@@ -39,19 +39,12 @@ import { collectP2pmdNotes } from '../p2pmd/notes-transfer.mjs'
 import { notifyApp } from '../rpc/notify.mjs'
 import { RPC_APP_BACKUP_PROGRESS } from '../rpc/commands.mjs'
 
-// Everything Link Device does, in one place: backups, transfers in both
-// directions, and putting a restore in place.
-//
-// One thing runs at a time: packing, sending, receiving, unpacking or putting
-// a restore in place. Two unpacks sharing a staging folder once produced a
-// store made of two backups.
-//
-// A restore waits decrypted in a staging folder until the person compares the
-// code and confirms, and only then replaces anything. It carries an id, so a
-// confirmation can only ever put in place the restore it was shown for.
-//
-// One transfer goes out at a time, and it is taken down when the person
-// closes the screen or when it expires.
+// Everything Link Device does: backups, transfers both ways, and restores.
+// One job runs at a time, because two unpacks sharing a staging folder once
+// made a store out of two backups. A restore waits decrypted in staging until
+// the person compares the code and confirms, and carries an id so a
+// confirmation only applies the restore it was shown for. One transfer goes
+// out at a time, taken down when the screen closes or it expires.
 const TRANSFER_DIR = '.peersky-transfer'
 // Names the drive an outgoing transfer is on, written before anything is put
 // on it, so if the app is killed while sending the next start can clear it.
@@ -268,14 +261,11 @@ export function confirmRestore ({ restoreId } = {}) {
 }
 
 /**
- * Sends this phone to the device whose pairing code was scanned, sealed to
- * that device and put on a drive for it to fetch. Both screens then show the
- * same six characters.
- *
- * Another phone gets everything, packed with the stores closed. PeerSky
- * Desktop gets the open tabs, the bookmarks and the private drive's address,
- * in its own format (desktop-sync.mjs): the rest of a phone means nothing to
- * a desktop, and none of it needs the stores closed.
+ * Sends this phone to the device whose pairing code was scanned, sealed to it
+ * and put on a drive for it to fetch. Both screens then show the same six
+ * characters. Another phone gets everything, packed with the stores closed. A
+ * desktop gets only what means something there, in its own format
+ * (desktop-sync.mjs), and none of that needs the stores closed.
  */
 export function sendTransfer ({ pairingCode, peerskyVersion, platform } = {}) {
   let target

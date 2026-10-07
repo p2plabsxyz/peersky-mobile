@@ -131,6 +131,24 @@ test('PeerChat keeps its swarm announce fresh while the app sits in the backgrou
   assert.ok(value >= 5 * 60 * 1000, 'refreshing this often would drain the battery')
 })
 
+// The count on the app icon went blank every time PeerSky opened, because the
+// runtime starting up set it to 0, and stayed blank if you left before the
+// first check. The messages were still unread. It stays until their room is
+// opened, and the PeerChat shortcut starts from it rather than from nothing.
+test('the unread count stays on the app icon until the chat is opened', async () => {
+  const hook = await readFile(new URL('../../app/peerchat/usePeerChatNotifications.ts', import.meta.url), 'utf8')
+  assert.doesNotMatch(hook, /setPeerChatBadgeCount\(0\)/)
+  assert.doesNotMatch(hook, /setUnreadTotal\(0\)/)
+  const starting = hook.slice(hook.indexOf('if (!isReady || isRuntimeReady) return'), hook.indexOf('if (!isReady || !isRuntimeReady) {'))
+  assert.match(starting, /badgeCountRef\.current = -1/)
+  assert.match(hook, /void getPeerChatBadgeCount\(\)\.then\(\(count\) => \{\s+if \(!cancelled && badgeCountRef\.current === -1 && count > 0\) setUnreadTotal\(count\)/)
+
+  // A room's count only clears when that room is opened, and it is saved.
+  const service = await readFile(new URL('../../backend/peerchat/service.mjs', import.meta.url), 'utf8')
+  const open = service.slice(service.indexOf('  setActiveRoom ({ roomKey } = {}) {'), service.indexOf('  async getSnapshot ('))
+  assert.match(open, /room\.unreadCount = 0[\s\S]*this\.schedulePersist\(\)/)
+})
+
 test('PeerChat offers the Android battery exemption after notifications are turned on', async () => {
   const screen = await readFile(new URL('../../app/peerchat/PeerChatScreen.tsx', import.meta.url), 'utf8')
   const offer = screen.slice(
@@ -149,31 +167,62 @@ test('PeerChat offers the Android battery exemption after notifications are turn
 })
 
 test('PeerChat answers the questions a first-time user actually asks', async () => {
-  const { PEERCHAT_QUESTIONS } = await import('../../app/peerchat/questions.mjs')
+  const { PEERCHAT_QUESTIONS, PEERCHAT_USAGE_QUESTIONS, PEERCHAT_WELCOME_QUESTIONS } = await import('../../app/peerchat/questions.mjs')
   const answer = (pattern) => PEERCHAT_QUESTIONS.find(({ q }) => pattern.test(q))?.a || ''
 
   // Asked the way a person asks: a question, in plain words.
   for (const { q, a } of PEERCHAT_QUESTIONS) {
     assert.match(q, /\?$/)
     assert.ok(a.length > 0)
-    assert.doesNotMatch(`${q} ${a}`, /—/)
+    assert.doesNotMatch(`${q} ${a}`, /—|honestly/i)
   }
+  assert.deepEqual(PEERCHAT_QUESTIONS, [...PEERCHAT_WELCOME_QUESTIONS, ...PEERCHAT_USAGE_QUESTIONS])
+
+  // Before using it: what it is, how it compares, how friends find you, what
+  // peer to peer means, how it works offline, on desktop and on several
+  // devices, and what it costs. Nothing about blocking people or deleting
+  // things yet.
+  for (const pattern of [/What is PeerChat/, /compare with WhatsApp, Telegram or Signal/, /phone number or email/, /friends find me/, /peer to peer mean/, /How does it work without internet/, /How private/, /Who can see my IP address/, /What does it cost/, /big files/, /available on desktop/, /phone and my computer/, /Who makes PeerChat/]) {
+    assert.ok(PEERCHAT_WELCOME_QUESTIONS.some(({ q }) => pattern.test(q)), String(pattern))
+  }
+  for (const pattern of [/bothering me/, /delete my account/, /unsend/]) {
+    assert.ok(!PEERCHAT_WELCOME_QUESTIONS.some(({ q }) => pattern.test(q)), String(pattern))
+  }
+  // In PeerChat's own words, not another chat app's FAQ word for word. "Is it
+  // on iPhone and Android?" was one, and someone reading it inside the app has
+  // the answer in their hand, so it asks about desktop instead.
+  for (const pattern of [/iPhone and Android/, /Who owns/, /phone number to use/, /share large files/, /different from/, /really free/, /why does it matter/, /any ads or subscriptions/i, /multiple devices/]) {
+    assert.ok(!PEERCHAT_QUESTIONS.some(({ q }) => pattern.test(q)), String(pattern))
+  }
+  // Offline is explained once, with the welcome questions.
+  assert.equal(PEERCHAT_QUESTIONS.filter(({ q }) => /without internet/.test(q)).length, 1)
+
+  // Straight about addresses: peers see it, as servers do in other apps, and a
+  // VPN is what keeps it from all of them.
+  assert.match(answer(/IP address/), /people you chat with/)
+  assert.match(answer(/IP address/), /even Signal’s servers see your IP address/)
+  assert.match(answer(/IP address/), /turn on a VPN/)
 
   // What PeerChat is, said outright: no accounts, no servers, works without
   // internet, end to end encrypted.
-  assert.match(answer(/need an account/), /Pick a name and start chatting/)
-  assert.match(answer(/where.s the server/), /There isn.t one/)
-  assert.match(answer(/read my messages/), /end to end encrypted/)
+  assert.match(answer(/phone number or email/), /Pick a name and you.re in/)
+  assert.match(answer(/compare with/), /end to end encrypted/)
   assert.match(answer(/without internet/), /Any local network will do/)
+  assert.match(answer(/without internet/), /find each other and talk directly/)
+  assert.match(answer(/without internet/), /Some public Wi-Fi keeps devices apart/)
+  assert.match(answer(/What does it cost/), /no ads, no subscriptions/)
+  assert.match(answer(/Who makes PeerChat/), /P2P Labs/)
+  assert.match(answer(/big files/), /any size your phone has room for/)
 
   // Knowing where a room is on the network gets nobody in.
   assert.match(answer(/stranger on the network/), /prove it holds the room.s key/)
   assert.match(answer(/stranger on the network/), /never goes over the wire/)
 
   // The awkward ones get a straight answer rather than a dodge.
-  assert.match(answer(/unsend/), /their phone is theirs/)
+  assert.match(answer(/unsend/), /their device is theirs/)
+  assert.match(answer(/delete my account/), /Delete PeerChat profile/)
   assert.match(answer(/delete my account/), /stays with the people you sent it to/)
-  assert.match(answer(/know about me/), /No tracking, no analytics/)
+  assert.match(answer(/How private/), /no tracking, no analytics/)
 
   // "How private is it" names what it does not hide, and a one to one chat
   // says how it is locked.
@@ -186,27 +235,38 @@ test('PeerChat answers the questions a first-time user actually asks', async () 
   assert.match(answer(/message arrive/), /both of you need to be online/)
   assert.match(answer(/older messages/), /start fresh from the moment you join/)
 
-  // Several devices at once, each with its label.
+  // On desktop too, and several devices at once, each with its label.
+  assert.match(answer(/available on desktop/), /Mac, Windows and Linux/)
   assert.match(answer(/phone and my computer/), /as many computers as you like, all at the same time/)
+  assert.match(answer(/phone and my computer/), /ada@mobile or ada@desktop1/)
 
-  // Reporting says what it sends.
-  assert.match(answer(/bothering me/), /room.s key in it/)
+  // Blocking and reporting say what they do, and the room key stays out of it.
+  assert.match(answer(/bothering me/), /Everything they send disappears for you, in every chat/)
+  assert.match(answer(/bothering me/), /with the message you reported/)
+  assert.doesNotMatch(answer(/bothering me/), /key/)
+
+  // What the filters catch, never what they miss: a list of gaps is a guide
+  // for whoever wants to get something past them.
+  for (const { a } of PEERCHAT_QUESTIONS) {
+    assert.doesNotMatch(a, /(aren|isn).t detected|not detected|can.t (detect|tell)|undetected/i)
+  }
+  assert.match(answer(/send anything they like/), /Nudity in pictures is refused/)
 })
 
 test('PeerChat shows the questions folded, on the welcome screen and in About', async () => {
   const screen = await readFile(new URL('../../app/peerchat/PeerChatScreen.tsx', import.meta.url), 'utf8')
 
   // One list for both places.
-  assert.match(screen, /import \{ PEERCHAT_QUESTIONS \} from '\.\/questions\.mjs'/)
+  assert.match(screen, /import \{ PEERCHAT_QUESTIONS, PEERCHAT_WELCOME_QUESTIONS \} from '\.\/questions\.mjs'/)
   assert.doesNotMatch(screen, /const PEERCHAT_ABOUT = \[/)
 
   // On the welcome screen, under the four points, and the button comes after
   // them inside the scroll, so whoever agrees has gone past every question.
   const intro = screen.slice(screen.indexOf('if (showIntro) {'), screen.indexOf('if (isInitialized && !profile?.username)'))
-  assert.match(intro, /<PeerChatQuestions colors=\{colors\} \/>/)
+  assert.match(intro, /<PeerChatQuestions colors=\{colors\} questions=\{PEERCHAT_WELCOME_QUESTIONS\} \/>/)
   assert.ok(intro.indexOf('PEERCHAT_INTRO_POINTS.map') < intro.indexOf('<PeerChatQuestions'))
-  assert.ok(intro.indexOf('<PeerChatQuestions') < intro.indexOf('Agree and continue'))
-  assert.ok(intro.indexOf('Agree and continue') < intro.indexOf('</ScrollView>'))
+  assert.ok(intro.indexOf('<PeerChatQuestions') < intro.indexOf('>I understand<'))
+  assert.ok(intro.indexOf('>I understand<') < intro.indexOf('</ScrollView>'))
 
   const about = screen.slice(screen.indexOf('function PeerChatAboutPage'), screen.indexOf('function PeerChatMediaViewer'))
   assert.match(about, /<PeerChatQuestions colors=\{colors\} \/>/)

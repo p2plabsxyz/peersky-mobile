@@ -1,0 +1,30 @@
+import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
+import test from 'node:test'
+
+import { buildPeerChatAppInviteMessage, buildPeerChatDirectInviteUrl } from '../../app/peerchat/peerchat-invite.mjs'
+
+test('Find invites friends to install PeerChat, with your own link to message you once they are set up', async () => {
+  const install = "I'm inviting you to install PeerSky! Here is the link:\nhttps://peersky.p2plabs.xyz/mobile"
+  const key = `1a2b3c4d${'9f'.repeat(28)}`
+  const mine = buildPeerChatDirectInviteUrl(key)
+  assert.equal(
+    buildPeerChatAppInviteMessage(mine),
+    `${install}\n\nThen open this PeerChat link to message me:\npeersky://p2p/peerchat/#dm=${key}`
+  )
+  // No name yet, so no link of your own: the install link alone.
+  assert.equal(buildPeerChatAppInviteMessage(''), install)
+  assert.equal(buildPeerChatAppInviteMessage('https://example.com/'), install)
+
+  const screen = await readFile(new URL('../../app/peerchat/PeerChatScreen.tsx', import.meta.url), 'utf8')
+  // Under the search bar, before anyone it finds.
+  const searchBar = screen.indexOf("placeholder='Search by name'")
+  const invite = screen.indexOf('>Invite friends to PeerChat</Text>')
+  const results = screen.indexOf('{directory.map((member) => (')
+  assert.ok(searchBar > 0 && searchBar < invite && invite < results)
+  // Plain text: WhatsApp kept only the link from the share with the icon header.
+  assert.match(screen, /await shareLink\(\{ title: 'Invite friends to PeerChat', message: buildPeerChatAppInviteMessage\(myInviteUrl\), plain: true \}\)/)
+  const wrapper = await readFile(new URL('../../app/share.ts', import.meta.url), 'utf8')
+  assert.match(wrapper, /if \(!plain && hasNativeShareIcon\(\)\) \{/)
+  assert.match(screen, /const myInviteUrl = buildPeerChatDirectInviteUrl\(profile\?\.key \|\| ''\)/)
+})

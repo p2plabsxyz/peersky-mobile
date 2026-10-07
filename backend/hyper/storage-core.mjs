@@ -11,7 +11,6 @@ export const P2P_APP_DRIVES = [
     ]
   }
 ]
-export const HYPERDRIVE_APP_DRIVE_NAME = 'hyperdrive'
 export const HYPERDRIVE_PUBLIC_DRIVE_NAME = 'hyperdrive-public'
 export const HYPERDRIVE_PRIVATE_DRIVE_NAME = 'hyperdrive-private'
 export const HYPERDRIVE_DEVICE_DRIVE_NAME = 'hyperdrive-device'
@@ -21,13 +20,6 @@ const MAX_PAGE_SIZE = 10
 const MAX_FILES_PER_APP = 10000
 const MAX_CACHE_CORES = 10000
 const MAX_APP_SCAN_MS = 500
-
-export function resolveHyperdriveAppDriveName (name) {
-  const trimmedName = typeof name === 'string' ? name.trim() : ''
-  return /^[A-Za-z0-9_-]+$/.test(trimmedName)
-    ? trimmedName
-    : HYPERDRIVE_APP_DRIVE_NAME
-}
 
 export function resolveHyperdriveUploadTarget (visibility) {
   if (visibility === 'public') {

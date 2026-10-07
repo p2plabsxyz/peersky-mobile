@@ -10,6 +10,7 @@ import {
   inlineHyperPreviewImages,
   renderMarkdownPreview,
   renderMarkdownSlides,
+  renderP2pmdPreview,
   splitMarkdownSlides
 } from '../../backend/p2pmd/preview.mjs'
 
@@ -19,6 +20,33 @@ describe('p2pmd Markdown preview rendering', () => {
 
     assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/)
     assert.doesNotMatch(html, /<img src=x onerror=alert\(1\)>/)
+  })
+
+  it('renders what the editor asks for, or says why not', () => {
+    const note = renderP2pmdPreview({
+      content: '<script>alert(1)</script>\n\n![pic](hyper://example.com/pic.png)'
+    })
+    assert.equal(note.ok, true)
+    assert.match(note.html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/)
+    assert.match(note.html, /src="\/hyper\/file\?url=hyper%3A%2F%2Fexample.com%2Fpic.png"/)
+
+    assert.deepEqual(renderP2pmdPreview({ content: 42 }), {
+      ok: false,
+      error: 'Invalid Markdown content. Expected a string.'
+    })
+    const tooMuchMath = renderP2pmdPreview({ content: Array.from({ length: 2001 }, () => '$x$').join(' ') })
+    assert.equal(tooMuchMath.ok, false)
+    assert.match(tooMuchMath.error, /too much LaTeX/)
+
+    const slides = renderP2pmdPreview({ content: '# First\n\n---\n\n# Second', mode: 'slides' })
+    assert.equal(slides.ok, true)
+    assert.equal(slides.count, 2)
+    assert.match(slides.html, /data-slide-index="1"/)
+
+    const paper = '<!-- ieee -->\n\n## Paper\n\n### Abstract\n\n$E = mc^2$'
+    assert.equal(renderP2pmdPreview({ content: paper, latexModeEnabled: true }).ieee, true)
+    assert.equal(renderP2pmdPreview({ content: paper, latexModeEnabled: false }).ieee, false)
+    assert.match(renderP2pmdPreview({ content: paper, latexModeEnabled: true }).html, /class="katex"/)
   })
 
   it('rewrites hyper image URLs through the local image proxy', () => {

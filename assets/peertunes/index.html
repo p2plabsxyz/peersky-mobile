@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
   <meta name="theme-color" content="#0b0c0f">
-  <meta name="description" content="PeerTunes. A p2p iPod for your local music. Load songs from hyper:// or your own folders.">
+  <meta name="description" content="PeerTunes. A p2p music player for your own music. Load songs from hyper:// or your own folders.">
   <title>PeerTunes</title>
   <link rel="icon" href="peersky://static/assets/peertunes.ico">
   <link rel="manifest" href="./manifest.webmanifest">
@@ -12,7 +12,7 @@
 </head>
 <body>
   <div class="stage" id="stage">
-    <div class="ipod" id="ipod">
+    <div class="player" id="player">
       <div class="screen-bezel">
         <div class="screen" id="screen">
           <header class="statusbar">
@@ -31,8 +31,8 @@
       </div>
 
       <div class="wheelzone">
-        <div class="clickwheel" id="wheel" aria-label="Click wheel">
-          <span class="wz wz-menu" data-btn="menu">MENU</span>
+        <div class="wheel" id="wheel" aria-label="Wheel">
+          <span class="wz wz-menu" data-btn="menu"></span>
           <span class="wz wz-prev" data-btn="prev"></span>
           <span class="wz wz-next" data-btn="next"></span>
           <span class="wz wz-play" data-btn="play"></span>
@@ -56,6 +56,7 @@
   <script defer src="./js/player.js"></script>
   <script defer src="./js/wheel.js"></script>
   <script defer src="./js/ui.js"></script>
+  <script defer src="./js/welcome.js"></script>
   <script defer src="./js/main.js"></script>
 </body>
 </html>

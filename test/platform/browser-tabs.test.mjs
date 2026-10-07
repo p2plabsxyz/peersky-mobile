@@ -4,6 +4,7 @@ import { BROWSER_HOME_URL } from '../../app/browser-shell.mjs'
 import {
   addBackgroundBrowserTabState,
   addBrowserTabState,
+  addOpeningBrowserTabState,
   appendIncomingBrowserTabs,
   closeBrowserTabState,
   createBrowserTabsState,
@@ -68,6 +69,19 @@ describe('browser tab state helpers', () => {
 
     assert.equal(state.tabs.length, 2)
     assert.equal(state.activeTabId, 'tab-2')
+  })
+
+  test('closing a tab goes back to the tab that opened it, while that is open', () => {
+    let state = createBrowserTabsState()
+    state = addBrowserTabState(state)
+    state = addBrowserTabState({ ...addBrowserTabState(state), activeTabId: 'tab-1' })
+
+    assert.equal(state.activeTabId, 'tab-4')
+    assert.equal(closeBrowserTabState(state, 'tab-4', 'tab-1').activeTabId, 'tab-1')
+    // Its opener is gone: the neighbour, as before.
+    assert.equal(closeBrowserTabState(state, 'tab-4', 'tab-9').activeTabId, 'tab-3')
+    // A tab that is not on screen goes without moving the one that is.
+    assert.equal(closeBrowserTabState(state, 'tab-2', 'tab-1').activeTabId, 'tab-4')
   })
 
   test('closing the last tab opens a fresh home tab', () => {
@@ -229,6 +243,27 @@ describe('browser tab state helpers', () => {
       url: 'https://example.com/image.jpg',
       source: { kind: 'restore', url: 'https://example.com/image.jpg' }
     })
+  })
+
+  // A hyper:// link from PeerChat showed the home page until the site came.
+  test('a tab opened for a link starts on that link, blank while it loads', async () => {
+    const state = addOpeningBrowserTabState(createBrowserTabsState(), 'hyper://abc/')
+    assert.equal(state.activeTabId, 'tab-2')
+    assert.deepEqual(state.tabs[1].history, [{
+      url: 'hyper://abc/',
+      source: { kind: 'restore', url: 'hyper://abc/', opening: true }
+    }])
+    assert.equal(state.tabs[1].historyIndex, 0)
+
+    const home = addOpeningBrowserTabState(createBrowserTabsState(), BROWSER_HOME_URL)
+    assert.deepEqual(home.tabs[1].history[0], { url: BROWSER_HOME_URL, source: { kind: 'home' } })
+
+    const { readFile } = await import('node:fs/promises')
+    const app = await readFile(new URL('../../app/index.tsx', import.meta.url), 'utf8')
+    assert.match(app, /\? addOpeningBrowserTabState\(browserTabsStateRef\.current, targetUrl, \{ incognito \}\)/)
+    assert.match(app, /\? browserSource\.opening\s+\/\/ [^\n]+\n\s+\? <View style=\{\[styles\.browserRestorePage, \{ backgroundColor: browserChrome\.surface \}\]\} \/>/)
+    // The address bar's spinner shows while it loads.
+    assert.match(app, /browserSource\.kind === 'restore' && browserSource\.opening === true && browserIsLoading/)
   })
 
   test('bounds remote-controlled tab titles', () => {
@@ -414,5 +449,25 @@ describe('tabs from another device', () => {
     assert.equal(new Set(next.tabs.map((tab) => tab.id)).size, MAX_BROWSER_TABS)
     assert.equal(appendIncomingBrowserTabs(state, { tabs: [] }), state)
     assert.equal(appendIncomingBrowserTabs(state, null), state)
+  })
+})
+
+// Chrome and Safari keep tabs in the order they were opened, newest last, and
+// open the tab screen on the tab you are on.
+describe('tab order', () => {
+  test('a new tab, in front or behind, goes after the others', () => {
+    let state = createBrowserTabsState()
+    state = addBrowserTabState(state)
+    state = addBackgroundBrowserTabState(state, 'https://example.com/', 'Example')
+    assert.deepEqual(state.tabs.map((tab) => tab.id), ['tab-1', 'tab-2', 'tab-3'])
+    assert.equal(state.activeTabId, 'tab-2')
+  })
+
+  test('the tab screen opens scrolled to the active tab', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const screen = await readFile(new URL('../../app/tabs/BrowserTabsScreen.tsx', import.meta.url), 'utf8')
+    assert.match(screen, /const activeRow = activeIndex < 0 \? 0 : isList \? activeIndex : Math\.floor\(activeIndex \/ 2\)/)
+    assert.match(screen, /onLayout=\{scrollToActiveTab\}/)
+    assert.match(screen, /scrollToIndex\(\{ index: activeRow, viewPosition: 0\.5, animated: false \}\)/)
   })
 })

@@ -3,16 +3,12 @@ import { PRE_JOINED_PEERCHAT_ROOM_KEY } from './rooms.mjs'
 /**
  * Who may remove people from a room, and who has been removed.
  *
- * There is no server, so "removed" can only mean what every honest client
- * agrees to do. What makes that safe rather than a free-for-all is that a
- * connection already proves who is on the other end: hyperswarm's handshake
- * gives each side the other's public key. So a removal can be checked against
- * the connection it arrived on, with no signing to build.
- *
- * The room's own record of the creator is only the first 8 characters of that
- * key. Thirty-two bits is short enough to grind a matching key for in minutes,
- * so it is a display name, never the thing a removal is checked against. The
- * full key is.
+ * With no server, "removed" is what every honest client agrees to do. The
+ * hyperswarm handshake gives each side the other's public key, so a removal is
+ * checked against the connection it arrived on, with no signing needed. The
+ * room records only the first 8 characters of the creator's key, and a match
+ * for 32 bits can be ground in minutes, so that is only for display. Removals
+ * check the full key.
  */
 
 const CREATOR_KEY_PATTERN = /^[a-f0-9]{64}$/
@@ -20,17 +16,15 @@ const PEER_ID_PATTERN = /^[a-f0-9]{8}$/
 // A room holds its own removals. Well past what a real room needs, and small
 // enough that a peer cannot grow one unboundedly by relaying.
 export const MAX_PEERCHAT_ROOM_BANS = 512
+const BAN_NAME_MAX_LENGTH = 50
+const BAN_NAME_PATTERN = /^[A-Za-z0-9]+(?: [A-Za-z0-9]+)*$/
 
 /**
- * Creator keys that ship with the app.
- *
- * P2P Republic already existed before any of this, so its record carries only
- * the short creator id, and nothing announced over the network could be trusted
- * to fill the rest in. Pinning it here settles that for every copy of PeerSky
- * at once: no guessing, no first-one-to-arrive-wins.
- *
- * A public key is public. It is what peers hand each other on every connection,
- * and pinning only works if it ships, so this belongs in the source.
+ * Creator keys that ship with the app. P2P Republic predates creator keys, so
+ * its record has only the short id. Nothing announced over the network can be
+ * trusted to fill in the rest, so the key is pinned here rather than taken from
+ * whoever announces first. A public key is safe in the source: peers hand it
+ * to each other on every connection.
  */
 export const PINNED_PEERCHAT_CREATOR_KEYS = Object.freeze({
   // Read off the device that runs P2P Republic with scripts/creator-key.mjs in
@@ -113,10 +107,14 @@ export function normalizePeerChatRoomBans (value) {
     if (!PEER_ID_PATTERN.test(id)) continue
 
     const at = Number.isSafeInteger(entry?.at) && entry.at > 0 ? entry.at : 0
+    const name = normalizeBanName(entry?.name)
     const existing = byId.get(id)
     // A full key is worth more than a short id, so it wins the slot.
-    if (existing && (!key || existing.key)) continue
-    byId.set(id, { id, key, at })
+    if (existing && (!key || existing.key)) {
+      if (!existing.name && name) existing.name = name
+      continue
+    }
+    byId.set(id, { id, key, at, name: name || existing?.name || '' })
 
     if (byId.size >= MAX_PEERCHAT_ROOM_BANS) break
   }
@@ -124,7 +122,16 @@ export function normalizePeerChatRoomBans (value) {
   return [...byId.values()]
 }
 
-export function addPeerChatRoomBan (bans, { id, key, at = Date.now() }) {
+// The name the creator knew them by, so a device that never met them says who
+// was removed instead of eight letters of their key. The same rule as a
+// profile name, so nothing else can ride in on it.
+function normalizeBanName (value) {
+  if (typeof value !== 'string') return ''
+  const name = value.trim().replace(/\s+/g, ' ')
+  return name.length <= BAN_NAME_MAX_LENGTH && BAN_NAME_PATTERN.test(name) ? name : ''
+}
+
+export function addPeerChatRoomBan (bans, { id, key, at = Date.now(), name = '' }) {
   const normalizedKey = normalizePeerChatCreatorKey(key)
   const normalizedId = normalizedKey
     ? peerIdForCreatorKey(normalizedKey)
@@ -132,7 +139,7 @@ export function addPeerChatRoomBan (bans, { id, key, at = Date.now() }) {
   if (!PEER_ID_PATTERN.test(normalizedId)) return normalizePeerChatRoomBans(bans)
 
   return normalizePeerChatRoomBans([
-    { id: normalizedId, key: normalizedKey, at },
+    { id: normalizedId, key: normalizedKey, at, name },
     ...(Array.isArray(bans) ? bans : [])
   ])
 }

@@ -34,18 +34,30 @@ export function persistHyperdriveRecents (recents: unknown[]) {
   }
 }
 
+// The Hyperdrive screen can stay open under Settings. It hears when Settings
+// clears recents, rather than going on showing ones that are gone.
+const clearedListeners = new Set<() => void>()
+
+export function onHyperdriveRecentsCleared (listener: () => void) {
+  clearedListeners.add(listener)
+  return () => { clearedListeners.delete(listener) }
+}
+
 export function clearHyperdriveRecents (source?: RecentSource) {
+  let cleared = false
   if (!source) {
     try {
       const recentsFile = getRecentsFile()
       if (recentsFile.exists) recentsFile.delete()
-      return true
+      cleared = true
     } catch {
-      return false
+      cleared = false
     }
+  } else {
+    const remaining = loadHyperdriveRecents<StoredRecent>()
+      .filter((item) => item.source !== source)
+    cleared = persistHyperdriveRecents(remaining)
   }
-
-  const remaining = loadHyperdriveRecents<StoredRecent>()
-    .filter((item) => item.source !== source)
-  return persistHyperdriveRecents(remaining)
+  if (cleared) for (const listener of clearedListeners) listener()
+  return cleared
 }

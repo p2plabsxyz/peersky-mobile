@@ -91,3 +91,40 @@ test('an answer with a line separator in it does not break the page', async () =
   assert.doesNotMatch(screen, /JSON\.stringify\(answer\)/)
   assert.match(screen, /serializeScanResult\(answer\)/)
 })
+
+// The page shows its Bluetooth mark from what the app reads off the audio
+// route, and hears again whenever it changes or the page loads.
+test('the page is told where the sound is going', async () => {
+  const { createAudioRouteScript } = await import('../../app/peertunes/peertunes-screen.mjs')
+  for (const external of [true, false]) {
+    const script = createAudioRouteScript(external)
+    assert.ok(script.includes(`window.peerskyAudioRoute = { external: ${external} }`))
+    assert.match(script, /dispatchEvent\(new Event\('peersky-audio-route'\)\)/)
+  }
+  assert.ok(createAudioRouteScript('yes').includes('external: false'))
+
+  const screen = await readFile(new URL('../../app/peertunes/PeerTunesScreen.tsx', import.meta.url), 'utf8')
+  assert.match(screen, /NativeModules\.PeerSkyAudioRoute/)
+  assert.match(screen, /onLoadEnd=\{\(\) => \{\s+audioExternalRef\.current = null\s+void pushAudioRoute\(\)/)
+
+  const page = await readFile(new URL('../../assets/peertunes/js/main.js', import.meta.url), 'utf8')
+  assert.match(page, /window\.addEventListener\("peersky-audio-route", updateBluetooth\)/)
+})
+
+// The phone reads hyper:// only, so PeerTunes there offers no ipfs:// links.
+test('PeerTunes on the phone is told which p2p links it can read', async () => {
+  const { HYPER_BRIDGE_SCRIPT } = await import('../../backend/peertunes/server.mjs')
+  assert.ok(HYPER_BRIDGE_SCRIPT.includes('window.peerskyProtocols=["hyper"]'))
+})
+
+// Coming back up on a PeerTunes tab, or switching to one, mounted the player
+// with no server address and nothing asked for one, so it spun until the page
+// was reloaded. Opening it fresh was the only path that started the server.
+test('a PeerTunes tab coming back asks for its server too', async () => {
+  const app = await readFile(new URL('../../app/index.tsx', import.meta.url), 'utf8')
+  const apply = app.slice(app.indexOf('function applyBrowserTab'), app.indexOf('function createBrowserTab'))
+  assert.match(apply, /if \(entry\.source\.app === 'peertunes'\) \{\s+setPeertunesMounted\(true\)\s+setPeertunesLaunchSuffix\(getRuntimeAppLaunchSuffix\(entry\.url\)\)[\s\S]{0,300}void ensurePeerTunesServer\(\)/)
+  // Asking a running server again just gives its address back.
+  const server = await readFile(new URL('../../backend/peertunes/server.mjs', import.meta.url), 'utf8')
+  assert.match(server, /if \(server && serverInfo\) \{\s+return \{\s+ok: true,\s+running: true,/)
+})

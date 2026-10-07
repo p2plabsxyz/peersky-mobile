@@ -1,4 +1,4 @@
-import { type ComponentRef, useEffect, useMemo, useRef, useState } from 'react'
+import { type ComponentRef, type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
@@ -7,6 +7,7 @@ import {
   BackHandler,
   Button,
   Clipboard,
+  DeviceEventEmitter,
   Image,
   Keyboard,
   LayoutAnimation,
@@ -14,6 +15,8 @@ import {
   KeyboardAvoidingView,
   Linking,
   Modal,
+  NativeModules,
+  PixelRatio,
   Platform,
   Pressable,
   ScrollView,
@@ -42,6 +45,10 @@ import {
   commitBrowserEntryState,
   getBrowserBackState,
   getBrowserForwardState,
+  getFileHandoffAction,
+  formatHyperSiteForPrompt,
+  getBrowserMessagePageUrl,
+  getHyperBridgeSite,
   getBrowserRequestAction,
   getBrowserWebViewKey,
   isHyperUrl,
@@ -55,11 +62,14 @@ import {
 import {
   addBackgroundBrowserTabState,
   addBrowserTabState,
+  addOpeningBrowserTabState,
   appendIncomingBrowserTabs,
   BROWSER_PAGE_ZOOMS,
   closeBrowserTabState,
   createBrowserTabsState,
   DEFAULT_BROWSER_PAGE_ZOOM,
+  findBrowserTabShowingApp,
+  isAppInBrowserTabs,
   isCurrentBrowserTabEntry,
   MAX_BROWSER_TABS,
   normalizeBrowserPageZoom,
@@ -73,6 +83,7 @@ import {
 } from './browser-tabs.mjs'
 import {
   createBrowserResetSession,
+  getListReturnScreen,
   getSettingsReturnPage,
   resolveBrowserStartupSession
 } from './browser-session.mjs'
@@ -82,12 +93,14 @@ import {
   createHyperMediaHtml
 } from './browser-html.mjs'
 import {
+  BROWSER_PALETTES,
   getBrowserPalette,
+  getBrowserStatusBarStyle,
   resolveBrowserDarkMode
 } from './browser-appearance.mjs'
 import { createBrowserAccessibilityScript } from './browser-accessibility.mjs'
 import { createForceDarkScript } from './browser-force-dark.mjs'
-import { clearBrowserWebViewData } from './browser-data.mjs'
+import { clearWebsiteData } from './browser-data.mjs'
 import {
   canPromptExternalLink,
   formatExternalLinkForPrompt,
@@ -97,7 +110,7 @@ import {
   parseExternalAppLink
 } from './browser-permissions.mjs'
 import { getBrowserShortcutTitleFontSize } from './browser-home-layout.mjs'
-import { createHyperBridgeScript } from './hyper-bridge.mjs'
+import { createHyperBridgeScript, withHyperBridgeScript } from './hyper-bridge.mjs'
 import {
   createHyperBridgeReply,
   createHyperBridgeSettleScript,
@@ -105,8 +118,11 @@ import {
 } from './hyper-bridge-host.mjs'
 import {
   backSwipeProgress,
+  forwardSwipeProgress,
   isBackEdgeSwipe,
-  shouldCompleteBackSwipe
+  isForwardEdgeSwipe,
+  shouldCompleteBackSwipe,
+  shouldCompleteForwardSwipe
 } from './browser-back-gesture.mjs'
 import {
   BROWSER_HOME_ICON,
@@ -126,12 +142,28 @@ import { useBrowserPreferences } from './settings/useBrowserPreferences'
 import { BrowserToolbar } from './BrowserToolbar'
 import { BrowserNavBar } from './BrowserNavBar'
 import { BrowserBackSwipe } from './BrowserBackSwipe'
+import { BrowserPullRefresh } from './BrowserPullRefresh'
+import {
+  createPullRefreshScript,
+  parsePullRefreshMessage,
+  pullRefreshOffset,
+  shouldReloadOnRelease
+} from './browser-pull-refresh.mjs'
 import { BrowserZoomSheet } from './BrowserZoomSheet'
 import { PublishedLinkSheet } from './PublishedLinkSheet'
+import { hasLinkedIdentity } from './hyperdrive/linked-identity'
+import { useHyperNetworkRefresh } from './useHyperNetworkRefresh'
+import { P2pmdNewNoteSheet } from './P2pmdNewNoteSheet'
+import { getP2pmdSyncDisplay } from './p2pmd-sync-status.mjs'
+import PencilSquareIcon from '../assets/icons/bootstrap/pencil-square.svg'
+import ShareIcon from '../assets/icons/bootstrap/share.svg'
+import GlobeIcon from '../assets/icons/bootstrap/globe.svg'
+import ShieldLockIcon from '../assets/icons/bootstrap/shield-lock.svg'
 import { WelcomeScreen } from './WelcomeScreen'
 import { RestartRequiredScreen } from './RestartRequiredScreen'
 import { emitLinkDeviceProgress } from './settings/link-device-progress'
 import { BrowserHomeBackground } from './BrowserHomeBackground'
+import { BurnAnimation } from './BurnAnimation'
 import { applyAppIcon } from './app-icon'
 import { useKeyboardVisible } from './use-keyboard-visible'
 import {
@@ -143,7 +175,9 @@ import {
 import { StartupScreen } from './StartupScreen'
 import { AppLoading } from './AppLoading'
 import { BrowserSiteInfoSheet } from './BrowserSiteInfoSheet'
-import { hasSeenWelcome, markWelcomeSeen, WELCOME_FILE_NAME } from './welcome-state.mjs'
+import { APP_WELCOME_FILE_NAMES, hasSeenWelcome, markWelcomeSeen, WELCOME_FILE_NAME } from './welcome-state.mjs'
+import { AppWelcome } from './AppWelcome'
+import { HYPERDRIVE_WELCOME, P2PMD_WELCOME } from './app-welcomes'
 import { createFunPeerName } from '../backend/p2pmd/peer-names.mjs'
 import { tapFeedback } from './haptics'
 import {
@@ -152,6 +186,7 @@ import {
 } from './BrowserMediaSheet'
 import {
   BROWSER_MEDIA_TOKEN_LENGTH,
+  PAUSE_ALL_MEDIA_SCRIPT,
   createBrowserMediaToken,
   createBrowserMediaLongPressScript,
   parseBrowserMediaMessage
@@ -172,6 +207,7 @@ import { getBrowserHistoryDocumentTitle } from './history/browser-history.mjs'
 import { useBrowserHistory } from './history/useBrowserHistory'
 import { DownloadsScreen } from './downloads/DownloadsScreen'
 import {
+  describeBrowserDownload,
   findCompletedHyperDownload,
   getProxiedHyperUrl
 } from './downloads/browser-downloads.mjs'
@@ -179,13 +215,17 @@ import { HyperdriveScreen } from './hyperdrive/HyperdriveScreen'
 import { canUseNetworkForOfflineHyper } from './hyperdrive/offline-network.mjs'
 import { PeerChatScreen, type PeerChatResponse } from './peerchat/PeerChatScreen'
 import { settleIncomingUrl, subscribeToIncomingUrls } from './incoming-links'
+import { parseHomeShortcut } from './home-shortcuts.mjs'
+import { idlePeerTunesWidget, updateBrowserWidget } from './widgets'
 import { parsePeerChatDirectInvite, parsePeerChatInvite } from './peerchat/peerchat-invite.mjs'
 import { screenUploadBytes } from './media/upload-gate'
 import { isUsableImageType, sniffBase64ImageType } from './media/media-moderation.mjs'
 import { NsfwScanner } from './media/NsfwScanner'
 import { usePeerChatNotifications } from './peerchat/usePeerChatNotifications'
 import { PeerTunesScreen } from './peertunes/PeerTunesScreen'
+import { keptFolderUrls } from './peertunes/peertunes-screen.mjs'
 import { peerSkyWebViewNativeConfig } from './downloads/PeerSkyWebView'
+import { WEBVIEW_DECELERATION_RATE } from './webview-scroll.mjs'
 import {
   initializeContentBlocking,
   setContentBlockingEnabled as applyContentBlockingEnabled,
@@ -200,17 +240,26 @@ import { BrowserTabsScreen } from './tabs/BrowserTabsScreen'
 import { useBrowserTabPreviews } from './tabs/useBrowserTabPreviews'
 import { isBrowserTabPreviewForPage } from './tabs/browser-tab-preview.mjs'
 import {
+  filterP2pmdRoomHistory,
   formatP2pmdRoomHistoryKey,
+  isPrivateP2pmdNoteKey,
   markP2pmdRoomsShared,
   mergeP2pmdRoomsFromDevice,
   normalizeP2pmdRoomKey,
   parseP2pmdNoteLink,
+  P2PMD_RECENT_SEARCH_AFTER,
   readP2pmdRoomHistoryFile,
   recordP2pmdRoom,
   writeP2pmdRoomHistoryFile
 } from './p2pmd-room-history.mjs'
 import { subscribeP2pmdNotesShared } from './settings/p2pmd-shared-notes'
 import { describeP2pmdNote } from './p2pmd-note-title.mjs'
+import {
+  createP2pmdEditorUrl,
+  createP2pmdNonce,
+  getP2pmdEditorRequestAction,
+  isP2pmdEditorMessage
+} from './p2pmd-editor.mjs'
 import { MODAL_ORIENTATIONS } from './modal-orientations'
 import { shareLink } from './share'
 import { p2pmdLight, styles } from './styles'
@@ -237,6 +286,7 @@ import {
   RPC_P2PMD_TAKE_NOTES,
   RPC_APP_BACKUP_PROGRESS,
   RPC_APP_PEERCHAT_CHANGED,
+  RPC_PEERCHAT_PRESENCE,
   RPC_PEERTUNES_START
 } from '../backend/rpc/commands.mjs'
 
@@ -297,6 +347,8 @@ type RpcResponse = {
   warning?: string | null
   noHost?: boolean
   notes?: P2pmdRoomHistoryEntry[]
+  // Offline folders, from RPC_HYPER_OFFLINE_LIST.
+  items?: unknown[]
   name?: string
 }
 
@@ -307,7 +359,8 @@ type BrowserSource =
   | { kind: 'web', uri: string }
   | { kind: 'hyper', html: string, baseUrl: string }
   | { kind: 'error', html: string }
-  | { kind: 'restore', url: string }
+  // opening: a tab just opened for a link, blank until the page is there.
+  | { kind: 'restore', url: string, opening?: boolean }
 
 type BrowserHistoryEntry = {
   url: string
@@ -323,6 +376,7 @@ type BrowserTab = {
   pageZoom: number
   webCanGoBack: boolean
   webCanGoForward: boolean
+  incognito?: boolean
 }
 
 type BrowserTabsState = {
@@ -342,11 +396,21 @@ export default function App () {
   const workletGenerationRef = useRef(0)
   const appStateRef = useRef(AppState.currentState)
   const browserWebViewRefs = useRef(new Map<string, ComponentRef<typeof WebView>>())
+  // The WebViews that have finished a page, by native view tag. One that
+  // hands a file over before that has nothing on screen.
+  const browserWebViewsShowingPageRef = useRef(new Set<number>())
+  // The tab that a page's new window was opened from.
+  const browserTabOpenersRef = useRef(new Map<string, string>())
+  // What a WebView reports as a page starts to load.
+  const browserLoadStartsRef = useRef(new WeakSet<object>())
   const browserFaviconsRef = useRef(new Map<string, string>())
   const browserLastRecordedUrlsRef = useRef(new Map<string, string>())
   const browserMediaTokensRef = useRef(new Map<string, string>())
+  const browserIncognitoSessionRef = useRef<string | null>(null)
   const p2pmdWebViewRef = useRef<ComponentRef<typeof WebView> | null>(null)
   const p2pmdPublishInFlightRef = useRef(false)
+  const p2pmdPublishNonceRef = useRef<string | null>(null)
+  const p2pmdPublishVisibilityRef = useRef<'public' | 'private'>('public')
   const browserLoadSeqRef = useRef(0)
   const browserWebViewGenerationsRef = useRef(new Map<string, number>())
   const externalLinkPromptOpenRef = useRef(false)
@@ -359,6 +423,8 @@ export default function App () {
   // Read once, synchronously, so the first frame is either the welcome screen
   // or the browser rather than one flashing into the other.
   const [showWelcome, setShowWelcome] = useState(() => !hasSeenWelcome(getWelcomeFile()))
+  const [showP2pmdWelcome, setShowP2pmdWelcome] = useState(() => !hasSeenWelcome(getAppWelcomeFile('p2pmd')))
+  const [showHyperdriveWelcome, setShowHyperdriveWelcome] = useState(() => !hasSeenWelcome(getAppWelcomeFile('hyperdrive')))
   const [restartRequired, setRestartRequired] = useState(false)
   const [siteInfoVisible, setSiteInfoVisible] = useState(false)
   const isKeyboardVisible = useKeyboardVisible()
@@ -367,6 +433,12 @@ export default function App () {
     page: SettingsPage
     tabId: string
     url: string
+  } | null>(null)
+  // The same for a page opened from Bookmarks or History.
+  const listReturnRef = useRef<{
+    screen: 'bookmarks' | 'history'
+    tabId: string
+    historyIndex: number
   } | null>(null)
   const [browserCurrentUrl, setBrowserCurrentUrl] = useState(BROWSER_HOME_URL)
   const [browserTitle, setBrowserTitle] = useState('New tab')
@@ -392,9 +464,11 @@ export default function App () {
     setDownloadOnlyOnWifi,
     setEnforceManualPageZoom,
     setExternalLinkBehavior,
+    setPublishingSite,
     setSearchEngine,
     setShowFullAddress,
     setTheme,
+    setToolbarButton,
     setWebsiteTextScale,
     setYoutubeAdBlockingEnabled
   } = useBrowserPreferences()
@@ -414,6 +488,14 @@ export default function App () {
     removeBookmark: removeBrowserBookmark,
     toggleBookmark: toggleBrowserBookmark
   } = useBrowserBookmarks()
+  // The large home screen widget lists the newest few.
+  useEffect(() => {
+    if (browserBookmarksReady) updateBrowserWidget(browserBookmarks)
+  }, [browserBookmarks, browserBookmarksReady])
+  // A fresh start has no player page yet, whatever the widget showed last.
+  useEffect(() => {
+    idlePeerTunesWidget()
+  }, [])
   const {
     favourites: browserFavourites,
     isReady: browserFavouritesReady,
@@ -431,6 +513,15 @@ export default function App () {
     removeHistoryItem: removeBrowserHistoryItem
   } = useBrowserHistory()
   const [browserDownloadsVisible, setBrowserDownloadsVisible] = useState(false)
+  // iOS always can. Android needs a System WebView with profiles.
+  const [privateBrowsingSupported, setPrivateBrowsingSupported] = useState(Platform.OS === 'ios')
+  useEffect(() => {
+    if (Platform.OS !== 'android') return
+    const downloads = NativeModules.BrowserDownloads as { isPrivateBrowsingSupported?: () => Promise<boolean> } | undefined
+    void downloads?.isPrivateBrowsingSupported?.()
+      .then((supported) => setPrivateBrowsingSupported(supported === true))
+      .catch(() => setPrivateBrowsingSupported(false))
+  }, [])
   const {
     downloads: browserDownloads,
     error: browserDownloadsError,
@@ -441,7 +532,8 @@ export default function App () {
     refresh: refreshBrowserDownloads,
     removeDownload: removeBrowserDownload,
     requestDownload: requestBrowserDownload,
-    retryDownload: retryBrowserDownloadFromSource
+    retryDownload: retryBrowserDownloadFromSource,
+    saveToFiles: saveBrowserDownloadToFiles
   } = useBrowserDownloads({ enabled: browserDownloadsVisible })
   const browserTabsStateRef = useRef(browserTabsState)
   const browserSessionReadyRef = useRef(false)
@@ -461,15 +553,17 @@ export default function App () {
   const [browserBookmarksVisible, setBrowserBookmarksVisible] = useState(false)
   const [browserHistoryVisible, setBrowserHistoryVisible] = useState(false)
   const [pendingRestoredUrl, setPendingRestoredUrl] = useState<string | null>(null)
+  const [pendingHomeShortcutUrl, setPendingHomeShortcutUrl] = useState<string | null>(null)
+  // Counts up each time the search widget asks for the cursor in the box.
+  const [browserAddressFocusRequest, setBrowserAddressFocusRequest] = useState(0)
   const [pendingIncomingUrl, setPendingIncomingUrl] = useState<string | null>(null)
   const [browserCanGoBack, setBrowserCanGoBack] = useState(false)
   const [browserCanGoForward, setBrowserCanGoForward] = useState(false)
-  const [browserWebCanGoBack, setBrowserWebCanGoBack] = useState(false)
-  const [browserWebCanGoForward, setBrowserWebCanGoForward] = useState(false)
   const [browserIsLoading, setBrowserIsLoading] = useState(false)
   const [activeTab, setActiveTab] = useState<RuntimeTab>('hyper')
   const [requestedPeerChatRoomKey, setRequestedPeerChatRoomKey] = useState<string | null>(null)
   const [requestedPeerChatPeerId, setRequestedPeerChatPeerId] = useState<string | null>(null)
+  useHyperNetworkRefresh(Boolean(identityStoragePath), () => callRpc(RPC_HYPER_REFRESH, {}))
   const peerChatNotifications = usePeerChatNotifications({
     isPeerChatVisible: browserSource.kind === 'app' && activeTab === 'peerchat',
     isRuntimeReady: Boolean(identityStoragePath),
@@ -489,7 +583,17 @@ export default function App () {
   const [peertunesUrl, setPeertunesUrl] = useState<string | null>(null)
   const [peertunesLaunchSuffix, setPeertunesLaunchSuffix] = useState('')
   const [peertunesError, setPeertunesError] = useState<string | null>(null)
+  // Goes up when folders are removed in Settings, P2P Data, so PeerTunes
+  // drops the songs that came from them.
+  const [offlineFoldersVersion, setOfflineFoldersVersion] = useState(0)
   const [peertunesMounted, setPeertunesMounted] = useState(false)
+  // Closing PeerTunes' tab, or burning the lot, is closing PeerTunes: the
+  // player out of sight goes with it, and so does the music.
+  if (peertunesMounted && !isAppInBrowserTabs(browserTabsState, 'peertunes')) setPeertunesMounted(false)
+  const [browserHomeMounted, setBrowserHomeMounted] = useState(false)
+  const [browserBurning, setBrowserBurning] = useState(false)
+  // Mounted the first time home shows and kept from then on.
+  if (browserSource.kind === 'home' && !browserHomeMounted) setBrowserHomeMounted(true)
   const [peerChatRevision, setPeerChatRevision] = useState(0)
   const [p2pmdRoom, setP2pmdRoom] = useState<P2pmdRoom | null>(null)
   const [p2pmdEditorHtml, setP2pmdEditorHtml] = useState<string | null>(null)
@@ -510,6 +614,15 @@ export default function App () {
   // does. The field starts on a fun one so "Get started" is one tap.
   const [p2pmdNameDraft, setP2pmdNameDraft] = useState(() => loadP2pmdPeerDisplayName() || createFunPeerName())
   const [isEditingP2pmdName, setIsEditingP2pmdName] = useState(false)
+  const [p2pmdNewNoteVisible, setP2pmdNewNoteVisible] = useState(false)
+  const [p2pmdRecentQuery, setP2pmdRecentQuery] = useState('')
+
+  // Opening P2PMD picks up a note the backend is still running, so a note that
+  // outlived the screen is never left hosting where nobody can see it.
+  useEffect(() => {
+    if (activeTab !== 'p2pmd' || browserSource.kind !== 'app' || p2pmdRoom || isBooting || !rpcRef.current) return
+    void reattachRunningP2pmdRoom()
+  }, [activeTab, browserSource.kind, isBooting])
   const isP2pmdLandscapeSlides = p2pmdViewMode === 'slides' && browserWindowWidth > browserWindowHeight
   const [p2pmdSyncStatus, setP2pmdSyncStatus] = useState('Ready')
   const [p2pmdSetupError, setP2pmdSetupError] = useState<string | null>(null)
@@ -517,6 +630,7 @@ export default function App () {
   const [isP2pmdPublishing, setIsP2pmdPublishing] = useState(false)
   const [p2pmdPublishSheet, setP2pmdPublishSheet] = useState<'note' | 'slides' | null>(null)
   const p2pmdPublishedModeRef = useRef<'note' | 'slides'>('note')
+  const [p2pmdPublishedVisibility, setP2pmdPublishedVisibility] = useState<'public' | 'private'>('public')
   const shouldShowRuntimeStatus = activeTab === 'holesail'
   const {
     clearAllPreviews: clearAllBrowserTabPreviews,
@@ -532,6 +646,8 @@ export default function App () {
     getEntryKey: (entry) => entry.url,
     isCurrentEntry: (tabId, entry) => {
       const tab = browserTabsStateRef.current.tabs.find((item) => item.id === tabId)
+      // No picture of an incognito page is ever written to disk.
+      if (tab?.incognito) return false
       const currentEntry = tab?.history[tab.historyIndex]
       return Boolean(
         currentEntry &&
@@ -607,8 +723,11 @@ export default function App () {
     }
   }, [browserPreferencesReady])
 
+  // Tabs come back without waiting for the filter rules: compiling them can
+  // take a minute after a list update, and no page loads before they are
+  // ready anyway, since web views wait for contentBlockingReady.
   useEffect(() => {
-    if (!browserPreferencesReady || !contentBlockingReady || browserSessionRestoreStartedRef.current) return
+    if (!browserPreferencesReady || browserSessionRestoreStartedRef.current) return
     browserSessionRestoreStartedRef.current = true
     let cancelled = false
 
@@ -657,7 +776,7 @@ export default function App () {
     return () => {
       cancelled = true
     }
-  }, [browserPreferencesReady, contentBlockingReady])
+  }, [browserPreferencesReady])
 
   // P2PMD notes another of this person's devices sent, left here by a Link
   // Device restore. The backend keeps the text of each hosted one as this
@@ -743,12 +862,26 @@ export default function App () {
           console.warn('Unable to refresh Hyper networking:', error)
         })
       }
+      // People in a PeerChat room see this phone as away while the app is in
+      // the background, a yellow dot and Idle. Not on inactive: iOS passes
+      // through it for Control Center or the app switcher, and comes back.
+      if ((nextState === 'background' || nextState === 'active') && rpcRef.current) {
+        void callRpc(RPC_PEERCHAT_PRESENCE, { idle: nextState === 'background' }).catch(() => {})
+      }
     })
 
     return () => subscription.remove()
   }, [])
 
   useEffect(() => subscribeToIncomingUrls((url) => {
+    // A quick action from the app icon, or a tap on a widget. It waits for
+    // last time's tabs and goes on top of them. Counted as something done in
+    // the app, it opened the app without them.
+    if (parseHomeShortcut(url)) {
+      setPendingHomeShortcutUrl(url)
+      return
+    }
+
     // peersky:// is our own scheme and is registered for deep links, so a
     // shared link like peersky://p2p/peertunes/#playlist=... arrives here.
     // Only accept the ones that name a built-in app, not any peersky:// text.
@@ -762,9 +895,69 @@ export default function App () {
       return
     }
 
-    browserUserInteractedRef.current = true
+    // It waits for last time's tabs, like a quick action. Counted as
+    // something done in the app, a link that started it opened the app with
+    // every tab from last time gone.
     setPendingIncomingUrl(url)
   }), [])
+
+  useEffect(() => {
+    if (!browserSessionReady || !pendingHomeShortcutUrl) return
+    const shortcutUrl = pendingHomeShortcutUrl
+    const shortcut = parseHomeShortcut(shortcutUrl)
+    setPendingHomeShortcutUrl(null)
+    settleIncomingUrl(shortcutUrl)
+    setBrowserBookmarksVisible(false)
+    setBrowserDownloadsVisible(false)
+    setBrowserHistoryVisible(false)
+    setBrowserMenuVisible(false)
+    setBrowserTabsVisible(false)
+    if (shortcut?.name === 'new-tab') {
+      setBrowserSettingsVisible(false)
+      onBrowserNewTab()
+    } else if (shortcut?.name === 'search') {
+      setBrowserSettingsVisible(false)
+      // A tab already on the start page will do, unless it is incognito.
+      // Anything else stays as it was, under a new tab.
+      if (browserSource.kind !== 'home' || isIncognitoTab(browserTabsStateRef.current.activeTabId)) {
+        onBrowserNewTab()
+      }
+      setBrowserAddressFocusRequest((count) => count + 1)
+    } else if (shortcut?.name === 'open' && shortcut.target) {
+      setBrowserSettingsVisible(false)
+      openWidgetTarget(shortcut.target)
+    } else if (shortcut?.name === 'incognito') {
+      setBrowserSettingsVisible(false)
+      onBrowserNewIncognitoTab()
+    } else if (shortcut?.name === 'app-icon') {
+      // Where the colours of the logo, and so of the app icon, are picked.
+      setBrowserSettingsInitialPage('appearance')
+      setBrowserSettingsVisible(true)
+    } else if (shortcut?.name === 'paste') {
+      setBrowserSettingsVisible(false)
+      // The copied address or words, in a new tab. A new tab loads what it is
+      // given as it is, so they become an address or a search first, as the
+      // address bar does.
+      void Clipboard.getString().then((text) => {
+        const value = text.trim()
+        if (!value) {
+          setStatus('Nothing to paste')
+          onBrowserNewTab()
+          return
+        }
+        const target = normalizeBrowserAddress(
+          value,
+          browserPreferences.searchEngine,
+          browserPreferences.customSearchUrl
+        )
+        if (target.length > MAX_BROWSER_URL_LENGTH) {
+          setStatus('That is too long to open')
+          return
+        }
+        if (!createBrowserTab(target)) void loadBrowserUrl(target)
+      }).catch(() => setStatus('Unable to read what was copied'))
+    }
+  }, [browserSessionReady, pendingHomeShortcutUrl])
 
   useEffect(() => {
     if (!browserSessionReady || !pendingIncomingUrl) return
@@ -779,6 +972,9 @@ export default function App () {
     setBrowserSettingsVisible(false)
     setBrowserSettingsInitialPage(undefined)
     setBrowserTabsVisible(false)
+    // In front of whatever this tab was about to bring back, which stays
+    // behind it in the tab's history.
+    setPendingRestoredUrl(null)
     void loadBrowserUrl(incomingUrl)
   }, [browserSessionReady, pendingIncomingUrl])
 
@@ -800,6 +996,9 @@ export default function App () {
 
   useEffect(() => {
     if (!pendingRestoredUrl) return
+    // A link that opened the app goes in front of the restored page, not
+    // under it. Loaded after the link, the page took the link's place.
+    if (pendingIncomingUrl) return
     // Built-in apps talk to the Bare worklet as soon as they open, so they have
     // to wait for it exactly like hyper:// does. Without this a restored
     // PeerTunes tab hit "Worklet is not ready" on every cold start.
@@ -810,7 +1009,7 @@ export default function App () {
     const restoredUrl = pendingRestoredUrl
     setPendingRestoredUrl(null)
     void loadRestoredBrowserUrl(restoredUrl)
-  }, [isBooting, pendingRestoredUrl])
+  }, [isBooting, pendingIncomingUrl, pendingRestoredUrl])
 
   function updateBrowserTabsState (
     update: BrowserTabsState | ((state: BrowserTabsState) => BrowserTabsState)
@@ -860,6 +1059,8 @@ export default function App () {
       if (!initResponse.ok) {
         throw new Error(initResponse.error || 'Unable to initialize Hyper')
       }
+      // A backend started with the app already behind another one starts away.
+      void callRpc(RPC_PEERCHAT_PRESENCE, { idle: appStateRef.current === 'background' }).catch(() => {})
 
       setIdentityStoragePath(Paths.document?.uri ? toBareFsPath(Paths.document.uri) : storageDir)
       const lanStatus = initResponse.lan?.available
@@ -983,14 +1184,6 @@ export default function App () {
           : activeTab?.webCanGoForward || false
       }) as BrowserTabsState
     })
-
-    if (typeof nextState.webCanGoBack === 'boolean') {
-      setBrowserWebCanGoBack(nextState.webCanGoBack)
-    }
-
-    if (typeof nextState.webCanGoForward === 'boolean') {
-      setBrowserWebCanGoForward(nextState.webCanGoForward)
-    }
   }
 
   function updateBrowserTabTitle (tabId: string, title: string) {
@@ -1237,11 +1430,17 @@ export default function App () {
         ? response.url
         : nextUrl
 
+      const isMedia = Boolean(response.mediaType && response.mediaUrl)
+      const html = isMedia
+        ? createHyperMediaHtml(response)
+        : createHyperBrowserHtml(response, nextUrl, browserIsDark)
       const source: BrowserSource = {
         kind: 'hyper',
-        html: response.mediaType && response.mediaUrl
-          ? createHyperMediaHtml(response)
-          : createHyperBrowserHtml(response, nextUrl, browserIsDark),
+        // Android runs the before-load script after a page loaded from a
+        // string has run its own, so there the bridge comes in the page itself.
+        html: Platform.OS === 'android' && !isMedia
+          ? withHyperBridgeScript(html, getBrowserTabToken(browserTabsStateRef.current.activeTabId))
+          : html,
         baseUrl: nextUrl
       }
 
@@ -1334,6 +1533,18 @@ export default function App () {
     }
   }
 
+  // Which of the PeerTunes page's folders are still kept on the device.
+  async function peerTunesKeptFolders (urls: string[]) {
+    try {
+      const response = await callRpc(RPC_HYPER_OFFLINE_LIST, {})
+      if (!response.ok) return { ok: false, error: response.error || 'Unable to read offline folders.' }
+      const items = Array.isArray(response.items) ? response.items as { driveKey?: string, path?: string }[] : []
+      return { ok: true, kept: keptFolderUrls(urls, items) }
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  }
+
   async function ensurePeerTunesServer () {
     setPeertunesError(null)
 
@@ -1394,33 +1605,62 @@ export default function App () {
     const currentEntry = activeBrowserTab?.history[activeBrowserTab.historyIndex]
     if (!activeBrowserTab || !currentEntry) return
 
-    // Settings is a sheet, not a history entry, so back from a page it opened
-    // used to land on whatever the tab was showing before. Only while that
-    // page is still the one on screen, in the tab it opened in: navigate on,
-    // or switch tabs, and back is ordinary again.
+    const nextState = getBrowserBackState({
+      history: activeBrowserTab.history,
+      historyIndex: activeBrowserTab.historyIndex
+    })
+    const stepBack = () => {
+      if (!nextState) return
+      const entry = nextState.history[nextState.historyIndex]
+      remountBrowserWebView(tabId)
+      applyBrowserState(nextState)
+      setBrowserTitle(getBrowserEntryTitle(entry))
+      setActiveTab(entry.source.kind === 'app' ? entry.source.app : 'hyper')
+    }
+
+    // Settings, Bookmarks and History are sheets over the tab, not entries in
+    // it. Back from a page one of them opened shows it again, and the tab
+    // steps back under it too, so closing it lands where it was opened from.
+    // Left on the page, closing Bookmarks showed that page again and it took
+    // another back to get home. Only while that page is still the one on
+    // screen, in the tab it opened in: navigate on, or switch tabs, and back is
+    // ordinary again.
     const settingsReturnPage = getSettingsReturnPage(settingsReturnRef.current, {
       tabId,
       url: currentEntry.url
     })
     if (settingsReturnPage) {
       settingsReturnRef.current = null
+      stepBack()
       setBrowserSettingsInitialPage(settingsReturnPage)
       setBrowserSettingsVisible(true)
       return
     }
-
-    const nextState = getBrowserBackState({
-      history: activeBrowserTab.history,
+    const listReturnScreen = getListReturnScreen(listReturnRef.current, {
+      tabId,
       historyIndex: activeBrowserTab.historyIndex
     })
-    if (!nextState) return
+    if (listReturnScreen) {
+      listReturnRef.current = null
+      stepBack()
+      if (listReturnScreen === 'bookmarks') setBrowserBookmarksVisible(true)
+      else setBrowserHistoryVisible(true)
+      return
+    }
 
-    const entry = nextState.history[nextState.historyIndex]
-    remountBrowserWebView(tabId)
-    applyBrowserState(nextState)
-    setBrowserTitle(getBrowserEntryTitle(entry))
-    setActiveTab(entry.source.kind === 'app' ? entry.source.app : 'hyper')
+    stepBack()
   }
+
+  // Android keeps the app running for PeerChat after a swipe away, and a tab
+  // went on playing with nothing left on screen to stop it.
+  useEffect(() => {
+    const subscription = DeviceEventEmitter.addListener('PeerSkyTaskRemoved', () => {
+      for (const webView of browserWebViewRefs.current.values()) {
+        webView?.injectJavaScript(PAUSE_ALL_MEDIA_SCRIPT)
+      }
+    })
+    return () => subscription.remove()
+  }, [])
 
   // Half-sent uploads, per tab. A body crosses the bridge in pieces because
   // postMessage carries text, so the pieces are held until the last one lands.
@@ -1431,11 +1671,36 @@ export default function App () {
    *
    * @returns true when the message was ours, so nothing else tries to read it.
    */
+  // One question per site at a time: a page that fires several writes at
+  // once waits on the same answer.
+  const publishingPromptsRef = useRef(new Map<string, Promise<boolean>>())
+
+  function decidePublishing (siteId: string) {
+    const decided = browserPreferences.publishingSites[siteId]
+    if (decided) return Promise.resolve(decided === 'allow')
+    const pending = publishingPromptsRef.current.get(siteId)
+    if (pending) return pending
+
+    const prompt = new Promise<boolean>((resolve) => {
+      Alert.alert(
+        'Let this site publish?',
+        `hyper://${formatHyperSiteForPrompt(siteId)} wants to create drives on this phone and save files to them. Anyone with the link can read what it publishes.`,
+        [
+          { text: 'Don\'t allow', style: 'cancel', onPress: () => { setPublishingSite(siteId, 'block'); resolve(false) } },
+          { text: 'Allow', onPress: () => { setPublishingSite(siteId, 'allow'); resolve(true) } }
+        ],
+        { cancelable: true, onDismiss: () => resolve(false) }
+      )
+    }).finally(() => publishingPromptsRef.current.delete(siteId))
+    publishingPromptsRef.current.set(siteId, prompt)
+    return prompt
+  }
+
   function handleHyperBridgeMessage (
     tabId: string,
     data: string,
     token: string,
-    allowed: boolean
+    page: { url: string, reportedUrl: string, isHyper: boolean }
   ) {
     let pending = hyperBridgePendingRef.current.get(tabId)
     if (!pending) {
@@ -1458,25 +1723,49 @@ export default function App () {
       return true
     }
 
-    // The patch is on every page so it cannot miss the one it was meant for,
-    // but only a page served over hyper:// gets to use it. Answering plainly
-    // beats leaving the request hanging.
-    if (!allowed) {
+    // Only hyper:// pages may use the bridge.
+    const siteId = getHyperBridgeSite(page)
+    if (!siteId) {
       settle({ error: 'hyper:// requests only work from a hyper:// page' })
       return true
     }
 
-    void callRpc(RPC_HYPER_FETCH, {
-      url: message.url,
-      method: message.method,
-      headers: message.headers,
-      body: message.body
-    })
-      .then((response) => settle(createHyperBridgeReply(response)))
-      .catch((error) => settle({
-        error: error instanceof Error ? error.message : String(error)
-      }))
+    const forward = () => {
+      void callRpc(RPC_HYPER_FETCH, {
+        url: message.url,
+        method: message.method,
+        headers: message.headers,
+        body: message.body,
+        page: page.url
+      })
+        .then((response) => settle(createHyperBridgeReply(response)))
+        .catch((error) => settle({
+          error: error instanceof Error ? error.message : String(error)
+        }))
+    }
 
+    if (message.method === 'GET' || message.method === 'HEAD') {
+      forward()
+      return true
+    }
+
+    // An incognito tab keeps nothing, and both the answer and the drives
+    // would outlive it.
+    if (isIncognitoTab(tabId)) {
+      settle({ error: 'Sites cannot publish from an incognito tab' })
+      return true
+    }
+
+    // A write puts files on this phone and shares them, so the person decides,
+    // once per site. A tab in the background cannot ask.
+    if (browserTabsStateRef.current.activeTabId !== tabId) {
+      settle({ error: 'Open this tab to let it publish' })
+      return true
+    }
+    void decidePublishing(siteId).then((allowed) => {
+      if (allowed) forward()
+      else settle({ error: 'Publishing from this site is off. You can change that in Settings, under Permissions.' })
+    })
     return true
   }
 
@@ -1518,6 +1807,12 @@ export default function App () {
       return
     }
 
+    reloadBrowserPage()
+  }
+
+  // Reloads whatever the tab shows. The address bar's button stops a page that
+  // is still loading instead; a pull always reloads.
+  function reloadBrowserPage () {
     if (browserSource.kind === 'web') {
       cancelPendingBrowserLoad()
       browserWebViewRefs.current.get(browserTabsState.activeTabId)?.reload()
@@ -1597,8 +1892,6 @@ export default function App () {
     setBrowserSource(entry.source)
     setBrowserCanGoBack(tab.historyIndex > 0)
     setBrowserCanGoForward(tab.history.length > tab.historyIndex + 1)
-    setBrowserWebCanGoBack(tab.webCanGoBack)
-    setBrowserWebCanGoForward(tab.webCanGoForward)
     setBrowserTitle(normalizeBrowserTabTitle(tab.title || getBrowserEntryTitle(entry)))
     setBrowserFavicon(
       entry.source.kind === 'web' || entry.source.kind === 'hyper'
@@ -1611,6 +1904,10 @@ export default function App () {
       if (entry.source.app === 'peertunes') {
         setPeertunesMounted(true)
         setPeertunesLaunchSuffix(getRuntimeAppLaunchSuffix(entry.url))
+        // A PeerTunes tab coming back, after a restart or from the tab list,
+        // needs its server as much as one just opened. Nothing asked for it,
+        // so it spun until reloaded. Asking again for a running one is free.
+        void ensurePeerTunesServer()
       }
     } else {
       setActiveTab('hyper')
@@ -1621,7 +1918,7 @@ export default function App () {
     )
   }
 
-  function createBrowserTab (targetUrl: string | null = null) {
+  function createBrowserTab (targetUrl: string | null = null, { incognito = false }: { incognito?: boolean } = {}) {
     if (browserTabsStateRef.current.tabs.length >= MAX_BROWSER_TABS) {
       setStatus('Maximum number of tabs reached')
       return false
@@ -1629,7 +1926,9 @@ export default function App () {
 
     browserUserInteractedRef.current = true
     cancelPendingBrowserLoad()
-    const nextState = addBrowserTabState(browserTabsStateRef.current) as BrowserTabsState
+    const nextState = (targetUrl
+      ? addOpeningBrowserTabState(browserTabsStateRef.current, targetUrl, { incognito })
+      : addBrowserTabState(browserTabsStateRef.current, { incognito })) as BrowserTabsState
     const tab = nextState.tabs.find((item) => item.id === nextState.activeTabId)
 
     updateBrowserTabsState(nextState)
@@ -1650,9 +1949,38 @@ export default function App () {
     void loadBrowserUrl(targetUrl)
   }
 
+  // A tap on a home screen widget. An app goes back to the tab it is open in,
+  // if there is one. Anything else opens in a new tab over what was there.
+  function openWidgetTarget (targetUrl: string) {
+    const app = getRuntimeAppFromUrl(targetUrl)
+    if (!app && !isWebUrl(targetUrl) && !isHyperUrl(targetUrl)) return
+    const tab = app ? findBrowserTabShowingApp(browserTabsStateRef.current, app) : null
+    if (tab) {
+      onBrowserSwitchTab(tab.id)
+      return
+    }
+    openBrowserUrlInNewTab(targetUrl)
+  }
+
   function onBrowserNewTab () {
     if (!createBrowserTab()) return
     setStatus('New tab')
+  }
+
+  function onBrowserNewIncognitoTab () {
+    if (!privateBrowsingSupported) {
+      Alert.alert(
+        'Incognito needs a newer WebView',
+        'Update Android System WebView from Google Play, then try again.'
+      )
+      return
+    }
+    if (!createBrowserTab(null, { incognito: true })) return
+    setStatus('New incognito tab')
+  }
+
+  function isIncognitoTab (tabId: string) {
+    return browserTabsStateRef.current.tabs.some((tab) => tab.id === tabId && tab.incognito === true)
   }
 
   function onBrowserToggleBookmark () {
@@ -1724,7 +2052,7 @@ export default function App () {
 
   function onBrowserMediaOpenInNewTab (targetUrl: string) {
     Keyboard.dismiss()
-    if (!createBrowserTab(targetUrl)) return
+    if (!createBrowserTab(targetUrl, { incognito: isIncognitoTab(browserTabsStateRef.current.activeTabId) })) return
     setStatus('Opened in new tab')
   }
 
@@ -1738,19 +2066,64 @@ export default function App () {
     updateBrowserTabsState((state) => addBackgroundBrowserTabState(
       state,
       targetUrl,
-      title || 'Media'
+      title || 'Media',
+      { incognito: isIncognitoTab(state.activeTabId) }
     ) as BrowserTabsState)
     setBrowserMediaTarget(null)
     setStatus('Opened in background tab')
   }
 
-  async function onBrowserMediaDownload (targetUrl: string) {
-    const accepted = await requestBrowserDownload(targetUrl)
-    setStatus(
-      accepted
-        ? Platform.OS === 'ios' ? 'Download saved' : 'Download requested'
-        : 'Unable to start download'
+  // A page can start a download without a tap, so nothing is saved until the
+  // person says yes. iOS asks here; Android asks in PeerSkyWebViewManager.
+  // A file, not a page: the WebView hands it over and loads nothing more, so
+  // the tab stops showing a page on its way. Once the file is wanted, Downloads
+  // opens on it, where its progress shows, rather than leaving a tab that looks
+  // stuck loading.
+  function confirmPageDownload (downloadUrl: string, tabId: string, webViewTag: number | null) {
+    setBrowserIsLoading(false)
+    leaveFileHandoff(tabId, downloadUrl, webViewTag)
+    const { name, host } = describeBrowserDownload(downloadUrl)
+    Alert.alert(
+      'Download this file?',
+      host ? `${name}\nfrom ${host}` : name,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Download', onPress: () => startBrowserDownload(downloadUrl, tabId) }
+      ]
     )
+  }
+
+  // A link that opens in a new tab, or an address typed in, can turn out to be
+  // a file, and the tab was left blank. See getFileHandoffAction.
+  function leaveFileHandoff (tabId: string, fileUrl: string, webViewTag: number | null) {
+    const tab = browserTabsStateRef.current.tabs.find((item) => item.id === tabId)
+    if (!tab) return
+    const handoff = getFileHandoffAction({
+      history: tab.history,
+      historyIndex: tab.historyIndex,
+      fileUrl,
+      // Not knowing which WebView it was, take it that a page is showing.
+      showedPage: webViewTag === null || browserWebViewsShowingPageRef.current.has(webViewTag)
+    })
+    if (handoff.action === 'close-tab') {
+      onBrowserCloseTab(tabId, browserTabOpenersRef.current.get(tabId))
+    } else if (handoff.state && browserTabsStateRef.current.activeTabId === tabId) {
+      const entry = handoff.state.history[handoff.state.historyIndex]
+      remountBrowserWebView(tabId)
+      applyBrowserState(handoff.state)
+      setBrowserTitle(getBrowserEntryTitle(entry))
+      setActiveTab(entry.source.kind === 'app' ? entry.source.app : 'hyper')
+    }
+  }
+
+  function startBrowserDownload (downloadUrl: string, tabId: string | null) {
+    void requestBrowserDownload(downloadUrl, { incognito: tabId !== null && isIncognitoTab(tabId) })
+    setBrowserMenuVisible(false)
+    setBrowserDownloadsVisible(true)
+  }
+
+  function onBrowserMediaDownload (targetUrl: string, tabId: string | null) {
+    startBrowserDownload(targetUrl, tabId)
   }
 
   async function retryBrowserDownload (download: BrowserDownload) {
@@ -1885,6 +2258,18 @@ export default function App () {
     setBrowserBookmarksVisible(true)
   }
 
+  // A page opened from Bookmarks or History goes into the entry after this
+  // one, and back from it returns to the list it came from first.
+  function openFromList (screen: 'bookmarks' | 'history', targetUrl: string) {
+    const tabsState = browserTabsStateRef.current
+    const tab = tabsState.tabs.find((candidate) => candidate.id === tabsState.activeTabId)
+    settingsReturnRef.current = null
+    listReturnRef.current = tab
+      ? { screen, tabId: tab.id, historyIndex: tab.historyIndex + 1 }
+      : null
+    void loadBrowserUrl(targetUrl)
+  }
+
   function onBrowserOpenDownloads () {
     setBrowserMenuVisible(false)
     setBrowserDownloadsVisible(true)
@@ -1918,13 +2303,13 @@ export default function App () {
     setStatus('Tab switched')
   }
 
-  function onBrowserCloseTab (tabId: string) {
+  function onBrowserCloseTab (tabId: string, returnTo?: string) {
     browserUserInteractedRef.current = true
     const currentTabsState = browserTabsStateRef.current
     const isClosingActive = tabId === currentTabsState.activeTabId
     if (isClosingActive) cancelPendingBrowserLoad()
 
-    const nextState = closeBrowserTabState(currentTabsState, tabId) as BrowserTabsState
+    const nextState = closeBrowserTabState(currentTabsState, tabId, returnTo) as BrowserTabsState
     const tab = nextState.tabs.find((item) => item.id === nextState.activeTabId)
 
     // Closing the active tab next to a live note lands on the note, and that
@@ -1947,6 +2332,7 @@ export default function App () {
     browserFaviconsRef.current.delete(tabId)
     browserLastRecordedUrlsRef.current.delete(tabId)
     browserMediaTokensRef.current.delete(tabId)
+    browserTabOpenersRef.current.delete(tabId)
     hyperBridgePendingRef.current.delete(tabId)
     browserWebViewGenerationsRef.current.delete(tabId)
     setBrowserWebViewGenerations((current) => {
@@ -1996,32 +2382,46 @@ export default function App () {
     return { previewCacheCleared, sessionSaved }
   }
 
+  // Like DuckDuckGo's Fire Button and Firefox Focus, history goes too, so
+  // nothing is left to say where you have been or what you searched for.
   function onBrowserBurnTabs () {
     Alert.alert(
-      'Burn tabs and cached data?',
-      'This closes every open tab and clears cached website files.',
+      'Burn tabs, history and cached data?',
+      'This closes every tab and deletes your browsing and search history and cached website files. Bookmarks and downloads stay.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Burn',
           style: 'destructive',
           onPress: () => {
-            for (const webView of browserWebViewRefs.current.values()) {
-              clearBrowserWebViewData(webView)
-            }
-            const { previewCacheCleared, sessionSaved } = onBrowserResetTabs()
+            // The flames go up first and the tabs go under their cover.
             setBrowserTabsVisible(false)
-            setBrowserTitle('New tab')
-            setStatus(
-              !sessionSaved
-                ? 'Tabs burned, but the fresh session could not be saved'
-                : !previewCacheCleared
-                  ? 'Tabs burned, but preview cache could not be cleared'
-                  : 'Tabs and cached data cleared'
-            )
+            setBrowserBurning(true)
           }
         }
       ]
+    )
+  }
+
+  function burnBrowserTabs () {
+    // Every website's data, never the app's own pages: see clearWebsiteData.
+    clearWebsiteData({
+      platform: Platform.OS,
+      browserData: NativeModules.PeerSkyBrowserData,
+      webViews: browserWebViewRefs.current.values()
+    })
+    const { previewCacheCleared, sessionSaved } = onBrowserResetTabs()
+    const historyCleared = clearBrowserHistory()
+    setBrowserTabsVisible(false)
+    setBrowserTitle('New tab')
+    setStatus(
+      !sessionSaved
+        ? 'Tabs burned, but the fresh session could not be saved'
+        : !historyCleared
+          ? 'Tabs burned, but history could not be cleared'
+          : !previewCacheCleared
+            ? 'Tabs burned, but preview cache could not be cleared'
+            : 'Tabs, history and cached data cleared'
     )
   }
 
@@ -2052,6 +2452,7 @@ export default function App () {
   }
 
   function recordCompletedBrowserVisit (tabId: string, url: string, title: string) {
+    if (isIncognitoTab(tabId)) return
     if (browserLastRecordedUrlsRef.current.get(tabId) === url) return
 
     browserLastRecordedUrlsRef.current.set(tabId, url)
@@ -2071,7 +2472,7 @@ export default function App () {
   function onBrowserShouldStartLoad (
     tabId: string,
     expectedEntry: BrowserHistoryEntry,
-    request: { url?: string, isTopFrame?: boolean }
+    request: { url?: string, isTopFrame?: boolean, navigationType?: string }
   ) {
     const currentTab = browserTabsStateRef.current.tabs.find((tab) => tab.id === tabId)
     if (!currentTab || currentTab.history[currentTab.historyIndex] !== expectedEntry) return false
@@ -2079,6 +2480,8 @@ export default function App () {
     const action = getBrowserRequestAction({
       requestUrl: request.url,
       currentSourceKind: expectedEntry.source.kind,
+      currentUrl: expectedEntry.source.kind === 'hyper' ? expectedEntry.source.baseUrl : '',
+      navigationType: request.navigationType,
       isTopFrame: request.isTopFrame !== false
     })
     const isActive = browserTabsStateRef.current.activeTabId === tabId
@@ -2152,13 +2555,20 @@ export default function App () {
       (action.action === 'load-hyper' || action.action === 'commit-web') &&
       action.url
     ) {
-      if (createBrowserTab(action.url)) setStatus('Popup opened in new tab')
+      openPopupTab(action.url, tabId)
       return
     }
 
     if (action.action === 'allow' && (isWebUrl(targetUrl) || isHyperUrl(targetUrl))) {
-      if (createBrowserTab(targetUrl)) setStatus('Popup opened in new tab')
+      openPopupTab(targetUrl, tabId)
     }
+  }
+
+  // The new tab remembers its opener, to go back to if it was only for a file.
+  function openPopupTab (targetUrl: string, openerTabId: string) {
+    if (!createBrowserTab(targetUrl, { incognito: isIncognitoTab(openerTabId) })) return
+    browserTabOpenersRef.current.set(browserTabsStateRef.current.activeTabId, openerTabId)
+    setStatus('Popup opened in new tab')
   }
 
   function openExternalAppLink (targetUrl: string) {
@@ -2252,6 +2662,30 @@ export default function App () {
     )
   }
 
+
+  // One for each run of incognito tabs: kept while any is open, new once the
+  // last one has closed. The native side keeps one store per session, so a
+  // WebView built again for the same tab, as going back does, keeps the tab's
+  // cookies instead of starting empty.
+  function getBrowserIncognitoSession (tabs: BrowserTab[]) {
+    if (!tabs.some((tab) => tab.incognito === true)) {
+      browserIncognitoSessionRef.current = null
+    } else if (!browserIncognitoSessionRef.current) {
+      browserIncognitoSessionRef.current = createBrowserMediaToken(
+        Crypto.getRandomValues(new Uint8Array(BROWSER_MEDIA_TOKEN_LENGTH / 2))
+      )
+    }
+    return browserIncognitoSessionRef.current
+  }
+
+  function getBrowserTabToken (tabId: string) {
+    let token = browserMediaTokensRef.current.get(tabId)
+    if (!token) {
+      token = createBrowserMediaToken(Crypto.getRandomValues(new Uint8Array(BROWSER_MEDIA_TOKEN_LENGTH / 2)))
+      browserMediaTokensRef.current.set(tabId, token)
+    }
+    return token
+  }
 
   // expo-print takes markup, not a page address, so printing is a round trip:
   // ask the tab for what it rendered, then hand that to the dialog.
@@ -2416,7 +2850,12 @@ export default function App () {
 
   // requireCopy: hosting a shared note nobody else has open, which only ever
   // goes up from this phone's copy of it.
-  async function onP2pmdRoomCreate (roomKey: string | null = null, { requireCopy = false }: { requireCopy?: boolean } = {}) {
+  // A note this phone made reopens the way it was made: the backend can tell
+  // a public key from a private one, so only a new note says which it is.
+  async function onP2pmdRoomCreate (
+    roomKey: string | null = null,
+    { requireCopy = false, secure = true }: { requireCopy?: boolean, secure?: boolean } = {}
+  ) {
     const isReopening = Boolean(roomKey)
     ensureP2pmdPeerName()
     setIsLoading(true)
@@ -2434,7 +2873,7 @@ export default function App () {
       const response = await callRpc(RPC_P2PMD_ROOM_CREATE, {
         ...(roomKey ? { connector: roomKey } : {}),
         ...(requireCopy ? { requireCopy: true } : {}),
-        secure: true,
+        secure,
         udp: false
       })
 
@@ -2564,6 +3003,15 @@ export default function App () {
     if (hostCopy) await onP2pmdRoomCreate(roomKey, { requireCopy: true })
   }
 
+  // Settings, P2P Data deleted P2PMD's notes from this device, so its Recent
+  // notes would only lead to notes that are gone.
+  function forgetP2pmdRecents () {
+    if (!saveP2pmdRoomHistory([])) return false
+    p2pmdRoomHistoryRef.current = []
+    setP2pmdRoomHistory([])
+    return true
+  }
+
   function rememberP2pmdRoom (key: string, role: P2pmdRoomHistoryEntry['role'], label = '') {
     const rooms = recordP2pmdRoom(p2pmdRoomHistoryRef.current, { key, role, label }) as P2pmdRoomHistoryEntry[]
     if (rooms === p2pmdRoomHistoryRef.current) return
@@ -2621,39 +3069,24 @@ export default function App () {
     rememberP2pmdRoom(room.key, known?.role || room.role, label)
   }
 
-  async function onP2pmdRoomRefresh () {
-    setIsLoading(true)
-    setStatus('Reading P2PMD room status...')
-
+  // A note the backend still runs after the screen lost track of it comes
+  // back by itself when P2PMD opens. It used to wait for a Refresh button.
+  async function reattachRunningP2pmdRoom () {
     try {
       const response = await callRpc(RPC_P2PMD_ROOM_STATUS, {})
+      if (!response.running || !response.room) return
 
-      if (response.running && response.room) {
-        await loadP2pmdEditorHtml()
-        setP2pmdPeerDisplayName(loadP2pmdPeerDisplayName())
-        setP2pmdRoom(response.room)
-        setP2pmdUrl(response.room.localUrl)
-        setP2pmdParticipants(null)
-        setP2pmdViewMode('edit')
-        setP2pmdPublishUrl(null)
-        setP2pmdSetupError(null)
-        setP2pmdSyncStatus('Ready')
-      } else {
-        setP2pmdRoom(null)
-        setP2pmdUrl(null)
-        setP2pmdParticipants(null)
-        setP2pmdViewMode('edit')
-        setP2pmdPublishUrl(null)
-        setP2pmdEditorHtml(null)
-        setP2pmdSetupError(null)
-        setP2pmdSyncStatus('Ready')
-      }
-
-      setStatus(response.running ? 'P2PMD room is running' : 'No P2PMD room is running')
+      await loadP2pmdEditorHtml()
+      setP2pmdPeerDisplayName(loadP2pmdPeerDisplayName())
+      setP2pmdRoom(response.room)
+      setP2pmdUrl(response.room.localUrl)
+      setP2pmdParticipants(null)
+      setP2pmdViewMode('edit')
+      setP2pmdPublishUrl(null)
+      setP2pmdSetupError(null)
+      setP2pmdSyncStatus('Ready')
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : String(error))
-    } finally {
-      setIsLoading(false)
+      console.warn('[p2pmd] Could not check for a running note:', error)
     }
   }
 
@@ -2722,16 +3155,60 @@ export default function App () {
 
   function onP2pmdPublishToHyper () {
     if (p2pmdPublishInFlightRef.current) return
+    Alert.alert(
+      'Who can open it?',
+      'Public: anyone with the link can open it, straight from this phone.\n\nPrivate: encrypted, so only your linked devices, the ones that share your identity, can open it.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Private', onPress: chooseP2pmdPrivatePublish },
+        { text: 'Public', onPress: () => requestP2pmdPublish('public') }
+      ],
+      { cancelable: true }
+    )
+  }
+
+  // Same rule as Hyperdrive's private files: the note is encrypted with the
+  // key the desktop sends with your identity. Before that, no other device
+  // could open it, so there is nothing private to publish to yet.
+  function chooseP2pmdPrivatePublish () {
+    if (hasLinkedIdentity()) {
+      requestP2pmdPublish('private')
+      return
+    }
+    Alert.alert(
+      'Link PeerSky Desktop first',
+      'A private note is encrypted with your identity\'s key, so only your linked devices can open it. Bring your identity over in Link Device, then publish again.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Link Device',
+          onPress: () => {
+            setBrowserSettingsInitialPage('link-device')
+            setBrowserSettingsCloseOnBack(true)
+            setBrowserSettingsVisible(true)
+          }
+        }
+      ],
+      { cancelable: true }
+    )
+  }
+
+  function requestP2pmdPublish (visibility: 'public' | 'private') {
+    if (p2pmdPublishInFlightRef.current) return
     setP2pmdSyncStatus('Publishing to Hyper...')
+    const nonce = createP2pmdNonce(Crypto.getRandomValues(new Uint8Array(16)))
+    p2pmdPublishNonceRef.current = nonce
+    p2pmdPublishVisibilityRef.current = visibility
     p2pmdWebViewRef.current?.injectJavaScript(
-      'window.__p2pmdPublishToHyper && window.__p2pmdPublishToHyper(); true;'
+      `window.__p2pmdPublishToHyper && window.__p2pmdPublishToHyper(${JSON.stringify(nonce)}); true;`
     )
   }
 
   async function publishP2pmdContentToHyper (
     content: unknown,
     mode: unknown,
-    latexModeEnabled: unknown
+    latexModeEnabled: unknown,
+    visibility: 'public' | 'private'
   ) {
     if (p2pmdPublishInFlightRef.current) return
 
@@ -2748,13 +3225,15 @@ export default function App () {
       const response = await callRpc(RPC_P2PMD_ROOM_PUBLISH, {
         content,
         mode: mode === 'slides' ? 'slides' : 'note',
-        latexModeEnabled: latexModeEnabled === true
+        latexModeEnabled: latexModeEnabled === true,
+        visibility
       })
 
       if (!response.ok || typeof response.url !== 'string') {
         throw new Error(response.error || 'Unable to publish document to Hyper')
       }
 
+      setP2pmdPublishedVisibility(visibility)
       setP2pmdPublishUrl(response.url)
       setP2pmdSyncStatus('Published to Hyper')
       setStatus(`P2PMD published: ${response.url}`)
@@ -2877,10 +3356,13 @@ export default function App () {
           setP2pmdSyncStatus('Image uploaded')
           break
         case 'p2pmd-publish-requested':
+          if (!parsed.nonce || parsed.nonce !== p2pmdPublishNonceRef.current) break
+          p2pmdPublishNonceRef.current = null
           void publishP2pmdContentToHyper(
             parsed.content,
             parsed.mode,
-            parsed.latexModeEnabled
+            parsed.latexModeEnabled,
+            p2pmdPublishVisibilityRef.current
           )
           break
         default:
@@ -2893,18 +3375,35 @@ export default function App () {
 
   const canBrowserGoBack = browserCanGoBack
   const canBrowserGoForward = browserCanGoForward
+  const browserIncognitoSession = getBrowserIncognitoSession(browserTabsState.tabs)
   const browserIsDark = resolveBrowserDarkMode(browserPreferences.theme, systemColorScheme)
+  const browserStatusBarStyle = getBrowserStatusBarStyle(Platform.OS, browserPreferences.theme, browserIsDark)
   const browserChrome = getBrowserPalette(browserIsDark)
   // P2PMD is written dark, so light is a set of overrides laid on top. Null
   // in dark mode means the arrays below collapse to the base style.
   const p2pmdTheme = browserIsDark ? null : p2pmdLight
   const p2pmdPageColor = browserIsDark ? '#1f2027' : '#f5f8ff'
+  // The search box shows once the list is long enough to need one, and a
+  // query left in it while the list was shorter does not hide anything.
+  const p2pmdRecentShown = filterP2pmdRoomHistory(
+    p2pmdRoomHistory,
+    p2pmdRoomHistory.length > P2PMD_RECENT_SEARCH_AFTER ? p2pmdRecentQuery : ''
+  ) as P2pmdRoomHistoryEntry[]
+  // The Hyperdrive screen's own page colour, so its welcome sits on the same.
+  const hyperdrivePageColor = browserIsDark ? '#1f2027' : '#f5f7fb'
 
   // Push the change into a page that is already open, since the setting can
   // be flipped while the editor is on screen.
   useEffect(() => {
     p2pmdWebViewRef.current?.injectJavaScript(p2pmdThemeScript(browserIsDark))
   }, [browserIsDark])
+  const p2pmdEditorNonce = useMemo(
+    () => createP2pmdNonce(Crypto.getRandomValues(new Uint8Array(16))),
+    [p2pmdRoom?.key, p2pmdRoom?.role, p2pmdUrl]
+  )
+  // Starts the editor over from its own page. A reload would ask the room's
+  // server for it instead.
+  const [p2pmdEditorMount, setP2pmdEditorMount] = useState(0)
   const browserBookmarkActionAvailable = canBookmarkBrowserPage(
     browserSource.kind,
     browserCurrentUrl
@@ -2912,19 +3411,29 @@ export default function App () {
   const browserPageActionAvailable = browserBookmarkActionAvailable || (
     browserSource.kind === 'app' &&
     canUseP2pAppPageActions(browserSource.app, browserCurrentUrl)
+  ) || (
+    // A tab opened for a link spins where reload goes until its page is there.
+    browserSource.kind === 'restore' && browserSource.opening === true && browserIsLoading
   )
   // A web page gets its edge swipe from WKWebView. peersky:// pages are React
   // Native screens with no web history behind them, so the same gesture is
   // recognised here and walks the browser's own history instead. Scoped to the
   // left edge so it never fights a list or the horizontal toolbars.
   const browserBackSwipe = useRef(new Animated.Value(0)).current
+  const browserForwardSwipe = useRef(new Animated.Value(0)).current
+  // Which way the swipe under the finger goes, decided by the edge it began at.
+  const browserSwipeDirectionRef = useRef<'back' | 'forward'>('back')
+  const browserCanGoForwardRef = useRef(false)
+  const browserWindowWidthRef = useRef(browserWindowWidth)
+  browserWindowWidthRef.current = browserWindowWidth
   const peerChatGoBackRef = useRef<(() => boolean) | null>(null)
   const browserSettingsGoBackRef = useRef<(() => boolean) | null>(null)
   const [peerChatRoomOpen, setPeerChatRoomOpen] = useState(false)
   const browserBackGestureStartRef = useRef(0)
   const browserCanGoBackRef = useRef(false)
   const goBrowserBackRef = useRef(goBrowserBack)
-  const browserBackAvailable =
+  // Something over the page that back closes first.
+  const browserOverPage =
     Boolean(browserMediaTarget) ||
     browserZoomVisible ||
     browserMenuVisible ||
@@ -2933,10 +3442,27 @@ export default function App () {
     browserHistoryVisible ||
     browserDownloadsVisible ||
     browserSettingsVisible ||
-    peerChatRoomOpen ||
-    canBrowserGoBack
+    peerChatRoomOpen
+  const browserBackAvailable = browserOverPage || canBrowserGoBack
   browserCanGoBackRef.current = browserBackAvailable
   goBrowserBackRef.current = goBrowserBack
+  // Forward only ever means the page you came back from. With a sheet or a
+  // screen open over the browser there is nothing ahead to go to.
+  browserCanGoForwardRef.current = canBrowserGoForward && !browserOverPage
+  const goBrowserForwardRef = useRef(onBrowserForward)
+  goBrowserForwardRef.current = onBrowserForward
+  const claimBrowserEdgeSwipe = (gesture: { dx: number, dy: number }) => {
+    const startX = browserBackGestureStartRef.current
+    if (browserCanGoBackRef.current && isBackEdgeSwipe({ startX, dx: gesture.dx, dy: gesture.dy })) {
+      browserSwipeDirectionRef.current = 'back'
+      return true
+    }
+    if (browserCanGoForwardRef.current && isForwardEdgeSwipe({ startX, width: browserWindowWidthRef.current, dx: gesture.dx, dy: gesture.dy })) {
+      browserSwipeDirectionRef.current = 'forward'
+      return true
+    }
+    return false
+  }
   const browserBackGesture = useMemo(() => PanResponder.create({
     onStartShouldSetPanResponderCapture: (event) => {
       browserBackGestureStartRef.current = event.nativeEvent.pageX
@@ -2945,42 +3471,51 @@ export default function App () {
     // Claimed on capture, before the touch reaches whatever is underneath. A
     // WebView takes every touch it is given, which is why the swipe worked on
     // the React Native screens and nowhere else.
-    onMoveShouldSetPanResponderCapture: (_event, gesture) => (
-      browserCanGoBackRef.current &&
-      isBackEdgeSwipe({ startX: browserBackGestureStartRef.current, dx: gesture.dx, dy: gesture.dy })
-    ),
-    onMoveShouldSetPanResponder: (_event, gesture) => (
-      browserCanGoBackRef.current &&
-      isBackEdgeSwipe({ startX: browserBackGestureStartRef.current, dx: gesture.dx, dy: gesture.dy })
-    ),
+    onMoveShouldSetPanResponderCapture: (_event, gesture) => claimBrowserEdgeSwipeRef.current(gesture),
+    onMoveShouldSetPanResponder: (_event, gesture) => claimBrowserEdgeSwipeRef.current(gesture),
     // A scroll view underneath asks for the gesture back the moment the finger
     // drifts; letting it have one halfway through a swipe is what made it
     // need two or three tries elsewhere.
     onPanResponderTerminationRequest: () => false,
     // A chip left over from the last swipe would otherwise animate away under
     // the new one.
-    onPanResponderGrant: () => browserBackSwipe.stopAnimation(),
+    onPanResponderGrant: () => {
+      browserBackSwipe.stopAnimation()
+      browserForwardSwipe.stopAnimation()
+    },
     onPanResponderMove: (_event, gesture) => {
-      browserBackSwipe.setValue(backSwipeProgress(gesture.dx))
+      if (browserSwipeDirectionRef.current === 'forward') {
+        browserForwardSwipe.setValue(forwardSwipeProgress(gesture.dx))
+      } else {
+        browserBackSwipe.setValue(backSwipeProgress(gesture.dx))
+      }
     },
     onPanResponderRelease: (_event, gesture) => {
       // The step happens now and the chip fades over the page that follows,
       // rather than the page waiting on an animation to finish.
-      if (shouldCompleteBackSwipe(gesture)) goBrowserBackRef.current()
+      if (browserSwipeDirectionRef.current === 'forward') {
+        if (shouldCompleteForwardSwipe(gesture)) goBrowserForwardRef.current()
+      } else if (shouldCompleteBackSwipe(gesture)) {
+        goBrowserBackRef.current()
+      }
       settleBrowserBackSwipe()
     },
     onPanResponderTerminate: settleBrowserBackSwipe
-  }), [browserBackSwipe])
+  }), [browserBackSwipe, browserForwardSwipe])
+  const claimBrowserEdgeSwipeRef = useRef(claimBrowserEdgeSwipe)
+  claimBrowserEdgeSwipeRef.current = claimBrowserEdgeSwipe
 
   // Always lands on nothing, whether the fade ran or something cut it short.
   // Skipping the reset on an interrupted animation is what used to leave the
   // browser sitting to the right of where it belonged.
   function settleBrowserBackSwipe () {
-    Animated.timing(browserBackSwipe, {
-      duration: 160,
-      toValue: 0,
-      useNativeDriver: true
-    }).start(() => browserBackSwipe.setValue(0))
+    for (const chip of [browserBackSwipe, browserForwardSwipe]) {
+      Animated.timing(chip, {
+        duration: 160,
+        toValue: 0,
+        useNativeDriver: true
+      }).start(() => chip.setValue(0))
+    }
   }
 
   // The note workspace replaces the entire browser when it renders, so the
@@ -3003,6 +3538,50 @@ export default function App () {
   )
   const activeBrowserDesktopView = browserTabsState.tabs
     .find((tab) => tab.id === browserTabsState.activeTabId)?.desktopView === true
+
+  // Android's pull to refresh: the page reports the pull (browser-pull-refresh)
+  // and this moves the card and reloads. iOS does it in the WebView.
+  const browserPullOffset = useRef(new Animated.Value(0)).current
+  const [browserPullRefreshing, setBrowserPullRefreshing] = useState(false)
+  const browserPullSawLoadingRef = useRef(false)
+  const browserPullTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  function settleBrowserPull () {
+    if (browserPullTimerRef.current) clearTimeout(browserPullTimerRef.current)
+    browserPullTimerRef.current = null
+    setBrowserPullRefreshing(false)
+    Animated.timing(browserPullOffset, { duration: 200, toValue: 0, useNativeDriver: true }).start()
+  }
+
+  function onBrowserPull (pull: { phase: string, distance: number }) {
+    if (browserPullRefreshing) return
+    if (pull.phase === 'move') {
+      browserPullOffset.setValue(pullRefreshOffset(pull.distance))
+      return
+    }
+    if (pull.phase !== 'end' || !shouldReloadOnRelease(pull.distance)) {
+      settleBrowserPull()
+      return
+    }
+    browserUserInteractedRef.current = true
+    browserPullSawLoadingRef.current = false
+    setBrowserPullRefreshing(true)
+    Animated.timing(browserPullOffset, { duration: 150, toValue: pullRefreshOffset(80), useNativeDriver: true }).start()
+    reloadBrowserPage()
+    // Gone once the page has loaded again, or after a while if it never says.
+    browserPullTimerRef.current = setTimeout(settleBrowserPull, 8000)
+  }
+
+  useEffect(() => {
+    if (!browserPullRefreshing) return
+    if (browserIsLoading) {
+      browserPullSawLoadingRef.current = true
+      return
+    }
+    if (!browserPullSawLoadingRef.current) return
+    const timer = setTimeout(settleBrowserPull, 250)
+    return () => clearTimeout(timer)
+  }, [browserIsLoading, browserPullRefreshing])
 
   // One definition of "back", so the Android button, the toolbar arrow and the
   // edge swipe cannot disagree about what the step before this one was.
@@ -3056,8 +3635,11 @@ export default function App () {
     return <RestartRequiredScreen isDark={browserIsDark} />
   }
 
+  // Full-screen pages sit on top of the browser instead of replacing it, so
+  // every tab, PeerTunes and an open note stay alive underneath.
+  let browserOverlay: ReactNode = null
   if (browserBookmarksVisible) {
-    return (
+    browserOverlay = (
       <SafeAreaView
         {...browserBackGesture.panHandlers}
         style={[styles.browserShell, { backgroundColor: browserChrome.shell }]}
@@ -3065,7 +3647,7 @@ export default function App () {
       >
         <StatusBar
           backgroundColor={browserChrome.shell}
-          barStyle={browserIsDark ? 'light-content' : 'dark-content'}
+          barStyle={browserStatusBarStyle}
         />
         <View style={styles.browserShellContent}>
           <BookmarksScreen
@@ -3076,7 +3658,7 @@ export default function App () {
             onClose={() => setBrowserBookmarksVisible(false)}
             onOpen={(targetUrl) => {
               setBrowserBookmarksVisible(false)
-              void loadBrowserUrl(targetUrl)
+              openFromList('bookmarks', targetUrl)
             }}
             onRemove={(targetUrl) => {
               if (removeBrowserBookmark(targetUrl)) setStatus('Bookmark removed')
@@ -3092,8 +3674,8 @@ export default function App () {
     )
   }
 
-  if (browserHistoryVisible) {
-    return (
+  if (!browserOverlay && browserHistoryVisible) {
+    browserOverlay = (
       <SafeAreaView
         {...browserBackGesture.panHandlers}
         style={[styles.browserShell, { backgroundColor: browserChrome.shell }]}
@@ -3101,7 +3683,7 @@ export default function App () {
       >
         <StatusBar
           backgroundColor={browserChrome.shell}
-          barStyle={browserIsDark ? 'light-content' : 'dark-content'}
+          barStyle={browserStatusBarStyle}
         />
         <View style={styles.browserShellContent}>
           <HistoryScreen
@@ -3116,7 +3698,7 @@ export default function App () {
             onOpen={(targetUrl) => {
               setBrowserHistoryVisible(false)
               setActiveTab('hyper')
-              void loadBrowserUrl(targetUrl)
+              openFromList('history', targetUrl)
             }}
             onRemove={(item) => {
               if (removeBrowserHistoryItem(item)) setStatus('History entry removed')
@@ -3132,8 +3714,8 @@ export default function App () {
     )
   }
 
-  if (browserDownloadsVisible) {
-    return (
+  if (!browserOverlay && browserDownloadsVisible) {
+    browserOverlay = (
       <SafeAreaView
         {...browserBackGesture.panHandlers}
         style={[styles.browserShell, { backgroundColor: browserChrome.shell }]}
@@ -3141,7 +3723,7 @@ export default function App () {
       >
         <StatusBar
           backgroundColor={browserChrome.shell}
-          barStyle={browserIsDark ? 'light-content' : 'dark-content'}
+          barStyle={browserStatusBarStyle}
         />
         <View style={styles.browserShellContent}>
           <DownloadsScreen
@@ -3155,6 +3737,7 @@ export default function App () {
             onRefresh={() => void refreshBrowserDownloads()}
             onRemove={(downloadId) => void removeBrowserDownload(downloadId)}
             onRetry={retryBrowserDownload}
+            onSaveToFiles={(downloadId) => void saveBrowserDownloadToFiles(downloadId)}
           />
         </View>
         <BrowserBackSwipe
@@ -3166,11 +3749,10 @@ export default function App () {
     )
   }
 
-  if (browserSettingsVisible) {
+  if (!browserOverlay && browserSettingsVisible) {
     // The screen keeps its own page state, so it has to be remounted to land
     // somewhere other than the top.
-
-    return (
+    browserOverlay = (
       <SafeAreaView
         {...browserBackGesture.panHandlers}
         style={[styles.browserShell, { backgroundColor: browserChrome.shell }]}
@@ -3178,7 +3760,7 @@ export default function App () {
       >
         <StatusBar
           backgroundColor={browserIsDark ? browserChrome.surface : browserChrome.shell}
-          barStyle={browserIsDark ? 'light-content' : 'dark-content'}
+          barStyle={browserStatusBarStyle}
         />
         <SafeAreaView
           edges={['top']}
@@ -3203,9 +3785,11 @@ export default function App () {
             isDark={browserIsDark}
             offlineNetworkAllowed={hyperOfflineNetworkAllowed}
             persistenceError={browserPreferencesError}
+            publishingSites={browserPreferences.publishingSites}
             searchEngine={browserPreferences.searchEngine}
             showFullAddress={browserPreferences.showFullAddress}
             theme={browserPreferences.theme}
+            toolbarButton={browserPreferences.toolbarButton}
             websiteTextScale={browserPreferences.websiteTextScale}
             youtubeAdBlockingEnabled={browserPreferences.youtubeAdBlockingEnabled}
             storagePath={identityStoragePath}
@@ -3217,6 +3801,7 @@ export default function App () {
               void applyAppIcon(color)
             }}
             onForceDarkWebsitesChange={setForceDarkWebsites}
+            onToolbarButtonChange={setToolbarButton}
             onCallRpc={(command, data = {}) => callRpc(command, data)}
             onContentBlockingEnabledChange={onContentBlockingEnabledChange}
             onClose={closeBrowserSettings}
@@ -3231,6 +3816,7 @@ export default function App () {
             onDownloadOnlyOnWifiChange={setDownloadOnlyOnWifi}
             onEnforceManualPageZoomChange={setEnforceManualPageZoom}
             onExternalLinkBehaviorChange={setExternalLinkBehavior}
+            onPublishingSiteChange={setPublishingSite}
             onFilterListsUpdated={refreshContentBlockedPages}
             onSearchEngineChange={setSearchEngine}
             onShowFullAddressChange={setShowFullAddress}
@@ -3238,8 +3824,11 @@ export default function App () {
             onWebsiteTextScaleChange={setWebsiteTextScale}
             onYoutubeAdBlockingEnabledChange={onYoutubeAdBlockingEnabledChange}
             onResetTabs={onBrowserResetTabs}
+            onP2pmdDataDeleted={forgetP2pmdRecents}
+            onOfflineFoldersChanged={() => setOfflineFoldersVersion((version) => version + 1)}
             onOpenUrl={(targetUrl, fromPage) => {
               closeBrowserSettings()
+              listReturnRef.current = null
               settingsReturnRef.current = !fromPage || fromPage === 'main'
                 ? null
                 : {
@@ -3270,26 +3859,28 @@ export default function App () {
     )
   }
 
-  if (activeTab === 'p2pmd' && p2pmdWorkspaceReady && p2pmdRoom && p2pmdUrl && p2pmdEditorHtml) {
+  // The tab list is drawn in the browser underneath, so the note steps aside
+  // while it is open, as it does for any other tab.
+  if (!browserOverlay && !browserTabsVisible && activeTab === 'p2pmd' && p2pmdWorkspaceReady && p2pmdRoom && p2pmdUrl && p2pmdEditorHtml) {
     const p2pmdEditorRoomBaseUrl = p2pmdUrl.replace(/\/$/, '')
-    const p2pmdEditorBaseUrl = `${p2pmdEditorRoomBaseUrl}/?role=${encodeURIComponent(p2pmdRoom.role)}`
+    const p2pmdSyncDisplay = getP2pmdSyncDisplay(p2pmdSyncStatus)
+    // The same colour as the menu's dots beside it.
+    const p2pmdHeaderIconColor = browserIsDark ? BROWSER_PALETTES.dark.mutedText : '#1f2a44'
+    const p2pmdEditorBaseUrl = createP2pmdEditorUrl(p2pmdEditorRoomBaseUrl, p2pmdRoom.role, p2pmdEditorNonce)
     const p2pmdEditorHtmlWithRoomBase = p2pmdEditorHtml.replace(
       '<head>',
       `<head><script>window.__P2PMD_ROOM_BASE_URL__=${serializeInlineScriptValue(p2pmdEditorRoomBaseUrl)};window.__P2PMD_ROOM_KEY__=${serializeInlineScriptValue(p2pmdRoom.key)};window.__P2PMD_DISPLAY_NAME__=${serializeInlineScriptValue(p2pmdPeerDisplayName)};</script>`
     )
 
-    return (
+    browserOverlay = (
       <SafeAreaView style={[styles.p2pmdWorkspace, p2pmdTheme?.p2pmdWorkspace]} edges={['top', 'left', 'right', 'bottom']}>
         <StatusBar
           hidden={isP2pmdLandscapeSlides}
           backgroundColor={browserIsDark ? '#1f2027' : '#ffffff'}
-          barStyle={browserIsDark ? 'light-content' : 'dark-content'}
+          barStyle={browserStatusBarStyle}
         />
         {!isP2pmdLandscapeSlides && <View style={[styles.p2pmdWorkspaceHeader, p2pmdTheme?.p2pmdWorkspaceHeader]}>
           <Text style={[styles.p2pmdWorkspaceTitle, p2pmdTheme?.p2pmdWorkspaceTitle]}>P2PMD</Text>
-          <Text style={[styles.p2pmdWorkspaceRole, p2pmdTheme?.p2pmdWorkspaceRole, p2pmdRoom.role === 'host' ? [styles.p2pmdWorkspaceRoleHost, p2pmdTheme?.p2pmdWorkspaceRoleHost] : null]}>
-            {p2pmdRoom.role}
-          </Text>
           <Pressable
             accessibilityRole='button'
             accessibilityLabel={`Peers: ${p2pmdParticipants ?? 'unknown'}`}
@@ -3327,6 +3918,21 @@ export default function App () {
               </Text>
             </View>
           </Pressable>
+          {/* The tabs, as on the toolbar. A note fills the screen, and the way
+              to another tab was the menu's New tab and then the tab list. */}
+          <Pressable
+            accessibilityLabel={`Open tabs, ${browserTabsState.tabs.length} open`}
+            accessibilityRole='button'
+            style={styles.p2pmdTabsButton}
+            onPress={() => {
+              browserUserInteractedRef.current = true
+              setBrowserTabsVisible(true)
+            }}
+          >
+            <View style={[styles.browserTabCountIcon, { borderColor: p2pmdHeaderIconColor }]}>
+              <Text style={[styles.browserTabCountText, { color: p2pmdHeaderIconColor }]}>{browserTabsState.tabs.length}</Text>
+            </View>
+          </Pressable>
           <BrowserOverflowMenu
             bookmarkActionAvailable={false}
             bookmarksDisabled={!browserBookmarksReady}
@@ -3336,6 +3942,7 @@ export default function App () {
             visible={browserMenuVisible}
             onClose={() => setBrowserMenuVisible(false)}
             onNewTab={onBrowserNewTab}
+            onNewIncognitoTab={onBrowserNewIncognitoTab}
             onOpenBookmarks={onBrowserOpenBookmarks}
             onOpenDownloads={onBrowserOpenDownloads}
             onOpenHistory={onBrowserOpenHistory}
@@ -3354,10 +3961,18 @@ export default function App () {
               <Text numberOfLines={1} ellipsizeMode='middle' style={[styles.p2pmdWorkspaceKey, p2pmdTheme?.p2pmdWorkspaceKey]}>
                 {p2pmdRoom.key}
               </Text>
+              {p2pmdSyncDisplay.kind === 'dot' && (
+                <View accessible accessibilityLabel='Unsaved changes' style={styles.p2pmdUnsavedDot} />
+              )}
             </View>
-            <Text numberOfLines={1} ellipsizeMode='middle' style={[styles.p2pmdWorkspaceUrl, p2pmdTheme?.p2pmdWorkspaceUrl]}>
-              {p2pmdRoom.localUrl}
-            </Text>
+            <View style={styles.p2pmdWorkspaceUrlRow}>
+              <Text numberOfLines={1} ellipsizeMode='middle' style={[styles.p2pmdWorkspaceUrl, p2pmdTheme?.p2pmdWorkspaceUrl]}>
+                {p2pmdRoom.localUrl}
+              </Text>
+              <Text style={[styles.p2pmdWorkspaceRole, styles.p2pmdWorkspaceRoleInline, p2pmdTheme?.p2pmdWorkspaceRole, p2pmdRoom.role === 'host' ? [styles.p2pmdWorkspaceRoleHost, p2pmdTheme?.p2pmdWorkspaceRoleHost] : null]}>
+                {p2pmdRoom.role}
+              </Text>
+            </View>
             {p2pmdPublishUrl && (
               <Pressable
                 accessibilityHint='Shows the published link to share or copy'
@@ -3372,23 +3987,27 @@ export default function App () {
                 <Text style={[styles.p2pmdPublishedUrlAction, p2pmdTheme?.p2pmdPublishedUrlAction]}>Share</Text>
               </Pressable>
             )}
-            <Text numberOfLines={1} style={[styles.p2pmdWorkspaceSyncStatus, p2pmdTheme?.p2pmdWorkspaceSyncStatus]}>
-              {p2pmdSyncStatus}
-            </Text>
+            {p2pmdSyncDisplay.kind === 'text' && (
+              <Text numberOfLines={1} style={[styles.p2pmdWorkspaceSyncStatus, p2pmdTheme?.p2pmdWorkspaceSyncStatus]}>
+                {p2pmdSyncDisplay.text}
+              </Text>
+            )}
           </View>
+          <Pressable
+            accessibilityLabel='Share note'
+            accessibilityRole='button'
+            style={[styles.p2pmdMetaButton, p2pmdTheme?.p2pmdMetaButton, styles.p2pmdMetaIconButton]}
+            onPress={() => void onP2pmdShareRoom()}
+            disabled={isBooting || isLoading}
+          >
+            <ShareIcon width={16} height={16} color={browserIsDark ? '#f1f2f7' : '#1f2a44'} />
+          </Pressable>
           <Pressable
             style={[styles.p2pmdMetaButton, p2pmdTheme?.p2pmdMetaButton]}
             onPress={onP2pmdPublishToHyper}
             disabled={isBooting || isLoading || isP2pmdPublishing}
           >
             <Text style={[styles.p2pmdMetaButtonText, p2pmdTheme?.p2pmdMetaButtonText]}>Publish</Text>
-          </Pressable>
-          <Pressable
-            style={[styles.p2pmdMetaButton, p2pmdTheme?.p2pmdMetaButton]}
-            onPress={() => void onP2pmdShareRoom()}
-            disabled={isBooting || isLoading}
-          >
-            <Text style={[styles.p2pmdMetaButtonText, p2pmdTheme?.p2pmdMetaButtonText]}>Share</Text>
           </Pressable>
           <Pressable
             style={[styles.p2pmdMetaButton, p2pmdTheme?.p2pmdMetaButton, styles.p2pmdMetaButtonDanger, p2pmdTheme?.p2pmdMetaButtonDanger]}
@@ -3399,11 +4018,25 @@ export default function App () {
           </Pressable>
         </View>}
         <WebView
-          key={`${p2pmdRoom.role}:${p2pmdEditorBaseUrl}:${p2pmdEditorHtml.length}`}
+          key={`${p2pmdEditorBaseUrl}:${p2pmdEditorHtml.length}:${p2pmdEditorMount}`}
           ref={p2pmdWebViewRef}
           source={{
             html: p2pmdEditorHtmlWithRoomBase,
             baseUrl: p2pmdEditorBaseUrl
+          }}
+          // Only the editor's own page loads here. A link in a note opens in
+          // a browser tab, and nothing is handed to another app unasked.
+          originWhitelist={['*']}
+          onShouldStartLoadWithRequest={(request) => {
+            const action = getP2pmdEditorRequestAction(request, p2pmdEditorBaseUrl)
+            if (action === 'open') openBrowserUrlInNewTab(request.url)
+            return action === 'load'
+          }}
+          onOpenWindow={(event) => {
+            const { targetUrl } = event.nativeEvent
+            if (getP2pmdEditorRequestAction({ url: targetUrl }, p2pmdEditorBaseUrl) === 'open') {
+              openBrowserUrlInNewTab(targetUrl)
+            }
           }}
           // The page cannot see the browser's own light/dark/system setting,
           // so it is told. Set before first paint so the editor never flashes
@@ -3413,10 +4046,15 @@ export default function App () {
           // The slide styles lay out <video>, which WKWebView will not play
           // inline on iPhone without this.
           allowsInlineMediaPlayback={true}
+          // Left unset, a swipe stops dead on iOS (see the browser WebView).
+          decelerationRate={WEBVIEW_DECELERATION_RATE}
           cacheEnabled={false}
           textZoom={100}
           style={[styles.p2pmdWorkspaceWebView, p2pmdTheme?.p2pmdWorkspaceWebView]}
-          onMessage={(event) => onP2pmdWebViewMessage(event.nativeEvent.data)}
+          onMessage={(event) => {
+            if (!isP2pmdEditorMessage(event.nativeEvent.url, p2pmdEditorBaseUrl)) return
+            onP2pmdWebViewMessage(event.nativeEvent.data)
+          }}
           // iOS kills a backgrounded WKWebView's content process to reclaim
           // memory. The view comes back blank and stays blank, which is why an
           // open note looked empty after the phone had been locked and left
@@ -3424,11 +4062,11 @@ export default function App () {
           // the document lives in the room, not in the view.
           onContentProcessDidTerminate={() => {
             setStatus('Reloading the note after iOS reclaimed it')
-            p2pmdWebViewRef.current?.reload()
+            setP2pmdEditorMount((count) => count + 1)
           }}
           onRenderProcessGone={() => {
             setStatus('Reloading the note after the system reclaimed it')
-            p2pmdWebViewRef.current?.reload()
+            setP2pmdEditorMount((count) => count + 1)
           }}
           onError={(event) => {
             setStatus(`P2PMD WebView failed: ${event.nativeEvent.description}`)
@@ -3448,9 +4086,13 @@ export default function App () {
 
         <PublishedLinkSheet
           isDark={browserIsDark}
-          message='Share it with other peers! It loads straight from this phone, so keep PeerSky open while they open it.'
+          message={p2pmdPublishedVisibility === 'private'
+            ? 'Only your linked devices can open it. It is encrypted, and loads straight from this phone, so keep PeerSky open while they open it.'
+            : 'Share it with other peers! It loads straight from this phone, so keep PeerSky open while they open it.'}
           shareTitle={p2pmdPublishSheet === 'slides' ? 'Published P2PMD presentation' : 'Published P2PMD note'}
-          title={p2pmdPublishSheet === 'slides' ? 'Your slides are live' : 'Your note is live'}
+          title={p2pmdPublishedVisibility === 'private'
+            ? (p2pmdPublishSheet === 'slides' ? 'Your private slides are ready' : 'Your private note is ready')
+            : (p2pmdPublishSheet === 'slides' ? 'Your slides are live' : 'Your note is live')}
           url={p2pmdPublishUrl}
           visible={p2pmdPublishSheet !== null}
           onClose={() => setP2pmdPublishSheet(null)}
@@ -3468,7 +4110,9 @@ export default function App () {
       activeTabId={browserTabsState.activeTabId}
       address={browserAddress}
       currentUrl={browserCurrentUrl}
+      focusRequest={browserAddressFocusRequest}
       isDark={browserIsDark}
+      isIncognito={browserTabsState.tabs.some((tab) => tab.id === browserTabsState.activeTabId && tab.incognito === true)}
       isLoading={browserIsLoading}
       historySuggestions={getBrowserHistorySuggestions(browserAddress)}
       navigationKey={`${browserTabsState.activeTabId}:${browserHistoryIndex}`}
@@ -3515,11 +4159,18 @@ export default function App () {
       // above, so the navigation bar does not draw a second one.
       showTopBorder={browserPreferences.addressBarPosition === 'top'}
       tabCount={browserTabsState.tabs.length}
+      toolbarButton={browserPreferences.toolbarButton}
       onBack={onBrowserBack}
       onBurnTabs={onBrowserBurnTabs}
       onCloseMenu={() => setBrowserMenuVisible(false)}
       onForward={onBrowserForward}
+      onGoHome={() => {
+        browserUserInteractedRef.current = true
+        cancelPendingBrowserLoad()
+        openBrowserHome()
+      }}
       onNewTab={onBrowserNewTab}
+      onNewIncognitoTab={onBrowserNewIncognitoTab}
       onOpenBookmarks={onBrowserOpenBookmarks}
       onOpenDownloads={onBrowserOpenDownloads}
       onOpenHistory={onBrowserOpenHistory}
@@ -3569,7 +4220,7 @@ export default function App () {
       ),
       id: tab.id,
       isActive: tab.id === browserTabsState.activeTabId,
-      label: getBrowserTabLabel(tab),
+      label: tab.incognito ? `Incognito · ${getBrowserTabLabel(tab)}` : getBrowserTabLabel(tab),
       preview
     }
   })
@@ -3602,15 +4253,19 @@ export default function App () {
     )
   }
 
-  return (
+  const browser = (
     // No left or right safe-area edge on purpose. Insetting the whole shell
     // left the toolbar stopping short of both screen edges in landscape, with
     // the page colour showing beside it. The chrome fills the screen and keeps
     // its own contents clear of the notch instead.
-    <View style={[styles.browserShell, { backgroundColor: browserChrome.shell }]}>
+    <View
+      accessibilityElementsHidden={browserOverlay !== null}
+      importantForAccessibility={browserOverlay ? 'no-hide-descendants' : 'auto'}
+      style={[styles.browserShell, { backgroundColor: browserChrome.shell }]}
+    >
         <StatusBar
           backgroundColor={browserTopInsetColor}
-          barStyle={browserIsDark ? 'light-content' : 'dark-content'}
+          barStyle={browserStatusBarStyle}
         />
         <SafeAreaView
           edges={['top']}
@@ -3619,8 +4274,14 @@ export default function App () {
         <KeyboardAvoidingView
           behavior='padding'
           enabled={
-            browserPreferences.addressBarPosition === 'bottom' ||
-            (browserSource.kind === 'app' && activeTab === 'peerchat')
+            // Android reports a keyboard that has gone away a little above the
+            // bottom, so the padding stayed: a band of page colour under the
+            // navigation bar until the next keyboard. Off while there is none.
+            (Platform.OS === 'ios' || isKeyboardVisible) &&
+            (
+              browserPreferences.addressBarPosition === 'bottom' ||
+              (browserSource.kind === 'app' && activeTab === 'peerchat')
+            )
           }
           style={styles.browserShellContent}
         >
@@ -3656,6 +4317,81 @@ export default function App () {
           ]}
           onTouchStart={browserSource.kind === 'app' && activeTab === 'peerchat' ? undefined : Keyboard.dismiss}
         >
+        {browserHomeMounted && (
+          // Kept once drawn and hidden while anything else is open. Built
+          // again on every return, the wallpaper and the icons flashed in.
+          <View
+            accessibilityElementsHidden={browserSource.kind !== 'home'}
+            importantForAccessibility={browserSource.kind === 'home' ? 'auto' : 'no-hide-descendants'}
+            pointerEvents={browserSource.kind === 'home' ? 'auto' : 'none'}
+            style={[styles.browserHomeLayer, browserSource.kind === 'home' ? null : styles.browserHomeLayerHidden]}
+          >
+            <BrowserHomeBackground isDark={browserIsDark}>
+              <ScrollView
+                style={styles.browserContentPage}
+                contentContainerStyle={[
+                  styles.browserHome,
+                  // The layer reaches the glass, so the shortcuts step in
+                  // themselves to clear the notch in landscape.
+                  {
+                    paddingLeft: BROWSER_HOME_PADDING + browserInsets.left,
+                    paddingRight: BROWSER_HOME_PADDING + browserInsets.right
+                  }
+                ]}
+                keyboardDismissMode='on-drag'
+              >
+                <View style={styles.browserShortcutGrid}>
+                  {BROWSER_HOME_SHORTCUTS.map((app) => (
+                    <Pressable
+                      key={app.id}
+                      style={styles.browserShortcut}
+                      onPress={() => void loadBrowserUrl(app.url)}
+                    >
+                      <View style={styles.browserShortcutIconFrame}>
+                        <View style={[
+                          styles.browserShortcutIcon,
+                          app.iconSource ? null : getRuntimeAppIconStyle(app.id)
+                        ]}>
+                          {app.iconSource
+                            ? <Image source={app.iconSource} style={styles.browserShortcutIconImage} />
+                            : <Text style={styles.browserShortcutIconText}>{app.icon}</Text>}
+                        </View>
+                        {app.id === 'peerchat' && peerChatNotifications.unreadTotal > 0 && (
+                          <View style={styles.browserShortcutBadge}>
+                            <Text style={styles.browserShortcutBadgeText}>
+                              {peerChatNotifications.unreadTotal > 99 ? '99+' : peerChatNotifications.unreadTotal}
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+                      <Text
+                        numberOfLines={2}
+                        style={[
+                          styles.browserShortcutTitle,
+                          // The labels carry their own contrast now, so the
+                          // wallpaper does not have to be washed out to hold
+                          // them.
+                          browserIsDark ? styles.browserShortcutTitleOnDark : styles.browserShortcutTitleOnLight,
+                          { color: browserChrome.text, fontSize: browserShortcutTitleFontSize }
+                        ]}
+                      >
+                        {app.title}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+                <BrowserFavourites
+                  favourites={browserFavourites}
+                  palette={browserChrome}
+                  titleStyle={browserIsDark ? styles.browserShortcutTitleOnDark : styles.browserShortcutTitleOnLight}
+                  onOpen={(targetUrl) => void loadBrowserUrl(targetUrl)}
+                  onRemove={onBrowserRemoveFavourite}
+                />
+              </ScrollView>
+            </BrowserHomeBackground>
+          </View>
+        )}
+
         {browserSource.kind === 'p2p'
           ? (
             <ScrollView
@@ -3699,75 +4435,21 @@ export default function App () {
             </ScrollView>
             )
           : browserSource.kind === 'home'
-          ? (
-            <BrowserHomeBackground
-              bleed={{ left: browserInsets.left, right: browserInsets.right }}
-              scrim={browserIsDark ? 'rgba(24, 24, 27, 0.35)' : 'rgba(255, 255, 255, 0.14)'}
-            >
-            <ScrollView
-              style={styles.browserContentPage}
-              contentContainerStyle={[
-                styles.browserHome,
-                // Put back what the wallpaper bled through, so the shortcuts
-                // still clear the notch in landscape.
-                {
-                  paddingLeft: BROWSER_HOME_PADDING + browserInsets.left,
-                  paddingRight: BROWSER_HOME_PADDING + browserInsets.right
-                }
-              ]}
-              keyboardDismissMode='on-drag'
-            >
-              <View style={styles.browserShortcutGrid}>
-                {BROWSER_HOME_SHORTCUTS.map((app) => (
-                  <Pressable
-                    key={app.id}
-                    style={styles.browserShortcut}
-                    onPress={() => void loadBrowserUrl(app.url)}
-                  >
-                    <View style={styles.browserShortcutIconFrame}>
-                      <View style={[
-                        styles.browserShortcutIcon,
-                        app.iconSource ? null : getRuntimeAppIconStyle(app.id)
-                      ]}>
-                        {app.iconSource
-                          ? <Image source={app.iconSource} style={styles.browserShortcutIconImage} />
-                          : <Text style={styles.browserShortcutIconText}>{app.icon}</Text>}
-                      </View>
-                      {app.id === 'peerchat' && peerChatNotifications.unreadTotal > 0 && (
-                        <View style={styles.browserShortcutBadge}>
-                          <Text style={styles.browserShortcutBadgeText}>
-                            {peerChatNotifications.unreadTotal > 99 ? '99+' : peerChatNotifications.unreadTotal}
-                          </Text>
-                        </View>
-                      )}
-                    </View>
-                    <Text
-                      numberOfLines={2}
-                      style={[
-                        styles.browserShortcutTitle,
-                        // The labels carry their own contrast now, so the
-                        // wallpaper does not have to be washed out to hold
-                        // them.
-                        browserIsDark ? styles.browserShortcutTitleOnDark : styles.browserShortcutTitleOnLight,
-                        { color: browserChrome.text, fontSize: browserShortcutTitleFontSize }
-                      ]}
-                    >
-                      {app.title}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
-              <BrowserFavourites
-                favourites={browserFavourites}
-                palette={browserChrome}
-                onOpen={(targetUrl) => void loadBrowserUrl(targetUrl)}
-                onRemove={onBrowserRemoveFavourite}
-              />
-            </ScrollView>
-            </BrowserHomeBackground>
-            )
+          ? null
           : browserSource.kind === 'app'
-            ? activeTab === 'hyper'
+            ? activeTab === 'hyper' && showHyperdriveWelcome
+              ? (
+                <AppWelcome
+                  content={HYPERDRIVE_WELCOME}
+                  isDark={browserIsDark}
+                  backgroundColor={hyperdrivePageColor}
+                  onDone={() => {
+                    markWelcomeSeen(getAppWelcomeFile('hyperdrive'))
+                    setShowHyperdriveWelcome(false)
+                  }}
+                />
+                )
+              : activeTab === 'hyper'
               ? (
                 <HyperdriveScreen
                   offlineNetworkAllowed={hyperOfflineNetworkAllowed}
@@ -3810,7 +4492,19 @@ export default function App () {
                 // PeerTunes lives in the persistent layer below so music keeps
                 // playing when the user switches tabs. Nothing to draw here.
                 ? null
-                : (
+                : activeTab === 'p2pmd' && showP2pmdWelcome
+                  ? (
+                    <AppWelcome
+                      content={P2PMD_WELCOME}
+                      isDark={browserIsDark}
+                      backgroundColor={p2pmdPageColor}
+                      onDone={() => {
+                        markWelcomeSeen(getAppWelcomeFile('p2pmd'))
+                        setShowP2pmdWelcome(false)
+                      }}
+                    />
+                    )
+                  : (
               <ScrollView
                 style={[
                   styles.browserContentPage,
@@ -3932,9 +4626,6 @@ export default function App () {
                           A real-time peer-to-peer Markdown editor for writing notes and collaboration.
                         </Text>
                       </View>
-                      <Text style={[styles.roomPill, p2pmdTheme?.roomPill, p2pmdRoom ? styles.roomPillLive : null]}>
-                        {p2pmdRoom ? 'live' : 'ready'}
-                      </Text>
                     </View>
                     {!p2pmdPeerDisplayName || isEditingP2pmdName
                       ? (
@@ -4020,20 +4711,23 @@ export default function App () {
                           </Text>
                           <View style={styles.p2pmdActionRow}>
                             <Pressable
-                              style={[styles.p2pmdPrimaryAction, isBooting || isLoading ? styles.p2pmdActionDisabled : null]}
-                              onPress={() => void onP2pmdRoomCreate()}
+                              style={[styles.p2pmdPrimaryAction, styles.p2pmdCreateAction, isBooting || isLoading ? styles.p2pmdActionDisabled : null]}
+                              onPress={() => setP2pmdNewNoteVisible(true)}
                               disabled={isBooting || isLoading}
                             >
+                              <PencilSquareIcon width={18} height={18} color='#ffffff' />
                               <Text style={styles.p2pmdPrimaryActionText}>Create Note</Text>
                             </Pressable>
-                            <Pressable
-                              style={[styles.p2pmdTextAction, p2pmdTheme?.p2pmdTextAction, isBooting || isLoading ? styles.p2pmdActionDisabled : null]}
-                              onPress={() => void onP2pmdRoomRefresh()}
-                              disabled={isBooting || isLoading}
-                            >
-                              <Text style={[styles.p2pmdTextActionText, p2pmdTheme?.p2pmdTextActionText]}>Refresh</Text>
-                            </Pressable>
                           </View>
+                          <P2pmdNewNoteSheet
+                            visible={p2pmdNewNoteVisible}
+                            isDark={browserIsDark}
+                            onClose={() => setP2pmdNewNoteVisible(false)}
+                            onCreate={(isPrivate) => {
+                              setP2pmdNewNoteVisible(false)
+                              void onP2pmdRoomCreate(null, { secure: isPrivate })
+                            }}
+                          />
                           <View style={styles.p2pmdNameSummary}>
                             <Text numberOfLines={1} style={[styles.helperText, p2pmdTheme?.helperText, styles.p2pmdNameSummaryText]}>
                               You are <Text style={styles.p2pmdNameSummaryName}>{p2pmdPeerDisplayName}</Text>
@@ -4122,10 +4816,30 @@ export default function App () {
                       {p2pmdRoomHistory.length > 0 && (
                         <View style={styles.p2pmdRecentRooms}>
                           <Text style={[styles.fieldLabel, p2pmdTheme?.fieldLabel]}>Recent notes</Text>
-                          {p2pmdRoomHistory.map((room) => (
+                          {p2pmdRoomHistory.length > P2PMD_RECENT_SEARCH_AFTER && (
+                            <TextInput
+                              accessibilityLabel='Search recent notes'
+                              autoCapitalize='none'
+                              autoCorrect={false}
+                              clearButtonMode='while-editing'
+                              onChangeText={setP2pmdRecentQuery}
+                              placeholder='Search notes'
+                              placeholderTextColor='#6f7484'
+                              returnKeyType='search'
+                              style={[styles.input, styles.p2pmdInput, p2pmdTheme?.p2pmdInput]}
+                              value={p2pmdRecentQuery}
+                            />
+                          )}
+                          {p2pmdRecentShown.length === 0 && (
+                            <Text style={[styles.helperText, p2pmdTheme?.helperText]}>No notes by that name.</Text>
+                          )}
+                          {p2pmdRecentShown.map((room) => {
+                            const isPrivate = isPrivateP2pmdNoteKey(room.key)
+                            const PrivacyIcon = isPrivate ? ShieldLockIcon : GlobeIcon
+                            return (
                             <Pressable
                               key={room.key}
-                              accessibilityLabel={`Reopen P2PMD note ${room.label || formatP2pmdRoomHistoryKey(room.key)}`}
+                              accessibilityLabel={`Reopen ${isPrivate ? 'private' : 'public'} P2PMD note ${room.label || formatP2pmdRoomHistoryKey(room.key)}`}
                               accessibilityRole='button'
                               disabled={isBooting || isLoading}
                               accessibilityHint='Press and hold to remove this note from the list'
@@ -4145,6 +4859,7 @@ export default function App () {
                                 isBooting || isLoading ? styles.p2pmdActionDisabled : null
                               ]}
                             >
+                              <PrivacyIcon width={16} height={16} color={browserIsDark ? '#9aa3b8' : '#687086'} />
                               <Text numberOfLines={1} style={[styles.p2pmdRecentRoomKey, p2pmdTheme?.p2pmdRecentRoomKey]}>
                                 {room.label || formatP2pmdRoomHistoryKey(room.key)}
                               </Text>
@@ -4152,7 +4867,8 @@ export default function App () {
                                 {room.role === 'host' ? 'Reopen' : 'Join'}
                               </Text>
                             </Pressable>
-                          ))}
+                            )
+                          })}
                           <Pressable
                             accessibilityLabel='Manage stored note data'
                             accessibilityRole='button'
@@ -4215,13 +4931,23 @@ export default function App () {
               </ScrollView>
               )
           : browserSource.kind === 'restore'
-            ? (
-              <View style={styles.browserRestorePage}>
-                <ActivityIndicator size='small' color='#1f6fd1' />
-                <Text style={styles.browserRestoreText}>Restoring tab...</Text>
-              </View>
-              )
-            : null}
+            ? browserSource.opening
+              // A page on its way: blank, with the address bar showing it load.
+              ? <View style={[styles.browserRestorePage, { backgroundColor: browserChrome.surface }]} />
+              : (
+                <View style={styles.browserRestorePage}>
+                  <ActivityIndicator size='small' color='#1f6fd1' />
+                  <Text style={styles.browserRestoreText}>Restoring tab...</Text>
+                </View>
+                )
+            : !contentBlockingReady && isBrowserWebViewSource(browserSource)
+                ? (
+                  <View style={styles.browserRestorePage}>
+                    <ActivityIndicator size='small' color='#1f6fd1' />
+                    <Text style={styles.browserRestoreText}>Turning on tracker protection...</Text>
+                  </View>
+                  )
+                : null}
 
         {peertunesMounted && (
           <View
@@ -4240,6 +4966,8 @@ export default function App () {
               localUrl={peertunesUrl}
               onEnsureServer={() => void ensurePeerTunesServer()}
               onKeepOffline={keepPeerTunesFolderOffline}
+              onKeptFolders={peerTunesKeptFolders}
+              offlineFoldersVersion={offlineFoldersVersion}
               onOpenUrl={(targetUrl) => openBrowserUrlInNewTab(targetUrl)}
               onStatus={setStatus}
             />
@@ -4261,12 +4989,8 @@ export default function App () {
           const isActive = tab.id === browserTabsState.activeTabId
           const tabPageZoom = normalizeBrowserPageZoom(tab.pageZoom)
           const tabDesktopView = tab.desktopView === true
-          let browserMediaToken = browserMediaTokensRef.current.get(tab.id)
-          if (!browserMediaToken) {
-            const tokenBytes = Crypto.getRandomValues(new Uint8Array(BROWSER_MEDIA_TOKEN_LENGTH / 2))
-            browserMediaToken = createBrowserMediaToken(tokenBytes)
-            browserMediaTokensRef.current.set(tab.id, browserMediaToken)
-          }
+          const browserMediaToken = getBrowserTabToken(tab.id)
+          const tabIncognito = tab.incognito === true
           const browserNativeConfig = peerSkyWebViewNativeConfig
             ? {
                 ...peerSkyWebViewNativeConfig,
@@ -4275,7 +4999,16 @@ export default function App () {
                     ? browserMediaToken
                     : null,
                   mediaLongPressToken: browserMediaToken
-                })
+                },
+                // Incognito cookies live apart from normal tabs, in one store
+                // (on Android a WebView profile) for each run of incognito tabs.
+                tabIncognito && browserIncognitoSession ? { incognitoSession: browserIncognitoSession } : {},
+                // Pages are told dark is preferred, so a site's own dark theme
+                // wins over the inverting script.
+                Platform.OS === 'ios' ? { forceDarkScheme: browserPreferences.forceDarkWebsites } : {},
+                // A hyper:// page keeps what it stores for as long as the app
+                // runs, apart from websites, so burning the tabs clears it too.
+                Platform.OS === 'ios' && entry.source.kind === 'hyper' ? { hyperSession: true } : {})
               }
             : undefined
           const browserAccessibilityScript = createBrowserAccessibilityScript({
@@ -4299,6 +5032,7 @@ export default function App () {
             browserAccessibilityScript,
             browserMediaScript,
             browserContentBlockingScript,
+            Platform.OS === 'android' ? createPullRefreshScript(browserMediaToken) : '',
             // After the page has drawn, so the check for a site that is already
             // dark reads the site's own background rather than an empty one.
             createForceDarkScript(browserPreferences.forceDarkWebsites),
@@ -4349,24 +5083,34 @@ export default function App () {
                 ? { uri: entry.source.uri }
                 : {
                     html: entry.source.html,
-                    // iOS refuses to render HTML whose baseUrl uses an unknown
-                    // scheme, so hyper:// pages came up blank there. The base is
-                    // carried by a <base href> tag in the document instead.
-                    baseUrl: entry.source.kind === 'hyper' && Platform.OS !== 'ios'
-                      ? entry.source.baseUrl
-                      : undefined
+                    // A hyper:// page is shown under its own address, so its
+                    // location, links and storage are its own. iOS renders it
+                    // only because PeerSkyWebView handles hyper:// (see
+                    // PeerSkyWebViewManager.m.template); before that it was
+                    // about:blank there.
+                    baseUrl: entry.source.kind === 'hyper' ? entry.source.baseUrl : undefined
                   }}
               allowsFullscreenVideo={true}
               // WKWebView refuses inline HTML5 video on iPhone unless this is
               // set, and YouTube's player is inline, so the video area stayed
               // black no matter what the content blocker was doing.
               allowsInlineMediaPlayback={true}
+              // Safari's glide. Left unset, react-native-webview hands iOS a
+              // rate of 0 at the start of every drag, so a swipe stopped dead
+              // the moment the finger lifted.
+              decelerationRate={WEBVIEW_DECELERATION_RATE}
               // The edge swipe is recognised by the app, not WKWebView, so
               // that one gesture walks the browser's own history everywhere.
               // WKWebView only knows the page's history, which is why a search
               // result could not be swiped back to the home screen.
               allowsBackForwardNavigationGestures={false}
-              cacheEnabled={true}
+              // Pull down at the top to reload, with the system's own spinner.
+              // Android's WebView has none, so its page reports the pull.
+              pullToRefreshEnabled={Platform.OS === 'ios'}
+              cacheEnabled={!tabIncognito}
+              // iOS gives each incognito tab a data store that is never
+              // written to disk.
+              incognito={Platform.OS === 'ios' && tabIncognito}
               geolocationEnabled={true}
               mediaCapturePermissionGrantType='prompt'
               nativeConfig={browserNativeConfig}
@@ -4389,9 +5133,7 @@ export default function App () {
               }}
               onShouldStartLoadWithRequest={(request) => onBrowserShouldStartLoad(tab.id, entry, request)}
               onOpenWindow={(event) => onBrowserOpenWindow(tab.id, entry, event.nativeEvent.targetUrl)}
-              onFileDownload={(event) => {
-                void requestBrowserDownload(event.nativeEvent.downloadUrl)
-              }}
+              onFileDownload={(event) => confirmPageDownload(event.nativeEvent.downloadUrl, tab.id, getNativeViewTag(event))}
               scrollEventThrottle={200}
               onScroll={() => {
                 Keyboard.dismiss()
@@ -4399,7 +5141,8 @@ export default function App () {
                   scheduleBrowserTabPreview(tab.id, entry)
                 }
               }}
-              onLoadStart={() => {
+              onLoadStart={(event) => {
+                browserLoadStartsRef.current.add(event.nativeEvent)
                 browserFaviconsRef.current.delete(tab.id)
                 setBrowserMediaTarget((current) => current?.tabId === tab.id ? null : current)
                 if (
@@ -4410,7 +5153,9 @@ export default function App () {
                   setBrowserIsLoading(true)
                 }
               }}
-              onLoadEnd={() => {
+              onLoadEnd={(event) => {
+                const webViewTag = getNativeViewTag(event)
+                if (webViewTag !== null) browserWebViewsShowingPageRef.current.add(webViewTag)
                 if (
                   browserTabsStateRef.current.activeTabId === tab.id &&
                   isCurrentBrowserTabEntry(browserTabsStateRef.current, tab.id, entry)
@@ -4424,8 +5169,14 @@ export default function App () {
                 if (entry.source.kind !== 'web') return
                 if (!isCurrentBrowserTabEntry(browserTabsStateRef.current, tab.id, entry)) return
                 if (!isWebUrl(navigationState.url) || navigationState.url.length > MAX_BROWSER_URL_LENGTH) return
+                // A page that has only started to load is not there yet. iOS
+                // reports the start with loading false, since the page being
+                // left is done, and read as a page that had landed, a link on
+                // the first page in a tab looked like that page redirecting:
+                // the new page took its place, and back skipped it.
+                const loading = navigationState.loading || browserLoadStartsRef.current.has(navigationState)
 
-                if (!navigationState.loading) {
+                if (!loading) {
                   recordCompletedBrowserVisit(
                     tab.id,
                     navigationState.url,
@@ -4440,12 +5191,12 @@ export default function App () {
                   }, {
                     canGoBack: navigationState.canGoBack,
                     canGoForward: navigationState.canGoForward,
-                    loading: navigationState.loading
+                    loading
                   }, tab.id)
                   const title = normalizeBrowserTabTitle(navigationState.title || navigationState.url)
                   setBrowserTitle(title)
                   updateBrowserTabTitle(tab.id, title)
-                  setBrowserIsLoading(navigationState.loading)
+                  setBrowserIsLoading(loading)
                 } else {
                   syncBackgroundBrowserTab(tab.id, entry, navigationState)
                 }
@@ -4454,16 +5205,29 @@ export default function App () {
                 if ((browserWebViewGenerationsRef.current.get(tab.id) || 0) !== webViewGeneration) return
                 if (!isCurrentBrowserTabEntry(browserTabsStateRef.current, tab.id, entry)) return
 
+                if (Platform.OS === 'android') {
+                  const pull = parsePullRefreshMessage(event.nativeEvent.data, browserMediaToken, PixelRatio.get())
+                  if (pull) {
+                    if (browserTabsStateRef.current.activeTabId === tab.id) onBrowserPull(pull)
+                    return
+                  }
+                }
+
                 if (handleHyperBridgeMessage(
                   tab.id,
                   event.nativeEvent.data,
                   browserMediaToken,
-                  entry.source.kind === 'hyper'
+                  {
+                    url: entry.url,
+                    reportedUrl: event.nativeEvent.url || '',
+                    isHyper: entry.source.kind === 'hyper'
+                  }
                 )) return
 
+                const pageUrl = getBrowserMessagePageUrl(event.nativeEvent.url, entry.url)
                 const mediaTarget = parseBrowserMediaMessage(
                   event.nativeEvent.data,
-                  event.nativeEvent.url || entry.url,
+                  pageUrl,
                   browserMediaToken
                 ) as BrowserMediaTarget | null
                 if (mediaTarget) {
@@ -4478,20 +5242,19 @@ export default function App () {
                   browserMediaToken
                 )
                 if (printHtml) {
-                  void printBrowserPage(printHtml, event.nativeEvent.url || entry.url)
+                  void printBrowserPage(printHtml, pageUrl)
                     .then((problem) => {
                       if (problem) Alert.alert('Unable to print', problem)
                     })
                   return
                 }
 
-                const favicon = parseBrowserFaviconMessage(
-                  event.nativeEvent.data,
-                  event.nativeEvent.url || entry.url
-                )
+                const favicon = parseBrowserFaviconMessage(event.nativeEvent.data, pageUrl)
                 if (favicon === undefined) return
 
-                if (favicon) {
+                // The tab list loads icons through the shared image cache, which
+                // is on disk, so an incognito page's icon is never handed to it.
+                if (favicon && !tab.incognito) {
                   browserFaviconsRef.current.set(tab.id, favicon)
                 } else {
                   browserFaviconsRef.current.delete(tab.id)
@@ -4527,11 +5290,25 @@ export default function App () {
           )
         })}
 
+        {Platform.OS === 'android' && (browserSource.kind === 'web' || browserSource.kind === 'hyper') && (
+          <BrowserPullRefresh
+            background={browserChrome.surface}
+            color={browserChrome.text}
+            offset={browserPullOffset}
+            refreshing={browserPullRefreshing}
+          />
+        )}
         </View>
         <BrowserBackSwipe
           background={browserChrome.surface}
           color={browserChrome.text}
           progress={browserBackSwipe}
+        />
+        <BrowserBackSwipe
+          background={browserChrome.surface}
+          color={browserChrome.text}
+          direction='forward'
+          progress={browserForwardSwipe}
         />
 
         {browserPreferences.addressBarPosition === 'bottom' && browserToolbar}
@@ -4567,7 +5344,7 @@ export default function App () {
           isDark={browserIsDark}
           target={browserMediaTarget}
           onClose={() => setBrowserMediaTarget(null)}
-          onDownload={(targetUrl) => void onBrowserMediaDownload(targetUrl)}
+          onDownload={(targetUrl) => void onBrowserMediaDownload(targetUrl, browserMediaTarget?.tabId ?? null)}
           onOpenInBackgroundTab={onBrowserMediaOpenInBackgroundTab}
           onOpenInNewTab={onBrowserMediaOpenInNewTab}
           onShare={(targetUrl, title) => void onBrowserMediaShare(targetUrl, title)}
@@ -4580,6 +5357,18 @@ export default function App () {
           edges={['bottom']}
           style={[styles.browserSystemInset, { backgroundColor: browserBottomInsetColor }]}
         />
+    </View>
+  )
+
+  // One shape whether a page is open or not, so opening one never remounts
+  // the browser underneath.
+  return (
+    <View style={styles.browserShellContent}>
+      {browser}
+      {browserOverlay && <View style={StyleSheet.absoluteFill}>{browserOverlay}</View>}
+      {browserBurning && (
+        <BurnAnimation onBurn={burnBrowserTabs} onDone={() => setBrowserBurning(false)} />
+      )}
     </View>
   )
 }
@@ -4658,6 +5447,10 @@ function getWelcomeFile () {
   return new File(Paths.document, WELCOME_FILE_NAME)
 }
 
+function getAppWelcomeFile (app: keyof typeof APP_WELCOME_FILE_NAMES) {
+  return new File(Paths.document, APP_WELCOME_FILE_NAMES[app])
+}
+
 function getBrowserSessionFile () {
   return new File(Paths.document, 'browser-tabs.json')
 }
@@ -4702,6 +5495,14 @@ function isBrowserWebViewSource (
   source: BrowserSource
 ): source is Extract<BrowserSource, { kind: 'web' | 'hyper' | 'error' }> {
   return source.kind === 'web' || source.kind === 'hyper' || source.kind === 'error'
+}
+
+// The native view an event came from. React Native adds its tag to every
+// event, and a view keeps its tag for as long as it lives. A ref will not do:
+// the WebView hands out a new one as it renders.
+function getNativeViewTag (event: { nativeEvent: object }) {
+  const tag = (event.nativeEvent as { target?: unknown }).target
+  return typeof tag === 'number' ? tag : null
 }
 
 function getBrowserEntryTitle (entry: BrowserHistoryEntry) {

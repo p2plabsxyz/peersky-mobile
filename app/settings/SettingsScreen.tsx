@@ -12,7 +12,6 @@ import {
   Animated,
   Easing,
   Image,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -25,11 +24,13 @@ import { BROWSER_PALETTES } from '../browser-appearance.mjs'
 import { RPC_HYPER_LAN_STATUS } from '../../backend/rpc/commands.mjs'
 import { LinkDeviceSettings } from './LinkDevice'
 import { Appearance } from './Appearance'
+import { ToolbarButtonSettings } from './ToolbarButton'
 import { Accessibility } from './Accessibility'
 import { DataClearing } from './DataClearing'
 import { General } from './General'
 import { Permissions } from './Permissions'
 import { Privacy } from './Privacy'
+import { Licenses } from './Licenses'
 import { P2PStorage } from './P2PStorage'
 import {
   SettingCopy,
@@ -41,7 +42,9 @@ import type {
   AddressBarPosition,
   BrowserTheme,
   ExternalLinkBehavior,
+  PublishingDecision,
   SearchEngine,
+  ToolbarButton,
   WebsiteTextScale
 } from './useBrowserPreferences'
 import ArrowLeftIcon from '../../assets/icons/bootstrap/arrow-left.svg'
@@ -55,8 +58,7 @@ import TrashIcon from '../../assets/icons/bootstrap/trash.svg'
 import UniversalAccessIcon from '../../assets/icons/bootstrap/universal-access-circle.svg'
 import DisplayIcon from '../../assets/icons/bootstrap/display.svg'
 import DatabaseIcon from '../../assets/icons/bootstrap/database.svg'
-import { MODAL_ORIENTATIONS } from '../modal-orientations'
-import { offerPermissionSettings } from '../permission-prompt'
+import { LAN_PERMISSION_HELP, LAN_PERMISSION_TITLE, offerPermissionSettings } from '../permission-prompt'
 
 export type SettingsPage =
   | 'main'
@@ -70,6 +72,8 @@ export type SettingsPage =
   | 'link-device'
   | 'lan-discovery'
   | 'about'
+  | 'licenses'
+  | 'toolbar-button'
 
 type StorageFileItem = {
   name: string
@@ -160,9 +164,11 @@ type SettingsScreenProps = {
   isDark: boolean
   offlineNetworkAllowed: boolean
   persistenceError: string | null
+  publishingSites: Record<string, PublishingDecision>
   searchEngine: SearchEngine
   showFullAddress: boolean
   theme: BrowserTheme
+  toolbarButton: ToolbarButton
   websiteTextScale: WebsiteTextScale
   youtubeAdBlockingEnabled: boolean
   storagePath: string
@@ -178,28 +184,25 @@ type SettingsScreenProps = {
   onDownloadOnlyOnWifiChange: (enabled: boolean) => void
   onEnforceManualPageZoomChange: (enabled: boolean) => void
   onExternalLinkBehaviorChange: (behavior: ExternalLinkBehavior) => void
+  onPublishingSiteChange: (siteId: string, decision: PublishingDecision | null) => void
   onFilterListsUpdated: () => void
   onSearchEngineChange: (searchEngine: SearchEngine) => void
   onShowFullAddressChange: (enabled: boolean) => void
   onThemeChange: (theme: BrowserTheme) => void
+  onToolbarButtonChange: (button: ToolbarButton) => void
   onWebsiteTextScaleChange: (scale: WebsiteTextScale) => void
   onYoutubeAdBlockingEnabledChange: (enabled: boolean) => void
   onResetTabs: () => void
+  // P2P Data deleted P2PMD's notes; false when Recent notes could not be cleared.
+  onP2pmdDataDeleted: () => boolean
+  // P2P Data removed offline folders, so PeerTunes drops songs from them.
+  onOfflineFoldersChanged: () => void
   onOpenUrl: (url: string, fromPage?: SettingsPage) => void
   onOpenHyperItem: (item: { name: string, source: 'fetched' | 'published', url: string }) => void
   onRestartRequired: () => void
 }
 
 const REPOSITORY_URL = 'https://github.com/p2plabsxyz/peersky-mobile'
-const LICENSE_URL = `${REPOSITORY_URL}/blob/main/LICENSE`
-// Both systems ask once and remember the answer. iOS puts it under the app's
-// own entry; Android keeps it with the permissions for nearby devices, and
-// needs Wi-Fi on for any of it to work.
-const LAN_PERMISSION_TITLE = 'Nearby devices cannot be found'
-const LAN_PERMISSION_HELP = Platform.OS === 'ios'
-  ? 'PeerSky finds nearby devices over your local network. If that was turned down, switch Local Network back on for PeerSky in Settings. Wi-Fi also has to be on, and both devices on the same network.'
-  : 'PeerSky finds nearby devices over your local network. Check that Wi-Fi is on and that Nearby devices is allowed for PeerSky in Settings, with both devices on the same network.'
-
 const FEEDBACK_EMAIL = 'contact@p2plabs.xyz'
 
 const SETTINGS_PAGES: Array<{
@@ -301,6 +304,27 @@ export function SettingsScreen(props: SettingsScreenProps) {
         onOpenPage={(nextPage) => changePage(nextPage, 1)}
       />
     )
+  } else if (page === 'toolbar-button') {
+    content = (
+      <SettingsSubpage
+        title='Toolbar Button'
+        onBack={() => changePage('appearance', -1)}
+      >
+        <ToolbarButtonSettings selected={props.toolbarButton} onSelect={props.onToolbarButtonChange} />
+      </SettingsSubpage>
+    )
+  } else if (page === 'licenses') {
+    // A long list of its own, so it scrolls itself rather than inside the
+    // page's ScrollView.
+    content = (
+      <SettingsSubpage
+        title='Open-source licenses'
+        scrollable={false}
+        onBack={() => changePage('about', -1)}
+      >
+        <Licenses onOpenUrl={openUrl} />
+      </SettingsSubpage>
+    )
   } else {
     content = (
       <SettingsSubpage
@@ -309,7 +333,9 @@ export function SettingsScreen(props: SettingsScreenProps) {
       >
         {page === 'general' && <General {...props} />}
         {page === 'accessibility' && <Accessibility {...props} />}
-        {page === 'appearance' && <Appearance {...props} />}
+        {page === 'appearance' && (
+          <Appearance {...props} onOpenToolbarButton={() => changePage('toolbar-button', 1)} />
+        )}
         {page === 'data-clearing' && <DataClearing {...props} />}
         {page === 'privacy' && <Privacy {...props} onOpenUrl={openUrl} />}
         {page === 'p2p-storage' && (
@@ -318,8 +344,10 @@ export function SettingsScreen(props: SettingsScreenProps) {
             offlineNetworkAllowed={props.offlineNetworkAllowed}
             onCallRpc={props.onCallRpc}
             onDownloadOnlyOnWifiChange={props.onDownloadOnlyOnWifiChange}
+            onOfflineFoldersChanged={props.onOfflineFoldersChanged}
             onOpenItem={props.onOpenHyperItem}
             onOpenUrl={openUrl}
+            onP2pmdDataDeleted={props.onP2pmdDataDeleted}
           />
         )}
         {page === 'permissions' && <Permissions {...props} />}
@@ -331,7 +359,9 @@ export function SettingsScreen(props: SettingsScreenProps) {
           />
         )}
         {page === 'lan-discovery' && <LANDiscoveryTest onCallRpc={props.onCallRpc} />}
-        {page === 'about' && <AboutSettings onOpenUrl={openUrl} />}
+        {page === 'about' && (
+          <AboutSettings onOpenUrl={openUrl} onOpenLicenses={() => changePage('licenses', 1)} />
+        )}
       </SettingsSubpage>
     )
   }
@@ -362,7 +392,11 @@ export function SettingsScreen(props: SettingsScreenProps) {
     transition.stopAnimation()
     transition.setValue(reduceMotion ? 1 : 0)
     setTransitionDirection(-1)
-    setPage('main')
+    // The licenses open from About, and the toolbar button from Appearance, so
+    // back returns there.
+    setPage(pageRef.current === 'licenses'
+      ? 'about'
+      : pageRef.current === 'toolbar-button' ? 'appearance' : 'main')
     return true
   }, [props.closeOnBack, props.initialPage, reduceMotion, transition])
 
@@ -484,10 +518,12 @@ function SettingsHome({
 function SettingsSubpage({
   title,
   onBack,
+  scrollable = true,
   children
 }: {
   title: string
   onBack: () => void
+  scrollable?: boolean
   children: React.ReactNode
 }) {
   const isDark = useSettingsDarkMode()
@@ -510,9 +546,13 @@ function SettingsSubpage({
         </Pressable>
         <Text style={[styles.subpageTitle, isDark ? darkStyles.primaryText : null]}>{title}</Text>
       </View>
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
-        {children}
-      </ScrollView>
+      {scrollable
+        ? (
+          <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
+            {children}
+          </ScrollView>
+          )
+        : <View style={styles.scroll}>{children}</View>}
     </View>
   )
 }
@@ -685,7 +725,7 @@ async function withTimeout<T> (promise: Promise<T>, timeoutMs: number) {
   try {
     return await Promise.race([
       promise,
-      new Promise<T>((resolve, reject) => {
+      new Promise<T>((_resolve, reject) => {
         timer = setTimeout(() => reject(new Error('LAN status request timed out')), timeoutMs)
       })
     ])
@@ -695,7 +735,13 @@ async function withTimeout<T> (promise: Promise<T>, timeoutMs: number) {
 }
 
 
-function AboutSettings({ onOpenUrl }: { onOpenUrl: (url: string) => void }) {
+function AboutSettings({
+  onOpenUrl,
+  onOpenLicenses
+}: {
+  onOpenUrl: (url: string) => void
+  onOpenLicenses: () => void
+}) {
   const isDark = useSettingsDarkMode()
   // One address for everything: feedback, a bug, or content that needs taking
   // down. A GitHub account is not a fair thing to ask for any of those. The
@@ -721,7 +767,7 @@ function AboutSettings({ onOpenUrl }: { onOpenUrl: (url: string) => void }) {
             color={isDark ? BROWSER_PALETTES.dark.mutedText : '#8190a7'}
           />
         </Pressable>
-        <Pressable accessibilityRole='link' style={styles.linkRow} onPress={() => onOpenUrl(LICENSE_URL)}>
+        <Pressable accessibilityRole='button' style={styles.linkRow} onPress={onOpenLicenses}>
           <Text style={[styles.linkText, isDark ? darkStyles.primaryText : null]}>Open-source licenses</Text>
           <ChevronRightIcon
             width={16}
@@ -946,23 +992,10 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '800'
   },
-  placeholder: {
-    backgroundColor: '#ffffff',
-    borderBottomColor: '#e1e7f0',
-    borderBottomWidth: 1,
-    gap: 7,
-    paddingHorizontal: 20,
-    paddingVertical: 22
-  },
   placeholderTitle: {
     color: '#1f2a44',
     fontSize: 16,
     fontWeight: '800'
-  },
-  placeholderDescription: {
-    color: '#687086',
-    fontSize: 14,
-    lineHeight: 20
   },
   errorBanner: {
     backgroundColor: '#fff1f3',

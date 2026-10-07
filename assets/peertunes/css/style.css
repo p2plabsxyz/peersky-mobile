@@ -1,9 +1,9 @@
-/* PeerTunes: iPod classic shell + LCD UI.
+/* PeerTunes: a pocket player shell + LCD UI.
    Screen UI scales with --u/--w (1% of screen height/width, set by main.js).
    Only broadly supported CSS here, so it renders the same in any engine. */
 
 :root {
-  /* silver iPod sits on a bright product-shot backdrop */
+  /* the silver player sits on a bright product-shot backdrop */
   --bg-a: #ffffff;
   --bg-b: #dfe2e7;
   --gloss: 0.55;
@@ -35,7 +35,7 @@
 }
 
 .shell-black {
-  /* black iPod keeps the dark stage */
+  /* the black player keeps the dark stage */
   --bg-a: #23252b;
   --bg-b: #0a0b0d;
   --gloss: 0.32;
@@ -75,7 +75,7 @@ body {
 
 /* ---------- body shell ---------- */
 
-.ipod {
+.player {
   position: relative;
   /* scales with the window, so it stays big on big screens */
   /* Size from the height, because that is the axis that runs out first. Width
@@ -106,7 +106,7 @@ body {
   -webkit-user-select: none;
 }
 
-.shell-black .ipod {
+.shell-black .player {
   box-shadow:
     inset 0 1px 1px rgba(255, 255, 255, 0.18),
     inset 0 -2px 6px rgba(0, 0, 0, 0.5),
@@ -116,7 +116,7 @@ body {
 }
 
 /* the anodized grain */
-.ipod::before {
+.player::before {
   content: "";
   position: absolute;
   inset: 0;
@@ -130,7 +130,7 @@ body {
 
 /* soft sheen sweeping the face: top glow + a glossy diagonal streak.
    The streak leads with a faint dark edge so it reads on light silver too. */
-.ipod::after {
+.player::after {
   content: "";
   position: absolute;
   inset: 0;
@@ -372,7 +372,7 @@ body {
 .msg .big { font-size: calc(var(--u) * 6.6); font-weight: 700; }
 .msg .small { font-size: calc(var(--u) * 5); color: var(--ink-dim); line-height: 1.45; }
 
-/* ---------- cover flow ---------- */
+/* ---------- album covers ---------- */
 
 .cf {
   position: absolute;
@@ -597,7 +597,9 @@ body {
   color: var(--ink-dim);
   text-align: center;
   line-height: 1.4;
-  word-break: break-all;
+  /* A share link has to wrap to fit, but break-all also split plain words in
+     two on a phone ("ri ght now"). This only breaks what does not fit. */
+  overflow-wrap: anywhere;
   white-space: pre-line;
   /* links shown here must be selectable, the shell disables selection */
   user-select: text;
@@ -627,11 +629,11 @@ body {
 .splash.bye { animation: fadeout 500ms ease forwards; }
 @keyframes fadeout { to { opacity: 0; } }
 
-/* ---------- click wheel ---------- */
+/* ---------- wheel ---------- */
 
 .wheelzone { flex: 1; display: grid; place-items: center; padding: 5% 0 7%; position: relative; z-index: 1; }
 
-.clickwheel {
+.wheel {
   --u: 1.6px;
   --w: 1.6px;
   position: relative;
@@ -647,7 +649,7 @@ body {
   touch-action: none;
   cursor: pointer;
 }
-.shell-black .clickwheel {
+.shell-black .wheel {
   box-shadow:
     inset 0 1.5px 2px rgba(255, 255, 255, 0.14),
     inset 0 -3px 6px rgba(0, 0, 0, 0.5),
@@ -665,6 +667,7 @@ body {
   transition: filter 90ms ease, transform 90ms ease;
 }
 .wz svg { display: block; width: calc(var(--w) * 7.5); fill: var(--wheel-label); }
+.wz-menu svg { width: calc(var(--w) * 5.4); }
 .wz-menu { top: 6.5%; left: 50%; transform: translateX(-50%); }
 .wz-prev { left: 6.5%; top: 50%; transform: translateY(-50%); }
 .wz-next { right: 6.5%; top: 50%; transform: translateY(-50%); }
@@ -679,7 +682,9 @@ body {
 .wheel-center {
   position: absolute;
   inset: 30.5%;
-  border-radius: 50%;
+  /* A rounded square, not a circle, so the wheel is PeerTunes' own and not a
+     copy of another player's. */
+  border-radius: 34%;
   border: none;
   cursor: pointer;
   background: radial-gradient(circle at 50% 32%, var(--wheel-center-a), var(--wheel-center-b) 80%);
@@ -722,11 +727,11 @@ body {
 }
 body.dropping .drop-hint { display: grid; }
 
-/* ---------- phone: the iPod becomes the phone ---------- */
+/* ---------- phone: the player becomes the phone ---------- */
 
 @media (max-width: 760px) and (orientation: portrait) {
   .stage { padding: 0; }
-  .ipod {
+  .player {
     /* 100%, for the same reason the stage uses it: inside the app the window
        is taller than the WebView, so a body sized in vh or dvh stopped short
        and left a strip of background under it. */
@@ -738,16 +743,16 @@ body.dropping .drop-hint { display: grid; }
   }
   .screen { aspect-ratio: auto; height: 44vh; height: 44dvh; }
   .wheelzone { padding: 2vh 0 1vh; }
-  .clickwheel { width: min(88vw, 42vh); }
+  .wheel { width: min(88vw, 42vh); }
 }
 
-/* Turned sideways there is no room for a tall body, so the iPod lies down and
+/* Turned sideways there is no room for a tall body, so the player lies down and
    puts the screen beside the wheel. Stacked, a 500:830 shell had to shrink to
    the height of the phone, which left a screen a couple of centimetres across
    with the wheel taking everything else. */
 @media (orientation: landscape) and (max-height: 600px) {
   .stage { padding: 0; }
-  .ipod {
+  .player {
     width: 100%;
     height: 100%;
     aspect-ratio: auto;
@@ -764,7 +769,7 @@ body.dropping .drop-hint { display: grid; }
   .screen-bezel { flex: 1 1 auto; min-width: 0; padding: 1.4%; }
   .screen { aspect-ratio: auto; height: 82vh; }
   .wheelzone { flex: 0 0 auto; padding: 0; }
-  .clickwheel { width: min(42vw, 84vh); }
+  .wheel { width: min(42vw, 84vh); }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -772,4 +777,192 @@ body.dropping .drop-hint { display: grid; }
   .page.anim-in-right, .page.anim-in-left, .page.anim-out-left, .page.anim-out-right { animation: none; }
   .cf-cover { transition: none; }
   .sync .arrows { animation-duration: 3s; }
+}
+
+/* ---------- welcome ---------- */
+
+.welcome {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(10, 11, 13, 0.42);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  animation: wl-in 0.22s ease-out;
+}
+.welcome.bye { opacity: 0; transition: opacity 0.2s ease; }
+
+.wl-card {
+  width: min(92vw, 360px);
+  max-height: 92%;
+  overflow: auto;
+  background: linear-gradient(180deg, var(--lcd-a), var(--lcd-b));
+  color: var(--ink);
+  border-radius: 18px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(0, 0, 0, 0.08);
+  padding: 22px 22px 18px;
+  text-align: center;
+  font-size: 15px;
+  line-height: 1.45;
+}
+.wl-card h1 { font-size: 22px; margin: 10px 0 6px; letter-spacing: -0.01em; }
+.wl-card p { margin: 0 0 10px; color: var(--ink-dim); }
+.wl-card b { color: var(--ink); }
+.wl-card .wl-lead { font-size: 16px; color: var(--ink); font-weight: 600; }
+
+.wl-moves { list-style: none; text-align: left; margin: 4px auto 6px; max-width: 290px; }
+.wl-moves li { position: relative; padding: 5px 0 5px 18px; color: var(--ink-dim); }
+.wl-moves li::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 12px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--sel-b);
+}
+
+.wl-dots { display: flex; justify-content: center; gap: 6px; margin: 12px 0 14px; }
+.wl-dots span { width: 7px; height: 7px; border-radius: 50%; background: rgba(0, 0, 0, 0.18); }
+.wl-dots span.on { background: var(--sel-b); }
+
+.wl-actions { display: flex; gap: 10px; justify-content: center; }
+.wl-actions button {
+  font: inherit;
+  font-weight: 600;
+  border: 0;
+  border-radius: 12px;
+  padding: 11px 18px;
+  min-height: 44px;
+  cursor: pointer;
+}
+.wl-skip { background: rgba(0, 0, 0, 0.06); color: var(--ink); }
+.wl-next { flex: 1; max-width: 220px; color: #fff; background: linear-gradient(180deg, var(--sel-a), var(--sel-b)); }
+
+.wl-art { height: 120px; display: flex; align-items: center; justify-content: center; position: relative; }
+
+/* what it is: songs travelling from a drive to the player */
+.wl-device {
+  position: relative;
+  display: block;
+  width: 54px;
+  height: 72px;
+  border-radius: 10px;
+  background: linear-gradient(150deg, var(--shell-a), var(--shell-c));
+  box-shadow: inset 0 0 0 1px var(--shell-edge);
+}
+.wl-drive { width: 66px; height: 46px; border-radius: 8px; }
+.wl-drive::after {
+  content: "hyper://";
+  position: absolute;
+  left: 50%;
+  bottom: -20px;
+  transform: translateX(-50%);
+  font-size: 11px;
+  color: var(--ink-dim);
+}
+.wl-pod::before {
+  content: "";
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  top: 8px;
+  height: 22px;
+  border-radius: 3px;
+  background: linear-gradient(180deg, var(--lcd-a), var(--lcd-b));
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.15);
+}
+.wl-pod b {
+  position: absolute;
+  left: 50%;
+  bottom: 8px;
+  width: 26px;
+  height: 26px;
+  margin-left: -13px;
+  border-radius: 50%;
+  background: linear-gradient(180deg, var(--wheel-a), var(--wheel-b));
+  box-shadow: inset 0 0 0 1px var(--shell-edge);
+}
+.wl-wire {
+  position: relative;
+  display: block;
+  width: 88px;
+  height: 2px;
+  margin: 0 8px;
+  background: repeating-linear-gradient(90deg, rgba(0, 0, 0, 0.2) 0 6px, transparent 6px 10px);
+}
+.wl-wire i {
+  position: absolute;
+  top: -4px;
+  left: 0;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--sel-b);
+  opacity: 0;
+  animation: wl-travel 2.4s ease-in-out infinite;
+}
+.wl-wire i:nth-child(2) { animation-delay: 0.8s; }
+.wl-wire i:nth-child(3) { animation-delay: 1.6s; }
+
+/* the wheel: a finger circling, and the center pressed now and then */
+.wl-ring {
+  position: relative;
+  display: block;
+  width: 112px;
+  height: 112px;
+  border-radius: 50%;
+  background: linear-gradient(180deg, var(--wheel-a), var(--wheel-b));
+  box-shadow: inset 0 0 0 1px var(--shell-edge);
+}
+.wl-menu-icon { top: 8px; left: 50%; margin-left: -8px; }
+.wl-glyph { position: absolute; display: flex; width: 16px; height: 12px; color: var(--wheel-label); }
+.wl-glyph svg { width: 100%; height: 100%; fill: currentColor; }
+.wl-prev { left: 8px; top: 50%; margin-top: -6px; }
+.wl-next-icon { right: 8px; top: 50%; margin-top: -6px; }
+.wl-play { bottom: 9px; left: 50%; margin-left: -8px; }
+.wl-arm { position: absolute; inset: 0; animation: wl-orbit 3.2s linear infinite; }
+.wl-arm i {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  width: 20px;
+  height: 20px;
+  margin-left: -10px;
+  border-radius: 50%;
+  background: rgba(23, 95, 212, 0.55);
+  box-shadow: 0 0 0 4px rgba(23, 95, 212, 0.18);
+}
+.wl-center {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 40px;
+  height: 40px;
+  margin: -20px 0 0 -20px;
+  border-radius: 34%;
+  background: linear-gradient(180deg, var(--wheel-center-a), var(--wheel-center-b));
+  box-shadow: inset 0 0 0 1px var(--shell-edge);
+  animation: wl-press 3.2s ease-in-out infinite;
+}
+
+@keyframes wl-in { from { opacity: 0; } }
+@keyframes wl-travel {
+  0% { transform: translateX(0); opacity: 0; }
+  15%, 85% { opacity: 1; }
+  100% { transform: translateX(78px); opacity: 0; }
+}
+@keyframes wl-orbit { to { transform: rotate(360deg); } }
+@keyframes wl-press {
+  0%, 80%, 100% { transform: scale(1); }
+  88% { transform: scale(0.86); box-shadow: inset 0 0 0 1px var(--shell-edge), 0 0 0 6px rgba(23, 95, 212, 0.2); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .welcome, .wl-wire i, .wl-arm, .wl-center { animation: none; }
+  .wl-wire i:first-child { opacity: 1; transform: translateX(39px); }
 }

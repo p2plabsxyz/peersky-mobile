@@ -1,5 +1,9 @@
-export const MAX_P2PMD_RECENT_ROOMS = 5
-export const MAX_P2PMD_ROOM_HISTORY_FILE_BYTES = 8 * 1024
+// Thirty notes, with a search box once there are more than ten. The text of
+// every note this phone hosts is kept beside the list (snapshots.mjs keeps
+// thirty-five copies), so any note on it reopens with what was in it.
+export const MAX_P2PMD_RECENT_ROOMS = 30
+export const P2PMD_RECENT_SEARCH_AFTER = 10
+export const MAX_P2PMD_ROOM_HISTORY_FILE_BYTES = 32 * 1024
 
 const MAX_P2PMD_ROOM_KEY_LENGTH = 256
 const MIN_P2PMD_ROOM_KEY_LENGTH = 32
@@ -35,6 +39,18 @@ export function parseP2pmdRoomHistory (serialized) {
   return Array.from(roomsByKey.values())
     .sort((left, right) => right.lastOpenedAt - left.lastOpenedAt)
     .slice(0, MAX_P2PMD_RECENT_ROOMS)
+}
+
+/** A private note's key is a secret its host's keys are made from: `hs://s...`. */
+export function isPrivateP2pmdNoteKey (key) {
+  return /^hs:\/\/s/i.test(String(key || ''))
+}
+
+export function filterP2pmdRoomHistory (rooms, query) {
+  const needle = String(query || '').trim().toLocaleLowerCase()
+  if (!needle) return rooms
+  return rooms.filter((room) => [room.label, room.key]
+    .some((value) => typeof value === 'string' && value.toLocaleLowerCase().includes(needle)))
 }
 
 export function serializeP2pmdRoomHistory (rooms) {

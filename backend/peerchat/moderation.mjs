@@ -38,6 +38,11 @@ export function normalizePeerChatModeration (value) {
 }
 
 export function checkPeerChatContent (text, settings) {
+  // A direct message is two people, either of whom can block the other, so
+  // the group filters stay out of it: threats, the word list and adult domain
+  // links all pass. The spam limit still holds, and a picture that looks
+  // explicit still arrives behind a warning.
+  if (settings?.directMessage === true) return { flagged: false, reason: '' }
   const value = typeof text === 'string' ? text : ''
   const moderation = normalizePeerChatModeration(settings)
 

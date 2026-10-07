@@ -469,6 +469,18 @@ export const styles = StyleSheet.create({
   browserContentPage: {
     flex: 1
   },
+  // Over the padding that keeps pages off the notch, so the wallpaper reaches
+  // the glass in landscape.
+  browserHomeLayer: {
+    bottom: 0,
+    left: 0,
+    position: 'absolute',
+    right: 0,
+    top: 0
+  },
+  browserHomeLayerHidden: {
+    opacity: 0
+  },
   browserWebViewLayer: {
     bottom: 0,
     left: 0,
@@ -554,6 +566,25 @@ export const styles = StyleSheet.create({
   p2pmdWorkspaceRoleHost: {
     backgroundColor: '#1d513d',
     color: '#c6f6df'
+  },
+  // Beside the local URL rather than in the header, which holds the tabs.
+  p2pmdWorkspaceRoleInline: {
+    flexShrink: 0,
+    fontSize: 9,
+    paddingHorizontal: 6,
+    paddingVertical: 2
+  },
+  p2pmdWorkspaceUrlRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 6,
+    minWidth: 0
+  },
+  p2pmdTabsButton: {
+    alignItems: 'center',
+    height: 38,
+    justifyContent: 'center',
+    width: 30
   },
   p2pmdPreviewButton: {
     backgroundColor: '#2f80ed',
@@ -653,6 +684,7 @@ export const styles = StyleSheet.create({
   },
   p2pmdWorkspaceUrl: {
     color: '#a2a8bb',
+    flexShrink: 1,
     fontFamily: 'monospace',
     fontSize: 11,
     minWidth: 0
@@ -692,6 +724,12 @@ export const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700'
   },
+  p2pmdUnsavedDot: {
+    backgroundColor: '#f5a524',
+    borderRadius: 4,
+    height: 8,
+    width: 8
+  },
   p2pmdMetaButton: {
     backgroundColor: '#30364a',
     borderColor: '#4c5675',
@@ -708,6 +746,11 @@ export const styles = StyleSheet.create({
     color: '#f1f2f7',
     fontSize: 12,
     fontWeight: '800'
+  },
+  p2pmdMetaIconButton: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 11
   },
   p2pmdWorkspaceWebView: {
     backgroundColor: '#202128',
@@ -861,6 +904,10 @@ export const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 15,
     fontWeight: '800'
+  },
+  p2pmdCreateAction: {
+    flexDirection: 'row',
+    gap: 8
   },
   p2pmdActionHint: {
     color: '#dbeafe',
@@ -1048,20 +1095,6 @@ export const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 15,
     fontWeight: '700'
-  },
-  roomPill: {
-    backgroundColor: '#30364a',
-    borderRadius: 999,
-    color: '#cdd6ff',
-    fontSize: 12,
-    fontWeight: '700',
-    overflow: 'hidden',
-    paddingHorizontal: 10,
-    paddingVertical: 4
-  },
-  roomPillLive: {
-    backgroundColor: '#2f80ed',
-    color: '#fff'
   }
 })
 
@@ -1116,7 +1149,6 @@ export const p2pmdLight = StyleSheet.create({
   emptyRoomTitle: { color: '#1f2a44' },
   fieldLabel: { color: '#687086' },
   sectionTitle: { color: '#1f2a44' },
-  roomPill: { backgroundColor: '#e5f0ff', color: '#1a5fb4' },
   // The page behind the whole tab. Left dark it frames the light content in
   // black down every edge.
   p2pmdAppContent: { backgroundColor: '#f5f8ff' }

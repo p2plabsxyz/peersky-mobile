@@ -1,13 +1,10 @@
-// Being in a room on a connection means holding the room's key, and a peer
-// shows that without sending it. The topic a room is found by is public: DHT
-// nodes see it go by. So a topic opens nothing on its own. Each side sends,
-// for every room it is in, an HMAC made with that room's key over the
-// connection's handshake hash and its own network key. Only someone holding
-// the key can make one, it is good on this connection alone, and it cannot be
-// bounced back, because the other side's would name the other key.
-//
-// PeerChat on the desktop keeps the same rules in lib/room-proof.js. Both have
-// to agree on every byte.
+// A peer proves it holds a room's key without sending it. The room's topic is
+// public (DHT nodes see it), so it opens nothing. For each room it is in, a
+// peer sends an HMAC keyed with the room key over the connection's handshake
+// hash and its own network key. Only a key holder can make one, it is good on
+// this connection alone, and it cannot be bounced back because the other
+// side's names the other key. Must match lib/room-proof.js in desktop PeerChat
+// byte for byte.
 import { createHash, createHmac } from 'node:crypto'
 import b4a from 'b4a'
 

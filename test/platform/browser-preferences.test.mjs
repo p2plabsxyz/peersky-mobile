@@ -22,9 +22,14 @@ describe('browser preferences', () => {
       enforceManualPageZoom: true,
       externalLinkBehavior: 'allow',
       forceDarkWebsites: true,
+      publishingSites: {
+        ['a'.repeat(64)]: 'allow',
+        ['b'.repeat(52)]: 'block'
+      },
       searchEngine: 'custom',
       showFullAddress: true,
       theme: 'dark',
+      toolbarButton: 'new-tab',
       websiteTextScale: 150,
       youtubeAdBlockingEnabled: false
     }
@@ -33,6 +38,28 @@ describe('browser preferences', () => {
       parseBrowserPreferences(serializeBrowserPreferences(preferences)),
       preferences
     )
+  })
+
+  // The middle of the bottom bar: the burn button unless another is chosen,
+  // and the burn button again for anything this build does not know.
+  test('keeps the toolbar button to the ones the bar can show', () => {
+    assert.equal(parseBrowserPreferences({}).toolbarButton, 'burn')
+    assert.equal(parseBrowserPreferences({ toolbarButton: 'zoom' }).toolbarButton, 'zoom')
+    assert.equal(parseBrowserPreferences({ toolbarButton: 'launch-rockets' }).toolbarButton, 'burn')
+    assert.equal(parseBrowserPreferences({ toolbarButton: 42 }).toolbarButton, 'burn')
+  })
+
+  test('keeps only real hyper sites and real answers for publishing', () => {
+    const parsed = parseBrowserPreferences({
+      publishingSites: {
+        ['a'.repeat(64)]: 'allow',
+        'example.com': 'allow',
+        ['c'.repeat(64)]: 'maybe',
+        ['d'.repeat(52)]: 'block'
+      }
+    })
+    assert.deepEqual(parsed.publishingSites, { ['a'.repeat(64)]: 'allow', ['d'.repeat(52)]: 'block' })
+    assert.deepEqual(parseBrowserPreferences({ publishingSites: ['allow'] }).publishingSites, {})
   })
 
   test('rejects unsupported preference values independently', () => {

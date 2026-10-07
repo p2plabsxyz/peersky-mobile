@@ -1,15 +1,10 @@
-// A hyper:// page on the phone is HTML handed to a WebView that has never
-// heard of the scheme: there is no WKURLSchemeHandler for hyper://, so
-// fetch('hyper://...') from page script throws before it reaches anything.
-// Static assets survive because the backend inlines them as data: URIs before
-// the page loads, but the publish flow in docs/P2P.md is all runtime:
-//
-//   await fetch(`hyper://localhost/?key=myapp`, { method: 'POST' })
-//   await fetch(uploadUrl, { method: 'PUT', body: file })
-//
-// This patches fetch inside the page so those calls travel over the React
-// Native bridge to the backend's own hyper fetch and come back as a real
-// Response. Desktop does not need it; there hyper:// is a registered protocol.
+// The WebView has no handler for hyper:// (no WKURLSchemeHandler), so
+// fetch('hyper://...') in page script throws. Static assets work because the
+// backend inlines them as data: URIs, but publishing (docs/P2P.md) fetches at
+// runtime: a POST to hyper://localhost/?key=..., then a PUT of the file. This
+// patches fetch in the page so those calls go over the React Native bridge to
+// the backend's hyper fetch and come back as a real Response. Desktop has
+// hyper:// as a registered protocol and does not need it.
 
 export const HYPER_BRIDGE_REQUEST = 'peersky-hyper-fetch'
 export const HYPER_BRIDGE_CHUNK = 'peersky-hyper-fetch-chunk'
@@ -20,6 +15,22 @@ export const HYPER_BRIDGE_CHUNK_CHARACTERS = 256 * 1024
 // Roughly 24 MB of file once the base64 is decoded. Past that an upload wants
 // a streaming channel, not a string, and saying so beats appearing to hang.
 export const HYPER_BRIDGE_MAX_BODY_CHARACTERS = 32 * 1024 * 1024
+
+/**
+ * The page with the bridge as its first script. Android runs a WebView's
+ * before-load script from onPageStarted, and by then a page loaded from a
+ * string has already run its own scripts, so a page that fetched hyper:// as
+ * it loaded got the browser's own fetch. The script takes itself out of the
+ * page once it has run, token and all.
+ */
+export function withHyperBridgeScript (html, token) {
+  const script = `<script>${createHyperBridgeScript(token)};document.currentScript&&document.currentScript.remove()</script>`
+  const source = String(html || '')
+  const doctype = /^\s*<!doctype[^>]*>/i.exec(source)
+  return doctype
+    ? `${doctype[0]}${script}${source.slice(doctype[0].length)}`
+    : `${script}${source}`
+}
 
 /**
  * @param {string} token Shared with the native side so a page cannot forge a
@@ -34,9 +45,26 @@ export function createHyperBridgeScript (token) {
   const pending = new Map()
   let nextId = 0
 
-  const post = (payload) => {
-    window.ReactNativeWebView.postMessage(JSON.stringify({ ...payload, token: TOKEN }))
+  // Taken before any page script runs. A page that later replaced
+  // JSON.stringify, Object.assign or postMessage was handed the token with
+  // every message. A copy with no prototype gives a page's
+  // Object.prototype.toJSON nothing to catch either. The media and print
+  // scripts send through the same function.
+  const stringify = JSON.stringify
+  const assign = Object.assign
+  const create = Object.create
+  const channel = window.ReactNativeWebView
+  const postToNative = channel && channel.postMessage.bind(channel)
+  const postSealed = (payload) => {
+    if (postToNative) postToNative(stringify(assign(create(null), payload)))
   }
+  Object.defineProperty(window, '__peerskyPostNative', {
+    value: Object.freeze(postSealed),
+    writable: false,
+    configurable: false
+  })
+
+  const post = (payload) => postSealed({ ...payload, token: TOKEN })
 
   const isHyper = (value) => {
     try {
@@ -65,9 +93,12 @@ export function createHyperBridgeScript (token) {
   }
 
   // A field name or filename goes inside a quoted string in the part header,
-  // so a quote or a newline in one would end that header early.
+  // so a quote or a newline in one would end that header early. Escapes in
+  // this script are doubled: it is a template literal, and a single \\n turned
+  // into a real line break inside a regex and a string, so the whole injected
+  // script stopped parsing on every page.
   const quoteField = (value) => String(value)
-    .replace(/\r?\n|\r/g, ' ')
+    .replace(/\\r?\\n|\\r/g, ' ')
     .replace(/"/g, '%22')
 
   // The browser builds this itself for an ordinary fetch, including the
@@ -82,14 +113,14 @@ export function createHyperBridgeScript (token) {
     for (const [name, value] of form.entries()) {
       const isFile = typeof Blob !== 'undefined' && value instanceof Blob
       const disposition = isFile
-        ? 'Content-Disposition: form-data; name="' + quoteField(name) + '"; filename="' + quoteField(value.name || 'blob') + '"\r\n' +
-          'Content-Type: ' + (value.type || 'application/octet-stream') + '\r\n\r\n'
-        : 'Content-Disposition: form-data; name="' + quoteField(name) + '"\r\n\r\n'
-      parts.push(encoder.encode('--' + boundary + '\r\n' + disposition))
+        ? 'Content-Disposition: form-data; name="' + quoteField(name) + '"; filename="' + quoteField(value.name || 'blob') + '"\\r\\n' +
+          'Content-Type: ' + (value.type || 'application/octet-stream') + '\\r\\n\\r\\n'
+        : 'Content-Disposition: form-data; name="' + quoteField(name) + '"\\r\\n\\r\\n'
+      parts.push(encoder.encode('--' + boundary + '\\r\\n' + disposition))
       parts.push(isFile ? new Uint8Array(await value.arrayBuffer()) : encoder.encode(String(value)))
-      parts.push(encoder.encode('\r\n'))
+      parts.push(encoder.encode('\\r\\n'))
     }
-    parts.push(encoder.encode('--' + boundary + '--\r\n'))
+    parts.push(encoder.encode('--' + boundary + '--\\r\\n'))
 
     let length = 0
     for (const part of parts) length += part.length
@@ -118,16 +149,21 @@ export function createHyperBridgeScript (token) {
     throw new TypeError('This body type cannot be sent over hyper:// yet')
   }
 
-  window.__peerskyHyperBridge = {
-    // Called by the native side, never by the page.
-    settle (token, id, result) {
-      if (token !== TOKEN) return
-      const entry = pending.get(id)
-      if (!entry) return
-      pending.delete(id)
-      entry(result)
-    }
-  }
+  // Called by the native side, never by the page, and fixed in place so a
+  // page cannot swap it for one that keeps the replies.
+  Object.defineProperty(window, '__peerskyHyperBridge', {
+    value: Object.freeze({
+      settle (token, id, result) {
+        if (token !== TOKEN) return
+        const entry = pending.get(id)
+        if (!entry) return
+        pending.delete(id)
+        entry(result)
+      }
+    }),
+    writable: false,
+    configurable: false
+  })
 
   const request = (url, init, bodyBase64) => new Promise((resolve) => {
     const id = ++nextId
@@ -210,12 +246,194 @@ export function createHyperBridgeScript (token) {
       throw new TypeError(result && result.error ? result.error : 'hyper:// request failed')
     }
 
+    // Images, sound and video come from the phone's asset server, by a link
+    // signed for this one file, instead of crossing the bridge as text.
+    if (result.assetUrl && (method === 'GET' || method === 'HEAD')) {
+      return nativeFetch(result.assetUrl, { method, headers })
+    }
+
     const payload = result.base64 ? fromBase64(result.body) : (result.body || '')
     return new Response(payload, {
       status: result.status || 200,
       statusText: result.statusText || '',
       headers: result.headers || {}
     })
+  }
+
+  // An image or a video pointed at a hyper:// address from script, or added
+  // with innerHTML. The engine cannot load hyper://, so the element gets the
+  // same signed link fetch() would. The page's own markup is rewritten before
+  // it loads; this is for what script adds after.
+  const loadable = async (url) => {
+    const result = await request(url, { method: 'GET', headers: {} }, '')
+    if (!result || result.error || result.status >= 400) return null
+    if (result.assetUrl) return result.assetUrl
+    const headers = result.headers || {}
+    const type = headers['content-type'] || headers['Content-Type'] || ''
+    const payload = result.base64 ? fromBase64(result.body) : (result.body || '')
+    return URL.createObjectURL(new Blob([payload], { type }))
+  }
+
+  const pendingSource = new WeakMap()
+  const pointAt = (element, setter, value) => {
+    const target = absolute(String(value))
+    pendingSource.set(element, target)
+    loadable(target).then((url) => {
+      if (pendingSource.get(element) !== target) return
+      pendingSource.delete(element)
+      if (url) setter.call(element, url)
+      else element.dispatchEvent(new Event('error'))
+    }, () => {
+      if (pendingSource.get(element) === target) element.dispatchEvent(new Event('error'))
+    })
+  }
+
+  const patchSource = (Element, property) => {
+    const proto = Element && Element.prototype
+    const descriptor = proto && Object.getOwnPropertyDescriptor(proto, property)
+    if (!descriptor || !descriptor.set || !descriptor.get) return
+    Object.defineProperty(proto, property, {
+      configurable: true,
+      enumerable: descriptor.enumerable,
+      get () { return descriptor.get.call(this) },
+      set (value) {
+        if (value !== null && value !== undefined && isHyper(String(value))) {
+          pointAt(this, descriptor.set, value)
+          return
+        }
+        pendingSource.delete(this)
+        descriptor.set.call(this, value)
+      }
+    })
+  }
+  patchSource(window.HTMLImageElement, 'src')
+  patchSource(window.HTMLMediaElement, 'src')
+  patchSource(window.HTMLSourceElement, 'src')
+  patchSource(window.HTMLVideoElement, 'poster')
+
+  const SOURCES = 'img[src],audio[src],video[src],source[src],video[poster]'
+  const fixSources = (element) => {
+    if (!element || element.nodeType !== 1 || !element.getAttribute) return
+    for (const property of ['src', 'poster']) {
+      const value = element.getAttribute(property)
+      if (value && property in element && isHyper(value)) element[property] = value
+    }
+  }
+  if (typeof MutationObserver === 'function') {
+    new MutationObserver((records) => {
+      for (const record of records) {
+        if (record.type === 'attributes') {
+          fixSources(record.target)
+          continue
+        }
+        for (const node of record.addedNodes) {
+          if (node.nodeType !== 1) continue
+          if (node.matches && node.matches(SOURCES)) fixSources(node)
+          if (node.querySelectorAll) node.querySelectorAll(SOURCES).forEach(fixSources)
+        }
+      }
+    }).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ['src', 'poster'] })
+  }
+
+  // XMLHttpRequest to hyper://, as jQuery, axios and older pages use, goes
+  // the same way as fetch. Anything else is the browser's own.
+  const NativeXHR = window.XMLHttpRequest
+  if (NativeXHR) {
+    const proto = NativeXHR.prototype
+    const nativeOpen = proto.open
+    const nativeSend = proto.send
+    const nativeSetRequestHeader = proto.setRequestHeader
+    const nativeAbort = proto.abort
+    const nativeGetResponseHeader = proto.getResponseHeader
+    const nativeGetAllResponseHeaders = proto.getAllResponseHeaders
+    const hyperRequests = new WeakMap()
+
+    const fire = (xhr, type) => {
+      xhr.dispatchEvent(type !== 'readystatechange' && typeof ProgressEvent === 'function'
+        ? new ProgressEvent(type)
+        : new Event(type))
+    }
+    const finish = (xhr, outcome, result) => {
+      const define = (name, value) => Object.defineProperty(xhr, name, { configurable: true, get: () => value })
+      define('readyState', 4)
+      define('status', result.status)
+      define('statusText', result.statusText)
+      define('response', result.response)
+      define('responseText', result.text)
+      define('responseURL', result.url)
+      fire(xhr, 'readystatechange')
+      fire(xhr, outcome)
+      fire(xhr, 'loadend')
+    }
+
+    proto.open = function (method, url, ...rest) {
+      const address = String(url)
+      if (!isHyper(address)) {
+        hyperRequests.delete(this)
+        return nativeOpen.call(this, method, url, ...rest)
+      }
+      hyperRequests.set(this, { method: String(method || 'GET').toUpperCase(), url: absolute(address), headers: {}, aborted: false, responseHeaders: null })
+      // Opened on nothing, so the object is in the state the page expects and
+      // setRequestHeader, responseType and the rest behave.
+      return nativeOpen.call(this, method, 'about:blank', ...rest)
+    }
+    proto.setRequestHeader = function (name, value) {
+      const pending = hyperRequests.get(this)
+      if (!pending) return nativeSetRequestHeader.call(this, name, value)
+      pending.headers[String(name)] = String(value)
+    }
+    proto.getResponseHeader = function (name) {
+      const pending = hyperRequests.get(this)
+      if (!pending) return nativeGetResponseHeader.call(this, name)
+      const headers = pending.responseHeaders || {}
+      const value = headers[String(name).toLowerCase()]
+      return value === undefined ? null : value
+    }
+    proto.getAllResponseHeaders = function () {
+      const pending = hyperRequests.get(this)
+      if (!pending) return nativeGetAllResponseHeaders.call(this)
+      return Object.entries(pending.responseHeaders || {}).map(([name, value]) => name + ': ' + value + '\\r\\n').join('')
+    }
+    proto.abort = function () {
+      const pending = hyperRequests.get(this)
+      if (!pending) return nativeAbort.call(this)
+      if (pending.aborted) return
+      pending.aborted = true
+      finish(this, 'abort', { status: 0, statusText: '', response: null, text: '', url: '' })
+    }
+    proto.send = function (body) {
+      const pending = hyperRequests.get(this)
+      if (!pending) return nativeSend.call(this, body)
+      const xhr = this
+      const init = { method: pending.method, headers: pending.headers }
+      if (body !== undefined && body !== null && pending.method !== 'GET' && pending.method !== 'HEAD') init.body = body
+      fire(xhr, 'loadstart')
+      window.fetch(pending.url, init).then(async (response) => {
+        if (pending.aborted) return
+        const type = xhr.responseType || ''
+        const headers = {}
+        response.headers.forEach((value, name) => { headers[String(name).toLowerCase()] = value })
+        pending.responseHeaders = headers
+        let text = ''
+        let value
+        if (type === 'arraybuffer') value = await response.arrayBuffer()
+        else if (type === 'blob') value = await response.blob()
+        else {
+          text = await response.text()
+          if (type === 'json') {
+            try { value = JSON.parse(text) } catch { value = null }
+          } else if (type === 'document' && typeof DOMParser === 'function') {
+            value = new DOMParser().parseFromString(text, 'text/html')
+          } else {
+            value = text
+          }
+        }
+        finish(xhr, 'load', { status: response.status, statusText: response.statusText, response: value, text, url: pending.url })
+      }, () => {
+        if (pending.aborted) return
+        finish(xhr, 'error', { status: 0, statusText: '', response: null, text: '', url: '' })
+      })
+    }
   }
 })()`
 }

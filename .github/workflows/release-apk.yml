@@ -1,0 +1,163 @@
+name: Release APK
+
+# Pushing a version tag, or creating a release with a new tag on GitHub, builds
+# the Android app and attaches the signed APK and its checksum to that release.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to build and attach the APK to, for example v0.1.0
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-apk-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+
+    steps:
+      - name: Checkout the tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: Check the tag matches the app version
+        run: |
+          version="$(node -p "require('./app.json').expo.version")"
+          if [ "$TAG" != "v$version" ]; then
+            echo "::error::Tag $TAG does not match app.json version $version. Tag v$version, or bump the version first."
+            exit 1
+          fi
+
+      - name: Check the signing key is set up
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          # Every release has to be signed with the same key, or phones refuse
+          # to install it over the last one. Stop before building rather than
+          # ship an APK signed with a throwaway key.
+          missing=""
+          for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            [ -n "${!name}" ] || missing="$missing $name"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository secrets:$missing. See docs/store-release.md."
+            exit 1
+          fi
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Rust Android tooling
+        run: npm run setup:content-blocking
+
+      - name: Install Android NDK
+        run: |
+          plugin='node_modules/expo-modules-autolinking/android/expo-gradle-plugin/expo-autolinking-plugin/src/main/kotlin/expo/modules/plugin/ExpoRootProjectPlugin.kt'
+          ndk_version="$(grep -oE '"ndkVersion", "[0-9.]+"' "$plugin" | grep -oE '[0-9]+(\.[0-9]+)+')"
+          if [ -z "$ndk_version" ]; then
+            echo "Could not read ndkVersion from $plugin" >&2
+            exit 1
+          fi
+          for attempt in 1 2 3; do
+            if yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$ndk_version"; then
+              exit 0
+            fi
+            echo "sdkmanager attempt $attempt failed, retrying"
+            sleep 15
+          done
+          echo "NDK install failed after 3 attempts" >&2
+          exit 1
+
+      - name: Bundle the Bare backend and filter lists
+        run: npm run bundle:bare
+
+      - name: Generate the Android project
+        run: npx expo prebuild --platform android --no-install --clean
+
+      # 64-bit ARM only: every phone sold for years, at under half the size of
+      # an APK carrying all four CPU types. Play serves the rest.
+      - name: Build the release APK
+        working-directory: android
+        run: ./gradlew :app:assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a
+
+      - name: Sign the APK
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          build_tools="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)"
+          keystore="$RUNNER_TEMP/release.keystore"
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$keystore"
+          apk="PeerSky-$TAG.apk"
+          "$build_tools/apksigner" sign \
+            --ks "$keystore" \
+            --ks-pass env:ANDROID_KEYSTORE_PASSWORD \
+            --ks-key-alias "$ANDROID_KEY_ALIAS" \
+            --key-pass env:ANDROID_KEY_PASSWORD \
+            --out "$apk" \
+            android/app/build/outputs/apk/release/app-release.apk
+          rm -f "$keystore"
+          "$build_tools/apksigner" verify "$apk"
+          "$build_tools/apksigner" verify --print-certs "$apk" | grep -E 'Signer #1 certificate (DN|SHA-256)' || true
+          sha256sum "$apk" > "$apk.sha256"
+
+      - name: Attach the APK to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          apk="PeerSky-$TAG.apk"
+          hash="$(cut -d ' ' -f 1 "$apk.sha256")"
+          # The checksum and the command to check a download go at the top of
+          # the notes. The markers let a rerun replace this block and nothing else.
+          notes="$RUNNER_TEMP/checksum-notes.md"
+          {
+            echo '<!-- apk-checksum -->'
+            echo "Checksum (SHA-256) = \`$hash\`"
+            echo
+            echo 'To check the download, run:'
+            echo
+            echo '```bash'
+            echo "openssl sha256 $apk"
+            echo '```'
+            echo
+            echo 'It should print the checksum above.'
+            echo '<!-- /apk-checksum -->'
+          } > "$notes"
+          if ! gh release view "$TAG" > /dev/null 2>&1; then
+            gh release create "$TAG" --title "PeerSky $TAG" --generate-notes --notes-file "$notes" --verify-tag
+          else
+            # A release made on GitHub keeps its own notes, under the checksum.
+            gh release view "$TAG" --json body --jq .body \
+              | sed '/<!-- apk-checksum -->/,/<!-- \/apk-checksum -->/d' > "$RUNNER_TEMP/old-notes.md"
+            { cat "$notes"; echo; cat "$RUNNER_TEMP/old-notes.md"; } > "$RUNNER_TEMP/new-notes.md"
+            gh release edit "$TAG" --notes-file "$RUNNER_TEMP/new-notes.md"
+          fi
+          gh release upload "$TAG" "$apk" "$apk.sha256" --clobber

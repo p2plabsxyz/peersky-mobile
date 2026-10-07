@@ -13,6 +13,9 @@ const CONTENT_BLOCKING_PACKAGE_REGISTRATION = 'add(BrowserContentBlockingPackage
 const SIMPLE_MAGIC_DEPENDENCY =
   'implementation("com.j256.simplemagic:simplemagic:1.17")'
 const JUNIT_DEPENDENCY = 'testImplementation("junit:junit:4.13.2")'
+// WebView profiles for incognito tabs. The version react-native-webview
+// already brings in, so nothing new is downloaded.
+const WEBKIT_DEPENDENCY = 'implementation("androidx.webkit:webkit:1.14.0")'
 const CONTENT_BLOCKING_BUILD_MARKER = '// PeerSky content-blocking native build'
 const TEMPLATE_DIRECTORY = path.join(__dirname, 'templates')
 
@@ -160,7 +163,7 @@ function addSimpleMagicDependency (contents) {
     throw new Error('Unable to add the browser download MIME detector.')
   }
 
-  return [SIMPLE_MAGIC_DEPENDENCY, JUNIT_DEPENDENCY].reduce(
+  return [SIMPLE_MAGIC_DEPENDENCY, WEBKIT_DEPENDENCY, JUNIT_DEPENDENCY].reduce(
     (result, dependency) => result.includes(dependency)
       ? result
       : result.replace(marker, `${marker}\n    ${dependency}`),

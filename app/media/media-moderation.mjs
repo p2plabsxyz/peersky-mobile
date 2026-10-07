@@ -1,14 +1,8 @@
-// Shared by every upload in the app: PeerChat attachments, Hyperdrive library
-// files and P2PMD images. One gate, so a new picker cannot quietly skip it.
-//
-// Photos and videos never reach the text filters. An attachment carries only a
-// hyper:// URL, so the word list and the domain blocklist look at the link and
-// never at the picture.
-//
-// This runs before an upload leaves the sender, so explicit media never enters
-// the room feed at all. It is not a guarantee: someone running a modified build
-// can skip it. It is the same trade the text filters make, and it stops the
-// ordinary case, which is what the room actually suffers from.
+// One media gate for every upload (PeerChat attachments, Hyperdrive files,
+// P2PMD images), so a new picker cannot skip it. The text filters only see an
+// attachment's hyper:// URL, never the picture. This runs before an upload
+// leaves the sender, so explicit media never reaches the room. A modified
+// build can skip it, as with the text filters, but it stops the ordinary case.
 
 export const MEDIA_ALLOWED = 'allowed'
 export const MEDIA_BLOCKED = 'blocked'

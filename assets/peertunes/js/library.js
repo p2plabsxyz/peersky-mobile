@@ -1,5 +1,5 @@
 // Music library. Keeps tracks, covers, playlists and uploaded audio blobs in
-// IndexedDB so the iPod stays synced between visits. Also handles publishing
+// IndexedDB so the library stays put between visits. Also handles publishing
 // a share to a hyper:// drive and loading someone else's share.
 
 (function (PT) {
@@ -30,11 +30,13 @@
 
   // ---------- share manifest (pure helpers, covered by tests) ----------
 
-  // How many files are read at once while importing from a URL. Each job is one
-  // ranged read of a file's first 128KB, so the time goes on waiting rather
-  // than on the device; three at a time meant a playlist of eighteen took six
-  // rounds of that wait.
+  // How many files are read at once while importing from a URL.
   const IMPORT_CONCURRENCY = 8;
+  // How often a subfolder that failed to list is tried again, and how long the
+  // wait grows each time.
+  const SUBFOLDER_RETRIES = 2;
+  const SUBFOLDER_RETRY_MS = 700;
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
   function buildManifest(name, entries) {
     return {
@@ -67,6 +69,9 @@
   }
 
   // manifest entries are either absolute urls or names inside the folder
+  // Returns the urls, and what the manifest says about each one. The names are
+  // the whole point: with them there is nothing to read off the drive before a
+  // playlist can be listed.
   function resolveManifestFiles(base, manifest) {
     const out = [];
     const meta = new Map();
@@ -115,10 +120,18 @@
     return out;
   }
 
+  // The p2p schemes this page can read. A host that reads fewer says so in
+  // window.peerskyProtocols: PeerSky Mobile reads hyper:// only.
+  const P2P_SCHEMES = (() => {
+    const host = typeof window !== "undefined" ? window.peerskyProtocols : null;
+    const list = Array.isArray(host) ? host.filter((s) => /^(hyper|ipfs|ipns)$/.test(s)) : [];
+    return list.length ? list : ["hyper", "ipfs", "ipns"];
+  })();
+
   // What a scanned QR code may legitimately contain: a music source, or a
   // PeerTunes share link carrying one. Anything else is rejected rather than
   // handed to fetch, since a QR code is untrusted input.
-  const SCANNABLE_SCHEME = /^(hyper|https?):\/\//i;
+  const SCANNABLE_SCHEME = new RegExp(`^(${P2P_SCHEMES.join("|")}|https?):\\/\\/`, "i");
   const MAX_SCANNED_URL_LENGTH = 4096;
 
   function readScannedUrl(text) {
@@ -284,6 +297,9 @@
       // afterwards rather than holding up the whole import.
       const artLater = [];
       const jobs = fileUrls.map((url, i) => ({ url, i }));
+      // Each job is one ranged read of a file's first 128KB, so the time goes
+      // on waiting rather than on the device. Three at a time meant a playlist
+      // of eighteen took six rounds of that wait.
       const workers = Array.from({ length: IMPORT_CONCURRENCY }, async () => {
         while (jobs.length) {
           const job = jobs.shift();
@@ -309,7 +325,7 @@
                 // a p2p url we cannot even probe will not play either, so
                 // do not fake-add it. http stays lenient: fetch can be
                 // cors-blocked while the audio element still plays fine.
-                if (/^hyper:\/\//i.test(job.url)) {
+                if (/^(hyper|ipfs|ipns):\/\//i.test(job.url)) {
                   unreachable++;
                   console.warn("url unreachable:", job.url, err);
                   this._emitProgress(++done, total, decodeSafe(job.url.split("/").pop() || ""));
@@ -440,10 +456,18 @@
         // was already here is still a source, and only remembering it when
         // something was new left it out of Rescan for good.
         if (remember) await this._rememberSource(url);
+        // A host that can keep a drive on the device does it now. Starting the
+        // download while listings were still being read slowed them down, and
+        // nested folders came back empty.
+        if (res.ids.length && /^hyper:\/\//i.test(url) && typeof window.peerskyKeepOffline === "function") {
+          Promise.resolve(window.peerskyKeepOffline(url))
+            .then((kept) => (kept && kept.ok ? this.markSourceKept(url) : null))
+            .catch(() => {});
+        }
         // How many songs this source holds, and how many of them were new. The
         // two are different the moment an import is run twice, or resumed after
         // being interrupted, and reporting only the second read as a failure.
-        return { added: res.added, found: res.ids.length };
+        return { added: res.added, found: res.ids.length, partial: Boolean(state.partial) };
       } finally {
         this.busy = false;
       }
@@ -526,7 +550,7 @@
               tags = await PT.readTags(await PT.urlSource(job.u));
             } catch (err) {
               // same rule as importing: skip p2p urls we cannot reach at all
-              if (/^hyper:\/\//i.test(job.u)) {
+              if (/^(hyper|ipfs|ipns):\/\//i.test(job.u)) {
                 console.warn("url unreachable:", job.u, err);
                 this._emitProgress(++done, files.length, decodeSafe(job.u.split("/").pop() || ""));
                 continue;
@@ -620,11 +644,12 @@
         return found;
       }
       const seen = new Set();
-      const queue = [{ url: rootUrl.endsWith("/") ? rootUrl : rootUrl + "/", depth: 0 }];
+      const queue = [{ url: rootUrl.endsWith("/") ? rootUrl : rootUrl + "/", depth: 0, tries: 0 }];
       while (queue.length && found.length < 5000) {
         const item = queue.shift();
-        if (seen.has(item.url) || item.depth > 6) continue;
+        if ((!item.tries && seen.has(item.url)) || item.depth > 6) continue;
         seen.add(item.url);
+        if (item.tries) await sleep(SUBFOLDER_RETRY_MS * item.tries);
         let entries;
         try {
           entries = await this._listDir(item.url);
@@ -634,12 +659,19 @@
             const res = await fetch(PT.mapP2p(rootUrl)).catch(() => null);
             if (res && res.ok && (res.headers.get("content-type") || "").startsWith("audio/")) return [rootUrl];
             state.rootError = err;
+          } else if (item.tries < SUBFOLDER_RETRIES) {
+            // A folder deep in a drive nobody has read yet can time out while
+            // its parent answered. It goes to the back of the queue for
+            // another go, instead of its songs going missing until a Rescan.
+            queue.push({ ...item, tries: item.tries + 1 });
+          } else {
+            state.partial = true;
           }
           continue;
         }
         for (const name of entries) {
           if (!name || name.startsWith(".")) continue;
-          if (name.endsWith("/")) queue.push({ url: item.url + name, depth: item.depth + 1 });
+          if (name.endsWith("/")) queue.push({ url: item.url + name, depth: item.depth + 1, tries: 0 });
           else if (PT.isAudioName(name)) found.push(item.url + encodeURIComponent(decodeSafe(name)));
         }
       }
@@ -648,7 +680,10 @@
 
     // hypercore-fetch style JSON listing, with an html index fallback
     async _listDir(url) {
-      const res = await fetch(PT.mapP2p(url), { headers: { Accept: "application/json" } });
+      // A hyper:// folder holding index.html or README.md answers with that
+      // file unless asked for the listing, and its songs were never found.
+      const listUrl = /^hyper:\/\//i.test(url) ? url + (url.includes("?") ? "&" : "?") + "noResolve" : url;
+      const res = await fetch(PT.mapP2p(listUrl), { headers: { Accept: "application/json" } });
       if (!res.ok) throw new Error(`listing ${res.status}`);
       const ct = res.headers.get("content-type") || "";
       const normalize = (data) => data
@@ -673,15 +708,76 @@
     }
 
     async rescan() {
-      let added = 0, found = 0;
+      let added = 0, found = 0, partial = false;
       for (const s of this.sources) {
         try {
           const res = await this.addUrl(s.url, { remember: false });
           added += res.added;
           found += res.found;
+          partial = partial || res.partial;
         } catch {}
       }
-      return { added, found };
+      return { added, found, partial };
+    }
+
+    // ---- folders the host keeps on the device ----
+
+    // On the phone every imported hyper:// folder is kept on the device. One
+    // that was kept and no longer is was removed there, in Settings, P2P Data,
+    // so its songs go too and the library only lists what is still here. A
+    // folder is marked once the host reports it kept, so one that never was is
+    // left alone. A host that cannot keep folders has no peerskyKeptFolders.
+    async syncKeptSources() {
+      if (typeof window === "undefined" || typeof window.peerskyKeptFolders !== "function") return 0;
+      const hyper = this.sources.filter((s) => /^hyper:\/\//i.test(s.url || ""));
+      if (!hyper.length) return 0;
+      const res = await Promise.resolve(window.peerskyKeptFolders(hyper.map((s) => s.url))).catch(() => null);
+      if (!res || !res.ok || !Array.isArray(res.kept)) return 0;
+      const kept = new Set(res.kept);
+      let removed = 0;
+      for (const source of hyper) {
+        if (kept.has(source.url)) {
+          if (!source.kept) await this._markKept(source);
+        } else if (source.kept) {
+          removed += await this.forgetSource(source.url);
+        }
+      }
+      return removed;
+    }
+
+    // PeerSky said it keeps this folder on the device. From now on, removing
+    // it there takes its songs out of PeerTunes too.
+    async markSourceKept(url) {
+      const source = this.sources.find((s) => s.url === url);
+      if (source && !source.kept) await this._markKept(source);
+    }
+
+    async _markKept(source) {
+      source.kept = true;
+      await idb(this.db, "sources", "readwrite", (s) => s.put(source));
+    }
+
+    // A source, every song read from it, and the playlist it made once that
+    // is empty. Songs added from files stay: they live in the library itself.
+    async forgetSource(url) {
+      const folder = url.endsWith("/") ? url : url + "/";
+      let removed = 0;
+      for (const track of Array.from(this.tracks.values())) {
+        if (track.kind !== "url" || typeof track.url !== "string") continue;
+        if (track.url !== url && !track.url.startsWith(folder)) continue;
+        if (await this.deleteTrack(track.id)) removed++;
+      }
+      for (const pl of Array.from(this.playlists.values())) {
+        if (pl.sourceUrl === url && !pl.trackIds.length) await this.deletePlaylist(pl.id);
+      }
+      await this._dropSource(url);
+      return removed;
+    }
+
+    async _dropSource(url) {
+      await idb(this.db, "sources", "readwrite", (s) => s.delete(url));
+      this.sources = this.sources.filter((s) => s.url !== url);
+      this._invalidate();
     }
 
     async clear() {
@@ -904,4 +1000,6 @@
   PT.resolveManifestFiles = resolveManifestFiles;
   PT.parseListingHtml = parseListingHtml;
   PT.readScannedUrl = readScannedUrl;
+  PT.P2P_SCHEMES = P2P_SCHEMES;
+  PT.SOURCE_SCHEME = SCANNABLE_SCHEME;
 })(typeof window !== "undefined" ? (window.PT = window.PT || {}) : module.exports);

@@ -8,6 +8,9 @@ export const BROWSER_PALETTES = {
     button: '#27272a',
     mutedText: '#9ca3af',
     selectedBackground: '#3f3f46',
+    // The hairline between the page and the bars: there, but only just, the
+    // way DuckDuckGo draws it. The border grey above read as a rule.
+    seam: '#323237',
     selectedControl: '#e5e7eb',
     shell: '#18181b',
     surface: '#27272a',
@@ -20,6 +23,7 @@ export const BROWSER_PALETTES = {
     button: '#e8f0fb',
     mutedText: '#687086',
     selectedBackground: '#edf5ff',
+    seam: '#e6ebf3',
     selectedControl: '#1f6fd1',
     shell: '#f5f8ff',
     surface: '#ffffff',
@@ -35,6 +39,18 @@ export function resolveBrowserDarkMode (theme, systemColorScheme) {
   if (theme === 'dark') return true
   if (theme === 'light') return false
   return systemColorScheme === 'dark'
+}
+
+/**
+ * The status bar's colour. Set to one colour, iOS kept it through a switch
+ * between light and dark in the system's settings, so it stayed dark on a dark
+ * page until PeerSky restarted. Following the system, iOS now picks it
+ * ('default'), and turns it with the system. A theme chosen in PeerSky still
+ * sets it, and Android always gets one, since its 'default' is light.
+ */
+export function getBrowserStatusBarStyle (platform, theme, isDark) {
+  if (platform === 'ios' && theme !== 'dark' && theme !== 'light') return 'default'
+  return isDark ? 'light-content' : 'dark-content'
 }
 
 export function formatBrowserAddress (address, showFullAddress) {

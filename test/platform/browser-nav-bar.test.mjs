@@ -10,13 +10,24 @@ describe('browser chrome layout', () => {
   test('five slots: two that change, then burn, tabs and the menu', () => {
     assert.match(navBar, /label='Go back'/)
     assert.match(navBar, /label='Go forward'/)
-    assert.match(navBar, /label='Burn tabs and cached data'/)
+    assert.match(navBar, /burn: \{ label: 'Burn tabs, history and cached data', onPress: onBurnTabs \}/)
     assert.match(navBar, /Open tabs, \$\{tabCount\} open/)
     assert.match(navBar, /<BrowserOverflowMenu[\s>]/)
   })
 
+  // DuckDuckGo lets you swap its Fire Button for another; so can this bar.
+  test('the middle button is whichever was chosen, and burning moves to the menu', () => {
+    assert.match(navBar, /const middleAction = middle\[toolbarButton\] \|\| middle\.burn/)
+    assert.match(navBar, /disabled=\{middleAction\.disabled\}\s+icon=\{middleIcon\}\s+label=\{middleAction\.label\}/)
+    // Off where it has nothing to act on, like back and forward.
+    assert.match(navBar, /share: \{ label: 'Share', disabled: !shareActionAvailable, onPress: onSharePage \}/)
+    assert.match(navBar, /home: \{ label: 'Home', disabled: isHome, onPress: onGoHome \}/)
+    assert.match(navBar, /\.\.\.\(burnsFromMenu\(toolbarButton\) \? \{ onBurnTabs: \(\) => afterMenuCloses\(onBurnTabs\) \} : \{\}\)/)
+    assert.match(index, /toolbarButton=\{browserPreferences\.toolbarButton\}/)
+  })
+
   test('the home screen has no history, so those two slots go elsewhere', () => {
-    const home = navBar.slice(navBar.indexOf('{isHome'), navBar.indexOf("label='Burn"))
+    const home = navBar.slice(navBar.indexOf('{isHome'), navBar.indexOf('unless another button was chosen'))
 
     assert.match(home, /label='Bookmarks'/)
     assert.match(home, /label='Nearby devices'/)
@@ -70,21 +81,19 @@ describe('chrome polish', () => {
     // visible every time you tap the address bar.
     assert.doesNotMatch(toolbar, /borderBottomWidth: isAddressFocused/)
     assert.doesNotMatch(toolbar, /borderTopWidth: isAddressFocused/)
-    assert.match(toolbar, /const seamColor = isAddressFocused \? 'transparent' : palette\.border/)
+    assert.match(toolbar, /const seamColor = isAddressFocused \? 'transparent' : palette\.seam/)
     assert.equal((toolbar.match(/StyleSheet\.hairlineWidth/g) || []).length, 2)
   })
+})
 
-  test('arriving home fades rather than cuts', async () => {
+describe('the bottom of the screen on Android', () => {
+  test('no band of page colour stays under the navigation bar after the keyboard', async () => {
     const { readFile } = await import('node:fs/promises')
-    const background = await readFile(
-      new URL('../../app/BrowserHomeBackground.tsx', import.meta.url),
-      'utf8'
-    )
+    const index = await readFile(new URL('../../app/index.tsx', import.meta.url), 'utf8')
 
-    // Burning every tab lands here, and cutting straight to a photograph makes
-    // that land hard. Opacity only: a transform would show an edge.
-    assert.match(background, /opacity: enter/)
-    assert.doesNotMatch(background, /scale|translateY/)
+    // Android reports a closed keyboard a little above the bottom of the
+    // screen, and the padding for it stayed behind under the navigation bar.
+    assert.match(index, /enabled=\{\s+\/\/[^\n]*\n(?:\s+\/\/[^\n]*\n)*\s+\(Platform\.OS === 'ios' \|\| isKeyboardVisible\) &&/)
   })
 })
 
@@ -103,4 +112,9 @@ describe('peerchat onboarding', () => {
     assert.match(screen, /onboardingScreen: \{ flex: 1 \}/)
     assert.match(screen, /introContinue: \{[\s\S]{0,400}marginBottom: 28/)
   })
+})
+
+// Searches need a space bar, which iOS's URL keyboard leaves off its letters.
+test('the address bar types searches as easily as addresses', () => {
+  assert.match(toolbar, /keyboardType=\{Platform\.OS === 'ios' \? 'web-search' : 'url'\}/)
 })

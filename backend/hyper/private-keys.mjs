@@ -56,7 +56,7 @@ export function getPrivateDriveKeyFile (storagePath) {
   const normalized = String(storagePath || '').replace(/[/\\]+$/, '')
   // NOTE: this file lives INSIDE the corestore directory. hypercore-storage's
   // tmpFixStorage moves unknown files from a directory that has no CORESTORE
-  // marker into db/ — so this must never be written before the store is
+  // marker into db/, so this must never be written before the store is
   // opened (the app always opens the runtime first, which creates the marker).
   // If we ever write the key before the store exists it will silently vanish
   // into db/; that is why loadOrCreatePrivateDriveKey writes with {flag:'wx'}
@@ -120,7 +120,7 @@ export function importPrivateDriveKey (storagePath, { key, driveId, source, anno
   mkdirSync(storagePath, { recursive: true })
 
   // Policy decision (desktop side mirrors this): an incoming record WITH a key
-  // wins — that is what makes linking actually sync both devices against one
+  // wins. That is what makes linking actually sync both devices against one
   // encrypted drive ("link my phone"). preserve only guards the case where the
   // incoming record has NO key (desktop's device-only export): it must never
   // clobber a phone-held encryption key with a plaintext identity. Re-encrypting

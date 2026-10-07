@@ -8,8 +8,6 @@ let assetServerInfo = null
 let assetServerTransition = Promise.resolve()
 const HYPER_ASSET_HOST = '127.0.0.1'
 
-export { createHyperAssetServer } from './asset-server-core.mjs'
-
 export async function startHyperAssetServer (fetch, fetchRange) {
   return withAssetServerTransition(async () => {
     if (assetServer && assetServerInfo) return assetServerInfo

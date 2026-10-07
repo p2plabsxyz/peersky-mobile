@@ -98,8 +98,13 @@ type P2PStorageProps = {
   offlineNetworkAllowed: boolean
   onCallRpc: (command: number, data?: object) => Promise<P2pStorageResponse>
   onDownloadOnlyOnWifiChange: (enabled: boolean) => void
+  // Offline folders were removed: PeerTunes drops the songs it took from them.
+  onOfflineFoldersChanged: () => void
   onOpenItem: (item: { name: string, source: 'fetched' | 'published', url: string }) => void
   onOpenUrl: (url: string) => void
+  // P2PMD's notes are gone from this device, so its Recent notes go too.
+  // False when they could not be cleared.
+  onP2pmdDataDeleted: () => boolean
 }
 
 const PAGE_SIZE = 5
@@ -107,7 +112,7 @@ const PAGE_SIZE = 5
 // that it does not feel like a pause.
 const ARCHIVE_SEARCH_DELAY_MS = 250
 
-export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallRpc, onDownloadOnlyOnWifiChange, onOpenItem, onOpenUrl }: P2PStorageProps) {
+export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallRpc, onDownloadOnlyOnWifiChange, onOfflineFoldersChanged, onOpenItem, onOpenUrl, onP2pmdDataDeleted }: P2PStorageProps) {
   const isDark = useSettingsDarkMode()
   const requestSequence = useRef(0)
   const offlineRequestSequence = useRef(0)
@@ -226,7 +231,7 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
   function confirmRemoveOffline (item: HyperOfflineItem) {
     Alert.alert(
       'Remove offline copy?',
-      `${formatOfflineName(item)} will remain available from peers, but its downloaded files will be removed from this device.`,
+      `${formatOfflineName(item)} will remain available from peers, but its downloaded files will be removed from this device, and any songs PeerTunes took from it leave PeerTunes.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -252,6 +257,7 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
         : { driveKey: item.driveKey, path: item.path }
       const response = await onCallRpc(command, payload) as HyperOfflineResponse
       if (!response.ok) throw new Error(response.error || 'Unable to update the offline folder.')
+      if (command === RPC_HYPER_OFFLINE_REMOVE) onOfflineFoldersChanged()
       if (mountedRef.current) {
         setNotice(response.item?.status === 'waiting-for-wifi'
           ? 'Offline download is waiting for Wi-Fi.'
@@ -295,7 +301,9 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
       if (!response.ok) throw new Error(response.error || `Unable to delete ${item.title} data.`)
       const recentWarning = item.id === 'hyperdrive' && !clearHyperdriveRecents('uploaded')
         ? 'App data was deleted, but Hyperdrive Recent could not be updated.'
-        : null
+        : item.id === 'p2pmd' && !onP2pmdDataDeleted()
+          ? 'App data was deleted, but P2PMD Recent notes could not be cleared.'
+          : null
       if (mountedRef.current) {
         setNotice(joinNotices(response.warning, recentWarning))
         await refreshArchive()
@@ -370,9 +378,12 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
     try {
       const response = await onCallRpc(RPC_HYPER_STORAGE_CLEAR_ALL)
       if (!response.ok || !response.cleared) throw new Error(response.error || 'Unable to clear P2P data.')
+      onOfflineFoldersChanged()
       const recentWarning = !clearHyperdriveRecents()
         ? 'P2P data was cleared, but Hyperdrive Recent could not be updated.'
-        : null
+        : !onP2pmdDataDeleted()
+          ? 'P2P data was cleared, but P2PMD Recent notes could not be cleared.'
+          : null
       if (mountedRef.current) {
         setNotice(joinNotices(response.warning, recentWarning))
         Alert.alert('P2P data cleared', 'All local Hyper and PeerChat data was removed from this device.')

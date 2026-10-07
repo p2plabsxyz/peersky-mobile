@@ -12,30 +12,59 @@ function isContent (node) {
   return node.nodeType !== Node.TEXT_NODE || node.textContent.trim().length > 0
 }
 
+// Line breaks are handled as nodes. Splitting a paragraph's HTML on "<br>"
+// cut through attributes on WebKit versions that leave "<" in them unescaped,
+// and turned a link title in a note into live markup.
 function collapseBreaks (node) {
   if (node?.nodeType !== Node.ELEMENT_NODE) return
   const paragraphs = node.tagName === 'P' ? [node] : []
   node.querySelectorAll('p').forEach((paragraph) => paragraphs.push(paragraph))
   paragraphs.forEach((paragraph) => {
-    paragraph.innerHTML = paragraph.innerHTML
-      .replace(/<br\s*\/?>\s*/gi, ' ')
-      .replace(/[ \t]{2,}/g, ' ')
-      .trim()
+    paragraph.querySelectorAll('br').forEach((br) => {
+      const next = br.nextSibling
+      if (next?.nodeType === Node.TEXT_NODE) next.textContent = next.textContent.replace(/^\s+/, '')
+      br.replaceWith(' ')
+    })
+    paragraph.normalize()
+    const walker = document.createTreeWalker(paragraph, NodeFilter.SHOW_TEXT)
+    for (let text = walker.nextNode(); text; text = walker.nextNode()) {
+      text.textContent = text.textContent.replace(/[ \t]{2,}/g, ' ')
+    }
+    trimEdges(Array.from(paragraph.childNodes))
   })
+}
+
+// Leading and trailing whitespace, taken off the text at either end.
+function trimEdges (nodes) {
+  const first = nodes[0]
+  const last = nodes[nodes.length - 1]
+  if (first?.nodeType === Node.TEXT_NODE) first.textContent = first.textContent.replace(/^\s+/, '')
+  if (last?.nodeType === Node.TEXT_NODE) last.textContent = last.textContent.replace(/\s+$/, '')
+  return nodes.filter((node) => node.nodeType !== Node.TEXT_NODE || node.textContent)
+}
+
+// A paragraph's children, cut into lines at each <br>.
+function splitLines (paragraph) {
+  const lines = [[]]
+  Array.from(paragraph.childNodes).forEach((child) => {
+    if (child.nodeType === Node.ELEMENT_NODE && child.tagName === 'BR') lines.push([])
+    else lines[lines.length - 1].push(child)
+  })
+  return lines
+    .map(trimEdges)
+    .filter((line) => line.some((child) => child.nodeType === Node.ELEMENT_NODE || child.textContent.trim()))
 }
 
 function buildAuthors (nodes) {
   const rows = []
   let count = 0
   nodes.filter(isContent).forEach((node) => {
-    const parts = node?.tagName === 'P'
-      ? node.innerHTML.split(/<br\s*\/?>/i).map((part) => part.trim()).filter(Boolean)
-      : null
+    const parts = node?.tagName === 'P' ? splitLines(node) : null
     if (parts?.length) {
       rows.push(parts)
       count = Math.max(count, parts.length)
     } else if (node.textContent?.trim()) {
-      rows.push([node.textContent.trim()])
+      rows.push([[document.createTextNode(node.textContent.trim())]])
       count = Math.max(count, 1)
     }
   })
@@ -53,7 +82,7 @@ function buildAuthors (nodes) {
   })
   rows.forEach((parts) => parts.forEach((part, index) => {
     const paragraph = document.createElement('p')
-    paragraph.innerHTML = part
+    paragraph.append(...part)
     columns[index].appendChild(paragraph)
   }))
   columns.filter((column) => column.childElementCount).forEach((column) => grid.appendChild(column))

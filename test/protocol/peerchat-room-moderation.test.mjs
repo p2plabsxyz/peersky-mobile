@@ -115,6 +115,23 @@ test('removals are kept once each, by key where there is one', () => {
   assert.equal(bans.find((ban) => ban.id === 'd00dfeed').key, '')
 })
 
+// A device that joins after somebody was removed never met them, and said
+// "c0ffee11 was removed" with only eight letters of their key to go on.
+test('a removal carries the name the creator knew them by', () => {
+  const bans = addPeerChatRoomBan([], { id: 'c0ffee11', at: 5, name: '  Bob   Smith ' })
+  assert.equal(bans[0].name, 'Bob Smith')
+
+  // It survives being sent and read back, and a full key arriving later keeps it.
+  const relayed = normalizePeerChatRoomBans(JSON.parse(JSON.stringify(bans)))
+  assert.equal(relayed[0].name, 'Bob Smith')
+  assert.equal(normalizePeerChatRoomBans([...relayed, { key: CREATOR, at: 6 }]).find((ban) => ban.id === 'c0ffee11').name, 'Bob Smith')
+
+  // Only what a profile name may be: nothing else rides in on it.
+  for (const name of ['<b>Bob</b>', 'Bob\u202e', 'x'.repeat(51), 42, null]) {
+    assert.equal(normalizePeerChatRoomBans([{ id: 'c0ffee11', at: 1, name }])[0].name, '')
+  }
+})
+
 test('a removal list cannot grow without bound', () => {
   const many = Array.from({ length: MAX_PEERCHAT_ROOM_BANS + 50 }, (_, index) => ({
     id: index.toString(16).padStart(8, '0'),

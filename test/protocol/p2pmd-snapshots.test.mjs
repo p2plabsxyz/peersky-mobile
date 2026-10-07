@@ -14,10 +14,11 @@ test('P2PMD snapshots persist hosted room content and bound retained rooms', asy
   const storagePath = await mkdtemp(join(tmpdir(), 'peersky-p2pmd-snapshots-'))
   t.after(() => rm(storagePath, { recursive: true, force: true }))
 
-  // Twelve rooms: the ten most recent are kept, twice the five on the recent
-  // list, so five arriving from a desktop never push out this phone's own.
-  for (let index = 0; index < 12; index++) {
-    const character = String.fromCharCode(97 + index)
+  // Thirty-six rooms: the thirty-five most recent are kept, one for each of the
+  // thirty on the recent list plus the five a desktop sends, so those arriving
+  // never push out this phone's own.
+  const characters = 'abcdefghijklmnopqrstuvwxyz0123456789'.split('')
+  for (const [index, character] of characters.entries()) {
     assert.equal(saveP2pmdRoomSnapshot(roomKey(character), {
       content: `Room ${index}`,
       lineAttributions: {},
@@ -25,16 +26,16 @@ test('P2PMD snapshots persist hosted room content and bound retained rooms', asy
     }, storagePath), true)
   }
 
-  assert.deepEqual(loadP2pmdRoomSnapshot(roomKey('l'), storagePath), {
-    content: 'Room 11',
+  assert.deepEqual(loadP2pmdRoomSnapshot(roomKey('9'), storagePath), {
+    content: 'Room 35',
     lineAttributions: {},
-    updatedAt: 11
+    updatedAt: 35
   })
-  assert.equal((await readdir(join(storagePath, 'p2pmd-rooms'))).length, 10)
+  assert.equal((await readdir(join(storagePath, 'p2pmd-rooms'))).length, 35)
 
-  const snapshotPath = join(storagePath, 'p2pmd-rooms', `${'l'.repeat(52)}.json`)
+  const snapshotPath = join(storagePath, 'p2pmd-rooms', `${'9'.repeat(52)}.json`)
   await rename(snapshotPath, `${snapshotPath}.previous`)
-  assert.equal(loadP2pmdRoomSnapshot(roomKey('l'), storagePath)?.content, 'Room 11')
+  assert.equal(loadP2pmdRoomSnapshot(roomKey('9'), storagePath)?.content, 'Room 35')
 })
 
 test('P2PMD snapshots reject mismatched and oversized stored data', async (t) => {

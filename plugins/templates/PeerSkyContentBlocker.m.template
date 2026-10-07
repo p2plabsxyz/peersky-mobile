@@ -7,7 +7,7 @@ static NSString *const PeerSkyYoutubeRuleIdentifier = @"peersky-youtube-ad-break
 // a version here a converter fix never reaches anybody who already has the
 // app. Keep it in step with WEBKIT_RULE_FORMAT_VERSION in
 // app/privacy/webkit-content-rules.mjs.
-static NSString *const PeerSkyRuleFormatVersion = @"v2";
+static NSString *const PeerSkyRuleFormatVersion = @"v3";
 static const unsigned long long MaxRuleFileBytes = 48ULL * 1024ULL * 1024ULL;
 
 // WKContentRuleListStore initializes WebKit on first touch, and WebKit must be
@@ -139,7 +139,9 @@ static void PeerSkyRunOnMain(dispatch_block_t block)
       if ([identifier hasPrefix:@"peersky-"] &&
           ![identifier hasPrefix:activePrefix] &&
           ![identifier isEqualToString:PeerSkyYoutubeRuleIdentifier]) {
-        [store removeContentRuleListForIdentifier:identifier completionHandler:nil];
+        // WebKit calls this handler without checking it, so a nil one crashed
+        // the app each time a filter-list update left old lists to clear.
+        [store removeContentRuleListForIdentifier:identifier completionHandler:^(NSError *error) {}];
       }
     }
   }];
@@ -183,7 +185,7 @@ static void PeerSkyRunOnMain(dispatch_block_t block)
       completion(cached, nil);
       return;
     }
-    NSString *json = @"[{\"trigger\":{\"url-filter\":\"^https://([a-z0-9-]+\\\\.)*youtube\\\\.com/youtubei/v1/player/ad_break([/?#]|$)\",\"resource-type\":[\"raw\"],\"if-domain\":[\"*youtube.com\"]},\"action\":{\"type\":\"block\"}},{\"trigger\":{\"url-filter\":\"^https://([a-z0-9-]+\\\\.)*youtube-nocookie\\\\.com/youtubei/v1/player/ad_break([/?#]|$)\",\"resource-type\":[\"raw\"],\"if-domain\":[\"*youtube-nocookie.com\"]},\"action\":{\"type\":\"block\"}}]";
+    NSString *json = @"[{\"trigger\":{\"url-filter\":\"^https://([a-z0-9-]+\\\\.)*youtube\\\\.com/youtubei/v1/player/ad_break([/?#].*)?$\",\"resource-type\":[\"raw\"],\"if-domain\":[\"*youtube.com\"]},\"action\":{\"type\":\"block\"}},{\"trigger\":{\"url-filter\":\"^https://([a-z0-9-]+\\\\.)*youtube-nocookie\\\\.com/youtubei/v1/player/ad_break([/?#].*)?$\",\"resource-type\":[\"raw\"],\"if-domain\":[\"*youtube-nocookie.com\"]},\"action\":{\"type\":\"block\"}}]";
     [store compileContentRuleListForIdentifier:identifier
                         encodedContentRuleList:json
                              completionHandler:completion];

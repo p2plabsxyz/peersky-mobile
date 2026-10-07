@@ -76,6 +76,9 @@ async function pickImages (
 ): Promise<ImagePicker.ImagePickerResult | null> {
   supersedePendingPick()
 
+  // The library needs no permission: the system photo picker runs outside the
+  // app and hands back only what was chosen. Asking for the whole library
+  // anyway is a prompt nobody needs and a question a store review asks.
   if (source === 'camera') {
     const allowed = await ensurePermission({
       request: () => ImagePicker.requestCameraPermissionsAsync(),
@@ -83,15 +86,6 @@ async function pickImages (
       message: 'PeerSky needs the camera to take a photo. Turn it on in Settings.'
     })
     if (!allowed) throw new Error('PeerSky needs camera access to take a photo.')
-  } else {
-    // Android asks for this; on iOS the picker runs out of process and needs
-    // nothing, so a granted answer comes straight back.
-    const allowed = await ensurePermission({
-      request: () => ImagePicker.requestMediaLibraryPermissionsAsync(),
-      title: 'Photo access is off',
-      message: 'PeerSky needs your photo library to attach a picture. Turn it on in Settings.'
-    })
-    if (!allowed) throw new Error('PeerSky needs photo access to attach a picture.')
   }
 
   const options: ImagePicker.ImagePickerOptions = {
@@ -144,10 +138,6 @@ async function pickDocuments (options: DocumentPicker.DocumentPickerOptions) {
 // which is honest: nothing has looked at it, so nothing can vouch for it.
 export function setUploadScanner (next: UploadScanner | null) {
   scanner = typeof next === 'function' ? next : null
-}
-
-export function hasUploadScanner () {
-  return scanner !== null
 }
 
 /**
@@ -260,18 +250,13 @@ export async function pickUploadFolder (): Promise<UploadAsset[]> {
 /**
  * The one place every upload in the app passes through: PeerChat attachments,
  * Hyperdrive library files and P2PMD images. Picks the files, bounds how many,
- * and refuses the batch if anything in it is explicit. Screening the whole
- * batch before uploading any of it means a refusal never leaves half a send
- * behind.
+ * and screens the whole batch before uploading any, so a refusal never leaves
+ * half a send behind. Returns [] when the picker is cancelled, and throws a
+ * sentence worth showing when a file is refused.
  *
- * Returns an empty array when the picker was cancelled. Throws with a sentence
- * worth showing when a file is refused.
- */
-/**
- * @param screen Whether to run the classifier over the batch. A direct message
- *   goes to one person who can block the sender, so screening it protects
- *   nobody: the safeguard exists for rooms, where a picture lands in front of
- *   everyone at once before anyone can act.
+ * @param screen Whether to run the classifier. It is for rooms, where a picture
+ *   lands in front of everyone at once. A direct message goes to one person
+ *   who can block the sender, so screening it protects nobody.
  */
 export async function pickUploads ({
   multiple = false,

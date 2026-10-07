@@ -107,6 +107,15 @@ export function isHyperUrl (targetUrl) {
   return /^hyper:\/\//i.test(String(targetUrl || ''))
 }
 
+// One page, whatever part of it the address points at.
+function pageAddress (value) {
+  return String(value || '').split('#')[0]
+}
+
+function isSameHyperDocument (url, currentUrl) {
+  return Boolean(currentUrl) && pageAddress(url) === pageAddress(currentUrl)
+}
+
 export function getBrowserWebViewKey (tabId, sourceKind) {
   return `${tabId}:${sourceKind}`
 }
@@ -207,7 +216,29 @@ export function getBrowserForwardState (state) {
   return buildBrowserState(state.history, state.historyIndex + 1)
 }
 
-export function getBrowserRequestAction ({ requestUrl, currentSourceKind, isTopFrame = true }) {
+// A file goes to Downloads and the WebView loads nothing in its place. A tab
+// that went to one from no page at all sat there blank, and one sent to it
+// from the address bar named the file over the page it still showed. So the
+// file's entry goes and the tab is back where it was. A tab that only ever
+// held the file has nowhere to go back to, and closes.
+export function getFileHandoffAction ({ history, historyIndex, fileUrl, showedPage }) {
+  const entry = history[historyIndex]
+  const entryIsFile = entry?.source?.kind === 'web' && pageAddress(entry.url) === pageAddress(fileUrl)
+  if (showedPage && !entryIsFile) return { action: 'stay' }
+  if (history.length === 1) return { action: 'close-tab' }
+  if (historyIndex > 0) {
+    return { action: 'back', state: buildBrowserState(history.slice(0, historyIndex), historyIndex - 1) }
+  }
+  return { action: 'stay' }
+}
+
+export function getBrowserRequestAction ({
+  requestUrl,
+  currentSourceKind,
+  currentUrl = '',
+  navigationType = '',
+  isTopFrame = true
+}) {
   const url = String(requestUrl || '')
 
   if (url.length > MAX_BROWSER_URL_LENGTH) {
@@ -219,6 +250,19 @@ export function getBrowserRequestAction ({ requestUrl, currentSourceKind, isTopF
   }
 
   if (isHyperUrl(url)) {
+    // A hyper:// frame cannot load in place, and turning it into a navigation
+    // let any embed or ad take the whole tab to a page of its choosing.
+    if (!isTopFrame) return { action: 'block' }
+    // The page itself, loaded from the string the app fetched under its own
+    // address. iOS reports that load like any other, and taking it over would
+    // load the page again, and again. A link or a reload is still the app's.
+    if (
+      currentSourceKind === 'hyper' &&
+      navigationType === 'other' &&
+      isSameHyperDocument(url, currentUrl)
+    ) {
+      return { action: 'allow' }
+    }
     return { action: 'load-hyper', url }
   }
 
@@ -251,6 +295,54 @@ export function getBrowserRequestAction ({ requestUrl, currentSourceKind, isTopF
   }
 
   return { action: 'allow' }
+}
+
+/**
+ * The host of a hyper:// address, lower case: how a site is known for things
+ * like the publishing permission. Null for anything else.
+ */
+export function getHyperSiteId (url) {
+  try {
+    const parsed = new URL(String(url || ''))
+    if (parsed.protocol !== 'hyper:') return null
+    const host = parsed.hostname.toLowerCase()
+    return /^([0-9a-f]{64}|[a-z0-9]{52})$/.test(host) ? host : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * The page a tab's message came from. iOS reports the page's address, or
+ * about:blank for one loaded from a string. Android reports only the origin:
+ * https://example.com for any page on that site, and hyper:// for every
+ * hyper:// page. When that fits the tab's own entry, the entry says more.
+ */
+export function getBrowserMessagePageUrl (reportedUrl, entryUrl) {
+  const reported = String(reportedUrl || '')
+  if (!reported || reported.startsWith('about:')) return entryUrl
+  try {
+    const entry = new URL(entryUrl)
+    if (reported === (entry.protocol === 'hyper:' ? 'hyper://' : entry.origin)) return entryUrl
+  } catch {}
+  return reported
+}
+
+/**
+ * The site a hyper:// tab's bridge request speaks for, or null when it may not
+ * use the bridge: the page that sent it is somewhere else, such as a web page
+ * the tab navigated off to.
+ */
+export function getHyperBridgeSite ({ url, reportedUrl = '', isHyper }) {
+  const siteId = isHyper ? getHyperSiteId(url) : null
+  if (!siteId) return null
+  const page = getBrowserMessagePageUrl(String(reportedUrl || '').split('#')[0], url)
+  return getHyperSiteId(page) === siteId ? siteId : null
+}
+
+export function formatHyperSiteForPrompt (siteId) {
+  const id = String(siteId || '')
+  return id.length > 16 ? `${id.slice(0, 8)}…${id.slice(-4)}` : id
 }
 
 export function isStaleBrowserLoad (loadSeq, currentSeq) {
