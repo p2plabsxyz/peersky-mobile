@@ -21,13 +21,6 @@ neither tells us who you are.
 
 QR codes are read on your phone, and nothing about a scan is sent anywhere.
 
-The Android APK first posted on GitHub, PeerSky-v0.1.0.apk, read them with
-Google's ML Kit, which sends Google its own diagnostics: details of the phone and
-the app, how well scans work, error codes, and a random ID for each session
-([ML Kit data disclosure](https://developers.google.com/ml-kit/android-data-disclosure)).
-Every Android build since, and the app on Google Play, reads them with ZXing on
-the phone and leaves ML Kit out. The iPhone app never used ML Kit.
-
 ## Data Stored on Your Device
 
 PeerSky stores browser settings, open tabs, history, bookmarks, download records, cached filter lists, and peer-to-peer application data on your device. None of it is sent to us.

@@ -175,9 +175,8 @@ describe('mobile platform runtime configuration', () => {
     assert.doesNotMatch(settings, /Report harmful content/)
     assert.match(privacyPolicy, /contact@p2plabs[.]xyz/)
     // Both store forms say nothing is collected, so the policy says scans stay
-    // on the phone, and names ML Kit only for the APK that shipped it.
+    // on the phone.
     assert.match(privacyPolicy, /QR codes are read on your phone, and nothing about a scan is sent anywhere/)
-    assert.match(privacyPolicy, /PeerSky-v0[.]1[.]0[.]apk, read them with\nGoogle's ML Kit/)
     assert.match(privacyPolicy, /issues\/new[?]template=content-report[.]yml/)
     assert.match(contentReport, /name: Report harmful content/)
   })
