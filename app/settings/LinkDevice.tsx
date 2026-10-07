@@ -303,7 +303,7 @@ export function LinkDeviceSettings ({ onCallRpc, onRestartRequired, onOpenUrl }:
 // One sheet for both directions, the way sync works in other browsers: show
 // your code, or scan theirs. What the camera sees decides what happens: a
 // pairing code means send this phone there, a transfer code means bring it
-// here.
+// here. Each tab only takes its own kind, so the wrong one is explained.
 function SyncSheet ({
   call,
   visible,
@@ -442,6 +442,18 @@ function SyncSheet ({
     }
     if (result.kind === 'invalid') {
       setError(result.error || 'That is not a PeerSky code.')
+      return
+    }
+    // Each tab takes one kind of code. A pairing code on Receive here is the
+    // other device's code for receiving, and acting on it would start sending
+    // from this phone instead; a transfer on Send from here is the other way
+    // round. Say which code belongs where rather than switching direction.
+    if (result.kind === 'pairing' && direction === 'receive') {
+      setError('That is the other device\'s code for receiving, so it does not go here. Once the other device starts sending to this phone, scan the code it shows then. To send from this phone instead, switch to Send from here.')
+      return
+    }
+    if (result.kind === 'transfer' && direction === 'send') {
+      setError('That code is a transfer for this phone to receive. Switch to Receive here and scan it there.')
       return
     }
     if (result.kind === 'transfer' && result.url) {

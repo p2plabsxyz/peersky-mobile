@@ -162,6 +162,18 @@ test('what the camera sees decides the direction', async () => {
   // A desktop's code sends to the desktop: it takes the tabs and bookmarks.
   assert.match(handle, /if \(result\.code\) confirmSend\(result\.code, result\.deviceType === 'desktop'\)/)
   assert.doesNotMatch(handle, /send to this phone instead/)
+
+  // But each tab takes only its own kind of code. Scanning the other device's
+  // receiving code in step 3 of Receive here used to offer to send from this
+  // phone; now it says which code belongs there. Checked before either action.
+  const wrongOnReceive = handle.indexOf("result.kind === 'pairing' && direction === 'receive'")
+  const wrongOnSend = handle.indexOf("result.kind === 'transfer' && direction === 'send'")
+  assert.ok(wrongOnReceive > -1 && wrongOnSend > -1)
+  assert.ok(wrongOnReceive < handle.indexOf('await receive(result.url)'))
+  assert.ok(wrongOnReceive < handle.indexOf('confirmSend(result.code'))
+  assert.ok(wrongOnSend < handle.indexOf('await receive(result.url)'))
+  assert.match(handle, /That is the other device\\'s code for receiving, so it does not go here\./)
+  assert.match(handle, /That code is a transfer for this phone to receive\. Switch to Receive here and scan it there\./)
 })
 
 test('sending to a desktop says what it gets and shows a link to paste there', async () => {
@@ -172,7 +184,7 @@ test('sending to a desktop says what it gets and shows a link to paste there', a
   // The key to the phone's private drive goes too, so the person is told.
   assert.match(confirm, /can open your private files/)
 
-  const sheet = screen.slice(screen.indexOf(': sending'), screen.indexOf('direction === \'receive\''))
+  const sheet = screen.slice(screen.indexOf(': sending'), screen.indexOf('{direction === \'receive\''))
   assert.match(sheet, /sending\.toDesktop \? 'Open this on the desktop'/)
   assert.match(sheet, /Under Restore from the network, paste this link or scan it/)
   assert.match(sheet, /onPress=\{copyLink\}/)
