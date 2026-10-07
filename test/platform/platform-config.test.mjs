@@ -171,6 +171,9 @@ describe('mobile platform runtime configuration', () => {
     assert.match(settings, /Send feedback/)
     assert.doesNotMatch(settings, /Report harmful content/)
     assert.match(privacyPolicy, /contact@p2plabs[.]xyz/)
+    // The Play data safety form declares what ML Kit sends Google from the
+    // Android QR scanner, so the policy has to say it too, or the two disagree.
+    assert.match(privacyPolicy, /Google's ML Kit/)
     assert.match(privacyPolicy, /issues\/new[?]template=content-report[.]yml/)
     assert.match(contentReport, /name: Report harmful content/)
   })

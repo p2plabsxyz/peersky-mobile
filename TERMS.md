@@ -21,8 +21,9 @@ objectionable content or abusive users. Do not send or post:
 
 ## When someone breaks them
 
-- PeerChat filters messages for abuse, slurs and adult links, and refuses nude
-  pictures before they are sent and again when they arrive.
+- In groups, PeerChat filters messages for abuse, slurs and adult links, and
+  refuses nude pictures before they are sent. Pictures that look explicit
+  arrive hidden behind a warning.
 - You can block anyone. Everything they send disappears for you, in every chat,
   and they can no longer message you directly.
 - You can report anyone, or a single message, from inside the app. Reports go to

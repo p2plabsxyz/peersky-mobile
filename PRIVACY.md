@@ -17,9 +17,19 @@ crash reports from people who agreed on their phone to share them with app
 developers. Apple and Google collect these under their own privacy policies, and
 neither tells us who you are.
 
+## The QR Scanner on Android
+
+On Android, scanning a QR code uses Google's ML Kit, which sends Google its own
+diagnostics: details of the phone and the app, how well scans work, error codes,
+where it spotted a code in the frame, and a random ID for each session. Google
+says they are encrypted on the way, used only for diagnostics and usage stats,
+and not passed to anyone else
+([ML Kit data disclosure](https://developers.google.com/ml-kit/android-data-disclosure)).
+We never see them. The iPhone app does not use ML Kit.
+
 ## Data Stored on Your Device
 
-PeerSky stores browser settings, open tabs, history, bookmarks, download records, cached filter lists, and peer-to-peer application data on your device. This data is used to provide browser features and is not sent to a PeerSky analytics service.
+PeerSky stores browser settings, open tabs, history, bookmarks, download records, cached filter lists, and peer-to-peer application data on your device. None of it is sent to us.
 
 Incognito tabs keep no history, page cache or tab previews, and their cookies and site data are gone once the last incognito tab closes. `hyper://` content opened in one is still stored by the app's peer-to-peer node, like any other drive, until you clear P2P data.
 
@@ -29,13 +39,15 @@ You can remove browsing and peer-to-peer data from the Data Clearing and P2P Dat
 
 Websites you visit can receive standard network information, including your IP address, and may collect data under their own privacy policies. Searches typed into the address bar go to the engine chosen in Settings, and that engine's policy applies rather than this one.
 
-Peer-to-peer is the part worth understanding. Opening a `hyper://` address or using PeerChat connects your device directly to other devices, and those peers see your IP address the same way a website does. That is what lets it work without a server, and there is no onion routing to hide it. Finding peers happens over a distributed hash table and over your local Wi-Fi; the nodes that help see a hashed topic, never a room key and never the content.
+Opening a `hyper://` address or using PeerChat connects your device directly to other devices, and those peers see your IP address the same way a website does. That is what lets it work without a server, and there is no onion routing to hide it. Finding peers happens over a distributed hash table and over your local Wi-Fi; the nodes that help see a hashed topic, never a room key and never the content.
 
-PeerChat rooms and direct messages are encrypted with a key only the people in them hold, and attachments with a key derived from it. Two honest limits: a room key is a shared secret, so anybody who has it can read that room including its past messages, and it never rotates, meaning somebody removed from a room still holds the key. What is encrypted is the content, not the fact that two devices are talking.
+PeerChat rooms and direct messages are encrypted with a key only the people in them hold, and attachments with a key derived from it. Two limits: a room key is a shared secret, so anybody who has it can read that room including its past messages, and it never rotates, meaning somebody removed from a room still holds the key. What is encrypted is the content, not the fact that two devices are talking.
 
 Your PeerChat name, bio and photo are seen by everyone in the rooms you join. A new PeerChat profile starts in P2P Republic, a public room anyone can join, so people you do not know will see them there, along with your IP address while you are both online. You can leave it from the chat list at any time.
 
-Public Hyperdrive uploads are shared with the peer-to-peer network and can be accessed by anyone who has the corresponding Hyper URL. Private Hyperdrive uploads remain in isolated local app storage unless you choose to share or transfer that storage.
+When you send a link in PeerChat, your phone opens the page once to make a preview, so that website sees your IP address as it would on a visit. The people you send it to get the preview inside the message, and their phones do not open the page. You can turn off Link previews in PeerChat's settings.
+
+A public Hyperdrive upload can be opened by anyone with its `hyper://` address. A private one stays on your phone unless you share it or move it with Link Device.
 
 ## Backups and Moving to Another Device
 
@@ -67,7 +79,7 @@ There is no account on a server to delete. In PeerChat, Settings, Delete PeerCha
 
 PeerSky provides unrestricted browser access and is not directed to children, and we collect nothing from anyone.
 
-The peer-to-peer web has no moderator. Media is screened on the device before it is sent and again when it arrives, text is filtered for abuse and slurs, and adult domains are blocked in links. None of that replaces judgement about who you share a room key with.
+The peer-to-peer web has no moderator. In PeerChat groups, pictures are screened on the phone before they are sent, text is filtered for abuse and slurs, and adult domains are blocked in links. Pictures that look explicit arrive hidden behind a warning. None of that replaces judgement about who you share a room key with.
 
 We do not tolerate child sexual abuse or exploitation in any form. Report it from inside PeerChat or to contact@p2plabs.xyz, and we report what we learn to the authorities, including the National Center for Missing and Exploited Children. Our rules are in the [Terms of Use](TERMS.md).
 

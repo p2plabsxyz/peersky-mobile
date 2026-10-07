@@ -57,9 +57,9 @@ release.
   playback one is blocked, because PeerTunes plays through its WebView.
 - **Data safety.** We collect and share nothing ourselves, but the QR scanner
   on Android is Google's ML Kit (through expo-camera), and ML Kit sends Google
-  its own diagnostics: device model and OS version, the app's package and
-  version, a per-installation identifier, latency and error codes. Google says
-  it is encrypted in transit and not passed on
+  its own diagnostics: device and app details, performance and error codes, a
+  session ID, and for barcodes the zoom level and where it saw a code. Google
+  says it is encrypted in transit and not passed on
   ([ML Kit data disclosure](https://developers.google.com/ml-kit/android-data-disclosure)).
   Declare it as collected, not shared, for analytics: App info and performance
   (Diagnostics) and Device or other IDs. The iOS app has no ML Kit, so App

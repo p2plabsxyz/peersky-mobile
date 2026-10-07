@@ -42,6 +42,8 @@ test('PeerChat states its rules, and the terms they come from', async () => {
   const terms = await readFile(new URL('../../TERMS.md', import.meta.url), 'utf8')
   assert.match(terms, /There is no tolerance for\nobjectionable content or abusive users/)
   assert.match(terms, /contact@p2plabs\.xyz and we read every one\./)
+  // Direct messages skip the text filters, so the terms say where they run.
+  assert.match(terms, /In groups, PeerChat filters messages/)
   assert.doesNotMatch(terms, /—/)
 
   // Every report is read, but no deadline is promised: a small team cannot
