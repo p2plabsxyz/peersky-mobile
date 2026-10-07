@@ -1221,7 +1221,8 @@ export function PeerChatScreen ({
       if (!mountedRef.current) return
       setRooms(response.rooms)
       openRoom(response.room)
-      onStatus(`Message request sent to ${member.username}`)
+      // Another device of someone you already talk to opens that chat instead.
+      if (response.room.pendingAcceptance) onStatus(`Message request sent to ${member.username}`)
     })
   }
 

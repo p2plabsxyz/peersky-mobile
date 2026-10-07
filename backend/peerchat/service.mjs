@@ -54,6 +54,7 @@ import { createPeerPresence } from './presence.mjs'
 import { collapsePeerChatMembers } from './members.mjs'
 import { nameNotice } from './notice-names.mjs'
 import { mentionsPerson } from './mentions.mjs'
+import { chatWithPerson } from './person-chat.mjs'
 import {
   acceptsPeerChatCreatorKey,
   addPeerChatRoomBan,
@@ -483,6 +484,13 @@ export class PeerChatService {
     const normalizedPeerId = normalizedPeerKey ? normalizedPeerKey.slice(0, 8) : normalizePeerChatPeerId(peerId)
     if (!normalizedPeerId || normalizedPeerId === this.localId) throw new Error('Choose another peer.')
     if (this.isPeerBlocked(normalizedPeerId)) throw new Error('Unblock this person before messaging them.')
+
+    // A link names one device. Picked from a list, it may be another device of
+    // someone you already talk to, and that chat is where they are.
+    if (!normalizedPeerKey && !this.findDirectRoomKey(normalizedPeerId)) {
+      const theirs = this.chatWithPersonOf(normalizedPeerId, normalizeMemberName(username) || this.nameForPeer(normalizedPeerId))
+      if (theirs) return { room: this.publicRoom(theirs), rooms: this.listRooms(), version: this.version }
+    }
 
     // An offline peer is allowed. activatePeer re-sends the invite the moment
     // they connect, so the room opens now and waits rather than failing. The
@@ -2169,6 +2177,22 @@ export class PeerChatService {
     this.acceptDirectMessage({ roomKey }).catch((error) => {
       console.warn(`[peerchat] Unable to open the chat with your other device: ${error.message}`)
     })
+  }
+
+  // Your chat with this person, when this is another of their devices: it is
+  // in that chat, under their name.
+  chatWithPersonOf (peerId, peerName) {
+    if (this.isOwnDevice(peerId)) return null
+    const chats = [...this.rooms.values()]
+      .filter((room) => room.isDM && room.dmWith && !room.pendingAcceptance && !room.rejected &&
+        !room.blockedByPeer && !this.isOwnDevice(room.dmWith))
+      .map((room) => ({
+        room,
+        dmWith: room.dmWith,
+        partnerName: (room.members || []).find((member) => member.id === room.dmWith)?.username || room.name,
+        members: (room.members || []).map((member) => member.id)
+      }))
+    return chatWithPerson(chats, peerId, peerName)?.room || null
   }
 
   /** The room this device already keeps for a conversation with one person. */
