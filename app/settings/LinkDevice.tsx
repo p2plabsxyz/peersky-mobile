@@ -46,6 +46,7 @@ import {
   createBackupFileName,
   describeBackupContents,
   describeBackupOrigin,
+  describePairingCodeLife,
   describeProgress,
   formatBackupSize,
   MIN_BACKUP_PASSPHRASE_LENGTH,
@@ -317,6 +318,9 @@ function SyncSheet ({
   const isDark = useSettingsDarkMode()
   const [direction, setDirection] = useState<'receive' | 'send'>('receive')
   const [pairingCode, setPairingCode] = useState('')
+  const [pairingExpiresAt, setPairingExpiresAt] = useState(0)
+  const [pairingRenewed, setPairingRenewed] = useState(false)
+  const [clock, setClock] = useState(() => Date.now())
   const [busy, setBusy] = useState<string | null>(null)
   const [progress, setProgress] = useState<LinkDeviceProgress | null>(null)
   const [sending, setSending] = useState<{ url: string, code: string, toDesktop: boolean } | null>(null)
@@ -339,6 +343,8 @@ function SyncSheet ({
     setError(null)
     setCopied(false)
     setPairingCode('')
+    setPairingExpiresAt(0)
+    setPairingRenewed(false)
 
     void (async () => {
       try {
@@ -346,6 +352,8 @@ function SyncSheet ({
         if (cancelled) return
         if (!response.ok) throw new Error(response.error || 'Unable to load this phone\'s code')
         setPairingCode(createMobilePairingCode(response.encryptionPublicKey, response.nonce))
+        setPairingExpiresAt(Number(response.expiresAt) || 0)
+        setClock(Date.now())
       } catch (loadError) {
         if (!cancelled) setError(errorMessage(loadError))
       }
@@ -355,6 +363,41 @@ function SyncSheet ({
       cancelled = true
     }
   }, [call, visible])
+
+  // The code works for 15 minutes from when this phone first showed it, so the
+  // sheet says how long is left. When it runs out the phone makes a new one
+  // and says so: a desktop still holding the old code would build a transfer
+  // this phone then refuses.
+  useEffect(() => {
+    if (!visible || direction !== 'receive' || sending || busy || !pairingExpiresAt) return
+    let cancelled = false
+    let renewing = false
+    const tick = () => {
+      const now = Date.now()
+      setClock(now)
+      if (now < pairingExpiresAt || renewing) return
+      renewing = true
+      call(RPC_IDENTITY_GET_KEY)
+        .then((response) => {
+          if (cancelled) return
+          if (!response.ok) {
+            renewing = false
+            return
+          }
+          setPairingCode(createMobilePairingCode(response.encryptionPublicKey, response.nonce))
+          setPairingExpiresAt(Number(response.expiresAt) || 0)
+          setPairingRenewed(true)
+          setCopied(false)
+        })
+        .catch(() => { renewing = false })
+    }
+    tick()
+    const timer = setInterval(tick, 5000)
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+    }
+  }, [busy, call, direction, pairingExpiresAt, sending, visible])
 
   function close () {
     if (sending) void call(RPC_IDENTITY_SEND_STOP).catch(() => {})
@@ -576,6 +619,16 @@ function SyncSheet ({
                     <Pressable accessibilityRole='button' disabled={!pairingCode} hitSlop={8} onPress={copyCode}>
                       <Text style={styles.linkText}>{copied ? 'Code copied' : 'Copy code instead'}</Text>
                     </Pressable>
+                    {pairingCode !== '' && pairingExpiresAt > 0 && (
+                      <Text style={[styles.sheetNote, isDark ? darkStyles.muted : null]}>
+                        {describePairingCodeLife(pairingExpiresAt - clock)}
+                      </Text>
+                    )}
+                    {pairingRenewed && (
+                      <Text style={[styles.sheetNote, isDark ? darkStyles.muted : null]}>
+                        The last code ran out, so this is a new one. If the other device has the old code, scan this one there instead.
+                      </Text>
+                    )}
                     <Step number={3} text='It then shows a code of its own. Scan that one here.' />
                   </>
                   )

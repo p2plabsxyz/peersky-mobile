@@ -92,3 +92,13 @@ export function parseProgressEvent (data) {
     return null
   }
 }
+
+// How long the pairing code on Receive here has left, in whole minutes rounded
+// down, so it never promises more time than the code really has.
+export function describePairingCodeLife (msLeft) {
+  const ms = Number(msLeft)
+  if (!Number.isFinite(ms) || ms <= 0) return 'Getting a new code…'
+  if (ms < 60 * 1000) return 'This code works for less than a minute more.'
+  const minutes = Math.floor(ms / (60 * 1000))
+  return `This code works for ${minutes} more ${minutes === 1 ? 'minute' : 'minutes'}.`
+}

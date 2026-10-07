@@ -8,6 +8,7 @@ import {
   createBackupFileName,
   describeBackupContents,
   describeBackupOrigin,
+  describePairingCodeLife,
   describeProgress,
   formatBackupSize,
   MIN_BACKUP_PASSPHRASE_LENGTH,
@@ -130,6 +131,26 @@ test('Link Device is laid out like a sync screen, not a debug page', async () =>
   assert.match(settings, /import \{ LinkDeviceSettings \} from '\.\/LinkDevice'/)
   assert.match(settings, /description: 'Sync with another device, or save a backup'/)
   assert.doesNotMatch(settings, /function LinkDeviceSettings/)
+})
+
+test('Receive here says how long its code has left, and renews it with a note when it runs out', async () => {
+  assert.equal(describePairingCodeLife(15 * 60 * 1000), 'This code works for 15 more minutes.')
+  // Rounded down, so it never promises time the code does not have.
+  assert.equal(describePairingCodeLife(14 * 60 * 1000 + 59 * 1000), 'This code works for 14 more minutes.')
+  assert.equal(describePairingCodeLife(90 * 1000), 'This code works for 1 more minute.')
+  assert.equal(describePairingCodeLife(59 * 1000), 'This code works for less than a minute more.')
+  assert.equal(describePairingCodeLife(0), 'Getting a new code…')
+  assert.equal(describePairingCodeLife(Number.NaN), 'Getting a new code…')
+
+  const screen = await read('app/settings/LinkDevice.tsx')
+  const renew = screen.slice(screen.indexOf('// The code works for 15 minutes'), screen.indexOf('function close ()'))
+  assert.match(renew, /if \(now < pairingExpiresAt \|\| renewing\) return/)
+  assert.match(renew, /call\(RPC_IDENTITY_GET_KEY\)/)
+  assert.match(renew, /setPairingRenewed\(true\)/)
+  // Only while the code is on screen: not mid-transfer and not on Send.
+  assert.match(renew, /if \(!visible \|\| direction !== 'receive' \|\| sending \|\| busy \|\| !pairingExpiresAt\) return/)
+  assert.match(screen, /describePairingCodeLife\(pairingExpiresAt - clock\)/)
+  assert.match(screen, /The last code ran out, so this is a new one\. If the other device has the old code, scan this one there instead\./)
 })
 
 test('what the camera sees decides the direction', async () => {
