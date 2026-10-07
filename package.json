@@ -116,6 +116,15 @@
   "overrides": {
     "hyper-cmd-lib-keys": "^0.2.0"
   },
+  "expo": {
+    "autolinking": {
+      "android": {
+        "buildFromSource": [
+          "expo-camera"
+        ]
+      }
+    }
+  },
   "standard": {
     "ignore": [
       "app/app.bundle.mjs",

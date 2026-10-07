@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
+import { readFile, readdir } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 
 const require = createRequire(import.meta.url)
@@ -174,11 +174,35 @@ describe('mobile platform runtime configuration', () => {
     assert.match(settings, /Send feedback/)
     assert.doesNotMatch(settings, /Report harmful content/)
     assert.match(privacyPolicy, /contact@p2plabs[.]xyz/)
-    // The Play data safety form declares what ML Kit sends Google from the
-    // Android QR scanner, so the policy has to say it too, or the two disagree.
-    assert.match(privacyPolicy, /Google's ML Kit/)
+    // Both store forms say nothing is collected, so the policy says scans stay
+    // on the phone, and names ML Kit only for the APK that shipped it.
+    assert.match(privacyPolicy, /QR codes are read on your phone, and nothing about a scan is sent anywhere/)
+    assert.match(privacyPolicy, /PeerSky-v0[.]1[.]0[.]apk, read them with\nGoogle's ML Kit/)
     assert.match(privacyPolicy, /issues\/new[?]template=content-report[.]yml/)
     assert.match(contentReport, /name: Report harmful content/)
+  })
+
+  it('reads QR codes with ZXing and keeps Google ML Kit out of the Android app', async () => {
+    const packageJson = JSON.parse(await readFile(repoFile('package.json'), 'utf8'))
+    const patchName = (await readdir(repoFile('patches/'))).find((name) => /^expo-camera\+[\d.]+[.]patch$/.test(name))
+    assert.ok(patchName, 'patches/ has an expo-camera patch')
+    const patch = await readFile(repoFile(`patches/${patchName}`), 'utf8')
+
+    // ML Kit sends Google usage data and has no switch to stop it, so it must
+    // not ship. Expo uses its prebuilt expo-camera, ML Kit and all, unless the
+    // app asks for a build from source, and only that build has the patch.
+    assert.ok(packageJson.expo?.autolinking?.android?.buildFromSource?.includes('expo-camera'))
+    assert.match(patch, /^\+\s*compileOnly "com[.]google[.]mlkit:barcode-scanning:/m)
+    assert.match(patch, /^\+\s*compileOnly "com[.]google[.]android[.]gms:play-services-code-scanner:/m)
+    assert.match(patch, /^\+\s*implementation "com[.]google[.]zxing:core:/m)
+    // Without this entry Google Play services never downloads ML Kit's scanner.
+    assert.match(patch, /^-\s*android:name="com[.]google[.]mlkit[.]vision[.]DEPENDENCIES"$/m)
+    assert.doesNotMatch(patch, /^\+.*android:name="com[.]google[.]mlkit/m)
+    // The camera view attaches the ZXing reader, and nothing waits for ML Kit
+    // before turning scanning on.
+    assert.match(patch, /^\+\s*ZxingBarcodeAnalyzer[.]executor,$/m)
+    assert.match(patch, /^-\s*if \(shouldScanBarcodes && CameraUtils[.]isMLKitBarcodeScannerAvailable\(\)\) \{$/m)
+    assert.match(patch, /^-\s*if \(!CameraUtils[.]isMLKitBarcodeScannerAvailable\(\)\) \{\n-\s*view[.]setShouldScanBarcodes\(false\)$/m)
   })
 
   it('configures native local notifications for PeerChat', async () => {

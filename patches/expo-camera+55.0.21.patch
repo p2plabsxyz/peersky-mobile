@@ -1,0 +1,249 @@
+diff --git a/node_modules/expo-camera/android/build.gradle b/node_modules/expo-camera/android/build.gradle
+index 082d4f0..c65247a 100644
+--- a/node_modules/expo-camera/android/build.gradle
++++ b/node_modules/expo-camera/android/build.gradle
+@@ -31,8 +31,9 @@ dependencies {
+   implementation "androidx.camera:camera-view:${camerax_version}"
+   implementation "androidx.camera:camera-extensions:${camerax_version}"
+ 
+-  def barcodeDependencyConfiguration = isBarcodeScannerEnabled ? "implementation" : "compileOnly"
+-  add(barcodeDependencyConfiguration, "com.google.android.gms:play-services-code-scanner:16.1.0")
+-  add(barcodeDependencyConfiguration, "com.google.mlkit:barcode-scanning:17.3.0")
+-  add(barcodeDependencyConfiguration, "androidx.camera:camera-mlkit-vision:${camerax_version}")
++  // PeerSky: ML Kit sends Google usage data, so it never ships; ZXing reads codes on the phone.
++  compileOnly "com.google.android.gms:play-services-code-scanner:16.1.0"
++  compileOnly "com.google.mlkit:barcode-scanning:17.3.0"
++  compileOnly "androidx.camera:camera-mlkit-vision:${camerax_version}"
++  implementation "com.google.zxing:core:3.5.3"
+ }
+diff --git a/node_modules/expo-camera/android/src/main/AndroidManifest.xml b/node_modules/expo-camera/android/src/main/AndroidManifest.xml
+index a8ee90d..1519e8e 100644
+--- a/node_modules/expo-camera/android/src/main/AndroidManifest.xml
++++ b/node_modules/expo-camera/android/src/main/AndroidManifest.xml
+@@ -2,9 +2,7 @@
+   <uses-permission android:name="android.permission.CAMERA" />
+   <uses-permission android:name="android.permission.RECORD_AUDIO" />
+ 
+-  <application>
+-    <meta-data
+-      android:name="com.google.mlkit.vision.DEPENDENCIES"
+-      android:value="barcode_ui"/>
+-  </application>
++  <!-- PeerSky: no com.google.mlkit.vision.DEPENDENCIES entry, so Google Play services
++       never downloads ML Kit's scanner for this app. -->
++  <application />
+ </manifest>
+diff --git a/node_modules/expo-camera/android/src/main/java/expo/modules/camera/CameraViewModule.kt b/node_modules/expo-camera/android/src/main/java/expo/modules/camera/CameraViewModule.kt
+index 7e50b98..151edf3 100644
+--- a/node_modules/expo-camera/android/src/main/java/expo/modules/camera/CameraViewModule.kt
++++ b/node_modules/expo-camera/android/src/main/java/expo/modules/camera/CameraViewModule.kt
+@@ -345,21 +345,14 @@ class CameraViewModule : Module() {
+         }
+       }
+ 
++      // PeerSky: the camera view scans with ZXing, so these no longer wait for ML Kit.
+       Prop("barcodeScannerSettings") { view, settings: BarcodeSettings? ->
+-        if (!CameraUtils.isMLKitBarcodeScannerAvailable()) {
+-          appContext.jsLogger?.warn("Barcode scanning has been disabled")
+-          return@Prop
+-        }
+         settings?.let {
+           view.setBarcodeScannerSettings(it)
+         }
+       }
+ 
+       Prop("barcodeScannerEnabled") { view, enabled: Boolean? ->
+-        if (!CameraUtils.isMLKitBarcodeScannerAvailable()) {
+-          view.setShouldScanBarcodes(false)
+-          return@Prop
+-        }
+         enabled?.let {
+           view.setShouldScanBarcodes(enabled)
+         }
+diff --git a/node_modules/expo-camera/android/src/main/java/expo/modules/camera/ExpoCameraView.kt b/node_modules/expo-camera/android/src/main/java/expo/modules/camera/ExpoCameraView.kt
+index 1ff8116..4d798ef 100644
+--- a/node_modules/expo-camera/android/src/main/java/expo/modules/camera/ExpoCameraView.kt
++++ b/node_modules/expo-camera/android/src/main/java/expo/modules/camera/ExpoCameraView.kt
+@@ -49,7 +49,7 @@ import androidx.camera.view.PreviewView
+ import androidx.core.app.ActivityCompat
+ import androidx.core.content.ContextCompat
+ import androidx.core.graphics.drawable.toDrawable
+-import expo.modules.camera.analyzers.BarcodeAnalyzer
++import expo.modules.camera.analyzers.ZxingBarcodeAnalyzer
+ import expo.modules.camera.analyzers.toByteArray
+ import expo.modules.camera.common.BarcodeScannedEvent
+ import expo.modules.camera.common.CameraMountErrorEvent
+@@ -532,22 +532,26 @@ class ExpoCameraView(
+     ImageAnalysis.Builder()
+       .setResolutionSelector(
+         ResolutionSelector.Builder()
+-          .setResolutionStrategy(ResolutionStrategy.HIGHEST_AVAILABLE_STRATEGY)
++          // PeerSky: ZXing reads a code as well from 1280x960 as from the largest frame, and much faster.
++          .setResolutionStrategy(
++            ResolutionStrategy(Size(1280, 960), ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER)
++          )
+           .build()
+       )
+       .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+       .build()
+       .also { analyzer ->
+-        if (shouldScanBarcodes && CameraUtils.isMLKitBarcodeScannerAvailable()) {
++        // PeerSky: ZXing in place of ML Kit, which sends Google usage data and is left out of the app.
++        if (shouldScanBarcodes) {
+           try {
+             analyzer.setAnalyzer(
+-              ContextCompat.getMainExecutor(context),
+-              BarcodeAnalyzer(barcodeFormats) {
++              ZxingBarcodeAnalyzer.executor,
++              ZxingBarcodeAnalyzer(barcodeFormats) {
+                 onBarcodeScanned(it)
+               }
+             )
+           } catch (e: Exception) {
+-            Log.e(CameraViewModule.TAG, "Failed to initialize BarcodeAnalyzer: ${e.message}")
++            Log.e(CameraViewModule.TAG, "Failed to initialize ZxingBarcodeAnalyzer: ${e.message}")
+           }
+         }
+       }
+diff --git a/node_modules/expo-camera/android/src/main/java/expo/modules/camera/analyzers/ZxingBarcodeAnalyzer.kt b/node_modules/expo-camera/android/src/main/java/expo/modules/camera/analyzers/ZxingBarcodeAnalyzer.kt
+new file mode 100644
+index 0000000..44314f5
+--- /dev/null
++++ b/node_modules/expo-camera/android/src/main/java/expo/modules/camera/analyzers/ZxingBarcodeAnalyzer.kt
+@@ -0,0 +1,136 @@
++package expo.modules.camera.analyzers
++
++import android.os.Bundle
++import android.os.Handler
++import android.os.Looper
++import android.util.Log
++import androidx.camera.core.ImageAnalysis
++import androidx.camera.core.ImageProxy
++import com.google.zxing.BarcodeFormat
++import com.google.zxing.BinaryBitmap
++import com.google.zxing.DecodeHintType
++import com.google.zxing.LuminanceSource
++import com.google.zxing.MultiFormatReader
++import com.google.zxing.PlanarYUVLuminanceSource
++import com.google.zxing.ReaderException
++import com.google.zxing.Result
++import com.google.zxing.common.HybridBinarizer
++import expo.modules.camera.records.BarcodeType
++import expo.modules.camera.utils.BarCodeScannerResult
++import java.util.concurrent.ExecutorService
++import java.util.concurrent.Executors
++
++// PeerSky: reads codes on the phone with ZXing. ML Kit, which expo-camera uses
++// by default, sends Google usage data, so it is left out of the app.
++class ZxingBarcodeAnalyzer(
++  formats: List<BarcodeType>,
++  private val onComplete: (BarCodeScannerResult) -> Unit
++) : ImageAnalysis.Analyzer {
++  private val mainHandler = Handler(Looper.getMainLooper())
++  private val reader = MultiFormatReader().apply {
++    val wanted = formats.mapNotNull { it.toZxingFormat() }.ifEmpty { listOf(BarcodeFormat.QR_CODE) }
++    setHints(
++      mapOf(
++        DecodeHintType.POSSIBLE_FORMATS to wanted,
++        DecodeHintType.TRY_HARDER to true
++      )
++    )
++  }
++
++  override fun analyze(imageProxy: ImageProxy) {
++    try {
++      val rotation = imageProxy.imageInfo.rotationDegrees
++      val width = imageProxy.width
++      val height = imageProxy.height
++      val plane = imageProxy.planes[0]
++      val bytes = ByteArray(plane.buffer.remaining())
++      plane.buffer.get(bytes)
++      // The Y plane is the grey image ZXing needs; rows can be padded to rowStride.
++      val source = PlanarYUVLuminanceSource(bytes, plane.rowStride, height, 0, 0, width, height, false)
++      // A code drawn light on dark, as in a dark theme, only reads inverted.
++      val result = decode(source) ?: decode(source.invert()) ?: return
++
++      // Points come in the sensor's orientation; the view expects them upright.
++      val isRotated = rotation == 90 || rotation == 270
++      val points = result.resultPoints.orEmpty().filterNotNull()
++      val cornerPoints = IntArray(points.size * 2)
++      points.forEachIndexed { index, point ->
++        val x = point.x.toInt()
++        val y = point.y.toInt()
++        val (uprightX, uprightY) = when (rotation) {
++          90 -> (height - y) to x
++          180 -> (width - x) to (height - y)
++          270 -> y to (width - x)
++          else -> x to y
++        }
++        cornerPoints[index * 2] = uprightX
++        cornerPoints[index * 2 + 1] = uprightY
++      }
++
++      val scanned = BarCodeScannerResult(
++        result.barcodeFormat.toBarcodeType().mapToBarcode(),
++        result.text,
++        result.text,
++        Bundle(),
++        cornerPoints.toMutableList(),
++        if (isRotated) width else height,
++        if (isRotated) height else width
++      )
++      mainHandler.post { onComplete(scanned) }
++    } catch (e: Exception) {
++      Log.d(TAG, e.message ?: "Barcode scanning failed")
++    } finally {
++      imageProxy.close()
++    }
++  }
++
++  private fun decode(source: LuminanceSource): Result? =
++    try {
++      reader.decodeWithState(BinaryBitmap(HybridBinarizer(source)))
++    } catch (_: ReaderException) {
++      null
++    } finally {
++      reader.reset()
++    }
++
++  companion object {
++    private const val TAG = "ZxingBarcodeAnalyzer"
++
++    // One thread for every camera view, so decoding never runs on the UI thread.
++    val executor: ExecutorService by lazy { Executors.newSingleThreadExecutor() }
++  }
++}
++
++private fun BarcodeType.toZxingFormat(): BarcodeFormat? = when (this) {
++  BarcodeType.AZTEC -> BarcodeFormat.AZTEC
++  BarcodeType.EAN13 -> BarcodeFormat.EAN_13
++  BarcodeType.EAN8 -> BarcodeFormat.EAN_8
++  BarcodeType.QR -> BarcodeFormat.QR_CODE
++  BarcodeType.PDF417 -> BarcodeFormat.PDF_417
++  BarcodeType.UPCE -> BarcodeFormat.UPC_E
++  BarcodeType.DATAMATRIX -> BarcodeFormat.DATA_MATRIX
++  BarcodeType.CODE39 -> BarcodeFormat.CODE_39
++  BarcodeType.CODE93 -> BarcodeFormat.CODE_93
++  BarcodeType.ITF14 -> BarcodeFormat.ITF
++  BarcodeType.CODABAR -> BarcodeFormat.CODABAR
++  BarcodeType.CODE128 -> BarcodeFormat.CODE_128
++  BarcodeType.UPCA -> BarcodeFormat.UPC_A
++  BarcodeType.UNKNOWN -> null
++}
++
++private fun BarcodeFormat.toBarcodeType(): BarcodeType = when (this) {
++  BarcodeFormat.AZTEC -> BarcodeType.AZTEC
++  BarcodeFormat.EAN_13 -> BarcodeType.EAN13
++  BarcodeFormat.EAN_8 -> BarcodeType.EAN8
++  BarcodeFormat.QR_CODE -> BarcodeType.QR
++  BarcodeFormat.PDF_417 -> BarcodeType.PDF417
++  BarcodeFormat.UPC_E -> BarcodeType.UPCE
++  BarcodeFormat.DATA_MATRIX -> BarcodeType.DATAMATRIX
++  BarcodeFormat.CODE_39 -> BarcodeType.CODE39
++  BarcodeFormat.CODE_93 -> BarcodeType.CODE93
++  BarcodeFormat.ITF -> BarcodeType.ITF14
++  BarcodeFormat.CODABAR -> BarcodeType.CODABAR
++  BarcodeFormat.CODE_128 -> BarcodeType.CODE128
++  BarcodeFormat.UPC_A -> BarcodeType.UPCA
++  else -> BarcodeType.UNKNOWN
++}

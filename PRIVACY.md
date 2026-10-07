@@ -1,6 +1,6 @@
 # PeerSky Mobile Privacy Policy
 
-Last updated: October 6, 2026
+Last updated: October 7, 2026
 
 PeerSky Mobile is a web and peer-to-peer browser. There are no accounts, no
 analytics and no servers of ours, so there is nowhere for us to collect anything
@@ -17,15 +17,16 @@ crash reports from people who agreed on their phone to share them with app
 developers. Apple and Google collect these under their own privacy policies, and
 neither tells us who you are.
 
-## The QR Scanner on Android
+## The QR Scanner
 
-On Android, scanning a QR code uses Google's ML Kit, which sends Google its own
-diagnostics: details of the phone and the app, how well scans work, error codes,
-where it spotted a code in the frame, and a random ID for each session. Google
-says they are encrypted on the way, used only for diagnostics and usage stats,
-and not passed to anyone else
+QR codes are read on your phone, and nothing about a scan is sent anywhere.
+
+The Android APK first posted on GitHub, PeerSky-v0.1.0.apk, read them with
+Google's ML Kit, which sends Google its own diagnostics: details of the phone and
+the app, how well scans work, error codes, and a random ID for each session
 ([ML Kit data disclosure](https://developers.google.com/ml-kit/android-data-disclosure)).
-We never see them. The iPhone app does not use ML Kit.
+Every Android build since, and the app on Google Play, reads them with ZXing on
+the phone and leaves ML Kit out. The iPhone app never used ML Kit.
 
 ## Data Stored on Your Device
 

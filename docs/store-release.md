@@ -60,17 +60,18 @@ release.
   PeerChat, the app in the background, a message arriving, and the ongoing
   notification. Nothing else declares a foreground service type: the media
   playback one is blocked, because PeerTunes plays through its WebView.
-- **Data safety.** We collect and share nothing ourselves, but the QR scanner
-  on Android is Google's ML Kit (through expo-camera), and ML Kit sends Google
-  its own diagnostics: device and app details, performance and error codes, a
-  session ID, and for barcodes the zoom level and where it saw a code. Google
-  says it is encrypted in transit and not passed on
-  ([ML Kit data disclosure](https://developers.google.com/ml-kit/android-data-disclosure)).
-  Declare it as collected, not shared, for analytics: App info and performance
-  (Diagnostics) and Device or other IDs. The iOS app has no ML Kit, so App
-  Privacy stays Data Not Collected. People can delete their data
-  in the app (Delete PeerChat profile, and Settings, P2P Data, Clear all P2P
-  data).
+- **Data safety.** Answer No to collecting or sharing user data: the app
+  collects nothing, as App Privacy says on iOS. The Android QR scanner reads
+  codes on the phone with ZXing. `patches/expo-camera+55.0.21.patch` swaps
+  expo-camera's ML Kit scanner for ZXing and keeps ML Kit out of the build, and
+  `expo.autolinking.android.buildFromSource` in `package.json` makes Expo
+  compile expo-camera from that patched source instead of its prebuilt copy.
+  If either goes, ML Kit comes back with the diagnostics it sends Google
+  ([ML Kit data disclosure](https://developers.google.com/ml-kit/android-data-disclosure)),
+  and this form would have to declare them. Firebase Messaging ships inside
+  expo-notifications but never starts, since there is no
+  `google-services.json`. People can delete their data in the app (Delete
+  PeerChat profile, and Settings, P2P Data, Clear all P2P data).
 - **Child safety standards.** Social apps have to publish them. Point to
   `TERMS.md` (PeerChat rules) and the Children section of `PRIVACY.md`, with
   contact@p2plabs.xyz as the point of contact.
