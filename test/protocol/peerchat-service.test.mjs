@@ -407,6 +407,37 @@ test('PeerChat persists bounded unread and mention counts and clears them for ac
   await restarted.close()
 })
 
+test('PeerChat counts a mention of any of your devices, and not of a longer name', async (t) => {
+  const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-mention-'))
+  t.after(() => rm(storagePath, { recursive: true, force: true }))
+  const service = await new PeerChatService({ sdk: createFakeSdk(new Map()), storagePath }).start()
+  const room = await service.createRoom({ name: 'Mentions', username: 'Ada' })
+  const stored = service.rooms.get(room.roomKey)
+  stored.members = [...(stored.members || []), { id: 'a1b2c3d4', username: 'Ada Lovelace', bio: '', avatar: null }]
+  const peer = {
+    id: 'desktop-peer',
+    username: 'Sam',
+    rooms: [room.roomKey],
+    initialSyncCount: 0,
+    liveRate: { count: 0, resetsAt: Date.now() + 60_000 }
+  }
+  const send = (id, text, at) => service.handlePeerMessage(peer, {
+    id,
+    roomKey: room.roomKey,
+    sn: 'Sam',
+    ...encryptPeerChatMessage(text, room.roomKey),
+    ts: Date.now() + at
+  })
+
+  await send('other-device', '@Ada@desktop1 look at this', 1_000)
+  assert.equal(service.listRooms()[0].unreadMentions, 1)
+  await send('longer-name', '@Ada Lovelace look at this', 2_000)
+  await send('address', 'mail ada@Ada.example', 3_000)
+  assert.equal(service.listRooms()[0].unreadCount, 3)
+  assert.equal(service.listRooms()[0].unreadMentions, 1)
+  await service.close()
+})
+
 test('PeerChat exposes participant profiles from desktop profile and join frames', async (t) => {
   const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-members-'))
   t.after(() => rm(storagePath, { recursive: true, force: true }))

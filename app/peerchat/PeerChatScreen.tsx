@@ -124,6 +124,7 @@ import {
   splitPeerChatDirectPeer
 } from './peerchat-invite.mjs'
 import { PRE_JOINED_PEERCHAT_ROOM_KEY } from '../../backend/peerchat/rooms.mjs'
+import { mentionQueryStart } from '../../backend/peerchat/mentions.mjs'
 import { QrCodeView } from '../settings/QrCodeView'
 import { pickUploads } from '../media/upload-gate'
 import type { UploadSource } from '../media/upload-gate'
@@ -4756,8 +4757,9 @@ function getMentionCandidates (
   messages: PeerChatMessage[],
   localId: string
 ) {
-  const atIndex = composer.lastIndexOf('@')
-  if (atIndex < 0 || (atIndex > 0 && !/\s/.test(composer[atIndex - 1]))) return []
+  // Past a device label's "@", so "@Ada@mo" still offers Ada@mobile.
+  const atIndex = mentionQueryStart(composer)
+  if (atIndex < 0) return []
   const query = composer.slice(atIndex + 1)
   if (query.includes('\n') || Array.from(query).length > 50) return []
 
@@ -4784,7 +4786,7 @@ function getMentionCandidates (
 }
 
 function insertMention (composer: string, username: string) {
-  const atIndex = composer.lastIndexOf('@')
+  const atIndex = mentionQueryStart(composer)
   if (atIndex < 0) return composer
   return `${composer.slice(0, atIndex)}@${username}  `
 }

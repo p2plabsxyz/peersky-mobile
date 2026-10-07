@@ -53,6 +53,7 @@ import { attachPeerChatTransport } from './transport.mjs'
 import { createPeerPresence } from './presence.mjs'
 import { collapsePeerChatMembers } from './members.mjs'
 import { nameNotice } from './notice-names.mjs'
+import { mentionsPerson } from './mentions.mjs'
 import {
   acceptsPeerChatCreatorKey,
   addPeerChatRoomBan,
@@ -2346,7 +2347,9 @@ export class PeerChatService {
     const message = this.entryToMessage(entry, roomKey).message
     room.unreadCount = Math.min(MAX_PEERCHAT_STORED_MESSAGES_PER_ROOM, (room.unreadCount || 0) + 1)
     const username = this.profile.username
-    if (username && message.toLocaleLowerCase().includes(`@${username.toLocaleLowerCase()}`)) {
+    // Named on any of this person's devices: "@ada@desktop1" is ada here too.
+    const names = (room.members || []).map((member) => member?.username)
+    if (username && mentionsPerson(message, names, [username, this.myName()])) {
       room.unreadMentions = Math.min(room.unreadCount, (room.unreadMentions || 0) + 1)
     }
     this.schedulePersist()
