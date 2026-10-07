@@ -407,6 +407,33 @@ test('PeerChat persists bounded unread and mention counts and clears them for ac
   await restarted.close()
 })
 
+// After a restart PeerChat waited for the network before anything showed:
+// every room, one after another, each until the DHT took its announcement.
+// With the internet down that is seconds a room, and the app sat loading.
+test('PeerChat starts without waiting for the network to take its rooms', async (t) => {
+  const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-start-'))
+  t.after(() => rm(storagePath, { recursive: true, force: true }))
+  const feeds = new Map()
+  const first = await new PeerChatService({ sdk: createFakeSdk(feeds), storagePath }).start()
+  const rooms = []
+  for (const name of ['One', 'Two', 'Three']) rooms.push(await first.createRoom({ name, username: 'Ada' }))
+  await first.close()
+
+  // A network that never answers.
+  const sdk = createFakeSdk(cloneFeeds(feeds))
+  let flushes = 0
+  sdk.swarm.flush = () => { flushes += 1; return new Promise(() => {}) }
+  const started = await Promise.race([
+    new PeerChatService({ sdk, storagePath }).start(),
+    new Promise((resolve) => setTimeout(() => resolve(null), 1000))
+  ])
+  assert.ok(started, 'start waited on the network')
+  for (const room of rooms) assert.ok(sdk.joined.includes(derivePeerChatTopic(room.roomKey).toString('hex')))
+  assert.equal(flushes, 1)
+  assert.equal(started.listRooms().length, 3)
+  await started.close()
+})
+
 test('PeerChat counts a mention of any of your devices, and not of a longer name', async (t) => {
   const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-mention-'))
   t.after(() => rm(storagePath, { recursive: true, force: true }))

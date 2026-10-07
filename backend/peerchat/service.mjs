@@ -256,13 +256,16 @@ export class PeerChatService {
     // side's control budget, which then dropped the proof for a new room.
     this.sdk.swarm.on('connection', this.onConnection)
 
-    for (const roomKey of this.rooms.keys()) {
-      try {
-        await this.joinRoomNetwork(roomKey)
-      } catch (error) {
+    // Every room at once, and none waiting on the network. A flush waits for
+    // the DHT to take the announcement, about six seconds a room with the
+    // internet down, and every PeerChat call waited for all of them, one room
+    // after another, so PeerChat sat loading after a restart.
+    await Promise.all([...this.rooms.keys()].map((roomKey) => (
+      this.joinRoomNetwork(roomKey, { flush: false }).catch((error) => {
         console.warn(`[peerchat] Unable to rejoin ${roomKey.slice(0, 8)}: ${error.message}`)
-      }
-    }
+      })
+    )))
+    this.sdk.swarm.flush().catch(() => {})
 
     return this
   }
@@ -971,19 +974,19 @@ export class PeerChatService {
     if (!this.profile.username) throw new Error('Set a PeerChat name first.')
   }
 
-  async joinRoomNetwork (roomKey) {
+  async joinRoomNetwork (roomKey, { flush = true } = {}) {
     if (this.closed) throw new Error('PeerChat service is closed.')
     const pending = this.pendingJoins.get(roomKey)
     if (pending) return pending
 
-    const join = this.openRoomNetwork(roomKey).finally(() => {
+    const join = this.openRoomNetwork(roomKey, { flush }).finally(() => {
       if (this.pendingJoins.get(roomKey) === join) this.pendingJoins.delete(roomKey)
     })
     this.pendingJoins.set(roomKey, join)
     return join
   }
 
-  async openRoomNetwork (roomKey) {
+  async openRoomNetwork (roomKey, { flush = true } = {}) {
     // The feed before anyone hears we are in the room. A peer starts sending
     // the moment our proof reaches it, and whatever came in while there was
     // nowhere to keep it was lost for good, its id already marked as seen. The
@@ -1002,7 +1005,7 @@ export class PeerChatService {
       this.sdk.join(topic, { client: true, server: true })
       this.joinedRooms.add(roomKey)
       for (const peer of this.peers.values()) this.shareTopics(peer)
-      await this.sdk.swarm.flush()
+      if (flush) await this.sdk.swarm.flush()
     } catch (error) {
       this.discoveryKeys.delete(discoveryKey)
       this.joinedRooms.delete(roomKey)
