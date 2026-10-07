@@ -1287,8 +1287,14 @@ export class PeerChatService {
           this.schedulePersist()
         }
         this.takeSiblingProfile(message.link, message.avatar || null)
-        // Every room this phone is in, once per connection.
-        if (first) this.sendRoomsToSibling(peer, this.sharedRoomEntries())
+        if (first) {
+          // Every room this phone is in, once per connection.
+          this.sendRoomsToSibling(peer, this.sharedRoomEntries())
+          // And a chat it asked for before it had proved itself here.
+          for (const pending of this.listPendingDirectMessages()) {
+            if (pending.fromKey && pending.fromKey === peer.key) this.acceptSiblingDirectMessage(pending.roomKey)
+          }
+        }
       }
       let changed = false
       const name = normalizeMemberName(message.username)
@@ -2130,7 +2136,13 @@ export class PeerChatService {
       this.dropRoomLocally(ours).catch(() => {})
     }
 
-    if (this.pendingDirectMessages.has(roomKey) || this.pendingDirectMessages.size >= MAX_PENDING_DIRECT_MESSAGES) return
+    const waiting = this.pendingDirectMessages.get(roomKey)
+    if (waiting) {
+      // Asked again by the device that asked first, now proven to be ours.
+      if (peer.sibling && waiting.fromKey === peer.key) this.acceptSiblingDirectMessage(roomKey)
+      return
+    }
+    if (this.pendingDirectMessages.size >= MAX_PENDING_DIRECT_MESSAGES) return
 
     this.pendingDirectMessages.set(roomKey, {
       roomKey,
@@ -2144,7 +2156,19 @@ export class PeerChatService {
       receivedAt: Date.now()
     })
     this.persistNow()
+    if (peer.sibling) {
+      this.acceptSiblingDirectMessage(roomKey)
+      return
+    }
     this.bumpVersion()
+  }
+
+  // Another of this person's devices asked, proven on its connection: there is
+  // nobody to ask, so the chat with themselves opens without a request.
+  acceptSiblingDirectMessage (roomKey) {
+    this.acceptDirectMessage({ roomKey }).catch((error) => {
+      console.warn(`[peerchat] Unable to open the chat with your other device: ${error.message}`)
+    })
   }
 
   /** The room this device already keeps for a conversation with one person. */
