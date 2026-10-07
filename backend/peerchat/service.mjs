@@ -202,6 +202,11 @@ export class PeerChatService {
     // person's devices offering one back is ignored until it is joined again
     // here, so leaving a room on one device sticks.
     this.leftRooms = new Map()
+    // Rooms this phone was removed from and then left: who made each one and
+    // the removal list, so joining again finds it still removed. The creator
+    // only sends the list on a new connection, and until then a rejoined room
+    // looked open and whatever was sent in it reached nobody.
+    this.removedRooms = new Map()
     this.rooms = new Map()
     this.pendingDirectMessages = new Map()
     // Blocking someone hides everything they send, in every room, and stops
@@ -416,6 +421,14 @@ export class PeerChatService {
         unreadCount: 0,
         unreadMentions: 0,
         lastReadTs: Date.now()
+      }
+      // Removed here before and left since: still removed, until the creator
+      // says otherwise.
+      const removal = this.removedRooms.get(normalized)
+      if (removal) {
+        room.creatorKey = removal.creatorKey
+        room.createdByName = removal.createdByName
+        room.bans = removal.bans
       }
       this.rooms.set(normalized, room)
     }
@@ -885,6 +898,8 @@ export class PeerChatService {
     const normalized = normalizePeerChatRoomKey(roomKey)
     if (!normalized) return
 
+    const leaving = this.rooms.get(normalized)
+    if (leaving && this.isRemovedFromRoom(normalized)) this.rememberRemoval(normalized, leaving)
     this.rooms.delete(normalized)
     this.markRoomLeft(normalized)
     this.moderator.clearRoom(normalized)
@@ -2705,6 +2720,19 @@ export class PeerChatService {
     }
   }
 
+  rememberRemoval (roomKey, room) {
+    this.removedRooms.set(roomKey, {
+      creatorKey: normalizePeerChatCreatorKey(room.creatorKey),
+      createdByName: typeof room.createdByName === 'string' ? room.createdByName : '',
+      bans: normalizePeerChatRoomBans(room.bans),
+      at: Date.now()
+    })
+    if (this.removedRooms.size > MAX_LEFT_ROOMS) {
+      const oldest = [...this.removedRooms.entries()].sort((a, b) => a[1].at - b[1].at)[0][0]
+      this.removedRooms.delete(oldest)
+    }
+  }
+
   /** Whether this device is the one that was removed. */
   isRemovedFromRoom (roomKey) {
     const room = this.rooms.get(roomKey)
@@ -2750,6 +2778,8 @@ export class PeerChatService {
     room.members = (room.members || []).filter((member) => (
       !isPeerChatPeerBanned(room.bans, { peerId: member.id })
     ))
+    // Let back in, this phone has no removal left to remember.
+    if (!this.isRemovedFromRoom(roomKey)) this.removedRooms.delete(roomKey)
     this.persistNow()
     this.bumpVersion()
   }
@@ -3019,6 +3049,17 @@ export class PeerChatService {
         const key = normalizePeerChatRoomKey(roomKey)
         if (key && Number.isSafeInteger(at) && at > 0 && this.leftRooms.size < MAX_LEFT_ROOMS) this.leftRooms.set(key, at)
       }
+      for (const [roomKey, value] of Object.entries(parsed?.removedRooms && typeof parsed.removedRooms === 'object' ? parsed.removedRooms : {})) {
+        const key = normalizePeerChatRoomKey(roomKey)
+        const bans = normalizePeerChatRoomBans(value?.bans)
+        if (!key || !bans.length || this.removedRooms.size >= MAX_LEFT_ROOMS) continue
+        this.removedRooms.set(key, {
+          creatorKey: normalizePeerChatCreatorKey(value?.creatorKey),
+          createdByName: typeof value?.createdByName === 'string' ? value.createdByName.slice(0, 200) : '',
+          bans,
+          at: Number.isSafeInteger(value?.at) ? value.at : 0
+        })
+      }
 
       for (const value of Array.isArray(parsed?.blockedPeers) ? parsed.blockedPeers.slice(0, MAX_BLOCKED_PEERS) : []) {
         const peerId = normalizePeerChatPeerId(value?.peerId)
@@ -3121,6 +3162,7 @@ export class PeerChatService {
         device: this.device,
         link: this.link,
         leftRooms: Object.fromEntries(this.leftRooms),
+        removedRooms: Object.fromEntries(this.removedRooms),
         siblings: [...this.siblings].slice(0, MAX_SIBLINGS),
         rooms: [...this.rooms.values()],
         pendingDirectMessages: this.listPendingDirectMessages(),

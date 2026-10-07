@@ -2034,6 +2034,54 @@ test('an arrival with no name given keeps the one we already have', async (t) =>
   await service.close()
 })
 
+// Removed from a room, left it, joined it again: the creator only sends the
+// removal list on a new connection, so until a restart the room looked open
+// and whatever was sent in it reached nobody.
+test('a room this phone was removed from and left is still removed when joined again', async (t) => {
+  const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-rejoin-removed-'))
+  t.after(() => rm(storagePath, { recursive: true, force: true }))
+  const creatorKey = 'cd'.repeat(32)
+  const service = await new PeerChatService({ sdk: createFakeSdk(), storagePath }).start()
+  await service.joinRoom({ roomKey: ROOM_KEY, username: 'Sam' })
+  // What the creator's removal leaves on this phone.
+  const room = service.rooms.get(ROOM_KEY)
+  room.creatorKey = creatorKey
+  room.createdByName = 'Alice'
+  room.bans = [{ id: service.localId, key: service.localKey, name: 'Sam' }]
+  const shown = (svc) => svc.listRooms().find((entry) => entry.roomKey === ROOM_KEY)
+  assert.equal(shown(service).removedByCreator, true)
+
+  await service.leaveRoom({ roomKey: ROOM_KEY })
+  await service.joinRoom({ roomKey: ROOM_KEY, username: 'Sam' })
+  assert.equal(shown(service).removedByCreator, true)
+  assert.equal(shown(service).createdByName, 'Alice')
+
+  // Left again, across a restart.
+  await service.leaveRoom({ roomKey: ROOM_KEY })
+  await service.close()
+  const restarted = await new PeerChatService({ sdk: createFakeSdk(), storagePath }).start()
+  await restarted.joinRoom({ roomKey: ROOM_KEY, username: 'Sam' })
+  assert.equal(shown(restarted).removedByCreator, true)
+
+  // Until the creator lets them back in.
+  restarted.receiveRoomBans(ROOM_KEY, { key: creatorKey }, [])
+  assert.equal(shown(restarted).removedByCreator, false)
+  assert.equal(restarted.removedRooms.has(ROOM_KEY), false)
+  await restarted.close()
+})
+
+test('leaving a room this phone was never removed from remembers no removal', async (t) => {
+  const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-leave-plain-'))
+  t.after(() => rm(storagePath, { recursive: true, force: true }))
+  const service = await new PeerChatService({ sdk: createFakeSdk(), storagePath }).start()
+  await service.joinRoom({ roomKey: ROOM_KEY, username: 'Sam' })
+  await service.leaveRoom({ roomKey: ROOM_KEY })
+  assert.equal(service.removedRooms.size, 0)
+  await service.joinRoom({ roomKey: ROOM_KEY, username: 'Sam' })
+  assert.equal(service.listRooms().find((entry) => entry.roomKey === ROOM_KEY).removedByCreator, false)
+  await service.close()
+})
+
 function createFakeSdk (feeds = new Map(), publicKeyByte = 7) {
   const swarm = new EventEmitter()
   swarm.flush = async () => {}
