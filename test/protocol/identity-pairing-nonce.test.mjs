@@ -210,7 +210,7 @@ test('the transfer ceiling the nonce is matched to still exists', async () => {
   // SAS the user is asked to compare.
   const verify = transfer.slice(transfer.indexOf('export function verifyDesktopTransfer'))
   assert.ok(
-    verify.indexOf('nonce does not match the QR code') < verify.indexOf('sas: deriveVerificationCode'),
+    verify.indexOf('made for an older code from this phone') < verify.indexOf('sas: deriveVerificationCode'),
     'SAS is computed before the nonce check'
   )
 })

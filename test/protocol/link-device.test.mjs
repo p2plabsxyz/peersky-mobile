@@ -131,7 +131,7 @@ describe('Link Device Identity Transfer', () => {
       nonce: toHex(crypto.randomBytes(16))
     })
 
-    await assert.rejects(phone.stage(bytes), /nonce does not match/)
+    await assert.rejects(phone.stage(bytes), /made for an older code from this phone/)
   })
 
   it('Flipped byte in payload is caught before anything is restored', async (t) => {
