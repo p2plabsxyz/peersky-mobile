@@ -9,10 +9,12 @@ import {
   parsePeerChatNotificationPreferences,
   PEERCHAT_NOTIFICATION_PREFERENCES_MAX_BYTES,
   serializePeerChatNotificationPreferences,
+  shouldAskForPeerChatNotifications,
   shouldEnablePeerChatBackground,
   shouldHandlePeerChatNotificationInApp
 } from './notification-state.mjs'
 import {
+  canAskForPeerChatNotifications,
   hasPeerChatNotificationPermission,
   addPeerChatNotificationResponseListener,
   getPeerChatBadgeCount,
@@ -153,6 +155,25 @@ export function usePeerChatNotifications ({
     setPreferences(nextPreferences)
     return true
   }, [persistPreferences])
+
+  // Asked once, the first time PeerChat is open with chats in it, when the
+  // system has never been asked: a profile from Link Device or a restore
+  // never went through onboarding, where this is asked.
+  const notificationsAskedRef = useRef(false)
+  useEffect(() => {
+    if (!shouldAskForPeerChatNotifications({
+      asked: notificationsAskedRef.current,
+      isPeerChatVisible,
+      isReady,
+      isRuntimeReady,
+      notificationsEnabled: preferences.notifications,
+      roomCount
+    })) return
+    notificationsAskedRef.current = true
+    void canAskForPeerChatNotifications()
+      .then((canAsk) => (canAsk ? setNotificationsEnabled(true) : undefined))
+      .catch((error) => console.warn('Unable to ask about PeerChat notifications:', error))
+  }, [isPeerChatVisible, isReady, isRuntimeReady, preferences.notifications, roomCount, setNotificationsEnabled])
 
   useEffect(() => {
     if (!isReady) return

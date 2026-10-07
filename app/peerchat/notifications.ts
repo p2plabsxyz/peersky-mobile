@@ -5,6 +5,7 @@ const PEERCHAT_SOUND_CHANNEL = 'peerchat-messages-v2'
 const PEERCHAT_SILENT_CHANNEL = 'peerchat-messages-silent-v2'
 
 let channelsOpening: Promise<void> | null = null
+let permissionAsking: Promise<boolean> | null = null
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -58,7 +59,27 @@ export async function hasPeerChatNotificationPermission () {
   )
 }
 
+// Not allowed yet, and the system will still put up its prompt. Android 13
+// and newer report a permission never asked for as denied, so this goes by
+// whether it can be asked rather than by that.
+export async function canAskForPeerChatNotifications () {
+  if (await hasPeerChatNotificationPermission()) return false
+  const permission = await Notifications.getPermissionsAsync()
+  return permission.canAskAgain !== false
+}
+
+// One prompt at a time. Onboarding and the first look at PeerChat can both
+// ask at once, and both get the one answer.
 export async function requestPeerChatNotificationPermission () {
+  if (!permissionAsking) {
+    permissionAsking = askForPeerChatNotificationPermission().finally(() => {
+      permissionAsking = null
+    })
+  }
+  return permissionAsking
+}
+
+async function askForPeerChatNotificationPermission () {
   await preparePeerChatNotifications()
   if (await hasPeerChatNotificationPermission()) return true
 

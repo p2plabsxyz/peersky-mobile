@@ -8,6 +8,7 @@ import {
   MAX_PEERCHAT_NOTIFICATIONS_PER_POLL,
   parsePeerChatNotificationPreferences,
   serializePeerChatNotificationPreferences,
+  shouldAskForPeerChatNotifications,
   shouldEnablePeerChatBackground,
   shouldHandlePeerChatNotificationInApp
 } from '../../app/peerchat/notification-state.mjs'
@@ -81,6 +82,31 @@ test('PeerChat background service runs only for enabled runtimes with joined roo
   assert.equal(shouldEnablePeerChatBackground({ isRuntimeReady: true, notificationsEnabled: true, roomCount: 0 }), false)
   assert.equal(shouldEnablePeerChatBackground({ isRuntimeReady: true, notificationsEnabled: false, roomCount: 1 }), false)
   assert.equal(shouldEnablePeerChatBackground({ isRuntimeReady: false, notificationsEnabled: true, roomCount: 1 }), false)
+})
+
+// PeerChat from Link Device or a restore never went through onboarding, which
+// is where the system is asked. Notifications showed as on, Android had never
+// been asked, and nothing arrived: the Play copy of a phone linked to its
+// desktop got no banners at all.
+test('PeerChat asks about notifications once when its profile came from another device', async () => {
+  const ready = { asked: false, isPeerChatVisible: true, isReady: true, isRuntimeReady: true, notificationsEnabled: true, roomCount: 2 }
+  assert.equal(shouldAskForPeerChatNotifications(ready), true)
+  assert.equal(shouldAskForPeerChatNotifications({ ...ready, asked: true }), false)
+  assert.equal(shouldAskForPeerChatNotifications({ ...ready, isPeerChatVisible: false }), false)
+  assert.equal(shouldAskForPeerChatNotifications({ ...ready, roomCount: 0 }), false)
+  // Turned off, or refused before: left alone.
+  assert.equal(shouldAskForPeerChatNotifications({ ...ready, notificationsEnabled: false }), false)
+  assert.equal(shouldAskForPeerChatNotifications({ ...ready, isRuntimeReady: false }), false)
+
+  const hook = await readFile(new URL('../../app/peerchat/usePeerChatNotifications.ts', import.meta.url), 'utf8')
+  assert.match(hook, /canAskForPeerChatNotifications\(\)\s+\.then\(\(canAsk\) => \(canAsk \? setNotificationsEnabled\(true\) : undefined\)\)/)
+  const source = await readFile(new URL('../../app/peerchat/notifications.ts', import.meta.url), 'utf8')
+  const canAsk = source.slice(source.indexOf('export async function canAskForPeerChatNotifications'), source.indexOf('// One prompt at a time.'))
+  // Android 13 and newer call a permission never asked for denied.
+  assert.match(canAsk, /permission\.canAskAgain !== false/)
+  assert.doesNotMatch(canAsk, /UNDETERMINED|undetermined/)
+  // One prompt, whoever asks.
+  assert.match(source, /if \(!permissionAsking\) \{\s+permissionAsking = askForPeerChatNotificationPermission\(\)/)
 })
 
 test('PeerChat leaves a declined notification prompt alone and deep links to the app page', async () => {
