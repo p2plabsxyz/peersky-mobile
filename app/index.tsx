@@ -4017,72 +4017,73 @@ export default function App () {
             <Text style={[styles.p2pmdMetaButtonText, p2pmdTheme?.p2pmdMetaButtonText]}>Leave</Text>
           </Pressable>
         </View>}
-        <WebView
-          key={`${p2pmdEditorBaseUrl}:${p2pmdEditorHtml.length}:${p2pmdEditorMount}`}
-          ref={p2pmdWebViewRef}
-          source={{
-            html: p2pmdEditorHtmlWithRoomBase,
-            baseUrl: p2pmdEditorBaseUrl
-          }}
-          // Only the editor's own page loads here. A link in a note opens in
-          // a browser tab, and nothing is handed to another app unasked.
-          originWhitelist={['*']}
-          onShouldStartLoadWithRequest={(request) => {
-            const action = getP2pmdEditorRequestAction(request, p2pmdEditorBaseUrl)
-            if (action === 'open') openBrowserUrlInNewTab(request.url)
-            return action === 'load'
-          }}
-          onOpenWindow={(event) => {
-            const { targetUrl } = event.nativeEvent
-            if (getP2pmdEditorRequestAction({ url: targetUrl }, p2pmdEditorBaseUrl) === 'open') {
-              openBrowserUrlInNewTab(targetUrl)
-            }
-          }}
-          // The page cannot see the browser's own light/dark/system setting,
-          // so it is told. Set before first paint so the editor never flashes
-          // the wrong theme on the way in.
-          injectedJavaScriptBeforeContentLoaded={p2pmdThemeScript(browserIsDark)}
-          allowsFullscreenVideo={true}
-          // The slide styles lay out <video>, which WKWebView will not play
-          // inline on iPhone without this.
-          allowsInlineMediaPlayback={true}
-          // Left unset, a swipe stops dead on iOS (see the browser WebView).
-          decelerationRate={WEBVIEW_DECELERATION_RATE}
-          cacheEnabled={false}
-          textZoom={100}
-          style={[styles.p2pmdWorkspaceWebView, p2pmdTheme?.p2pmdWorkspaceWebView]}
-          onMessage={(event) => {
-            if (!isP2pmdEditorMessage(event.nativeEvent.url, p2pmdEditorBaseUrl)) return
-            onP2pmdWebViewMessage(event.nativeEvent.data)
-          }}
-          // iOS kills a backgrounded WKWebView's content process to reclaim
-          // memory. The view comes back blank and stays blank, which is why an
-          // open note looked empty after the phone had been locked and left
-          // leaving and rejoining the room as the only way out. Reload instead;
-          // the document lives in the room, not in the view.
-          onContentProcessDidTerminate={() => {
-            setStatus('Reloading the note after iOS reclaimed it')
-            setP2pmdEditorMount((count) => count + 1)
-          }}
-          onRenderProcessGone={() => {
-            setStatus('Reloading the note after the system reclaimed it')
-            setP2pmdEditorMount((count) => count + 1)
-          }}
-          onError={(event) => {
-            setStatus(`P2PMD WebView failed: ${event.nativeEvent.description}`)
-          }}
-          onLoad={() => {
-            if (p2pmdRoom.role === 'client') {
-              setStatus('P2PMD joined room page loaded')
-            }
-          }}
-        />
-
-        {(isBooting || isLoading) && (
-          <View style={styles.p2pmdWorkspaceLoader}>
-            <AppLoading app='p2pmd' isDark={browserIsDark} />
-          </View>
-        )}
+        <View style={styles.p2pmdWorkspaceEditor}>
+          <WebView
+            key={`${p2pmdEditorBaseUrl}:${p2pmdEditorHtml.length}:${p2pmdEditorMount}`}
+            ref={p2pmdWebViewRef}
+            source={{
+              html: p2pmdEditorHtmlWithRoomBase,
+              baseUrl: p2pmdEditorBaseUrl
+            }}
+            // Only the editor's own page loads here. A link in a note opens in
+            // a browser tab, and nothing is handed to another app unasked.
+            originWhitelist={['*']}
+            onShouldStartLoadWithRequest={(request) => {
+              const action = getP2pmdEditorRequestAction(request, p2pmdEditorBaseUrl)
+              if (action === 'open') openBrowserUrlInNewTab(request.url)
+              return action === 'load'
+            }}
+            onOpenWindow={(event) => {
+              const { targetUrl } = event.nativeEvent
+              if (getP2pmdEditorRequestAction({ url: targetUrl }, p2pmdEditorBaseUrl) === 'open') {
+                openBrowserUrlInNewTab(targetUrl)
+              }
+            }}
+            // The page cannot see the browser's own light/dark/system setting,
+            // so it is told. Set before first paint so the editor never flashes
+            // the wrong theme on the way in.
+            injectedJavaScriptBeforeContentLoaded={p2pmdThemeScript(browserIsDark)}
+            allowsFullscreenVideo={true}
+            // The slide styles lay out <video>, which WKWebView will not play
+            // inline on iPhone without this.
+            allowsInlineMediaPlayback={true}
+            // Left unset, a swipe stops dead on iOS (see the browser WebView).
+            decelerationRate={WEBVIEW_DECELERATION_RATE}
+            cacheEnabled={false}
+            textZoom={100}
+            style={[styles.p2pmdWorkspaceWebView, p2pmdTheme?.p2pmdWorkspaceWebView]}
+            onMessage={(event) => {
+              if (!isP2pmdEditorMessage(event.nativeEvent.url, p2pmdEditorBaseUrl)) return
+              onP2pmdWebViewMessage(event.nativeEvent.data)
+            }}
+            // iOS kills a backgrounded WKWebView's content process to reclaim
+            // memory. The view comes back blank and stays blank, which is why an
+            // open note looked empty after the phone had been locked and left
+            // leaving and rejoining the room as the only way out. Reload instead;
+            // the document lives in the room, not in the view.
+            onContentProcessDidTerminate={() => {
+              setStatus('Reloading the note after iOS reclaimed it')
+              setP2pmdEditorMount((count) => count + 1)
+            }}
+            onRenderProcessGone={() => {
+              setStatus('Reloading the note after the system reclaimed it')
+              setP2pmdEditorMount((count) => count + 1)
+            }}
+            onError={(event) => {
+              setStatus(`P2PMD WebView failed: ${event.nativeEvent.description}`)
+            }}
+            onLoad={() => {
+              if (p2pmdRoom.role === 'client') {
+                setStatus('P2PMD joined room page loaded')
+              }
+            }}
+          />
+          {(isBooting || isLoading) && (
+            <View style={[styles.p2pmdWorkspaceLoader, p2pmdTheme?.p2pmdWorkspaceLoader]}>
+              <AppLoading app='p2pmd' isDark={browserIsDark} />
+            </View>
+          )}
+        </View>
 
         <PublishedLinkSheet
           isDark={browserIsDark}

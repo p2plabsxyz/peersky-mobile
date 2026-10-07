@@ -756,10 +756,21 @@ export const styles = StyleSheet.create({
     backgroundColor: '#202128',
     flex: 1
   },
+  // The note's editor, with the loading screen over it while a note opens or
+  // closes.
+  p2pmdWorkspaceEditor: {
+    flex: 1
+  },
+  // Covers the whole note and is centred in it, like PeerChat's and
+  // PeerTunes', in the editor's colour so a half-loaded page does not show
+  // through. It used to sit in a small box in the bottom right corner.
   p2pmdWorkspaceLoader: {
-    bottom: 12,
+    backgroundColor: '#202128',
+    bottom: 0,
+    left: 0,
     position: 'absolute',
-    right: 12
+    right: 0,
+    top: 0
   },
   content: {
     gap: 12,
@@ -1120,6 +1131,7 @@ export const p2pmdLight = StyleSheet.create({
   p2pmdWorkspaceUrl: { color: '#687086' },
   p2pmdWorkspaceSyncStatus: { color: '#687086' },
   p2pmdWorkspaceWebView: { backgroundColor: '#ffffff' },
+  p2pmdWorkspaceLoader: { backgroundColor: '#ffffff' },
   p2pmdPublishedUrlLabel: { color: '#1a5fb4' },
   p2pmdPublishedUrlAction: { color: '#1a5fb4' },
   p2pmdPublishedUrl: { color: '#1f6fd1' },
