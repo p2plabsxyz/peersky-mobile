@@ -485,11 +485,14 @@ export class PeerChatService {
     if (!normalizedPeerId || normalizedPeerId === this.localId) throw new Error('Choose another peer.')
     if (this.isPeerBlocked(normalizedPeerId)) throw new Error('Unblock this person before messaging them.')
 
-    // A link names one device. Picked from a list, it may be another device of
-    // someone you already talk to, and that chat is where they are.
+    // A link names one device. Picked from a list, it may be one of yours, or
+    // another device of someone you already talk to, and the chat you have is
+    // where they are.
     if (!normalizedPeerKey && !this.findDirectRoomKey(normalizedPeerId)) {
-      const theirs = this.chatWithPersonOf(normalizedPeerId, normalizeMemberName(username) || this.nameForPeer(normalizedPeerId))
-      if (theirs) return { room: this.publicRoom(theirs), rooms: this.listRooms(), version: this.version }
+      const existing = this.isOwnDevice(normalizedPeerId)
+        ? this.chatWithYourself()
+        : this.chatWithPersonOf(normalizedPeerId, normalizeMemberName(username) || this.nameForPeer(normalizedPeerId))
+      if (existing) return { room: this.publicRoom(existing), rooms: this.listRooms(), version: this.version }
     }
 
     // An offline peer is allowed. activatePeer re-sends the invite the moment
@@ -2177,6 +2180,14 @@ export class PeerChatService {
     this.acceptDirectMessage({ roomKey }).catch((error) => {
       console.warn(`[peerchat] Unable to open the chat with your other device: ${error.message}`)
     })
+  }
+
+  // Your chat with yourself. Your devices all join it, so messaging any of them
+  // opens it rather than starting another one.
+  chatWithYourself () {
+    return [...this.rooms.values()].find((room) => (
+      room.isDM && room.dmWith && this.isOwnDevice(room.dmWith) && !room.pendingAcceptance
+    )) || null
   }
 
   // Your chat with this person, when this is another of their devices: it is

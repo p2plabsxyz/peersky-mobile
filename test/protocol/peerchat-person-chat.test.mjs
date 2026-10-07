@@ -46,6 +46,15 @@ test('PeerChat opens your chat with ada when you message ada@mobile, and asks no
   assert.equal(opened.room.roomKey, chat)
   assert.equal(service.rooms.size, before)
 
+  // Your own devices share one chat with yourself, whichever you message.
+  service.siblings.add('0d0d0d0d')
+  service.siblings.add('0f0f0f0f')
+  const yours = 'fe'.repeat(32)
+  service.rooms.set(yours, { roomKey: yours, name: 'ada', isDM: true, dmWith: '0d0d0d0d', pendingAcceptance: false, createdAt: 1, members: [] })
+  assert.equal((await service.createDirectMessage({ peerId: '0f0f0f0f', username: 'grace@desktop1' })).room.roomKey, yours)
+  service.rooms.delete(yours)
+  service.siblings.clear()
+
   // Someone else, in no chat of yours, still gets a request.
   const asked = await service.createDirectMessage({ peerId: '0e0e0e0e', username: 'sam' })
   assert.notEqual(asked.room.roomKey, chat)
