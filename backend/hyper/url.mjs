@@ -74,6 +74,20 @@ export function createHyperUrl (driveAddress, pathname) {
 }
 
 /**
+ * The path hypercore-fetch reads for an address made by createHyperUrl.
+ *
+ * decodeURI leaves %3F and %23 as they are, so a file uploaded through
+ * hypercore-fetch as "Why?.txt", by the desktop or a page, is stored as
+ * "Why%3F.txt", and the browser and the desktop read it under that name.
+ */
+export function getHyperFetchPath (pathname) {
+  return pathname
+    .split('/')
+    .map((segment) => decodeURI(encodeURI(segment).replace(/[?#]/g, encodeURIComponent)))
+    .join('/')
+}
+
+/**
  * A hyper:// address as hypercore-fetch has to be given it.
  *
  * Pages escape a name with encodeURIComponent, so "Safe & Sound.mp3" arrives

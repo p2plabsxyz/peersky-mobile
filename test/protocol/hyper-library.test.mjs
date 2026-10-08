@@ -133,6 +133,47 @@ test('rejects a missing non-root path instead of displaying an empty folder', as
   assert.equal(response.error, 'No file or directory was found at this Hyper URL.')
 })
 
+// Uploaded from the desktop, through hypercore-fetch, which decodes with
+// decodeURI and so stores a ? in a name as %3F. The desktop opened the link and
+// the phone's Hyperdrive tab said nothing was there.
+test('opens a file whose name had a ? in it, stored the way the desktop uploads it', async () => {
+  const stored = '/https:--external-content.duckduckgo.com-iu-%3F.txt'
+  const drive = createDrive({ [stored]: { blob: { byteLength: 7 } } })
+  const response = await listHyperdriveLocation({ url: `${DRIVE_URL}https%3A--external-content.duckduckgo.com-iu-%3F.txt` }, {
+    runtime: { getDrive: async () => drive },
+    recordArchive: async () => {}
+  })
+
+  assert.equal(response.ok, true)
+  assert.equal(response.location.type, 'file')
+  assert.equal(response.location.path, stored)
+  assert.equal(response.location.byteLength, 7)
+  // Its link reads the same file from the list again.
+  const again = await listHyperdriveLocation({ url: response.location.url }, {
+    runtime: { getDrive: async () => drive },
+    recordArchive: async () => {}
+  })
+  assert.equal(again.location.path, stored)
+})
+
+test('opens a folder whose name had a # in it, and still says when nothing is there', async () => {
+  const drive = createDrive({ '/Notes %231/today.md': { blob: { byteLength: 3 } } })
+  const folder = await listHyperdriveLocation({ url: `${DRIVE_URL}Notes%20%231/` }, {
+    runtime: { getDrive: async () => drive },
+    recordArchive: async () => {}
+  })
+  assert.equal(folder.ok, true)
+  assert.deepEqual(folder.items.map(({ name }) => name), ['today.md'])
+
+  const missing = await listHyperdriveLocation({ url: `${DRIVE_URL}nothing%3F.txt` }, {
+    runtime: { getDrive: async () => drive },
+    recordArchive: async () => {},
+    refreshRuntime: async () => {}
+  })
+  assert.equal(missing.ok, false)
+  assert.equal(missing.error, 'No file or directory was found at this Hyper URL.')
+})
+
 test('returns collected directory entries when listing times out', async () => {
   const drive = createStallingDrive({
     '/docs/readme.md': { blob: { byteLength: 24 } }

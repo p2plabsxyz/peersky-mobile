@@ -18,7 +18,7 @@ import {
 import { normalizePickedLocalFile } from './local-file.mjs'
 import { isUnreadableDriveError, PRIVATE_DRIVE_ERROR } from './linked-private-drives.mjs'
 import { normalizeDriveAddressId } from './runtime-routing.mjs'
-import { createHyperUrl, parseHyperUrl } from './url.mjs'
+import { createHyperUrl, getHyperFetchPath, parseHyperUrl } from './url.mjs'
 import { recordHyperArchive } from './archive.mjs'
 import { resolveHyperdriveUploadTarget } from './storage-core.mjs'
 import { refreshHyperRuntimeNetwork } from './network-refresh.mjs'
@@ -62,10 +62,20 @@ export async function listHyperdriveLocation ({ url } = {}, options = {}) {
         entry = await drive.entry(target.pathname, { timeout: MAX_LIST_TIME_MS })
       }
 
+      // A file with ? or # in its name, uploaded from the desktop or a page, is
+      // stored under the name the browser reads. A scanned link to one said
+      // "No file or directory was found" here and opened on the desktop.
+      const fetchPath = getHyperFetchPath(target.pathname)
+      let pathname = target.pathname
+      if (!explicitDirectory && !entry && fetchPath !== pathname) {
+        entry = await drive.entry(fetchPath, { timeout: MAX_LIST_TIME_MS })
+        if (entry) pathname = fetchPath
+      }
+
       if (entry?.value?.blob) {
         const response = {
           ok: true,
-          location: createFileItem(target.driveAddress, target.pathname, entry.value),
+          location: createFileItem(target.driveAddress, pathname, entry.value),
           ...(divergenceWarning ? { warning: divergenceWarning } : {})
         }
         await (options.recordArchive || recordHyperArchive)({
@@ -76,8 +86,8 @@ export async function listHyperdriveLocation ({ url } = {}, options = {}) {
         return response
       }
 
-      const directory = normalizeDirectoryPath(target.pathname)
-      const { items, truncated, timedOut } = await listDirectoryWithDiscoveryRetry(
+      let directory = normalizeDirectoryPath(target.pathname)
+      let { items, truncated, timedOut } = await listDirectoryWithDiscoveryRetry(
         drive,
         target.driveAddress,
         directory,
@@ -85,6 +95,17 @@ export async function listHyperdriveLocation ({ url } = {}, options = {}) {
         options.directoryRetryDelaysMs,
         refreshDrive
       )
+      // The same for a folder.
+      if (items.length === 0 && !timedOut && fetchPath !== target.pathname) {
+        const fetchDirectory = normalizeDirectoryPath(fetchPath)
+        const listed = await listDirectory(drive, target.driveAddress, fetchDirectory, resolveListTimeMs(options.listTimeMs))
+        if (listed.items.length > 0 || listed.timedOut) {
+          directory = fetchDirectory
+          items = listed.items
+          truncated = listed.truncated
+          timedOut = listed.timedOut
+        }
+      }
       if (directory !== '/' && items.length === 0 && !timedOut) {
         return { ok: false, error: 'No file or directory was found at this Hyper URL.' }
       }
