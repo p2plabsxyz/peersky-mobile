@@ -13,10 +13,13 @@ says what it does in four lines, once per phone (`AppWelcome`, marker
 - DNS-style Hyper aliases, such as `hyper://agregore.mauve.moe/`, are resolved
   by the Hyper runtime.
 
-## What a hyper:// page can do
+## What a page can do with hyper://
 
-A page served over `hyper://` can call `fetch('hyper://...')` the way it does
-on desktop. The phone has no protocol handler for that, so the call crosses
+A page served over `hyper://`, under a drive key or a domain name, or over
+`https://`, can call `fetch('hyper://...')` the way it does on desktop. Each is
+a site of its own: a hyper:// page by its host, an https:// page by its origin.
+A plain `http://` page gets nothing, since anyone on the network can change it
+on the way. The phone has no protocol handler for hyper://, so the call crosses
 the React Native bridge to the Bare worklet (`app/hyper-bridge.mjs`), and the
 backend applies a few rules to anything a page asks for
 (`backend/hyper/page-access.mjs`). iOS adds the bridge before the page loads.
@@ -55,7 +58,8 @@ signed links above, the same as on Android. Before this, iOS pages read
   share one. A page writes only to drives it created.
 - **Private drives stay private.** A page cannot read this phone's private
   drive, the drives adopted from a desktop, or the device-only one, unless it is
-  a page inside that same drive.
+  a page inside that same drive. A site with a name, on hyper:// or https://,
+  never reads one.
 - **Asset links are signed.** Images, media and downloads in a page load from a
   local server on `127.0.0.1`. Each link carries a signature over its own
   address, so a page can load what it was given and cannot use one link to

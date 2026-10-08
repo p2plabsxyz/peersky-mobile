@@ -200,8 +200,8 @@ test('the phone reads a linked device\'s new private drive through the private s
   const runtime = await readFile(new URL('../../backend/hyper/runtime.mjs', import.meta.url), 'utf8')
   // Tried with the private keys only when the public store could not decode it,
   // read again if one opens it, or if another read got there first, and
-  // otherwise refused in plain words.
-  assert.match(fetchSource, /if \(result\?\.ok === false && isUnreadableDriveError\(result\.error\)\) \{\s+if \(await isPrivateHyperAddress\(target\.driveAddress\) \|\|\s+await adoptLinkedPrivateDriveIfReadable\(target\.driveAddress\)\) return read\(\)\s+return \{ ok: false, status: 403, error: PRIVATE_DRIVE_ERROR \}/)
+  // otherwise refused in plain words. Never for a page from another site.
+  assert.match(fetchSource, /if \(result\?\.ok === false && isUnreadableDriveError\(result\.error\)\) \{(\s+\/\/[^\n]*)*\s+if \(otherPage\) return \{ ok: false, status: 403, error: PAGE_PRIVATE_DRIVE_ERROR \}\s+if \(await isPrivateHyperAddress\(target\.driveAddress\) \|\|\s+await adoptLinkedPrivateDriveIfReadable\(target\.driveAddress\)\) return read\(\)\s+return \{ ok: false, status: 403, error: PRIVATE_DRIVE_ERROR \}/)
   // One try per drive, however many of its files a page asks for, on the copy
   // the public store holds.
   assert.match(runtime, /if \(!adoptingLinkedDrives\.has\(id\)\) \{\s+const adopting = runtimeCoordinator\.runOperation\(\(\) => findLinkedPrivateDriveKey\(id, timeout\)\)/)

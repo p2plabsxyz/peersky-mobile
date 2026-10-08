@@ -2,26 +2,37 @@ import { createHash } from 'node:crypto'
 
 import { normalizeDriveAddressId } from './runtime-routing.mjs'
 
-// What a hyper:// page may do through the fetch bridge, beyond what the app
-// itself does. A page's named drives live under a prefix of its own, so
-// `?key=p2pmd` from a page is never P2PMD's drive, and a page writes only to
-// drives it created. Everything else it reads, private drives aside.
+// What a page may do through the fetch bridge, beyond what the app itself
+// does. A hyper:// page and an https:// one get the same rules. A page's named
+// drives live under a prefix of its own, so `?key=p2pmd` from a page is never
+// P2PMD's drive, and a page writes only to drives it created. Everything else
+// it reads, private drives aside.
 
 const MAX_NAME_LENGTH = 64
 const NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
 const MAX_SITES = 256
 const MAX_DRIVES_PER_SITE = 64
+// A name the Hyper runtime looks up over DNS, such as agregore.mauve.moe.
+const HYPER_DOMAIN = /^(?=.{1,253}$)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/
 
 // For this session only. The publish flow always asks for its drive by name
 // before it writes, which puts the drive back in the list after a restart.
 const createdDrives = new Map()
 
-/** The drive id of the page's own hyper:// address, or null for any other page. */
+/**
+ * Who a page is to the bridge: a hyper:// page by the drive in its address, or
+ * by the domain name it was opened under, and an https:// page by its origin.
+ * Only the first is a drive id, so only a page inside a drive is that drive's
+ * own. Null for any other page.
+ */
 export function pageSiteId (pageUrl) {
   try {
     const url = new URL(String(pageUrl || ''))
+    // Bare's URL has no origin, which is this.
+    if (url.protocol === 'https:') return `https://${url.host}`
     if (url.protocol !== 'hyper:') return null
-    return normalizeDriveAddressId(url.hostname)
+    const host = url.hostname.toLowerCase()
+    return normalizeDriveAddressId(host) || (HYPER_DOMAIN.test(host) ? host : null)
   } catch {
     return null
   }

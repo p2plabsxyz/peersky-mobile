@@ -8,6 +8,7 @@ import {
   createBackupFileName,
   describeBackupContents,
   describeBackupOrigin,
+  describePairingCodeLife,
   describeProgress,
   formatBackupSize,
   MIN_BACKUP_PASSPHRASE_LENGTH,
@@ -132,6 +133,26 @@ test('Link Device is laid out like a sync screen, not a debug page', async () =>
   assert.doesNotMatch(settings, /function LinkDeviceSettings/)
 })
 
+test('Receive here says how long its code has left, and renews it with a note when it runs out', async () => {
+  assert.equal(describePairingCodeLife(15 * 60 * 1000), 'This code works for 15 more minutes.')
+  // Rounded down, so it never promises time the code does not have.
+  assert.equal(describePairingCodeLife(14 * 60 * 1000 + 59 * 1000), 'This code works for 14 more minutes.')
+  assert.equal(describePairingCodeLife(90 * 1000), 'This code works for 1 more minute.')
+  assert.equal(describePairingCodeLife(59 * 1000), 'This code works for less than a minute more.')
+  assert.equal(describePairingCodeLife(0), 'Getting a new code…')
+  assert.equal(describePairingCodeLife(Number.NaN), 'Getting a new code…')
+
+  const screen = await read('app/settings/LinkDevice.tsx')
+  const renew = screen.slice(screen.indexOf('// The code works for 15 minutes'), screen.indexOf('function close ()'))
+  assert.match(renew, /if \(now < pairingExpiresAt \|\| renewing\) return/)
+  assert.match(renew, /call\(RPC_IDENTITY_GET_KEY\)/)
+  assert.match(renew, /setPairingRenewed\(true\)/)
+  // Only while the code is on screen: not mid-transfer and not on Send.
+  assert.match(renew, /if \(!visible \|\| direction !== 'receive' \|\| sending \|\| busy \|\| !pairingExpiresAt\) return/)
+  assert.match(screen, /describePairingCodeLife\(pairingExpiresAt - clock\)/)
+  assert.match(screen, /The last code ran out, so this is a new one\. If the other device has the old code, scan this one there instead\./)
+})
+
 test('what the camera sees decides the direction', async () => {
   const screen = await read('app/settings/LinkDevice.tsx')
   const handle = screen.slice(screen.indexOf('async function handleCode'), screen.indexOf('async function receive'))
@@ -141,6 +162,18 @@ test('what the camera sees decides the direction', async () => {
   // A desktop's code sends to the desktop: it takes the tabs and bookmarks.
   assert.match(handle, /if \(result\.code\) confirmSend\(result\.code, result\.deviceType === 'desktop'\)/)
   assert.doesNotMatch(handle, /send to this phone instead/)
+
+  // But each tab takes only its own kind of code. Scanning the other device's
+  // receiving code in step 3 of Receive here used to offer to send from this
+  // phone; now it says which code belongs there. Checked before either action.
+  const wrongOnReceive = handle.indexOf("result.kind === 'pairing' && direction === 'receive'")
+  const wrongOnSend = handle.indexOf("result.kind === 'transfer' && direction === 'send'")
+  assert.ok(wrongOnReceive > -1 && wrongOnSend > -1)
+  assert.ok(wrongOnReceive < handle.indexOf('await receive(result.url)'))
+  assert.ok(wrongOnReceive < handle.indexOf('confirmSend(result.code'))
+  assert.ok(wrongOnSend < handle.indexOf('await receive(result.url)'))
+  assert.match(handle, /That is the other device\\'s code for receiving, so it does not go here\./)
+  assert.match(handle, /That code is a transfer for this phone to receive\. Switch to Receive here and scan it there\./)
 })
 
 test('sending to a desktop says what it gets and shows a link to paste there', async () => {
@@ -151,7 +184,7 @@ test('sending to a desktop says what it gets and shows a link to paste there', a
   // The key to the phone's private drive goes too, so the person is told.
   assert.match(confirm, /can open your private files/)
 
-  const sheet = screen.slice(screen.indexOf(': sending'), screen.indexOf('direction === \'receive\''))
+  const sheet = screen.slice(screen.indexOf(': sending'), screen.indexOf('{direction === \'receive\''))
   assert.match(sheet, /sending\.toDesktop \? 'Open this on the desktop'/)
   assert.match(sheet, /Under Restore from the network, paste this link or scan it/)
   assert.match(sheet, /onPress=\{copyLink\}/)

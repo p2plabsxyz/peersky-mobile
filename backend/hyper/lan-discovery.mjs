@@ -45,7 +45,12 @@ async function openLANDiscovery (runtime, options) {
   const createLAN = options.createLAN || ((lanOptions) => new HyperDHTmDNS(lanOptions))
   const logger = options.logger || console
   const lanOptions = options.lanOptions || {}
-  const host = lanOptions.host || HyperDHTmDNS.selectLocalIPv4()
+  const host = lanOptions.host || localHost()
+  if (!host) {
+    status = unavailableStatus(new Error(NO_LAN_INTERFACE))
+    logger.warn(`[LAN] Local discovery unavailable: ${NO_LAN_INTERFACE}`)
+    return
+  }
   const mdnsOptions = lanOptions.mdnsOptions || createMobileMDNSOptions(host)
   const keyPair = runtime?.swarm?.keyPair
 
@@ -101,6 +106,62 @@ async function openLANDiscovery (runtime, options) {
 
   status = unavailableStatus(failure)
   logger.warn(`[LAN] Local discovery unavailable: ${errorMessage(failure)}`)
+}
+
+/**
+ * Local discovery for a store other than the public one: the private store
+ * this person's devices share. It has a network key of its own, and a LAN
+ * connection is made with the key of the swarm it belongs to, so it gets a LAN
+ * swarm of its own. Without one a private file could not be fetched over
+ * Wi-Fi with the internet down, though messages went through. The LAN page
+ * shows the public swarm only. Null when it could not start.
+ */
+export async function attachPrivateLANDiscovery (runtime, options = {}) {
+  const createLAN = options.createLAN || ((lanOptions) => new HyperDHTmDNS(lanOptions))
+  const attach = options.attach || HyperDHTmDNS.attachHyperSDK
+  const logger = options.logger || console
+  const host = options.host || localHost()
+  const pickPort = options.pickFallbackPort || randomLANPort
+  const keyPair = runtime?.swarm?.keyPair
+  if (!keyPair) return null
+  if (!host) {
+    logger.warn(`[LAN private] Local discovery unavailable: ${NO_LAN_INTERFACE}`)
+    return null
+  }
+
+  let failure = null
+  for (let tries = 0; tries < FALLBACK_PORT_ATTEMPTS; tries++) {
+    let next = null
+    try {
+      next = createLAN({ host, port: pickPort(), mdnsOptions: createMobileMDNSOptions(host), keyPair })
+      addLANReadinessBarrier(next, options.readinessBarrierOptions)
+      next.on('warning', (error) => logger.warn(`[LAN private] ${errorMessage(error)}`))
+      next.on('error', (error) => logger.error(`[LAN private] ${errorMessage(error)}`))
+      await next.ready()
+      return await attach(runtime, { lan: next })
+    } catch (error) {
+      failure = error
+      if (next && !next.destroyed) await next.destroy().catch(() => {})
+      if (!isPortInUseError(error)) break
+    }
+  }
+  logger.warn(`[LAN private] Local discovery unavailable: ${errorMessage(failure)}`)
+  return null
+}
+
+// With no network at all, as in airplane mode, there is no address to be found
+// at on a LAN. The lookup threw, after the store it was for had opened and
+// locked its files, so the store never finished opening, and every later try
+// to open it again was refused the lock: no hyper:// read worked, local ones
+// included, until PeerSky was restarted with a network.
+const NO_LAN_INTERFACE = 'No network to find peers on'
+
+function localHost () {
+  try {
+    return HyperDHTmDNS.selectLocalIPv4()
+  } catch {
+    return null
+  }
 }
 
 function randomLANPort () {

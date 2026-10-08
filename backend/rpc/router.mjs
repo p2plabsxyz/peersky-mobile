@@ -103,7 +103,7 @@ import {
   refreshHyperNetworking,
   withHyperRuntimeOperation
 } from '../hyper/runtime.mjs'
-import { getOrCreatePairingNonce } from '../backup/pairing-nonce.mjs'
+import { getOrCreatePairingNonceRecord } from '../backup/pairing-nonce.mjs'
 import { clearAllP2pData, clearP2pCache, deleteP2pAppData, listP2pAppData } from '../hyper/storage.mjs'
 
 import {
@@ -227,10 +227,12 @@ export async function routeRpcRequest (req) {
     if (req.command === RPC_IDENTITY_GET_KEY) {
       const identityStoragePath = getDefaultIdentityStoragePath()
       const keys = await getDeviceKeys(identityStoragePath)
+      const pairing = getOrCreatePairingNonceRecord(identityStoragePath)
       replyJson(req, {
         ok: true,
         encryptionPublicKey: getEncryptionPublicKeyHex(keys),
-        nonce: getOrCreatePairingNonce(identityStoragePath)
+        nonce: pairing.nonce,
+        expiresAt: pairing.expiresAt
       })
       return
     }

@@ -54,7 +54,7 @@ export function verifyDesktopTransfer (manifest, { deviceKeys, expectedNonce, no
   }
 
   if (!expectedNonce || transfer.nonce !== expectedNonce) {
-    throw new Error('Identity transfer nonce does not match the QR code')
+    throw new Error('This transfer was made for an older code from this phone. Send this phone\'s code to the desktop again and upload a new transfer.')
   }
   if (transfer.targetEncryptionPublicKey !== b4a.toString(deviceKeys.encryption.publicKey, 'hex')) {
     throw new Error('Identity transfer is encrypted for a different device')

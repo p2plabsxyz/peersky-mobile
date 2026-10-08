@@ -46,7 +46,7 @@ import {
   getBrowserBackState,
   getBrowserForwardState,
   getFileHandoffAction,
-  formatHyperSiteForPrompt,
+  formatBridgeSite,
   getBrowserMessagePageUrl,
   getHyperBridgeSite,
   getBrowserRequestAction,
@@ -189,6 +189,7 @@ import {
   PAUSE_ALL_MEDIA_SCRIPT,
   createBrowserMediaToken,
   createBrowserMediaLongPressScript,
+  parseBrowserLinkActionMessage,
   parseBrowserMediaMessage
 } from './browser-media.mjs'
 import { BookmarksScreen } from './bookmarks/BookmarksScreen'
@@ -1667,7 +1668,7 @@ export default function App () {
   const hyperBridgePendingRef = useRef(new Map<string, Map<number, string>>())
 
   /**
-   * A hyper:// page asking for something its WebView cannot fetch for itself.
+   * A page asking for a hyper:// address its WebView cannot fetch for itself.
    *
    * @returns true when the message was ours, so nothing else tries to read it.
    */
@@ -1684,7 +1685,7 @@ export default function App () {
     const prompt = new Promise<boolean>((resolve) => {
       Alert.alert(
         'Let this site publish?',
-        `hyper://${formatHyperSiteForPrompt(siteId)} wants to create drives on this phone and save files to them. Anyone with the link can read what it publishes.`,
+        `${formatBridgeSite(siteId)} wants to create hyper:// drives on this phone and save files to them. Anyone with the link can read what it publishes.`,
         [
           { text: 'Don\'t allow', style: 'cancel', onPress: () => { setPublishingSite(siteId, 'block'); resolve(false) } },
           { text: 'Allow', onPress: () => { setPublishingSite(siteId, 'allow'); resolve(true) } }
@@ -1700,7 +1701,7 @@ export default function App () {
     tabId: string,
     data: string,
     token: string,
-    page: { url: string, reportedUrl: string, isHyper: boolean }
+    page: { url: string, reportedUrl: string, isHyper: boolean, isWeb: boolean }
   ) {
     let pending = hyperBridgePendingRef.current.get(tabId)
     if (!pending) {
@@ -1723,10 +1724,11 @@ export default function App () {
       return true
     }
 
-    // Only hyper:// pages may use the bridge.
+    // Only hyper:// and https:// pages may use the bridge, each as a site of
+    // its own.
     const siteId = getHyperBridgeSite(page)
     if (!siteId) {
-      settle({ error: 'hyper:// requests only work from a hyper:// page' })
+      settle({ error: 'hyper:// requests only work from a hyper:// or https:// page' })
       return true
     }
 
@@ -2194,6 +2196,18 @@ export default function App () {
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error))
     }
+  }
+
+  // A link held on iOS, picked from the menu PeerSkyWebViewManager shows for
+  // it: the long-press sheet's buttons, and a tap on the held link opens it in
+  // its tab. WebKit gives the menu the address and not the link's text, so the
+  // address names the link, rather than the title of the page it is on.
+  function onBrowserLinkAction (tabId: string, action: string, targetUrl: string) {
+    if (action === 'open') void loadBrowserUrl(targetUrl)
+    else if (action === 'new-tab') onBrowserMediaOpenInNewTab(targetUrl)
+    else if (action === 'background-tab') onBrowserMediaOpenInBackgroundTab(targetUrl, targetUrl)
+    else if (action === 'download') onBrowserMediaDownload(targetUrl, tabId)
+    else if (action === 'share') void onBrowserMediaShare(targetUrl, targetUrl)
   }
 
   function updateActiveBrowserZoom (nextZoom: number) {
@@ -4017,72 +4031,73 @@ export default function App () {
             <Text style={[styles.p2pmdMetaButtonText, p2pmdTheme?.p2pmdMetaButtonText]}>Leave</Text>
           </Pressable>
         </View>}
-        <WebView
-          key={`${p2pmdEditorBaseUrl}:${p2pmdEditorHtml.length}:${p2pmdEditorMount}`}
-          ref={p2pmdWebViewRef}
-          source={{
-            html: p2pmdEditorHtmlWithRoomBase,
-            baseUrl: p2pmdEditorBaseUrl
-          }}
-          // Only the editor's own page loads here. A link in a note opens in
-          // a browser tab, and nothing is handed to another app unasked.
-          originWhitelist={['*']}
-          onShouldStartLoadWithRequest={(request) => {
-            const action = getP2pmdEditorRequestAction(request, p2pmdEditorBaseUrl)
-            if (action === 'open') openBrowserUrlInNewTab(request.url)
-            return action === 'load'
-          }}
-          onOpenWindow={(event) => {
-            const { targetUrl } = event.nativeEvent
-            if (getP2pmdEditorRequestAction({ url: targetUrl }, p2pmdEditorBaseUrl) === 'open') {
-              openBrowserUrlInNewTab(targetUrl)
-            }
-          }}
-          // The page cannot see the browser's own light/dark/system setting,
-          // so it is told. Set before first paint so the editor never flashes
-          // the wrong theme on the way in.
-          injectedJavaScriptBeforeContentLoaded={p2pmdThemeScript(browserIsDark)}
-          allowsFullscreenVideo={true}
-          // The slide styles lay out <video>, which WKWebView will not play
-          // inline on iPhone without this.
-          allowsInlineMediaPlayback={true}
-          // Left unset, a swipe stops dead on iOS (see the browser WebView).
-          decelerationRate={WEBVIEW_DECELERATION_RATE}
-          cacheEnabled={false}
-          textZoom={100}
-          style={[styles.p2pmdWorkspaceWebView, p2pmdTheme?.p2pmdWorkspaceWebView]}
-          onMessage={(event) => {
-            if (!isP2pmdEditorMessage(event.nativeEvent.url, p2pmdEditorBaseUrl)) return
-            onP2pmdWebViewMessage(event.nativeEvent.data)
-          }}
-          // iOS kills a backgrounded WKWebView's content process to reclaim
-          // memory. The view comes back blank and stays blank, which is why an
-          // open note looked empty after the phone had been locked and left
-          // leaving and rejoining the room as the only way out. Reload instead;
-          // the document lives in the room, not in the view.
-          onContentProcessDidTerminate={() => {
-            setStatus('Reloading the note after iOS reclaimed it')
-            setP2pmdEditorMount((count) => count + 1)
-          }}
-          onRenderProcessGone={() => {
-            setStatus('Reloading the note after the system reclaimed it')
-            setP2pmdEditorMount((count) => count + 1)
-          }}
-          onError={(event) => {
-            setStatus(`P2PMD WebView failed: ${event.nativeEvent.description}`)
-          }}
-          onLoad={() => {
-            if (p2pmdRoom.role === 'client') {
-              setStatus('P2PMD joined room page loaded')
-            }
-          }}
-        />
-
-        {(isBooting || isLoading) && (
-          <View style={styles.p2pmdWorkspaceLoader}>
-            <AppLoading app='p2pmd' isDark={browserIsDark} />
-          </View>
-        )}
+        <View style={styles.p2pmdWorkspaceEditor}>
+          <WebView
+            key={`${p2pmdEditorBaseUrl}:${p2pmdEditorHtml.length}:${p2pmdEditorMount}`}
+            ref={p2pmdWebViewRef}
+            source={{
+              html: p2pmdEditorHtmlWithRoomBase,
+              baseUrl: p2pmdEditorBaseUrl
+            }}
+            // Only the editor's own page loads here. A link in a note opens in
+            // a browser tab, and nothing is handed to another app unasked.
+            originWhitelist={['*']}
+            onShouldStartLoadWithRequest={(request) => {
+              const action = getP2pmdEditorRequestAction(request, p2pmdEditorBaseUrl)
+              if (action === 'open') openBrowserUrlInNewTab(request.url)
+              return action === 'load'
+            }}
+            onOpenWindow={(event) => {
+              const { targetUrl } = event.nativeEvent
+              if (getP2pmdEditorRequestAction({ url: targetUrl }, p2pmdEditorBaseUrl) === 'open') {
+                openBrowserUrlInNewTab(targetUrl)
+              }
+            }}
+            // The page cannot see the browser's own light/dark/system setting,
+            // so it is told. Set before first paint so the editor never flashes
+            // the wrong theme on the way in.
+            injectedJavaScriptBeforeContentLoaded={p2pmdThemeScript(browserIsDark)}
+            allowsFullscreenVideo={true}
+            // The slide styles lay out <video>, which WKWebView will not play
+            // inline on iPhone without this.
+            allowsInlineMediaPlayback={true}
+            // Left unset, a swipe stops dead on iOS (see the browser WebView).
+            decelerationRate={WEBVIEW_DECELERATION_RATE}
+            cacheEnabled={false}
+            textZoom={100}
+            style={[styles.p2pmdWorkspaceWebView, p2pmdTheme?.p2pmdWorkspaceWebView]}
+            onMessage={(event) => {
+              if (!isP2pmdEditorMessage(event.nativeEvent.url, p2pmdEditorBaseUrl)) return
+              onP2pmdWebViewMessage(event.nativeEvent.data)
+            }}
+            // iOS kills a backgrounded WKWebView's content process to reclaim
+            // memory. The view comes back blank and stays blank, which is why an
+            // open note looked empty after the phone had been locked and left
+            // leaving and rejoining the room as the only way out. Reload instead;
+            // the document lives in the room, not in the view.
+            onContentProcessDidTerminate={() => {
+              setStatus('Reloading the note after iOS reclaimed it')
+              setP2pmdEditorMount((count) => count + 1)
+            }}
+            onRenderProcessGone={() => {
+              setStatus('Reloading the note after the system reclaimed it')
+              setP2pmdEditorMount((count) => count + 1)
+            }}
+            onError={(event) => {
+              setStatus(`P2PMD WebView failed: ${event.nativeEvent.description}`)
+            }}
+            onLoad={() => {
+              if (p2pmdRoom.role === 'client') {
+                setStatus('P2PMD joined room page loaded')
+              }
+            }}
+          />
+          {(isBooting || isLoading) && (
+            <View style={[styles.p2pmdWorkspaceLoader, p2pmdTheme?.p2pmdWorkspaceLoader]}>
+              <AppLoading app='p2pmd' isDark={browserIsDark} />
+            </View>
+          )}
+        </View>
 
         <PublishedLinkSheet
           isDark={browserIsDark}
@@ -4142,7 +4157,9 @@ export default function App () {
       bookmarksDisabled={!browserBookmarksReady}
       favouritesDisabled={!browserFavouritesReady}
       isFavourited={isBrowserPageFavourited(browserCurrentUrl)}
-      canGoBack={canBrowserGoBack}
+      // The same back as the Android button and the edge swipe. Wired to page
+      // history alone, the arrow left an open chat for the page behind it.
+      canGoBack={browserBackAvailable}
       canGoForward={canBrowserGoForward}
       desktopView={activeBrowserDesktopView}
       isBookmarked={browserPageIsBookmarked}
@@ -4160,7 +4177,7 @@ export default function App () {
       showTopBorder={browserPreferences.addressBarPosition === 'top'}
       tabCount={browserTabsState.tabs.length}
       toolbarButton={browserPreferences.toolbarButton}
-      onBack={onBrowserBack}
+      onBack={goBrowserBack}
       onBurnTabs={onBrowserBurnTabs}
       onCloseMenu={() => setBrowserMenuVisible(false)}
       onForward={onBrowserForward}
@@ -5042,9 +5059,9 @@ export default function App () {
             // First, and on every page rather than only hyper:// ones. A WebView
             // is built once and reused as a tab navigates, so a script that only
             // appears when the source changes to hyper can arrive after the page
-            // it was meant for. The patch is inert anywhere else: it forwards
-            // every address that is not hyper:// to the real fetch, and the app
-            // refuses a write from a page that is not itself on hyper://.
+            // it was meant for. It forwards every address that is not hyper://
+            // to the real fetch, and the app answers only hyper:// and https://
+            // pages, each as a site of its own.
             createHyperBridgeScript(browserMediaToken),
             browserAccessibilityScript,
             browserContentBlockingScript,
@@ -5220,7 +5237,8 @@ export default function App () {
                   {
                     url: entry.url,
                     reportedUrl: event.nativeEvent.url || '',
-                    isHyper: entry.source.kind === 'hyper'
+                    isHyper: entry.source.kind === 'hyper',
+                    isWeb: entry.source.kind === 'web'
                   }
                 )) return
 
@@ -5233,6 +5251,18 @@ export default function App () {
                 if (mediaTarget) {
                   if (browserTabsStateRef.current.activeTabId === tab.id) {
                     setBrowserMediaTarget({ ...mediaTarget, tabId: tab.id })
+                  }
+                  return
+                }
+
+                const linkAction = parseBrowserLinkActionMessage(
+                  event.nativeEvent.data,
+                  pageUrl,
+                  browserMediaToken
+                )
+                if (linkAction) {
+                  if (browserTabsStateRef.current.activeTabId === tab.id) {
+                    onBrowserLinkAction(tab.id, linkAction.action, linkAction.url)
                   }
                   return
                 }

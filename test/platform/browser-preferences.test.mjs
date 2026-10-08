@@ -24,7 +24,9 @@ describe('browser preferences', () => {
       forceDarkWebsites: true,
       publishingSites: {
         ['a'.repeat(64)]: 'allow',
-        ['b'.repeat(52)]: 'block'
+        ['b'.repeat(52)]: 'block',
+        'agregore.mauve.moe': 'allow',
+        'https://agregore.mauve.moe': 'block'
       },
       searchEngine: 'custom',
       showFullAddress: true,
@@ -49,16 +51,25 @@ describe('browser preferences', () => {
     assert.equal(parseBrowserPreferences({ toolbarButton: 42 }).toolbarButton, 'burn')
   })
 
-  test('keeps only real hyper sites and real answers for publishing', () => {
+  test('keeps only real sites and real answers for publishing', () => {
     const parsed = parseBrowserPreferences({
       publishingSites: {
         ['a'.repeat(64)]: 'allow',
-        'example.com': 'allow',
+        'not a site': 'allow',
+        'http://example.com': 'allow',
+        'https://example.com/path': 'allow',
         ['c'.repeat(64)]: 'maybe',
-        ['d'.repeat(52)]: 'block'
+        ['d'.repeat(52)]: 'block',
+        'example.com': 'block',
+        'https://example.com': 'allow'
       }
     })
-    assert.deepEqual(parsed.publishingSites, { ['a'.repeat(64)]: 'allow', ['d'.repeat(52)]: 'block' })
+    assert.deepEqual(parsed.publishingSites, {
+      ['a'.repeat(64)]: 'allow',
+      ['d'.repeat(52)]: 'block',
+      'example.com': 'block',
+      'https://example.com': 'allow'
+    })
     assert.deepEqual(parseBrowserPreferences({ publishingSites: ['allow'] }).publishingSites, {})
   })
 

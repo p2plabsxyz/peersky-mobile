@@ -39,23 +39,29 @@ function readNonceRecord (storagePath) {
 }
 
 /**
- * The nonce the phone is currently showing. Mints one only when there is no
- * live record, so reading the pairing code never changes it.
+ * The nonce the phone is currently showing, and when it stops working. Mints
+ * one only when there is no live record, so reading the pairing code never
+ * changes it. The expiry is what Link Device counts down, so the person knows
+ * how long the code they hand to the other device has left.
  */
-export function getOrCreatePairingNonce (storagePath, now = Date.now()) {
+export function getOrCreatePairingNonceRecord (storagePath, now = Date.now()) {
   const existing = readNonceRecord(storagePath)
-  if (existing && now < existing.expiresAt) return existing.nonce
+  if (existing && now < existing.expiresAt) return existing
 
-  const nonce = b4a.toString(randomBytes(16), 'hex')
+  const record = { nonce: b4a.toString(randomBytes(16), 'hex'), expiresAt: now + PAIRING_NONCE_TTL_MS }
   try {
     mkdirSync(storagePath, { recursive: true })
-    writeFileSync(noncePath(storagePath), JSON.stringify({ nonce, expiresAt: now + PAIRING_NONCE_TTL_MS }))
+    writeFileSync(noncePath(storagePath), JSON.stringify(record))
   } catch {
     // Unwritable storage means the nonce cannot outlive this call. The restore
     // will fail its check and say the code expired, which is the honest
     // outcome and still safe.
   }
-  return nonce
+  return record
+}
+
+export function getOrCreatePairingNonce (storagePath, now = Date.now()) {
+  return getOrCreatePairingNonceRecord(storagePath, now).nonce
 }
 
 /**

@@ -7,6 +7,7 @@ import Hyperdrive from 'hyperdrive'
 import { create as createSDK } from 'hyper-sdk'
 import {
   getLANDiscoveryStatus,
+  attachPrivateLANDiscovery,
   resetLANDiscovery,
   startLANDiscovery
 } from './lan-discovery.mjs'
@@ -275,7 +276,11 @@ export async function getHyperRuntime () {
       .then(shareDriveOpens)
       .then(blockReportedDrives)
       .then(async (runtime) => {
-        await startLANDiscovery(runtime)
+        // Never fatal. The store is open and holds its files' lock by now, and
+        // one that failed here was left open with nothing to close it.
+        await startLANDiscovery(runtime).catch((error) => {
+          console.warn('[LAN] Local discovery did not start:', error?.message || error)
+        })
         sdk = runtime
         return runtime
       })
@@ -323,7 +328,17 @@ export async function getSyncedPrivateHyperRuntime () {
   if (!syncedPrivateSdkOpening) {
     syncedPrivateStoragePath = getSyncedPrivateHyperSdkStoragePath()
     syncedPrivateSdkOpening = initializeRuntimeCandidate(
-      () => createSDK(createSyncedPrivateHyperRuntimeOptions(syncedPrivateStoragePath)).then(shareDriveOpens),
+      // Found over Wi-Fi as well as the internet, as the public store is, so a
+      // private file comes over the LAN with the internet down.
+      () => createSDK(createSyncedPrivateHyperRuntimeOptions(syncedPrivateStoragePath))
+        .then(shareDriveOpens)
+        .then(async (runtime) => {
+          // Never fatal, as for the public store.
+          await attachPrivateLANDiscovery(runtime).catch((error) => {
+            console.warn('[LAN private] Local discovery did not start:', error?.message || error)
+          })
+          return runtime
+        }),
       async (runtime) => {
         const drive = await getSyncedPrivateHyperdrive(runtime)
         rememberSyncedPrivateHyperdrive(drive)

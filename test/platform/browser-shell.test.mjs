@@ -5,11 +5,13 @@ import {
   commitBrowserEntryState,
   getBrowserBackState,
   getBrowserForwardState,
-  formatHyperSiteForPrompt,
+  formatBridgeSite,
   getBrowserMessagePageUrl,
   getHyperBridgeSite,
   getBrowserRequestAction,
   getHyperSiteId,
+  getWebSiteId,
+  isBridgeSiteId,
   getBrowserWebViewKey,
   getHyperDriveListingUrl,
   getSearchUrl,
@@ -333,7 +335,27 @@ describe('browser shell navigation helpers', () => {
     assert.equal(getHyperSiteId('hyper://localhost/?key=x'), null)
     assert.equal(getHyperSiteId('https://example.com/'), null)
     assert.equal(getHyperSiteId('about:blank'), null)
-    assert.equal(formatHyperSiteForPrompt(hex), `${hex.slice(0, 8)}…${hex.slice(-4)}`)
+    assert.equal(formatBridgeSite(hex), `hyper://${hex.slice(0, 8)}…${hex.slice(-4)}`)
+  })
+
+  // The Agregore scratchpad, on the web and under its hyper:// name. Neither
+  // could publish from the phone, though both can on desktop.
+  test('knows a hyper site by its domain name and a web site by its origin', () => {
+    assert.equal(getHyperSiteId('hyper://Agregore.Mauve.Moe/apps/scratchpad.html'), 'agregore.mauve.moe')
+    assert.equal(getHyperSiteId('hyper://a%20b.com/'), null)
+    assert.equal(getWebSiteId('https://agregore.mauve.moe/apps/scratchpad.html?x=1#y'), 'https://agregore.mauve.moe')
+    assert.equal(getWebSiteId('https://Example.com:8443/'), 'https://example.com:8443')
+    assert.equal(getWebSiteId('http://example.com/'), null)
+    assert.equal(getWebSiteId('hyper://agregore.mauve.moe/'), null)
+    assert.equal(formatBridgeSite('agregore.mauve.moe'), 'hyper://agregore.mauve.moe')
+    assert.equal(formatBridgeSite('https://agregore.mauve.moe'), 'https://agregore.mauve.moe')
+
+    for (const id of ['ab'.repeat(32), 'y'.repeat(52), 'agregore.mauve.moe', 'https://agregore.mauve.moe', 'https://example.com:8443']) {
+      assert.equal(isBridgeSiteId(id), true, id)
+    }
+    for (const id of ['', 'localhost', 'http://example.com', 'https://example.com/', 'https://EXAMPLE.com', 'hyper://agregore.mauve.moe', 'not a site']) {
+      assert.equal(isBridgeSiteId(id), false, id)
+    }
   })
 
   // iOS hyper pages had no address at all before PeerSkyWebView handled
@@ -351,6 +373,29 @@ describe('browser shell navigation helpers', () => {
     assert.equal(getHyperBridgeSite({ url, reportedUrl: `hyper://${'cd'.repeat(32)}/`, isHyper: true }), null)
     assert.equal(getHyperBridgeSite({ url, reportedUrl: 'about:blank', isHyper: false }), null)
     assert.equal(getHyperBridgeSite({ url: 'https://example.com/', reportedUrl: '', isHyper: true }), null)
+
+    const named = 'hyper://agregore.mauve.moe/apps/scratchpad.html'
+    assert.equal(getHyperBridgeSite({ url: named, reportedUrl: 'hyper://', isHyper: true }), 'agregore.mauve.moe')
+    assert.equal(getHyperBridgeSite({ url: named, reportedUrl: 'hyper://agregore.mauve.moe/docs/', isHyper: true }), 'agregore.mauve.moe')
+    assert.equal(getHyperBridgeSite({ url: named, reportedUrl: 'hyper://other.example/', isHyper: true }), null)
+  })
+
+  // iOS reports a web page's address and Android its origin. An https:// page
+  // gets the bridge as a site of its own, and only while the tab is on it.
+  test('lets an https:// page use the bridge as its origin', () => {
+    const url = 'https://agregore.mauve.moe/apps/scratchpad.html'
+    const site = 'https://agregore.mauve.moe'
+    assert.equal(getHyperBridgeSite({ url, reportedUrl: site, isHyper: false, isWeb: true }), site)
+    assert.equal(getHyperBridgeSite({ url, reportedUrl: `${url}#top`, isHyper: false, isWeb: true }), site)
+    assert.equal(getHyperBridgeSite({ url, reportedUrl: 'https://agregore.mauve.moe/docs/', isHyper: false, isWeb: true }), site)
+    // A frame or a page the tab moved on to, and messages naming nowhere.
+    for (const reportedUrl of ['https://ads.example', 'https://agregore.mauve.moe:8443', 'http://agregore.mauve.moe', 'null', 'about:blank', '']) {
+      assert.equal(getHyperBridgeSite({ url, reportedUrl, isHyper: false, isWeb: true }), null, reportedUrl)
+    }
+    // Plain http, and the app's own pages, never.
+    assert.equal(getHyperBridgeSite({ url: 'http://example.com/', reportedUrl: 'http://example.com', isHyper: false, isWeb: true }), null)
+    assert.equal(getHyperBridgeSite({ url, reportedUrl: site, isHyper: false, isWeb: false }), null)
+    assert.equal(getHyperBridgeSite({ url, reportedUrl: site, isHyper: false }), null)
   })
 
   // What Android hands over, as seen on a phone: "hyper://" for every hyper://

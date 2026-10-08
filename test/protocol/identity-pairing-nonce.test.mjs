@@ -14,6 +14,7 @@ import {
   clearPairingNonce,
   getLivePairingNonce,
   getOrCreatePairingNonce,
+  getOrCreatePairingNonceRecord,
   PAIRING_NONCE_FILE,
   PAIRING_NONCE_TTL_MS
 } from '../../backend/backup/pairing-nonce.mjs'
@@ -77,6 +78,32 @@ test('an expired nonce stops being live and is replaced on the next read', async
   }
 })
 
+test('the code reports when it stops working, and reading it does not push that back', async () => {
+  const dir = await storage()
+  try {
+    const shownAt = Date.now()
+    const first = getOrCreatePairingNonceRecord(dir, shownAt)
+    assert.equal(first.expiresAt, shownAt + PAIRING_NONCE_TTL_MS)
+    // Link Device counts this down. A read later on must not reset the clock,
+    // or the countdown would promise time the transfer does not have.
+    assert.deepEqual(getOrCreatePairingNonceRecord(dir, shownAt + 60 * 1000), first)
+    assert.equal(getOrCreatePairingNonce(dir), first.nonce)
+
+    const renewed = getOrCreatePairingNonceRecord(dir, first.expiresAt)
+    assert.notEqual(renewed.nonce, first.nonce)
+    assert.equal(renewed.expiresAt, first.expiresAt + PAIRING_NONCE_TTL_MS)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('the key RPC hands the screen the code and when it expires', async () => {
+  const router = await readFile(new URL('../../backend/rpc/router.mjs', import.meta.url), 'utf8')
+  const handler = router.slice(router.indexOf('req.command === RPC_IDENTITY_GET_KEY'), router.indexOf('req.command === RPC_IDENTITY_RESTORE_FROM_HYPER'))
+  assert.match(handler, /const pairing = getOrCreatePairingNonceRecord\(identityStoragePath\)/)
+  assert.match(handler, /nonce: pairing\.nonce,\s*expiresAt: pairing\.expiresAt/)
+})
+
 test('the nonce cannot outlive the transfer it protects', async () => {
   // Transfers from the desktop and from another phone are both capped at 15
   // minutes. A longer-lived nonce would accept a code the transfer had
@@ -125,7 +152,7 @@ function bodyOf (source, signature) {
 }
 
 test('the router reads the nonce from disk and never mints one to restore with', () => {
-  assert.match(router, /nonce: getOrCreatePairingNonce\(identityStoragePath\)/)
+  assert.match(router, /const pairing = getOrCreatePairingNonceRecord\(identityStoragePath\)[\s\S]*?nonce: pairing\.nonce/)
   // A restore has to answer the code that was shown, so it reads without
   // minting. getOrCreate here would hand every transfer a fresh nonce to
   // fail against.
@@ -210,7 +237,7 @@ test('the transfer ceiling the nonce is matched to still exists', async () => {
   // SAS the user is asked to compare.
   const verify = transfer.slice(transfer.indexOf('export function verifyDesktopTransfer'))
   assert.ok(
-    verify.indexOf('nonce does not match the QR code') < verify.indexOf('sas: deriveVerificationCode'),
+    verify.indexOf('made for an older code from this phone') < verify.indexOf('sas: deriveVerificationCode'),
     'SAS is computed before the nonce check'
   )
 })

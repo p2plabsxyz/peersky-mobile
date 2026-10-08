@@ -14,7 +14,7 @@ import {
   hasPeerChatNotificationPermission,
   requestPeerChatNotificationPermission
 } from '../peerchat/notifications'
-import { formatHyperSiteForPrompt } from '../browser-shell.mjs'
+import { formatBridgeSite } from '../browser-shell.mjs'
 import type { ExternalLinkBehavior, PublishingDecision } from './useBrowserPreferences'
 import {
   ChoiceGroup,
@@ -176,14 +176,14 @@ export function Permissions ({
             <View style={[styles.permissionRow, isDark ? styles.permissionRowDark : null]}>
               <SettingCopy
                 title='No site has asked yet'
-                description='A hyper:// site asks before it creates drives on this phone or saves files to them. Your answers show up here.'
+                description='A site asks before it creates hyper:// drives on this phone or saves files to them. Your answers show up here.'
               />
             </View>
             )
           : Object.entries(publishingSites).map(([siteId, decision]) => (
             <PermissionRow
               key={siteId}
-              title={`hyper://${formatHyperSiteForPrompt(siteId)}`}
+              title={formatBridgeSite(siteId)}
               description={decision === 'allow' ? 'Can publish from this phone.' : 'Blocked from publishing.'}
               action='Forget'
               isDark={isDark}

@@ -408,6 +408,50 @@ test('a direct conversation goes to the other devices only once accepted', async
   await service.close()
 })
 
+// The phone got a message request from its own desktop. The desktop is the
+// same person, proven on its own connection, so there is nobody to ask.
+test('a chat the person\'s other device asks for opens without a request, even asked before it proved itself', async (t) => {
+  const { service, link } = await linkedPhone(t)
+  const frames = []
+  const desktop = createFakePeer('0b0b0b0b', 'ada', frames)
+  const laptop = createFakePeer('0d0d0d0d', 'ada@desktop2', frames)
+  const stranger = createFakePeer('0c0c0c0c', 'grace')
+  for (const peer of [desktop, laptop, stranger]) service.peers.set(peer.connection, peer)
+  const invite = (peer, roomKey) => service.handlePeerMessage(peer, {
+    type: 'dm-invite', roomKey, fromId: peer.id, fromUsername: peer.username, toId: service.localId
+  })
+  const prove = (peer) => service.handlePeerMessage(peer, {
+    type: 'profile', username: peer.username, link: makeProfileProof(link, { username: 'ada', at: 100 }, peer.key)
+  })
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 50))
+  const early = 'd1'.repeat(32)
+  const later = 'd2'.repeat(32)
+  const theirs = 'd3'.repeat(32)
+
+  // Asked before the desktop proved itself on this connection: a request,
+  // until the proof lands.
+  await invite(desktop, early)
+  assert.deepEqual(service.listPendingDirectMessages().map((request) => request.roomKey), [early])
+  await prove(desktop)
+  await settle()
+  // Asked by a device already proven: opened straight away.
+  await prove(laptop)
+  await invite(laptop, later)
+  await settle()
+  for (const roomKey of [early, later]) {
+    assert.equal(service.publicRoom(service.rooms.get(roomKey)).name, 'You')
+    assert.equal(service.rooms.get(roomKey).pendingAcceptance, false)
+    assert.ok(frames.find((frame) => frame.type === 'dm-accept' && frame.room === wire(roomKey)))
+  }
+
+  // Anyone else still asks.
+  await invite(stranger, theirs)
+  await settle()
+  assert.deepEqual(service.listPendingDirectMessages().map((request) => request.roomKey), [theirs])
+  assert.equal(service.rooms.has(theirs), false)
+  await service.close()
+})
+
 test('shows other people\'s labels as they send them', async (t) => {
   const { service } = await linkedPhone(t)
   const peer = createFakePeer('0e0e0e0e', '')

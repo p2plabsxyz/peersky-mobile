@@ -1,6 +1,6 @@
 import { DEFAULT_APP_LOGO_COLOR, normalizeAppLogoColor } from '../app-logo-colors.mjs'
 import { EXTERNAL_LINK_BEHAVIORS } from '../browser-permissions.mjs'
-import { normalizeCustomSearchUrl } from '../browser-shell.mjs'
+import { isBridgeSiteId, normalizeCustomSearchUrl } from '../browser-shell.mjs'
 import { DEFAULT_TOOLBAR_BUTTON, normalizeToolbarButton } from '../toolbar-button.mjs'
 
 export const DEFAULT_BROWSER_PREFERENCES = {
@@ -87,15 +87,16 @@ export function parseBrowserPreferences (serialized) {
 }
 
 /**
- * Which hyper:// sites may publish from this phone, by the host in their
- * address, as the person answered when each one first asked.
+ * Which sites may publish from this phone, a hyper:// site by the host in its
+ * address and an https:// one by its origin, as the person answered when each
+ * one first asked.
  */
 export function normalizePublishingSites (value) {
   const sites = {}
   if (!value || typeof value !== 'object' || Array.isArray(value)) return sites
   for (const [siteId, decision] of Object.entries(value)) {
     if (Object.keys(sites).length >= MAX_PUBLISHING_SITES) break
-    if (/^([0-9a-f]{64}|[a-z0-9]{52})$/.test(siteId) && PUBLISHING_DECISIONS.includes(decision)) sites[siteId] = decision
+    if (isBridgeSiteId(siteId) && PUBLISHING_DECISIONS.includes(decision)) sites[siteId] = decision
   }
   return sites
 }

@@ -57,11 +57,13 @@ const HYPER_WRITE_METHODS = new Set(['POST', 'PUT'])
 // publishing something a page asked to keep private is the one outcome worth
 // refusing outright.
 const PUBLIC_VISIBILITY = new Set(['', 'public'])
+const PAGE_PRIVATE_DRIVE_ERROR = 'A page cannot read private drives'
 
 /**
  * @param {object} options
- * @param {string|null} [options.page] The hyper:// page that asked, when the
- *   request came through the page bridge rather than from the app itself.
+ * @param {string|null} [options.page] The hyper:// or https:// page that
+ *   asked, when the request came through the page bridge rather than from the
+ *   app itself.
  */
 export async function fetchHyper ({
   url,
@@ -89,7 +91,7 @@ export async function fetchHyper ({
 
   const pageSite = page === null ? null : pageSiteId(page)
   if (page !== null && !pageSite) {
-    return { ok: false, status: 403, error: 'Only a hyper:// page can make hyper:// requests' }
+    return { ok: false, status: 403, error: 'Only a hyper:// or https:// page can make hyper:// requests' }
   }
 
   if (HYPER_WRITE_METHODS.has(normalizedMethod)) {
@@ -105,9 +107,9 @@ export async function fetchHyper ({
 
   // A link to someone's private drive can reach a page, and the phone holds
   // the keys that open it. Only that drive's own pages may read it.
-  if (pageSite && normalizeDriveAddressId(target.driveAddress) !== pageSite &&
-    await isPrivateHyperAddress(target.driveAddress)) {
-    return { ok: false, status: 403, error: 'A page cannot read private drives' }
+  const otherPage = Boolean(pageSite) && normalizeDriveAddressId(target.driveAddress) !== pageSite
+  if (otherPage && await isPrivateHyperAddress(target.driveAddress)) {
+    return { ok: false, status: 403, error: PAGE_PRIVATE_DRIVE_ERROR }
   }
 
   const read = () => withHyperRuntimeForAddress(target.driveAddress, async (runtime) => {
@@ -199,6 +201,11 @@ export async function fetchHyper ({
   // the same time got there first. A device that is not linked gets told what
   // the drive is.
   if (result?.ok === false && isUnreadableDriveError(result.error)) {
+    // A page gets no further. A drive that reads only as ciphertext is someone's
+    // private drive, and when it was this person's, made on a linked desktop
+    // after the link, trying the keys and reading again handed its files to
+    // the page.
+    if (otherPage) return { ok: false, status: 403, error: PAGE_PRIVATE_DRIVE_ERROR }
     if (await isPrivateHyperAddress(target.driveAddress) ||
       await adoptLinkedPrivateDriveIfReadable(target.driveAddress)) return read()
     return { ok: false, status: 403, error: PRIVATE_DRIVE_ERROR }

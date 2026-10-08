@@ -16,6 +16,7 @@ import {
   stagePhoneBackupFile
 } from './phone-backup.mjs'
 import { stageDesktopTransferFile } from './desktop-transfer.mjs'
+import { ANOTHER_PROFILE_ERROR, isAnotherProfile } from './profile-guard.mjs'
 import { createDesktopTransfer, DESKTOP_TRANSFER_FILE_NAME } from './desktop-sync.mjs'
 import { commitStagedRestore, recoverInterruptedRestore, RESTORE_STAGING_DIR } from './restore.mjs'
 import { adoptTransferredPrivateDrive } from './private-drive-import.mjs'
@@ -172,6 +173,10 @@ export function receiveTransfer ({ hyperUrl } = {}) {
       if (isZipHeader(head)) {
         source = 'desktop'
         staged = await stageDesktopTransferFile({ filePath, stagingPath, deviceKeys, expectedNonce, now: startedAt })
+        if (isAnotherProfile(storagePath, stagingPath)) {
+          rmSync(stagingPath, { recursive: true, force: true })
+          return { ok: false, error: ANOTHER_PROFILE_ERROR }
+        }
       } else if (isBackupFileHeader(head)) {
         source = 'phone'
         staged = await stagePhoneBackupFile({

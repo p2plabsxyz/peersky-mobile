@@ -124,6 +124,7 @@ import {
   splitPeerChatDirectPeer
 } from './peerchat-invite.mjs'
 import { PRE_JOINED_PEERCHAT_ROOM_KEY } from '../../backend/peerchat/rooms.mjs'
+import { mentionQueryStart } from '../../backend/peerchat/mentions.mjs'
 import { QrCodeView } from '../settings/QrCodeView'
 import { pickUploads } from '../media/upload-gate'
 import type { UploadSource } from '../media/upload-gate'
@@ -1220,7 +1221,8 @@ export function PeerChatScreen ({
       if (!mountedRef.current) return
       setRooms(response.rooms)
       openRoom(response.room)
-      onStatus(`Message request sent to ${member.username}`)
+      // Another device of someone you already talk to opens that chat instead.
+      if (response.room.pendingAcceptance) onStatus(`Message request sent to ${member.username}`)
     })
   }
 
@@ -4417,6 +4419,16 @@ function PeerProfileModal ({
                   )}
             </Pressable>
             <Text style={[styles.peerProfileName, { color: colors.text }]}>{member.username}</Text>
+            {/* Names are not unique, so two people can both be Alice. The ID is
+                the start of their key, the same one PeerChat on the desktop
+                knows them by, and it is what tells them apart. */}
+            <Text
+              accessibilityLabel={`ID ${member.id.split('').join(' ')}`}
+              selectable
+              style={[styles.peerProfileId, { color: colors.muted }]}
+            >
+              ID {member.id}
+            </Text>
             <Text style={[styles.peerProfileStatus, { color: member.self ? colors.success : memberTextColor(member, colors) }]}>
               {member.self ? 'You' : formatMemberPresence(member)}
             </Text>
@@ -4746,8 +4758,9 @@ function getMentionCandidates (
   messages: PeerChatMessage[],
   localId: string
 ) {
-  const atIndex = composer.lastIndexOf('@')
-  if (atIndex < 0 || (atIndex > 0 && !/\s/.test(composer[atIndex - 1]))) return []
+  // Past a device label's "@", so "@Ada@mo" still offers Ada@mobile.
+  const atIndex = mentionQueryStart(composer)
+  if (atIndex < 0) return []
   const query = composer.slice(atIndex + 1)
   if (query.includes('\n') || Array.from(query).length > 50) return []
 
@@ -4774,7 +4787,7 @@ function getMentionCandidates (
 }
 
 function insertMention (composer: string, username: string) {
-  const atIndex = composer.lastIndexOf('@')
+  const atIndex = mentionQueryStart(composer)
   if (atIndex < 0) return composer
   return `${composer.slice(0, atIndex)}@${username}  `
 }
@@ -5051,6 +5064,7 @@ const styles = StyleSheet.create({
   peerProfileAvatar: { borderRadius: 48, height: 96, width: 96 },
   peerProfileInitials: { fontSize: 27, fontWeight: '900' },
   peerProfileName: { fontSize: 20, fontWeight: '900', marginTop: 13, textAlign: 'center' },
+  peerProfileId: { fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', fontSize: 12, marginTop: 3 },
   peerProfileStatus: { fontSize: 12, fontWeight: '700', marginTop: 3 },
   peerProfileBio: { fontSize: 13, lineHeight: 19, marginTop: 10, textAlign: 'center' },
   peerProfileMessage: { alignItems: 'center', borderRadius: 10, justifyContent: 'center', marginTop: 18, minHeight: 42, paddingHorizontal: 28 },

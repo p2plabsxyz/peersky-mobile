@@ -70,6 +70,27 @@ export function shouldHandlePeerChatNotificationInApp (isPeerChatVisible, appSta
   return isPeerChatVisible === true && appState === 'active'
 }
 
+// A profile brought from another device, by Link Device or a restore, skips
+// onboarding, which is where the system is asked about notifications. They
+// showed as on while Android or iOS had never been asked, and nothing ever
+// arrived. They are asked once, the first time PeerChat is open with chats.
+export function shouldAskForPeerChatNotifications ({
+  asked,
+  isPeerChatVisible,
+  isReady,
+  isRuntimeReady,
+  notificationsEnabled,
+  roomCount
+}) {
+  return asked !== true &&
+    isReady === true &&
+    isRuntimeReady === true &&
+    isPeerChatVisible === true &&
+    notificationsEnabled === true &&
+    Number.isSafeInteger(roomCount) &&
+    roomCount > 0
+}
+
 export function shouldEnablePeerChatBackground ({ isRuntimeReady, notificationsEnabled, roomCount }) {
   return isRuntimeReady === true &&
     notificationsEnabled === true &&

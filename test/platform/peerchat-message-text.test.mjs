@@ -28,6 +28,18 @@ test('PeerChat does not style email-like text or unknown names', () => {
   ])
 })
 
+test('PeerChat reads a device label as part of the name', () => {
+  assert.deepEqual(splitPeerChatMentions('@Akhilesh@mobile hi', ['Akhilesh', 'Akhilesh@mobile']), [
+    { text: '@Akhilesh@mobile', mention: true },
+    { text: ' hi', mention: false }
+  ])
+  assert.deepEqual(splitPeerChatMentions('hey @Akhilesh how are you', ['Akhilesh']), [
+    { text: 'hey ', mention: false },
+    { text: '@Akhilesh', mention: true },
+    { text: ' how are you', mention: false }
+  ])
+})
+
 test('PeerChat separates known mentions for the desktop renderer', () => {
   assert.equal(
     normalizePeerChatMentionSpacing('@Harshal2 hi hello', ['Harshal2']),
