@@ -276,7 +276,11 @@ export async function getHyperRuntime () {
       .then(shareDriveOpens)
       .then(blockReportedDrives)
       .then(async (runtime) => {
-        await startLANDiscovery(runtime)
+        // Never fatal. The store is open and holds its files' lock by now, and
+        // one that failed here was left open with nothing to close it.
+        await startLANDiscovery(runtime).catch((error) => {
+          console.warn('[LAN] Local discovery did not start:', error?.message || error)
+        })
         sdk = runtime
         return runtime
       })
@@ -329,7 +333,10 @@ export async function getSyncedPrivateHyperRuntime () {
       () => createSDK(createSyncedPrivateHyperRuntimeOptions(syncedPrivateStoragePath))
         .then(shareDriveOpens)
         .then(async (runtime) => {
-          await attachPrivateLANDiscovery(runtime)
+          // Never fatal, as for the public store.
+          await attachPrivateLANDiscovery(runtime).catch((error) => {
+            console.warn('[LAN private] Local discovery did not start:', error?.message || error)
+          })
           return runtime
         }),
       async (runtime) => {

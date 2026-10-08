@@ -45,7 +45,12 @@ async function openLANDiscovery (runtime, options) {
   const createLAN = options.createLAN || ((lanOptions) => new HyperDHTmDNS(lanOptions))
   const logger = options.logger || console
   const lanOptions = options.lanOptions || {}
-  const host = lanOptions.host || HyperDHTmDNS.selectLocalIPv4()
+  const host = lanOptions.host || localHost()
+  if (!host) {
+    status = unavailableStatus(new Error(NO_LAN_INTERFACE))
+    logger.warn(`[LAN] Local discovery unavailable: ${NO_LAN_INTERFACE}`)
+    return
+  }
   const mdnsOptions = lanOptions.mdnsOptions || createMobileMDNSOptions(host)
   const keyPair = runtime?.swarm?.keyPair
 
@@ -115,10 +120,14 @@ export async function attachPrivateLANDiscovery (runtime, options = {}) {
   const createLAN = options.createLAN || ((lanOptions) => new HyperDHTmDNS(lanOptions))
   const attach = options.attach || HyperDHTmDNS.attachHyperSDK
   const logger = options.logger || console
-  const host = options.host || HyperDHTmDNS.selectLocalIPv4()
+  const host = options.host || localHost()
   const pickPort = options.pickFallbackPort || randomLANPort
   const keyPair = runtime?.swarm?.keyPair
   if (!keyPair) return null
+  if (!host) {
+    logger.warn(`[LAN private] Local discovery unavailable: ${NO_LAN_INTERFACE}`)
+    return null
+  }
 
   let failure = null
   for (let tries = 0; tries < FALLBACK_PORT_ATTEMPTS; tries++) {
@@ -138,6 +147,21 @@ export async function attachPrivateLANDiscovery (runtime, options = {}) {
   }
   logger.warn(`[LAN private] Local discovery unavailable: ${errorMessage(failure)}`)
   return null
+}
+
+// With no network at all, as in airplane mode, there is no address to be found
+// at on a LAN. The lookup threw, after the store it was for had opened and
+// locked its files, so the store never finished opening, and every later try
+// to open it again was refused the lock: no hyper:// read worked, local ones
+// included, until PeerSky was restarted with a network.
+const NO_LAN_INTERFACE = 'No network to find peers on'
+
+function localHost () {
+  try {
+    return HyperDHTmDNS.selectLocalIPv4()
+  } catch {
+    return null
+  }
 }
 
 function randomLANPort () {
