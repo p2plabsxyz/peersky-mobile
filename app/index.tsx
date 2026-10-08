@@ -4143,7 +4143,9 @@ export default function App () {
       bookmarksDisabled={!browserBookmarksReady}
       favouritesDisabled={!browserFavouritesReady}
       isFavourited={isBrowserPageFavourited(browserCurrentUrl)}
-      canGoBack={canBrowserGoBack}
+      // The same back as the Android button and the edge swipe. Wired to page
+      // history alone, the arrow left an open chat for the page behind it.
+      canGoBack={browserBackAvailable}
       canGoForward={canBrowserGoForward}
       desktopView={activeBrowserDesktopView}
       isBookmarked={browserPageIsBookmarked}
@@ -4161,7 +4163,7 @@ export default function App () {
       showTopBorder={browserPreferences.addressBarPosition === 'top'}
       tabCount={browserTabsState.tabs.length}
       toolbarButton={browserPreferences.toolbarButton}
-      onBack={onBrowserBack}
+      onBack={goBrowserBack}
       onBurnTabs={onBrowserBurnTabs}
       onCloseMenu={() => setBrowserMenuVisible(false)}
       onForward={onBrowserForward}
