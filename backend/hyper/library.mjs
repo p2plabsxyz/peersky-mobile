@@ -2,9 +2,11 @@ import b4a from 'b4a'
 import { createReadStream, statSync } from 'node:fs'
 import { pipeline } from 'node:stream/promises'
 import {
+  adoptLinkedPrivateDriveIfReadable,
   getPrivateDriveWarningForDriveId,
   getSyncedPrivateHyperdrive,
   getSyncedPrivateHyperdriveForId,
+  isPrivateHyperAddress,
   isSyncedPrivateHyperdriveAddress,
   rememberDeviceOnlyHyperdrive,
   rememberSyncedPrivateHyperdrive,
@@ -14,6 +16,7 @@ import {
   withSyncedPrivateHyperRuntimeOperation
 } from './runtime.mjs'
 import { normalizePickedLocalFile } from './local-file.mjs'
+import { isUnreadableDriveError, PRIVATE_DRIVE_ERROR } from './linked-private-drives.mjs'
 import { normalizeDriveAddressId } from './runtime-routing.mjs'
 import { createHyperUrl, parseHyperUrl } from './url.mjs'
 import { recordHyperArchive } from './archive.mjs'
@@ -106,11 +109,26 @@ export async function listHyperdriveLocation ({ url } = {}, options = {}) {
       return response
     }, { address: target.driveAddress })
   } catch (error) {
+    // Encrypted, and read without its key: someone's private drive. A scanned
+    // link said "Decoding error: unknown wire type 7". This phone's own
+    // private keys are tried first, as the browser does, so a linked device's
+    // newer private drive opens here too; anyone else is told what it is.
+    if (isUnreadableDriveError(error)) {
+      const opensHere = options.opensAsPrivate || opensAsPrivate
+      if (!options.retriedAsPrivate && await opensHere(target.driveAddress)) {
+        return listHyperdriveLocation({ url }, { ...options, retriedAsPrivate: true })
+      }
+      return { ok: false, error: PRIVATE_DRIVE_ERROR }
+    }
     return {
       ok: false,
       error: error instanceof Error ? error.message : String(error)
     }
   }
+}
+
+async function opensAsPrivate (driveAddress) {
+  return await isPrivateHyperAddress(driveAddress) || await adoptLinkedPrivateDriveIfReadable(driveAddress)
 }
 
 async function listDirectoryWithDiscoveryRetry (
