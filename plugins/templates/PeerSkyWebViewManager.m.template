@@ -6,6 +6,7 @@
 
 @interface RNCWebViewImpl (PeerSkyConfiguration)
 - (WKWebViewConfiguration *)setUpWkWebViewConfig;
+- (NSMutableDictionary<NSString *, id> *)baseEvent;
 - (void)webView:(WKWebView *)webView
   decidePolicyForNavigationAction:(WKNavigationAction *)navigationAction
                   decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler;
@@ -19,8 +20,18 @@ static const WKNavigationActionPolicy PeerSkyAllowWithoutOpeningApp = (WKNavigat
 @property (nonatomic, copy) NSString *incognitoSession;
 @property (nonatomic, assign) BOOL forceDarkScheme;
 @property (nonatomic, assign) BOOL hyperSession;
+@property (nonatomic, copy) NSString *mediaLongPressToken;
 - (NSString *)hyperPageForURL:(NSURL *)url;
 @end
+
+// What a held link can be opened with in the app, as in its long-press sheet.
+static NSString *const PeerSkyLinkActionMessageType = @"peersky-browser-link-action";
+
+static BOOL PeerSkyIsBrowserLink(NSURL *url)
+{
+  NSSet<NSString *> *schemes = [NSSet setWithArray:@[ @"http", @"https", @"hyper", @"peersky" ]];
+  return url.host.length > 0 && [schemes containsObject:url.scheme.lowercaseString];
+}
 
 static NSString *PeerSkyWithoutFragment(NSURL *url)
 {
@@ -92,11 +103,16 @@ static PeerSkyHyperSchemeHandler *PeerSkySharedHyperSchemeHandler(void)
 static NSString *PeerSkyIncognitoSession;
 static WKWebsiteDataStore *PeerSkyIncognitoStore;
 
+static BOOL PeerSkyIsToken(NSString *value)
+{
+  if (value.length != 32) return NO;
+  NSCharacterSet *hex = [NSCharacterSet characterSetWithCharactersInString:@"0123456789abcdef"];
+  return [value rangeOfCharacterFromSet:hex.invertedSet].location == NSNotFound;
+}
+
 static BOOL PeerSkyIsIncognitoSession(NSString *session)
 {
-  if (session.length != 32) return NO;
-  NSCharacterSet *hex = [NSCharacterSet characterSetWithCharactersInString:@"0123456789abcdef"];
-  return [session rangeOfCharacterFromSet:hex.invertedSet].location == NSNotFound;
+  return PeerSkyIsToken(session);
 }
 
 // Pages from hyper:// keep their storage for as long as the app runs, in a
@@ -200,6 +216,71 @@ static WKWebsiteDataStore *PeerSkyIncognitoStoreForSession(NSString *session)
   }];
 }
 
+// A held link got the system's menu for links, whose Open Link went to Safari.
+// Without a menu from here WebKit falls back to that one, so a link the app can
+// open gets the app's own instead, with what its long-press sheet on Android
+// has. A tap on the held link opens it in its tab. Mail and phone links keep
+// the system's menu.
+- (void)webView:(WKWebView *)webView
+  contextMenuConfigurationForElement:(WKContextMenuElementInfo *)elementInfo
+                   completionHandler:(void (^)(UIContextMenuConfiguration *))completionHandler
+{
+  NSURL *url = elementInfo.linkURL;
+  if (!PeerSkyIsBrowserLink(url) || !PeerSkyIsToken(self.mediaLongPressToken)) {
+    completionHandler(nil);
+    return;
+  }
+
+  __weak PeerSkyWebViewImpl *weakSelf = self;
+  UIAction *(^linkAction)(NSString *, NSString *, NSString *) = ^UIAction *(NSString *title, NSString *symbol, NSString *action) {
+    return [UIAction actionWithTitle:title image:[UIImage systemImageNamed:symbol] identifier:nil handler:^(__kindof UIAction *picked) {
+      [weakSelf sendLinkAction:action url:url];
+    }];
+  };
+  UIAction *copyLink = [UIAction actionWithTitle:@"Copy Link" image:[UIImage systemImageNamed:@"doc.on.doc"] identifier:nil handler:^(__kindof UIAction *picked) {
+    UIPasteboard.generalPasteboard.items = @[ @{ @"public.url": url, @"public.utf8-plain-text": url.absoluteString } ];
+  }];
+  completionHandler([UIContextMenuConfiguration configurationWithIdentifier:nil previewProvider:nil actionProvider:^UIMenu *(NSArray<UIMenuElement *> *suggestedActions) {
+    return [UIMenu menuWithTitle:url.absoluteString children:@[
+      linkAction(@"Open in New Tab", @"plus.square.on.square", @"new-tab"),
+      linkAction(@"Open in Background Tab", @"square.on.square", @"background-tab"),
+      linkAction(@"Download Linked File", @"arrow.down.circle", @"download"),
+      copyLink,
+      linkAction(@"Share\u2026", @"square.and.arrow.up", @"share")
+    ]];
+  }]);
+}
+
+- (void)webView:(WKWebView *)webView
+  contextMenuForElement:(WKContextMenuElementInfo *)elementInfo
+  willCommitWithAnimator:(id<UIContextMenuInteractionCommitAnimating>)animator
+{
+  NSURL *url = elementInfo.linkURL;
+  if (!PeerSkyIsBrowserLink(url)) return;
+  __weak PeerSkyWebViewImpl *weakSelf = self;
+  [animator addCompletion:^{
+    [weakSelf sendLinkAction:@"open" url:url];
+  }];
+}
+
+// The app opens the link as it does from its own sheet. The message goes to
+// the app from here, not through the page, with the tab's token.
+- (void)sendLinkAction:(NSString *)action url:(NSURL *)url
+{
+  NSString *token = self.mediaLongPressToken;
+  if (!self.onMessage || !PeerSkyIsToken(token)) return;
+  NSData *json = [NSJSONSerialization dataWithJSONObject:@{
+    @"type": PeerSkyLinkActionMessageType,
+    @"token": token,
+    @"action": action,
+    @"url": url.absoluteString ?: @""
+  } options:0 error:nil];
+  if (!json) return;
+  NSMutableDictionary<NSString *, id> *event = [self baseEvent];
+  event[@"data"] = [[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding];
+  self.onMessage(event);
+}
+
 @end
 
 // Burning tabs clears what websites kept on the phone. react-native-webview's
@@ -269,6 +350,7 @@ RCT_EXPORT_MODULE(PeerSkyWebView)
 RCT_EXPORT_VIEW_PROPERTY(incognitoSession, NSString)
 RCT_EXPORT_VIEW_PROPERTY(forceDarkScheme, BOOL)
 RCT_EXPORT_VIEW_PROPERTY(hyperSession, BOOL)
+RCT_EXPORT_VIEW_PROPERTY(mediaLongPressToken, NSString)
 
 - (UIView *)view
 {

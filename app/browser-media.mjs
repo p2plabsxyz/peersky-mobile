@@ -1,6 +1,7 @@
 import { MAX_BROWSER_URL_LENGTH } from './browser-shell.mjs'
 
 export const BROWSER_MEDIA_MESSAGE_TYPE = 'peersky-browser-media-long-press'
+export const BROWSER_LINK_ACTION_MESSAGE_TYPE = 'peersky-browser-link-action'
 export const MAX_BROWSER_MEDIA_MESSAGE_LENGTH = 24 * 1024
 export const MAX_BROWSER_MEDIA_TEXT_LENGTH = 256
 export const BROWSER_MEDIA_TOKEN_LENGTH = 32
@@ -8,6 +9,7 @@ export const BROWSER_MEDIA_TOKEN_LENGTH = 32
 const MEDIA_KINDS = new Set(['image', 'video', 'link'])
 const MEDIA_PROTOCOLS = new Set(['http:', 'https:'])
 const LINK_PROTOCOLS = new Set(['http:', 'https:', 'hyper:', 'peersky:'])
+const LINK_ACTIONS = new Set(['open', 'new-tab', 'background-tab', 'download', 'share'])
 
 // Every sound on a page stops. For when the app is swiped away but kept
 // running for PeerChat, and nothing on screen is left to stop it.
@@ -186,6 +188,32 @@ function isBrowserMediaToken (value) {
   return typeof value === 'string' &&
     value.length === BROWSER_MEDIA_TOKEN_LENGTH &&
     /^[a-f0-9]+$/.test(value)
+}
+
+// On iOS a held link shows a menu PeerSkyWebViewManager builds, and what was
+// picked there comes from the app's own code with the tab's token, never from
+// the page. 'open' is a tap on the held link, which opens it in its tab.
+export function parseBrowserLinkActionMessage (message, pageUrl = '', expectedToken = '') {
+  if (typeof message !== 'string' || message.length > MAX_BROWSER_MEDIA_MESSAGE_LENGTH) {
+    return null
+  }
+
+  try {
+    const parsed = JSON.parse(message)
+    if (
+      parsed?.type !== BROWSER_LINK_ACTION_MESSAGE_TYPE ||
+      !isBrowserMediaToken(expectedToken) ||
+      parsed.token !== expectedToken ||
+      !LINK_ACTIONS.has(parsed.action)
+    ) {
+      return null
+    }
+
+    const url = normalizeTargetUrl(parsed.url, pageUrl, LINK_PROTOCOLS)
+    return url ? { action: parsed.action, url } : null
+  } catch {
+    return null
+  }
 }
 
 export function isDownloadableBrowserMediaUrl (url) {

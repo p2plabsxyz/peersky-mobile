@@ -189,6 +189,7 @@ import {
   PAUSE_ALL_MEDIA_SCRIPT,
   createBrowserMediaToken,
   createBrowserMediaLongPressScript,
+  parseBrowserLinkActionMessage,
   parseBrowserMediaMessage
 } from './browser-media.mjs'
 import { BookmarksScreen } from './bookmarks/BookmarksScreen'
@@ -2195,6 +2196,18 @@ export default function App () {
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error))
     }
+  }
+
+  // A link held on iOS, picked from the menu PeerSkyWebViewManager shows for
+  // it: the long-press sheet's buttons, and a tap on the held link opens it in
+  // its tab. WebKit gives the menu the address and not the link's text, so the
+  // address names the link, rather than the title of the page it is on.
+  function onBrowserLinkAction (tabId: string, action: string, targetUrl: string) {
+    if (action === 'open') void loadBrowserUrl(targetUrl)
+    else if (action === 'new-tab') onBrowserMediaOpenInNewTab(targetUrl)
+    else if (action === 'background-tab') onBrowserMediaOpenInBackgroundTab(targetUrl, targetUrl)
+    else if (action === 'download') onBrowserMediaDownload(targetUrl, tabId)
+    else if (action === 'share') void onBrowserMediaShare(targetUrl, targetUrl)
   }
 
   function updateActiveBrowserZoom (nextZoom: number) {
@@ -5238,6 +5251,18 @@ export default function App () {
                 if (mediaTarget) {
                   if (browserTabsStateRef.current.activeTabId === tab.id) {
                     setBrowserMediaTarget({ ...mediaTarget, tabId: tab.id })
+                  }
+                  return
+                }
+
+                const linkAction = parseBrowserLinkActionMessage(
+                  event.nativeEvent.data,
+                  pageUrl,
+                  browserMediaToken
+                )
+                if (linkAction) {
+                  if (browserTabsStateRef.current.activeTabId === tab.id) {
+                    onBrowserLinkAction(tab.id, linkAction.action, linkAction.url)
                   }
                   return
                 }
