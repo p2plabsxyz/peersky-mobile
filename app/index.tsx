@@ -46,7 +46,7 @@ import {
   getBrowserBackState,
   getBrowserForwardState,
   getFileHandoffAction,
-  formatHyperSiteForPrompt,
+  formatBridgeSite,
   getBrowserMessagePageUrl,
   getHyperBridgeSite,
   getBrowserRequestAction,
@@ -1667,7 +1667,7 @@ export default function App () {
   const hyperBridgePendingRef = useRef(new Map<string, Map<number, string>>())
 
   /**
-   * A hyper:// page asking for something its WebView cannot fetch for itself.
+   * A page asking for a hyper:// address its WebView cannot fetch for itself.
    *
    * @returns true when the message was ours, so nothing else tries to read it.
    */
@@ -1684,7 +1684,7 @@ export default function App () {
     const prompt = new Promise<boolean>((resolve) => {
       Alert.alert(
         'Let this site publish?',
-        `hyper://${formatHyperSiteForPrompt(siteId)} wants to create drives on this phone and save files to them. Anyone with the link can read what it publishes.`,
+        `${formatBridgeSite(siteId)} wants to create hyper:// drives on this phone and save files to them. Anyone with the link can read what it publishes.`,
         [
           { text: 'Don\'t allow', style: 'cancel', onPress: () => { setPublishingSite(siteId, 'block'); resolve(false) } },
           { text: 'Allow', onPress: () => { setPublishingSite(siteId, 'allow'); resolve(true) } }
@@ -1700,7 +1700,7 @@ export default function App () {
     tabId: string,
     data: string,
     token: string,
-    page: { url: string, reportedUrl: string, isHyper: boolean }
+    page: { url: string, reportedUrl: string, isHyper: boolean, isWeb: boolean }
   ) {
     let pending = hyperBridgePendingRef.current.get(tabId)
     if (!pending) {
@@ -1723,10 +1723,11 @@ export default function App () {
       return true
     }
 
-    // Only hyper:// pages may use the bridge.
+    // Only hyper:// and https:// pages may use the bridge, each as a site of
+    // its own.
     const siteId = getHyperBridgeSite(page)
     if (!siteId) {
-      settle({ error: 'hyper:// requests only work from a hyper:// page' })
+      settle({ error: 'hyper:// requests only work from a hyper:// or https:// page' })
       return true
     }
 
@@ -5045,9 +5046,9 @@ export default function App () {
             // First, and on every page rather than only hyper:// ones. A WebView
             // is built once and reused as a tab navigates, so a script that only
             // appears when the source changes to hyper can arrive after the page
-            // it was meant for. The patch is inert anywhere else: it forwards
-            // every address that is not hyper:// to the real fetch, and the app
-            // refuses a write from a page that is not itself on hyper://.
+            // it was meant for. It forwards every address that is not hyper://
+            // to the real fetch, and the app answers only hyper:// and https://
+            // pages, each as a site of its own.
             createHyperBridgeScript(browserMediaToken),
             browserAccessibilityScript,
             browserContentBlockingScript,
@@ -5223,7 +5224,8 @@ export default function App () {
                   {
                     url: entry.url,
                     reportedUrl: event.nativeEvent.url || '',
-                    isHyper: entry.source.kind === 'hyper'
+                    isHyper: entry.source.kind === 'hyper',
+                    isWeb: entry.source.kind === 'web'
                   }
                 )) return
 

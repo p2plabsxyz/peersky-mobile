@@ -297,19 +297,40 @@ export function getBrowserRequestAction ({
   return { action: 'allow' }
 }
 
+const HYPER_KEY_HOST = /^([0-9a-f]{64}|[a-z0-9]{52})$/
+// A name the Hyper runtime looks up over DNS, such as agregore.mauve.moe.
+const HYPER_DOMAIN_HOST = /^(?=.{1,253}$)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/
+
 /**
- * The host of a hyper:// address, lower case: how a site is known for things
- * like the publishing permission. Null for anything else.
+ * The host of a hyper:// address, lower case: the drive key, or the domain
+ * name the site was opened under. How a hyper site is known for things like
+ * the publishing permission. Null for anything else.
  */
 export function getHyperSiteId (url) {
   try {
     const parsed = new URL(String(url || ''))
     if (parsed.protocol !== 'hyper:') return null
     const host = parsed.hostname.toLowerCase()
-    return /^([0-9a-f]{64}|[a-z0-9]{52})$/.test(host) ? host : null
+    return HYPER_KEY_HOST.test(host) || HYPER_DOMAIN_HOST.test(host) ? host : null
   } catch {
     return null
   }
+}
+
+/** The origin of an https:// page, which is how a web site is known. Null for anything else. */
+export function getWebSiteId (url) {
+  try {
+    const parsed = new URL(String(url || ''))
+    return parsed.protocol === 'https:' ? parsed.origin : null
+  } catch {
+    return null
+  }
+}
+
+/** Whether a saved site is one the bridge could have named. */
+export function isBridgeSiteId (value) {
+  const id = String(value || '')
+  return HYPER_KEY_HOST.test(id) || HYPER_DOMAIN_HOST.test(id) || getWebSiteId(id) === id
 }
 
 /**
@@ -329,20 +350,30 @@ export function getBrowserMessagePageUrl (reportedUrl, entryUrl) {
 }
 
 /**
- * The site a hyper:// tab's bridge request speaks for, or null when it may not
- * use the bridge: the page that sent it is somewhere else, such as a web page
- * the tab navigated off to.
+ * The site a tab's bridge request speaks for, or null when it may not use the
+ * bridge: the page that sent it is somewhere else, such as a site the tab
+ * navigated off to, or the tab shows one of the app's own pages. A hyper://
+ * page is known by its host and an https:// page by its origin, and both get
+ * the same rules.
  */
-export function getHyperBridgeSite ({ url, reportedUrl = '', isHyper }) {
-  const siteId = isHyper ? getHyperSiteId(url) : null
-  if (!siteId) return null
-  const page = getBrowserMessagePageUrl(String(reportedUrl || '').split('#')[0], url)
-  return getHyperSiteId(page) === siteId ? siteId : null
+export function getHyperBridgeSite ({ url, reportedUrl = '', isHyper, isWeb = false }) {
+  const reported = String(reportedUrl || '').split('#')[0]
+  if (isHyper) {
+    const siteId = getHyperSiteId(url)
+    if (!siteId) return null
+    return getHyperSiteId(getBrowserMessagePageUrl(reported, url)) === siteId ? siteId : null
+  }
+  // A web page always says where it is, as its address on iOS and its origin
+  // on Android, so a message that names nowhere is not taken for the tab's.
+  const siteId = isWeb ? getWebSiteId(url) : null
+  return siteId && getWebSiteId(reported) === siteId ? siteId : null
 }
 
-export function formatHyperSiteForPrompt (siteId) {
+/** A site as the publishing prompt and Settings name it. */
+export function formatBridgeSite (siteId) {
   const id = String(siteId || '')
-  return id.length > 16 ? `${id.slice(0, 8)}…${id.slice(-4)}` : id
+  if (getWebSiteId(id) === id) return id
+  return `hyper://${HYPER_KEY_HOST.test(id) ? `${id.slice(0, 8)}…${id.slice(-4)}` : id}`
 }
 
 export function isStaleBrowserLoad (loadSeq, currentSeq) {

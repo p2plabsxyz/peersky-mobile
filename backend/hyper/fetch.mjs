@@ -61,8 +61,9 @@ const PAGE_PRIVATE_DRIVE_ERROR = 'A page cannot read private drives'
 
 /**
  * @param {object} options
- * @param {string|null} [options.page] The hyper:// page that asked, when the
- *   request came through the page bridge rather than from the app itself.
+ * @param {string|null} [options.page] The hyper:// or https:// page that
+ *   asked, when the request came through the page bridge rather than from the
+ *   app itself.
  */
 export async function fetchHyper ({
   url,
@@ -90,7 +91,7 @@ export async function fetchHyper ({
 
   const pageSite = page === null ? null : pageSiteId(page)
   if (page !== null && !pageSite) {
-    return { ok: false, status: 403, error: 'Only a hyper:// page can make hyper:// requests' }
+    return { ok: false, status: 403, error: 'Only a hyper:// or https:// page can make hyper:// requests' }
   }
 
   if (HYPER_WRITE_METHODS.has(normalizedMethod)) {

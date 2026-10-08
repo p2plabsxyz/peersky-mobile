@@ -12,6 +12,7 @@ import {
   rememberPageDrive,
   resetPageAccess
 } from '../../backend/hyper/page-access.mjs'
+import { normalizeDriveAddressId } from '../../backend/hyper/runtime-routing.mjs'
 
 // A hyper:// page used to reach the app's own drives by name and write to
 // them without asking: `?key=p2pmd` from any page was P2PMD's publish drive.
@@ -26,9 +27,63 @@ test('a page is known by its own drive, in either spelling', () => {
   const site = driveKey()
   assert.equal(pageSiteId(`hyper://${site.z32}/index.html`), site.hex)
   assert.equal(pageSiteId(`hyper://${site.hex}/`), site.hex)
-  assert.equal(pageSiteId('https://example.com/'), null)
   assert.equal(pageSiteId('hyper://localhost/'), null)
   assert.equal(pageSiteId('about:blank'), null)
+})
+
+// The Agregore scratchpad is an https:// page, and its hyper:// copy is opened
+// under a domain name. Both were turned away with "Only a hyper:// page can
+// make hyper:// requests", though the scratchpad publishes on desktop.
+test('an https:// page is known by its origin and a hyper:// domain by its name', () => {
+  assert.equal(pageSiteId('https://agregore.mauve.moe/apps/scratchpad.html'), 'https://agregore.mauve.moe')
+  assert.equal(pageSiteId('https://Example.COM:8443/a/b?c#d'), 'https://example.com:8443')
+  assert.equal(pageSiteId('hyper://Agregore.Mauve.Moe/apps/scratchpad.html'), 'agregore.mauve.moe')
+  // Nothing else gets the bridge: plain http can be rewritten on the way.
+  for (const page of ['http://example.com/', 'hyper://a%20b.com/', 'hyper://-bad.example/', 'data:text/html,x', 'file:///index.html']) {
+    assert.equal(pageSiteId(page), null, page)
+  }
+})
+
+// The backend runs in Bare, whose URL has no origin, so every https:// page
+// came out as no site at all on the phone, while Node gave the right one.
+test('an https:// page is known by its origin also where URL has none', () => {
+  const NativeURL = globalThis.URL
+  globalThis.URL = class extends NativeURL {
+    get origin () { return undefined }
+  }
+  try {
+    assert.equal(pageSiteId('https://agregore.mauve.moe/apps/scratchpad.html'), 'https://agregore.mauve.moe')
+    assert.equal(pageSiteId('https://Example.COM:8443/a'), 'https://example.com:8443')
+    assert.equal(pageSiteId('https://example.com:443/'), 'https://example.com')
+  } finally {
+    globalThis.URL = NativeURL
+  }
+})
+
+test('a site with a name is never taken for a drive, so it reads no private one', () => {
+  for (const page of ['https://agregore.mauve.moe/', 'hyper://agregore.mauve.moe/']) {
+    const site = pageSiteId(page)
+    assert.ok(site)
+    // The private check lets a page through only when this is its drive.
+    assert.equal(normalizeDriveAddressId(site), null, page)
+  }
+})
+
+test('the same name from the https:// and hyper:// copies of a site gets two drives', () => {
+  resetPageAccess()
+  const web = pageSiteId('https://agregore.mauve.moe/apps/scratchpad.html')
+  const hyper = pageSiteId('hyper://agregore.mauve.moe/apps/scratchpad.html')
+  const name = (site) => new URL(namespacePageDriveRequest('hyper://localhost/?key=scratchpad', site).url).searchParams.get('key')
+  assert.match(name(web), /^site-[0-9a-f]{16}-scratchpad$/)
+  assert.notEqual(name(web), name(hyper))
+  assert.notEqual(name(web), name(driveKey().hex))
+
+  const created = driveKey()
+  rememberPageDrive(web, `hyper://${created.z32}/`)
+  assert.equal(pageMayWriteTo(web, created.hex), true)
+  assert.equal(pageMayWriteTo(hyper, created.hex), false)
+  assert.equal(pageMayWriteTo(pageSiteId('https://evil.example/'), created.hex), false)
+  resetPageAccess()
 })
 
 test('only POST to localhost with a key asks for a named drive', () => {
@@ -99,7 +154,7 @@ test('a page gets no private drive, also one found to be private only as it aske
 
 test('the fetch path applies all of it to page requests', () => {
   assert.match(fetchSource, /page = null/)
-  assert.match(fetchSource, /Only a hyper:\/\/ page can make hyper:\/\/ requests/)
+  assert.match(fetchSource, /Only a hyper:\/\/ or https:\/\/ page can make hyper:\/\/ requests/)
   assert.match(fetchSource, /const PAGE_PRIVATE_DRIVE_ERROR = 'A page cannot read private drives'/)
   assert.match(fetchSource, /isPrivateHyperAddress\(target\.driveAddress\)/)
   assert.match(fetchSource, /namespacePageDriveRequest\(requestUrl, pageSite\)/)
