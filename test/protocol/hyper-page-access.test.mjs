@@ -83,10 +83,24 @@ test('a page writes only to drives it created', () => {
   assert.equal(pageMayWriteTo(site, created.z32), false)
 })
 
+// A private drive a linked desktop made after the link is not known here to be
+// private until a read of it comes back as ciphertext. The phone then tried its
+// own keys, read the drive again, and handed the files to the page that asked.
+test('a page gets no private drive, also one found to be private only as it asked', () => {
+  const unreadable = fetchSource.slice(fetchSource.indexOf('if (result?.ok === false && isUnreadableDriveError(result.error)) {'))
+  const refused = unreadable.indexOf('if (otherPage) return { ok: false, status: 403, error: PAGE_PRIVATE_DRIVE_ERROR }')
+  assert.ok(refused > -1, 'a page is not turned away when the drive reads as ciphertext')
+  assert.ok(refused < unreadable.indexOf('adoptLinkedPrivateDriveIfReadable'), 'the keys are tried before the page is turned away')
+  assert.ok(refused < unreadable.indexOf('return read()'), 'the drive is read again for the page')
+  // Its own pages still read it, and the app itself is no page.
+  assert.match(fetchSource, /const otherPage = Boolean\(pageSite\) && normalizeDriveAddressId\(target\.driveAddress\) !== pageSite/)
+  assert.match(fetchSource, /if \(otherPage && await isPrivateHyperAddress\(target\.driveAddress\)\)/)
+})
+
 test('the fetch path applies all of it to page requests', () => {
   assert.match(fetchSource, /page = null/)
   assert.match(fetchSource, /Only a hyper:\/\/ page can make hyper:\/\/ requests/)
-  assert.match(fetchSource, /A page cannot read private drives/)
+  assert.match(fetchSource, /const PAGE_PRIVATE_DRIVE_ERROR = 'A page cannot read private drives'/)
   assert.match(fetchSource, /isPrivateHyperAddress\(target\.driveAddress\)/)
   assert.match(fetchSource, /namespacePageDriveRequest\(requestUrl, pageSite\)/)
   assert.match(fetchSource, /A page can only write to drives it created/)
