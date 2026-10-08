@@ -103,6 +103,43 @@ async function openLANDiscovery (runtime, options) {
   logger.warn(`[LAN] Local discovery unavailable: ${errorMessage(failure)}`)
 }
 
+/**
+ * Local discovery for a store other than the public one: the private store
+ * this person's devices share. It has a network key of its own, and a LAN
+ * connection is made with the key of the swarm it belongs to, so it gets a LAN
+ * swarm of its own. Without one a private file could not be fetched over
+ * Wi-Fi with the internet down, though messages went through. The LAN page
+ * shows the public swarm only. Null when it could not start.
+ */
+export async function attachPrivateLANDiscovery (runtime, options = {}) {
+  const createLAN = options.createLAN || ((lanOptions) => new HyperDHTmDNS(lanOptions))
+  const attach = options.attach || HyperDHTmDNS.attachHyperSDK
+  const logger = options.logger || console
+  const host = options.host || HyperDHTmDNS.selectLocalIPv4()
+  const pickPort = options.pickFallbackPort || randomLANPort
+  const keyPair = runtime?.swarm?.keyPair
+  if (!keyPair) return null
+
+  let failure = null
+  for (let tries = 0; tries < FALLBACK_PORT_ATTEMPTS; tries++) {
+    let next = null
+    try {
+      next = createLAN({ host, port: pickPort(), mdnsOptions: createMobileMDNSOptions(host), keyPair })
+      addLANReadinessBarrier(next, options.readinessBarrierOptions)
+      next.on('warning', (error) => logger.warn(`[LAN private] ${errorMessage(error)}`))
+      next.on('error', (error) => logger.error(`[LAN private] ${errorMessage(error)}`))
+      await next.ready()
+      return await attach(runtime, { lan: next })
+    } catch (error) {
+      failure = error
+      if (next && !next.destroyed) await next.destroy().catch(() => {})
+      if (!isPortInUseError(error)) break
+    }
+  }
+  logger.warn(`[LAN private] Local discovery unavailable: ${errorMessage(failure)}`)
+  return null
+}
+
 function randomLANPort () {
   return FALLBACK_PORT_MIN + Math.floor(Math.random() * (FALLBACK_PORT_MAX - FALLBACK_PORT_MIN + 1))
 }

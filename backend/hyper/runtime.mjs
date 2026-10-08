@@ -7,6 +7,7 @@ import Hyperdrive from 'hyperdrive'
 import { create as createSDK } from 'hyper-sdk'
 import {
   getLANDiscoveryStatus,
+  attachPrivateLANDiscovery,
   resetLANDiscovery,
   startLANDiscovery
 } from './lan-discovery.mjs'
@@ -323,7 +324,14 @@ export async function getSyncedPrivateHyperRuntime () {
   if (!syncedPrivateSdkOpening) {
     syncedPrivateStoragePath = getSyncedPrivateHyperSdkStoragePath()
     syncedPrivateSdkOpening = initializeRuntimeCandidate(
-      () => createSDK(createSyncedPrivateHyperRuntimeOptions(syncedPrivateStoragePath)).then(shareDriveOpens),
+      // Found over Wi-Fi as well as the internet, as the public store is, so a
+      // private file comes over the LAN with the internet down.
+      () => createSDK(createSyncedPrivateHyperRuntimeOptions(syncedPrivateStoragePath))
+        .then(shareDriveOpens)
+        .then(async (runtime) => {
+          await attachPrivateLANDiscovery(runtime)
+          return runtime
+        }),
       async (runtime) => {
         const drive = await getSyncedPrivateHyperdrive(runtime)
         rememberSyncedPrivateHyperdrive(drive)
