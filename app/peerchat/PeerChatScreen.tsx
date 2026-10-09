@@ -146,6 +146,8 @@ type PeerChatMessage = {
   fileName?: string
   fileSize?: number
   fileEnc?: boolean
+  // The file's own key, in a room whose keys rotate.
+  fileKey?: string
   preview?: PeerChatLinkPreview | null
   system?: boolean
   // Sent on from another chat, and shown so.
@@ -288,7 +290,7 @@ export type PeerChatResponse = {
   messages?: PeerChatMessage[] | null
   version?: number
   sent?: PeerChatMessage
-  item?: { name: string, url: string, byteLength?: number }
+  item?: { name: string, url: string, byteLength?: number, fileKey?: string }
   pendingDirectMessages?: PeerChatDirectInvite[]
   blockedPeers?: PeerChatBlockedPeer[]
   unreadTotal?: number
@@ -1747,7 +1749,8 @@ export function PeerChatScreen ({
           message: upload.item.url,
           fileName: asset.name,
           fileSize: upload.item.byteLength ?? asset.size,
-          fileEnc: true
+          fileEnc: true,
+          ...(upload.item.fileKey && { fileKey: upload.item.fileKey })
         })
         if (!response.ok) throw new Error(response.error || 'Unable to send attachment.')
       }
@@ -4212,7 +4215,8 @@ function PeerChatAttachment ({
           url: item.message,
           fileName: item.fileName,
           fileSize: item.fileSize,
-          encrypted: true
+          encrypted: true,
+          ...(item.fileKey && { fileKey: item.fileKey })
         }
       : { url: item.message }
     void onCallRpc(command, request)
@@ -4228,7 +4232,7 @@ function PeerChatAttachment ({
     return () => {
       cancelled = true
     }
-  }, [canPreview, item.fileEnc, item.fileName, item.fileSize, item.message, mediaKind, onCallRpc, roomKey])
+  }, [canPreview, item.fileEnc, item.fileKey, item.fileName, item.fileSize, item.message, mediaKind, onCallRpc, roomKey])
 
   async function openAttachment () {
     if (isOpening) return
@@ -4243,7 +4247,8 @@ function PeerChatAttachment ({
         url: item.message,
         fileName: item.fileName,
         fileSize: item.fileSize,
-        encrypted: true
+        encrypted: true,
+        ...(item.fileKey && { fileKey: item.fileKey })
       })
       if (!response.ok || !response.localUri) {
         throw new Error(response.error || 'Unable to open encrypted attachment.')

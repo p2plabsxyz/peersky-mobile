@@ -11,6 +11,7 @@
 // the proof must match byte for byte.
 import { createHash, createHmac, randomBytes } from 'node:crypto'
 import b4a from 'b4a'
+import { normalizeKeyChain } from './key-chain.mjs'
 
 const KEY_RE = /^[0-9a-f]{64}$/
 const LABEL_RE = /^(mobile|desktop[0-9]{0,3})$/
@@ -187,7 +188,10 @@ function normalizeTransferRoom (raw) {
     joinedAt: Number.isSafeInteger(raw.joinedAt) && raw.joinedAt > 0 ? raw.joinedAt : 0,
     createdBy: PEER_ID_RE.test(createdBy) ? createdBy : '',
     createdByName: clamp(raw.createdByName, MAX_NAME + 20),
-    creatorKey: KEY_RE.test(creatorKey) ? creatorKey : ''
+    creatorKey: KEY_RE.test(creatorKey) ? creatorKey : '',
+    // A room whose keys rotate: from the earliest hour this device holds, so
+    // the other device reads the same history. See key-chain.mjs.
+    ...(normalizeKeyChain(raw.chain) && { chain: normalizeKeyChain(raw.chain) })
   }
 }
 
