@@ -2128,6 +2128,39 @@ test('a room this phone was removed from and left is still removed when joined a
   await restarted.close()
 })
 
+// A newcomer gets the creator's whole removal list the first time they meet.
+// Every entry in it became a "was removed" line, so the first thing a new
+// member of P2P Republic saw was the names of everyone ever removed from it.
+test('a newcomer sees no removals from before they joined, and does see later ones', async (t) => {
+  const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-old-removals-'))
+  t.after(() => rm(storagePath, { recursive: true, force: true }))
+  const creatorKey = 'cd'.repeat(32)
+  const service = await new PeerChatService({ sdk: createFakeSdk(), storagePath }).start()
+  await service.joinRoom({ roomKey: ROOM_KEY, username: 'Sam' })
+  const room = service.rooms.get(ROOM_KEY)
+  room.creatorKey = creatorKey
+  room.createdByName = 'Alice'
+  const notices = () => service.feeds.get(ROOM_KEY).entries.filter((entry) => entry.moderationNotice)
+
+  // Removed long before Sam came, one of them before removals had a time.
+  const old = [
+    { id: '11111111', name: 'Adele', at: room.joinedAt - 86_400_000 },
+    { id: '22222222', name: 'ada' }
+  ]
+  service.receiveRoomBans(ROOM_KEY, { key: creatorKey }, old)
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.deepEqual(notices(), [])
+  // The removals still hold: they only go unannounced.
+  assert.deepEqual(service.rooms.get(ROOM_KEY).bans.map((ban) => ban.id).sort(), ['11111111', '22222222'])
+
+  // Removed while Sam is in the room.
+  const at = room.joinedAt + 60_000
+  service.receiveRoomBans(ROOM_KEY, { key: creatorKey }, [...old, { id: '33333333', name: 'Eve', at }])
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.deepEqual(notices().map((entry) => [entry.message, entry.ts]), [['Eve was removed from the room by Alice', at]])
+  await service.close()
+})
+
 test('leaving a room this phone was never removed from remembers no removal', async (t) => {
   const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-leave-plain-'))
   t.after(() => rm(storagePath, { recursive: true, force: true }))

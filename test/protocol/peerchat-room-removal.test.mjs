@@ -176,7 +176,7 @@ test('a removed member is filtered out of the list, not just deleted once', () =
 })
 
 test('a removal is said out loud in the room, by everyone who honours it', () => {
-  assert.match(service, /async appendRemovalNotice \(roomKey, peerId, username\)/)
+  assert.match(service, /async appendRemovalNotice \(roomKey, peerId, username, at = Date\.now\(\)\)/)
   // By name: "the creator" tells nobody in the room who that was.
   assert.match(service, /was removed from the room by \$\{by\}/)
   assert.match(service, /room\?\.createdByName \|\| room\?\.createdBy \|\| 'whoever made the room'/)
@@ -186,18 +186,20 @@ test('a removal is said out loud in the room, by everyone who honours it', () =>
   assert.match(remove, /await this\.appendRemovalNotice\(normalized, id, name\)/)
 
   // And everyone else says it when the removal reaches them, for bans that
-  // are new to them rather than for the whole list every time.
+  // are new to them and made since they joined, rather than for the whole
+  // list every time, or for removals from before a newcomer was there.
   const receive = service.slice(service.indexOf('receiveRoomBans (roomKey, peer, bans)'), service.indexOf('enforceRoomBans (roomKey)'))
   assert.match(receive, /const before = new Set\(/)
-  assert.match(receive, /if \(before\.has\(ban\.id\)\) continue/)
-  assert.match(receive, /this\.appendRemovalNotice\(roomKey, ban\.id, ban\.name\)/)
+  assert.match(receive, /const since = room\.joinedAt \|\| Date\.now\(\)/)
+  assert.match(receive, /if \(before\.has\(ban\.id\) \|\| !\(ban\.at > since\)\) continue/)
+  assert.match(receive, /this\.appendRemovalNotice\(roomKey, ban\.id, ban\.name, ban\.at\)/)
 })
 
 test('a removal says who it was by the name the creator gave', () => {
   const remove = service.slice(service.indexOf('async removeRoomMember ('), service.indexOf('async restoreRoomMember ('))
   assert.match(remove, /addPeerChatRoomBan\(room\.bans, \{ id, key: connected\?\.key \|\| '', name \}\)/)
   const receive = service.slice(service.indexOf('receiveRoomBans (roomKey, peer, bans)'), service.indexOf('enforceRoomBans (roomKey)'))
-  assert.match(receive, /this\.appendRemovalNotice\(roomKey, ban\.id, ban\.name\)/)
+  assert.match(receive, /this\.appendRemovalNotice\(roomKey, ban\.id, ban\.name, ban\.at\)/)
 })
 
 test('a removed person cannot get back in through somebody else s history', () => {

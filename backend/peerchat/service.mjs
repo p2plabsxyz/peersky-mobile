@@ -2766,7 +2766,7 @@ export class PeerChatService {
     }
   }
 
-  async appendRemovalNotice (roomKey, peerId, username) {
+  async appendRemovalNotice (roomKey, peerId, username, at = Date.now()) {
     const room = this.rooms.get(roomKey)
     const name = normalizeMemberName(username) ||
       room?.members?.find((member) => member.id === peerId)?.username ||
@@ -2777,11 +2777,11 @@ export class PeerChatService {
       : (room?.createdByName || room?.createdBy || 'whoever made the room')
     try {
       await this.appendEntry(roomKey, {
-        id: `removed-${roomKey}-${peerId}-${Date.now()}`,
+        id: `removed-${roomKey}-${peerId}-${at}`,
         type: 'system',
         moderationNotice: true,
         message: `${name} was removed from the room by ${by}`,
-        ts: Date.now()
+        ts: at
       })
     } catch (error) {
       console.warn('[peerchat] Unable to record a removal:', error)
@@ -2838,9 +2838,14 @@ export class PeerChatService {
 
     const before = new Set(normalizePeerChatRoomBans(room.bans).map((ban) => ban.id))
     room.bans = normalizePeerChatRoomBans(bans)
+    // Only a removal made since this phone joined is news here. A newcomer
+    // gets the whole list the first time it meets the creator, and turning it
+    // into notices greeted every new member with the names of everyone ever
+    // removed. Without a join time, nothing before now counts.
+    const since = room.joinedAt || Date.now()
     for (const ban of room.bans) {
-      if (before.has(ban.id)) continue
-      this.appendRemovalNotice(roomKey, ban.id, ban.name).catch(() => {})
+      if (before.has(ban.id) || !(ban.at > since)) continue
+      this.appendRemovalNotice(roomKey, ban.id, ban.name, ban.at).catch(() => {})
     }
     // Anyone the creator has let back in stops being filtered out of the list.
     room.members = (room.members || []).filter((member) => (
