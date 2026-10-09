@@ -355,13 +355,22 @@ export async function getSyncedPrivateHyperRuntime () {
 }
 
 export async function getSyncedPrivateHyperdrive (runtime = null) {
-  if (runtime && syncedPrivateDrive) return syncedPrivateDrive
-
-  if (syncedPrivateDriveOpening) return syncedPrivateDriveOpening
   if (syncedPrivateDrive) return syncedPrivateDrive
 
+  // Opening the store opens this drive as its last step, by calling back in
+  // here with the store. Asked first with no store, the drive used to start
+  // opening and then wait for the store, while the store waited for that same
+  // opening, so neither finished and Settings > P2P Data spun for good. The
+  // store comes first now, and the drive it opened is the one handed back.
+  if (!runtime) {
+    runtime = await getSyncedPrivateHyperRuntime()
+    if (syncedPrivateDrive) return syncedPrivateDrive
+  }
+
+  if (syncedPrivateDriveOpening) return syncedPrivateDriveOpening
+
   const open = (async () => {
-    const target = runtime || await getSyncedPrivateHyperRuntime()
+    const target = runtime
     const storage = syncedPrivateStoragePath || getSyncedPrivateHyperSdkStoragePath()
     const driveId = getSyncedPrivateDriveId()
     const encryptionKey = getPrivateDriveKey(storage, { linkedKey: linkedPrivateDriveKey(getDefaultIdentityStoragePath()) })
