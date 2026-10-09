@@ -20,11 +20,14 @@ test('a new room records who made it by whole key, not by eight characters', () 
   assert.match(create, /bans: \[\]/)
 })
 
-test('a removal list is taken from the creator and nobody else', () => {
+test('a removal list counts signed by the creator from anyone, or unsigned from the creator alone', () => {
   const receive = service.slice(
-    service.indexOf('receiveRoomBans (roomKey, peer, bans)'),
+    service.indexOf('receiveRoomBans (roomKey, peer, bans, signedValue)'),
     service.indexOf('enforceRoomBans (roomKey)')
   )
+  // Signed, whoever passed it on: the signature says it is the creator's.
+  assert.match(receive, /if \(signed\.sig && checkSignedRemovals\(\{ topic: wireTopic\(roomKey\), creatorKey, bans, signed \}\)\) \{\s+if \(signed\.v <= held\.v\) return/)
+  // Unsigned, from an older build: the connection has to be the creator's.
   assert.match(receive, /isPeerChatRoomCreator\(\{/)
   assert.match(receive, /connectionKey: peer\.key/)
   // Their list replaces ours outright: they are the record.
@@ -188,7 +191,7 @@ test('a removal is said out loud in the room, by everyone who honours it', () =>
   // And everyone else says it when the removal reaches them, for bans that
   // are new to them and made since they joined, rather than for the whole
   // list every time, or for removals from before a newcomer was there.
-  const receive = service.slice(service.indexOf('receiveRoomBans (roomKey, peer, bans)'), service.indexOf('enforceRoomBans (roomKey)'))
+  const receive = service.slice(service.indexOf('receiveRoomBans (roomKey, peer, bans, signedValue)'), service.indexOf('enforceRoomBans (roomKey)'))
   assert.match(receive, /const before = new Set\(/)
   assert.match(receive, /const since = room\.joinedAt \|\| Date\.now\(\)/)
   assert.match(receive, /if \(before\.has\(ban\.id\) \|\| !\(ban\.at > since\)\) continue/)
@@ -198,7 +201,7 @@ test('a removal is said out loud in the room, by everyone who honours it', () =>
 test('a removal says who it was by the name the creator gave', () => {
   const remove = service.slice(service.indexOf('async removeRoomMember ('), service.indexOf('async restoreRoomMember ('))
   assert.match(remove, /addPeerChatRoomBan\(room\.bans, \{ id, key: connected\?\.key \|\| '', name \}\)/)
-  const receive = service.slice(service.indexOf('receiveRoomBans (roomKey, peer, bans)'), service.indexOf('enforceRoomBans (roomKey)'))
+  const receive = service.slice(service.indexOf('receiveRoomBans (roomKey, peer, bans, signedValue)'), service.indexOf('enforceRoomBans (roomKey)'))
   assert.match(receive, /this\.appendRemovalNotice\(roomKey, ban\.id, ban\.name, ban\.at\)/)
 })
 
@@ -214,6 +217,6 @@ test('a removed person cannot get back in through somebody else s history', () =
 })
 
 test('letting somebody back in puts them back in the list', () => {
-  const receive = service.slice(service.indexOf('receiveRoomBans (roomKey, peer, bans)'), service.indexOf('enforceRoomBans (roomKey)'))
+  const receive = service.slice(service.indexOf('receiveRoomBans (roomKey, peer, bans, signedValue)'), service.indexOf('enforceRoomBans (roomKey)'))
   assert.match(receive, /room\.members = \(room\.members \|\| \[\]\)\.filter/)
 })

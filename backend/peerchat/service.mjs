@@ -51,6 +51,13 @@ import { RPC_APP_PEERCHAT_CHANGED } from '../rpc/commands.mjs'
 import { notifyApp } from '../rpc/notify.mjs'
 import { attachPeerChatTransport } from './transport.mjs'
 import { createPeerPresence } from './presence.mjs'
+import {
+  checkSignedRemovals,
+  nextRemovalsVersion,
+  normalizeSignedRemovals,
+  pickSigningKeyPair,
+  signRemovals
+} from './removal-signature.mjs'
 import { collapsePeerChatMembers } from './members.mjs'
 import { nameNotice } from './notice-names.mjs'
 import { mentionsPerson } from './mentions.mjs'
@@ -226,6 +233,10 @@ export class PeerChatService {
     this.peers = new Map()
     this.pendingPeers = new Map()
     this.presence = createPeerPresence()
+    // The pair behind localKey, for signing the removal lists of rooms made
+    // here. Null until read from the store, and for good when the store does
+    // not hold the key this phone connects with.
+    this.signingKeys = null
     this.presenceTimer = null
     // Away: the app in the background here. Each person in a room with us
     // hears it, and we hear theirs. A desktop is away when its screen is
@@ -247,6 +258,7 @@ export class PeerChatService {
     this.started = true
     this.loadState()
     this.takeIncomingTransfer()
+    this.loadSigningKeys().catch(() => {})
 
     // Nothing listens for the swarm's topic changes. Anyone can announce a
     // topic, so being found under one opens nothing, and our proofs already go
@@ -1415,7 +1427,7 @@ export class PeerChatService {
     // first check rather than making anything of it.
     if (message.type === 'room-bans') {
       if (!this.consumeControlRate(peer)) return
-      this.receiveRoomBans(roomKey, peer, message.bans)
+      this.receiveRoomBans(roomKey, peer, message.bans, message.signed)
       return
     }
 
@@ -2816,39 +2828,108 @@ export class PeerChatService {
     return isPeerChatPeerBanned(room.bans, { peerId: this.localId, connectionKey: this.localKey })
   }
 
-  sendRoomBans (peer, roomKey) {
-    if (!this.isRoomCreator(roomKey)) return
+  // The network key's pair, which is the one hyper-sdk connects with.
+  async loadSigningKeys () {
+    const candidates = []
+    try {
+      if (typeof this.sdk.corestore?.createKeyPair === 'function') {
+        candidates.push(await this.sdk.corestore.createKeyPair('noise'))
+      }
+    } catch {}
+    this.signingKeys = pickSigningKeyPair(this.localKey, candidates)
+  }
+
+  // The creator's list, signed, so anybody in the room can pass it on. A list
+  // from before lists were signed is signed the first time it goes out, and a
+  // list the creator just changed gets a new version.
+  signedRemovalsFor (roomKey) {
     const room = this.rooms.get(roomKey)
+    if (!room) return null
+    const held = normalizeSignedRemovals(room.bansSigned)
+    if (held.sig) return held
+    if (!this.signingKeys || !this.isRoomCreator(roomKey)) return null
+    const version = nextRemovalsVersion(held.v)
+    const sig = signRemovals({ topic: wireTopic(roomKey), version, bans: room.bans, keyPair: this.signingKeys })
+    if (!sig) return null
+    room.bansSigned = { v: version, sig }
+    this.schedulePersist()
+    return room.bansSigned
+  }
+
+  // A list changed here, by the creator: the old signature no longer fits it.
+  // The version stays, so the next one is later.
+  unsignRemovals (room) {
+    room.bansSigned = { v: normalizeSignedRemovals(room.bansSigned).v, sig: '' }
+  }
+
+  sendRoomBans (peer, roomKey) {
+    const room = this.rooms.get(roomKey)
+    if (!room) return
+    const signed = this.signedRemovalsFor(roomKey)
+    // Unsigned, a list only counts from the creator, so only the creator sends
+    // one. Signed, anyone in the room passes it on. An older build checks the
+    // connection either way, and drops it from anyone else.
+    if (!signed && !this.isRoomCreator(roomKey)) return
     this.sendToPeer(peer, {
       type: 'room-bans',
       roomKey,
-      bans: normalizePeerChatRoomBans(room?.bans)
+      bans: normalizePeerChatRoomBans(room.bans),
+      ...(signed && { signed })
     })
   }
 
-  broadcastRoomBans (roomKey) {
-    if (!this.isRoomCreator(roomKey)) return
+  // Everyone in the room this phone is connected to, but whoever it came from.
+  broadcastRoomBans (roomKey, exceptPeer = null) {
     for (const peer of this.peers.values()) {
-      if (peer.rooms.includes(roomKey)) this.sendRoomBans(peer, roomKey)
+      if (peer === exceptPeer || !peer.rooms.includes(roomKey)) continue
+      this.sendRoomBans(peer, roomKey)
     }
   }
 
-  receiveRoomBans (roomKey, peer, bans) {
+  receiveRoomBans (roomKey, peer, bans, signedValue) {
     const room = this.rooms.get(roomKey)
     if (!room) return
-    // Only the creator, proven by the connection rather than claimed in the
-    // payload. Their list replaces ours outright: they are the record.
+    const held = normalizeSignedRemovals(room.bansSigned)
+    const signed = normalizeSignedRemovals(signedValue)
+    const creatorKey = resolvePeerChatCreatorKey(roomKey, room.creatorKey)
+
+    // Signed with the creator key, it counts from anyone, when it is newer
+    // than the list here, and it goes on to everyone else in the room. That is
+    // how a removal reaches people who never meet the creator.
+    if (signed.sig && checkSignedRemovals({ topic: wireTopic(roomKey), creatorKey, bans, signed })) {
+      if (signed.v <= held.v) return
+      this.applyRoomBans(roomKey, bans)
+      room.bansSigned = signed
+      this.persistNow()
+      this.bumpVersion()
+      this.broadcastRoomBans(roomKey, peer)
+      return
+    }
+
+    // Unsigned, from an older build: only the creator, proven by the
+    // connection rather than claimed in the payload.
     if (!isPeerChatRoomCreator({
       roomKey,
       storedKey: room.creatorKey,
       connectionKey: peer.key
     })) return
+    this.applyRoomBans(roomKey, bans)
+    // No signature to pass on, and the version stays, so an older signed list
+    // cannot undo this one.
+    room.bansSigned = { v: held.v, sig: '' }
+    this.persistNow()
+    this.bumpVersion()
+  }
 
+  // A new list for a room, from its creator one way or another. It replaces
+  // the list here outright: the creator is the record.
+  applyRoomBans (roomKey, bans) {
+    const room = this.rooms.get(roomKey)
     const before = new Set(normalizePeerChatRoomBans(room.bans).map((ban) => ban.id))
     room.bans = normalizePeerChatRoomBans(bans)
     // Only a removal made since this phone joined is news here. A newcomer
-    // gets the whole list the first time it meets the creator, and turning it
-    // into notices greeted every new member with the names of everyone ever
+    // gets the whole list the first time it hears it, and turning it into
+    // notices greeted every new member with the names of everyone ever
     // removed. Without a join time, nothing before now counts.
     const since = room.joinedAt || Date.now()
     for (const ban of room.bans) {
@@ -2861,8 +2942,6 @@ export class PeerChatService {
     ))
     // Let back in, this phone has no removal left to remember.
     if (!this.isRemovedFromRoom(roomKey)) this.removedRooms.delete(roomKey)
-    this.persistNow()
-    this.bumpVersion()
   }
 
   /** Drop anyone in the room who is no longer welcome in it. */
@@ -2887,6 +2966,7 @@ export class PeerChatService {
       connected?.username || id
     // The name goes with the removal, for anyone in the room who never met them.
     room.bans = addPeerChatRoomBan(room.bans, { id, key: connected?.key || '', name })
+    this.unsignRemovals(room)
     room.members = (room.members || []).filter((member) => member.id !== id)
 
     await this.appendRemovalNotice(normalized, id, name)
@@ -2907,6 +2987,7 @@ export class PeerChatService {
     }
 
     room.bans = removePeerChatRoomBan(room.bans, peerId)
+    this.unsignRemovals(room)
     this.broadcastRoomBans(normalized)
     this.persistNow()
     this.bumpVersion()
@@ -3188,6 +3269,7 @@ export class PeerChatService {
           creatorKey: normalizePeerChatCreatorKey(value?.creatorKey) ||
             (value?.isHost === true && !isDM ? this.localKey : ''),
           bans: isDM ? [] : normalizePeerChatRoomBans(value?.bans),
+          bansSigned: normalizeSignedRemovals(isDM ? null : value?.bansSigned),
           createdByName: normalizeMemberName(value?.createdByName),
           moderation: isDM
             ? { ...DEFAULT_PEERCHAT_MODERATION }
