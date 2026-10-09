@@ -1112,13 +1112,18 @@ export class PeerChatService {
 
   activatePeer (peer) {
     if (peer.active || peer.connection.destroyed || this.closed) return
+    // Asked before this connection counts. Whether they are away comes again
+    // on it, once a room opens on it. Somebody still here on another
+    // connection, or back from a redial inside the grace, stays as away as
+    // they last said: taking every new connection as here turned an away dot
+    // green until their next presence frame, again on each redial. Anyone
+    // else starts as here, which is all an older build can be.
+    const wasHere = this.isPeerOnline(peer.id)
     peer.active = true
     this.pendingPeers.delete(peer.connection)
     this.peers.set(peer.connection, peer)
     this.rememberPeerPresence(peer)
-    // Whether they are away comes again on this connection, once a room opens
-    // on it. Until then they are here, which is all an older build can be.
-    this.idlePeerIds.delete(normalizePeerChatPeerId(peer.id))
+    if (!wasHere) this.idlePeerIds.delete(normalizePeerChatPeerId(peer.id))
     this.bumpVersion()
 
     // Our proofs, and any invite waiting on this person. Nothing about a room,
