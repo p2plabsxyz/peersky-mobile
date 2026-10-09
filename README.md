@@ -27,7 +27,6 @@ We are building a surveillance-free internet where you own your tools, your data
 - [ ] PeerChat
   - [ ] Blind peers for messages, with notifications on iPhone when PeerSky is closed
   - [ ] Voice and video calls
-  - [ ] Rotate keys, so a stolen key can't read old messages
 - [ ] P2PMD
   - [ ] Blind peers, so notes stay up without their host
 

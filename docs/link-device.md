@@ -50,7 +50,7 @@ A person's PeerChat goes with the transfers between a phone and a desktop, and e
 What goes (`backend/peerchat/device-link.mjs`, the same rules as `lib/device-link.js` in PeerChat on the desktop):
 
 - The profile: name, bio, picture, and when they were last changed.
-- Every room with its key, and when the person joined it, so peers send the new device the history since then. Direct messages too, once the other person has accepted them. A phone keeps up to 50 rooms.
+- Every room with its key, and when the person joined it, so peers send the new device the history since then. A room made on 0.1.2 or later goes with its key chain, so the new device reads the same hours the old one does. Direct messages too, once the other person has accepted them. A phone keeps up to 50 rooms.
 - The label the other device takes, and a link: 32 random bytes the person's devices share. It only travels inside the sealed transfers.
 
 A device takes PeerChat only when its pairing code says `chat=1`, which this phone's code does. An older app refuses files it does not know, so it is sent none.
