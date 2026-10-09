@@ -2488,7 +2488,10 @@ export class PeerChatService {
           this.collectReaction(reactions, entry)
           continue
         }
-        if (entry?.type === 'system' && entry?.moderationNotice === true) {
+        // Every line this phone wrote about the room, who joined as well as the
+        // moderation notices. Only the notices used to come back, so a join
+        // was written into the room and never shown.
+        if (entry?.type === 'system') {
           const notice = this.entryToSystemMessage(entry)
           if (notice) messages.push(notice)
           continue

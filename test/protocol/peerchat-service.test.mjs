@@ -525,6 +525,38 @@ test('PeerChat accepts valid room history from before the local join time', asyn
   await service.close()
 })
 
+// A join was written into the room and never shown: only moderation notices
+// came back with the history, so a phone never said who had turned up.
+test('PeerChat shows who joined a room, once', async (t) => {
+  const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-join-line-'))
+  t.after(() => rm(storagePath, { recursive: true, force: true }))
+  const service = await new PeerChatService({ sdk: createFakeSdk(), storagePath }).start()
+  const room = await service.createRoom({ name: 'Joins', username: 'Alice' })
+  const peer = createFakePeer('deadbeef', '')
+  peer.rooms = [room.roomKey]
+  service.peers.set(peer.connection, peer)
+
+  const joinedAt = Date.now() - 1000
+  const join = {
+    type: 'join',
+    roomKey: room.roomKey,
+    username: 'Bob',
+    id: `${wireRoom(room.roomKey)}-deadbeef-join-${joinedAt}`,
+    ts: joinedAt
+  }
+  await service.handlePeerMessage(peer, join)
+  // Every new connection announces the same join again.
+  await service.handlePeerMessage(peer, join)
+
+  const snapshot = await service.getSnapshot({ roomKey: room.roomKey, version: -1 })
+  assert.deepEqual(
+    snapshot.messages.map(({ message, system, timestamp }) => ({ message, system, timestamp })),
+    [{ message: 'Bob joined', system: true, timestamp: joinedAt }]
+  )
+  service.peers.delete(peer.connection)
+  await service.close()
+})
+
 test('PeerChat persists profile metadata and lets only hosts update room metadata', async (t) => {
   const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-metadata-'))
   t.after(() => rm(storagePath, { recursive: true, force: true }))
