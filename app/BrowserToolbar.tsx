@@ -7,8 +7,9 @@ import { getSiteSecurity, SITE_SECURITY } from './site-security.mjs'
 import IncognitoIcon from '../assets/icons/bootstrap/incognito.svg'
 import ShieldCheckIcon from '../assets/icons/bootstrap/shield-check.svg'
 import ShieldSlashIcon from '../assets/icons/bootstrap/shield-slash.svg'
-import { HistorySuggestions } from './history/HistorySuggestions'
+import { HistorySuggestions, type OneOffSearchEngine } from './history/HistorySuggestions'
 import type { BrowserHistoryItem } from './history/useBrowserHistory'
+import { useSearchSuggestions } from './search/useSearchSuggestions'
 import { styles } from './styles'
 import ReloadIcon from '../assets/icons/bootstrap/arrow-clockwise.svg'
 import ShareIcon from '../assets/icons/bootstrap/arrow-bar-up.svg'
@@ -63,6 +64,10 @@ type BrowserToolbarProps = {
     text: string
   }
   position: 'top' | 'bottom'
+  // The engine chosen in Settings, and the others to search with once.
+  searchEngine: string
+  searchEngines: OneOffSearchEngine[]
+  searchSuggestionsEnabled: boolean
   shareActionAvailable: boolean
   showFullAddress: boolean
   onAddressChange: (address: string) => void
@@ -70,6 +75,7 @@ type BrowserToolbarProps = {
   onOpenSiteInfo: () => void
   onReload: () => void
   onSharePage: () => void
+  onSearch: (text: string, searchEngine?: string) => void
   onSubmit: () => void
   onSuggestionPress: (url: string) => void
   onToggleBookmark?: () => void
@@ -97,6 +103,9 @@ export function BrowserToolbar ({
   pageActionAvailable,
   palette,
   position,
+  searchEngine,
+  searchEngines,
+  searchSuggestionsEnabled,
   shareActionAvailable,
   showFullAddress,
   onAddressChange,
@@ -104,6 +113,7 @@ export function BrowserToolbar ({
   onOpenSiteInfo,
   onReload,
   onSharePage,
+  onSearch,
   onSubmit,
   onSuggestionPress,
   onToggleBookmark
@@ -121,6 +131,15 @@ export function BrowserToolbar ({
   // The suggestion list sits flush on this edge, so a line between them makes
   // it read as a separate card rather than the address bar opening out.
   const seamColor = isAddressFocused ? 'transparent' : palette.seam
+  const searches = useSearchSuggestions(address, {
+    active: isAddressFocused,
+    enabled: searchSuggestionsEnabled,
+    incognito: isIncognito,
+    searchEngine
+  })
+  // Once something is typed. An address the bar already shows, with its
+  // scheme, is where you are rather than something to search for.
+  const oneOffSearchEngines = /^[a-z][a-z0-9+.-]*:\/\//i.test(address.trim()) ? [] : searchEngines
 
   useEffect(() => {
     addressInputRef.current?.blur()
@@ -342,10 +361,19 @@ export function BrowserToolbar ({
           offset={barHeight}
           palette={palette}
           position={position}
+          query={address}
+          searches={searches}
+          searchEngines={oneOffSearchEngines}
+          onFill={(text) => onAddressChange(`${text} `)}
           onOpen={(url) => {
             addressInputRef.current?.blur()
             setIsAddressFocused(false)
             onSuggestionPress(url)
+          }}
+          onSearch={(text, engine) => {
+            addressInputRef.current?.blur()
+            setIsAddressFocused(false)
+            onSearch(text, engine)
           }}
         />
       )}

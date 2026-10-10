@@ -14,6 +14,7 @@ export const DEFAULT_BROWSER_PREFERENCES = {
   forceDarkWebsites: false,
   publishingSites: {},
   searchEngine: 'duckduckgo',
+  searchSuggestionsEnabled: true,
   showFullAddress: false,
   theme: 'system',
   toolbarButton: DEFAULT_TOOLBAR_BUTTON,
@@ -70,6 +71,9 @@ export function parseBrowserPreferences (serialized) {
     searchEngine: SEARCH_ENGINES.some((engine) => engine.id === value?.searchEngine)
       ? value.searchEngine
       : DEFAULT_BROWSER_PREFERENCES.searchEngine,
+    searchSuggestionsEnabled: typeof value?.searchSuggestionsEnabled === 'boolean'
+      ? value.searchSuggestionsEnabled
+      : DEFAULT_BROWSER_PREFERENCES.searchSuggestionsEnabled,
     showFullAddress: typeof value?.showFullAddress === 'boolean'
       ? value.showFullAddress
       : DEFAULT_BROWSER_PREFERENCES.showFullAddress,

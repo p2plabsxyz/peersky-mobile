@@ -29,6 +29,7 @@ describe('browser preferences', () => {
         'https://agregore.mauve.moe': 'block'
       },
       searchEngine: 'custom',
+      searchSuggestionsEnabled: false,
       showFullAddress: true,
       theme: 'dark',
       toolbarButton: 'new-tab',

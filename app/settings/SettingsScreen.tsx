@@ -166,6 +166,7 @@ type SettingsScreenProps = {
   persistenceError: string | null
   publishingSites: Record<string, PublishingDecision>
   searchEngine: SearchEngine
+  searchSuggestionsEnabled: boolean
   showFullAddress: boolean
   theme: BrowserTheme
   toolbarButton: ToolbarButton
@@ -187,6 +188,7 @@ type SettingsScreenProps = {
   onPublishingSiteChange: (siteId: string, decision: PublishingDecision | null) => void
   onFilterListsUpdated: () => void
   onSearchEngineChange: (searchEngine: SearchEngine) => void
+  onSearchSuggestionsChange: (enabled: boolean) => void
   onShowFullAddressChange: (enabled: boolean) => void
   onThemeChange: (theme: BrowserTheme) => void
   onToolbarButtonChange: (button: ToolbarButton) => void

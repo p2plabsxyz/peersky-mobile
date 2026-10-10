@@ -1,6 +1,6 @@
 # PeerSky Mobile Privacy Policy
 
-Last updated: October 7, 2026
+Last updated: October 10, 2026
 
 PeerSky Mobile is a web and peer-to-peer browser. There are no accounts, no
 analytics and no servers of ours, so there is nowhere for us to collect anything
@@ -31,7 +31,7 @@ You can remove browsing and peer-to-peer data from the Data Clearing and P2P Dat
 
 ## Websites, Searches, and Peer-to-Peer Services
 
-Websites you visit can receive standard network information, including your IP address, and may collect data under their own privacy policies. Searches typed into the address bar go to the engine chosen in Settings, and that engine's policy applies rather than this one.
+Websites you visit can receive standard network information, including your IP address, and may collect data under their own privacy policies. Searches typed into the address bar go to the engine chosen in Settings, or to the one you pick for a single search, and that engine's policy applies rather than this one. While you type a search, what you have typed so far also goes to that engine, without cookies, so it can suggest searches. Incognito tabs never send it, and neither does anything that looks like an address. You can turn off Search suggestions in Settings.
 
 Opening a `hyper://` address or using PeerChat connects your device directly to other devices, and those peers see your IP address the same way a website does. That is what lets it work without a server, and there is no onion routing to hide it. Finding peers happens over a distributed hash table and over your local Wi-Fi; the nodes that help see a hashed topic, never a room key and never the content.
 

@@ -51,6 +51,7 @@ import {
   getHyperBridgeSite,
   getBrowserRequestAction,
   getBrowserWebViewKey,
+  getSearchUrl,
   isHyperUrl,
   isStaleBrowserLoad,
   isWebUrl,
@@ -149,6 +150,7 @@ import { SettingsScreen } from './settings/SettingsScreen'
 import type { SettingsPage } from './settings/SettingsScreen'
 import { BrowserOverflowMenu } from './settings/BrowserOverflowMenu'
 import { useBrowserPreferences } from './settings/useBrowserPreferences'
+import { getOneOffSearchEngines } from './search/search-suggestions.mjs'
 import { BrowserToolbar } from './BrowserToolbar'
 import { BrowserNavBar } from './BrowserNavBar'
 import { BrowserBackSwipe } from './BrowserBackSwipe'
@@ -488,6 +490,7 @@ export default function App () {
     setAddressBarPosition,
     setAppLogoColor,
     setForceDarkWebsites,
+    setSearchSuggestionsEnabled,
     setContentBlockingEnabled: setContentBlockingPreference,
     setCustomSearchEngine,
     setDownloadOnlyOnWifi,
@@ -4025,6 +4028,7 @@ export default function App () {
             persistenceError={browserPreferencesError}
             publishingSites={browserPreferences.publishingSites}
             searchEngine={browserPreferences.searchEngine}
+            searchSuggestionsEnabled={browserPreferences.searchSuggestionsEnabled}
             showFullAddress={browserPreferences.showFullAddress}
             theme={browserPreferences.theme}
             toolbarButton={browserPreferences.toolbarButton}
@@ -4039,6 +4043,7 @@ export default function App () {
               void applyAppIcon(color)
             }}
             onForceDarkWebsitesChange={setForceDarkWebsites}
+            onSearchSuggestionsChange={setSearchSuggestionsEnabled}
             onToolbarButtonChange={setToolbarButton}
             onCallRpc={(command, data = {}) => callRpc(command, data)}
             onContentBlockingEnabledChange={onContentBlockingEnabledChange}
@@ -4362,6 +4367,9 @@ export default function App () {
       pageActionAvailable={browserPageActionAvailable}
       palette={browserChrome}
       position={browserPreferences.addressBarPosition}
+      searchEngine={browserPreferences.searchEngine}
+      searchEngines={getOneOffSearchEngines(browserPreferences.searchEngine, browserPreferences.customSearchUrl)}
+      searchSuggestionsEnabled={browserPreferences.searchSuggestionsEnabled}
       shareActionAvailable={browserShareActionAvailable}
       showFullAddress={browserPreferences.showFullAddress}
       onAddressChange={(value) => {
@@ -4372,6 +4380,15 @@ export default function App () {
       onOpenSiteInfo={() => setSiteInfoVisible(true)}
       onReload={onBrowserReload}
       onSharePage={() => void onBrowserSharePage()}
+      onSearch={(text, searchEngine) => {
+        const targetUrl = getSearchUrl(
+          searchEngine || browserPreferences.searchEngine,
+          text,
+          browserPreferences.customSearchUrl
+        )
+        setBrowserAddress(targetUrl)
+        void loadBrowserUrl(targetUrl)
+      }}
       onSubmit={() => void onBrowserSubmit()}
       onSuggestionPress={(targetUrl) => {
         setBrowserAddress(targetUrl)

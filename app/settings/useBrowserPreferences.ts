@@ -46,6 +46,7 @@ export type BrowserPreferences = {
   forceDarkWebsites: boolean
   publishingSites: Record<string, PublishingDecision>
   searchEngine: SearchEngine
+  searchSuggestionsEnabled: boolean
   showFullAddress: boolean
   theme: BrowserTheme
   toolbarButton: ToolbarButton
@@ -137,6 +138,9 @@ export function useBrowserPreferences () {
     },
     setForceDarkWebsites: (forceDarkWebsites: boolean) => {
       return updatePreferences({ forceDarkWebsites })
+    },
+    setSearchSuggestionsEnabled: (searchSuggestionsEnabled: boolean) => {
+      return updatePreferences({ searchSuggestionsEnabled })
     },
     // null forgets the answer, so the site asks again next time.
     setPublishingSite: (siteId: string, decision: PublishingDecision | null) => {
