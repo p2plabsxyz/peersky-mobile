@@ -185,8 +185,10 @@ export function derivePeerChatTopic (roomKey) {
   return derivePeerChatKey(roomKey, TOPIC_CONTEXT)
 }
 
-export function encryptPeerChatMessage (message, roomKey) {
-  const key = derivePeerChatKey(roomKey, MESSAGE_KEY_CONTEXT)
+// hourKey: in a room whose keys rotate, the hour's key from key-chain.mjs,
+// sealing in place of the room key.
+export function encryptPeerChatMessage (message, roomKey, hourKey = null) {
+  const key = hourKey || derivePeerChatKey(roomKey, MESSAGE_KEY_CONTEXT)
   const iv = randomBytes(12)
   const cipher = createCipheriv('aes-256-gcm', key, iv)
   let ciphertext = cipher.update(message, 'utf8', 'hex')
@@ -199,7 +201,9 @@ export function encryptPeerChatMessage (message, roomKey) {
   }
 }
 
-export function decryptPeerChatMessage (payload, roomKey) {
+// hourKey: the hour's key the message says it was sealed with. Nothing else
+// opens it, so a key given later reads nothing older.
+export function decryptPeerChatMessage (payload, roomKey, hourKey = null) {
   if (
     typeof payload?.ct !== 'string' ||
     typeof payload?.iv !== 'string' ||
@@ -216,9 +220,10 @@ export function decryptPeerChatMessage (payload, roomKey) {
   try {
     plaintext = decryptPeerChatPayload(
       payload,
-      derivePeerChatKey(roomKey, MESSAGE_KEY_CONTEXT)
+      hourKey || derivePeerChatKey(roomKey, MESSAGE_KEY_CONTEXT)
     )
   } catch (error) {
+    if (hourKey) throw error
     try {
       plaintext = decryptPeerChatPayload(
         payload,

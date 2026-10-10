@@ -495,7 +495,8 @@ export async function routeRpcRequest (req) {
         replyJson(req, { ok: false, error: 'PeerChat room not found.' })
         return
       }
-      replyJson(req, await uploadPeerChatAttachment(body))
+      // The service says whether this room's files get keys of their own.
+      replyJson(req, await uploadPeerChatAttachment({ ...body, ownKey: peerChat.filesHaveOwnKeys(body.roomKey) }))
       return
     }
 

@@ -58,11 +58,11 @@ describe('internal app registry', () => {
     assert.equal(getRuntimeAppFromUrl('peersky://p2p/p2pmd/', { devApps: false }), 'p2pmd')
   })
 
-  test('the p2p page and the home grid draw from the listed apps only', async () => {
+  test('the home grid draws from the listed apps only', async () => {
     const app = await readFile(new URL('../../app/index.tsx', import.meta.url), 'utf8')
     const shell = await readFile(new URL('../../app/internal-apps.ts', import.meta.url), 'utf8')
 
-    assert.match(app, /\{P2P_APPS\.map\(\(app\) => \(/)
+    // peersky://p2p lists P2P sites now; the apps are on the home screen.
     assert.match(app, /const BROWSER_HOME_SHORTCUTS = P2P_APPS/)
     assert.doesNotMatch(app, /INTERNAL_APPS\.map/)
     // Routing follows the build: a debug build still reaches Holesail.

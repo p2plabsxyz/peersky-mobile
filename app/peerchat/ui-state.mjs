@@ -5,11 +5,14 @@ export const PEERCHAT_DRAFT_MAX_CHARACTERS = 64 * 1024
 export const PEERCHAT_MAX_DRAFTS = 30
 // Same depth as desktop, so a phone and a laptop remember about as much.
 export const PEERCHAT_RECENT_EMOJI_MAX = 24
+// As many as the browser keeps tabs.
+export const PEERCHAT_MAX_TAB_ROOMS = 50
 
 const EMPTY_STATE = Object.freeze({
   activeRoomKey: null,
   drafts: Object.freeze({}),
-  recentEmojis: []
+  recentEmojis: [],
+  tabRooms: null
 })
 
 export function parsePeerChatUiState (serialized) {
@@ -30,19 +33,22 @@ export function parsePeerChatUiState (serialized) {
     return {
       activeRoomKey: normalizeRoomKey(stored.activeRoomKey),
       drafts: normalizeDrafts(drafts),
-      recentEmojis: normalizeRecentEmojis(stored.recentEmojis)
+      recentEmojis: normalizeRecentEmojis(stored.recentEmojis),
+      // None in a file saved before each tab had a chat of its own.
+      tabRooms: stored.tabRooms === undefined ? null : normalizeTabRooms(stored.tabRooms)
     }
   } catch {
     return { ...EMPTY_STATE, drafts: {} }
   }
 }
 
-export function serializePeerChatUiState ({ activeRoomKey, drafts, recentEmojis }) {
+export function serializePeerChatUiState ({ activeRoomKey, drafts, recentEmojis, tabRooms }) {
   const state = {
     version: 2,
     activeRoomKey: normalizeRoomKey(activeRoomKey),
     drafts: normalizeDrafts(drafts),
-    recentEmojis: normalizeRecentEmojis(recentEmojis)
+    recentEmojis: normalizeRecentEmojis(recentEmojis),
+    tabRooms: normalizeTabRooms(tabRooms)
   }
   // The newest come first, so when everything will not fit it is the oldest
   // drafts that are left out.
@@ -65,6 +71,49 @@ export function setPeerChatDraft (drafts, roomKey, text) {
   const draft = normalizeDraft(text)
   if (!key) return Object.fromEntries(rest)
   return normalizeDrafts(Object.fromEntries(draft ? [[key, draft], ...rest] : rest))
+}
+
+/**
+ * Which chat each browser tab shows, so two tabs can be on two chats. Every
+ * PeerChat tab used to show the one chat the screen last had open. It is kept
+ * here rather than in the tab's address, where the room key would sit in the
+ * address bar. Newest first; a tab on the chat list has no entry.
+ */
+export function setPeerChatTabRoom (tabRooms, tabId, roomKey) {
+  const id = normalizeTabId(tabId)
+  const rest = Object.entries(normalizeTabRooms(tabRooms)).filter(([tab]) => tab !== id)
+  const key = normalizeRoomKey(roomKey)
+  if (!id) return Object.fromEntries(rest)
+  return normalizeTabRooms(Object.fromEntries(key ? [[id, key], ...rest] : rest))
+}
+
+/**
+ * The chat a tab opens on. A file saved before tabs had chats of their own
+ * knows only the last chat, so the first tab after the update opens that one.
+ */
+export function peerChatRoomForTab (state, tabId) {
+  if (!state?.tabRooms) return normalizeRoomKey(state?.activeRoomKey)
+  const id = normalizeTabId(tabId)
+  return (id && normalizeRoomKey(state.tabRooms[id])) || null
+}
+
+function normalizeTabRooms (value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  const tabRooms = {}
+  for (const [tabId, roomKey] of Object.entries(value)) {
+    const id = normalizeTabId(tabId)
+    const key = normalizeRoomKey(roomKey)
+    if (!id || !key || id in tabRooms) continue
+    tabRooms[id] = key
+    if (Object.keys(tabRooms).length >= PEERCHAT_MAX_TAB_ROOMS) break
+  }
+  return tabRooms
+}
+
+function normalizeTabId (value) {
+  if (typeof value !== 'string') return null
+  const id = value.trim()
+  return /^[A-Za-z0-9_-]{1,64}$/.test(id) ? id : null
 }
 
 function normalizeDrafts (value) {

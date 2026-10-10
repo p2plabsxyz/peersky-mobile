@@ -20,11 +20,14 @@ test('a new room records who made it by whole key, not by eight characters', () 
   assert.match(create, /bans: \[\]/)
 })
 
-test('a removal list is taken from the creator and nobody else', () => {
+test('a removal list counts signed by the creator from anyone, or unsigned from the creator alone', () => {
   const receive = service.slice(
-    service.indexOf('receiveRoomBans (roomKey, peer, bans)'),
+    service.indexOf('receiveRoomBans (roomKey, peer, bans, signedValue)'),
     service.indexOf('enforceRoomBans (roomKey)')
   )
+  // Signed, whoever passed it on: the signature says it is the creator's.
+  assert.match(receive, /if \(signed\.sig && checkSignedRemovals\(\{ topic: wireTopic\(roomKey\), creatorKey, bans, signed \}\)\) \{\s+if \(signed\.v <= held\.v\) return/)
+  // Unsigned, from an older build: the connection has to be the creator's.
   assert.match(receive, /isPeerChatRoomCreator\(\{/)
   assert.match(receive, /connectionKey: peer\.key/)
   // Their list replaces ours outright: they are the record.
@@ -176,7 +179,7 @@ test('a removed member is filtered out of the list, not just deleted once', () =
 })
 
 test('a removal is said out loud in the room, by everyone who honours it', () => {
-  assert.match(service, /async appendRemovalNotice \(roomKey, peerId, username\)/)
+  assert.match(service, /async appendRemovalNotice \(roomKey, peerId, username, at = Date\.now\(\)\)/)
   // By name: "the creator" tells nobody in the room who that was.
   assert.match(service, /was removed from the room by \$\{by\}/)
   assert.match(service, /room\?\.createdByName \|\| room\?\.createdBy \|\| 'whoever made the room'/)
@@ -186,32 +189,38 @@ test('a removal is said out loud in the room, by everyone who honours it', () =>
   assert.match(remove, /await this\.appendRemovalNotice\(normalized, id, name\)/)
 
   // And everyone else says it when the removal reaches them, for bans that
-  // are new to them rather than for the whole list every time.
-  const receive = service.slice(service.indexOf('receiveRoomBans (roomKey, peer, bans)'), service.indexOf('enforceRoomBans (roomKey)'))
+  // are new to them and made since they joined, rather than for the whole
+  // list every time, or for removals from before a newcomer was there.
+  const receive = service.slice(service.indexOf('receiveRoomBans (roomKey, peer, bans, signedValue)'), service.indexOf('enforceRoomBans (roomKey)'))
   assert.match(receive, /const before = new Set\(/)
-  assert.match(receive, /if \(before\.has\(ban\.id\)\) continue/)
-  assert.match(receive, /this\.appendRemovalNotice\(roomKey, ban\.id, ban\.name\)/)
+  assert.match(receive, /const since = room\.joinedAt \|\| Date\.now\(\)/)
+  assert.match(receive, /if \(before\.has\(ban\.id\) \|\| !\(ban\.at > since\)\) continue/)
+  assert.match(receive, /this\.appendRemovalNotice\(roomKey, ban\.id, ban\.name, ban\.at\)/)
 })
 
 test('a removal says who it was by the name the creator gave', () => {
   const remove = service.slice(service.indexOf('async removeRoomMember ('), service.indexOf('async restoreRoomMember ('))
   assert.match(remove, /addPeerChatRoomBan\(room\.bans, \{ id, key: connected\?\.key \|\| '', name \}\)/)
-  const receive = service.slice(service.indexOf('receiveRoomBans (roomKey, peer, bans)'), service.indexOf('enforceRoomBans (roomKey)'))
-  assert.match(receive, /this\.appendRemovalNotice\(roomKey, ban\.id, ban\.name\)/)
+  const receive = service.slice(service.indexOf('receiveRoomBans (roomKey, peer, bans, signedValue)'), service.indexOf('enforceRoomBans (roomKey)'))
+  assert.match(receive, /this\.appendRemovalNotice\(roomKey, ban\.id, ban\.name, ban\.at\)/)
 })
 
 test('a removed person cannot get back in through somebody else s history', () => {
-  const handler = service.slice(service.indexOf('async handlePeerMessage ('))
-  assert.match(handler, /if \(isSync && this\.isPeerIdRemovedFromRoom\(roomKey, normalizePeerChatPeerId\(message\.sender\)\)\) return/)
+  const author = service.slice(service.indexOf('  authorOf ('), service.indexOf('  arrivesInTime ('))
+  // Signed, a removed author's message is refused whoever brings it.
+  assert.match(author, /this\.isAuthorRemoved\(roomKey, signed\.authorId, signed\.author\)/)
+  // Unsigned, somebody else's history cannot name an author at all.
+  assert.match(author, /if \(via === 'sync' && message\.sender !== peer\.id\) return null/)
 
   // Before the message is tracked, or a second copy of it would be dropped as
   // a duplicate rather than refused.
-  const guard = handler.indexOf('isSync && this.isPeerIdRemovedFromRoom')
-  const track = handler.indexOf('!this.trackMessageId(message.id)')
+  const receive = service.slice(service.indexOf('  async receiveChatMessage ('), service.indexOf('  passOn ('))
+  const guard = receive.indexOf('this.authorOf(')
+  const track = receive.indexOf('!this.trackMessageId(message.id)')
   assert.ok(guard > -1 && track > -1 && guard < track)
 })
 
 test('letting somebody back in puts them back in the list', () => {
-  const receive = service.slice(service.indexOf('receiveRoomBans (roomKey, peer, bans)'), service.indexOf('enforceRoomBans (roomKey)'))
+  const receive = service.slice(service.indexOf('receiveRoomBans (roomKey, peer, bans, signedValue)'), service.indexOf('enforceRoomBans (roomKey)'))
   assert.match(receive, /room\.members = \(room\.members \|\| \[\]\)\.filter/)
 })

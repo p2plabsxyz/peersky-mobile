@@ -5,7 +5,8 @@ import {
   MAX_BROWSER_HISTORY_ENTRIES,
   MAX_BROWSER_URL_LENGTH
 } from './browser-shell.mjs'
-import { getRuntimeAppFromUrl } from './internal-apps-registry.mjs'
+import { getRuntimeAppFromUrl, getRuntimeAppUrl } from './internal-apps-registry.mjs'
+import { parsePeerChatDirectInvite, parsePeerChatInvite } from './peerchat/peerchat-invite.mjs'
 
 export const MAX_BROWSER_TABS = 50
 export const MAX_LIVE_BROWSER_WEBVIEWS = 5
@@ -256,10 +257,16 @@ function restorePersistedEntry (entry) {
     return null
   }
 
-  return {
-    url: entry.url,
-    source: restorePersistedSource(entry.source, entry.url)
-  }
+  const source = restorePersistedSource(entry.source, entry.url)
+  return { url: withoutPeerChatInvite(entry.url, source), source }
+}
+
+// A PeerChat invite used to stay in the tab's address once it was opened, room
+// key and all, whichever chat the tab moved on to. It is read once now, so a
+// tab saved before that keeps PeerChat's own address and nothing after it.
+function withoutPeerChatInvite (url, source) {
+  if (source.kind !== 'app' || source.app !== 'peerchat') return url
+  return parsePeerChatInvite(url) || parsePeerChatDirectInvite(url) ? getRuntimeAppUrl('peerchat') : url
 }
 
 function restorePersistedSource (source, url) {

@@ -4,12 +4,15 @@ import test from 'node:test'
 import {
   parsePeerChatUiState,
   PEERCHAT_MAX_DRAFTS,
+  PEERCHAT_MAX_TAB_ROOMS,
   PEERCHAT_RECENT_EMOJI_MAX,
+  peerChatRoomForTab,
   recordRecentEmoji,
   PEERCHAT_DRAFT_MAX_CHARACTERS,
   PEERCHAT_UI_STATE_MAX_BYTES,
   serializePeerChatUiState,
-  setPeerChatDraft
+  setPeerChatDraft,
+  setPeerChatTabRoom
 } from '../../app/peerchat/ui-state.mjs'
 
 const ROOM_A = 'ab'.repeat(32)
@@ -24,7 +27,8 @@ test('PeerChat UI state restores an active room and its draft', () => {
   assert.deepEqual(restored, {
     activeRoomKey: ROOM_A,
     drafts: { [ROOM_A]: 'Unsent message' },
-    recentEmojis: []
+    recentEmojis: [],
+    tabRooms: {}
   })
 })
 
@@ -69,7 +73,8 @@ test('a file from before drafts were per chat keeps its one draft', () => {
   })), {
     activeRoomKey: ROOM_A,
     drafts: { [ROOM_B]: 'Unsent' },
-    recentEmojis: []
+    recentEmojis: [],
+    tabRooms: null
   })
 })
 
@@ -81,7 +86,8 @@ test('PeerChat UI state rejects malformed room keys and stale draft metadata', (
   })), {
     activeRoomKey: null,
     drafts: {},
-    recentEmojis: []
+    recentEmojis: [],
+    tabRooms: null
   })
   assert.equal(parsePeerChatUiState('{invalid').activeRoomKey, null)
   assert.deepEqual(parsePeerChatUiState('x'.repeat(PEERCHAT_UI_STATE_MAX_BYTES + 1)).drafts, {})
@@ -105,6 +111,63 @@ test('the screen puts back a chat\'s draft when it opens', async () => {
   assert.match(screen, /draftsRef\.current = setPeerChatDraft\(draftsRef\.current, composerRoomKeyRef\.current, composer\)/)
   // Leaving a chat for good takes its draft with it.
   assert.match(screen, /draftsRef\.current = setPeerChatDraft\(draftsRef\.current, room\.roomKey, ''\)/)
+})
+
+// Every PeerChat tab used to show whichever chat the screen last had open, so
+// a tab on one chat and a tab on another always showed the same one.
+test('each tab keeps its own chat', () => {
+  let tabRooms = setPeerChatTabRoom({}, 'tab-1', ROOM_A)
+  tabRooms = setPeerChatTabRoom(tabRooms, 'tab-2', ROOM_B)
+  assert.deepEqual(tabRooms, { 'tab-2': ROOM_B, 'tab-1': ROOM_A })
+  // Back on the list, the tab has no chat to come back to.
+  assert.deepEqual(setPeerChatTabRoom(tabRooms, 'tab-2', null), { 'tab-1': ROOM_A })
+  assert.deepEqual(setPeerChatTabRoom(tabRooms, '../tab', ROOM_A), tabRooms)
+  assert.deepEqual(setPeerChatTabRoom(tabRooms, 'tab-3', 'not a room'), tabRooms)
+
+  const restored = parsePeerChatUiState(serializePeerChatUiState({ activeRoomKey: ROOM_B, drafts: {}, tabRooms }))
+  assert.equal(peerChatRoomForTab(restored, 'tab-1'), ROOM_A)
+  assert.equal(peerChatRoomForTab(restored, 'tab-2'), ROOM_B)
+  // A tab that never opened a chat starts on the list, whatever was open last.
+  assert.equal(peerChatRoomForTab(restored, 'tab-3'), null)
+  assert.equal(peerChatRoomForTab(restored, null), null)
+
+  // Saved before tabs had chats of their own: the last chat is all there is.
+  const older = parsePeerChatUiState(JSON.stringify({ version: 2, activeRoomKey: ROOM_A, drafts: {} }))
+  assert.equal(older.tabRooms, null)
+  assert.equal(peerChatRoomForTab(older, 'tab-3'), ROOM_A)
+})
+
+test('the one PeerChat screen follows the tab it is shown in', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const screen = await readFile(new URL('../../app/peerchat/PeerChatScreen.tsx', import.meta.url), 'utf8')
+  const shell = await readFile(new URL('../../app/index.tsx', import.meta.url), 'utf8')
+
+  // The browser says which tab is showing, and the open chat names that tab.
+  assert.match(shell, /tabId=\{browserTabsState\.activeTabId\}\s+onRoomTitleChange=\{showPeerChatRoomTitle\}/)
+  // Switching tabs moves the screen to that tab's chat, or to the list.
+  assert.match(screen, /const roomKey = peerChatRoomForTab\(uiStateRef\.current, tabId\)/)
+  assert.match(screen, /if \(room\) \{\s+if \(activeRoomRef\.current\?\.roomKey !== room\.roomKey\) openRoom\(room\)\s+\} else \{\s+leaveActiveRoom\(\)/)
+  // Whatever it opens is remembered for the tab it is showing.
+  assert.match(screen, /tabRooms: setPeerChatTabRoom\(uiStateRef\.current\.tabRooms, shownTabIdRef\.current, activeRoom\?\.roomKey \|\| null\)/)
+  // An invite opened into a new tab wins over that tab's empty list, so the
+  // tab switch is handled before it.
+  assert.ok(screen.indexOf('const roomKey = peerChatRoomForTab(uiStateRef.current, tabId)') <
+    screen.indexOf('if (!requestedRoomKey || !isInitialized || !profile?.username) return'))
+  assert.match(screen, /const restoredRoomKey = requestedRoomKey \? null : peerChatRoomForTab\(restoredUiState, tabId\)/)
+
+  // An invite is read once and kept out of the tab's address, where its room
+  // key showed and opened the invite again after a restart.
+  assert.match(shell, /const appUrl = `\$\{getRuntimeAppUrl\(app\)\}\$\{invitedRoom \|\| invitedPeer \? '' : launchSuffix\}`/)
+})
+
+test('the tabs remembered are bounded like the tabs themselves', () => {
+  let tabRooms = {}
+  for (let index = 0; index < PEERCHAT_MAX_TAB_ROOMS + 5; index += 1) {
+    tabRooms = setPeerChatTabRoom(tabRooms, `tab-${index}`, ROOM_A)
+  }
+  assert.equal(Object.keys(tabRooms).length, PEERCHAT_MAX_TAB_ROOMS)
+  assert.equal(Object.keys(tabRooms)[0], `tab-${PEERCHAT_MAX_TAB_ROOMS + 4}`)
+  assert.deepEqual(parsePeerChatUiState(JSON.stringify({ version: 2, drafts: {}, tabRooms: { 'tab-1': 'x', 'a b': ROOM_A } })).tabRooms, {})
 })
 
 // Desktop keeps a Recent row at the top of its emoji panel. The phone had no

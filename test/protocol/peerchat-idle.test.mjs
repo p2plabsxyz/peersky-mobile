@@ -97,18 +97,32 @@ test('a member who says they are away is idle until they say otherwise, and a st
   assert.equal(service.isPeerIdle('bb00bb00'), false)
 })
 
-test('a new connection starts as here, since an older build never says either way', async (t) => {
+test('an away member stays away through a redial, and starts as here only after really leaving', async (t) => {
   const service = await startService(t)
   const bob = connect(service, 'bb00bb00', 'Bob')
   await proveRoom(service, bob)
   await service.handlePeerMessage(bob, { type: 'presence', state: 'idle' })
   assert.equal(service.isPeerIdle('bb00bb00'), true)
+  const newConnection = () => Object.assign(createFakePeer('bb00bb00', 'Bob'), { active: false })
 
+  // A second connection alongside the first is as they last said.
+  const alongside = newConnection()
+  service.activatePeer(alongside)
+  assert.equal(service.isPeerIdle('bb00bb00'), true)
+
+  // So is one back from a redial inside the grace. Taking each new connection
+  // as here turned the dot green on every redial.
   service.deactivatePeer(bob)
-  const again = createFakePeer('bb00bb00', 'Bob')
-  again.active = false
-  again.connection.destroyed = false
+  service.deactivatePeer(alongside)
+  const again = newConnection()
   service.activatePeer(again)
+  assert.equal(service.isPeerIdle('bb00bb00'), true)
+
+  // Gone past the grace, a new connection starts as here, which is all an
+  // older build that never says either way can be.
+  service.deactivatePeer(again)
+  service.presence.clear()
+  service.activatePeer(newConnection())
   assert.equal(service.isPeerIdle('bb00bb00'), false)
   for (const peer of service.peers.values()) clearInterval(peer.pingTimer)
 })

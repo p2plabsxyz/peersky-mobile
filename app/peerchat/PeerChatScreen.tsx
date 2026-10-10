@@ -38,9 +38,11 @@ import { buildPeerChatReport, PEERCHAT_REPORT_EMAIL } from './report.mjs'
 import {
   parsePeerChatUiState,
   PEERCHAT_UI_STATE_MAX_BYTES,
+  peerChatRoomForTab,
   recordRecentEmoji,
   serializePeerChatUiState,
-  setPeerChatDraft
+  setPeerChatDraft,
+  setPeerChatTabRoom
 } from './ui-state.mjs'
 import { assessLink, describeLinkRisk, extractFirstLink, LINK_SUSPICIOUS } from './link-safety.mjs'
 import { shareLink } from '../share'
@@ -124,7 +126,7 @@ import {
   splitPeerChatDirectPeer
 } from './peerchat-invite.mjs'
 import { PRE_JOINED_PEERCHAT_ROOM_KEY } from '../../backend/peerchat/rooms.mjs'
-import { mentionQueryStart } from '../../backend/peerchat/mentions.mjs'
+import { mentionQueryStart, personName } from '../../backend/peerchat/mentions.mjs'
 import { QrCodeView } from '../settings/QrCodeView'
 import { pickUploads } from '../media/upload-gate'
 import type { UploadSource } from '../media/upload-gate'
@@ -146,6 +148,8 @@ type PeerChatMessage = {
   fileName?: string
   fileSize?: number
   fileEnc?: boolean
+  // The file's own key, in a room whose keys rotate.
+  fileKey?: string
   preview?: PeerChatLinkPreview | null
   system?: boolean
   // Sent on from another chat, and shown so.
@@ -288,7 +292,7 @@ export type PeerChatResponse = {
   messages?: PeerChatMessage[] | null
   version?: number
   sent?: PeerChatMessage
-  item?: { name: string, url: string, byteLength?: number }
+  item?: { name: string, url: string, byteLength?: number, fileKey?: string }
   pendingDirectMessages?: PeerChatDirectInvite[]
   blockedPeers?: PeerChatBlockedPeer[]
   unreadTotal?: number
@@ -320,6 +324,10 @@ type PeerChatScreenProps = {
   // The person a link names: their whole key, or the short id of an older link.
   requestedPeerId?: string | null
   onRequestedPeerHandled?: () => void
+  // The browser tab showing PeerChat. Each tab keeps its own chat.
+  tabId?: string | null
+  // The open chat's name, for the tab's title, or null on the list.
+  onRoomTitleChange?: (title: string | null) => void
 }
 
 const POLL_INTERVAL_MS = 1500
@@ -353,12 +361,15 @@ type PeerChatUiState = {
   // What you had typed and not sent, per chat.
   drafts: Record<string, string>
   recentEmojis: string[]
+  // The chat each browser tab is on. Null in a file from before tabs had one.
+  tabRooms: Record<string, string> | null
 }
 
 const EMPTY_UI_STATE: PeerChatUiState = {
   activeRoomKey: null,
   drafts: {},
-  recentEmojis: []
+  recentEmojis: [],
+  tabRooms: null
 }
 
 const PEERCHAT_UI_STATE_FILE = new File(Paths.document, 'peerchat-ui-state.json')
@@ -396,7 +407,9 @@ export function PeerChatScreen ({
   soundsEnabled,
   requestedRoomKey,
   requestedPeerId,
-  onRequestedPeerHandled
+  onRequestedPeerHandled,
+  tabId = null,
+  onRoomTitleChange
 }: PeerChatScreenProps) {
   const colors = isDark ? darkColors : lightColors
   const callRpcRef = useRef(onCallRpc)
@@ -420,6 +433,11 @@ export function PeerChatScreen ({
   const draftsRef = useRef<Record<string, string>>({})
   const uiStateRef = useRef<PeerChatUiState>(EMPTY_UI_STATE)
   const uiStateRestoredRef = useRef(false)
+  // The tab whose chat this screen is showing. One screen serves every
+  // PeerChat tab, so switching tabs changes it rather than mounting another.
+  const shownTabIdRef = useRef<string | null>(null)
+  const onRoomTitleChangeRef = useRef(onRoomTitleChange)
+  onRoomTitleChangeRef.current = onRoomTitleChange
   const [isIntroReady, setIsIntroReady] = useState(false)
   const [showIntro, setShowIntro] = useState(false)
   const [isReady, setIsReady] = useState(false)
@@ -627,6 +645,11 @@ export function PeerChatScreen ({
     onRoomOpenChange?.(Boolean(activeRoom))
   }, [activeRoom, onRoomOpenChange])
 
+  // A tab on a chat is named after it, so two PeerChat tabs can be told apart.
+  useEffect(() => {
+    onRoomTitleChangeRef.current?.(activeRoom ? activeRoom.name : null)
+  }, [activeRoom?.roomKey, activeRoom?.name])
+
   useEffect(() => () => onRoomOpenChange?.(false), [onRoomOpenChange])
 
   useEffect(() => {
@@ -656,7 +679,8 @@ export function PeerChatScreen ({
     const nextState = {
       activeRoomKey: activeRoom?.roomKey || null,
       drafts: draftsRef.current,
-      recentEmojis
+      recentEmojis,
+      tabRooms: setPeerChatTabRoom(uiStateRef.current.tabRooms, shownTabIdRef.current, activeRoom?.roomKey || null)
     }
     uiStateRef.current = nextState
     const timer = setTimeout(() => persistPeerChatUiState(nextState), UI_STATE_PERSIST_DELAY_MS)
@@ -695,6 +719,21 @@ export function PeerChatScreen ({
     setSelectedMessageIds(null)
     setIsForwardOpen(false)
   }, [activeRoom?.roomKey])
+
+  // Switching to another PeerChat tab moves this screen to the chat that tab
+  // was on, or to the list. Every tab used to show the last chat opened in any
+  // of them. Before the saved state is read, the restore below does this.
+  useEffect(() => {
+    if (!uiStateRestoredRef.current || shownTabIdRef.current === tabId) return
+    shownTabIdRef.current = tabId
+    const roomKey = peerChatRoomForTab(uiStateRef.current, tabId)
+    const room = roomKey ? rooms.find((item) => item.roomKey === roomKey) || null : null
+    if (room) {
+      if (activeRoomRef.current?.roomKey !== room.roomKey) openRoom(room)
+    } else {
+      leaveActiveRoom()
+    }
+  }, [leaveActiveRoom, rooms, tabId])
 
   useEffect(() => {
     // Same wait as a room invite: a request cannot be sent without a name.
@@ -780,8 +819,10 @@ export function PeerChatScreen ({
     const drafts = Object.fromEntries(
       Object.entries(restoredUiState.drafts || {}).filter(([roomKey]) => roomKeys.has(roomKey))
     )
-    const restoredRoom = restoredUiState.activeRoomKey
-      ? rooms.find((room) => room.roomKey === restoredUiState.activeRoomKey) || null
+    // The chat this tab was on. An invite being opened comes first.
+    const restoredRoomKey = requestedRoomKey ? null : peerChatRoomForTab(restoredUiState, tabId)
+    const restoredRoom = restoredRoomKey
+      ? rooms.find((room) => room.roomKey === restoredRoomKey) || null
       : null
 
     draftsRef.current = drafts
@@ -796,10 +837,12 @@ export function PeerChatScreen ({
       setActiveRoom(restoredRoom)
     }
     setRecentEmojis(restoredUiState.recentEmojis || [])
+    shownTabIdRef.current = tabId
     uiStateRef.current = {
       activeRoomKey: restoredRoom?.roomKey || null,
       drafts,
-      recentEmojis: restoredUiState.recentEmojis || []
+      recentEmojis: restoredUiState.recentEmojis || [],
+      tabRooms: restoredUiState.tabRooms || {}
     }
     uiStateRestoredRef.current = true
   }, [isInitialized, restoredUiState, rooms])
@@ -1263,6 +1306,24 @@ export function PeerChatScreen ({
       self: message.self,
       online: false
     })
+  }
+
+  // A mention opens the profile of whoever it names, as a sender's name does.
+  // "@ada@mobile" is ada's phone; "@ada" with no such member finds ada on any
+  // of their devices.
+  function openMentionProfile (mention: string) {
+    if (!activeRoom) return
+    const name = mention.replace(/^@/, '').toLowerCase()
+    const members = activeRoom.members
+    const member = members.find((candidate) => candidate.username.toLowerCase() === name) ||
+      members.find((candidate) => personName(candidate.username).toLowerCase() === personName(name))
+    if (member) {
+      setProfileTarget(member)
+      return
+    }
+    if (profile && profile.username.toLowerCase() === name) {
+      setProfileTarget({ id: profile.id, username: profile.username, bio: profile.bio || '', avatar: profile.avatar || null, self: true, online: true })
+    }
   }
 
   function viewProfileAvatar (member: PeerChatMember) {
@@ -1747,7 +1808,8 @@ export function PeerChatScreen ({
           message: upload.item.url,
           fileName: asset.name,
           fileSize: upload.item.byteLength ?? asset.size,
-          fileEnc: true
+          fileEnc: true,
+          ...(upload.item.fileKey && { fileKey: upload.item.fileKey })
         })
         if (!response.ok) throw new Error(response.error || 'Unable to send attachment.')
       }
@@ -2568,7 +2630,8 @@ export function PeerChatScreen ({
                             showMessageActions(item)
                           },
                           onHoldLink: setLinkActionTarget,
-                          onOpenLink: openMessageLink
+                          onOpenLink: openMessageLink,
+                          onOpenMention: openMentionProfile
                         }
                       )}
                       <PeerChatLinkCard
@@ -3631,19 +3694,34 @@ export function PeerChatScreen ({
               <Text numberOfLines={1} style={[styles.roomTitle, { color: colors.text }]}>{item.name}</Text>
             </View>
             <Text numberOfLines={1} style={[styles.roomPreview, { color: colors.muted }]}>
+              {/* A room with nothing in it yet says so, as the desktop does.
+                  It used to show the start of the room key, which is the
+                  room's secret in an older room. */}
               {item.lastMessage
                 ? `${item.lastMessage.senderName}: ${item.lastMessage.message}`
-                : `${item.roomKey.slice(0, 10)}...`}
+                : 'No messages yet'}
             </Text>
           </View>
           <View style={styles.roomMeta}>
             <Text style={[styles.roomTime, { color: colors.muted }]}>{formatRoomTime(item)}</Text>
             <View style={styles.roomStateRow}>
+              {/* Mentions and messages in bubbles of their own, "1 @" then
+                  "2". A muted chat greys its count, as most apps do, and
+                  still shows a mention. */}
+              {item.unreadMentions > 0 && (
+                <View
+                  accessibilityLabel={`${item.unreadMentions} unread mention${item.unreadMentions === 1 ? '' : 's'}`}
+                  style={[styles.unreadBadge, { backgroundColor: colors.accent }]}
+                >
+                  <Text style={styles.unreadBadgeText}>{item.unreadMentions} @</Text>
+                </View>
+              )}
               {item.unreadCount > 0 && (
-                <View style={[styles.unreadBadge, { backgroundColor: colors.accent }]}>
-                  <Text style={styles.unreadBadgeText}>
-                    {item.unreadMentions > 0 ? '@ ' : ''}{item.unreadCount}
-                  </Text>
+                <View
+                  accessibilityLabel={`${item.unreadCount} unread message${item.unreadCount === 1 ? '' : 's'}`}
+                  style={[styles.unreadBadge, { backgroundColor: item.isMuted ? colors.muted : colors.accent }]}
+                >
+                  <Text style={styles.unreadBadgeText}>{item.unreadCount}</Text>
                 </View>
               )}
               {item.isMuted && (
@@ -4212,7 +4290,8 @@ function PeerChatAttachment ({
           url: item.message,
           fileName: item.fileName,
           fileSize: item.fileSize,
-          encrypted: true
+          encrypted: true,
+          ...(item.fileKey && { fileKey: item.fileKey })
         }
       : { url: item.message }
     void onCallRpc(command, request)
@@ -4228,7 +4307,7 @@ function PeerChatAttachment ({
     return () => {
       cancelled = true
     }
-  }, [canPreview, item.fileEnc, item.fileName, item.fileSize, item.message, mediaKind, onCallRpc, roomKey])
+  }, [canPreview, item.fileEnc, item.fileKey, item.fileName, item.fileSize, item.message, mediaKind, onCallRpc, roomKey])
 
   async function openAttachment () {
     if (isOpening) return
@@ -4243,7 +4322,8 @@ function PeerChatAttachment ({
         url: item.message,
         fileName: item.fileName,
         fileSize: item.fileSize,
-        encrypted: true
+        encrypted: true,
+        ...(item.fileKey && { fileKey: item.fileKey })
       })
       if (!response.ok || !response.localUri) {
         throw new Error(response.error || 'Unable to open encrypted attachment.')
@@ -4651,6 +4731,7 @@ function renderMessageText (
     onHold: () => void
     onHoldLink: (url: string) => void
     onOpenLink: (url: string) => void
+    onOpenMention: (mention: string) => void
   }
 ) {
   const blocks = formatPeerChatMessage(message, usernames) as PeerChatMessageBlock[]
@@ -4704,6 +4785,7 @@ function renderMessageSpan (
     onHold: () => void
     onHoldLink: (url: string) => void
     onOpenLink: (url: string) => void
+    onOpenMention: (mention: string) => void
   }
 ) {
   const style = [
@@ -4745,8 +4827,25 @@ function renderMessageSpan (
       </Text>
     )
   }
+  if (span.mention) {
+    const mention = span.text
+    return (
+      <Text
+        key={`${index}-mention`}
+        accessibilityHint="Opens this person's profile"
+        accessibilityRole='button'
+        style={[style, { color: colors.accent }]}
+        onPress={() => handlers.onOpenMention(mention)}
+        // Claims the touch like a link, so holding it still offers the
+        // message's actions.
+        onLongPress={handlers.onHold}
+      >
+        {span.text}
+      </Text>
+    )
+  }
   return (
-    <Text key={`${index}-text`} style={[style, span.mention ? { color: colors.accent } : null]}>
+    <Text key={`${index}-text`} style={style}>
       {span.text}
     </Text>
   )

@@ -9,6 +9,7 @@ import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
 import android.media.AudioAttributes
+import android.media.AudioManager
 import android.media.SoundPool
 import androidx.core.content.ContextCompat
 import com.facebook.react.bridge.Promise
@@ -50,8 +51,11 @@ class PeerChatBackgroundModule(
     )
     receiverRegistered = true
 
+    // On the media stream, which is what the volume buttons change in the app.
+    // As sonification they went to the system stream, which phones tie to the
+    // ringer, so turning the volume down left them as loud as the ringer.
     val attributes = AudioAttributes.Builder()
-      .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
+      .setUsage(AudioAttributes.USAGE_MEDIA)
       .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
       .build()
     soundPool = SoundPool.Builder()
@@ -67,7 +71,7 @@ class PeerChatBackgroundModule(
               ?: return@synchronized false
             pendingSounds.remove(kind)
           }
-          if (shouldPlay) loadedPool.play(soundId, 1f, 1f, 1, 0, 1f)
+          if (shouldPlay) playLoaded(loadedPool, soundId)
         }
         soundIds["send"] = pool.load(reactApplicationContext, R.raw.peerchat_send, 1)
         soundIds["receive"] = pool.load(reactApplicationContext, R.raw.peerchat_receive, 1)
@@ -150,8 +154,17 @@ class PeerChatBackgroundModule(
       loadedSoundIds.contains(soundId)
     }
     if (loaded) {
-      pool.play(soundId, 1f, 1f, 1, 0, 1f)
+      playLoaded(pool, soundId)
     }
+  }
+
+  // The ringer stream kept these quiet on silent and vibrate by itself. Media
+  // does not, so that is asked here. And below full scale, since media volume
+  // usually sits higher than the ringer did.
+  private fun playLoaded(pool: SoundPool, soundId: Int) {
+    val audio = reactApplicationContext.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+    if (audio != null && audio.ringerMode != AudioManager.RINGER_MODE_NORMAL) return
+    pool.play(soundId, SOUND_VOLUME, SOUND_VOLUME, 1, 0, 1f)
   }
 
   @ReactMethod
@@ -182,5 +195,6 @@ class PeerChatBackgroundModule(
 
   companion object {
     private const val TICK_EVENT = "PeerChatBackgroundTick"
+    private const val SOUND_VOLUME = 0.6f
   }
 }

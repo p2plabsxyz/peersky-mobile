@@ -206,6 +206,7 @@ import { MAX_BROWSER_FAVOURITES } from './favourites/browser-favourites.mjs'
 import { HistoryScreen } from './history/HistoryScreen'
 import { getBrowserHistoryDocumentTitle } from './history/browser-history.mjs'
 import { useBrowserHistory } from './history/useBrowserHistory'
+import { P2pSitesPage } from './P2pSitesPage'
 import { DownloadsScreen } from './downloads/DownloadsScreen'
 import {
   describeBrowserDownload,
@@ -1187,6 +1188,15 @@ export default function App () {
     })
   }
 
+  // A PeerChat tab is named after the chat it is on, so two of them can be
+  // told apart in the tab list. On the chat list it is PeerChat again.
+  function showPeerChatRoomTitle (roomName: string | null) {
+    const title = normalizeBrowserTabTitle(roomName || getRuntimeAppTitle('peerchat'))
+    setBrowserTitle(title)
+    const { activeTabId, tabs } = browserTabsStateRef.current
+    if (tabs.find((tab) => tab.id === activeTabId)?.title !== title) updateBrowserTabTitle(activeTabId, title)
+  }
+
   function updateBrowserTabTitle (tabId: string, title: string) {
     updateBrowserTabsState((state) => updateBrowserTabState(
       state,
@@ -1305,7 +1315,7 @@ export default function App () {
     if (isBrowserP2pUrl(nextUrl)) {
       cancelPendingBrowserLoad()
       commitBrowserEntry(BROWSER_P2P_URL, { kind: 'p2p' })
-      setBrowserTitle('P2P apps')
+      setBrowserTitle('P2P sites')
       return
     }
 
@@ -1354,7 +1364,7 @@ export default function App () {
 
     if (isBrowserP2pUrl(url)) {
       replaceBrowserEntry(BROWSER_P2P_URL, { kind: 'p2p' })
-      setBrowserTitle('P2P apps')
+      setBrowserTitle('P2P sites')
       return
     }
 
@@ -1491,7 +1501,13 @@ export default function App () {
   }
 
   function openInternalApp (app: RuntimeTab, shouldCommit = true, launchSuffix = '') {
-    const appUrl = `${getRuntimeAppUrl(app)}${launchSuffix}`
+    // A PeerChat invite is read here and handed to the chat, then left out of
+    // the tab's address. Kept there, its room key sat in the address bar, and
+    // the tab opened the invite again after a restart, over whichever chat the
+    // tab had moved on to. The desktop clears it from the address the same way.
+    const invitedRoom = app === 'peerchat' ? parsePeerChatInvite(launchSuffix) : ''
+    const invitedPeer = app === 'peerchat' ? parsePeerChatDirectInvite(launchSuffix) : ''
+    const appUrl = `${getRuntimeAppUrl(app)}${invitedRoom || invitedPeer ? '' : launchSuffix}`
     cancelPendingBrowserLoad()
     setActiveTab(app)
     setBrowserTitle(getRuntimeAppTitle(app))
@@ -1504,11 +1520,9 @@ export default function App () {
     }
 
     if (app === 'peerchat') {
-      const invited = parsePeerChatInvite(launchSuffix)
-      if (invited) setRequestedPeerChatRoomKey(invited)
+      if (invitedRoom) setRequestedPeerChatRoomKey(invitedRoom)
       // A personal invite names a person rather than a room, so it asks them
       // rather than joining anything.
-      const invitedPeer = parsePeerChatDirectInvite(launchSuffix)
       if (invitedPeer) setRequestedPeerChatPeerId(invitedPeer)
     }
 
@@ -4411,45 +4425,11 @@ export default function App () {
 
         {browserSource.kind === 'p2p'
           ? (
-            <ScrollView
-              style={styles.browserContentPage}
-              contentContainerStyle={styles.browserHome}
-              keyboardDismissMode='on-drag'
-            >
-              {/* Every built-in app people use. Holesail is a development
-                  tool and is only reachable by address in a debug build. */}
-              <View style={styles.browserShortcutGrid}>
-                {P2P_APPS.map((app) => (
-                  <Pressable
-                    key={app.id}
-                    accessibilityRole='button'
-                    accessibilityLabel={`Open ${app.title}`}
-                    style={styles.browserShortcut}
-                    onPress={() => void loadBrowserUrl(app.url)}
-                  >
-                    <View style={styles.browserShortcutIconFrame}>
-                      <View style={[
-                        styles.browserShortcutIcon,
-                        app.iconSource ? null : getRuntimeAppIconStyle(app.id)
-                      ]}>
-                        {app.iconSource
-                          ? <Image source={app.iconSource} style={styles.browserShortcutIconImage} />
-                          : <Text style={styles.browserShortcutIconText}>{app.icon}</Text>}
-                      </View>
-                    </View>
-                    <Text
-                      numberOfLines={2}
-                      style={[
-                        styles.browserShortcutTitle,
-                        { color: browserChrome.text, fontSize: browserShortcutTitleFontSize }
-                      ]}
-                    >
-                      {app.title}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
-            </ScrollView>
+            <P2pSitesPage
+              history={browserVisitHistory}
+              palette={browserChrome}
+              onOpen={(targetUrl) => void loadBrowserUrl(targetUrl)}
+            />
             )
           : browserSource.kind === 'home'
           ? null
@@ -4503,6 +4483,8 @@ export default function App () {
                   requestedPeerId={requestedPeerChatPeerId}
                   onRequestedPeerHandled={() => setRequestedPeerChatPeerId(null)}
                   soundsEnabled={peerChatNotifications.soundsEnabled}
+                  tabId={browserTabsState.activeTabId}
+                  onRoomTitleChange={showPeerChatRoomTitle}
                 />
                 )
               : activeTab === 'peertunes'

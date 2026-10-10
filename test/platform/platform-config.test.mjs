@@ -279,7 +279,13 @@ describe('mobile platform runtime configuration', () => {
     assert.match(backgroundModule, /isIgnoringBatteryOptimizations/)
     assert.match(backgroundModule, /ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS/)
     assert.match(backgroundModule, /SoundPool[.]Builder/)
-    assert.match(backgroundModule, /USAGE_ASSISTANCE_SONIFICATION/)
+    // Send and receive sounds follow the media volume, which the volume
+    // buttons change; on the system stream they rode the ringer instead. On
+    // silent or vibrate they stay quiet, as the ringer stream used to keep them.
+    assert.match(backgroundModule, /setUsage\(AudioAttributes[.]USAGE_MEDIA\)/)
+    assert.doesNotMatch(backgroundModule, /USAGE_ASSISTANCE_SONIFICATION/)
+    assert.match(backgroundModule, /ringerMode != AudioManager[.]RINGER_MODE_NORMAL\) return/)
+    assert.doesNotMatch(backgroundModule, /[.]play\(soundId, 1f, 1f/)
     assert.match(backgroundModule, /PeerChatBackgroundTick/)
     assert.doesNotMatch(backgroundModule, /MediaSession/)
   })

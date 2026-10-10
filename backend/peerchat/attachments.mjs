@@ -230,7 +230,8 @@ export function decryptAttachment (bytes, roomKey) {
 export async function uploadPeerChatAttachment ({
   roomKey,
   fileUri,
-  byteLength
+  byteLength,
+  ownKey
 } = {}, options = {}) {
   const normalizedRoomKey = normalizePeerChatRoomKey(roomKey)
   if (!normalizedRoomKey) return { ok: false, error: 'Invalid PeerChat room key.' }
@@ -249,7 +250,11 @@ export async function uploadPeerChatAttachment ({
       return await runWithRuntime(options, async (runtime) => {
         const drive = await runtime.getDrive(attachmentDriveName(normalizedRoomKey))
         const pathname = opaqueAttachmentPath(options.now, options.randomBytes)
-        await writeEncryptedFile(drive, pathname, localFile, normalizedRoomKey, options)
+        // In a room whose keys rotate, the file is sealed with a key of its
+        // own, which goes inside the sealed message, so it opens only for
+        // someone who can read that. Any other room seals with its room key.
+        const fileKey = ownKey === true ? b4a.toString(randomBytes(32), 'hex') : ''
+        await writeEncryptedFile(drive, pathname, localFile, fileKey || normalizedRoomKey, options)
 
         const storedEntry = await drive.entry(pathname)
         const expectedLength = sealedAttachmentLength(localFile.byteLength, options)
@@ -261,7 +266,8 @@ export async function uploadPeerChatAttachment ({
           ok: true,
           item: {
             url: createHyperUrl(`hyper://${drive.id}/`, pathname),
-            byteLength: localFile.byteLength
+            byteLength: localFile.byteLength,
+            ...(fileKey && { fileKey })
           }
         }
       })
@@ -276,10 +282,14 @@ export async function openPeerChatAttachment ({
   url,
   fileName,
   fileSize,
-  encrypted
+  encrypted,
+  fileKey
 } = {}, options = {}) {
   const normalizedRoomKey = normalizePeerChatRoomKey(roomKey)
   if (!normalizedRoomKey) return { ok: false, error: 'Invalid PeerChat room key.' }
+  // Sealed with its own key, which its message carried, or else the room's.
+  const sealKey = fileKey ? normalizePeerChatRoomKey(fileKey) : normalizedRoomKey
+  if (!sealKey) return { ok: false, error: 'Invalid attachment key.' }
   const target = parseHyperUrl(url)
   if (target.error || target.pathname === '/' || target.pathname.endsWith('/')) {
     return { ok: false, error: target.error || 'Invalid PeerChat attachment URL.' }
@@ -336,7 +346,7 @@ export async function openPeerChatAttachment ({
       const source = drive.createReadStream(target.pathname)
       await pipeline(
         source,
-        new AttachmentDecryptStream(normalizedRoomKey),
+        new AttachmentDecryptStream(sealKey),
         createWriteStream(temporaryPath)
       )
       if (statSync(temporaryPath).size !== outputSize) {

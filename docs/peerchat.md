@@ -10,7 +10,15 @@ and transport formats as PeerSky Desktop.
 
 - Create a group or join one with its 64-character room key.
 - Exchange encrypted messages with mobile and desktop peers.
+- Rooms and direct messages made on 0.1.2 or later change their message key
+  every hour, so a key someone gets later cannot read what came before.
+- Every message is signed by whoever wrote it, and passed on from device to
+  device, so it reaches people its author is not connected to and nobody can
+  fake one.
 - Restore recent rooms and message history after an app restart.
+- Keep a chat per browser tab, so two tabs show two rooms, each tab named after
+  its room. The tab's chat is kept in PeerChat's UI state, not in its address,
+  so no room key sits in the address bar.
 - Reply to messages, add reactions, mention peers, and search chats or messages.
 - Share room-encrypted Hyperdrive attachments and bounded HTTP or HTTPS link previews.
 - Start direct-message conversations through an explicit accept or decline flow.
@@ -27,7 +35,8 @@ bridge. A single `PeerChatService` in the Bare worklet uses PeerSky's shared
 second SDK, Corestore, swarm, local HTTP server, or unrestricted proxy.
 
 Each room derives a discovery topic and an AES-256-GCM message key from separate
-contexts. The room key itself is never used as the public discovery topic, and
+contexts. A room made on 0.1.2 or later seals its messages with hourly keys
+instead (see [Keys that rotate](#keys-that-rotate)). The room key itself is never used as the public discovery topic, and
 it never goes over the wire either: frames name a room by its topic, and a peer
 is let into a room on a connection only after it proves it holds the key. Every
 received frame, profile field, URL, attachment description, timestamp, and
@@ -39,6 +48,9 @@ Important files:
 - `backend/peerchat/service.mjs`: rooms, feeds, synchronization, and lifecycle.
 - `backend/peerchat/protocol.mjs`: validation, key derivation, and encryption.
 - `backend/peerchat/room-proof.mjs`: the proof a peer gives that it holds a room's key.
+- `backend/peerchat/key-chain.mjs`: hourly message keys for rooms made on 0.1.2 or later.
+- `backend/peerchat/removal-signature.mjs`: the creator's signature on a room's removal list.
+- `backend/peerchat/message-signature.mjs`: every message's signature by whoever wrote it.
 - `backend/peerchat/transport.mjs`: bounded newline-delimited peer frames.
 - `backend/peerchat/link-preview.mjs`: bounded public-network preview fetching.
 - `backend/peerchat/moderation.mjs`: local content and spam enforcement.
@@ -55,11 +67,18 @@ a picture that looks explicit arrives hidden behind a warning the reader can
 open. Whether a room is a direct message is worked out on each device, never
 taken from a peer, so no room setting can switch a group's filters off.
 
+Whoever made a room can remove anyone from it, for good. The creator signs the
+room's removal list with their own key, so anyone in the room can pass it on
+and every device checks it against the creator's key, which is how a removal
+reaches people who never meet the creator. A list from an older build carries
+no signature and counts only from the creator's own connection.
+
 ## Room-key security
 
-The room key is both an invitation and the secret needed to decrypt room
-messages. Anyone who receives it can join that room and read synchronized
-history, so share it only with intended participants. PeerChat currently has no
+The room key is both an invitation and, in a room made before 0.1.2, the secret
+needed to decrypt its messages. Anyone who receives it can join that room and
+read synchronized history, all of it in an older room and from the hour they
+join in a newer one, so share it only with intended participants. PeerChat currently has no
 server-side account, invitation revocation, or mechanism to remove knowledge of
 a key from a device that already received it. Create a new room and distribute a
 new key if an old key is exposed.
@@ -102,6 +121,76 @@ key, so a request from one goes to that key alone. A request started from a
 member list, or from an older link with only the 8-character id, goes to the one
 connected key with that id, and while two share it, the invite waits.
 
+### Keys that rotate
+
+Rooms and direct messages made on 0.1.2 or later seal each hour's messages with
+a different key, so a key someone gets later, from a forwarded invite or a lost
+phone, cannot read anything sent before it. The room key marks such a room by
+itself: `SHA-256("peersky-chat/3 rotates:" + roomKey)` starts with two zero
+bytes, which a new room's key is picked to meet. An older room can never be
+given a chain, so it seals with its room key as before and every version reads
+it.
+
+- Hours count from the Unix epoch. The chain starts with 32 random bytes, made
+  by whoever made the room or opened the direct message, for the hour it was
+  made.
+- The next hour's secret is `HMAC-SHA256(secret, "peersky-chat/3 next hour")`,
+  which cannot be run backwards, and an hour's message key is
+  `HMAC-SHA256(secret, "peersky-chat/3 message key")`.
+- A message carries its hour as `e`. One without `e` was sealed with the room's
+  message key, by an older build or by a device that has no chain yet, and still
+  reads.
+- On each connection, after a room's details and before its history, a device
+  sends `room-chain` with the current hour and its secret, never an earlier one
+  and never to someone removed. A phone takes one only when it has none and only
+  for an hour from two before its own to one after, keeps it, and passes it on to
+  the others in the room. It keeps the earliest secret it was given, so its own
+  history stays readable on it.
+- A file in such a room is sealed with a `fileKey` of its own, 32 random bytes
+  used where the room key would be, and the `fileKey` travels inside the
+  encrypted message.
+- Link Device carries the chain with each room, and a device keeps the earliest
+  start of the same chain.
+
+It protects the past, not the future: every later hour's key follows from any
+hour's, so a stolen phone keeps reading new messages until the room is replaced
+with a new one. Builds from before 0.1.2 cannot read rooms made on 0.1.2 or
+later. The desktop keeps the same rules in peerchat's `lib/key-chain.js`, and
+both apps pin one vector (`test/protocol/peerchat-key-chain.test.mjs`).
+
+### Signed messages and passing on
+
+A message used to name its author in a field anyone could fill in. Straight
+from its author, the connection proved who that was, but history a peer sent on
+carried whatever author that peer wrote in. Now every message and reaction
+carries:
+
+- `ak`: the author's network key, whose first 8 hex are their id.
+- `h`: a header the author writes once, as a JSON string: the room's topic,
+  the message id, its time, its hour in a room whose keys rotate, the author's
+  name, whether it was forwarded, and in an older room the reply and file
+  details, which sit next to the sealed body there.
+- `as`: an Ed25519 signature by `ak` over a label, `h` and the sealed body.
+
+The phone keeps `h` exactly as it came, so a message can go on to the next
+device and be checked there again. A signed message counts from anyone once its
+signature checks out and its key is the one that id's connections proved. An
+unsigned one, as an older build sends, counts only straight from its author's
+connection, and never in somebody else's history.
+
+A device keeps at most 64 connections, so in a big room most people are not
+connected to most others. A newer build says so in its handshake and passes
+each new signed message on once to everyone else in the room who said the same,
+never back where it came from or to its author. A copy the phone has already
+seen stops at its first check, so a message crosses the room in a few steps.
+Only signed messages are passed on, only for ten minutes after they were
+written, and none from before the phone joined; an older build never gets one.
+Limits count per author, not per connection: each author has the room's spam
+limit and 120 messages a minute, wherever their messages come from, so a device
+passing on a busy room is never blamed for what others wrote. The desktop keeps
+the same rules in peerchat's `lib/message-signature.js`, and both apps pin one
+vector (`test/protocol/peerchat-message-signature.test.mjs`).
+
 Messages are encrypted before they are appended to a room feed or sent to a
 peer. Sender names, timestamps, reactions, and other routing metadata are not
 promised to be anonymous. Peer discovery can also reveal network metadata to
@@ -118,7 +207,9 @@ are part of the local threat model.
 
 PeerChat stores attachments in a dedicated Hyperdrive for each room. Before
 upload, file bytes are sealed with AES-256-GCM using a key derived from the room
-key, in the attachment formats PeerSky Desktop uses too: `PCA1`, in one piece,
+key, or in a room made on 0.1.2 or later from a key of the file's own that
+travels inside the encrypted message, in the attachment formats PeerSky Desktop
+uses too: `PCA1`, in one piece,
 up to 100 MB, and `PCA2`, a megabyte frame at a time, for anything bigger.
 Both apps read both, and neither ever holds a framed file whole. The real file
 name and size travel inside the encrypted chat message.
@@ -131,8 +222,8 @@ blocks and the opened copy, so the phone checks for that much room first, plus
 and videos up to 100 MB load in the chat by themselves on both apps. Anything
 bigger waits for a tap, with its size shown, so a huge file never fills a phone
 on its own. Room members can
-decrypt attachments because they hold the room key; obtaining the `hyper://`
-URL alone exposes only ciphertext. Legacy plaintext attachments remain readable
+decrypt attachments because they hold the room key, or the message carrying the
+file's key; obtaining the `hyper://` URL alone exposes only ciphertext. Legacy plaintext attachments remain readable
 for compatibility.
 
 Link previews are optional and run only when the local user sends a public HTTP
@@ -210,6 +301,7 @@ them. See [link-device.md](link-device.md).
 The service limits room count, returned and stored history, room and total
 storage bytes, frame and message size, pending direct-message requests, peer
 members, initial synchronization, queued frames, live/control message rates,
+messages passed on per connection and per author,
 tracked moderation state, and link-preview work. It releases feed listeners,
 timers, transports, pending joins, swarm topics, and room state during leave,
 runtime reset, P2P clearing, and application shutdown.
@@ -233,6 +325,8 @@ before more messages can be stored.
 6. Restart both applications and confirm saved rooms and history return.
 7. Disable internet access, connect both devices to the same local hotspot, and
    confirm discovery and two-way messaging still work.
+8. In a room made on each app, confirm messages and attachments go both ways,
+   and that a room made on an older build still works on both.
 
 ## Developer checks
 

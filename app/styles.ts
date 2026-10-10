@@ -397,10 +397,12 @@ export const styles = StyleSheet.create({
     overflow: 'hidden',
     width: 64
   },
+  // A site's icon fills its tile, as an app's artwork does. It was drawn at 38
+  // points in the middle, which read as a small square on a plate.
   browserFavouriteIconImage: {
-    height: 38,
-    resizeMode: 'contain',
-    width: 38
+    height: '100%',
+    resizeMode: 'cover',
+    width: '100%'
   },
   // The first letter of the site, for the many that serve no icon at all.
   browserFavouriteInitial: {
