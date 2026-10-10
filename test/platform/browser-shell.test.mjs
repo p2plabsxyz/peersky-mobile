@@ -602,7 +602,7 @@ test('the P2PMD button names the view it takes you to', async () => {
 
 // peersky://p2p is an address the app hands out, and it used to resolve to
 // nothing and come back as an unsupported scheme.
-test('the p2p address lists the built-in apps', async () => {
+test('the p2p address lists the P2P sites this phone has opened', async () => {
   const { BROWSER_P2P_URL, isBrowserP2pUrl } = await import('../../app/browser-shell.mjs')
   const { P2P_APPS } = await import('../../app/internal-apps-registry.mjs')
 
@@ -619,11 +619,13 @@ test('the p2p address lists the built-in apps', async () => {
   const index = await readFile(new URL('../../app/index.tsx', import.meta.url), 'utf8')
   // Typed, or restored with the tab: both land on the same screen.
   assert.equal((index.match(/isBrowserP2pUrl\(/g) || []).length, 2)
-  // Every app people use. Holesail is a development tool and is not listed.
+  // The hyper:// sites from history, searchable by title. The apps are on the
+  // home screen, where Holesail, a development tool, is not listed.
   const p2pStart = index.indexOf("browserSource.kind === 'p2p'")
   const screen = index.slice(p2pStart, index.indexOf("browserSource.kind === 'home'", p2pStart))
   assert.ok(p2pStart > 0 && screen.length > 0)
-  assert.match(screen, /P2P_APPS\.map/)
+  assert.match(screen, /<P2pSitesPage\s+history=\{browserVisitHistory\}/)
+  assert.equal((index.match(/setBrowserTitle\('P2P sites'\)/g) || []).length, 2)
   assert.ok(!P2P_APPS.some((app) => app.id === 'holesail'))
 
   test('following a search result keeps the search behind it', () => {

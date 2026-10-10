@@ -206,6 +206,7 @@ import { MAX_BROWSER_FAVOURITES } from './favourites/browser-favourites.mjs'
 import { HistoryScreen } from './history/HistoryScreen'
 import { getBrowserHistoryDocumentTitle } from './history/browser-history.mjs'
 import { useBrowserHistory } from './history/useBrowserHistory'
+import { P2pSitesPage } from './P2pSitesPage'
 import { DownloadsScreen } from './downloads/DownloadsScreen'
 import {
   describeBrowserDownload,
@@ -1305,7 +1306,7 @@ export default function App () {
     if (isBrowserP2pUrl(nextUrl)) {
       cancelPendingBrowserLoad()
       commitBrowserEntry(BROWSER_P2P_URL, { kind: 'p2p' })
-      setBrowserTitle('P2P apps')
+      setBrowserTitle('P2P sites')
       return
     }
 
@@ -1354,7 +1355,7 @@ export default function App () {
 
     if (isBrowserP2pUrl(url)) {
       replaceBrowserEntry(BROWSER_P2P_URL, { kind: 'p2p' })
-      setBrowserTitle('P2P apps')
+      setBrowserTitle('P2P sites')
       return
     }
 
@@ -4411,45 +4412,11 @@ export default function App () {
 
         {browserSource.kind === 'p2p'
           ? (
-            <ScrollView
-              style={styles.browserContentPage}
-              contentContainerStyle={styles.browserHome}
-              keyboardDismissMode='on-drag'
-            >
-              {/* Every built-in app people use. Holesail is a development
-                  tool and is only reachable by address in a debug build. */}
-              <View style={styles.browserShortcutGrid}>
-                {P2P_APPS.map((app) => (
-                  <Pressable
-                    key={app.id}
-                    accessibilityRole='button'
-                    accessibilityLabel={`Open ${app.title}`}
-                    style={styles.browserShortcut}
-                    onPress={() => void loadBrowserUrl(app.url)}
-                  >
-                    <View style={styles.browserShortcutIconFrame}>
-                      <View style={[
-                        styles.browserShortcutIcon,
-                        app.iconSource ? null : getRuntimeAppIconStyle(app.id)
-                      ]}>
-                        {app.iconSource
-                          ? <Image source={app.iconSource} style={styles.browserShortcutIconImage} />
-                          : <Text style={styles.browserShortcutIconText}>{app.icon}</Text>}
-                      </View>
-                    </View>
-                    <Text
-                      numberOfLines={2}
-                      style={[
-                        styles.browserShortcutTitle,
-                        { color: browserChrome.text, fontSize: browserShortcutTitleFontSize }
-                      ]}
-                    >
-                      {app.title}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
-            </ScrollView>
+            <P2pSitesPage
+              history={browserVisitHistory}
+              palette={browserChrome}
+              onOpen={(targetUrl) => void loadBrowserUrl(targetUrl)}
+            />
             )
           : browserSource.kind === 'home'
           ? null
