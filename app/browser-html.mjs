@@ -172,6 +172,7 @@ function createBrowserDocumentHtml (title, body, isDark = false) {
     color: ${theme.muted};
     font-size: 1rem;
     margin: 0 0 18px;
+    overflow-wrap: anywhere;
   }
   .address {
     color: ${theme.muted};

@@ -79,7 +79,8 @@ function isPeerUrl (targetUrl) {
 
 // The host on its own, because that is the part somebody recognises. A peer
 // address has a key for a host, which nobody recognises, so those say what it
-// is instead of showing sixty four characters of hex.
+// is instead of showing sixty four characters of hex, or the fifty two of
+// z-base-32 that the desktop and most shared links write a drive key in.
 function describeSite (targetUrl) {
   const value = String(targetUrl || '').trim()
   if (!value) return 'this page'
@@ -87,7 +88,7 @@ function describeSite (targetUrl) {
   try {
     const { host } = new URL(value)
     if (!host) return 'this page'
-    if (isPeerUrl(value) && /^[0-9a-f]{32,}$/i.test(host)) return 'this drive'
+    if (isPeerUrl(value) && /^(?:[0-9a-f]{32,}|[a-z0-9]{52})$/i.test(host)) return 'this drive'
     return host.replace(/^www\./i, '')
   } catch {
     return 'this page'

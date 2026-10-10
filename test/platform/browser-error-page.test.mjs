@@ -24,6 +24,17 @@ describe('a page that would not load', () => {
     // what a key is rather than repeating "this address".
     assert.match(describeBrowserError(key, 'Not Found').body, /^This drive answered, but there is nothing at this address\./)
     assert.match(describeBrowserError(key, 'Request timed out').body, /^This drive did not answer in time\./)
+    // The same kind of key in z-base-32, the way the desktop and most links
+    // write it. It used to land in the sentence whole.
+    const z32 = 'hyper://smhy768hq9d4kyznaeff97ogsz8arswo1crpdubnpfgjxkpqdjjo/map.htm'
+    assert.match(describeBrowserError(z32, 'Not Found').body, /^This drive answered, but there is nothing at this address\./)
+  })
+
+  // A name with no spaces in it, like an IPFS address, is wider than a phone.
+  // Without a wrap the sentence ran off both edges of the screen.
+  test('a long name in the sentence wraps instead of running off the screen', () => {
+    const html = createBrowserErrorHtml(`ipfs://${'b'.repeat(59)}/`, 'socket hang up')
+    assert.match(html, /\.lead \{[^}]*overflow-wrap: anywhere;/)
   })
 
   // The two blocks WebKit names. The first is the device's own filter, which
