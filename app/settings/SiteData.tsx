@@ -86,7 +86,7 @@ export function SiteData ({
 
   function confirmRemoveAll (names: string[]) {
     Alert.alert(
-      `Remove data for ${names.length === 1 ? 'one site' : `all ${names.length} sites`}?`,
+      `Remove data for ${names.length === 1 ? 'one site' : names.length === 2 ? 'both sites' : `all ${names.length} sites`}?`,
       'Their cookies and stored data are removed, so you will be signed out of them.',
       [
         { text: 'Cancel', style: 'cancel' },
