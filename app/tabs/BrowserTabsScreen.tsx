@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
+import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import {
   Animated,
   FlatList,
   Image,
   type ImageSourcePropType,
+  LayoutAnimation,
   Modal,
   PanResponder,
   Platform,
@@ -32,7 +33,7 @@ import MoreIcon from '../../assets/icons/bootstrap/three-dots-vertical.svg'
 import PlusIcon from '../../assets/icons/bootstrap/plus-lg.svg'
 import ShareIcon from '../../assets/icons/bootstrap/arrow-bar-up.svg'
 import CloseIcon from '../../assets/icons/bootstrap/x-lg.svg'
-import { isHorizontalSwipe, shouldCloseOnRelease } from './tab-swipe.mjs'
+import { getTabDropIndex, isHorizontalSwipe, shouldCloseOnRelease } from './tab-swipe.mjs'
 import { formatClosedTabTime } from './recently-closed-time.mjs'
 import { MODAL_ORIENTATIONS } from '../modal-orientations'
 
@@ -98,6 +99,8 @@ type BrowserTabsScreenProps = {
   onPreviewError: (tabId: string) => void
   onReopenClosedTab: (key: string, options?: { restorePlace?: boolean }) => void
   onReopenClosedTabs: (keys: string[]) => void
+  // Moves a tab to where another one is, as dragging it there does.
+  onMoveTab: (tabId: string, toTabId: string) => void
   onShareTabLinks: (tabIds: string[]) => void
   onSwitchTab: (tabId: string) => void
   onToggleView: () => void
@@ -122,6 +125,7 @@ export function BrowserTabsScreen ({
   onPreviewError,
   onReopenClosedTab,
   onReopenClosedTabs,
+  onMoveTab,
   onShareTabLinks,
   onSwitchTab,
   onToggleView
@@ -139,6 +143,33 @@ export function BrowserTabsScreen ({
   const inactiveItems = items.filter((item) => item.isInactive)
   const gridItems = selecting ? items : items.filter((item) => !item.isInactive)
   const [inactiveOpen, setInactiveOpen] = useState(false)
+  // Pressing and holding a tab picks it up. Dragged, it moves there; let go
+  // where it is, and it starts picking tabs instead.
+  const [dragArmedId, setDragArmedId] = useState<string | null>(null)
+  const dragArmedIdRef = useRef<string | null>(null)
+  dragArmedIdRef.current = dragArmedId
+  const draggingRef = useRef(false)
+  const armedIndex = dragArmedId ? gridItems.findIndex((entry) => entry.id === dragArmedId) : -1
+  const liftedRow = armedIndex < 0 ? -1 : Math.floor(armedIndex / (viewMode === 'list' ? 1 : 2))
+
+  function dropTab (item: BrowserTabManagerItem, gesture: { dx: number, dy: number }, size: { width: number, height: number }) {
+    draggingRef.current = false
+    setDragArmedId(null)
+    const from = gridItems.findIndex((entry) => entry.id === item.id)
+    const to = getTabDropIndex({
+      from,
+      dx: gesture.dx,
+      dy: gesture.dy,
+      width: size.width,
+      height: size.height,
+      columns: isList ? 1 : 2,
+      count: gridItems.length
+    })
+    const target = gridItems[to]
+    if (from < 0 || !target || target.id === item.id) return
+    LayoutAnimation.configureNext(LayoutAnimation.create(180, 'easeInEaseOut', 'opacity'))
+    onMoveTab(item.id, target.id)
+  }
 
   function closeInactive () {
     const keys = onCloseTabs(inactiveItems.map((item) => item.id))
@@ -205,6 +236,7 @@ export function BrowserTabsScreen ({
     setMenuOpen(false)
     setToast(null)
     setSelected(null)
+    setDragArmedId(null)
   }, [visible])
 
   // Tabs stay in the order they were opened, newest last, as in Chrome and
@@ -346,6 +378,7 @@ export function BrowserTabsScreen ({
         </View>
             )}
 
+        <LiftedRowContext.Provider value={liftedRow}>
         <FlatList
           ref={listRef}
           key={`browser-tabs-${viewMode}`}
@@ -373,6 +406,10 @@ export function BrowserTabsScreen ({
             }
           }}
           keyExtractor={(item) => item.id}
+          // A picked-up card moves with the finger, not the list under it, and
+          // its row draws over the rows it is dragged across.
+          scrollEnabled={dragArmedId === null}
+          CellRendererComponent={TabRow}
           numColumns={isList ? 1 : 2}
           initialNumToRender={6}
           maxToRenderPerBatch={6}
@@ -385,8 +422,11 @@ export function BrowserTabsScreen ({
           ]}
           renderItem={({ item }) => (
             <SwipeableTabCard
+              armed={dragArmedId === item.id}
               disabled={selecting}
               onClose={() => closeTab(item.id)}
+              onDragStart={() => { draggingRef.current = true }}
+              onDrop={(gesture, size) => dropTab(item, gesture, size)}
               style={[
                 styles.browserTabCard,
                 {
@@ -401,7 +441,11 @@ export function BrowserTabsScreen ({
                 accessibilityLabel={selecting ? `Select ${item.label} tab` : `Open ${item.label} tab`}
                 accessibilityRole={selecting ? 'checkbox' : 'button'}
                 accessibilityState={selecting ? { checked: selected?.has(item.id) } : { selected: item.isActive }}
-                accessibilityHint={selecting ? undefined : 'Press and hold to select several tabs'}
+                accessibilityHint={selecting ? undefined : 'Press and hold to move it, or to select several tabs'}
+                accessibilityActions={selecting ? undefined : [{ name: 'longpress', label: 'Select several tabs' }]}
+                onAccessibilityAction={() => {
+                  if (!selecting) setSelected(new Set([item.id]))
+                }}
                 delayLongPress={350}
                 style={[
                   styles.browserTabCardBody,
@@ -410,7 +454,18 @@ export function BrowserTabsScreen ({
                 onLongPress={() => {
                   if (selecting) return
                   setMenuOpen(false)
-                  setSelected(new Set([item.id]))
+                  draggingRef.current = false
+                  setDragArmedId(item.id)
+                }}
+                onPressOut={() => {
+                  // Let go without dragging: pick tabs, starting with this one.
+                  // After the drag gets the touch, if it does, which happens
+                  // just after this press ends.
+                  setTimeout(() => {
+                    if (dragArmedIdRef.current !== item.id || draggingRef.current) return
+                    setDragArmedId(null)
+                    setSelected(new Set([item.id]))
+                  }, 0)
                 }}
                 onPress={() => selecting ? toggleSelected(item.id) : onSwitchTab(item.id)}
               >
@@ -500,6 +555,7 @@ export function BrowserTabsScreen ({
             </SwipeableTabCard>
           )}
         />
+        </LiftedRowContext.Provider>
         {selecting && (
           <View style={[local.selectionBar, { backgroundColor: palette.shell, borderTopColor: palette.border }]}>
             <SelectionAction
@@ -561,6 +617,22 @@ export function BrowserTabsScreen ({
         </SafeAreaView>
       </SafeAreaProvider>
     </Modal>
+  )
+}
+
+// The row of the tab being dragged, so that row draws above the rest. Rows are
+// separate views in the list, painted in order, so a card dragged downward went
+// under the next row without it.
+const LiftedRowContext = createContext(-1)
+
+// The same component every render: a new one each time would rebuild every
+// card, and drop a drag in the middle of it.
+function TabRow ({ children, index, style, ...props }: { children?: ReactNode, index: number, style?: StyleProp<ViewStyle> }) {
+  const liftedRow = useContext(LiftedRowContext)
+  return (
+    <View {...props} style={[style, liftedRow === index ? local.liftedRow : null]}>
+      {children}
+    </View>
   )
 }
 
@@ -803,33 +875,72 @@ function RecentlyClosedPanel ({
 }
 
 function SwipeableTabCard ({
+  armed = false,
   children,
   disabled = false,
   onClose,
+  onDragStart,
+  onDrop,
   style
 }: {
+  // Picked up by a long press: the next move drags it.
+  armed?: boolean
   children: ReactNode
   // While picking tabs, a sideways drag is not a close.
   disabled?: boolean
   onClose: () => void
+  onDragStart?: () => void
+  onDrop?: (gesture: { dx: number, dy: number }, size: { width: number, height: number }) => void
   style: StyleProp<ViewStyle>
 }) {
   const translateX = useRef(new Animated.Value(0)).current
+  const dragX = useRef(new Animated.Value(0)).current
+  const dragY = useRef(new Animated.Value(0)).current
   const onCloseRef = useRef(onClose)
   onCloseRef.current = onClose
+  const onDragStartRef = useRef(onDragStart)
+  onDragStartRef.current = onDragStart
+  const onDropRef = useRef(onDrop)
+  onDropRef.current = onDrop
   const disabledRef = useRef(disabled)
   disabledRef.current = disabled
+  const armedRef = useRef(armed)
+  armedRef.current = armed
+  const draggingRef = useRef(false)
+  const sizeRef = useRef({ width: 0, height: 0 })
+
+  useEffect(() => {
+    if (armed) return
+    dragX.setValue(0)
+    dragY.setValue(0)
+  }, [armed, dragX, dragY])
 
   const panResponder = useRef(PanResponder.create({
-    onMoveShouldSetPanResponder: (_, gesture) => !disabledRef.current && isHorizontalSwipe(gesture),
+    onMoveShouldSetPanResponder: (_, gesture) => armedRef.current || (!disabledRef.current && isHorizontalSwipe(gesture)),
     // Claim the move before the card's own Pressable sees it, or a swipe that
     // starts on the preview reads as a press.
-    onMoveShouldSetPanResponderCapture: (_, gesture) => !disabledRef.current && isHorizontalSwipe(gesture),
+    onMoveShouldSetPanResponderCapture: (_, gesture) => armedRef.current || (!disabledRef.current && isHorizontalSwipe(gesture)),
     // The FlatList asks for the gesture back as soon as the finger drifts
     // downward. Saying yes is what made a swipe take two or three tries.
     onPanResponderTerminationRequest: () => false,
-    onPanResponderMove: (_, gesture) => translateX.setValue(gesture.dx),
+    onPanResponderGrant: () => {
+      draggingRef.current = armedRef.current
+      if (draggingRef.current) onDragStartRef.current?.()
+    },
+    onPanResponderMove: (_, gesture) => {
+      if (draggingRef.current) {
+        dragX.setValue(gesture.dx)
+        dragY.setValue(gesture.dy)
+        return
+      }
+      translateX.setValue(gesture.dx)
+    },
     onPanResponderRelease: (_, gesture) => {
+      if (draggingRef.current) {
+        draggingRef.current = false
+        onDropRef.current?.({ dx: gesture.dx, dy: gesture.dy }, sizeRef.current)
+        return
+      }
       if (!shouldCloseOnRelease(gesture)) {
         Animated.spring(translateX, {
           toValue: 0,
@@ -851,6 +962,11 @@ function SwipeableTabCard ({
       })
     },
     onPanResponderTerminate: () => {
+      if (draggingRef.current) {
+        draggingRef.current = false
+        onDropRef.current?.({ dx: 0, dy: 0 }, sizeRef.current)
+        return
+      }
       Animated.spring(translateX, {
         toValue: 0,
         useNativeDriver: true
@@ -861,15 +977,26 @@ function SwipeableTabCard ({
   return (
     <Animated.View
       {...panResponder.panHandlers}
+      onLayout={(event) => {
+        sizeRef.current = {
+          width: event.nativeEvent.layout.width,
+          height: event.nativeEvent.layout.height
+        }
+      }}
       style={[
         style,
+        armed ? local.liftedCard : null,
         {
           opacity: translateX.interpolate({
             inputRange: [-200, 0, 200],
             outputRange: [0.25, 1, 0.25],
             extrapolate: 'clamp'
           }),
-          transform: [{ translateX }]
+          transform: [
+            { translateX: Animated.add(translateX, dragX) },
+            { translateY: dragY },
+            { scale: armed ? 1.04 : 1 }
+          ]
         }
       ]}
     >
@@ -934,6 +1061,17 @@ function TabFavicon ({
 }
 
 const local = StyleSheet.create({
+  liftedRow: {
+    elevation: 12,
+    zIndex: 10
+  },
+  liftedCard: {
+    elevation: 12,
+    shadowColor: '#10131a',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.25,
+    shadowRadius: 18
+  },
   inactiveBox: {
     borderRadius: 16,
     borderWidth: 1,

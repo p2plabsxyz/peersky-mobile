@@ -10,7 +10,8 @@ const shell = await readFile(new URL('../../app/index.tsx', import.meta.url), 'u
 
 test('the menu and a long press both start picking tabs, and a tap then picks', () => {
   assert.match(screen, /Select tabs<\/Text>/)
-  assert.match(screen, /onLongPress=\{\(\) => \{\s+if \(selecting\) return\s+setMenuOpen\(false\)\s+setSelected\(new Set\(\[item\.id\]\)\)/)
+  // A long press picks the tab up; let go without dragging, and it is picked.
+  assert.match(screen, /setDragArmedId\(null\)\s+setSelected\(new Set\(\[item\.id\]\)\)/)
   assert.match(screen, /onPress=\{\(\) => selecting \? toggleSelected\(item\.id\) : onSwitchTab\(item\.id\)\}/)
   // A sideways drag is not a close while picking.
   assert.match(screen, /disabled=\{selecting\}/)

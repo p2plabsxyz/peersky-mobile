@@ -76,6 +76,7 @@ import {
   isCurrentBrowserTabEntry,
   isInactiveBrowserTab,
   MAX_BROWSER_TABS,
+  moveBrowserTabState,
   normalizeBrowserPageZoom,
   normalizeBrowserTabTitle,
   parseRecentlyClosedBrowserTabs,
@@ -2494,6 +2495,18 @@ export default function App () {
     if (activeChanged && tab) applyBrowserTab(tab)
   }
 
+  // A tab dragged to where another one is, in the tab list.
+  function onBrowserMoveTab (tabId: string, toTabId: string) {
+    const currentTabsState = browserTabsStateRef.current
+    const toIndex = currentTabsState.tabs.findIndex((item) => item.id === toTabId)
+    if (toIndex < 0) return
+    const nextState = moveBrowserTabState(currentTabsState, tabId, toIndex) as BrowserTabsState
+    if (nextState === currentTabsState) return
+    browserUserInteractedRef.current = true
+    updateBrowserTabsState(nextState)
+    setStatus('Tab moved')
+  }
+
   // The picked tabs' addresses, one per line.
   function onBrowserCopyTabLinks (tabIds: string[]) {
     const urls = getBrowserTabUrls(browserTabsStateRef.current, tabIds) as string[]
@@ -4505,6 +4518,7 @@ export default function App () {
           onPreviewError={clearBrowserTabPreview}
           onReopenClosedTab={onBrowserReopenClosedTab}
           onReopenClosedTabs={onBrowserReopenClosedTabs}
+          onMoveTab={onBrowserMoveTab}
           onShareTabLinks={onBrowserShareTabLinks}
           onSwitchTab={onBrowserSwitchTab}
           onToggleView={onBrowserToggleTabView}
