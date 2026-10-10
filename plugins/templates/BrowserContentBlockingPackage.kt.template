@@ -10,7 +10,8 @@ class BrowserContentBlockingPackage : ReactPackage {
     reactContext: ReactApplicationContext
   ): List<NativeModule> = listOf(
     BrowserContentBlockingModule(reactContext),
-    PeerSkyBrowserDataModule(reactContext)
+    PeerSkyBrowserDataModule(reactContext),
+    PeerSkyHomeScreenModule(reactContext)
   )
 
   override fun createViewManagers(

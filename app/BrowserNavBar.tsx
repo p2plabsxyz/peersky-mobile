@@ -37,6 +37,8 @@ type BrowserNavBarProps = {
   // A website or hyper:// page: one with an article to read, and one to send
   // to your other devices.
   readerActionAvailable: boolean
+  // Android's launcher takes a page as a shortcut; iOS lets only Safari.
+  homeScreenActionAvailable: boolean
   newTabDisabled: boolean
   palette: {
     border: string
@@ -69,6 +71,7 @@ type BrowserNavBarProps = {
   onPrintPage: () => void
   onReaderView: () => void
   onSendToDevices: () => void
+  onAddToHomeScreen: () => void
   onSharePage: () => void
   onToggleBookmark: () => void
   onToggleDesktopView: () => void
@@ -96,6 +99,7 @@ export function BrowserNavBar ({
   menuVisible,
   printActionAvailable,
   readerActionAvailable,
+  homeScreenActionAvailable,
   newTabDisabled,
   palette,
   shareActionAvailable,
@@ -120,6 +124,7 @@ export function BrowserNavBar ({
   onPrintPage,
   onReaderView,
   onSendToDevices,
+  onAddToHomeScreen,
   onSharePage,
   onToggleBookmark,
   onToggleDesktopView,
@@ -284,6 +289,7 @@ export function BrowserNavBar ({
         {...(printActionAvailable ? { onPrintPage: () => afterMenuCloses(onPrintPage) } : {})}
         {...(readerActionAvailable ? { onReaderView: () => afterMenuCloses(onReaderView) } : {})}
         {...(readerActionAvailable ? { onSendToDevices: () => afterMenuCloses(onSendToDevices) } : {})}
+        {...(homeScreenActionAvailable ? { onAddToHomeScreen: () => afterMenuCloses(onAddToHomeScreen) } : {})}
         onSharePage={() => afterMenuCloses(onSharePage)}
         onShow={() => {
           Keyboard.dismiss()

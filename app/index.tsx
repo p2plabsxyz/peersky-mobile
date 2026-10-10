@@ -2991,6 +2991,23 @@ export default function App () {
     }
   }
 
+  // The page as a shortcut on Android's home screen, through the launcher's
+  // own prompt. Not from an incognito tab, where nothing is meant to stay.
+  async function onBrowserAddToHomeScreen () {
+    const homeScreen = NativeModules.PeerSkyHomeScreen as
+      | { addPage?: (url: string, title: string, iconUrl: string | null) => Promise<boolean> }
+      | undefined
+    if (typeof homeScreen?.addPage !== 'function') return
+    const icon = browserFavicon && /^https?:\/\//i.test(browserFavicon) ? browserFavicon : null
+    try {
+      if (!await homeScreen.addPage(browserCurrentUrl, browserTitle, icon)) {
+        setBrowserToast({ id: Date.now(), message: 'This home screen does not take shortcuts' })
+      }
+    } catch {
+      setBrowserToast({ id: Date.now(), message: 'This page could not be added to the home screen' })
+    }
+  }
+
   async function onHolesailStartLive () {
     setIsLoading(true)
     setStatus('Starting Holesail live tunnel...')
@@ -4478,6 +4495,11 @@ export default function App () {
       // nothing to offer on a hyper:// page or one of our own screens.
       printActionAvailable={canPrintBrowserUrl(browserCurrentUrl)}
       readerActionAvailable={canUseReaderView(browserCurrentUrl)}
+      homeScreenActionAvailable={
+        Platform.OS === 'android' &&
+        canUseReaderView(browserCurrentUrl) &&
+        !browserTabsState.tabs.some((tab) => tab.id === browserTabsState.activeTabId && tab.incognito === true)
+      }
       newTabDisabled={browserTabsState.tabs.length >= MAX_BROWSER_TABS}
       palette={browserChrome}
       shareActionAvailable={browserShareActionAvailable}
@@ -4519,6 +4541,7 @@ export default function App () {
       onPrintPage={onBrowserPrintPage}
       onReaderView={onBrowserReaderView}
       onSendToDevices={() => void onBrowserSendToDevices()}
+      onAddToHomeScreen={() => void onBrowserAddToHomeScreen()}
       onSharePage={() => void onBrowserSharePage()}
       onToggleBookmark={onBrowserToggleBookmark}
       onToggleDesktopView={onBrowserToggleDesktopView}

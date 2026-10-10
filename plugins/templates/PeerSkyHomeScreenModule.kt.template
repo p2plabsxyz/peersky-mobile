@@ -1,0 +1,180 @@
+package __PACKAGE_NAME__
+
+import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.Rect
+import android.graphics.Typeface
+import android.net.Uri
+import androidx.core.content.pm.ShortcutInfoCompat
+import androidx.core.content.pm.ShortcutManagerCompat
+import androidx.core.graphics.drawable.IconCompat
+import com.facebook.react.bridge.Promise
+import com.facebook.react.bridge.ReactApplicationContext
+import com.facebook.react.bridge.ReactContextBaseJavaModule
+import com.facebook.react.bridge.ReactMethod
+import com.facebook.react.module.annotations.ReactModule
+import java.io.ByteArrayOutputStream
+import java.net.HttpURLConnection
+import java.net.URI
+import java.net.URL
+import java.security.MessageDigest
+import java.util.concurrent.Executors
+
+// A page on the home screen, opening in PeerSky as a link tapped there would,
+// the way other browsers' Add to Home screen works. The launcher asks the
+// person before anything is added. The icon is the one the page names, or
+// the first letter of its site.
+@ReactModule(name = PeerSkyHomeScreenModule.NAME)
+class PeerSkyHomeScreenModule(
+  private val reactContext: ReactApplicationContext
+) : ReactContextBaseJavaModule(reactContext) {
+  private val worker = Executors.newSingleThreadExecutor()
+
+  override fun getName() = NAME
+
+  @ReactMethod
+  fun addPage(url: String, title: String, iconUrl: String?, promise: Promise) {
+    val page = pageUrl(url)
+    if (page == null) {
+      promise.reject("ERR_PAGE", "This page cannot go on the home screen.")
+      return
+    }
+    if (!ShortcutManagerCompat.isRequestPinShortcutSupported(reactContext)) {
+      promise.reject("ERR_UNSUPPORTED", "This home screen does not take shortcuts.")
+      return
+    }
+    worker.execute {
+      try {
+        val label = shortcutLabel(title, page)
+        val icon = iconUrl?.let(::loadIcon)?.let(::framedIcon) ?: letterIcon(page)
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(page), reactContext, MainActivity::class.java)
+          .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val shortcut = ShortcutInfoCompat.Builder(reactContext, shortcutId(page))
+          .setShortLabel(label.take(MAX_SHORT_LABEL))
+          .setLongLabel(label.take(MAX_LONG_LABEL))
+          .setIcon(IconCompat.createWithAdaptiveBitmap(icon))
+          .setIntent(intent)
+          .build()
+        promise.resolve(ShortcutManagerCompat.requestPinShortcut(reactContext, shortcut, null))
+      } catch (error: Exception) {
+        promise.reject("ERR_SHORTCUT", error.message, error)
+      }
+    }
+  }
+
+  // The page's own icon, as it named it. Nothing is sent but the request: no
+  // cookies go with it. Anything that is not a picture Android can read, an
+  // SVG among them, gets the letter instead.
+  private fun loadIcon(address: String): Bitmap? {
+    if (!address.startsWith("https://") && !address.startsWith("http://")) return null
+    return try {
+      val connection = URL(address).openConnection() as HttpURLConnection
+      connection.connectTimeout = ICON_TIMEOUT_MS
+      connection.readTimeout = ICON_TIMEOUT_MS
+      connection.useCaches = true
+      try {
+        if (connection.responseCode !in 200..299) return null
+        val bytes = ByteArrayOutputStream()
+        connection.inputStream.use { input ->
+          val buffer = ByteArray(16 * 1024)
+          while (true) {
+            val read = input.read(buffer)
+            if (read < 0) break
+            bytes.write(buffer, 0, read)
+            if (bytes.size() > MAX_ICON_BYTES) return null
+          }
+        }
+        val data = bytes.toByteArray()
+        BitmapFactory.decodeByteArray(data, 0, data.size)?.takeIf { it.width >= MIN_ICON_SIZE && it.height >= MIN_ICON_SIZE }
+      } finally {
+        connection.disconnect()
+      }
+    } catch (error: Exception) {
+      null
+    }
+  }
+
+  // On white, in the middle of an adaptive icon, inside the part every
+  // launcher's mask leaves showing.
+  private fun framedIcon(source: Bitmap): Bitmap {
+    val icon = Bitmap.createBitmap(ICON_SIZE, ICON_SIZE, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(icon)
+    canvas.drawColor(Color.WHITE)
+    val inner = (ICON_SIZE * 0.5f).toInt()
+    val scale = inner.toFloat() / maxOf(source.width, source.height)
+    val width = (source.width * scale).toInt()
+    val height = (source.height * scale).toInt()
+    val left = (ICON_SIZE - width) / 2
+    val top = (ICON_SIZE - height) / 2
+    canvas.drawBitmap(source, null, Rect(left, top, left + width, top + height), Paint(Paint.FILTER_BITMAP_FLAG))
+    return icon
+  }
+
+  private fun letterIcon(page: String): Bitmap {
+    val icon = Bitmap.createBitmap(ICON_SIZE, ICON_SIZE, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(icon)
+    canvas.drawColor(LETTER_BACKGROUND)
+    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+      color = Color.WHITE
+      textAlign = Paint.Align.CENTER
+      textSize = ICON_SIZE * 0.3f
+      typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+    }
+    val letter = siteLetter(page)
+    val baseline = ICON_SIZE / 2f - (paint.descent() + paint.ascent()) / 2f
+    canvas.drawText(letter, ICON_SIZE / 2f, baseline, paint)
+    return icon
+  }
+
+  companion object {
+    const val NAME = "PeerSkyHomeScreen"
+    private const val ICON_SIZE = 288
+    private const val MIN_ICON_SIZE = 32
+    private const val MAX_ICON_BYTES = 1024 * 1024
+    private const val ICON_TIMEOUT_MS = 5000
+    private const val MAX_SHORT_LABEL = 25
+    private const val MAX_LONG_LABEL = 50
+    private const val MAX_URL_LENGTH = 8192
+    // PeerSky's blue, #1f6fd1.
+    private const val LETTER_BACKGROUND = 0xFF1F6FD1.toInt()
+
+    internal fun pageUrl(value: String?): String? {
+      val candidate = value?.trim()?.takeIf { it.isNotEmpty() && it.length <= MAX_URL_LENGTH } ?: return null
+      return try {
+        val parsed = URI(candidate)
+        candidate.takeIf {
+          parsed.scheme?.lowercase() in setOf("https", "http", "hyper") &&
+            !parsed.host.isNullOrBlank() &&
+            parsed.userInfo == null
+        }
+      } catch (error: Exception) {
+        null
+      }
+    }
+
+    // The page's title, or its site when it has none worth showing.
+    internal fun shortcutLabel(title: String?, page: String): String {
+      val cleaned = title?.filter { it.code >= 32 && it.code !in 127..159 }?.trim().orEmpty()
+      if (cleaned.isNotEmpty() && cleaned != page) return cleaned
+      return siteName(page)
+    }
+
+    internal fun siteLetter(page: String): String =
+      siteName(page).firstOrNull { it.isLetterOrDigit() }?.uppercase() ?: "P"
+
+    // Stable for a page, so adding it again updates the one already there.
+    internal fun shortcutId(page: String): String {
+      val digest = MessageDigest.getInstance("SHA-256").digest(page.toByteArray())
+      return "page-" + digest.take(8).joinToString("") { "%02x".format(it) }
+    }
+
+    private fun siteName(page: String): String {
+      val host = try { URI(page).host } catch (error: Exception) { null }
+      return host?.removePrefix("www.")?.takeIf { it.isNotEmpty() } ?: page
+    }
+  }
+}

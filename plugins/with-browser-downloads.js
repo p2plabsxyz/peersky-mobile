@@ -83,6 +83,11 @@ module.exports = function withBrowserDownloads (config) {
     )
     writeAndroidSource(
       sourceDirectory,
+      'PeerSkyHomeScreenModule.kt',
+      readAndroidTemplate('PeerSkyHomeScreenModule.kt.template', packageName)
+    )
+    writeAndroidSource(
+      sourceDirectory,
       'PeerSkyAdBlockEngine.kt',
       createAdBlockEngine(packageName)
     )
@@ -110,6 +115,11 @@ module.exports = function withBrowserDownloads (config) {
       testDirectory,
       'PeerSkyWebViewClientTest.kt',
       createWebViewClientTest(packageName)
+    )
+    writeAndroidSource(
+      testDirectory,
+      'PeerSkyHomeScreenModuleTest.kt',
+      readAndroidTemplate('PeerSkyHomeScreenModuleTest.kt.template', packageName)
     )
 
     return androidConfig

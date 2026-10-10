@@ -8,6 +8,7 @@ import DownloadIcon from '../../assets/icons/bootstrap/download.svg'
 import FileTextIcon from '../../assets/icons/bootstrap/file-text.svg'
 import FireIcon from '../../assets/icons/bootstrap/fire.svg'
 import HistoryIcon from '../../assets/icons/bootstrap/clock-history.svg'
+import HouseIcon from '../../assets/icons/bootstrap/house.svg'
 import IncognitoIcon from '../../assets/icons/bootstrap/incognito.svg'
 import PhoneIcon from '../../assets/icons/bootstrap/phone.svg'
 import BookmarksIcon from '../../assets/icons/bootstrap/bookmarks.svg'
@@ -61,6 +62,7 @@ type BrowserOverflowMenuProps = {
   onPrintPage?: () => void
   onReaderView?: () => void
   onSendToDevices?: () => void
+  onAddToHomeScreen?: () => void
   onToggleFavourite?: () => void
   onSharePage?: () => void
   onShow: () => void
@@ -92,6 +94,7 @@ export function BrowserOverflowMenu ({
   onPrintPage,
   onReaderView,
   onSendToDevices,
+  onAddToHomeScreen,
   onToggleFavourite,
   onSharePage,
   onShow,
@@ -179,6 +182,18 @@ export function BrowserOverflowMenu ({
           isDark={isDark}
           label='Send to Your Devices'
           onPress={onSendToDevices}
+        />
+      )
+    }
+    if (onAddToHomeScreen) {
+      pageActions.push(
+        <MenuItem
+          key='home-screen'
+          cardColor={cardColor}
+          icon={<HouseIcon {...iconProps} />}
+          isDark={isDark}
+          label='Add to Home Screen'
+          onPress={onAddToHomeScreen}
         />
       )
     }

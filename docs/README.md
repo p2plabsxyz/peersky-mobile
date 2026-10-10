@@ -33,7 +33,7 @@
   - Cookies and site data listed site by site, to remove one or all
   - Page zoom per tab, desktop view, Reader view, sharing and printing
   - Send a page to your other devices, through your PeerChat chat with yourself
-  - On Android, a link shared from another app opens in PeerSky
+  - On Android, a link shared from another app opens in PeerSky, and a page can go on the home screen
   - Search with DuckDuckGo (default), DuckDuckGo without AI, Startpage, Ecosia, Kagi or your own engine, with suggestions as you type and the other engines a tap away for one search
   - Home screen widgets and quick actions on iPhone
 
