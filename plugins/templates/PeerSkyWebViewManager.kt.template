@@ -251,7 +251,16 @@ class PeerSkyWebViewManager : RNCWebViewManager() {
         )
         handled || dispatchDomTarget(webView)
       }
-      else -> dispatchDomTarget(webView)
+      // A text field keeps its own long press: the cursor, selecting and Paste.
+      WebView.HitTestResult.EDIT_TEXT_TYPE -> false
+      // Text, and anything else, goes on to the WebView, which selects it. The
+      // page is still asked whether a video or picture is under the finger.
+      // Answering true here took every long press, so no text on a page could
+      // be selected and no field offered Paste.
+      else -> {
+        dispatchDomTarget(webView)
+        false
+      }
     }
   }
 
