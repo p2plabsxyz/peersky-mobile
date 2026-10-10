@@ -74,6 +74,7 @@ import {
   getBrowserTabUrls,
   isAppInBrowserTabs,
   isCurrentBrowserTabEntry,
+  isInactiveBrowserTab,
   MAX_BROWSER_TABS,
   normalizeBrowserPageZoom,
   normalizeBrowserTabTitle,
@@ -4398,6 +4399,7 @@ export default function App () {
     borderColor: browserChrome.border,
     color: browserChrome.text
   }
+  const browserTabManagerNow = Date.now()
   const browserTabManagerItems = browserTabsState.tabs.map((tab) => {
     const entry = tab.history[tab.historyIndex]
     const storedPreview = browserTabPreviews.get(tab.id)
@@ -4416,6 +4418,7 @@ export default function App () {
       ),
       id: tab.id,
       isActive: tab.id === browserTabsState.activeTabId,
+      isInactive: isInactiveBrowserTab(tab, browserTabsState.activeTabId, browserTabManagerNow),
       label: tab.incognito ? `Incognito · ${getBrowserTabLabel(tab)}` : getBrowserTabLabel(tab),
       preview
     }

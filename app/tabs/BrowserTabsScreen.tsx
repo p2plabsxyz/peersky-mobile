@@ -22,6 +22,7 @@ import { styles } from '../styles'
 import { BrowserToast, type BrowserToastMessage } from '../BrowserToast'
 import CheckIcon from '../../assets/icons/bootstrap/check2.svg'
 import ChevronLeftIcon from '../../assets/icons/bootstrap/chevron-left.svg'
+import ChevronRightIcon from '../../assets/icons/bootstrap/chevron-right.svg'
 import ClockHistoryIcon from '../../assets/icons/bootstrap/clock-history.svg'
 import CopyIcon from '../../assets/icons/bootstrap/copy.svg'
 import FireIcon from '../../assets/icons/bootstrap/fire.svg'
@@ -46,6 +47,8 @@ type BrowserTabManagerItem = {
   favicon: ImageSourcePropType | string | null
   id: string
   isActive: boolean
+  // Not opened for two weeks. See isInactiveBrowserTab.
+  isInactive: boolean
   label: string
   preview: BrowserTabPreview | null
 }
@@ -131,6 +134,23 @@ export function BrowserTabsScreen ({
   const [selected, setSelected] = useState<Set<string> | null>(null)
   const selecting = selected !== null
   const selectedIds = items.filter((item) => selected?.has(item.id)).map((item) => item.id)
+  // Tabs not opened for two weeks sit in a group of their own at the top,
+  // folded away, as in Firefox. Picking tabs shows them all in the grid.
+  const inactiveItems = items.filter((item) => item.isInactive)
+  const gridItems = selecting ? items : items.filter((item) => !item.isInactive)
+  const [inactiveOpen, setInactiveOpen] = useState(false)
+
+  function closeInactive () {
+    const keys = onCloseTabs(inactiveItems.map((item) => item.id))
+    setInactiveOpen(false)
+    if (keys.length === 0) return
+    setToast({
+      id: Date.now(),
+      message: keys.length === 1 ? 'Inactive tab closed' : `${keys.length} inactive tabs closed`,
+      actionLabel: 'Undo',
+      onAction: () => onReopenClosedTabs(keys)
+    })
+  }
 
   function toggleSelected (tabId: string) {
     setSelected((current) => {
@@ -193,7 +213,7 @@ export function BrowserTabsScreen ({
   const listRef = useRef<FlatList<BrowserTabManagerItem>>(null)
   const scrolledToActiveRef = useRef(false)
   const scrollRetriesRef = useRef(0)
-  const activeIndex = items.findIndex((item) => item.isActive)
+  const activeIndex = gridItems.findIndex((item) => item.isActive)
   const activeRow = activeIndex < 0 ? 0 : isList ? activeIndex : Math.floor(activeIndex / 2)
 
   useEffect(() => {
@@ -329,7 +349,20 @@ export function BrowserTabsScreen ({
         <FlatList
           ref={listRef}
           key={`browser-tabs-${viewMode}`}
-          data={items}
+          data={gridItems}
+          ListHeaderComponent={!selecting && inactiveItems.length > 0
+            ? (
+              <InactiveTabs
+                items={inactiveItems}
+                open={inactiveOpen}
+                palette={palette}
+                onCloseAll={closeInactive}
+                onCloseTab={closeTab}
+                onOpenTab={onSwitchTab}
+                onToggle={() => setInactiveOpen((open) => !open)}
+              />
+              )
+            : null}
           onLayout={scrollToActiveTab}
           onScrollToIndexFailed={({ index, averageItemLength }) => {
             // Rows past the first few are not measured yet: jump near the row,
@@ -585,6 +618,84 @@ function TabsMenu ({
   )
 }
 
+// The group of tabs not opened for two weeks, folded until asked for.
+function InactiveTabs ({
+  items,
+  open,
+  palette,
+  onCloseAll,
+  onCloseTab,
+  onOpenTab,
+  onToggle
+}: {
+  items: BrowserTabManagerItem[]
+  open: boolean
+  palette: BrowserTabsPalette
+  onCloseAll: () => void
+  onCloseTab: (tabId: string) => void
+  onOpenTab: (tabId: string) => void
+  onToggle: () => void
+}) {
+  return (
+    <View style={[local.inactiveBox, { backgroundColor: palette.address, borderColor: palette.border }]}>
+      <Pressable
+        accessibilityRole='button'
+        accessibilityState={{ expanded: open }}
+        style={local.inactiveHeader}
+        onPress={onToggle}
+      >
+        <View style={local.inactiveHeaderCopy}>
+          <Text style={[local.inactiveTitle, { color: palette.text }]}>Inactive tabs ({items.length})</Text>
+          <Text style={[local.inactiveHint, { color: palette.mutedText }]}>Not opened in two weeks</Text>
+        </View>
+        <ChevronRightIcon
+          width={16}
+          height={16}
+          color={palette.mutedText}
+          style={{ transform: [{ rotate: open ? '90deg' : '0deg' }] }}
+        />
+      </Pressable>
+      {open && (
+        <>
+          {items.map((item) => (
+            <View key={item.id} style={[local.inactiveRow, { borderTopColor: palette.border }]}>
+              <Pressable
+                accessibilityLabel={`Open ${item.label} tab`}
+                accessibilityRole='button'
+                style={local.inactiveRowBody}
+                onPress={() => onOpenTab(item.id)}
+              >
+                <TabFavicon favicon={item.favicon} label={item.label} palette={palette} size='header' />
+                <Text numberOfLines={1} style={[local.inactiveRowTitle, { color: palette.text }]}>{item.label}</Text>
+              </Pressable>
+              <Pressable
+                accessibilityLabel={`Close ${item.label}`}
+                accessibilityRole='button'
+                hitSlop={8}
+                style={[styles.browserTabCardClose, local.inactiveRowClose, { backgroundColor: palette.button }]}
+                onPress={() => onCloseTab(item.id)}
+              >
+                <CloseIcon width={15} height={15} color={palette.text} />
+              </Pressable>
+            </View>
+          ))}
+          <Pressable
+            accessibilityRole='button'
+            style={({ pressed }) => [
+              local.inactiveCloseAll,
+              { borderTopColor: palette.border },
+              pressed ? { backgroundColor: palette.button } : null
+            ]}
+            onPress={onCloseAll}
+          >
+            <Text style={local.inactiveCloseAllText}>Close all inactive tabs</Text>
+          </Pressable>
+        </>
+      )}
+    </View>
+  )
+}
+
 function SelectionAction ({
   destructive = false,
   disabled,
@@ -823,6 +934,66 @@ function TabFavicon ({
 }
 
 const local = StyleSheet.create({
+  inactiveBox: {
+    borderRadius: 16,
+    borderWidth: 1,
+    overflow: 'hidden'
+  },
+  inactiveHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 12,
+    minHeight: 60,
+    paddingHorizontal: 16,
+    paddingVertical: 10
+  },
+  inactiveHeaderCopy: {
+    flex: 1
+  },
+  inactiveTitle: {
+    fontSize: 15,
+    fontWeight: '800'
+  },
+  inactiveHint: {
+    fontSize: 12,
+    marginTop: 2
+  },
+  inactiveRow: {
+    alignItems: 'center',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    flexDirection: 'row',
+    minHeight: 52,
+    paddingLeft: 16,
+    paddingRight: 12
+  },
+  inactiveRowBody: {
+    alignItems: 'center',
+    flex: 1,
+    flexDirection: 'row',
+    gap: 10,
+    minHeight: 52
+  },
+  inactiveRowTitle: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '600'
+  },
+  inactiveRowClose: {
+    position: 'relative',
+    right: 0,
+    top: 0
+  },
+  inactiveCloseAll: {
+    alignItems: 'center',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    justifyContent: 'center',
+    minHeight: 50
+  },
+  inactiveCloseAllText: {
+    color: '#d44a3a',
+    fontSize: 14,
+    fontWeight: '700'
+  },
   selectionHeaderActions: {
     alignItems: 'center',
     flexDirection: 'row',
