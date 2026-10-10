@@ -3978,6 +3978,8 @@ export function PeerChatScreen ({
         onRequestClose={() => setIsScanningInvite(false)}
         visible={isScanningInvite}
       >
+        {/* Its own root view on iOS: without a provider the overlay got no insets. */}
+        <SafeAreaProvider initialMetrics={initialWindowMetrics}>
         <View style={styles.peerchatScanner}>
           {isScanningInvite && (
             <CameraView
@@ -3997,6 +3999,7 @@ export function PeerChatScreen ({
             </Pressable>
           </SafeAreaView>
         </View>
+        </SafeAreaProvider>
       </Modal>
       <Modal
         supportedOrientations={MODAL_ORIENTATIONS}

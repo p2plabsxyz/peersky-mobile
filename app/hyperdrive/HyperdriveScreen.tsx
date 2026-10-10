@@ -15,7 +15,7 @@ import {
   TextInput,
   View
 } from 'react-native'
-import { SafeAreaView } from 'react-native-safe-area-context'
+import { initialWindowMetrics, SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { CameraView, useCameraPermissions } from 'expo-camera'
 import { pickUploadFolder, pickUploads, type UploadAsset } from '../media/upload-gate'
 import ArrowLeftIcon from '../../assets/icons/bootstrap/arrow-left.svg'
@@ -99,6 +99,7 @@ const RECENT_FILTERS: Array<{ id: RecentFilter, label: string }> = [
 ]
 
 export function HyperdriveScreen ({ offlineNetworkAllowed, isDark, isLandscape, onCallRpc, onOpenItem, onOpenLinkDevice, onOpenUrl, onStatus }: Props) {
+  const insets = useSafeAreaInsets()
   const [recents, setRecents] = useState<HyperdriveItem[]>(loadHyperdriveRecents)
   // Settings, P2P Data clears recents with this screen still open underneath.
   useEffect(() => onHyperdriveRecentsCleared(() => setRecents(loadHyperdriveRecents())), [])
@@ -677,6 +678,8 @@ export function HyperdriveScreen ({ offlineNetworkAllowed, isDark, isLandscape, 
       />
 
       <Modal supportedOrientations={MODAL_ORIENTATIONS} visible={isScanning} animationType='fade' onRequestClose={() => setIsScanning(false)}>
+        {/* Its own root view on iOS: without a provider the overlay got no insets. */}
+        <SafeAreaProvider initialMetrics={initialWindowMetrics}>
         <View style={styles.scanner}>
           {isScanning && (
             <CameraView
@@ -699,11 +702,14 @@ export function HyperdriveScreen ({ offlineNetworkAllowed, isDark, isLandscape, 
               <View style={[styles.scanCorner, styles.scanBottomRight]} />
             </View>
             <Text style={styles.scanHint}>Align the Hyper QR code inside the frame</Text>
-            <Pressable style={styles.scannerClose} onPress={() => setIsScanning(false)}>
+            {/* Placed absolutely, it ignores the safe area's padding, so the
+                insets are added here or it sits on the status bar. */}
+            <Pressable style={[styles.scannerClose, { right: 16 + insets.right, top: 12 + insets.top }]} onPress={() => setIsScanning(false)}>
               <Text style={styles.scannerCloseText}>Cancel</Text>
             </Pressable>
           </SafeAreaView>
         </View>
+        </SafeAreaProvider>
       </Modal>
     </>
   )

@@ -1,6 +1,6 @@
 import { type ReactNode, useEffect, useState } from 'react'
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native'
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
+import { initialWindowMetrics, SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { WebView } from 'react-native-webview'
 import DisplayIcon from '../assets/icons/bootstrap/display.svg'
 import DownloadIcon from '../assets/icons/bootstrap/download.svg'
@@ -61,6 +61,10 @@ export function BrowserMediaSheet ({
         visible={true}
         onRequestClose={() => setPreviewVisible(false)}
       >
+        {/* A Modal is its own root view on iOS, so a bare SafeAreaView inside
+            it reports no top inset and the close button sat under the status
+            bar. Its own provider gives it real insets. */}
+        <SafeAreaProvider initialMetrics={initialWindowMetrics}>
         <SafeAreaView style={[styles.preview, isDark ? darkStyles.preview : null]}>
           <View style={[styles.previewHeader, isDark ? darkStyles.border : null]}>
             <Text numberOfLines={1} style={[styles.previewTitle, isDark ? darkStyles.primaryText : null]}>
@@ -84,6 +88,7 @@ export function BrowserMediaSheet ({
             style={styles.previewWebView}
           />
         </SafeAreaView>
+        </SafeAreaProvider>
       </Modal>
     )
   }

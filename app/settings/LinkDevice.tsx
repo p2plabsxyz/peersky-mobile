@@ -19,7 +19,7 @@ import {
   TextInput,
   View
 } from 'react-native'
-import { SafeAreaView } from 'react-native-safe-area-context'
+import { initialWindowMetrics, SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context'
 import type { SvgProps } from 'react-native-svg'
 import {
   RPC_BACKUP_CREATE,
@@ -677,6 +677,8 @@ function SyncSheet ({
         visible={scanning}
         onRequestClose={() => setScanning(false)}
       >
+        {/* Its own root view on iOS: without a provider the overlay got no insets. */}
+        <SafeAreaProvider initialMetrics={initialWindowMetrics}>
         <View style={styles.scanner}>
           {scanning && (
             <CameraView
@@ -697,6 +699,7 @@ function SyncSheet ({
             </Pressable>
           </SafeAreaView>
         </View>
+        </SafeAreaProvider>
       </Modal>
     </SheetFrame>
   )

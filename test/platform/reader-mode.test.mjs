@@ -81,6 +81,9 @@ test('the reader page allows no scripts and no forms, and follows the chosen siz
 test('the reader view runs no scripts and opens links in the tab', async () => {
   const view = await readFile(new URL('../../app/reader/ReaderView.tsx', import.meta.url), 'utf8')
   assert.match(view, /javaScriptEnabled=\{false\}/)
+  // Its own insets, since a Modal does not get the app's: the close button sat
+  // under the status bar without them.
+  assert.match(view, /<SafeAreaProvider initialMetrics=\{initialWindowMetrics\}>/)
   assert.match(view, /onOpenLink\(request\.url\)/)
   const menu = await readFile(new URL('../../app/settings/BrowserOverflowMenu.tsx', import.meta.url), 'utf8')
   assert.match(menu, /label='Reader View'/)

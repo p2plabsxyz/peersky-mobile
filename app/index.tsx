@@ -33,7 +33,7 @@ import * as Crypto from 'expo-crypto'
 import { CameraView, useCameraPermissions } from 'expo-camera'
 import { File, Paths } from 'expo-file-system'
 import { useNetworkState } from 'expo-network'
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
+import { initialWindowMetrics, SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import b4a from 'b4a'
 import RPC from 'bare-rpc'
 import { WebView } from 'react-native-webview'
@@ -5289,6 +5289,8 @@ export default function App () {
                       onRequestClose={() => setIsP2pmdScanning(false)}
                       visible={isP2pmdScanning}
                     >
+                      {/* Its own root view on iOS: without a provider the overlay got no insets. */}
+                      <SafeAreaProvider initialMetrics={initialWindowMetrics}>
                       <View style={styles.p2pmdScanner}>
                         <CameraView
                           barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
@@ -5306,15 +5308,18 @@ export default function App () {
                             <View style={[styles.p2pmdScanCorner, styles.p2pmdScanBottomRight]} />
                           </View>
                           <Text style={styles.p2pmdScanHint}>Align the P2PMD room QR code inside the frame</Text>
+                          {/* Placed absolutely, it ignores the safe area's padding, so the
+                              insets are added here or it sits on the status bar. */}
                           <Pressable
                             accessibilityRole='button'
                             onPress={() => setIsP2pmdScanning(false)}
-                            style={styles.p2pmdScannerClose}
+                            style={[styles.p2pmdScannerClose, { right: 16 + browserInsets.right, top: 12 + browserInsets.top }]}
                           >
                             <Text style={styles.p2pmdScannerCloseText}>Cancel</Text>
                           </Pressable>
                         </SafeAreaView>
                       </View>
+                      </SafeAreaProvider>
                     </Modal>
                   </View>
                 )}
