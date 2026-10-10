@@ -30,7 +30,7 @@
   - Tabs that come back after a restart, and incognito tabs
   - Recently closed tabs, Undo after closing, inactive tabs folded away after two weeks, picking several tabs to copy, share or close, and dragging tabs into order
   - Bookmarks in folders, favourites, history and downloads
-  - Page zoom per tab, desktop view, sharing and printing
+  - Page zoom per tab, desktop view, Reader view, sharing and printing
   - Search with DuckDuckGo (default), DuckDuckGo without AI, Startpage, Ecosia, Kagi or your own engine, with suggestions as you type and the other engines a tap away for one search
   - Home screen widgets and quick actions on iPhone
 

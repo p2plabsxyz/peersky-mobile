@@ -33,6 +33,8 @@ type BrowserNavBarProps = {
   isHome: boolean
   menuVisible: boolean
   printActionAvailable: boolean
+  // A website or hyper:// page, which has an article to read.
+  readerActionAvailable: boolean
   newTabDisabled: boolean
   palette: {
     border: string
@@ -63,6 +65,7 @@ type BrowserNavBarProps = {
   onOpenTabs: () => void
   onOpenZoom: () => void
   onPrintPage: () => void
+  onReaderView: () => void
   onSharePage: () => void
   onToggleBookmark: () => void
   onToggleDesktopView: () => void
@@ -89,6 +92,7 @@ export function BrowserNavBar ({
   isHome,
   menuVisible,
   printActionAvailable,
+  readerActionAvailable,
   newTabDisabled,
   palette,
   shareActionAvailable,
@@ -111,6 +115,7 @@ export function BrowserNavBar ({
   onOpenTabs,
   onOpenZoom,
   onPrintPage,
+  onReaderView,
   onSharePage,
   onToggleBookmark,
   onToggleDesktopView,
@@ -272,6 +277,7 @@ export function BrowserNavBar ({
           onOpenZoom()
         }}
         {...(printActionAvailable ? { onPrintPage: () => afterMenuCloses(onPrintPage) } : {})}
+        {...(readerActionAvailable ? { onReaderView: () => afterMenuCloses(onReaderView) } : {})}
         onSharePage={() => afterMenuCloses(onSharePage)}
         onShow={() => {
           Keyboard.dismiss()

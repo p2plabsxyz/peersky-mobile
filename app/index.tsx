@@ -213,6 +213,8 @@ import {
 } from './bookmarks/browser-favicon.mjs'
 import { useBrowserBookmarks } from './bookmarks/useBrowserBookmarks'
 import { BookmarkFolderSheet } from './bookmarks/BookmarkFolderSheet'
+import { canUseReaderView, createReaderScript, parseReaderMessage } from './reader/reader-mode.mjs'
+import { ReaderView, type ReaderArticle } from './reader/ReaderView'
 import { useBrowserFavourites } from './favourites/useBrowserFavourites'
 import { BrowserFavourites } from './favourites/BrowserFavourites'
 import { MAX_BROWSER_FAVOURITES } from './favourites/browser-favourites.mjs'
@@ -556,6 +558,9 @@ export default function App () {
   const [browserDownloadsVisible, setBrowserDownloadsVisible] = useState(false)
   // What just happened, said near the bottom, with Undo where it can be.
   const [browserToast, setBrowserToast] = useState<BrowserToastMessage | null>(null)
+  // The article Reader view is showing, from the page it came from.
+  const [readerPage, setReaderPage] = useState<{ article: ReaderArticle, pageUrl: string, incognito: boolean } | null>(null)
+  const [readerTextScale, setReaderTextScale] = useState(100)
   // Tabs closed lately, to open again. Kept across restarts, cleared with
   // history and by Burn.
   const [recentlyClosedTabs, setRecentlyClosedTabs] = useState<ClosedBrowserTab[]>([])
@@ -2936,6 +2941,20 @@ export default function App () {
     webView.injectJavaScript(createBrowserPrintScript(token))
   }
 
+  // The same round trip as printing: ask the tab for its article, and show
+  // what comes back in Reader view.
+  function onBrowserReaderView () {
+    const tabId = browserTabsStateRef.current.activeTabId
+    const token = browserMediaTokensRef.current.get(tabId)
+    const webView = browserWebViewRefs.current.get(tabId)
+
+    if (!token || !webView) {
+      setBrowserToast({ id: Date.now(), message: 'Reader view is not available on this page' })
+      return
+    }
+    webView.injectJavaScript(createReaderScript(token))
+  }
+
   async function onHolesailStartLive () {
     setIsLoading(true)
     setStatus('Starting Holesail live tunnel...')
@@ -4414,6 +4433,7 @@ export default function App () {
       // Both systems print from a URL the printer fetches itself, so there is
       // nothing to offer on a hyper:// page or one of our own screens.
       printActionAvailable={canPrintBrowserUrl(browserCurrentUrl)}
+      readerActionAvailable={canUseReaderView(browserCurrentUrl)}
       newTabDisabled={browserTabsState.tabs.length >= MAX_BROWSER_TABS}
       palette={browserChrome}
       shareActionAvailable={browserShareActionAvailable}
@@ -4453,6 +4473,7 @@ export default function App () {
       }}
       onOpenZoom={() => setBrowserZoomVisible(true)}
       onPrintPage={onBrowserPrintPage}
+      onReaderView={onBrowserReaderView}
       onSharePage={() => void onBrowserSharePage()}
       onToggleBookmark={onBrowserToggleBookmark}
       onToggleDesktopView={onBrowserToggleDesktopView}
@@ -5503,6 +5524,20 @@ export default function App () {
                   return
                 }
 
+                const readerArticle = parseReaderMessage(
+                  event.nativeEvent.data,
+                  browserMediaToken
+                ) as ReaderArticle | null
+                if (readerArticle) {
+                  if (browserTabsStateRef.current.activeTabId !== tab.id) return
+                  if (readerArticle.ok) {
+                    setReaderPage({ article: readerArticle, pageUrl, incognito: tabIncognito })
+                  } else {
+                    setBrowserToast({ id: Date.now(), message: 'This page has no article to show in Reader view' })
+                  }
+                  return
+                }
+
                 const favicon = parseBrowserFaviconMessage(event.nativeEvent.data, pageUrl)
                 if (favicon === undefined) return
 
@@ -5571,6 +5606,20 @@ export default function App () {
               setBrowserToast({ id: Date.now(), message: `Saved in ${title}` })
             }
           }}
+        />
+        <ReaderView
+          article={readerPage?.article || null}
+          incognitoSession={readerPage?.incognito ? browserIncognitoSession : null}
+          isDark={browserIsDark}
+          pageUrl={readerPage?.pageUrl || ''}
+          textScale={readerTextScale}
+          onClose={() => setReaderPage(null)}
+          onOpenLink={(url) => {
+            setReaderPage(null)
+            setBrowserAddress(url)
+            void loadBrowserUrl(url)
+          }}
+          onTextScaleChange={setReaderTextScale}
         />
         </View>
         <BrowserBackSwipe

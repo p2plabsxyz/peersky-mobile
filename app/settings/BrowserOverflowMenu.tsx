@@ -5,6 +5,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import CheckIcon from '../../assets/icons/bootstrap/check2.svg'
 import DisplayIcon from '../../assets/icons/bootstrap/display.svg'
 import DownloadIcon from '../../assets/icons/bootstrap/download.svg'
+import FileTextIcon from '../../assets/icons/bootstrap/file-text.svg'
 import FireIcon from '../../assets/icons/bootstrap/fire.svg'
 import HistoryIcon from '../../assets/icons/bootstrap/clock-history.svg'
 import IncognitoIcon from '../../assets/icons/bootstrap/incognito.svg'
@@ -55,6 +56,7 @@ type BrowserOverflowMenuProps = {
   onOpenSettings: () => void
   onOpenZoom?: () => void
   onPrintPage?: () => void
+  onReaderView?: () => void
   onToggleFavourite?: () => void
   onSharePage?: () => void
   onShow: () => void
@@ -84,6 +86,7 @@ export function BrowserOverflowMenu ({
   onOpenSettings,
   onOpenZoom,
   onPrintPage,
+  onReaderView,
   onToggleFavourite,
   onSharePage,
   onShow,
@@ -162,6 +165,18 @@ export function BrowserOverflowMenu ({
         onPress={onSharePage}
       />
     )
+    if (onReaderView) {
+      pageActions.push(
+        <MenuItem
+          key='reader'
+          cardColor={cardColor}
+          icon={<FileTextIcon {...iconProps} />}
+          isDark={isDark}
+          label='Reader View'
+          onPress={onReaderView}
+        />
+      )
+    }
     if (onOpenZoom) {
       pageActions.push(
         <MenuItem
