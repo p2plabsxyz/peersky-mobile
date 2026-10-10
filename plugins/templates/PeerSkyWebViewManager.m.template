@@ -136,6 +136,22 @@ static WKWebsiteDataStore *PeerSkyIncognitoStoreForSession(NSString *session)
   return PeerSkyIncognitoStore;
 }
 
+// Pages are told this is a browser, in the words Safari uses. A WKWebView's
+// user agent stopped at "Mobile/15E148", with no Version or Safari, which is
+// how the in-app browsers of other apps look, and sites served those cut-down
+// pages or asked to be opened in Safari. Safari names the system's version;
+// on an iPad it is the desktop Safari that asks for desktop pages.
+static NSString *PeerSkyBrowserApplicationName(void)
+{
+  NSArray<NSString *> *parts = [UIDevice.currentDevice.systemVersion componentsSeparatedByString:@"."];
+  NSString *version = [NSString stringWithFormat:@"%@.%@",
+    parts.count > 0 ? parts[0] : @"18",
+    parts.count > 1 ? parts[1] : @"0"];
+  return UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad
+    ? [NSString stringWithFormat:@"Version/%@ Safari/605.1.15", version]
+    : [NSString stringWithFormat:@"Version/%@ Mobile/15E148 Safari/604.1", version];
+}
+
 @implementation PeerSkyWebViewImpl
 
 // With Force dark mode on, pages are told the reader prefers dark, so a site
@@ -150,6 +166,9 @@ static WKWebsiteDataStore *PeerSkyIncognitoStoreForSession(NSString *session)
 - (WKWebViewConfiguration *)setUpWkWebViewConfig
 {
   WKWebViewConfiguration *configuration = [super setUpWkWebViewConfig];
+  // In place of WebKit's own name, not after it. Desktop view's user agent
+  // replaces the whole string, this included.
+  configuration.applicationNameForUserAgent = PeerSkyBrowserApplicationName();
   if (self.incognito && PeerSkyIsIncognitoSession(self.incognitoSession)) {
     configuration.websiteDataStore = PeerSkyIncognitoStoreForSession(self.incognitoSession);
   } else if (self.hyperSession) {
