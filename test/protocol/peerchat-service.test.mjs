@@ -10,11 +10,13 @@ import {
   MAX_PEERCHAT_ROOM_STORAGE_BYTES,
   PeerChatService
 } from '../../backend/peerchat/service.mjs'
+import crypto from 'hypercore-crypto'
 import {
   derivePeerChatTopic,
   encryptPeerChatMessage,
   MAX_PEERCHAT_FRAME_BYTES
 } from '../../backend/peerchat/protocol.mjs'
+import { signMessage } from '../../backend/peerchat/message-signature.mjs'
 import { checkRoomProof, roomProof } from '../../backend/peerchat/room-proof.mjs'
 import { PRE_JOINED_PEERCHAT_ROOM_KEY } from '../../backend/peerchat/rooms.mjs'
 
@@ -661,15 +663,23 @@ test('PeerChat filters synced history without escalating the relaying peer', asy
   const peer = createFakePeer('desktop-peer', 'Desktop')
   peer.initialSyncCount = 0
 
+  // Somebody else's history counts only signed by its author.
+  const author = crypto.keyPair(Buffer.alloc(32, 3))
+  const authorId = author.publicKey.toString('hex').slice(0, 8)
+  const topic = derivePeerChatTopic(ROOM_KEY).toString('hex')
   for (let index = 0; index < 3; index += 1) {
+    const id = `blocked-sync-${index}`
+    const ts = Date.now() + index
+    const sealed = encryptPeerChatMessage('stfu', ROOM_KEY)
     await service.handlePeerMessage(peer, {
       type: 'sync',
-      id: `blocked-sync-${index}`,
+      id,
       roomKey: ROOM_KEY,
-      sender: 'history-author',
+      sender: authorId,
       sn: 'History author',
-      ...encryptPeerChatMessage('stfu', ROOM_KEY),
-      ts: Date.now() + index
+      ...sealed,
+      ts,
+      ...signMessage({ topic, id, ts, sn: 'History author' }, sealed, author)
     })
   }
   await service.handlePeerMessage(peer, {

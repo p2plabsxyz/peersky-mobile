@@ -206,13 +206,17 @@ test('a removal says who it was by the name the creator gave', () => {
 })
 
 test('a removed person cannot get back in through somebody else s history', () => {
-  const handler = service.slice(service.indexOf('async handlePeerMessage ('))
-  assert.match(handler, /if \(isSync && this\.isPeerIdRemovedFromRoom\(roomKey, normalizePeerChatPeerId\(message\.sender\)\)\) return/)
+  const author = service.slice(service.indexOf('  authorOf ('), service.indexOf('  arrivesInTime ('))
+  // Signed, a removed author's message is refused whoever brings it.
+  assert.match(author, /this\.isAuthorRemoved\(roomKey, signed\.authorId, signed\.author\)/)
+  // Unsigned, somebody else's history cannot name an author at all.
+  assert.match(author, /if \(via === 'sync' && message\.sender !== peer\.id\) return null/)
 
   // Before the message is tracked, or a second copy of it would be dropped as
   // a duplicate rather than refused.
-  const guard = handler.indexOf('isSync && this.isPeerIdRemovedFromRoom')
-  const track = handler.indexOf('!this.trackMessageId(message.id)')
+  const receive = service.slice(service.indexOf('  async receiveChatMessage ('), service.indexOf('  passOn ('))
+  const guard = receive.indexOf('this.authorOf(')
+  const track = receive.indexOf('!this.trackMessageId(message.id)')
   assert.ok(guard > -1 && track > -1 && guard < track)
 })
 

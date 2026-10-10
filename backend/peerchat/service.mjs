@@ -68,6 +68,12 @@ import {
   roomRotates,
   takeKeyGift
 } from './key-chain.mjs'
+import {
+  readSignedMessage,
+  readSignedReaction,
+  signMessage,
+  signReaction
+} from './message-signature.mjs'
 import { collapsePeerChatMembers } from './members.mjs'
 import { nameNotice } from './notice-names.mjs'
 import { mentionsPerson } from './mentions.mjs'
@@ -122,6 +128,15 @@ export const MAX_PEERCHAT_TOTAL_STORAGE_BYTES = 128 * 1024 * 1024
 const LIVE_RATE_WINDOW_MS = 60_000
 const MAX_LIVE_MESSAGES_PER_WINDOW = 120
 const MAX_CONTROL_MESSAGES_PER_WINDOW = 60
+// Messages others pass on arrive on one connection from many people, so they
+// have their own, bigger budget there, and each person's own limit applies to
+// them whichever way they came. See passOn.
+const MAX_PASSED_MESSAGES_PER_WINDOW = 1200
+// Passing on is for what is being said now. Anything older comes in history,
+// which starts at the right time for each person.
+const MAX_PASSED_MESSAGE_AGE_MS = 10 * 60 * 1000
+const MAX_AUTHOR_RATES = 4096
+const MAX_PROVEN_KEYS = 4096
 const MAX_TOPIC_FRAMES_PER_WINDOW = 120
 // Its own budget, so a burst of room traffic on connecting cannot crowd out
 // the one frame that says whether someone is away.
@@ -243,10 +258,15 @@ export class PeerChatService {
     this.peers = new Map()
     this.pendingPeers = new Map()
     this.presence = createPeerPresence()
-    // The pair behind localKey, for signing the removal lists of rooms made
-    // here. Null until read from the store, and for good when the store does
-    // not hold the key this phone connects with.
+    // The pair behind localKey, for signing what this phone writes and the
+    // removal lists of rooms made here. Null until read from the store, and for
+    // good when the store does not hold the key this phone connects with.
     this.signingKeys = null
+    // How much each person has said lately, wherever it came from.
+    this.authorRates = new Map()
+    // The whole key behind each short id, as connections proved them, so a
+    // key ground to match somebody's id cannot sign as them.
+    this.provenKeys = new Map()
     this.presenceTimer = null
     // Away: the app in the background here. Each person in a room with us
     // hears it, and we hear theirs. A desktop is away when its screen is
@@ -847,12 +867,6 @@ export class PeerChatService {
     const keepsFileKey = fileEnc === true && Boolean(this.roomChainFor(normalizedRoomKey)) &&
       typeof fileKey === 'string' && /^[0-9a-f]{64}$/.test(fileKey)
     const ownFileKey = keepsFileKey ? fileKey : ''
-    const encodedPayload = encodeMessagePayload(normalizedMessage, normalizedPreview, ownFileKey)
-    const plaintext = getPeerChatMessageByteLength(encodedPayload) <= MAX_PEERCHAT_MESSAGE_BYTES
-      ? encodedPayload
-      : normalizedMessage
-    const { e, hourKey } = this.sealingKey(normalizedRoomKey)
-    const encrypted = encryptPeerChatMessage(plaintext, normalizedRoomKey, hourKey)
     const normalizedReply = normalizePeerChatReply(replyTo)
     const attachment = normalizePeerChatAttachment({
       message: normalizedMessage,
@@ -860,18 +874,43 @@ export class PeerChatService {
       fileSize,
       fileEnc
     })
+    // A room whose keys rotate keeps the reply and the file's name and size
+    // inside the sealed body. Any other room keeps them next to it, where an
+    // older build looks for them.
+    const sealsDetails = roomRotates(normalizedRoomKey)
+    const details = { ...(normalizedReply && { replyTo: normalizedReply }), ...(attachment || {}) }
+    const outside = sealsDetails ? {} : details
+    // Too long with its preview, it goes without one, but keeps what it needs
+    // to open.
+    let plaintext = encodeMessagePayload(normalizedMessage, normalizedPreview, ownFileKey, sealsDetails && details)
+    if (getPeerChatMessageByteLength(plaintext) > MAX_PEERCHAT_MESSAGE_BYTES) {
+      plaintext = encodeMessagePayload(normalizedMessage, null, ownFileKey, sealsDetails && details)
+    }
+    if (getPeerChatMessageByteLength(plaintext) > MAX_PEERCHAT_MESSAGE_BYTES) plaintext = normalizedMessage
+    const { e, hourKey } = this.sealingKey(normalizedRoomKey)
+    const encrypted = encryptPeerChatMessage(plaintext, normalizedRoomKey, hourKey)
+    const id = createPeerChatMessageId()
+    const ts = Date.now()
+    const sn = this.myName()
+    // Signed, so it can go on through anyone and still prove who wrote it.
+    // See message-signature.mjs.
+    const signed = signMessage(
+      { topic: wireTopic(normalizedRoomKey), id, ts, e, sn, ...outside, fwd: forwarded === true },
+      encrypted,
+      this.signingKeys
+    )
     const entry = {
-      id: createPeerChatMessageId(),
+      id,
       sender: this.localId,
-      sn: this.myName(),
+      sn,
       ...encrypted,
       ...(e !== undefined && { e }),
-      ...(normalizedReply && { replyTo: normalizedReply }),
-      ...(attachment || {}),
+      ...outside,
       // Sent on from another chat: shown as forwarded on every side. A build
       // without this shows it as an ordinary message.
       ...(forwarded === true && { fwd: true }),
-      ts: Date.now()
+      ts,
+      ...(signed || {})
     }
 
     this.trackMessageId(entry.id)
@@ -897,6 +936,15 @@ export class PeerChatService {
       ts: Date.now()
     })
     if (!entry) throw new Error('Invalid PeerChat reaction.')
+    // Signed like a message, so it can go on through anyone.
+    Object.assign(entry, signReaction({
+      topic: wireTopic(normalizedRoomKey),
+      id: entry.id,
+      ts: entry.ts,
+      msgId: entry.msgId,
+      emoji: entry.emoji,
+      sn: entry.sn
+    }, this.signingKeys) || {})
 
     this.trackMessageId(entry.id)
     await this.appendEntry(normalizedRoomKey, entry)
@@ -1107,6 +1155,9 @@ export class PeerChatService {
       initialSyncCount: 0,
       liveRate: { count: 0, resetsAt: Date.now() + LIVE_RATE_WINDOW_MS },
       controlRate: { count: 0, resetsAt: Date.now() + LIVE_RATE_WINDOW_MS },
+      passRate: { count: 0, resetsAt: Date.now() + LIVE_RATE_WINDOW_MS },
+      // Whether its handshake said it takes messages passed on.
+      passes: false,
       pendingMessages: 0,
       processing: Promise.resolve(),
       pingTimer: null,
@@ -1154,6 +1205,7 @@ export class PeerChatService {
     peer.active = true
     this.pendingPeers.delete(peer.connection)
     this.peers.set(peer.connection, peer)
+    if (peer.key) this.rememberProvenKey(peer.id, peer.key)
     this.rememberPeerPresence(peer)
     if (!wasHere) this.idlePeerIds.delete(normalizePeerChatPeerId(peer.id))
     this.bumpVersion()
@@ -1285,6 +1337,8 @@ export class PeerChatService {
       // one dropped, leaving that room shut on this connection.
       if (!this.consumeTopicRate(peer) || !Array.isArray(message.rooms)) return
       peer.handshake = true
+      // A newer build passes messages on and takes them passed on. See passOn.
+      if (message.pass === true) peer.passes = true
       const added = []
       for (const entry of message.rooms.slice(0, MAX_ANNOUNCED_TOPICS)) {
         const topic = typeof entry?.topic === 'string' ? entry.topic.toLowerCase() : ''
@@ -1607,6 +1661,17 @@ export class PeerChatService {
     }
     if (message.type === 'sync-system') return
 
+    // A message somebody passed on, in a wrapper an older build drops. Only a
+    // signed one counts, and it is its author's, not the sender's.
+    if (message.type === 'pass') {
+      if (!this.consumePassRate(peer)) return
+      const inner = message.m
+      if (!inner || typeof inner !== 'object' || Array.isArray(inner)) return
+      if (inner.type === 'reaction') await this.receiveReaction(peer, roomKey, inner, 'pass')
+      else if (inner.type === undefined) await this.receiveChatMessage(peer, roomKey, inner, 'pass')
+      return
+    }
+
     const isReaction = message.type === 'reaction' || message.type === 'sync-reaction'
     if (isReaction) {
       const isSyncReaction = message.type === 'sync-reaction'
@@ -1616,14 +1681,7 @@ export class PeerChatService {
       } else if (!this.consumeLiveRate(peer)) {
         return
       }
-
-      const entry = normalizePeerChatReaction({
-        ...message,
-        sender: isSyncReaction ? message.sender : peer.id,
-        sn: message.sn || peer.username || peer.id
-      })
-      if (!entry || !this.trackMessageId(entry.id)) return
-      await this.appendEntry(roomKey, entry)
+      await this.receiveReaction(peer, roomKey, message, isSyncReaction ? 'sync' : 'live')
       return
     }
 
@@ -1634,14 +1692,75 @@ export class PeerChatService {
     } else if (!this.consumeLiveRate(peer)) {
       return
     }
+    await this.receiveChatMessage(peer, roomKey, message, isSync ? 'sync' : 'live')
+  }
 
+  // Who wrote a message or reaction, or null when it does not count. Signed,
+  // it is its author's wherever it came from, once the signature checks out
+  // and the key is the one that id's connections proved. Unsigned, as an older
+  // build sends, it counts straight from its author's own connection and from
+  // nowhere else: somebody else's history used to name any author it liked,
+  // which is how a message could be faked.
+  authorOf (peer, roomKey, message, via, signed) {
+    if (signed === false) return null
+    if (signed) {
+      if (via === 'live' && signed.author !== peer.key) return null
+      if (this.authorKeyConflicts(signed.authorId, signed.author)) return null
+      if (via !== 'live' && this.isAuthorRemoved(roomKey, signed.authorId, signed.author)) return null
+      if (via !== 'live' && this.moderator.isKicked(signed.authorId, roomKey)) return null
+      return signed.authorId
+    }
+    if (via === 'pass') return null
+    if (via === 'sync' && message.sender !== peer.id) return null
+    return peer.id
+  }
+
+  // Signed history and passed-on messages from before this phone joined are
+  // not its to read, as with the history a peer sends, and passed-on ones are
+  // for what is being said now.
+  arrivesInTime (room, via, ts, signed) {
+    if (via === 'live') return true
+    if (signed && !room.isHost && Number.isFinite(room.joinedAt) && ts < room.joinedAt) return false
+    return via !== 'pass' || ts >= Date.now() - MAX_PASSED_MESSAGE_AGE_MS
+  }
+
+  async receiveReaction (peer, roomKey, message, via) {
     const room = this.rooms.get(roomKey)
+    if (!room) return
+    const signed = readSignedReaction(message, wireTopic(roomKey))
+    const authorId = this.authorOf(peer, roomKey, message, via, signed)
+    if (!authorId) return
+    const source = signed ? signed.header : message
+    const entry = normalizePeerChatReaction({
+      type: 'reaction',
+      id: message.id,
+      msgId: source.msgId,
+      emoji: source.emoji,
+      sender: authorId,
+      sn: source.sn || (via === 'live' ? peer.username : '') || authorId,
+      ts: source.ts
+    })
+    if (!entry || !this.arrivesInTime(room, via, entry.ts, signed)) return
+    if (!this.trackMessageId(entry.id)) return
+    if (via === 'pass' && !this.consumeAuthorRate(roomKey, authorId)) return
+    if (signed) Object.assign(entry, { ak: message.ak, h: message.h, as: message.as })
+    await this.appendEntry(roomKey, entry)
+    if (signed && via !== 'sync') this.passOn(roomKey, entry, peer)
+  }
 
-    // A removed person's old messages can still reach us through somebody
-    // else's history sync, which is how they kept appearing after a removal.
-    if (isSync && this.isPeerIdRemovedFromRoom(roomKey, normalizePeerChatPeerId(message.sender))) return
+  async receiveChatMessage (peer, roomKey, message, via) {
+    const room = this.rooms.get(roomKey)
+    if (!room) return
+    const signed = readSignedMessage(message, wireTopic(roomKey))
+    const authorId = this.authorOf(peer, roomKey, message, via, signed)
+    if (!authorId) return
 
+    const ts = normalizePeerChatTimestamp(signed ? signed.header.ts : message.ts)
+    if (!this.arrivesInTime(room, via, ts, signed)) return
     if (typeof message.id !== 'string' || message.id.length > 128 || !this.trackMessageId(message.id)) return
+    // A copy that comes again from another neighbour stops above, so this
+    // counts each message once.
+    if (via === 'pass' && !this.consumeAuthorRate(roomKey, authorId)) return
 
     let plaintext
     try {
@@ -1654,47 +1773,123 @@ export class PeerChatService {
     const decodedPayload = decodeMessagePayload(plaintext)
     const normalizedMessage = normalizePeerChatMessage(decodedPayload.text)
     if (!normalizedMessage) return
-    const moderation = isSync
+    const source = signed ? signed.header : message
+    const sn = normalizeMemberName(source.sn) || (via === 'live' ? peer.username : '') || authorId
+    const moderation = via === 'sync'
       ? checkPeerChatContent(normalizedMessage, this.moderationFor(room))
-      : this.moderator.checkMessage(peer.id, roomKey, normalizedMessage, {
+      : this.moderator.checkMessage(authorId, roomKey, normalizedMessage, {
         settings: this.moderationFor(room)
       })
     if (moderation.flagged || moderation.allowed === false) {
-      await this.appendModerationNotice(roomKey, message.id, peer, {
+      await this.appendModerationNotice(roomKey, message.id, via === 'live' ? peer : { id: authorId, username: sn }, {
         action: moderation.action || 'warn',
         reason: moderation.reason
-      }, message.ts)
+      }, ts)
       return
     }
 
-    const safePreview = this.sanitizeModeratedPreview(decodedPayload.preview, this.moderationFor(room))
-    const safePlaintext = encodeMessagePayload(normalizedMessage, safePreview, decodedPayload.fileKey)
-    // Kept under the hour it came sealed with, if it had one.
-    const safeEncrypted = safePlaintext === plaintext
-      ? { ct: message.ct, iv: message.iv, tag: message.tag }
-      : encryptPeerChatMessage(safePlaintext, roomKey, this.openingKey(roomKey, message.e))
+    // A signed body is kept as it came, so it can go on and still check out,
+    // and a preview the room's filters hold back is left out when it is read.
+    // An unsigned one is sealed again without it, as before.
+    let sealed = { ct: message.ct, iv: message.iv, tag: message.tag }
+    if (!signed) {
+      const safePreview = this.sanitizeModeratedPreview(decodedPayload.preview, this.moderationFor(room))
+      const safePlaintext = encodeMessagePayload(normalizedMessage, safePreview, decodedPayload.fileKey, decodedPayload)
+      // Kept under the hour it came sealed with, if it had one.
+      if (safePlaintext !== plaintext) sealed = encryptPeerChatMessage(safePlaintext, roomKey, this.openingKey(roomKey, message.e))
+    }
 
-    const normalizedReply = normalizePeerChatReply(message.replyTo)
+    // In a room whose keys rotate these are inside the body, and read from it.
+    const normalizedReply = normalizePeerChatReply(source.replyTo)
     const attachment = normalizePeerChatAttachment({
       message: normalizedMessage,
-      fileName: message.fileName,
-      fileSize: message.fileSize,
-      fileEnc: message.fileEnc
+      fileName: source.fileName,
+      fileSize: source.fileSize,
+      fileEnc: source.fileEnc
     })
     const entry = {
       id: message.id,
-      sender: isSync && typeof message.sender === 'string'
-        ? message.sender.slice(0, 200)
-        : peer.id,
-      sn: normalizeMemberName(message.sn) || peer.username || peer.id,
-      ...safeEncrypted,
+      sender: authorId,
+      sn,
+      ...sealed,
       ...(Number.isSafeInteger(message.e) && { e: message.e }),
       ...(normalizedReply && { replyTo: normalizedReply }),
       ...(attachment || {}),
-      ...(message.fwd === true && { fwd: true }),
-      ts: normalizePeerChatTimestamp(message.ts)
+      ...(source.fwd === true && { fwd: true }),
+      ts,
+      ...(signed && { ak: message.ak, h: message.h, as: message.as })
     }
     await this.appendEntry(roomKey, entry)
+    if (signed && via !== 'sync') this.passOn(roomKey, entry, peer)
+  }
+
+  // A signed message or reaction, sent on once to everyone else here who
+  // passes messages on, but not back where it came from or to its author.
+  // A copy a neighbour already has stops at its first check, so a message
+  // crosses the room in a few steps. It goes in a wrapper an older build
+  // drops, and only to peers whose handshake said they take it.
+  passOn (roomKey, entry, fromPeer) {
+    if (!entry?.as) return
+    const frame = { type: 'pass', roomKey, m: entry }
+    for (const peer of this.peers.values()) {
+      if (peer === fromPeer || !peer.passes || !peer.rooms.includes(roomKey)) continue
+      if (peer.key === entry.ak || this.isPeerRemovedFromRoom(roomKey, peer)) continue
+      this.sendToPeer(peer, frame)
+    }
+  }
+
+  consumePassRate (peer) {
+    const now = Date.now()
+    if (!peer.passRate || now >= peer.passRate.resetsAt) {
+      peer.passRate = { count: 1, resetsAt: now + LIVE_RATE_WINDOW_MS }
+      return true
+    }
+    if (peer.passRate.count >= MAX_PASSED_MESSAGES_PER_WINDOW) return false
+    peer.passRate.count += 1
+    return true
+  }
+
+  // Each person's limit, whichever connection their messages come through. A
+  // limit per connection would block a neighbour who passes on a busy room.
+  consumeAuthorRate (roomKey, authorId) {
+    const key = `${roomKey}:${authorId}`
+    const now = Date.now()
+    const rate = this.authorRates.get(key)
+    if (!rate || now >= rate.resetsAt) {
+      this.authorRates.delete(key)
+      this.authorRates.set(key, { count: 1, resetsAt: now + LIVE_RATE_WINDOW_MS })
+      if (this.authorRates.size > MAX_AUTHOR_RATES) this.authorRates.delete(this.authorRates.keys().next().value)
+      return true
+    }
+    if (rate.count >= MAX_LIVE_MESSAGES_PER_WINDOW) return false
+    rate.count += 1
+    return true
+  }
+
+  rememberProvenKey (id, key) {
+    if (!id || !key) return
+    this.provenKeys.delete(id)
+    this.provenKeys.set(id, key)
+    if (this.provenKeys.size > MAX_PROVEN_KEYS) this.provenKeys.delete(this.provenKeys.keys().next().value)
+  }
+
+  // A short id is 32 bits, so a key can be ground to match somebody's. A
+  // signature from any key but the one that id's connections proved, or ours
+  // for our own id, is not theirs.
+  authorKeyConflicts (authorId, authorKey) {
+    if (authorId === this.localId) return authorKey !== this.localKey
+    const proven = this.provenKeys.get(authorId)
+    if (proven && proven !== authorKey) return true
+    for (const peer of this.peers.values()) {
+      if (peer.id === authorId && peer.key && peer.key !== authorKey && !peer.connection?.destroyed) return true
+    }
+    return false
+  }
+
+  isAuthorRemoved (roomKey, authorId, authorKey) {
+    const room = this.rooms.get(roomKey)
+    if (!room?.bans?.length) return false
+    return isPeerChatPeerBanned(room.bans, { peerId: authorId, connectionKey: authorKey })
   }
 
   consumeLiveRate (peer) {
@@ -1896,7 +2091,7 @@ export class PeerChatService {
       if (proof) rooms.push({ topic, proof })
       if (rooms.length === MAX_ANNOUNCED_TOPICS) break
     }
-    this.sendToPeer(peer, { type: 'topics', rooms })
+    this.sendToPeer(peer, { type: 'topics', rooms, pass: true })
   }
 
   sendProfile (peer) {
@@ -2639,20 +2834,25 @@ export class PeerChatService {
     const payload = decodeMessagePayload(decrypted)
     const message = normalizePeerChatMessage(payload.text)
     if (!message) throw new Error('Invalid PeerChat message payload')
+    // A signed body is kept as it came, so a preview the room's filters hold
+    // back is left out here. In a room whose keys rotate, the reply and the
+    // file's details are inside the body.
+    const preview = this.sanitizeModeratedPreview(payload.preview, this.moderationFor(this.rooms.get(roomKey)))
+    const file = payload.fileName ? payload : entry
     return {
       id: String(entry.id || ''),
       sender,
       senderName: normalizeMemberName(entry.sn) || normalizePeerChatRoomName(sender, 'Peer'),
       message,
-      ...(payload.preview && { preview: payload.preview }),
+      ...(preview && { preview }),
       ...(payload.fileKey && { fileKey: payload.fileKey }),
       ...(normalizePeerChatAttachment({
         message,
-        fileName: entry.fileName,
-        fileSize: entry.fileSize,
-        fileEnc: entry.fileEnc
+        fileName: file.fileName,
+        fileSize: file.fileSize,
+        fileEnc: file.fileEnc
       }) || {}),
-      replyTo: normalizePeerChatReply(entry.replyTo),
+      replyTo: normalizePeerChatReply(payload.replyTo) || normalizePeerChatReply(entry.replyTo),
       ...(entry.fwd === true && { forwarded: true }),
       timestamp: normalizePeerChatTimestamp(entry.ts),
       // From this person's other devices too, so a chat with yourself, or a
