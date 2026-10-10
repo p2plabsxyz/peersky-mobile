@@ -69,13 +69,19 @@ import {
   createBrowserTabsState,
   DEFAULT_BROWSER_PAGE_ZOOM,
   findBrowserTabShowingApp,
+  forgetClosedBrowserTab,
   isAppInBrowserTabs,
   isCurrentBrowserTabEntry,
   MAX_BROWSER_TABS,
   normalizeBrowserPageZoom,
   normalizeBrowserTabTitle,
+  parseRecentlyClosedBrowserTabs,
+  rememberClosedBrowserTabs,
+  reopenClosedBrowserTabState,
   setBrowserTabViewModeState,
   serializeBrowserTabsState,
+  serializeRecentlyClosedBrowserTabs,
+  snapshotClosedBrowserTab,
   suspendInactiveBrowserTabsState,
   switchBrowserTabState,
   touchLiveBrowserTabIds,
@@ -375,10 +381,25 @@ type BrowserTab = {
   desktopView: boolean
   history: BrowserHistoryEntry[]
   historyIndex: number
+  lastOpenedAt?: number
   pageZoom: number
   webCanGoBack: boolean
   webCanGoForward: boolean
   incognito?: boolean
+}
+
+// A closed tab as Recently closed keeps it. See browser-tabs.mjs.
+type ClosedBrowserTab = {
+  key: string
+  closedAt: number
+  title: string
+  url: string
+  history: BrowserHistoryEntry[]
+  historyIndex: number
+  desktopView: boolean
+  pageZoom: number
+  index?: number
+  wasActive?: boolean
 }
 
 type BrowserTabsState = {
@@ -515,6 +536,30 @@ export default function App () {
     removeHistoryItem: removeBrowserHistoryItem
   } = useBrowserHistory()
   const [browserDownloadsVisible, setBrowserDownloadsVisible] = useState(false)
+  // Tabs closed lately, to open again. Kept across restarts, cleared with
+  // history and by Burn.
+  const [recentlyClosedTabs, setRecentlyClosedTabs] = useState<ClosedBrowserTab[]>([])
+  const recentlyClosedTabsRef = useRef<ClosedBrowserTab[]>([])
+  useEffect(() => {
+    try {
+      const file = getRecentlyClosedTabsFile()
+      if (!file.exists) return
+      void file.text().then((text) => {
+        const restored = parseRecentlyClosedBrowserTabs(text) as ClosedBrowserTab[]
+        // Anything closed before the file was read stays on top.
+        const merged = rememberClosedBrowserTabs(restored, [...recentlyClosedTabsRef.current].reverse()) as ClosedBrowserTab[]
+        recentlyClosedTabsRef.current = merged
+        setRecentlyClosedTabs(merged)
+      }).catch((error) => console.warn('Unable to read recently closed tabs:', error))
+    } catch (error) {
+      console.warn('Unable to read recently closed tabs:', error)
+    }
+  }, [])
+  function updateRecentlyClosedTabs (next: ClosedBrowserTab[]) {
+    recentlyClosedTabsRef.current = next
+    setRecentlyClosedTabs(next)
+    writeRecentlyClosedTabs(next)
+  }
   // iOS always can. Android needs a System WebView with profiles.
   const [privateBrowsingSupported, setPrivateBrowsingSupported] = useState(Platform.OS === 'ios')
   useEffect(() => {
@@ -2331,11 +2376,17 @@ export default function App () {
     setStatus('Tab switched')
   }
 
-  function onBrowserCloseTab (tabId: string, returnTo?: string) {
+  function onBrowserCloseTab (tabId: string, returnTo?: string): string | null {
     browserUserInteractedRef.current = true
     const currentTabsState = browserTabsStateRef.current
     const isClosingActive = tabId === currentTabsState.activeTabId
     if (isClosingActive) cancelPendingBrowserLoad()
+    const closingIndex = currentTabsState.tabs.findIndex((item) => item.id === tabId)
+    const closed = snapshotClosedBrowserTab(currentTabsState.tabs[closingIndex], Date.now(), {
+      index: closingIndex,
+      wasActive: isClosingActive
+    }) as ClosedBrowserTab | null
+    if (closed) updateRecentlyClosedTabs(rememberClosedBrowserTabs(recentlyClosedTabsRef.current, [closed]) as ClosedBrowserTab[])
 
     const nextState = closeBrowserTabState(currentTabsState, tabId, returnTo) as BrowserTabsState
     const tab = nextState.tabs.find((item) => item.id === nextState.activeTabId)
@@ -2372,6 +2423,30 @@ export default function App () {
     setBrowserLiveTabIds((tabIds) => tabIds.filter((id) => id !== tabId))
     if (isClosingActive && tab) applyBrowserTab(tab)
     setStatus('Tab closed')
+    return closed ? closed.key : null
+  }
+
+  // From Recently closed: in a tab of its own, on screen. From Undo: back where
+  // it was, with the tab list still open.
+  function onBrowserReopenClosedTab (key: string, { restorePlace = false }: { restorePlace?: boolean } = {}) {
+    const closed = recentlyClosedTabsRef.current.find((item) => item.key === key)
+    if (!closed) return
+    const currentTabsState = browserTabsStateRef.current
+    if (currentTabsState.tabs.length >= MAX_BROWSER_TABS) {
+      Alert.alert('Too many tabs', `Close a tab first. PeerSky keeps up to ${MAX_BROWSER_TABS} open.`)
+      return
+    }
+    browserUserInteractedRef.current = true
+    const nextState = reopenClosedBrowserTabState(currentTabsState, closed, Date.now(), { restorePlace }) as BrowserTabsState
+    if (nextState === currentTabsState) return
+    updateRecentlyClosedTabs(forgetClosedBrowserTab(recentlyClosedTabsRef.current, key) as ClosedBrowserTab[])
+    const activeChanged = nextState.activeTabId !== currentTabsState.activeTabId
+    if (activeChanged) cancelPendingBrowserLoad()
+    updateBrowserTabsState(nextState)
+    const tab = nextState.tabs.find((item) => item.id === nextState.activeTabId)
+    if (activeChanged && tab) applyBrowserTab(tab)
+    if (!restorePlace) setBrowserTabsVisible(false)
+    setStatus('Tab reopened')
   }
 
   function onBrowserResetTabs (clearPreviews = true) {
@@ -2440,6 +2515,7 @@ export default function App () {
     })
     const { previewCacheCleared, sessionSaved } = onBrowserResetTabs()
     const historyCleared = clearBrowserHistory()
+    updateRecentlyClosedTabs([])
     setBrowserTabsVisible(false)
     setBrowserTitle('New tab')
     setStatus(
@@ -2463,6 +2539,11 @@ export default function App () {
           text: 'Close all',
           style: 'destructive',
           onPress: () => {
+            const closedAt = Date.now()
+            const closed = browserTabsStateRef.current.tabs
+              .map((tab, index) => snapshotClosedBrowserTab(tab, closedAt + index, { index }))
+              .filter(Boolean) as ClosedBrowserTab[]
+            updateRecentlyClosedTabs(rememberClosedBrowserTabs(recentlyClosedTabsRef.current, closed) as ClosedBrowserTab[])
             const { previewCacheCleared, sessionSaved } = onBrowserResetTabs()
             setBrowserTabsVisible(false)
             setBrowserTitle('New tab')
@@ -3721,6 +3802,7 @@ export default function App () {
             items={browserVisitHistory}
             onClear={() => {
               if (clearBrowserHistory()) setStatus('Browsing history cleared')
+              updateRecentlyClosedTabs([])
             }}
             onClose={() => setBrowserHistoryVisible(false)}
             onOpen={(targetUrl) => {
@@ -3836,6 +3918,7 @@ export default function App () {
             onClearBrowsingData={() => {
               const { sessionSaved } = onBrowserResetTabs(false)
               const historyCleared = clearBrowserHistory()
+              updateRecentlyClosedTabs([])
               if (sessionSaved && historyCleared) closeBrowserSettings()
               return sessionSaved && historyCleared
             }}
@@ -4319,17 +4402,21 @@ export default function App () {
         {browserPreferences.addressBarPosition === 'top' && browserToolbar}
 
         <BrowserTabsScreen
+          isDark={browserIsDark}
           items={browserTabManagerItems}
           newTabDisabled={browserTabsState.tabs.length >= MAX_BROWSER_TABS}
           palette={browserChrome}
+          recentlyClosed={recentlyClosedTabs}
           viewMode={browserTabsState.viewMode}
           visible={browserTabsVisible}
           onBurnTabs={onBrowserBurnTabs}
+          onClearRecentlyClosed={() => updateRecentlyClosedTabs([])}
           onCloseAllTabs={onBrowserCloseAllTabs}
           onClose={() => setBrowserTabsVisible(false)}
           onCloseTab={onBrowserCloseTab}
           onNewTab={onBrowserNewTab}
           onPreviewError={clearBrowserTabPreview}
+          onReopenClosedTab={onBrowserReopenClosedTab}
           onSwitchTab={onBrowserSwitchTab}
           onToggleView={onBrowserToggleTabView}
         />
@@ -5489,6 +5576,24 @@ function removeIncomingTabs () {
     const file = getIncomingTabsFile()
     if (file.exists) file.delete()
   } catch {}
+}
+
+function getRecentlyClosedTabsFile () {
+  return new File(Paths.document, 'browser-closed-tabs.json')
+}
+
+function writeRecentlyClosedTabs (list: ClosedBrowserTab[]) {
+  try {
+    const file = getRecentlyClosedTabsFile()
+    if (list.length === 0) {
+      if (file.exists) file.delete()
+      return
+    }
+    if (!file.exists) file.create({ intermediates: true })
+    file.write(serializeRecentlyClosedBrowserTabs(list))
+  } catch (error) {
+    console.warn('Unable to save recently closed tabs:', error)
+  }
 }
 
 function writeBrowserSession (state: BrowserTabsState) {

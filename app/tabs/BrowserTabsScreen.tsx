@@ -9,6 +9,7 @@ import {
   PanResponder,
   Platform,
   Pressable,
+  StyleSheet,
   type StyleProp,
   Text,
   UIManager,
@@ -18,12 +19,17 @@ import {
 import { SafeAreaProvider, SafeAreaView, initialWindowMetrics } from 'react-native-safe-area-context'
 import type { BrowserTabPreview } from './useBrowserTabPreviews'
 import { styles } from '../styles'
+import { BrowserToast, type BrowserToastMessage } from '../BrowserToast'
+import ChevronLeftIcon from '../../assets/icons/bootstrap/chevron-left.svg'
+import ClockHistoryIcon from '../../assets/icons/bootstrap/clock-history.svg'
 import FireIcon from '../../assets/icons/bootstrap/fire.svg'
 import GridIcon from '../../assets/icons/bootstrap/grid.svg'
 import ListIcon from '../../assets/icons/bootstrap/list-ul.svg'
+import MoreIcon from '../../assets/icons/bootstrap/three-dots-vertical.svg'
 import PlusIcon from '../../assets/icons/bootstrap/plus-lg.svg'
 import CloseIcon from '../../assets/icons/bootstrap/x-lg.svg'
 import { isHorizontalSwipe, shouldCloseOnRelease } from './tab-swipe.mjs'
+import { formatClosedTabTime } from './recently-closed-time.mjs'
 import { MODAL_ORIENTATIONS } from '../modal-orientations'
 
 const TAB_ACTION_ICON_SIZE = 21
@@ -57,37 +63,58 @@ type TabFaviconProps = {
   size: 'header' | 'preview'
 }
 
+type RecentlyClosedTab = {
+  key: string
+  title: string
+  url: string
+  closedAt: number
+}
+
 type BrowserTabsScreenProps = {
+  isDark: boolean
   items: BrowserTabManagerItem[]
   newTabDisabled: boolean
   palette: BrowserTabsPalette
+  recentlyClosed: RecentlyClosedTab[]
   viewMode: 'grid' | 'list'
   visible: boolean
   onBurnTabs: () => void
+  onClearRecentlyClosed: () => void
   onClose: () => void
   onCloseAllTabs: () => void
-  onCloseTab: (tabId: string) => void
+  // The closed tab's key in Recently closed, for Undo, or null when there is
+  // nothing to bring back.
+  onCloseTab: (tabId: string) => string | null
   onNewTab: () => void
   onPreviewError: (tabId: string) => void
+  onReopenClosedTab: (key: string, options?: { restorePlace?: boolean }) => void
   onSwitchTab: (tabId: string) => void
   onToggleView: () => void
 }
 
 export function BrowserTabsScreen ({
+  isDark,
   items,
   newTabDisabled,
   palette,
+  recentlyClosed,
   viewMode,
   visible,
   onBurnTabs,
+  onClearRecentlyClosed,
   onClose,
   onCloseAllTabs,
   onCloseTab,
   onNewTab,
   onPreviewError,
+  onReopenClosedTab,
   onSwitchTab,
   onToggleView
 }: BrowserTabsScreenProps) {
+  // The tabs, or the list of recently closed ones.
+  const [panel, setPanel] = useState<'tabs' | 'closed'>('tabs')
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [toast, setToast] = useState<BrowserToastMessage | null>(null)
   const isList = viewMode === 'list'
   const actionIconProps = {
     color: palette.text,
@@ -103,7 +130,24 @@ export function BrowserTabsScreen ({
   }
   // The layout animation is configured by the close handler instead: closing
   // the active tab can swap the whole screen, and only the caller knows when.
-  const closeTab = (tabId: string) => onCloseTab(tabId)
+  // A tab closed here can come straight back, as in Firefox.
+  const closeTab = (tabId: string) => {
+    const key = onCloseTab(tabId)
+    if (!key) return
+    setToast({
+      id: Date.now(),
+      message: 'Tab closed',
+      actionLabel: 'Undo',
+      onAction: () => onReopenClosedTab(key, { restorePlace: true })
+    })
+  }
+
+  useEffect(() => {
+    if (visible) return
+    setPanel('tabs')
+    setMenuOpen(false)
+    setToast(null)
+  }, [visible])
 
   // Tabs stay in the order they were opened, newest last, as in Chrome and
   // Safari, and the screen opens on the tab you are on. A long list used to
@@ -147,6 +191,18 @@ export function BrowserTabsScreen ({
           style={[styles.browserTabsScreen, { backgroundColor: palette.shell }]}
           edges={['top', 'left', 'right', 'bottom']}
         >
+        {panel === 'closed'
+          ? (
+            <RecentlyClosedPanel
+              items={recentlyClosed}
+              palette={palette}
+              onBack={() => setPanel('tabs')}
+              onClear={onClearRecentlyClosed}
+              onReopen={(key) => onReopenClosedTab(key)}
+            />
+            )
+          : (
+            <>
         <View style={[styles.browserTabsHeader, { borderBottomColor: palette.border }]}>
           <View>
             <Text style={[styles.browserTabsTitle, { color: palette.text }]}>Tabs</Text>
@@ -173,13 +229,17 @@ export function BrowserTabsScreen ({
             >
               <FireIcon {...primaryActionIconProps} />
             </Pressable>
+            {/* Close all lives in here now, with the tab list's other
+                occasional actions, so the bar keeps four buttons on a
+                narrow phone. */}
             <Pressable
-              accessibilityLabel='Close all tabs'
+              accessibilityLabel='More tab actions'
               accessibilityRole='button'
+              accessibilityState={{ expanded: menuOpen }}
               style={[styles.browserTabsViewButton, { backgroundColor: palette.button }]}
-              onPress={onCloseAllTabs}
+              onPress={() => setMenuOpen((open) => !open)}
             >
-              <CloseIcon {...actionIconProps} />
+              <MoreIcon {...actionIconProps} />
             </Pressable>
             <Pressable
               accessibilityLabel='Open new tab'
@@ -313,9 +373,144 @@ export function BrowserTabsScreen ({
             </SwipeableTabCard>
           )}
         />
+            </>
+            )}
+        {menuOpen && (
+          <TabsMenu
+            palette={palette}
+            recentlyClosedCount={recentlyClosed.length}
+            onClose={() => setMenuOpen(false)}
+            onCloseAll={() => {
+              setMenuOpen(false)
+              onCloseAllTabs()
+            }}
+            onRecentlyClosed={() => {
+              setMenuOpen(false)
+              setPanel('closed')
+            }}
+          />
+        )}
+        <BrowserToast bottom={24} isDark={isDark} toast={toast} onHide={() => setToast(null)} />
         </SafeAreaView>
       </SafeAreaProvider>
     </Modal>
+  )
+}
+
+// The tab list's occasional actions, under the button that opens them.
+function TabsMenu ({
+  palette,
+  recentlyClosedCount,
+  onClose,
+  onCloseAll,
+  onRecentlyClosed
+}: {
+  palette: BrowserTabsPalette
+  recentlyClosedCount: number
+  onClose: () => void
+  onCloseAll: () => void
+  onRecentlyClosed: () => void
+}) {
+  return (
+    <Pressable accessibilityLabel='Close menu' style={StyleSheet.absoluteFill} onPress={onClose}>
+      <View
+        accessibilityRole='menu'
+        style={[local.menu, { backgroundColor: palette.address, borderColor: palette.border }]}
+      >
+        <Pressable
+          accessibilityRole='menuitem'
+          style={({ pressed }) => [local.menuItem, pressed ? { backgroundColor: palette.button } : null]}
+          onPress={onRecentlyClosed}
+        >
+          <ClockHistoryIcon width={18} height={18} color={palette.text} />
+          <Text style={[local.menuText, { color: palette.text }]}>Recently closed tabs</Text>
+          {recentlyClosedCount > 0 && (
+            <Text style={[local.menuCount, { color: palette.mutedText }]}>{recentlyClosedCount}</Text>
+          )}
+        </Pressable>
+        <Pressable
+          accessibilityRole='menuitem'
+          style={({ pressed }) => [local.menuItem, pressed ? { backgroundColor: palette.button } : null]}
+          onPress={onCloseAll}
+        >
+          <CloseIcon width={17} height={17} color={palette.text} />
+          <Text style={[local.menuText, { color: palette.text }]}>Close all tabs</Text>
+        </Pressable>
+      </View>
+    </Pressable>
+  )
+}
+
+// Tabs closed lately, newest first, each one tap from coming back.
+function RecentlyClosedPanel ({
+  items,
+  palette,
+  onBack,
+  onClear,
+  onReopen
+}: {
+  items: RecentlyClosedTab[]
+  palette: BrowserTabsPalette
+  onBack: () => void
+  onClear: () => void
+  onReopen: (key: string) => void
+}) {
+  const now = Date.now()
+  return (
+    <>
+      <View style={[styles.browserTabsHeader, { borderBottomColor: palette.border }]}>
+        <View style={local.panelTitleRow}>
+          <Pressable
+            accessibilityLabel='Back to tabs'
+            accessibilityRole='button'
+            hitSlop={8}
+            style={[styles.browserTabsViewButton, { backgroundColor: palette.button }]}
+            onPress={onBack}
+          >
+            <ChevronLeftIcon width={20} height={20} color={palette.text} />
+          </Pressable>
+          <Text style={[local.panelTitle, { color: palette.text }]}>Recently closed</Text>
+        </View>
+        {items.length > 0 && (
+          <Pressable accessibilityRole='button' hitSlop={8} onPress={onClear}>
+            <Text style={[local.clearText, { color: palette.text }]}>Clear</Text>
+          </Pressable>
+        )}
+      </View>
+      <FlatList
+        data={items}
+        keyExtractor={(item) => item.key}
+        contentContainerStyle={local.closedList}
+        ListEmptyComponent={(
+          <Text style={[local.emptyText, { color: palette.mutedText }]}>
+            Tabs you close show up here, so you can open them again.
+          </Text>
+        )}
+        renderItem={({ item }) => (
+          <Pressable
+            accessibilityLabel={`Open ${item.title} again`}
+            accessibilityRole='button'
+            style={({ pressed }) => [
+              local.closedRow,
+              { backgroundColor: pressed ? palette.button : palette.address, borderColor: palette.border }
+            ]}
+            onPress={() => onReopen(item.key)}
+          >
+            <View style={[styles.browserTabCardHeaderFallback, { backgroundColor: palette.button }]}>
+              <Text style={[styles.browserTabCardHeaderFallbackText, { color: palette.text }]}>
+                {Array.from(item.title || '?')[0]?.toUpperCase()}
+              </Text>
+            </View>
+            <View style={local.closedCopy}>
+              <Text numberOfLines={1} style={[local.closedTitle, { color: palette.text }]}>{item.title}</Text>
+              <Text numberOfLines={1} style={[local.closedUrl, { color: palette.mutedText }]}>
+                {formatClosedTabTime(item.closedAt, now)} · {item.url}
+              </Text>
+            </View>
+          </Pressable>
+        )}
+      />
+    </>
   )
 }
 
@@ -444,3 +639,82 @@ function TabFavicon ({
     </View>
   )
 }
+
+const local = StyleSheet.create({
+  menu: {
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    elevation: 10,
+    paddingVertical: 6,
+    position: 'absolute',
+    right: 16,
+    shadowColor: '#10131a',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.18,
+    shadowRadius: 14,
+    top: 82,
+    width: 250
+  },
+  menuItem: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 12,
+    minHeight: 48,
+    paddingHorizontal: 16
+  },
+  menuText: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: '600'
+  },
+  menuCount: {
+    fontSize: 13,
+    fontWeight: '700'
+  },
+  panelTitleRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 12
+  },
+  panelTitle: {
+    fontSize: 22,
+    fontWeight: '900'
+  },
+  clearText: {
+    fontSize: 15,
+    fontWeight: '700'
+  },
+  closedList: {
+    gap: 10,
+    padding: 16
+  },
+  closedRow: {
+    alignItems: 'center',
+    borderRadius: 14,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 12,
+    minHeight: 62,
+    paddingHorizontal: 14,
+    paddingVertical: 10
+  },
+  closedCopy: {
+    flex: 1,
+    minWidth: 0
+  },
+  closedTitle: {
+    fontSize: 14,
+    fontWeight: '700'
+  },
+  closedUrl: {
+    fontSize: 12,
+    marginTop: 2
+  },
+  emptyText: {
+    fontSize: 14,
+    lineHeight: 20,
+    paddingHorizontal: 8,
+    paddingVertical: 24,
+    textAlign: 'center'
+  }
+})
