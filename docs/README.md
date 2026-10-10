@@ -28,7 +28,7 @@
 
 - [x] Browsing
   - Tabs that come back after a restart, and incognito tabs
-  - Bookmarks, favourites, history and downloads
+  - Bookmarks in folders, favourites, history and downloads
   - Page zoom per tab, desktop view, sharing and printing
   - Search with DuckDuckGo (default), DuckDuckGo without AI, Startpage, Ecosia, Kagi or your own engine
   - Home screen widgets and quick actions on iPhone

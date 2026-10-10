@@ -15,6 +15,12 @@ test('the address bar has a star that bookmarks the page in one tap', () => {
   assert.match(shell, /isBookmarked=\{browserPageIsBookmarked\}\s+onToggleBookmark/)
 })
 
-test('bookmarking says so, and Undo takes it back', () => {
-  assert.match(shell, /message: result === 'added' \? 'Bookmarked' : 'Bookmark removed',\s+actionLabel: 'Undo',\s+onAction: \(\) => \{ toggleBrowserBookmark\(page\) \}/)
+test('bookmarking says so and offers a folder, and removing one can be undone', () => {
+  assert.match(shell, /message: 'Bookmarked',\s+actionLabel: 'Add to folder',\s+onAction: \(\) => setBookmarkFolderUrl\(page\.url\)/)
+  assert.match(shell, /const place = findBrowserBookmark\(page\.url\)\s+const result = toggleBrowserBookmark\(page\)/)
+  assert.match(shell, /message: 'Bookmark removed',\s+actionLabel: 'Undo',\s+onAction: \(\) => \{ if \(place\) restoreBrowserBookmark\(place\) \}/)
+})
+
+test('picking a folder from the toast says where the bookmark went', () => {
+  assert.match(shell, /moveBrowserBookmark\(bookmarkFolderUrl, folderId\)\) \{\s+setBrowserToast\(\{ id: Date\.now\(\), message: `Saved in \$\{title\}` \}\)/)
 })

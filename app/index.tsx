@@ -210,6 +210,7 @@ import {
   parseBrowserFaviconMessage
 } from './bookmarks/browser-favicon.mjs'
 import { useBrowserBookmarks } from './bookmarks/useBrowserBookmarks'
+import { BookmarkFolderSheet } from './bookmarks/BookmarkFolderSheet'
 import { useBrowserFavourites } from './favourites/useBrowserFavourites'
 import { BrowserFavourites } from './favourites/BrowserFavourites'
 import { MAX_BROWSER_FAVOURITES } from './favourites/browser-favourites.mjs'
@@ -510,12 +511,21 @@ export default function App () {
   hyperOfflineNetworkAllowedRef.current = hyperOfflineNetworkAllowed
   const {
     bookmarks: browserBookmarks,
+    createFolder: createBrowserBookmarkFolder,
+    deleteFolder: deleteBrowserBookmarkFolder,
+    findBookmark: findBrowserBookmark,
+    folders: browserBookmarkFolders,
     isReady: browserBookmarksReady,
     isBookmarked: isBrowserPageBookmarked,
+    moveBookmark: moveBrowserBookmark,
     persistenceError: browserBookmarksError,
     removeBookmark: removeBrowserBookmark,
+    renameFolder: renameBrowserBookmarkFolder,
+    restoreBookmark: restoreBrowserBookmark,
     toggleBookmark: toggleBrowserBookmark
   } = useBrowserBookmarks()
+  // A bookmark just made, being put in a folder from its toast.
+  const [bookmarkFolderUrl, setBookmarkFolderUrl] = useState<string | null>(null)
   // The large home screen widget lists the newest few.
   useEffect(() => {
     if (browserBookmarksReady) updateBrowserWidget(browserBookmarks)
@@ -2053,6 +2063,8 @@ export default function App () {
 
   function onBrowserToggleBookmark () {
     const page = { url: browserCurrentUrl, title: browserTitle, favicon: browserFavicon }
+    // Undo puts it back where it was, in its folder.
+    const place = findBrowserBookmark(page.url)
     const result = toggleBrowserBookmark(page)
 
     if (result === 'limit-reached') {
@@ -2061,13 +2073,21 @@ export default function App () {
       Alert.alert('Bookmark limit reached', message)
     } else if (result) {
       setStatus(result === 'added' ? 'Bookmark added' : 'Bookmark removed')
-      // Undo toggles it back, whichever way it went.
-      setBrowserToast({
-        id: Date.now(),
-        message: result === 'added' ? 'Bookmarked' : 'Bookmark removed',
-        actionLabel: 'Undo',
-        onAction: () => { toggleBrowserBookmark(page) }
-      })
+      // A new bookmark can go straight into a folder. A removed one can come
+      // back: the star is a toggle, so adding needs no Undo of its own.
+      setBrowserToast(result === 'added'
+        ? {
+            id: Date.now(),
+            message: 'Bookmarked',
+            actionLabel: 'Add to folder',
+            onAction: () => setBookmarkFolderUrl(page.url)
+          }
+        : {
+            id: Date.now(),
+            message: 'Bookmark removed',
+            actionLabel: 'Undo',
+            onAction: () => { if (place) restoreBrowserBookmark(place) }
+          })
     } else {
       setStatus('Unable to update bookmark')
     }
@@ -3864,10 +3884,15 @@ export default function App () {
         <View style={styles.browserShellContent}>
           <BookmarksScreen
             bookmarks={browserBookmarks}
+            folders={browserBookmarkFolders}
             isDark={browserIsDark}
             isReady={browserBookmarksReady}
             persistenceError={browserBookmarksError}
             onClose={() => setBrowserBookmarksVisible(false)}
+            onCreateFolder={createBrowserBookmarkFolder}
+            onDeleteFolder={deleteBrowserBookmarkFolder}
+            onMoveBookmark={moveBrowserBookmark}
+            onRenameFolder={renameBrowserBookmarkFolder}
             onOpen={(targetUrl) => {
               setBrowserBookmarksVisible(false)
               openFromList('bookmarks', targetUrl)
@@ -5516,6 +5541,19 @@ export default function App () {
           isDark={browserIsDark}
           toast={browserToast}
           onHide={() => setBrowserToast(null)}
+        />
+        <BookmarkFolderSheet
+          currentFolder={browserBookmarks.find((bookmark) => bookmark.url === bookmarkFolderUrl)?.folder || null}
+          folders={browserBookmarkFolders}
+          isDark={browserIsDark}
+          visible={bookmarkFolderUrl !== null}
+          onClose={() => setBookmarkFolderUrl(null)}
+          onCreateFolder={createBrowserBookmarkFolder}
+          onPick={(folderId, title) => {
+            if (bookmarkFolderUrl && moveBrowserBookmark(bookmarkFolderUrl, folderId)) {
+              setBrowserToast({ id: Date.now(), message: `Saved in ${title}` })
+            }
+          }}
         />
         </View>
         <BrowserBackSwipe
