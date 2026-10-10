@@ -3694,9 +3694,12 @@ export function PeerChatScreen ({
               <Text numberOfLines={1} style={[styles.roomTitle, { color: colors.text }]}>{item.name}</Text>
             </View>
             <Text numberOfLines={1} style={[styles.roomPreview, { color: colors.muted }]}>
+              {/* A room with nothing in it yet says so, as the desktop does.
+                  It used to show the start of the room key, which is the
+                  room's secret in an older room. */}
               {item.lastMessage
                 ? `${item.lastMessage.senderName}: ${item.lastMessage.message}`
-                : `${item.roomKey.slice(0, 10)}...`}
+                : 'No messages yet'}
             </Text>
           </View>
           <View style={styles.roomMeta}>

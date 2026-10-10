@@ -34,3 +34,11 @@ test('a row keeps the same height with or without a pin or unread count', () => 
   assert.match(screen, /roomStateRow: \{[^}]*minHeight: 18/)
   assert.match(screen, /roomTime: \{[^}]*minHeight: ROOM_STATE_ICON_SIZE/)
 })
+
+// A room with no messages used to show the start of its room key as its
+// preview, which in an older room is the room's secret. The desktop says
+// "No messages yet", and now the phone does too.
+test('a room with no messages yet says so instead of showing its key', () => {
+  assert.match(screen, /\? `\$\{item\.lastMessage\.senderName\}: \$\{item\.lastMessage\.message\}`\s+: 'No messages yet'/)
+  assert.doesNotMatch(screen, /item\.roomKey\.slice\(0, 10\)/)
+})
