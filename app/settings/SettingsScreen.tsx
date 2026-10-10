@@ -33,6 +33,7 @@ import { Privacy } from './Privacy'
 import { Licenses } from './Licenses'
 import { P2PStorage } from './P2PStorage'
 import { SiteData } from './SiteData'
+import { AddressBarButtonSettings } from './AddressBarButton'
 import {
   SettingCopy,
   SettingsSection,
@@ -40,6 +41,7 @@ import {
   useSettingsDarkMode
 } from './SettingsUI'
 import type {
+  AddressBarButton,
   AddressBarPosition,
   BrowserTheme,
   ExternalLinkBehavior,
@@ -75,6 +77,7 @@ export type SettingsPage =
   | 'about'
   | 'licenses'
   | 'toolbar-button'
+  | 'address-bar-button'
   | 'site-data'
 
 // Pages opened from another page, which back returns to: the licenses from
@@ -82,6 +85,7 @@ export type SettingsPage =
 const SETTINGS_PARENT_PAGES: Partial<Record<SettingsPage, SettingsPage>> = {
   licenses: 'about',
   'toolbar-button': 'appearance',
+  'address-bar-button': 'appearance',
   'site-data': 'data-clearing'
 }
 
@@ -156,6 +160,7 @@ type LANDiscoveryStatus = {
 }
 
 type SettingsScreenProps = {
+  addressBarButton: AddressBarButton
   addressBarPosition: AddressBarPosition
   appLogoColor: string
   forceDarkWebsites: boolean
@@ -185,6 +190,7 @@ type SettingsScreenProps = {
   storagePath: string
   // The sites Android is asked about in Cookies and site data.
   getSiteDataHosts: () => string[]
+  onAddressBarButtonChange: (button: AddressBarButton) => void
   onAddressBarPositionChange: (position: AddressBarPosition) => void
   onAppLogoColorChange: (color: string) => void
   onForceDarkWebsitesChange: (enabled: boolean) => void
@@ -327,6 +333,15 @@ export function SettingsScreen(props: SettingsScreenProps) {
         <ToolbarButtonSettings selected={props.toolbarButton} onSelect={props.onToolbarButtonChange} />
       </SettingsSubpage>
     )
+  } else if (page === 'address-bar-button') {
+    content = (
+      <SettingsSubpage
+        title='Address Bar Button'
+        onBack={() => changePage('appearance', -1)}
+      >
+        <AddressBarButtonSettings selected={props.addressBarButton} onSelect={props.onAddressBarButtonChange} />
+      </SettingsSubpage>
+    )
   } else if (page === 'site-data') {
     content = (
       <SettingsSubpage
@@ -357,7 +372,11 @@ export function SettingsScreen(props: SettingsScreenProps) {
         {page === 'general' && <General {...props} />}
         {page === 'accessibility' && <Accessibility {...props} />}
         {page === 'appearance' && (
-          <Appearance {...props} onOpenToolbarButton={() => changePage('toolbar-button', 1)} />
+          <Appearance
+            {...props}
+            onOpenAddressBarButton={() => changePage('address-bar-button', 1)}
+            onOpenToolbarButton={() => changePage('toolbar-button', 1)}
+          />
         )}
         {page === 'data-clearing' && (
           <DataClearing {...props} onOpenSiteData={() => changePage('site-data', 1)} />

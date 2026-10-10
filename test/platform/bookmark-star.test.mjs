@@ -2,17 +2,17 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
-// Bookmarking a page took opening the menu first. The address bar has a star
-// now, filled when the page is bookmarked, and a toast with Undo.
+// Bookmarking a page took opening the menu first. Add Bookmark can be the
+// address bar's button now, filled when the page is bookmarked, with a toast
+// and Undo. It is a choice rather than a star for everyone.
 
 const toolbar = await readFile(new URL('../../app/BrowserToolbar.tsx', import.meta.url), 'utf8')
 const shell = await readFile(new URL('../../app/index.tsx', import.meta.url), 'utf8')
 
-test('the address bar has a star that bookmarks the page in one tap', () => {
-  assert.match(toolbar, /accessibilityLabel=\{isBookmarked \? 'Remove bookmark' : 'Bookmark page'\}/)
-  assert.match(toolbar, /onPress=\{onToggleBookmark\}/)
-  assert.match(shell, /onToggleBookmark=\{onBrowserToggleBookmark\}/)
-  assert.match(shell, /isBookmarked=\{browserPageIsBookmarked\}\s+onToggleBookmark/)
+test('Add Bookmark in the address bar bookmarks the page in one tap', () => {
+  assert.match(shell, /case 'bookmark':[\s\S]{0,200}label: browserPageIsBookmarked \? 'Remove bookmark' : 'Bookmark page',\s+active: browserPageIsBookmarked,\s+onPress: onBrowserToggleBookmark/)
+  assert.match(toolbar, /accessibilityLabel=\{action\.label\}/)
+  assert.match(toolbar, /onPress=\{action\.onPress\}/)
 })
 
 test('bookmarking says so and offers a folder, and removing one can be undone', () => {

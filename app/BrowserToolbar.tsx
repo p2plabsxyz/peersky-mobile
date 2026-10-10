@@ -14,10 +14,9 @@ import { useSearchSuggestions } from './search/useSearchSuggestions'
 import { dimWhenPressed, ROUND_PRESS, SMALL_ICON_RIPPLE } from './press-feedback'
 import { styles } from './styles'
 import ReloadIcon from '../assets/icons/bootstrap/arrow-clockwise.svg'
-import ShareIcon from '../assets/icons/bootstrap/arrow-bar-up.svg'
-import StarIcon from '../assets/icons/bootstrap/star.svg'
-import StarFillIcon from '../assets/icons/bootstrap/star-fill.svg'
 import ClearIcon from '../assets/icons/bootstrap/x-circle.svg'
+import { ADDRESS_BAR_BUTTON_ACTIVE_ICONS, ADDRESS_BAR_BUTTON_ICONS } from './address-bar-button-icons'
+import type { AddressBarButton } from './settings/useBrowserPreferences'
 
 const ADDRESS_ACTION_ICON_SIZE = 22
 // The shield is a solid glyph filling its box, while reload and share are
@@ -28,9 +27,10 @@ const ADDRESS_SECURITY_ICON_SIZE = 20
 // share arrows do not, so it is drawn at the shield's size to look the
 // same as all three.
 const ADDRESS_CLEAR_ICON_SIZE = ADDRESS_SECURITY_ICON_SIZE
-// The star is drawn as an outline like reload and share, at the size that
-// matches them by eye.
-const ADDRESS_STAR_ICON_SIZE = 20
+// The chosen button's glyph. Share's arrow is an outline like reload, drawn at
+// their size; the others fill their box, so they are drawn a little smaller to
+// match by eye.
+const ADDRESS_BUTTON_ICON_SIZE = 20
 const TOOLBAR_ICON_STROKE_WIDTH = 0.35
 
 // Matches browserToolbar's own paddingHorizontal.
@@ -39,16 +39,23 @@ const TOOLBAR_SIDE_PADDING = 14
 // widget opened it. The keyboard does not come up for a window that is not.
 const FOCUS_REQUEST_DELAY_MS = 350
 
+// The button after reload, whichever one is chosen in Settings, with what it
+// does on this page. None when it has nothing to act on here.
+export type AddressBarAction = {
+  id: AddressBarButton
+  label: string
+  active?: boolean
+  onPress: () => void
+}
+
 type BrowserToolbarProps = {
   activeTabId: string
   address: string
-  // One tap to bookmark the page, which took opening the menu first.
-  bookmarkActionAvailable?: boolean
+  addressBarAction?: AddressBarAction | null
   currentUrl: string
   // Each new value puts the cursor in the box: the search widget.
   focusRequest?: number
   historySuggestions: BrowserHistoryItem[]
-  isBookmarked?: boolean
   isDark: boolean
   isIncognito?: boolean
   isLoading: boolean
@@ -72,17 +79,14 @@ type BrowserToolbarProps = {
   searchEngine: string
   searchEngines: OneOffSearchEngine[]
   searchSuggestionsEnabled: boolean
-  shareActionAvailable: boolean
   showFullAddress: boolean
   onAddressChange: (address: string) => void
   onCloseMenu: () => void
   onOpenSiteInfo: () => void
   onReload: () => void
-  onSharePage: () => void
   onSearch: (text: string, searchEngine?: string) => void
   onSubmit: () => void
   onSuggestionPress: (url: string) => void
-  onToggleBookmark?: () => void
 }
 
 /**
@@ -95,11 +99,10 @@ type BrowserToolbarProps = {
 export function BrowserToolbar ({
   activeTabId,
   address,
-  bookmarkActionAvailable = false,
+  addressBarAction = null,
   currentUrl,
   focusRequest = 0,
   historySuggestions,
-  isBookmarked = false,
   isDark,
   isIncognito = false,
   isLoading,
@@ -111,17 +114,14 @@ export function BrowserToolbar ({
   searchEngine,
   searchEngines,
   searchSuggestionsEnabled,
-  shareActionAvailable,
   showFullAddress,
   onAddressChange,
   onCloseMenu,
   onOpenSiteInfo,
   onReload,
-  onSharePage,
   onSearch,
   onSubmit,
-  onSuggestionPress,
-  onToggleBookmark
+  onSuggestionPress
 }: BrowserToolbarProps) {
   const [isAddressFocused, setIsAddressFocused] = useState(false)
   // The page that loaded, not the text in the box: once you type an address
@@ -302,34 +302,6 @@ export function BrowserToolbar ({
           )}
           {!isAddressFocused && pageActionAvailable && (
             <View style={styles.browserAddressActions}>
-              {bookmarkActionAvailable && onToggleBookmark && (
-                <Pressable
-                  accessibilityLabel={isBookmarked ? 'Remove bookmark' : 'Bookmark page'}
-                  accessibilityRole='button'
-                  accessibilityState={{ selected: isBookmarked }}
-                  android_ripple={SMALL_ICON_RIPPLE}
-                  hitSlop={6}
-                  style={({ pressed }) => [styles.browserAddressAction, ROUND_PRESS, dimWhenPressed(pressed)]}
-                  onPress={onToggleBookmark}
-                >
-                  {isBookmarked
-                    ? (
-                      <StarFillIcon
-                        width={ADDRESS_STAR_ICON_SIZE}
-                        height={ADDRESS_STAR_ICON_SIZE}
-                        color={palette.accent}
-                      />
-                      )
-                    : (
-                      <StarIcon
-                        width={ADDRESS_STAR_ICON_SIZE}
-                        height={ADDRESS_STAR_ICON_SIZE}
-                        color={addressActionIconColor}
-                        opacity={0.76}
-                      />
-                      )}
-                </Pressable>
-              )}
               <Pressable
                 accessibilityLabel={isLoading ? 'Stop loading page' : 'Reload page'}
                 accessibilityRole='button'
@@ -350,23 +322,12 @@ export function BrowserToolbar ({
                     />
                     )}
               </Pressable>
-              {shareActionAvailable && (
-                <Pressable
-                  accessibilityLabel='Share page'
-                  accessibilityRole='button'
-                  android_ripple={SMALL_ICON_RIPPLE}
-                  hitSlop={6}
-                  style={({ pressed }) => [styles.browserAddressAction, ROUND_PRESS, dimWhenPressed(pressed)]}
-                  onPress={onSharePage}
-                >
-                  <ShareIcon
-                    width={ADDRESS_ACTION_ICON_SIZE}
-                    height={ADDRESS_ACTION_ICON_SIZE}
-                    color={addressActionIconColor}
-                    opacity={0.76}
-                    style={styles.browserAddressShareIcon}
-                  />
-                </Pressable>
+              {addressBarAction && (
+                <AddressBarActionButton
+                  action={addressBarAction}
+                  activeColor={palette.accent}
+                  color={addressActionIconColor}
+                />
               )}
             </View>
           )}
@@ -396,5 +357,38 @@ export function BrowserToolbar ({
         />
       )}
     </View>
+  )
+}
+
+function AddressBarActionButton ({
+  action,
+  activeColor,
+  color
+}: {
+  action: AddressBarAction
+  activeColor: string
+  color: string
+}) {
+  const Icon = (action.active && ADDRESS_BAR_BUTTON_ACTIVE_ICONS[action.id]) || ADDRESS_BAR_BUTTON_ICONS[action.id]
+  const isShare = action.id === 'share'
+  const size = isShare ? ADDRESS_ACTION_ICON_SIZE : ADDRESS_BUTTON_ICON_SIZE
+  return (
+    <Pressable
+      accessibilityLabel={action.label}
+      accessibilityRole='button'
+      accessibilityState={{ selected: action.active === true }}
+      android_ripple={SMALL_ICON_RIPPLE}
+      hitSlop={6}
+      style={({ pressed }) => [styles.browserAddressAction, ROUND_PRESS, dimWhenPressed(pressed)]}
+      onPress={action.onPress}
+    >
+      <Icon
+        width={size}
+        height={size}
+        color={action.active ? activeColor : color}
+        opacity={action.active ? 1 : 0.76}
+        style={isShare ? styles.browserAddressShareIcon : null}
+      />
+    </Pressable>
   )
 }

@@ -14,6 +14,7 @@ describe('browser preferences', () => {
 
   test('restores supported browser preferences', () => {
     const preferences = {
+      addressBarButton: 'reader',
       addressBarPosition: 'bottom',
       appLogoColor: 'violet',
       contentBlockingEnabled: false,

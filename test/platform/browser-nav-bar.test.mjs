@@ -48,7 +48,9 @@ describe('browser chrome layout', () => {
     assert.doesNotMatch(toolbar, /Go back|Go forward|Open tabs|BrowserOverflowMenu/)
     assert.match(toolbar, /accessibilityLabel='Browser address'/)
     assert.match(toolbar, /Reload page/)
-    assert.match(toolbar, /accessibilityLabel='Share page'/)
+    // One button after reload, Share unless another is chosen.
+    assert.match(toolbar, /<AddressBarActionButton/)
+    assert.match(index, /case 'share':\s+return browserShareActionAvailable\s+\? \{ id: 'share', label: 'Share page'/)
   })
 
   test('the address bar moves, the navigation bar does not', () => {

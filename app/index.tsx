@@ -152,7 +152,7 @@ import { BrowserOverflowMenu } from './settings/BrowserOverflowMenu'
 import { useBrowserPreferences } from './settings/useBrowserPreferences'
 import { getOneOffSearchEngines } from './search/search-suggestions.mjs'
 import { getSiteDataHosts } from './privacy/site-data.mjs'
-import { BrowserToolbar } from './BrowserToolbar'
+import { BrowserToolbar, type AddressBarAction } from './BrowserToolbar'
 import { BrowserNavBar } from './BrowserNavBar'
 import { BrowserBackSwipe } from './BrowserBackSwipe'
 import { BrowserPullRefresh } from './BrowserPullRefresh'
@@ -495,6 +495,7 @@ export default function App () {
     setAppLogoColor,
     setForceDarkWebsites,
     setSearchSuggestionsEnabled,
+    setAddressBarButton,
     setContentBlockingEnabled: setContentBlockingPreference,
     setCustomSearchEngine,
     setDownloadOnlyOnWifi,
@@ -4089,6 +4090,7 @@ export default function App () {
             initialPage={browserSettingsInitialPage}
             closeOnBack={browserSettingsCloseOnBack}
             registerGoBack={(handler) => { browserSettingsGoBackRef.current = handler }}
+            addressBarButton={browserPreferences.addressBarButton}
             addressBarPosition={browserPreferences.addressBarPosition}
             appLogoColor={browserPreferences.appLogoColor}
             forceDarkWebsites={browserPreferences.forceDarkWebsites}
@@ -4114,6 +4116,7 @@ export default function App () {
               ...browserTabsStateRef.current.tabs.map((tab) => tab.history[tab.historyIndex]?.url),
               ...browserBookmarks.map((bookmark) => bookmark.url)
             ])}
+            onAddressBarButtonChange={setAddressBarButton}
             onAddressBarPositionChange={setAddressBarPosition}
             onAppLogoColorChange={(color) => {
               // The in-app logo changes either way; the home screen icon is a
@@ -4429,14 +4432,73 @@ export default function App () {
     )
   }
 
+  // The button after reload, as chosen in Settings, or none where it has
+  // nothing to act on.
+  const browserAddressBarAction = ((): AddressBarAction | null => {
+    const pageAvailable = canUseReaderView(browserCurrentUrl)
+    switch (browserPreferences.addressBarButton) {
+      case 'share':
+        return browserShareActionAvailable
+          ? { id: 'share', label: 'Share page', onPress: () => void onBrowserSharePage() }
+          : null
+      case 'bookmark':
+        return browserBookmarkActionAvailable && browserBookmarksReady
+          ? {
+              id: 'bookmark',
+              label: browserPageIsBookmarked ? 'Remove bookmark' : 'Bookmark page',
+              active: browserPageIsBookmarked,
+              onPress: onBrowserToggleBookmark
+            }
+          : null
+      case 'favourite': {
+        const favourited = isBrowserPageFavourited(browserCurrentUrl)
+        return browserBookmarkActionAvailable && browserFavouritesReady
+          ? {
+              id: 'favourite',
+              label: favourited ? 'Remove favourite' : 'Add favourite',
+              active: favourited,
+              onPress: onBrowserToggleFavourite
+            }
+          : null
+      }
+      case 'reader':
+        return pageAvailable ? { id: 'reader', label: 'Reader view', onPress: onBrowserReaderView } : null
+      case 'send':
+        return pageAvailable
+          ? { id: 'send', label: 'Send to your devices', onPress: () => void onBrowserSendToDevices() }
+          : null
+      case 'zoom':
+        return browserShareActionAvailable
+          ? { id: 'zoom', label: 'Zoom', onPress: () => setBrowserZoomVisible(true) }
+          : null
+      case 'desktop':
+        return browserShareActionAvailable
+          ? {
+              id: 'desktop',
+              label: 'Desktop view',
+              active: activeBrowserDesktopView,
+              onPress: onBrowserToggleDesktopView
+            }
+          : null
+      case 'print':
+        return canPrintBrowserUrl(browserCurrentUrl)
+          ? { id: 'print', label: 'Print', onPress: onBrowserPrintPage }
+          : null
+      case 'new-tab':
+        return browserTabsState.tabs.length < MAX_BROWSER_TABS
+          ? { id: 'new-tab', label: 'New tab', onPress: onBrowserNewTab }
+          : null
+      default:
+        return null
+    }
+  })()
+
   const browserToolbar = (
     <BrowserToolbar
       activeTabId={browserTabsState.activeTabId}
       address={browserAddress}
-      bookmarkActionAvailable={browserBookmarkActionAvailable && browserBookmarksReady}
+      addressBarAction={browserAddressBarAction}
       currentUrl={browserCurrentUrl}
-      isBookmarked={browserPageIsBookmarked}
-      onToggleBookmark={onBrowserToggleBookmark}
       focusRequest={browserAddressFocusRequest}
       isDark={browserIsDark}
       isIncognito={browserTabsState.tabs.some((tab) => tab.id === browserTabsState.activeTabId && tab.incognito === true)}
@@ -4450,7 +4512,6 @@ export default function App () {
       searchEngine={browserPreferences.searchEngine}
       searchEngines={getOneOffSearchEngines(browserPreferences.searchEngine, browserPreferences.customSearchUrl)}
       searchSuggestionsEnabled={browserPreferences.searchSuggestionsEnabled}
-      shareActionAvailable={browserShareActionAvailable}
       showFullAddress={browserPreferences.showFullAddress}
       onAddressChange={(value) => {
         browserUserInteractedRef.current = true
@@ -4459,7 +4520,6 @@ export default function App () {
       onCloseMenu={() => setBrowserMenuVisible(false)}
       onOpenSiteInfo={() => setSiteInfoVisible(true)}
       onReload={onBrowserReload}
-      onSharePage={() => void onBrowserSharePage()}
       onSearch={(text, searchEngine) => {
         const targetUrl = getSearchUrl(
           searchEngine || browserPreferences.searchEngine,

@@ -1,9 +1,11 @@
+import { DEFAULT_ADDRESS_BAR_BUTTON, normalizeAddressBarButton } from '../address-bar-button.mjs'
 import { DEFAULT_APP_LOGO_COLOR, normalizeAppLogoColor } from '../app-logo-colors.mjs'
 import { EXTERNAL_LINK_BEHAVIORS } from '../browser-permissions.mjs'
 import { isBridgeSiteId, normalizeCustomSearchUrl } from '../browser-shell.mjs'
 import { DEFAULT_TOOLBAR_BUTTON, normalizeToolbarButton } from '../toolbar-button.mjs'
 
 export const DEFAULT_BROWSER_PREFERENCES = {
+  addressBarButton: DEFAULT_ADDRESS_BAR_BUTTON,
   addressBarPosition: 'top',
   appLogoColor: DEFAULT_APP_LOGO_COLOR,
   contentBlockingEnabled: true,
@@ -47,6 +49,7 @@ export function parseBrowserPreferences (serialized) {
   }
 
   return {
+    addressBarButton: normalizeAddressBarButton(value?.addressBarButton),
     addressBarPosition: ADDRESS_BAR_POSITIONS.includes(value?.addressBarPosition)
       ? value.addressBarPosition
       : DEFAULT_BROWSER_PREFERENCES.addressBarPosition,

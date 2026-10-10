@@ -52,7 +52,7 @@ test('Appearance opens the toolbar button page, and back returns there', async (
   assert.ok(appearance.indexOf("title='Toolbar button'") > appearance.indexOf("title='Logo'"))
 
   const settings = await read('app/settings/SettingsScreen.tsx')
-  assert.match(settings, /<Appearance \{\.\.\.props\} onOpenToolbarButton=\{\(\) => changePage\('toolbar-button', 1\)\} \/>/)
+  assert.match(settings, /<Appearance\s+\{\.\.\.props\}[\s\S]{0,160}onOpenToolbarButton=\{\(\) => changePage\('toolbar-button', 1\)\}/)
   assert.match(settings, /title='Toolbar Button'\s+onBack=\{\(\) => changePage\('appearance', -1\)\}/)
   assert.match(settings, /'toolbar-button': 'appearance'/)
   assert.match(settings, /setPage\(SETTINGS_PARENT_PAGES\[pageRef\.current\] \|\| 'main'\)/)

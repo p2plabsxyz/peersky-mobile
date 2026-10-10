@@ -1,10 +1,13 @@
 import { Pressable, StyleSheet, Switch, Text, View } from 'react-native'
+import { ADDRESS_BAR_BUTTON_ICONS } from '../address-bar-button-icons'
+import { addressBarButtonTitle } from '../address-bar-button.mjs'
 import { AppLogo } from '../AppLogo'
 import { APP_LOGO_COLORS } from '../app-logo-colors.mjs'
 import { BROWSER_PALETTES } from '../browser-appearance.mjs'
 import { TOOLBAR_BUTTON_ICONS } from '../toolbar-button-icons'
 import { TOOLBAR_BUTTONS } from '../toolbar-button.mjs'
 import type {
+  AddressBarButton,
   AddressBarPosition,
   BrowserTheme,
   ToolbarButton
@@ -18,6 +21,7 @@ import {
 } from './SettingsUI'
 
 type AppearanceProps = {
+  addressBarButton: AddressBarButton
   addressBarPosition: AddressBarPosition
   appLogoColor: string
   persistenceError: string | null
@@ -26,12 +30,14 @@ type AppearanceProps = {
   toolbarButton: ToolbarButton
   onAddressBarPositionChange: (position: AddressBarPosition) => void
   onAppLogoColorChange: (color: string) => void
+  onOpenAddressBarButton: () => void
   onOpenToolbarButton: () => void
   onShowFullAddressChange: (enabled: boolean) => void
   onThemeChange: (theme: BrowserTheme) => void
 }
 
 export function Appearance ({
+  addressBarButton,
   addressBarPosition,
   appLogoColor,
   persistenceError,
@@ -40,6 +46,7 @@ export function Appearance ({
   toolbarButton,
   onAddressBarPositionChange,
   onAppLogoColorChange,
+  onOpenAddressBarButton,
   onOpenToolbarButton,
   onShowFullAddressChange,
   onThemeChange
@@ -47,6 +54,8 @@ export function Appearance ({
   const isDark = useSettingsDarkMode()
   const ToolbarIcon = TOOLBAR_BUTTON_ICONS[toolbarButton] || TOOLBAR_BUTTON_ICONS.burn
   const toolbarTitle = TOOLBAR_BUTTONS.find((button) => button.id === toolbarButton)?.title || 'Burn Tabs and Data'
+  const AddressIcon = ADDRESS_BAR_BUTTON_ICONS[addressBarButton] || ADDRESS_BAR_BUTTON_ICONS.share
+  const addressTitle = addressBarButtonTitle(addressBarButton)
 
   return (
     <View style={[styles.page, isDark ? styles.pageDark : null]}>
@@ -136,6 +145,21 @@ export function Appearance ({
         >
           <ToolbarIcon width={22} height={22} color={isDark ? '#f1f2f7' : '#1f2a44'} />
           <Text style={[styles.toolbarTitle, isDark ? styles.toolbarTitleDark : null]}>{toolbarTitle}</Text>
+          <ChevronRightIcon width={16} height={16} color={isDark ? '#aab4c8' : '#687086'} />
+        </Pressable>
+      </SettingsSection>
+
+      {/* The one after reload in the address bar: Share, or whichever button
+          you reach for most on a page. */}
+      <SettingsSection title='Address bar button'>
+        <Pressable
+          accessibilityRole='button'
+          accessibilityLabel={`Address bar button, ${addressTitle}`}
+          style={({ pressed }) => [styles.settingRow, pressed ? styles.logoPressed : null]}
+          onPress={onOpenAddressBarButton}
+        >
+          <AddressIcon width={22} height={22} color={isDark ? '#f1f2f7' : '#1f2a44'} />
+          <Text style={[styles.toolbarTitle, isDark ? styles.toolbarTitleDark : null]}>{addressTitle}</Text>
           <ChevronRightIcon width={16} height={16} color={isDark ? '#aab4c8' : '#687086'} />
         </Pressable>
       </SettingsSection>
