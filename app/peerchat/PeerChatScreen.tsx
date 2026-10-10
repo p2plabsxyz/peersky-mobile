@@ -3661,11 +3661,23 @@ export function PeerChatScreen ({
           <View style={styles.roomMeta}>
             <Text style={[styles.roomTime, { color: colors.muted }]}>{formatRoomTime(item)}</Text>
             <View style={styles.roomStateRow}>
+              {/* Mentions and messages in bubbles of their own, "1 @" then
+                  "2". A muted chat greys its count, as most apps do, and
+                  still shows a mention. */}
+              {item.unreadMentions > 0 && (
+                <View
+                  accessibilityLabel={`${item.unreadMentions} unread mention${item.unreadMentions === 1 ? '' : 's'}`}
+                  style={[styles.unreadBadge, { backgroundColor: colors.accent }]}
+                >
+                  <Text style={styles.unreadBadgeText}>{item.unreadMentions} @</Text>
+                </View>
+              )}
               {item.unreadCount > 0 && (
-                <View style={[styles.unreadBadge, { backgroundColor: colors.accent }]}>
-                  <Text style={styles.unreadBadgeText}>
-                    {item.unreadMentions > 0 ? '@ ' : ''}{item.unreadCount}
-                  </Text>
+                <View
+                  accessibilityLabel={`${item.unreadCount} unread message${item.unreadCount === 1 ? '' : 's'}`}
+                  style={[styles.unreadBadge, { backgroundColor: item.isMuted ? colors.muted : colors.accent }]}
+                >
+                  <Text style={styles.unreadBadgeText}>{item.unreadCount}</Text>
                 </View>
               )}
               {item.isMuted && (

@@ -54,6 +54,18 @@ test('PeerChat emits bounded notifications only for new unread unmuted messages'
   assert.equal(collectPeerChatNotificationCandidates(previous, previous).length, 0)
 })
 
+// A muted chat says nothing about new messages, but a mention still comes
+// through, as in most apps.
+test('a muted chat notifies only for a new mention', () => {
+  const room = { roomKey: 'quiet', name: 'Quiet', isMuted: true, lastMessage: { sender: 'peer', senderName: 'Alice', message: 'hi', timestamp: 1 } }
+  const before = [{ roomKey: 'quiet', unreadCount: 1, unreadMentions: 0 }]
+  assert.equal(collectPeerChatNotificationCandidates(before, [{ ...room, unreadCount: 2, unreadMentions: 0 }]).length, 0)
+  assert.deepEqual(
+    collectPeerChatNotificationCandidates(before, [{ ...room, unreadCount: 2, unreadMentions: 1 }]).map((candidate) => candidate.roomKey),
+    ['quiet']
+  )
+})
+
 test('PeerChat notification text is sanitized and bounded', () => {
   const [candidate] = collectPeerChatNotificationCandidates(
     [{ roomKey: 'room', unreadCount: 0 }],

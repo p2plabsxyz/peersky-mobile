@@ -40,8 +40,11 @@ export function collectPeerChatNotificationCandidates (previousRooms, nextRooms)
   return nextRooms
     .filter((room) => {
       const previous = previousByKey.get(room?.roomKey)
+      // A muted chat stays quiet, except for a new mention, as in most apps.
+      const mentioned = Number.isSafeInteger(room?.unreadMentions) &&
+        room.unreadMentions > Math.max(0, Number(previous?.unreadMentions) || 0)
       return previous &&
-        room?.isMuted !== true &&
+        (room?.isMuted !== true || mentioned) &&
         Number.isSafeInteger(room?.unreadCount) &&
         room.unreadCount > Math.max(0, Number(previous.unreadCount) || 0) &&
         room?.lastMessage &&
