@@ -2,7 +2,7 @@
   "expo": {
     "name": "PeerSky",
     "slug": "peersky-mobile",
-    "version": "0.1.1",
+    "version": "0.1.2",
     "orientation": "default",
     "scheme": "peersky",
     "icon": "./assets/images/icon.png",
@@ -10,7 +10,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "xyz.p2plabs.peersky",
-      "buildNumber": "2",
+      "buildNumber": "3",
       "appleTeamId": "PP6D6HB667",
       "entitlements": {
         "com.apple.developer.networking.multicast": true,
@@ -33,7 +33,6 @@
         "UIBackgroundModes": [
           "audio"
         ],
-        "NSPhotoLibraryUsageDescription": "PeerSky uses your photo library so you can attach a picture or video to a chat message or a note.",
         "NSPhotoLibraryAddUsageDescription": "PeerSky saves a picture to your photo library when you choose Save to Photos.",
         "LSApplicationCategoryType": "public.app-category.utilities"
       },
@@ -83,7 +82,7 @@
         "backgroundImage": "./assets/app-icons/android/background-cyan.png"
       },
       "package": "xyz.p2plabs.peersky",
-      "versionCode": 2,
+      "versionCode": 3,
       "softwareKeyboardLayoutMode": "resize",
       "permissions": [
         "android.permission.ACCESS_COARSE_LOCATION",
@@ -163,6 +162,12 @@
       "./plugins/with-audio-route",
       "./plugins/with-home-shortcuts",
       "./plugins/with-hyper-links",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": false
+        }
+      ],
       "./plugins/with-share-to-open",
       "@bacons/apple-targets",
       [

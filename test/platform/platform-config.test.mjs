@@ -150,6 +150,14 @@ describe('mobile platform runtime configuration', () => {
     // to add to the library with this. Without it iOS asked for the whole
     // library, with the attach-a-picture reason, and the save did not happen.
     assert.match(infoPlist?.NSPhotoLibraryAddUsageDescription, /Save to Photos/)
+    // Apple rejects a browser asking for the whole photo library, and the
+    // picker needs no permission. expo-image-picker's plugin, which Expo adds
+    // on its own, puts the key back unless told not to.
+    assert.equal(infoPlist?.NSPhotoLibraryUsageDescription, undefined)
+    assert.deepEqual(
+      appJson.expo.plugins.find((plugin) => Array.isArray(plugin) && plugin[0] === 'expo-image-picker')?.[1],
+      { photosPermission: false }
+    )
     // All of PeerSky's encryption is standard and published as open source,
     // which US export rules leave out. Saying true makes App Store Connect
     // refuse the upload (ITMS-90592) until it has approved documentation.
@@ -387,6 +395,10 @@ describe('mobile platform runtime configuration', () => {
     const infoPlist = plugin.addHyperSchemeToInfoPlist({ CFBundleURLTypes: [{ CFBundleURLSchemes: ['peersky'] }] })
     assert.deepEqual(infoPlist.CFBundleURLTypes.map((type) => type.CFBundleURLSchemes), [['peersky'], ['hyper']])
     assert.deepEqual(plugin.addHyperSchemeToInfoPlist(infoPlist), infoPlist)
+    // Apple's default browser entitlement asks for http and https there too.
+    const webPlist = plugin.addWebSchemesToInfoPlist(infoPlist)
+    assert.deepEqual(webPlist.CFBundleURLTypes.map((type) => type.CFBundleURLSchemes), [['peersky'], ['hyper'], ['http'], ['https']])
+    assert.deepEqual(plugin.addWebSchemesToInfoPlist(webPlist), webPlist)
 
     const manifest = { manifest: { application: [{ activity: [{ $: { 'android:name': '.MainActivity' }, 'intent-filter': [] }] }] } }
     plugin.addHyperIntentFilter(manifest)
