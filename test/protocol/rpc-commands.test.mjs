@@ -154,3 +154,18 @@ test('PeerChat blocking RPC commands route to the service and stay clear of the 
   assert.match(initRoute, /blockedPeers: peerChat[.]listBlockedPeers[(][)]/)
   assert.match(roomsRoute, /blockedPeers: peerChat[.]listBlockedPeers[(][)]/)
 })
+
+test('every RPC command, app to backend and back, has a number of its own', async () => {
+  const commands = await import('../../backend/rpc/commands.mjs')
+  const numbers = Object.entries(commands).filter(([name]) => name.startsWith('RPC_')).map(([, value]) => value)
+  assert.equal(new Set(numbers).size, numbers.length)
+  assert.equal(commands.RPC_DEVICE_SYNC_STATUS, 16)
+  assert.equal(commands.RPC_DEVICE_SYNC_NETWORK, 17)
+  assert.equal(commands.RPC_DEVICE_SYNC_FORGET, 18)
+  assert.equal(commands.RPC_APP_DEVICE_SYNC_CHANGED, 102)
+
+  const router = await readFile(new URL('../../backend/rpc/router.mjs', import.meta.url), 'utf8')
+  for (const name of ['RPC_DEVICE_SYNC_STATUS', 'RPC_DEVICE_SYNC_NETWORK', 'RPC_DEVICE_SYNC_FORGET']) {
+    assert.match(router, new RegExp(`req[.]command === ${name}`))
+  }
+})

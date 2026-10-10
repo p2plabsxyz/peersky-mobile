@@ -27,6 +27,7 @@ import PauseIcon from '../../assets/icons/bootstrap/pause-fill.svg'
 import UploadIcon from '../../assets/icons/bootstrap/arrow-bar-up.svg'
 
 import {
+  RPC_DEVICE_SYNC_STATUS,
   RPC_HYPER_LIBRARY_LIST,
   RPC_HYPER_LIBRARY_UPLOAD,
   RPC_HYPER_OFFLINE_KEEP,
@@ -48,6 +49,7 @@ import { MODAL_ORIENTATIONS } from '../modal-orientations'
 import { tapFeedback } from '../haptics'
 import { PublishedLinkSheet } from '../PublishedLinkSheet'
 import { hasLinkedIdentity } from './linked-identity'
+import { labelLinkedDevices } from '../linked-devices.mjs'
 
 const hyperdriveIcon = require('../../assets/images/hyperdrive.png')
 
@@ -68,7 +70,25 @@ type HyperdriveItem = {
   visibility?: UploadVisibility
   localUri?: string
   children?: HyperdriveItem[]
+  // On which of your other devices it is, for a file from one of them.
+  deviceLabel?: string
 }
+
+// A file or folder at the top of a private drive one of your other devices
+// writes, as the backend last listed it.
+type DeviceFile = {
+  type: 'directory' | 'file'
+  name: string
+  path: string
+  url: string
+  byteLength: number
+  deviceId: string
+  deviceType: 'phone' | 'desktop'
+}
+
+// How many show above Recent before See all.
+const DEVICE_FILES_SHOWN = 3
+const DEVICE_FILES_URL = 'peersky://p2p/hyperdrive/#your-devices'
 
 type HyperOfflineItem = {
   driveKey: string
@@ -80,6 +100,8 @@ type HyperOfflineItem = {
 }
 
 type Props = {
+  // Bumped when a linked device comes or goes, or one of its drives changes.
+  deviceSyncRevision?: number
   offlineNetworkAllowed: boolean
   isDark: boolean
   isLandscape: boolean
@@ -98,7 +120,7 @@ const RECENT_FILTERS: Array<{ id: RecentFilter, label: string }> = [
   { id: 'fetched', label: 'Fetched' }
 ]
 
-export function HyperdriveScreen ({ offlineNetworkAllowed, isDark, isLandscape, onCallRpc, onOpenItem, onOpenLinkDevice, onOpenUrl, onStatus }: Props) {
+export function HyperdriveScreen ({ deviceSyncRevision = 0, offlineNetworkAllowed, isDark, isLandscape, onCallRpc, onOpenItem, onOpenLinkDevice, onOpenUrl, onStatus }: Props) {
   const insets = useSafeAreaInsets()
   const [recents, setRecents] = useState<HyperdriveItem[]>(loadHyperdriveRecents)
   // Settings, P2P Data clears recents with this screen still open underneath.
@@ -127,6 +149,51 @@ export function HyperdriveScreen ({ offlineNetworkAllowed, isDark, isLandscape, 
   const heading = items ? location?.name || 'Files' : 'Recent'
   const filterLabel = RECENT_FILTERS.find((filter) => filter.id === recentFilter)?.label || 'All'
   const offlineTarget = getOfflineTarget(location)
+
+  // Private files from this person's other devices, which show up here on
+  // their own once the devices have met. Read again whenever the backend says
+  // a device or one of its drives changed.
+  const [deviceFiles, setDeviceFiles] = useState<HyperdriveItem[]>([])
+  const onCallRpcRef = useRef(onCallRpc)
+  onCallRpcRef.current = onCallRpc
+  useEffect(() => {
+    let cancelled = false
+    void onCallRpcRef.current(RPC_DEVICE_SYNC_STATUS, {}).then((response) => {
+      if (cancelled || !response?.ok) return
+      const labels = labelLinkedDevices(Array.isArray(response.devices) ? response.devices : [])
+      const files: DeviceFile[] = Array.isArray(response.files) ? response.files : []
+      setDeviceFiles(files.map((file) => ({
+        type: file.type,
+        name: file.name,
+        path: file.path,
+        url: file.url,
+        byteLength: file.byteLength,
+        visibility: 'private',
+        deviceLabel: labels.get(file.deviceId) || (file.deviceType === 'phone' ? 'Phone' : 'Desktop')
+      })))
+    }).catch(() => {})
+    return () => { cancelled = true }
+  }, [deviceSyncRevision])
+  // The full list, open as if it were a folder, keeps up as files arrive.
+  useEffect(() => {
+    if (location?.url === DEVICE_FILES_URL) setItems(deviceFiles)
+  }, [deviceFiles])
+
+  function showAllDeviceFiles () {
+    setLocation({ type: 'directory', name: 'From your devices', url: DEVICE_FILES_URL })
+    setItems(deviceFiles)
+    setListingTruncated(false)
+  }
+
+  // A folder opens here, a file the way any other opens. Neither goes in Recent:
+  // it is already listed above.
+  async function openDeviceFile (item: HyperdriveItem) {
+    if (item.type === 'directory') {
+      await fetchLocation(item.url, false)
+      return
+    }
+    onOpenItem(item)
+  }
 
   useEffect(() => {
     const request = ++offlineRequestRef.current
@@ -252,7 +319,7 @@ export function HyperdriveScreen ({ offlineNetworkAllowed, isDark, isLandscape, 
   function chooseUploadVisibility (source: UploadSource) {
     Alert.alert(
       'Choose where to store the file',
-      'Public files can be shared, and anyone with one public link may browse other files in your public drive. Private files are encrypted: the link is safe to share, and only your linked devices can open them. This device only keeps files on this phone and never syncs.',
+      'Public files can be shared, and anyone with one public link may browse other files in your public drive. Private files are encrypted: they show up in Hyperdrive on your linked devices, the only ones that can open them, and the link is safe to share. This device only keeps files on this phone and never syncs.',
       [
         // Android renders at most three buttons and silently drops the rest,
         // which is why Public was missing there. Back dismisses instead.
@@ -566,6 +633,42 @@ export function HyperdriveScreen ({ offlineNetworkAllowed, isDark, isLandscape, 
       {error && <Text selectable style={styles.error}>{error}</Text>}
       {notice && <Text style={[styles.notice, { color: palette.noticeText, backgroundColor: palette.notice }]}>{notice}</Text>}
 
+      {!items && deviceFiles.length > 0 && (
+        <View style={styles.deviceFiles}>
+          <View style={styles.libraryHeader}>
+            <Text numberOfLines={1} style={[styles.heading, { color: palette.text }]}>From your devices</Text>
+            {deviceFiles.length > DEVICE_FILES_SHOWN && (
+              <Pressable
+                accessibilityLabel={`See all ${deviceFiles.length} files from your devices`}
+                accessibilityRole='button'
+                hitSlop={8}
+                onPress={showAllDeviceFiles}
+                style={({ pressed }) => [styles.seeAll, pressed ? styles.pressed : null]}
+              >
+                <Text style={[styles.seeAllText, { color: palette.accent }]}>See all</Text>
+              </Pressable>
+            )}
+          </View>
+          {deviceFiles.slice(0, DEVICE_FILES_SHOWN).map((item) => (
+            <View key={item.url} style={[styles.item, { backgroundColor: palette.surface, borderColor: palette.border }]}>
+              <Pressable
+                accessibilityRole='button'
+                accessibilityLabel={`${item.type === 'directory' ? 'Folder' : 'File'} ${item.name}, ${formatItemMeta(item)}`}
+                onPress={() => void openDeviceFile(item)}
+                style={({ pressed }) => [styles.itemOpen, pressed ? styles.pressed : null]}
+              >
+                {item.type === 'directory' ? <FolderIcon color={palette.folder} /> : <FilePreview item={item} palette={palette} />}
+                <View style={styles.itemCopy}>
+                  <Text numberOfLines={1} style={[styles.itemName, { color: palette.text }]}>{item.name}</Text>
+                  <Text numberOfLines={1} style={[styles.itemMeta, { color: palette.muted }]}>{formatItemMeta(item)}</Text>
+                </View>
+                <ChevronRightIcon width={18} height={18} color={palette.muted} style={styles.privateItemChevron} />
+              </Pressable>
+            </View>
+          ))}
+        </View>
+      )}
+
       <View style={styles.libraryHeader}>
         {items && (
           <Pressable
@@ -844,7 +947,8 @@ function getOfflineTarget (item: HyperdriveItem | null) {
 }
 
 function formatItemMeta (item: HyperdriveItem) {
-  return item.type === 'directory' ? 'Folder' : formatBytes(item.byteLength || 0)
+  const size = item.type === 'directory' ? 'Folder' : formatBytes(item.byteLength || 0)
+  return item.deviceLabel ? `On your ${item.deviceLabel.toLowerCase()} - ${size}` : size
 }
 
 function formatRecentMeta (item: HyperdriveItem) {
@@ -860,7 +964,7 @@ function formatRecentMeta (item: HyperdriveItem) {
 
 function getUploadSuccessMessage (visibility: UploadVisibility, _item: HyperdriveItem) {
   if (visibility === 'device') return 'Stored on this device only. It never syncs. A backup from Settings > Link Device keeps a copy if this phone is lost.'
-  if (visibility === 'private') return 'Encrypted. The link is safe to share, and only your linked devices can open it.'
+  if (visibility === 'private') return 'Encrypted. It shows up in Hyperdrive on your linked devices, the only ones that can open it, and the link is safe to share.'
   return 'Share it with other peers! Anyone with the link can open it, straight from this phone. Keep PeerSky open while they grab it.'
 }
 
@@ -922,6 +1026,9 @@ const styles = StyleSheet.create({
   limitNote: { fontSize: 12, marginBottom: 4 },
   list: { flex: 1 },
   listContent: { gap: 8, paddingBottom: 36 },
+  deviceFiles: { gap: 8, marginBottom: 6 },
+  seeAll: { justifyContent: 'center', minHeight: 36, paddingHorizontal: 4 },
+  seeAllText: { fontSize: 14, fontWeight: '700' },
   item: { alignItems: 'center', borderRadius: 10, borderWidth: 1, flexDirection: 'row', minHeight: 62 },
   itemOpen: { alignItems: 'center', flex: 1, flexDirection: 'row', minHeight: 60, paddingLeft: 12, paddingVertical: 8 },
   itemCopy: { flex: 1, gap: 4, marginHorizontal: 13 },

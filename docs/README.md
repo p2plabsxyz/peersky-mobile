@@ -112,6 +112,7 @@
   - [x] Browse a drive's folders and open its files
   - [x] Keep a folder offline, with pause, resume and progress, and an option to download only on Wi-Fi
   - [x] Recent, with what you uploaded and fetched
+  - [x] From your devices: private files from your other devices show up here on their own, and this phone's show up there, with a copy kept on your desktop
 
 - [x] P2PMD (`peersky://p2p/p2pmd/`):
 
@@ -153,6 +154,7 @@
 
 - [x] Link Device and backups (Settings > Link Device):
 
+  - [x] My devices: your desktops and phones, shown as Desktop or Phone, online or when last seen
   - [x] Move everything to a new phone, device to device
   - [x] Bring private drives, notes, chats, tabs and bookmarks over from PeerSky Desktop, and send tabs, bookmarks, notes and chats to it
   - [x] A backup file locked with a passphrase, to keep wherever you like

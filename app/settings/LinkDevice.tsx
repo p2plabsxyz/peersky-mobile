@@ -26,6 +26,8 @@ import {
   RPC_BACKUP_ESTIMATE,
   RPC_BACKUP_INSPECT,
   RPC_BACKUP_RESTORE_FILE,
+  RPC_DEVICE_SYNC_FORGET,
+  RPC_DEVICE_SYNC_STATUS,
   RPC_HYPER_OFFLINE_RESUME_ALL,
   RPC_IDENTITY_CONFIRM_RESTORE,
   RPC_IDENTITY_DISCARD_RESTORE,
@@ -37,6 +39,7 @@ import {
 } from '../../backend/rpc/commands.mjs'
 import { BROWSER_PALETTES } from '../browser-appearance.mjs'
 import { tapFeedback } from '../haptics'
+import { describeLinkedDevice, labelLinkedDevices, sortLinkedDevices } from '../linked-devices.mjs'
 import { MODAL_ORIENTATIONS } from '../modal-orientations'
 import { QrCodeView } from './QrCodeView'
 import { SettingsSection, useSettingsDarkMode } from './SettingsUI'
@@ -73,11 +76,21 @@ type RpcResult = {
 type CallRpc = (command: number, data?: object) => Promise<RpcResult>
 
 export type LinkDeviceProps = {
+  // Bumped when a linked device comes or goes.
+  deviceSyncRevision?: number
   onCallRpc: (command: number, data?: object) => Promise<any>
   // Swaps the app for a screen asking for a restart. Called before a restore
   // or a removal lands, not after, see replaceData below.
   onRestartRequired: () => void
   onOpenUrl: (url: string) => void
+}
+
+type LinkedDevice = {
+  id: string
+  type: 'phone' | 'desktop'
+  online: boolean
+  firstSeen: number
+  lastSeen: number
 }
 
 type PickedBackup = {
@@ -98,7 +111,7 @@ const DANGER = '#c62f45'
 // Link Device, laid out the way a sync screen in any browser is: this device,
 // one way to sync with another, a backup for when this phone is gone, and the
 // desktop app. Everything else stays out of the way.
-export function LinkDeviceSettings ({ onCallRpc, onRestartRequired, onOpenUrl }: LinkDeviceProps) {
+export function LinkDeviceSettings ({ deviceSyncRevision = 0, onCallRpc, onRestartRequired, onOpenUrl }: LinkDeviceProps) {
   const isDark = useSettingsDarkMode()
   const [syncVisible, setSyncVisible] = useState(false)
   const [backupVisible, setBackupVisible] = useState(false)
@@ -111,6 +124,49 @@ export function LinkDeviceSettings ({ onCallRpc, onRestartRequired, onOpenUrl }:
   const onCallRpcRef = useRef(onCallRpc)
   onCallRpcRef.current = onCallRpc
   const call = useCallback<CallRpc>((command, data = {}) => onCallRpcRef.current(command, data), [])
+
+  // This person's other devices: met under the private files key, so only the
+  // devices that can open this phone's private files are ever listed.
+  const [linkedDevices, setLinkedDevices] = useState<LinkedDevice[]>([])
+  const [isLinked, setIsLinked] = useState(false)
+  const [devicesLoaded, setDevicesLoaded] = useState(false)
+  useEffect(() => {
+    let cancelled = false
+    void call(RPC_DEVICE_SYNC_STATUS).then((response) => {
+      if (cancelled || !response?.ok) return
+      setLinkedDevices(Array.isArray(response.devices) ? response.devices : [])
+      setIsLinked(response.linked === true)
+      setDevicesLoaded(true)
+    }).catch(() => {})
+    return () => { cancelled = true }
+  }, [call, deviceSyncRevision])
+  // "Seen 5 min ago" moves on while the page is open.
+  const [, setClock] = useState(0)
+  useEffect(() => {
+    const timer = setInterval(() => setClock((value) => value + 1), 60000)
+    return () => clearInterval(timer)
+  }, [])
+  const deviceLabels = labelLinkedDevices(linkedDevices)
+
+  function showLinkedDevice (device: LinkedDevice) {
+    const label = deviceLabels.get(device.id) || 'Device'
+    Alert.alert(
+      label,
+      `${describeLinkedDevice(device)}. Its private files show in Hyperdrive here, and this phone's show there.`,
+      [
+        { text: 'OK', style: 'cancel' },
+        {
+          text: 'Remove from list',
+          style: 'destructive',
+          onPress: () => {
+            void call(RPC_DEVICE_SYNC_FORGET, { id: device.id }).then(() => {
+              setLinkedDevices((current) => current.filter((entry) => entry.id !== device.id))
+            }).catch(() => {})
+          }
+        }
+      ]
+    )
+  }
 
   // Everything that replaces or deletes data goes through here. The restart
   // screen replaces the app first, because the screens on show hold the old
@@ -224,6 +280,25 @@ export function LinkDeviceSettings ({ onCallRpc, onRestartRequired, onOpenUrl }:
           title={Platform.OS === 'ios' ? (Platform.isPad ? 'iPad' : 'iPhone') : 'Android phone'}
           trailing='This device'
         />
+        {sortLinkedDevices(linkedDevices).map((device: LinkedDevice) => (
+          <LinkRow
+            key={device.id}
+            divider
+            icon={device.type === 'phone' ? PhoneIcon : DisplayIcon}
+            title={deviceLabels.get(device.id) || 'Device'}
+            description={describeLinkedDevice(device)}
+            online={device.online}
+            onPress={() => showLinkedDevice(device)}
+          />
+        ))}
+        {devicesLoaded && isLinked && linkedDevices.length === 0 && (
+          <LinkRow
+            divider
+            icon={DisplayIcon}
+            title='No other device yet'
+            description='Your desktop shows here once the latest PeerSky is open on it and both are online.'
+          />
+        )}
         <LinkRow
           accent
           divider
@@ -1024,6 +1099,7 @@ function LinkRow ({
   chevron = false,
   divider = false,
   busy = false,
+  online = false,
   onPress
 }: {
   icon: ComponentType<SvgProps>
@@ -1035,6 +1111,8 @@ function LinkRow ({
   chevron?: boolean
   divider?: boolean
   busy?: boolean
+  // A green dot before the description, for a linked device that is connected.
+  online?: boolean
   onPress?: () => void
 }) {
   const isDark = useSettingsDarkMode()
@@ -1047,7 +1125,12 @@ function LinkRow ({
       <View style={styles.rowCopy}>
         <Text style={[styles.rowTitle, { color: titleColor }]}>{title}</Text>
         {description
-          ? <Text style={[styles.rowDescription, isDark ? darkStyles.muted : null]}>{description}</Text>
+          ? (
+            <View style={styles.rowDescriptionLine}>
+              {online ? <View style={styles.onlineDot} /> : null}
+              <Text style={[styles.rowDescription, isDark ? darkStyles.muted : null]}>{description}</Text>
+            </View>
+            )
           : null}
       </View>
       {trailing ? <Text style={[styles.rowTrailing, isDark ? darkStyles.muted : null]}>{trailing}</Text> : null}
@@ -1235,8 +1318,20 @@ const styles = StyleSheet.create({
   },
   rowDescription: {
     color: '#687086',
+    flexShrink: 1,
     fontSize: 12,
     lineHeight: 17
+  },
+  rowDescriptionLine: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 6
+  },
+  onlineDot: {
+    backgroundColor: '#2fb36d',
+    borderRadius: 4,
+    height: 8,
+    width: 8
   },
   rowTrailing: {
     color: '#8190a7',

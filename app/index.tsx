@@ -231,6 +231,7 @@ import {
 } from './downloads/browser-downloads.mjs'
 import { HyperdriveScreen } from './hyperdrive/HyperdriveScreen'
 import { canUseNetworkForOfflineHyper } from './hyperdrive/offline-network.mjs'
+import { isMeteredNetwork } from './linked-devices.mjs'
 import { PeerChatScreen, type PeerChatResponse } from './peerchat/PeerChatScreen'
 import { settleIncomingUrl, subscribeToIncomingUrls } from './incoming-links'
 import { parseHomeShortcut } from './home-shortcuts.mjs'
@@ -304,7 +305,9 @@ import {
   RPC_P2PMD_ROOM_STATUS,
   RPC_P2PMD_TAKE_NOTES,
   RPC_APP_BACKUP_PROGRESS,
+  RPC_APP_DEVICE_SYNC_CHANGED,
   RPC_APP_PEERCHAT_CHANGED,
+  RPC_DEVICE_SYNC_NETWORK,
   RPC_PEERCHAT_PRESENCE,
   RPC_PEERCHAT_SEND_TO_DEVICES,
   RPC_PEERTUNES_START
@@ -672,6 +675,9 @@ export default function App () {
   // Mounted the first time home shows and kept from then on.
   if (browserSource.kind === 'home' && !browserHomeMounted) setBrowserHomeMounted(true)
   const [peerChatRevision, setPeerChatRevision] = useState(0)
+  // Bumped when the backend says a linked device came or went, or one of its
+  // private drives changed, so Hyperdrive and Link Device read again.
+  const [deviceSyncRevision, setDeviceSyncRevision] = useState(0)
   const [p2pmdRoom, setP2pmdRoom] = useState<P2pmdRoom | null>(null)
   const [p2pmdEditorHtml, setP2pmdEditorHtml] = useState<string | null>(null)
   const [p2pmdJoinKey, setP2pmdJoinKey] = useState('')
@@ -749,6 +755,17 @@ export default function App () {
       }, 0)
     }
   }, [])
+
+  // Starts meeting this person's other devices once the backend is up, and
+  // tells them when the phone is on a cellular connection, so a desktop waits
+  // for Wi-Fi before copying the phone's private files.
+  const deviceSyncMetered = isMeteredNetwork(networkState)
+  useEffect(() => {
+    if (!identityStoragePath) return
+    void callRpc(RPC_DEVICE_SYNC_NETWORK, { metered: deviceSyncMetered }).catch((error) => {
+      console.warn('[device sync] Unable to report the network:', error)
+    })
+  }, [deviceSyncMetered, identityStoragePath])
 
   useEffect(() => {
     if (!browserPreferencesReady || !identityStoragePath) return
@@ -1117,6 +1134,9 @@ export default function App () {
       const rpc = new RPC(worklet.IPC, (request) => {
         if (request.command === RPC_APP_PEERCHAT_CHANGED) {
           setPeerChatRevision((value) => value + 1)
+        }
+        if (request.command === RPC_APP_DEVICE_SYNC_CHANGED) {
+          setDeviceSyncRevision((value) => value + 1)
         }
         if (request.command === RPC_APP_BACKUP_PROGRESS && request.data) {
           emitLinkDeviceProgress(typeof request.data === 'string'
@@ -4093,6 +4113,7 @@ export default function App () {
             addressBarButton={browserPreferences.addressBarButton}
             addressBarPosition={browserPreferences.addressBarPosition}
             appLogoColor={browserPreferences.appLogoColor}
+            deviceSyncRevision={deviceSyncRevision}
             forceDarkWebsites={browserPreferences.forceDarkWebsites}
             contentBlockingEnabled={browserPreferences.contentBlockingEnabled}
             customSearchUrl={browserPreferences.customSearchUrl}
@@ -4840,6 +4861,7 @@ export default function App () {
               : activeTab === 'hyper'
               ? (
                 <HyperdriveScreen
+                  deviceSyncRevision={deviceSyncRevision}
                   offlineNetworkAllowed={hyperOfflineNetworkAllowed}
                   isDark={browserIsDark}
                   isLandscape={!browserIsPortrait}

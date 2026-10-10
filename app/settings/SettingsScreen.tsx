@@ -163,6 +163,8 @@ type SettingsScreenProps = {
   addressBarButton: AddressBarButton
   addressBarPosition: AddressBarPosition
   appLogoColor: string
+  // Bumped when a linked device comes or goes, so Link Device lists it.
+  deviceSyncRevision: number
   forceDarkWebsites: boolean
   initialPage?: SettingsPage
   // Lets the back gesture and the Android button step out of a subpage the way
@@ -397,6 +399,7 @@ export function SettingsScreen(props: SettingsScreenProps) {
         {page === 'permissions' && <Permissions {...props} />}
         {page === 'link-device' && (
           <LinkDeviceSettings
+            deviceSyncRevision={props.deviceSyncRevision}
             onCallRpc={props.onCallRpc}
             onRestartRequired={props.onRestartRequired}
             onOpenUrl={openUrl}

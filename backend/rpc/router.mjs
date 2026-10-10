@@ -7,6 +7,9 @@ import {
   RPC_HYPER_INIT,
   RPC_HYPER_LIBRARY_LIST,
   RPC_HYPER_LIBRARY_UPLOAD,
+  RPC_DEVICE_SYNC_FORGET,
+  RPC_DEVICE_SYNC_NETWORK,
+  RPC_DEVICE_SYNC_STATUS,
   RPC_HYPER_LAN_STATUS,
   RPC_HYPER_OFFLINE_KEEP,
   RPC_HYPER_OFFLINE_LIST,
@@ -98,10 +101,15 @@ import {
   resumeWantedHyperOffline
 } from '../hyper/offline-manager.mjs'
 import {
+  ensureDeviceSync,
   ensureLANDiscovery,
+  forgetDeviceSyncDevice,
+  getDeviceSyncSnapshot,
   getHyperStoragePath,
   getLANDiscoveryStatus,
+  refreshDeviceSync,
   refreshHyperNetworking,
+  setDeviceSyncMetered,
   withHyperRuntimeOperation
 } from '../hyper/runtime.mjs'
 import { getOrCreatePairingNonceRecord } from '../backup/pairing-nonce.mjs'
@@ -171,7 +179,33 @@ export async function routeRpcRequest (req) {
     }
 
     if (req.command === RPC_HYPER_REFRESH) {
+      // The app asks after a network change and on coming back to the front,
+      // which is when this person's devices are worth looking for again too.
+      refreshDeviceSync()
       replyJson(req, { ok: true, ...(await refreshHyperNetworking()) })
+      return
+    }
+
+    if (req.command === RPC_DEVICE_SYNC_STATUS) {
+      await ensureDeviceSync().catch((error) => {
+        console.warn('[device sync] Did not start:', error?.message || error)
+      })
+      replyJson(req, { ok: true, ...getDeviceSyncSnapshot() })
+      return
+    }
+
+    if (req.command === RPC_DEVICE_SYNC_NETWORK) {
+      setDeviceSyncMetered(parseJsonMessage(req.data)?.metered === true)
+      await ensureDeviceSync().catch((error) => {
+        console.warn('[device sync] Did not start:', error?.message || error)
+      })
+      replyJson(req, { ok: true })
+      return
+    }
+
+    if (req.command === RPC_DEVICE_SYNC_FORGET) {
+      const id = parseJsonMessage(req.data)?.id
+      replyJson(req, { ok: forgetDeviceSyncDevice(typeof id === 'string' ? id : '') })
       return
     }
 

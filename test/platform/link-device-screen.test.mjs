@@ -103,16 +103,20 @@ test('every RPC command has its own number, and the router answers the new ones'
   }
 })
 
-// The screen a person sees: this device, one way to sync, a backup, the
-// desktop app, and a way to let go of this phone. Nothing else.
+// The screen a person sees: this device and the others it has met, one way to
+// sync, a backup, the desktop app, and a way to let go of this phone. Nothing
+// else.
 test('Link Device is laid out like a sync screen, not a debug page', async () => {
   const screen = await read('app/settings/LinkDevice.tsx')
   const main = screen.slice(screen.indexOf('export function LinkDeviceSettings'), screen.indexOf('function SyncSheet'))
 
-  // Sections and rows, in the order they appear.
+  // Sections and rows, in the order they appear. The other devices are rows of
+  // their own between this one and the sync row, with one standing in for them
+  // until the first is met.
   const titles = [...main.matchAll(/title='([^']+)'/g)].map((match) => match[1])
   assert.deepEqual(titles, [
     'My devices',
+    'No other device yet',
     'Sync with another device',
     'Backup',
     'Save a backup file',

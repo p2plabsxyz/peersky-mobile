@@ -41,7 +41,7 @@ Your PeerChat name, bio and photo are seen by everyone in the rooms you join. A 
 
 When you send a link in PeerChat, your phone opens the page once to make a preview, so that website sees your IP address as it would on a visit. The people you send it to get the preview inside the message, and their phones do not open the page. You can turn off Link previews in PeerChat's settings.
 
-A public Hyperdrive upload can be opened by anyone with its `hyper://` address. A private one stays on your phone unless you share it or move it with Link Device.
+A public Hyperdrive upload can be opened by anyone with its `hyper://` address. A private one is encrypted with your identity's key, and it also goes to your own devices that hold that key, such as the desktop you linked: they find each other directly and list each other's private files, and a desktop keeps a copy of your phone's, made while your phone is on Wi-Fi. Nobody else can open them.
 
 ## Backups and Moving to Another Device
 

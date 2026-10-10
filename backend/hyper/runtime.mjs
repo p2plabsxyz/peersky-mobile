@@ -50,6 +50,15 @@ import {
   resetLinkedPrivateDrivesCache
 } from './linked-private-drives.mjs'
 import { getDefaultIdentityStoragePath } from '../backup/device-keys.mjs'
+import { attachDeviceSync } from './device-sync.mjs'
+import { createHyperUrl } from './url.mjs'
+import {
+  forgetSyncedDevice,
+  readDeviceSyncState,
+  resetDeviceSyncStateCache
+} from './device-sync-state.mjs'
+import { notifyApp } from '../rpc/notify.mjs'
+import { RPC_APP_DEVICE_SYNC_CHANGED } from '../rpc/commands.mjs'
 
 let sdk = null
 let sdkOpening = null
@@ -72,6 +81,8 @@ const linkedPrivateDrivesById = new Map()
 const adoptingLinkedDrives = new Map()
 const privateDriveWarnings = new Map()
 let networkRefresh = null
+let deviceSync = null
+let deviceSyncMetered = false
 const runtimeCoordinator = createRuntimeCoordinator()
 
 export function withHyperRuntimeOperation (task) {
@@ -153,10 +164,14 @@ export async function getKeyedPrivateHyperdrive (address) {
   const id = b4a.isBuffer(address) ? b4a.toString(address, 'hex') : normalizeDriveAddressId(address)
   if (!id) return null
   if (id === getSyncedPrivateDriveId()) return getSyncedPrivateHyperdrive()
-  const storage = syncedPrivateStoragePath || (typeof Bare !== 'undefined' ? getSyncedPrivateHyperSdkStoragePath() : null)
-  if (isAdoptedSyncedPrivateDrive(storage, id)) return getSyncedPrivateHyperdriveForId(id)
+  // A drive a linked device lists, or one found to open with this phone's
+  // keys, reads from the store that replicates. That comes before the copy
+  // adopted from a desktop at transfer, which never replicates: a drive the
+  // desktop still writes would show here as it was on the day of the transfer.
   const key = linkedPrivateDriveKeyFor(getDefaultIdentityStoragePath(), id, privateDriveKeyCandidates())
   if (key) return getLinkedPrivateHyperdrive(id, key)
+  const storage = syncedPrivateStoragePath || (typeof Bare !== 'undefined' ? getSyncedPrivateHyperSdkStoragePath() : null)
+  if (isAdoptedSyncedPrivateDrive(storage, id)) return getSyncedPrivateHyperdriveForId(id)
   return null
 }
 
@@ -343,6 +358,7 @@ export async function getSyncedPrivateHyperRuntime () {
         const drive = await getSyncedPrivateHyperdrive(runtime)
         rememberSyncedPrivateHyperdrive(drive)
         syncedPrivateSdk = runtime
+        startDeviceSync(runtime)
       }
     )
   }
@@ -588,6 +604,9 @@ export function getPrivateDriveWarningForDriveId (driveId) {
 }
 
 export async function closeHyperRuntime () {
+  const closingSync = deviceSync
+  deviceSync = null
+  await closingSync?.close().catch(() => {})
   try {
     await closeRuntimeCandidates([
       sdk || sdkOpening,
@@ -615,9 +634,113 @@ export async function closeHyperRuntime () {
     syncedPrivateDriveId = null
     resetPrivateDriveKeyCache()
     resetLinkedPrivateDrivesCache()
+    resetDeviceSyncStateCache()
     networkRefresh = null
     resetLANDiscovery()
   }
+}
+
+// This person's other devices, met under a topic made from the private drive
+// key a desktop sent when it linked. A phone that was never linked has no
+// other device to meet, and no sync starts.
+function startDeviceSync (runtime) {
+  if (deviceSync) return
+  const identityStoragePath = getDefaultIdentityStoragePath()
+  const identityKey = linkedPrivateDriveKey(identityStoragePath)
+  if (!identityKey) return
+  deviceSync = attachDeviceSync(runtime, {
+    identityKey,
+    stateDirectory: identityStoragePath,
+    device: 'phone',
+    ownDrives: () => ownDevicesSyncDrives(identityKey),
+    // Only on the store this sync came up with: a drive opened after it closed
+    // would open the store again in the middle of a backup.
+    openDrive: (id, key) => syncedPrivateSdk === runtime ? getLinkedPrivateHyperdrive(id, key) : null,
+    rememberDrive: (id, key) => {
+      // A key this phone does not hold is not kept: only the fingerprint is,
+      // and reads look the key up among this phone's own.
+      if (privateDriveKeyCandidates().some((candidate) => b4a.equals(candidate, key))) {
+        rememberLinkedPrivateDrive(identityStoragePath, id, key)
+      }
+    },
+    isMetered: () => deviceSyncMetered,
+    onChange: () => notifyApp(RPC_APP_DEVICE_SYNC_CHANGED, {})
+  })
+}
+
+// The phone's own private drive, with its key when the phone made that key
+// itself before it was linked. Never a drive adopted from a desktop: that one
+// is the desktop's to list.
+function ownDevicesSyncDrives (identityKey) {
+  const id = getSyncedPrivateDriveId()
+  const storage = syncedPrivateStoragePath || (typeof Bare !== 'undefined' ? getSyncedPrivateHyperSdkStoragePath() : null)
+  if (!id || !storage || isAdoptedSyncedPrivateDrive(storage, id)) return []
+  const record = getPrivateDriveKeyRecord(storage)
+  if (!record.ok || !record.encrypted || !record.key) return []
+  return [b4a.equals(record.key, identityKey) ? { id } : { id, key: b4a.toString(record.key, 'hex') }]
+}
+
+/** Starts the sync if this phone is linked and it is not running yet. */
+export async function ensureDeviceSync () {
+  if (deviceSync) return true
+  if (!linkedPrivateDriveKey(getDefaultIdentityStoragePath())) return false
+  await withSyncedPrivateHyperRuntimeOperation(() => {})
+  return deviceSync !== null
+}
+
+/**
+ * Whether the phone is on a cellular connection. Its other devices hear it, so
+ * a desktop waits for Wi-Fi before copying this phone's files.
+ */
+export function setDeviceSyncMetered (metered) {
+  const next = metered === true
+  if (next === deviceSyncMetered) return
+  deviceSyncMetered = next
+  deviceSync?.announce()
+}
+
+export function getDeviceSyncSnapshot () {
+  const identityStoragePath = getDefaultIdentityStoragePath()
+  const state = readDeviceSyncState(identityStoragePath)
+  const online = deviceSync ? deviceSync.online : new Set()
+  return {
+    linked: linkedPrivateDriveKey(identityStoragePath) !== null,
+    running: deviceSync !== null,
+    devices: state.devices.map((device) => ({
+      id: device.id,
+      type: device.type,
+      online: online.has(device.id),
+      firstSeen: device.firstSeen,
+      lastSeen: device.lastSeen
+    })),
+    files: state.devices.flatMap((device) => device.drives.flatMap((driveId) => {
+      const listing = state.listings[driveId]
+      if (!listing) return []
+      return listing.items.map((item) => ({
+        ...item,
+        deviceId: device.id,
+        deviceType: device.type,
+        driveId,
+        url: createHyperUrl(`hyper://${driveId}/`, item.path)
+      }))
+    }))
+  }
+}
+
+/** The phone moved to another network or came back to the front. */
+export function refreshDeviceSync () {
+  deviceSync?.refresh()
+}
+
+/** A private file was just added: with no device connected, look for them. */
+export function nudgeDeviceSync () {
+  deviceSync?.nudge()
+}
+
+export function forgetDeviceSyncDevice (id) {
+  const forgotten = forgetSyncedDevice(getDefaultIdentityStoragePath(), id)
+  if (forgotten) notifyApp(RPC_APP_DEVICE_SYNC_CHANGED, {})
+  return forgotten
 }
 
 function adoptedDriveHeadStatePath () {

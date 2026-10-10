@@ -58,7 +58,7 @@ export const HYPERDRIVE_WELCOME: AppWelcomeContent = {
       id: 'private',
       Icon: ShieldLockIcon,
       title: 'Private when you want',
-      body: 'Private files are encrypted, so only your linked devices can open them. This device only keeps a file here and never syncs it.'
+      body: 'Private files are encrypted, so only your linked devices can open them, and they show up there on their own. This device only keeps a file here and never syncs it.'
     },
     {
       id: 'offline',
