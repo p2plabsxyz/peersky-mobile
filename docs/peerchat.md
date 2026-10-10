@@ -12,6 +12,9 @@ and transport formats as PeerSky Desktop.
 - Exchange encrypted messages with mobile and desktop peers.
 - Rooms and direct messages made on 0.1.2 or later change their message key
   every hour, so a key someone gets later cannot read what came before.
+- Every message is signed by whoever wrote it, and passed on from device to
+  device, so it reaches people its author is not connected to and nobody can
+  fake one.
 - Restore recent rooms and message history after an app restart.
 - Reply to messages, add reactions, mention peers, and search chats or messages.
 - Share room-encrypted Hyperdrive attachments and bounded HTTP or HTTPS link previews.
@@ -44,6 +47,7 @@ Important files:
 - `backend/peerchat/room-proof.mjs`: the proof a peer gives that it holds a room's key.
 - `backend/peerchat/key-chain.mjs`: hourly message keys for rooms made on 0.1.2 or later.
 - `backend/peerchat/removal-signature.mjs`: the creator's signature on a room's removal list.
+- `backend/peerchat/message-signature.mjs`: every message's signature by whoever wrote it.
 - `backend/peerchat/transport.mjs`: bounded newline-delimited peer frames.
 - `backend/peerchat/link-preview.mjs`: bounded public-network preview fetching.
 - `backend/peerchat/moderation.mjs`: local content and spam enforcement.
@@ -150,6 +154,39 @@ hour's, so a stolen phone keeps reading new messages until the room is replaced
 with a new one. Builds from before 0.1.2 cannot read rooms made on 0.1.2 or
 later. The desktop keeps the same rules in peerchat's `lib/key-chain.js`, and
 both apps pin one vector (`test/protocol/peerchat-key-chain.test.mjs`).
+
+### Signed messages and passing on
+
+A message used to name its author in a field anyone could fill in. Straight
+from its author, the connection proved who that was, but history a peer sent on
+carried whatever author that peer wrote in. Now every message and reaction
+carries:
+
+- `ak`: the author's network key, whose first 8 hex are their id.
+- `h`: a header the author writes once, as a JSON string: the room's topic,
+  the message id, its time, its hour in a room whose keys rotate, the author's
+  name, whether it was forwarded, and in an older room the reply and file
+  details, which sit next to the sealed body there.
+- `as`: an Ed25519 signature by `ak` over a label, `h` and the sealed body.
+
+The phone keeps `h` exactly as it came, so a message can go on to the next
+device and be checked there again. A signed message counts from anyone once its
+signature checks out and its key is the one that id's connections proved. An
+unsigned one, as an older build sends, counts only straight from its author's
+connection, and never in somebody else's history.
+
+A device keeps at most 64 connections, so in a big room most people are not
+connected to most others. A newer build says so in its handshake and passes
+each new signed message on once to everyone else in the room who said the same,
+never back where it came from or to its author. A copy the phone has already
+seen stops at its first check, so a message crosses the room in a few steps.
+Only signed messages are passed on, only for ten minutes after they were
+written, and none from before the phone joined; an older build never gets one.
+Limits count per author, not per connection: each author has the room's spam
+limit and 120 messages a minute, wherever their messages come from, so a device
+passing on a busy room is never blamed for what others wrote. The desktop keeps
+the same rules in peerchat's `lib/message-signature.js`, and both apps pin one
+vector (`test/protocol/peerchat-message-signature.test.mjs`).
 
 Messages are encrypted before they are appended to a room feed or sent to a
 peer. Sender names, timestamps, reactions, and other routing metadata are not
@@ -261,6 +298,7 @@ them. See [link-device.md](link-device.md).
 The service limits room count, returned and stored history, room and total
 storage bytes, frame and message size, pending direct-message requests, peer
 members, initial synchronization, queued frames, live/control message rates,
+messages passed on per connection and per author,
 tracked moderation state, and link-preview work. It releases feed listeners,
 timers, transports, pending joins, swarm topics, and room state during leave,
 runtime reset, P2P clearing, and application shutdown.
