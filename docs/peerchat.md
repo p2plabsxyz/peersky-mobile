@@ -16,6 +16,9 @@ and transport formats as PeerSky Desktop.
   device, so it reaches people its author is not connected to and nobody can
   fake one.
 - Restore recent rooms and message history after an app restart.
+- Keep a chat per browser tab, so two tabs show two rooms, each tab named after
+  its room. The tab's chat is kept in PeerChat's UI state, not in its address,
+  so no room key sits in the address bar.
 - Reply to messages, add reactions, mention peers, and search chats or messages.
 - Share room-encrypted Hyperdrive attachments and bounded HTTP or HTTPS link previews.
 - Start direct-message conversations through an explicit accept or decline flow.

@@ -1188,6 +1188,15 @@ export default function App () {
     })
   }
 
+  // A PeerChat tab is named after the chat it is on, so two of them can be
+  // told apart in the tab list. On the chat list it is PeerChat again.
+  function showPeerChatRoomTitle (roomName: string | null) {
+    const title = normalizeBrowserTabTitle(roomName || getRuntimeAppTitle('peerchat'))
+    setBrowserTitle(title)
+    const { activeTabId, tabs } = browserTabsStateRef.current
+    if (tabs.find((tab) => tab.id === activeTabId)?.title !== title) updateBrowserTabTitle(activeTabId, title)
+  }
+
   function updateBrowserTabTitle (tabId: string, title: string) {
     updateBrowserTabsState((state) => updateBrowserTabState(
       state,
@@ -1492,7 +1501,13 @@ export default function App () {
   }
 
   function openInternalApp (app: RuntimeTab, shouldCommit = true, launchSuffix = '') {
-    const appUrl = `${getRuntimeAppUrl(app)}${launchSuffix}`
+    // A PeerChat invite is read here and handed to the chat, then left out of
+    // the tab's address. Kept there, its room key sat in the address bar, and
+    // the tab opened the invite again after a restart, over whichever chat the
+    // tab had moved on to. The desktop clears it from the address the same way.
+    const invitedRoom = app === 'peerchat' ? parsePeerChatInvite(launchSuffix) : ''
+    const invitedPeer = app === 'peerchat' ? parsePeerChatDirectInvite(launchSuffix) : ''
+    const appUrl = `${getRuntimeAppUrl(app)}${invitedRoom || invitedPeer ? '' : launchSuffix}`
     cancelPendingBrowserLoad()
     setActiveTab(app)
     setBrowserTitle(getRuntimeAppTitle(app))
@@ -1505,11 +1520,9 @@ export default function App () {
     }
 
     if (app === 'peerchat') {
-      const invited = parsePeerChatInvite(launchSuffix)
-      if (invited) setRequestedPeerChatRoomKey(invited)
+      if (invitedRoom) setRequestedPeerChatRoomKey(invitedRoom)
       // A personal invite names a person rather than a room, so it asks them
       // rather than joining anything.
-      const invitedPeer = parsePeerChatDirectInvite(launchSuffix)
       if (invitedPeer) setRequestedPeerChatPeerId(invitedPeer)
     }
 
@@ -4470,6 +4483,8 @@ export default function App () {
                   requestedPeerId={requestedPeerChatPeerId}
                   onRequestedPeerHandled={() => setRequestedPeerChatPeerId(null)}
                   soundsEnabled={peerChatNotifications.soundsEnabled}
+                  tabId={browserTabsState.activeTabId}
+                  onRoomTitleChange={showPeerChatRoomTitle}
                 />
                 )
               : activeTab === 'peertunes'

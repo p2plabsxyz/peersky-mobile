@@ -38,9 +38,11 @@ import { buildPeerChatReport, PEERCHAT_REPORT_EMAIL } from './report.mjs'
 import {
   parsePeerChatUiState,
   PEERCHAT_UI_STATE_MAX_BYTES,
+  peerChatRoomForTab,
   recordRecentEmoji,
   serializePeerChatUiState,
-  setPeerChatDraft
+  setPeerChatDraft,
+  setPeerChatTabRoom
 } from './ui-state.mjs'
 import { assessLink, describeLinkRisk, extractFirstLink, LINK_SUSPICIOUS } from './link-safety.mjs'
 import { shareLink } from '../share'
@@ -322,6 +324,10 @@ type PeerChatScreenProps = {
   // The person a link names: their whole key, or the short id of an older link.
   requestedPeerId?: string | null
   onRequestedPeerHandled?: () => void
+  // The browser tab showing PeerChat. Each tab keeps its own chat.
+  tabId?: string | null
+  // The open chat's name, for the tab's title, or null on the list.
+  onRoomTitleChange?: (title: string | null) => void
 }
 
 const POLL_INTERVAL_MS = 1500
@@ -355,12 +361,15 @@ type PeerChatUiState = {
   // What you had typed and not sent, per chat.
   drafts: Record<string, string>
   recentEmojis: string[]
+  // The chat each browser tab is on. Null in a file from before tabs had one.
+  tabRooms: Record<string, string> | null
 }
 
 const EMPTY_UI_STATE: PeerChatUiState = {
   activeRoomKey: null,
   drafts: {},
-  recentEmojis: []
+  recentEmojis: [],
+  tabRooms: null
 }
 
 const PEERCHAT_UI_STATE_FILE = new File(Paths.document, 'peerchat-ui-state.json')
@@ -398,7 +407,9 @@ export function PeerChatScreen ({
   soundsEnabled,
   requestedRoomKey,
   requestedPeerId,
-  onRequestedPeerHandled
+  onRequestedPeerHandled,
+  tabId = null,
+  onRoomTitleChange
 }: PeerChatScreenProps) {
   const colors = isDark ? darkColors : lightColors
   const callRpcRef = useRef(onCallRpc)
@@ -422,6 +433,11 @@ export function PeerChatScreen ({
   const draftsRef = useRef<Record<string, string>>({})
   const uiStateRef = useRef<PeerChatUiState>(EMPTY_UI_STATE)
   const uiStateRestoredRef = useRef(false)
+  // The tab whose chat this screen is showing. One screen serves every
+  // PeerChat tab, so switching tabs changes it rather than mounting another.
+  const shownTabIdRef = useRef<string | null>(null)
+  const onRoomTitleChangeRef = useRef(onRoomTitleChange)
+  onRoomTitleChangeRef.current = onRoomTitleChange
   const [isIntroReady, setIsIntroReady] = useState(false)
   const [showIntro, setShowIntro] = useState(false)
   const [isReady, setIsReady] = useState(false)
@@ -629,6 +645,11 @@ export function PeerChatScreen ({
     onRoomOpenChange?.(Boolean(activeRoom))
   }, [activeRoom, onRoomOpenChange])
 
+  // A tab on a chat is named after it, so two PeerChat tabs can be told apart.
+  useEffect(() => {
+    onRoomTitleChangeRef.current?.(activeRoom ? activeRoom.name : null)
+  }, [activeRoom?.roomKey, activeRoom?.name])
+
   useEffect(() => () => onRoomOpenChange?.(false), [onRoomOpenChange])
 
   useEffect(() => {
@@ -658,7 +679,8 @@ export function PeerChatScreen ({
     const nextState = {
       activeRoomKey: activeRoom?.roomKey || null,
       drafts: draftsRef.current,
-      recentEmojis
+      recentEmojis,
+      tabRooms: setPeerChatTabRoom(uiStateRef.current.tabRooms, shownTabIdRef.current, activeRoom?.roomKey || null)
     }
     uiStateRef.current = nextState
     const timer = setTimeout(() => persistPeerChatUiState(nextState), UI_STATE_PERSIST_DELAY_MS)
@@ -697,6 +719,21 @@ export function PeerChatScreen ({
     setSelectedMessageIds(null)
     setIsForwardOpen(false)
   }, [activeRoom?.roomKey])
+
+  // Switching to another PeerChat tab moves this screen to the chat that tab
+  // was on, or to the list. Every tab used to show the last chat opened in any
+  // of them. Before the saved state is read, the restore below does this.
+  useEffect(() => {
+    if (!uiStateRestoredRef.current || shownTabIdRef.current === tabId) return
+    shownTabIdRef.current = tabId
+    const roomKey = peerChatRoomForTab(uiStateRef.current, tabId)
+    const room = roomKey ? rooms.find((item) => item.roomKey === roomKey) || null : null
+    if (room) {
+      if (activeRoomRef.current?.roomKey !== room.roomKey) openRoom(room)
+    } else {
+      leaveActiveRoom()
+    }
+  }, [leaveActiveRoom, rooms, tabId])
 
   useEffect(() => {
     // Same wait as a room invite: a request cannot be sent without a name.
@@ -782,8 +819,10 @@ export function PeerChatScreen ({
     const drafts = Object.fromEntries(
       Object.entries(restoredUiState.drafts || {}).filter(([roomKey]) => roomKeys.has(roomKey))
     )
-    const restoredRoom = restoredUiState.activeRoomKey
-      ? rooms.find((room) => room.roomKey === restoredUiState.activeRoomKey) || null
+    // The chat this tab was on. An invite being opened comes first.
+    const restoredRoomKey = requestedRoomKey ? null : peerChatRoomForTab(restoredUiState, tabId)
+    const restoredRoom = restoredRoomKey
+      ? rooms.find((room) => room.roomKey === restoredRoomKey) || null
       : null
 
     draftsRef.current = drafts
@@ -798,10 +837,12 @@ export function PeerChatScreen ({
       setActiveRoom(restoredRoom)
     }
     setRecentEmojis(restoredUiState.recentEmojis || [])
+    shownTabIdRef.current = tabId
     uiStateRef.current = {
       activeRoomKey: restoredRoom?.roomKey || null,
       drafts,
-      recentEmojis: restoredUiState.recentEmojis || []
+      recentEmojis: restoredUiState.recentEmojis || [],
+      tabRooms: restoredUiState.tabRooms || {}
     }
     uiStateRestoredRef.current = true
   }, [isInitialized, restoredUiState, rooms])

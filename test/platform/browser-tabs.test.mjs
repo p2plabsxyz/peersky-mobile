@@ -159,6 +159,35 @@ describe('browser tab state helpers', () => {
     }
   })
 
+  // An opened invite used to stay in the tab's address, room key and all,
+  // whichever chat the tab had moved on to. A tab saved like that comes back
+  // with PeerChat's own address, and a PeerTunes suffix is left alone.
+  test('a PeerChat tab saved with an opened invite comes back without it', () => {
+    const room = 'ab'.repeat(32)
+    const restored = restoreBrowserTabsState(JSON.stringify({
+      version: 1,
+      activeTabId: 'tab-1',
+      viewMode: 'grid',
+      tabs: [{
+        id: 'tab-1',
+        title: 'PeerChat',
+        historyIndex: 2,
+        history: [
+          { url: `peersky://p2p/peerchat/#room=${room}`, source: { kind: 'app', app: 'peerchat' } },
+          { url: `peersky://p2p/peerchat/#dm=${'cd'.repeat(32)}`, source: { kind: 'app', app: 'peerchat' } },
+          { url: 'peersky://p2p/peertunes/#playlist=hyper%3A%2F%2Fabc%2F', source: { kind: 'app', app: 'peertunes' } }
+        ]
+      }]
+    }))
+
+    assert.deepEqual(restored.tabs[0].history.map((entry) => entry.url), [
+      'peersky://p2p/peerchat/',
+      'peersky://p2p/peerchat/',
+      'peersky://p2p/peertunes/#playlist=hyper%3A%2F%2Fabc%2F'
+    ])
+    assert.deepEqual(restored.tabs[0].history[0].source, { kind: 'app', app: 'peerchat' })
+  })
+
   // A tab left on the Holesail check in a debug build must not reopen the
   // development tool in a release build. It restores as a plain address.
   test('a Holesail tab does not reopen the dev tool in a release build', () => {
