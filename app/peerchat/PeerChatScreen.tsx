@@ -124,7 +124,7 @@ import {
   splitPeerChatDirectPeer
 } from './peerchat-invite.mjs'
 import { PRE_JOINED_PEERCHAT_ROOM_KEY } from '../../backend/peerchat/rooms.mjs'
-import { mentionQueryStart } from '../../backend/peerchat/mentions.mjs'
+import { mentionQueryStart, personName } from '../../backend/peerchat/mentions.mjs'
 import { QrCodeView } from '../settings/QrCodeView'
 import { pickUploads } from '../media/upload-gate'
 import type { UploadSource } from '../media/upload-gate'
@@ -1265,6 +1265,24 @@ export function PeerChatScreen ({
       self: message.self,
       online: false
     })
+  }
+
+  // A mention opens the profile of whoever it names, as a sender's name does.
+  // "@ada@mobile" is ada's phone; "@ada" with no such member finds ada on any
+  // of their devices.
+  function openMentionProfile (mention: string) {
+    if (!activeRoom) return
+    const name = mention.replace(/^@/, '').toLowerCase()
+    const members = activeRoom.members
+    const member = members.find((candidate) => candidate.username.toLowerCase() === name) ||
+      members.find((candidate) => personName(candidate.username).toLowerCase() === personName(name))
+    if (member) {
+      setProfileTarget(member)
+      return
+    }
+    if (profile && profile.username.toLowerCase() === name) {
+      setProfileTarget({ id: profile.id, username: profile.username, bio: profile.bio || '', avatar: profile.avatar || null, self: true, online: true })
+    }
   }
 
   function viewProfileAvatar (member: PeerChatMember) {
@@ -2571,7 +2589,8 @@ export function PeerChatScreen ({
                             showMessageActions(item)
                           },
                           onHoldLink: setLinkActionTarget,
-                          onOpenLink: openMessageLink
+                          onOpenLink: openMessageLink,
+                          onOpenMention: openMentionProfile
                         }
                       )}
                       <PeerChatLinkCard
@@ -4656,6 +4675,7 @@ function renderMessageText (
     onHold: () => void
     onHoldLink: (url: string) => void
     onOpenLink: (url: string) => void
+    onOpenMention: (mention: string) => void
   }
 ) {
   const blocks = formatPeerChatMessage(message, usernames) as PeerChatMessageBlock[]
@@ -4709,6 +4729,7 @@ function renderMessageSpan (
     onHold: () => void
     onHoldLink: (url: string) => void
     onOpenLink: (url: string) => void
+    onOpenMention: (mention: string) => void
   }
 ) {
   const style = [
@@ -4750,8 +4771,25 @@ function renderMessageSpan (
       </Text>
     )
   }
+  if (span.mention) {
+    const mention = span.text
+    return (
+      <Text
+        key={`${index}-mention`}
+        accessibilityHint="Opens this person's profile"
+        accessibilityRole='button'
+        style={[style, { color: colors.accent }]}
+        onPress={() => handlers.onOpenMention(mention)}
+        // Claims the touch like a link, so holding it still offers the
+        // message's actions.
+        onLongPress={handlers.onHold}
+      >
+        {span.text}
+      </Text>
+    )
+  }
   return (
-    <Text key={`${index}-text`} style={[style, span.mention ? { color: colors.accent } : null]}>
+    <Text key={`${index}-text`} style={style}>
       {span.text}
     </Text>
   )

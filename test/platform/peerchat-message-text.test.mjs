@@ -104,3 +104,16 @@ test('https is still https, not an hs link', () => {
   const parts = splitPeerChatMessageParts('see https://example.com', [])
   assert.deepEqual(parts.filter((part) => part.link).map((part) => part.link), ['https://example.com'])
 })
+
+// Tapping a mention opens the profile of whoever it names, as tapping a
+// sender's name does.
+test('a mention in a message opens the profile it names', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const screen = await readFile(new URL('../../app/peerchat/PeerChatScreen.tsx', import.meta.url), 'utf8')
+  const span = screen.slice(screen.indexOf('function renderMessageSpan ('), screen.indexOf('function getMentionCandidates ('))
+  assert.match(span, /if \(span\.mention\) \{[\s\S]*onPress=\{\(\) => handlers\.onOpenMention\(mention\)\}/)
+  assert.match(screen, /onOpenMention: openMentionProfile/)
+  const open = screen.slice(screen.indexOf('function openMentionProfile ('), screen.indexOf('function viewProfileAvatar ('))
+  assert.match(open, /personName\(candidate\.username\)\.toLowerCase\(\) === personName\(name\)/)
+  assert.match(open, /setProfileTarget\(member\)/)
+})

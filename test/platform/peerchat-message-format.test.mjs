@@ -74,6 +74,7 @@ describe('formatted messages on screen', () => {
     assert.match(screen, /accessibilityLabel='Copy code'[\s\S]{0,200}onPress=\{\(\) => handlers\.onCopyCode\(block\.text\)\}/)
     assert.match(screen, /onPress=\{\(\) => handlers\.onCopyCode\(span\.text\)\}/)
     assert.match(screen, /function copyMessageCode \(code: string\) \{\s+Clipboard\.setString\(code\)/)
-    assert.equal((screen.match(/onLongPress=\{handlers\.onHold\}/g) || []).length, 2)
+    // Code, and a mention, which opens a profile on a tap.
+    assert.equal((screen.match(/onLongPress=\{handlers\.onHold\}/g) || []).length, 3)
   })
 })
