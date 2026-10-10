@@ -20,13 +20,16 @@ import { SafeAreaProvider, SafeAreaView, initialWindowMetrics } from 'react-nati
 import type { BrowserTabPreview } from './useBrowserTabPreviews'
 import { styles } from '../styles'
 import { BrowserToast, type BrowserToastMessage } from '../BrowserToast'
+import CheckIcon from '../../assets/icons/bootstrap/check2.svg'
 import ChevronLeftIcon from '../../assets/icons/bootstrap/chevron-left.svg'
 import ClockHistoryIcon from '../../assets/icons/bootstrap/clock-history.svg'
+import CopyIcon from '../../assets/icons/bootstrap/copy.svg'
 import FireIcon from '../../assets/icons/bootstrap/fire.svg'
 import GridIcon from '../../assets/icons/bootstrap/grid.svg'
 import ListIcon from '../../assets/icons/bootstrap/list-ul.svg'
 import MoreIcon from '../../assets/icons/bootstrap/three-dots-vertical.svg'
 import PlusIcon from '../../assets/icons/bootstrap/plus-lg.svg'
+import ShareIcon from '../../assets/icons/bootstrap/arrow-bar-up.svg'
 import CloseIcon from '../../assets/icons/bootstrap/x-lg.svg'
 import { isHorizontalSwipe, shouldCloseOnRelease } from './tab-swipe.mjs'
 import { formatClosedTabTime } from './recently-closed-time.mjs'
@@ -85,9 +88,14 @@ type BrowserTabsScreenProps = {
   // The closed tab's key in Recently closed, for Undo, or null when there is
   // nothing to bring back.
   onCloseTab: (tabId: string) => string | null
+  onCloseTabs: (tabIds: string[]) => string[]
+  // How many links went to the clipboard.
+  onCopyTabLinks: (tabIds: string[]) => number
   onNewTab: () => void
   onPreviewError: (tabId: string) => void
   onReopenClosedTab: (key: string, options?: { restorePlace?: boolean }) => void
+  onReopenClosedTabs: (keys: string[]) => void
+  onShareTabLinks: (tabIds: string[]) => void
   onSwitchTab: (tabId: string) => void
   onToggleView: () => void
 }
@@ -105,9 +113,13 @@ export function BrowserTabsScreen ({
   onClose,
   onCloseAllTabs,
   onCloseTab,
+  onCloseTabs,
+  onCopyTabLinks,
   onNewTab,
   onPreviewError,
   onReopenClosedTab,
+  onReopenClosedTabs,
+  onShareTabLinks,
   onSwitchTab,
   onToggleView
 }: BrowserTabsScreenProps) {
@@ -115,6 +127,31 @@ export function BrowserTabsScreen ({
   const [panel, setPanel] = useState<'tabs' | 'closed'>('tabs')
   const [menuOpen, setMenuOpen] = useState(false)
   const [toast, setToast] = useState<BrowserToastMessage | null>(null)
+  // Picking several tabs to copy, share or close at once. Null when not.
+  const [selected, setSelected] = useState<Set<string> | null>(null)
+  const selecting = selected !== null
+  const selectedIds = items.filter((item) => selected?.has(item.id)).map((item) => item.id)
+
+  function toggleSelected (tabId: string) {
+    setSelected((current) => {
+      const next = new Set(current || [])
+      if (next.has(tabId)) next.delete(tabId)
+      else next.add(tabId)
+      return next
+    })
+  }
+
+  function closeSelected () {
+    const keys = onCloseTabs(selectedIds)
+    setSelected(null)
+    if (keys.length === 0) return
+    setToast({
+      id: Date.now(),
+      message: keys.length === 1 ? 'Tab closed' : `${keys.length} tabs closed`,
+      actionLabel: 'Undo',
+      onAction: () => onReopenClosedTabs(keys)
+    })
+  }
   const isList = viewMode === 'list'
   const actionIconProps = {
     color: palette.text,
@@ -147,6 +184,7 @@ export function BrowserTabsScreen ({
     setPanel('tabs')
     setMenuOpen(false)
     setToast(null)
+    setSelected(null)
   }, [visible])
 
   // Tabs stay in the order they were opened, newest last, as in Chrome and
@@ -203,6 +241,36 @@ export function BrowserTabsScreen ({
             )
           : (
             <>
+        {selecting
+          ? (
+            <View style={[styles.browserTabsHeader, { borderBottomColor: palette.border }]}>
+              <View>
+                <Text style={[styles.browserTabsTitle, { color: palette.text }]}>
+                  {selectedIds.length} selected
+                </Text>
+                <Text style={[styles.browserTabsSubtitle, { color: palette.mutedText }]}>
+                  Tap tabs to pick them
+                </Text>
+              </View>
+              <View style={local.selectionHeaderActions}>
+                <Pressable
+                  accessibilityRole='button'
+                  hitSlop={8}
+                  onPress={() => setSelected(
+                    selectedIds.length === items.length ? new Set() : new Set(items.map((item) => item.id))
+                  )}
+                >
+                  <Text style={[local.headerTextButton, { color: palette.text }]}>
+                    {selectedIds.length === items.length ? 'None' : 'All'}
+                  </Text>
+                </Pressable>
+                <Pressable accessibilityRole='button' hitSlop={8} onPress={() => setSelected(null)}>
+                  <Text style={[local.headerTextButton, local.headerTextButtonStrong]}>Done</Text>
+                </Pressable>
+              </View>
+            </View>
+            )
+          : (
         <View style={[styles.browserTabsHeader, { borderBottomColor: palette.border }]}>
           <View>
             <Text style={[styles.browserTabsTitle, { color: palette.text }]}>Tabs</Text>
@@ -256,6 +324,7 @@ export function BrowserTabsScreen ({
             </Pressable>
           </View>
         </View>
+            )}
 
         <FlatList
           ref={listRef}
@@ -283,6 +352,7 @@ export function BrowserTabsScreen ({
           ]}
           renderItem={({ item }) => (
             <SwipeableTabCard
+              disabled={selecting}
               onClose={() => closeTab(item.id)}
               style={[
                 styles.browserTabCard,
@@ -291,18 +361,25 @@ export function BrowserTabsScreen ({
                   borderColor: palette.border
                 },
                 isList ? styles.browserTabCardList : null,
-                item.isActive ? styles.browserTabCardActive : null
+                (selecting ? selected?.has(item.id) : item.isActive) ? styles.browserTabCardActive : null
               ]}
             >
               <Pressable
-                accessibilityLabel={`Open ${item.label} tab`}
-                accessibilityRole='button'
-                accessibilityState={{ selected: item.isActive }}
+                accessibilityLabel={selecting ? `Select ${item.label} tab` : `Open ${item.label} tab`}
+                accessibilityRole={selecting ? 'checkbox' : 'button'}
+                accessibilityState={selecting ? { checked: selected?.has(item.id) } : { selected: item.isActive }}
+                accessibilityHint={selecting ? undefined : 'Press and hold to select several tabs'}
+                delayLongPress={350}
                 style={[
                   styles.browserTabCardBody,
                   isList ? styles.browserTabCardBodyList : null
                 ]}
-                onPress={() => onSwitchTab(item.id)}
+                onLongPress={() => {
+                  if (selecting) return
+                  setMenuOpen(false)
+                  setSelected(new Set([item.id]))
+                }}
+                onPress={() => selecting ? toggleSelected(item.id) : onSwitchTab(item.id)}
               >
                 <View style={[
                   styles.browserTabCardDetails,
@@ -361,24 +438,81 @@ export function BrowserTabsScreen ({
                 </View>
               </Pressable>
 
-              <Pressable
-                accessibilityLabel={`Close ${item.label}`}
-                accessibilityRole='button'
-                hitSlop={8}
-                style={[styles.browserTabCardClose, { backgroundColor: palette.button }]}
-                onPress={() => closeTab(item.id)}
-              >
-                <CloseIcon {...actionIconProps} width={17} height={17} />
-              </Pressable>
+              {selecting
+                ? (
+                  <View
+                    pointerEvents='none'
+                    style={[
+                      styles.browserTabCardClose,
+                      local.selectMark,
+                      selected?.has(item.id)
+                        ? local.selectMarkOn
+                        : { backgroundColor: palette.address, borderColor: palette.mutedText }
+                    ]}
+                  >
+                    {selected?.has(item.id) && <CheckIcon width={16} height={16} color='#ffffff' />}
+                  </View>
+                  )
+                : (
+                  <Pressable
+                    accessibilityLabel={`Close ${item.label}`}
+                    accessibilityRole='button'
+                    hitSlop={8}
+                    style={[styles.browserTabCardClose, { backgroundColor: palette.button }]}
+                    onPress={() => closeTab(item.id)}
+                  >
+                    <CloseIcon {...actionIconProps} width={17} height={17} />
+                  </Pressable>
+                  )}
             </SwipeableTabCard>
           )}
         />
+        {selecting && (
+          <View style={[local.selectionBar, { backgroundColor: palette.shell, borderTopColor: palette.border }]}>
+            <SelectionAction
+              disabled={selectedIds.length === 0}
+              icon={<CopyIcon width={18} height={18} color={palette.text} />}
+              label='Copy links'
+              palette={palette}
+              onPress={() => {
+                const count = onCopyTabLinks(selectedIds)
+                setSelected(null)
+                setToast({
+                  id: Date.now(),
+                  message: count === 0 ? 'No links to copy' : count === 1 ? 'Link copied' : `${count} links copied`
+                })
+              }}
+            />
+            <SelectionAction
+              disabled={selectedIds.length === 0}
+              icon={<ShareIcon width={18} height={18} color={palette.text} />}
+              label='Share'
+              palette={palette}
+              onPress={() => {
+                onShareTabLinks(selectedIds)
+                setSelected(null)
+              }}
+            />
+            <SelectionAction
+              destructive
+              disabled={selectedIds.length === 0}
+              icon={<CloseIcon width={16} height={16} color='#d44a3a' />}
+              label={selectedIds.length > 1 ? `Close ${selectedIds.length}` : 'Close'}
+              palette={palette}
+              onPress={closeSelected}
+            />
+          </View>
+        )}
             </>
             )}
         {menuOpen && (
           <TabsMenu
             palette={palette}
             recentlyClosedCount={recentlyClosed.length}
+            onSelect={() => {
+              setMenuOpen(false)
+              setSelected(new Set())
+            }}
             onClose={() => setMenuOpen(false)}
             onCloseAll={() => {
               setMenuOpen(false)
@@ -390,7 +524,7 @@ export function BrowserTabsScreen ({
             }}
           />
         )}
-        <BrowserToast bottom={24} isDark={isDark} toast={toast} onHide={() => setToast(null)} />
+        <BrowserToast bottom={selecting ? 92 : 24} isDark={isDark} toast={toast} onHide={() => setToast(null)} />
         </SafeAreaView>
       </SafeAreaProvider>
     </Modal>
@@ -403,13 +537,15 @@ function TabsMenu ({
   recentlyClosedCount,
   onClose,
   onCloseAll,
-  onRecentlyClosed
+  onRecentlyClosed,
+  onSelect
 }: {
   palette: BrowserTabsPalette
   recentlyClosedCount: number
   onClose: () => void
   onCloseAll: () => void
   onRecentlyClosed: () => void
+  onSelect: () => void
 }) {
   return (
     <Pressable accessibilityLabel='Close menu' style={StyleSheet.absoluteFill} onPress={onClose}>
@@ -417,6 +553,14 @@ function TabsMenu ({
         accessibilityRole='menu'
         style={[local.menu, { backgroundColor: palette.address, borderColor: palette.border }]}
       >
+        <Pressable
+          accessibilityRole='menuitem'
+          style={({ pressed }) => [local.menuItem, pressed ? { backgroundColor: palette.button } : null]}
+          onPress={onSelect}
+        >
+          <CheckIcon width={18} height={18} color={palette.text} />
+          <Text style={[local.menuText, { color: palette.text }]}>Select tabs</Text>
+        </Pressable>
         <Pressable
           accessibilityRole='menuitem'
           style={({ pressed }) => [local.menuItem, pressed ? { backgroundColor: palette.button } : null]}
@@ -437,6 +581,39 @@ function TabsMenu ({
           <Text style={[local.menuText, { color: palette.text }]}>Close all tabs</Text>
         </Pressable>
       </View>
+    </Pressable>
+  )
+}
+
+function SelectionAction ({
+  destructive = false,
+  disabled,
+  icon,
+  label,
+  palette,
+  onPress
+}: {
+  destructive?: boolean
+  disabled: boolean
+  icon: ReactNode
+  label: string
+  palette: BrowserTabsPalette
+  onPress: () => void
+}) {
+  return (
+    <Pressable
+      accessibilityRole='button'
+      accessibilityState={{ disabled }}
+      disabled={disabled}
+      style={({ pressed }) => [
+        local.selectionAction,
+        { backgroundColor: pressed ? palette.border : palette.button },
+        disabled ? local.selectionActionDisabled : null
+      ]}
+      onPress={onPress}
+    >
+      {icon}
+      <Text style={[local.selectionActionText, { color: destructive ? '#d44a3a' : palette.text }]}>{label}</Text>
     </Pressable>
   )
 }
@@ -516,22 +693,27 @@ function RecentlyClosedPanel ({
 
 function SwipeableTabCard ({
   children,
+  disabled = false,
   onClose,
   style
 }: {
   children: ReactNode
+  // While picking tabs, a sideways drag is not a close.
+  disabled?: boolean
   onClose: () => void
   style: StyleProp<ViewStyle>
 }) {
   const translateX = useRef(new Animated.Value(0)).current
   const onCloseRef = useRef(onClose)
   onCloseRef.current = onClose
+  const disabledRef = useRef(disabled)
+  disabledRef.current = disabled
 
   const panResponder = useRef(PanResponder.create({
-    onMoveShouldSetPanResponder: (_, gesture) => isHorizontalSwipe(gesture),
+    onMoveShouldSetPanResponder: (_, gesture) => !disabledRef.current && isHorizontalSwipe(gesture),
     // Claim the move before the card's own Pressable sees it, or a swipe that
     // starts on the preview reads as a press.
-    onMoveShouldSetPanResponderCapture: (_, gesture) => isHorizontalSwipe(gesture),
+    onMoveShouldSetPanResponderCapture: (_, gesture) => !disabledRef.current && isHorizontalSwipe(gesture),
     // The FlatList asks for the gesture back as soon as the finger drifts
     // downward. Saying yes is what made a swipe take two or three tries.
     onPanResponderTerminationRequest: () => false,
@@ -641,6 +823,50 @@ function TabFavicon ({
 }
 
 const local = StyleSheet.create({
+  selectionHeaderActions: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 20
+  },
+  headerTextButton: {
+    fontSize: 16,
+    fontWeight: '700'
+  },
+  headerTextButtonStrong: {
+    color: '#1f6fd1',
+    fontWeight: '800'
+  },
+  selectMark: {
+    borderWidth: 2
+  },
+  selectMarkOn: {
+    backgroundColor: '#1f6fd1',
+    borderColor: '#1f6fd1'
+  },
+  selectionBar: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    flexDirection: 'row',
+    gap: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 12
+  },
+  selectionAction: {
+    alignItems: 'center',
+    borderRadius: 12,
+    flex: 1,
+    flexDirection: 'row',
+    gap: 8,
+    justifyContent: 'center',
+    minHeight: 48,
+    paddingHorizontal: 8
+  },
+  selectionActionDisabled: {
+    opacity: 0.45
+  },
+  selectionActionText: {
+    fontSize: 14,
+    fontWeight: '700'
+  },
   menu: {
     borderRadius: 12,
     borderWidth: StyleSheet.hairlineWidth,

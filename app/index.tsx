@@ -66,10 +66,12 @@ import {
   appendIncomingBrowserTabs,
   BROWSER_PAGE_ZOOMS,
   closeBrowserTabState,
+  closeBrowserTabsState,
   createBrowserTabsState,
   DEFAULT_BROWSER_PAGE_ZOOM,
   findBrowserTabShowingApp,
   forgetClosedBrowserTab,
+  getBrowserTabUrls,
   isAppInBrowserTabs,
   isCurrentBrowserTabEntry,
   MAX_BROWSER_TABS,
@@ -2407,6 +2409,14 @@ export default function App () {
     }
 
     updateBrowserTabsState(nextState)
+    forgetBrowserTabResources(tabId)
+    if (isClosingActive && tab) applyBrowserTab(tab)
+    setStatus('Tab closed')
+    return closed ? closed.key : null
+  }
+
+  // What the app kept for a tab that is gone.
+  function forgetBrowserTabResources (tabId: string) {
     removeBrowserTabPreview(tabId)
     browserFaviconsRef.current.delete(tabId)
     browserLastRecordedUrlsRef.current.delete(tabId)
@@ -2421,9 +2431,81 @@ export default function App () {
       return next
     })
     setBrowserLiveTabIds((tabIds) => tabIds.filter((id) => id !== tabId))
+  }
+
+  // Several tabs picked in the tab list, closed together and kept together in
+  // Recently closed, so one Undo brings them all back.
+  function onBrowserCloseTabs (tabIds: string[]): string[] {
+    const currentTabsState = browserTabsStateRef.current
+    const ids = tabIds.filter((tabId) => currentTabsState.tabs.some((item) => item.id === tabId))
+    if (ids.length === 0) return []
+    browserUserInteractedRef.current = true
+    const isClosingActive = ids.includes(currentTabsState.activeTabId)
+    if (isClosingActive) cancelPendingBrowserLoad()
+
+    const closedAt = Date.now()
+    const closed = ids
+      .map((tabId, order) => {
+        const index = currentTabsState.tabs.findIndex((item) => item.id === tabId)
+        return snapshotClosedBrowserTab(currentTabsState.tabs[index], closedAt + order, {
+          index,
+          wasActive: tabId === currentTabsState.activeTabId
+        })
+      })
+      .filter(Boolean) as ClosedBrowserTab[]
+    if (closed.length > 0) {
+      updateRecentlyClosedTabs(rememberClosedBrowserTabs(recentlyClosedTabsRef.current, closed) as ClosedBrowserTab[])
+    }
+
+    const nextState = closeBrowserTabsState(currentTabsState, ids) as BrowserTabsState
+    const tab = nextState.tabs.find((item) => item.id === nextState.activeTabId)
+    // As for one tab: landing on a live note swaps the whole screen.
+    if (isClosingActive && p2pmdWorkspaceReady && isP2pmdWorkspaceTab(tab)) setBrowserTabsVisible(false)
+    updateBrowserTabsState(nextState)
+    for (const tabId of ids) forgetBrowserTabResources(tabId)
     if (isClosingActive && tab) applyBrowserTab(tab)
-    setStatus('Tab closed')
-    return closed ? closed.key : null
+    setStatus(ids.length === 1 ? 'Tab closed' : `${ids.length} tabs closed`)
+    return closed.map((item) => item.key)
+  }
+
+  // Undo for several at once: each back in its place, in the order they were.
+  function onBrowserReopenClosedTabs (keys: string[]) {
+    const wanted = keys
+      .map((key) => recentlyClosedTabsRef.current.find((item) => item.key === key))
+      .filter(Boolean) as ClosedBrowserTab[]
+    wanted.sort((left, right) => (left.index ?? 0) - (right.index ?? 0))
+    const currentTabsState = browserTabsStateRef.current
+    let nextState = currentTabsState
+    const reopened: string[] = []
+    for (const closed of wanted) {
+      const state = reopenClosedBrowserTabState(nextState, closed, Date.now(), { restorePlace: true }) as BrowserTabsState
+      if (state === nextState) continue
+      nextState = state
+      reopened.push(closed.key)
+    }
+    if (reopened.length === 0) return
+    browserUserInteractedRef.current = true
+    updateRecentlyClosedTabs(recentlyClosedTabsRef.current.filter((item) => !reopened.includes(item.key)))
+    const activeChanged = nextState.activeTabId !== currentTabsState.activeTabId
+    if (activeChanged) cancelPendingBrowserLoad()
+    updateBrowserTabsState(nextState)
+    const tab = nextState.tabs.find((item) => item.id === nextState.activeTabId)
+    if (activeChanged && tab) applyBrowserTab(tab)
+  }
+
+  // The picked tabs' addresses, one per line.
+  function onBrowserCopyTabLinks (tabIds: string[]) {
+    const urls = getBrowserTabUrls(browserTabsStateRef.current, tabIds) as string[]
+    if (urls.length > 0) Clipboard.setString(urls.join('\n'))
+    return urls.length
+  }
+
+  function onBrowserShareTabLinks (tabIds: string[]) {
+    const urls = getBrowserTabUrls(browserTabsStateRef.current, tabIds) as string[]
+    if (urls.length === 0) return
+    // One link gets the sheet with PeerSky's icon; a list goes as plain text.
+    void shareLink({ message: urls.join('\n'), plain: urls.length > 1 })
+      .catch((error) => console.warn('Unable to share tab links:', error))
   }
 
   // From Recently closed: in a tab of its own, on screen. From Undo: back where
@@ -4414,9 +4496,13 @@ export default function App () {
           onCloseAllTabs={onBrowserCloseAllTabs}
           onClose={() => setBrowserTabsVisible(false)}
           onCloseTab={onBrowserCloseTab}
+          onCloseTabs={onBrowserCloseTabs}
+          onCopyTabLinks={onBrowserCopyTabLinks}
           onNewTab={onBrowserNewTab}
           onPreviewError={clearBrowserTabPreview}
           onReopenClosedTab={onBrowserReopenClosedTab}
+          onReopenClosedTabs={onBrowserReopenClosedTabs}
+          onShareTabLinks={onBrowserShareTabLinks}
           onSwitchTab={onBrowserSwitchTab}
           onToggleView={onBrowserToggleTabView}
         />
