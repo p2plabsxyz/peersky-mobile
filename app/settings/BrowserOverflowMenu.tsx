@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { useEffect, useRef } from 'react'
-import { Animated, Easing, Modal, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native'
+import { Animated, Easing, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native'
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import CheckIcon from '../../assets/icons/bootstrap/check2.svg'
 import DisplayIcon from '../../assets/icons/bootstrap/display.svg'
@@ -22,15 +22,17 @@ import StarIcon from '../../assets/icons/bootstrap/star.svg'
 import ZoomIcon from '../../assets/icons/bootstrap/zoom-in.svg'
 import { BROWSER_PALETTES } from '../browser-appearance.mjs'
 import { MODAL_ORIENTATIONS } from '../modal-orientations'
+import { dimWhenPressed, ICON_RIPPLE, ROUND_PRESS, ROW_RIPPLE } from '../press-feedback'
 
 const MENU_ICON_SIZE = 22
 const CARD_ICON_SIZE = 26
 const MENU_ICON_STROKE_WIDTH = 0.35
 // The sheet rises from fully below the screen and settles slowly at the end,
 // the way a system sheet does. It used to start half way up and arrive almost
-// at once, which read as the menu snapping open.
-const OPEN_MS = 380
-const CLOSE_MS = 220
+// at once, which read as the menu snapping open. Android's own sheets are
+// quicker than iOS's, and the slower settle read as sluggish there.
+const OPEN_MS = Platform.OS === 'android' ? 260 : 380
+const CLOSE_MS = Platform.OS === 'android' ? 180 : 220
 const OPEN_EASING = Easing.bezier(0.2, 0.8, 0.2, 1)
 const CLOSE_EASING = Easing.bezier(0.4, 0, 1, 1)
 
@@ -236,7 +238,8 @@ export function BrowserOverflowMenu ({
       <Pressable
         accessibilityLabel='Open browser menu'
         accessibilityRole='button'
-        style={styles.trigger}
+        android_ripple={ICON_RIPPLE}
+        style={({ pressed }) => [styles.trigger, ROUND_PRESS, dimWhenPressed(pressed)]}
         onPress={onShow}
       >
         <View style={styles.dots}>
@@ -400,11 +403,12 @@ function BigAction ({
       accessibilityRole='button'
       accessibilityState={{ disabled }}
       disabled={disabled}
+      android_ripple={ROW_RIPPLE}
       style={({ pressed }) => [
         styles.bigAction,
         { backgroundColor: cardColor },
         disabled ? styles.disabled : null,
-        pressed ? styles.pressed : null
+        pressed && Platform.OS !== 'android' ? styles.pressed : null
       ]}
       onPress={onPress}
     >
@@ -436,11 +440,12 @@ function MenuItem ({
       accessibilityRole='button'
       accessibilityState={{ disabled, selected }}
       disabled={disabled}
+      android_ripple={ROW_RIPPLE}
       style={({ pressed }) => [
         styles.menuItem,
         { backgroundColor: cardColor },
         disabled ? styles.disabled : null,
-        pressed ? styles.pressed : null
+        pressed && Platform.OS !== 'android' ? styles.pressed : null
       ]}
       onPress={onPress}
     >

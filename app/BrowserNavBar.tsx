@@ -4,6 +4,7 @@ import type { SvgProps } from 'react-native-svg'
 import { Keyboard, Platform, Pressable, StyleSheet, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
+import { dimWhenPressed, ICON_RIPPLE, ROUND_PRESS } from './press-feedback'
 import { BrowserOverflowMenu } from './settings/BrowserOverflowMenu'
 import type { ToolbarButton } from './settings/useBrowserPreferences'
 import { styles } from './styles'
@@ -242,7 +243,8 @@ export function BrowserNavBar ({
       <Pressable
         accessibilityLabel={`Open tabs, ${tabCount} open`}
         accessibilityRole='button'
-        style={styles.browserNavBarButton}
+        android_ripple={ICON_RIPPLE}
+        style={({ pressed }) => [styles.browserNavBarButton, ROUND_PRESS, dimWhenPressed(pressed)]}
         onPress={() => navigate(onOpenTabs)}
       >
         <View style={[styles.browserTabCountIcon, { borderColor: palette.mutedText }]}>
@@ -317,7 +319,13 @@ function NavButton ({
       accessibilityRole='button'
       accessibilityState={{ disabled }}
       disabled={disabled}
-      style={[styles.browserNavBarButton, disabled ? styles.browserNavButtonDisabled : null]}
+      android_ripple={ICON_RIPPLE}
+      style={({ pressed }) => [
+        styles.browserNavBarButton,
+        ROUND_PRESS,
+        disabled ? styles.browserNavButtonDisabled : null,
+        dimWhenPressed(pressed)
+      ]}
       onPress={onPress}
     >
       <Icon

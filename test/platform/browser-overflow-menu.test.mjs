@@ -20,9 +20,9 @@ describe('browser menu', () => {
     assert.match(menu, /transform: \[\{\s*\n\s*translateY: open\.interpolate/)
   })
 
-  test('the sheet rises from below the screen and settles slowly', () => {
+  test('the sheet rises from below the screen and settles slowly, quicker on Android', () => {
     assert.match(menu, /outputRange: \[windowHeight, 0\]/)
-    assert.match(menu, /const OPEN_MS = 380/)
+    assert.match(menu, /const OPEN_MS = Platform\.OS === 'android' \? 260 : 380/)
     assert.match(menu, /easing: visible \? OPEN_EASING : CLOSE_EASING/)
   })
 

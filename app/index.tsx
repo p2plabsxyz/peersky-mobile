@@ -634,6 +634,8 @@ export default function App () {
   const [browserCanGoBack, setBrowserCanGoBack] = useState(false)
   const [browserCanGoForward, setBrowserCanGoForward] = useState(false)
   const [browserIsLoading, setBrowserIsLoading] = useState(false)
+  const browserIsLoadingRef = useRef(false)
+  browserIsLoadingRef.current = browserIsLoading
   const [activeTab, setActiveTab] = useState<RuntimeTab>('hyper')
   const [requestedPeerChatRoomKey, setRequestedPeerChatRoomKey] = useState<string | null>(null)
   const [requestedPeerChatPeerId, setRequestedPeerChatPeerId] = useState<string | null>(null)
@@ -3709,6 +3711,8 @@ export default function App () {
   // left edge so it never fights a list or the horizontal toolbars.
   const browserBackSwipe = useRef(new Animated.Value(0)).current
   const browserForwardSwipe = useRef(new Animated.Value(0)).current
+  // How far the page in front has loaded, for the line along the address bar.
+  const browserLoadProgress = useRef(new Animated.Value(0)).current
   // Which way the swipe under the finger goes, decided by the edge it began at.
   const browserSwipeDirectionRef = useRef<'back' | 'forward'>('back')
   const browserCanGoForwardRef = useRef(false)
@@ -4420,6 +4424,7 @@ export default function App () {
       isDark={browserIsDark}
       isIncognito={browserTabsState.tabs.some((tab) => tab.id === browserTabsState.activeTabId && tab.incognito === true)}
       isLoading={browserIsLoading}
+      loadProgress={browserLoadProgress}
       historySuggestions={getBrowserHistorySuggestions(browserAddress)}
       navigationKey={`${browserTabsState.activeTabId}:${browserHistoryIndex}`}
       pageActionAvailable={browserPageActionAvailable}
@@ -5453,7 +5458,29 @@ export default function App () {
                 ) {
                   setBrowserFavicon(null)
                   setBrowserIsLoading(true)
+                  // A new page starts its line from the left again.
+                  browserLoadProgress.stopAnimation()
+                  browserLoadProgress.setValue(0.08)
                 }
+              }}
+              onLoadProgress={(event) => {
+                if (browserTabsStateRef.current.activeTabId !== tab.id) return
+                const progress = Math.min(1, event.nativeEvent.progress)
+                // Android's WebView tells the start of a load only once the
+                // server answers, so a slow site showed nothing for seconds
+                // after Go. Its progress starts at once, and is what says it.
+                if (isCurrentBrowserTabEntry(browserTabsStateRef.current, tab.id, entry)) {
+                  const loading = progress < 1
+                  if (loading !== browserIsLoadingRef.current) {
+                    browserIsLoadingRef.current = loading
+                    setBrowserIsLoading(loading)
+                  }
+                }
+                Animated.timing(browserLoadProgress, {
+                  duration: 160,
+                  toValue: Math.max(0.08, progress),
+                  useNativeDriver: false
+                }).start()
               }}
               onLoadEnd={(event) => {
                 const webViewTag = getNativeViewTag(event)

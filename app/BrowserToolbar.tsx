@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ActivityIndicator, Keyboard, Platform, Pressable, StyleSheet, TextInput, View } from 'react-native'
+import { ActivityIndicator, type Animated, Keyboard, Platform, Pressable, StyleSheet, TextInput, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { getBrowserAddressForUrl, MAX_BROWSER_URL_LENGTH } from './browser-shell.mjs'
 import { formatBrowserAddress } from './browser-appearance.mjs'
@@ -7,9 +7,11 @@ import { getSiteSecurity, SITE_SECURITY } from './site-security.mjs'
 import IncognitoIcon from '../assets/icons/bootstrap/incognito.svg'
 import ShieldCheckIcon from '../assets/icons/bootstrap/shield-check.svg'
 import ShieldSlashIcon from '../assets/icons/bootstrap/shield-slash.svg'
+import { BrowserLoadProgress } from './BrowserLoadProgress'
 import { HistorySuggestions, type OneOffSearchEngine } from './history/HistorySuggestions'
 import type { BrowserHistoryItem } from './history/useBrowserHistory'
 import { useSearchSuggestions } from './search/useSearchSuggestions'
+import { dimWhenPressed, ROUND_PRESS, SMALL_ICON_RIPPLE } from './press-feedback'
 import { styles } from './styles'
 import ReloadIcon from '../assets/icons/bootstrap/arrow-clockwise.svg'
 import ShareIcon from '../assets/icons/bootstrap/arrow-bar-up.svg'
@@ -50,6 +52,8 @@ type BrowserToolbarProps = {
   isDark: boolean
   isIncognito?: boolean
   isLoading: boolean
+  // How far the page has loaded, from 0 to 1, for the line along the bar.
+  loadProgress?: Animated.Value
   navigationKey: string
   pageActionAvailable: boolean
   palette: {
@@ -99,6 +103,7 @@ export function BrowserToolbar ({
   isDark,
   isIncognito = false,
   isLoading,
+  loadProgress,
   navigationKey,
   pageActionAvailable,
   palette,
@@ -187,6 +192,14 @@ export function BrowserToolbar ({
         ]}
         onLayout={(event) => setBarHeight(event.nativeEvent.layout.height)}
       >
+        {loadProgress && (
+          <BrowserLoadProgress
+            color={palette.accent}
+            edge={position === 'bottom' ? 'top' : 'bottom'}
+            isLoading={isLoading && !isAddressFocused}
+            progress={loadProgress}
+          />
+        )}
         <View style={[styles.browserAddressContainer, { backgroundColor: palette.address }]}>
           {isIncognito && (
             <View
@@ -208,9 +221,10 @@ export function BrowserToolbar ({
             <Pressable
               accessibilityRole='button'
               accessibilityLabel='Connection information'
+              android_ripple={SMALL_ICON_RIPPLE}
               hitSlop={8}
               onPress={onOpenSiteInfo}
-              style={styles.browserSecurity}
+              style={({ pressed }) => [styles.browserSecurity, ROUND_PRESS, dimWhenPressed(pressed)]}
             >
               {/* Same size, colour and weight as reload and share, on the same
                   centre line, so the row reads as one set of controls rather
@@ -269,8 +283,9 @@ export function BrowserToolbar ({
             <Pressable
               accessibilityLabel='Clear address'
               accessibilityRole='button'
+              android_ripple={SMALL_ICON_RIPPLE}
               hitSlop={4}
-              style={[styles.browserAddressAction, styles.browserAddressClearAction]}
+              style={({ pressed }) => [styles.browserAddressAction, styles.browserAddressClearAction, ROUND_PRESS, dimWhenPressed(pressed)]}
               onPress={() => {
                 onAddressChange('')
                 addressInputRef.current?.focus()
@@ -292,8 +307,9 @@ export function BrowserToolbar ({
                   accessibilityLabel={isBookmarked ? 'Remove bookmark' : 'Bookmark page'}
                   accessibilityRole='button'
                   accessibilityState={{ selected: isBookmarked }}
+                  android_ripple={SMALL_ICON_RIPPLE}
                   hitSlop={6}
-                  style={styles.browserAddressAction}
+                  style={({ pressed }) => [styles.browserAddressAction, ROUND_PRESS, dimWhenPressed(pressed)]}
                   onPress={onToggleBookmark}
                 >
                   {isBookmarked
@@ -317,8 +333,9 @@ export function BrowserToolbar ({
               <Pressable
                 accessibilityLabel={isLoading ? 'Stop loading page' : 'Reload page'}
                 accessibilityRole='button'
+                android_ripple={SMALL_ICON_RIPPLE}
                 hitSlop={6}
-                style={styles.browserAddressAction}
+                style={({ pressed }) => [styles.browserAddressAction, ROUND_PRESS, dimWhenPressed(pressed)]}
                 onPress={onReload}
               >
                 {isLoading
@@ -337,8 +354,9 @@ export function BrowserToolbar ({
                 <Pressable
                   accessibilityLabel='Share page'
                   accessibilityRole='button'
+                  android_ripple={SMALL_ICON_RIPPLE}
                   hitSlop={6}
-                  style={styles.browserAddressAction}
+                  style={({ pressed }) => [styles.browserAddressAction, ROUND_PRESS, dimWhenPressed(pressed)]}
                   onPress={onSharePage}
                 >
                   <ShareIcon
