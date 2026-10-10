@@ -12,6 +12,8 @@ import type { BrowserHistoryItem } from './history/useBrowserHistory'
 import { styles } from './styles'
 import ReloadIcon from '../assets/icons/bootstrap/arrow-clockwise.svg'
 import ShareIcon from '../assets/icons/bootstrap/arrow-bar-up.svg'
+import StarIcon from '../assets/icons/bootstrap/star.svg'
+import StarFillIcon from '../assets/icons/bootstrap/star-fill.svg'
 import ClearIcon from '../assets/icons/bootstrap/x-circle.svg'
 
 const ADDRESS_ACTION_ICON_SIZE = 22
@@ -23,6 +25,9 @@ const ADDRESS_SECURITY_ICON_SIZE = 20
 // share arrows do not, so it is drawn at the shield's size to look the
 // same as all three.
 const ADDRESS_CLEAR_ICON_SIZE = ADDRESS_SECURITY_ICON_SIZE
+// The star is drawn as an outline like reload and share, at the size that
+// matches them by eye.
+const ADDRESS_STAR_ICON_SIZE = 20
 const TOOLBAR_ICON_STROKE_WIDTH = 0.35
 
 // Matches browserToolbar's own paddingHorizontal.
@@ -34,10 +39,13 @@ const FOCUS_REQUEST_DELAY_MS = 350
 type BrowserToolbarProps = {
   activeTabId: string
   address: string
+  // One tap to bookmark the page, which took opening the menu first.
+  bookmarkActionAvailable?: boolean
   currentUrl: string
   // Each new value puts the cursor in the box: the search widget.
   focusRequest?: number
   historySuggestions: BrowserHistoryItem[]
+  isBookmarked?: boolean
   isDark: boolean
   isIncognito?: boolean
   isLoading: boolean
@@ -64,6 +72,7 @@ type BrowserToolbarProps = {
   onSharePage: () => void
   onSubmit: () => void
   onSuggestionPress: (url: string) => void
+  onToggleBookmark?: () => void
 }
 
 /**
@@ -76,9 +85,11 @@ type BrowserToolbarProps = {
 export function BrowserToolbar ({
   activeTabId,
   address,
+  bookmarkActionAvailable = false,
   currentUrl,
   focusRequest = 0,
   historySuggestions,
+  isBookmarked = false,
   isDark,
   isIncognito = false,
   isLoading,
@@ -94,7 +105,8 @@ export function BrowserToolbar ({
   onReload,
   onSharePage,
   onSubmit,
-  onSuggestionPress
+  onSuggestionPress,
+  onToggleBookmark
 }: BrowserToolbarProps) {
   const [isAddressFocused, setIsAddressFocused] = useState(false)
   // The page that loaded, not the text in the box: once you type an address
@@ -256,6 +268,33 @@ export function BrowserToolbar ({
           )}
           {!isAddressFocused && pageActionAvailable && (
             <View style={styles.browserAddressActions}>
+              {bookmarkActionAvailable && onToggleBookmark && (
+                <Pressable
+                  accessibilityLabel={isBookmarked ? 'Remove bookmark' : 'Bookmark page'}
+                  accessibilityRole='button'
+                  accessibilityState={{ selected: isBookmarked }}
+                  hitSlop={6}
+                  style={styles.browserAddressAction}
+                  onPress={onToggleBookmark}
+                >
+                  {isBookmarked
+                    ? (
+                      <StarFillIcon
+                        width={ADDRESS_STAR_ICON_SIZE}
+                        height={ADDRESS_STAR_ICON_SIZE}
+                        color={palette.accent}
+                      />
+                      )
+                    : (
+                      <StarIcon
+                        width={ADDRESS_STAR_ICON_SIZE}
+                        height={ADDRESS_STAR_ICON_SIZE}
+                        color={addressActionIconColor}
+                        opacity={0.76}
+                      />
+                      )}
+                </Pressable>
+              )}
               <Pressable
                 accessibilityLabel={isLoading ? 'Stop loading page' : 'Reload page'}
                 accessibilityRole='button'

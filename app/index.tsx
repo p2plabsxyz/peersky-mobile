@@ -274,6 +274,7 @@ import {
 } from './p2pmd-editor.mjs'
 import { MODAL_ORIENTATIONS } from './modal-orientations'
 import { shareLink } from './share'
+import { BrowserToast, type BrowserToastMessage } from './BrowserToast'
 import { p2pmdLight, styles } from './styles'
 import {
   RPC_HOLESAIL_CONNECT,
@@ -540,6 +541,8 @@ export default function App () {
     removeHistoryItem: removeBrowserHistoryItem
   } = useBrowserHistory()
   const [browserDownloadsVisible, setBrowserDownloadsVisible] = useState(false)
+  // What just happened, said near the bottom, with Undo where it can be.
+  const [browserToast, setBrowserToast] = useState<BrowserToastMessage | null>(null)
   // Tabs closed lately, to open again. Kept across restarts, cleared with
   // history and by Burn.
   const [recentlyClosedTabs, setRecentlyClosedTabs] = useState<ClosedBrowserTab[]>([])
@@ -2049,11 +2052,8 @@ export default function App () {
   }
 
   function onBrowserToggleBookmark () {
-    const result = toggleBrowserBookmark({
-      url: browserCurrentUrl,
-      title: browserTitle,
-      favicon: browserFavicon
-    })
+    const page = { url: browserCurrentUrl, title: browserTitle, favicon: browserFavicon }
+    const result = toggleBrowserBookmark(page)
 
     if (result === 'limit-reached') {
       const message = 'Delete a bookmark before adding another.'
@@ -2061,6 +2061,13 @@ export default function App () {
       Alert.alert('Bookmark limit reached', message)
     } else if (result) {
       setStatus(result === 'added' ? 'Bookmark added' : 'Bookmark removed')
+      // Undo toggles it back, whichever way it went.
+      setBrowserToast({
+        id: Date.now(),
+        message: result === 'added' ? 'Bookmarked' : 'Bookmark removed',
+        actionLabel: 'Undo',
+        onAction: () => { toggleBrowserBookmark(page) }
+      })
     } else {
       setStatus('Unable to update bookmark')
     }
@@ -4317,7 +4324,10 @@ export default function App () {
     <BrowserToolbar
       activeTabId={browserTabsState.activeTabId}
       address={browserAddress}
+      bookmarkActionAvailable={browserBookmarkActionAvailable && browserBookmarksReady}
       currentUrl={browserCurrentUrl}
+      isBookmarked={browserPageIsBookmarked}
+      onToggleBookmark={onBrowserToggleBookmark}
       focusRequest={browserAddressFocusRequest}
       isDark={browserIsDark}
       isIncognito={browserTabsState.tabs.some((tab) => tab.id === browserTabsState.activeTabId && tab.incognito === true)}
@@ -5500,6 +5510,13 @@ export default function App () {
             refreshing={browserPullRefreshing}
           />
         )}
+        {/* At the bottom of the page, so above whichever bars are below it. */}
+        <BrowserToast
+          bottom={12}
+          isDark={browserIsDark}
+          toast={browserToast}
+          onHide={() => setBrowserToast(null)}
+        />
         </View>
         <BrowserBackSwipe
           background={browserChrome.surface}
