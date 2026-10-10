@@ -151,6 +151,7 @@ import type { SettingsPage } from './settings/SettingsScreen'
 import { BrowserOverflowMenu } from './settings/BrowserOverflowMenu'
 import { useBrowserPreferences } from './settings/useBrowserPreferences'
 import { getOneOffSearchEngines } from './search/search-suggestions.mjs'
+import { getSiteDataHosts } from './privacy/site-data.mjs'
 import { BrowserToolbar } from './BrowserToolbar'
 import { BrowserNavBar } from './BrowserNavBar'
 import { BrowserBackSwipe } from './BrowserBackSwipe'
@@ -4054,6 +4055,11 @@ export default function App () {
             websiteTextScale={browserPreferences.websiteTextScale}
             youtubeAdBlockingEnabled={browserPreferences.youtubeAdBlockingEnabled}
             storagePath={identityStoragePath}
+            getSiteDataHosts={() => getSiteDataHosts([
+              ...browserVisitHistory.map((item) => item.url),
+              ...browserTabsStateRef.current.tabs.map((tab) => tab.history[tab.historyIndex]?.url),
+              ...browserBookmarks.map((bookmark) => bookmark.url)
+            ])}
             onAddressBarPositionChange={setAddressBarPosition}
             onAppLogoColorChange={(color) => {
               // The in-app logo changes either way; the home screen icon is a

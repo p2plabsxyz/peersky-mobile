@@ -338,6 +338,63 @@ RCT_EXPORT_METHOD(clearSiteData:(RCTPromiseResolveBlock)resolve
   });
 }
 
+// Cookies and site data, one site at a time, as Settings lists them. WebKit
+// keeps a record for each site (wikipedia.org for all of its pages) with what
+// kinds of data it holds. The app's own loopback pages are never listed, so
+// PeerTunes' library stays. The hosts argument is Android's: iOS knows its
+// sites without being told.
+RCT_EXPORT_METHOD(listSites:(NSArray *)hosts
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+{
+  dispatch_async(dispatch_get_main_queue(), ^{
+    WKWebsiteDataStore *store = [WKWebsiteDataStore defaultDataStore];
+    [store fetchDataRecordsOfTypes:[WKWebsiteDataStore allWebsiteDataTypes] completionHandler:^(NSArray<WKWebsiteDataRecord *> *records) {
+      NSSet<NSString *> *appOwn = [NSSet setWithArray:@[ @"127.0.0.1", @"localhost" ]];
+      NSSet<NSString *> *storage = [NSSet setWithArray:@[
+        WKWebsiteDataTypeLocalStorage,
+        WKWebsiteDataTypeSessionStorage,
+        WKWebsiteDataTypeIndexedDBDatabases,
+        WKWebsiteDataTypeWebSQLDatabases
+      ]];
+      NSMutableArray *sites = [NSMutableArray array];
+      for (WKWebsiteDataRecord *record in records) {
+        NSString *name = record.displayName.lowercaseString;
+        if (name.length == 0 || [appOwn containsObject:name]) continue;
+        BOOL cookies = [record.dataTypes containsObject:WKWebsiteDataTypeCookies];
+        BOOL stored = [record.dataTypes intersectsSet:storage];
+        [sites addObject:@{ @"name": name, @"cookies": @(cookies), @"storage": @(stored) }];
+      }
+      resolve(sites);
+    }];
+  });
+}
+
+RCT_EXPORT_METHOD(removeSites:(NSArray *)names
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+{
+  NSMutableSet<NSString *> *wanted = [NSMutableSet set];
+  for (id name in names) {
+    if ([name isKindOfClass:[NSString class]]) [wanted addObject:[name lowercaseString]];
+  }
+  [wanted removeObject:@"127.0.0.1"];
+  [wanted removeObject:@"localhost"];
+  dispatch_async(dispatch_get_main_queue(), ^{
+    WKWebsiteDataStore *store = [WKWebsiteDataStore defaultDataStore];
+    NSSet<NSString *> *types = [WKWebsiteDataStore allWebsiteDataTypes];
+    [store fetchDataRecordsOfTypes:types completionHandler:^(NSArray<WKWebsiteDataRecord *> *records) {
+      NSMutableArray<WKWebsiteDataRecord *> *matches = [NSMutableArray array];
+      for (WKWebsiteDataRecord *record in records) {
+        if ([wanted containsObject:record.displayName.lowercaseString]) [matches addObject:record];
+      }
+      [store removeDataOfTypes:types forDataRecords:matches completionHandler:^{
+        resolve(@(matches.count));
+      }];
+    }];
+  });
+}
+
 @end
 
 @interface PeerSkyWebViewManager : RNCWebViewManager

@@ -1,0 +1,116 @@
+package __PACKAGE_NAME__
+
+import android.webkit.CookieManager
+import android.webkit.WebStorage
+import com.facebook.react.bridge.Arguments
+import com.facebook.react.bridge.Promise
+import com.facebook.react.bridge.ReactApplicationContext
+import com.facebook.react.bridge.ReactContextBaseJavaModule
+import com.facebook.react.bridge.ReactMethod
+import com.facebook.react.bridge.ReadableArray
+import com.facebook.react.bridge.UiThreadUtil
+import com.facebook.react.module.annotations.ReactModule
+
+// Cookies and site data, one site at a time, as Settings lists them. Android
+// keeps no list of the sites that have cookies, so the app names the sites it
+// has been to and this says which of them have some. The app's own loopback
+// pages are never touched, so PeerTunes' library stays.
+@ReactModule(name = PeerSkyBrowserDataModule.NAME)
+class PeerSkyBrowserDataModule(
+  reactContext: ReactApplicationContext
+) : ReactContextBaseJavaModule(reactContext) {
+  override fun getName() = NAME
+
+  @ReactMethod
+  fun listSites(hosts: ReadableArray, promise: Promise) {
+    UiThreadUtil.runOnUiThread {
+      try {
+        val cookies = CookieManager.getInstance()
+        val sites = Arguments.createArray()
+        for (host in siteHosts(hosts)) {
+          if (cookieNames(cookies, host).isEmpty()) continue
+          val site = Arguments.createMap()
+          site.putString("name", host)
+          site.putBoolean("cookies", true)
+          site.putBoolean("storage", false)
+          sites.pushMap(site)
+        }
+        promise.resolve(sites)
+      } catch (error: Exception) {
+        promise.reject("ERR_SITE_DATA", error.message, error)
+      }
+    }
+  }
+
+  // A cookie can only be removed by writing it again already expired, for
+  // the domain and path it was set with. The path is not something Android
+  // tells, so "/" is tried for the site and each domain above it, which is
+  // where nearly every cookie lives. Local storage and databases go too.
+  @ReactMethod
+  fun removeSites(hosts: ReadableArray, promise: Promise) {
+    UiThreadUtil.runOnUiThread {
+      try {
+        val cookies = CookieManager.getInstance()
+        val storage = WebStorage.getInstance()
+        var removed = 0
+        for (host in siteHosts(hosts)) {
+          val names = cookieNames(cookies, host)
+          for (scheme in listOf("https", "http")) {
+            for (domain in cookieDomains(host)) {
+              for (name in names) {
+                val expired = StringBuilder("$name=; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=/")
+                if (domain != null) expired.append("; Domain=").append(domain)
+                if (scheme == "https") expired.append("; Secure")
+                cookies.setCookie("$scheme://$host", expired.toString())
+              }
+            }
+            storage.deleteOrigin("$scheme://$host")
+          }
+          removed += 1
+        }
+        cookies.flush()
+        promise.resolve(removed)
+      } catch (error: Exception) {
+        promise.reject("ERR_SITE_DATA", error.message, error)
+      }
+    }
+  }
+
+  private fun siteHosts(hosts: ReadableArray): List<String> {
+    val result = LinkedHashSet<String>()
+    for (index in 0 until hosts.size()) {
+      val host = hosts.getString(index)?.trim()?.lowercase() ?: continue
+      if (host == "localhost" || host == "127.0.0.1" || !HOST.matches(host)) continue
+      result.add(host)
+      if (result.size >= MAX_SITES) break
+    }
+    return result.toList()
+  }
+
+  private fun cookieNames(cookies: CookieManager, host: String): List<String> {
+    val names = LinkedHashSet<String>()
+    for (scheme in listOf("https", "http")) {
+      val header = cookies.getCookie("$scheme://$host") ?: continue
+      for (pair in header.split(";")) {
+        val name = pair.substringBefore("=").trim()
+        if (name.isNotEmpty() && pair.contains("=")) names.add(name)
+      }
+    }
+    return names.toList()
+  }
+
+  // The site itself with no Domain, then the site and every domain above it
+  // but the last part, as a cookie could have been set for any of them.
+  private fun cookieDomains(host: String): List<String?> {
+    val parts = host.split(".")
+    val domains = mutableListOf<String?>(null)
+    for (index in 0 until parts.size - 1) domains.add(parts.subList(index, parts.size).joinToString("."))
+    return domains
+  }
+
+  companion object {
+    const val NAME = "PeerSkyBrowserData"
+    private const val MAX_SITES = 500
+    private val HOST = Regex("^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$")
+  }
+}

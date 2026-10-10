@@ -32,6 +32,7 @@ import { Permissions } from './Permissions'
 import { Privacy } from './Privacy'
 import { Licenses } from './Licenses'
 import { P2PStorage } from './P2PStorage'
+import { SiteData } from './SiteData'
 import {
   SettingCopy,
   SettingsSection,
@@ -74,6 +75,15 @@ export type SettingsPage =
   | 'about'
   | 'licenses'
   | 'toolbar-button'
+  | 'site-data'
+
+// Pages opened from another page, which back returns to: the licenses from
+// About, the toolbar button from Appearance, and site data from Data Clearing.
+const SETTINGS_PARENT_PAGES: Partial<Record<SettingsPage, SettingsPage>> = {
+  licenses: 'about',
+  'toolbar-button': 'appearance',
+  'site-data': 'data-clearing'
+}
 
 type StorageFileItem = {
   name: string
@@ -173,6 +183,8 @@ type SettingsScreenProps = {
   websiteTextScale: WebsiteTextScale
   youtubeAdBlockingEnabled: boolean
   storagePath: string
+  // The sites Android is asked about in Cookies and site data.
+  getSiteDataHosts: () => string[]
   onAddressBarPositionChange: (position: AddressBarPosition) => void
   onAppLogoColorChange: (color: string) => void
   onForceDarkWebsitesChange: (enabled: boolean) => void
@@ -315,6 +327,15 @@ export function SettingsScreen(props: SettingsScreenProps) {
         <ToolbarButtonSettings selected={props.toolbarButton} onSelect={props.onToolbarButtonChange} />
       </SettingsSubpage>
     )
+  } else if (page === 'site-data') {
+    content = (
+      <SettingsSubpage
+        title='Cookies and site data'
+        onBack={() => changePage('data-clearing', -1)}
+      >
+        <SiteData getSiteDataHosts={props.getSiteDataHosts} />
+      </SettingsSubpage>
+    )
   } else if (page === 'licenses') {
     // A long list of its own, so it scrolls itself rather than inside the
     // page's ScrollView.
@@ -338,7 +359,9 @@ export function SettingsScreen(props: SettingsScreenProps) {
         {page === 'appearance' && (
           <Appearance {...props} onOpenToolbarButton={() => changePage('toolbar-button', 1)} />
         )}
-        {page === 'data-clearing' && <DataClearing {...props} />}
+        {page === 'data-clearing' && (
+          <DataClearing {...props} onOpenSiteData={() => changePage('site-data', 1)} />
+        )}
         {page === 'privacy' && <Privacy {...props} onOpenUrl={openUrl} />}
         {page === 'p2p-storage' && (
           <P2PStorage
@@ -394,11 +417,7 @@ export function SettingsScreen(props: SettingsScreenProps) {
     transition.stopAnimation()
     transition.setValue(reduceMotion ? 1 : 0)
     setTransitionDirection(-1)
-    // The licenses open from About, and the toolbar button from Appearance, so
-    // back returns there.
-    setPage(pageRef.current === 'licenses'
-      ? 'about'
-      : pageRef.current === 'toolbar-button' ? 'appearance' : 'main')
+    setPage(SETTINGS_PARENT_PAGES[pageRef.current] || 'main')
     return true
   }, [props.closeOnBack, props.initialPage, reduceMotion, transition])
 

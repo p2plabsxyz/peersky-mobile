@@ -8,7 +8,10 @@ import com.facebook.react.uimanager.ViewManager
 class BrowserContentBlockingPackage : ReactPackage {
   override fun createNativeModules(
     reactContext: ReactApplicationContext
-  ): List<NativeModule> = listOf(BrowserContentBlockingModule(reactContext))
+  ): List<NativeModule> = listOf(
+    BrowserContentBlockingModule(reactContext),
+    PeerSkyBrowserDataModule(reactContext)
+  )
 
   override fun createViewManagers(
     reactContext: ReactApplicationContext

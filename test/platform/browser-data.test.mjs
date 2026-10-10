@@ -67,7 +67,9 @@ describe('browser data clearing', () => {
     assert.match(manager, /if \(\[appOwn containsObject:record\.displayName\.lowercaseString\]\) \{\s+kept \+= 1;\s+\} else \{\s+\[sites addObject:record\];/)
     assert.match(manager, /\[store removeDataOfTypes:types forDataRecords:sites completionHandler:/)
     // The same storage clearCache(true) cleared, no more: cookies are kept.
-    assert.match(manager, /WKWebsiteDataTypeIndexedDBDatabases/)
-    assert.doesNotMatch(manager, /WKWebsiteDataTypeCookies|allWebsiteDataTypes/)
+    // They go one site at a time, in Settings > Cookies and site data.
+    const clearAll = manager.slice(manager.indexOf('RCT_EXPORT_METHOD(clearSiteData'), manager.indexOf('RCT_EXPORT_METHOD(listSites'))
+    assert.match(clearAll, /WKWebsiteDataTypeIndexedDBDatabases/)
+    assert.doesNotMatch(clearAll, /WKWebsiteDataTypeCookies|allWebsiteDataTypes/)
   })
 })

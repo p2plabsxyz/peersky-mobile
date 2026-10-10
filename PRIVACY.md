@@ -27,7 +27,7 @@ PeerSky stores browser settings, open tabs, history, bookmarks, download records
 
 Incognito tabs keep no history, page cache or tab previews, and their cookies and site data are gone once the last incognito tab closes. `hyper://` content opened in one is still stored by the app's peer-to-peer node, like any other drive, until you clear P2P data.
 
-You can remove browsing and peer-to-peer data from the Data Clearing and P2P Data sections in Settings. Files saved through the system download manager may also need to be removed through the Downloads screen or your device's file manager.
+You can remove browsing and peer-to-peer data from the Data Clearing and P2P Data sections in Settings, and each site's cookies from Cookies and site data in Data Clearing. Files saved through the system download manager may also need to be removed through the Downloads screen or your device's file manager.
 
 ## Websites, Searches, and Peer-to-Peer Services
 

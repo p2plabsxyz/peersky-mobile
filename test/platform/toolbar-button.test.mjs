@@ -54,7 +54,8 @@ test('Appearance opens the toolbar button page, and back returns there', async (
   const settings = await read('app/settings/SettingsScreen.tsx')
   assert.match(settings, /<Appearance \{\.\.\.props\} onOpenToolbarButton=\{\(\) => changePage\('toolbar-button', 1\)\} \/>/)
   assert.match(settings, /title='Toolbar Button'\s+onBack=\{\(\) => changePage\('appearance', -1\)\}/)
-  assert.match(settings, /pageRef\.current === 'toolbar-button' \? 'appearance' : 'main'/)
+  assert.match(settings, /'toolbar-button': 'appearance'/)
+  assert.match(settings, /setPage\(SETTINGS_PARENT_PAGES\[pageRef\.current\] \|\| 'main'\)/)
 
   const page = await read('app/settings/ToolbarButton.tsx')
   // The bar drawn small, with the chosen place picked out, over the list.
