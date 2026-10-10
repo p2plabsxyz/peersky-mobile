@@ -52,3 +52,12 @@ test('searching matches the titles shown, ignoring case', () => {
   assert.deepEqual(listP2pSites(history, 'nothing like it'), [])
   assert.equal(listP2pSites(undefined).length, 0)
 })
+
+// Nothing in Settings led to the list. P2P Data, where the phone's Hyper data
+// is managed, now opens it.
+test('P2P Data in Settings opens the P2P sites list', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const page = await readFile(new URL('../../app/settings/P2PStorage.tsx', import.meta.url), 'utf8')
+  assert.match(page, /<SettingsSection title='P2P sites'>/)
+  assert.match(page, /onPress=\{\(\) => onOpenUrl\(BROWSER_P2P_URL\)\}/)
+})
