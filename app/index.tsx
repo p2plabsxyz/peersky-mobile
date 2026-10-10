@@ -306,6 +306,7 @@ import {
   RPC_APP_BACKUP_PROGRESS,
   RPC_APP_PEERCHAT_CHANGED,
   RPC_PEERCHAT_PRESENCE,
+  RPC_PEERCHAT_SEND_TO_DEVICES,
   RPC_PEERTUNES_START
 } from '../backend/rpc/commands.mjs'
 
@@ -2956,6 +2957,38 @@ export default function App () {
     webView.injectJavaScript(createReaderScript(token))
   }
 
+  // Into your PeerChat chat with yourself, where your other devices see it
+  // and can open it. The title goes first, since a hyper:// address alone
+  // says nothing about the page.
+  async function onBrowserSendToDevices () {
+    const url = browserCurrentUrl
+    const title = browserTitle.trim()
+    const message = title && title !== url ? `${title}\n${url}` : url
+    try {
+      const response = await callRpc(RPC_PEERCHAT_SEND_TO_DEVICES, { message })
+      if (!response.ok) throw new Error(response.error || 'Unable to send')
+      if (response.noDevices) {
+        setBrowserToast({
+          id: Date.now(),
+          message: 'Link another device to send pages to it',
+          actionLabel: 'Link Device',
+          onAction: () => {
+            setBrowserSettingsInitialPage('link-device')
+            setBrowserSettingsCloseOnBack(true)
+            setBrowserSettingsVisible(true)
+          }
+        })
+      } else {
+        setBrowserToast({
+          id: Date.now(),
+          message: response.waiting ? 'It goes to your other device once that is online' : 'Sent to your devices'
+        })
+      }
+    } catch {
+      setBrowserToast({ id: Date.now(), message: 'This page could not be sent to your devices' })
+    }
+  }
+
   async function onHolesailStartLive () {
     setIsLoading(true)
     setStatus('Starting Holesail live tunnel...')
@@ -4480,6 +4513,7 @@ export default function App () {
       onOpenZoom={() => setBrowserZoomVisible(true)}
       onPrintPage={onBrowserPrintPage}
       onReaderView={onBrowserReaderView}
+      onSendToDevices={() => void onBrowserSendToDevices()}
       onSharePage={() => void onBrowserSharePage()}
       onToggleBookmark={onBrowserToggleBookmark}
       onToggleDesktopView={onBrowserToggleDesktopView}

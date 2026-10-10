@@ -9,6 +9,7 @@ import FileTextIcon from '../../assets/icons/bootstrap/file-text.svg'
 import FireIcon from '../../assets/icons/bootstrap/fire.svg'
 import HistoryIcon from '../../assets/icons/bootstrap/clock-history.svg'
 import IncognitoIcon from '../../assets/icons/bootstrap/incognito.svg'
+import PhoneIcon from '../../assets/icons/bootstrap/phone.svg'
 import BookmarksIcon from '../../assets/icons/bootstrap/bookmarks.svg'
 import GearIcon from '../../assets/icons/bootstrap/gear.svg'
 import PlusIcon from '../../assets/icons/bootstrap/plus-lg.svg'
@@ -57,6 +58,7 @@ type BrowserOverflowMenuProps = {
   onOpenZoom?: () => void
   onPrintPage?: () => void
   onReaderView?: () => void
+  onSendToDevices?: () => void
   onToggleFavourite?: () => void
   onSharePage?: () => void
   onShow: () => void
@@ -87,6 +89,7 @@ export function BrowserOverflowMenu ({
   onOpenZoom,
   onPrintPage,
   onReaderView,
+  onSendToDevices,
   onToggleFavourite,
   onSharePage,
   onShow,
@@ -165,6 +168,18 @@ export function BrowserOverflowMenu ({
         onPress={onSharePage}
       />
     )
+    if (onSendToDevices) {
+      pageActions.push(
+        <MenuItem
+          key='send-to-devices'
+          cardColor={cardColor}
+          icon={<PhoneIcon {...iconProps} />}
+          isDark={isDark}
+          label='Send to Your Devices'
+          onPress={onSendToDevices}
+        />
+      )
+    }
     if (onReaderView) {
       pageActions.push(
         <MenuItem

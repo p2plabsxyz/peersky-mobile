@@ -112,6 +112,8 @@ const MAX_BLOCKED_PEERS = 500
 const MAX_LEFT_ROOMS = 1000
 // A person's own devices. Links are made for a few, so this is generous.
 const MAX_SIBLINGS = 16
+// Pages waiting for your chat with yourself to be accepted on another device.
+const MAX_OWN_DEVICE_OUTBOX = 20
 // Desktop keys its member list by peer id. Packed by size rather than by
 // count: one frame carrying everyone's data-url picture passes the frame cap
 // once roughly nine of them have one, and an oversized line is dropped whole.
@@ -236,6 +238,9 @@ export class PeerChatService {
     // other devices. Kept, so their messages are still this person's after a
     // restart, before they have been seen again.
     this.siblings = new Set()
+    // Pages sent to your other devices before your chat with yourself was
+    // accepted there, by room. They go once it is. Kept in memory only.
+    this.ownDeviceOutbox = []
     // Rooms this phone left or was removed from, by when. Another of the
     // person's devices offering one back is ignored until it is joined again
     // here, so leaving a room on one device sticks.
@@ -609,6 +614,45 @@ export class PeerChatService {
     this.schedulePersist()
     this.bumpVersion()
     return { room: this.publicRoom(room), rooms: this.listRooms(), version: this.version }
+  }
+
+  /**
+   * A page sent from the browser to your other devices, as a message in your
+   * chat with yourself. With no such chat yet, one is started with another of
+   * your devices, preferring one online now, and the message waits until that
+   * device takes the chat, which it does by itself as soon as it is online.
+   */
+  async sendToOwnDevices ({ message } = {}) {
+    if (this.siblings.size === 0) return { sent: false, noDevices: true, version: this.version }
+    this.ensureProfile()
+    let room = [...this.rooms.values()].find((candidate) => (
+      candidate.isDM && candidate.dmWith && this.isOwnDevice(candidate.dmWith) &&
+      !candidate.rejected && !candidate.blockedByPeer
+    ))
+    if (!room) {
+      const online = [...this.peers.values()].find((peer) => peer.sibling && peer.active)
+      const created = await this.createDirectMessage({ peerId: online?.id || [...this.siblings][0] })
+      room = this.rooms.get(created.room.roomKey)
+    }
+    if (!room) throw new Error('Your chat with your other devices could not be started.')
+    if (room.pendingAcceptance) {
+      if (this.ownDeviceOutbox.length >= MAX_OWN_DEVICE_OUTBOX) this.ownDeviceOutbox.shift()
+      this.ownDeviceOutbox.push({ roomKey: room.roomKey, message })
+      return { sent: false, waiting: true, version: this.version }
+    }
+    await this.sendMessage({ roomKey: room.roomKey, message })
+    return { sent: true, version: this.version }
+  }
+
+  flushOwnDeviceOutbox (roomKey) {
+    const waiting = this.ownDeviceOutbox.filter((item) => item.roomKey === roomKey)
+    if (waiting.length === 0) return
+    this.ownDeviceOutbox = this.ownDeviceOutbox.filter((item) => item.roomKey !== roomKey)
+    for (const item of waiting) {
+      this.sendMessage({ roomKey, message: item.message }).catch((error) => {
+        console.warn(`[peerchat] Unable to send a page to your other devices: ${error.message}`)
+      })
+    }
   }
 
   async acceptDirectMessage ({ roomKey } = {}) {
@@ -1484,6 +1528,7 @@ export class PeerChatService {
         directRoom.bio = normalizePeerChatBio(message.fromBio)
         directRoom.avatar = normalizePeerChatAvatar(message.fromAvatar)
         this.offerRoomToSiblings(directRoomKey)
+        this.flushOwnDeviceOutbox(directRoomKey)
       } else {
         directRoom.pendingAcceptance = false
         directRoom.rejected = true

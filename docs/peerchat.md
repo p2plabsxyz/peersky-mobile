@@ -22,6 +22,10 @@ and transport formats as PeerSky Desktop.
 - Reply to messages, add reactions, mention peers, and search chats or messages.
 - Share room-encrypted Hyperdrive attachments and bounded HTTP or HTTPS link previews.
 - Start direct-message conversations through an explicit accept or decline flow.
+- Take pages from the browser's Send to Your Devices into your chat with
+  yourself. With no such chat yet, one is started with another of your devices
+  and the page waits, in memory, until that device accepts it, which it does by
+  itself as soon as it is online.
 - Set a profile and host-owned room name, description, link, image, and moderation.
 - Pin or mute rooms and track unread messages and mentions.
 - Show online room members and reconnect after temporary network loss.

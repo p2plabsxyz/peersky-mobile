@@ -59,6 +59,7 @@ import {
   RPC_PEERCHAT_ROOM_MUTE,
   RPC_PEERCHAT_ROOM_UPDATE,
   RPC_PEERCHAT_DM_CREATE,
+  RPC_PEERCHAT_SEND_TO_DEVICES,
   RPC_PEERCHAT_DM_ACCEPT,
   RPC_PEERCHAT_DM_REJECT,
   RPC_PEERCHAT_ONBOARD,
@@ -568,6 +569,15 @@ export async function routeRpcRequest (req) {
       replyJson(req, {
         ok: true,
         ...await peerChat.createDirectMessage(parseJsonMessage(req.data))
+      })
+      return
+    }
+
+    if (req.command === RPC_PEERCHAT_SEND_TO_DEVICES) {
+      const peerChat = await getPeerChatService()
+      replyJson(req, {
+        ok: true,
+        ...await peerChat.sendToOwnDevices(parseJsonMessage(req.data))
       })
       return
     }
