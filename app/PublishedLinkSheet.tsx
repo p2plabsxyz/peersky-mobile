@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Clipboard, Modal, Platform, Pressable, StyleSheet, Text, View } from 'react-native'
-import { SafeAreaView } from 'react-native-safe-area-context'
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { BROWSER_PALETTES } from './browser-appearance.mjs'
 import { MODAL_ORIENTATIONS } from './modal-orientations'
 import { shareLink } from './share'
@@ -35,6 +35,7 @@ export function PublishedLinkSheet ({
 }: PublishedLinkSheetProps) {
   const [copied, setCopied] = useState(false)
   const palette = isDark ? BROWSER_PALETTES.dark : BROWSER_PALETTES.light
+  const insets = useSafeAreaInsets()
 
   useEffect(() => {
     if (!visible) setCopied(false)
@@ -60,9 +61,9 @@ export function PublishedLinkSheet ({
       visible={visible && Boolean(url)}
       onRequestClose={onClose}
     >
-      <SafeAreaView style={styles.overlay} edges={['top', 'left', 'right', 'bottom']}>
+      <SafeAreaView style={styles.overlay} edges={['top', 'left', 'right']}>
         <Pressable accessibilityLabel='Close' style={styles.backdrop} onPress={onClose} />
-        <View style={[styles.sheet, { backgroundColor: palette.surface }]}>
+        <View style={[styles.sheet, { backgroundColor: palette.surface, paddingBottom: 24 + insets.bottom }]}>
           <View style={styles.header}>
             <View style={styles.badge}>
               <CheckIcon width={20} height={20} color='#ffffff' />

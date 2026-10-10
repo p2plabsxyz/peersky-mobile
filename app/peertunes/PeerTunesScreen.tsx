@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AppState, DeviceEventEmitter, Modal, NativeEventEmitter, NativeModules, Platform, Pressable, StyleSheet, Text, View } from 'react-native'
 import { CameraView, useCameraPermissions } from 'expo-camera'
-import { SafeAreaView } from 'react-native-safe-area-context'
+import { initialWindowMetrics, SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context'
 import { WebView } from 'react-native-webview'
 
 import {
@@ -309,6 +309,8 @@ export function PeerTunesScreen ({
       onRequestClose={() => finishScan(null)}
       visible={scanRequestId !== null}
     >
+      {/* Its own root view on iOS: without a provider the overlay got no insets. */}
+      <SafeAreaProvider initialMetrics={initialWindowMetrics}>
       <View style={styles.scanner}>
         {scanRequestId !== null && (
           <CameraView
@@ -332,6 +334,7 @@ export function PeerTunesScreen ({
           </Pressable>
         </SafeAreaView>
       </View>
+      </SafeAreaProvider>
     </Modal>
     </>
   )

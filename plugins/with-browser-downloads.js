@@ -78,6 +78,16 @@ module.exports = function withBrowserDownloads (config) {
     )
     writeAndroidSource(
       sourceDirectory,
+      'PeerSkyBrowserDataModule.kt',
+      createBrowserDataModule(packageName)
+    )
+    writeAndroidSource(
+      sourceDirectory,
+      'PeerSkyHomeScreenModule.kt',
+      readAndroidTemplate('PeerSkyHomeScreenModule.kt.template', packageName)
+    )
+    writeAndroidSource(
+      sourceDirectory,
       'PeerSkyAdBlockEngine.kt',
       createAdBlockEngine(packageName)
     )
@@ -105,6 +115,11 @@ module.exports = function withBrowserDownloads (config) {
       testDirectory,
       'PeerSkyWebViewClientTest.kt',
       createWebViewClientTest(packageName)
+    )
+    writeAndroidSource(
+      testDirectory,
+      'PeerSkyHomeScreenModuleTest.kt',
+      readAndroidTemplate('PeerSkyHomeScreenModuleTest.kt.template', packageName)
     )
 
     return androidConfig
@@ -244,6 +259,10 @@ function createContentBlockingPackage (packageName) {
   return readAndroidTemplate('BrowserContentBlockingPackage.kt.template', packageName)
 }
 
+function createBrowserDataModule (packageName) {
+  return readAndroidTemplate('PeerSkyBrowserDataModule.kt.template', packageName)
+}
+
 function createAdBlockEngine (packageName) {
   return readAndroidTemplate('PeerSkyAdBlockEngine.kt.template', packageName)
 }
@@ -300,6 +319,7 @@ module.exports.createDownloadsModuleTest = createDownloadsModuleTest
 module.exports.createWebViewClientTest = createWebViewClientTest
 module.exports.createContentBlockingModule = createContentBlockingModule
 module.exports.createContentBlockingPackage = createContentBlockingPackage
+module.exports.createBrowserDataModule = createBrowserDataModule
 module.exports.createAdBlockEngine = createAdBlockEngine
 module.exports.createWebViewClient = createWebViewClient
 module.exports.addPackageRegistration = addPackageRegistration

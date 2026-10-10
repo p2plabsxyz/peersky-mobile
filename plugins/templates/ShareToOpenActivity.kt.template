@@ -1,0 +1,49 @@
+package __PACKAGE_NAME__
+
+import android.app.Activity
+import android.content.Intent
+import android.net.Uri
+import android.os.Bundle
+import android.widget.Toast
+
+// Text shared to PeerSky from another app: the first web or hyper:// link in
+// it goes to MainActivity as an ordinary link, which opens it in a tab. This
+// activity has no window and is gone at once.
+class ShareToOpenActivity : Activity() {
+  override fun onCreate(savedInstanceState: Bundle?) {
+    super.onCreate(savedInstanceState)
+    val link = if (intent?.action == Intent.ACTION_SEND) {
+      sharedLink(intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString())
+    } else {
+      null
+    }
+    if (link == null) {
+      Toast.makeText(this, "There is no link to open in what was shared", Toast.LENGTH_SHORT).show()
+    } else {
+      startActivity(
+        Intent(Intent.ACTION_VIEW, Uri.parse(link), this, MainActivity::class.java)
+          .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      )
+    }
+    finish()
+  }
+
+  companion object {
+    private val LINK = Regex("(?:https?|hyper)://[^\\s<>\"]+", RegexOption.IGNORE_CASE)
+    private const val MAX_LINK_LENGTH = 8192
+
+    // A link at the end of a sentence keeps the sentence's full stop out, and
+    // a bracket around it, but not one that belongs to it, as in
+    // https://en.wikipedia.org/wiki/Hydra_(genus).
+    fun sharedLink(text: String?): String? {
+      var link = LINK.find(text ?: return null)?.value ?: return null
+      while (link.isNotEmpty()) {
+        val last = link.last()
+        val unbalanced = (last == ')' && link.count { it == '(' } < link.count { it == ')' }) ||
+          (last == ']' && link.count { it == '[' } < link.count { it == ']' })
+        if (last in ".,!?;:'" || unbalanced) link = link.dropLast(1) else break
+      }
+      return link.takeIf { it.contains("://") && it.length <= MAX_LINK_LENGTH && !it.endsWith("://") }
+    }
+  }
+}

@@ -7,15 +7,27 @@ import {
   addOpeningBrowserTabState,
   appendIncomingBrowserTabs,
   closeBrowserTabState,
+  closeBrowserTabsState,
   createBrowserTabsState,
+  forgetClosedBrowserTab,
   getActiveBrowserTab,
+  getBrowserTabUrls,
+  INACTIVE_BROWSER_TAB_AFTER_MS,
   isCurrentBrowserTabEntry,
+  isInactiveBrowserTab,
   MAX_BROWSER_TITLE_LENGTH,
   MAX_BROWSER_TABS,
+  MAX_RECENTLY_CLOSED_TABS,
+  moveBrowserTabState,
   normalizeBrowserPageZoom,
+  parseRecentlyClosedBrowserTabs,
+  rememberClosedBrowserTabs,
+  reopenClosedBrowserTabState,
   restoreBrowserTabsState,
   setBrowserTabViewModeState,
   serializeBrowserTabsState,
+  serializeRecentlyClosedBrowserTabs,
+  snapshotClosedBrowserTab,
   suspendInactiveBrowserTabsState,
   switchBrowserTabState,
   touchLiveBrowserTabIds,
@@ -498,5 +510,130 @@ describe('tab order', () => {
     assert.match(screen, /const activeRow = activeIndex < 0 \? 0 : isList \? activeIndex : Math\.floor\(activeIndex \/ 2\)/)
     assert.match(screen, /onLayout=\{scrollToActiveTab\}/)
     assert.match(screen, /scrollToIndex\(\{ index: activeRow, viewPosition: 0\.5, animated: false \}\)/)
+  })
+})
+
+const web = (url) => ({ url, source: { kind: 'web', uri: url } })
+
+function withPages (state, tabId, urls, title = 'Page') {
+  return updateBrowserTabState(state, tabId, {
+    title,
+    history: [{ url: BROWSER_HOME_URL, source: { kind: 'home' } }, ...urls.map(web)],
+    historyIndex: urls.length
+  })
+}
+
+describe('recently closed tabs', () => {
+  test('a closed tab comes back with its pages, newest first, once per address', () => {
+    let state = withPages(createBrowserTabsState(), 'tab-1', ['https://a.example/', 'https://a.example/2'], 'A')
+    state = withPages(addBrowserTabState(state), 'tab-2', ['https://b.example/'], 'B')
+
+    let closed = rememberClosedBrowserTabs([], [snapshotClosedBrowserTab(state.tabs[0], 10)])
+    closed = rememberClosedBrowserTabs(closed, [snapshotClosedBrowserTab(state.tabs[1], 20)])
+    assert.deepEqual(closed.map((item) => item.title), ['B', 'A'])
+    // The same address closed again keeps only the newest.
+    closed = rememberClosedBrowserTabs(closed, [snapshotClosedBrowserTab(state.tabs[0], 30)])
+    assert.deepEqual(closed.map((item) => [item.title, item.closedAt]), [['A', 30], ['B', 20]])
+
+    const reopened = reopenClosedBrowserTabState(createBrowserTabsState(), closed[0], 99)
+    const tab = getActiveBrowserTab(reopened)
+    assert.equal(reopened.tabs.length, 2)
+    assert.equal(tab.title, 'A')
+    assert.equal(tab.lastOpenedAt, 99)
+    assert.deepEqual(tab.history.map((entry) => entry.url), [BROWSER_HOME_URL, 'https://a.example/', 'https://a.example/2'])
+    assert.equal(tab.historyIndex, 2)
+    assert.deepEqual(forgetClosedBrowserTab(closed, closed[0].key).map((item) => item.title), ['B'])
+  })
+
+  test('undo puts a closed tab back where it was', () => {
+    let state = withPages(createBrowserTabsState(), 'tab-1', ['https://a.example/'], 'A')
+    state = withPages(addBrowserTabState(state), 'tab-2', ['https://b.example/'], 'B')
+    state = withPages(addBrowserTabState(state), 'tab-3', ['https://c.example/'], 'C')
+    state = switchBrowserTabState(state, 'tab-3')
+    const snapshot = snapshotClosedBrowserTab(state.tabs[1], 7, { index: 1, wasActive: false })
+    state = closeBrowserTabState(state, 'tab-2')
+
+    const undone = reopenClosedBrowserTabState(state, snapshot, 8, { restorePlace: true })
+    assert.deepEqual(undone.tabs.map((tab) => tab.title), ['A', 'B', 'C'])
+    assert.equal(undone.activeTabId, 'tab-3')
+    // Neither is saved: they are for straight after closing.
+    assert.equal(parseRecentlyClosedBrowserTabs(serializeRecentlyClosedBrowserTabs([snapshot]))[0].index, undefined)
+  })
+
+  test('a private tab and a tab that never left home are not kept, and the list is bounded', () => {
+    const state = addBrowserTabState(createBrowserTabsState(), { incognito: true })
+    assert.equal(snapshotClosedBrowserTab(state.tabs[1]), null)
+    assert.equal(snapshotClosedBrowserTab(state.tabs[0]), null)
+
+    let closed = []
+    for (let index = 0; index < MAX_RECENTLY_CLOSED_TABS + 5; index += 1) {
+      const tab = withPages(createBrowserTabsState(), 'tab-1', [`https://site${index}.example/`]).tabs[0]
+      closed = rememberClosedBrowserTabs(closed, [snapshotClosedBrowserTab(tab, index)])
+    }
+    assert.equal(closed.length, MAX_RECENTLY_CLOSED_TABS)
+    assert.equal(closed[0].url, `https://site${MAX_RECENTLY_CLOSED_TABS + 4}.example/`)
+  })
+
+  test('the list survives a restart, and a broken file reads as empty', () => {
+    const tab = withPages(createBrowserTabsState(), 'tab-1', ['https://a.example/'], 'A').tabs[0]
+    const closed = rememberClosedBrowserTabs([], [snapshotClosedBrowserTab(tab, 5)])
+    const restored = parseRecentlyClosedBrowserTabs(serializeRecentlyClosedBrowserTabs(closed))
+    assert.deepEqual(restored, closed)
+    assert.deepEqual(parseRecentlyClosedBrowserTabs('{nope'), [])
+    assert.deepEqual(parseRecentlyClosedBrowserTabs(JSON.stringify({ version: 1, tabs: [{ key: 'x' }] })), [])
+  })
+})
+
+describe('inactive tabs', () => {
+  test('a tab not on screen for two weeks is inactive, and showing it makes it active again', () => {
+    const now = 1_800_000_000_000
+    let state = createBrowserTabsState()
+    state = addBrowserTabState(state)
+    state = updateBrowserTabState(state, 'tab-1', { lastOpenedAt: now - INACTIVE_BROWSER_TAB_AFTER_MS })
+    assert.equal(isInactiveBrowserTab(state.tabs[0], state.activeTabId, now), true)
+    assert.equal(isInactiveBrowserTab(state.tabs[1], state.activeTabId, now), false)
+
+    state = switchBrowserTabState(state, 'tab-1', now)
+    assert.equal(isInactiveBrowserTab(state.tabs[0], state.activeTabId, now + 1), false)
+    // The tab left behind was on screen until now.
+    assert.equal(state.tabs[1].lastOpenedAt, now)
+  })
+
+  test('the time a tab was last shown is saved, and a session from before starts from now', () => {
+    const state = updateBrowserTabState(createBrowserTabsState(), 'tab-1', { lastOpenedAt: 1234 })
+    assert.equal(restoreBrowserTabsState(serializeBrowserTabsState(state)).tabs[0].lastOpenedAt, 1234)
+
+    const before = Date.now()
+    const restored = restoreBrowserTabsState(JSON.stringify({
+      version: 1,
+      activeTabId: 'tab-1',
+      tabs: [{ id: 'tab-1', title: 'Old', historyIndex: 0, history: [web('https://old.example/')] }]
+    }))
+    assert.ok(restored.tabs[0].lastOpenedAt >= before)
+  })
+})
+
+describe('several tabs at once', () => {
+  test('their addresses come in tab order, without the home page', () => {
+    let state = withPages(createBrowserTabsState(), 'tab-1', ['https://a.example/'])
+    state = addBrowserTabState(state)
+    state = withPages(addBrowserTabState(state), 'tab-3', ['hyper://blog.example/'])
+    assert.deepEqual(getBrowserTabUrls(state, ['tab-3', 'tab-1', 'tab-2']), ['https://a.example/', 'hyper://blog.example/'])
+  })
+
+  test('closing them leaves the rest, or a fresh tab when they were all', () => {
+    let state = addBrowserTabState(addBrowserTabState(createBrowserTabsState()))
+    assert.deepEqual(closeBrowserTabsState(state, ['tab-1', 'tab-3']).tabs.map((tab) => tab.id), ['tab-2'])
+    state = closeBrowserTabsState(state, ['tab-1', 'tab-2', 'tab-3'])
+    assert.equal(state.tabs.length, 1)
+    assert.equal(state.tabs[0].history[0].url, BROWSER_HOME_URL)
+  })
+
+  test('a tab moves to where it is dragged', () => {
+    const state = addBrowserTabState(addBrowserTabState(createBrowserTabsState()))
+    assert.deepEqual(moveBrowserTabState(state, 'tab-3', 0).tabs.map((tab) => tab.id), ['tab-3', 'tab-1', 'tab-2'])
+    assert.deepEqual(moveBrowserTabState(state, 'tab-1', 9).tabs.map((tab) => tab.id), ['tab-2', 'tab-3', 'tab-1'])
+    assert.equal(moveBrowserTabState(state, 'tab-2', 1), state)
+    assert.equal(moveBrowserTabState(state, 'nope', 0), state)
   })
 })

@@ -6,7 +6,7 @@ It is the only way PeerSky data moves. The app keeps it out of iCloud, computer 
 
 ## The screen
 
-- **This device**, then **Sync with another device**: one sheet for both directions. *Receive here* shows this phone's pairing code; *Send from here* is for scanning the other device's. The scan decides what happens either way: a pairing code (`peersky-identity:`) means "send this phone there", and a `hyper://` code is a transfer another device has ready for this one. A desktop's pairing code sends the tabs and bookmarks to that desktop.
+- **This device**, the person's other devices, then **Sync with another device**. The other devices are the ones met under the private files key, listed as Desktop or Phone with when each was last online (see Private files on your other devices in [hyper.md](hyper.md)). **Sync with another device** is one sheet for both directions. *Receive here* shows this phone's pairing code; *Send from here* is for scanning the other device's. The scan decides what happens either way: a pairing code (`peersky-identity:`) means "send this phone there", and a `hyper://` code is a transfer another device has ready for this one. A desktop's pairing code sends the tabs and bookmarks to that desktop.
 - **Save a backup file** and **Restore from a backup file**.
 - **Get the desktop browser**.
 - **Remove my data from this phone**, for handing a phone on or finishing a move.
@@ -137,6 +137,8 @@ A drive the desktop lists that is the phone's own, sent there earlier, is not ad
 Private uploads are encrypted with the key the desktop sends with its identity, so the desktop can open them too. Until a desktop has sent one, choosing Private in Hyperdrive asks to link the desktop first, with Link Device to go and do it, or This device only to keep the file on the phone.
 
 The phone keeps the desktop's key at the top of Documents (`private-drive-key.json`). Its own private drive gets its key the first time it is opened, from that file when it is there (`getPrivateDriveKey` with `linkedKey` in `backend/hyper/private-keys.mjs`). A key the phone already has is never swapped, since the files under it would stop opening. That does not keep a drive made before linking from the desktop: *Send from here* sends the drive's own key with its address, sealed to the desktop like the rest, and the desktop opens the drive with it. The same goes for a second desktop. The key file travels in backups and phone-to-phone transfers, so a phone restored from this one encrypts for the same desktop.
+
+Once linked, private files no longer need a send to reach the desktop: the two meet under the same key and each lists the other's private files, and the desktop keeps a copy of the phone's. How, and what happens at the edges, is in [hyper.md](hyper.md#private-files-on-your-other-devices).
 
 
 ## Putting a restore in place

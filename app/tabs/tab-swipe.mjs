@@ -26,3 +26,19 @@ export function shouldCloseOnRelease ({ dx, vx }) {
   const speed = Math.abs(Number(vx) || 0)
   return across > CLOSE_DISTANCE || (across > FLICK_DISTANCE && speed > FLICK_VELOCITY)
 }
+
+// The gap between tab cards, both ways, as styles.ts lays them out.
+export const TAB_CARD_GAP = 14
+
+/**
+ * Where a dragged tab card lands: how many cards across and rows down it was
+ * moved, rounded to the nearest, counted from where it started and kept inside
+ * the list.
+ */
+export function getTabDropIndex ({ from, dx, dy, width, height, columns, count }) {
+  if (!Number.isInteger(from) || count < 1) return from
+  const across = width > 0 ? Math.round((Number(dx) || 0) / (width + TAB_CARD_GAP)) : 0
+  const down = height > 0 ? Math.round((Number(dy) || 0) / (height + TAB_CARD_GAP)) : 0
+  const step = columns > 1 ? down * columns + across : down
+  return Math.max(0, Math.min(count - 1, from + step))
+}

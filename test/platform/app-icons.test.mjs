@@ -160,4 +160,42 @@ describe('adaptive icon layers', () => {
     const gradle = await readFile(new URL('../../app.json', import.meta.url), 'utf8')
     assert.doesNotMatch(gradle, /enableMinifyInReleaseBuilds|enableProguardInReleaseBuilds/)
   })
+
+  // A prebuild over an existing android folder finds the launcher entry
+  // already moved. Copying nothing left every alias without one, so the app
+  // had no icon in the launcher.
+  test('the icon aliases keep their launcher entry on a second prebuild', () => {
+    const manifest = {
+      manifest: {
+        application: [{
+          $: { 'android:name': '.MainApplication' },
+          activity: [{
+            $: { 'android:name': '.MainActivity' },
+            'intent-filter': [
+              {
+                action: [{ $: { 'android:name': 'android.intent.action.MAIN' } }],
+                category: [{ $: { 'android:name': 'android.intent.category.LAUNCHER' } }]
+              },
+              {
+                action: [{ $: { 'android:name': 'android.intent.action.VIEW' } }],
+                data: [{ $: { 'android:scheme': 'peersky' } }]
+              }
+            ]
+          }]
+        }]
+      }
+    }
+    const launcherOf = (entry) => (entry['intent-filter'] || []).filter((filter) => (filter.category || [])
+      .some((category) => category.$['android:name'] === 'android.intent.category.LAUNCHER'))
+    for (const run of [1, 2]) {
+      plugin.moveLauncherToAliases(manifest)
+      const application = manifest.manifest.application[0]
+      assert.equal(application['activity-alias'].length, plugin.COLORS.length, `run ${run}`)
+      for (const alias of application['activity-alias']) {
+        assert.equal(launcherOf(alias).length, 1, `run ${run}: ${alias.$['android:name']}`)
+      }
+      assert.equal(launcherOf(application.activity[0]).length, 0, `run ${run}`)
+      assert.equal(application.activity[0]['intent-filter'].length, 1, `run ${run}`)
+    }
+  })
 })

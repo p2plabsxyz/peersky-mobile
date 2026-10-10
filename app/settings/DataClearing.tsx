@@ -9,6 +9,7 @@ import {
   View
 } from 'react-native'
 import { WebView } from 'react-native-webview'
+import ChevronRightIcon from '../../assets/icons/bootstrap/chevron-right.svg'
 import { BROWSER_PALETTES } from '../browser-appearance.mjs'
 import { clearWebsiteData } from '../browser-data.mjs'
 import {
@@ -20,13 +21,15 @@ import {
 type DataClearingProps = {
   onClearBrowsingData: () => boolean
   onClearCachedData: () => boolean
+  onOpenSiteData: () => void
 }
 
 const CLEAR_WEBVIEW_TIMEOUT_MS = 5000
 
 export function DataClearing ({
   onClearBrowsingData,
-  onClearCachedData
+  onClearCachedData,
+  onOpenSiteData
 }: DataClearingProps) {
   const isDark = useSettingsDarkMode()
   const clearWebViewRef = useRef<ComponentRef<typeof WebView> | null>(null)
@@ -128,6 +131,22 @@ export function DataClearing ({
 
   return (
     <View style={[styles.page, isDark ? styles.pageDark : null]}>
+      {/* Clearing below keeps cookies, so nobody is signed out of every site
+          at once. They go one site at a time, or all together, here. */}
+      <SettingsSection title='Cookies'>
+        <Pressable
+          accessibilityRole='button'
+          style={({ pressed }) => [styles.actionRow, pressed ? styles.actionPressed : null]}
+          onPress={onOpenSiteData}
+        >
+          <SettingCopy
+            title='Cookies and site data'
+            description='See which sites keep cookies or data on this phone, and remove them.'
+          />
+          <ChevronRightIcon width={16} height={16} color={isDark ? BROWSER_PALETTES.dark.mutedText : '#8190a7'} />
+        </Pressable>
+      </SettingsSection>
+
       <SettingsSection title='Cache'>
         <Pressable
           accessibilityRole='button'
@@ -176,7 +195,7 @@ export function DataClearing ({
 
       <View style={[styles.notice, isDark ? styles.noticeDark : null]}>
         <Text style={[styles.noticeText, isDark ? styles.noticeTextDark : null]}>
-          Cookies, search, appearance, and accessibility preferences are not deleted.
+          Cookies and your search, appearance, and accessibility preferences are not deleted here.
         </Text>
       </View>
 

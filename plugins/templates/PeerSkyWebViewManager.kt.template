@@ -8,9 +8,12 @@ import android.text.format.Formatter
 import android.util.Log
 import android.view.MotionEvent
 import android.webkit.CookieManager
+import android.webkit.WebSettings
 import android.webkit.WebView
 import android.widget.Toast
 import androidx.webkit.ProfileStore
+import androidx.webkit.UserAgentMetadata
+import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import com.facebook.react.bridge.ReadableArray
@@ -41,6 +44,11 @@ class PeerSkyWebViewManager : RNCWebViewManager() {
           setContentBlockingToken(view, value as? String)
         } else if (propName == "incognitoSession") {
           setIncognitoSession(view, value as? String)
+        } else if (propName == "userAgent") {
+          // Desktop view names a desktop browser. Without it, the WebView's
+          // own user agent would come back, so the browser's goes on again.
+          inheritedDelegate.setProperty(view, propName, value)
+          if ((value as? String).isNullOrEmpty()) presentAsBrowser(view.webView)
         } else {
           inheritedDelegate.setProperty(view, propName, value)
         }
@@ -133,6 +141,7 @@ class PeerSkyWebViewManager : RNCWebViewManager() {
     context: ThemedReactContext
   ): RNCWebViewWrapper {
     val wrapper = super.createViewInstance(context)
+    presentAsBrowser(wrapper.webView)
     val contentBlockerBridge = PeerSkyContentBlockerBridge()
     contentBlockerBridges[wrapper.webView] = contentBlockerBridge
     wrapper.webView.addJavascriptInterface(
@@ -251,7 +260,16 @@ class PeerSkyWebViewManager : RNCWebViewManager() {
         )
         handled || dispatchDomTarget(webView)
       }
-      else -> dispatchDomTarget(webView)
+      // A text field keeps its own long press: the cursor, selecting and Paste.
+      WebView.HitTestResult.EDIT_TEXT_TYPE -> false
+      // Text, and anything else, goes on to the WebView, which selects it. The
+      // page is still asked whether a video or picture is under the finger.
+      // Answering true here took every long press, so no text on a page could
+      // be selected and no field offered Paste.
+      else -> {
+        dispatchDomTarget(webView)
+        false
+      }
     }
   }
 
@@ -315,6 +333,35 @@ class PeerSkyWebViewManager : RNCWebViewManager() {
     }
   }
 
+  // Pages are told this is a browser, in the words Chrome on Android uses,
+  // rather than an app with a page inside it. A WebView put "; wv" and
+  // "Version/4.0" in its user agent and named itself "Android WebView" in
+  // client hints. Sites read those and served cut-down pages, asked to open
+  // their app instead, or refused to sign in. Its user agent also gave every
+  // site the phone's model, build and Android version, which Chrome stopped
+  // sending in 2023.
+  private fun presentAsBrowser(webView: WebView) {
+    val settings = webView.settings
+    try {
+      settings.userAgentString = browserUserAgent(WebSettings.getDefaultUserAgent(webView.context))
+      // The X-Requested-With header names the app on every request. Only some
+      // WebView versions let an app stop it; current ones send it regardless.
+      if (WebViewFeature.isFeatureSupported(WebViewFeature.REQUESTED_WITH_HEADER_ALLOW_LIST)) {
+        WebSettingsCompat.setRequestedWithHeaderOriginAllowList(settings, emptySet())
+      }
+      if (WebViewFeature.isFeatureSupported(WebViewFeature.USER_AGENT_METADATA)) {
+        val metadata = WebSettingsCompat.getUserAgentMetadata(settings)
+        val brands = metadata.brandVersionList.filter { it.brand != WEBVIEW_BRAND }
+        WebSettingsCompat.setUserAgentMetadata(
+          settings,
+          UserAgentMetadata.Builder(metadata).setBrandVersionList(brands).build()
+        )
+      }
+    } catch (error: Exception) {
+      Log.w(TAG, "Unable to present the WebView as a browser", error)
+    }
+  }
+
   private fun normalizeTitle(value: String?): String {
     return value
       ?.filter { it.code >= 32 && it.code !in 127..159 }
@@ -333,8 +380,21 @@ class PeerSkyWebViewManager : RNCWebViewManager() {
     private val MEDIA_SCHEMES = setOf("http", "https")
     private val LINK_SCHEMES = setOf("http", "https", "hyper", "peersky")
 
+    private const val WEBVIEW_BRAND = "Android WebView"
+    private val CHROME_VERSION = Regex("Chrome/(\\d+)")
+
     internal fun isValidToken(value: String?): Boolean =
       value?.length == TOKEN_LENGTH && value.all { it in '0'..'9' || it in 'a'..'f' }
+
+    // Chrome's reduced user agent for the same engine: Android 10 and K for
+    // every phone, and the version without its minor parts.
+    internal fun browserUserAgent(webViewUserAgent: String): String {
+      val major = CHROME_VERSION.find(webViewUserAgent)?.groupValues?.get(1)
+        ?: return webViewUserAgent.replace("; wv)", ")")
+      val mobile = if (webViewUserAgent.contains(" Mobile ")) " Mobile" else ""
+      return "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) " +
+        "Chrome/$major.0.0.0$mobile Safari/537.36"
+    }
   }
 
   private data class TouchPoint(val xRatio: Double, val yRatio: Double)

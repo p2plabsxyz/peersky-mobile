@@ -21,7 +21,8 @@ import {
   RPC_HYPER_STORAGE_LIST
 } from '../../backend/rpc/commands.mjs'
 import { BROWSER_PALETTES } from '../browser-appearance.mjs'
-import { getHyperDriveListingUrl } from '../browser-shell.mjs'
+import { BROWSER_P2P_URL, getHyperDriveListingUrl } from '../browser-shell.mjs'
+import ChevronRightIcon from '../../assets/icons/bootstrap/chevron-right.svg'
 import CopyIcon from '../../assets/icons/bootstrap/copy.svg'
 import { clearHyperdriveRecents } from '../hyperdrive/recents-store'
 import { SettingsSection, useSettingsDarkMode } from './SettingsUI'
@@ -427,6 +428,28 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
 
   return (
     <>
+      {/* The list at peersky://p2p, which nothing else in Settings led to. */}
+      <SettingsSection title='P2P sites'>
+        <Pressable
+          accessibilityHint='Opens the list of hyper:// sites you have opened'
+          accessibilityRole='link'
+          onPress={() => onOpenUrl(BROWSER_P2P_URL)}
+          style={({ pressed }) => [styles.sitesRow, pressed ? styles.buttonPressed : null]}
+        >
+          <View style={styles.copy}>
+            <Text style={[styles.title, isDark ? darkStyles.primaryText : null]}>Sites you opened</Text>
+            <Text style={[styles.description, isDark ? darkStyles.secondaryText : null]}>
+              The hyper:// sites you opened, by title. Their pages stay on this phone, so they open without a connection.
+            </Text>
+          </View>
+          <ChevronRightIcon
+            width={16}
+            height={16}
+            color={isDark ? BROWSER_PALETTES.dark.mutedText : '#8190a7'}
+          />
+        </Pressable>
+      </SettingsSection>
+
       <SettingsSection title='App data'>
         {isLoading && items.length === 0
           ? <ActivityIndicator style={styles.loading} />
@@ -816,6 +839,14 @@ function joinNotices (...notices: Array<string | null | undefined>) {
 }
 
 const styles = StyleSheet.create({
+  sitesRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 12,
+    minHeight: 64,
+    paddingHorizontal: 18,
+    paddingVertical: 12
+  },
   appRow: {
     alignItems: 'center',
     flexDirection: 'row',

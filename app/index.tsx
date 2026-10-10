@@ -33,7 +33,7 @@ import * as Crypto from 'expo-crypto'
 import { CameraView, useCameraPermissions } from 'expo-camera'
 import { File, Paths } from 'expo-file-system'
 import { useNetworkState } from 'expo-network'
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
+import { initialWindowMetrics, SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import b4a from 'b4a'
 import RPC from 'bare-rpc'
 import { WebView } from 'react-native-webview'
@@ -51,6 +51,7 @@ import {
   getHyperBridgeSite,
   getBrowserRequestAction,
   getBrowserWebViewKey,
+  getSearchUrl,
   isHyperUrl,
   isStaleBrowserLoad,
   isWebUrl,
@@ -66,16 +67,26 @@ import {
   appendIncomingBrowserTabs,
   BROWSER_PAGE_ZOOMS,
   closeBrowserTabState,
+  closeBrowserTabsState,
   createBrowserTabsState,
   DEFAULT_BROWSER_PAGE_ZOOM,
   findBrowserTabShowingApp,
+  forgetClosedBrowserTab,
+  getBrowserTabUrls,
   isAppInBrowserTabs,
   isCurrentBrowserTabEntry,
+  isInactiveBrowserTab,
   MAX_BROWSER_TABS,
+  moveBrowserTabState,
   normalizeBrowserPageZoom,
   normalizeBrowserTabTitle,
+  parseRecentlyClosedBrowserTabs,
+  rememberClosedBrowserTabs,
+  reopenClosedBrowserTabState,
   setBrowserTabViewModeState,
   serializeBrowserTabsState,
+  serializeRecentlyClosedBrowserTabs,
+  snapshotClosedBrowserTab,
   suspendInactiveBrowserTabsState,
   switchBrowserTabState,
   touchLiveBrowserTabIds,
@@ -139,7 +150,9 @@ import { SettingsScreen } from './settings/SettingsScreen'
 import type { SettingsPage } from './settings/SettingsScreen'
 import { BrowserOverflowMenu } from './settings/BrowserOverflowMenu'
 import { useBrowserPreferences } from './settings/useBrowserPreferences'
-import { BrowserToolbar } from './BrowserToolbar'
+import { getOneOffSearchEngines } from './search/search-suggestions.mjs'
+import { getSiteDataHosts } from './privacy/site-data.mjs'
+import { BrowserToolbar, type AddressBarAction } from './BrowserToolbar'
 import { BrowserNavBar } from './BrowserNavBar'
 import { BrowserBackSwipe } from './BrowserBackSwipe'
 import { BrowserPullRefresh } from './BrowserPullRefresh'
@@ -200,6 +213,9 @@ import {
   parseBrowserFaviconMessage
 } from './bookmarks/browser-favicon.mjs'
 import { useBrowserBookmarks } from './bookmarks/useBrowserBookmarks'
+import { BookmarkFolderSheet } from './bookmarks/BookmarkFolderSheet'
+import { canUseReaderView, createReaderScript, parseReaderMessage } from './reader/reader-mode.mjs'
+import { ReaderView, type ReaderArticle } from './reader/ReaderView'
 import { useBrowserFavourites } from './favourites/useBrowserFavourites'
 import { BrowserFavourites } from './favourites/BrowserFavourites'
 import { MAX_BROWSER_FAVOURITES } from './favourites/browser-favourites.mjs'
@@ -215,6 +231,7 @@ import {
 } from './downloads/browser-downloads.mjs'
 import { HyperdriveScreen } from './hyperdrive/HyperdriveScreen'
 import { canUseNetworkForOfflineHyper } from './hyperdrive/offline-network.mjs'
+import { isMeteredNetwork } from './linked-devices.mjs'
 import { PeerChatScreen, type PeerChatResponse } from './peerchat/PeerChatScreen'
 import { settleIncomingUrl, subscribeToIncomingUrls } from './incoming-links'
 import { parseHomeShortcut } from './home-shortcuts.mjs'
@@ -264,6 +281,7 @@ import {
 } from './p2pmd-editor.mjs'
 import { MODAL_ORIENTATIONS } from './modal-orientations'
 import { shareLink } from './share'
+import { BrowserToast, type BrowserToastMessage } from './BrowserToast'
 import { p2pmdLight, styles } from './styles'
 import {
   RPC_HOLESAIL_CONNECT,
@@ -287,8 +305,11 @@ import {
   RPC_P2PMD_ROOM_STATUS,
   RPC_P2PMD_TAKE_NOTES,
   RPC_APP_BACKUP_PROGRESS,
+  RPC_APP_DEVICE_SYNC_CHANGED,
   RPC_APP_PEERCHAT_CHANGED,
+  RPC_DEVICE_SYNC_NETWORK,
   RPC_PEERCHAT_PRESENCE,
+  RPC_PEERCHAT_SEND_TO_DEVICES,
   RPC_PEERTUNES_START
 } from '../backend/rpc/commands.mjs'
 
@@ -375,10 +396,25 @@ type BrowserTab = {
   desktopView: boolean
   history: BrowserHistoryEntry[]
   historyIndex: number
+  lastOpenedAt?: number
   pageZoom: number
   webCanGoBack: boolean
   webCanGoForward: boolean
   incognito?: boolean
+}
+
+// A closed tab as Recently closed keeps it. See browser-tabs.mjs.
+type ClosedBrowserTab = {
+  key: string
+  closedAt: number
+  title: string
+  url: string
+  history: BrowserHistoryEntry[]
+  historyIndex: number
+  desktopView: boolean
+  pageZoom: number
+  index?: number
+  wasActive?: boolean
 }
 
 type BrowserTabsState = {
@@ -461,6 +497,8 @@ export default function App () {
     setAddressBarPosition,
     setAppLogoColor,
     setForceDarkWebsites,
+    setSearchSuggestionsEnabled,
+    setAddressBarButton,
     setContentBlockingEnabled: setContentBlockingPreference,
     setCustomSearchEngine,
     setDownloadOnlyOnWifi,
@@ -484,12 +522,21 @@ export default function App () {
   hyperOfflineNetworkAllowedRef.current = hyperOfflineNetworkAllowed
   const {
     bookmarks: browserBookmarks,
+    createFolder: createBrowserBookmarkFolder,
+    deleteFolder: deleteBrowserBookmarkFolder,
+    findBookmark: findBrowserBookmark,
+    folders: browserBookmarkFolders,
     isReady: browserBookmarksReady,
     isBookmarked: isBrowserPageBookmarked,
+    moveBookmark: moveBrowserBookmark,
     persistenceError: browserBookmarksError,
     removeBookmark: removeBrowserBookmark,
+    renameFolder: renameBrowserBookmarkFolder,
+    restoreBookmark: restoreBrowserBookmark,
     toggleBookmark: toggleBrowserBookmark
   } = useBrowserBookmarks()
+  // A bookmark just made, being put in a folder from its toast.
+  const [bookmarkFolderUrl, setBookmarkFolderUrl] = useState<string | null>(null)
   // The large home screen widget lists the newest few.
   useEffect(() => {
     if (browserBookmarksReady) updateBrowserWidget(browserBookmarks)
@@ -515,6 +562,35 @@ export default function App () {
     removeHistoryItem: removeBrowserHistoryItem
   } = useBrowserHistory()
   const [browserDownloadsVisible, setBrowserDownloadsVisible] = useState(false)
+  // What just happened, said near the bottom, with Undo where it can be.
+  const [browserToast, setBrowserToast] = useState<BrowserToastMessage | null>(null)
+  // The article Reader view is showing, from the page it came from.
+  const [readerPage, setReaderPage] = useState<{ article: ReaderArticle, pageUrl: string, incognito: boolean } | null>(null)
+  const [readerTextScale, setReaderTextScale] = useState(100)
+  // Tabs closed lately, to open again. Kept across restarts, cleared with
+  // history and by Burn.
+  const [recentlyClosedTabs, setRecentlyClosedTabs] = useState<ClosedBrowserTab[]>([])
+  const recentlyClosedTabsRef = useRef<ClosedBrowserTab[]>([])
+  useEffect(() => {
+    try {
+      const file = getRecentlyClosedTabsFile()
+      if (!file.exists) return
+      void file.text().then((text) => {
+        const restored = parseRecentlyClosedBrowserTabs(text) as ClosedBrowserTab[]
+        // Anything closed before the file was read stays on top.
+        const merged = rememberClosedBrowserTabs(restored, [...recentlyClosedTabsRef.current].reverse()) as ClosedBrowserTab[]
+        recentlyClosedTabsRef.current = merged
+        setRecentlyClosedTabs(merged)
+      }).catch((error) => console.warn('Unable to read recently closed tabs:', error))
+    } catch (error) {
+      console.warn('Unable to read recently closed tabs:', error)
+    }
+  }, [])
+  function updateRecentlyClosedTabs (next: ClosedBrowserTab[]) {
+    recentlyClosedTabsRef.current = next
+    setRecentlyClosedTabs(next)
+    writeRecentlyClosedTabs(next)
+  }
   // iOS always can. Android needs a System WebView with profiles.
   const [privateBrowsingSupported, setPrivateBrowsingSupported] = useState(Platform.OS === 'ios')
   useEffect(() => {
@@ -562,6 +638,8 @@ export default function App () {
   const [browserCanGoBack, setBrowserCanGoBack] = useState(false)
   const [browserCanGoForward, setBrowserCanGoForward] = useState(false)
   const [browserIsLoading, setBrowserIsLoading] = useState(false)
+  const browserIsLoadingRef = useRef(false)
+  browserIsLoadingRef.current = browserIsLoading
   const [activeTab, setActiveTab] = useState<RuntimeTab>('hyper')
   const [requestedPeerChatRoomKey, setRequestedPeerChatRoomKey] = useState<string | null>(null)
   const [requestedPeerChatPeerId, setRequestedPeerChatPeerId] = useState<string | null>(null)
@@ -597,6 +675,9 @@ export default function App () {
   // Mounted the first time home shows and kept from then on.
   if (browserSource.kind === 'home' && !browserHomeMounted) setBrowserHomeMounted(true)
   const [peerChatRevision, setPeerChatRevision] = useState(0)
+  // Bumped when the backend says a linked device came or went, or one of its
+  // private drives changed, so Hyperdrive and Link Device read again.
+  const [deviceSyncRevision, setDeviceSyncRevision] = useState(0)
   const [p2pmdRoom, setP2pmdRoom] = useState<P2pmdRoom | null>(null)
   const [p2pmdEditorHtml, setP2pmdEditorHtml] = useState<string | null>(null)
   const [p2pmdJoinKey, setP2pmdJoinKey] = useState('')
@@ -674,6 +755,17 @@ export default function App () {
       }, 0)
     }
   }, [])
+
+  // Starts meeting this person's other devices once the backend is up, and
+  // tells them when the phone is on a cellular connection, so a desktop waits
+  // for Wi-Fi before copying the phone's private files.
+  const deviceSyncMetered = isMeteredNetwork(networkState)
+  useEffect(() => {
+    if (!identityStoragePath) return
+    void callRpc(RPC_DEVICE_SYNC_NETWORK, { metered: deviceSyncMetered }).catch((error) => {
+      console.warn('[device sync] Unable to report the network:', error)
+    })
+  }, [deviceSyncMetered, identityStoragePath])
 
   useEffect(() => {
     if (!browserPreferencesReady || !identityStoragePath) return
@@ -1042,6 +1134,9 @@ export default function App () {
       const rpc = new RPC(worklet.IPC, (request) => {
         if (request.command === RPC_APP_PEERCHAT_CHANGED) {
           setPeerChatRevision((value) => value + 1)
+        }
+        if (request.command === RPC_APP_DEVICE_SYNC_CHANGED) {
+          setDeviceSyncRevision((value) => value + 1)
         }
         if (request.command === RPC_APP_BACKUP_PROGRESS && request.data) {
           emitLinkDeviceProgress(typeof request.data === 'string'
@@ -2000,11 +2095,10 @@ export default function App () {
   }
 
   function onBrowserToggleBookmark () {
-    const result = toggleBrowserBookmark({
-      url: browserCurrentUrl,
-      title: browserTitle,
-      favicon: browserFavicon
-    })
+    const page = { url: browserCurrentUrl, title: browserTitle, favicon: browserFavicon }
+    // Undo puts it back where it was, in its folder.
+    const place = findBrowserBookmark(page.url)
+    const result = toggleBrowserBookmark(page)
 
     if (result === 'limit-reached') {
       const message = 'Delete a bookmark before adding another.'
@@ -2012,6 +2106,21 @@ export default function App () {
       Alert.alert('Bookmark limit reached', message)
     } else if (result) {
       setStatus(result === 'added' ? 'Bookmark added' : 'Bookmark removed')
+      // A new bookmark can go straight into a folder. A removed one can come
+      // back: the star is a toggle, so adding needs no Undo of its own.
+      setBrowserToast(result === 'added'
+        ? {
+            id: Date.now(),
+            message: 'Bookmarked',
+            actionLabel: 'Add to folder',
+            onAction: () => setBookmarkFolderUrl(page.url)
+          }
+        : {
+            id: Date.now(),
+            message: 'Bookmark removed',
+            actionLabel: 'Undo',
+            onAction: () => { if (place) restoreBrowserBookmark(place) }
+          })
     } else {
       setStatus('Unable to update bookmark')
     }
@@ -2331,11 +2440,17 @@ export default function App () {
     setStatus('Tab switched')
   }
 
-  function onBrowserCloseTab (tabId: string, returnTo?: string) {
+  function onBrowserCloseTab (tabId: string, returnTo?: string): string | null {
     browserUserInteractedRef.current = true
     const currentTabsState = browserTabsStateRef.current
     const isClosingActive = tabId === currentTabsState.activeTabId
     if (isClosingActive) cancelPendingBrowserLoad()
+    const closingIndex = currentTabsState.tabs.findIndex((item) => item.id === tabId)
+    const closed = snapshotClosedBrowserTab(currentTabsState.tabs[closingIndex], Date.now(), {
+      index: closingIndex,
+      wasActive: isClosingActive
+    }) as ClosedBrowserTab | null
+    if (closed) updateRecentlyClosedTabs(rememberClosedBrowserTabs(recentlyClosedTabsRef.current, [closed]) as ClosedBrowserTab[])
 
     const nextState = closeBrowserTabState(currentTabsState, tabId, returnTo) as BrowserTabsState
     const tab = nextState.tabs.find((item) => item.id === nextState.activeTabId)
@@ -2356,6 +2471,14 @@ export default function App () {
     }
 
     updateBrowserTabsState(nextState)
+    forgetBrowserTabResources(tabId)
+    if (isClosingActive && tab) applyBrowserTab(tab)
+    setStatus('Tab closed')
+    return closed ? closed.key : null
+  }
+
+  // What the app kept for a tab that is gone.
+  function forgetBrowserTabResources (tabId: string) {
     removeBrowserTabPreview(tabId)
     browserFaviconsRef.current.delete(tabId)
     browserLastRecordedUrlsRef.current.delete(tabId)
@@ -2370,8 +2493,116 @@ export default function App () {
       return next
     })
     setBrowserLiveTabIds((tabIds) => tabIds.filter((id) => id !== tabId))
+  }
+
+  // Several tabs picked in the tab list, closed together and kept together in
+  // Recently closed, so one Undo brings them all back.
+  function onBrowserCloseTabs (tabIds: string[]): string[] {
+    const currentTabsState = browserTabsStateRef.current
+    const ids = tabIds.filter((tabId) => currentTabsState.tabs.some((item) => item.id === tabId))
+    if (ids.length === 0) return []
+    browserUserInteractedRef.current = true
+    const isClosingActive = ids.includes(currentTabsState.activeTabId)
+    if (isClosingActive) cancelPendingBrowserLoad()
+
+    const closedAt = Date.now()
+    const closed = ids
+      .map((tabId, order) => {
+        const index = currentTabsState.tabs.findIndex((item) => item.id === tabId)
+        return snapshotClosedBrowserTab(currentTabsState.tabs[index], closedAt + order, {
+          index,
+          wasActive: tabId === currentTabsState.activeTabId
+        })
+      })
+      .filter(Boolean) as ClosedBrowserTab[]
+    if (closed.length > 0) {
+      updateRecentlyClosedTabs(rememberClosedBrowserTabs(recentlyClosedTabsRef.current, closed) as ClosedBrowserTab[])
+    }
+
+    const nextState = closeBrowserTabsState(currentTabsState, ids) as BrowserTabsState
+    const tab = nextState.tabs.find((item) => item.id === nextState.activeTabId)
+    // As for one tab: landing on a live note swaps the whole screen.
+    if (isClosingActive && p2pmdWorkspaceReady && isP2pmdWorkspaceTab(tab)) setBrowserTabsVisible(false)
+    updateBrowserTabsState(nextState)
+    for (const tabId of ids) forgetBrowserTabResources(tabId)
     if (isClosingActive && tab) applyBrowserTab(tab)
-    setStatus('Tab closed')
+    setStatus(ids.length === 1 ? 'Tab closed' : `${ids.length} tabs closed`)
+    return closed.map((item) => item.key)
+  }
+
+  // Undo for several at once: each back in its place, in the order they were.
+  function onBrowserReopenClosedTabs (keys: string[]) {
+    const wanted = keys
+      .map((key) => recentlyClosedTabsRef.current.find((item) => item.key === key))
+      .filter(Boolean) as ClosedBrowserTab[]
+    wanted.sort((left, right) => (left.index ?? 0) - (right.index ?? 0))
+    const currentTabsState = browserTabsStateRef.current
+    let nextState = currentTabsState
+    const reopened: string[] = []
+    for (const closed of wanted) {
+      const state = reopenClosedBrowserTabState(nextState, closed, Date.now(), { restorePlace: true }) as BrowserTabsState
+      if (state === nextState) continue
+      nextState = state
+      reopened.push(closed.key)
+    }
+    if (reopened.length === 0) return
+    browserUserInteractedRef.current = true
+    updateRecentlyClosedTabs(recentlyClosedTabsRef.current.filter((item) => !reopened.includes(item.key)))
+    const activeChanged = nextState.activeTabId !== currentTabsState.activeTabId
+    if (activeChanged) cancelPendingBrowserLoad()
+    updateBrowserTabsState(nextState)
+    const tab = nextState.tabs.find((item) => item.id === nextState.activeTabId)
+    if (activeChanged && tab) applyBrowserTab(tab)
+  }
+
+  // A tab dragged to where another one is, in the tab list.
+  function onBrowserMoveTab (tabId: string, toTabId: string) {
+    const currentTabsState = browserTabsStateRef.current
+    const toIndex = currentTabsState.tabs.findIndex((item) => item.id === toTabId)
+    if (toIndex < 0) return
+    const nextState = moveBrowserTabState(currentTabsState, tabId, toIndex) as BrowserTabsState
+    if (nextState === currentTabsState) return
+    browserUserInteractedRef.current = true
+    updateBrowserTabsState(nextState)
+    setStatus('Tab moved')
+  }
+
+  // The picked tabs' addresses, one per line.
+  function onBrowserCopyTabLinks (tabIds: string[]) {
+    const urls = getBrowserTabUrls(browserTabsStateRef.current, tabIds) as string[]
+    if (urls.length > 0) Clipboard.setString(urls.join('\n'))
+    return urls.length
+  }
+
+  function onBrowserShareTabLinks (tabIds: string[]) {
+    const urls = getBrowserTabUrls(browserTabsStateRef.current, tabIds) as string[]
+    if (urls.length === 0) return
+    // One link gets the sheet with PeerSky's icon; a list goes as plain text.
+    void shareLink({ message: urls.join('\n'), plain: urls.length > 1 })
+      .catch((error) => console.warn('Unable to share tab links:', error))
+  }
+
+  // From Recently closed: in a tab of its own, on screen. From Undo: back where
+  // it was, with the tab list still open.
+  function onBrowserReopenClosedTab (key: string, { restorePlace = false }: { restorePlace?: boolean } = {}) {
+    const closed = recentlyClosedTabsRef.current.find((item) => item.key === key)
+    if (!closed) return
+    const currentTabsState = browserTabsStateRef.current
+    if (currentTabsState.tabs.length >= MAX_BROWSER_TABS) {
+      Alert.alert('Too many tabs', `Close a tab first. PeerSky keeps up to ${MAX_BROWSER_TABS} open.`)
+      return
+    }
+    browserUserInteractedRef.current = true
+    const nextState = reopenClosedBrowserTabState(currentTabsState, closed, Date.now(), { restorePlace }) as BrowserTabsState
+    if (nextState === currentTabsState) return
+    updateRecentlyClosedTabs(forgetClosedBrowserTab(recentlyClosedTabsRef.current, key) as ClosedBrowserTab[])
+    const activeChanged = nextState.activeTabId !== currentTabsState.activeTabId
+    if (activeChanged) cancelPendingBrowserLoad()
+    updateBrowserTabsState(nextState)
+    const tab = nextState.tabs.find((item) => item.id === nextState.activeTabId)
+    if (activeChanged && tab) applyBrowserTab(tab)
+    if (!restorePlace) setBrowserTabsVisible(false)
+    setStatus('Tab reopened')
   }
 
   function onBrowserResetTabs (clearPreviews = true) {
@@ -2440,6 +2671,7 @@ export default function App () {
     })
     const { previewCacheCleared, sessionSaved } = onBrowserResetTabs()
     const historyCleared = clearBrowserHistory()
+    updateRecentlyClosedTabs([])
     setBrowserTabsVisible(false)
     setBrowserTitle('New tab')
     setStatus(
@@ -2463,6 +2695,11 @@ export default function App () {
           text: 'Close all',
           style: 'destructive',
           onPress: () => {
+            const closedAt = Date.now()
+            const closed = browserTabsStateRef.current.tabs
+              .map((tab, index) => snapshotClosedBrowserTab(tab, closedAt + index, { index }))
+              .filter(Boolean) as ClosedBrowserTab[]
+            updateRecentlyClosedTabs(rememberClosedBrowserTabs(recentlyClosedTabsRef.current, closed) as ClosedBrowserTab[])
             const { previewCacheCleared, sessionSaved } = onBrowserResetTabs()
             setBrowserTabsVisible(false)
             setBrowserTitle('New tab')
@@ -2727,6 +2964,69 @@ export default function App () {
       return
     }
     webView.injectJavaScript(createBrowserPrintScript(token))
+  }
+
+  // The same round trip as printing: ask the tab for its article, and show
+  // what comes back in Reader view.
+  function onBrowserReaderView () {
+    const tabId = browserTabsStateRef.current.activeTabId
+    const token = browserMediaTokensRef.current.get(tabId)
+    const webView = browserWebViewRefs.current.get(tabId)
+
+    if (!token || !webView) {
+      setBrowserToast({ id: Date.now(), message: 'Reader view is not available on this page' })
+      return
+    }
+    webView.injectJavaScript(createReaderScript(token))
+  }
+
+  // Into your PeerChat chat with yourself, where your other devices see it
+  // and can open it. The title goes first, since a hyper:// address alone
+  // says nothing about the page.
+  async function onBrowserSendToDevices () {
+    const url = browserCurrentUrl
+    const title = browserTitle.trim()
+    const message = title && title !== url ? `${title}\n${url}` : url
+    try {
+      const response = await callRpc(RPC_PEERCHAT_SEND_TO_DEVICES, { message })
+      if (!response.ok) throw new Error(response.error || 'Unable to send')
+      if (response.noDevices) {
+        setBrowserToast({
+          id: Date.now(),
+          message: 'Link another device to send pages to it',
+          actionLabel: 'Link Device',
+          onAction: () => {
+            setBrowserSettingsInitialPage('link-device')
+            setBrowserSettingsCloseOnBack(true)
+            setBrowserSettingsVisible(true)
+          }
+        })
+      } else {
+        setBrowserToast({
+          id: Date.now(),
+          message: response.waiting ? 'It goes to your other device once that is online' : 'Sent to your devices'
+        })
+      }
+    } catch {
+      setBrowserToast({ id: Date.now(), message: 'This page could not be sent to your devices' })
+    }
+  }
+
+  // The page as a shortcut on Android's home screen, through the launcher's
+  // own prompt. Not from an incognito tab, where nothing is meant to stay.
+  async function onBrowserAddToHomeScreen () {
+    const homeScreen = NativeModules.PeerSkyHomeScreen as
+      | { addPage?: (url: string, title: string, iconUrl: string | null) => Promise<boolean> }
+      | undefined
+    if (typeof homeScreen?.addPage !== 'function') return
+    const icon = browserFavicon && /^https?:\/\//i.test(browserFavicon) ? browserFavicon : null
+    try {
+      if (!await homeScreen.addPage(browserCurrentUrl, browserTitle, icon)) {
+        setBrowserToast({ id: Date.now(), message: 'This home screen does not take shortcuts' })
+      }
+    } catch {
+      setBrowserToast({ id: Date.now(), message: 'This page could not be added to the home screen' })
+    }
   }
 
   async function onHolesailStartLive () {
@@ -3449,6 +3749,8 @@ export default function App () {
   // left edge so it never fights a list or the horizontal toolbars.
   const browserBackSwipe = useRef(new Animated.Value(0)).current
   const browserForwardSwipe = useRef(new Animated.Value(0)).current
+  // How far the page in front has loaded, for the line along the address bar.
+  const browserLoadProgress = useRef(new Animated.Value(0)).current
   // Which way the swipe under the finger goes, decided by the edge it began at.
   const browserSwipeDirectionRef = useRef<'back' | 'forward'>('back')
   const browserCanGoForwardRef = useRef(false)
@@ -3680,10 +3982,15 @@ export default function App () {
         <View style={styles.browserShellContent}>
           <BookmarksScreen
             bookmarks={browserBookmarks}
+            folders={browserBookmarkFolders}
             isDark={browserIsDark}
             isReady={browserBookmarksReady}
             persistenceError={browserBookmarksError}
             onClose={() => setBrowserBookmarksVisible(false)}
+            onCreateFolder={createBrowserBookmarkFolder}
+            onDeleteFolder={deleteBrowserBookmarkFolder}
+            onMoveBookmark={moveBrowserBookmark}
+            onRenameFolder={renameBrowserBookmarkFolder}
             onOpen={(targetUrl) => {
               setBrowserBookmarksVisible(false)
               openFromList('bookmarks', targetUrl)
@@ -3721,6 +4028,7 @@ export default function App () {
             items={browserVisitHistory}
             onClear={() => {
               if (clearBrowserHistory()) setStatus('Browsing history cleared')
+              updateRecentlyClosedTabs([])
             }}
             onClose={() => setBrowserHistoryVisible(false)}
             onOpen={(targetUrl) => {
@@ -3802,8 +4110,10 @@ export default function App () {
             initialPage={browserSettingsInitialPage}
             closeOnBack={browserSettingsCloseOnBack}
             registerGoBack={(handler) => { browserSettingsGoBackRef.current = handler }}
+            addressBarButton={browserPreferences.addressBarButton}
             addressBarPosition={browserPreferences.addressBarPosition}
             appLogoColor={browserPreferences.appLogoColor}
+            deviceSyncRevision={deviceSyncRevision}
             forceDarkWebsites={browserPreferences.forceDarkWebsites}
             contentBlockingEnabled={browserPreferences.contentBlockingEnabled}
             customSearchUrl={browserPreferences.customSearchUrl}
@@ -3815,12 +4125,19 @@ export default function App () {
             persistenceError={browserPreferencesError}
             publishingSites={browserPreferences.publishingSites}
             searchEngine={browserPreferences.searchEngine}
+            searchSuggestionsEnabled={browserPreferences.searchSuggestionsEnabled}
             showFullAddress={browserPreferences.showFullAddress}
             theme={browserPreferences.theme}
             toolbarButton={browserPreferences.toolbarButton}
             websiteTextScale={browserPreferences.websiteTextScale}
             youtubeAdBlockingEnabled={browserPreferences.youtubeAdBlockingEnabled}
             storagePath={identityStoragePath}
+            getSiteDataHosts={() => getSiteDataHosts([
+              ...browserVisitHistory.map((item) => item.url),
+              ...browserTabsStateRef.current.tabs.map((tab) => tab.history[tab.historyIndex]?.url),
+              ...browserBookmarks.map((bookmark) => bookmark.url)
+            ])}
+            onAddressBarButtonChange={setAddressBarButton}
             onAddressBarPositionChange={setAddressBarPosition}
             onAppLogoColorChange={(color) => {
               // The in-app logo changes either way; the home screen icon is a
@@ -3829,6 +4146,7 @@ export default function App () {
               void applyAppIcon(color)
             }}
             onForceDarkWebsitesChange={setForceDarkWebsites}
+            onSearchSuggestionsChange={setSearchSuggestionsEnabled}
             onToolbarButtonChange={setToolbarButton}
             onCallRpc={(command, data = {}) => callRpc(command, data)}
             onContentBlockingEnabledChange={onContentBlockingEnabledChange}
@@ -3836,6 +4154,7 @@ export default function App () {
             onClearBrowsingData={() => {
               const { sessionSaved } = onBrowserResetTabs(false)
               const historyCleared = clearBrowserHistory()
+              updateRecentlyClosedTabs([])
               if (sessionSaved && historyCleared) closeBrowserSettings()
               return sessionSaved && historyCleared
             }}
@@ -4134,21 +4453,86 @@ export default function App () {
     )
   }
 
+  // The button after reload, as chosen in Settings, or none where it has
+  // nothing to act on.
+  const browserAddressBarAction = ((): AddressBarAction | null => {
+    const pageAvailable = canUseReaderView(browserCurrentUrl)
+    switch (browserPreferences.addressBarButton) {
+      case 'share':
+        return browserShareActionAvailable
+          ? { id: 'share', label: 'Share page', onPress: () => void onBrowserSharePage() }
+          : null
+      case 'bookmark':
+        return browserBookmarkActionAvailable && browserBookmarksReady
+          ? {
+              id: 'bookmark',
+              label: browserPageIsBookmarked ? 'Remove bookmark' : 'Bookmark page',
+              active: browserPageIsBookmarked,
+              onPress: onBrowserToggleBookmark
+            }
+          : null
+      case 'favourite': {
+        const favourited = isBrowserPageFavourited(browserCurrentUrl)
+        return browserBookmarkActionAvailable && browserFavouritesReady
+          ? {
+              id: 'favourite',
+              label: favourited ? 'Remove favourite' : 'Add favourite',
+              active: favourited,
+              onPress: onBrowserToggleFavourite
+            }
+          : null
+      }
+      case 'reader':
+        return pageAvailable ? { id: 'reader', label: 'Reader view', onPress: onBrowserReaderView } : null
+      case 'send':
+        return pageAvailable
+          ? { id: 'send', label: 'Send to your devices', onPress: () => void onBrowserSendToDevices() }
+          : null
+      case 'zoom':
+        return browserShareActionAvailable
+          ? { id: 'zoom', label: 'Zoom', onPress: () => setBrowserZoomVisible(true) }
+          : null
+      case 'desktop':
+        return browserShareActionAvailable
+          ? {
+              id: 'desktop',
+              label: 'Desktop view',
+              active: activeBrowserDesktopView,
+              onPress: onBrowserToggleDesktopView
+            }
+          : null
+      case 'print':
+        return canPrintBrowserUrl(browserCurrentUrl)
+          ? { id: 'print', label: 'Print', onPress: onBrowserPrintPage }
+          : null
+      case 'new-tab':
+        return browserTabsState.tabs.length < MAX_BROWSER_TABS
+          ? { id: 'new-tab', label: 'New tab', onPress: onBrowserNewTab }
+          : null
+      default:
+        return null
+    }
+  })()
+
   const browserToolbar = (
     <BrowserToolbar
       activeTabId={browserTabsState.activeTabId}
       address={browserAddress}
+      addressBarAction={browserAddressBarAction}
       currentUrl={browserCurrentUrl}
       focusRequest={browserAddressFocusRequest}
       isDark={browserIsDark}
       isIncognito={browserTabsState.tabs.some((tab) => tab.id === browserTabsState.activeTabId && tab.incognito === true)}
       isLoading={browserIsLoading}
+      loadProgress={browserLoadProgress}
       historySuggestions={getBrowserHistorySuggestions(browserAddress)}
       navigationKey={`${browserTabsState.activeTabId}:${browserHistoryIndex}`}
       pageActionAvailable={browserPageActionAvailable}
       palette={browserChrome}
       position={browserPreferences.addressBarPosition}
-      shareActionAvailable={browserShareActionAvailable}
+      searchEngine={browserPreferences.searchEngine}
+      searchEngines={getOneOffSearchEngines(browserPreferences.searchEngine, browserPreferences.customSearchUrl)}
+      searchSuggestionsEnabled={browserPreferences.searchSuggestionsEnabled}
       showFullAddress={browserPreferences.showFullAddress}
       onAddressChange={(value) => {
         browserUserInteractedRef.current = true
@@ -4157,7 +4541,15 @@ export default function App () {
       onCloseMenu={() => setBrowserMenuVisible(false)}
       onOpenSiteInfo={() => setSiteInfoVisible(true)}
       onReload={onBrowserReload}
-      onSharePage={() => void onBrowserSharePage()}
+      onSearch={(text, searchEngine) => {
+        const targetUrl = getSearchUrl(
+          searchEngine || browserPreferences.searchEngine,
+          text,
+          browserPreferences.customSearchUrl
+        )
+        setBrowserAddress(targetUrl)
+        void loadBrowserUrl(targetUrl)
+      }}
       onSubmit={() => void onBrowserSubmit()}
       onSuggestionPress={(targetUrl) => {
         setBrowserAddress(targetUrl)
@@ -4183,6 +4575,12 @@ export default function App () {
       // Both systems print from a URL the printer fetches itself, so there is
       // nothing to offer on a hyper:// page or one of our own screens.
       printActionAvailable={canPrintBrowserUrl(browserCurrentUrl)}
+      readerActionAvailable={canUseReaderView(browserCurrentUrl)}
+      homeScreenActionAvailable={
+        Platform.OS === 'android' &&
+        canUseReaderView(browserCurrentUrl) &&
+        !browserTabsState.tabs.some((tab) => tab.id === browserTabsState.activeTabId && tab.incognito === true)
+      }
       newTabDisabled={browserTabsState.tabs.length >= MAX_BROWSER_TABS}
       palette={browserChrome}
       shareActionAvailable={browserShareActionAvailable}
@@ -4222,6 +4620,9 @@ export default function App () {
       }}
       onOpenZoom={() => setBrowserZoomVisible(true)}
       onPrintPage={onBrowserPrintPage}
+      onReaderView={onBrowserReaderView}
+      onSendToDevices={() => void onBrowserSendToDevices()}
+      onAddToHomeScreen={() => void onBrowserAddToHomeScreen()}
       onSharePage={() => void onBrowserSharePage()}
       onToggleBookmark={onBrowserToggleBookmark}
       onToggleDesktopView={onBrowserToggleDesktopView}
@@ -4233,6 +4634,7 @@ export default function App () {
     borderColor: browserChrome.border,
     color: browserChrome.text
   }
+  const browserTabManagerNow = Date.now()
   const browserTabManagerItems = browserTabsState.tabs.map((tab) => {
     const entry = tab.history[tab.historyIndex]
     const storedPreview = browserTabPreviews.get(tab.id)
@@ -4251,6 +4653,7 @@ export default function App () {
       ),
       id: tab.id,
       isActive: tab.id === browserTabsState.activeTabId,
+      isInactive: isInactiveBrowserTab(tab, browserTabsState.activeTabId, browserTabManagerNow),
       label: tab.incognito ? `Incognito · ${getBrowserTabLabel(tab)}` : getBrowserTabLabel(tab),
       preview
     }
@@ -4319,17 +4722,26 @@ export default function App () {
         {browserPreferences.addressBarPosition === 'top' && browserToolbar}
 
         <BrowserTabsScreen
+          isDark={browserIsDark}
           items={browserTabManagerItems}
           newTabDisabled={browserTabsState.tabs.length >= MAX_BROWSER_TABS}
           palette={browserChrome}
+          recentlyClosed={recentlyClosedTabs}
           viewMode={browserTabsState.viewMode}
           visible={browserTabsVisible}
           onBurnTabs={onBrowserBurnTabs}
+          onClearRecentlyClosed={() => updateRecentlyClosedTabs([])}
           onCloseAllTabs={onBrowserCloseAllTabs}
           onClose={() => setBrowserTabsVisible(false)}
           onCloseTab={onBrowserCloseTab}
+          onCloseTabs={onBrowserCloseTabs}
+          onCopyTabLinks={onBrowserCopyTabLinks}
           onNewTab={onBrowserNewTab}
           onPreviewError={clearBrowserTabPreview}
+          onReopenClosedTab={onBrowserReopenClosedTab}
+          onReopenClosedTabs={onBrowserReopenClosedTabs}
+          onMoveTab={onBrowserMoveTab}
+          onShareTabLinks={onBrowserShareTabLinks}
           onSwitchTab={onBrowserSwitchTab}
           onToggleView={onBrowserToggleTabView}
         />
@@ -4449,6 +4861,7 @@ export default function App () {
               : activeTab === 'hyper'
               ? (
                 <HyperdriveScreen
+                  deviceSyncRevision={deviceSyncRevision}
                   offlineNetworkAllowed={hyperOfflineNetworkAllowed}
                   isDark={browserIsDark}
                   isLandscape={!browserIsPortrait}
@@ -4898,6 +5311,8 @@ export default function App () {
                       onRequestClose={() => setIsP2pmdScanning(false)}
                       visible={isP2pmdScanning}
                     >
+                      {/* Its own root view on iOS: without a provider the overlay got no insets. */}
+                      <SafeAreaProvider initialMetrics={initialWindowMetrics}>
                       <View style={styles.p2pmdScanner}>
                         <CameraView
                           barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
@@ -4915,15 +5330,18 @@ export default function App () {
                             <View style={[styles.p2pmdScanCorner, styles.p2pmdScanBottomRight]} />
                           </View>
                           <Text style={styles.p2pmdScanHint}>Align the P2PMD room QR code inside the frame</Text>
+                          {/* Placed absolutely, it ignores the safe area's padding, so the
+                              insets are added here or it sits on the status bar. */}
                           <Pressable
                             accessibilityRole='button'
                             onPress={() => setIsP2pmdScanning(false)}
-                            style={styles.p2pmdScannerClose}
+                            style={[styles.p2pmdScannerClose, { right: 16 + browserInsets.right, top: 12 + browserInsets.top }]}
                           >
                             <Text style={styles.p2pmdScannerCloseText}>Cancel</Text>
                           </Pressable>
                         </SafeAreaView>
                       </View>
+                      </SafeAreaProvider>
                     </Modal>
                   </View>
                 )}
@@ -5150,7 +5568,29 @@ export default function App () {
                 ) {
                   setBrowserFavicon(null)
                   setBrowserIsLoading(true)
+                  // A new page starts its line from the left again.
+                  browserLoadProgress.stopAnimation()
+                  browserLoadProgress.setValue(0.08)
                 }
+              }}
+              onLoadProgress={(event) => {
+                if (browserTabsStateRef.current.activeTabId !== tab.id) return
+                const progress = Math.min(1, event.nativeEvent.progress)
+                // Android's WebView tells the start of a load only once the
+                // server answers, so a slow site showed nothing for seconds
+                // after Go. Its progress starts at once, and is what says it.
+                if (isCurrentBrowserTabEntry(browserTabsStateRef.current, tab.id, entry)) {
+                  const loading = progress < 1
+                  if (loading !== browserIsLoadingRef.current) {
+                    browserIsLoadingRef.current = loading
+                    setBrowserIsLoading(loading)
+                  }
+                }
+                Animated.timing(browserLoadProgress, {
+                  duration: 160,
+                  toValue: Math.max(0.08, progress),
+                  useNativeDriver: false
+                }).start()
               }}
               onLoadEnd={(event) => {
                 const webViewTag = getNativeViewTag(event)
@@ -5261,6 +5701,20 @@ export default function App () {
                   return
                 }
 
+                const readerArticle = parseReaderMessage(
+                  event.nativeEvent.data,
+                  browserMediaToken
+                ) as ReaderArticle | null
+                if (readerArticle) {
+                  if (browserTabsStateRef.current.activeTabId !== tab.id) return
+                  if (readerArticle.ok) {
+                    setReaderPage({ article: readerArticle, pageUrl, incognito: tabIncognito })
+                  } else {
+                    setBrowserToast({ id: Date.now(), message: 'This page has no article to show in Reader view' })
+                  }
+                  return
+                }
+
                 const favicon = parseBrowserFaviconMessage(event.nativeEvent.data, pageUrl)
                 if (favicon === undefined) return
 
@@ -5310,6 +5764,40 @@ export default function App () {
             refreshing={browserPullRefreshing}
           />
         )}
+        {/* At the bottom of the page, so above whichever bars are below it. */}
+        <BrowserToast
+          bottom={12}
+          isDark={browserIsDark}
+          toast={browserToast}
+          onHide={() => setBrowserToast(null)}
+        />
+        <BookmarkFolderSheet
+          currentFolder={browserBookmarks.find((bookmark) => bookmark.url === bookmarkFolderUrl)?.folder || null}
+          folders={browserBookmarkFolders}
+          isDark={browserIsDark}
+          visible={bookmarkFolderUrl !== null}
+          onClose={() => setBookmarkFolderUrl(null)}
+          onCreateFolder={createBrowserBookmarkFolder}
+          onPick={(folderId, title) => {
+            if (bookmarkFolderUrl && moveBrowserBookmark(bookmarkFolderUrl, folderId)) {
+              setBrowserToast({ id: Date.now(), message: `Saved in ${title}` })
+            }
+          }}
+        />
+        <ReaderView
+          article={readerPage?.article || null}
+          incognitoSession={readerPage?.incognito ? browserIncognitoSession : null}
+          isDark={browserIsDark}
+          pageUrl={readerPage?.pageUrl || ''}
+          textScale={readerTextScale}
+          onClose={() => setReaderPage(null)}
+          onOpenLink={(url) => {
+            setReaderPage(null)
+            setBrowserAddress(url)
+            void loadBrowserUrl(url)
+          }}
+          onTextScaleChange={setReaderTextScale}
+        />
         </View>
         <BrowserBackSwipe
           background={browserChrome.surface}
@@ -5489,6 +5977,24 @@ function removeIncomingTabs () {
     const file = getIncomingTabsFile()
     if (file.exists) file.delete()
   } catch {}
+}
+
+function getRecentlyClosedTabsFile () {
+  return new File(Paths.document, 'browser-closed-tabs.json')
+}
+
+function writeRecentlyClosedTabs (list: ClosedBrowserTab[]) {
+  try {
+    const file = getRecentlyClosedTabsFile()
+    if (list.length === 0) {
+      if (file.exists) file.delete()
+      return
+    }
+    if (!file.exists) file.create({ intermediates: true })
+    file.write(serializeRecentlyClosedBrowserTabs(list))
+  } catch (error) {
+    console.warn('Unable to save recently closed tabs:', error)
+  }
 }
 
 function writeBrowserSession (state: BrowserTabsState) {

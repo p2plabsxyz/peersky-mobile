@@ -136,6 +136,22 @@ static WKWebsiteDataStore *PeerSkyIncognitoStoreForSession(NSString *session)
   return PeerSkyIncognitoStore;
 }
 
+// Pages are told this is a browser, in the words Safari uses. A WKWebView's
+// user agent stopped at "Mobile/15E148", with no Version or Safari, which is
+// how the in-app browsers of other apps look, and sites served those cut-down
+// pages or asked to be opened in Safari. Safari names the system's version;
+// on an iPad it is the desktop Safari that asks for desktop pages.
+static NSString *PeerSkyBrowserApplicationName(void)
+{
+  NSArray<NSString *> *parts = [UIDevice.currentDevice.systemVersion componentsSeparatedByString:@"."];
+  NSString *version = [NSString stringWithFormat:@"%@.%@",
+    parts.count > 0 ? parts[0] : @"18",
+    parts.count > 1 ? parts[1] : @"0"];
+  return UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad
+    ? [NSString stringWithFormat:@"Version/%@ Safari/605.1.15", version]
+    : [NSString stringWithFormat:@"Version/%@ Mobile/15E148 Safari/604.1", version];
+}
+
 @implementation PeerSkyWebViewImpl
 
 // With Force dark mode on, pages are told the reader prefers dark, so a site
@@ -150,6 +166,9 @@ static WKWebsiteDataStore *PeerSkyIncognitoStoreForSession(NSString *session)
 - (WKWebViewConfiguration *)setUpWkWebViewConfig
 {
   WKWebViewConfiguration *configuration = [super setUpWkWebViewConfig];
+  // In place of WebKit's own name, not after it. Desktop view's user agent
+  // replaces the whole string, this included.
+  configuration.applicationNameForUserAgent = PeerSkyBrowserApplicationName();
   if (self.incognito && PeerSkyIsIncognitoSession(self.incognitoSession)) {
     configuration.websiteDataStore = PeerSkyIncognitoStoreForSession(self.incognitoSession);
   } else if (self.hyperSession) {
@@ -333,6 +352,63 @@ RCT_EXPORT_METHOD(clearSiteData:(RCTPromiseResolveBlock)resolve
       }
       [store removeDataOfTypes:types forDataRecords:sites completionHandler:^{
         resolve(@{ @"cleared": @(sites.count), @"kept": @(kept) });
+      }];
+    }];
+  });
+}
+
+// Cookies and site data, one site at a time, as Settings lists them. WebKit
+// keeps a record for each site (wikipedia.org for all of its pages) with what
+// kinds of data it holds. The app's own loopback pages are never listed, so
+// PeerTunes' library stays. The hosts argument is Android's: iOS knows its
+// sites without being told.
+RCT_EXPORT_METHOD(listSites:(NSArray *)hosts
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+{
+  dispatch_async(dispatch_get_main_queue(), ^{
+    WKWebsiteDataStore *store = [WKWebsiteDataStore defaultDataStore];
+    [store fetchDataRecordsOfTypes:[WKWebsiteDataStore allWebsiteDataTypes] completionHandler:^(NSArray<WKWebsiteDataRecord *> *records) {
+      NSSet<NSString *> *appOwn = [NSSet setWithArray:@[ @"127.0.0.1", @"localhost" ]];
+      NSSet<NSString *> *storage = [NSSet setWithArray:@[
+        WKWebsiteDataTypeLocalStorage,
+        WKWebsiteDataTypeSessionStorage,
+        WKWebsiteDataTypeIndexedDBDatabases,
+        WKWebsiteDataTypeWebSQLDatabases
+      ]];
+      NSMutableArray *sites = [NSMutableArray array];
+      for (WKWebsiteDataRecord *record in records) {
+        NSString *name = record.displayName.lowercaseString;
+        if (name.length == 0 || [appOwn containsObject:name]) continue;
+        BOOL cookies = [record.dataTypes containsObject:WKWebsiteDataTypeCookies];
+        BOOL stored = [record.dataTypes intersectsSet:storage];
+        [sites addObject:@{ @"name": name, @"cookies": @(cookies), @"storage": @(stored) }];
+      }
+      resolve(sites);
+    }];
+  });
+}
+
+RCT_EXPORT_METHOD(removeSites:(NSArray *)names
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+{
+  NSMutableSet<NSString *> *wanted = [NSMutableSet set];
+  for (id name in names) {
+    if ([name isKindOfClass:[NSString class]]) [wanted addObject:[name lowercaseString]];
+  }
+  [wanted removeObject:@"127.0.0.1"];
+  [wanted removeObject:@"localhost"];
+  dispatch_async(dispatch_get_main_queue(), ^{
+    WKWebsiteDataStore *store = [WKWebsiteDataStore defaultDataStore];
+    NSSet<NSString *> *types = [WKWebsiteDataStore allWebsiteDataTypes];
+    [store fetchDataRecordsOfTypes:types completionHandler:^(NSArray<WKWebsiteDataRecord *> *records) {
+      NSMutableArray<WKWebsiteDataRecord *> *matches = [NSMutableArray array];
+      for (WKWebsiteDataRecord *record in records) {
+        if ([wanted containsObject:record.displayName.lowercaseString]) [matches addObject:record];
+      }
+      [store removeDataOfTypes:types forDataRecords:matches completionHandler:^{
+        resolve(@(matches.count));
       }];
     }];
   });

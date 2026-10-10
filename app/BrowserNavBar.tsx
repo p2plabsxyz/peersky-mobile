@@ -4,6 +4,7 @@ import type { SvgProps } from 'react-native-svg'
 import { Keyboard, Platform, Pressable, StyleSheet, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
+import { dimWhenPressed, ICON_RIPPLE, ROUND_PRESS } from './press-feedback'
 import { BrowserOverflowMenu } from './settings/BrowserOverflowMenu'
 import type { ToolbarButton } from './settings/useBrowserPreferences'
 import { styles } from './styles'
@@ -33,6 +34,11 @@ type BrowserNavBarProps = {
   isHome: boolean
   menuVisible: boolean
   printActionAvailable: boolean
+  // A website or hyper:// page: one with an article to read, and one to send
+  // to your other devices.
+  readerActionAvailable: boolean
+  // Android's launcher takes a page as a shortcut; iOS lets only Safari.
+  homeScreenActionAvailable: boolean
   newTabDisabled: boolean
   palette: {
     border: string
@@ -63,6 +69,9 @@ type BrowserNavBarProps = {
   onOpenTabs: () => void
   onOpenZoom: () => void
   onPrintPage: () => void
+  onReaderView: () => void
+  onSendToDevices: () => void
+  onAddToHomeScreen: () => void
   onSharePage: () => void
   onToggleBookmark: () => void
   onToggleDesktopView: () => void
@@ -89,6 +98,8 @@ export function BrowserNavBar ({
   isHome,
   menuVisible,
   printActionAvailable,
+  readerActionAvailable,
+  homeScreenActionAvailable,
   newTabDisabled,
   palette,
   shareActionAvailable,
@@ -111,6 +122,9 @@ export function BrowserNavBar ({
   onOpenTabs,
   onOpenZoom,
   onPrintPage,
+  onReaderView,
+  onSendToDevices,
+  onAddToHomeScreen,
   onSharePage,
   onToggleBookmark,
   onToggleDesktopView,
@@ -234,7 +248,8 @@ export function BrowserNavBar ({
       <Pressable
         accessibilityLabel={`Open tabs, ${tabCount} open`}
         accessibilityRole='button'
-        style={styles.browserNavBarButton}
+        android_ripple={ICON_RIPPLE}
+        style={({ pressed }) => [styles.browserNavBarButton, ROUND_PRESS, dimWhenPressed(pressed)]}
         onPress={() => navigate(onOpenTabs)}
       >
         <View style={[styles.browserTabCountIcon, { borderColor: palette.mutedText }]}>
@@ -272,6 +287,9 @@ export function BrowserNavBar ({
           onOpenZoom()
         }}
         {...(printActionAvailable ? { onPrintPage: () => afterMenuCloses(onPrintPage) } : {})}
+        {...(readerActionAvailable ? { onReaderView: () => afterMenuCloses(onReaderView) } : {})}
+        {...(readerActionAvailable ? { onSendToDevices: () => afterMenuCloses(onSendToDevices) } : {})}
+        {...(homeScreenActionAvailable ? { onAddToHomeScreen: () => afterMenuCloses(onAddToHomeScreen) } : {})}
         onSharePage={() => afterMenuCloses(onSharePage)}
         onShow={() => {
           Keyboard.dismiss()
@@ -307,7 +325,13 @@ function NavButton ({
       accessibilityRole='button'
       accessibilityState={{ disabled }}
       disabled={disabled}
-      style={[styles.browserNavBarButton, disabled ? styles.browserNavButtonDisabled : null]}
+      android_ripple={ICON_RIPPLE}
+      style={({ pressed }) => [
+        styles.browserNavBarButton,
+        ROUND_PRESS,
+        disabled ? styles.browserNavButtonDisabled : null,
+        dimWhenPressed(pressed)
+      ]}
       onPress={onPress}
     >
       <Icon

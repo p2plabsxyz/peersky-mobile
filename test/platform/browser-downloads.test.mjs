@@ -445,7 +445,10 @@ describe('browser downloads', () => {
     assert.match(webViewManagerSource, /peersky-browser-media-long-press/)
     assert.match(webViewManagerSource, /MAX_URL_LENGTH = 8192/)
     assert.match(webViewManagerSource, /parsed[.]userInfo == null/)
-    assert.match(webViewManagerSource, /else -> dispatchDomTarget\(webView\)/)
+    // Text and fields keep the WebView's own long press, so text can be
+    // selected and pasted into: the page probe runs without taking it.
+    assert.match(webViewManagerSource, /HitTestResult[.]EDIT_TEXT_TYPE -> false/)
+    assert.match(webViewManagerSource, /else -> \{\s+dispatchDomTarget\(webView\)\s+false\s+\}/)
     assert.match(webViewManagerSource, /val result = webView[.]hitTestResult/)
     assert.match(webViewManagerSource, /private fun dispatchDomTarget[\s\S]*?: Boolean/)
     assert.doesNotMatch(webViewManagerSource, /MotionEvent[.]ACTION_UP, MotionEvent[.]ACTION_CANCEL/)

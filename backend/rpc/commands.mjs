@@ -8,6 +8,12 @@ export const RPC_HYPER_LIBRARY_UPLOAD = 8
 export const RPC_HYPER_LAN_STATUS = 9
 export const RPC_HYPER_STORAGE_CLEAR_ALL = 14
 export const RPC_HYPER_REFRESH = 15
+// This person's other devices, met under the private drive key: the devices
+// with what is in their private drives, whether the phone is on a cellular
+// connection, and taking a device off the list.
+export const RPC_DEVICE_SYNC_STATUS = 16
+export const RPC_DEVICE_SYNC_NETWORK = 17
+export const RPC_DEVICE_SYNC_FORGET = 18
 
 export const RPC_HYPER_OFFLINE_LIST = 60
 export const RPC_HYPER_OFFLINE_KEEP = 61
@@ -76,6 +82,9 @@ export const RPC_PEERCHAT_DELETE_PROFILE = 73
 // { idle } as the app goes to the background and comes back, so people in a
 // room see this phone as away.
 export const RPC_PEERCHAT_PRESENCE = 74
+// { message } from the browser's Send to your devices, into your chat with
+// yourself.
+export const RPC_PEERCHAT_SEND_TO_DEVICES = 75
 
 export const RPC_IDENTITY_REMOVE = 68
 
@@ -86,3 +95,5 @@ export const RPC_PEERTUNES_START = 70
 export const RPC_APP_PEERCHAT_CHANGED = 100
 // { phase, done, total } while a backup or transfer is packed, sent or unpacked.
 export const RPC_APP_BACKUP_PROGRESS = 101
+// A linked device came or went, or one of its private drives changed.
+export const RPC_APP_DEVICE_SYNC_CHANGED = 102

@@ -122,6 +122,7 @@ test('the address bar keeps one rhythm', async () => {
   // A solid shield next to two thin outlines has to be drawn smaller to look
   // the same size.
   assert.ok(securityIcon < actionIcon)
-  // The narrower box gives back in touch area what it takes in width.
+  // The narrower box gives back in touch area what it takes in width: reload
+  // and the button after it.
   assert.equal((toolbar.match(/hitSlop=\{6\}/g) || []).length, 2)
 })

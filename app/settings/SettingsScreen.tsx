@@ -32,6 +32,8 @@ import { Permissions } from './Permissions'
 import { Privacy } from './Privacy'
 import { Licenses } from './Licenses'
 import { P2PStorage } from './P2PStorage'
+import { SiteData } from './SiteData'
+import { AddressBarButtonSettings } from './AddressBarButton'
 import {
   SettingCopy,
   SettingsSection,
@@ -39,6 +41,7 @@ import {
   useSettingsDarkMode
 } from './SettingsUI'
 import type {
+  AddressBarButton,
   AddressBarPosition,
   BrowserTheme,
   ExternalLinkBehavior,
@@ -74,6 +77,17 @@ export type SettingsPage =
   | 'about'
   | 'licenses'
   | 'toolbar-button'
+  | 'address-bar-button'
+  | 'site-data'
+
+// Pages opened from another page, which back returns to: the licenses from
+// About, the toolbar button from Appearance, and site data from Data Clearing.
+const SETTINGS_PARENT_PAGES: Partial<Record<SettingsPage, SettingsPage>> = {
+  licenses: 'about',
+  'toolbar-button': 'appearance',
+  'address-bar-button': 'appearance',
+  'site-data': 'data-clearing'
+}
 
 type StorageFileItem = {
   name: string
@@ -146,8 +160,11 @@ type LANDiscoveryStatus = {
 }
 
 type SettingsScreenProps = {
+  addressBarButton: AddressBarButton
   addressBarPosition: AddressBarPosition
   appLogoColor: string
+  // Bumped when a linked device comes or goes, so Link Device lists it.
+  deviceSyncRevision: number
   forceDarkWebsites: boolean
   initialPage?: SettingsPage
   // Lets the back gesture and the Android button step out of a subpage the way
@@ -166,12 +183,16 @@ type SettingsScreenProps = {
   persistenceError: string | null
   publishingSites: Record<string, PublishingDecision>
   searchEngine: SearchEngine
+  searchSuggestionsEnabled: boolean
   showFullAddress: boolean
   theme: BrowserTheme
   toolbarButton: ToolbarButton
   websiteTextScale: WebsiteTextScale
   youtubeAdBlockingEnabled: boolean
   storagePath: string
+  // The sites Android is asked about in Cookies and site data.
+  getSiteDataHosts: () => string[]
+  onAddressBarButtonChange: (button: AddressBarButton) => void
   onAddressBarPositionChange: (position: AddressBarPosition) => void
   onAppLogoColorChange: (color: string) => void
   onForceDarkWebsitesChange: (enabled: boolean) => void
@@ -187,6 +208,7 @@ type SettingsScreenProps = {
   onPublishingSiteChange: (siteId: string, decision: PublishingDecision | null) => void
   onFilterListsUpdated: () => void
   onSearchEngineChange: (searchEngine: SearchEngine) => void
+  onSearchSuggestionsChange: (enabled: boolean) => void
   onShowFullAddressChange: (enabled: boolean) => void
   onThemeChange: (theme: BrowserTheme) => void
   onToolbarButtonChange: (button: ToolbarButton) => void
@@ -313,6 +335,24 @@ export function SettingsScreen(props: SettingsScreenProps) {
         <ToolbarButtonSettings selected={props.toolbarButton} onSelect={props.onToolbarButtonChange} />
       </SettingsSubpage>
     )
+  } else if (page === 'address-bar-button') {
+    content = (
+      <SettingsSubpage
+        title='Address Bar Button'
+        onBack={() => changePage('appearance', -1)}
+      >
+        <AddressBarButtonSettings selected={props.addressBarButton} onSelect={props.onAddressBarButtonChange} />
+      </SettingsSubpage>
+    )
+  } else if (page === 'site-data') {
+    content = (
+      <SettingsSubpage
+        title='Cookies and site data'
+        onBack={() => changePage('data-clearing', -1)}
+      >
+        <SiteData getSiteDataHosts={props.getSiteDataHosts} />
+      </SettingsSubpage>
+    )
   } else if (page === 'licenses') {
     // A long list of its own, so it scrolls itself rather than inside the
     // page's ScrollView.
@@ -334,9 +374,15 @@ export function SettingsScreen(props: SettingsScreenProps) {
         {page === 'general' && <General {...props} />}
         {page === 'accessibility' && <Accessibility {...props} />}
         {page === 'appearance' && (
-          <Appearance {...props} onOpenToolbarButton={() => changePage('toolbar-button', 1)} />
+          <Appearance
+            {...props}
+            onOpenAddressBarButton={() => changePage('address-bar-button', 1)}
+            onOpenToolbarButton={() => changePage('toolbar-button', 1)}
+          />
         )}
-        {page === 'data-clearing' && <DataClearing {...props} />}
+        {page === 'data-clearing' && (
+          <DataClearing {...props} onOpenSiteData={() => changePage('site-data', 1)} />
+        )}
         {page === 'privacy' && <Privacy {...props} onOpenUrl={openUrl} />}
         {page === 'p2p-storage' && (
           <P2PStorage
@@ -353,6 +399,7 @@ export function SettingsScreen(props: SettingsScreenProps) {
         {page === 'permissions' && <Permissions {...props} />}
         {page === 'link-device' && (
           <LinkDeviceSettings
+            deviceSyncRevision={props.deviceSyncRevision}
             onCallRpc={props.onCallRpc}
             onRestartRequired={props.onRestartRequired}
             onOpenUrl={openUrl}
@@ -392,11 +439,7 @@ export function SettingsScreen(props: SettingsScreenProps) {
     transition.stopAnimation()
     transition.setValue(reduceMotion ? 1 : 0)
     setTransitionDirection(-1)
-    // The licenses open from About, and the toolbar button from Appearance, so
-    // back returns there.
-    setPage(pageRef.current === 'licenses'
-      ? 'about'
-      : pageRef.current === 'toolbar-button' ? 'appearance' : 'main')
+    setPage(SETTINGS_PARENT_PAGES[pageRef.current] || 'main')
     return true
   }, [props.closeOnBack, props.initialPage, reduceMotion, transition])
 

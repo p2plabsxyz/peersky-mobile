@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ActivityIndicator, Keyboard, Platform, Pressable, StyleSheet, TextInput, View } from 'react-native'
+import { ActivityIndicator, type Animated, Keyboard, Platform, Pressable, StyleSheet, TextInput, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { getBrowserAddressForUrl, MAX_BROWSER_URL_LENGTH } from './browser-shell.mjs'
 import { formatBrowserAddress } from './browser-appearance.mjs'
@@ -7,12 +7,16 @@ import { getSiteSecurity, SITE_SECURITY } from './site-security.mjs'
 import IncognitoIcon from '../assets/icons/bootstrap/incognito.svg'
 import ShieldCheckIcon from '../assets/icons/bootstrap/shield-check.svg'
 import ShieldSlashIcon from '../assets/icons/bootstrap/shield-slash.svg'
-import { HistorySuggestions } from './history/HistorySuggestions'
+import { BrowserLoadProgress } from './BrowserLoadProgress'
+import { HistorySuggestions, type OneOffSearchEngine } from './history/HistorySuggestions'
 import type { BrowserHistoryItem } from './history/useBrowserHistory'
+import { useSearchSuggestions } from './search/useSearchSuggestions'
+import { dimWhenPressed, ROUND_PRESS, SMALL_ICON_RIPPLE } from './press-feedback'
 import { styles } from './styles'
 import ReloadIcon from '../assets/icons/bootstrap/arrow-clockwise.svg'
-import ShareIcon from '../assets/icons/bootstrap/arrow-bar-up.svg'
 import ClearIcon from '../assets/icons/bootstrap/x-circle.svg'
+import { ADDRESS_BAR_BUTTON_ACTIVE_ICONS, ADDRESS_BAR_BUTTON_ICONS } from './address-bar-button-icons'
+import type { AddressBarButton } from './settings/useBrowserPreferences'
 
 const ADDRESS_ACTION_ICON_SIZE = 22
 // The shield is a solid glyph filling its box, while reload and share are
@@ -23,6 +27,10 @@ const ADDRESS_SECURITY_ICON_SIZE = 20
 // share arrows do not, so it is drawn at the shield's size to look the
 // same as all three.
 const ADDRESS_CLEAR_ICON_SIZE = ADDRESS_SECURITY_ICON_SIZE
+// The chosen button's glyph. Share's arrow is an outline like reload, drawn at
+// their size; the others fill their box, so they are drawn a little smaller to
+// match by eye.
+const ADDRESS_BUTTON_ICON_SIZE = 20
 const TOOLBAR_ICON_STROKE_WIDTH = 0.35
 
 // Matches browserToolbar's own paddingHorizontal.
@@ -31,9 +39,19 @@ const TOOLBAR_SIDE_PADDING = 14
 // widget opened it. The keyboard does not come up for a window that is not.
 const FOCUS_REQUEST_DELAY_MS = 350
 
+// The button after reload, whichever one is chosen in Settings, with what it
+// does on this page. None when it has nothing to act on here.
+export type AddressBarAction = {
+  id: AddressBarButton
+  label: string
+  active?: boolean
+  onPress: () => void
+}
+
 type BrowserToolbarProps = {
   activeTabId: string
   address: string
+  addressBarAction?: AddressBarAction | null
   currentUrl: string
   // Each new value puts the cursor in the box: the search widget.
   focusRequest?: number
@@ -41,6 +59,8 @@ type BrowserToolbarProps = {
   isDark: boolean
   isIncognito?: boolean
   isLoading: boolean
+  // How far the page has loaded, from 0 to 1, for the line along the bar.
+  loadProgress?: Animated.Value
   navigationKey: string
   pageActionAvailable: boolean
   palette: {
@@ -55,13 +75,16 @@ type BrowserToolbarProps = {
     text: string
   }
   position: 'top' | 'bottom'
-  shareActionAvailable: boolean
+  // The engine chosen in Settings, and the others to search with once.
+  searchEngine: string
+  searchEngines: OneOffSearchEngine[]
+  searchSuggestionsEnabled: boolean
   showFullAddress: boolean
   onAddressChange: (address: string) => void
   onCloseMenu: () => void
   onOpenSiteInfo: () => void
   onReload: () => void
-  onSharePage: () => void
+  onSearch: (text: string, searchEngine?: string) => void
   onSubmit: () => void
   onSuggestionPress: (url: string) => void
 }
@@ -76,23 +99,27 @@ type BrowserToolbarProps = {
 export function BrowserToolbar ({
   activeTabId,
   address,
+  addressBarAction = null,
   currentUrl,
   focusRequest = 0,
   historySuggestions,
   isDark,
   isIncognito = false,
   isLoading,
+  loadProgress,
   navigationKey,
   pageActionAvailable,
   palette,
   position,
-  shareActionAvailable,
+  searchEngine,
+  searchEngines,
+  searchSuggestionsEnabled,
   showFullAddress,
   onAddressChange,
   onCloseMenu,
   onOpenSiteInfo,
   onReload,
-  onSharePage,
+  onSearch,
   onSubmit,
   onSuggestionPress
 }: BrowserToolbarProps) {
@@ -109,6 +136,15 @@ export function BrowserToolbar ({
   // The suggestion list sits flush on this edge, so a line between them makes
   // it read as a separate card rather than the address bar opening out.
   const seamColor = isAddressFocused ? 'transparent' : palette.seam
+  const searches = useSearchSuggestions(address, {
+    active: isAddressFocused,
+    enabled: searchSuggestionsEnabled,
+    incognito: isIncognito,
+    searchEngine
+  })
+  // Once something is typed. An address the bar already shows, with its
+  // scheme, is where you are rather than something to search for.
+  const oneOffSearchEngines = /^[a-z][a-z0-9+.-]*:\/\//i.test(address.trim()) ? [] : searchEngines
 
   useEffect(() => {
     addressInputRef.current?.blur()
@@ -156,6 +192,14 @@ export function BrowserToolbar ({
         ]}
         onLayout={(event) => setBarHeight(event.nativeEvent.layout.height)}
       >
+        {loadProgress && (
+          <BrowserLoadProgress
+            color={palette.accent}
+            edge={position === 'bottom' ? 'top' : 'bottom'}
+            isLoading={isLoading && !isAddressFocused}
+            progress={loadProgress}
+          />
+        )}
         <View style={[styles.browserAddressContainer, { backgroundColor: palette.address }]}>
           {isIncognito && (
             <View
@@ -177,9 +221,10 @@ export function BrowserToolbar ({
             <Pressable
               accessibilityRole='button'
               accessibilityLabel='Connection information'
+              android_ripple={SMALL_ICON_RIPPLE}
               hitSlop={8}
               onPress={onOpenSiteInfo}
-              style={styles.browserSecurity}
+              style={({ pressed }) => [styles.browserSecurity, ROUND_PRESS, dimWhenPressed(pressed)]}
             >
               {/* Same size, colour and weight as reload and share, on the same
                   centre line, so the row reads as one set of controls rather
@@ -238,8 +283,9 @@ export function BrowserToolbar ({
             <Pressable
               accessibilityLabel='Clear address'
               accessibilityRole='button'
+              android_ripple={SMALL_ICON_RIPPLE}
               hitSlop={4}
-              style={[styles.browserAddressAction, styles.browserAddressClearAction]}
+              style={({ pressed }) => [styles.browserAddressAction, styles.browserAddressClearAction, ROUND_PRESS, dimWhenPressed(pressed)]}
               onPress={() => {
                 onAddressChange('')
                 addressInputRef.current?.focus()
@@ -259,8 +305,9 @@ export function BrowserToolbar ({
               <Pressable
                 accessibilityLabel={isLoading ? 'Stop loading page' : 'Reload page'}
                 accessibilityRole='button'
+                android_ripple={SMALL_ICON_RIPPLE}
                 hitSlop={6}
-                style={styles.browserAddressAction}
+                style={({ pressed }) => [styles.browserAddressAction, ROUND_PRESS, dimWhenPressed(pressed)]}
                 onPress={onReload}
               >
                 {isLoading
@@ -275,22 +322,12 @@ export function BrowserToolbar ({
                     />
                     )}
               </Pressable>
-              {shareActionAvailable && (
-                <Pressable
-                  accessibilityLabel='Share page'
-                  accessibilityRole='button'
-                  hitSlop={6}
-                  style={styles.browserAddressAction}
-                  onPress={onSharePage}
-                >
-                  <ShareIcon
-                    width={ADDRESS_ACTION_ICON_SIZE}
-                    height={ADDRESS_ACTION_ICON_SIZE}
-                    color={addressActionIconColor}
-                    opacity={0.76}
-                    style={styles.browserAddressShareIcon}
-                  />
-                </Pressable>
+              {addressBarAction && (
+                <AddressBarActionButton
+                  action={addressBarAction}
+                  activeColor={palette.accent}
+                  color={addressActionIconColor}
+                />
               )}
             </View>
           )}
@@ -303,13 +340,55 @@ export function BrowserToolbar ({
           offset={barHeight}
           palette={palette}
           position={position}
+          query={address}
+          searches={searches}
+          searchEngines={oneOffSearchEngines}
+          onFill={(text) => onAddressChange(`${text} `)}
           onOpen={(url) => {
             addressInputRef.current?.blur()
             setIsAddressFocused(false)
             onSuggestionPress(url)
           }}
+          onSearch={(text, engine) => {
+            addressInputRef.current?.blur()
+            setIsAddressFocused(false)
+            onSearch(text, engine)
+          }}
         />
       )}
     </View>
+  )
+}
+
+function AddressBarActionButton ({
+  action,
+  activeColor,
+  color
+}: {
+  action: AddressBarAction
+  activeColor: string
+  color: string
+}) {
+  const Icon = (action.active && ADDRESS_BAR_BUTTON_ACTIVE_ICONS[action.id]) || ADDRESS_BAR_BUTTON_ICONS[action.id]
+  const isShare = action.id === 'share'
+  const size = isShare ? ADDRESS_ACTION_ICON_SIZE : ADDRESS_BUTTON_ICON_SIZE
+  return (
+    <Pressable
+      accessibilityLabel={action.label}
+      accessibilityRole='button'
+      accessibilityState={{ selected: action.active === true }}
+      android_ripple={SMALL_ICON_RIPPLE}
+      hitSlop={6}
+      style={({ pressed }) => [styles.browserAddressAction, ROUND_PRESS, dimWhenPressed(pressed)]}
+      onPress={action.onPress}
+    >
+      <Icon
+        width={size}
+        height={size}
+        color={action.active ? activeColor : color}
+        opacity={action.active ? 1 : 0.76}
+        style={isShare ? styles.browserAddressShareIcon : null}
+      />
+    </Pressable>
   )
 }

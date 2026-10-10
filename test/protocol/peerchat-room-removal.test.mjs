@@ -216,7 +216,7 @@ test('a removed person cannot get back in through somebody else s history', () =
   // a duplicate rather than refused.
   const receive = service.slice(service.indexOf('  async receiveChatMessage ('), service.indexOf('  passOn ('))
   const guard = receive.indexOf('this.authorOf(')
-  const track = receive.indexOf('!this.trackMessageId(message.id)')
+  const track = receive.indexOf('this.takeMessageId(roomKey, message.id, via)')
   assert.ok(guard > -1 && track > -1 && guard < track)
 })
 

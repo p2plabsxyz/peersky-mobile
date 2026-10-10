@@ -142,6 +142,71 @@ Hyperdrive uploads support three visibility modes:
 > [!NOTE]
 > The key starts on the desktop. A desktop identity transfer carries it to the phone, along with the desktop's private drives, which the phone adopts read-only. Sending the phone's tabs and bookmarks to the desktop from Link Device also tells the desktop the phone's private drive address, and the desktop adds it to its own private drives, read-only. A phone that made a private drive before it was linked keeps that drive's own key, so that drive opens on the phone only. See `docs/link-device.md`.
 
+## Private files on your other devices
+
+A private upload shows up in Hyperdrive on the person's other devices on its
+own, with no link to send: on the phone under **From your devices**, above
+Recent, and on the desktop in its Hyperdrive app. Settings > Link Device lists
+those devices under My devices, as Desktop or Phone, never by name, with a dot
+while one is online and when it was last seen otherwise. A device can be taken
+off the list there; it comes back the next time it connects.
+
+Every device of one person holds the same private drive key: a desktop made it
+and Link Device carried it to the phone (the top-level `private-drive-key.json`).
+That key is what the devices meet under, which means the devices that sync are
+exactly the ones that can already open each other's private files.
+
+- They meet on the private store's swarm, the one that already replicates
+  private drives, under the topic `HMAC-SHA256(key, "peersky-private-sync/1 topic")`.
+  DHT nodes see the topic and cannot get the key from it.
+- On each connection a protomux channel, `peersky-private-sync/1`, carries JSON
+  frames. Each side first sends a proof:
+  `HMAC-SHA256(HMAC-SHA256(key, "peersky-private-sync/1 proof key"), "peersky-private-sync/1 proof\n" + handshake hash + "\n" + its own network key)`.
+  It is good on that connection alone and cannot be bounced back at its
+  sender, the same construction as PeerChat's room proofs.
+- Only after the other side's proof checks out does a device send its hello:
+  `phone` or `desktop`, the private drives it writes (up to 200, a drive made
+  under another key with that key), and on the phone whether it is on a
+  cellular connection. A device sends it again when its drives or network
+  change.
+- The phone opens each listed drive in the synced private store, which
+  replicates, lists its top folder newest first (up to 100 entries) into
+  `Documents/device-sync.json`, and lists it again whenever the drive grows.
+  A file downloads when it is opened. A desktop drive the phone adopted at a
+  transfer is read from this live copy rather than the frozen one, which
+  would show the drive as it was on the day of the transfer.
+- The desktop adds the phone's drive to its private drives as
+  `Private files from your phone`, read-only, and copies every file in it, so
+  they open on the desktop with the phone asleep, which on iOS is most of the
+  time. It waits while the phone says it is on a cellular connection, and
+  copies once it says it is back on Wi-Fi.
+
+What it does at the edges:
+
+- Someone else's device never makes the topic. One that connects for another
+  reason, say under a drive's topic, gets nothing: a wrong proof closes the
+  channel before any hello is sent.
+- A phone no desktop has linked starts nothing and opens no store for it.
+- Two devices that join at the same moment each look before the other has
+  announced. Until one is met they look again after 15 seconds, a minute and
+  five minutes, and again on every network change and every return to the
+  front.
+- A device going offline stays listed, with when it was last seen, and its
+  files stay listed. A device seen from two networks at once counts once.
+- An older app does not open the channel, so nothing syncs until both are on
+  a version that has it.
+- At most 16 devices, 200 drives per device, 100 entries per drive listing,
+  30 frames a minute per connection and 64 KiB per frame.
+
+The code is `backend/hyper/device-sync-protocol.mjs` (keys and frames),
+`device-sync-state.mjs` (the file) and `device-sync.mjs` (the service), started
+in `runtime.mjs` when the synced private store opens and stopped when it
+closes, so a backup never finds it running. PeerSky Desktop has the same three
+files under `src/protocols/`, and both test the same vector: key `0f` x32,
+handshake hash `0e` x64 and sender `0d` x32 give the topic
+`e702b30ef6aaa58eb3694a8888c6ddeda12383813d5121dec0db65df9b9c3cc8` and the
+proof `8beb43aaede8fa35e6b0558e88ebeae7c1b3e809c00a68ec98e698fdae438c6c`.
+
 ## Developer notes
 **Clear all P2P data** is broader than **Remove offline**. It closes active P2P
 runtimes and removes local Hyper and PeerChat data from the device.

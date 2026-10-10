@@ -112,6 +112,8 @@ const MAX_BLOCKED_PEERS = 500
 const MAX_LEFT_ROOMS = 1000
 // A person's own devices. Links are made for a few, so this is generous.
 const MAX_SIBLINGS = 16
+// Pages waiting for your chat with yourself to be accepted on another device.
+const MAX_OWN_DEVICE_OUTBOX = 20
 // Desktop keys its member list by peer id. Packed by size rather than by
 // count: one frame carrying everyone's data-url picture passes the frame cap
 // once roughly nine of them have one, and an oversized line is dropped whole.
@@ -120,7 +122,11 @@ const PEERCHAT_NOTIFY_DEBOUNCE_MS = 40
 const MAX_RETURNED_MESSAGES = 200
 const MAX_RETURNED_ENTRIES = 1000
 const MAX_SYNC_MESSAGES = 200
-const MAX_SEEN_MESSAGE_IDS = 10_000
+// Per room, enough for every entry a room is ever read back to and a busy
+// session on top. One set for every room, cut at 10,000, forgot one room's ids
+// to make space for another's, and the next history sync stored those
+// messages again.
+const MAX_SEEN_MESSAGE_IDS_PER_ROOM = MAX_RETURNED_ENTRIES + 500
 const MAX_FRAME_LENGTH = MAX_PEERCHAT_FRAME_BYTES
 export const MAX_PEERCHAT_STORED_MESSAGES_PER_ROOM = 5000
 export const MAX_PEERCHAT_ROOM_STORAGE_BYTES = 16 * 1024 * 1024
@@ -232,6 +238,9 @@ export class PeerChatService {
     // other devices. Kept, so their messages are still this person's after a
     // restart, before they have been seen again.
     this.siblings = new Set()
+    // Pages sent to your other devices before your chat with yourself was
+    // accepted there, by room. They go once it is. Kept in memory only.
+    this.ownDeviceOutbox = []
     // Rooms this phone left or was removed from, by when. Another of the
     // person's devices offering one back is ignored until it is joined again
     // here, so leaving a room on one device sticks.
@@ -273,7 +282,11 @@ export class PeerChatService {
     // locked, it is asleep or idle, or another app is in front for a while.
     this.idle = false
     this.idlePeerIds = new Set()
-    this.seenIds = new Set()
+    // Message ids per room, read from the newest entries when a room opens and
+    // from further back once something from a peer's history needs it.
+    this.seenIds = new Map()
+    this.seenFrom = new Map()
+    this.olderIdLoads = new Map()
     this.activeRoomKey = null
     this.version = 0
     this.persistTimer = null
@@ -603,6 +616,45 @@ export class PeerChatService {
     return { room: this.publicRoom(room), rooms: this.listRooms(), version: this.version }
   }
 
+  /**
+   * A page sent from the browser to your other devices, as a message in your
+   * chat with yourself. With no such chat yet, one is started with another of
+   * your devices, preferring one online now, and the message waits until that
+   * device takes the chat, which it does by itself as soon as it is online.
+   */
+  async sendToOwnDevices ({ message } = {}) {
+    if (this.siblings.size === 0) return { sent: false, noDevices: true, version: this.version }
+    this.ensureProfile()
+    let room = [...this.rooms.values()].find((candidate) => (
+      candidate.isDM && candidate.dmWith && this.isOwnDevice(candidate.dmWith) &&
+      !candidate.rejected && !candidate.blockedByPeer
+    ))
+    if (!room) {
+      const online = [...this.peers.values()].find((peer) => peer.sibling && peer.active)
+      const created = await this.createDirectMessage({ peerId: online?.id || [...this.siblings][0] })
+      room = this.rooms.get(created.room.roomKey)
+    }
+    if (!room) throw new Error('Your chat with your other devices could not be started.')
+    if (room.pendingAcceptance) {
+      if (this.ownDeviceOutbox.length >= MAX_OWN_DEVICE_OUTBOX) this.ownDeviceOutbox.shift()
+      this.ownDeviceOutbox.push({ roomKey: room.roomKey, message })
+      return { sent: false, waiting: true, version: this.version }
+    }
+    await this.sendMessage({ roomKey: room.roomKey, message })
+    return { sent: true, version: this.version }
+  }
+
+  flushOwnDeviceOutbox (roomKey) {
+    const waiting = this.ownDeviceOutbox.filter((item) => item.roomKey === roomKey)
+    if (waiting.length === 0) return
+    this.ownDeviceOutbox = this.ownDeviceOutbox.filter((item) => item.roomKey !== roomKey)
+    for (const item of waiting) {
+      this.sendMessage({ roomKey, message: item.message }).catch((error) => {
+        console.warn(`[peerchat] Unable to send a page to your other devices: ${error.message}`)
+      })
+    }
+  }
+
   async acceptDirectMessage ({ roomKey } = {}) {
     const normalized = normalizePeerChatRoomKey(roomKey)
     const pending = this.pendingDirectMessages.get(normalized)
@@ -913,7 +965,7 @@ export class PeerChatService {
       ...(signed || {})
     }
 
-    this.trackMessageId(entry.id)
+    this.trackMessageId(normalizedRoomKey, entry.id)
     await this.appendEntry(normalizedRoomKey, entry)
     this.relayToRoom(normalizedRoomKey, entry)
 
@@ -946,7 +998,7 @@ export class PeerChatService {
       sn: entry.sn
     }, this.signingKeys) || {})
 
-    this.trackMessageId(entry.id)
+    this.trackMessageId(normalizedRoomKey, entry.id)
     await this.appendEntry(normalizedRoomKey, entry)
     this.relayToRoom(normalizedRoomKey, entry)
     return entry
@@ -1115,9 +1167,10 @@ export class PeerChatService {
     for (let index = firstIndex; index < feed.length; index += 1) {
       try {
         const entry = await feed.get(index)
-        if (entry?.id) this.trackMessageId(entry.id)
+        if (entry?.id) this.trackMessageId(roomKey, entry.id)
       } catch {}
     }
+    this.seenFrom.set(roomKey, firstIndex)
 
     const onAppend = () => {
       this.updateLastMessage(roomKey).catch(() => {})
@@ -1475,6 +1528,7 @@ export class PeerChatService {
         directRoom.bio = normalizePeerChatBio(message.fromBio)
         directRoom.avatar = normalizePeerChatAvatar(message.fromAvatar)
         this.offerRoomToSiblings(directRoomKey)
+        this.flushOwnDeviceOutbox(directRoomKey)
       } else {
         directRoom.pendingAcceptance = false
         directRoom.rejected = true
@@ -1741,7 +1795,7 @@ export class PeerChatService {
       ts: source.ts
     })
     if (!entry || !this.arrivesInTime(room, via, entry.ts, signed)) return
-    if (!this.trackMessageId(entry.id)) return
+    if (!(await this.takeMessageId(roomKey, entry.id, via))) return
     if (via === 'pass' && !this.consumeAuthorRate(roomKey, authorId)) return
     if (signed) Object.assign(entry, { ak: message.ak, h: message.h, as: message.as })
     await this.appendEntry(roomKey, entry)
@@ -1757,7 +1811,7 @@ export class PeerChatService {
 
     const ts = normalizePeerChatTimestamp(signed ? signed.header.ts : message.ts)
     if (!this.arrivesInTime(room, via, ts, signed)) return
-    if (typeof message.id !== 'string' || message.id.length > 128 || !this.trackMessageId(message.id)) return
+    if (typeof message.id !== 'string' || message.id.length > 128 || !(await this.takeMessageId(roomKey, message.id, via))) return
     // A copy that comes again from another neighbour stops above, so this
     // counts each message once.
     if (via === 'pass' && !this.consumeAuthorRate(roomKey, authorId)) return
@@ -2738,10 +2792,17 @@ export class PeerChatService {
     const messages = []
     const reactions = new Map()
     const authors = new Map()
+    const ids = new Set()
     const firstIndex = Math.max(0, feed.length - MAX_RETURNED_ENTRIES)
     for (let index = firstIndex; index < feed.length; index += 1) {
       try {
         const entry = await feed.get(index)
+        // A copy stored a second time, as earlier builds could after a
+        // restart, shows once, where it first came.
+        if (entry?.id) {
+          if (ids.has(entry.id)) continue
+          ids.add(entry.id)
+        }
         this.collectEntryAuthor(authors, entry)
         if (this.isPeerBlocked(entry?.sender)) continue
         if (entry?.type === 'reaction') {
@@ -3022,7 +3083,10 @@ export class PeerChatService {
     // line's id is taken, so their join with a name still gets one.
     if (!name) return
     const id = `${wireTopic(roomKey)}-${peer.id}-join-${message.ts || Date.now()}`
-    if (!this.trackMessageId(typeof message.id === 'string' ? message.id : id)) return
+    // By the id the line is kept under, which is what a restart reads back,
+    // and by the announcement's own id when it has one.
+    if (!this.trackMessageId(roomKey, id)) return
+    if (typeof message.id === 'string' && message.id !== id && !this.trackMessageId(roomKey, message.id)) return
     if (!this.feeds.has(roomKey)) return
     try {
       await this.appendEntry(roomKey, {
@@ -3458,13 +3522,52 @@ export class PeerChatService {
     return true
   }
 
-  trackMessageId (id) {
-    if (this.seenIds.has(id)) return false
-    this.seenIds.add(id)
-    if (this.seenIds.size > MAX_SEEN_MESSAGE_IDS) {
-      this.seenIds.delete(this.seenIds.values().next().value)
+  trackMessageId (roomKey, id) {
+    let seen = this.seenIds.get(roomKey)
+    if (!seen) {
+      seen = new Set()
+      this.seenIds.set(roomKey, seen)
     }
+    if (seen.has(id)) return false
+    seen.add(id)
+    if (seen.size > MAX_SEEN_MESSAGE_IDS_PER_ROOM) seen.delete(seen.values().next().value)
     return true
+  }
+
+  /**
+   * Whether a message is new to the room, remembering it if so. Opening a room
+   * reads the ids of its newest entries only, so one from a peer's history, or
+   * passed on, that is not among them is looked for further back first, as
+   * far as the room is ever read. It used to be stored again, and the chat
+   * showed it twice.
+   */
+  async takeMessageId (roomKey, id, via) {
+    if (via !== 'live' && !this.seenIds.get(roomKey)?.has(id)) await this.rememberOlderIds(roomKey)
+    return this.trackMessageId(roomKey, id)
+  }
+
+  // Once per room while it is open.
+  rememberOlderIds (roomKey) {
+    let loading = this.olderIdLoads.get(roomKey)
+    if (!loading) {
+      loading = this.loadOlderIds(roomKey)
+      this.olderIdLoads.set(roomKey, loading)
+    }
+    return loading
+  }
+
+  async loadOlderIds (roomKey) {
+    const feed = this.feeds.get(roomKey)
+    const from = this.seenFrom.get(roomKey)
+    if (!feed || !Number.isSafeInteger(from)) return
+    const floor = Math.max(0, feed.length - MAX_RETURNED_ENTRIES)
+    for (let index = floor; index < from; index += 1) {
+      try {
+        const entry = await feed.get(index)
+        if (entry?.id) this.trackMessageId(roomKey, entry.id)
+      } catch {}
+    }
+    this.seenFrom.set(roomKey, Math.min(from, floor))
   }
 
   bumpVersion () {
@@ -3654,6 +3757,9 @@ export class PeerChatService {
     if (feed && listener) feed.off?.('append', listener)
     this.feedListeners.delete(roomKey)
     this.feeds.delete(roomKey)
+    this.seenIds.delete(roomKey)
+    this.seenFrom.delete(roomKey)
+    this.olderIdLoads.delete(roomKey)
     if (feed?.close) await feed.close().catch(() => {})
   }
 }

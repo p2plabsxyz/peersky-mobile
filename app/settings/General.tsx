@@ -29,9 +29,11 @@ type GeneralProps = {
   forceDarkWebsites: boolean
   persistenceError: string | null
   searchEngine: SearchEngine
+  searchSuggestionsEnabled: boolean
   onCustomSearchSave: (url: string) => boolean
   onForceDarkWebsitesChange: (enabled: boolean) => void
   onSearchEngineChange: (searchEngine: SearchEngine) => void
+  onSearchSuggestionsChange: (enabled: boolean) => void
   onResetTabs: () => void
 }
 
@@ -40,9 +42,11 @@ export function General ({
   forceDarkWebsites,
   persistenceError,
   searchEngine,
+  searchSuggestionsEnabled,
   onCustomSearchSave,
   onForceDarkWebsitesChange,
   onSearchEngineChange,
+  onSearchSuggestionsChange,
   onResetTabs
 }: GeneralProps) {
   const isDark = useSettingsDarkMode()
@@ -206,6 +210,24 @@ export function General ({
             </Pressable>
           </View>
         )}
+        {/* On, like the link previews in PeerChat: the engine is the one you
+            search with anyway, it is asked without cookies, and never from an
+            incognito tab. */}
+        <View style={[styles.settingRow, styles.suggestionsRow, isDark ? styles.customSearchDark : null]}>
+          <SettingCopy
+            title='Search suggestions'
+            description={searchEngine === 'custom'
+              ? 'A custom engine has no suggestions to show.'
+              : 'Searches from your search engine as you type. Never in incognito tabs, and never for addresses.'}
+          />
+          <Switch
+            accessibilityLabel='Search suggestions'
+            value={searchSuggestionsEnabled}
+            onValueChange={onSearchSuggestionsChange}
+            trackColor={{ false: '#bac3d2', true: '#7eb2ee' }}
+            thumbColor={searchSuggestionsEnabled ? '#1f6fd1' : '#ffffff'}
+          />
+        </View>
       </SettingsSection>
 
       <SettingsSection title='Tabs'>
@@ -243,6 +265,10 @@ const styles = StyleSheet.create({
   },
   customSearchDark: {
     borderTopColor: '#343949'
+  },
+  suggestionsRow: {
+    borderTopColor: '#e6ecf5',
+    borderTopWidth: 1
   },
   label: {
     color: '#1f2a44',

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native'
-import { SafeAreaView } from 'react-native-safe-area-context'
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { BROWSER_PALETTES } from './browser-appearance.mjs'
 import { MODAL_ORIENTATIONS } from './modal-orientations'
 import GlobeIcon from '../assets/icons/bootstrap/globe.svg'
@@ -34,6 +34,7 @@ const CHOICES = [
 export function P2pmdNewNoteSheet ({ visible, isDark, onCreate, onClose }: P2pmdNewNoteSheetProps) {
   const [isPrivate, setIsPrivate] = useState(true)
   const palette = isDark ? BROWSER_PALETTES.dark : BROWSER_PALETTES.light
+  const insets = useSafeAreaInsets()
 
   useEffect(() => {
     if (visible) setIsPrivate(true)
@@ -47,9 +48,9 @@ export function P2pmdNewNoteSheet ({ visible, isDark, onCreate, onClose }: P2pmd
       visible={visible}
       onRequestClose={onClose}
     >
-      <SafeAreaView style={styles.overlay} edges={['top', 'left', 'right', 'bottom']}>
+      <SafeAreaView style={styles.overlay} edges={['top', 'left', 'right']}>
         <Pressable accessibilityLabel='Close' style={styles.backdrop} onPress={onClose} />
-        <View style={[styles.sheet, { backgroundColor: palette.surface }]}>
+        <View style={[styles.sheet, { backgroundColor: palette.surface, paddingBottom: 24 + insets.bottom }]}>
           <Text style={[styles.title, { color: palette.text }]}>New note</Text>
           <View accessibilityRole='radiogroup' style={styles.choices}>
             {CHOICES.map(({ isPrivate: value, title, detail, Icon }) => {

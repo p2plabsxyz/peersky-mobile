@@ -6,9 +6,18 @@ const { IOSConfig, withAndroidManifest, withInfoPlist } = require('@expo/config-
 // app.json; a second scheme there makes expo-linking warn on every start that
 // it found several, so this one goes into the native files directly.
 const HYPER_SCHEME = 'hyper'
+// Apple requires a browser to name http and https in its Info.plist before it
+// can be granted the default browser entitlement. iOS sends web links to an
+// app this way only once it is the default browser; until then they go to
+// Safari as before. Android has its own filters for them in app.json.
+const WEB_SCHEMES = ['http', 'https']
 
 function addHyperSchemeToInfoPlist (infoPlist) {
   return IOSConfig.Scheme.appendScheme(HYPER_SCHEME, infoPlist)
+}
+
+function addWebSchemesToInfoPlist (infoPlist) {
+  return WEB_SCHEMES.reduce((result, scheme) => IOSConfig.Scheme.appendScheme(scheme, result), infoPlist)
 }
 
 function isHyperLinkFilter (filter) {
@@ -36,7 +45,7 @@ function addHyperIntentFilter (manifest) {
 
 module.exports = function withHyperLinks (config) {
   config = withInfoPlist(config, (iosConfig) => {
-    iosConfig.modResults = addHyperSchemeToInfoPlist(iosConfig.modResults)
+    iosConfig.modResults = addWebSchemesToInfoPlist(addHyperSchemeToInfoPlist(iosConfig.modResults))
     return iosConfig
   })
   return withAndroidManifest(config, (androidConfig) => {
@@ -48,3 +57,4 @@ module.exports = function withHyperLinks (config) {
 module.exports.HYPER_SCHEME = HYPER_SCHEME
 module.exports.addHyperIntentFilter = addHyperIntentFilter
 module.exports.addHyperSchemeToInfoPlist = addHyperSchemeToInfoPlist
+module.exports.addWebSchemesToInfoPlist = addWebSchemesToInfoPlist

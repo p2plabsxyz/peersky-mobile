@@ -3,8 +3,10 @@ import { createReadStream, statSync } from 'node:fs'
 import { pipeline } from 'node:stream/promises'
 import {
   adoptLinkedPrivateDriveIfReadable,
+  getKeyedPrivateHyperdrive,
   getPrivateDriveWarningForDriveId,
   getSyncedPrivateHyperdrive,
+  nudgeDeviceSync,
   getSyncedPrivateHyperdriveForId,
   isPrivateHyperAddress,
   isSyncedPrivateHyperdriveAddress,
@@ -266,6 +268,10 @@ export async function uploadHyperdriveFile ({
       appId: 'hyperdrive'
     })
 
+    // Your other devices fetch it from here: with none connected, they are
+    // looked for now rather than at the swarm's next turn.
+    if (visibility === 'private') (options.nudgeDeviceSync || nudgeDeviceSync)()
+
     return {
       ok: true,
       driveUrl: `hyper://${drive.id}/`,
@@ -485,6 +491,10 @@ async function resolveDriveForAddress (runtime, driveAddress, options) {
     const primary = await getSyncedPrivateDrive(options)
     const addressId = normalizeDriveAddressId(driveAddress)
     if (addressId && primary && b4a.toString(primary.key, 'hex') !== addressId) {
+      // A drive a linked device still writes reads from its live copy before
+      // the one adopted at transfer, as the browser does.
+      const keyed = await (options.getKeyedPrivateDrive || getKeyedPrivateHyperdrive)(addressId)
+      if (keyed) return keyed
       const adopted = await getSyncedPrivateHyperdriveForId(addressId, runtime)
       if (adopted) return adopted
     }

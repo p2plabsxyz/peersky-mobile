@@ -247,44 +247,58 @@ function withAndroidAlternateIcons (config) {
 
 function withAndroidAliases (config) {
   return withAndroidManifest(config, (config) => {
-    const application = AndroidConfig.Manifest.getMainApplicationOrThrow(config.modResults)
-    const activity = AndroidConfig.Manifest.getMainActivityOrThrow(config.modResults)
-
-    const isLauncher = (filter) => (filter.category || []).some((category) => (
-      category.$['android:name'] === 'android.intent.category.LAUNCHER'
-    ))
-    const launcher = (activity['intent-filter'] || []).filter(isLauncher)
-
-    // The launcher entry moves off the activity and onto the aliases, all of
-    // it. The activity itself stays enabled and keeps every other filter, so
-    // deep links and anything that starts it by class still work.
-    //
-    // The alternative, leaving the entry here and disabling the activity when
-    // an alias is on, breaks starting it by name: the dev launcher, and
-    // anything else holding an explicit component, gets "unable to find
-    // explicit activity class".
-    activity['intent-filter'] = (activity['intent-filter'] || []).filter(
-      (filter) => !isLauncher(filter)
-    )
-
-    // One is on from the start, or a fresh install has no icon at all.
-    application['activity-alias'] = COLORS.map((color) => ({
-      $: {
-        'android:name': aliasName(color),
-        'android:enabled': color === COLORS[0] ? 'true' : 'false',
-        'android:exported': 'true',
-        'android:icon': `@mipmap/ic_launcher_${color}`,
-        'android:roundIcon': `@mipmap/ic_launcher_${color}`,
-        'android:targetActivity': '.MainActivity'
-      },
-      'intent-filter': JSON.parse(JSON.stringify(launcher))
-    }))
-
+    config.modResults = moveLauncherToAliases(config.modResults)
     return config
   })
+}
+
+// The launcher entry the template gives MainActivity. A second prebuild over
+// an existing android folder finds it already moved, and copying nothing left
+// every alias without one: an app with no icon to start it from.
+const LAUNCHER_FILTER = {
+  action: [{ $: { 'android:name': 'android.intent.action.MAIN' } }],
+  category: [{ $: { 'android:name': 'android.intent.category.LAUNCHER' } }]
+}
+
+function moveLauncherToAliases (manifest) {
+  const application = AndroidConfig.Manifest.getMainApplicationOrThrow(manifest)
+  const activity = AndroidConfig.Manifest.getMainActivityOrThrow(manifest)
+
+  const isLauncher = (filter) => (filter.category || []).some((category) => (
+    category.$['android:name'] === 'android.intent.category.LAUNCHER'
+  ))
+  const fromActivity = (activity['intent-filter'] || []).filter(isLauncher)
+  const launcher = fromActivity.length > 0 ? fromActivity : [LAUNCHER_FILTER]
+
+  // The launcher entry moves off the activity and onto the aliases, all of
+  // it. The activity itself stays enabled and keeps every other filter, so
+  // deep links and anything that starts it by class still work.
+  //
+  // The alternative, leaving the entry here and disabling the activity when
+  // an alias is on, breaks starting it by name: the dev launcher, and
+  // anything else holding an explicit component, gets "unable to find
+  // explicit activity class".
+  activity['intent-filter'] = (activity['intent-filter'] || []).filter(
+    (filter) => !isLauncher(filter)
+  )
+
+  // One is on from the start, or a fresh install has no icon at all.
+  application['activity-alias'] = COLORS.map((color) => ({
+    $: {
+      'android:name': aliasName(color),
+      'android:enabled': color === COLORS[0] ? 'true' : 'false',
+      'android:exported': 'true',
+      'android:icon': `@mipmap/ic_launcher_${color}`,
+      'android:roundIcon': `@mipmap/ic_launcher_${color}`,
+      'android:targetActivity': '.MainActivity'
+    },
+    'intent-filter': JSON.parse(JSON.stringify(launcher))
+  }))
+  return manifest
 }
 
 module.exports.COLORS = COLORS
 module.exports.addAppIconPackage = addAppIconPackage
 module.exports.aliasName = aliasName
+module.exports.moveLauncherToAliases = moveLauncherToAliases
 module.exports.iosIconName = iosIconName

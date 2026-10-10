@@ -35,7 +35,20 @@ export type ToolbarButton =
 
 export type AppLogoColor = string
 
+export type AddressBarButton =
+  | 'share'
+  | 'bookmark'
+  | 'favourite'
+  | 'reader'
+  | 'send'
+  | 'zoom'
+  | 'desktop'
+  | 'print'
+  | 'new-tab'
+  | 'none'
+
 export type BrowserPreferences = {
+  addressBarButton: AddressBarButton
   addressBarPosition: AddressBarPosition
   appLogoColor: AppLogoColor
   contentBlockingEnabled: boolean
@@ -46,6 +59,7 @@ export type BrowserPreferences = {
   forceDarkWebsites: boolean
   publishingSites: Record<string, PublishingDecision>
   searchEngine: SearchEngine
+  searchSuggestionsEnabled: boolean
   showFullAddress: boolean
   theme: BrowserTheme
   toolbarButton: ToolbarButton
@@ -137,6 +151,12 @@ export function useBrowserPreferences () {
     },
     setForceDarkWebsites: (forceDarkWebsites: boolean) => {
       return updatePreferences({ forceDarkWebsites })
+    },
+    setAddressBarButton: (addressBarButton: AddressBarButton) => {
+      return updatePreferences({ addressBarButton })
+    },
+    setSearchSuggestionsEnabled: (searchSuggestionsEnabled: boolean) => {
+      return updatePreferences({ searchSuggestionsEnabled })
     },
     // null forgets the answer, so the site asks again next time.
     setPublishingSite: (siteId: string, decision: PublishingDecision | null) => {

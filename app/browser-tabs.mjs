@@ -14,16 +14,23 @@ export const MAX_BROWSER_TITLE_LENGTH = 256
 export const BROWSER_PAGE_ZOOMS = [80, 90, 100, 110, 125, 150]
 export const DEFAULT_BROWSER_PAGE_ZOOM = 100
 export const DEFAULT_BROWSER_TAB_VIEW_MODE = 'grid'
+// A tab not looked at for two weeks is inactive, as Firefox counts it, and the
+// tab screen keeps those apart from the rest.
+export const INACTIVE_BROWSER_TAB_AFTER_MS = 14 * 24 * 60 * 60 * 1000
+export const MAX_RECENTLY_CLOSED_TABS = 25
+const RECENTLY_CLOSED_VERSION = 1
 const SESSION_VERSION = 1
 // An incognito tab keeps no history, no preview and no cookies past its own
 // session, and is never written into the saved session.
-export function createBrowserTab (id, title = 'New tab', { incognito = false } = {}) {
+export function createBrowserTab (id, title = 'New tab', { incognito = false, now = Date.now() } = {}) {
   return {
     id,
     title,
     desktopView: false,
     history: [{ url: BROWSER_HOME_URL, source: { kind: 'home' } }],
     historyIndex: 0,
+    // When it was last on screen, which is what makes a tab inactive.
+    lastOpenedAt: now,
     pageZoom: DEFAULT_BROWSER_PAGE_ZOOM,
     webCanGoBack: false,
     webCanGoForward: false,
@@ -115,41 +122,46 @@ export function serializeBrowserTabsState (state) {
     activeTabId,
     nextTabIndex: state.nextTabIndex + (kept.length > 0 ? 0 : 1),
     viewMode: normalizeBrowserTabViewMode(state.viewMode),
-    tabs: tabs.map((tab) => {
-      const retainedHistory = boundBrowserHistory(tab.history)
-      const history = retainedHistory.map((entry) => {
-        const url = normalizeBrowserTabUrl(entry?.url)
-        return {
-          url,
-          source: getPersistedSource({ ...entry, url })
-        }
-      })
-      const currentEntry = tab.history[tab.historyIndex]
-      const retainedIndex = retainedHistory.indexOf(currentEntry)
-      const historyIndex = retainedIndex >= 0 ? retainedIndex : history.length - 1
-      const entry = history[historyIndex]
-      const persistedHistory = history.length > 0
-        ? history
-        : [{
-            url: BROWSER_HOME_URL,
-            source: { kind: 'home' }
-          }]
-
-      return {
-        id: tab.id,
-        desktopView: tab.desktopView === true,
-        pageZoom: normalizeBrowserPageZoom(tab.pageZoom),
-        title: normalizeBrowserTabTitle(tab.title),
-        history: persistedHistory,
-        historyIndex: history.length > 0 ? historyIndex : 0,
-        // Keep the current entry for compatibility with older app versions.
-        entry: entry || {
-          url: BROWSER_HOME_URL,
-          source: { kind: 'home' }
-        }
-      }
-    })
+    tabs: tabs.map(persistBrowserTab)
   })
+}
+
+// A tab in the form a saved session keeps it, which is also what reopening a
+// closed tab starts from.
+function persistBrowserTab (tab) {
+  const retainedHistory = boundBrowserHistory(tab.history)
+  const history = retainedHistory.map((entry) => {
+    const url = normalizeBrowserTabUrl(entry?.url)
+    return {
+      url,
+      source: getPersistedSource({ ...entry, url })
+    }
+  })
+  const currentEntry = tab.history[tab.historyIndex]
+  const retainedIndex = retainedHistory.indexOf(currentEntry)
+  const historyIndex = retainedIndex >= 0 ? retainedIndex : history.length - 1
+  const entry = history[historyIndex]
+  const persistedHistory = history.length > 0
+    ? history
+    : [{
+        url: BROWSER_HOME_URL,
+        source: { kind: 'home' }
+      }]
+
+  return {
+    id: tab.id,
+    desktopView: tab.desktopView === true,
+    pageZoom: normalizeBrowserPageZoom(tab.pageZoom),
+    title: normalizeBrowserTabTitle(tab.title),
+    history: persistedHistory,
+    historyIndex: history.length > 0 ? historyIndex : 0,
+    ...(Number.isSafeInteger(tab.lastOpenedAt) && { lastOpenedAt: tab.lastOpenedAt }),
+    // Keep the current entry for compatibility with older app versions.
+    entry: entry || {
+      url: BROWSER_HOME_URL,
+      source: { kind: 'home' }
+    }
+  }
 }
 
 export function restoreBrowserTabsState (serialized) {
@@ -243,6 +255,9 @@ function restoreBrowserTab (tab) {
     title: normalizeBrowserTabTitle(tab.title || currentEntry.url),
     history,
     historyIndex,
+    // A session saved before tabs kept this starts every tab from now, so
+    // none of them turns inactive the moment the app updates.
+    lastOpenedAt: Number.isSafeInteger(tab.lastOpenedAt) && tab.lastOpenedAt > 0 ? tab.lastOpenedAt : Date.now(),
     webCanGoBack: false,
     webCanGoForward: false
   }
@@ -328,13 +343,180 @@ export function appendIncomingBrowserTabs (state, incoming) {
   return { ...state, tabs, nextTabIndex }
 }
 
-export function switchBrowserTabState (state, tabId) {
+// The tab left and the tab shown were both on screen just now.
+export function switchBrowserTabState (state, tabId, now = Date.now()) {
   if (!state.tabs.some((tab) => tab.id === tabId)) return state
 
   return {
     ...state,
-    activeTabId: tabId
+    activeTabId: tabId,
+    tabs: state.tabs.map((tab) => (
+      tab.id === tabId || tab.id === state.activeTabId ? { ...tab, lastOpenedAt: now } : tab
+    ))
   }
+}
+
+export function isInactiveBrowserTab (tab, activeTabId, now = Date.now()) {
+  return Boolean(
+    tab &&
+    tab.id !== activeTabId &&
+    !tab.incognito &&
+    Number.isSafeInteger(tab.lastOpenedAt) &&
+    now - tab.lastOpenedAt >= INACTIVE_BROWSER_TAB_AFTER_MS
+  )
+}
+
+// Moves a tab to another place in the order, as dragging it there does.
+export function moveBrowserTabState (state, tabId, toIndex) {
+  const from = state.tabs.findIndex((tab) => tab.id === tabId)
+  if (from < 0 || !Number.isInteger(toIndex)) return state
+  const target = Math.max(0, Math.min(state.tabs.length - 1, toIndex))
+  if (target === from) return state
+
+  const tabs = [...state.tabs]
+  const [tab] = tabs.splice(from, 1)
+  tabs.splice(target, 0, tab)
+  return { ...state, tabs }
+}
+
+/**
+ * The addresses of these tabs, in tab order, to copy or share them all at
+ * once. The home page is left out: there is nothing there to pass on.
+ */
+export function getBrowserTabUrls (state, tabIds) {
+  const wanted = new Set(tabIds)
+  return state.tabs
+    .filter((tab) => wanted.has(tab.id))
+    .map((tab) => tab.history[tab.historyIndex]?.url)
+    .filter((url) => typeof url === 'string' && url && url !== BROWSER_HOME_URL)
+}
+
+export function closeBrowserTabsState (state, tabIds) {
+  return tabIds.reduce((next, tabId) => closeBrowserTabState(next, tabId), state)
+}
+
+/**
+ * What reopening a closed tab needs: its pages, kept the way a saved session
+ * keeps them. A private tab is never kept, and nor is one that only ever
+ * showed the home page.
+ *
+ * @param {any} tab
+ * @param {number} [closedAt]
+ * @param {{ index?: number, wasActive?: boolean }} [options]
+ */
+export function snapshotClosedBrowserTab (tab, closedAt = Date.now(), { index, wasActive = false } = {}) {
+  if (!tab || tab.incognito) return null
+  const persisted = persistBrowserTab(tab)
+  const entry = persisted.history[persisted.historyIndex]
+  if (!entry || (persisted.history.length === 1 && entry.url === BROWSER_HOME_URL)) return null
+  return {
+    key: `${tab.id}-${closedAt}`,
+    closedAt,
+    title: persisted.title || entry.url,
+    url: entry.url,
+    history: persisted.history,
+    historyIndex: persisted.historyIndex,
+    desktopView: persisted.desktopView,
+    pageZoom: persisted.pageZoom,
+    // Where it was, for Undo straight after closing it. Not saved.
+    ...(Number.isInteger(index) && { index }),
+    ...(wasActive && { wasActive: true })
+  }
+}
+
+// Newest first, one line per address, up to the limit. Tabs closed together
+// go in with the last of them first.
+export function rememberClosedBrowserTabs (list, snapshots) {
+  const added = snapshots.filter(Boolean).reverse()
+  if (added.length === 0) return list
+  const urls = new Set(added.map((item) => item.url))
+  return [...added, ...list.filter((item) => !urls.has(item.url))].slice(0, MAX_RECENTLY_CLOSED_TABS)
+}
+
+export function forgetClosedBrowserTab (list, key) {
+  return list.filter((item) => item.key !== key)
+}
+
+/**
+ * The closed tab back in a tab of its own, after the others and on screen.
+ * Undo puts it back where it was instead, on screen only if it was before.
+ *
+ * @param {any} state
+ * @param {any} snapshot
+ * @param {number} [now]
+ * @param {{ restorePlace?: boolean }} [options]
+ */
+export function reopenClosedBrowserTabState (state, snapshot, now = Date.now(), { restorePlace = false } = {}) {
+  if (!snapshot || state.tabs.length >= MAX_BROWSER_TABS) return state
+  const usedIds = new Set(state.tabs.map((tab) => tab.id))
+  let nextTabIndex = state.nextTabIndex
+  while (usedIds.has(`tab-${nextTabIndex}`)) nextTabIndex += 1
+  const tab = restoreBrowserTab({
+    id: `tab-${nextTabIndex}`,
+    title: snapshot.title,
+    history: snapshot.history,
+    historyIndex: snapshot.historyIndex,
+    desktopView: snapshot.desktopView,
+    pageZoom: snapshot.pageZoom,
+    lastOpenedAt: now
+  })
+  if (!tab) return state
+  if (restorePlace && Number.isInteger(snapshot.index)) {
+    const tabs = [...state.tabs]
+    tabs.splice(Math.max(0, Math.min(tabs.length, snapshot.index)), 0, tab)
+    return {
+      ...state,
+      tabs,
+      activeTabId: snapshot.wasActive ? tab.id : state.activeTabId,
+      nextTabIndex: nextTabIndex + 1
+    }
+  }
+  return {
+    ...state,
+    tabs: [...state.tabs, tab],
+    activeTabId: tab.id,
+    nextTabIndex: nextTabIndex + 1
+  }
+}
+
+export function serializeRecentlyClosedBrowserTabs (list) {
+  return JSON.stringify({
+    version: RECENTLY_CLOSED_VERSION,
+    tabs: list.slice(0, MAX_RECENTLY_CLOSED_TABS)
+  })
+}
+
+export function parseRecentlyClosedBrowserTabs (serialized) {
+  let value
+  try {
+    value = typeof serialized === 'string' ? JSON.parse(serialized) : serialized
+  } catch {
+    return []
+  }
+  if (!value || value.version !== RECENTLY_CLOSED_VERSION || !Array.isArray(value.tabs)) return []
+
+  const seen = new Set()
+  const list = []
+  for (const item of value.tabs.slice(0, MAX_RECENTLY_CLOSED_TABS)) {
+    const key = typeof item?.key === 'string' && item.key.length <= 128 ? item.key : ''
+    const closedAt = Number(item?.closedAt)
+    if (!key || seen.has(key) || !Number.isSafeInteger(closedAt) || closedAt < 0) continue
+    const tab = restoreBrowserTab({ ...item, id: 'closed' })
+    if (!tab) continue
+    seen.add(key)
+    const entry = tab.history[tab.historyIndex]
+    list.push({
+      key,
+      closedAt,
+      title: tab.title || entry.url,
+      url: entry.url,
+      history: tab.history.map(({ url, source }) => ({ url, source: getPersistedSource({ url, source }) })),
+      historyIndex: tab.historyIndex,
+      desktopView: tab.desktopView,
+      pageZoom: tab.pageZoom
+    })
+  }
+  return list
 }
 
 export function setBrowserTabViewModeState (state, viewMode) {

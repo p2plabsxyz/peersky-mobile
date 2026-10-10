@@ -1,6 +1,6 @@
 import { type ReactNode, useEffect, useState } from 'react'
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native'
-import { SafeAreaView } from 'react-native-safe-area-context'
+import { initialWindowMetrics, SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { WebView } from 'react-native-webview'
 import DisplayIcon from '../assets/icons/bootstrap/display.svg'
 import DownloadIcon from '../assets/icons/bootstrap/download.svg'
@@ -41,6 +41,7 @@ export function BrowserMediaSheet ({
   onShare
 }: BrowserMediaSheetProps) {
   const [previewVisible, setPreviewVisible] = useState(false)
+  const insets = useSafeAreaInsets()
 
   useEffect(() => {
     if (!target) setPreviewVisible(false)
@@ -60,6 +61,10 @@ export function BrowserMediaSheet ({
         visible={true}
         onRequestClose={() => setPreviewVisible(false)}
       >
+        {/* A Modal is its own root view on iOS, so a bare SafeAreaView inside
+            it reports no top inset and the close button sat under the status
+            bar. Its own provider gives it real insets. */}
+        <SafeAreaProvider initialMetrics={initialWindowMetrics}>
         <SafeAreaView style={[styles.preview, isDark ? darkStyles.preview : null]}>
           <View style={[styles.previewHeader, isDark ? darkStyles.border : null]}>
             <Text numberOfLines={1} style={[styles.previewTitle, isDark ? darkStyles.primaryText : null]}>
@@ -83,6 +88,7 @@ export function BrowserMediaSheet ({
             style={styles.previewWebView}
           />
         </SafeAreaView>
+        </SafeAreaProvider>
       </Modal>
     )
   }
@@ -95,9 +101,11 @@ export function BrowserMediaSheet ({
       visible={true}
       onRequestClose={onClose}
     >
-      <SafeAreaView style={styles.overlay} edges={['top', 'left', 'right', 'bottom']}>
+      <SafeAreaView style={styles.overlay} edges={['top', 'left', 'right']}>
         <Pressable accessibilityLabel='Close media actions' style={styles.backdrop} onPress={onClose} />
-        <View style={[styles.sheet, isDark ? darkStyles.sheet : null]}>
+        {/* The sheet reaches the bottom edge, under the home indicator or the
+            navigation bar, and only its rows step clear of them. */}
+        <View style={[styles.sheet, isDark ? darkStyles.sheet : null, { paddingBottom: 26 + insets.bottom }]}>
           <View style={styles.header}>
             <View style={styles.targetDetails}>
               <Text numberOfLines={1} style={[styles.title, isDark ? darkStyles.primaryText : null]}>

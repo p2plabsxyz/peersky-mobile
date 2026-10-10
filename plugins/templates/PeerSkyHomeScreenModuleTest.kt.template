@@ -1,0 +1,34 @@
+package __PACKAGE_NAME__
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
+import org.junit.Test
+
+class PeerSkyHomeScreenModuleTest {
+  @Test
+  fun takesOnlyPagesTheBrowserOpens() {
+    assertEquals("https://example.com/a", PeerSkyHomeScreenModule.pageUrl(" https://example.com/a "))
+    assertEquals("hyper://blog.example/", PeerSkyHomeScreenModule.pageUrl("hyper://blog.example/"))
+    assertNull(PeerSkyHomeScreenModule.pageUrl("peersky://home"))
+    assertNull(PeerSkyHomeScreenModule.pageUrl("javascript:alert(1)"))
+    assertNull(PeerSkyHomeScreenModule.pageUrl("https://user:secret@example.com/"))
+    assertNull(PeerSkyHomeScreenModule.pageUrl(null))
+  }
+
+  @Test
+  fun namesTheShortcutAfterThePageOrItsSite() {
+    assertEquals("Peer-to-peer", PeerSkyHomeScreenModule.shortcutLabel(" Peer-to-peer ", "https://en.wikipedia.org/wiki/Peer-to-peer"))
+    assertEquals("example.com", PeerSkyHomeScreenModule.shortcutLabel("", "https://www.example.com/a"))
+    assertEquals("example.com", PeerSkyHomeScreenModule.shortcutLabel("https://www.example.com/a", "https://www.example.com/a"))
+    assertEquals("E", PeerSkyHomeScreenModule.siteLetter("https://www.example.com/"))
+  }
+
+  @Test
+  fun keepsOneShortcutPerPage() {
+    val id = PeerSkyHomeScreenModule.shortcutId("https://example.com/a")
+    assertEquals(id, PeerSkyHomeScreenModule.shortcutId("https://example.com/a"))
+    assertNotEquals(id, PeerSkyHomeScreenModule.shortcutId("https://example.com/b"))
+    assertEquals(21, id.length)
+  }
+}

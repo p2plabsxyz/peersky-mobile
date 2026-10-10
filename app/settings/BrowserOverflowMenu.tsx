@@ -1,13 +1,16 @@
 import type { ReactNode } from 'react'
 import { useEffect, useRef } from 'react'
-import { Animated, Easing, Modal, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native'
+import { Animated, Easing, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native'
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import CheckIcon from '../../assets/icons/bootstrap/check2.svg'
 import DisplayIcon from '../../assets/icons/bootstrap/display.svg'
 import DownloadIcon from '../../assets/icons/bootstrap/download.svg'
+import FileTextIcon from '../../assets/icons/bootstrap/file-text.svg'
 import FireIcon from '../../assets/icons/bootstrap/fire.svg'
 import HistoryIcon from '../../assets/icons/bootstrap/clock-history.svg'
+import HouseIcon from '../../assets/icons/bootstrap/house.svg'
 import IncognitoIcon from '../../assets/icons/bootstrap/incognito.svg'
+import PhoneIcon from '../../assets/icons/bootstrap/phone.svg'
 import BookmarksIcon from '../../assets/icons/bootstrap/bookmarks.svg'
 import GearIcon from '../../assets/icons/bootstrap/gear.svg'
 import PlusIcon from '../../assets/icons/bootstrap/plus-lg.svg'
@@ -20,15 +23,17 @@ import StarIcon from '../../assets/icons/bootstrap/star.svg'
 import ZoomIcon from '../../assets/icons/bootstrap/zoom-in.svg'
 import { BROWSER_PALETTES } from '../browser-appearance.mjs'
 import { MODAL_ORIENTATIONS } from '../modal-orientations'
+import { dimWhenPressed, ICON_RIPPLE, ROUND_PRESS, ROW_RIPPLE } from '../press-feedback'
 
 const MENU_ICON_SIZE = 22
 const CARD_ICON_SIZE = 26
 const MENU_ICON_STROKE_WIDTH = 0.35
 // The sheet rises from fully below the screen and settles slowly at the end,
 // the way a system sheet does. It used to start half way up and arrive almost
-// at once, which read as the menu snapping open.
-const OPEN_MS = 380
-const CLOSE_MS = 220
+// at once, which read as the menu snapping open. Android's own sheets are
+// quicker than iOS's, and the slower settle read as sluggish there.
+const OPEN_MS = Platform.OS === 'android' ? 260 : 380
+const CLOSE_MS = Platform.OS === 'android' ? 180 : 220
 const OPEN_EASING = Easing.bezier(0.2, 0.8, 0.2, 1)
 const CLOSE_EASING = Easing.bezier(0.4, 0, 1, 1)
 
@@ -55,6 +60,9 @@ type BrowserOverflowMenuProps = {
   onOpenSettings: () => void
   onOpenZoom?: () => void
   onPrintPage?: () => void
+  onReaderView?: () => void
+  onSendToDevices?: () => void
+  onAddToHomeScreen?: () => void
   onToggleFavourite?: () => void
   onSharePage?: () => void
   onShow: () => void
@@ -84,6 +92,9 @@ export function BrowserOverflowMenu ({
   onOpenSettings,
   onOpenZoom,
   onPrintPage,
+  onReaderView,
+  onSendToDevices,
+  onAddToHomeScreen,
   onToggleFavourite,
   onSharePage,
   onShow,
@@ -162,6 +173,42 @@ export function BrowserOverflowMenu ({
         onPress={onSharePage}
       />
     )
+    if (onSendToDevices) {
+      pageActions.push(
+        <MenuItem
+          key='send-to-devices'
+          cardColor={cardColor}
+          icon={<PhoneIcon {...iconProps} />}
+          isDark={isDark}
+          label='Send to Your Devices'
+          onPress={onSendToDevices}
+        />
+      )
+    }
+    if (onAddToHomeScreen) {
+      pageActions.push(
+        <MenuItem
+          key='home-screen'
+          cardColor={cardColor}
+          icon={<HouseIcon {...iconProps} />}
+          isDark={isDark}
+          label='Add to Home Screen'
+          onPress={onAddToHomeScreen}
+        />
+      )
+    }
+    if (onReaderView) {
+      pageActions.push(
+        <MenuItem
+          key='reader'
+          cardColor={cardColor}
+          icon={<FileTextIcon {...iconProps} />}
+          isDark={isDark}
+          label='Reader View'
+          onPress={onReaderView}
+        />
+      )
+    }
     if (onOpenZoom) {
       pageActions.push(
         <MenuItem
@@ -206,7 +253,8 @@ export function BrowserOverflowMenu ({
       <Pressable
         accessibilityLabel='Open browser menu'
         accessibilityRole='button'
-        style={styles.trigger}
+        android_ripple={ICON_RIPPLE}
+        style={({ pressed }) => [styles.trigger, ROUND_PRESS, dimWhenPressed(pressed)]}
         onPress={onShow}
       >
         <View style={styles.dots}>
@@ -370,11 +418,12 @@ function BigAction ({
       accessibilityRole='button'
       accessibilityState={{ disabled }}
       disabled={disabled}
+      android_ripple={ROW_RIPPLE}
       style={({ pressed }) => [
         styles.bigAction,
         { backgroundColor: cardColor },
         disabled ? styles.disabled : null,
-        pressed ? styles.pressed : null
+        pressed && Platform.OS !== 'android' ? styles.pressed : null
       ]}
       onPress={onPress}
     >
@@ -406,11 +455,12 @@ function MenuItem ({
       accessibilityRole='button'
       accessibilityState={{ disabled, selected }}
       disabled={disabled}
+      android_ripple={ROW_RIPPLE}
       style={({ pressed }) => [
         styles.menuItem,
         { backgroundColor: cardColor },
         disabled ? styles.disabled : null,
-        pressed ? styles.pressed : null
+        pressed && Platform.OS !== 'android' ? styles.pressed : null
       ]}
       onPress={onPress}
     >

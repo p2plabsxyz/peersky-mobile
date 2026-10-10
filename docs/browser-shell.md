@@ -35,7 +35,8 @@ tested independently:
 - `app/browser-session.mjs` restores or resets a saved browsing session.
 - `app/history/` stores bounded browsing history and provides address-bar
   suggestions.
-- `app/bookmarks/` validates and stores bookmarks and their favicons.
+- `app/bookmarks/` validates and stores bookmarks, their favicons and their
+  folders, one level deep.
 - `app/tabs/` captures and stores bounded tab previews.
 - `app/downloads/` tracks downloads and connects the browser to the native
   download implementation. A download a page starts waits for the person to

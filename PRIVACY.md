@@ -1,6 +1,6 @@
 # PeerSky Mobile Privacy Policy
 
-Last updated: October 7, 2026
+Last updated: October 10, 2026
 
 PeerSky Mobile is a web and peer-to-peer browser. There are no accounts, no
 analytics and no servers of ours, so there is nowhere for us to collect anything
@@ -27,11 +27,11 @@ PeerSky stores browser settings, open tabs, history, bookmarks, download records
 
 Incognito tabs keep no history, page cache or tab previews, and their cookies and site data are gone once the last incognito tab closes. `hyper://` content opened in one is still stored by the app's peer-to-peer node, like any other drive, until you clear P2P data.
 
-You can remove browsing and peer-to-peer data from the Data Clearing and P2P Data sections in Settings. Files saved through the system download manager may also need to be removed through the Downloads screen or your device's file manager.
+You can remove browsing and peer-to-peer data from the Data Clearing and P2P Data sections in Settings, and each site's cookies from Cookies and site data in Data Clearing. Files saved through the system download manager may also need to be removed through the Downloads screen or your device's file manager.
 
 ## Websites, Searches, and Peer-to-Peer Services
 
-Websites you visit can receive standard network information, including your IP address, and may collect data under their own privacy policies. Searches typed into the address bar go to the engine chosen in Settings, and that engine's policy applies rather than this one.
+Websites you visit can receive standard network information, including your IP address, and may collect data under their own privacy policies. Searches typed into the address bar go to the engine chosen in Settings, or to the one you pick for a single search, and that engine's policy applies rather than this one. While you type a search, what you have typed so far also goes to that engine, without cookies, so it can suggest searches. Incognito tabs never send it, and neither does anything that looks like an address. You can turn off Search suggestions in Settings.
 
 Opening a `hyper://` address or using PeerChat connects your device directly to other devices, and those peers see your IP address the same way a website does. That is what lets it work without a server, and there is no onion routing to hide it. Finding peers happens over a distributed hash table and over your local Wi-Fi; the nodes that help see a hashed topic, never a room key and never the content.
 
@@ -41,7 +41,7 @@ Your PeerChat name, bio and photo are seen by everyone in the rooms you join. A 
 
 When you send a link in PeerChat, your phone opens the page once to make a preview, so that website sees your IP address as it would on a visit. The people you send it to get the preview inside the message, and their phones do not open the page. You can turn off Link previews in PeerChat's settings.
 
-A public Hyperdrive upload can be opened by anyone with its `hyper://` address. A private one stays on your phone unless you share it or move it with Link Device.
+A public Hyperdrive upload can be opened by anyone with its `hyper://` address. A private one is encrypted with your identity's key, and it also goes to your own devices that hold that key, such as the desktop you linked: they find each other directly and list each other's private files, and a desktop keeps a copy of your phone's, made while your phone is on Wi-Fi. Nobody else can open them.
 
 ## Backups and Moving to Another Device
 
