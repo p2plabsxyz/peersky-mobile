@@ -1,6 +1,6 @@
 import { type ReactNode, useEffect, useState } from 'react'
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native'
-import { SafeAreaView } from 'react-native-safe-area-context'
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { WebView } from 'react-native-webview'
 import DisplayIcon from '../assets/icons/bootstrap/display.svg'
 import DownloadIcon from '../assets/icons/bootstrap/download.svg'
@@ -41,6 +41,7 @@ export function BrowserMediaSheet ({
   onShare
 }: BrowserMediaSheetProps) {
   const [previewVisible, setPreviewVisible] = useState(false)
+  const insets = useSafeAreaInsets()
 
   useEffect(() => {
     if (!target) setPreviewVisible(false)
@@ -95,9 +96,11 @@ export function BrowserMediaSheet ({
       visible={true}
       onRequestClose={onClose}
     >
-      <SafeAreaView style={styles.overlay} edges={['top', 'left', 'right', 'bottom']}>
+      <SafeAreaView style={styles.overlay} edges={['top', 'left', 'right']}>
         <Pressable accessibilityLabel='Close media actions' style={styles.backdrop} onPress={onClose} />
-        <View style={[styles.sheet, isDark ? darkStyles.sheet : null]}>
+        {/* The sheet reaches the bottom edge, under the home indicator or the
+            navigation bar, and only its rows step clear of them. */}
+        <View style={[styles.sheet, isDark ? darkStyles.sheet : null, { paddingBottom: 26 + insets.bottom }]}>
           <View style={styles.header}>
             <View style={styles.targetDetails}>
               <Text numberOfLines={1} style={[styles.title, isDark ? darkStyles.primaryText : null]}>

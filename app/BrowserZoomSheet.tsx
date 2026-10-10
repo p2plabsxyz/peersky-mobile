@@ -1,5 +1,5 @@
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native'
-import { SafeAreaView } from 'react-native-safe-area-context'
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import {
   BROWSER_PAGE_ZOOMS,
   DEFAULT_BROWSER_PAGE_ZOOM
@@ -28,6 +28,7 @@ export function BrowserZoomSheet ({
   onZoomIn,
   onZoomOut
 }: BrowserZoomSheetProps) {
+  const insets = useSafeAreaInsets()
   const zoomIndex = BROWSER_PAGE_ZOOMS.indexOf(pageZoom)
   const canZoomOut = zoomIndex > 0
   const canZoomIn = zoomIndex >= 0 && zoomIndex < BROWSER_PAGE_ZOOMS.length - 1
@@ -41,9 +42,9 @@ export function BrowserZoomSheet ({
       visible={visible}
       onRequestClose={onClose}
     >
-      <SafeAreaView style={styles.overlay} edges={['top', 'left', 'right', 'bottom']}>
+      <SafeAreaView style={styles.overlay} edges={['top', 'left', 'right']}>
         <Pressable accessibilityLabel='Close zoom controls' style={styles.backdrop} onPress={onClose} />
-        <View style={[styles.sheet, isDark ? darkStyles.sheet : null]}>
+        <View style={[styles.sheet, isDark ? darkStyles.sheet : null, { paddingBottom: 28 + insets.bottom }]}>
           <View style={styles.header}>
             <Text style={[styles.title, isDark ? darkStyles.primaryText : null]}>Zoom</Text>
             <Pressable accessibilityLabel='Close zoom controls' onPress={onClose}>
