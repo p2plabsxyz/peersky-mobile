@@ -163,6 +163,7 @@
       "./plugins/with-audio-route",
       "./plugins/with-home-shortcuts",
       "./plugins/with-hyper-links",
+      "./plugins/with-share-to-open",
       "@bacons/apple-targets",
       [
         "expo-notifications",

@@ -1,0 +1,29 @@
+package __PACKAGE_NAME__
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Test
+
+class ShareToOpenActivityTest {
+  @Test
+  fun findsTheLinkInWhatWasShared() {
+    assertEquals("https://example.com/a?b=1", ShareToOpenActivity.sharedLink("https://example.com/a?b=1"))
+    assertEquals("https://example.com/post", ShareToOpenActivity.sharedLink("Read this: https://example.com/post."))
+    assertEquals("hyper://blog.example/", ShareToOpenActivity.sharedLink("hyper://blog.example/ from Sam"))
+    assertEquals("https://example.com/x", ShareToOpenActivity.sharedLink("(see https://example.com/x)"))
+    assertEquals(
+      "https://en.wikipedia.org/wiki/Hydra_(genus)",
+      ShareToOpenActivity.sharedLink("https://en.wikipedia.org/wiki/Hydra_(genus)")
+    )
+    assertEquals("HTTPS://EXAMPLE.COM/", ShareToOpenActivity.sharedLink("HTTPS://EXAMPLE.COM/"))
+  }
+
+  @Test
+  fun leavesTextWithNoLinkAlone() {
+    assertNull(ShareToOpenActivity.sharedLink(null))
+    assertNull(ShareToOpenActivity.sharedLink("just some words"))
+    assertNull(ShareToOpenActivity.sharedLink("javascript:alert(1)"))
+    assertNull(ShareToOpenActivity.sharedLink("ftp://example.com/file"))
+    assertNull(ShareToOpenActivity.sharedLink("https://" + "a".repeat(9000)))
+  }
+}
