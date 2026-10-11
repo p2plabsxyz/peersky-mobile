@@ -10,7 +10,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "xyz.p2plabs.peersky",
-      "buildNumber": "3",
+      "buildNumber": "4",
       "appleTeamId": "PP6D6HB667",
       "entitlements": {
         "com.apple.developer.networking.multicast": true,
@@ -150,6 +150,7 @@
       ],
       "expo-font",
       "./plugins/with-ios-pod-deployment-target",
+      "./plugins/with-ios-prebuilt-deps-guard",
       "./plugins/with-android-16kb-libs",
       "./plugins/with-android-app-category",
       "./plugins/with-android-loopback-cleartext",

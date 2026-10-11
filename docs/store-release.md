@@ -12,6 +12,14 @@ release.
 - Build iOS with Xcode 26. Apps built with the iOS 27 SDK must use the UIScene
   life cycle, which this Expo version does not, so stay on Xcode 26 until the
   Expo upgrade that brings it. On EAS, pin an Xcode 26 image.
+- If `pod install` stops with "ReactNativeDependencies is missing", run it
+  again. React Native's prebuilt core needs its prebuilt dependencies, and when
+  the check for them on Maven fails, it builds them from source without saying
+  so; the app then dies at launch with "Library not loaded:
+  ReactNativeDependencies.framework", as 0.1.2 build 3 did.
+  `plugins/with-ios-prebuilt-deps-guard.js` stops the install instead. Before
+  uploading, the archive's `Products/Applications/PeerSky.app/Frameworks` should
+  list `ReactNativeDependencies.framework`.
 - Bump `version` in `app.json` for a new store version. EAS increments build
   numbers.
 - After adding or removing a dependency, run
