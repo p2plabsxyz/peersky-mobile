@@ -127,7 +127,7 @@
 - [x] PeerChat (`peersky://p2p/peerchat/`):
 
   - [x] Group rooms and direct messages, with no account and no server
-  - [x] Every message is encrypted and signed by whoever wrote it, and passed on from device to device
+  - [x] Every message is encrypted and signed by whoever wrote it, and passed on from device to device, as an id first so each device takes it in once
   - [x] Rooms and direct messages made on 0.1.2 or later change their key every hour
   - [x] Replies, reactions, mentions and search
   - [x] Files and pictures, encrypted with the room, and link previews
@@ -139,6 +139,7 @@
   - [x] Notifications and sounds
   - [x] Moderation
     - Whoever made a room can remove anyone from it, and the removal reaches everyone in the room
+    - Removing somebody moves the room to a new key that everyone else follows on their own, so the person removed cannot read on
     - Block or report anyone, from a message or their profile
     - Groups hold back threats, slurs and adult links, and refuse explicit pictures before they are sent
   - [x] Works on the same Wi-Fi with no internet

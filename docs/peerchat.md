@@ -54,6 +54,7 @@ Important files:
 - `backend/peerchat/room-proof.mjs`: the proof a peer gives that it holds a room's key.
 - `backend/peerchat/key-chain.mjs`: hourly message keys for rooms made on 0.1.2 or later.
 - `backend/peerchat/removal-signature.mjs`: the creator's signature on a room's removal list.
+- `backend/peerchat/room-move.mjs`: room keys that say who made the room, and a room's move to a new key when somebody is removed.
 - `backend/peerchat/message-signature.mjs`: every message's signature by whoever wrote it.
 - `backend/peerchat/transport.mjs`: bounded newline-delimited peer frames.
 - `backend/peerchat/link-preview.mjs`: bounded public-network preview fetching.
@@ -75,17 +76,19 @@ Whoever made a room can remove anyone from it, for good. The creator signs the
 room's removal list with their own key, so anyone in the room can pass it on
 and every device checks it against the creator's key, which is how a removal
 reaches people who never meet the creator. A list from an older build carries
-no signature and counts only from the creator's own connection.
+no signature and counts only from the creator's own connection. On 0.1.3 the
+room also moves to a new key the person removed never hears (see
+[Removing somebody moves the room](#removing-somebody-moves-the-room)).
 
 ## Room-key security
 
 The room key is both an invitation and, in a room made before 0.1.2, the secret
 needed to decrypt its messages. Anyone who receives it can join that room and
 read synchronized history, all of it in an older room and from the hour they
-join in a newer one, so share it only with intended participants. PeerChat currently has no
-server-side account, invitation revocation, or mechanism to remove knowledge of
-a key from a device that already received it. Create a new room and distribute a
-new key if an old key is exposed.
+join in a newer one, so share it only with intended participants. PeerChat has
+no server-side account or invitation revocation. Removing somebody from a room
+moves it to a new key they never hear, so the key they held stops working. For
+a key exposed some other way, create a new room and share its key.
 
 A room's discovery topic is public: DHT nodes see it on the way past, so knowing
 it opens nothing. On every connection each side sends, for each of its rooms,
@@ -158,9 +161,10 @@ it.
 
 It protects the past, not the future: every later hour's key follows from any
 hour's, so a stolen phone keeps reading new messages until the room is replaced
-with a new one. Builds from before 0.1.2 cannot read rooms made on 0.1.2 or
-later. The desktop keeps the same rules in peerchat's `lib/key-chain.js`, and
-both apps pin one vector (`test/protocol/peerchat-key-chain.test.mjs`).
+with a new one, which removing it from the room now does (see below). Builds
+from before 0.1.2 cannot read rooms made on 0.1.2 or later. The desktop keeps
+the same rules in peerchat's `lib/key-chain.js`, and both apps pin one vector
+(`test/protocol/peerchat-key-chain.test.mjs`).
 
 ### Signed messages and passing on
 
@@ -182,13 +186,28 @@ signature checks out and its key is the one that id's connections proved. An
 unsigned one, as an older build sends, counts only straight from its author's
 connection, and never in somebody else's history.
 
-A device keeps at most 64 connections, so in a big room most people are not
-connected to most others. A newer build says so in its handshake and passes
-each new signed message on once to everyone else in the room who said the same,
-never back where it came from or to its author. A copy the phone has already
-seen stops at its first check, so a message crosses the room in a few steps.
-Only signed messages are passed on, only for ten minutes after they were
-written, and none from before the phone joined; an older build never gets one.
+A device opens up to 64 connections itself (Hyperswarm's default, which
+PeerSky keeps), and others can connect to it too, so in a big room it ends up
+with about a hundred. Even so, in a room of hundreds or thousands most people
+are not connected to most others. A newer build says so in its handshake
+(`pass: true`) and passes each new signed message on once to everyone else in
+the room who said the same, never back where it came from or to its author. A
+copy the phone has already seen stops at its first check, so a message crosses
+the room in a few steps. Only signed messages are passed on, only for ten
+minutes after they were written, and none from before the phone joined; an
+older build never gets one.
+
+Ids first. Passing the whole message on every connection meant a device took
+in a copy from each of its connections, about a hundred in a big room. On 0.1.3
+a device whose handshake also says `have: true` is sent only the id of each new
+message, in a batch every 50 ms (`{ type: "have", room, ids }`). It asks for the
+ones it does not have (`{ type: "want", room, ids }`) from the first neighbour
+that told it, and that neighbour sends the message as a `pass`. If it has not
+come in three seconds, the next neighbour that has it is asked, for up to 30
+seconds. So a device takes in each message once, and a short id from its other
+connections. Asked-for messages are kept outside the budget for unasked ones,
+each connection has a budget of 6,000 ids a minute each way, and an older build
+is passed whole messages as before.
 Limits count per author, not per connection: each author has the room's spam
 limit and 120 messages a minute, wherever their messages come from, so a device
 passing on a busy room is never blamed for what others wrote. The desktop keeps
@@ -206,6 +225,49 @@ computer and Google backups and out of Android's phone-to-phone copy. The curren
 mobile build does not protect room keys with Android Keystore or iOS Keychain
 hardware-backed encryption, so device access and rooted or jailbroken devices
 are part of the local threat model.
+
+### Removing somebody moves the room
+
+A room's key is its invite. Removing somebody stops every honest device talking
+to them, but they still hold the key, so with a modified app they could come back
+under a new name and read on. On 0.1.3, when the person who made a room removes
+somebody, the room moves to a new key, and only the people still in it hear it.
+
+- **Who made a room.** A room made on 0.1.3 has a key made from its creator's
+  key and a secret: `SHA-256("peersky-chat/4 room\n" + creator key + "\n" +
+  secret)`, picked to carry the mark for hourly keys. Room details
+  (`room-meta`) carry the creator key and the secret (`creatorProof`) from
+  anyone who has them, and a device takes the creator key once the two make the
+  room's key. So a member who never meets the creator still learns who made the
+  room, and a signed removal list that came before is kept and checked then.
+  Before, only the creator's own connection could say, and in a big room most
+  members dropped every removal list as unchecked. The secret is as private as
+  the room key.
+- **The move.** The creator makes a new room key the same way, with a new chain,
+  and signs `"peersky-chat/4 moved\n" + old topic + "\n" + new topic + "\n" +
+  time + "\n" + chain's first hour + "\n" + SHA-256 of its secret`. The move
+  goes as `{ type: "room-moved", room, moves }`, only to peers whose handshake
+  says `move: true`, and each device checks it against the old room's creator
+  key and the new key's own proof before it follows.
+- **Who hears it.** A device passes a move on only to somebody it saw in the
+  room before the move was made, by full key, never by the short id anyone can
+  grind a key to match, and never to anyone removed, nor does a person's other
+  device hand the room to one of theirs that was removed. So the person
+  removed, even under a new key, is never told. Somebody offline when the room moved hears
+  where it went when they come back, from any device that saw them there, or
+  from another of their own devices. If nobody online saw them, they need a new
+  invite.
+- **What stays.** The room keeps its name, picture, members, settings, pins and
+  unread count, and its history from before shows with the new room's. The old
+  key is kept only for that history and for whoever missed the move: nobody new
+  is let in under it, and nothing is sent in it. Invites from before stop
+  working, and the room says so.
+- **What does not move.** P2P Republic, whose key ships with the app, and
+  direct messages, where there is nobody to remove. A device on 0.1.2 or older
+  cannot follow a move and stays on the old key until it updates.
+
+The desktop keeps the same rules in peerchat's `lib/room-move.js`, and both apps
+pin one vector (`test/protocol/peerchat-room-move.test.mjs`).
 
 ## Attachments and link previews
 
@@ -313,6 +375,83 @@ runtime reset, P2P clearing, and application shutdown.
 These limits protect a mobile process from unbounded memory, storage, and
 network use. A room that reaches its local storage limit must be left or cleared
 before more messages can be stored.
+
+## Tested with hundreds of devices
+
+`npm run test:load:peerchat -- --devices 200` puts that many devices in one
+room on this machine, each running the apps' own PeerChat code with its own
+key, Hyperswarm and DHT node, on a testnet bound to `127.0.0.1`. Nothing leaves
+the machine, and no device ever joins P2P Republic. See
+[test/load/peerchat](../test/load/peerchat/README.md).
+
+Run on 2026-10-12 on one MacBook Air (Apple M5, 10 cores, 32 GB of memory,
+macOS 26.6, Node 24.21). A tenth of each room were desktops running PeerChat's
+`p2p.js` from a checkout next to this one and the rest phones running
+`backend/peerchat/service.mjs`, all with 0.1.3's changes. Every device shared
+the same 10 cores and talked over loopback, so the times are what one busy
+machine managed, not a real network.
+
+| | 50 devices | 100 devices | 200 devices | 300 devices |
+|---|---|---|---|---|
+| Joined the room | 50 | 100 | 200 | 300 |
+| Connections per device (median, max) | 49, 49 | 89, 97 | 108, 150 | 108, 181 |
+| Messages delivered (steady, burst, busy) | 100% | 100% | 100% | 100% |
+| Time until the last device had a message (steady chat) | 0.08 s | 0.15 s | 0.26 s | 0.35 s |
+| Time until the last device had a message (busy minute) | 0.02 s | 0.15 s | 0.34 s | 13.06 s |
+| Time until the last device had a message (a burst) | 0.1 s | 0.43 s | 1.2 s | 2 s |
+| Devices back after missing 300 messages | got the newest 200 | got the newest 200 | got the newest 200 | got the newest 200 |
+| Data received per message, per device | 7.5 KB (34 KB on 0.1.2) | 12.3 KB (64 KB on 0.1.2) | 13.3 KB (77 KB on 0.1.2) | 13.2 KB |
+| Devices that learned of a removal | 48 of 48 (48 of 48 on 0.1.2) | 98 of 98 (93 of 98 on 0.1.2) | 198 of 198 (138 of 198 on 0.1.2) | 298 of 298 |
+| Devices that followed the room's new key | 48 of 48 | 98 of 98 | 198 of 198 | 298 of 298 |
+| Messages after the removal that reached them | 100% | 100% | 100% | 100% |
+| New messages the person removed got | 0 | 0 | 0 | 0 |
+| New messages a newcomer with the old key got | 0 | 0 | 0 | 0 |
+
+Steady chat is 2 messages a second for a minute and a busy minute 5 a second;
+a burst is half the room, up to 50 people, sending at the same moment. Data
+received is everything a device took in while the messages went round, divided
+by how many there were, so it counts the ids and asks too. A device back after
+missing 300 messages has the newest 200, which is as much of its log as each
+device sends a peer that connects. At 300 devices the Mac ran out of free
+memory and swapped during the busy minute, which is where its 13 seconds come
+from; every message still arrived. The 0.1.2 numbers are the same test on the
+build before, run on 2026-10-11.
+
+Real connections stop at 300 here: at about 30 MB a device, a thousand would
+need more memory than this Mac has. A thousand are tested without the network,
+below.
+
+### A thousand phones, in CI
+
+`npm run test:scale:peerchat` (`test/scale/peerchat-thousand.test.mjs`) puts a
+thousand phones in one room in one process, each running
+`backend/peerchat/service.mjs` as the app does. Only the network is left out:
+each connection is made in memory, both ends built the way `handleConnection`
+builds them, and what one end sends goes to the other end's frame handler. Each
+phone connects to 32 others at random and others connect to it, so it ends up
+with about 64, as with Hyperswarm in a big room. CI runs it on every pull
+request and push to main (the `peerchat-scale` job, 10 minutes at most). On the
+Mac above, on 2026-10-12, it took 101 seconds:
+
+| 1000 phones | |
+|---|---|
+| Connections per phone (median, max) | 64, 83 |
+| Messages delivered | 100% |
+| Data taken in per message, per phone | 8.6 KB |
+| Phones that learned of a removal | 998 of 998 |
+| Phones that followed the room's new key | 998 of 998 |
+| Messages after the move that reached them | 100% |
+| New messages the person removed got | 0 |
+| New messages a newcomer with the old key got | 0 |
+| Memory, all 1000 in one process | 3.7 GB |
+
+It shows how far messages, removals and moves get through a room that size and
+what each phone takes in. It says nothing about sockets, the DHT or how fast a
+phone is: one process does every phone's work, so its times are its own (the
+last phone had each message about 6 seconds after it was sent).
+
+Not tested anywhere: the CPU and battery of real phones, and real networks with
+NAT and mobile data.
 
 ## Desktop interoperability smoke test
 
