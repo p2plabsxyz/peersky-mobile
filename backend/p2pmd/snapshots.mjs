@@ -79,6 +79,8 @@ export function activateP2pmdRoomSnapshot (roomKey, document) {
   if (activeRoomKey && document) saveP2pmdRoomSnapshot(activeRoomKey, document)
 }
 
+// document can be a function that gives it, called only when the snapshot is
+// saved.
 export function scheduleP2pmdRoomSnapshot (document) {
   if (!activeRoomKey) return
 
@@ -93,7 +95,7 @@ export function scheduleP2pmdRoomSnapshot (document) {
 export function deactivateP2pmdRoomSnapshot (document = null) {
   clearSnapshotTimer()
   if (activeRoomKey && (document || pendingDocument)) {
-    saveP2pmdRoomSnapshot(activeRoomKey, document || pendingDocument)
+    saveP2pmdRoomSnapshot(activeRoomKey, document || documentOf(pendingDocument))
   }
   activeRoomKey = null
   pendingDocument = null
@@ -102,9 +104,13 @@ export function deactivateP2pmdRoomSnapshot (document = null) {
 export function flushP2pmdRoomSnapshot () {
   if (!activeRoomKey || !pendingDocument) return false
 
-  const document = pendingDocument
+  const document = documentOf(pendingDocument)
   pendingDocument = null
   return saveP2pmdRoomSnapshot(activeRoomKey, document)
+}
+
+function documentOf (pending) {
+  return typeof pending === 'function' ? pending() : pending
 }
 
 function normalizeSnapshot (document) {

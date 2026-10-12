@@ -131,9 +131,12 @@ describe('p2pmd HTTP endpoints with injectable Node server', () => {
     const updateBody = await updateResponse.json()
 
     assert.equal(updateResponse.status, 200)
-    assert.equal(updateBody.ok, true)
-    assert.match(updateBody.document.content, /Desktop edited line 2/)
-    assert.deepEqual(updateBody.document.lineAttributions, {
+    // Just ok, as from the desktop's host: every editor has the note, and
+    // sending it back with each edit cost the host its upload.
+    assert.deepEqual(updateBody, { ok: true })
+    const document = await getJson(`${localUrl}/doc`)
+    assert.match(document.content, /Desktop edited line 2/)
+    assert.deepEqual(document.lineAttributions, {
       2: { color: '#9d4edd', name: 'Desktop', clientId: '' }
     })
   })

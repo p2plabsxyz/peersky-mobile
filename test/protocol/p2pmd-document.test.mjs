@@ -1,5 +1,6 @@
 import { beforeEach, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { performance } from 'node:perf_hooks'
 import b4a from 'b4a'
 import * as Y from 'yjs'
 import { buildLineReplaceUpdate } from '../fixtures/yjs-helpers.mjs'
@@ -14,6 +15,17 @@ import {
 } from '../../backend/p2pmd/document.mjs'
 
 const MAX_INCREMENTAL_UPDATE_BYTES = 4 * 1024 * 1024
+
+// An editor's edit: text put in at a place, made on its own copy of the note.
+function insertUpdate (base64State, index, text) {
+  const doc = new Y.Doc()
+  Y.applyUpdate(doc, b4a.from(base64State, 'base64'))
+  const before = Y.encodeStateVector(doc)
+  doc.getText('content').insert(index, text)
+  const update = b4a.toString(Y.encodeStateAsUpdate(doc, before), 'base64')
+  doc.destroy()
+  return update
+}
 
 describe('p2pmd document protocol state', () => {
   beforeEach(() => {
@@ -55,9 +67,9 @@ describe('p2pmd document protocol state', () => {
       1: { color: '#9d4edd', name: 'Desktop', clientId: 'desktop-1' }
     })
 
-    assert.equal(result.ok, true)
-    assert.equal(result.document.content, 'synced from peer')
-    assert.deepEqual(result.document.lineAttributions, {
+    assert.deepEqual(result, { ok: true })
+    assert.equal(getDocumentState().content, 'synced from peer')
+    assert.deepEqual(getDocumentState().lineAttributions, {
       1: { color: '#9d4edd', name: 'Desktop', clientId: 'desktop-1' }
     })
     remoteDoc.destroy()
@@ -112,6 +124,69 @@ describe('p2pmd document protocol state', () => {
     assert.equal(applyDocumentUpdate(nothing, moved).ok, true)
     assert.deepEqual(getDocumentState().lineAttributions[3], moved[3])
     assert.deepEqual(getDocumentState().lineAttributions[4], authors[4])
+  })
+
+  it('refuses an edit that would make the note too big, leaves the note as it was, and takes the next one', () => {
+    const limit = getMaxDocumentLength()
+    updateDocumentState('x'.repeat(limit - 10))
+    const base = getEncodedDocumentState()
+
+    assert.deepEqual(applyDocumentUpdate(insertUpdate(base, 0, 'y'.repeat(20))), {
+      ok: false,
+      error: 'Document is too large. Maximum size is 10 MB.'
+    })
+    assert.equal(getDocumentState().content.length, limit - 10)
+
+    assert.deepEqual(applyDocumentUpdate(insertUpdate(base, 0, 'y'.repeat(5))), { ok: true })
+    assert.equal(getDocumentState().content.length, limit - 5)
+  })
+
+  it('checks an edit against the note as it is now, after it was emptied or replaced', () => {
+    updateDocumentState('x'.repeat(getMaxDocumentLength() - 10))
+    resetDocumentState()
+    assert.deepEqual(applyDocumentUpdate(insertUpdate(getEncodedDocumentState(), 0, 'y'.repeat(1000))), { ok: true })
+    assert.equal(getDocumentState().content, 'y'.repeat(1000))
+
+    updateDocumentState('short\nnote')
+    assert.deepEqual(applyDocumentUpdate(insertUpdate(getEncodedDocumentState(), 5, '!')), { ok: true })
+    assert.equal(getDocumentState().content, 'short!\nnote')
+  })
+
+  it('refuses a broken update without touching the note, and takes the next one', () => {
+    updateDocumentState('Line 1: base')
+    assert.deepEqual(applyDocumentUpdate(b4a.toString(b4a.from([1, 2, 3]), 'base64')), {
+      ok: false,
+      error: 'Invalid Yjs update.'
+    })
+    assert.equal(getDocumentState().content, 'Line 1: base')
+
+    assert.deepEqual(applyDocumentUpdate(insertUpdate(getEncodedDocumentState(), 12, ' and more')), { ok: true })
+    assert.equal(getDocumentState().content, 'Line 1: base and more')
+  })
+
+  it('takes about as long to check an edit to a big note as to a small one', () => {
+    // Every edit was tried on a copy made from the whole note's state, so each
+    // one cost more the bigger the note had grown.
+    const medianEditMs = (content) => {
+      updateDocumentState(content)
+      const editor = new Y.Doc()
+      Y.applyUpdate(editor, b4a.from(getEncodedDocumentState(), 'base64'))
+      let update = null
+      editor.on('update', (next) => { update = next })
+      const times = []
+      for (let i = 0; i < 60; i++) {
+        editor.getText('content').insert(1, 'y')
+        const started = performance.now()
+        assert.equal(applyDocumentUpdate(b4a.toString(update, 'base64')).ok, true)
+        times.push(performance.now() - started)
+      }
+      editor.destroy()
+      return times.sort((a, b) => a - b)[30]
+    }
+    medianEditMs('warming up')
+    const small = medianEditMs('one line')
+    const big = medianEditMs(Array.from({ length: 20000 }, (_, i) => `Line ${i + 1}: ${'x'.repeat(40)}`).join('\n'))
+    assert.ok(big < small * 3 + 0.05, `an edit took ${big.toFixed(3)} ms on a 1 MB note and ${small.toFixed(3)} ms on a small one`)
   })
 
   it('rejects malformed and oversized incremental Yjs updates', () => {

@@ -10,13 +10,33 @@ const ytext = ydoc.getText('content')
 const ylineAttributions = ydoc.getMap('lineAttributions')
 const updateListeners = new Set()
 
+// A second copy of the note, kept in step with every change, that an edit is
+// tried on first. Trying it on a copy made from the whole note's state cost
+// more the bigger that state grew, on every edit. The copy is made again only
+// when an edit is refused.
+let mirror = null
+let mirrorText = null
+let mirrorLineAttributions = null
+rebuildMirror()
+
 let updatedAt = Date.now()
 
 ydoc.on('update', (update, origin) => {
   updatedAt = Date.now()
+  try {
+    Y.applyUpdate(mirror, update, 'mirror')
+  } catch {
+    rebuildMirror()
+  }
 
+  // Built only if a listener reads it: twice an edit, the whole note was put
+  // together for a snapshot that waits for a pause anyway.
+  let document = null
   const event = {
-    document: getDocumentState(),
+    get document () {
+      if (!document) document = getDocumentState()
+      return document
+    },
     origin,
     update: b4a.toString(update, 'base64')
   }
@@ -105,20 +125,21 @@ export function applyDocumentUpdate (encodedUpdate, lineAttributions = null) {
     Y.applyUpdate(ydoc, update, 'remote-update')
     if (lineAttributions !== null && lineAttributions !== undefined) {
       ydoc.transact(() => {
-        mergeLineAttributions(lineAttributions, getLineCount(ytext.toString()))
+        mergeLineAttributions(lineAttributions, candidateValidation.lineCount)
       }, 'line-attribution-update')
     }
   } catch {
+    rebuildMirror()
     return {
       ok: false,
       error: 'Invalid Yjs update.'
     }
   }
 
-  return {
-    ok: true,
-    document: getDocumentState()
-  }
+  // Not the whole note: every editor has it already, and sending it back with
+  // each edit cost the host its upload, more the longer the note. Editors read
+  // nothing here but ok, and the phone's falls back to its own copy.
+  return { ok: true }
 }
 
 export function getEncodedDocumentState () {
@@ -165,46 +186,66 @@ function validateDocumentContent (content) {
   return { ok: true }
 }
 
+// The edit tried on the mirror. Kept, it is what the note becomes once the edit
+// is applied for real, which then changes nothing on the mirror. Refused, the
+// mirror is made again from the note.
 function validateCandidateDocumentUpdate (update, lineAttributions) {
-  const candidateDoc = new Y.Doc()
-  const candidateText = candidateDoc.getText('content')
-  const candidateLineAttributions = candidateDoc.getMap('lineAttributions')
-
   try {
-    Y.applyUpdate(candidateDoc, Y.encodeStateAsUpdate(ydoc), 'current-state')
-    Y.applyUpdate(candidateDoc, update, 'candidate-update')
+    Y.applyUpdate(mirror, update, 'candidate-update')
   } catch {
-    candidateDoc.destroy()
+    rebuildMirror()
     return {
       ok: false,
       error: 'Invalid Yjs update.'
     }
   }
 
-  if (lineAttributions !== null && lineAttributions !== undefined) {
-    mergeLineAttributionsIntoMap(
-      candidateLineAttributions,
-      lineAttributions,
-      getLineCount(candidateText.toString())
-    )
+  if (mirrorText.length > MAX_DOCUMENT_LENGTH) {
+    rebuildMirror()
+    return {
+      ok: false,
+      error: 'Document is too large. Maximum size is 10 MB.'
+    }
   }
 
-  const contentValidation = validateDocumentContent(candidateText.toString())
-  if (!contentValidation.ok) {
-    candidateDoc.destroy()
-    return contentValidation
-  }
-
-  if (candidateLineAttributions.size > MAX_LINE_ATTRIBUTIONS) {
-    candidateDoc.destroy()
+  // Lines are counted only for authors that came with the edit; any the edit
+  // itself added to the map are counted either way.
+  const lineCount = lineAttributions === null || lineAttributions === undefined
+    ? 0
+    : getLineCount(mirrorText.toString())
+  if (lineAttributionCountAfter(lineAttributions, lineCount) > MAX_LINE_ATTRIBUTIONS) {
+    rebuildMirror()
     return {
       ok: false,
       error: 'Too many line attributions.'
     }
   }
 
-  candidateDoc.destroy()
-  return { ok: true }
+  return { ok: true, lineCount }
+}
+
+function rebuildMirror () {
+  if (mirror) mirror.destroy()
+  mirror = new Y.Doc()
+  mirrorText = mirror.getText('content')
+  mirrorLineAttributions = mirror.getMap('lineAttributions')
+  Y.applyUpdate(mirror, Y.encodeStateAsUpdate(ydoc), 'mirror')
+}
+
+// How many lines would have an author once these are merged in, as merging
+// them into the mirror would count them, without touching the mirror.
+function lineAttributionCountAfter (lineAttributions, lineCount) {
+  let count = mirrorLineAttributions.size
+  const normalized = normalizeLineAttributions(lineAttributions)
+  if (!normalized) return count
+
+  for (const line of Object.keys(normalized)) {
+    const lineNumber = Number(line)
+    if (lineNumber > lineCount || mirrorLineAttributions.has(line)) continue
+    count += 1
+  }
+
+  return count
 }
 
 function getLineAttributionsState () {
@@ -348,5 +389,9 @@ function normalizeLineAttribution (value) {
 
 function getLineCount (content) {
   if (!content) return 1
-  return content.split('\n').length
+  // Counted in place: splitting a big note into lines for this, once an
+  // edit, took most of what an edit cost.
+  let count = 1
+  for (let at = content.indexOf('\n'); at !== -1; at = content.indexOf('\n', at + 1)) count += 1
+  return count
 }

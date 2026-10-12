@@ -74,8 +74,10 @@ Any questions?
 
 <!-- Speaker notes: Open floor for Q&A -->`
 
-subscribeToDocumentUpdates(({ document, origin, update }) => {
-  scheduleP2pmdRoomSnapshot(document)
+subscribeToDocumentUpdates(({ origin, update }) => {
+  // The note as it is when the snapshot is saved, after a pause, rather than
+  // put together on every edit.
+  scheduleP2pmdRoomSnapshot(getDocumentState)
   if (origin !== 'line-attribution-update') {
     broadcastEvent('yjsupdate', update)
   }
