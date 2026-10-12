@@ -124,11 +124,12 @@ test('the creator key is recorded when a room is made and nowhere else', () => {
   assert.match(create, /isHost: true/)
   assert.match(create, /creatorKey: this\.localKey/)
 
-  // Every other assignment is either the room-meta announcement, which is
-  // guarded by the connection, or reading one back.
+  // Every other assignment is either the room-meta announcement, which the
+  // other side checks against the connection, or against the secret that made
+  // the room's key, or reading one back.
   const assignments = [...service.matchAll(/creatorKey: this\.localKey/g)]
   assert.equal(assignments.length, 1, 'only the room being created gets it')
-  assert.match(service, /creatorKey: room\.isHost \? this\.localKey : ''/)
+  assert.match(service, /creatorKey: room\.isHost \? this\.localKey : creatorProof \? resolvePeerChatCreatorKey\(roomKey, room\.creatorKey\) : ''/)
 })
 
 // P2P Republic predates all of this and its own record names a device whose

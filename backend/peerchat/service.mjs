@@ -106,6 +106,7 @@ import {
   normalizeTransfer
 } from './device-link.mjs'
 import { checkRoomProof, roomProof } from './room-proof.mjs'
+import { checkCreatorProof, makeCreatorRoomKey } from './room-move.mjs'
 
 const MAX_ROOMS = 50
 const MAX_BLOCKED_PEERS = 500
@@ -409,8 +410,12 @@ export class PeerChatService {
     this.ensureProfile(username)
     if (this.rooms.size >= MAX_ROOMS) throw new Error(`PeerChat supports up to ${MAX_ROOMS} rooms.`)
 
-    // Marked, with a chain, so its keys rotate. See key-chain.mjs.
-    const roomKey = makeRotatingRoomKey()
+    // Marked, with a chain, so its keys rotate (key-chain.mjs), and made from
+    // this phone's key, so anyone in the room can check who made it
+    // (room-move.mjs).
+    const { roomKey, creatorProof } = this.localKey
+      ? makeCreatorRoomKey(this.localKey)
+      : { roomKey: makeRotatingRoomKey(), creatorProof: '' }
     const now = Date.now()
     const normalizedLink = normalizePeerChatLink(link)
     const normalizedAvatar = normalizePeerChatAvatar(avatar)
@@ -434,6 +439,7 @@ export class PeerChatService {
       // The whole key, because the eight characters above are a label and a
       // removal has to be checked against something that cannot be ground out.
       creatorKey: this.localKey,
+      ...(creatorProof && { creatorProof }),
       createdByName: this.myName(),
       moderation: normalizePeerChatModeration(moderation),
       bans: [],
@@ -1644,8 +1650,13 @@ export class PeerChatService {
           room.createdBy = message.createdBy.slice(0, 200)
           changed = true
         }
-        // Only from the creator, and only once. The connection is what proves
-        // it: whoever is announcing has to be the key they are announcing.
+        const knewCreator = Boolean(resolvePeerChatCreatorKey(roomKey, room.creatorKey))
+        // From anyone, with the secret that made the room's key out of the
+        // creator's. See room-move.mjs.
+        if (this.takeCreatorProof(roomKey, room, message.creatorKey, message.creatorProof)) changed = true
+        // Otherwise only from the creator, and only once. The connection is
+        // what proves it: whoever is announcing has to be the key they are
+        // announcing.
         if (acceptsPeerChatCreatorKey({
           roomKey,
           storedKey: room.creatorKey,
@@ -1655,6 +1666,11 @@ export class PeerChatService {
         })) {
           room.creatorKey = normalizePeerChatCreatorKey(message.creatorKey)
           changed = true
+        }
+        if (!knewCreator && resolvePeerChatCreatorKey(roomKey, room.creatorKey)) {
+          this.applyPendingBans(roomKey)
+          // On through the room, to everyone this phone can show it to.
+          if (this.creatorProofFor(roomKey)) this.broadcastRoomMeta(roomKey, peer)
         }
         if (!room.createdByName) {
           const creatorName = normalizeMemberName(message.createdByName)
@@ -2210,6 +2226,7 @@ export class PeerChatService {
       createdBy: room.createdBy || (room.isHost ? this.localId : ''),
       createdByName: room.createdByName || '',
       creatorKey: room.creatorKey || '',
+      ...(this.creatorProofFor(room.roomKey) && { creatorProof: this.creatorProofFor(room.roomKey) }),
       // The person's other device reads the room's history as this one does.
       ...(this.roomChainFor(room.roomKey) && { chain: this.roomChainFor(room.roomKey) })
     }
@@ -2271,6 +2288,10 @@ export class PeerChatService {
       const existing = this.rooms.get(room.roomKey)
       if (existing) {
         if (room.creatorKey && !existing.creatorKey) existing.creatorKey = room.creatorKey
+        if (room.creatorProof && !existing.creatorProof &&
+            checkCreatorProof(room.roomKey, resolvePeerChatCreatorKey(room.roomKey, existing.creatorKey), room.creatorProof)) {
+          existing.creatorProof = room.creatorProof
+        }
         if (room.chain && roomRotates(room.roomKey)) existing.chain = earlierKeyChain(existing.chain, room.chain)
         continue
       }
@@ -2296,6 +2317,7 @@ export class PeerChatService {
         joinedAt: room.joinedAt || room.createdAt || now,
         createdBy: room.createdBy,
         creatorKey: room.creatorKey,
+        ...(room.creatorProof && checkCreatorProof(room.roomKey, room.creatorKey, room.creatorProof) && { creatorProof: room.creatorProof }),
         bans: [],
         ...(room.chain && roomRotates(room.roomKey) && { chain: room.chain }),
         createdByName: normalizeMemberName(room.createdByName),
@@ -2378,6 +2400,10 @@ export class PeerChatService {
   sendRoomMeta (peer, roomKey) {
     const room = this.rooms.get(roomKey)
     if (!room || (!room.isHost && room.name === `${roomKey.slice(0, 8)}...`)) return
+    // Without the secret that made the room's key, a creator key counts only
+    // from the creator's own connection, so only the creator sends one. With
+    // it, anyone in the room can, and the other side checks it against the key.
+    const creatorProof = this.creatorProofFor(roomKey)
     this.sendToPeer(peer, {
       type: 'room-meta',
       roomKey,
@@ -2387,12 +2413,77 @@ export class PeerChatService {
       avatar: room.avatar || null,
       createdAt: normalizePeerChatReadTimestamp(room.createdAt),
       createdBy: room.createdBy || (room.isHost ? this.localId : ''),
-      // Announced by the creator alone. A peer passing this along cannot prove
-      // it, so the other side will not take it from them.
-      creatorKey: room.isHost ? this.localKey : '',
+      creatorKey: room.isHost ? this.localKey : creatorProof ? resolvePeerChatCreatorKey(roomKey, room.creatorKey) : '',
+      ...(creatorProof && { creatorProof }),
       createdByName: room.createdByName || (room.isHost ? this.myName() : ''),
       moderation: normalizePeerChatModeration(room.moderation)
     })
+  }
+
+  // Room details to everyone else in the room, for the creator key this phone
+  // just learned, so it goes on through the room.
+  broadcastRoomMeta (roomKey, exceptPeer = null) {
+    for (const peer of this.peers.values()) {
+      if (peer === exceptPeer || !peer.rooms.includes(roomKey)) continue
+      this.sendRoomMeta(peer, roomKey)
+    }
+  }
+
+  // The secret that shows who made a room, when this phone holds one that
+  // checks out against the creator key it trusts. See room-move.mjs.
+  creatorProofFor (roomKey) {
+    const room = this.rooms.get(roomKey)
+    const creatorKey = resolvePeerChatCreatorKey(roomKey, room?.creatorKey)
+    return room?.creatorProof && creatorKey && checkCreatorProof(roomKey, creatorKey, room.creatorProof)
+      ? room.creatorProof
+      : ''
+  }
+
+  // The creator key from anyone in the room, when it comes with the secret
+  // that made the room's key out of it. Before this, only the creator's own
+  // connection could say who made a room, so in a room bigger than one
+  // device's connections most members never learned it, and dropped every
+  // removal list as unchecked. True when the room learned something.
+  takeCreatorProof (roomKey, room, announcedKey, proof) {
+    if (room.isDM) return false
+    const key = normalizePeerChatCreatorKey(announcedKey)
+    if (!key || !checkCreatorProof(roomKey, key, proof)) return false
+    const held = resolvePeerChatCreatorKey(roomKey, room.creatorKey)
+    if (held && held !== key) return false
+    let changed = false
+    if (!room.creatorKey) {
+      room.creatorKey = key
+      changed = true
+    }
+    if (!room.creatorProof) {
+      room.creatorProof = proof.toLowerCase()
+      changed = true
+    }
+    // The short id is a label, and whoever said it first may have been wrong.
+    if (room.createdBy !== key.slice(0, 8)) {
+      room.createdBy = key.slice(0, 8)
+      changed = true
+    }
+    return changed
+  }
+
+  // A signed removal list that came before this phone knew who made the room,
+  // checked now that it does. It used to be dropped, and the next one came
+  // only with the next removal.
+  applyPendingBans (roomKey, exceptPeer = null) {
+    const room = this.rooms.get(roomKey)
+    const pending = room?.pendingBans
+    const creatorKey = resolvePeerChatCreatorKey(roomKey, room?.creatorKey)
+    if (!pending || !creatorKey) return
+    delete room.pendingBans
+    const signed = normalizeSignedRemovals(pending.signed)
+    if (signed.v <= normalizeSignedRemovals(room.bansSigned).v) return
+    if (!checkSignedRemovals({ topic: wireTopic(roomKey), creatorKey, bans: pending.bans, signed })) return
+    this.applyRoomBans(roomKey, pending.bans)
+    room.bansSigned = signed
+    this.persistNow()
+    this.bumpVersion()
+    this.broadcastRoomBans(roomKey, exceptPeer)
   }
 
   // What a room's messages are checked against. directMessage is never stored
@@ -3270,6 +3361,17 @@ export class PeerChatService {
       return
     }
 
+    // Signed, but this phone does not know who made the room yet: kept, and
+    // checked once it does. See applyPendingBans.
+    if (signed.sig && !creatorKey) {
+      const pendingV = normalizeSignedRemovals(room.pendingBans?.signed).v
+      if (signed.v > held.v && signed.v > pendingV) {
+        room.pendingBans = { bans: normalizePeerChatRoomBans(bans), signed }
+        this.schedulePersist()
+      }
+      return
+    }
+
     // Unsigned, from an older build: only the creator, proven by the
     // connection rather than claimed in the payload.
     if (!isPeerChatRoomCreator({
@@ -3673,6 +3775,10 @@ export class PeerChatService {
             (value?.isHost === true && !isDM ? this.localKey : ''),
           bans: isDM ? [] : normalizePeerChatRoomBans(value?.bans),
           bansSigned: normalizeSignedRemovals(isDM ? null : value?.bansSigned),
+          ...(!isDM && /^[0-9a-f]{64}$/.test(value?.creatorProof || '') && { creatorProof: value.creatorProof }),
+          ...(!isDM && value?.pendingBans?.signed && {
+            pendingBans: { bans: normalizePeerChatRoomBans(value.pendingBans.bans), signed: normalizeSignedRemovals(value.pendingBans.signed) }
+          }),
           chain: normalizeKeyChain(value?.chain),
           createdByName: normalizeMemberName(value?.createdByName),
           moderation: isDM
