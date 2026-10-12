@@ -119,8 +119,9 @@ test('who a device has seen in a room: keeps when each key was first seen, and m
   const known = {}
   assert.ok(noteKnownKey(known, key(1), 1000))
   assert.equal(noteKnownKey(known, key(1), 2000), false)
-  assert.ok(noteKnownKey(known, key(1), 70_000))
-  assert.deepEqual(known[key(1)], [1000, 70_000])
+  assert.equal(noteKnownKey(known, key(1), 70_000), false)
+  assert.ok(noteKnownKey(known, key(1), 3_700_000))
+  assert.deepEqual(known[key(1)], [1000, 3_700_000])
   assert.ok(knownBefore(known, key(1), 1001))
   assert.equal(knownBefore(known, key(1), 1000), false)
   assert.equal(knownBefore(known, key(2), Infinity), false)
