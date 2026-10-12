@@ -5,10 +5,11 @@ const MAX_DOCUMENT_LENGTH = 10 * 1024 * 1024
 const MAX_UPDATE_LENGTH = 4 * 1024 * 1024
 const MAX_LINE_ATTRIBUTIONS = 100000
 
-const ydoc = new Y.Doc()
-const ytext = ydoc.getText('content')
-const ylineAttributions = ydoc.getMap('lineAttributions')
 const updateListeners = new Set()
+
+let ydoc = null
+let ytext = null
+let ylineAttributions = null
 
 // A second copy of the note, kept in step with every change, that an edit is
 // tried on first. Trying it on a copy made from the whole note's state cost
@@ -17,11 +18,24 @@ const updateListeners = new Set()
 let mirror = null
 let mirrorText = null
 let mirrorLineAttributions = null
-rebuildMirror()
 
 let updatedAt = Date.now()
 
-ydoc.on('update', (update, origin) => {
+startFreshDocument()
+
+// Each note gets a document of its own. Emptying the last one kept its deleted
+// text, so a note opened again from its saved history could not be put back
+// over it.
+function startFreshDocument () {
+  if (ydoc) ydoc.destroy()
+  ydoc = new Y.Doc()
+  ytext = ydoc.getText('content')
+  ylineAttributions = ydoc.getMap('lineAttributions')
+  ydoc.on('update', onDocumentUpdate)
+  rebuildMirror()
+}
+
+function onDocumentUpdate (update, origin) {
   updatedAt = Date.now()
   try {
     Y.applyUpdate(mirror, update, 'mirror')
@@ -48,7 +62,7 @@ ydoc.on('update', (update, origin) => {
       console.error('[p2pmd] Document update listener failed:', error)
     }
   }
-})
+}
 
 export function getDocumentState () {
   const lineAttributions = getLineAttributionsState()
@@ -147,16 +161,45 @@ export function getEncodedDocumentState () {
 }
 
 export function resetDocumentState () {
-  ydoc.transact(() => {
-    const current = ytext.toString()
-    if (current.length > 0) ytext.delete(0, current.length)
-
-    for (const key of Array.from(ylineAttributions.keys())) {
-      ylineAttributions.delete(key)
-    }
-  }, 'document-reset')
-
+  startFreshDocument()
   updatedAt = Date.now()
+}
+
+// What a saved copy keeps: the text and its authors, and the Yjs state, so the
+// note can be opened again with the history its editors share.
+export function getDocumentSnapshot () {
+  return { ...getDocumentState(), yjsState: getEncodedDocumentState() }
+}
+
+// A note opened again from its saved copy. With its Yjs state it keeps the
+// history it had, so an editor that kept the note open merges with it. From
+// the text alone, as older copies and a desktop's are, the note started a new
+// history, and an editor that still had the old one wrote it out twice.
+export function restoreDocumentState ({ content, lineAttributions = null, yjsState = '' } = {}) {
+  const validation = validateDocumentContent(content)
+  if (!validation.ok) return validation
+
+  const state = savedStateFor(yjsState, content)
+  startFreshDocument()
+  if (!state) return updateDocumentState(content, lineAttributions)
+
+  Y.applyUpdate(ydoc, state, 'snapshot-restore')
+  return { ok: true }
+}
+
+// A saved Yjs state, only if it gives back the text it was saved with.
+function savedStateFor (yjsState, content) {
+  if (typeof yjsState !== 'string' || !yjsState) return null
+  const check = new Y.Doc()
+  try {
+    const state = b4a.from(yjsState, 'base64')
+    Y.applyUpdate(check, state)
+    return check.getText('content').toString() === content ? state : null
+  } catch {
+    return null
+  } finally {
+    check.destroy()
+  }
 }
 
 export function subscribeToDocumentUpdates (listener) {

@@ -39,7 +39,8 @@ export function loadP2pmdRoomSnapshot (roomKey, storagePath = getHyperStoragePat
     return {
       content: parsed.content,
       lineAttributions: parsed.lineAttributions,
-      updatedAt: normalizeTimestamp(parsed.updatedAt)
+      updatedAt: normalizeTimestamp(parsed.updatedAt),
+      ...(typeof parsed.yjsState === 'string' && parsed.yjsState && { yjsState: parsed.yjsState })
     }
   } catch {
     return null
@@ -51,11 +52,17 @@ export function saveP2pmdRoomSnapshot (roomKey, document, storagePath = getHyper
   const snapshot = normalizeSnapshot(document)
   if (!target || !snapshot) return false
 
-  const serialized = JSON.stringify({
+  let serialized = JSON.stringify({
     version: 1,
     key: target.roomKey,
     ...snapshot
   })
+  // A long-edited note's Yjs state can outgrow the limit. The text alone still
+  // opens it, with a new history.
+  if (b4a.byteLength(serialized) > MAX_SNAPSHOT_FILE_BYTES && snapshot.yjsState) {
+    const { yjsState, ...text } = snapshot
+    serialized = JSON.stringify({ version: 1, key: target.roomKey, ...text })
+  }
   if (b4a.byteLength(serialized) > MAX_SNAPSHOT_FILE_BYTES) return false
 
   const temporaryPath = `${target.filePath}.tmp`
@@ -121,7 +128,8 @@ function normalizeSnapshot (document) {
   return {
     content: document.content,
     lineAttributions: document.lineAttributions,
-    updatedAt: normalizeTimestamp(document.updatedAt)
+    updatedAt: normalizeTimestamp(document.updatedAt),
+    ...(typeof document.yjsState === 'string' && document.yjsState && { yjsState: document.yjsState })
   }
 }
 

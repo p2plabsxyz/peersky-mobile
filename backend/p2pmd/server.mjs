@@ -3,6 +3,7 @@ import { isOwnLoopbackRequest } from '../loopback-request.mjs'
 import {
   applyDocumentUpdate,
   getEncodedDocumentState,
+  getDocumentSnapshot,
   getDocumentState,
   getMaxDocumentLength,
   subscribeToDocumentUpdates,
@@ -77,7 +78,7 @@ Any questions?
 subscribeToDocumentUpdates(({ origin, update }) => {
   // The note as it is when the snapshot is saved, after a pause, rather than
   // put together on every edit.
-  scheduleP2pmdRoomSnapshot(getDocumentState)
+  scheduleP2pmdRoomSnapshot(getDocumentSnapshot)
   if (origin !== 'line-attribution-update') {
     broadcastEvent('yjsupdate', update)
   }

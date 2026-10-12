@@ -13,9 +13,9 @@ import {
   stopP2pmdServer
 } from './server.mjs'
 import {
-  getDocumentState,
+  getDocumentSnapshot,
   resetDocumentState,
-  updateDocumentState
+  restoreDocumentState
 } from './document.mjs'
 import {
   activateP2pmdRoomSnapshot,
@@ -73,7 +73,7 @@ export async function createP2pmdRoom ({
     if (connector) {
       const snapshot = loadP2pmdRoomSnapshot(connector)
       if (snapshot) {
-        const restored = updateDocumentState(snapshot.content, snapshot.lineAttributions)
+        const restored = restoreDocumentState(snapshot)
         if (!restored.ok) return restored
       } else if (requireCopy) {
         return {
@@ -138,7 +138,7 @@ export async function createP2pmdRoom ({
         return { ok: false, error: 'Unable to keep this public note on the phone, so it was not opened.' }
       }
 
-      activateP2pmdRoomSnapshot(room.key, getDocumentState())
+      activateP2pmdRoomSnapshot(room.key, getDocumentSnapshot())
       rememberNotePort(room.key, room.port)
 
       return {
@@ -264,7 +264,7 @@ export async function disconnectP2pmdRoom () {
 }
 
 async function disconnectRoomInternal () {
-  deactivateP2pmdRoomSnapshot(room?.role === 'host' ? getDocumentState() : null)
+  deactivateP2pmdRoomSnapshot(room?.role === 'host' ? getDocumentSnapshot() : null)
   const results = await Promise.allSettled([
     stopHolesail(),
     stopP2pmdServer()

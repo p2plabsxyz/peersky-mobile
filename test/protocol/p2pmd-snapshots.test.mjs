@@ -64,3 +64,27 @@ test('P2PMD snapshots reject mismatched and oversized stored data', async (t) =>
   }))
   assert.equal(loadP2pmdRoomSnapshot(roomKey('a'), storagePath), null)
 })
+
+test('P2PMD snapshots keep the note\'s Yjs state, and drop it rather than the note when it is too big', async (t) => {
+  const storagePath = await mkdtemp(join(tmpdir(), 'peersky-p2pmd-yjs-'))
+  t.after(() => rm(storagePath, { recursive: true, force: true }))
+
+  assert.equal(saveP2pmdRoomSnapshot(roomKey('y'), {
+    content: 'Line one',
+    lineAttributions: {},
+    updatedAt: 1,
+    yjsState: 'AQLmx5ziAgA='
+  }, storagePath), true)
+  assert.equal(loadP2pmdRoomSnapshot(roomKey('y'), storagePath).yjsState, 'AQLmx5ziAgA=')
+
+  // Over the limit with the state, under it with the text alone.
+  assert.equal(saveP2pmdRoomSnapshot(roomKey('z'), {
+    content: 'x'.repeat(1024),
+    lineAttributions: {},
+    updatedAt: 2,
+    yjsState: 'A'.repeat(45 * 1024 * 1024)
+  }, storagePath), true)
+  const saved = loadP2pmdRoomSnapshot(roomKey('z'), storagePath)
+  assert.equal(saved.content, 'x'.repeat(1024))
+  assert.equal(saved.yjsState, undefined)
+})

@@ -6,10 +6,12 @@ import * as Y from 'yjs'
 import { buildLineReplaceUpdate } from '../fixtures/yjs-helpers.mjs'
 import {
   applyDocumentUpdate,
+  getDocumentSnapshot,
   getDocumentState,
   getEncodedDocumentState,
   getMaxDocumentLength,
   resetDocumentState,
+  restoreDocumentState,
   subscribeToDocumentUpdates,
   updateDocumentState
 } from '../../backend/p2pmd/document.mjs'
@@ -187,6 +189,42 @@ describe('p2pmd document protocol state', () => {
     const small = medianEditMs('one line')
     const big = medianEditMs(Array.from({ length: 20000 }, (_, i) => `Line ${i + 1}: ${'x'.repeat(40)}`).join('\n'))
     assert.ok(big < small * 3 + 0.05, `an edit took ${big.toFixed(3)} ms on a 1 MB note and ${small.toFixed(3)} ms on a small one`)
+  })
+
+  it('opens a note again with the history it had, so an editor that kept it open merges instead of writing it out twice', () => {
+    updateDocumentState('Line one')
+    // An editor with the note open, which types a line of its own.
+    const editor = new Y.Doc()
+    Y.applyUpdate(editor, b4a.from(getEncodedDocumentState(), 'base64'))
+    let update = null
+    editor.on('update', (next) => { update = next })
+    editor.getText('content').insert(8, '\nLine two')
+    assert.equal(applyDocumentUpdate(b4a.toString(update, 'base64')).ok, true)
+
+    // The host goes away and opens the note again from its saved copy.
+    const saved = getDocumentSnapshot()
+    resetDocumentState()
+    assert.deepEqual(restoreDocumentState(saved), { ok: true })
+    assert.equal(getDocumentState().content, 'Line one\nLine two')
+
+    // The editor takes the host's state, as on reconnecting.
+    Y.applyUpdate(editor, b4a.from(getEncodedDocumentState(), 'base64'))
+    assert.equal(editor.getText('content').toString(), 'Line one\nLine two')
+    editor.destroy()
+  })
+
+  it('opens a note from its text when there is no history saved with it, or the history does not give the text back', () => {
+    assert.deepEqual(restoreDocumentState({ content: 'From a desktop', lineAttributions: {} }), { ok: true, document: getDocumentState() })
+    assert.equal(getDocumentState().content, 'From a desktop')
+
+    const other = new Y.Doc()
+    other.getText('content').insert(0, 'Something else')
+    const mismatched = b4a.toString(Y.encodeStateAsUpdate(other), 'base64')
+    other.destroy()
+    restoreDocumentState({ content: 'The saved text', lineAttributions: {}, yjsState: mismatched })
+    assert.equal(getDocumentState().content, 'The saved text')
+    restoreDocumentState({ content: 'Still the saved text', lineAttributions: {}, yjsState: 'not a state' })
+    assert.equal(getDocumentState().content, 'Still the saved text')
   })
 
   it('rejects malformed and oversized incremental Yjs updates', () => {
