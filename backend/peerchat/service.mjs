@@ -2552,8 +2552,14 @@ export class PeerChatService {
   // Rooms go only to a peer whose profile proved, on its own connection, that
   // it is another of this person's devices.
   sendRoomsToSibling (peer, rooms) {
-    if (!rooms.length || !peer?.sibling) return
-    this.sendToPeer(peer, { type: 'link-rooms', rooms })
+    if (!peer?.sibling) return
+    // Never a room that device was removed from, under its key now or one from
+    // before a move: a stolen phone removed from a room would get the new key
+    // from its owner's other devices.
+    const allowed = rooms.filter((entry) =>
+      ![...this.roomsBefore(entry.roomKey), entry.roomKey].some((key) => this.isPeerRemovedFromRoom(key, peer)))
+    if (!allowed.length) return
+    this.sendToPeer(peer, { type: 'link-rooms', rooms: allowed })
   }
 
   // A room joined here goes to this person's other devices that are online.

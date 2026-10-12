@@ -11,6 +11,7 @@ import { derivePeerChatTopic } from '../../backend/peerchat/protocol.mjs'
 import { newKeyChain } from '../../backend/peerchat/key-chain.mjs'
 import { roomProof } from '../../backend/peerchat/room-proof.mjs'
 import { checkMove, makeCreatorRoomKey, signMove } from '../../backend/peerchat/room-move.mjs'
+import { makeProfileProof } from '../../backend/peerchat/device-link.mjs'
 
 // A room that moves to a new key when its creator removes somebody: everyone
 // still in it follows, the person removed does not, and neither does anyone
@@ -31,6 +32,7 @@ const SAM = pair(64)
 const OLDER = pair(65)
 const NEWCOMER = pair(66)
 const UNKNOWN = pair(67)
+const LAPTOP = pair(68)
 
 async function startService (t) {
   const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-room-move-'))
@@ -150,6 +152,33 @@ test('a move from the creator is followed, and passed on only to people seen in 
   const forged = signMove({ fromTopic: wireRoom(other.roomKey), topicOf: wireRoom, to: fake.roomKey, proof: fake.creatorProof, chain: newKeyChain(), at: Date.now(), keyPair: STRANGER })
   await service.handlePeerMessage(relay, { type: 'room-moved', roomKey: other.roomKey, moves: [forged] })
   assert.equal(service.movedRoomsMap()[other.roomKey], undefined)
+})
+
+test('a device of the person\'s own that was removed never gets the new key, even once it proves it is theirs', async (t) => {
+  const service = await startService(t)
+  const { roomKey } = await service.createRoom({ name: 'Family' })
+  const { roomKey: kept } = await service.createRoom({ name: 'Kept' })
+  const link = service.exportTransfer({ targetType: 'desktop' }).link
+  const proveSibling = (peer) => service.handlePeerMessage(peer, {
+    type: 'profile', username: 'Ada@desktop1', link: makeProfileProof(link, { username: 'Ada', at: 1 }, peer.key)
+  })
+  const offered = (peer) => peer.of('link-rooms').flatMap((frame) => frame.rooms.map((room) => room.roomKey))
+
+  const laptop = await connect(service, LAPTOP, [roomKey, kept])
+  await proveSibling(laptop)
+  assert.ok(offered(laptop).includes(roomKey))
+  assert.ok(offered(laptop).includes(kept))
+  // Removed, as a laptop that was stolen would be.
+  const { movedTo } = await service.removeRoomMember({ roomKey, peerId: keyOf(LAPTOP).slice(0, 8) })
+  assert.match(movedTo, /^[0-9a-f]{64}$/)
+  service.peers.delete(laptop.connection)
+
+  const back = await connect(service, LAPTOP, [roomKey, kept])
+  await proveSibling(back)
+  assert.ok(offered(back).includes(kept))
+  assert.ok(!offered(back).includes(movedTo))
+  assert.ok(!offered(back).includes(roomKey))
+  assert.equal(back.of('room-moved').length, 0)
 })
 
 async function waitFor (check) {
