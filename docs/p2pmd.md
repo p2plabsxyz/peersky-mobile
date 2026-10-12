@@ -80,7 +80,20 @@ A note is meant for a team, up to about 100 people. Every editor talks to the ho
 - A person's line authors are in that list only when they changed since the last one. Someone who joins gets everyone's in full.
 - The whole note as text, which the editor reads line authors from, goes out at most twice a second, and every two seconds at 100 people.
 
-Measured on this phone's room server under Node, with 100 people in a note and 10 of them typing: each device receives about 34 KB a second and the host sends about 3.3 MB a second. Sending the whole note and the people list with every keystroke was 4.3 MB a second to each device and 426 MB a second from the host.
+`npm run test:load:p2pmd` measures this on one machine: this phone's room server under Node, with simulated editors that make the same requests as the real ones (see [test/load/p2pmd](../test/load/p2pmd/README.md)). PeerSky Desktop has the same test for its host. Run on 2026-10-12 on a MacBook Air (Apple M5, 10 cores, 32 GB, Node 24.21), each typist typing a character every 100 ms on a line of their own:
+
+| 100 people, 10 typing for 60 s | Phone host, desktop editors | Phone host, phone editors | Desktop host, desktop editors | Desktop host, phone editors |
+|---|---|---|---|---|
+| Edits sent, none refused | 5,960 (99 a second) | 5,950 (99 a second) | 5,950 (99 a second) | 5,942 (99 a second) |
+| Every editor ended with the host's text | yes | yes | yes | yes |
+| Time until every editor saw an edit (median, slowest) | 5.5 ms, 21.1 ms | 83.4 ms, 89.4 ms | 2.5 ms, 5.4 ms | 59.7 ms, 85.4 ms |
+| Data in per editor | 58 KB/s | 58 KB/s | 33 KB/s | 32 KB/s |
+| Out from the host | 5.9 MB/s | 5.9 MB/s | 3.4 MB/s | 3.3 MB/s |
+| Host CPU, first and last 5 s | 19%, 30% | 19%, 43% | 13%, 10% | 12%, 8% |
+| Host memory at most | 252 MB | 262 MB | 139 MB | 137 MB |
+| Yjs state at the start and end | 8.6 KB, 73.1 KB | 8.6 KB, 117.9 KB | 2.4 KB, 12.1 KB | 2.4 KB, 12.1 KB |
+
+Data in counts the replies to an editor's own requests too, and out from the host counts headers, so these run higher than earlier measurements of the events alone. The phone host answers each edit with the whole note, which the desktop host does not, and the phone editor applies what the host sends every 80 ms, which sets its times. The phone host's CPU still grows while people type: it checks each edit against a full copy of the note, so each one costs a little more than the last. Until 0.1.3, a phone editor's edit also set every line's author again, and at 20 people with 3 typing the note's Yjs state reached 395 KB in 20 seconds, against 18 KB now. Sending the whole note and the people list with every keystroke, as P2PMD once did, was 4.3 MB a second to each device and 426 MB a second from the host.
 
 A note is live only while its host has it open. iOS suspends PeerSky a few minutes after it leaves the screen, and a note the phone hosts goes offline with it until it comes back; edits made meanwhile merge then. For a big or long-running room, host from a desktop.
 
