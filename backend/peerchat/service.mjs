@@ -1230,17 +1230,10 @@ export class PeerChatService {
     return true
   }
 
-  handleConnection (connection, info = {}) {
-    const sharedRooms = getSharedPeerChatRooms(info.topics, this.discoveryKeys)
-    const hasTopics = Array.isArray(info.topics)
-      ? info.topics.length > 0
-      : !!info.topics?.length
-    // Found under one of our topics, or arriving without any (inbound ones
-    // can). Either way it starts in no room: anyone can announce a topic, so
-    // rooms open one by one as the peer proves it holds their keys.
-    if (this.closed || (sharedRooms.length === 0 && (hasTopics || this.discoveryKeys.size === 0))) return
-
-    const peer = {
+  // A connection's peer, before its transport: the key the handshake
+  // established, and nothing the peer says about itself.
+  newPeer (connection) {
+    return {
       connection,
       id: connection.remotePublicKey
         ? b4a.toString(connection.remotePublicKey, 'hex').slice(0, 8).toLowerCase()
@@ -1268,6 +1261,19 @@ export class PeerChatService {
       syncingRooms: new Map(),
       transport: null
     }
+  }
+
+  handleConnection (connection, info = {}) {
+    const sharedRooms = getSharedPeerChatRooms(info.topics, this.discoveryKeys)
+    const hasTopics = Array.isArray(info.topics)
+      ? info.topics.length > 0
+      : !!info.topics?.length
+    // Found under one of our topics, or arriving without any (inbound ones
+    // can). Either way it starts in no room: anyone can announce a topic, so
+    // rooms open one by one as the peer proves it holds their keys.
+    if (this.closed || (sharedRooms.length === 0 && (hasTopics || this.discoveryKeys.size === 0))) return
+
+    const peer = this.newPeer(connection)
     this.pendingPeers.set(connection, peer)
 
     const transport = attachPeerChatTransport(
