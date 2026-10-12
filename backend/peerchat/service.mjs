@@ -1811,10 +1811,13 @@ export class PeerChatService {
       const inner = message.m
       if (!inner || typeof inner !== 'object' || Array.isArray(inner)) return
       // One this phone asked for comes outside the budget for the ones nobody
-      // asked for. See passOn.
-      const asked = isMessageId(inner.id) && this.wantedIds.get(inner.id)?.sources.includes(peer)
+      // asked for, once from each neighbour asked. It stops being asked for
+      // only once a copy that checks out is kept, so a forged answer does not
+      // end the asking. See passOn.
+      const wanted = isMessageId(inner.id) ? this.wantedIds.get(inner.id) : null
+      const asked = Boolean(wanted) && wanted.sources.includes(peer) && !wanted.answered?.has(peer)
       if (!asked && !this.consumePassRate(peer)) return
-      if (asked) this.wantedIds.delete(inner.id)
+      if (asked) (wanted.answered ||= new Set()).add(peer)
       if (inner.type === 'reaction') await this.receiveReaction(peer, roomKey, inner, 'pass')
       else if (inner.type === undefined) await this.receiveChatMessage(peer, roomKey, inner, 'pass')
       return

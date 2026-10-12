@@ -110,6 +110,22 @@ test('a message heard of by id is asked for, taken once, and passed on by id', a
   assert.equal((await shown(service)).filter((text) => text === 'Heard about').length, 1)
 })
 
+test('asking goes on when the first answer does not check out', async (t) => {
+  const service = await setUp(t)
+  const alice = await connect(service, ALICE)
+  const bob = await connect(service, BOB)
+
+  const message = written(pair(82), 'The real one')
+  await service.handlePeerMessage(alice, { type: 'have', roomKey: ROOM, ids: [message.id] })
+  await service.handlePeerMessage(bob, { type: 'have', roomKey: ROOM, ids: [message.id] })
+  await service.handlePeerMessage(alice, { type: 'pass', roomKey: ROOM, m: { ...message, as: '00'.repeat(64) } })
+  assert.equal((await shown(service)).includes('The real one'), false)
+  for (let i = 0; i < 60 && !bob.ids('want').includes(message.id); i += 1) await sleep(100)
+  assert.ok(bob.ids('want').includes(message.id))
+  await service.handlePeerMessage(bob, { type: 'pass', roomKey: ROOM, m: message })
+  assert.ok((await shown(service)).includes('The real one'))
+})
+
 test('the next neighbour that has it is asked when the first does not answer', async (t) => {
   const service = await setUp(t)
   const bob = await connect(service, BOB)
