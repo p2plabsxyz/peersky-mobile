@@ -91,6 +91,29 @@ describe('p2pmd document protocol state', () => {
     })
   })
 
+  it('does not grow the note when the same line authors come with every edit', () => {
+    // The phone editor sends every line author it knows with each edit. Set
+    // again unchanged, each one left its old value behind in the note's state,
+    // which every edit then re-encoded and every joiner downloaded.
+    const authors = {}
+    for (let line = 1; line <= 20; line++) {
+      authors[line] = { color: '#58a6ff', name: `Person ${line}`, clientId: `client-${line}`, updatedAt: 1000 + line }
+    }
+    updateDocumentState(Array.from({ length: 20 }, (_, i) => `Line ${i + 1}`).join('\n'), authors)
+    const stateBytes = () => b4a.from(getEncodedDocumentState(), 'base64').byteLength
+    const nothing = b4a.toString(Y.encodeStateAsUpdate(new Y.Doc()), 'base64')
+    const before = stateBytes()
+
+    for (let i = 0; i < 50; i++) assert.equal(applyDocumentUpdate(nothing, authors).ok, true)
+    assert.equal(stateBytes(), before)
+
+    // A line whose author did change still changes.
+    const moved = { ...authors, 3: { color: '#9d4edd', name: 'Desktop', clientId: 'desktop-1', updatedAt: 5000 } }
+    assert.equal(applyDocumentUpdate(nothing, moved).ok, true)
+    assert.deepEqual(getDocumentState().lineAttributions[3], moved[3])
+    assert.deepEqual(getDocumentState().lineAttributions[4], authors[4])
+  })
+
   it('rejects malformed and oversized incremental Yjs updates', () => {
     assert.deepEqual(applyDocumentUpdate(''), {
       ok: false,

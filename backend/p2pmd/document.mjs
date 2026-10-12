@@ -249,9 +249,18 @@ function mergeLineAttributionsIntoMap (target, lineAttributions, lineCount) {
   for (const [line, attribution] of Object.entries(normalized)) {
     const lineNumber = Number(line)
     if (!Number.isInteger(lineNumber) || lineNumber < 1 || lineNumber > lineCount) continue
+    // Every set leaves the old value behind in the note's state, and the phone
+    // editor sends every line's author with each edit, so one that has not
+    // changed is left alone.
+    if (sameLineAttribution(target.get(String(lineNumber)), attribution)) continue
 
     target.set(String(lineNumber), attribution)
   }
+}
+
+function sameLineAttribution (current, next) {
+  return !!current && current.color === next.color && current.name === next.name &&
+    current.clientId === next.clientId && current.updatedAt === next.updatedAt
 }
 
 function trimLineAttributions (lineCount) {
