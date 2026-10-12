@@ -26,6 +26,7 @@
     "test:holesail:live": "node --test --test-force-exit ./test/integration/holesail-live.test.mjs",
     "test:load:peerchat": "node ./test/load/peerchat/run.mjs",
     "test:scale:peerchat": "node --test --test-force-exit ./test/scale/*.test.mjs",
+    "test:load:p2pmd": "node ./test/load/p2pmd/run.mjs",
     "generate:peertunes-runtime": "node scripts/generate-peertunes-runtime.mjs"
   },
   "repository": {
