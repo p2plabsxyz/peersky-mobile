@@ -152,6 +152,19 @@ const MAX_PASSED_MESSAGES_PER_WINDOW = 1200
 // Passing on is for what is being said now. Anything older comes in history,
 // which starts at the right time for each person.
 const MAX_PASSED_MESSAGE_AGE_MS = 10 * 60 * 1000
+// Ids first: a newer build hears only the id of each new message from most of
+// its connections, and asks one of them for the message itself. See passOn.
+const HAVE_BATCH_MS = 50
+const MAX_IDS_PER_FRAME = 256
+const MAX_HAVE_IDS_PER_WINDOW = 6000
+const MAX_WANT_IDS_PER_WINDOW = 6000
+// How long an asked-for message has to arrive before the next neighbour that
+// has it is asked, and how long to keep trying at all.
+const WANT_RETRY_MS = 3000
+const WANT_GIVE_UP_MS = 30_000
+const MAX_WANTED = 4096
+const MAX_REMEMBERED_PASSES = 4096
+const MAX_IDS_HEARD_PER_PEER = 2048
 const MAX_AUTHOR_RATES = 4096
 const MAX_PROVEN_KEYS = 4096
 const MAX_TOPIC_FRAMES_PER_WINDOW = 120
@@ -289,6 +302,11 @@ export class PeerChatService {
     this.signingKeys = null
     // How much each person has said lately, wherever it came from.
     this.authorRates = new Map()
+    // Messages this phone passed on lately, by id, for anyone who asks for one,
+    // and the ones it asked for, with who else has them. See passOn.
+    this.recentPasses = new Map()
+    this.wantedIds = new Map()
+    this.wantTimer = null
     // The whole key behind each short id, as connections proved them, so a
     // key ground to match somebody's id cannot sign as them.
     this.provenKeys = new Map()
@@ -1103,6 +1121,8 @@ export class PeerChatService {
     this.notifyTimer = null
     if (this.presenceTimer) clearTimeout(this.presenceTimer)
     this.presenceTimer = null
+    if (this.wantTimer) clearInterval(this.wantTimer)
+    this.wantTimer = null
     this.presence.clear()
 
     this.sdk.swarm.off?.('connection', this.onConnection)
@@ -1421,6 +1441,8 @@ export class PeerChatService {
       peer.handshake = true
       // A newer build passes messages on and takes them passed on. See passOn.
       if (message.pass === true) peer.passes = true
+      // Takes ids first, and asks for what it lacks. See passOn.
+      if (message.have === true) peer.haves = true
       // And takes a room's move to a new key. See room-move.mjs.
       if (message.move === true) peer.moves = true
       const added = []
@@ -1786,11 +1808,23 @@ export class PeerChatService {
     // A message somebody passed on, in a wrapper an older build drops. Only a
     // signed one counts, and it is its author's, not the sender's.
     if (message.type === 'pass') {
-      if (!this.consumePassRate(peer)) return
       const inner = message.m
       if (!inner || typeof inner !== 'object' || Array.isArray(inner)) return
+      // One this phone asked for comes outside the budget for the ones nobody
+      // asked for. See passOn.
+      const asked = isMessageId(inner.id) && this.wantedIds.get(inner.id)?.sources.includes(peer)
+      if (!asked && !this.consumePassRate(peer)) return
+      if (asked) this.wantedIds.delete(inner.id)
       if (inner.type === 'reaction') await this.receiveReaction(peer, roomKey, inner, 'pass')
       else if (inner.type === undefined) await this.receiveChatMessage(peer, roomKey, inner, 'pass')
+      return
+    }
+
+    // Ids a neighbour has, and ids a neighbour asks for. See passOn.
+    if (message.type === 'have' || message.type === 'want') {
+      if (!Array.isArray(message.ids)) return
+      if (message.type === 'have') this.takeHaves(peer, roomKey, message.ids)
+      else this.answerWants(peer, roomKey, message.ids)
       return
     }
 
@@ -1952,13 +1986,134 @@ export class PeerChatService {
   // A copy a neighbour already has stops at its first check, so a message
   // crosses the room in a few steps. It goes in a wrapper an older build
   // drops, and only to peers whose handshake said they take it.
+  //
+  // Ids first: to a peer whose handshake said it takes them (have: true), only
+  // the message's id goes, in a batch, and the peer asks for the message itself
+  // if it does not have it yet (want), from whichever neighbour told it first.
+  // Sending the whole message on every connection meant a device took in a copy
+  // from each of its connections, about a hundred in a big room. Now it takes
+  // the message once, and an id from the rest. An older build gets the whole
+  // message as before.
   passOn (roomKey, entry, fromPeer) {
     if (!entry?.as) return
+    this.rememberPass(roomKey, entry)
     const frame = { type: 'pass', roomKey, m: entry }
     for (const peer of this.peers.values()) {
       if (peer === fromPeer || !peer.passes || !peer.rooms.includes(roomKey)) continue
       if (peer.key === entry.ak || this.isPeerRemovedFromRoom(roomKey, peer)) continue
+      if (peer.haves) {
+        if (!peer.heardIds?.has(entry.id)) this.announceId(peer, roomKey, entry.id)
+        continue
+      }
       this.sendToPeer(peer, frame)
+    }
+  }
+
+  // Kept for ten minutes, as long as a message is passed on at all, for anyone
+  // who asks for it by id.
+  rememberPass (roomKey, entry) {
+    const now = Date.now()
+    this.recentPasses.delete(entry.id)
+    this.recentPasses.set(entry.id, { roomKey, entry, at: now })
+    for (const [id, kept] of this.recentPasses) {
+      if (this.recentPasses.size <= MAX_REMEMBERED_PASSES && now - kept.at < MAX_PASSED_MESSAGE_AGE_MS) break
+      this.recentPasses.delete(id)
+    }
+  }
+
+  announceId (peer, roomKey, id) {
+    if (!peer.haveQueue) peer.haveQueue = new Map()
+    const ids = peer.haveQueue.get(roomKey) || []
+    ids.push(id)
+    peer.haveQueue.set(roomKey, ids)
+    if (peer.haveTimer) return
+    peer.haveTimer = setTimeout(() => {
+      peer.haveTimer = null
+      const queue = peer.haveQueue
+      peer.haveQueue = new Map()
+      if (peer.connection.destroyed || this.closed) return
+      for (const [key, list] of queue) {
+        for (let index = 0; index < list.length; index += MAX_IDS_PER_FRAME) {
+          this.sendToPeer(peer, { type: 'have', roomKey: key, ids: list.slice(index, index + MAX_IDS_PER_FRAME) })
+        }
+      }
+    }, HAVE_BATCH_MS)
+    peer.haveTimer.unref?.()
+  }
+
+  // A budget of ids per connection a minute, for what neighbours say they have
+  // and what they ask for.
+  consumeIdRate (peer, field, count, max) {
+    const now = Date.now()
+    if (!peer[field] || now >= peer[field].resetsAt) peer[field] = { count: 0, resetsAt: now + LIVE_RATE_WINDOW_MS }
+    if (peer[field].count + count > max) return false
+    peer[field].count += count
+    return true
+  }
+
+  // Ids a neighbour has: anything new is asked for, from the first one to say
+  // so, and the rest are kept as the next to ask.
+  takeHaves (peer, roomKey, ids) {
+    const list = ids.filter(isMessageId).slice(0, MAX_IDS_PER_FRAME)
+    if (!list.length || !this.consumeIdRate(peer, 'haveRate', list.length, MAX_HAVE_IDS_PER_WINDOW)) return
+    if (!peer.heardIds) peer.heardIds = new Set()
+    const seen = this.seenIds.get(roomKey)
+    const ask = []
+    const now = Date.now()
+    for (const id of list) {
+      peer.heardIds.add(id)
+      if (peer.heardIds.size > MAX_IDS_HEARD_PER_PEER) peer.heardIds.delete(peer.heardIds.values().next().value)
+      if (seen?.has(id)) continue
+      const wanted = this.wantedIds.get(id)
+      if (wanted) {
+        if (!wanted.sources.includes(peer)) wanted.sources.push(peer)
+        continue
+      }
+      if (this.wantedIds.size >= MAX_WANTED) continue
+      this.wantedIds.set(id, { roomKey, sources: [peer], asked: 0, askedAt: now, since: now })
+      ask.push(id)
+    }
+    if (ask.length) this.sendToPeer(peer, { type: 'want', roomKey, ids: ask })
+    if (this.wantedIds.size && !this.wantTimer) {
+      this.wantTimer = setInterval(() => this.retryWants(), 1000)
+      this.wantTimer.unref?.()
+    }
+  }
+
+  // A message asked for that has not come: the next neighbour that has it is
+  // asked, until none is left or it has been too long.
+  retryWants () {
+    const now = Date.now()
+    for (const [id, wanted] of this.wantedIds) {
+      if (this.seenIds.get(wanted.roomKey)?.has(id) || now - wanted.since > WANT_GIVE_UP_MS) {
+        this.wantedIds.delete(id)
+        continue
+      }
+      if (now - wanted.askedAt < WANT_RETRY_MS) continue
+      let next = wanted.asked + 1
+      while (next < wanted.sources.length && (wanted.sources[next].connection.destroyed || !wanted.sources[next].rooms.includes(wanted.roomKey))) next += 1
+      if (next >= wanted.sources.length) {
+        this.wantedIds.delete(id)
+        continue
+      }
+      wanted.asked = next
+      wanted.askedAt = now
+      this.sendToPeer(wanted.sources[next], { type: 'want', roomKey: wanted.roomKey, ids: [id] })
+    }
+    if (!this.wantedIds.size && this.wantTimer) {
+      clearInterval(this.wantTimer)
+      this.wantTimer = null
+    }
+  }
+
+  // Messages a neighbour asked this phone for, which it passed on lately.
+  answerWants (peer, roomKey, ids) {
+    const list = ids.filter(isMessageId).slice(0, MAX_IDS_PER_FRAME)
+    if (!list.length || !this.consumeIdRate(peer, 'wantRate', list.length, MAX_WANT_IDS_PER_WINDOW)) return
+    for (const id of list) {
+      const kept = this.recentPasses.get(id)
+      if (!kept || kept.roomKey !== roomKey) continue
+      this.sendToPeer(peer, { type: 'pass', roomKey, m: kept.entry })
     }
   }
 
@@ -2215,9 +2370,10 @@ export class PeerChatService {
       if (proof) rooms.push({ topic, proof })
       if (rooms.length === MAX_ANNOUNCED_TOPICS) break
     }
-    // pass: takes messages passed on. move: takes a room's move to a new key.
-    // An older build ignores both and never gets either.
-    this.sendToPeer(peer, { type: 'topics', rooms, pass: true, move: true })
+    // pass: takes messages passed on. have: takes their ids first and asks
+    // for what it lacks. move: takes a room's move to a new key. An older
+    // build ignores all three and never gets any of them.
+    this.sendToPeer(peer, { type: 'topics', rooms, pass: true, have: true, move: true })
   }
 
   sendProfile (peer) {
@@ -4189,6 +4345,10 @@ export class PeerChatService {
     this.olderIdLoads.delete(roomKey)
     if (feed?.close) await feed.close().catch(() => {})
   }
+}
+
+function isMessageId (id) {
+  return typeof id === 'string' && id.length > 0 && id.length <= 128
 }
 
 function roomJoinTime (room) {
