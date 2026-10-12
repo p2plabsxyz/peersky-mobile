@@ -406,6 +406,8 @@ export async function routeRpcRequest (req) {
         ok: true,
         profile: peerChat.getProfile(),
         rooms: peerChat.listRooms(),
+        // Where each room that moved to a new key went. See peerchat/room-move.mjs.
+        movedRooms: peerChat.movedRoomsMap(),
         unreadTotal: peerChat.getUnreadTotal(),
         pendingDirectMessages: peerChat.listPendingDirectMessages(),
         blockedPeers: peerChat.listBlockedPeers(),
@@ -454,6 +456,8 @@ export async function routeRpcRequest (req) {
         ok: true,
         profile: peerChat.getProfile(),
         rooms: peerChat.listRooms(),
+        // Where each room that moved to a new key went. See peerchat/room-move.mjs.
+        movedRooms: peerChat.movedRoomsMap(),
         unreadTotal: peerChat.getUnreadTotal(),
         pendingDirectMessages: peerChat.listPendingDirectMessages(),
         blockedPeers: peerChat.listBlockedPeers(),

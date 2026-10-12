@@ -153,7 +153,10 @@ test('the one PeerChat screen follows the tab it is shown in', async () => {
   // tab switch is handled before it.
   assert.ok(screen.indexOf('const roomKey = peerChatRoomForTab(uiStateRef.current, tabId)') <
     screen.indexOf('if (!requestedRoomKey || !isInitialized || !profile?.username) return'))
-  assert.match(screen, /const restoredRoomKey = requestedRoomKey \? null : peerChatRoomForTab\(restoredUiState, tabId\)/)
+  assert.match(screen, /const savedRoomKey = requestedRoomKey \? null : peerChatRoomForTab\(restoredUiState, tabId\)/)
+  // A room that moved to a new key carries on under it, in every tab.
+  assert.match(screen, /const restoredRoomKey = savedRoomKey \? shownKey\(savedRoomKey\) : null/)
+  assert.match(screen, /const shown = roomKey \? movedRoomsRef\.current\[roomKey\] \|\| roomKey : null/)
 
   // An invite is read once and kept out of the tab's address, where its room
   // key showed and opened the invite again after a restart.

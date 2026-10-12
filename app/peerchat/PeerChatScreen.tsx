@@ -154,6 +154,9 @@ type PeerChatMessage = {
   system?: boolean
   // Sent on from another chat, and shown so.
   forwarded?: boolean
+  // From a room this one moved from, whose key opens its files. See
+  // backend/peerchat/room-move.mjs.
+  roomKey?: string
 }
 
 type PeerChatModeration = {
@@ -284,6 +287,7 @@ type PeerChatDirectInvite = {
 }
 
 export type PeerChatResponse = {
+  movedRooms?: Record<string, string>
   ok: boolean
   error?: string
   profile?: PeerChatProfile
@@ -415,6 +419,9 @@ export function PeerChatScreen ({
   const callRpcRef = useRef(onCallRpc)
   const messageListRef = useRef<FlatList<PeerChatMessage> | null>(null)
   const versionRef = useRef(-1)
+  // Where each room that moved to a new key went, so a tab still on the old
+  // key carries on in the new one. See backend/peerchat/room-move.mjs.
+  const movedRoomsRef = useRef<Record<string, string>>({})
   const activeRoomRef = useRef<PeerChatRoom | null>(null)
   const pollInFlightRef = useRef(false)
   const refreshAgainRef = useRef<boolean | 'poll'>(false)
@@ -727,7 +734,9 @@ export function PeerChatScreen ({
     if (!uiStateRestoredRef.current || shownTabIdRef.current === tabId) return
     shownTabIdRef.current = tabId
     const roomKey = peerChatRoomForTab(uiStateRef.current, tabId)
-    const room = roomKey ? rooms.find((item) => item.roomKey === roomKey) || null : null
+    // A room that moved to a new key is where it went now.
+    const shown = roomKey ? movedRoomsRef.current[roomKey] || roomKey : null
+    const room = shown ? rooms.find((item) => item.roomKey === shown) || null : null
     if (room) {
       if (activeRoomRef.current?.roomKey !== room.roomKey) openRoom(room)
     } else {
@@ -795,6 +804,7 @@ export function PeerChatScreen ({
         setProfileAvatar(nextProfile?.avatar || null)
         setLinkPreviewsEnabled(nextProfile?.linkPreview !== false)
         setRooms(response.rooms || [])
+        movedRoomsRef.current = response.movedRooms || {}
         setPendingDirectMessages(response.pendingDirectMessages || [])
         setBlockedPeers(response.blockedPeers || [])
         versionRef.current = Number.isSafeInteger(response.version) ? response.version as number : -1
@@ -816,11 +826,16 @@ export function PeerChatScreen ({
     if (!isInitialized || !restoredUiState || uiStateRestoredRef.current) return
 
     const roomKeys = new Set(rooms.map((room) => room.roomKey))
+    // A room that moved keeps its draft and its tabs, under its new key.
+    const shownKey = (roomKey: string) => movedRoomsRef.current[roomKey] || roomKey
     const drafts = Object.fromEntries(
-      Object.entries(restoredUiState.drafts || {}).filter(([roomKey]) => roomKeys.has(roomKey))
+      Object.entries(restoredUiState.drafts || {})
+        .map(([roomKey, draft]) => [shownKey(roomKey), draft])
+        .filter(([roomKey]) => roomKeys.has(roomKey))
     )
     // The chat this tab was on. An invite being opened comes first.
-    const restoredRoomKey = requestedRoomKey ? null : peerChatRoomForTab(restoredUiState, tabId)
+    const savedRoomKey = requestedRoomKey ? null : peerChatRoomForTab(restoredUiState, tabId)
+    const restoredRoomKey = savedRoomKey ? shownKey(savedRoomKey) : null
     const restoredRoom = restoredRoomKey
       ? rooms.find((room) => room.roomKey === restoredRoomKey) || null
       : null
@@ -867,6 +882,9 @@ export function PeerChatScreen ({
       if (!response.ok) throw new Error(response.error || 'Unable to refresh PeerChat room.')
       if (!mountedRef.current || activeRoomRef.current?.roomKey !== room.roomKey) return
 
+      // A room that moved answers as the room it went to, so this is where the
+      // tab goes on.
+      if (response.movedRooms) movedRoomsRef.current = response.movedRooms
       if (response.room) setActiveRoom(response.room)
       if (response.rooms) setRooms(response.rooms)
       // A snapshot read before our own message went out would take that
@@ -1829,9 +1847,13 @@ export function PeerChatScreen ({
    */
   function confirmRemoveMember (member: PeerChatMember) {
     if (!activeRoom || isBusy) return
+    // Every room but P2P Republic, whose key ships with the app, moves to a
+    // new key when somebody is removed. See backend/peerchat/room-move.mjs.
+    const movesKey = activeRoom.roomKey !== PRE_JOINED_PEERCHAT_ROOM_KEY
     Alert.alert(
       `Remove ${member.username}?`,
-      'They will not be able to come back to this room. Everyone running PeerChat will stop passing their messages on.',
+      'They will not be able to come back to this room. Everyone running PeerChat will stop passing their messages on.' +
+        (movesKey ? ' The room also moves to a new key they never get, so invites from before stop working.' : ''),
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -4289,7 +4311,7 @@ function PeerChatAttachment ({
     const command = item.fileEnc === true ? RPC_PEERCHAT_ATTACHMENT_OPEN : RPC_HYPER_FETCH
     const request = item.fileEnc === true
       ? {
-          roomKey,
+          roomKey: item.roomKey || roomKey,
           url: item.message,
           fileName: item.fileName,
           fileSize: item.fileSize,
@@ -4310,7 +4332,7 @@ function PeerChatAttachment ({
     return () => {
       cancelled = true
     }
-  }, [canPreview, item.fileEnc, item.fileKey, item.fileName, item.fileSize, item.message, mediaKind, onCallRpc, roomKey])
+  }, [canPreview, item.fileEnc, item.fileKey, item.fileName, item.fileSize, item.message, item.roomKey, mediaKind, onCallRpc, roomKey])
 
   async function openAttachment () {
     if (isOpening) return
@@ -4321,7 +4343,7 @@ function PeerChatAttachment ({
     setIsOpening(true)
     try {
       const response = await onCallRpc(RPC_PEERCHAT_ATTACHMENT_OPEN, {
-        roomKey,
+        roomKey: item.roomKey || roomKey,
         url: item.message,
         fileName: item.fileName,
         fileSize: item.fileSize,
