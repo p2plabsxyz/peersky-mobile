@@ -9,7 +9,7 @@ It is the only way PeerSky data moves. The app keeps it out of iCloud, computer 
 - **This device**, the person's other devices, then **Sync with another device**. The other devices are the ones met under the private files key, listed as Desktop or Phone with when each was last online (see Private files on your other devices in [hyper.md](hyper.md)). **Sync with another device** is one sheet for both directions. *Receive here* shows this phone's pairing code; *Send from here* is for scanning the other device's. The scan decides what happens either way: a pairing code (`peersky-identity:`) means "send this phone there", and a `hyper://` code is a transfer another device has ready for this one. A desktop's pairing code sends the tabs and bookmarks to that desktop.
 - **Save a backup file** and **Restore from a backup file**.
 - **Get the desktop browser**.
-- **Remove my data from this phone**, for handing a phone on or finishing a move.
+- **Remove my data from this phone**, for handing a phone on or finishing a move. Settings, P2P Data, Clear all P2P data takes this phone's identity too (its Link Device keys, a desktop's identity and private files key, and the list of your other devices, which stop syncing with it), but keeps tabs, bookmarks, history, downloads and settings.
 
 ## What moves
 
@@ -98,7 +98,7 @@ sequenceDiagram
   Note right of R: restores only once<br/>the person says they match
 ```
 
-The sender clears the transfer when its sheet is closed, or 15 minutes after it was made. Each send uses a new drive. Hyperdrive's `purge()` calls a method that does not exist in the hypercore release in use, so the file's blocks are cleared instead; the drive's index is kept, because clearing it leaves a drive that hangs whenever it is opened again. A send cut short by the app being killed leaves a marker, and the next start clears its drive.
+The sender keeps the transfer up when its sheet is closed, so opening the sheet again shows the same link and code, with the time it has left and how much of it the other device has taken (counted from the blocks the phone has sent). It comes down when the person presses Stop sending, or a minute after its 15 minutes are up. Closing the sheet used to clear it, and a desktop given the link afterwards had nothing to download. The other device still needs PeerSky open on this phone: iOS stops an app in the background from sending. So the screen stays on (`expo-keep-awake`) while a transfer is going out, until the other device has all of it, it runs out or it is stopped, and while one is packed or comes in. The desktop says when a download goes quiet, looks for the phone again, and gives up after two minutes with a plain message. Each send uses a new drive. Hyperdrive's `purge()` calls a method that does not exist in the hypercore release in use, so the file's blocks are cleared instead; the drive's index is kept, because clearing it leaves a drive that hangs whenever it is opened again. A send cut short by the app being killed leaves a marker, and the next start clears its drive.
 
 ## Phone to desktop
 
@@ -191,6 +191,7 @@ Once linked, private files no longer need a send to reach the desktop: the two m
 | `RPC_BACKUP_RESTORE_FILE` (36) | `{ path, passphrase }` | `{ ok, restoreId, restoredFiles, contents, about }` |
 | `RPC_IDENTITY_SEND` (37) | `{ pairingCode, peerskyVersion, platform }` | `{ ok, url, verificationCode, expiresAt, bytes, deviceType, sent }`; `sent` counts tabs, bookmarks, private drives and PeerChat rooms for a desktop |
 | `RPC_IDENTITY_SEND_STOP` (38) | `{}` | `{ ok }` |
+| `RPC_IDENTITY_SEND_STATUS` (78) | `{}` | `{ ok, sending: { url, verificationCode, expiresAt, deviceType, sent } \| null }`; `sent` is how much of it the other device has taken, 0 to 1 |
 | `RPC_IDENTITY_DISCARD_RESTORE` (39) | `{ restoreId }` | `{ ok }` |
 | `RPC_IDENTITY_REMOVE` (68) | `{}` | `{ ok, requiresRestart: true }` |
 

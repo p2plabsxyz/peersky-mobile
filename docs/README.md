@@ -129,8 +129,10 @@
   - [x] Group rooms and direct messages, with no account and no server
   - [x] Every message is encrypted and signed by whoever wrote it, and passed on from device to device, as an id first so each device takes it in once
   - [x] Rooms and direct messages made on 0.1.2 or later change their key every hour
-  - [x] Replies, reactions, mentions and search
-  - [x] Files and pictures, encrypted with the room, and link previews
+  - [x] Replies, reactions, mentions, and search in a chat or across every chat
+  - [x] Files and pictures, encrypted with the room, saved to the phone, and link previews
+  - [x] Forwarding messages, pictures, videos and files, paced under the chat's spam limit
+  - [x] Rooms their creator can edit, and messages grouped by sender
   - [x] Message requests to accept or decline
   - [x] Invite links and QR codes, and invites sent through any app
   - [x] A profile with a name, a bio, a picture and a short ID

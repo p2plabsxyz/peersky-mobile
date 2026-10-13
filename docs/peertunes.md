@@ -23,6 +23,7 @@ To update the app, replace the files under `assets/peertunes/`, update `manifest
 |---|---|---|
 | `/` and bundled files | `GET`, `HEAD` | The app page, scripts, styles and icons |
 | `/hyper/asset?url=hyper://...` | `GET`, `HEAD` | Streams a file from a drive with `Range` support. With `Accept: application/json` it returns the folder listing instead |
+| `/hyper/keep` | `GET` | For Keep On This Device: each song of a kept playlist as saved, saving or waiting (nobody who has it is online), and a download started for any song not all on the phone yet (`backend/peertunes/song-keeper.mjs`). The page reaches it through `window.peerskyKeepSongs` |
 
 Everything else answers `404`, and any write method answers `405`. PeerTunes probes for a writable drive when publishing a share; the `405` makes it show its "publishing needs desktop PeerSky" message, since mobile drives are read-only.
 
@@ -30,8 +31,12 @@ Everything else answers `404`, and any write method answers `405`. PeerTunes pro
 
 1. Opening `peersky://p2p/peertunes/` sends `RPC_PEERTUNES_START` to the Bare worklet.
 2. The backend starts the loopback server on the fixed port `47317` and falls back to a random port if that one is taken.
-3. React Native opens the local URL in a WebView. A share link such as `peersky://p2p/peertunes/#playlist=hyper%3A%2F%2F...` passes its fragment through, so the app can offer to import or play the playlist.
+3. React Native opens the local URL in a WebView. A share link such as `peersky://p2p/peertunes/#playlist=hyper%3A%2F%2F...` passes its fragment through once, so the app can offer to import or play the playlist; the tab's address keeps only `peersky://p2p/peertunes/`, so a restart opens the page where it was rather than the playlist again.
 4. Inside the page, `hyper://` reads go to `/hyper/asset`, which uses the read-only Hyper fetch from `backend/hyper/fetch.mjs`.
+
+The page keeps its queue and the place in the song, and puts the song back paused at that place when it starts. The home screen widget shows the song playing, and a tap on it carries the song's id (`&song=` beside the address, `parsePeerTunesWidgetTap` in `app/home-shortcuts.mjs`): PeerTunes hands it to the page once it has loaded (`PeerTunes.openNowPlaying(id)`), cold start or warm, and the page opens Now Playing on that song, or says it is no longer in the library.
+
+Keep On This Device counts a song as saved only once every block of it is on the phone. Each look at `/hyper/keep` also starts a download for any song still missing, songs in other drives included, and looks for the person who shared them again at most every 30 seconds. The page asks every few seconds while the playlist or the progress screen is open, and asks for the folder to be kept again every five minutes while songs are missing, so a playlist whose sharer went offline fills in once they are back.
 
 A drive the phone has never read answers its first listing with 404 "Peers Not Found" until a peer connects. The proxy waits that out the way the browser does, with a network refresh and a growing delay between tries (about six seconds in all), so the first add of a new drive works. A folder listing never starts a download on its own: PeerTunes asks for the drive to be kept on the device once an import has finished, through `window.peerskyKeepOffline`. Starting it earlier competed with the listings the import was still reading, and nested folders came back empty.
 

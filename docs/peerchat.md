@@ -19,14 +19,31 @@ and transport formats as PeerSky Desktop.
 - Keep a chat per browser tab, so two tabs show two rooms, each tab named after
   its room. The tab's chat is kept in PeerChat's UI state, not in its address,
   so no room key sits in the address bar.
-- Reply to messages, add reactions, mention peers, and search chats or messages.
-- Share room-encrypted Hyperdrive attachments and bounded HTTP or HTTPS link previews.
+- Reply to messages, add reactions and mention peers. Tapping the quote in a
+  reply goes to the message it answers, loading older history first if needed.
+- Search inside a chat, or from the chat list: chats whose name matches, then
+  matching messages from every chat, kept on this phone and never asked of
+  anyone else (see [Search](#search)).
+- Back-to-back messages from one person show together under one name, closer
+  together, with the time once at the end of a run. A gap of five minutes, a
+  new day, or a notice in between starts a new group, the same rule as the
+  desktop (`app/peerchat/message-groups.mjs`).
+- Share room-encrypted Hyperdrive attachments and bounded HTTP or HTTPS link
+  previews. A picture or video's bubble fits it, and either can be saved from
+  the viewer or its long-press menu: on iOS through the share sheet, on Android
+  into a folder picked once, so no new permission is asked for.
+- Forward messages, pictures, videos and files to another chat, each marked
+  Forwarded. Several go a moment apart, under that chat's spam limit, and a
+  picture or video forwarded into a group is screened like one sent there.
 - Start direct-message conversations through an explicit accept or decline flow.
 - Take pages from the browser's Send to Your Devices into your chat with
   yourself. With no such chat yet, one is started with another of your devices
   and the page waits, in memory, until that device accepts it, which it does by
   itself as soon as it is online.
-- Set a profile and host-owned room name, description, link, image, and moderation.
+- Set a profile, and as the person who made a room, its name, description,
+  link, picture and moderation, then change them later with Edit room.
+  Everyone in the room takes the change, signed by the room's creator (see
+  [Room details, signed by whoever made the room](#room-details-signed-by-whoever-made-the-room)).
 - Pin or mute rooms and track unread messages and mentions.
 - Show online room members and reconnect after temporary network loss.
 - Notify for unread messages while the PeerSky process can receive events.
@@ -79,6 +96,12 @@ reaches people who never meet the creator. A list from an older build carries
 no signature and counts only from the creator's own connection. On 0.1.3 the
 room also moves to a new key the person removed never hears (see
 [Removing somebody moves the room](#removing-somebody-moves-the-room)).
+
+The picture check runs the vendored model in a hidden WebView
+(`app/media/NsfwScanner.tsx`). iOS ends a WebView's page process while the app
+is in the background, and Android can lose its renderer, so the page is loaded
+again when that happens, and a picture goes to the page only once it says it is
+ready. The chat says it is checking a picture while it does.
 
 ## Room-key security
 
@@ -269,6 +292,35 @@ somebody, the room moves to a new key, and only the people still in it hear it.
 The desktop keeps the same rules in peerchat's `lib/room-move.js`, and both apps
 pin one vector (`test/protocol/peerchat-room-move.test.mjs`).
 
+### Room details, signed by whoever made the room
+
+A room's name, description, link, picture and filters used to be taken once,
+from anyone, and only to fill in what a phone did not have yet, so the creator
+could never change them, and the filters came from anyone every time. On 0.1.3
+the creator's device signs them:
+
+```text
+"peersky-chat/4 room details\n" + topic + "\n" +
+JSON.stringify([version, name, description, link, picture hash,
+                abuse filter, profanity filter, spam limit])
+```
+
+The picture hash is the SHA-256 of the picture's data URL, and the picture
+travels once beside the details. Room details (`room-meta`) carry the signed
+details as `details` from anyone who has them. A device checks them against the
+creator key, which the room key vouches for (above), takes the newest version,
+keeps them exactly as they came and passes them on, so a change reaches people
+who never meet the creator. Details that arrive before the creator key is known
+wait for it. Once a device holds signed details, nothing unsigned changes the
+room, and settings without a signature count only from the creator's own
+connection. Only the creator gets Edit room, and the backend refuses a change
+from anyone else ("Only the person who made this room can change it."). A
+device on 0.1.2 or older ignores `details` and keeps what it had.
+
+The desktop keeps the same rules in peerchat's `lib/room-details.js`
+(`backend/peerchat/room-details.mjs` here), and both apps pin one vector
+(`test/protocol/peerchat-room-details.test.mjs`).
+
 ## Attachments and link previews
 
 PeerChat stores attachments in a dedicated Hyperdrive for each room. Before
@@ -292,12 +344,32 @@ decrypt attachments because they hold the room key, or the message carrying the
 file's key; obtaining the `hyper://` URL alone exposes only ciphertext. Legacy plaintext attachments remain readable
 for compatibility.
 
+Forwarding a file opens it with the key it was sealed with and seals it again
+for the chat it goes to, as a new upload there with that chat's own key rule
+(`forwardPeerChatAttachment` in `backend/peerchat/attachments.mjs`, behind
+`RPC_PEERCHAT_ATTACHMENT_FORWARD` = 76). The picked file is never read by path
+from outside the app's own caches: the backend opens the attachment into its
+cache and seals that copy. The first file in a room no longer waits for the
+room's files drive to be announced; it is announced alongside, and the people
+in the room fetch over the connections they already have.
+
 Link previews are optional and run only when the local user sends a public HTTP
 or HTTPS URL. Preview fetching rejects credentials, loopback, link-local, and
 private-network targets, including names that resolve to one; validates every
 redirect; limits redirects and response bytes; and stops after a fixed time
 budget. Remote peers cannot use a received message to make this device fetch an
 arbitrary preview URL.
+
+## Search
+
+The chat list's search box finds chats by name, then messages in every chat.
+`RPC_PEERCHAT_SEARCH` (77) takes `{ query }` and reads only what this phone
+keeps: the newest 2000 entries of each chat, decrypted text cached up to two
+million characters, one search at a time, and the newest 50 matches, each with
+its chat, sender, time and a snippet around the match
+(`backend/peerchat/search.mjs`). Nothing is sent to anyone. Opening a result
+opens the chat at that message; the room snapshot takes a `limit` (200 to 5000)
+and says `hasOlder`, so a jump to an old message loads far enough back.
 
 ## Invite links, blocking and reports
 
@@ -347,7 +419,11 @@ Settings -> P2P Data provides two relevant operations:
   removes refetchable Hyper cores, retains locally owned room feeds and recent
   room metadata, and then restarts the shared runtime.
 - **Clear all P2P data** closes PeerChat and removes its rooms, message history,
-  metadata, and the rest of the device's local Hyper data and signing keys.
+  metadata, and the rest of the device's local Hyper data and signing keys,
+  and this device's identity with them: the PeerChat profile and keys, the key
+  private files are encrypted with, and the links to the person's other
+  devices (see Developer notes in [hyper.md](hyper.md)). Tabs, bookmarks,
+  history, downloads and settings stay.
 
 Leaving one room removes that room from the device and closes its active feed,
 without deleting another participant's copy. General browser cache clearing is

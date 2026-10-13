@@ -208,8 +208,31 @@ handshake hash `0e` x64 and sender `0d` x32 give the topic
 proof `8beb43aaede8fa35e6b0558e88ebeae7c1b3e809c00a68ec98e698fdae438c6c`.
 
 ## Developer notes
+
+Hyperdrive opens its core exclusively, so a second open of one drive waits for
+the first to close, which a drive hyper-sdk keeps never does.
+`backend/hyper/shared-drive-opens.mjs` makes opens of one drive share one, by
+address, key or name. A drive this phone made is opened by name and by address
+too (a PeerChat room's files drive, by name to upload and by address to show a
+picture sent earlier), so an open by name first reads the drive's key from a
+session on its core that takes no lock, and shares the open of that key. Before
+that, an upload after a restart could wait forever, and every upload after it
+queued behind.
 **Clear all P2P data** is broader than **Remove offline**. It closes active P2P
-runtimes and removes local Hyper and PeerChat data from the device.
+runtimes and removes local Hyper and PeerChat data from the device, and this
+device's identity with it, the way the desktop's Reset P2P data starts it over
+on the network: the Link Device keys and last pairing code, a desktop's
+identity record, the key private files are encrypted with, the private drives
+it sent, the list of other devices and their drives, what other devices sent
+that the apps have not taken yet, and the apps' own lists of that data (the
+list is in `backend/hyper/p2p-reset.mjs`). Tabs, bookmarks, history, downloads
+and settings stay, which is what sets it apart from Remove my data from this
+phone in Link Device. Link Device first drops a restore that is waiting and a
+transfer going out, and a note this phone hosts is closed. Everything goes
+into `.peersky-p2p-reset` first and is then deleted, so a clear the app is
+killed in is finished at the next start, before any store opens
+(`backend/main.mjs`). The app shows its restart screen before anything is
+removed, since what is on screen belongs to the identity going.
 
 ## Implementation
 
