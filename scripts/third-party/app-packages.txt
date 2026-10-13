@@ -43,6 +43,7 @@ node_modules/expo-glass-effect
 node_modules/expo-haptics
 node_modules/expo-image-manipulator
 node_modules/expo-image-picker
+node_modules/expo-keep-awake
 node_modules/expo-linking
 node_modules/expo-modules-core
 node_modules/expo-network

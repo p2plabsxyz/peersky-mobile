@@ -1,3 +1,4 @@
+import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake'
 import Constants from 'expo-constants'
 import * as DocumentPicker from 'expo-document-picker'
 import * as Sharing from 'expo-sharing'
@@ -35,6 +36,7 @@ import {
   RPC_IDENTITY_REMOVE,
   RPC_IDENTITY_RESTORE_FROM_HYPER,
   RPC_IDENTITY_SEND,
+  RPC_IDENTITY_SEND_STATUS,
   RPC_IDENTITY_SEND_STOP
 } from '../../backend/rpc/commands.mjs'
 import { BROWSER_PALETTES } from '../browser-appearance.mjs'
@@ -51,6 +53,8 @@ import {
   describeBackupOrigin,
   describePairingCodeLife,
   describeProgress,
+  describeSendLinkLife,
+  describeSendProgress,
   formatBackupSize,
   MIN_BACKUP_PASSPHRASE_LENGTH,
   toBareFsPath
@@ -375,6 +379,33 @@ export function LinkDeviceSettings ({ deviceSyncRevision = 0, onCallRpc, onResta
   )
 }
 
+// While a transfer goes out, or one is packed or comes in, the screen stays
+// on. iOS stops PeerSky sending once the phone locks, and the desktop then sat
+// on Connecting with nothing coming.
+const LINK_DEVICE_KEEP_AWAKE = 'peersky-link-device'
+
+// A transfer this phone is sending, as the sheet shows it.
+type OutgoingSend = {
+  url: string
+  code: string
+  toDesktop: boolean
+  expiresAt: number
+  // How much of it the other device has taken, 0 to 1.
+  sent: number
+}
+
+function readOutgoingSend (response: RpcResult): OutgoingSend | null {
+  const sending = response?.ok ? response.sending : null
+  if (!sending || typeof sending.url !== 'string') return null
+  return {
+    url: sending.url,
+    code: String(sending.verificationCode || ''),
+    toDesktop: sending.deviceType === 'desktop',
+    expiresAt: Number(sending.expiresAt) || 0,
+    sent: Number(sending.sent) || 0
+  }
+}
+
 // One sheet for both directions, the way sync works in other browsers: show
 // your code, or scan theirs. What the camera sees decides what happens: a
 // pairing code means send this phone there, a transfer code means bring it
@@ -398,7 +429,8 @@ function SyncSheet ({
   const [clock, setClock] = useState(() => Date.now())
   const [busy, setBusy] = useState<string | null>(null)
   const [progress, setProgress] = useState<LinkDeviceProgress | null>(null)
-  const [sending, setSending] = useState<{ url: string, code: string, toDesktop: boolean } | null>(null)
+  const [sending, setSending] = useState<OutgoingSend | null>(null)
+  const [sendEnded, setSendEnded] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [linkCopied, setLinkCopied] = useState(false)
@@ -415,11 +447,23 @@ function SyncSheet ({
     let cancelled = false
     setDirection('receive')
     setSending(null)
+    setSendEnded(false)
     setError(null)
     setCopied(false)
     setPairingCode('')
     setPairingExpiresAt(0)
     setPairingRenewed(false)
+
+    // A transfer this phone is still sending shows again, with the same link
+    // and code, until it runs out or is stopped. Closing the sheet used to
+    // stop it, and a desktop given the link then had nothing to download.
+    void call(RPC_IDENTITY_SEND_STATUS).then((response) => {
+      const current = readOutgoingSend(response)
+      if (cancelled || !current) return
+      setDirection('send')
+      setSending(current)
+      setClock(Date.now())
+    }).catch(() => {})
 
     void (async () => {
       try {
@@ -474,11 +518,60 @@ function SyncSheet ({
     }
   }, [busy, call, direction, pairingExpiresAt, sending, visible])
 
+  // While a transfer is out, how much the other device has taken and how
+  // long the link has left, and back to the start once it is over. Asked even
+  // with the sheet closed, so the screen is let go once the other device has
+  // it.
+  useEffect(() => {
+    if (!sending) return
+    let cancelled = false
+    const tick = () => {
+      setClock(Date.now())
+      call(RPC_IDENTITY_SEND_STATUS).then((response) => {
+        if (cancelled) return
+        const current = readOutgoingSend(response)
+        if (!current) {
+          setSending(null)
+          setSendEnded(true)
+          return
+        }
+        setSending((previous) => previous && previous.url === current.url && previous.sent === current.sent ? previous : current)
+      }).catch(() => {})
+    }
+    const timer = setInterval(tick, 2000)
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+    }
+  }, [call, sending, visible])
+
+  const sendingUrl = sending?.url || ''
+  const sendDone = (sending?.sent ?? 0) >= 1
+  const sendExpiresAt = sending?.expiresAt ?? 0
+  useEffect(() => {
+    const out = sendingUrl !== '' && !sendDone
+    if (!out && !busy) return
+    void activateKeepAwakeAsync(LINK_DEVICE_KEEP_AWAKE).catch(() => {})
+    // A transfer runs out by itself, and the screen is let go then too.
+    const timer = out && !busy && sendExpiresAt > 0
+      ? setTimeout(() => { void deactivateKeepAwake(LINK_DEVICE_KEEP_AWAKE).catch(() => {}) }, Math.max(0, sendExpiresAt - Date.now()) + 60 * 1000)
+      : null
+    return () => {
+      if (timer) clearTimeout(timer)
+      void deactivateKeepAwake(LINK_DEVICE_KEEP_AWAKE).catch(() => {})
+    }
+  }, [busy, sendDone, sendExpiresAt, sendingUrl])
+
+  // Closing leaves a transfer going, so the other device can still download
+  // it. Stop sending is what takes it down.
   function close () {
-    if (sending) void call(RPC_IDENTITY_SEND_STOP).catch(() => {})
-    setSending(null)
-    setBusy(null)
     onClose()
+  }
+
+  function stopSending () {
+    void call(RPC_IDENTITY_SEND_STOP).catch(() => {})
+    tapFeedback()
+    setSending(null)
   }
 
   async function openScanner () {
@@ -609,13 +702,18 @@ function SyncSheet ({
         platform: Platform.OS
       })
       if (!response.ok) throw new Error(response.error || 'Could not send')
-      if (!visibleRef.current) {
-        void call(RPC_IDENTITY_SEND_STOP).catch(() => {})
-        return
-      }
-      tapFeedback()
-      setSending({ url: response.url, code: response.verificationCode, toDesktop })
+      // Kept even if the sheet was closed while packing: it shows the next
+      // time the sheet opens.
       if (toDesktop) emitP2pmdNotesShared(response.sharedNotes)
+      if (visibleRef.current) tapFeedback()
+      setSendEnded(false)
+      setSending({
+        url: response.url,
+        code: response.verificationCode,
+        toDesktop,
+        expiresAt: Number(response.expiresAt) || 0,
+        sent: 0
+      })
     } catch (sendError) {
       setError(errorMessage(sendError))
     } finally {
@@ -643,7 +741,7 @@ function SyncSheet ({
   }
 
   return (
-    <SheetFrame title='Sync with another device' visible={visible} onClose={close} closeLabel={sending ? 'Done' : 'Close'}>
+    <SheetFrame title='Sync with another device' visible={visible} onClose={close} closeLabel='Close'>
       {error && <Banner kind='error' text={error} onDismiss={() => setError(null)} />}
 
       {busy
@@ -669,11 +767,28 @@ function SyncSheet ({
                 </Text>
                 <Text style={[styles.codeValue, isDark ? darkStyles.text : null]}>{sending.code}</Text>
               </View>
+              {describeSendProgress(sending.sent, sending.toDesktop) !== '' && (
+                <Text style={[styles.sheetText, isDark ? darkStyles.text : null]}>
+                  {describeSendProgress(sending.sent, sending.toDesktop)}
+                </Text>
+              )}
               <Text style={[styles.sheetText, isDark ? darkStyles.muted : null]}>
                 {sending.toDesktop
-                  ? 'Keep PeerSky open on this phone until the desktop has it. This code works for 15 minutes.'
-                  : 'Keep PeerSky open on both phones until it finishes. This code works for 15 minutes.'}
+                  ? 'Keep PeerSky open on this phone until the desktop has it. The screen stays on meanwhile. You can close this; the link keeps working until it runs out or you stop it.'
+                  : 'Keep PeerSky open on both phones until it finishes. The screen stays on meanwhile. You can close this; the link keeps working until it runs out or you stop it.'}
               </Text>
+              {sending.expiresAt > 0 && (
+                <Text style={[styles.sheetNote, isDark ? darkStyles.muted : null]}>
+                  {describeSendLinkLife(sending.expiresAt - clock)}
+                </Text>
+              )}
+              <Pressable
+                accessibilityRole='button'
+                style={({ pressed }) => [styles.secondaryButton, isDark ? darkStyles.secondaryButton : null, pressed ? styles.pressed : null]}
+                onPress={stopSending}
+              >
+                <Text style={[styles.secondaryButtonText, isDark ? darkStyles.text : null]}>Stop sending</Text>
+              </Pressable>
               {!sending.toDesktop && (
                 <Text style={[styles.sheetNote, isDark ? darkStyles.muted : null]}>
                   Moving for good? Once the new phone has everything, remove your data from this one, so the two are not using the same chats.
@@ -694,6 +809,12 @@ function SyncSheet ({
                   setError(null)
                 }}
               />
+
+              {sendEnded && direction === 'send' && (
+                <Text style={[styles.sheetNote, isDark ? darkStyles.muted : null]}>
+                  The last link ran out, so it no longer works. Scan the other device's code again to send a new one.
+                </Text>
+              )}
 
               {direction === 'receive'
                 ? (

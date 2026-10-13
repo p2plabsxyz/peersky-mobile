@@ -28,6 +28,7 @@ import {
   RPC_IDENTITY_REMOVE,
   RPC_IDENTITY_SEND,
   RPC_IDENTITY_SEND_STOP,
+  RPC_IDENTITY_SEND_STATUS,
   RPC_IDENTITY_DISCARD_RESTORE,
   RPC_BACKUP_CREATE,
   RPC_BACKUP_ESTIMATE,
@@ -83,6 +84,7 @@ import {
   createBackupFile,
   discardPendingRestore,
   estimateBackup,
+  getOutgoingTransfer,
   inspectBackup,
   receiveTransfer,
   removeIdentity,
@@ -305,6 +307,11 @@ export async function routeRpcRequest (req) {
 
     if (req.command === RPC_IDENTITY_SEND_STOP) {
       replyJson(req, await stopOutgoingTransfer())
+      return
+    }
+
+    if (req.command === RPC_IDENTITY_SEND_STATUS) {
+      replyJson(req, getOutgoingTransfer())
       return
     }
 

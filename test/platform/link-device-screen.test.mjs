@@ -10,6 +10,8 @@ import {
   describeBackupOrigin,
   describePairingCodeLife,
   describeProgress,
+  describeSendLinkLife,
+  describeSendProgress,
   formatBackupSize,
   MIN_BACKUP_PASSPHRASE_LENGTH,
   parseProgressEvent,
@@ -155,6 +157,40 @@ test('Receive here says how long its code has left, and renews it with a note wh
   assert.match(renew, /if \(!visible \|\| direction !== 'receive' \|\| sending \|\| busy \|\| !pairingExpiresAt\) return/)
   assert.match(screen, /describePairingCodeLife\(pairingExpiresAt - clock\)/)
   assert.match(screen, /The last code ran out, so this is a new one\. If the other device has the old code, scan this one there instead\./)
+})
+
+test('Send from here keeps sending when the sheet closes, shows the same link again, and stops only when asked', async () => {
+  assert.equal(describeSendLinkLife(15 * 60 * 1000), 'This link works for 15 more minutes.')
+  assert.equal(describeSendLinkLife(61 * 1000), 'This link works for 1 more minute.')
+  assert.equal(describeSendLinkLife(30 * 1000), 'This link works for less than a minute more.')
+  assert.equal(describeSendLinkLife(0), 'This link has run out.')
+  assert.equal(describeSendProgress(0, true), '')
+  assert.equal(describeSendProgress(0.426, true), 'The desktop has 42% of it so far.')
+  assert.equal(describeSendProgress(1, true), 'The desktop has all of it. You can stop sending now.')
+  assert.equal(describeSendProgress(1, false), 'The other phone has all of it. You can stop sending now.')
+  assert.equal(commands.RPC_IDENTITY_SEND_STATUS, 78)
+
+  const screen = await read('app/settings/LinkDevice.tsx')
+  // Closing used to stop the transfer, and a desktop given the link then
+  // waited on nothing.
+  const close = screen.slice(screen.indexOf('  function close ()'), screen.indexOf('  function stopSending ()'))
+  assert.doesNotMatch(close, /RPC_IDENTITY_SEND_STOP/)
+  assert.doesNotMatch(screen, /if \(!visibleRef\.current\) \{\s*void call\(RPC_IDENTITY_SEND_STOP\)/)
+  assert.match(screen, /function stopSending \(\) \{\s*void call\(RPC_IDENTITY_SEND_STOP\)/)
+  assert.match(screen, />Stop sending</)
+  // Opening the sheet shows a transfer still going out, on Send from here.
+  const open = screen.slice(screen.indexOf('    setSendEnded(false)'), screen.indexOf('// The code works for 15 minutes'))
+  assert.match(open, /call\(RPC_IDENTITY_SEND_STATUS\)/)
+  assert.match(open, /setDirection\('send'\)\s*setSending\(current\)/)
+  assert.match(screen, /describeSendLinkLife\(sending\.expiresAt - clock\)/)
+  assert.match(screen, /describeSendProgress\(sending\.sent, sending\.toDesktop\)/)
+
+  // The screen stays on while the transfer is out, or one is packed or comes
+  // in: iOS stops PeerSky sending once the phone locks.
+  assert.match(screen, /import \{ activateKeepAwakeAsync, deactivateKeepAwake \} from 'expo-keep-awake'/)
+  const awake = screen.slice(screen.indexOf('const sendingUrl ='), screen.indexOf('function close ()'))
+  assert.match(awake, /const out = sendingUrl !== '' && !sendDone\s+if \(!out && !busy\) return\s+void activateKeepAwakeAsync\(LINK_DEVICE_KEEP_AWAKE\)/)
+  assert.match(awake, /return \(\) => \{\s+if \(timer\) clearTimeout\(timer\)\s+void deactivateKeepAwake\(LINK_DEVICE_KEEP_AWAKE\)/)
 })
 
 test('what the camera sees decides the direction', async () => {

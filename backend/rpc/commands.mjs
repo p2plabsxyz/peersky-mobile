@@ -91,6 +91,10 @@ export const RPC_PEERCHAT_ATTACHMENT_FORWARD = 76
 // { query } over the messages kept on this phone, every chat at once. Nothing
 // is asked of anyone else.
 export const RPC_PEERCHAT_SEARCH = 77
+// The transfer Link Device is sending now, if any, so its screen can show the
+// same link and code after it was closed: { sending: { url, verificationCode,
+// expiresAt, deviceType, sent } | null }.
+export const RPC_IDENTITY_SEND_STATUS = 78
 
 export const RPC_IDENTITY_REMOVE = 68
 

@@ -102,3 +102,24 @@ export function describePairingCodeLife (msLeft) {
   const minutes = Math.floor(ms / (60 * 1000))
   return `This code works for ${minutes} more ${minutes === 1 ? 'minute' : 'minutes'}.`
 }
+
+// How long a link this phone is sending has left. Like the pairing code, in
+// whole minutes rounded down.
+export function describeSendLinkLife (msLeft) {
+  const ms = Number(msLeft)
+  if (!Number.isFinite(ms) || ms <= 0) return 'This link has run out.'
+  if (ms < 60 * 1000) return 'This link works for less than a minute more.'
+  const minutes = Math.floor(ms / (60 * 1000))
+  return `This link works for ${minutes} more ${minutes === 1 ? 'minute' : 'minutes'}.`
+}
+
+// How much of a transfer the other device has taken, from the share of its
+// blocks this phone has sent, or '' before it starts.
+export function describeSendProgress (sent, toDesktop) {
+  const share = Number(sent)
+  if (!Number.isFinite(share) || share <= 0) return ''
+  if (share >= 1) {
+    return `${toDesktop ? 'The desktop' : 'The other phone'} has all of it. You can stop sending now.`
+  }
+  return `${toDesktop ? 'The desktop' : 'The other phone'} has ${Math.floor(share * 100)}% of it so far.`
+}
