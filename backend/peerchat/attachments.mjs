@@ -291,11 +291,13 @@ async function sealIntoRoom (normalizedRoomKey, localFile, ownKey, options) {
   return withUploadTransition(async () => {
     try {
       return await runWithRuntime(options, async (runtime) => {
-        const drive = await runtime.getDrive(attachmentDriveName(normalizedRoomKey))
+        // Not held up while the drive is announced: the first file in a room
+        // used to wait for that, half a second on a local network and many
+        // seconds with no network. It is announced alongside, and the people
+        // in the room can fetch it over the connections they already have.
+        const drive = await runtime.getDrive(attachmentDriveName(normalizedRoomKey), { autoJoin: false })
+        if (drive.core && !drive.core.discovery && typeof runtime.joinCore === 'function') runtime.joinCore(drive.core).catch(() => {})
         const pathname = opaqueAttachmentPath(options.now, options.randomBytes)
-        // In a room whose keys rotate, the file is sealed with a key of its
-        // own, which goes inside the sealed message, so it opens only for
-        // someone who can read that. Any other room seals with its room key.
         const fileKey = ownKey === true ? b4a.toString(randomBytes(32), 'hex') : ''
         await writeEncryptedFile(drive, pathname, localFile, fileKey || normalizedRoomKey, options)
 

@@ -2087,7 +2087,10 @@ export function PeerChatScreen ({
         source,
         // A room shows a picture to everyone at once, so it is screened. A
         // direct message reaches one person, who can block the sender.
-        screen: !activeRoom.isDM
+        screen: !activeRoom.isDM,
+        // The check takes a moment, and with nothing said the screen looked
+        // stuck between the picker closing and the upload starting.
+        onPicked: (picked) => onStatus(picked.length === 1 ? `Checking ${picked[0].name}` : `Checking ${picked.length} files`)
       })
       if (assets.length === 0) return
 

@@ -1,7 +1,7 @@
 import { Asset } from 'expo-asset'
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator'
 import { Directory, File, Paths } from 'expo-file-system'
-import { memo, useEffect, useMemo, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import { StyleSheet, View } from 'react-native'
 import WebView from 'react-native-webview'
 
@@ -28,12 +28,17 @@ const MAX_SCANNED_BYTES = 24 * 1024 * 1024
 type Pending = {
   resolve: (verdict: string) => void
   timer: ReturnType<typeof setTimeout>
+  // What goes to the page, kept so it can go again to a page that restarted.
+  request: string
 }
 
 // Module scope on purpose. The send path screens what you are about to upload
 // and the receive path screens what arrived, and a peer running a modified
 // build is exactly why the second one has to exist. Both go through here.
 let liveWebView: WebView | null = null
+// Whether the page has said its classifier is loaded. A picture posted to a
+// page that is not listening is never answered, so it waits for this.
+let classifierReady = false
 const pending = new Map<string, Pending>()
 let nextId = 0
 
@@ -94,8 +99,9 @@ export async function scanMedia (asset: {
       pending.delete(id)
       resolve(MEDIA_UNSCANNED)
     }, SCAN_TIMEOUT_MS)
-    pending.set(id, { resolve, timer })
-    liveWebView?.postMessage(JSON.stringify({ id, dataUrl: `data:image/jpeg;base64,${base64}` }))
+    const request = JSON.stringify({ id, dataUrl: `data:image/jpeg;base64,${base64}` })
+    pending.set(id, { resolve, timer, request })
+    if (classifierReady) liveWebView?.postMessage(request)
   })
 }
 
@@ -146,6 +152,18 @@ async function stageScannerFiles () {
 export const NsfwScanner = memo(function NsfwScanner () {
   const [pageUri, setPageUri] = useState<string | null>(null)
   const [folderUri, setFolderUri] = useState<string | null>(null)
+  // iOS ends a WebView's page process while the app is in the background, and
+  // Android can lose its renderer. The view then stays blank and answered
+  // nothing again, so every picture waited the whole timeout: pictures sent
+  // in a room went out only after a 20 second wait, which looked like waiting
+  // for the app to go to the background, since timers catch up when it comes
+  // back. A new WebView loads the page again; scans waiting go to it once it
+  // is ready.
+  const [generation, setGeneration] = useState(0)
+  const restart = useCallback(() => {
+    classifierReady = false
+    setGeneration((value) => value + 1)
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -183,6 +201,7 @@ export const NsfwScanner = memo(function NsfwScanner () {
   return (
     <View pointerEvents='none' style={styles.hidden}>
       <WebView
+        key={generation}
         androidLayerType='software'
         originWhitelist={['*']}
         allowFileAccess
@@ -199,8 +218,14 @@ export const NsfwScanner = memo(function NsfwScanner () {
           // Without this the classifier failing to start looks exactly like a
           // clean picture: silence, and every upload waved through.
           if (message.ready !== undefined) {
-            if (message.ready) console.log('[nsfw] classifier ready')
-            else console.warn('[nsfw] classifier failed to start:', message.error)
+            if (message.ready) {
+              console.log('[nsfw] classifier ready')
+              classifierReady = true
+              for (const entry of pending.values()) liveWebView?.postMessage(entry.request)
+            } else {
+              console.warn('[nsfw] classifier failed to start:', message.error)
+              for (const id of [...pending.keys()]) settle(id, MEDIA_UNSCANNED)
+            }
             return
           }
 
@@ -211,6 +236,8 @@ export const NsfwScanner = memo(function NsfwScanner () {
         onError={(event) => {
           console.warn('[nsfw] classifier page failed:', event.nativeEvent.description)
         }}
+        onContentProcessDidTerminate={restart}
+        onRenderProcessGone={restart}
         ref={(instance) => { liveWebView = instance }}
         source={source}
       />

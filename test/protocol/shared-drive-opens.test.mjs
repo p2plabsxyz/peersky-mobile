@@ -122,3 +122,53 @@ test('every store the phone opens shares its drive opens', async () => {
   assert.equal(created.length, 4)
   assert.equal(shared.length, created.length)
 })
+
+// A drive this phone made, opened by its name and by its address after a
+// restart: a PeerChat room's files drive by name to upload a picture, and by
+// address to show one sent earlier. The open by name used to make a second
+// drive that waited for the first to let go of its core, for good, so the
+// upload never finished and every upload after it queued behind.
+test('a drive opened by its name and by its address is one open, in any order', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'peersky-opens-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const storage = join(root, 'phone')
+
+  const first = await createSDK({ storage, swarmOpts: SWARM_OFF, autoJoin: false })
+  const made = await first.getDrive('peerchat-files', { autoJoin: false })
+  await made.put('/picture.jpg', b4a.from('picture'))
+  const address = `hyper://${z32.encode(made.key)}/`
+  await first.close()
+
+  const within = (promise) => {
+    let timer = null
+    return Promise.race([
+      promise,
+      new Promise((resolve) => { timer = setTimeout(() => resolve(null), 5000) })
+    ]).finally(() => clearTimeout(timer))
+  }
+  for (const order of ['address first', 'together', 'name first']) {
+    const phone = shareDriveOpens(await createSDK({ storage, swarmOpts: SWARM_OFF, autoJoin: false }))
+    try {
+      let byAddress, byName
+      if (order === 'address first') {
+        byAddress = await within(phone.getDrive(address, { autoJoin: false }))
+        byName = await within(phone.getDrive('peerchat-files', { autoJoin: false }))
+      } else if (order === 'together') {
+        ;[byAddress, byName] = await Promise.all([
+          within(phone.getDrive(address, { autoJoin: false })),
+          within(phone.getDrive('peerchat-files', { autoJoin: false }))
+        ])
+      } else {
+        byName = await within(phone.getDrive('peerchat-files', { autoJoin: false }))
+        byAddress = await within(phone.getDrive(address, { autoJoin: false }))
+      }
+      assert.ok(byAddress && byName, `${order}: both opens finished`)
+      assert.equal(byName, byAddress, `${order}: one drive`)
+      // Still this phone's own drive, so the upload can write to it.
+      await byName.put('/another.jpg', b4a.from('another'))
+      assert.equal(b4a.toString(await byAddress.get('/another.jpg')), 'another')
+    } finally {
+      await phone.close()
+    }
+  }
+})

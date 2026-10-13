@@ -87,10 +87,20 @@ test('PeerChat streams encrypted files through a room-specific drive and decrypt
     }
   }
   const requestedDrives = []
+  // The drive is announced alongside the upload, never before it: an announce
+  // that never ends must not hold the file up.
+  drive.core = { discovery: null }
+  let joined = 0
+  const driveOptions = []
   const runtime = {
-    async getDrive (name) {
+    async getDrive (name, opts) {
       requestedDrives.push(name)
+      driveOptions.push(opts)
       return drive
+    },
+    joinCore () {
+      joined++
+      return new Promise(() => {})
     }
   }
 
@@ -104,6 +114,8 @@ test('PeerChat streams encrypted files through a room-specific drive and decrypt
     randomBytes: () => Buffer.alloc(8, 9)
   })
   assert.equal(uploaded.ok, true)
+  assert.equal(driveOptions[0]?.autoJoin, false)
+  assert.equal(joined, 1)
   assert.equal(requestedDrives[0], attachmentDriveName(ROOM_KEY))
   assert.equal(isEncryptedAttachment(stored.values().next().value), true)
   assert.equal(stored.values().next().value.includes(plaintext), false)
