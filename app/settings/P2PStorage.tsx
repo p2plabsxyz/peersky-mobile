@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
+  BackHandler,
   Clipboard,
+  Platform,
   Pressable,
   StyleSheet,
   Switch,
@@ -106,6 +108,9 @@ type P2PStorageProps = {
   // P2PMD's notes are gone from this device, so its Recent notes go too.
   // False when they could not be cleared.
   onP2pmdDataDeleted: () => boolean
+  // Swaps the app for a screen asking for a restart. Clear all P2P data takes
+  // this device's identity, and what is on screen still belongs to it.
+  onRestartRequired: () => void
 }
 
 const PAGE_SIZE = 5
@@ -113,7 +118,7 @@ const PAGE_SIZE = 5
 // that it does not feel like a pause.
 const ARCHIVE_SEARCH_DELAY_MS = 250
 
-export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallRpc, onDownloadOnlyOnWifiChange, onOfflineFoldersChanged, onOpenItem, onOpenUrl, onP2pmdDataDeleted }: P2PStorageProps) {
+export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallRpc, onDownloadOnlyOnWifiChange, onOfflineFoldersChanged, onOpenItem, onOpenUrl, onP2pmdDataDeleted, onRestartRequired }: P2PStorageProps) {
   const isDark = useSettingsDarkMode()
   const requestSequence = useRef(0)
   const offlineRequestSequence = useRef(0)
@@ -360,8 +365,10 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
 
   function confirmClearAllData () {
     Alert.alert(
-      'Clear all P2P data?',
-      'This permanently removes locally owned P2PMD and Hyperdrive files, PeerChat rooms and message history, downloaded Hyper data, and signing keys from this device. You will permanently lose the ability to update previously shared Hyper URLs, leaving them frozen unless another peer retains their signing keys.',
+      'Clear all P2P data and this device\'s identity?',
+      'This permanently removes locally owned P2PMD and Hyperdrive files, PeerChat rooms and message history, downloaded Hyper data, folders kept offline, and signing keys from this device. You will permanently lose the ability to update previously shared Hyper URLs, leaving them frozen unless another peer retains their signing keys.\n\n' +
+        'This device\'s identity goes too: your PeerChat profile and keys, the key your private files are encrypted with, and this phone\'s links to your other devices. Link Device forgets them and they stop syncing with this phone, as after Remove my data from this phone. Your tabs, bookmarks, history, downloads and settings stay.\n\n' +
+        'PeerSky needs a fresh start afterwards.',
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Clear all', style: 'destructive', onPress: () => void clearAllData() }
@@ -369,6 +376,11 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
     )
   }
 
+  // The same steps as Remove my data from this phone (LinkDevice.tsx). The
+  // restart screen goes up before anything is removed, since what is on screen
+  // belongs to the identity going, and PeerChat writes what it holds as it
+  // closes. It stays until PeerSky starts again. A clear that stops part way
+  // is finished by the backend as it starts.
   async function clearAllData () {
     if (activeActionRef.current) return
     activeActionRef.current = 'all'
@@ -376,27 +388,23 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
     setError(null)
     setNotice(null)
 
+    // Time for the dialog to close before the screens under it go.
+    await new Promise((resolve) => setTimeout(resolve, 450))
+    onRestartRequired()
+    await new Promise((resolve) => setTimeout(resolve, 300))
     try {
       const response = await onCallRpc(RPC_HYPER_STORAGE_CLEAR_ALL)
       if (!response.ok || !response.cleared) throw new Error(response.error || 'Unable to clear P2P data.')
-      onOfflineFoldersChanged()
-      const recentWarning = !clearHyperdriveRecents()
-        ? 'P2P data was cleared, but Hyperdrive Recent could not be updated.'
-        : !onP2pmdDataDeleted()
-          ? 'P2P data was cleared, but P2PMD Recent notes could not be cleared.'
-          : null
-      if (mountedRef.current) {
-        setNotice(joinNotices(response.warning, recentWarning))
-        Alert.alert('P2P data cleared', 'All local Hyper and PeerChat data was removed from this device.')
-        await refreshArchive()
+      if (response.warning) {
+        Alert.alert('P2P data cleared', `${response.warning}\n\nClose PeerSky and open it again to finish.`)
+        return
       }
+      if (Platform.OS === 'android') BackHandler.exitApp()
     } catch (clearError) {
-      if (mountedRef.current) {
-        setError(clearError instanceof Error ? clearError.message : String(clearError))
-      }
-    } finally {
-      activeActionRef.current = null
-      if (mountedRef.current) setActiveAction(null)
+      Alert.alert(
+        'P2P data was not all cleared',
+        `${clearError instanceof Error ? clearError.message : String(clearError)}\n\nClose PeerSky and open it again to finish.`
+      )
     }
   }
 
@@ -741,6 +749,9 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
             <Text style={[styles.description, isDark ? darkStyles.secondaryText : null]}>
               Permanently remove owned app files and downloaded Hyper data from this device.
             </Text>
+            <Text style={[styles.dangerNote, isDark ? darkStyles.dangerNote : null]}>
+              This device's identity goes too: your PeerChat profile and keys, and this phone's links to your other devices in Link Device. Your chats, notes and files go as they would with Remove my data from this phone, but tabs, bookmarks, history, downloads and settings stay.
+            </Text>
           </View>
           <Pressable
             accessibilityRole='button'
@@ -923,6 +934,14 @@ const styles = StyleSheet.create({
     color: '#687086',
     fontSize: 12,
     lineHeight: 17
+  },
+  // What cannot be undone, in the red of the delete buttons.
+  dangerNote: {
+    color: '#bd3552',
+    fontSize: 12,
+    fontWeight: '600',
+    lineHeight: 17,
+    marginTop: 2
   },
   driveRow: {
     alignItems: 'flex-start',
@@ -1118,5 +1137,10 @@ const darkStyles = StyleSheet.create({
   },
   warningText: {
     color: '#e0b030'
+  },
+  // The light red is too dark to read on the dark rows, so PeerChat's dark
+  // red is used there.
+  dangerNote: {
+    color: '#ff8278'
   }
 })

@@ -2232,6 +2232,25 @@ test('leaving a room this phone was never removed from remembers no removal', as
   await service.close()
 })
 
+// Clear all P2P data closes PeerChat, then removes its folder. A request still
+// on its way finished after that and saved what it held, folder and all, so
+// the profile and rooms came back once PeerSky started again.
+test('PeerChat writes nothing once it has closed, so a cleared folder stays gone', async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-closed-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const storagePath = path.join(root, 'hyper-sdk')
+  const service = await new PeerChatService({ sdk: createFakeSdk(), storagePath }).start()
+  await service.completeOnboarding({ username: 'Ada' })
+  await service.close()
+  // The one save as it closes still happens.
+  assert.match(await readFile(path.join(storagePath, 'peerchat-mobile.json'), 'utf8'), /"username":"Ada"/)
+
+  await rm(storagePath, { recursive: true, force: true })
+  service.persistNow()
+  service.setProfile({ username: 'Ada again' })
+  await assert.rejects(readFile(path.join(storagePath, 'peerchat-mobile.json'), 'utf8'), { code: 'ENOENT' })
+})
+
 function createFakeSdk (feeds = new Map(), publicKeyByte = 7) {
   const swarm = new EventEmitter()
   swarm.flush = async () => {}

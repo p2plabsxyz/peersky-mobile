@@ -1189,7 +1189,7 @@ export class PeerChatService {
     this.joinedRooms.clear()
     this.discoveryKeys.clear()
     this.moderator.clear()
-    this.persistNow()
+    this.persistNow({ final: true })
   }
 
   ensureProfile (username) {
@@ -4600,7 +4600,12 @@ export class PeerChatService {
     }, PERSIST_DELAY_MS)
   }
 
-  persistNow () {
+  persistNow ({ final = false } = {}) {
+    // A PeerChat that has closed writes once more as it closes, and never
+    // after: a request still on its way finished later and wrote what it held
+    // back, folder and all, after Clear all P2P data had removed it, so the
+    // profile and rooms came back.
+    if (this.closed && !final) return
     const temporaryPath = `${this.stateFilePath}.tmp`
     try {
       mkdirSync(this.storagePath, { recursive: true })

@@ -173,9 +173,14 @@ test('deleting app data in P2P Data clears the lists that pointed at it', async 
   const storage = await read('app/settings/P2PStorage.tsx')
   assert.match(storage, /item\.id === 'p2pmd' && !onP2pmdDataDeleted\(\)/)
   assert.match(storage, /if \(command === RPC_HYPER_OFFLINE_REMOVE\) onOfflineFoldersChanged\(\)/)
+  // Clear all P2P data asks for a fresh start, and the backend takes these
+  // lists with everything else, so they are gone when PeerSky opens again.
   const clearAll = storage.slice(storage.indexOf('async function clearAllData'), storage.indexOf('async function refreshArchive'))
-  assert.match(clearAll, /onOfflineFoldersChanged\(\)/)
-  assert.match(clearAll, /!onP2pmdDataDeleted\(\)/)
+  assert.match(clearAll, /onRestartRequired\(\)/)
+  const reset = await read('backend/hyper/p2p-reset.mjs')
+  for (const list of ['\'p2pmd-room-history.json\'', '\'hyperdrive-recents.json\'', '\'-offline.json\'']) {
+    assert.ok(reset.includes(list), list)
+  }
 
   const settings = await read('app/settings/SettingsScreen.tsx')
   assert.match(settings, /onP2pmdDataDeleted=\{props\.onP2pmdDataDeleted\}/)

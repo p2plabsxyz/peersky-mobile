@@ -394,6 +394,7 @@ export function SettingsScreen(props: SettingsScreenProps) {
             onOpenItem={props.onOpenHyperItem}
             onOpenUrl={openUrl}
             onP2pmdDataDeleted={props.onP2pmdDataDeleted}
+            onRestartRequired={props.onRestartRequired}
           />
         )}
         {page === 'permissions' && <Permissions {...props} />}

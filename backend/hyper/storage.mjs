@@ -1,5 +1,4 @@
 import Corestore from 'corestore'
-import { rmSync } from 'bare-fs'
 import {
   closeHyperRuntime,
   getHyperRuntime,
@@ -10,10 +9,11 @@ import {
   getPrivateDriveWarnings,
   getSyncedPrivateHyperdrive,
   getSyncedPrivateHyperStoragePath,
+  holdHyperStores,
   withHyperRuntimeMaintenance,
   withHyperRuntimeOperation
 } from './runtime.mjs'
-import { normalizeDriveAddressId } from './runtime-routing.mjs'
+import { adoptedStoragePathFor, normalizeDriveAddressId } from './runtime-routing.mjs'
 import { resetHyperFetch, stopHyperAssetServer } from './fetch.mjs'
 import {
   clearHyperArchive,
@@ -27,14 +27,20 @@ import {
   listRegisteredP2pAppData
 } from './storage-core.mjs'
 import {
-  removeHyperStoragePaths,
   runP2pAppDataDelete,
   runP2pCacheClear,
-  runP2pDataClear
+  runP2pDataClear,
+  runP2pIdentityClear
 } from './storage-lifecycle.mjs'
-import { hasPrivateDriveKey } from './private-keys.mjs'
+import { beginP2pReset, finishP2pReset, listP2pResetTargets, recoverP2pReset } from './p2p-reset.mjs'
+import { hasPrivateDriveKey, resetPrivateDriveKeyCache } from './private-keys.mjs'
+import { resetLinkedPrivateDrivesCache } from './linked-private-drives.mjs'
+import { resetDeviceSyncStateCache } from './device-sync-state.mjs'
 import { closePeerChatService } from '../peerchat/runtime.mjs'
 import { closeHyperOfflineDownloads } from './offline-manager.mjs'
+import { getDefaultIdentityStoragePath } from '../backup/device-keys.mjs'
+import { discardPendingRestore, stopOutgoingTransfer } from '../backup/link-device.mjs'
+import { disconnectP2pmdRoom } from '../p2pmd/room.mjs'
 
 let storageTransition = Promise.resolve()
 
@@ -109,15 +115,59 @@ export async function clearP2pCache (options = {}) {
   ))
 }
 
+/**
+ * Settings, P2P Data, Clear all P2P data: every store, and this device's
+ * identity with them (p2p-reset.mjs has the list). The app shows its restart
+ * screen first and asks for a fresh start after, as for Remove my data from
+ * this phone in Link Device, because what is on screen still belongs to the
+ * identity that went.
+ */
 export async function clearAllP2pData (options = {}) {
-  return withStorageTransition(() => (
-    options.getRuntime
-      ? performAllP2pDataClear(options)
-      : withHyperRuntimeMaintenance(
-        () => performAllP2pDataClear(options),
-        closeHyperOfflineDownloads
-      )
-  ))
+  return withStorageTransition(() => {
+    const plan = getP2pResetPlan()
+    return runP2pIdentityClear({
+      beginReset: () => beginP2pReset(plan.identityPath),
+      stopLinkDevice: async () => {
+        discardPendingRestore()
+        await stopOutgoingTransfer()
+      },
+      disconnectNotes: disconnectP2pmdRoom,
+      runMaintenance: options.getRuntime
+        ? (task) => task()
+        : (task) => withHyperRuntimeMaintenance(task, closeHyperOfflineDownloads),
+      clearData: () => performAllP2pDataClear(options, plan)
+    })
+  })
+}
+
+/**
+ * Finishes a clear the app was killed in. Run as the backend starts, before
+ * anything can open a store.
+ */
+export function recoverInterruptedP2pReset () {
+  try {
+    if (recoverP2pReset(getP2pResetPlan())) console.warn('[hyper] Finished clearing P2P data, which was cut short')
+  } catch (error) {
+    console.error('[hyper] Could not finish clearing P2P data:', error)
+  }
+}
+
+function getP2pResetPlan () {
+  const identityPath = getDefaultIdentityStoragePath()
+  const syncedPrivatePath = getSyncedPrivateHyperStoragePath()
+  return {
+    identityPath,
+    targets: listP2pResetTargets({
+      identityPath,
+      stores: [
+        getHyperStoragePath(),
+        getPrivateHyperStoragePath(),
+        syncedPrivatePath,
+        // Drives a desktop sent, in a store of their own beside the private one.
+        syncedPrivatePath ? adoptedStoragePathFor(syncedPrivatePath) : null
+      ]
+    })
+  }
 }
 
 async function performP2pCacheClear (options) {
@@ -142,20 +192,25 @@ async function performP2pCacheClear (options) {
   })
 }
 
-function performAllP2pDataClear (options) {
+function performAllP2pDataClear (options, plan) {
   return runP2pDataClear({
     getRuntime: options.getRuntime || getHyperRuntime,
     getStoragePath: options.getStoragePath || getHyperStoragePath,
+    holdStores: options.holdStores || holdHyperStores,
     stopAssetServer: options.stopAssetServer || stopHyperAssetServer,
     closeServices: options.closeServices || closePeerChatService,
     closeRuntime: options.closeRuntime || closeHyperRuntime,
     resetFetch: options.resetFetch || resetHyperFetch,
-    removeStorage: options.removeStorage || ((storagePath) => removeHyperStoragePaths({
-      storagePath,
-      privateStoragePath: getPrivateHyperStoragePath(),
-      syncedPrivateStoragePath: getSyncedPrivateHyperStoragePath(),
-      removeStorage: (target) => rmSync(target, { recursive: true, force: true })
-    })),
+    removeStorage: options.removeStorage || (() => {
+      const { failed } = finishP2pReset(plan)
+      // Read again from what is left, not from before.
+      resetPrivateDriveKeyCache()
+      resetLinkedPrivateDrivesCache()
+      resetDeviceSyncStateCache()
+      return failed.length > 0
+        ? { warning: `P2P data was cleared, but ${failed.length === 1 ? 'one item' : `${failed.length} items`} could not be removed.` }
+        : null
+    }),
     clearArchive: options.clearArchive || clearHyperArchive
   })
 }

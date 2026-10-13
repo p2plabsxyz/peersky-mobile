@@ -5,6 +5,7 @@ import { stopHolesail } from './holesail/session.mjs'
 import { stopHyperAssetServer } from './hyper/fetch.mjs'
 import { closeHyperOfflineDownloads } from './hyper/offline-manager.mjs'
 import { closeHyperRuntime } from './hyper/runtime.mjs'
+import { recoverInterruptedP2pReset } from './hyper/storage.mjs'
 import { disconnectP2pmdRoom } from './p2pmd/room.mjs'
 import { closePeerChatService } from './peerchat/runtime.mjs'
 import { stopPeerTunesServer } from './peertunes/server.mjs'
@@ -15,8 +16,10 @@ import { recoverLinkDeviceStorage } from './backup/link-device.mjs'
 const { IPC } = BareKit
 
 // Before anything can open a store: a restore the app was killed in the
-// middle of is undone here, while nothing has its files open.
+// middle of is undone here, while nothing has its files open, and a Clear all
+// P2P data is finished.
 recoverLinkDeviceStorage()
+recoverInterruptedP2pReset()
 createRpc()
 
 function createRpc () {

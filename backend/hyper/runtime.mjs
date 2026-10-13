@@ -280,6 +280,15 @@ async function waitForHeldStores () {
   }
 }
 
+/**
+ * Waits while the stores are held shut. getHyperRuntime still hands out a
+ * store that is open when the hold starts, which a caller about to read files
+ * a clear or a restore is going to replace has to wait out.
+ */
+export function waitForHyperStores () {
+  return waitForHeldStores()
+}
+
 export async function getHyperRuntime () {
   if (sdk) return sdk
   await waitForHeldStores()
