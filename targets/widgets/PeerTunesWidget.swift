@@ -70,7 +70,7 @@ struct PeerTunesWidgetView: View {
         small
       }
     }
-    .widgetURL(WidgetLinks.peerTunes)
+    .widgetURL(WidgetLinks.peerTunes(showing: song))
     .containerBackground(for: .widget) { background }
   }
 

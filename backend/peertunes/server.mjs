@@ -6,6 +6,7 @@ import { headersToObject } from '../hyper/assets.mjs'
 import { parseHyperUrl } from '../hyper/url.mjs'
 import { PEERTUNES_LOOPBACK_HOST, PEERTUNES_LOOPBACK_PORT } from './constants.mjs'
 import peertunesAssets from './peertunes-runtime.mjs'
+import { MAX_KEEP_SONGS_PER_REQUEST, createSongKeeper, within } from './song-keeper.mjs'
 
 // A folder listing or playlist manifest is a small document. Anything larger is
 // either the wrong branch or an attempt to exhaust the worklet's heap, so it is
@@ -41,18 +42,40 @@ const STATIC_CONTENT_TYPES = {
   webmanifest: 'application/manifest+json'
 }
 
+// A drive this phone has not opened yet can take a moment. Checking a kept
+// song does not wait longer than this for it.
+const KEEP_DRIVE_OPEN_TIMEOUT_MS = 4000
+// Songs asked about in one request, so its address stays short.
+const KEEP_SONGS_BATCH = 10
+
+// PeerTunes asks which songs of a kept playlist are on the device, and the
+// server fetches the ones that are not. A few at a time, then one answer.
+const KEEP_SONGS_SCRIPT = 'window.peerskyKeepSongs=function(urls){' +
+  'var list=Array.isArray(urls)?urls.map(String):[],batches=[];' +
+  `for(var i=0;i<list.length;i+=${KEEP_SONGS_BATCH})batches.push(list.slice(i,i+${KEEP_SONGS_BATCH}));` +
+  'return Promise.all(batches.map(function(batch){' +
+  'return fetch("/hyper/keep?"+batch.map(function(url){return"url="+encodeURIComponent(url)}).join("&"))' +
+  '.then(function(res){if(!res.ok)throw new Error("keep "+res.status);return res.json()})' +
+  '})).then(function(parts){' +
+  'var out={ok:true,saved:[],saving:[],waiting:[]};' +
+  'parts.forEach(function(part){["saved","saving","waiting"].forEach(function(key){' +
+  'if(part&&Array.isArray(part[key]))out[key]=out[key].concat(part[key])})});' +
+  'return out' +
+  '}).catch(function(){return null})}'
+
 // PeerTunes looks for this global and sends its hyper:// reads through it,
 // because the WebView cannot fetch hyper:// on its own. The path is relative,
 // so the page never handles a proxy token.
 // peerskyProtocols: the phone reads hyper:// only, so PeerTunes offers no other
 // p2p link.
-export const HYPER_BRIDGE_SCRIPT = '<script>window.peerskyProtocols=["hyper"];window.peerskyHyperAsset=function(url){return"/hyper/asset?url="+encodeURIComponent(String(url))}</script>'
+export const HYPER_BRIDGE_SCRIPT = `<script>window.peerskyProtocols=["hyper"];window.peerskyHyperAsset=function(url){return"/hyper/asset?url="+encodeURIComponent(String(url))};${KEEP_SONGS_SCRIPT}</script>`
 
 let server = null
 let serverInfo = null
 let serverTransition = Promise.resolve()
 let bareHttp = null
 let hyperFetchModule = null
+let hyperRuntimeModule = null
 
 export async function startPeerTunesServer () {
   return withServerTransition(async () => {
@@ -66,12 +89,22 @@ export async function startPeerTunesServer () {
 
     const httpImpl = await getBareHttp()
     const { ensureFetchGlobals, refreshHyperNetworkFor, routedHyperFetch, routedHyperRangeFetch } = await getHyperFetchModule()
+    const { withHyperRuntimeForAddress } = await getHyperRuntimeModule()
+    const keeper = createSongKeeper({
+      openDrive: (address, task) => withHyperRuntimeForAddress(address, async (runtime) => {
+        const drive = await within(runtime.getDrive(address), KEEP_DRIVE_OPEN_TIMEOUT_MS)
+        if (!drive) throw new Error('The drive did not open in time.')
+        return task(drive)
+      }),
+      refreshNetwork: refreshHyperNetworkFor
+    })
     const options = {
       httpImpl,
       fetch: routedHyperFetch,
       fetchRange: routedHyperRangeFetch,
       ensureGlobals: ensureFetchGlobals,
-      refreshNetwork: refreshHyperNetworkFor
+      refreshNetwork: refreshHyperNetworkFor,
+      keepSongs: keeper.keep
     }
 
     let bound
@@ -134,7 +167,8 @@ export function createPeerTunesHttpServer ({
   fetch,
   fetchRange,
   ensureGlobals = () => {},
-  refreshNetwork = async () => {}
+  refreshNetwork = async () => {},
+  keepSongs = null
 } = {}) {
   if (!httpImpl?.createServer) {
     throw new Error('PeerTunes HTTP server requires an HTTP implementation.')
@@ -144,7 +178,7 @@ export function createPeerTunesHttpServer ({
   }
 
   return httpImpl.createServer((req, res) => {
-    handleRequest(req, res, { fetch, fetchRange, ensureGlobals, refreshNetwork })
+    handleRequest(req, res, { fetch, fetchRange, ensureGlobals, refreshNetwork, keepSongs })
   })
 }
 
@@ -177,7 +211,7 @@ export function injectHyperBridge (html) {
   return `${source.slice(0, insertAt)}${HYPER_BRIDGE_SCRIPT}${source.slice(insertAt)}`
 }
 
-function handleRequest (req, res, { fetch, fetchRange, ensureGlobals, refreshNetwork }) {
+function handleRequest (req, res, { fetch, fetchRange, ensureGlobals, refreshNetwork, keepSongs }) {
   const requestUrl = parseRequestUrl(req.url)
   if (!requestUrl) {
     sendText(res, 400, 'Bad request')
@@ -201,6 +235,12 @@ function handleRequest (req, res, { fetch, fetchRange, ensureGlobals, refreshNet
 
   if (requestUrl.pathname === '/hyper/asset') {
     serveHyperAsset(req, res, { fetch, fetchRange, ensureGlobals, refreshNetwork }, requestUrl.searchParams.get('url'))
+      .catch((error) => sendError(req, res, error))
+    return
+  }
+
+  if (requestUrl.pathname === '/hyper/keep') {
+    serveKeptSongs(req, res, keepSongs, requestUrl.searchParams.getAll('url'))
       .catch((error) => sendError(req, res, error))
     return
   }
@@ -246,6 +286,27 @@ async function serveHyperAsset (req, res, { fetch, fetchRange, ensureGlobals, re
   }
 
   await streamHyperAsset(fetch, fetchRange, assetUrl, req, guardProxyResponse(res), null)
+}
+
+// Which songs of a kept playlist are on the device. Asking also fetches the
+// ones that are not, so a song that could not be saved before, because the
+// person sharing it was offline, is tried again each time.
+async function serveKeptSongs (req, res, keepSongs, urls) {
+  if (typeof keepSongs !== 'function') {
+    sendText(res, 404, 'Not found')
+    return
+  }
+  if (req.method !== 'GET') {
+    sendText(res, 405, 'Method not allowed')
+    return
+  }
+  if (!urls.length || urls.length > MAX_KEEP_SONGS_PER_REQUEST) {
+    sendText(res, 400, `Ask about 1 to ${MAX_KEEP_SONGS_PER_REQUEST} songs`)
+    return
+  }
+
+  const answer = await keepSongs(urls)
+  sendText(res, 200, JSON.stringify(answer), 'application/json; charset=utf-8')
 }
 
 function sendStaticAsset (req, res, asset) {
@@ -341,6 +402,15 @@ async function getHyperFetchModule () {
   }
 
   return hyperFetchModule
+}
+
+// The drives behind kept songs, opened the same way the reads above open them.
+async function getHyperRuntimeModule () {
+  if (!hyperRuntimeModule) {
+    hyperRuntimeModule = await import('../hyper/runtime.mjs')
+  }
+
+  return hyperRuntimeModule
 }
 
 function wantsJson (req) {

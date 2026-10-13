@@ -7,6 +7,7 @@ import {
   PEERTUNES_MEDIA_BRIDGE_SCRIPT,
   PEERTUNES_MEDIA_REPORT_SCRIPT,
   createPeerTunesMediaCommandScript,
+  createPeerTunesNowPlayingScript,
   parsePeerTunesNowPlaying
 } from '../../app/peertunes/peertunes-screen.mjs'
 import { PAUSE_ALL_MEDIA_SCRIPT } from '../../app/browser-media.mjs'
@@ -85,7 +86,7 @@ test('the page says what is playing, once per change', () => {
   page.navigator.mediaSession.metadata = new page.window.MediaMetadata({ title: 'Song', artist: 'Band' })
   page.fire('play')
   page.fire('playing')
-  assert.deepEqual(page.posted, [{ type: 'peertunes-now-playing', playing: true, title: 'Song', artist: 'Band', album: '', artwork: '' }])
+  assert.deepEqual(page.posted, [{ type: 'peertunes-now-playing', playing: true, title: 'Song', artist: 'Band', album: '', id: '', artwork: '' }])
 
   page.audio.paused = true
   page.fire('pause')
@@ -151,13 +152,57 @@ test('the page says what is playing again when asked', () => {
   assert.equal(page.posted.length, before + 1)
 })
 
+// The widget's tap asks PeerTunes for this song, so the page says which one
+// it is, by its id in PeerTunes.
+test('the page says which song is playing by its PeerTunes id', () => {
+  const page = createPage()
+  page.window.PeerTunes = { player: { current: () => ({ id: 'u15hrfys1q' }) } }
+  page.navigator.mediaSession.metadata = new page.window.MediaMetadata({ title: 'Song' })
+  page.fire('play')
+  assert.equal(page.posted.at(-1).id, 'u15hrfys1q')
+
+  page.window.PeerTunes.player.current = () => ({ id: 'u1"; alert(1)' })
+  page.fire('pause')
+  assert.equal(page.posted.at(-1).id, '')
+  page.window.PeerTunes.player.current = () => { throw new Error('not ready') }
+  page.navigator.mediaSession.metadata = new page.window.MediaMetadata({ title: 'Other' })
+  assert.equal(page.posted.at(-1).id, '')
+})
+
+test('a widget tap reaches the page as a request for Now Playing with its song', () => {
+  const opened = []
+  const window = { PeerTunes: { openNowPlaying: (song) => opened.push(song) } }
+  vm.runInNewContext(createPeerTunesNowPlayingScript('u15hrfys1q'), { window })
+  vm.runInNewContext(createPeerTunesNowPlayingScript(''), { window })
+  vm.runInNewContext(createPeerTunesNowPlayingScript('"); alert(1); ("'), { window })
+  assert.deepEqual(opened, ['u15hrfys1q', '', ''])
+  // A page that is not PeerTunes, or not ready, is left alone.
+  assert.doesNotThrow(() => vm.runInNewContext(createPeerTunesNowPlayingScript('u1'), { window: {} }))
+})
+
+// Tapped with PeerSky closed, PeerTunes opened on the list the song was played
+// from. The tap is heard before the screen exists and handed to the page once
+// it has loaded, and again if it loads once more soon after.
+test('PeerTunes hands the widget song to its page once the page has loaded', async () => {
+  const screen = await read('app/peertunes/PeerTunesScreen.tsx')
+  assert.match(screen, /^Linking\.addEventListener\('url', \(event\) => hearWidgetTap\(event\.url\)\)$/m)
+  assert.match(screen, /^void Linking\.getInitialURL\(\)\.then\(hearWidgetTap\)/m)
+  assert.match(screen, /const tap = parsePeerTunesWidgetTap\(url\)/)
+  assert.match(screen, /onLoadStart=\{\(\) => \{ pageLoadedRef\.current = false \}\}/)
+  assert.match(screen, /pageLoadedRef\.current = true\s+showWidgetSong\(\)/)
+  assert.match(screen, /if \(!tap \|\| !pageLoadedRef\.current\) return/)
+  assert.match(screen, /injectJavaScript\(createPeerTunesNowPlayingScript\(tap\.song\)\)/)
+  assert.match(screen, /const WIDGET_TAP_MS = 60 \* 1000/)
+})
+
 test('only the four buttons become scripts, and the text is cleaned', () => {
   assert.equal(createPeerTunesMediaCommandScript('stop'), null)
   assert.equal(createPeerTunesMediaCommandScript('");alert(1);("'), null)
   assert.deepEqual(
-    parsePeerTunesNowPlaying(JSON.stringify({ type: 'peertunes-now-playing', playing: 'yes', title: 'A\u0000B', artist: 'x'.repeat(500), album: 'LP' })),
-    { playing: false, title: 'AB', artist: 'x'.repeat(200), album: 'LP', artwork: '' }
+    parsePeerTunesNowPlaying(JSON.stringify({ type: 'peertunes-now-playing', playing: 'yes', title: 'A\u0000B', artist: 'x'.repeat(500), album: 'LP', id: 'u1 2' })),
+    { playing: false, title: 'AB', artist: 'x'.repeat(200), album: 'LP', id: '', artwork: '' }
   )
+  assert.equal(parsePeerTunesNowPlaying(JSON.stringify({ type: 'peertunes-now-playing', id: 'u15hrfys1q' })).id, 'u15hrfys1q')
   assert.equal(
     parsePeerTunesNowPlaying(JSON.stringify({ type: 'peertunes-now-playing', artwork: 'x'.repeat(400 * 1024) })).artwork,
     ''

@@ -160,7 +160,10 @@ test('the one PeerChat screen follows the tab it is shown in', async () => {
 
   // An invite is read once and kept out of the tab's address, where its room
   // key showed and opened the invite again after a restart.
-  assert.match(shell, /const appUrl = `\$\{getRuntimeAppUrl\(app\)\}\$\{invitedRoom \|\| invitedPeer \? '' : launchSuffix\}`/)
+  // A shared PeerTunes playlist is left out of the address too, so a restart
+  // opens the page where it was, not the playlist again.
+  assert.match(shell, /const appUrl = `\$\{getRuntimeAppUrl\(app\)\}\$\{invitedRoom \|\| invitedPeer \|\| app === 'peertunes' \? '' : launchSuffix\}`/)
+  assert.match(shell, /setPeertunesLaunchSuffix\(launchSuffix\)/)
 })
 
 test('the tabs remembered are bounded like the tabs themselves', () => {

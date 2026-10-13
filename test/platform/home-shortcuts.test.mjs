@@ -4,7 +4,7 @@ import { createRequire } from 'node:module'
 import { describe, test } from 'node:test'
 import { gunzipSync } from 'node:zlib'
 
-import { HOME_SHORTCUTS, parseHomeShortcut } from '../../app/home-shortcuts.mjs'
+import { HOME_SHORTCUTS, parseHomeShortcut, parsePeerTunesWidgetTap } from '../../app/home-shortcuts.mjs'
 
 const require = createRequire(import.meta.url)
 const plugin = require('../../plugins/with-home-shortcuts')
@@ -78,6 +78,28 @@ describe('quick actions on the app icon', () => {
       'peersky://shortcut/search?url=https%3A%2F%2Fexample.com'
     ]) {
       assert.equal(parseHomeShortcut(url), null, url)
+    }
+  })
+
+  // The PeerTunes widget names the song it shows, beside the address, so the
+  // PeerTunes tab keeps its plain address and PeerTunes opens that song.
+  test('read the song a PeerTunes widget tap asks for, and nothing else', () => {
+    const peertunes = `peersky://shortcut/open?url=${encodeURIComponent('peersky://p2p/peertunes/')}`
+    assert.deepEqual(parsePeerTunesWidgetTap(`${peertunes}&song=u15hrfys1q`), { song: 'u15hrfys1q' })
+    // A song the widget had no id for: Now Playing with whatever is loaded.
+    assert.deepEqual(parsePeerTunesWidgetTap(`${peertunes}&song=`), { song: '' })
+    for (const url of [
+      peertunes,
+      `${peertunes}&song=u1%20x`,
+      `${peertunes}&song=${'a'.repeat(65)}`,
+      `${peertunes}&song=%E0%A4%A`,
+      `peersky://shortcut/open?url=${encodeURIComponent('peersky://p2p/peerchat/')}&song=u1`,
+      `peersky://shortcut/open?url=${encodeURIComponent('peersky://p2p/peertunes/#playlist=x')}&song=u1`,
+      'peersky://shortcut/search?song=u1',
+      'peersky://p2p/peertunes/?song=u1',
+      null
+    ]) {
+      assert.equal(parsePeerTunesWidgetTap(url), null, String(url))
     }
   })
 

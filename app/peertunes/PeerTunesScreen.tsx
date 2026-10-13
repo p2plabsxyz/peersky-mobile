@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { AppState, DeviceEventEmitter, Modal, NativeEventEmitter, NativeModules, Platform, Pressable, StyleSheet, Text, View } from 'react-native'
+import { AppState, DeviceEventEmitter, Linking, Modal, NativeEventEmitter, NativeModules, Platform, Pressable, StyleSheet, Text, View } from 'react-native'
 import { CameraView, useCameraPermissions } from 'expo-camera'
 import { initialWindowMetrics, SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context'
 import { WebView } from 'react-native-webview'
@@ -10,6 +10,7 @@ import {
   PEERTUNES_SCAN_BRIDGE_SCRIPT,
   createAudioRouteScript,
   createPeerTunesMediaCommandScript,
+  createPeerTunesNowPlayingScript,
   createPeerTunesPageUrl,
   isPeerTunesPageRequest,
   parsePeerTunesHapticRequest,
@@ -21,6 +22,7 @@ import {
 } from './peertunes-screen.mjs'
 import { AppLoading } from '../AppLoading'
 import { PAUSE_ALL_MEDIA_SCRIPT } from '../browser-media.mjs'
+import { parsePeerTunesWidgetTap } from '../home-shortcuts.mjs'
 import { MODAL_ORIENTATIONS } from '../modal-orientations'
 import { WEBVIEW_DECELERATION_RATE } from '../webview-scroll.mjs'
 import { tapFeedback } from '../haptics'
@@ -44,6 +46,25 @@ const mediaCommandEvents = Platform.OS === 'ios' && NativeModules.PeerSkyAudioRo
 const AUDIO_ROUTE_POLL_MS = 3000
 // Long enough for the page to have started or stopped the song.
 const MEDIA_REPORT_DELAY_MS = 800
+
+// A tap on the PeerTunes widget asks for Now Playing with the song it shows.
+// The app brings PeerTunes forward by itself; this hands the song to the page,
+// which may not be open yet: PeerTunes can be closed, or the whole app can be
+// starting from the tap. Heard at module scope, so a tap that comes before
+// the screen mounts still counts. A page that loads within a minute gets it,
+// including one that reloads straight after.
+const WIDGET_TAP_MS = 60 * 1000
+type WidgetTap = { song: string, at: number }
+let widgetTap: WidgetTap | null = null
+const widgetTapListeners = new Set<() => void>()
+function hearWidgetTap (url: string | null) {
+  const tap = parsePeerTunesWidgetTap(url)
+  if (!tap) return
+  widgetTap = { song: tap.song, at: Date.now() }
+  for (const listener of widgetTapListeners) listener()
+}
+Linking.addEventListener('url', (event) => hearWidgetTap(event.url))
+void Linking.getInitialURL().then(hearWidgetTap).catch(() => {})
 
 type Props = {
   error: string | null
@@ -79,6 +100,23 @@ export function PeerTunesScreen ({
   const [cameraPermission, requestCameraPermission] = useCameraPermissions()
   const webViewRef = useRef<WebView | null>(null)
   const scanHandledRef = useRef(false)
+  const pageLoadedRef = useRef(false)
+
+  // The widget's song goes to a page that has loaded: now, or when it has.
+  const showWidgetSong = useCallback(() => {
+    const tap = widgetTap
+    if (!tap || !pageLoadedRef.current) return
+    if (Date.now() - tap.at > WIDGET_TAP_MS) {
+      widgetTap = null
+      return
+    }
+    webViewRef.current?.injectJavaScript(createPeerTunesNowPlayingScript(tap.song))
+  }, [])
+
+  useEffect(() => {
+    widgetTapListeners.add(showWidgetSong)
+    return () => { widgetTapListeners.delete(showWidgetSong) }
+  }, [showWidgetSong])
 
   const recover = useCallback((reason: string) => {
     onStatus(`PeerTunes reloaded after ${reason}`)
@@ -293,9 +331,12 @@ export function PeerTunesScreen ({
         return false
       }}
       onOpenWindow={(event) => onOpenUrl(event.nativeEvent.targetUrl)}
+      onLoadStart={() => { pageLoadedRef.current = false }}
       onLoadEnd={() => {
         audioExternalRef.current = null
         void pushAudioRoute()
+        pageLoadedRef.current = true
+        showWidgetSong()
       }}
       onRenderProcessGone={() => recover('a renderer restart')}
       onContentProcessDidTerminate={() => recover('a renderer restart')}

@@ -3,7 +3,7 @@ import { readdir, readFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { describe, test } from 'node:test'
 
-import { parseHomeShortcut } from '../../app/home-shortcuts.mjs'
+import { parseHomeShortcut, parsePeerTunesWidgetTap } from '../../app/home-shortcuts.mjs'
 import { P2P_APPS } from '../../app/internal-apps-registry.mjs'
 import { createPeerTunesMediaCommandScript } from '../../app/peertunes/peertunes-screen.mjs'
 import {
@@ -64,13 +64,34 @@ describe('home screen widgets', () => {
   // The buttons only work while the player page is open to take them.
   test('show PeerTunes as playing only while its page is open', () => {
     assert.deepEqual(
-      toPeerTunesWidgetState({ playing: true, title: 'Song\u0007', artist: 'Band', album: 'LP' }),
-      { live: true, playing: true, title: 'Song', artist: 'Band', album: 'LP' }
+      toPeerTunesWidgetState({ playing: true, title: 'Song\u0007', artist: 'Band', album: 'LP', id: 'u1x2y3' }),
+      { live: true, playing: true, title: 'Song', artist: 'Band', album: 'LP', id: 'u1x2y3' }
     )
     assert.deepEqual(
-      toPeerTunesWidgetState({ playing: true, title: 'Song' }, { live: false }),
-      { live: false, playing: false, title: 'Song', artist: '', album: '' }
+      toPeerTunesWidgetState({ playing: true, title: 'Song', id: 'u1x2y3' }, { live: false }),
+      { live: false, playing: false, title: 'Song', artist: '', album: '', id: 'u1x2y3' }
     )
+    // Only a plain id goes into the tap's link.
+    assert.equal(toPeerTunesWidgetState({ title: 'Song', id: 'u1&song=x' }).id, '')
+    assert.equal(toPeerTunesWidgetState({ title: 'Song' }).id, '')
+  })
+
+  // Tapped with PeerSky closed, the widget opened PeerTunes on the list the
+  // song was played from. Its link now carries the song, which PeerTunes
+  // opens in Now Playing, and the app's own link handling still reads it as
+  // a plain PeerTunes address.
+  test('open PeerTunes on the song they show', async () => {
+    const widget = await read('targets/widgets/PeerTunesWidget.swift')
+    assert.match(widget, /\.widgetURL\(WidgetLinks\.peerTunes\(showing: song\)\)/)
+    assert.match(widgetBundle, /private static let peerTunesApp = open\("peersky:\/\/p2p\/peertunes\/"\)/)
+    assert.match(widgetBundle, /static func peerTunes\(showing song: PeerSkyWidgetStore\.NowPlaying\?\) -> URL \{\s+guard let song else \{ return peerTunesApp \}/)
+    assert.match(widgetBundle, /URL\(string: "\\\(peerTunesApp\.absoluteString\)&song=\\\(id\)"\)/)
+    assert.match(store, /var id: String\?/)
+
+    // What that Swift writes, read the way the app reads it.
+    const app = `peersky://shortcut/open?url=${encodeURIComponent('peersky://p2p/peertunes/')}`
+    assert.deepEqual(parseHomeShortcut(`${app}&song=u1x2y3`), { name: 'open', target: 'peersky://p2p/peertunes/' })
+    assert.deepEqual(parsePeerTunesWidgetTap(`${app}&song=u1x2y3`), { song: 'u1x2y3' })
   })
 
   test('take only the small cover the page makes', () => {

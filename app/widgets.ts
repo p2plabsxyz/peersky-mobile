@@ -27,6 +27,8 @@ type NowPlaying = {
   title: string
   artist: string
   album?: string
+  // The song's id in PeerTunes, for the widget's tap.
+  id?: string
   artwork?: string
 }
 

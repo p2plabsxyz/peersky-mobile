@@ -1602,7 +1602,11 @@ export default function App () {
     // tab had moved on to. The desktop clears it from the address the same way.
     const invitedRoom = app === 'peerchat' ? parsePeerChatInvite(launchSuffix) : ''
     const invitedPeer = app === 'peerchat' ? parsePeerChatDirectInvite(launchSuffix) : ''
-    const appUrl = `${getRuntimeAppUrl(app)}${invitedRoom || invitedPeer ? '' : launchSuffix}`
+    // A shared PeerTunes playlist (#playlist=...) goes to the page once, the
+    // same way. Kept in the address, every restart opened that playlist again,
+    // over the song the page had saved, which is where a tap on the widget
+    // should land.
+    const appUrl = `${getRuntimeAppUrl(app)}${invitedRoom || invitedPeer || app === 'peertunes' ? '' : launchSuffix}`
     cancelPendingBrowserLoad()
     setActiveTab(app)
     setBrowserTitle(getRuntimeAppTitle(app))

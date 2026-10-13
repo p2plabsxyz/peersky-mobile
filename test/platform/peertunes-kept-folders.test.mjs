@@ -74,7 +74,7 @@ test('a folder counts as kept the moment PeerSky says it keeps it', async () => 
   const library = await read('assets/peertunes/js/library.js')
   assert.match(library, /\.then\(\(kept\) => \(kept && kept\.ok \? this\.markSourceKept\(url\) : null\)\)/)
   const ui = await read('assets/peertunes/js/ui.js')
-  assert.match(ui, /if \(res && res\.ok\) \{\n {8}this\.lib\.markSourceKept\(url\)/)
+  assert.match(ui, /if \(res && res\.ok\) \{\n {8}await this\.lib\.markSourceKept\(url\)/)
 })
 
 test('forgetting a folder removes its songs and its empty playlist only', async () => {
