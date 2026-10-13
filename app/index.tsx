@@ -5543,7 +5543,13 @@ export default function App () {
               setDisplayZoomControls={false}
               textZoom={Math.round(browserPreferences.websiteTextScale * tabPageZoom / 100)}
               userAgent={tabDesktopView ? DESKTOP_BROWSER_USER_AGENT : undefined}
-              style={styles.browserWebView}
+              // react-native-webview gives iOS this colour for the scroll view
+              // too, the colour above the top of a page pulled down. White, it
+              // showed a white band over a page Force dark mode had darkened.
+              style={[
+                styles.browserWebView,
+                Platform.OS === 'ios' && browserPreferences.forceDarkWebsites ? styles.browserWebViewForceDark : null
+              ]}
               // Same reclaim as the note editor: a backgrounded tab comes back
               // blank unless it is reloaded when its content process is killed.
               onContentProcessDidTerminate={() => {
