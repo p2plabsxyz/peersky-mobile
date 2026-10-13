@@ -8,7 +8,8 @@ import {
   formatPeerChatDateLabel,
   formatPeerChatMessageDetails,
   isPeerChatNearBottom,
-  PEERCHAT_SEARCH_QUERY_MAX_CHARACTERS
+  PEERCHAT_SEARCH_QUERY_MAX_CHARACTERS,
+  splitPeerChatSearchMatch
 } from '../../app/peerchat/message-search.mjs'
 
 const messages = [
@@ -35,12 +36,29 @@ test('PeerChat message search handles invalid and bounded Unicode queries', () =
   assert.equal(filterPeerChatMessages(messages, oversized).length, 0)
 })
 
-test('PeerChat room search matches names, keys, senders, and previews', () => {
+// What was said is searched in full on its own, every message of every chat,
+// so a chat comes first only for its name.
+test('PeerChat room search matches names and keys, and leaves messages to the message search', () => {
   assert.deepEqual(filterPeerChatRooms(rooms, 'release').map((item) => item.name), ['Release Room'])
-  assert.deepEqual(filterPeerChatRooms(rooms, 'desktop').map((item) => item.name), ['Design'])
-  assert.deepEqual(filterPeerChatRooms(rooms, 'new mockup').map((item) => item.name), ['Design'])
+  assert.deepEqual(filterPeerChatRooms(rooms, 'DESIGN').map((item) => item.name), ['Design'])
   assert.deepEqual(filterPeerChatRooms(rooms, 'ab'.repeat(4)).map((item) => item.name), ['Release Room'])
+  assert.equal(filterPeerChatRooms(rooms, 'new mockup').length, 0)
+  // A few letters that happen to be in a key do not list the room.
+  assert.equal(filterPeerChatRooms(rooms, 'ab').length, 0)
+  assert.equal(filterPeerChatRooms(rooms, 'desktop').length, 0)
   assert.equal(filterPeerChatRooms(rooms, 'missing').length, 0)
+})
+
+test('a search result shows the words that matched in bold', () => {
+  assert.deepEqual(splitPeerChatSearchMatch('Book the Lighthouse room, the lighthouse', 'LIGHTHOUSE'), [
+    { text: 'Book the ', match: false },
+    { text: 'Lighthouse', match: true },
+    { text: ' room, the ', match: false },
+    { text: 'lighthouse', match: true }
+  ])
+  assert.deepEqual(splitPeerChatSearchMatch('Nothing here', 'missing'), [{ text: 'Nothing here', match: false }])
+  assert.deepEqual(splitPeerChatSearchMatch('Plain', ''), [{ text: 'Plain', match: false }])
+  assert.deepEqual(splitPeerChatSearchMatch('', 'x'), [])
 })
 
 test('PeerChat member search matches names, bios, and peer IDs', () => {

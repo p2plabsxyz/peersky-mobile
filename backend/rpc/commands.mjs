@@ -85,6 +85,12 @@ export const RPC_PEERCHAT_PRESENCE = 74
 // { message } from the browser's Send to your devices, into your chat with
 // yourself.
 export const RPC_PEERCHAT_SEND_TO_DEVICES = 75
+// A file or picture from one chat, opened and sealed again for another, to be
+// forwarded there.
+export const RPC_PEERCHAT_ATTACHMENT_FORWARD = 76
+// { query } over the messages kept on this phone, every chat at once. Nothing
+// is asked of anyone else.
+export const RPC_PEERCHAT_SEARCH = 77
 
 export const RPC_IDENTITY_REMOVE = 68
 

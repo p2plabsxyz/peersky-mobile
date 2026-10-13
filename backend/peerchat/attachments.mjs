@@ -237,6 +237,49 @@ export async function uploadPeerChatAttachment ({
   if (!normalizedRoomKey) return { ok: false, error: 'Invalid PeerChat room key.' }
   const localFile = normalizePickedLocalFile(fileUri, byteLength)
   if (!localFile) return { ok: false, error: 'Invalid attachment file.' }
+  return sealIntoRoom(normalizedRoomKey, localFile, ownKey, options)
+}
+
+/**
+ * A file or picture from one chat, sent on to another.
+ *
+ * It is opened with the key it was sealed with, its own or its room's, into
+ * the copy this phone keeps to show it, and that copy is sealed again for the
+ * chat it goes to, the way a file picked on this phone is. Nothing outside
+ * the attachment cache is read, so this is no way around the picker check.
+ */
+export async function forwardPeerChatAttachment ({
+  roomKey,
+  fromRoomKey,
+  url,
+  fileName,
+  fileSize,
+  fileKey,
+  ownKey
+} = {}, options = {}) {
+  const normalizedRoomKey = normalizePeerChatRoomKey(roomKey)
+  if (!normalizedRoomKey) return { ok: false, error: 'Invalid PeerChat room key.' }
+  const opened = await openPeerChatAttachment({
+    roomKey: fromRoomKey,
+    url,
+    fileName,
+    fileSize,
+    encrypted: true,
+    ...(fileKey && { fileKey })
+  }, options)
+  if (!opened.ok) return opened
+  const path = pathFromFileUri(opened.localUri)
+  if (!path || !Number.isSafeInteger(opened.byteLength) || opened.byteLength < 1) {
+    return { ok: false, error: 'Invalid attachment file.' }
+  }
+  return sealIntoRoom(normalizedRoomKey, { path, byteLength: opened.byteLength }, ownKey, options)
+}
+
+// Seals a file on this phone into a room's drive. In a room whose keys rotate,
+// the file gets a key of its own, which goes inside the sealed message, so it
+// opens only for someone who can read that. Any other room seals with its
+// room key.
+async function sealIntoRoom (normalizedRoomKey, localFile, ownKey, options) {
   const room = checkRoom(
     options.storagePath || getHyperStoragePath(),
     sealedAttachmentLength(localFile.byteLength, options),
@@ -674,6 +717,16 @@ function getDirName (path) {
 function toFileUri (path) {
   const normalized = String(path).replaceAll('\\', '/')
   return `file://${encodeURI(normalized.startsWith('/') ? normalized : `/${normalized}`)}`
+}
+
+// Back from what toFileUri made.
+function pathFromFileUri (uri) {
+  if (typeof uri !== 'string' || !uri.startsWith('file:///')) return ''
+  try {
+    return decodeURI(uri.slice('file://'.length))
+  } catch {
+    return ''
+  }
 }
 
 function requireRoomKey (roomKey) {

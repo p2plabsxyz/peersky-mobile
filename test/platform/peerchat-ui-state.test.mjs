@@ -316,16 +316,6 @@ test('a created or joined room takes its place in the list at once', async () =>
   assert.equal((screen.match(/setRooms\(\(current\) => response\.rooms \|\| \[\n/g) || []).length, 2)
 })
 
-// Desktop says so on its create form, and the phone said nothing, then offered
-// an editor whose changes no device took.
-test('a group says what cannot change once it is made, and nobody edits it later', async () => {
-  const { readFile } = await import('node:fs/promises')
-  const screen = await readFile(new URL('../../app/peerchat/PeerChatScreen.tsx', import.meta.url), 'utf8')
-  assert.match(screen, /Group name, picture, description and link cannot be edited after creation\./)
-  assert.match(screen, /Settings are fixed once the group is created\./)
-  assert.doesNotMatch(screen, /Save room details|saveRoomDetails|RPC_PEERCHAT_ROOM_UPDATE/)
-})
-
 // Find had nowhere to scan someone's code, though that is where people go
 // looking for someone to add.
 test('Find people scans a code from beside its search', async () => {

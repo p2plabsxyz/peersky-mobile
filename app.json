@@ -33,7 +33,7 @@
         "UIBackgroundModes": [
           "audio"
         ],
-        "NSPhotoLibraryAddUsageDescription": "PeerSky saves a picture to your photo library when you choose Save to Photos.",
+        "NSPhotoLibraryAddUsageDescription": "PeerSky saves a picture or video to your photo library when you choose Save to Photos.",
         "LSApplicationCategoryType": "public.app-category.utilities"
       },
       "privacyManifests": {

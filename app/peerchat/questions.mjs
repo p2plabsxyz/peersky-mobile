@@ -81,7 +81,7 @@ export const PEERCHAT_USAGE_QUESTIONS = [
   },
   {
     q: 'Can somebody be kicked out of a room?',
-    a: 'Whoever made the room can remove anyone in it, and nobody else can. Every copy of PeerChat checks the removal really came from the room’s maker, so it can’t be faked. What it can’t do is take the room key back, so someone removed could still listen with a changed app. For a clean slate, make a new room. The three strikes spam and abuse limit is separate: that one is a five minute pause.'
+    a: 'Whoever made the room can remove anyone in it, and nobody else can. Every copy of PeerChat checks the removal really came from the room’s maker, so it can’t be faked. In a room made on this version of PeerSky or later, the room also moves to a new key the person removed never gets, so the key they hold reaches nothing new. An older room keeps its key, so someone removed from it could still listen with a changed app; for a clean slate there, make a new room. The three strikes spam and abuse limit is separate: that one is a five minute pause.'
   },
   {
     q: 'Can people send anything they like?',

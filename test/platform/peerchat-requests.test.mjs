@@ -33,7 +33,7 @@ test('a request can be blocked from the request itself', () => {
 
 test('every request is reachable, not just the newest', () => {
   const sheet = screen.slice(screen.indexOf('visible={isRequestsOpen}'))
-  assert.match(sheet, /pendingDirectMessages\.map\(\(invite\) =>/)
+  assert.match(sheet, /shownRequests\.map\(\(invite\) =>/)
   assert.match(sheet, /Nobody is waiting/)
 })
 

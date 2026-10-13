@@ -20,8 +20,9 @@ test('the three weights map onto the platform styles', () => {
 // Holding something is a decision the phone should answer to.
 test('every long press in the app answers back', async () => {
   const files = [
-    // The newest: holding a mention, which offers the message's actions.
-    ['../../app/peerchat/PeerChatScreen.tsx', 10],
+    // The newest: holding a reply's quote, which offers the message's
+    // actions, as holding a mention does.
+    ['../../app/peerchat/PeerChatScreen.tsx', 11],
     ['../../app/hyperdrive/HyperdriveScreen.tsx', 1],
     ['../../app/index.tsx', 1]
   ]

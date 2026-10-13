@@ -68,6 +68,8 @@ import {
   RPC_PEERCHAT_ONBOARD,
   RPC_PEERCHAT_ATTACHMENT_UPLOAD,
   RPC_PEERCHAT_ATTACHMENT_OPEN,
+  RPC_PEERCHAT_ATTACHMENT_FORWARD,
+  RPC_PEERCHAT_SEARCH,
   RPC_PEERTUNES_START
 } from './commands.mjs'
 import {
@@ -133,7 +135,7 @@ import { getP2pmdEditorPage } from '../p2pmd/server.mjs'
 import { startPeerTunesServer } from '../peertunes/server.mjs'
 import { parseJsonMessage, replyJson } from './messages.mjs'
 import { deletePeerChatProfile, getPeerChatService, setPeerChatIdle } from '../peerchat/runtime.mjs'
-import { openPeerChatAttachment, uploadPeerChatAttachment } from '../peerchat/attachments.mjs'
+import { forwardPeerChatAttachment, openPeerChatAttachment, uploadPeerChatAttachment } from '../peerchat/attachments.mjs'
 
 export async function routeRpcRequest (req) {
   try {
@@ -547,6 +549,25 @@ export async function routeRpcRequest (req) {
         return
       }
       replyJson(req, await openPeerChatAttachment(body))
+      return
+    }
+
+    if (req.command === RPC_PEERCHAT_ATTACHMENT_FORWARD) {
+      const body = parseJsonMessage(req.data)
+      const peerChat = await getPeerChatService()
+      if (!peerChat.hasRoom(body.roomKey) || !peerChat.hasRoom(body.fromRoomKey)) {
+        replyJson(req, { ok: false, error: 'PeerChat room not found.' })
+        return
+      }
+      // Sealed for the chat it goes to, with a key of its own where that
+      // chat's files have one.
+      replyJson(req, await forwardPeerChatAttachment({ ...body, ownKey: peerChat.filesHaveOwnKeys(body.roomKey) }))
+      return
+    }
+
+    if (req.command === RPC_PEERCHAT_SEARCH) {
+      const peerChat = await getPeerChatService()
+      replyJson(req, { ok: true, ...await peerChat.searchMessages(parseJsonMessage(req.data)) })
       return
     }
 
