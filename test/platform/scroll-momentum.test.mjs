@@ -13,6 +13,8 @@ test('every WebView people scroll glides on after a swipe', async () => {
   assert.equal((app.match(/decelerationRate=\{WEBVIEW_DECELERATION_RATE\}/g) || []).length, 2)
   assert.match(await read('app/peertunes/PeerTunesScreen.tsx'), /decelerationRate=\{WEBVIEW_DECELERATION_RATE\}/)
   assert.match(await read('app/BrowserMediaSheet.tsx'), /decelerationRate=\{WEBVIEW_DECELERATION_RATE\}/)
+  // Reader view had none, so an article stopped where the finger left it.
+  assert.match(await read('app/reader/ReaderView.tsx'), /decelerationRate=\{WEBVIEW_DECELERATION_RATE\}/)
 })
 
 // Android hands the prop to a native view that reads it as a double, so the

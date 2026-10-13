@@ -5,7 +5,8 @@ import CloseIcon from '../../assets/icons/bootstrap/x-lg.svg'
 import { BROWSER_PALETTES } from '../browser-appearance.mjs'
 import { peerSkyWebViewNativeConfig } from '../downloads/PeerSkyWebView'
 import { MODAL_ORIENTATIONS } from '../modal-orientations'
-import { createReaderHtml, READER_TEXT_SCALES } from './reader-mode.mjs'
+import { WEBVIEW_DECELERATION_RATE } from '../webview-scroll.mjs'
+import { createReaderHtml, READER_BACKGROUNDS, READER_TEXT_SCALES } from './reader-mode.mjs'
 
 export type ReaderArticle = {
   ok: boolean
@@ -44,6 +45,7 @@ export function ReaderView ({
   onTextScaleChange: (scale: number) => void
 }) {
   const palette = isDark ? BROWSER_PALETTES.dark : BROWSER_PALETTES.light
+  const pageColor = isDark ? READER_BACKGROUNDS.dark : READER_BACKGROUNDS.light
   const scaleIndex = Math.max(READER_TEXT_SCALES.indexOf(textScale), 0)
   const nativeConfig = peerSkyWebViewNativeConfig && incognitoSession
     ? {
@@ -64,7 +66,7 @@ export function ReaderView ({
           it, and the header with its close button sat under the status bar,
           where a tap could not reach it. The tab list does the same. */}
       <SafeAreaProvider initialMetrics={initialWindowMetrics}>
-        <SafeAreaView edges={['top', 'left', 'right']} style={[styles.screen, { backgroundColor: isDark ? '#16181d' : '#fbfbf9' }]}>
+        <SafeAreaView edges={['top', 'left', 'right']} style={[styles.screen, { backgroundColor: pageColor }]}>
           <View style={[styles.header, { borderBottomColor: palette.border }]}>
             <Pressable
               accessibilityLabel='Close Reader view'
@@ -105,11 +107,18 @@ export function ReaderView ({
           </View>
           {article && (
             <WebView
+              // Left unset, a swipe stops dead on iOS the moment the finger
+              // lifts (see the browser WebView), so an article only moved as
+              // far as the finger did.
+              decelerationRate={WEBVIEW_DECELERATION_RATE}
               javaScriptEnabled={false}
               nativeConfig={nativeConfig}
               originWhitelist={['*']}
               source={{ html: createReaderHtml(article, { isDark, textScale }), baseUrl: pageUrl }}
-              style={styles.page}
+              // Opaque, in the page's own colour. A see-through WebView is
+              // blended with the screen under it on every frame of a scroll
+              // on iOS, and it looks the same either way.
+              style={[styles.page, { backgroundColor: pageColor }]}
               onShouldStartLoadWithRequest={(request) => {
                 // The reader page itself, and a jump within it.
                 if (request.url === 'about:blank' || request.url.split('#')[0] === page) return true
@@ -140,5 +149,5 @@ const styles = StyleSheet.create({
   disabled: { opacity: 0.35 },
   smallA: { fontSize: 14, fontWeight: '700' },
   largeA: { fontSize: 20, fontWeight: '700' },
-  page: { backgroundColor: 'transparent', flex: 1 }
+  page: { flex: 1 }
 })

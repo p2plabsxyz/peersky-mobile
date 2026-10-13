@@ -4868,7 +4868,6 @@ export default function App () {
                   deviceSyncRevision={deviceSyncRevision}
                   offlineNetworkAllowed={hyperOfflineNetworkAllowed}
                   isDark={browserIsDark}
-                  isLandscape={!browserIsPortrait}
                   onCallRpc={(command, data = {}) => callRpc(command, data)}
                   onOpenItem={(item) => void openHyperdriveItem(item)}
                   onOpenLinkDevice={() => {

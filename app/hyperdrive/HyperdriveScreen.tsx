@@ -104,7 +104,6 @@ type Props = {
   deviceSyncRevision?: number
   offlineNetworkAllowed: boolean
   isDark: boolean
-  isLandscape: boolean
   onCallRpc: (command: number, data?: Record<string, unknown>) => Promise<any>
   onOpenItem: (item: HyperdriveItem) => void
   onOpenLinkDevice: () => void
@@ -120,7 +119,7 @@ const RECENT_FILTERS: Array<{ id: RecentFilter, label: string }> = [
   { id: 'fetched', label: 'Fetched' }
 ]
 
-export function HyperdriveScreen ({ deviceSyncRevision = 0, offlineNetworkAllowed, isDark, isLandscape, onCallRpc, onOpenItem, onOpenLinkDevice, onOpenUrl, onStatus }: Props) {
+export function HyperdriveScreen ({ deviceSyncRevision = 0, offlineNetworkAllowed, isDark, onCallRpc, onOpenItem, onOpenLinkDevice, onOpenUrl, onStatus }: Props) {
   const insets = useSafeAreaInsets()
   const [recents, setRecents] = useState<HyperdriveItem[]>(loadHyperdriveRecents)
   // Settings, P2P Data clears recents with this screen still open underneath.
@@ -753,17 +752,7 @@ export function HyperdriveScreen ({ deviceSyncRevision = 0, offlineNetworkAllowe
       )}
       {listingTruncated && <Text style={[styles.limitNote, { color: palette.muted }]}>Showing a partial directory listing.</Text>}
 
-      {isLandscape
-        ? <View style={styles.listContent}>{libraryItems}</View>
-        : (
-          <ScrollView
-            contentContainerStyle={styles.listContent}
-            keyboardShouldPersistTaps='handled'
-            style={styles.list}
-          >
-            {libraryItems}
-          </ScrollView>
-          )}
+      <View style={styles.listContent}>{libraryItems}</View>
 
       <PublishedLinkSheet
         isDark={isDark}
@@ -817,19 +806,20 @@ export function HyperdriveScreen ({ deviceSyncRevision = 0, offlineNetworkAllowe
     </>
   )
 
-  if (isLandscape) {
-    return (
-      <ScrollView
-        contentContainerStyle={styles.page}
-        keyboardShouldPersistTaps='handled'
-        style={[styles.pageScroll, { backgroundColor: palette.background }]}
-      >
-        {pageContent}
-      </ScrollView>
-    )
-  }
-
-  return <View style={[styles.page, styles.pageFixed, { backgroundColor: palette.background }]}>{pageContent}</View>
+  // The whole page scrolls, in either orientation. Only Recent used to, below
+  // everything else, and with files from your devices above it there was no
+  // room left to scroll it in. The filter's menu hangs below its button, so
+  // while it is open the page keeps room for it under the last file.
+  return (
+    <ScrollView
+      contentContainerStyle={[styles.page, filterVisible ? styles.pageMenuRoom : null]}
+      keyboardDismissMode='on-drag'
+      keyboardShouldPersistTaps='handled'
+      style={[styles.pageScroll, { backgroundColor: palette.background }]}
+    >
+      {pageContent}
+    </ScrollView>
+  )
 }
 
 function FolderIcon ({ color }: { color: string }) {
@@ -983,8 +973,8 @@ const darkPalette = {
 }
 
 const styles = StyleSheet.create({
-  page: { gap: 18, paddingHorizontal: 18, paddingTop: 12 },
-  pageFixed: { flex: 1 },
+  page: { flexGrow: 1, gap: 18, paddingHorizontal: 18, paddingTop: 12 },
+  pageMenuRoom: { paddingBottom: 140 },
   pageScroll: { flex: 1 },
   appHeader: { alignItems: 'flex-start', flexDirection: 'row', gap: 10 },
   appIcon: { borderRadius: 10, height: 44, width: 44 },
@@ -1024,7 +1014,6 @@ const styles = StyleSheet.create({
   filterOption: { justifyContent: 'center', minHeight: 44, paddingHorizontal: 14 },
   filterOptionLabel: { fontSize: 14, fontWeight: '600' },
   limitNote: { fontSize: 12, marginBottom: 4 },
-  list: { flex: 1 },
   listContent: { gap: 8, paddingBottom: 36 },
   deviceFiles: { gap: 8, marginBottom: 6 },
   seeAll: { justifyContent: 'center', minHeight: 36, paddingHorizontal: 4 },

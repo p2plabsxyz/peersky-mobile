@@ -38,6 +38,20 @@ describe('linked devices in the app', () => {
     assert.match(hyperdrive, /On your \$\{item\.deviceLabel\.toLowerCase\(\)\}/)
   })
 
+  // Only Recent scrolled, under everything else, so with files from your
+  // devices above it there was no room left and the rest could not be reached.
+  test('the whole Hyperdrive page scrolls, Recent with it', () => {
+    assert.equal((hyperdrive.match(/<ScrollView\b/g) || []).length, 1)
+    assert.match(hyperdrive, /<ScrollView[^>]*>\s*\{pageContent\}\s*<\/ScrollView>/)
+    assert.match(hyperdrive, /<View style=\{styles\.listContent\}>\{libraryItems\}<\/View>/)
+    assert.doesNotMatch(hyperdrive, /isLandscape/)
+    assert.doesNotMatch(index, /isLandscape=/)
+    // A short page still fills the screen, and the filter's menu, which hangs
+    // below its button, has room under the last file while it is open.
+    assert.match(hyperdrive, /contentContainerStyle=\{\[styles\.page, filterVisible \? styles\.pageMenuRoom : null\]\}/)
+    assert.match(hyperdrive, /page: \{ flexGrow: 1,/)
+  })
+
   test('the app hears when devices change and says when the phone is on cellular', () => {
     assert.match(index, /request\.command === RPC_APP_DEVICE_SYNC_CHANGED/)
     assert.match(index, /setDeviceSyncRevision\(\(value\) => value \+ 1\)/)
