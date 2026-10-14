@@ -84,6 +84,7 @@ Fixed as a result:
 
 - A tab another page got PeerSky to open, or on iOS before 16.4 an image on any page, could make PeerTunes keep songs from any drive: up to twenty drives a request, downloading on cellular and staying open.
 - Kept songs downloaded on cellular with Download only on Wi-Fi on.
+- The picture check left a small copy of every picture it checked, pictures sent in rooms included, and the copies that Save and Share made stayed after Clear all P2P data.
 
 Not covered in depth: native modules and upstream libraries beyond advisory triage.
 

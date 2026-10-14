@@ -27,6 +27,7 @@ import { BROWSER_P2P_URL, getHyperDriveListingUrl } from '../browser-shell.mjs'
 import ChevronRightIcon from '../../assets/icons/bootstrap/chevron-right.svg'
 import CopyIcon from '../../assets/icons/bootstrap/copy.svg'
 import { clearHyperdriveRecents } from '../hyperdrive/recents-store'
+import { clearChatFileCopies } from '../peerchat/media-save'
 import { SettingsSection, useSettingsDarkMode } from './SettingsUI'
 
 type P2pAppData = {
@@ -392,6 +393,7 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
     await new Promise((resolve) => setTimeout(resolve, 450))
     onRestartRequired()
     await new Promise((resolve) => setTimeout(resolve, 300))
+    clearChatFileCopies()
     try {
       const response = await onCallRpc(RPC_HYPER_STORAGE_CLEAR_ALL)
       if (!response.ok || !response.cleared) throw new Error(response.error || 'Unable to clear P2P data.')

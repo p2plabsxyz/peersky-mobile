@@ -69,6 +69,7 @@ export async function scanMedia (asset: {
   // hands over whole photos as base64, and posting those at full size outlasted
   // the scan timeout, so they went through unscanned.
   let scratch: File | null = null
+  let jpegUri = ''
   let base64 = ''
   try {
     let sourceUri = asset.uri || ''
@@ -84,12 +85,16 @@ export async function scanMedia (asset: {
       .resize({ width: NSFW_INPUT_SIZE })
       .renderAsync()
     const jpeg = await rendered.saveAsync({ base64: true, compress: 0.9, format: SaveFormat.JPEG })
+    jpegUri = jpeg.uri
     base64 = jpeg.base64 || ''
   } catch {
     // Not something the platform can decode, so not something it can judge.
     return MEDIA_UNSCANNED
   } finally {
     try { scratch?.delete() } catch {}
+    // The manipulator always writes the JPEG to a file as well. For a picture
+    // someone sent, that copy outlived the chat, Clear all P2P data included.
+    try { if (jpegUri) new File(jpegUri).delete() } catch {}
   }
   if (!base64) return MEDIA_UNSCANNED
 

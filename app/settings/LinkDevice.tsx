@@ -61,6 +61,7 @@ import {
 } from './link-device-state.mjs'
 import { type LinkDeviceProgress, subscribeLinkDeviceProgress } from './link-device-progress'
 import { emitP2pmdNotesShared } from './p2pmd-shared-notes'
+import { clearChatFileCopies } from '../peerchat/media-save'
 import ChevronRightIcon from '../../assets/icons/bootstrap/chevron-right.svg'
 import DisplayIcon from '../../assets/icons/bootstrap/display.svg'
 import DownloadIcon from '../../assets/icons/bootstrap/download.svg'
@@ -185,6 +186,8 @@ export function LinkDeviceSettings ({ deviceSyncRevision = 0, onCallRpc, onResta
     await new Promise((resolve) => setTimeout(resolve, 450))
     onRestartRequired()
     await new Promise((resolve) => setTimeout(resolve, 300))
+    // The chats the copies came from are going.
+    clearChatFileCopies()
     try {
       const response = await call(command, data)
       if (!response.ok) throw new Error(response.error || 'It did not go through')

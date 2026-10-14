@@ -62,6 +62,19 @@ export async function savePeerChatMedia ({ uri, fileName }: { uri: string, fileN
   return null
 }
 
+// Copies of chat files kept outside the stores: the ones Save and Share
+// handed on, and the JPEGs the picture check and a profile picture's resize
+// write. The chats they came from go with Clear all P2P data, Remove my data
+// and a restore, and so do these.
+export function clearChatFileCopies () {
+  for (const name of ['peerchat-save', 'ImageManipulator']) {
+    try {
+      const folder = new Directory(Paths.cache, name)
+      if (folder.exists) folder.delete()
+    } catch {}
+  }
+}
+
 // The opened copy is kept under a name with a fingerprint in front, which
 // the share sheet showed and Save to Files kept. A copy under the name it was
 // sent with goes instead.

@@ -86,3 +86,24 @@ test('Save is in the picture viewer and in the message\'s long-press menu', asyn
   const app = JSON.parse(await read('app.json'))
   assert.match(app.expo.ios.infoPlist.NSPhotoLibraryAddUsageDescription, /Save to Photos/)
 })
+
+// Clear all P2P data said the chats go. Copies of their pictures outside the
+// stores stayed: the picture check's small JPEG of every picture in a room,
+// and what Save and Share handed on.
+test('a picture check keeps no copy, and clearing the chats clears the copies', async () => {
+  const scanner = await read('app/media/NsfwScanner.tsx')
+  assert.match(scanner, /jpegUri = jpeg\.uri/)
+  assert.match(scanner, /finally \{[\s\S]{0,400}if \(jpegUri\) new File\(jpegUri\)\.delete\(\)/)
+
+  const helper = await read('app/peerchat/media-save.ts')
+  assert.match(helper, /export function clearChatFileCopies \(\) \{\s*for \(const name of \['peerchat-save', 'ImageManipulator'\]\)/)
+  assert.match(helper, /new Directory\(Paths\.cache, 'peerchat-save'\)/, 'the folder Save and Share write to')
+
+  const storage = await read('app/settings/P2PStorage.tsx')
+  const clearAll = storage.slice(storage.indexOf('async function clearAllData'), storage.indexOf('async function refreshArchive'))
+  assert.ok(clearAll.indexOf('clearChatFileCopies()') > -1 && clearAll.indexOf('clearChatFileCopies()') < clearAll.indexOf('RPC_HYPER_STORAGE_CLEAR_ALL'))
+
+  const linkDevice = await read('app/settings/LinkDevice.tsx')
+  const replace = linkDevice.slice(linkDevice.indexOf('const replaceData = useCallback'), linkDevice.indexOf('const commitRestore'))
+  assert.ok(replace.indexOf('clearChatFileCopies()') > -1 && replace.indexOf('clearChatFileCopies()') < replace.indexOf('await call(command, data)'))
+})
