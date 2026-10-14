@@ -8,7 +8,8 @@ and transport formats as PeerSky Desktop.
 
 ## Capabilities
 
-- Create a group or join one with its 64-character room key.
+- Create a group or join one with its 64-character room key or an invite link,
+  which says who made the room too.
 - Exchange encrypted messages with mobile and desktop peers.
 - Rooms and direct messages made on 0.1.2 or later change their message key
   every hour, so a key someone gets later cannot read what came before.
@@ -82,8 +83,10 @@ Important files:
 
 Each phone and desktop filters what it sends and what it receives, on its own.
 In a group, a message with threats, slurs or an adult-domain link is held back
-and a notice takes its place, and a picture that looks explicit is refused
-before it is sent. A direct message skips the text filters: it is between two
+and a notice takes its place. So is a file whose name has them, since the name
+shows in the chat list, a search and a notification. A picture that looks
+explicit is refused before it is sent. A direct message skips the text filters,
+file names included: it is between two
 people, and either can block the other. The spam limit still applies there, and
 a picture that looks explicit arrives hidden behind a warning the reader can
 open. Whether a room is a direct message is worked out on each device, never
@@ -94,8 +97,9 @@ room's removal list with their own key, so anyone in the room can pass it on
 and every device checks it against the creator's key, which is how a removal
 reaches people who never meet the creator. A list from an older build carries
 no signature and counts only from the creator's own connection. On 0.1.3 the
-room also moves to a new key the person removed never hears (see
-[Removing somebody moves the room](#removing-somebody-moves-the-room)).
+room also moves to a new key for the people still in it (see
+[Removing somebody moves the room](#removing-somebody-moves-the-room)). A
+person's other devices are members of their own, so each has to be removed.
 
 The picture check runs the vendored model in a hidden WebView
 (`app/media/NsfwScanner.tsx`). iOS ends a WebView's page process while the app
@@ -113,8 +117,9 @@ needed to decrypt its messages. Anyone who receives it can join that room and
 read synchronized history, all of it in an older room and from the hour they
 join in a newer one, so share it only with intended participants. PeerChat has
 no server-side account or invitation revocation. Removing somebody from a room
-moves it to a new key they never hear, so the key they held stops working. For
-a key exposed some other way, create a new room and share its key.
+moves it to a new key for the people still in it, so invites from before stop
+working; a device on 0.1.2 or older stays on the old key. For a key exposed
+some other way, create a new room and share its key.
 
 A room's discovery topic is public: DHT nodes see it on the way past, so knowing
 it opens nothing. On every connection each side sends, for each of its rooms,
@@ -233,7 +238,10 @@ come in three seconds, the next neighbour that has it is asked, for up to 30
 seconds. So a device takes in each message once, and a short id from its other
 connections. Asked-for messages are kept outside the budget for unasked ones,
 each connection has a budget of 6,000 ids a minute each way, and an older build
-is passed whole messages as before.
+is passed whole messages as before. A device waits on at most 4,096 ids at
+once, and of those one connection may have put 512 there and one room 2,048,
+so made-up ids from one connection, or one busy room, cannot crowd out a real
+message from another room.
 Limits count per author, not per connection: each author has the room's spam
 limit and 120 messages a minute, wherever their messages come from, so a device
 passing on a busy room is never blamed for what others wrote. The desktop keeps
@@ -269,25 +277,61 @@ somebody, the room moves to a new key, and only the people still in it hear it.
   Before, only the creator's own connection could say, and in a big room most
   members dropped every removal list as unchecked. The secret is as private as
   the room key.
+- **A claim gives way to the secret.** A room made before 0.1.3 has no secret,
+  so its creator key still comes from the creator's own connection, the first
+  time it is announced. A member of a newer room could say the same of
+  themselves to a device that had just joined from a bare key. Such a key is
+  only somebody's word: once the secret names somebody else, it is replaced,
+  and everything checked against it goes with it, its signed details and the
+  filters they set, its removal list, the maker's name, and any move the room
+  followed under it, whose rooms are left without telling anyone. The real
+  details are then taken whatever their version. A removal list or details that
+  do not check out under a claimed key wait for the secret instead of being
+  dropped, and are checked again when it comes. The secret counts even from
+  somebody the claimed key removed, or kept out of a room it moved. A key that
+  is pinned in the app or proven by the secret is never replaced: two keys
+  cannot both make one room key. The maker's name is taken only from the
+  maker's own connection.
+- **Invites.** An invite says who made the room:
+  `peersky://p2p/peerchat/#room=<room key>&creator=<creator key>&proof=<secret>`,
+  all lowercase hex, 64 characters each, in that order. `creator` comes only
+  when the inviting device has a creator key for the room, never for a direct
+  message or P2P Republic, and `proof` only with it, when the device holds a
+  secret that checks out. A device joining from one starts with that creator,
+  so nobody can claim the room first, and a room already there takes the
+  creator when it has none or the secret over a claim. A secret that does not
+  make the room's key drops the creator too, as if the link had neither. Copy
+  invite link, Share, the Join box, a scanned code and a tapped link all carry
+  it, and an older build reads `room` alone.
 - **The move.** The creator makes a new room key the same way, with a new chain,
   and signs `"peersky-chat/4 moved\n" + old topic + "\n" + new topic + "\n" +
   time + "\n" + chain's first hour + "\n" + SHA-256 of its secret`. The move
   goes as `{ type: "room-moved", room, moves }`, only to peers whose handshake
   says `move: true`, and each device checks it against the old room's creator
-  key and the new key's own proof before it follows.
-- **Who hears it.** A device passes a move on only to somebody it saw in the
-  room before the move was made, by full key, never by the short id anyone can
-  grind a key to match, and never to anyone removed, nor does a person's other
-  device hand the room to one of theirs that was removed. So the person
-  removed, even under a new key, is never told. Somebody offline when the room moved hears
-  where it went when they come back, from any device that saw them there, or
-  from another of their own devices. If nobody online saw them, they need a new
-  invite.
+  key and the new key's own proof before it follows. A device following a line
+  of moves joins only the room at its end: the rooms on the way get a record,
+  so an old key still leads there, and nothing else, no swarm topic, no feed
+  and no notice. A line of rooms follows at most ten moves in any hour, counted
+  by the time each move carries, unless this device made them. The rest come
+  again with the line on the next connection and are taken once the hour
+  allows.
+- **Who hears it.** A device passes a move on only to a key that proved the
+  room on a connection to it before the move was made, by full key, never by
+  the short id anyone can grind a key to match, and never to anyone removed,
+  nor does a person's other device hand the room to one of theirs that was
+  removed. A key that only signed a message or reaction somebody passed on
+  does not count, so a member about to be removed cannot slip in a spare key to
+  come back under. A person's other devices are members of their own, so
+  removing one leaves the others in: remove each. Somebody offline when the
+  room moved hears where it went when they come back within 14 days, from any
+  device they proved the room to before, or from another of their own devices.
+  After that, or if nobody online saw them, they need a new invite.
 - **What stays.** The room keeps its name, picture, members, settings, pins and
   unread count, and its history from before shows with the new room's. The old
-  key is kept only for that history and for whoever missed the move: nobody new
-  is let in under it, and nothing is sent in it. Invites from before stop
-  working, and the room says so.
+  key is kept only for that history and for whoever missed the move, joined for
+  14 days after the move and then left with its history kept: nobody new is let
+  in under it, and nothing is sent in it. Invites from before stop working, and
+  the room says so.
 - **What does not move.** P2P Republic, whose key ships with the app, and
   direct messages, where there is nobody to remove. A device on 0.1.2 or older
   cannot follow a move and stays on the old key until it updates.
@@ -314,7 +358,10 @@ details as `details` from anyone who has them. A device checks them against the
 creator key, which the room key vouches for (above), takes the newest version,
 keeps them exactly as they came and passes them on, so a change reaches people
 who never meet the creator. Details that arrive before the creator key is known
-wait for it. Once a device holds signed details, nothing unsigned changes the
+wait for it, and so do details that do not check out under a creator key taken
+on somebody's word, until the secret settles who made the room (see
+[Removing somebody moves the room](#removing-somebody-moves-the-room)). Once a
+device holds signed details, nothing unsigned changes the
 room, and settings without a signature count only from the creator's own
 connection. Only the creator gets Edit room, and the backend refuses a change
 from anyone else ("Only the person who made this room can change it."). A
@@ -378,7 +425,10 @@ and says `hasOlder`, so a jump to an old message loads far enough back.
 
 A room or message-request link can come from any web page, so opening one only
 asks: joining a room or sending a request shows the people there your name, bio
-and photo. Scanning a QR code is already a choice you made, so it goes ahead.
+and photo. Scanning a QR code is already a choice you made, so it goes ahead. A
+room link also says who made the room, which counts for a room already on the
+phone too (see
+[Removing somebody moves the room](#removing-somebody-moves-the-room)).
 
 Press and hold a message, or open someone's profile, to report them or block
 them. A block hides everything that person sends, in every room, the moment it
@@ -446,7 +496,8 @@ them. See [link-device.md](link-device.md).
 The service limits room count, returned and stored history, room and total
 storage bytes, frame and message size, pending direct-message requests, peer
 members, initial synchronization, queued frames, live/control message rates,
-messages passed on per connection and per author,
+messages passed on per connection and per author, ids asked for per connection
+and per room, moves followed per hour and how long a moved room stays joined,
 tracked moderation state, and link-preview work. It releases feed listeners,
 timers, transports, pending joins, swarm topics, and room state during leave,
 runtime reset, P2P clearing, and application shutdown.

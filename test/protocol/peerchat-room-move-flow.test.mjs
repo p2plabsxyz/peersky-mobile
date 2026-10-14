@@ -7,8 +7,9 @@ import test from 'node:test'
 import crypto from 'hypercore-crypto'
 
 import { PeerChatService } from '../../backend/peerchat/service.mjs'
-import { derivePeerChatTopic } from '../../backend/peerchat/protocol.mjs'
+import { createPeerChatMessageId, derivePeerChatTopic } from '../../backend/peerchat/protocol.mjs'
 import { newKeyChain } from '../../backend/peerchat/key-chain.mjs'
+import { signReaction } from '../../backend/peerchat/message-signature.mjs'
 import { roomProof } from '../../backend/peerchat/room-proof.mjs'
 import { checkMove, makeCreatorRoomKey, signMove } from '../../backend/peerchat/room-move.mjs'
 import { makeProfileProof } from '../../backend/peerchat/device-link.mjs'
@@ -33,6 +34,7 @@ const OLDER = pair(65)
 const NEWCOMER = pair(66)
 const UNKNOWN = pair(67)
 const LAPTOP = pair(68)
+const SPARE = pair(69)
 
 async function startService (t) {
   const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-room-move-'))
@@ -179,6 +181,34 @@ test('a device of the person\'s own that was removed never gets the new key, eve
   assert.ok(!offered(back).includes(movedTo))
   assert.ok(!offered(back).includes(roomKey))
   assert.equal(back.of('room-moved').length, 0)
+})
+
+// Anyone can sign with a spare key. A member about to be removed passed on one
+// reaction signed by a spare key, to a message that is not there, so nothing
+// showed, and the spare key used to be noted as seen in the room: once the room
+// moved, it was handed the new key.
+test('a key that only signed something passed on is not handed the room when it moves', async (t) => {
+  const service = await startService(t)
+  const { roomKey } = await service.createRoom({ name: 'Weekend' })
+  const alice = await connect(service, ALICE, [roomKey])
+  const removed = await connect(service, REMOVED, [roomKey])
+  const id = createPeerChatMessageId()
+  const ts = Date.now()
+  const signed = signReaction({ topic: wireRoom(roomKey), id, ts, msgId: 'nothing-here', emoji: '👍', sn: 'Spare' }, SPARE)
+  await service.handlePeerMessage(removed, { type: 'pass', roomKey, m: { type: 'reaction', id, ts, msgId: 'nothing-here', emoji: '👍', sn: 'Spare', ...signed } })
+  // Taken in, as any signed reaction is.
+  assert.ok(service.seenIds.get(roomKey)?.has(id))
+  await new Promise((resolve) => setTimeout(resolve, 5))
+
+  const { movedTo } = await service.removeRoomMember({ roomKey, peerId: keyOf(REMOVED).slice(0, 8) })
+  assert.equal(alice.of('room-moved', roomKey)[0]?.moves[0].to, movedTo)
+  assert.equal(removed.of('room-moved').length, 0)
+
+  // The spare key turns up with the old key afterwards: nothing.
+  const spare = await connect(service, SPARE, [roomKey])
+  assert.equal(spare.of('room-moved').length, 0)
+  assert.ok(!spare.rooms.includes(roomKey))
+  assert.equal(service.rooms.get(roomKey).knownKeys[keyOf(SPARE)], undefined)
 })
 
 async function waitFor (check) {

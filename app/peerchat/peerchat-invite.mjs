@@ -1,6 +1,8 @@
 // PeerChat invite links, in the desktop's format so either side opens them:
 //
 //   peersky://p2p/peerchat/#room=<64 hex room key>   a room
+//   peersky://p2p/peerchat/#room=<room key>&creator=<creator key>&proof=<secret>
+//                                                    a room, and who made it
 //   peersky://p2p/peerchat/#dm=<64 hex public key>   one person
 //
 // A room key is the room's capability: anyone with the link is in. A person's
@@ -8,6 +10,15 @@
 // before carried the 8 hex short id the member list shows, and still open.
 // Both ride in the fragment, so the browser shell treats them as a launch
 // suffix on the built-in app.
+//
+// A room invite also says who made the room, when the device making it knows:
+// the creator's key, and with it the secret that made the room's key out of
+// the creator's, when that device holds one that checks out. Whoever joins
+// from the link knows the creator from the start, rather than taking the
+// first member who claims to have made it. All lowercase hex, 64 characters
+// each, in that order. The secret is as private as the room key. A direct
+// message and P2P Republic, whose creator key ships with the app, carry room
+// alone, and an older build reads room alone and ignores the rest.
 export const PEERCHAT_INVITE_BASE = 'peersky://p2p/peerchat/'
 
 // "Invite friends to PeerChat" in Find: a message to send through any app on
@@ -25,30 +36,77 @@ export function buildPeerChatAppInviteMessage (directInviteUrl = '') {
 
 const ROOM_KEY_RE = /^[a-f0-9]{64}$/i
 
-export function buildPeerChatInviteUrl (roomKey) {
+// creatorKey and creatorProof are what the room says about who made it, as
+// PeerChat hands them to the screen: none for a direct message or P2P
+// Republic, and the secret only with the key.
+export function buildPeerChatInviteUrl (roomKey, creatorKey = '', creatorProof = '') {
   const key = String(roomKey || '')
   if (!ROOM_KEY_RE.test(key)) return ''
-  return `${PEERCHAT_INVITE_BASE}#room=${key.toLowerCase()}`
+  const link = `${PEERCHAT_INVITE_BASE}#room=${key.toLowerCase()}`
+  const creator = String(creatorKey || '')
+  if (!ROOM_KEY_RE.test(creator)) return link
+  const proof = String(creatorProof || '')
+  const withCreator = `${link}&creator=${creator.toLowerCase()}`
+  return ROOM_KEY_RE.test(proof) ? `${withCreator}&proof=${proof.toLowerCase()}` : withCreator
 }
 
-// Accepts a full invite link, a bare fragment, or a plain room key, so the same
-// function handles a pasted link and a scanned QR code.
-export function parsePeerChatInvite (input) {
+/**
+ * A room invite: the room key, and who made the room when the link says so.
+ * Accepts a full invite link, a bare fragment, or a plain room key, so the
+ * same function handles a pasted link and a scanned QR code. Null when it
+ * names no room.
+ *
+ * The creator key is taken only whole, and the secret only with it. Whether
+ * the two make the room's key is checked where the room is joined
+ * (PeerChatService.joinRoom), where PeerChat's hashing lives and which every
+ * way in goes through: a secret that does not check out drops the creator key
+ * too, as if the link had neither.
+ */
+export function parsePeerChatRoomInvite (input) {
   const value = String(input || '').trim()
-  if (!value) return ''
-  if (ROOM_KEY_RE.test(value)) return value.toLowerCase()
+  if (!value) return null
+  if (ROOM_KEY_RE.test(value)) return { roomKey: value.toLowerCase(), creatorKey: '', creatorProof: '' }
 
   const tail = value.match(/[#?](.*)$/)?.[1] ?? ''
-  if (!tail) return ''
+  if (!tail) return null
 
-  let key = ''
+  let params
   try {
-    key = new URLSearchParams(tail).get('room') || ''
+    params = new URLSearchParams(tail)
   } catch {
-    return ''
+    return null
   }
 
-  return ROOM_KEY_RE.test(key) ? key.toLowerCase() : ''
+  const roomKey = params.get('room') || ''
+  if (!ROOM_KEY_RE.test(roomKey)) return null
+  const creator = params.get('creator') || ''
+  const proof = params.get('proof') || ''
+  // A secret that is there but cannot be one says the same as one that does
+  // not check out.
+  const proofFits = ROOM_KEY_RE.test(proof)
+  const creatorKey = ROOM_KEY_RE.test(creator) && (proofFits || !params.has('proof')) ? creator.toLowerCase() : ''
+  const creatorProof = creatorKey && proofFits ? proof.toLowerCase() : ''
+  return { roomKey: roomKey.toLowerCase(), creatorKey, creatorProof }
+}
+
+// The room key alone, for everything that only needs to know which room.
+export function parsePeerChatInvite (input) {
+  return parsePeerChatRoomInvite(input)?.roomKey || ''
+}
+
+/**
+ * What joining from a room key or an invite asks PeerChat for: the room, and
+ * who made it when the invite says. Anything else goes as it was typed, for
+ * PeerChat to refuse in its own words.
+ */
+export function peerChatJoinRequest (input) {
+  const invite = parsePeerChatRoomInvite(input)
+  if (!invite) return { roomKey: String(input || '').trim() }
+  return {
+    roomKey: invite.roomKey,
+    ...(invite.creatorKey && { creatorKey: invite.creatorKey }),
+    ...(invite.creatorProof && { creatorProof: invite.creatorProof })
+  }
 }
 
 const PEER_ID_RE = /^[a-f0-9]{8}$/i

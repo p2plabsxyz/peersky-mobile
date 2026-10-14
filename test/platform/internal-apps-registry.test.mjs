@@ -185,8 +185,9 @@ test('a room is shared as an invite link, and a direct message has nothing to sh
   const start = screen.indexOf('async function shareRoom ()')
   const share = screen.slice(start, screen.indexOf('\n  }', start))
 
-  // The bare key has to be pasted into Join Room by hand; the link just joins.
-  assert.match(share, /buildPeerChatInviteUrl\(activeRoom[.]roomKey\)/)
+  // The bare key has to be pasted into Join Room by hand; the link just joins,
+  // and says who made the room. See peerchat-room-invite.test.mjs.
+  assert.match(share, /buildPeerChatInviteUrl\(activeRoom[.]roomKey, activeRoom[.]creatorKey, activeRoom[.]creatorProof\)/)
 
   // There is nobody to invite into a one-to-one chat. The button becomes a
   // spacer rather than simply going: the title is centred between the two

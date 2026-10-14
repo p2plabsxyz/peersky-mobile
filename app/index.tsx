@@ -236,7 +236,12 @@ import { PeerChatScreen, type PeerChatResponse } from './peerchat/PeerChatScreen
 import { settleIncomingUrl, subscribeToIncomingUrls } from './incoming-links'
 import { parseHomeShortcut } from './home-shortcuts.mjs'
 import { idlePeerTunesWidget, updateBrowserWidget } from './widgets'
-import { parsePeerChatDirectInvite, parsePeerChatInvite } from './peerchat/peerchat-invite.mjs'
+import {
+  buildPeerChatInviteUrl,
+  parsePeerChatDirectInvite,
+  parsePeerChatInvite,
+  parsePeerChatRoomInvite
+} from './peerchat/peerchat-invite.mjs'
 import { screenUploadBytes } from './media/upload-gate'
 import { isUsableImageType, sniffBase64ImageType } from './media/media-moderation.mjs'
 import { NsfwScanner } from './media/NsfwScanner'
@@ -1619,7 +1624,12 @@ export default function App () {
     }
 
     if (app === 'peerchat') {
-      if (invitedRoom) setRequestedPeerChatRoomKey(invitedRoom)
+      // The whole invite, so who made the room comes with it. See
+      // peerchat/peerchat-invite.mjs.
+      if (invitedRoom) {
+        const invite = parsePeerChatRoomInvite(launchSuffix)
+        setRequestedPeerChatRoomKey(buildPeerChatInviteUrl(invitedRoom, invite?.creatorKey, invite?.creatorProof))
+      }
       // A personal invite names a person rather than a room, so it asks them
       // rather than joining anything.
       if (invitedPeer) setRequestedPeerChatPeerId(invitedPeer)

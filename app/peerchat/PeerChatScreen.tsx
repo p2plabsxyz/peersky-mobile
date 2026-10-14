@@ -133,6 +133,8 @@ import {
   isPeerChatDirectRoomFor,
   parsePeerChatDirectInvite,
   parsePeerChatInvite,
+  parsePeerChatRoomInvite,
+  peerChatJoinRequest,
   splitPeerChatDirectPeer
 } from './peerchat-invite.mjs'
 import { PRE_JOINED_PEERCHAT_ROOM_KEY } from '../../backend/peerchat/rooms.mjs'
@@ -240,6 +242,11 @@ type PeerChatRoom = {
   createdAt: number
   createdBy: string
   createdByName: string
+  // Who made the room, for its invite: the key, and the secret behind the
+  // room key when this phone has it. Neither for a direct message or P2P
+  // Republic. See peerchat-invite.mjs.
+  creatorKey?: string
+  creatorProof?: string
   isCreator: boolean
   removedByCreator: boolean
   moderation: PeerChatModeration
@@ -385,6 +392,7 @@ type PeerChatScreenProps = {
   onSoundsEnabledChange: (enabled: boolean) => boolean
   onStatus: (message: string) => void
   soundsEnabled: boolean
+  // A room key, or a whole invite link that may also say who made the room.
   requestedRoomKey: string | null
   // The person a link names: their whole key, or the short id of an older link.
   requestedPeerId?: string | null
@@ -407,6 +415,9 @@ const HIGHLIGHT_MS = 2000
 const CHAT_NOTE_MS = 5000
 // The chat list's search over messages waits for typing to pause.
 const MESSAGE_SEARCH_DELAY_MS = 250
+// Join takes a room key or a whole invite link, which says who made the room
+// too and runs to about 240 characters.
+const MAX_JOIN_INPUT_LENGTH = 512
 const MAX_PEERCHAT_AVATAR_SOURCE_BYTES = 25 * 1024 * 1024
 type PeerChatBlockedPeer = {
   peerId: string
@@ -914,10 +925,18 @@ export function PeerChatScreen ({
     // away. It used to clear the request and then fail the join, which left the
     // link doing nothing once they were finally through.
     if (!requestedRoomKey || !isInitialized || !profile?.username) return
-    const room = rooms.find((item) => item.roomKey === requestedRoomKey)
+    // A room key from a notification, or a whole invite from a link, which may
+    // say who made the room. A room that moved is where it went now.
+    const invite = parsePeerChatRoomInvite(requestedRoomKey)
+    const shownKey = invite ? movedRoomsRef.current[invite.roomKey] || invite.roomKey : ''
+    const room = rooms.find((item) => item.roomKey === shownKey)
     if (room) {
       openRoom(room)
       onRequestedRoomHandled()
+      // In it already, and who made it still counts: PeerChat takes the
+      // creator when it has none, and a proof over one it took on somebody's
+      // word.
+      if (invite?.creatorKey) void callRpcRef.current(RPC_PEERCHAT_ROOM_JOIN, peerChatJoinRequest(requestedRoomKey)).catch(() => {})
       return
     }
 
@@ -1757,11 +1776,12 @@ export function PeerChatScreen ({
   }
 
   // Shared by the Join button, an invite link and a scanned QR code. A function
-  // declaration so the invite effect above can call it.
-  async function joinRoomByKey (roomKey: string) {
+  // declaration so the invite effect above can call it. Takes a room key or a
+  // whole invite, which may say who made the room.
+  async function joinRoomByKey (invite: string) {
     await runAction(async () => {
       await saveProfile()
-      const response = await callRpc(RPC_PEERCHAT_ROOM_JOIN, { roomKey })
+      const response = await callRpc(RPC_PEERCHAT_ROOM_JOIN, peerChatJoinRequest(invite))
       if (!response.ok || !response.room) {
         throw new Error(response.error || 'Unable to join PeerChat room.')
       }
@@ -1948,15 +1968,16 @@ export function PeerChatScreen ({
       return
     }
     setJoinKey(roomKey)
-    void joinRoomByKey(roomKey)
+    // The whole invite, so who made the room comes with it.
+    void joinRoomByKey(value)
   }
 
   function joinRoom () {
     void runAction(async () => {
       await saveProfile()
-      const response = await callRpc(RPC_PEERCHAT_ROOM_JOIN, {
-        roomKey: joinKey
-      })
+      // A room key or a whole invite pasted in, which may say who made the
+      // room.
+      const response = await callRpc(RPC_PEERCHAT_ROOM_JOIN, peerChatJoinRequest(joinKey))
       if (!response.ok || !response.room) {
         throw new Error(response.error || 'Unable to join PeerChat room.')
       }
@@ -2135,11 +2156,14 @@ export function PeerChatScreen ({
     if (!activeRoom || isBusy) return
     // Every room but P2P Republic, whose key ships with the app, moves to a
     // new key when somebody is removed. See backend/peerchat/room-move.mjs.
+    // The new key goes to everyone who proved the room to this phone before,
+    // and a person's other devices are members of their own, so it says to
+    // remove those too.
     const movesKey = activeRoom.roomKey !== PRE_JOINED_PEERCHAT_ROOM_KEY
     Alert.alert(
       `Remove ${member.username}?`,
       'They will not be able to come back to this room. Everyone running PeerChat will stop passing their messages on.' +
-        (movesKey ? ' The room also moves to a new key they never get, so invites from before stop working.' : ''),
+        (movesKey ? ' The room also moves to a new key for the people still in it, so invites from before stop working. If they use PeerChat on another device too, remove that one as well.' : ''),
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -2195,10 +2219,11 @@ export function PeerChatScreen ({
     if (!activeRoom) return
     try {
       // The link, not the bare key. Tapping it joins the room; a 64 character
-      // key has to be copied into Join Room by hand.
+      // key has to be copied into Join Room by hand. It says who made the
+      // room too, so whoever joins knows from the start.
       await shareLink({
         title: `Join ${activeRoom.name} on PeerChat`,
-        message: buildPeerChatInviteUrl(activeRoom.roomKey) || activeRoom.roomKey
+        message: buildPeerChatInviteUrl(activeRoom.roomKey, activeRoom.creatorKey, activeRoom.creatorProof) || activeRoom.roomKey
       })
     } catch (cause) {
       if (!mountedRef.current) return
@@ -4387,7 +4412,8 @@ export function PeerChatScreen ({
               "Scan invite or room QR": the buttons took their text width first
               and the field, which starts at zero and only grows into what is
               left, collapsed to a sliver. The key gets its own line, the same
-              way the create panel does it. */}
+              way the create panel does it. It takes a whole invite link too,
+              which may also say who made the room. */}
           {landingAction === 'join' && (
             <View style={[styles.actionPanel, styles.createActionPanel, { backgroundColor: colors.surface }]}>
               <TextInput
@@ -4395,8 +4421,8 @@ export function PeerChatScreen ({
                 onChangeText={setJoinKey}
                 autoCapitalize='none'
                 autoCorrect={false}
-                maxLength={64}
-                placeholder='64-character room key'
+                maxLength={MAX_JOIN_INPUT_LENGTH}
+                placeholder='Room key or invite link'
                 placeholderTextColor={colors.muted}
                 style={[styles.input, styles.createActionInput, styles.roomKeyInput, { backgroundColor: colors.input, color: colors.text }]}
               />
@@ -4411,9 +4437,9 @@ export function PeerChatScreen ({
                 </Pressable>
                 <Pressable
                   accessibilityRole='button'
-                  disabled={!profileName.trim() || joinKey.trim().length !== 64 || isBusy}
+                  disabled={!profileName.trim() || !parsePeerChatInvite(joinKey) || isBusy}
                   onPress={joinRoom}
-                  style={[styles.actionSubmit, { backgroundColor: colors.accent }, !profileName.trim() || joinKey.trim().length !== 64 || isBusy ? styles.disabled : null]}
+                  style={[styles.actionSubmit, { backgroundColor: colors.accent }, !profileName.trim() || !parsePeerChatInvite(joinKey) || isBusy ? styles.disabled : null]}
                 >
                   <Text style={styles.actionSubmitText}>Join</Text>
                 </Pressable>
@@ -4878,8 +4904,9 @@ export function PeerChatScreen ({
                           <Pressable
                             accessibilityRole='button'
                             onPress={() => {
-                              // A link anyone can tap to join, same shape as desktop.
-                              Clipboard.setString(buildPeerChatInviteUrl(roomActionTarget.roomKey))
+                              // A link anyone can tap to join, same shape as
+                              // desktop, saying who made the room.
+                              Clipboard.setString(buildPeerChatInviteUrl(roomActionTarget.roomKey, roomActionTarget.creatorKey, roomActionTarget.creatorProof))
                               setRoomActionTarget(null)
                               onStatus('PeerChat invite link copied')
                             }}

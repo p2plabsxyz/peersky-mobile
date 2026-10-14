@@ -16,9 +16,11 @@
 //   Anyone in the room can be shown the creator key and the secret and check
 //   them against the room key they hold, so the creator key no longer has to
 //   come over the creator's own connection. That is what lets a removal, or a
-//   move, be checked by people who never meet the creator. The secret is as
-//   private as the room key: with the creator key, which is public, it gives
-//   the room key.
+//   move, be checked by people who never meet the creator. Two keys cannot
+//   both make one room key, so the secret always wins over a creator key taken
+//   on somebody's word, and an invite carries both. The secret is as private
+//   as the room key: with the creator key, which is public, it gives the room
+//   key.
 //
 // - The move. The creator signs where the room goes:
 //     "peersky-chat/4 moved\n" + old topic + "\n" + new topic + "\n" + when +
@@ -26,9 +28,10 @@
 //   The new key is made the same way, so it says who made it too, and its
 //   chain travels with the move, so everyone moved reads the same hours.
 //
-// A move goes on only to somebody this device saw in the room before the move
-// was made, by key, not by the short id anyone can grind a key to match. So the
-// person removed cannot come back under a new key and be handed the new room.
+// A move goes on only to a key that proved the room on a connection to this
+// device before the move was made, by the whole key, not by the short id
+// anyone can grind a key to match, and never to anyone removed. A key that
+// only signed a message somebody passed on is not one of them.
 //
 // The desktop keeps the same rules in peerchat's lib/room-move.js. Both have to
 // agree on every byte.
@@ -134,7 +137,10 @@ export function checkMove ({ fromTopic, creatorKey, move, topicOf }) {
   }
 }
 
-/** Who a phone has seen in a room, by key: when it first and last saw each. */
+/**
+ * Who proved a room to a phone on a connection, by key: when it first and
+ * last saw each.
+ */
 export function normalizeKnownKeys (value) {
   const entries = []
   for (const [key, seen] of Object.entries(value && typeof value === 'object' ? value : {})) {
@@ -147,7 +153,7 @@ export function normalizeKnownKeys (value) {
   return Object.fromEntries(entries.slice(0, MAX_KNOWN_KEYS))
 }
 
-/** Notes a key seen in the room now. True when the record changed. */
+/** Notes a key that proved the room now. True when the record changed. */
 export function noteKnownKey (known, key, now = Date.now()) {
   const id = hex64(key)
   if (!id || !known) return false
@@ -169,7 +175,7 @@ export function noteKnownKey (known, key, now = Date.now()) {
   return true
 }
 
-/** Whether this phone saw this key in the room before a time. */
+/** Whether this key proved the room to this phone before a time. */
 export function knownBefore (known, key, at) {
   const seen = known?.[hex64(key)]
   return Array.isArray(seen) && seen[0] < at

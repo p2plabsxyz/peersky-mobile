@@ -51,14 +51,14 @@ async function setUp (t) {
   return service
 }
 
-async function connect (service, keyPair, { haves = true } = {}) {
+async function connect (service, keyPair, { haves = true, rooms = [ROOM] } = {}) {
   const frames = []
   const key = keyOf(keyPair)
   const peer = createFakePeer(key, frames)
   service.peers.set(peer.connection, peer)
   await service.handlePeerMessage(peer, {
     type: 'topics',
-    rooms: [{ topic: wireRoom(ROOM), proof: roomProof(ROOM, HANDSHAKE, key) }],
+    rooms: rooms.map((roomKey) => ({ topic: wireRoom(roomKey), proof: roomProof(roomKey, HANDSHAKE, key) })),
     pass: true,
     ...(haves && { have: true })
   })
@@ -141,6 +141,43 @@ test('the next neighbour that has it is asked when the first does not answer', a
   assert.ok(far.ids('want').includes(message.id))
   await service.handlePeerMessage(far, { type: 'pass', roomKey: ROOM, m: message })
   assert.ok((await shown(service)).includes('Second try'))
+})
+
+// The list of ids being asked for holds 4096, for every room at once. One
+// connection in P2P Republic filled it with made-up ids, and a real message in
+// another room was then never asked for. Each connection may have 512 waiting
+// and each room 2048, and the rest go on being asked for.
+test('no one connection, and no one room, can fill the list of ids being asked for', async (t) => {
+  const service = await setUp(t)
+  const OTHER = 'c2'.repeat(32)
+  await service.joinRoom({ roomKey: OTHER })
+  const madeUp = () => Array.from({ length: 256 }, () => createPeerChatMessageId())
+
+  const flooder = await connect(service, pair(90))
+  for (let i = 0; i < 16; i += 1) await service.handlePeerMessage(flooder, { type: 'have', roomKey: ROOM, ids: madeUp() })
+  assert.equal(flooder.ids('want').length, 512)
+  const honest = await connect(service, pair(91), { rooms: [OTHER] })
+  const real = createPeerChatMessageId()
+  await service.handlePeerMessage(honest, { type: 'have', roomKey: OTHER, ids: [real] })
+  assert.ok(honest.ids('want').includes(real))
+
+  // Eight connections in one room reach that room's share and no further.
+  for (let n = 0; n < 7; n += 1) {
+    const more = await connect(service, pair(92 + n))
+    for (let i = 0; i < 2; i += 1) await service.handlePeerMessage(more, { type: 'have', roomKey: ROOM, ids: madeUp() })
+  }
+  assert.equal(service.wantedPerRoom.get(ROOM), 2048)
+  const later = createPeerChatMessageId()
+  await service.handlePeerMessage(honest, { type: 'have', roomKey: OTHER, ids: [later] })
+  assert.ok(honest.ids('want').includes(later))
+
+  // Ids given up on come off the counts, so the connection can ask again.
+  const now = Date.now()
+  t.mock.method(Date, 'now', () => now + 31_000)
+  service.retryWants()
+  assert.equal(flooder.wanting, 0)
+  assert.equal(service.wantedPerRoom.size, 0)
+  assert.equal(service.wantedIds.size, 0)
 })
 
 function createFakeSdk () {
