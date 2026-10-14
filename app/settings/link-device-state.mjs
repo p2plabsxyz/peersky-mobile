@@ -71,7 +71,8 @@ export function describeBackupOrigin ({ createdAt, platform } = {}) {
     if (platform === 'android') return t('Made on an Android phone')
     return t('Made on a phone')
   }
-  const day = date.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
+  // In the phone's region, as every other date in the app.
+  const day = date.toLocaleDateString([], { year: 'numeric', month: 'long', day: 'numeric' })
   if (platform === 'ios') return t('Made on an iPhone, {date}', { date: day })
   if (platform === 'android') return t('Made on an Android phone, {date}', { date: day })
   return t('Made on a phone, {date}', { date: day })

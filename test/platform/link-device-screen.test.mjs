@@ -69,7 +69,8 @@ test('what a backup holds is said the way a person would say it', () => {
   assert.equal(formatBackupSize(120 * 1024 * 1024), '120 MB')
   assert.equal(formatBackupSize(2.5 * 1024 * 1024 * 1024), '2.5 GB')
 
-  assert.equal(describeBackupOrigin({ createdAt: '2026-09-29T12:00:00.000Z', platform: 'ios' }), 'Made on an iPhone, September 29, 2026')
+  const day = new Date('2026-09-29T12:00:00.000Z').toLocaleDateString([], { year: 'numeric', month: 'long', day: 'numeric' })
+  assert.equal(describeBackupOrigin({ createdAt: '2026-09-29T12:00:00.000Z', platform: 'ios' }), `Made on an iPhone, ${day}`)
   assert.equal(describeBackupOrigin({ platform: 'android' }), 'Made on an Android phone')
   assert.equal(describeBackupOrigin({ createdAt: 'not a date' }), 'Made on a phone')
 })
