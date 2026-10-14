@@ -40,7 +40,7 @@ class PeerChatBackgroundService : Service() {
     val notification = NotificationCompat.Builder(this, CHANNEL_ID)
       .setSmallIcon(R.drawable.notification_icon)
       .setContentTitle("PeerChat")
-      .setContentText("Staying connected so messages reach you")
+      .setContentText(getString(R.string.peerchat_background_text))
       .setContentIntent(pendingIntent)
       .setCategory(NotificationCompat.CATEGORY_SERVICE)
       .setOngoing(true)
@@ -77,15 +77,18 @@ class PeerChatBackgroundService : Service() {
 
   override fun onBind(intent: Intent?): IBinder? = null
 
+  // The words are string resources, in the phone's language (or the one
+  // picked for PeerSky in Android Settings). Creating the channel again with a
+  // new name renames it, so a change of language reaches it at the next start.
   private fun createNotificationChannel() {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
     val manager = getSystemService(NotificationManager::class.java)
     manager.createNotificationChannel(NotificationChannel(
       CHANNEL_ID,
-      "PeerChat background connection",
+      getString(R.string.peerchat_background_channel),
       NotificationManager.IMPORTANCE_LOW
     ).apply {
-      description = "Keeps PeerChat connected while PeerSky is in the background"
+      description = getString(R.string.peerchat_background_channel_description)
       setShowBadge(false)
     })
   }

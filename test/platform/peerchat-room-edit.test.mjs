@@ -11,7 +11,7 @@ test('Room info offers Edit room only to the person who made a group', () => {
   assert.match(canEdit, /return Boolean\(room\?\.isCreator && !room\.isDM && !room\.removedByCreator\)/)
   const info = screen.slice(screen.indexOf('visible={showRoomInfo}'), screen.indexOf('visible={roomDraft !== null}'))
   assert.match(info, /\{canEditRoom\(activeRoom\) && \(\s+<Pressable[\s\S]{0,400}onPress=\{openEditRoom\}/)
-  assert.match(info, />Edit room<\/Text>/)
+  assert.match(info, />\{t\('Edit room'\)\}<\/Text>/)
 })
 
 test('Edit room opens with the room as it is, closing Room info first', () => {
@@ -27,11 +27,11 @@ test('the edit sheet has the create sheet\'s picture, fields and moderation, and
   const sheet = screen.slice(screen.indexOf('visible={roomDraft !== null}'), screen.indexOf('{activeRoom.removedByCreator && ('))
   // The same picker and screening as the create sheet's picture.
   assert.match(sheet, /onPress=\{\(\) => chooseAvatar\(roomDraft\.avatar, \(avatar\) => changeRoomDraft\(\{ avatar \}\)\)\}/)
-  assert.match(sheet, /placeholder='Room name'/)
-  assert.match(sheet, /placeholder='Description \(optional\)'/)
-  assert.match(sheet, /placeholder='https:\/\/ link \(optional\)'/)
-  assert.match(sheet, />Abuse filter</)
-  assert.match(sheet, />Profanity &amp; slurs</)
+  assert.match(sheet, /placeholder=\{t\('Room name'\)\}/)
+  assert.match(sheet, /placeholder=\{t\('Description \(optional\)'\)\}/)
+  assert.match(sheet, /placeholder=\{t\('https:\/\/ link \(optional\)'\)\}/)
+  assert.match(sheet, />\{t\('Abuse filter'\)\}</)
+  assert.match(sheet, />\{t\('Profanity & slurs'\)\}</)
   assert.match(sheet, /changeRoomDraft\(\{ spamRateLimit: nextSpamRateLimit\(roomDraft\.spamRateLimit\) \}\)/)
   assert.match(sheet, /Everyone in the room sees the change\./)
   assert.match(sheet, /disabled=\{!roomDraft\.name\.trim\(\) \|\| isBusy\}\s+onPress=\{saveRoomDraft\}/)

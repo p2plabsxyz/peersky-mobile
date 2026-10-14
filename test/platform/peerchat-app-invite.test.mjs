@@ -18,12 +18,12 @@ test('Find invites friends to install PeerChat, with your own link to message yo
 
   const screen = await readFile(new URL('../../app/peerchat/PeerChatScreen.tsx', import.meta.url), 'utf8')
   // Under the search bar, before anyone it finds.
-  const searchBar = screen.indexOf("placeholder='Search by name'")
-  const invite = screen.indexOf('>Invite friends to PeerChat</Text>')
+  const searchBar = screen.indexOf("placeholder={t('Search by name')}")
+  const invite = screen.indexOf(">{t('Invite friends to PeerChat')}</Text>")
   const results = screen.indexOf('{directory.map((member) => (')
   assert.ok(searchBar > 0 && searchBar < invite && invite < results)
   // Plain text: WhatsApp kept only the link from the share with the icon header.
-  assert.match(screen, /await shareLink\(\{ title: 'Invite friends to PeerChat', message: buildPeerChatAppInviteMessage\(myInviteUrl\), plain: true \}\)/)
+  assert.match(screen, /await shareLink\(\{ title: t\('Invite friends to PeerChat'\), message: buildPeerChatAppInviteMessage\(myInviteUrl\), plain: true \}\)/)
   const wrapper = await readFile(new URL('../../app/share.ts', import.meta.url), 'utf8')
   assert.match(wrapper, /if \(!plain && hasNativeShareIcon\(\)\) \{/)
   assert.match(screen, /const myInviteUrl = buildPeerChatDirectInviteUrl\(profile\?\.key \|\| ''\)/)

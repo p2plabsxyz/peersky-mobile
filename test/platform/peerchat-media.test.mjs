@@ -35,16 +35,16 @@ test('a picture or video bubble fits it with a thin edge and no name or size', (
   assert.match(screen, /media \? styles\.messageBubbleMedia : null/)
   assert.match(screen, /inlineMedia: \{ borderRadius: 12, overflow: 'hidden' \}/)
   const attachment = screen.slice(screen.indexOf('function PeerChatAttachment ('), screen.indexOf('function PeerChatVideo ('))
-  const media = attachment.slice(attachment.indexOf("if (mediaUrl && mediaKind === 'image' && (isScreening"), attachment.indexOf('  return (\n    <Pressable\n      accessibilityHint=\'Opens this Hyperdrive attachment'))
+  const media = attachment.slice(attachment.indexOf("if (mediaUrl && mediaKind === 'image' && (isScreening"), attachment.indexOf("  return (\n    <Pressable\n      accessibilityHint={t('Opens this Hyperdrive attachment"))
   assert.doesNotMatch(media, /AttachmentCaption/)
   assert.doesNotMatch(media, /borderWidth|borderColor/)
   assert.match(media, /onLoad=\{\(\{ nativeEvent \}\) => noteMediaSize\(nativeEvent\.source\)\}/)
   assert.match(media, /<PeerChatVideo mediaUrl=\{mediaUrl\} onSize=\{noteMediaSize\} \/>/)
   // Any other file keeps its name and size.
-  assert.match(attachment.slice(attachment.indexOf("accessibilityHint='Opens this Hyperdrive attachment")), /<AttachmentCaption colors=\{colors\} item=\{item\}/)
+  assert.match(attachment.slice(attachment.indexOf("accessibilityHint={t('Opens this Hyperdrive attachment")), /<AttachmentCaption colors=\{colors\} item=\{item\}/)
   // A video plays full screen from a tap on it, and holding it opens the
   // message's actions, as a picture does.
-  assert.match(media, /accessibilityHint='Plays this video full screen\. Long press for message actions'/)
+  assert.match(media, /accessibilityHint=\{t\('Plays this video full screen\. Long press for message actions'\)\}/)
   assert.match(screen, /nativeControls=\{fullScreen\}/)
 })
 
@@ -66,7 +66,7 @@ test('a picture or video saves with its own type, and only from a copy on this p
 
 test('Save is in the picture viewer and in the message\'s long-press menu', async () => {
   const viewer = screen.slice(screen.indexOf('function PeerChatMediaViewer ('), screen.indexOf('function AttachmentCaption ('))
-  assert.match(viewer, /\{canSave && \(\s+<Pressable\s+accessibilityLabel=\{Platform\.OS === 'ios' \? 'Save to Photos' : 'Save to gallery'\}/)
+  assert.match(viewer, /\{canSave && \(\s+<Pressable\s+accessibilityLabel=\{Platform\.OS === 'ios' \? t\('Save to Photos'\) : t\('Save to gallery'\)\}/)
   assert.match(viewer, /savePeerChatMedia\(\{ uri: target\.uri, fileName: target\.fileName \}\)/)
   const menu = screen.slice(screen.indexOf('visible={messageActionTarget !== null}'), screen.indexOf('visible={isAttachSheetOpen}'))
   assert.match(menu, /\{canSaveMessageMedia\(messageActionTarget\) && \(\s+<Pressable accessibilityRole='button' onPress=\{\(\) => saveMessageMedia\(messageActionTarget\)\}/)

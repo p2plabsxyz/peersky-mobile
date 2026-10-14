@@ -1,3 +1,5 @@
+import { t } from '../i18n/i18n.mjs'
+
 // PeerChat invite links, in the desktop's format so either side opens them:
 //
 //   peersky://p2p/peerchat/#room=<64 hex room key>   a room
@@ -28,10 +30,10 @@ export const PEERCHAT_INVITE_BASE = 'peersky://p2p/peerchat/'
 export const PEERCHAT_APP_INVITE_URL = 'https://peersky.p2plabs.xyz/mobile'
 
 export function buildPeerChatAppInviteMessage (directInviteUrl = '') {
-  const message = `I'm inviting you to install PeerSky! Here is the link:\n${PEERCHAT_APP_INVITE_URL}`
+  const message = `${t("I'm inviting you to install PeerSky! Here is the link:")}\n${PEERCHAT_APP_INVITE_URL}`
   // No name yet means no link of your own yet.
   if (!parsePeerChatDirectInvite(directInviteUrl)) return message
-  return `${message}\n\nThen open this PeerChat link to message me:\n${directInviteUrl}`
+  return `${message}\n\n${t('Then open this PeerChat link to message me:')}\n${directInviteUrl}`
 }
 
 const ROOM_KEY_RE = /^[a-f0-9]{64}$/i

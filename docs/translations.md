@@ -35,12 +35,23 @@ One JSON file per language in `app/i18n/locales`, the English text to its transl
 
 ## Outside JavaScript
 
-- iOS shows its own prompts for the camera, the local network, location, the microphone and saving to Photos from Info.plist. `app/i18n/native-strings.mjs` holds the English, which has to match `app.json`, and `--write` makes each language's copy in `app/i18n/native/<code>.json`. The `locales` in `app.json` turn those into `<code>.lproj/InfoPlist.strings`, which is also how iOS knows which languages to offer for PeerSky in its Settings.
+Some text is shown by the phone itself, from files made when the app is built. It follows the phone's language, or the one picked for PeerSky in the phone's Settings, not the one picked in PeerSky. `app/i18n/native-strings.mjs` holds its English, and `--write` makes each language's copy from the catalogs.
+
+- iOS's own prompts for the camera, the local network, location, the microphone and saving to Photos, from Info.plist, and the quick actions on the app icon. Each language's copy is in `app/i18n/native/<code>.json`, and the `locales` in `app.json` turn those into `<code>.lproj/InfoPlist.strings`, which is also how iOS knows which languages to offer for PeerSky in its Settings. The prompts' English has to match `app.json`. A quick action's title in Info.plist is a key such as `ShortcutNewTab`, and each language's InfoPlist.strings, English too, has its words: Expo writes those files with each key unquoted, which a title with a space in it would break.
+- The home screen widgets and the PeerTunes buttons, in Swift. Every language's words go into `targets/widgets/_shared/Localizable.xcstrings`, a String Catalog Xcode builds into the widgets and the app.
+- Android's PeerChat background notification and its channel in Android's notification settings. They are string resources, from the `android` part of the same files in `app/i18n/native`, which the `locales` turn into each language's `strings.xml`. `plugins/with-peerchat-background.js` puts the English in the default one.
 - Android's list of languages for its per-app setting is `res/xml/locales_config.xml`, written by `plugins/with-app-languages.js` from `app/i18n/native/languages.json`.
 
 ## Not translated
 
-Websites; the pages of the built-in web apps loaded into a WebView (the P2PMD editor and the PeerTunes player); messages that come from the backend; and the privacy policy, the terms and the open-source licenses.
+- Websites, and the pages of the built-in web apps loaded into a WebView (the P2PMD editor and the PeerTunes player).
+- Messages that come from the backend.
+- The privacy policy, the terms and the open-source licenses.
+- A PeerChat report's email subject and field labels, for the people who read every report. What the person reporting sees is translated.
+- Emoji search, which matches English words.
+- The Holesail screen, which only development builds have.
+
+Dates and times follow the phone's region, as before.
 
 ## Adding text
 

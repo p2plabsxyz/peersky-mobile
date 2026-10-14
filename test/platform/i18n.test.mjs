@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { test } from 'node:test'
 
 import { msg, registerCatalogs, setLanguage, t, tKey, tp } from '../../app/i18n/i18n.mjs'
 import { LANGUAGE_CODES, LANGUAGES, SOURCE_LANGUAGE, SYSTEM_LANGUAGE, isRtlLanguage, matchLanguage } from '../../app/i18n/languages.mjs'
-import { INFO_PLIST_TEXT } from '../../app/i18n/native-strings.mjs'
+import { ANDROID_TEXT, INFO_PLIST_TEXT, SHORTCUT_TEXT, WIDGET_NAMES, WIDGET_TEXT } from '../../app/i18n/native-strings.mjs'
 import { PLURAL_CATEGORIES, pluralCategory } from '../../app/i18n/plural.mjs'
 import { parseBrowserPreferences } from '../../app/settings/browser-preferences.mjs'
-import { checkCatalog, collectStrings, readCatalog, scanSource } from '../../scripts/i18n.mjs'
+import { checkCatalog, collectStrings, readCatalog, scanSource, stringsValue, widgetCatalog } from '../../scripts/i18n.mjs'
 
 const read = (path) => readFileSync(new URL(`../../${path}`, import.meta.url), 'utf8')
 const json = (path) => JSON.parse(read(path))
@@ -147,25 +147,74 @@ test('each catalog loads only when its language is picked', () => {
   assert.ok(!loaders.includes("'./locales/en.json'"))
 })
 
-test('iOS and Android are told about every language, with iOS prompts in each', () => {
+test('iOS and Android are told about every language, with their own text in each', () => {
   const app = json('app.json').expo
   assert.deepEqual(json('app/i18n/native/languages.json'), LANGUAGE_CODES)
   assert.deepEqual(Object.keys(app.locales), LANGUAGE_CODES)
   assert.ok(app.plugins.includes('./plugins/with-app-languages'))
   for (const code of LANGUAGE_CODES) {
     assert.equal(app.locales[code], `./app/i18n/native/${code}.json`)
-    const { ios } = json(`app/i18n/native/${code}.json`)
-    assert.deepEqual(Object.keys(ios).sort(), Object.keys(INFO_PLIST_TEXT).sort(), code)
-    for (const value of Object.values(ios)) assert.ok(value.trim(), code)
+    const { ios, android } = json(`app/i18n/native/${code}.json`)
+    assert.deepEqual(Object.keys(ios).sort(), [...Object.keys(INFO_PLIST_TEXT), ...Object.keys(SHORTCUT_TEXT)].sort(), code)
+    assert.deepEqual(Object.keys(android).sort(), Object.keys(ANDROID_TEXT).sort(), code)
+    for (const value of [...Object.values(ios), ...Object.values(android)]) assert.ok(value.trim(), code)
   }
   // The English is what Info.plist says, so the copies are of the real text.
   for (const [key, text] of Object.entries(INFO_PLIST_TEXT)) assert.equal(app.ios.infoPlist[key], text, key)
   assert.ok(read('plugins/with-lan-discovery.js').includes(INFO_PLIST_TEXT.NSLocalNetworkUsageDescription))
-  assert.deepEqual(json('app/i18n/native/en.json').ios, INFO_PLIST_TEXT)
+  assert.deepEqual(json('app/i18n/native/en.json').ios, { ...INFO_PLIST_TEXT, ...SHORTCUT_TEXT })
+  assert.deepEqual(json('app/i18n/native/en.json').android, ANDROID_TEXT)
 
   const plugin = read('plugins/with-app-languages.js')
   assert.match(plugin, /application\.\$\['android:localeConfig'\] = '@xml\/locales_config'/)
   assert.match(plugin, /<locale android:name="\$\{code\}"\/>/)
+})
+
+// Expo puts each value between double quotes as it is.
+test('a translation that holds a quote, a backslash or a line break goes into iOS escaped', () => {
+  assert.equal(stringsValue('Say "hi"'), 'Say \\"hi\\"')
+  assert.equal(stringsValue('a\\b'), 'a\\\\b')
+  assert.equal(stringsValue('one\ntwo'), 'one\\ntwo')
+})
+
+test('Android\'s PeerChat notification takes its words from string resources, English by default', async () => {
+  const service = read('plugins/templates/PeerChatBackgroundService.kt.template')
+  for (const [name, text] of Object.entries(ANDROID_TEXT)) {
+    assert.ok(service.includes(`getString(R.string.${name})`), name)
+    assert.ok(!service.includes(text), text)
+  }
+  // The default strings.xml gets the English the way Expo writes each language.
+  const { addPeerChatBackgroundStrings } = await import('../../plugins/with-peerchat-background.js')
+  const strings = addPeerChatBackgroundStrings({ resources: { string: [{ $: { name: 'app_name' }, _: 'PeerSky' }] } }, json('app/i18n/native/en.json').android)
+  assert.deepEqual(
+    strings.resources.string.map((item) => [item.$.name, item._]),
+    [['app_name', 'PeerSky'], ...Object.entries(ANDROID_TEXT).map(([name, text]) => [name, `"${text}"`])]
+  )
+})
+
+test('the widgets and the PeerTunes buttons are in every language as well', () => {
+  assert.equal(read('targets/widgets/_shared/Localizable.xcstrings'), widgetCatalog(), 'run node scripts/i18n.mjs --write')
+  const catalog = json('targets/widgets/_shared/Localizable.xcstrings')
+  for (const text of WIDGET_TEXT) {
+    for (const { code } of LANGUAGES) {
+      if (code === SOURCE_LANGUAGE) continue
+      assert.ok(catalog.strings[text]?.localizations?.[code]?.stringUnit?.value, `${code}: ${text}`)
+    }
+  }
+  // Every text the widgets' Swift shows is one of those, or a name kept as it is.
+  const swift = []
+  const walk = (dir) => {
+    for (const entry of readdirSync(new URL(`../../${dir}`, import.meta.url), { withFileTypes: true })) {
+      if (entry.isDirectory()) walk(`${dir}/${entry.name}`)
+      else if (entry.name.endsWith('.swift')) swift.push(read(`${dir}/${entry.name}`))
+    }
+  }
+  walk('targets/widgets')
+  const shown = /(?:\bText|\.accessibilityLabel|\.description|\.configurationDisplayName|String\(localized:)\(?\s*"([^"]+)"|LocalizedStringResource = "([^"]+)"/g
+  const found = new Set()
+  for (const source of swift) for (const match of source.matchAll(shown)) found.add(match[1] || match[2])
+  assert.ok(found.size >= WIDGET_TEXT.length)
+  for (const text of found) assert.ok(WIDGET_TEXT.includes(text) || WIDGET_NAMES.includes(text), text)
 })
 
 test('the language is a preference, the phone\'s unless one is picked', () => {

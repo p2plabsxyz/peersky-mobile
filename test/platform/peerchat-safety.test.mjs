@@ -19,7 +19,7 @@ test('a message from someone else can be reported or its sender blocked, from th
 test('every block asks first, and can report in the same tap', () => {
   const confirm = screen.slice(screen.indexOf('function confirmBlockPeer ('), screen.indexOf('async function blockMember'))
   assert.match(confirm, /You will not see anything they send, in any chat/)
-  assert.match(confirm, /text: 'Block and report'/)
+  assert.match(confirm, /text: t\('Block and report'\)/)
   assert.match(confirm, /void blockMember\(member\)\s+void reportMember\(member, from, message\)/)
   assert.doesNotMatch(screen, /onBlock=\{blockMember\}/)
   assert.equal((screen.match(/onBlock=\{\(member\) => confirmBlockPeer\(member\)\}/g) || []).length, 2)
@@ -43,7 +43,7 @@ test('a PeerChat profile can be deleted from PeerChat settings', async () => {
   assert.match(router, /req\.command === RPC_PEERCHAT_DELETE_PROFILE\) \{\s+replyJson\(req, await deletePeerChatProfile\(\)\)/)
 
   assert.match(screen, /onPress=\{confirmDeleteProfile\}/)
-  assert.match(screen, />Delete PeerChat profile</)
+  assert.match(screen, />\{t\('Delete PeerChat profile'\)\}</)
   const confirm = screen.slice(screen.indexOf('function confirmDeleteProfile'), screen.indexOf('async function deleteProfile'))
   assert.match(confirm, /This cannot be undone/)
   assert.match(confirm, /style: 'destructive', onPress: \(\) => void deleteProfile\(\)/)

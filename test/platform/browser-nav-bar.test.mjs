@@ -50,7 +50,7 @@ describe('browser chrome layout', () => {
     assert.match(toolbar, /Reload page/)
     // One button after reload, Share unless another is chosen.
     assert.match(toolbar, /<AddressBarActionButton/)
-    assert.match(index, /case 'share':\s+return browserShareActionAvailable\s+\? \{ id: 'share', label: 'Share page'/)
+    assert.match(index, /case 'share':\s+return browserShareActionAvailable\s+\? \{ id: 'share', label: t\('Share page'\)/)
   })
 
   test('the address bar moves, the navigation bar does not', () => {

@@ -2,6 +2,7 @@ import { Directory, File, Paths } from 'expo-file-system'
 import * as Sharing from 'expo-sharing'
 import { Platform } from 'react-native'
 
+import { t } from '../i18n/i18n.mjs'
 import { peerChatMediaType, savedFolderName } from './media-save.mjs'
 
 /**
@@ -29,10 +30,10 @@ export type SavedPeerChatMedia = {
 
 export async function savePeerChatMedia ({ uri, fileName }: { uri: string, fileName: string }): Promise<SavedPeerChatMedia | null> {
   const mimeType = peerChatMediaType(fileName)
-  if (!mimeType) throw new Error('Only pictures and videos can be saved.')
+  if (!mimeType) throw new Error(t('Only pictures and videos can be saved.'))
 
   if (Platform.OS !== 'android') {
-    if (!await Sharing.isAvailableAsync()) throw new Error('Saving is not available on this phone.')
+    if (!await Sharing.isAvailableAsync()) throw new Error(t('Saving is not available on this phone.'))
     await Sharing.shareAsync(namedCopy(uri, fileName), {
       dialogTitle: fileName,
       mimeType,
@@ -52,7 +53,7 @@ export async function savePeerChatMedia ({ uri, fileName }: { uri: string, fileN
     }
     try {
       copyInto(folder, uri, fileName, mimeType)
-      return { message: `Saved to ${savedFolderName(folder.uri)}` }
+      return { message: t('Saved to {folder}', { folder: savedFolderName(folder.uri) }) }
     } catch (error) {
       forgetFolder()
       folder = null
@@ -112,7 +113,7 @@ function copyInto (folder: Directory, uri: string, fileName: string, mimeType: s
       target.write(chunk, { append: !first })
       first = false
     }
-    if (first) throw new Error('That picture or video is empty.')
+    if (first) throw new Error(t('That picture or video is empty.'))
   } catch (error) {
     try { target.delete() } catch {}
     throw error

@@ -1,9 +1,18 @@
 {
   "ios": {
-    "NSCameraUsageDescription": "PeerSky uses the camera to scan QR codes when you link a device or open a shared room or drive, and when a website you visit requests it and you allow access.",
-    "NSLocalNetworkUsageDescription": "PeerSky uses your local network to discover and connect to nearby PeerSky devices.",
-    "NSLocationWhenInUseUsageDescription": "PeerSky uses your location only when a website you visit requests it and you allow access.",
-    "NSMicrophoneUsageDescription": "PeerSky uses the microphone only when a website you visit requests it and you allow access.",
-    "NSPhotoLibraryAddUsageDescription": "PeerSky saves a picture or video to your photo library when you choose Save to Photos."
+    "NSCameraUsageDescription": "PeerSky कैमरे से QR कोड तब स्कैन करता है, जब आप कोई डिवाइस लिंक करते हैं या शेयर किया गया कोई रूम या ड्राइव खोलते हैं, और तब भी जब आपकी खोली गई कोई वेबसाइट कैमरा माँगती है और आप ऐक्सेस की अनुमति देते हैं।",
+    "NSLocalNetworkUsageDescription": "PeerSky आपके लोकल नेटवर्क का इस्तेमाल आस-पास के PeerSky डिवाइस ढूँढने और उनसे कनेक्ट होने के लिए करता है।",
+    "NSLocationWhenInUseUsageDescription": "PeerSky आपकी जगह की जानकारी का इस्तेमाल सिर्फ़ तब करता है जब आपकी खोली गई कोई वेबसाइट इसे माँगती है और आप ऐक्सेस की अनुमति देते हैं।",
+    "NSMicrophoneUsageDescription": "PeerSky माइक्रोफ़ोन का इस्तेमाल सिर्फ़ तब करता है जब आपकी खोली गई कोई वेबसाइट इसे माँगती है और आप ऐक्सेस की अनुमति देते हैं।",
+    "NSPhotoLibraryAddUsageDescription": "जब आप ‘फ़ोटो में सेव करें’ चुनते हैं, तब PeerSky कोई तस्वीर या वीडियो आपकी फ़ोटो लाइब्रेरी में सेव करता है।",
+    "ShortcutPasteAndGo": "पेस्ट करें और जाएँ",
+    "ShortcutNewTab": "नया टैब",
+    "ShortcutNewIncognitoTab": "नया इनकॉग्निटो टैब",
+    "ShortcutAppIcon": "ऐप आइकन"
+  },
+  "android": {
+    "peerchat_background_text": "Staying connected so messages reach you",
+    "peerchat_background_channel": "PeerChat background connection",
+    "peerchat_background_channel_description": "Keeps PeerChat connected while PeerSky is in the background"
   }
 }

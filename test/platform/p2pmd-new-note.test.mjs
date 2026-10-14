@@ -34,16 +34,16 @@ test('the choice reaches the backend, and reopening keeps how a note was made', 
 test('the start screen has Create Note alone, and picks up a running note itself', async () => {
   const app = await read('app/index.tsx')
   const start = app.slice(app.indexOf('Start a collaborative note'), app.indexOf('<P2pmdNewNoteSheet'))
-  assert.match(start, /<PencilSquareIcon width=\{18\} height=\{18\} color='#ffffff' \/>\s+<Text style=\{styles\.p2pmdPrimaryActionText\}>Create Note<\/Text>/)
-  assert.doesNotMatch(start, />Refresh</)
+  assert.match(start, /<PencilSquareIcon width=\{18\} height=\{18\} color='#ffffff' \/>\s+<Text style=\{styles\.p2pmdPrimaryActionText\}>\{t\('Create Note'\)\}<\/Text>/)
+  assert.doesNotMatch(start, />Refresh<|t\('Refresh'\)/)
   assert.doesNotMatch(app, /onP2pmdRoomRefresh/)
   assert.match(app, /if \(activeTab !== 'p2pmd' \|\| browserSource\.kind !== 'app' \|\| p2pmdRoom \|\| isBooting \|\| !rpcRef\.current\) return\s+void reattachRunningP2pmdRoom\(\)/)
 })
 
 test('the note header shares from an icon before Publish', async () => {
   const app = await read('app/index.tsx')
-  const share = app.indexOf("accessibilityLabel='Share note'")
-  const publish = app.indexOf('>Publish</Text>')
+  const share = app.indexOf("accessibilityLabel={t('Share note')}")
+  const publish = app.indexOf(">{t('Publish')}</Text>")
   assert.ok(share > 0 && share < publish)
   assert.match(app.slice(share, publish), /<ShareIcon width=\{16\} height=\{16\}/)
 })

@@ -4,6 +4,15 @@
     "NSLocalNetworkUsageDescription": "PeerSky uses your local network to discover and connect to nearby PeerSky devices.",
     "NSLocationWhenInUseUsageDescription": "PeerSky uses your location only when a website you visit requests it and you allow access.",
     "NSMicrophoneUsageDescription": "PeerSky uses the microphone only when a website you visit requests it and you allow access.",
-    "NSPhotoLibraryAddUsageDescription": "PeerSky saves a picture or video to your photo library when you choose Save to Photos."
+    "NSPhotoLibraryAddUsageDescription": "PeerSky saves a picture or video to your photo library when you choose Save to Photos.",
+    "ShortcutPasteAndGo": "Paste and Go",
+    "ShortcutNewTab": "New Tab",
+    "ShortcutNewIncognitoTab": "New Incognito Tab",
+    "ShortcutAppIcon": "App Icon"
+  },
+  "android": {
+    "peerchat_background_text": "Staying connected so messages reach you",
+    "peerchat_background_channel": "PeerChat background connection",
+    "peerchat_background_channel_description": "Keeps PeerChat connected while PeerSky is in the background"
   }
 }

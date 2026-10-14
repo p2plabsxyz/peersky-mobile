@@ -1,3 +1,5 @@
+import { tp } from '../i18n/i18n.mjs'
+
 // What a message forwards as: its words, or its file. A file or picture is
 // opened here and sealed again for the chat it goes to, as one picked on this
 // phone would be, the same as on the desktop. A notice from the app is not
@@ -53,7 +55,9 @@ export function forwardGapMs (spamRateLimit) {
 
 // Said in the chat while more than two go out, as the desktop says it.
 export function describeForwarding (count) {
-  return count > 2
-    ? `Forwarding ${count} messages, a moment apart so the chat's spam limit is not reached.`
-    : ''
+  if (!(count > 2)) return ''
+  return tp({
+    one: 'Forwarding {count} message, a moment apart so the chat\'s spam limit is not reached.',
+    other: 'Forwarding {count} messages, a moment apart so the chat\'s spam limit is not reached.'
+  }, count)
 }

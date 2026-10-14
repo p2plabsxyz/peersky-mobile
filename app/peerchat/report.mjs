@@ -1,3 +1,5 @@
+import { t } from '../i18n/i18n.mjs'
+
 // There is no server to receive a report, so it goes to the maintainers by
 // email. The room is named by a hash of its key, never the key itself: the key
 // lets whoever holds it into the room and all of its history.
@@ -31,15 +33,15 @@ export function buildPeerChatReport ({ member, roomName = '', roomId = '', messa
       text.length > MAX_QUOTED_MESSAGE ? `${text.slice(0, MAX_QUOTED_MESSAGE)}…` : text
     )
   }
+  // The subject and the labels stay in English for whoever reads the report.
+  // The question and the note under it are for the person writing it.
   lines.push(
     `Reported at: ${now.toISOString()}`,
     '',
-    'What happened?',
+    t('What happened?'),
     '',
     '',
-    'Please describe what happened above. PeerChat is peer to peer, so there is',
-    'no server to delete messages from, but blocking this person hides',
-    'everything they send on your device.'
+    t('Please describe what happened above. PeerChat is peer to peer, so there is\nno server to delete messages from, but blocking this person hides\neverything they send on your device.')
   )
 
   const subject = `PeerChat report: ${name}`

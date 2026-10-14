@@ -3,9 +3,11 @@
 // catalogs checked against it.
 //
 //   node scripts/i18n.mjs          lists any call whose text is not a plain string
-//   node scripts/i18n.mjs --write  writes app/i18n/strings.json, app/i18n/catalogs.ts, and
-//                                  each language's iOS prompts and the list of
-//                                  languages in app/i18n/native
+//   node scripts/i18n.mjs --write  writes app/i18n/strings.json, app/i18n/catalogs.ts,
+//                                  each language's iOS prompts and quick actions,
+//                                  its Android notification text and the list
+//                                  of languages in app/i18n/native,
+//                                  and the widgets' Localizable.xcstrings
 //   node scripts/i18n.mjs --check  also says what each catalog is missing or has wrong
 //
 // Only files that import t, tp or msg from app/i18n/i18n.mjs are read. Every
@@ -16,7 +18,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { LANGUAGES, SOURCE_LANGUAGE } from '../app/i18n/languages.mjs'
-import { INFO_PLIST_TEXT } from '../app/i18n/native-strings.mjs'
+import { ANDROID_TEXT, INFO_PLIST_TEXT, SHORTCUT_TEXT, WIDGET_NAMES, WIDGET_TEXT } from '../app/i18n/native-strings.mjs'
 import { PLURAL_CATEGORIES } from '../app/i18n/plural.mjs'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
@@ -111,8 +113,15 @@ export function scanSource (source, file = '') {
 /** Every key the app uses: what strings.json holds. */
 export function collectStrings (files = sourceFiles()) {
   // Every language's name, for the language list (language-name.mjs), and
-  // what iOS shows in its prompts (native-strings.mjs).
-  const strings = new Set([...LANGUAGES.map((language) => language.name), ...Object.values(INFO_PLIST_TEXT)])
+  // what iOS, the quick actions, the widgets and Android's PeerChat
+  // notification show (native-strings.mjs).
+  const strings = new Set([
+    ...LANGUAGES.map((language) => language.name),
+    ...Object.values(INFO_PLIST_TEXT),
+    ...Object.values(SHORTCUT_TEXT),
+    ...WIDGET_TEXT,
+    ...Object.values(ANDROID_TEXT)
+  ])
   const plurals = new Map()
   const problems = []
   for (const file of files) {
@@ -187,23 +196,66 @@ function writeCatalogLoaders () {
   writeFileSync(join(APP, 'i18n', 'catalogs.ts'), lines.join('\n'))
 }
 
+function catalogFor (code) {
+  return code !== SOURCE_LANGUAGE && existsSync(catalogPath(code)) ? readCatalog(code) : {}
+}
+
+function translated (catalog, text) {
+  return typeof catalog[text] === 'string' && catalog[text].trim() ? catalog[text] : text
+}
+
+// Expo writes each value into a .strings file, and into Android's
+// strings.xml, between double quotes as it is, so a quote, a backslash or a
+// line break in a translation would end the string early. They go in escaped.
+export function stringsValue (text) {
+  return String(text).replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n')
+}
+
 // For the native side, which runs before any JavaScript: the languages, for
 // Android's list of them (plugins/with-app-languages.js), and each one's iOS
-// prompts, which the locales in app.json point at. Text a catalog lacks stays
-// English.
+// prompts and quick action titles and Android notification text, which the
+// locales in app.json point at. Text a catalog lacks stays English.
 function writeNativeFiles () {
   const dir = join(APP, 'i18n', 'native')
   mkdirSync(dir, { recursive: true })
   writeFileSync(join(dir, 'languages.json'), JSON.stringify(LANGUAGES.map((language) => language.code)) + '\n')
   for (const { code } of LANGUAGES) {
-    let catalog = {}
-    if (code !== SOURCE_LANGUAGE && existsSync(catalogPath(code))) catalog = readCatalog(code)
+    const catalog = catalogFor(code)
     const ios = {}
-    for (const [key, text] of Object.entries(INFO_PLIST_TEXT)) {
-      ios[key] = typeof catalog[text] === 'string' && catalog[text].trim() ? catalog[text] : text
-    }
-    writeFileSync(join(dir, `${code}.json`), JSON.stringify({ ios }, null, 2) + '\n')
+    for (const [key, text] of Object.entries(INFO_PLIST_TEXT)) ios[key] = stringsValue(translated(catalog, text))
+    for (const [key, text] of Object.entries(SHORTCUT_TEXT)) ios[key] = stringsValue(translated(catalog, text))
+    const android = {}
+    for (const [key, text] of Object.entries(ANDROID_TEXT)) android[key] = stringsValue(translated(catalog, text))
+    writeFileSync(join(dir, `${code}.json`), JSON.stringify({ ios, android }, null, 2) + '\n')
   }
+}
+
+// The widgets' words in every language, as a String Catalog: Xcode builds it
+// into the widget extension and, as it sits in _shared, into the app too, for
+// the PeerTunes buttons' titles. Written the way Xcode writes one, keys in
+// order and a space before each colon, so a build that reads it leaves it be.
+export function widgetCatalog () {
+  const strings = {}
+  for (const name of WIDGET_NAMES) strings[name] = { shouldTranslate: false }
+  for (const text of WIDGET_TEXT) {
+    const localizations = {}
+    for (const { code } of LANGUAGES) {
+      if (code === SOURCE_LANGUAGE) continue
+      const value = catalogFor(code)[text]
+      if (typeof value === 'string' && value.trim()) localizations[code] = { stringUnit: { state: 'translated', value } }
+    }
+    strings[text] = Object.keys(localizations).length ? { localizations } : {}
+  }
+  const sorted = (value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return value
+    return Object.fromEntries(Object.keys(value).sort().map((key) => [key, sorted(value[key])]))
+  }
+  const json = JSON.stringify(sorted({ sourceLanguage: SOURCE_LANGUAGE, strings, version: '1.0' }), null, 2)
+  return json.replace(/^(\s*"(?:[^"\\]|\\.)*"):/gm, '$1 :') + '\n'
+}
+
+function writeWidgetCatalog () {
+  writeFileSync(join(ROOT, 'targets', 'widgets', '_shared', 'Localizable.xcstrings'), widgetCatalog())
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
@@ -216,6 +268,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     writeFileSync(join(APP, 'i18n', 'strings.json'), JSON.stringify({ strings: collected.strings, plurals: collected.plurals }, null, 2) + '\n')
     writeCatalogLoaders()
     writeNativeFiles()
+    writeWidgetCatalog()
   }
   console.log(`${collected.strings.length} strings and ${collected.plurals.length} plurals`)
 

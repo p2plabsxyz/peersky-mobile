@@ -5,6 +5,7 @@ import { describe, test } from 'node:test'
 import { gunzipSync } from 'node:zlib'
 
 import { HOME_SHORTCUTS, parseHomeShortcut, parsePeerTunesWidgetTap } from '../../app/home-shortcuts.mjs'
+import { SHORTCUT_TEXT } from '../../app/i18n/native-strings.mjs'
 
 const require = createRequire(import.meta.url)
 const plugin = require('../../plugins/with-home-shortcuts')
@@ -116,7 +117,14 @@ describe('quick actions on the app icon', () => {
     for (const item of modResults.UIApplicationShortcutItems) {
       assert.ok(item.UIApplicationShortcutItemTitle)
       assert.ok(item.UIApplicationShortcutItemIconSymbolName)
+      // A key, whose words each language's InfoPlist.strings gives.
+      assert.ok(SHORTCUT_TEXT[item.UIApplicationShortcutItemTitle], item.UIApplicationShortcutItemTitle)
+      for (const code of Object.keys(appJson.expo.locales)) {
+        const native = JSON.parse(await readFile(new URL(`../../app/i18n/native/${code}.json`, import.meta.url), 'utf8'))
+        assert.ok(native.ios[item.UIApplicationShortcutItemTitle], `${code} ${item.UIApplicationShortcutItemTitle}`)
+      }
     }
+    assert.deepEqual(plugin.SHORTCUTS.map((shortcut) => [shortcut.titleKey, shortcut.title]), Object.entries(SHORTCUT_TEXT))
   })
 
   test('reach the app whether it was running or not, and once', async () => {

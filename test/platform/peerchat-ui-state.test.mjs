@@ -243,9 +243,9 @@ test('a long press offers a room its key and a direct message its answers', asyn
 
   // The two arms of the same branch: direct message first, room second.
   const dm = sheet.slice(sheet.indexOf('roomActionTarget.isDM'), sheet.indexOf('Copy room key'))
-  assert.match(dm, /Report</)
+  assert.match(dm, /t\('Report'\)\}</)
   assert.match(dm, /confirmBlockPeer\(peer\)/)
-  assert.match(dm, /isMemberBlocked\(directMessagePeer\(roomActionTarget\)\) \? 'Unblock' : 'Block'/)
+  assert.match(dm, /isMemberBlocked\(directMessagePeer\(roomActionTarget\)\) \? t\('Unblock'\) : t\('Block'\)/)
   // Neither of these means anything for a conversation with one person.
   assert.doesNotMatch(dm, /Copy room key/)
   assert.doesNotMatch(dm, /Copy invite link/)
@@ -286,7 +286,7 @@ test('room details show the room picture to everyone, not only the host', async 
   const screen = await readFile(new URL('../../app/peerchat/PeerChatScreen.tsx', import.meta.url), 'utf8')
   const details = screen.slice(screen.indexOf('visible={showRoomInfo}'), screen.indexOf('{!activeRoom.isDM && (\n              <View style={styles.roomProvenance}>'))
   assert.doesNotMatch(details, /isHost/)
-  assert.match(details, /accessibilityLabel=\{`Picture of \$\{activeRoom\.name\}`\}/)
+  assert.match(details, /accessibilityLabel=\{t\('Picture of \{name\}', \{ name: activeRoom\.name \}\)\}/)
   assert.match(details, /<Image source=\{\{ uri: activeRoom\.avatar \}\} style=\{styles\.roomInfoAvatar\} \/>/)
   assert.match(details, /getRoomInitials\(activeRoom\.name\)/)
 })

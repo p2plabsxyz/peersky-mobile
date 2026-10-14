@@ -1,0 +1,182 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "Bookmarks" : {
+      "localizations" : {
+        "hi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "बुकमार्क"
+          }
+        }
+      }
+    },
+    "Last played" : {
+      "localizations" : {
+        "hi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "पिछली बार चलाया गया"
+          }
+        }
+      }
+    },
+    "Next Song" : {
+      "localizations" : {
+        "hi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "अगला गाना"
+          }
+        }
+      }
+    },
+    "Next song" : {
+      "localizations" : {
+        "hi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "अगला गाना"
+          }
+        }
+      }
+    },
+    "Nothing playing" : {
+      "localizations" : {
+        "hi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "कुछ नहीं चल रहा"
+          }
+        }
+      }
+    },
+    "Now playing" : {
+      "localizations" : {
+        "hi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "अभी चल रहा है"
+          }
+        }
+      }
+    },
+    "Pages you bookmark in PeerSky show up here." : {
+      "localizations" : {
+        "hi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PeerSky में बुकमार्क किए गए पेज यहाँ दिखते हैं।"
+          }
+        }
+      }
+    },
+    "Pause" : {
+      "localizations" : {
+        "hi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "रोकें"
+          }
+        }
+      }
+    },
+    "Paused" : {
+      "localizations" : {
+        "hi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "रुका हुआ"
+          }
+        }
+      }
+    },
+    "PeerSky" : {
+      "shouldTranslate" : false
+    },
+    "PeerTunes" : {
+      "shouldTranslate" : false
+    },
+    "Play" : {
+      "localizations" : {
+        "hi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "चलाएँ"
+          }
+        }
+      }
+    },
+    "Previous Song" : {
+      "localizations" : {
+        "hi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "पिछला गाना"
+          }
+        }
+      }
+    },
+    "Previous song" : {
+      "localizations" : {
+        "hi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "पिछला गाना"
+          }
+        }
+      }
+    },
+    "Search" : {
+      "localizations" : {
+        "hi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "खोजें"
+          }
+        }
+      }
+    },
+    "Search or enter address" : {
+      "localizations" : {
+        "hi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "खोजें या एड्रेस डालें"
+          }
+        }
+      }
+    },
+    "Search, and open the P2P apps and your bookmarks." : {
+      "localizations" : {
+        "hi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "खोजें, और P2P ऐप व अपने बुकमार्क खोलें।"
+          }
+        }
+      }
+    },
+    "Tap to open PeerTunes" : {
+      "localizations" : {
+        "hi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PeerTunes खोलने के लिए टैप करें"
+          }
+        }
+      }
+    },
+    "What is playing. The medium size has the controls." : {
+      "localizations" : {
+        "hi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "क्या चल रहा है। मीडियम साइज़ में कंट्रोल भी हैं।"
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}

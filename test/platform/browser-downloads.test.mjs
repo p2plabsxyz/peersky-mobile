@@ -109,7 +109,7 @@ describe('browser downloads', () => {
   // which told the site who was on the other end.
   test('an incognito tab\'s download sends none of the shared cookies', () => {
     const app = readFileSync(new URL('../../app/index.tsx', import.meta.url), 'utf8')
-    assert.match(app, /\{ text: 'Download', onPress: \(\) => startBrowserDownload\(downloadUrl, tabId\) \}/)
+    assert.match(app, /\{ text: t\('Download'\), onPress: \(\) => startBrowserDownload\(downloadUrl, tabId\) \}/)
     assert.match(app, /onDownload=\{\(targetUrl\) => void onBrowserMediaDownload\(targetUrl, browserMediaTarget\?\.tabId \?\? null\)\}/)
 
     const hook = readFileSync(new URL('../../app/downloads/useBrowserDownloads.ts', import.meta.url), 'utf8')

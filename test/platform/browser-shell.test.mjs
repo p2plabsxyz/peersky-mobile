@@ -587,7 +587,7 @@ test('the P2PMD button names the view it takes you to', async () => {
     index.indexOf('<BrowserOverflowMenu')
   )
   // Editing offers Preview; anything else offers Edit.
-  assert.match(button, /p2pmdViewMode === 'edit' \? 'Preview' : 'Edit'/)
+  assert.match(button, /p2pmdViewMode === 'edit' \? t\('Preview'\) : t\('Edit'\)/)
   // And the icon agrees with the words: a pencil to go and edit, an eye to go
   // and look.
   assert.ok(button.indexOf('p2pmdViewMode !== \'edit\'') < button.indexOf('p2pmdPencilIcon'))
@@ -625,7 +625,7 @@ test('the p2p address lists the P2P sites this phone has opened', async () => {
   const screen = index.slice(p2pStart, index.indexOf("browserSource.kind === 'home'", p2pStart))
   assert.ok(p2pStart > 0 && screen.length > 0)
   assert.match(screen, /<P2pSitesPage\s+history=\{browserVisitHistory\}/)
-  assert.equal((index.match(/setBrowserTitle\('P2P sites'\)/g) || []).length, 2)
+  assert.equal((index.match(/setBrowserTitle\(t\('P2P sites'\)\)/g) || []).length, 2)
   assert.ok(!P2P_APPS.some((app) => app.id === 'holesail'))
 
   test('following a search result keeps the search behind it', () => {
