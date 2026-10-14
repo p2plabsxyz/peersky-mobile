@@ -106,7 +106,8 @@ export function DataClearing ({
             ? t('Your tabs were closed, but some tab preview files could not be removed and the fresh tab session could not be saved. Please try again.')
             : !previewCacheCleared
               ? t('Your tabs were closed, but some tab preview files could not be removed. Please try again.')
-              : t('Your tabs were closed, but the fresh tab session could not be saved. Please try again.')
+              : t('Your tabs were closed, but the fresh tab session could not be saved. Please try again.'),
+              [{ text: t('OK') }]
         )
       }
       return
@@ -119,7 +120,8 @@ export function DataClearing ({
         : t('Unable to clear all cached data'),
       previewCacheCleared
         ? undefined
-        : t('Some tab preview files could not be removed. Please try again.')
+        : t('Some tab preview files could not be removed. Please try again.'),
+        [{ text: t('OK') }]
     )
   }
 
@@ -127,7 +129,7 @@ export function DataClearing ({
     if (clearStartedRef.current) return
     clearStartedRef.current = true
     setClearAction(null)
-    Alert.alert(t('Unable to clear cached data'), message)
+    Alert.alert(t('Unable to clear cached data'), message, [{ text: t('OK') }])
   }
 
   return (

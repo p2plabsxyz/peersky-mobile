@@ -196,7 +196,8 @@ export function LinkDeviceSettings ({ deviceSyncRevision = 0, onCallRpc, onResta
     } catch (replaceError) {
       Alert.alert(
         failureTitle,
-        t('{error}\n\nNothing on this phone was changed. Close PeerSky and open it again.', { error: errorMessage(replaceError) })
+        t('{error}\n\nNothing on this phone was changed. Close PeerSky and open it again.', { error: errorMessage(replaceError) }),
+        [{ text: t('OK') }]
       )
     }
   }, [call, onRestartRequired])

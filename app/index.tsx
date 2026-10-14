@@ -542,7 +542,8 @@ export default function App () {
     const name = languageNamed(resolveLanguage(language))?.native || ''
     Alert.alert(
       t('Restart PeerSky'),
-      t('Close PeerSky and open it again to finish switching to {language}.', { language: name })
+      t('Close PeerSky and open it again to finish switching to {language}.', { language: name }),
+      [{ text: t('OK') }]
     )
   }
 
@@ -2129,7 +2130,8 @@ export default function App () {
     if (!privateBrowsingSupported) {
       Alert.alert(
         t('Incognito needs a newer WebView'),
-        t('Update Android System WebView from Google Play, then try again.')
+        t('Update Android System WebView from Google Play, then try again.'),
+        [{ text: t('OK') }]
       )
       return
     }
@@ -2150,7 +2152,7 @@ export default function App () {
     if (result === 'limit-reached') {
       const message = t('Delete a bookmark before adding another.')
       setStatus(`Maximum of 200 bookmarks reached. ${message}`)
-      Alert.alert(t('Bookmark limit reached'), message)
+      Alert.alert(t('Bookmark limit reached'), message, [{ text: t('OK') }])
     } else if (result) {
       setStatus(result === 'added' ? 'Bookmark added' : 'Bookmark removed')
       // A new bookmark can go straight into a folder. A removed one can come
@@ -2185,7 +2187,8 @@ export default function App () {
     if (result === 'limit-reached') {
       Alert.alert(
         t('Home is full'),
-        tp({ one: 'Remove one of your {count} favourites to add this one.', other: 'Remove one of your {count} favourites to add this one.' }, MAX_BROWSER_FAVOURITES)
+        tp({ one: 'Remove one of your {count} favourites to add this one.', other: 'Remove one of your {count} favourites to add this one.' }, MAX_BROWSER_FAVOURITES),
+        [{ text: t('OK') }]
       )
     } else if (result) {
       setStatus(result === 'added' ? 'Added to home' : 'Removed from home')
@@ -2636,7 +2639,7 @@ export default function App () {
     if (!closed) return
     const currentTabsState = browserTabsStateRef.current
     if (currentTabsState.tabs.length >= MAX_BROWSER_TABS) {
-      Alert.alert(t('Too many tabs'), tp({ one: 'Close a tab first. PeerSky keeps up to {count} open.', other: 'Close a tab first. PeerSky keeps up to {count} open.' }, MAX_BROWSER_TABS))
+      Alert.alert(t('Too many tabs'), tp({ one: 'Close a tab first. PeerSky keeps up to {count} open.', other: 'Close a tab first. PeerSky keeps up to {count} open.' }, MAX_BROWSER_TABS), [{ text: t('OK') }])
       return
     }
     browserUserInteractedRef.current = true
@@ -2957,7 +2960,7 @@ export default function App () {
   function offerExternalLinkFallback (scheme: string, targetUrl: string) {
     const target = getExternalLinkTarget(targetUrl)
     if (!target) {
-      Alert.alert(t('Unable to open link'), t('No app on this device can open this link.'))
+      Alert.alert(t('Unable to open link'), t('No app on this device can open this link.'), [{ text: t('OK') }])
       return
     }
 
@@ -3010,7 +3013,7 @@ export default function App () {
     const webView = browserWebViewRefs.current.get(tabId)
 
     if (!token || !webView) {
-      Alert.alert(t('Unable to print'), t('This page cannot be printed'))
+      Alert.alert(t('Unable to print'), t('This page cannot be printed'), [{ text: t('OK') }])
       return
     }
     webView.injectJavaScript(createBrowserPrintScript(token))
@@ -5760,7 +5763,7 @@ export default function App () {
                 if (printHtml) {
                   void printBrowserPage(printHtml, pageUrl)
                     .then((problem) => {
-                      if (problem) Alert.alert(t('Unable to print'), problem)
+                      if (problem) Alert.alert(t('Unable to print'), problem, [{ text: t('OK') }])
                     })
                   return
                 }

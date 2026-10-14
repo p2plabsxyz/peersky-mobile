@@ -411,14 +411,15 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
       const response = await onCallRpc(RPC_HYPER_STORAGE_CLEAR_ALL)
       if (!response.ok || !response.cleared) throw new Error(response.error || t('Unable to clear P2P data.'))
       if (response.warning) {
-        Alert.alert(t('P2P data cleared'), t('{message}\n\nClose PeerSky and open it again to finish.', { message: response.warning }))
+        Alert.alert(t('P2P data cleared'), t('{message}\n\nClose PeerSky and open it again to finish.', { message: response.warning }), [{ text: t('OK') }])
         return
       }
       if (Platform.OS === 'android') BackHandler.exitApp()
     } catch (clearError) {
       Alert.alert(
         t('P2P data was not all cleared'),
-        t('{message}\n\nClose PeerSky and open it again to finish.', { message: clearError instanceof Error ? clearError.message : String(clearError) })
+        t('{message}\n\nClose PeerSky and open it again to finish.', { message: clearError instanceof Error ? clearError.message : String(clearError) }),
+        [{ text: t('OK') }]
       )
     }
   }

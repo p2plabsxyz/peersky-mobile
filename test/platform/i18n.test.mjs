@@ -249,3 +249,45 @@ test('Settings has a Language page listing each language under its own name', ()
   assert.match(page, /\{ id: SYSTEM_LANGUAGE, title: t\('Phone language'\)/)
   assert.match(page, /title: entry\.native/)
 })
+
+// Given no buttons, an alert gets the phone's own OK, in the phone's language
+// rather than the one picked in PeerSky.
+test('every alert names its buttons, so OK is in the language picked too', () => {
+  const files = []
+  const walk = (dir) => {
+    for (const entry of readdirSync(new URL(`../../${dir}`, import.meta.url), { withFileTypes: true })) {
+      if (entry.isDirectory()) walk(`${dir}/${entry.name}`)
+      else if (/\.tsx?$/.test(entry.name)) files.push(`${dir}/${entry.name}`)
+    }
+  }
+  walk('app')
+  const bare = []
+  for (const file of files) {
+    const source = read(file)
+    let at = 0
+    while ((at = source.indexOf('Alert.alert(', at)) !== -1) {
+      let depth = 0
+      let args = 1
+      let quote = null
+      let end = at + 'Alert.alert'.length
+      for (; end < source.length; end++) {
+        const char = source[end]
+        if (quote) {
+          if (char === '\\') end++
+          else if (char === quote) quote = null
+        } else if (char === "'" || char === '"' || char === '`') {
+          quote = char
+        } else if ('([{'.includes(char)) {
+          depth++
+        } else if (')]}'.includes(char)) {
+          if (--depth === 0) break
+        } else if (char === ',' && depth === 1) {
+          args++
+        }
+      }
+      if (args < 3) bare.push(`${file}:${source.slice(0, at).split('\n').length}`)
+      at = end
+    }
+  }
+  assert.deepEqual(bare, [])
+})
