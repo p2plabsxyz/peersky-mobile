@@ -9,8 +9,8 @@ import b4a from 'b4a'
 import Corestore from 'corestore'
 import Hyperdrive from 'hyperdrive'
 
-import { HYPER_BRIDGE_SCRIPT, createPeerTunesHttpServer } from '../../backend/peertunes/server.mjs'
-import { MAX_KEEP_SONGS_PER_REQUEST, createSongKeeper, songState, within } from '../../backend/peertunes/song-keeper.mjs'
+import { HYPER_BRIDGE_SCRIPT, KEEP_SONGS_HEADER, createPeerTunesHttpServer } from '../../backend/peertunes/server.mjs'
+import { MAX_KEEP_DRIVES, MAX_KEEP_SONGS_PER_REQUEST, createSongKeeper, songState, within } from '../../backend/peertunes/song-keeper.mjs'
 
 // PeerTunes keeps a shared playlist on the phone song by song. A laptop that
 // shared one was closed halfway and later only half the songs played, with
@@ -36,7 +36,7 @@ function fakeDrive ({ entries = [], local = [], started = [], peers = 0 } = {}) 
     download (path) {
       let finish
       const done = new Promise((resolve) => { finish = resolve })
-      const download = { path, done: () => done, finish }
+      const download = { path, done: () => done, finish, destroyed: false, destroy () { download.destroyed = true; finish() } }
       drive.downloads.push(download)
       return download
     }
@@ -44,18 +44,21 @@ function fakeDrive ({ entries = [], local = [], started = [], peers = 0 } = {}) 
   return drive
 }
 
-function keeperFor (drives, { now = () => 0 } = {}) {
+function keeperFor (drives, { now = () => 0, mayDownload } = {}) {
   const refreshed = []
+  const opened = new Set()
   const keeper = createSongKeeper({
     openDrive: async (address, task) => {
-      const drive = drives[address]
+      opened.add(address)
+      const drive = typeof drives === 'function' ? drives(address) : drives[address]
       if (!drive) throw new Error('The drive did not open in time.')
       return task(drive)
     },
     refreshNetwork: async (url) => { refreshed.push(url) },
+    mayDownload,
     now
   })
-  return { keeper, refreshed }
+  return { keeper, refreshed, opened }
 }
 
 const settle = () => new Promise((resolve) => setImmediate(resolve))
@@ -132,6 +135,39 @@ describe('PeerTunes song keeper', () => {
     assert.equal(keeper.downloading, 0)
     await keeper.keep(['hyper://abc/b.mp3'])
     assert.equal(drive.downloads.length, 2, 'still missing, so it is fetched again')
+  })
+
+  // Download only on Wi-Fi, on cellular: the folder downloads wait, and the
+  // songs did not.
+  it('starts nothing on cellular with Download only on Wi-Fi, stops what was going, and says the rest waits', async () => {
+    let wifi = true
+    const drive = fakeDrive({ entries: ['/a.mp3', '/b.mp3', '/c.mp3'], local: ['/a.mp3'], started: ['/b.mp3'], peers: 1 })
+    const { keeper, refreshed } = keeperFor({ 'hyper://abc/': drive }, { mayDownload: () => wifi })
+    await keeper.keep(['hyper://abc/b.mp3'])
+    assert.equal(keeper.downloading, 1)
+
+    wifi = false
+    const answer = await keeper.keep(['hyper://abc/a.mp3', 'hyper://abc/b.mp3', 'hyper://abc/c.mp3'])
+    assert.deepEqual(answer, { ok: true, saved: ['hyper://abc/a.mp3'], saving: [], waiting: ['hyper://abc/b.mp3', 'hyper://abc/c.mp3'] })
+    assert.equal(drive.downloads[0].destroyed, true)
+    assert.equal(drive.downloads.length, 1, 'nothing new started')
+    assert.equal(keeper.downloading, 0)
+    await settle()
+    assert.deepEqual(refreshed, [], 'not even looked for')
+
+    wifi = true
+    await keeper.keep(['hyper://abc/b.mp3', 'hyper://abc/c.mp3'])
+    assert.equal(drive.downloads.length, 3, 'back on Wi-Fi, both start')
+  })
+
+  it(`opens no more than ${MAX_KEEP_DRIVES} separate drives, however many a playlist names`, async () => {
+    const { keeper, opened } = keeperFor((address) => fakeDrive({ entries: ['/a.mp3'], peers: 1 }))
+    const songs = Array.from({ length: MAX_KEEP_DRIVES + 30 }, (_, index) => `hyper://${String(index).padStart(52, 'a')}/a.mp3`)
+    for (let at = 0; at < songs.length; at += MAX_KEEP_SONGS_PER_REQUEST) await keeper.keep(songs.slice(at, at + MAX_KEEP_SONGS_PER_REQUEST))
+    assert.equal(opened.size, MAX_KEEP_DRIVES)
+    // One it already holds is still checked.
+    await keeper.keep([songs[0]])
+    assert.equal(opened.size, MAX_KEEP_DRIVES)
   })
 
   it('looks a song up by the name the drive stores it under', async () => {
@@ -226,6 +262,9 @@ describe('PeerTunes song keeper', () => {
 })
 
 describe('PeerTunes keep endpoint', () => {
+  // What the PeerTunes page's own fetch sends.
+  const asPage = { [KEEP_SONGS_HEADER]: '1', 'Sec-Fetch-Site': 'same-origin' }
+
   async function withServer (keepSongs, run) {
     const server = createPeerTunesHttpServer({ httpImpl: http, fetch: async () => ({ ok: false, status: 404 }), keepSongs })
     const localUrl = await new Promise((resolve, reject) => {
@@ -248,7 +287,7 @@ describe('PeerTunes keep endpoint', () => {
     await withServer(keepSongs, async (localUrl) => {
       const a = 'hyper://abc/mix/01 One.mp3'
       const b = 'hyper://abc/mix/02 Two.mp3'
-      const response = await fetch(`${localUrl}/hyper/keep?url=${encodeURIComponent(a)}&url=${encodeURIComponent(b)}`)
+      const response = await fetch(`${localUrl}/hyper/keep?url=${encodeURIComponent(a)}&url=${encodeURIComponent(b)}`, { headers: asPage })
       assert.equal(response.status, 200)
       assert.equal(response.headers.get('content-type'), 'application/json; charset=utf-8')
       assert.deepEqual(await response.json(), { ok: true, saved: [a], saving: [], waiting: [b] })
@@ -258,16 +297,31 @@ describe('PeerTunes keep endpoint', () => {
 
   it('refuses a check with no songs, too many, or a write', async () => {
     await withServer(async () => ({ ok: true }), async (localUrl) => {
-      assert.equal((await fetch(`${localUrl}/hyper/keep`)).status, 400)
+      assert.equal((await fetch(`${localUrl}/hyper/keep`, { headers: asPage })).status, 400)
       const many = Array.from({ length: MAX_KEEP_SONGS_PER_REQUEST + 1 }, (_, index) => `url=hyper%3A%2F%2Fabc%2F${index}.mp3`).join('&')
-      assert.equal((await fetch(`${localUrl}/hyper/keep?${many}`)).status, 400)
-      assert.equal((await fetch(`${localUrl}/hyper/keep?url=hyper%3A%2F%2Fabc%2Fa.mp3`, { method: 'POST', body: 'x' })).status, 405)
-      const head = await fetch(`${localUrl}/hyper/keep?url=hyper%3A%2F%2Fabc%2Fa.mp3`, { method: 'HEAD' })
+      assert.equal((await fetch(`${localUrl}/hyper/keep?${many}`, { headers: asPage })).status, 400)
+      assert.equal((await fetch(`${localUrl}/hyper/keep?url=hyper%3A%2F%2Fabc%2Fa.mp3`, { method: 'POST', body: 'x', headers: asPage })).status, 405)
+      const head = await fetch(`${localUrl}/hyper/keep?url=hyper%3A%2F%2Fabc%2Fa.mp3`, { method: 'HEAD', headers: asPage })
       assert.equal(head.status, 405)
     })
     await withServer(null, async (localUrl) => {
-      assert.equal((await fetch(`${localUrl}/hyper/keep?url=hyper%3A%2F%2Fabc%2Fa.mp3`)).status, 404)
+      assert.equal((await fetch(`${localUrl}/hyper/keep?url=hyper%3A%2F%2Fabc%2Fa.mp3`, { headers: asPage })).status, 404)
     })
+  })
+
+  // A tab the app opened for a page, an <img> on a page an older WebView
+  // loads, or a page on another origin.
+  it('starts nothing for a tab, an image or another page, which cannot send the header', async () => {
+    let asked = 0
+    await withServer(async () => { asked++; return { ok: true } }, async (localUrl) => {
+      const keep = `${localUrl}/hyper/keep?url=hyper%3A%2F%2Fabc%2Fa.mp3`
+      assert.equal((await fetch(keep, { headers: { 'Sec-Fetch-Site': 'none', 'Sec-Fetch-Mode': 'navigate' } })).status, 403)
+      assert.equal((await fetch(keep)).status, 403)
+      assert.equal((await fetch(keep, { headers: { ...asPage, Origin: 'https://site.example' } })).status, 403)
+      assert.equal((await fetch(keep, { headers: { ...asPage, 'Sec-Fetch-Site': 'cross-site' } })).status, 403)
+      assert.equal((await fetch(keep, { headers: { [KEEP_SONGS_HEADER]: 'yes' } })).status, 403)
+    })
+    assert.equal(asked, 0)
   })
 
   it('gives the page a keep function that asks a few songs at a time and adds up the answers', async () => {
@@ -279,8 +333,9 @@ describe('PeerTunes keep endpoint', () => {
       encodeURIComponent,
       Promise,
       Error,
-      fetch: async (url) => {
+      fetch: async (url, init) => {
         requested.push(url)
+        assert.equal(init?.headers?.[KEEP_SONGS_HEADER], '1')
         const urls = new URL(url, 'http://127.0.0.1').searchParams.getAll('url')
         return { ok: true, json: async () => ({ ok: true, saved: urls.slice(0, 1), saving: urls.slice(1, 2), waiting: [] }) }
       }

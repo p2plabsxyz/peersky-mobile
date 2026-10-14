@@ -48,13 +48,20 @@ const KEEP_DRIVE_OPEN_TIMEOUT_MS = 4000
 // Songs asked about in one request, so its address stays short.
 const KEEP_SONGS_BATCH = 10
 
+// Asking starts downloads, so only the PeerTunes page may ask: it sends this
+// header. A tab or an image another page points here cannot send one, and the
+// loopback check lets those through when the app opened the tab, or when an
+// older WebView says nothing about where a request came from. A fetch from
+// another origin that adds it is refused at the preflight.
+export const KEEP_SONGS_HEADER = 'X-PeerTunes-Keep'
+
 // PeerTunes asks which songs of a kept playlist are on the device, and the
 // server fetches the ones that are not. A few at a time, then one answer.
 const KEEP_SONGS_SCRIPT = 'window.peerskyKeepSongs=function(urls){' +
   'var list=Array.isArray(urls)?urls.map(String):[],batches=[];' +
   `for(var i=0;i<list.length;i+=${KEEP_SONGS_BATCH})batches.push(list.slice(i,i+${KEEP_SONGS_BATCH}));` +
   'return Promise.all(batches.map(function(batch){' +
-  'return fetch("/hyper/keep?"+batch.map(function(url){return"url="+encodeURIComponent(url)}).join("&"))' +
+  `return fetch("/hyper/keep?"+batch.map(function(url){return"url="+encodeURIComponent(url)}).join("&"),{headers:{"${KEEP_SONGS_HEADER}":"1"}})` +
   '.then(function(res){if(!res.ok)throw new Error("keep "+res.status);return res.json()})' +
   '})).then(function(parts){' +
   'var out={ok:true,saved:[],saving:[],waiting:[]};' +
@@ -90,13 +97,16 @@ export async function startPeerTunesServer () {
     const httpImpl = await getBareHttp()
     const { ensureFetchGlobals, refreshHyperNetworkFor, routedHyperFetch, routedHyperRangeFetch } = await getHyperFetchModule()
     const { withHyperRuntimeForAddress } = await getHyperRuntimeModule()
+    const { hyperOfflineNetworkAllowed } = await import('../hyper/offline-manager.mjs')
     const keeper = createSongKeeper({
       openDrive: (address, task) => withHyperRuntimeForAddress(address, async (runtime) => {
         const drive = await within(runtime.getDrive(address), KEEP_DRIVE_OPEN_TIMEOUT_MS)
         if (!drive) throw new Error('The drive did not open in time.')
         return task(drive)
       }),
-      refreshNetwork: refreshHyperNetworkFor
+      refreshNetwork: refreshHyperNetworkFor,
+      // Download only on Wi-Fi holds for kept songs as for kept folders.
+      mayDownload: hyperOfflineNetworkAllowed
     })
     const options = {
       httpImpl,
@@ -240,6 +250,10 @@ function handleRequest (req, res, { fetch, fetchRange, ensureGlobals, refreshNet
   }
 
   if (requestUrl.pathname === '/hyper/keep') {
+    if (req.headers?.[KEEP_SONGS_HEADER.toLowerCase()] !== '1') {
+      sendText(res, 403, 'Forbidden')
+      return
+    }
     serveKeptSongs(req, res, keepSongs, requestUrl.searchParams.getAll('url'))
       .catch((error) => sendError(req, res, error))
     return

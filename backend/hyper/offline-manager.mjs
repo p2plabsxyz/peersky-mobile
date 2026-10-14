@@ -337,7 +337,11 @@ export function createHyperOfflineManager ({
     }
   }
 
-  return { close, keep, list, pause, remove, resume, resumeAll }
+  // Whether downloads may use the network now: false while Download only on
+  // Wi-Fi is on and the phone is on cellular, as the app last said.
+  const networkAllowed = () => automaticNetworkAllowed
+
+  return { close, keep, list, networkAllowed, pause, remove, resume, resumeAll }
 }
 
 async function createOfflineProgressTracker (drive, path, active) {
@@ -459,6 +463,7 @@ export const pauseHyperOffline = manager.pause
 export const removeHyperOffline = manager.remove
 export const resumeHyperOffline = manager.resume
 export const resumeWantedHyperOffline = manager.resumeAll
+export const hyperOfflineNetworkAllowed = manager.networkAllowed
 
 function success (item, status, details = {}) {
   return { ok: true, item: { ...item, status, ...details } }

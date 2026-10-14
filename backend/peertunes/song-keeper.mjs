@@ -14,6 +14,9 @@ const MAX_SONG_DOWNLOADS = 1000
 const CHECK_TIMEOUT_MS = 4000
 // How often a drive that nobody is sharing right now is looked for again.
 const LOOK_AGAIN_MS = 30 * 1000
+// Separate drives one keeper opens. A playlist can name songs in any drive,
+// and each drive opened joins its swarm and stays open.
+export const MAX_KEEP_DRIVES = 100
 
 /**
  * @param {object} options
@@ -21,10 +24,13 @@ const LOOK_AGAIN_MS = 30 * 1000
  *   Runs task with the drive at a hyper:// drive address.
  * @param {(url: string) => Promise<any>} [options.refreshNetwork]
  *   Looks for the peers of the drive behind url again.
+ * @param {() => boolean} [options.mayDownload] False while Download only on
+ *   Wi-Fi is on and the phone is on cellular.
  */
-export function createSongKeeper ({ openDrive, refreshNetwork = async () => {}, now = Date.now }) {
+export function createSongKeeper ({ openDrive, refreshNetwork = async () => {}, mayDownload = () => true, now = Date.now }) {
   const downloads = new Map()
   const lookedAt = new Map()
+  const drives = new Set()
 
   /**
    * Which of these songs are on the device. One that is not is fetched, and
@@ -33,36 +39,54 @@ export function createSongKeeper ({ openDrive, refreshNetwork = async () => {}, 
    * list.
    */
   async function keep (urls) {
+    // On cellular with Download only on Wi-Fi, nothing new starts and what
+    // was going stops, as the kept folders' downloads do.
+    const allowed = mayDownload() !== false
+    if (!allowed) stopDownloads()
     const songs = []
     for (const url of Array.isArray(urls) ? urls : []) {
       if (songs.length >= MAX_KEEP_SONGS_PER_REQUEST) break
       const target = typeof url === 'string' ? parseHyperUrl(url) : { error: 'Not a song' }
       if (target.error || target.driveAddress === 'default' || target.pathname.endsWith('/')) continue
+      if (!drives.has(target.driveAddress)) {
+        if (drives.size >= MAX_KEEP_DRIVES) continue
+        drives.add(target.driveAddress)
+      }
       songs.push({ url, target })
     }
 
-    const states = await Promise.all(songs.map(check))
+    const states = await Promise.all(songs.map((song) => check(song, allowed)))
     const answer = { ok: true, saved: [], saving: [], waiting: [] }
     songs.forEach((song, index) => {
-      const state = states[index]
+      // A song that is not all here waits for Wi-Fi.
+      const state = allowed || states[index] === 'saved' || states[index] === 'unknown' ? states[index] : 'waiting'
       if (answer[state]) answer[state].push(song.url)
       // Whoever shares it may be back: look for them again, now and then.
-      if (state === 'waiting') lookAgain(song)
+      if (allowed && state === 'waiting') lookAgain(song)
     })
     return answer
   }
 
-  async function check ({ url, target }) {
+  async function check ({ url, target }, allowed) {
     const path = getHyperFetchPath(target.pathname)
     try {
       return await openDrive(target.driveAddress, async (drive) => {
         const state = await songState(drive, path)
-        if (state !== 'saved') fetchSong(url, drive, path)
+        if (state !== 'saved' && allowed) fetchSong(url, drive, path)
         return state
       })
     } catch {
       return 'unknown'
     }
+  }
+
+  function stopDownloads () {
+    for (const download of downloads.values()) {
+      try {
+        download.destroy?.()
+      } catch {}
+    }
+    downloads.clear()
   }
 
   function fetchSong (url, drive, path) {

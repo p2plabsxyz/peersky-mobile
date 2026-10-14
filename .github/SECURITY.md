@@ -37,7 +37,7 @@ Out of scope: third-party websites, and upstream projects such as React Native, 
   - Writing asks once per site (**Publishing from sites** in Settings, Permissions). A page's named drives get a prefix of its own, so it never reaches the app's drives by name, and it writes only to drives it created.
   - Media links to the local asset server are signed one address at a time, so a page can fetch what it was handed and nothing else.
   - `hyper://` never loads in a frame.
-- The local servers (P2PMD rooms, PeerTunes, Hyper assets) bind `127.0.0.1` and answer only their own origin, which rules out other local servers too. The one other origin is desktop P2PMD (`peersky://p2p`) on a P2PMD room. Drive files from the asset server are sandboxed, so an HTML file cannot run on a loopback origin.
+- The local servers (P2PMD rooms, PeerTunes, Hyper assets) bind `127.0.0.1` and answer only their own origin, which rules out other local servers too. The one other origin is desktop P2PMD (`peersky://p2p`) on a P2PMD room. Drive files from the asset server are sandboxed, so an HTML file cannot run on a loopback origin. PeerTunes' request to keep songs, which starts downloads, also needs a header only its own page sends, so a tab or an image another page points at it does nothing.
 - The built-in apps:
   - The P2PMD editor runs only the app's own code: yjs ships inside the page, nothing loads in its place, links open in a browser tab, and it publishes only with a nonce the app hands over when you tap Publish. A phone joining a note listens on a port it picks itself.
   - The PeerTunes WebView stays on its own origin.
@@ -77,6 +77,13 @@ Fixed as a result:
 - Keys, chats and P2P stores went into iCloud, Google and phone-to-phone backups.
 - Downloads started without asking, APKs went straight to the installer, and the app declared install, storage and overlay permissions it did not need.
 - Shipped dependencies included vulnerable versions of `markdown-it` and `linkify-it`.
+
+Later in October 2026, before 0.1.3, the changes since then went through a second review, run the same way: Clear all P2P data, Link Device transfers that keep going, PeerTunes' kept playlists, shuffle and widget, forced dark mode, drives opened by name and address, and PeerChat's signed rooms, forwarding and search.
+
+Fixed as a result:
+
+- A tab another page got PeerSky to open, or on iOS before 16.4 an image on any page, could make PeerTunes keep songs from any drive: up to twenty drives a request, downloading on cellular and staying open.
+- Kept songs downloaded on cellular with Download only on Wi-Fi on.
 
 Not covered in depth: native modules and upstream libraries beyond advisory triage.
 
