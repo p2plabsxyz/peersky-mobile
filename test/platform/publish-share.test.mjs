@@ -61,7 +61,7 @@ test('the published link sheet keeps the link, and shares or copies it', async (
   // Copying does not close the sheet: the link stays on screen.
   const copy = sheet.slice(sheet.indexOf('function copy ()'), sheet.indexOf('function share ()'))
   assert.doesNotMatch(copy, /onClose/)
-  assert.match(sheet, /\{copied \? 'Copied' : 'Tap to copy'\}/)
+  assert.match(sheet, /\{copied \? t\('Copied'\) : t\('Tap to copy'\)\}/)
 })
 
 test('a Hyperdrive upload that can be shared says so', async () => {

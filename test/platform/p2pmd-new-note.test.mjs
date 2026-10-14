@@ -10,12 +10,12 @@ test('Create Note asks private or public, and starts on private every time', asy
   const sheet = await read('app/P2pmdNewNoteSheet.tsx')
   assert.match(sheet, /useState\(true\)/)
   assert.match(sheet, /if \(visible\) setIsPrivate\(true\)/)
-  assert.match(sheet, /title: 'Private'/)
-  assert.match(sheet, /title: 'Public'/)
+  assert.match(sheet, /title: msg\('Private'\)/)
+  assert.match(sheet, /title: msg\('Public'\)/)
   assert.match(sheet, /Only this phone can host it\./)
   assert.match(sheet, /accessibilityRole='radio'/)
   // Two choices and nothing to type: no host, port or UDP on a phone.
-  assert.equal(sheet.match(/title: '/g).length, 2)
+  assert.equal(sheet.match(/title: msg\('/g).length, 2)
   assert.doesNotMatch(sheet, /TextInput|Switch/)
 })
 

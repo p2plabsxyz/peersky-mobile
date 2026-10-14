@@ -1,4 +1,5 @@
 import { createPairingCode, parsePairingCode } from '../../backend/backup/pairing-code.mjs'
+import { t } from '../i18n/i18n.mjs'
 
 export { parsePairingCode }
 
@@ -24,5 +25,5 @@ export function classifyLinkDeviceCode (text) {
 
   if (/^hyper:\/\/[a-z0-9]{52,64}(\/[^\s]*)?$/i.test(value)) return { kind: 'transfer', url: value }
 
-  return { kind: 'invalid', error: 'That is not a PeerSky code. Open Link Device on the other device and scan the code it shows.' }
+  return { kind: 'invalid', error: t('That is not a PeerSky code. Open Link Device on the other device and scan the code it shows.') }
 }

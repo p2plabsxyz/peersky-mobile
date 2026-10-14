@@ -47,8 +47,8 @@ test('warns that clearing all P2P data permanently loses signing keys', () => {
 // with identities, and says so in red before anyone taps it.
 test('Clear all P2P data says in red that this device\'s identity and its links go, and what stays', () => {
   const screen = readSource('app/settings/P2PStorage.tsx')
-  const row = screen.slice(screen.indexOf('>Clear all P2P data</Text>'), screen.indexOf('onPress={confirmClearAllData}'))
-  assert.match(row, /<Text style=\{\[styles\.dangerNote, isDark \? darkStyles\.dangerNote : null\]\}>\s*This device's identity goes too/)
+  const row = screen.slice(screen.indexOf(">{t('Clear all P2P data')}</Text>"), screen.indexOf('onPress={confirmClearAllData}'))
+  assert.match(row, /<Text style=\{\[styles\.dangerNote, isDark \? darkStyles\.dangerNote : null\]\}>\s*\{t\("This device's identity goes too/)
   assert.match(row, /this phone's links to your other devices in Link Device/)
   assert.match(row, /as they would with Remove my data from this phone/)
   assert.match(row, /tabs, bookmarks, history, downloads and settings stay/)

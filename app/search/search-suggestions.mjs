@@ -1,4 +1,5 @@
 import { CUSTOM_SEARCH_QUERY_PLACEHOLDER, normalizeCustomSearchUrl } from '../browser-shell.mjs'
+import { tKey } from '../i18n/i18n.mjs'
 import { SEARCH_ENGINES } from '../settings/browser-preferences.mjs'
 
 // What the search engine suggests while you type in the address bar. Each one
@@ -96,7 +97,7 @@ export function getOneOffSearchEngines (searchEngine, customSearchUrl = '') {
   const customUrl = normalizeCustomSearchUrl(customSearchUrl)
   return SEARCH_ENGINES.flatMap((engine) => {
     if (engine.id === searchEngine) return []
-    if (engine.id !== 'custom') return [{ id: engine.id, title: engine.title }]
+    if (engine.id !== 'custom') return [{ id: engine.id, title: tKey(engine.title) }]
     if (!customUrl) return []
     const host = new URL(customUrl.replaceAll(CUSTOM_SEARCH_QUERY_PLACEHOLDER, 'q')).hostname
     return [{ id: engine.id, title: host.replace(/^www[.]/, '') }]

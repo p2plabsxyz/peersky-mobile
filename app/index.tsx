@@ -150,6 +150,10 @@ import { SettingsScreen } from './settings/SettingsScreen'
 import type { SettingsPage } from './settings/SettingsScreen'
 import { BrowserOverflowMenu } from './settings/BrowserOverflowMenu'
 import { useBrowserPreferences } from './settings/useBrowserPreferences'
+import { applyLanguageSetting, resolveLanguage } from './i18n/apply-language'
+import { t } from './i18n/i18n.mjs'
+import { languageNamed } from './i18n/languages.mjs'
+import { useT } from './i18n/useT'
 import { getOneOffSearchEngines } from './search/search-suggestions.mjs'
 import { getSiteDataHosts } from './privacy/site-data.mjs'
 import { BrowserToolbar, type AddressBarAction } from './BrowserToolbar'
@@ -434,6 +438,8 @@ type BrowserTabsState = {
 
 const DESKTOP_BROWSER_USER_AGENT = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 PeerSkyMobile/1.0'
 export default function App () {
+  // Every screen hangs off this one, so a new language re-renders them all.
+  useT()
   const systemColorScheme = useColorScheme()
   const browserInsets = useSafeAreaInsets()
   const { height: browserWindowHeight, width: browserWindowWidth } = useWindowDimensions()
@@ -505,6 +511,7 @@ export default function App () {
     setAddressBarPosition,
     setAppLogoColor,
     setForceDarkWebsites,
+    setLanguage: setLanguagePreference,
     setSearchSuggestionsEnabled,
     setAddressBarButton,
     setContentBlockingEnabled: setContentBlockingPreference,
@@ -520,6 +527,23 @@ export default function App () {
     setWebsiteTextScale,
     setYoutubeAdBlockingEnabled
   } = useBrowserPreferences()
+  // The text is in the language picked from the first frame (i18n/setup.ts).
+  // Once the preferences are read, which way the screens are laid out follows
+  // it too, from the next start.
+  useEffect(() => {
+    if (browserPreferencesReady) applyLanguageSetting(browserPreferences.language)
+  }, [browserPreferencesReady])
+
+  function changeLanguage (language: string) {
+    if (!setLanguagePreference(language)) return
+    if (!applyLanguageSetting(language)) return
+    const name = languageNamed(resolveLanguage(language))?.native || ''
+    Alert.alert(
+      t('Restart PeerSky'),
+      t('Close PeerSky and open it again to finish switching to {language}.', { language: name })
+    )
+  }
+
   const networkState = useNetworkState()
   const hyperOfflineNetworkAllowed = browserPreferencesReady && canUseNetworkForOfflineHyper({
     downloadOnlyOnWifi: browserPreferences.downloadOnlyOnWifi,
@@ -4138,6 +4162,8 @@ export default function App () {
             appLogoColor={browserPreferences.appLogoColor}
             deviceSyncRevision={deviceSyncRevision}
             forceDarkWebsites={browserPreferences.forceDarkWebsites}
+            language={browserPreferences.language}
+            onLanguageChange={changeLanguage}
             contentBlockingEnabled={browserPreferences.contentBlockingEnabled}
             customSearchUrl={browserPreferences.customSearchUrl}
             downloadOnlyOnWifi={browserPreferences.downloadOnlyOnWifi}

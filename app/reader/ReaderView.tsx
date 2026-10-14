@@ -4,6 +4,7 @@ import { WebView } from 'react-native-webview'
 import CloseIcon from '../../assets/icons/bootstrap/x-lg.svg'
 import { BROWSER_PALETTES } from '../browser-appearance.mjs'
 import { peerSkyWebViewNativeConfig } from '../downloads/PeerSkyWebView'
+import { t } from '../i18n/i18n.mjs'
 import { MODAL_ORIENTATIONS } from '../modal-orientations'
 import { WEBVIEW_DECELERATION_RATE } from '../webview-scroll.mjs'
 import { createReaderHtml, READER_BACKGROUNDS, READER_TEXT_SCALES } from './reader-mode.mjs'
@@ -69,7 +70,7 @@ export function ReaderView ({
         <SafeAreaView edges={['top', 'left', 'right']} style={[styles.screen, { backgroundColor: pageColor }]}>
           <View style={[styles.header, { borderBottomColor: palette.border }]}>
             <Pressable
-              accessibilityLabel='Close Reader view'
+              accessibilityLabel={t('Close Reader view')}
               accessibilityRole='button'
               hitSlop={10}
               style={({ pressed }) => [styles.button, pressed ? styles.pressed : null]}
@@ -77,9 +78,9 @@ export function ReaderView ({
             >
               <CloseIcon width={18} height={18} color={palette.text} />
             </Pressable>
-            <Text numberOfLines={1} style={[styles.heading, { color: palette.mutedText }]}>Reader view</Text>
+            <Text numberOfLines={1} style={[styles.heading, { color: palette.mutedText }]}>{t('Reader view')}</Text>
             <Pressable
-              accessibilityLabel='Smaller text'
+              accessibilityLabel={t('Smaller text')}
               accessibilityRole='button'
               accessibilityState={{ disabled: scaleIndex === 0 }}
               disabled={scaleIndex === 0}
@@ -90,7 +91,7 @@ export function ReaderView ({
               <Text style={[styles.smallA, { color: palette.text }]}>A</Text>
             </Pressable>
             <Pressable
-              accessibilityLabel='Larger text'
+              accessibilityLabel={t('Larger text')}
               accessibilityRole='button'
               accessibilityState={{ disabled: scaleIndex === READER_TEXT_SCALES.length - 1 }}
               disabled={scaleIndex === READER_TEXT_SCALES.length - 1}

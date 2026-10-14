@@ -34,7 +34,7 @@ test('with another button on the bar, burning is still in the menu', async () =>
   assert.equal(burnsFromMenu('share'), true)
   const menu = await read('app/settings/BrowserOverflowMenu.tsx')
   assert.match(menu, /\.\.\.\(onBurnTabs\s+\? \[\s+<MenuItem\s+key='burn'/)
-  assert.match(menu, /label='Burn Tabs and Data'/)
+  assert.match(menu, /label=\{t\('Burn Tabs and Data'\)\}/)
 })
 
 test('every choice has an icon, the one the menu uses', async () => {
@@ -46,14 +46,14 @@ test('every choice has an icon, the one the menu uses', async () => {
 
 test('Appearance opens the toolbar button page, and back returns there', async () => {
   const appearance = await read('app/settings/Appearance.tsx')
-  assert.match(appearance, /<SettingsSection title='Toolbar button'>/)
+  assert.match(appearance, /<SettingsSection title=\{t\('Toolbar button'\)\}>/)
   assert.match(appearance, /onPress=\{onOpenToolbarButton\}/)
   // Below the logos.
-  assert.ok(appearance.indexOf("title='Toolbar button'") > appearance.indexOf("title='Logo'"))
+  assert.ok(appearance.indexOf("title={t('Toolbar button')}") > appearance.indexOf("title={t('Logo')}"))
 
   const settings = await read('app/settings/SettingsScreen.tsx')
   assert.match(settings, /<Appearance\s+\{\.\.\.props\}[\s\S]{0,160}onOpenToolbarButton=\{\(\) => changePage\('toolbar-button', 1\)\}/)
-  assert.match(settings, /title='Toolbar Button'\s+onBack=\{\(\) => changePage\('appearance', -1\)\}/)
+  assert.match(settings, /title=\{t\('Toolbar Button'\)\}\s+onBack=\{\(\) => changePage\('appearance', -1\)\}/)
   assert.match(settings, /'toolbar-button': 'appearance'/)
   assert.match(settings, /setPage\(SETTINGS_PARENT_PAGES\[pageRef\.current\] \|\| 'main'\)/)
 

@@ -3,6 +3,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 
 import { AppWelcome, type AppWelcomeContent } from './AppWelcome'
 import { BROWSER_PALETTES } from './browser-appearance.mjs'
+import { msg } from './i18n/i18n.mjs'
 import DatabaseIcon from '../assets/icons/bootstrap/database.svg'
 import FileCodeIcon from '../assets/icons/bootstrap/file-code.svg'
 import GridIcon from '../assets/icons/bootstrap/grid.svg'
@@ -16,41 +17,41 @@ const QUALITIES = [
   {
     id: 'together',
     Icon: PeopleIcon,
-    title: 'Device to device',
-    body: 'What you share goes straight between phones and computers. There is no server. Your phone is the server.'
+    title: msg('Device to device'),
+    body: msg('What you share goes straight between phones and computers. There is no server. Your phone is the server.')
   },
   {
     id: 'product',
     Icon: ShieldCheckIcon,
-    title: 'You are not the product',
-    body: 'No ads, no trackers, no account. We collect nothing about you, so there is nothing to sell.'
+    title: msg('You are not the product'),
+    body: msg('No ads, no trackers, no account. We collect nothing about you, so there is nothing to sell.')
   },
   {
     id: 'everything',
     Icon: GridIcon,
-    title: 'Everything in one app',
-    body: 'Browser, chat, shared notes, music and file sharing, all built in. One app instead of five, with more on the way.'
+    title: msg('Everything in one app'),
+    body: msg('Browser, chat, shared notes, music and file sharing, all built in. One app instead of five, with more on the way.')
   },
   {
     id: 'yours',
     Icon: DatabaseIcon,
-    title: 'Your data stays yours',
-    body: 'Everything lives on this phone first, and keeps working over a local network even when the internet is down.'
+    title: msg('Your data stays yours'),
+    body: msg('Everything lives on this phone first, and keeps working over a local network even when the internet is down.')
   },
   {
     id: 'open',
     Icon: FileCodeIcon,
-    title: 'Free and open source',
-    body: 'Anyone can read the code and improve it.'
+    title: msg('Free and open source'),
+    body: msg('Anyone can read the code and improve it.')
   }
 ]
 
 const PEERSKY_WELCOME: AppWelcomeContent = {
   icon: require('../assets/images/logo.png'),
   title: 'PeerSky',
-  lead: 'Your peer-to-peer, local-first, surveillance-free browser.',
+  lead: msg('Your peer-to-peer, local-first, surveillance-free browser.'),
   points: QUALITIES,
-  action: 'Start exploring'
+  action: msg('Start exploring')
 }
 
 // The same screen the P2P apps greet with, full screen and with the same

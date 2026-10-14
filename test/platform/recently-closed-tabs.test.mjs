@@ -20,11 +20,11 @@ test('the list says how long ago each tab was closed', () => {
 })
 
 test('the tab list opens Recently closed from its menu, and closing a tab offers Undo', () => {
-  assert.match(screen, /Recently closed tabs<\/Text>/)
+  assert.match(screen, /\{t\('Recently closed tabs'\)\}<\/Text>/)
   assert.match(screen, /onReopen=\{\(key\) => onReopenClosedTab\(key\)\}/)
-  assert.match(screen, /actionLabel: 'Undo',\s+onAction: \(\) => onReopenClosedTab\(key, \{ restorePlace: true \}\)/)
+  assert.match(screen, /actionLabel: t\('Undo'\),\s+onAction: \(\) => onReopenClosedTab\(key, \{ restorePlace: true \}\)/)
   // Close all moved into the menu, so the bar keeps four buttons.
-  assert.match(screen, /Close all tabs<\/Text>/)
+  assert.match(screen, /\{t\('Close all tabs'\)\}<\/Text>/)
 })
 
 test('a closed tab is remembered, and Burn and clearing history forget them all', () => {

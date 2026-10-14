@@ -98,7 +98,7 @@ test('privacy settings point at a test nobody here controls', async () => {
 
   // It sits with the switch it tests, not off in its own section.
   const protection = privacy.slice(
-    privacy.indexOf("title='Block ads and trackers'"),
+    privacy.indexOf("title={t('Block ads and trackers')}"),
     privacy.indexOf("title='YouTube'")
   )
   assert.match(protection, /https:\/\/coveryourtracks\.eff\.org\//)

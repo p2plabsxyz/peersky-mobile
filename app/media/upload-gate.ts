@@ -10,6 +10,7 @@ import {
   MEDIA_UNSCANNED,
   screenUploadBatch
 } from './media-moderation.mjs'
+import { t } from '../i18n/i18n.mjs'
 import { ensurePermission } from '../permission-prompt'
 
 export type UploadAsset = {
@@ -89,10 +90,10 @@ async function pickImages (
   if (source === 'camera') {
     const allowed = await ensurePermission({
       request: () => ImagePicker.requestCameraPermissionsAsync(),
-      title: 'Camera access is off',
-      message: 'PeerSky needs the camera to take a photo. Turn it on in Settings.'
+      title: t('Camera access is off'),
+      message: t('PeerSky needs the camera to take a photo. Turn it on in Settings.')
     })
-    if (!allowed) throw new Error('PeerSky needs camera access to take a photo.')
+    if (!allowed) throw new Error(t('PeerSky needs camera access to take a photo.'))
   }
 
   const options: ImagePicker.ImagePickerOptions = {
@@ -211,7 +212,7 @@ export async function pickUploadFolder (): Promise<UploadAsset[]> {
 
   const found: File[] = []
   collectFiles(folder, 0, found)
-  if (found.length === 0) throw new Error('That folder has no files in it.')
+  if (found.length === 0) throw new Error(t('That folder has no files in it.'))
 
   const staging = new Directory(Paths.cache, STAGING_FOLDER)
   if (staging.exists) staging.delete()
@@ -305,7 +306,7 @@ async function pickFromFiles (multiple: boolean, type?: string | string[]): Prom
   return selection.assets.map((asset) => {
     const file = new File(asset.uri)
     const size = asset.size ?? file.size
-    if (!Number.isSafeInteger(size) || !size) throw new Error('Choose a non-empty file.')
+    if (!Number.isSafeInteger(size) || !size) throw new Error(t('Choose a non-empty file.'))
     return {
       uri: file.uri,
       name: asset.name,
@@ -325,7 +326,7 @@ async function pickFromPhotos (
   return selection.assets.map((asset) => {
     const file = new File(asset.uri)
     const size = asset.fileSize ?? file.size
-    if (!Number.isSafeInteger(size) || !size) throw new Error('Choose a non-empty file.')
+    if (!Number.isSafeInteger(size) || !size) throw new Error(t('Choose a non-empty file.'))
     return {
       uri: file.uri,
       // The camera roll does not always hand over a name, and a photo with no

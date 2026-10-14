@@ -148,7 +148,7 @@ test('the browser menu sends the page with its title, and says what happened', a
   const { readFile } = await import('node:fs/promises')
   const read = (file) => readFile(new URL(`../../${file}`, import.meta.url), 'utf8')
   const menu = await read('app/settings/BrowserOverflowMenu.tsx')
-  assert.match(menu, /label='Send to Your Devices'/)
+  assert.match(menu, /label=\{t\('Send to Your Devices'\)\}/)
   const app = await read('app/index.tsx')
   assert.match(app, /callRpc\(RPC_PEERCHAT_SEND_TO_DEVICES, \{ message \}\)/)
   assert.match(app, /message: 'Link another device to send pages to it',\s+actionLabel: 'Link Device'/)

@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native'
 import { ADDRESS_BAR_BUTTON_ICONS } from '../address-bar-button-icons'
 import { ADDRESS_BAR_BUTTONS, addressBarButtonTitle } from '../address-bar-button.mjs'
 import { BROWSER_PALETTES } from '../browser-appearance.mjs'
+import { t, tKey } from '../i18n/i18n.mjs'
 import type { AddressBarButton } from './useBrowserPreferences'
 import { SettingsSection, useSettingsDarkMode } from './SettingsUI'
 import ReloadIcon from '../../assets/icons/bootstrap/arrow-clockwise.svg'
@@ -29,13 +30,13 @@ export function AddressBarButtonSettings ({
 
   return (
     <View style={[styles.page, { backgroundColor: colors.page }]}>
-      <SettingsSection title='Address bar button'>
+      <SettingsSection title={t('Address bar button')}>
         <View style={styles.previewWrap}>
           <View
             accessible
             accessibilityLabel={selected === 'none'
-              ? 'The address bar, with reload only'
-              : `The address bar, with ${addressBarButtonTitle(selected)} after reload`}
+              ? t('The address bar, with reload only')
+              : t('The address bar, with {button} after reload', { button: addressBarButtonTitle(selected) })}
             style={[styles.preview, { borderColor: colors.outline }]}
           >
             <ShieldCheckIcon width={PREVIEW_ICON_SIZE} height={PREVIEW_ICON_SIZE} color={colors.muted} />
@@ -61,7 +62,7 @@ export function AddressBarButtonSettings ({
                 onPress={() => onSelect(button.id as AddressBarButton)}
               >
                 <Icon width={ICON_SIZE} height={ICON_SIZE} color={colors.text} />
-                <Text style={[styles.rowText, { color: colors.text }]}>{button.title}</Text>
+                <Text style={[styles.rowText, { color: colors.text }]}>{tKey(button.title)}</Text>
                 {isSelected && <CheckIcon width={20} height={20} color={colors.accent} />}
               </Pressable>
             </View>
@@ -69,7 +70,7 @@ export function AddressBarButtonSettings ({
         })}
       </SettingsSection>
       <Text style={[styles.note, { color: colors.muted }]}>
-        It shows on web and hyper:// pages, when the page has something for it to do. Everything here is also in the menu.
+        {t('It shows on web and hyper:// pages, when the page has something for it to do. Everything here is also in the menu.')}
       </Text>
     </View>
   )

@@ -3,6 +3,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import ArrowUpLeftIcon from '../../assets/icons/bootstrap/arrow-up-left.svg'
 import HistoryIcon from '../../assets/icons/bootstrap/clock-history.svg'
 import SearchIcon from '../../assets/icons/bootstrap/search.svg'
+import { t } from '../i18n/i18n.mjs'
 import type { BrowserHistoryItem } from './useBrowserHistory'
 
 type BrowserPalette = {
@@ -82,7 +83,7 @@ export function HistorySuggestions ({
         {items.map((item) => (
           <Pressable
             key={item.url}
-            accessibilityLabel={`Open history suggestion ${item.title}`}
+            accessibilityLabel={t('Open history suggestion {name}', { name: item.title })}
             accessibilityRole='link'
             style={({ pressed }) => [styles.row, pressed ? { backgroundColor: palette.button } : null]}
             onPress={() => onOpen(item.url)}
@@ -97,7 +98,7 @@ export function HistorySuggestions ({
         {onSearch && searches.map((search) => (
           <View key={`search:${search}`} style={styles.searchRow}>
             <Pressable
-              accessibilityLabel={`Search for ${search}`}
+              accessibilityLabel={t('Search for {search}', { search })}
               accessibilityRole='button'
               style={({ pressed }) => [styles.row, styles.searchRowMain, pressed ? { backgroundColor: palette.button } : null]}
               onPress={() => onSearch(search)}
@@ -107,7 +108,7 @@ export function HistorySuggestions ({
             </Pressable>
             {onFill && (
               <Pressable
-                accessibilityLabel={`Edit ${search} in the address bar`}
+                accessibilityLabel={t('Edit {search} in the address bar', { search })}
                 accessibilityRole='button'
                 hitSlop={6}
                 style={({ pressed }) => [styles.fill, pressed ? { backgroundColor: palette.button } : null]}
@@ -127,7 +128,7 @@ export function HistorySuggestions ({
       </ScrollView>
       {showEngines && (
         <View style={[styles.engines, { borderTopColor: `${palette.mutedText}33` }]}>
-          <Text style={[styles.enginesLabel, { color: palette.mutedText }]}>Search with</Text>
+          <Text style={[styles.enginesLabel, { color: palette.mutedText }]}>{t('Search with')}</Text>
           <ScrollView
             horizontal
             contentContainerStyle={styles.engineList}
@@ -137,7 +138,7 @@ export function HistorySuggestions ({
             {searchEngines.map((engine) => (
               <Pressable
                 key={engine.id}
-                accessibilityLabel={`Search for ${typed} with ${engine.title}`}
+                accessibilityLabel={t('Search for {search} with {engine}', { search: typed, engine: engine.title })}
                 accessibilityRole='button'
                 style={({ pressed }) => [
                   styles.engine,

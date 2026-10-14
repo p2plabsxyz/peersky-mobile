@@ -102,5 +102,5 @@ test('the reader view runs no scripts and opens links in the tab', async () => {
   assert.match(view, /<SafeAreaProvider initialMetrics=\{initialWindowMetrics\}>/)
   assert.match(view, /onOpenLink\(request\.url\)/)
   const menu = await readFile(new URL('../../app/settings/BrowserOverflowMenu.tsx', import.meta.url), 'utf8')
-  assert.match(menu, /label='Reader View'/)
+  assert.match(menu, /label=\{t\('Reader View'\)\}/)
 })

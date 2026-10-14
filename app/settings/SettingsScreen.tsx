@@ -22,12 +22,14 @@ import type { ImageSourcePropType } from 'react-native'
 import type { SvgProps } from 'react-native-svg'
 import { BROWSER_PALETTES } from '../browser-appearance.mjs'
 import { RPC_HYPER_LAN_STATUS } from '../../backend/rpc/commands.mjs'
+import { msg, t, tKey, tp } from '../i18n/i18n.mjs'
 import { LinkDeviceSettings } from './LinkDevice'
 import { Appearance } from './Appearance'
 import { ToolbarButtonSettings } from './ToolbarButton'
 import { Accessibility } from './Accessibility'
 import { DataClearing } from './DataClearing'
 import { General } from './General'
+import { LanguageSettings } from './Language'
 import { Permissions } from './Permissions'
 import { Privacy } from './Privacy'
 import { Licenses } from './Licenses'
@@ -57,6 +59,7 @@ import PaletteIcon from '../../assets/icons/bootstrap/palette.svg'
 import ShieldLockIcon from '../../assets/icons/bootstrap/shield-lock.svg'
 import LinkIcon from '../../assets/icons/bootstrap/link-45deg.svg'
 import SlidersIcon from '../../assets/icons/bootstrap/sliders.svg'
+import GlobeIcon from '../../assets/icons/bootstrap/globe.svg'
 import TrashIcon from '../../assets/icons/bootstrap/trash.svg'
 import UniversalAccessIcon from '../../assets/icons/bootstrap/universal-access-circle.svg'
 import DisplayIcon from '../../assets/icons/bootstrap/display.svg'
@@ -66,6 +69,7 @@ import { LAN_PERMISSION_HELP, LAN_PERMISSION_TITLE, offerPermissionSettings } fr
 export type SettingsPage =
   | 'main'
   | 'general'
+  | 'language'
   | 'accessibility'
   | 'appearance'
   | 'data-clearing'
@@ -167,6 +171,9 @@ type SettingsScreenProps = {
   deviceSyncRevision: number
   forceDarkWebsites: boolean
   initialPage?: SettingsPage
+  // 'system', or the code of the language picked in PeerSky.
+  language: string
+  onLanguageChange: (language: string) => void
   // Lets the back gesture and the Android button step out of a subpage the way
   // its own back arrow does, instead of closing settings from inside one.
   registerGoBack?: (handler: (() => boolean) | null) => void
@@ -238,64 +245,70 @@ const SETTINGS_PAGES: Array<{
 }> = [
   {
     id: 'general',
-    title: 'General',
-    description: 'Search and startup behavior',
+    title: msg('General'),
+    description: msg('Search and startup behavior'),
     icon: SlidersIcon
   },
   {
+    id: 'language',
+    title: msg('Language'),
+    description: msg('The language PeerSky shows in'),
+    icon: GlobeIcon
+  },
+  {
     id: 'accessibility',
-    title: 'Accessibility',
-    description: 'Text size and page zoom',
+    title: msg('Accessibility'),
+    description: msg('Text size and page zoom'),
     icon: UniversalAccessIcon
   },
   {
     id: 'appearance',
-    title: 'Appearance',
-    description: 'Theme and address bar layout',
+    title: msg('Appearance'),
+    description: msg('Theme and address bar layout'),
     icon: PaletteIcon
   },
   {
     id: 'data-clearing',
-    title: 'Data Clearing',
-    description: 'Tabs and browsing data',
+    title: msg('Data Clearing'),
+    description: msg('Tabs and browsing data'),
     icon: TrashIcon
   },
   {
     id: 'privacy',
-    title: 'Privacy',
-    description: 'Ad and tracker protection',
+    title: msg('Privacy'),
+    description: msg('Ad and tracker protection'),
     icon: ShieldLockIcon
   },
   {
     id: 'p2p-storage',
-    title: 'P2P Data',
-    description: 'App storage and downloaded cache',
+    title: msg('P2P Data'),
+    description: msg('App storage and downloaded cache'),
     icon: DatabaseIcon
   },
   {
     id: 'permissions',
-    title: 'Permissions',
-    description: 'Site access and device defaults',
+    title: msg('Permissions'),
+    description: msg('Site access and device defaults'),
     icon: ShieldLockIcon
   },
   {
     id: 'link-device',
-    title: 'Link Device',
-    description: 'Sync with another device, or save a backup',
+    title: msg('Link Device'),
+    description: msg('Sync with another device, or save a backup'),
     icon: LinkIcon
   },
   {
     id: 'lan-discovery',
     // Not "LAN Discovery Test": what it is for is using PeerSky with no
     // internet, and a screen called Test reads as something unfinished.
-    title: 'Offline',
-    description: 'Use PeerSky with no internet, over local Wi-Fi',
+    title: msg('Offline'),
+    description: msg('Use PeerSky with no internet, over local Wi-Fi'),
     icon: DisplayIcon
   },
   {
     id: 'about',
-    title: 'About',
-    description: 'Version, source code, and licenses',
+    title: msg('About'),
+    description: msg('Version, source code, and licenses'),
     icon: InfoIcon,
     image: require('../../assets/images/logo.png')
   }
@@ -329,7 +342,7 @@ export function SettingsScreen(props: SettingsScreenProps) {
   } else if (page === 'toolbar-button') {
     content = (
       <SettingsSubpage
-        title='Toolbar Button'
+        title={t('Toolbar Button')}
         onBack={() => changePage('appearance', -1)}
       >
         <ToolbarButtonSettings selected={props.toolbarButton} onSelect={props.onToolbarButtonChange} />
@@ -338,7 +351,7 @@ export function SettingsScreen(props: SettingsScreenProps) {
   } else if (page === 'address-bar-button') {
     content = (
       <SettingsSubpage
-        title='Address Bar Button'
+        title={t('Address Bar Button')}
         onBack={() => changePage('appearance', -1)}
       >
         <AddressBarButtonSettings selected={props.addressBarButton} onSelect={props.onAddressBarButtonChange} />
@@ -347,7 +360,7 @@ export function SettingsScreen(props: SettingsScreenProps) {
   } else if (page === 'site-data') {
     content = (
       <SettingsSubpage
-        title='Cookies and site data'
+        title={t('Cookies and site data')}
         onBack={() => changePage('data-clearing', -1)}
       >
         <SiteData getSiteDataHosts={props.getSiteDataHosts} />
@@ -358,7 +371,7 @@ export function SettingsScreen(props: SettingsScreenProps) {
     // page's ScrollView.
     content = (
       <SettingsSubpage
-        title='Open-source licenses'
+        title={t('Open-source licenses')}
         scrollable={false}
         onBack={() => changePage('about', -1)}
       >
@@ -372,6 +385,9 @@ export function SettingsScreen(props: SettingsScreenProps) {
         onBack={() => changePage('main', -1)}
       >
         {page === 'general' && <General {...props} />}
+        {page === 'language' && (
+          <LanguageSettings language={props.language} onLanguageChange={props.onLanguageChange} />
+        )}
         {page === 'accessibility' && <Accessibility {...props} />}
         {page === 'appearance' && (
           <Appearance
@@ -492,7 +508,7 @@ function SettingsHome({
     <View style={[styles.screen, isDark ? darkStyles.screen : null]}>
       <View style={[styles.homeHeader, isDark ? darkStyles.header : null]}>
         <Pressable
-          accessibilityLabel='Close Settings'
+          accessibilityLabel={t('Close Settings')}
           accessibilityRole='button'
           hitSlop={10}
           style={({ pressed }) => [styles.backButton, pressed ? styles.rowPressed : null]}
@@ -504,7 +520,7 @@ function SettingsHome({
             color={isDark ? BROWSER_PALETTES.dark.text : '#1f2a44'}
           />
         </Pressable>
-        <Text style={[styles.title, isDark ? darkStyles.primaryText : null]}>Settings</Text>
+        <Text style={[styles.title, isDark ? darkStyles.primaryText : null]}>{t('Settings')}</Text>
       </View>
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
@@ -512,11 +528,13 @@ function SettingsHome({
           {SETTINGS_PAGES.map((page, index) => {
             const Icon = page.icon
             const image = page.image ?? null
+            const title = tKey(page.title)
+            const description = tKey(page.description)
 
             return (
               <Pressable
                 key={page.id}
-                accessibilityLabel={`${page.title}. ${page.description}`}
+                accessibilityLabel={t('{title}. {description}', { title, description })}
                 accessibilityRole='button'
                 style={({ pressed }) => [
                   styles.menuRow,
@@ -541,8 +559,8 @@ function SettingsHome({
                       )}
                 </View>
                 <SettingCopy
-                  title={page.title}
-                  description={page.description}
+                  title={title}
+                  description={description}
                   prominent
                 />
                 <ChevronRightIcon
@@ -576,7 +594,7 @@ function SettingsSubpage({
     <View style={[styles.screen, isDark ? darkStyles.screen : null]}>
       <View style={[styles.subpageHeader, isDark ? darkStyles.header : null]}>
         <Pressable
-          accessibilityLabel='Back to Settings'
+          accessibilityLabel={t('Back to Settings')}
           accessibilityRole='button'
           hitSlop={10}
           style={({ pressed }) => [styles.backButton, pressed ? styles.rowPressed : null]}
@@ -633,7 +651,7 @@ function LANDiscoveryTest({
         5000
       )
       if (!response.ok || !response.lan) {
-        throw new Error(response.error || 'Unable to read LAN discovery status')
+        throw new Error(response.error || t('Unable to read LAN discovery status'))
       }
 
       setLANStatus(response.lan)
@@ -653,6 +671,16 @@ function LANDiscoveryTest({
   }, [refreshStatus])
 
   const peers = lanStatus?.peers || []
+  // Each count is its own part, so it can take its own form. The English
+  // has always read "topics" and "connections", whatever the count.
+  const lanAddress = `${lanStatus?.host || t('unknown')}:${lanStatus?.port || t('unknown')}`
+  const lanSummary = lanStatus?.available
+    ? [
+        t('Listening at {address}', { address: lanAddress }),
+        tp({ one: '{count} joined topics', other: '{count} joined topics' }, lanStatus.joinedTopics),
+        tp({ one: '{count} active connections', other: '{count} active connections' }, lanStatus.activeConnections)
+      ].join(' · ')
+    : lanStatus?.error || t('Waiting for LAN discovery to start')
 
   return (
     <View style={[styles.pageContent, isDark ? darkStyles.page : null]}>
@@ -661,14 +689,12 @@ function LANDiscoveryTest({
           <Text style={styles.errorText}>{error}</Text>
         </View>
       )}
-      <SettingsSection title='Local LAN discovery'>
+      <SettingsSection title={t('Local LAN discovery')}>
         <View style={styles.lanSummary}>
           <View style={styles.lanTitleRow}>
             <SettingCopy
-              title={lanStatus?.available ? 'mDNS is active' : 'mDNS is unavailable'}
-              description={lanStatus?.available
-                ? `Listening at ${lanStatus.host || 'unknown'}:${lanStatus.port || 'unknown'} · ${lanStatus.joinedTopics} joined topics · ${lanStatus.activeConnections} active connections`
-                : lanStatus?.error || 'Waiting for LAN discovery to start'}
+              title={lanStatus?.available ? t('mDNS is active') : t('mDNS is unavailable')}
+              description={lanSummary}
             />
             {isRefreshing && <ActivityIndicator size='small' />}
           </View>
@@ -680,7 +706,7 @@ function LANDiscoveryTest({
           {lanStatus && !lanStatus.available && (
             <View style={styles.lanHelp}>
               <Text style={[styles.lanHelpText, isDark ? darkStyles.secondaryText : null]}>
-                {LAN_PERMISSION_HELP}
+                {tKey(LAN_PERMISSION_HELP)}
               </Text>
               <Pressable
                 accessibilityRole='button'
@@ -688,20 +714,20 @@ function LANDiscoveryTest({
                   styles.secondaryButton,
                   pressed ? styles.rowPressed : null
                 ]}
-                onPress={() => offerPermissionSettings(LAN_PERMISSION_TITLE, LAN_PERMISSION_HELP)}
+                onPress={() => offerPermissionSettings(tKey(LAN_PERMISSION_TITLE), tKey(LAN_PERMISSION_HELP))}
               >
                 <Text style={[
                   styles.secondaryButtonText,
                   isDark ? darkStyles.primaryText : null
                 ]}>
-                  Open settings
+                  {t('Open settings')}
                 </Text>
               </Pressable>
             </View>
           )}
           {lanStatus?.publicKey && (
             <Text style={[styles.keyText, isDark ? darkStyles.primaryText : null]}>
-              Local peer: {lanStatus.publicKey}
+              {t('Local peer: {key}', { key: lanStatus.publicKey })}
             </Text>
           )}
           <Pressable
@@ -716,20 +742,20 @@ function LANDiscoveryTest({
               styles.secondaryButtonText,
               isDark ? darkStyles.primaryText : null
             ]}>
-              Refresh peers
+              {t('Refresh peers')}
             </Text>
           </Pressable>
         </View>
       </SettingsSection>
 
-      <SettingsSection title={`Discoverable peers (${peers.length})`}>
+      <SettingsSection title={t('Discoverable peers ({count})', { count: peers.length })}>
         {peers.length === 0 ? (
           <View style={styles.lanEmptyState}>
             <Text style={[styles.placeholderTitle, isDark ? darkStyles.primaryText : null]}>
-              No peers discovered yet
+              {t('No peers discovered yet')}
             </Text>
             <Text style={[styles.helperText, isDark ? darkStyles.secondaryText : null]}>
-              Open PeerSky on another device connected to the same Wi-Fi network. Neither one needs the internet: you can chat and share files with both of them offline.
+              {t('Open PeerSky on another device connected to the same Wi-Fi network. Neither one needs the internet: you can chat and share files with both of them offline.')}
             </Text>
           </View>
         ) : peers.map((peer, index) => (
@@ -743,17 +769,21 @@ function LANDiscoveryTest({
           >
             <View style={styles.lanTitleRow}>
               <Text style={[styles.lanPeerTitle, isDark ? darkStyles.primaryText : null]}>
-                {peer.host}:{peer.port || 'unknown'}
+                {peer.host}:{peer.port || t('unknown')}
               </Text>
               <Text style={peer.connected || peer.reachable ? styles.lanReachable : styles.lanDiscovered}>
-                {peer.connected ? 'Connected' : peer.reachable ? 'Reachable' : 'Discovered'}
+                {peer.connected ? t('Connected') : peer.reachable ? t('Reachable') : t('Discovered')}
               </Text>
             </View>
             <Text style={[styles.keyText, isDark ? darkStyles.primaryText : null]}>
               {peer.publicKey}
             </Text>
             <Text style={[styles.helperText, isDark ? darkStyles.secondaryText : null]}>
-              Shared topics: {peer.sharedTopics} | Connections: {peer.activeConnections} | Last seen: {new Date(peer.lastSeen).toLocaleTimeString()}
+              {t('Shared topics: {topics} | Connections: {connections} | Last seen: {time}', {
+                topics: peer.sharedTopics,
+                connections: peer.activeConnections,
+                time: new Date(peer.lastSeen).toLocaleTimeString()
+              })}
             </Text>
           </View>
         ))}
@@ -770,7 +800,7 @@ async function withTimeout<T> (promise: Promise<T>, timeoutMs: number) {
     return await Promise.race([
       promise,
       new Promise<T>((_resolve, reject) => {
-        timer = setTimeout(() => reject(new Error('LAN status request timed out')), timeoutMs)
+        timer = setTimeout(() => reject(new Error(t('LAN status request timed out'))), timeoutMs)
       })
     ])
   } finally {
@@ -800,11 +830,11 @@ function AboutSettings({
         <View style={styles.aboutRow}>
           <SettingCopy
             title='PeerSky'
-            description={`Version ${Constants.expoConfig?.version || 'unknown'}`}
+            description={t('Version {version}', { version: Constants.expoConfig?.version || t('unknown') })}
           />
         </View>
         <Pressable accessibilityRole='link' style={styles.linkRow} onPress={() => onOpenUrl(REPOSITORY_URL)}>
-          <Text style={[styles.linkText, isDark ? darkStyles.primaryText : null]}>Source code</Text>
+          <Text style={[styles.linkText, isDark ? darkStyles.primaryText : null]}>{t('Source code')}</Text>
           <ChevronRightIcon
             width={16}
             height={16}
@@ -812,7 +842,7 @@ function AboutSettings({
           />
         </Pressable>
         <Pressable accessibilityRole='button' style={styles.linkRow} onPress={onOpenLicenses}>
-          <Text style={[styles.linkText, isDark ? darkStyles.primaryText : null]}>Open-source licenses</Text>
+          <Text style={[styles.linkText, isDark ? darkStyles.primaryText : null]}>{t('Open-source licenses')}</Text>
           <ChevronRightIcon
             width={16}
             height={16}
@@ -820,7 +850,7 @@ function AboutSettings({
           />
         </Pressable>
         <Pressable accessibilityRole='link' style={styles.linkRow} onPress={() => onOpenUrl(feedbackMailUrl)}>
-          <Text style={[styles.linkText, isDark ? darkStyles.primaryText : null]}>Send feedback</Text>
+          <Text style={[styles.linkText, isDark ? darkStyles.primaryText : null]}>{t('Send feedback')}</Text>
           <ChevronRightIcon
             width={16}
             height={16}
@@ -833,7 +863,8 @@ function AboutSettings({
 }
 
 function getSettingsPageTitle(page: Exclude<SettingsPage, 'main'>) {
-  return SETTINGS_PAGES.find((entry) => entry.id === page)?.title || 'Settings'
+  const entry = SETTINGS_PAGES.find((item) => item.id === page)
+  return entry ? tKey(entry.title) : t('Settings')
 }
 
 function useReducedMotion() {

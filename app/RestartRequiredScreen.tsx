@@ -2,6 +2,7 @@ import { Image, Platform, StyleSheet, Text, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 
 import { BROWSER_PALETTES } from './browser-appearance.mjs'
+import { t } from './i18n/i18n.mjs'
 
 const PEERSKY_ICON = require('../assets/images/logo.png')
 
@@ -12,8 +13,8 @@ const PEERSKY_ICON = require('../assets/images/logo.png')
 export function RestartRequiredScreen ({ isDark }: { isDark: boolean }) {
   const palette = isDark ? BROWSER_PALETTES.dark : BROWSER_PALETTES.light
   const how = Platform.OS === 'ios'
-    ? 'Swipe up from the bottom and hold to see your apps, swipe PeerSky away, then open it again.'
-    : 'Close PeerSky from your recent apps, then open it again.'
+    ? t('Swipe up from the bottom and hold to see your apps, swipe PeerSky away, then open it again.')
+    : t('Close PeerSky from your recent apps, then open it again.')
 
   return (
     <SafeAreaView
@@ -23,10 +24,10 @@ export function RestartRequiredScreen ({ isDark }: { isDark: boolean }) {
       <View style={styles.content}>
         <Image source={PEERSKY_ICON} style={styles.logo} />
         <Text accessibilityRole='header' style={[styles.title, { color: palette.text }]}>
-          Close PeerSky to finish
+          {t('Close PeerSky to finish')}
         </Text>
         <Text style={[styles.body, { color: palette.mutedText }]}>
-          Everything is in place. PeerSky needs a fresh start to pick it up.
+          {t('Everything is in place. PeerSky needs a fresh start to pick it up.')}
         </Text>
         <Text style={[styles.body, { color: palette.mutedText }]}>{how}</Text>
       </View>

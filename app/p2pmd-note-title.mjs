@@ -5,6 +5,8 @@
 //
 // Mirror of note-title.js in p2pmd. Keep them in step.
 
+import { msg, t, tKey } from './i18n/i18n.mjs'
+
 // The same rule the editor uses to decide where one slide ends and the next
 // begins, so a deck is called a deck for exactly the reason it renders as one.
 const SLIDE_BREAK = /(?:\r?\n\r?\n---\r?\n\r?\n|^---\r?\n\r?\n|\r?\n\r?\n---$|^<!-- slide -->$)/m
@@ -12,10 +14,10 @@ const IEEE_MARKER = /^\s*<!--\s*ieee\s*-->/i
 const HEADING = /^[ \t]{0,3}#{1,6}[ \t]+(.+?)[ \t]*#*[ \t]*$/m
 
 export const P2PMD_NOTE_KIND_LABELS = {
-  note: 'Note',
-  paper: 'Research paper',
-  slides: 'Slides',
-  technical: 'Technical document'
+  note: msg('Note'),
+  paper: msg('Research paper'),
+  slides: msg('Slides'),
+  technical: msg('Technical document')
 }
 
 // Long enough to tell two notes apart, short enough for one line on a phone.
@@ -59,15 +61,16 @@ export function p2pmdNoteKind (content, { slides = false } = {}) {
 }
 
 /**
- * Returns { kind, title, label }. The label is what goes in a list.
+ * Returns { kind, title, label }. The label is what goes in a list, in the
+ * language shown when it was made: the list keeps it as it is.
  */
 export function describeP2pmdNote (content, hint) {
   const kind = p2pmdNoteKind(content, hint)
   const title = p2pmdNoteTitle(content)
-  const kindLabel = P2PMD_NOTE_KIND_LABELS[kind]
+  const kindLabel = tKey(P2PMD_NOTE_KIND_LABELS[kind])
   return {
     kind,
     title,
-    label: title ? `${kindLabel} - ${title}` : kindLabel
+    label: title ? t('{kind} - {title}', { kind: kindLabel, title }) : kindLabel
   }
 }

@@ -120,6 +120,33 @@
         }
       ]
     },
+    "locales": {
+      "en": "./app/i18n/native/en.json",
+      "es": "./app/i18n/native/es.json",
+      "pt-BR": "./app/i18n/native/pt-BR.json",
+      "fr": "./app/i18n/native/fr.json",
+      "de": "./app/i18n/native/de.json",
+      "it": "./app/i18n/native/it.json",
+      "nl": "./app/i18n/native/nl.json",
+      "pl": "./app/i18n/native/pl.json",
+      "ru": "./app/i18n/native/ru.json",
+      "uk": "./app/i18n/native/uk.json",
+      "tr": "./app/i18n/native/tr.json",
+      "ar": "./app/i18n/native/ar.json",
+      "fa": "./app/i18n/native/fa.json",
+      "ur": "./app/i18n/native/ur.json",
+      "hi": "./app/i18n/native/hi.json",
+      "mr": "./app/i18n/native/mr.json",
+      "sa": "./app/i18n/native/sa.json",
+      "bn": "./app/i18n/native/bn.json",
+      "id": "./app/i18n/native/id.json",
+      "vi": "./app/i18n/native/vi.json",
+      "th": "./app/i18n/native/th.json",
+      "ja": "./app/i18n/native/ja.json",
+      "ko": "./app/i18n/native/ko.json",
+      "zh-Hans": "./app/i18n/native/zh-Hans.json",
+      "zh-Hant": "./app/i18n/native/zh-Hant.json"
+    },
     "plugins": [
       [
         "expo-router"
@@ -186,7 +213,8 @@
         }
       ],
       "expo-sharing",
-      "expo-video"
+      "expo-video",
+      "./plugins/with-app-languages"
     ],
     "extra": {
       "router": {},

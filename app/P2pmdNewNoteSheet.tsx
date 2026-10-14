@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native'
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { BROWSER_PALETTES } from './browser-appearance.mjs'
+import { msg, t, tKey } from './i18n/i18n.mjs'
 import { MODAL_ORIENTATIONS } from './modal-orientations'
 import GlobeIcon from '../assets/icons/bootstrap/globe.svg'
 import ShieldLockIcon from '../assets/icons/bootstrap/shield-lock.svg'
@@ -16,14 +17,14 @@ type P2pmdNewNoteSheetProps = {
 const CHOICES = [
   {
     isPrivate: true,
-    title: 'Private',
-    detail: 'Only people you send the key to can open it. Your other devices can host it too.',
+    title: msg('Private'),
+    detail: msg('Only people you send the key to can open it. Your other devices can host it too.'),
     Icon: ShieldLockIcon
   },
   {
     isPrivate: false,
-    title: 'Public',
-    detail: 'Anyone with the key can open it, and the computers that help peers find each other see the key. Only this phone can host it.',
+    title: msg('Public'),
+    detail: msg('Anyone with the key can open it, and the computers that help peers find each other see the key. Only this phone can host it.'),
     Icon: GlobeIcon
   }
 ]
@@ -49,9 +50,9 @@ export function P2pmdNewNoteSheet ({ visible, isDark, onCreate, onClose }: P2pmd
       onRequestClose={onClose}
     >
       <SafeAreaView style={styles.overlay} edges={['top', 'left', 'right']}>
-        <Pressable accessibilityLabel='Close' style={styles.backdrop} onPress={onClose} />
+        <Pressable accessibilityLabel={t('Close')} style={styles.backdrop} onPress={onClose} />
         <View style={[styles.sheet, { backgroundColor: palette.surface, paddingBottom: 24 + insets.bottom }]}>
-          <Text style={[styles.title, { color: palette.text }]}>New note</Text>
+          <Text style={[styles.title, { color: palette.text }]}>{t('New note')}</Text>
           <View accessibilityRole='radiogroup' style={styles.choices}>
             {CHOICES.map(({ isPrivate: value, title, detail, Icon }) => {
               const selected = value === isPrivate
@@ -71,8 +72,8 @@ export function P2pmdNewNoteSheet ({ visible, isDark, onCreate, onClose }: P2pmd
                 >
                   <Icon width={20} height={20} color={selected ? palette.accent : palette.mutedText} />
                   <View style={styles.choiceCopy}>
-                    <Text style={[styles.choiceTitle, { color: palette.text }]}>{title}</Text>
-                    <Text style={[styles.choiceDetail, { color: palette.mutedText }]}>{detail}</Text>
+                    <Text style={[styles.choiceTitle, { color: palette.text }]}>{tKey(title)}</Text>
+                    <Text style={[styles.choiceDetail, { color: palette.mutedText }]}>{tKey(detail)}</Text>
                   </View>
                   <View style={[styles.radio, { borderColor: color }]}>
                     {selected ? <View style={[styles.radioDot, { backgroundColor: palette.accent }]} /> : null}
@@ -86,10 +87,10 @@ export function P2pmdNewNoteSheet ({ visible, isDark, onCreate, onClose }: P2pmd
             onPress={() => onCreate(isPrivate)}
             style={({ pressed }) => [styles.primary, pressed ? styles.pressed : null]}
           >
-            <Text style={styles.primaryText}>Create note</Text>
+            <Text style={styles.primaryText}>{t('Create note')}</Text>
           </Pressable>
           <Pressable accessibilityRole='button' hitSlop={8} onPress={onClose} style={styles.cancel}>
-            <Text style={[styles.cancelText, { color: palette.mutedText }]}>Cancel</Text>
+            <Text style={[styles.cancelText, { color: palette.mutedText }]}>{t('Cancel')}</Text>
           </Pressable>
         </View>
       </SafeAreaView>
