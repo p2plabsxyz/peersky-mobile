@@ -1,18 +1,18 @@
 {
   "ios": {
-    "NSCameraUsageDescription": "PeerSky uses the camera to scan QR codes when you link a device or open a shared room or drive, and when a website you visit requests it and you allow access.",
-    "NSLocalNetworkUsageDescription": "PeerSky uses your local network to discover and connect to nearby PeerSky devices.",
-    "NSLocationWhenInUseUsageDescription": "PeerSky uses your location only when a website you visit requests it and you allow access.",
-    "NSMicrophoneUsageDescription": "PeerSky uses the microphone only when a website you visit requests it and you allow access.",
-    "NSPhotoLibraryAddUsageDescription": "PeerSky saves a picture or video to your photo library when you choose Save to Photos.",
-    "ShortcutPasteAndGo": "Paste and Go",
-    "ShortcutNewTab": "New Tab",
-    "ShortcutNewIncognitoTab": "New Incognito Tab",
-    "ShortcutAppIcon": "App Icon"
+    "NSCameraUsageDescription": "PeerSky 會在你連結裝置或開啟分享的聊天室或網路硬碟時使用相機掃描 QR 碼，也會在你造訪的網站要求且你允許存取時使用相機。",
+    "NSLocalNetworkUsageDescription": "PeerSky 會使用你的區域網路來探索並連線到鄰近的 PeerSky 裝置。",
+    "NSLocationWhenInUseUsageDescription": "PeerSky 只會在你造訪的網站要求且你允許存取時使用你的位置。",
+    "NSMicrophoneUsageDescription": "PeerSky 只會在你造訪的網站要求且你允許存取時使用麥克風。",
+    "NSPhotoLibraryAddUsageDescription": "當你選擇「儲存到照片」時，PeerSky 會將圖片或影片儲存到你的照片圖庫。",
+    "ShortcutPasteAndGo": "貼上並前往",
+    "ShortcutNewTab": "新分頁",
+    "ShortcutNewIncognitoTab": "新無痕分頁",
+    "ShortcutAppIcon": "App 圖示"
   },
   "android": {
-    "peerchat_background_text": "Staying connected so messages reach you",
-    "peerchat_background_channel": "PeerChat background connection",
-    "peerchat_background_channel_description": "Keeps PeerChat connected while PeerSky is in the background"
+    "peerchat_background_text": "正在保持連線，以便接收訊息",
+    "peerchat_background_channel": "PeerChat 背景連線",
+    "peerchat_background_channel_description": "PeerSky 在背景執行時保持 PeerChat 連線"
   }
 }

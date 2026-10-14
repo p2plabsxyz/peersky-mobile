@@ -1,18 +1,18 @@
 {
   "ios": {
-    "NSCameraUsageDescription": "PeerSky uses the camera to scan QR codes when you link a device or open a shared room or drive, and when a website you visit requests it and you allow access.",
-    "NSLocalNetworkUsageDescription": "PeerSky uses your local network to discover and connect to nearby PeerSky devices.",
-    "NSLocationWhenInUseUsageDescription": "PeerSky uses your location only when a website you visit requests it and you allow access.",
-    "NSMicrophoneUsageDescription": "PeerSky uses the microphone only when a website you visit requests it and you allow access.",
-    "NSPhotoLibraryAddUsageDescription": "PeerSky saves a picture or video to your photo library when you choose Save to Photos.",
-    "ShortcutPasteAndGo": "Paste and Go",
-    "ShortcutNewTab": "New Tab",
-    "ShortcutNewIncognitoTab": "New Incognito Tab",
-    "ShortcutAppIcon": "App Icon"
+    "NSCameraUsageDescription": "PeerSky gebruikt de camera om QR-codes te scannen als je een apparaat koppelt of een gedeelde chatroom of drive opent, en als een website die je bezoekt erom vraagt en jij toegang geeft.",
+    "NSLocalNetworkUsageDescription": "PeerSky gebruikt je lokale netwerk om PeerSky-apparaten in de buurt te vinden en er verbinding mee te maken.",
+    "NSLocationWhenInUseUsageDescription": "PeerSky gebruikt je locatie alleen als een website die je bezoekt erom vraagt en jij toegang geeft.",
+    "NSMicrophoneUsageDescription": "PeerSky gebruikt de microfoon alleen als een website die je bezoekt erom vraagt en jij toegang geeft.",
+    "NSPhotoLibraryAddUsageDescription": "PeerSky bewaart een foto of video in je fotobibliotheek als je ‘Opslaan in Foto's’ kiest.",
+    "ShortcutPasteAndGo": "Plakken en openen",
+    "ShortcutNewTab": "Nieuw tabblad",
+    "ShortcutNewIncognitoTab": "Nieuw incognitotabblad",
+    "ShortcutAppIcon": "App-icoon"
   },
   "android": {
-    "peerchat_background_text": "Staying connected so messages reach you",
-    "peerchat_background_channel": "PeerChat background connection",
-    "peerchat_background_channel_description": "Keeps PeerChat connected while PeerSky is in the background"
+    "peerchat_background_text": "Verbonden blijven zodat berichten je bereiken",
+    "peerchat_background_channel": "PeerChat-achtergrondverbinding",
+    "peerchat_background_channel_description": "Houdt PeerChat verbonden terwijl PeerSky op de achtergrond draait"
   }
 }

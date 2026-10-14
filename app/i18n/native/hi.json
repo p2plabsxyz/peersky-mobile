@@ -11,8 +11,8 @@
     "ShortcutAppIcon": "ऐप आइकन"
   },
   "android": {
-    "peerchat_background_text": "Staying connected so messages reach you",
-    "peerchat_background_channel": "PeerChat background connection",
-    "peerchat_background_channel_description": "Keeps PeerChat connected while PeerSky is in the background"
+    "peerchat_background_text": "कनेक्ट रहकर आप तक मैसेज पहुँचा रहा है",
+    "peerchat_background_channel": "PeerChat बैकग्राउंड कनेक्शन",
+    "peerchat_background_channel_description": "PeerSky के बैकग्राउंड में रहने पर PeerChat को कनेक्ट रखता है"
   }
 }

@@ -1,18 +1,18 @@
 {
   "ios": {
-    "NSCameraUsageDescription": "PeerSky uses the camera to scan QR codes when you link a device or open a shared room or drive, and when a website you visit requests it and you allow access.",
-    "NSLocalNetworkUsageDescription": "PeerSky uses your local network to discover and connect to nearby PeerSky devices.",
-    "NSLocationWhenInUseUsageDescription": "PeerSky uses your location only when a website you visit requests it and you allow access.",
-    "NSMicrophoneUsageDescription": "PeerSky uses the microphone only when a website you visit requests it and you allow access.",
-    "NSPhotoLibraryAddUsageDescription": "PeerSky saves a picture or video to your photo library when you choose Save to Photos.",
-    "ShortcutPasteAndGo": "Paste and Go",
-    "ShortcutNewTab": "New Tab",
-    "ShortcutNewIncognitoTab": "New Incognito Tab",
-    "ShortcutAppIcon": "App Icon"
+    "NSCameraUsageDescription": "يستخدم PeerSky الكاميرا لمسح رموز QR عندما تربط جهازًا أو تفتح غرفة أو مساحة تخزين مشتركة، وعندما يطلبها موقع ويب تزوره وتسمح بذلك.",
+    "NSLocalNetworkUsageDescription": "يستخدم PeerSky شبكتك المحلية لاكتشاف أجهزة PeerSky القريبة والاتصال بها.",
+    "NSLocationWhenInUseUsageDescription": "يستخدم PeerSky موقعك الجغرافي فقط عندما يطلبه موقع ويب تزوره وتسمح بذلك.",
+    "NSMicrophoneUsageDescription": "يستخدم PeerSky الميكروفون فقط عندما يطلبه موقع ويب تزوره وتسمح بذلك.",
+    "NSPhotoLibraryAddUsageDescription": "يحفظ PeerSky صورة أو فيديو في مكتبة الصور عندما تختار «حفظ في الصور».",
+    "ShortcutPasteAndGo": "لصق وانتقال",
+    "ShortcutNewTab": "علامة تبويب جديدة",
+    "ShortcutNewIncognitoTab": "علامة تبويب متخفية جديدة",
+    "ShortcutAppIcon": "أيقونة التطبيق"
   },
   "android": {
-    "peerchat_background_text": "Staying connected so messages reach you",
-    "peerchat_background_channel": "PeerChat background connection",
-    "peerchat_background_channel_description": "Keeps PeerChat connected while PeerSky is in the background"
+    "peerchat_background_text": "جارٍ الحفاظ على الاتصال لتصلك الرسائل",
+    "peerchat_background_channel": "اتصال PeerChat في الخلفية",
+    "peerchat_background_channel_description": "يُبقي PeerChat متصلًا أثناء عمل PeerSky في الخلفية"
   }
 }
