@@ -63,6 +63,7 @@ import {
 import { type LinkDeviceProgress, subscribeLinkDeviceProgress } from './link-device-progress'
 import { emitP2pmdNotesShared } from './p2pmd-shared-notes'
 import { clearChatFileCopies } from '../peerchat/media-save'
+import { bumpSavedHyperdriveViewerEpoch } from './useBrowserPreferences'
 import ChevronRightIcon from '../../assets/icons/bootstrap/chevron-right.svg'
 import DisplayIcon from '../../assets/icons/bootstrap/display.svg'
 import DownloadIcon from '../../assets/icons/bootstrap/download.svg'
@@ -192,6 +193,10 @@ export function LinkDeviceSettings ({ deviceSyncRevision = 0, onCallRpc, onResta
     try {
       const response = await call(command, data)
       if (!response.ok) throw new Error(response.error || t('It did not go through'))
+      // A restore brings its own preferences, with the Hyperdrive viewer's
+      // epoch from wherever they were saved. It moves on from there, so the
+      // viewer empties what it kept for the data that was replaced.
+      if (command === RPC_IDENTITY_CONFIRM_RESTORE) bumpSavedHyperdriveViewerEpoch()
       if (Platform.OS === 'android') BackHandler.exitApp()
     } catch (replaceError) {
       Alert.alert(

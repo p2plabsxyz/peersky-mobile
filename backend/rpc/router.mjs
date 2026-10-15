@@ -71,7 +71,9 @@ import {
   RPC_PEERCHAT_ATTACHMENT_OPEN,
   RPC_PEERCHAT_ATTACHMENT_FORWARD,
   RPC_PEERCHAT_SEARCH,
-  RPC_PEERTUNES_START
+  RPC_PEERTUNES_START,
+  RPC_HYPERDRIVE_VIEWER_DOWNLOAD,
+  RPC_HYPERDRIVE_VIEWER_START
 } from './commands.mjs'
 import {
   getDefaultIdentityStoragePath,
@@ -135,6 +137,7 @@ import { takeP2pmdNotes } from '../p2pmd/notes-transfer.mjs'
 import { inlineHyperPreviewImages, renderP2pmdPreview } from '../p2pmd/preview.mjs'
 import { getP2pmdEditorPage } from '../p2pmd/server.mjs'
 import { startPeerTunesServer } from '../peertunes/server.mjs'
+import { createHyperdriveViewerDownload, startHyperdriveViewerServer } from '../hyperdrive-viewer/server.mjs'
 import { parseJsonMessage, replyJson } from './messages.mjs'
 import { deletePeerChatProfile, getPeerChatService, setPeerChatIdle } from '../peerchat/runtime.mjs'
 import { forwardPeerChatAttachment, openPeerChatAttachment, uploadPeerChatAttachment } from '../peerchat/attachments.mjs'
@@ -669,6 +672,16 @@ export async function routeRpcRequest (req) {
 
     if (req.command === RPC_PEERTUNES_START) {
       replyJson(req, await startPeerTunesServer())
+      return
+    }
+
+    if (req.command === RPC_HYPERDRIVE_VIEWER_START) {
+      replyJson(req, await startHyperdriveViewerServer())
+      return
+    }
+
+    if (req.command === RPC_HYPERDRIVE_VIEWER_DOWNLOAD) {
+      replyJson(req, await createHyperdriveViewerDownload(parseJsonMessage(req.data)))
       return
     }
 

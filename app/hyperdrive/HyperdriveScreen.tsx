@@ -18,6 +18,7 @@ import {
 import { initialWindowMetrics, SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { CameraView, useCameraPermissions } from 'expo-camera'
 import { pickUploadFolder, pickUploads, type UploadAsset } from '../media/upload-gate'
+import { discardHeicPreview, makeHeicPreview } from './heic-preview'
 import ArrowLeftIcon from '../../assets/icons/bootstrap/arrow-left.svg'
 import ChevronRightIcon from '../../assets/icons/bootstrap/chevron-right.svg'
 import CopyIcon from '../../assets/icons/bootstrap/copy.svg'
@@ -375,12 +376,21 @@ export function HyperdriveScreen ({ deviceSyncRevision = 0, offlineNetworkAllowe
         // A folder can carry fifty files. Without this the spinner is
         // indistinguishable from the app having hung.
         if (assets.length > 1) setNotice(t('Uploading {current} of {total}: {name}', { current: index + 1, total: assets.length, name: asset.name }))
-        const response = await onCallRpc(RPC_HYPER_LIBRARY_UPLOAD, {
-          name: asset.name,
-          fileUri: asset.uri,
-          byteLength: asset.size,
-          visibility
-        })
+        // An iPhone photo gets a JPEG copy in the drive for the viewer, which
+        // cannot draw HEIC everywhere. If the copy fails the photo still goes.
+        const preview = await makeHeicPreview(asset)
+        let response
+        try {
+          response = await onCallRpc(RPC_HYPER_LIBRARY_UPLOAD, {
+            name: asset.name,
+            fileUri: asset.uri,
+            byteLength: asset.size,
+            visibility,
+            ...(preview ? { previewUri: preview.uri, previewByteLength: preview.size } : {})
+          })
+        } finally {
+          discardHeicPreview(preview)
+        }
         if (!response.ok || !response.item) throw new Error(response.error || t('Upload failed.'))
         lastItem = { ...response.item, localUri: asset.uri }
         remember(lastItem, 'uploaded')

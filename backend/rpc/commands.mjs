@@ -99,6 +99,12 @@ export const RPC_IDENTITY_SEND_STATUS = 78
 export const RPC_IDENTITY_REMOVE = 68
 
 export const RPC_PEERTUNES_START = 70
+// Starts the Hyperdrive viewer's loopback server: the Files, Photos and Videos
+// views a hyper:// folder opens in (backend/hyperdrive-viewer/server.mjs).
+export const RPC_HYPERDRIVE_VIEWER_START = 79
+// { url, name }: the address to download one file of a drive through that
+// server, signed for that file alone.
+export const RPC_HYPERDRIVE_VIEWER_DOWNLOAD = 80
 
 // Backend to app pushes. Separate range so they never collide with the
 // app-initiated commands above.

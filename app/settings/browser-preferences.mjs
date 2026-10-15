@@ -16,6 +16,9 @@ export const DEFAULT_BROWSER_PREFERENCES = {
   enforceManualPageZoom: false,
   externalLinkBehavior: 'ask',
   forceDarkWebsites: false,
+  // The Hyperdrive viewer empties what it keeps whenever this changes: on
+  // Burn, Clear all P2P data, Remove my data and a restore. 0 is none yet.
+  hyperdriveViewerEpoch: 0,
   // 'system' follows the phone's language; otherwise a code from LANGUAGES.
   language: SYSTEM_LANGUAGE,
   publishingSites: {},
@@ -76,6 +79,9 @@ export function parseBrowserPreferences (serialized) {
     forceDarkWebsites: typeof value?.forceDarkWebsites === 'boolean'
       ? value.forceDarkWebsites
       : DEFAULT_BROWSER_PREFERENCES.forceDarkWebsites,
+    hyperdriveViewerEpoch: Number.isSafeInteger(value?.hyperdriveViewerEpoch) && value.hyperdriveViewerEpoch > 0
+      ? value.hyperdriveViewerEpoch
+      : DEFAULT_BROWSER_PREFERENCES.hyperdriveViewerEpoch,
     language: isLanguageCode(value?.language) ? value.language : SYSTEM_LANGUAGE,
     publishingSites: normalizePublishingSites(value?.publishingSites),
     searchEngine: SEARCH_ENGINES.some((engine) => engine.id === value?.searchEngine)
@@ -113,6 +119,17 @@ export function normalizePublishingSites (value) {
     if (isBridgeSiteId(siteId) && PUBLISHING_DECISIONS.includes(decision)) sites[siteId] = decision
   }
   return sites
+}
+
+/**
+ * The Hyperdrive viewer's next cache epoch. The time it changed, and never
+ * one the phone had before, so a value a restore brings back from another
+ * phone, or from this one earlier, is not taken for the one the viewer last
+ * saw.
+ */
+export function nextHyperdriveViewerEpoch (current, now = Date.now()) {
+  const previous = Number.isSafeInteger(current) && current > 0 ? current : 0
+  return Math.max(Math.floor(now), previous + 1)
 }
 
 export function serializeBrowserPreferences (preferences) {

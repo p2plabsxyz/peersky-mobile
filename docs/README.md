@@ -111,6 +111,7 @@
   - [x] Copy or share the link of what you uploaded
   - [x] Fetch a `hyper://` address, pasted or scanned from a QR code
   - [x] Browse a drive's folders and open its files
+  - [x] A `hyper://` folder that is not a website opens as Files, Photos or Videos, made for what it holds, at `peersky://p2p/hyperdrive/<view>/...`
   - [x] Keep a folder offline, with pause, resume and progress, and an option to download only on Wi-Fi
   - [x] Recent, with what you uploaded and fetched
   - [x] From your devices: private files from your other devices show up here on their own, and this phone's show up there, with a copy kept on your desktop
@@ -198,13 +199,13 @@ flowchart TB
   subgraph app["React Native app"]
     shell["Browser shell<br/>app/index.tsx"]
     native["Native screens<br/>Hyperdrive, PeerChat, Settings"]
-    webviews["WebViews<br/>web and hyper:// pages,<br/>P2PMD, PeerTunes"]
+    webviews["WebViews<br/>web and hyper:// pages,<br/>P2PMD, PeerTunes,<br/>Hyperdrive viewer"]
   end
 
   subgraph worklet["Bare worklet, backend/"]
     router["RPC router"]
     hyper["Hyper node<br/>hyper-sdk: Corestore,<br/>Hyperswarm, LAN mDNS"]
-    loopback["Servers on 127.0.0.1<br/>Hyper assets, P2PMD room,<br/>PeerTunes"]
+    loopback["Servers on 127.0.0.1<br/>Hyper assets, P2PMD room,<br/>PeerTunes, Hyperdrive viewer"]
     chat["PeerChat service"]
     holesail["Holesail tunnel"]
     link["Link Device<br/>and backups"]

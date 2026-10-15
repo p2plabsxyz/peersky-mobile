@@ -307,6 +307,84 @@ test('streams picker-owned files without an application size limit', async () =>
   assert.equal(streamedUpload.byteLength, byteLength)
 })
 
+const HEIC_FILE = 'file:///data/user/0/xyz.p2plabs.peersky/cache/DocumentPicker/IMG_0001.HEIC'
+const PREVIEW_FILE = 'file:///data/user/0/xyz.p2plabs.peersky/cache/peersky-upload/previews/a1.jpg'
+
+function heicUpload (drive, extra = {}, options = {}) {
+  const streamed = []
+  const pending = uploadHyperdriveFile({
+    name: 'IMG_0001.HEIC',
+    fileUri: HEIC_FILE,
+    byteLength: 3000,
+    visibility: 'public',
+    previewUri: PREVIEW_FILE,
+    previewByteLength: 500,
+    ...extra
+  }, {
+    runtime: { getDrive: async () => drive },
+    uploadLocalFile: async (upload) => {
+      streamed.push(upload)
+      drive.setEntry(upload.pathname, upload.byteLength)
+    },
+    ...options
+  })
+  return pending.then((response) => ({ response, streamed }))
+}
+
+test('a HEIC photo uploads with a JPEG copy under /.peersky/previews', async () => {
+  const drive = createDrive({})
+  const { response, streamed } = await heicUpload(drive)
+
+  assert.equal(response.ok, true)
+  assert.deepEqual(streamed.map(({ pathname, byteLength }) => ({ pathname, byteLength })), [
+    { pathname: '/IMG_0001.HEIC', byteLength: 3000 },
+    { pathname: '/.peersky/previews/IMG_0001.HEIC.jpg', byteLength: 500 }
+  ])
+})
+
+test('the JPEG copy follows the photo when its name had to change', async () => {
+  const drive = createDrive({ '/IMG_0001.HEIC': { blob: { byteLength: 1 } } })
+  const { response, streamed } = await heicUpload(drive)
+
+  assert.equal(response.ok, true)
+  assert.equal(response.item.name, 'IMG_0001 (1).HEIC')
+  assert.equal(streamed[1].pathname, '/.peersky/previews/IMG_0001 (1).HEIC.jpg')
+})
+
+test('a JPEG copy that cannot be written does not fail the photo upload', async () => {
+  const drive = createDrive({})
+  const written = []
+  const { response } = await heicUpload(drive, {}, {
+    uploadLocalFile: async (upload) => {
+      if (upload.pathname.startsWith('/.peersky/')) throw new Error('disk full')
+      written.push(upload.pathname)
+      drive.setEntry(upload.pathname, upload.byteLength)
+    }
+  })
+
+  assert.equal(response.ok, true)
+  assert.equal(response.item.name, 'IMG_0001.HEIC')
+  assert.deepEqual(written, ['/IMG_0001.HEIC'])
+})
+
+test('a JPEG copy outside the picker cache is left out and the photo still uploads', async () => {
+  const drive = createDrive({})
+  const { response, streamed } = await heicUpload(drive, {
+    previewUri: 'file:///data/user/0/xyz.p2plabs.peersky/files/secret.jpg'
+  })
+
+  assert.equal(response.ok, true)
+  assert.deepEqual(streamed.map(({ pathname }) => pathname), ['/IMG_0001.HEIC'])
+})
+
+test('only HEIC photos get a JPEG copy, and none is made when none is sent', async () => {
+  const other = await heicUpload(createDrive({}), { name: 'IMG_0001.jpg' })
+  assert.deepEqual(other.streamed.map(({ pathname }) => pathname), ['/IMG_0001.jpg'])
+
+  const none = await heicUpload(createDrive({}), { previewUri: undefined, previewByteLength: undefined })
+  assert.deepEqual(none.streamed.map(({ pathname }) => pathname), ['/IMG_0001.HEIC'])
+})
+
 test('rejects file URIs outside the picker cache', async () => {
   let opened = false
   const response = await uploadHyperdriveFile({

@@ -66,7 +66,8 @@ test('it credits the lists, models and media the app carries', async () => {
     'StevenBlack/hosts',
     'List of offensive words',
     'PeerChat sounds',
-    'Start page wallpaper'
+    'Start page wallpaper',
+    'GeoNames'
   ]) assert.ok(names.has(name), name)
 })
 

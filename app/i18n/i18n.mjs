@@ -109,6 +109,32 @@ export function tp (forms, count, values) {
   return fill(text, { count, ...values })
 }
 
+/**
+ * What the catalog of the language picked has for these keys, as it has it:
+ * a string, or a plural's forms. For a page that translates itself with the
+ * app's catalogs, the Hyperdrive viewer, which is handed these and nothing
+ * else. Keys the catalog lacks are left out, so English is empty.
+ * @param {string[]} keys
+ */
+export function catalogEntries (keys) {
+  const entries = {}
+  if (!catalog) return entries
+  for (const key of keys || []) {
+    if (typeof key !== 'string' || !Object.prototype.hasOwnProperty.call(catalog, key)) continue
+    const entry = catalog[key]
+    if (typeof entry === 'string' && entry) {
+      entries[key] = entry
+    } else if (entry && typeof entry === 'object' && !Array.isArray(entry)) {
+      const forms = {}
+      for (const [category, text] of Object.entries(entry)) {
+        if (typeof text === 'string' && text) forms[category] = text
+      }
+      if (Object.keys(forms).length) entries[key] = forms
+    }
+  }
+  return entries
+}
+
 function fill (text, values) {
   return String(text).replace(/\{(\w+)\}/g, (match, name) =>
     Object.prototype.hasOwnProperty.call(values, name) ? String(values[name]) : match

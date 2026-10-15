@@ -1,4 +1,4 @@
-import { type ComponentRef, type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
+import { type ComponentRef, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
@@ -234,6 +234,19 @@ import {
   getProxiedHyperUrl
 } from './downloads/browser-downloads.mjs'
 import { HyperdriveScreen } from './hyperdrive/HyperdriveScreen'
+import {
+  DriveViewerScreen,
+  type DriveViewerHistory,
+  type DriveViewerNavigation,
+  type DriveViewerServer
+} from './hyperdrive/DriveViewerScreen'
+import {
+  DRIVE_VIEWER_LOCAL_URL,
+  isDriveViewerDownloadUrl,
+  isRunToken,
+  parseDriveViewerDownloadUrl
+} from './hyperdrive/drive-viewer.mjs'
+import { getFolderViewerRedirect, normalizeViewerUrl, parseViewerUrl, viewerTitle } from './hyperdrive/viewer-route.mjs'
 import { canUseNetworkForOfflineHyper } from './hyperdrive/offline-network.mjs'
 import { isMeteredNetwork } from './linked-devices.mjs'
 import { PeerChatScreen, type PeerChatResponse } from './peerchat/PeerChatScreen'
@@ -320,7 +333,9 @@ import {
   RPC_DEVICE_SYNC_NETWORK,
   RPC_PEERCHAT_PRESENCE,
   RPC_PEERCHAT_SEND_TO_DEVICES,
-  RPC_PEERTUNES_START
+  RPC_PEERTUNES_START,
+  RPC_HYPERDRIVE_VIEWER_DOWNLOAD,
+  RPC_HYPERDRIVE_VIEWER_START
 } from '../backend/rpc/commands.mjs'
 
 type P2pmdRoom = {
@@ -338,6 +353,7 @@ type P2pmdRoom = {
 type P2pmdViewMode = 'edit' | 'preview' | 'slides'
 
 const PEERTUNES_START_TIMEOUT_MS = 15000
+const DRIVE_VIEWER_START_TIMEOUT_MS = 15000
 
 const HYPER_OFFLINE_NETWORK_COMMANDS = new Set([
   RPC_HYPER_INIT,
@@ -393,6 +409,9 @@ type BrowserSource =
   | { kind: 'app', app: RuntimeTab }
   | { kind: 'web', uri: string }
   | { kind: 'hyper', html: string, baseUrl: string }
+  // A hyper:// folder's Files, Photos or Videos view, under its
+  // peersky://p2p/hyperdrive/... address (hyperdrive/viewer-route.mjs).
+  | { kind: 'viewer' }
   | { kind: 'error', html: string }
   // opening: a tab just opened for a link, blank until the page is there.
   | { kind: 'restore', url: string, opening?: boolean }
@@ -512,6 +531,7 @@ export default function App () {
     preferences: browserPreferences,
     setAddressBarPosition,
     setAppLogoColor,
+    bumpHyperdriveViewerEpoch,
     setForceDarkWebsites,
     setLanguage: setLanguagePreference,
     setSearchSuggestionsEnabled,
@@ -699,6 +719,15 @@ export default function App () {
   const [peertunesToken, setPeertunesToken] = useState<string | null>(null)
   const [peertunesLaunchSuffix, setPeertunesLaunchSuffix] = useState('')
   const [peertunesError, setPeertunesError] = useState<string | null>(null)
+  // The Hyperdrive viewer's server, and where back and forward stand in the
+  // viewer on screen.
+  const [driveViewerServer, setDriveViewerServer] = useState<DriveViewerServer | null>(null)
+  const [driveViewerError, setDriveViewerError] = useState<string | null>(null)
+  const [driveViewerHistory, setDriveViewerHistory] = useState<DriveViewerHistory>({ canGoBack: false, canGoForward: false })
+  const driveViewerNavigationRef = useRef<DriveViewerNavigation | null>(null)
+  const registerDriveViewerNavigation = useCallback((navigation: DriveViewerNavigation | null) => {
+    driveViewerNavigationRef.current = navigation
+  }, [])
   // Goes up when folders are removed in Settings, P2P Data, so PeerTunes
   // drops the songs that came from them.
   const [offlineFoldersVersion, setOfflineFoldersVersion] = useState(0)
@@ -1014,8 +1043,9 @@ export default function App () {
 
     // peersky:// is our own scheme and is registered for deep links, so a
     // shared link like peersky://p2p/peertunes/#playlist=... arrives here.
-    // Only accept the ones that name a built-in app, not any peersky:// text.
-    const isInternalAppUrl = getRuntimeAppFromUrl(url) !== null
+    // Only accept the ones that name a built-in app or a folder's view, not
+    // any peersky:// text.
+    const isInternalAppUrl = getRuntimeAppFromUrl(url) !== null || parseViewerUrl(url) !== null
     if (
       (!isWebUrl(url) && !isHyperUrl(url) && !isInternalAppUrl) ||
       url.length > MAX_BROWSER_URL_LENGTH
@@ -1133,7 +1163,8 @@ export default function App () {
     // to wait for it exactly like hyper:// does. Without this a restored
     // PeerTunes tab hit "Worklet is not ready" on every cold start.
     const needsWorklet = isHyperUrl(pendingRestoredUrl) ||
-      getRuntimeAppFromUrl(pendingRestoredUrl) !== null
+      getRuntimeAppFromUrl(pendingRestoredUrl) !== null ||
+      parseViewerUrl(pendingRestoredUrl) !== null
     if (needsWorklet && (isBooting || !rpcRef.current)) return
 
     const restoredUrl = pendingRestoredUrl
@@ -1427,6 +1458,12 @@ export default function App () {
       return
     }
 
+    const viewerUrl = normalizeViewerUrl(nextUrl)
+    if (viewerUrl) {
+      openDriveViewer(viewerUrl)
+      return
+    }
+
     const internalApp = getRuntimeAppFromUrl(nextUrl)
     if (internalApp) {
       openInternalApp(internalApp, true, getRuntimeAppLaunchSuffix(nextUrl))
@@ -1485,6 +1522,12 @@ export default function App () {
     if (url === BROWSER_HOME_URL) {
       replaceBrowserEntry(BROWSER_HOME_URL, { kind: 'home' })
       setBrowserTitle(t('New tab'))
+      return
+    }
+
+    const viewerUrl = normalizeViewerUrl(url)
+    if (viewerUrl) {
+      openDriveViewer(viewerUrl, false)
       return
     }
 
@@ -1547,6 +1590,29 @@ export default function App () {
         throw new Error(response.error || response.statusText || t('Unable to load Hyper page'))
       }
 
+      const responseUrl = response.url &&
+        response.url.length <= MAX_BROWSER_URL_LENGTH &&
+        isHyperUrl(response.url)
+        ? response.url
+        : nextUrl
+
+      // A folder that is not a website opens in the Hyperdrive viewer
+      // instead, in this tab, under the viewer's address: one that came back
+      // as a list of names, or as its README or another index file that is
+      // not a web page, which the viewer shows under the list. Before a
+      // download, since a folder is never one. History keeps the hyper://
+      // address, as it did for the list.
+      const viewerUrl = getFolderViewerRedirect(nextUrl, response)
+      if (viewerUrl) {
+        recordCompletedBrowserVisit(
+          browserTabsStateRef.current.activeTabId,
+          responseUrl,
+          getBrowserHistoryDocumentTitle(response.body, responseUrl)
+        )
+        openDriveViewer(viewerUrl, shouldCommit)
+        return
+      }
+
       if (response.downloadUrl) {
         if (!allowDownload) {
           throw new Error(t('Open this Hyper file from the address bar to download it.'))
@@ -1565,12 +1631,6 @@ export default function App () {
         )
         return
       }
-
-      const responseUrl = response.url &&
-        response.url.length <= MAX_BROWSER_URL_LENGTH &&
-        isHyperUrl(response.url)
-        ? response.url
-        : nextUrl
 
       const isMedia = Boolean(response.mediaType && response.mediaUrl)
       const html = isMedia
@@ -1738,6 +1798,101 @@ export default function App () {
       const message = error instanceof Error ? error.message : String(error)
       setPeertunesError(message)
       setStatus(message)
+    }
+  }
+
+  // A hyper:// folder's Files, Photos or Videos view, in this tab. A new
+  // address for the viewer is a new page, so the viewer loads again even in
+  // a tab that already showed it.
+  function openDriveViewer (viewerUrl: string, shouldCommit = true) {
+    const route = parseViewerUrl(viewerUrl)
+    if (!route) return
+    cancelPendingBrowserLoad()
+    // A phone with no epoch yet, a new one or one Remove my data emptied,
+    // gets one before the viewer first opens, so a cache left from before is
+    // never taken for this one's.
+    if (browserPreferencesReady && !browserPreferences.hyperdriveViewerEpoch) bumpHyperdriveViewerEpoch()
+    const tabId = browserTabsStateRef.current.activeTabId
+    setActiveTab('hyper')
+    if (shouldCommit) {
+      commitBrowserEntry(viewerUrl, { kind: 'viewer' })
+    } else {
+      replaceBrowserEntry(viewerUrl, { kind: 'viewer' })
+    }
+    remountBrowserWebView(tabId)
+    setBrowserTitle(viewerTitle(route))
+    setStatus(`Opened ${viewerUrl}`)
+  }
+
+  // Starts the viewer's server, or finds it running, and says where it is and
+  // this run's secret. The secret goes to the viewer's page, nowhere else.
+  async function ensureDriveViewerServer (): Promise<{ localUrl: string, token: string } | null> {
+    setDriveViewerError(null)
+
+    try {
+      // As for PeerTunes: quick to start, and bounded, so a wedged worklet
+      // shows Try again rather than a spinner for good.
+      const response = await Promise.race([
+        callRpc(RPC_HYPERDRIVE_VIEWER_START, {}),
+        new Promise<never>((_resolve, reject) => {
+          setTimeout(
+            () => reject(new Error(t('This folder took too long to open. Try again.'))),
+            DRIVE_VIEWER_START_TIMEOUT_MS
+          )
+        })
+      ])
+
+      if (!response.ok || !response.localUrl || !isRunToken(response.token)) {
+        const message = response.error || t('This folder could not be opened.')
+        setDriveViewerError(message)
+        setStatus(message)
+        return null
+      }
+
+      const running = { localUrl: String(response.localUrl), token: String(response.token) }
+      // A server started again has a new secret, and the viewer loads again
+      // with it.
+      setDriveViewerServer((current) => current && current.localUrl === running.localUrl && current.token === running.token
+        ? current
+        : { ...running, run: (current?.run || 0) + 1 })
+      if (response.usingFallbackPort) {
+        setStatus('The Hyperdrive viewer started on a temporary port, so its saved pictures are not available')
+      }
+      return running
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      setDriveViewerError(message)
+      setStatus(message)
+      return null
+    }
+  }
+
+  // The viewer moved to another folder or view. The tab's address and title
+  // follow it in the entry it has, so back still leaves the viewer.
+  function onDriveViewerRoute (url: string, title: string) {
+    const { activeTabId, tabs } = browserTabsStateRef.current
+    const tab = tabs.find((item) => item.id === activeTabId)
+    const entry = tab?.history[tab.historyIndex]
+    if (!tab || !entry || entry.source.kind !== 'viewer') return
+    if (entry.url !== url) replaceBrowserEntry(url, entry.source)
+    setBrowserTitle(normalizeBrowserTabTitle(title))
+    updateBrowserTabTitle(tab.id, title)
+  }
+
+  // Saved through the viewer's own server, under the name the file has in
+  // the drive, and listed in Downloads like any other. The server signs the
+  // address for that one file, so what Downloads keeps opens nothing else.
+  async function onDriveViewerDownload (hyperUrl: string, name: string) {
+    const tabId = browserTabsStateRef.current.activeTabId
+    try {
+      const response = await callRpc(RPC_HYPERDRIVE_VIEWER_DOWNLOAD, { url: hyperUrl, name })
+      if (!response.ok || typeof response.downloadUrl !== 'string') {
+        setStatus(response.error || 'Unable to start this download')
+        return
+      }
+      startBrowserDownload(response.downloadUrl, tabId)
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error))
     }
   }
 
@@ -1980,6 +2135,12 @@ export default function App () {
 
     if (browserSource.kind === 'hyper') {
       void loadHyperBrowserUrl(browserCurrentUrl, false)
+      return
+    }
+
+    // The viewer loads again where it is, and lists the folder again.
+    if (browserSource.kind === 'viewer') {
+      remountBrowserWebView(browserTabsState.activeTabId)
       return
     }
 
@@ -2305,7 +2466,24 @@ export default function App () {
     let retryUrl = download.sourceUrl
     const hyperUrl = getProxiedHyperUrl(retryUrl)
 
-    if (hyperUrl) {
+    // One the Hyperdrive viewer started comes from its own server, which
+    // saves any kind of file. Its signature was for the run it started in,
+    // so the server signs it again for the run going now.
+    const viewerDownload = hyperUrl && isDriveViewerDownloadUrl(retryUrl, driveViewerServer?.localUrl || DRIVE_VIEWER_LOCAL_URL)
+      ? parseDriveViewerDownloadUrl(retryUrl)
+      : null
+    if (viewerDownload) {
+      try {
+        const response = await callRpc(RPC_HYPERDRIVE_VIEWER_DOWNLOAD, viewerDownload)
+        if (!response.ok || typeof response.downloadUrl !== 'string') {
+          throw new Error(response.error || `Unable to retry ${download.name}`)
+        }
+        retryUrl = response.downloadUrl
+      } catch (error) {
+        setStatus(error instanceof Error ? error.message : String(error))
+        return false
+      }
+    } else if (hyperUrl) {
       try {
         const response = await callRpc(RPC_HYPER_FETCH, {
           url: hyperUrl,
@@ -2719,6 +2897,9 @@ export default function App () {
       browserData: NativeModules.PeerSkyBrowserData,
       webViews: browserWebViewRefs.current.values()
     })
+    // The Hyperdrive viewer is one of those pages. What it made of the drives
+    // opened here goes the next time it opens.
+    bumpHyperdriveViewerEpoch()
     const { previewCacheCleared, sessionSaved } = onBrowserResetTabs()
     const historyCleared = clearBrowserHistory()
     updateRecentlyClosedTabs([])
@@ -3754,8 +3935,11 @@ export default function App () {
     }
   }
 
+  // The Hyperdrive viewer's own folders come first, as a page's history does.
+  const driveViewerCanGoBack = browserSource.kind === 'viewer' && driveViewerHistory.canGoBack
+  const driveViewerCanGoForward = browserSource.kind === 'viewer' && driveViewerHistory.canGoForward
   const canBrowserGoBack = browserCanGoBack
-  const canBrowserGoForward = browserCanGoForward
+  const canBrowserGoForward = browserCanGoForward || driveViewerCanGoForward
   const browserIncognitoSession = getBrowserIncognitoSession(browserTabsState.tabs)
   const browserIsDark = resolveBrowserDarkMode(browserPreferences.theme, systemColorScheme)
   const browserStatusBarStyle = getBrowserStatusBarStyle(Platform.OS, browserPreferences.theme, browserIsDark)
@@ -3796,7 +3980,7 @@ export default function App () {
   const browserPageActionAvailable = browserBookmarkActionAvailable || (
     browserSource.kind === 'app' &&
     canUseP2pAppPageActions(browserSource.app, browserCurrentUrl)
-  ) || (
+  ) || browserSource.kind === 'viewer' || (
     // A tab opened for a link spins where reload goes until its page is there.
     browserSource.kind === 'restore' && browserSource.opening === true && browserIsLoading
   )
@@ -3830,14 +4014,14 @@ export default function App () {
     browserDownloadsVisible ||
     browserSettingsVisible ||
     peerChatRoomOpen
-  const browserBackAvailable = browserOverPage || canBrowserGoBack
+  const browserBackAvailable = browserOverPage || canBrowserGoBack || driveViewerCanGoBack
   browserCanGoBackRef.current = browserBackAvailable
   goBrowserBackRef.current = goBrowserBack
   // Forward only ever means the page you came back from. With a sheet or a
   // screen open over the browser there is nothing ahead to go to.
   browserCanGoForwardRef.current = canBrowserGoForward && !browserOverPage
-  const goBrowserForwardRef = useRef(onBrowserForward)
-  goBrowserForwardRef.current = onBrowserForward
+  const goBrowserForwardRef = useRef(goBrowserForward)
+  goBrowserForwardRef.current = goBrowserForward
   const claimBrowserEdgeSwipe = (gesture: { dx: number, dy: number }) => {
     const startX = browserBackGestureStartRef.current
     if (browserCanGoBackRef.current && isBackEdgeSwipe({ startX, dx: gesture.dx, dy: gesture.dy })) {
@@ -3970,6 +4154,12 @@ export default function App () {
     return () => clearTimeout(timer)
   }, [browserIsLoading, browserPullRefreshing])
 
+  // Forward, through the viewer's own folders first, as back does.
+  function goBrowserForward () {
+    if (browserSource.kind === 'viewer' && driveViewerNavigationRef.current?.goForward()) return
+    onBrowserForward()
+  }
+
   // One definition of "back", so the Android button, the toolbar arrow and the
   // edge swipe cannot disagree about what the step before this one was.
   function goBrowserBack () {
@@ -3987,6 +4177,8 @@ export default function App () {
     // An open chat is a place you can be, so leaving it lands on the room list
     // rather than dropping the whole app back to the home screen.
     else if (peerChatGoBackRef.current?.()) return true
+    // So is a folder in the Hyperdrive viewer, or a photo open in it.
+    else if (browserSource.kind === 'viewer' && driveViewerNavigationRef.current?.goBack()) return true
     else if (canBrowserGoBack) onBrowserBack()
     else return false
 
@@ -4253,6 +4445,10 @@ export default function App () {
               browserSessionReadyRef.current = false
               setBrowserSessionReady(false)
               setRestartRequired(true)
+              // Clear all P2P data, Remove my data and a restore all start
+              // here. What the Hyperdrive viewer made of the drives goes too,
+              // the next time it opens.
+              bumpHyperdriveViewerEpoch()
             }}
           />
         </View>
@@ -4652,7 +4848,7 @@ export default function App () {
       onBack={goBrowserBack}
       onBurnTabs={onBrowserBurnTabs}
       onCloseMenu={() => setBrowserMenuVisible(false)}
-      onForward={onBrowserForward}
+      onForward={goBrowserForward}
       onGoHome={() => {
         browserUserInteractedRef.current = true
         cancelPendingBrowserLoad()
@@ -4707,6 +4903,8 @@ export default function App () {
       favicon: browserFaviconsRef.current.get(tab.id) || (
         entry?.source.kind === 'app'
           ? getRuntimeAppIconSource(entry.source.app)
+          : entry?.source.kind === 'viewer'
+          ? getRuntimeAppIconSource('hyper')
           : entry?.source.kind === 'home'
             ? BROWSER_HOME_ICON
             : null
@@ -4905,6 +5103,32 @@ export default function App () {
             )
           : browserSource.kind === 'home'
           ? null
+          : browserSource.kind === 'viewer'
+          ? (
+            <DriveViewerScreen
+              key={`${browserTabsState.activeTabId}:${browserWebViewGenerations[browserTabsState.activeTabId] || 0}`}
+              url={browserCurrentUrl}
+              server={driveViewerServer}
+              error={driveViewerError}
+              isDark={browserIsDark}
+              incognito={browserTabsState.tabs.some((tab) => tab.id === browserTabsState.activeTabId && tab.incognito === true)}
+              epoch={browserPreferences.hyperdriveViewerEpoch}
+              backgroundColor={browserChrome.surface}
+              textColor={browserChrome.text}
+              onEnsureServer={() => void ensureDriveViewerServer()}
+              onRoute={onDriveViewerRoute}
+              onDownload={(hyperUrl, name) => void onDriveViewerDownload(hyperUrl, name)}
+              // A file, a site or a link from a README, in a tab of its own:
+              // nothing from a drive renders inside the viewer.
+              onOpen={onBrowserMediaOpenInNewTab}
+              onCopy={(text) => Clipboard.setString(text)}
+              onShare={(targetUrl, name) => void onBrowserMediaShare(targetUrl, name)}
+              onHistoryChange={(history) => setDriveViewerHistory((current) => (
+                current.canGoBack === history.canGoBack && current.canGoForward === history.canGoForward ? current : history
+              ))}
+              registerNavigation={registerDriveViewerNavigation}
+            />
+            )
           : browserSource.kind === 'app'
             ? activeTab === 'hyper' && showHyperdriveWelcome
               ? (
@@ -6092,6 +6316,10 @@ function getNativeViewTag (event: { nativeEvent: object }) {
 
 function getBrowserEntryTitle (entry: BrowserHistoryEntry) {
   if (entry.source.kind === 'app') return getRuntimeAppTitle(entry.source.app)
+  if (entry.source.kind === 'viewer') {
+    const route = parseViewerUrl(entry.url)
+    return route ? viewerTitle(route) : entry.url
+  }
   return entry.url === BROWSER_HOME_URL ? t('New tab') : entry.url
 }
 
