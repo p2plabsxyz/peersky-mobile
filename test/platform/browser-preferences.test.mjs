@@ -23,6 +23,7 @@ describe('browser preferences', () => {
       enforceManualPageZoom: true,
       externalLinkBehavior: 'allow',
       forceDarkWebsites: true,
+      hyperdriveViewerEpoch: 1760400000000,
       language: 'mr',
       publishingSites: {
         ['a'.repeat(64)]: 'allow',

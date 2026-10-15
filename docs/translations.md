@@ -27,11 +27,20 @@ tp({ one: '{count} file', other: '{count} files' }, count)
 - A table written at the top of a file marks its text with `msg()`, which returns it unchanged, and whatever shows it calls `tKey()`. A `t()` at the top level of a file would run once, in whatever language was in force when the file loaded.
 - Text a catalog lacks shows in English.
 
-`node scripts/i18n.mjs` reads every file that imports these and refuses a call whose text is not one plain string literal, with its place. `--write` updates `app/i18n/strings.json` (every text and plural the app uses), `app/i18n/catalogs.ts` and the native files below. `--check` also says what each catalog lacks or gets wrong: a missing text, a plural form the language needs, placeholders that differ from the English, or a text nothing uses any more. `test/platform/i18n.test.mjs` fails on any of those, and when strings.json is out of date.
+`node scripts/i18n.mjs` reads every file that imports these and refuses a call whose text is not one plain string literal, with its place. A call named in a comment is not one. `--write` updates `app/i18n/strings.json` (every text and plural the app uses), `app/i18n/catalogs.ts` and the native files below. `--check` also says what each catalog lacks or gets wrong: a missing text, a plural form the language needs, placeholders that differ from the English, or a text nothing uses any more. `test/platform/i18n.test.mjs` fails on any of those, and when strings.json is out of date.
 
 ## The catalogs
 
 One JSON file per language in `app/i18n/locales`, the English text to its translation. A plural is kept under its English `other`, as an object with a form for each category the language has. A catalog is required only when its language is picked, so the others are never parsed.
+
+## The Hyperdrive viewer
+
+The Files, Photos and Videos views of a `hyper://` folder are a web page, `assets/hyperdrive-viewer`, copied from [p2plabsxyz/upload](https://github.com/p2plabsxyz/upload) (see [Hyper](hyper.md)). It translates itself the same way: its own `i18n.js` has `t()`, `tp()`, `msg()` and `tKey()` with the same rules, the English is the key, and plurals take the forms of `plural.mjs`, which its `lib/plural.js` copies.
+
+- `node scripts/i18n.mjs` reads the viewer's scripts too, each one that imports these from the viewer's `i18n.js` (as `'/hyperdrive/viewer/i18n.js'`), and refuses a call there the same way. Its texts are in `strings.json`, so every catalog needs them like the app's own.
+- `--write` also writes `app/i18n/viewer-strings.json`, the texts the viewer uses and nothing else. `scripts/sync-hyperdrive-viewer.mjs` writes it and `strings.json` too when it brings in a new viewer.
+- `app/hyperdrive/DriveViewerScreen.tsx` hands the page those texts from the catalog in force, and only those, as `window.peerskyViewer.strings`, with the language for its plurals and for `Intl`: numbers, sizes, dates, and the names of countries and languages. A text the catalog lacks shows in English, and switching languages loads the page again.
+- PeerSky Desktop shows the viewer in English for now.
 
 ## Outside JavaScript
 

@@ -3,19 +3,22 @@
 // catalogs checked against it.
 //
 //   node scripts/i18n.mjs          lists any call whose text is not a plain string
-//   node scripts/i18n.mjs --write  writes app/i18n/strings.json, app/i18n/catalogs.ts,
+//   node scripts/i18n.mjs --write  writes app/i18n/strings.json, app/i18n/viewer-strings.json,
+//                                  app/i18n/catalogs.ts,
 //                                  each language's iOS prompts and quick actions,
 //                                  its Android notification text and the list
 //                                  of languages in app/i18n/native,
 //                                  and the widgets' Localizable.xcstrings
 //   node scripts/i18n.mjs --check  also says what each catalog is missing or has wrong
 //
-// Only files that import t, tp or msg from app/i18n/i18n.mjs are read. Every
-// call must name its English text as one plain string literal: a key put
-// together at run time could never be in a catalog, so this refuses it with
-// its place. tKey() takes a variable, holding text marked with msg().
+// Only files that import t, tp or msg from app/i18n/i18n.mjs are read, and the
+// Hyperdrive viewer's files under assets/hyperdrive-viewer that import them
+// from its own i18n.js. Every call must name its English text as one plain
+// string literal: a key put together at run time could never be in a
+// catalog, so this refuses it with its place. tKey() takes a variable,
+// holding text marked with msg().
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { join, relative } from 'node:path'
+import { join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { LANGUAGES, SOURCE_LANGUAGE } from '../app/i18n/languages.mjs'
 import { ANDROID_TEXT, INFO_PLIST_TEXT, SHORTCUT_TEXT, WIDGET_NAMES, WIDGET_TEXT } from '../app/i18n/native-strings.mjs'
@@ -23,8 +26,14 @@ import { PLURAL_CATEGORIES } from '../app/i18n/plural.mjs'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const APP = join(ROOT, 'app')
+// The Hyperdrive viewer, a web page the app serves (backend/hyperdrive-viewer).
+// It translates itself with the strings the app hands it.
+export const VIEWER = join(ROOT, 'assets', 'hyperdrive-viewer')
 const SKIP = new Set(['app.bundle.mjs'])
 const I18N_IMPORT = /import\s*\{[^}]*\b(?:t|tp|msg)\b[^}]*\}\s*from\s*['"][./]*(?:[\w-]+\/)*i18n\/i18n\.mjs['"]/
+// The viewer's modules load each other by absolute path, as
+// '/hyperdrive/viewer/i18n.js', or by a relative one.
+export const VIEWER_I18N_IMPORT = /import\s*\{[^}]*\b(?:t|tp|msg)\b[^}]*\}\s*from\s*['"](?:\/hyperdrive\/viewer\/|(?:\.{1,2}\/)+)(?:[\w-]+\/)*i18n\.js['"]/
 
 export function sourceFiles (dir = APP) {
   const files = []
@@ -39,6 +48,27 @@ export function sourceFiles (dir = APP) {
     }
   }
   return files
+}
+
+/** The viewer's scripts. Its data (the place names) holds no text to show. */
+export function viewerSourceFiles (dir = VIEWER) {
+  if (!existsSync(dir)) return []
+  const files = []
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (entry.name.startsWith('.')) continue
+    const path = join(dir, entry.name)
+    if (entry.isDirectory()) {
+      if (entry.name === 'data') continue
+      files.push(...viewerSourceFiles(path))
+    } else if (/\.m?js$/.test(entry.name)) {
+      files.push(path)
+    }
+  }
+  return files.sort()
+}
+
+function isViewerFile (file) {
+  return file.startsWith(VIEWER + sep)
 }
 
 // A single or double quoted JavaScript string literal at `at`, read as the
@@ -67,12 +97,105 @@ function lineOf (source, at) {
   return source.slice(0, at).split('\n').length
 }
 
-/** The keys one file uses, and each call that does not name its text plainly. */
-export function scanSource (source, file = '') {
+// After these, a slash starts a regular expression rather than a division.
+const BEFORE_REGEX = new Set(['', '(', ',', '=', ':', '[', '!', '&', '|', '?', '{', '}', ';', '+', '-', '*', '%', '<', '>', '~', '^'])
+const KEYWORDS_BEFORE_REGEX = new Set(['return', 'typeof', 'instanceof', 'in', 'of', 'new', 'delete', 'void', 'throw', 'case', 'do', 'else', 'yield', 'await'])
+
+// The end of the string, template or regular expression starting at `at`.
+function skipQuoted (source, at) {
+  const quote = source[at]
+  let depth = 0
+  let i = at + 1
+  while (i < source.length) {
+    const c = source[i]
+    if (c === '\\') {
+      i += 2
+      continue
+    }
+    if (quote === '`' && c === '$' && source[i + 1] === '{') {
+      depth++
+      i += 2
+      continue
+    }
+    if (quote === '`' && depth > 0 && c === '}') depth--
+    else if (c === quote && depth === 0) return i + 1
+    else if (quote !== '`' && c === '\n') return i
+    i++
+  }
+  return i
+}
+
+function skipRegex (source, at) {
+  let inClass = false
+  let i = at + 1
+  while (i < source.length && source[i] !== '\n') {
+    const c = source[i]
+    if (c === '\\') {
+      i += 2
+      continue
+    }
+    if (c === '[') inClass = true
+    else if (c === ']') inClass = false
+    else if (c === '/' && !inClass) return i + 1
+    i++
+  }
+  return i
+}
+
+/**
+ * The source with its comments blanked out, every character kept in its
+ * place, so a call named in a comment, as `t('...')` in a note on how to
+ * write one, is not taken for one. Strings, templates and regular
+ * expressions are stepped over whole.
+ */
+export function withoutComments (source) {
+  let out = ''
+  let last = ''
+  let word = ''
+  let i = 0
+  while (i < source.length) {
+    const c = source[i]
+    const next = source[i + 1]
+    if (c === '/' && (next === '/' || next === '*')) {
+      const end = next === '/' ? source.indexOf('\n', i) : source.indexOf('*/', i + 2)
+      const stop = end === -1 ? source.length : next === '/' ? end : end + 2
+      out += source.slice(i, stop).replace(/[^\n]/g, ' ')
+      i = stop
+      continue
+    }
+    const regex = c === '/' && (BEFORE_REGEX.has(last) || (/\w/.test(last) && KEYWORDS_BEFORE_REGEX.has(word)))
+    if (c === '"' || c === "'" || c === '`' || regex) {
+      const stop = regex ? skipRegex(source, i) : skipQuoted(source, i)
+      out += source.slice(i, stop)
+      last = regex ? '/' : c
+      word = ''
+      i = stop
+      continue
+    }
+    out += c
+    if (/[\w$]/.test(c)) {
+      word = /[\w$]/.test(source[i - 1] || '') ? word + c : c
+      last = c
+    } else if (!/\s/.test(c)) {
+      word = ''
+      last = c
+    }
+    i++
+  }
+  return out
+}
+
+/**
+ * The keys one file uses, and each call that does not name its text plainly.
+ * A viewer file is read when it imports the viewer's own i18n.js. Comments
+ * are left out.
+ */
+export function scanSource (text, file = '', { viewer = false } = {}) {
   const strings = []
   const plurals = []
   const problems = []
-  if (!I18N_IMPORT.test(source)) return { strings, plurals, problems }
+  const source = withoutComments(text)
+  if (!(viewer ? VIEWER_I18N_IMPORT : I18N_IMPORT).test(source)) return { strings, plurals, problems }
 
   for (const match of source.matchAll(/(?<![\w.$])(t|msg)\(/g)) {
     let at = skipSpace(source, match.index + match[0].length)
@@ -110,22 +233,11 @@ export function scanSource (source, file = '') {
   return { strings, plurals, problems }
 }
 
-/** Every key the app uses: what strings.json holds. */
-export function collectStrings (files = sourceFiles()) {
-  // Every language's name, for the language list (language-name.mjs), and
-  // what iOS, the quick actions, the widgets and Android's PeerChat
-  // notification show (native-strings.mjs).
-  const strings = new Set([
-    ...LANGUAGES.map((language) => language.name),
-    ...Object.values(INFO_PLIST_TEXT),
-    ...Object.values(SHORTCUT_TEXT),
-    ...WIDGET_TEXT,
-    ...Object.values(ANDROID_TEXT)
-  ])
+function gather (files, strings = new Set()) {
   const plurals = new Map()
   const problems = []
   for (const file of files) {
-    const found = scanSource(readFileSync(file, 'utf8'), relative(ROOT, file))
+    const found = scanSource(readFileSync(file, 'utf8'), relative(ROOT, file), { viewer: isViewerFile(file) })
     for (const text of found.strings) strings.add(text)
     for (const forms of found.plurals) plurals.set(forms.other, forms)
     problems.push(...found.problems)
@@ -135,6 +247,44 @@ export function collectStrings (files = sourceFiles()) {
     plurals: [...plurals.values()].sort((a, b) => a.other.localeCompare(b.other)),
     problems
   }
+}
+
+/** Every key the app uses, the viewer's with them: what strings.json holds. */
+export function collectStrings (files = [...sourceFiles(), ...viewerSourceFiles()]) {
+  // Every language's name, for the language list (language-name.mjs), and
+  // what iOS, the quick actions, the widgets and Android's PeerChat
+  // notification show (native-strings.mjs).
+  return gather(files, new Set([
+    ...LANGUAGES.map((language) => language.name),
+    ...Object.values(INFO_PLIST_TEXT),
+    ...Object.values(SHORTCUT_TEXT),
+    ...WIDGET_TEXT,
+    ...Object.values(ANDROID_TEXT)
+  ]))
+}
+
+/**
+ * The keys the Hyperdrive viewer uses: what viewer-strings.json holds, and
+ * all the app hands the page of a catalog.
+ */
+export function collectViewerStrings (files = viewerSourceFiles()) {
+  return gather(files)
+}
+
+function writeJson (path, value) {
+  writeFileSync(path, JSON.stringify(value, null, 2) + '\n')
+}
+
+/**
+ * Writes strings.json and viewer-strings.json, and nothing else, so it can
+ * run without the catalogs: the sync of the viewer does.
+ */
+export function writeStringFiles () {
+  const app = collectStrings()
+  const viewer = collectViewerStrings()
+  writeJson(join(APP, 'i18n', 'strings.json'), { strings: app.strings, plurals: app.plurals })
+  writeJson(join(APP, 'i18n', 'viewer-strings.json'), { strings: viewer.strings, plurals: viewer.plurals })
+  return { app, viewer, problems: app.problems }
 }
 
 const PLACEHOLDER = /\{(\w+)\}/g
@@ -265,7 +415,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     process.exitCode = 1
   }
   if (process.argv.includes('--write')) {
-    writeFileSync(join(APP, 'i18n', 'strings.json'), JSON.stringify({ strings: collected.strings, plurals: collected.plurals }, null, 2) + '\n')
+    writeStringFiles()
     writeCatalogLoaders()
     writeNativeFiles()
     writeWidgetCatalog()

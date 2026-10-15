@@ -27,6 +27,7 @@ import { BROWSER_P2P_URL, getHyperDriveListingUrl } from '../browser-shell.mjs'
 import ChevronRightIcon from '../../assets/icons/bootstrap/chevron-right.svg'
 import CopyIcon from '../../assets/icons/bootstrap/copy.svg'
 import { clearHyperdriveRecents } from '../hyperdrive/recents-store'
+import { viewerUrlFor } from '../hyperdrive/viewer-route.mjs'
 import { msg, t, tKey, tp } from '../i18n/i18n.mjs'
 import { clearChatFileCopies } from '../peerchat/media-save'
 import { SettingsSection, useSettingsDarkMode } from './SettingsUI'
@@ -497,7 +498,7 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
                   <Pressable
                     accessibilityHint={t('Lists the files in this drive')}
                     accessibilityRole='link'
-                    onPress={() => onOpenUrl(getHyperDriveListingUrl(item.url))}
+                    onPress={() => onOpenUrl(driveFilesUrl(item.url))}
                   >
                     <Text numberOfLines={1} style={[styles.url, styles.urlLink, isDark ? darkStyles.urlLink : null]}>
                       {item.url}
@@ -516,7 +517,7 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
                       <Pressable
                         accessibilityHint={t('Lists the files in this drive')}
                         accessibilityRole='link'
-                        onPress={() => onOpenUrl(getHyperDriveListingUrl(drive.url))}
+                        onPress={() => onOpenUrl(driveFilesUrl(drive.url))}
                       >
                         <Text numberOfLines={1} style={[styles.driveUrl, styles.urlLink, isDark ? darkStyles.urlLink : null]}>
                           {drive.url}
@@ -812,6 +813,13 @@ function PageButton ({
       <Text style={[styles.pageButtonText, isDark ? darkStyles.actionText : null]}>{title}</Text>
     </Pressable>
   )
+}
+
+// A drive's files, in the Hyperdrive viewer's Files view, rather than the page
+// its index.html makes of it: P2PMD publishes a note as one. The list of
+// names, if the address cannot be the viewer's.
+function driveFilesUrl (url: string) {
+  return viewerUrlFor(url, { view: 'files', auto: false }) || getHyperDriveListingUrl(url)
 }
 
 function formatBytes (bytes: number) {
