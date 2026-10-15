@@ -303,8 +303,8 @@ test('PeerChat shows the questions folded, on the welcome screen and in About', 
   const intro = screen.slice(screen.indexOf('if (showIntro) {'), screen.indexOf('if (isInitialized && !profile?.username)'))
   assert.match(intro, /<PeerChatQuestions colors=\{colors\} questions=\{PEERCHAT_WELCOME_QUESTIONS\} \/>/)
   assert.ok(intro.indexOf('PEERCHAT_INTRO_POINTS.map') < intro.indexOf('<PeerChatQuestions'))
-  assert.ok(intro.indexOf('<PeerChatQuestions') < intro.indexOf('>I understand<'))
-  assert.ok(intro.indexOf('>I understand<') < intro.indexOf('</ScrollView>'))
+  assert.ok(intro.indexOf('<PeerChatQuestions') < intro.indexOf("{t('I understand')}"))
+  assert.ok(intro.indexOf("{t('I understand')}") < intro.indexOf('</ScrollView>'))
 
   const about = screen.slice(screen.indexOf('function PeerChatAboutPage'), screen.indexOf('function PeerChatMediaViewer'))
   assert.match(about, /<PeerChatQuestions colors=\{colors\} \/>/)

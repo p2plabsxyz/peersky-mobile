@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { getBrowserAddressForUrl, MAX_BROWSER_URL_LENGTH } from './browser-shell.mjs'
 import { formatBrowserAddress } from './browser-appearance.mjs'
 import { getSiteSecurity, SITE_SECURITY } from './site-security.mjs'
+import { t } from './i18n/i18n.mjs'
 import IncognitoIcon from '../assets/icons/bootstrap/incognito.svg'
 import ShieldCheckIcon from '../assets/icons/bootstrap/shield-check.svg'
 import ShieldSlashIcon from '../assets/icons/bootstrap/shield-slash.svg'
@@ -204,7 +205,7 @@ export function BrowserToolbar ({
           {isIncognito && (
             <View
               accessible
-              accessibilityLabel='Incognito tab'
+              accessibilityLabel={t('Incognito tab')}
               style={styles.browserSecurity}
             >
               <IncognitoIcon
@@ -220,7 +221,7 @@ export function BrowserToolbar ({
           {showSiteSecurity && (
             <Pressable
               accessibilityRole='button'
-              accessibilityLabel='Connection information'
+              accessibilityLabel={t('Connection information')}
               android_ripple={SMALL_ICON_RIPPLE}
               hitSlop={8}
               onPress={onOpenSiteInfo}
@@ -250,7 +251,7 @@ export function BrowserToolbar ({
           )}
           <TextInput
             ref={addressInputRef}
-            accessibilityLabel='Browser address'
+            accessibilityLabel={t('Browser address')}
             style={[
               styles.browserAddress,
               showSiteSecurity ? styles.browserAddressBesideSecurity : null,
@@ -276,12 +277,12 @@ export function BrowserToolbar ({
               addressInputRef.current?.blur()
               onSubmit()
             }}
-            placeholder='Search or enter address'
+            placeholder={t('Search or enter address')}
             placeholderTextColor={palette.mutedText}
           />
           {isAddressFocused && address.length > 0 && (
             <Pressable
-              accessibilityLabel='Clear address'
+              accessibilityLabel={t('Clear address')}
               accessibilityRole='button'
               android_ripple={SMALL_ICON_RIPPLE}
               hitSlop={4}
@@ -303,7 +304,7 @@ export function BrowserToolbar ({
           {!isAddressFocused && pageActionAvailable && (
             <View style={styles.browserAddressActions}>
               <Pressable
-                accessibilityLabel={isLoading ? 'Stop loading page' : 'Reload page'}
+                accessibilityLabel={isLoading ? t('Stop loading page') : t('Reload page')}
                 accessibilityRole='button'
                 android_ripple={SMALL_ICON_RIPPLE}
                 hitSlop={6}

@@ -23,6 +23,7 @@ import {
 } from './peertunes-screen.mjs'
 import { AppLoading } from '../AppLoading'
 import { PAUSE_ALL_MEDIA_SCRIPT } from '../browser-media.mjs'
+import { t } from '../i18n/i18n.mjs'
 import { parsePeerTunesWidgetTap } from '../home-shortcuts.mjs'
 import { MODAL_ORIENTATIONS } from '../modal-orientations'
 import { createServerTokenScript } from '../server-token.mjs'
@@ -127,8 +128,9 @@ export function PeerTunesScreen ({
     return () => { widgetTapListeners.delete(showWidgetSong) }
   }, [showWidgetSong])
 
-  const recover = useCallback((reason: string) => {
-    onStatus(`PeerTunes reloaded after ${reason}`)
+  // The message says what PeerTunes was reloaded after.
+  const recover = useCallback((message: string) => {
+    onStatus(message)
     onEnsureServer()
     setReloadNonce((value) => value + 1)
   }, [onEnsureServer, onStatus])
@@ -251,7 +253,7 @@ export function PeerTunesScreen ({
       webViewRef.current?.injectJavaScript(
         `window.__peerskyResolveScan(${serializeScanResult(requestId)}, null); true;`
       )
-      onStatus('Camera access is needed to scan a QR code')
+      onStatus(t('Camera access is needed to scan a QR code'))
       return
     }
 
@@ -265,10 +267,10 @@ export function PeerTunesScreen ({
         <Text style={[styles.message, isDark ? styles.messageDark : null]}>{error}</Text>
         <Pressable
           accessibilityRole='button'
-          onPress={() => recover('a retry')}
+          onPress={() => recover(t('PeerTunes reloaded after a retry'))}
           style={styles.retry}
         >
-          <Text style={styles.retryText}>Try again</Text>
+          <Text style={styles.retryText}>{t('Try again')}</Text>
         </Pressable>
       </View>
     )
@@ -353,10 +355,10 @@ export function PeerTunesScreen ({
         pageLoadedRef.current = true
         showWidgetSong()
       }}
-      onRenderProcessGone={() => recover('a renderer restart')}
-      onContentProcessDidTerminate={() => recover('a renderer restart')}
+      onRenderProcessGone={() => recover(t('PeerTunes reloaded after a renderer restart'))}
+      onContentProcessDidTerminate={() => recover(t('PeerTunes reloaded after a renderer restart'))}
       onError={(event) => {
-        recover(`a load failure (${event.nativeEvent.description})`)
+        recover(t('PeerTunes reloaded after a load failure ({error})', { error: event.nativeEvent.description }))
       }}
     />
     <Modal
@@ -380,13 +382,13 @@ export function PeerTunesScreen ({
           />
         )}
         <SafeAreaView style={styles.scannerOverlay} edges={['top', 'right', 'bottom', 'left']}>
-          <Text style={styles.scanHint}>Align the QR code inside the frame</Text>
+          <Text style={styles.scanHint}>{t('Align the QR code inside the frame')}</Text>
           <Pressable
             accessibilityRole='button'
             onPress={() => finishScan(null)}
             style={styles.scannerClose}
           >
-            <Text style={styles.scannerCloseText}>Cancel</Text>
+            <Text style={styles.scannerCloseText}>{t('Cancel')}</Text>
           </Pressable>
         </SafeAreaView>
       </View>

@@ -4,6 +4,7 @@ import type { SvgProps } from 'react-native-svg'
 import { Keyboard, Platform, Pressable, StyleSheet, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
+import { t, tp } from './i18n/i18n.mjs'
 import { dimWhenPressed, ICON_RIPPLE, ROUND_PRESS } from './press-feedback'
 import { BrowserOverflowMenu } from './settings/BrowserOverflowMenu'
 import type { ToolbarButton } from './settings/useBrowserPreferences'
@@ -154,27 +155,27 @@ export function BrowserNavBar ({
   // nothing to act on here: sharing an app screen, bookmarking the home page.
   const middle: Record<ToolbarButton, { label: string, disabled?: boolean, active?: boolean, onPress: () => void }> = {
     bookmark: {
-      label: isBookmarked ? 'Remove bookmark' : 'Add bookmark',
+      label: isBookmarked ? t('Remove bookmark') : t('Add bookmark'),
       active: isBookmarked,
       disabled: !bookmarkActionAvailable || bookmarksDisabled,
       onPress: onToggleBookmark
     },
     favourite: {
-      label: isFavourited ? 'Remove favourite' : 'Add favourite',
+      label: isFavourited ? t('Remove favourite') : t('Add favourite'),
       active: isFavourited,
       disabled: !bookmarkActionAvailable || favouritesDisabled,
       onPress: onToggleFavourite
     },
-    bookmarks: { label: 'Bookmarks', disabled: bookmarksDisabled, onPress: onOpenBookmarks },
-    burn: { label: 'Burn tabs, history and cached data', onPress: onBurnTabs },
-    downloads: { label: 'Downloads', onPress: onOpenDownloads },
-    history: { label: 'History', onPress: onOpenHistory },
-    home: { label: 'Home', disabled: isHome, onPress: onGoHome },
-    incognito: { label: 'New incognito tab', disabled: newTabDisabled, onPress: onNewIncognitoTab },
-    'new-tab': { label: 'New tab', disabled: newTabDisabled, onPress: onNewTab },
-    settings: { label: 'Settings', onPress: onOpenSettings },
-    share: { label: 'Share', disabled: !shareActionAvailable, onPress: onSharePage },
-    zoom: { label: 'Zoom', disabled: !shareActionAvailable, onPress: onOpenZoom }
+    bookmarks: { label: t('Bookmarks'), disabled: bookmarksDisabled, onPress: onOpenBookmarks },
+    burn: { label: t('Burn tabs, history and cached data'), onPress: onBurnTabs },
+    downloads: { label: t('Downloads'), onPress: onOpenDownloads },
+    history: { label: t('History'), onPress: onOpenHistory },
+    home: { label: t('Home'), disabled: isHome, onPress: onGoHome },
+    incognito: { label: t('New incognito tab'), disabled: newTabDisabled, onPress: onNewIncognitoTab },
+    'new-tab': { label: t('New tab'), disabled: newTabDisabled, onPress: onNewTab },
+    settings: { label: t('Settings'), onPress: onOpenSettings },
+    share: { label: t('Share'), disabled: !shareActionAvailable, onPress: onSharePage },
+    zoom: { label: t('Zoom'), disabled: !shareActionAvailable, onPress: onOpenZoom }
   }
   const middleAction = middle[toolbarButton] || middle.burn
   const middleIcon = (middleAction.active && TOOLBAR_BUTTON_ACTIVE_ICONS[toolbarButton]) ||
@@ -204,13 +205,13 @@ export function BrowserNavBar ({
           <>
             <NavButton
               icon={BookmarksIcon}
-              label='Bookmarks'
+              label={t('Bookmarks')}
               palette={palette}
               onPress={() => navigate(onOpenBookmarks)}
             />
             <NavButton
               icon={DisplayIcon}
-              label='Nearby devices'
+              label={t('Nearby devices')}
               palette={palette}
               onPress={() => navigate(onOpenNearby)}
             />
@@ -221,14 +222,14 @@ export function BrowserNavBar ({
             <NavButton
               disabled={!canGoBack}
               icon={BackIcon}
-              label='Go back'
+              label={t('Go back')}
               palette={palette}
               onPress={() => navigate(onBack)}
             />
             <NavButton
               disabled={!canGoForward}
               icon={ForwardIcon}
-              label='Go forward'
+              label={t('Go forward')}
               palette={palette}
               onPress={() => navigate(onForward)}
             />
@@ -246,7 +247,7 @@ export function BrowserNavBar ({
       />
 
       <Pressable
-        accessibilityLabel={`Open tabs, ${tabCount} open`}
+        accessibilityLabel={tp({ one: 'Open tabs, {count} open', other: 'Open tabs, {count} open' }, tabCount)}
         accessibilityRole='button'
         android_ripple={ICON_RIPPLE}
         style={({ pressed }) => [styles.browserNavBarButton, ROUND_PRESS, dimWhenPressed(pressed)]}

@@ -1,3 +1,5 @@
+import { t } from '../i18n/i18n.mjs'
+
 // The type a saved picture or video is given, so the gallery or Photos takes
 // it for what it is. From the name, which is all a message says about it.
 const MEDIA_TYPES = {
@@ -41,8 +43,8 @@ export function savedFolderName (uri) {
   const tree = value.split('/tree/')[1] || value.split('/document/')[1] || ''
   try {
     const path = decodeURIComponent(tree.split('/')[0]).split(':').slice(1).join(':')
-    return path || 'the folder you picked'
+    return path || t('the folder you picked')
   } catch {
-    return 'the folder you picked'
+    return t('the folder you picked')
   }
 }

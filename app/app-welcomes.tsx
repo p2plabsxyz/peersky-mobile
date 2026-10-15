@@ -1,4 +1,5 @@
 import type { AppWelcomeContent } from './AppWelcome'
+import { msg } from './i18n/i18n.mjs'
 import DownloadIcon from '../assets/icons/bootstrap/download.svg'
 import GlobeIcon from '../assets/icons/bootstrap/globe.svg'
 import PeopleIcon from '../assets/icons/bootstrap/people.svg'
@@ -11,34 +12,34 @@ import ShieldLockIcon from '../assets/icons/bootstrap/shield-lock.svg'
 export const P2PMD_WELCOME: AppWelcomeContent = {
   icon: require('../assets/images/p2pmd.png'),
   title: 'P2PMD',
-  lead: 'Markdown notes you write together, live, straight between devices.',
+  lead: msg('Markdown notes you write together, live, straight between devices.'),
   points: [
     {
       id: 'together',
       Icon: PeopleIcon,
-      title: 'Write together, live',
-      body: 'Send a note’s key, and everyone edits the same note at the same time.'
+      title: msg('Write together, live'),
+      body: msg('Send a note’s key, and everyone edits the same note at the same time.')
     },
     {
       id: 'server',
       Icon: PhoneIcon,
-      title: 'Your phone is the server',
-      body: 'Notes you make are hosted right here. Keep PeerSky open while others write with you.'
+      title: msg('Your phone is the server'),
+      body: msg('Notes you make are hosted right here. Keep PeerSky open while others write with you.')
     },
     {
       id: 'private',
       Icon: ShieldLockIcon,
-      title: 'Private from the start',
-      body: 'Every new note is private: only people you give its key to can open it.'
+      title: msg('Private from the start'),
+      body: msg('Every new note is private: only people you give its key to can open it.')
     },
     {
       id: 'share',
       Icon: GlobeIcon,
-      title: 'Slides and links',
-      body: 'Put --- between parts to show them as slides, and publish a note as a link anyone can open.'
+      title: msg('Slides and links'),
+      body: msg('Put --- between parts to show them as slides, and publish a note as a link anyone can open.')
     }
   ],
-  action: 'Start writing'
+  action: msg('Start writing')
 }
 
 // The same words the screen itself uses (Private, This device only, Keep
@@ -46,32 +47,32 @@ export const P2PMD_WELCOME: AppWelcomeContent = {
 export const HYPERDRIVE_WELCOME: AppWelcomeContent = {
   icon: require('../assets/images/hyperdrive.png'),
   title: 'Hyperdrive',
-  lead: 'Your files, shared straight from this phone.',
+  lead: msg('Your files, shared straight from this phone.'),
   points: [
     {
       id: 'share',
       Icon: GlobeIcon,
-      title: 'Share with a link',
-      body: 'Upload a file and send its link. People open it straight from your phone, with no server in between.'
+      title: msg('Share with a link'),
+      body: msg('Upload a file and send its link. People open it straight from your phone, with no server in between.')
     },
     {
       id: 'private',
       Icon: ShieldLockIcon,
-      title: 'Private when you want',
-      body: 'Private files are encrypted, so only your linked devices can open them, and they show up there on their own. This device only keeps a file here and never syncs it.'
+      title: msg('Private when you want'),
+      body: msg('Private files are encrypted, so only your linked devices can open them, and they show up there on their own. This device only keeps a file here and never syncs it.')
     },
     {
       id: 'offline',
       Icon: DownloadIcon,
-      title: 'Keep folders offline',
-      body: 'Fetch a folder someone shared and keep it, so it opens with no connection.'
+      title: msg('Keep folders offline'),
+      body: msg('Fetch a folder someone shared and keep it, so it opens with no connection.')
     },
     {
       id: 'open',
       Icon: QrIcon,
-      title: 'Open what others share',
-      body: 'Paste a link or scan a QR code to fetch files from another device.'
+      title: msg('Open what others share'),
+      body: msg('Paste a link or scan a QR code to fetch files from another device.')
     }
   ],
-  action: 'Get started'
+  action: msg('Get started')
 }

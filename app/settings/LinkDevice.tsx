@@ -41,6 +41,7 @@ import {
 } from '../../backend/rpc/commands.mjs'
 import { BROWSER_PALETTES } from '../browser-appearance.mjs'
 import { tapFeedback } from '../haptics'
+import { t, tp } from '../i18n/i18n.mjs'
 import { describeLinkedDevice, labelLinkedDevices, sortLinkedDevices } from '../linked-devices.mjs'
 import { MODAL_ORIENTATIONS } from '../modal-orientations'
 import { QrCodeView } from './QrCodeView'
@@ -154,14 +155,14 @@ export function LinkDeviceSettings ({ deviceSyncRevision = 0, onCallRpc, onResta
   const deviceLabels = labelLinkedDevices(linkedDevices)
 
   function showLinkedDevice (device: LinkedDevice) {
-    const label = deviceLabels.get(device.id) || 'Device'
+    const label = deviceLabels.get(device.id) || t('Device')
     Alert.alert(
       label,
-      `${describeLinkedDevice(device)}. Its private files show in Hyperdrive here, and this phone's show there.`,
+      t('{device}. Its private files show in Hyperdrive here, and this phone\'s show there.', { device: describeLinkedDevice(device) }),
       [
-        { text: 'OK', style: 'cancel' },
+        { text: t('OK'), style: 'cancel' },
         {
-          text: 'Remove from list',
+          text: t('Remove from list'),
           style: 'destructive',
           onPress: () => {
             void call(RPC_DEVICE_SYNC_FORGET, { id: device.id }).then(() => {
@@ -190,18 +191,19 @@ export function LinkDeviceSettings ({ deviceSyncRevision = 0, onCallRpc, onResta
     clearChatFileCopies()
     try {
       const response = await call(command, data)
-      if (!response.ok) throw new Error(response.error || 'It did not go through')
+      if (!response.ok) throw new Error(response.error || t('It did not go through'))
       if (Platform.OS === 'android') BackHandler.exitApp()
     } catch (replaceError) {
       Alert.alert(
         failureTitle,
-        `${errorMessage(replaceError)}\n\nNothing on this phone was changed. Close PeerSky and open it again.`
+        t('{error}\n\nNothing on this phone was changed. Close PeerSky and open it again.', { error: errorMessage(replaceError) }),
+        [{ text: t('OK') }]
       )
     }
   }, [call, onRestartRequired])
 
   const commitRestore = useCallback((restoreId: string) => {
-    void replaceData(RPC_IDENTITY_CONFIRM_RESTORE, { restoreId }, 'The restore did not go through')
+    void replaceData(RPC_IDENTITY_CONFIRM_RESTORE, { restoreId }, t('The restore did not go through'))
   }, [replaceData])
 
   async function pickBackupFile () {
@@ -221,14 +223,14 @@ export function LinkDeviceSettings ({ deviceSyncRevision = 0, onCallRpc, onResta
       const info = await call(RPC_BACKUP_INSPECT, { path })
       if (!info.ok) {
         deleteCachedFile(asset.uri)
-        setError(info.error || 'That file is not a PeerSky backup.')
+        setError(info.error || t('That file is not a PeerSky backup.'))
         return
       }
 
       setRestoreFile({
         uri: asset.uri,
         path,
-        name: asset.name || 'Backup',
+        name: asset.name || t('Backup'),
         needsPassphrase: info.needsPassphrase !== false,
         origin: describeBackupOrigin({ createdAt: info.createdAt, platform: info.platform }),
         contents: describeBackupContents(info.contents),
@@ -246,15 +248,15 @@ export function LinkDeviceSettings ({ deviceSyncRevision = 0, onCallRpc, onResta
   // profile write the same chats and split them, so the old one lets go.
   function removeData () {
     Alert.alert(
-      'Remove your data from this phone?',
-      'This deletes everything PeerSky keeps here: tabs, bookmarks, history, settings, chats, notes and files. Anything that is only on this phone is gone for good. Save a backup first if you need one.',
+      t('Remove your data from this phone?'),
+      t('This deletes everything PeerSky keeps here: tabs, bookmarks, history, settings, chats, notes and files. Anything that is only on this phone is gone for good. Save a backup first if you need one.'),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('Cancel'), style: 'cancel' },
         {
-          text: 'Remove',
+          text: t('Remove'),
           style: 'destructive',
           onPress: () => {
-            void replaceData(RPC_IDENTITY_REMOVE, {}, 'Your data was not removed')
+            void replaceData(RPC_IDENTITY_REMOVE, {}, t('Your data was not removed'))
           }
         }
       ]
@@ -273,26 +275,26 @@ export function LinkDeviceSettings ({ deviceSyncRevision = 0, onCallRpc, onResta
             <DisplayIcon width={26} height={26} color={isDark ? '#8fc1ff' : ACCENT} />
           </View>
         </View>
-        <Text style={[styles.heroTitle, isDark ? darkStyles.text : null]}>Your data, on your devices</Text>
+        <Text style={[styles.heroTitle, isDark ? darkStyles.text : null]}>{t('Your data, on your devices')}</Text>
         <Text style={[styles.heroBody, isDark ? darkStyles.muted : null]}>
-          Move your tabs, bookmarks, chats and files to another device, or keep a backup. It goes straight across, end-to-end encrypted, with no server in between.
+          {t('Move your tabs, bookmarks, chats and files to another device, or keep a backup. It goes straight across, end-to-end encrypted, with no server in between.')}
         </Text>
       </View>
 
       {error && <Banner kind='error' text={error} onDismiss={() => setError(null)} />}
 
-      <SettingsSection title='My devices'>
+      <SettingsSection title={t('My devices')}>
         <LinkRow
           icon={PhoneIcon}
-          title={Platform.OS === 'ios' ? (Platform.isPad ? 'iPad' : 'iPhone') : 'Android phone'}
-          trailing='This device'
+          title={Platform.OS === 'ios' ? (Platform.isPad ? 'iPad' : 'iPhone') : t('Android phone')}
+          trailing={t('This device')}
         />
         {sortLinkedDevices(linkedDevices).map((device: LinkedDevice) => (
           <LinkRow
             key={device.id}
             divider
             icon={device.type === 'phone' ? PhoneIcon : DisplayIcon}
-            title={deviceLabels.get(device.id) || 'Device'}
+            title={deviceLabels.get(device.id) || t('Device')}
             description={describeLinkedDevice(device)}
             online={device.online}
             onPress={() => showLinkedDevice(device)}
@@ -302,25 +304,25 @@ export function LinkDeviceSettings ({ deviceSyncRevision = 0, onCallRpc, onResta
           <LinkRow
             divider
             icon={DisplayIcon}
-            title='No other device yet'
-            description='Your desktop shows here once the latest PeerSky is open on it and both are online.'
+            title={t('No other device yet')}
+            description={t('Your desktop shows here once the latest PeerSky is open on it and both are online.')}
           />
         )}
         <LinkRow
           accent
           divider
           icon={QrScanIcon}
-          title='Sync with another device'
+          title={t('Sync with another device')}
           onPress={() => setSyncVisible(true)}
         />
       </SettingsSection>
 
-      <SettingsSection title='Backup'>
+      <SettingsSection title={t('Backup')}>
         <LinkRow
           chevron
           icon={DownloadIcon}
-          title='Save a backup file'
-          description='For when this phone is lost or broken. Keep it somewhere that is not this phone.'
+          title={t('Save a backup file')}
+          description={t('For when this phone is lost or broken. Keep it somewhere that is not this phone.')}
           onPress={() => {
             setRestoreFile(null)
             setBackupVisible(true)
@@ -331,34 +333,34 @@ export function LinkDeviceSettings ({ deviceSyncRevision = 0, onCallRpc, onResta
           divider
           busy={isPicking}
           icon={UploadIcon}
-          title='Restore from a backup file'
-          description='Bring a backup back, here or on a new phone.'
+          title={t('Restore from a backup file')}
+          description={t('Bring a backup back, here or on a new phone.')}
           onPress={() => void pickBackupFile()}
         />
       </SettingsSection>
 
-      <SettingsSection title='Download'>
+      <SettingsSection title={t('Download')}>
         <LinkRow
           chevron
           icon={DisplayIcon}
-          title='Get the desktop browser'
-          description='PeerSky for Mac, Windows and Linux.'
+          title={t('Get the desktop browser')}
+          description={t('PeerSky for Mac, Windows and Linux.')}
           onPress={() => onOpenUrl(PEERSKY_WEBSITE_URL)}
         />
       </SettingsSection>
 
-      <SettingsSection title='This phone'>
+      <SettingsSection title={t('This phone')}>
         <LinkRow
           danger
           icon={TrashIcon}
-          title='Remove my data from this phone'
-          description='When you move to a new phone or give this one away.'
+          title={t('Remove my data from this phone')}
+          description={t('When you move to a new phone or give this one away.')}
           onPress={removeData}
         />
       </SettingsSection>
 
       <Text style={[styles.footer, isDark ? darkStyles.muted : null]}>
-        Nothing goes through a server. Your devices talk to each other directly, and only they can open what they send.
+        {t('Nothing goes through a server. Your devices talk to each other directly, and only they can open what they send.')}
       </Text>
 
       <SyncSheet
@@ -472,7 +474,7 @@ function SyncSheet ({
       try {
         const response = await call(RPC_IDENTITY_GET_KEY)
         if (cancelled) return
-        if (!response.ok) throw new Error(response.error || 'Unable to load this phone\'s code')
+        if (!response.ok) throw new Error(response.error || t('Unable to load this phone\'s code'))
         setPairingCode(createMobilePairingCode(response.encryptionPublicKey, response.nonce))
         setPairingExpiresAt(Number(response.expiresAt) || 0)
         setClock(Date.now())
@@ -582,7 +584,7 @@ function SyncSheet ({
     if (!permission?.granted) {
       const response = await requestPermission()
       if (!response.granted) {
-        setError('PeerSky needs the camera to scan the other device\'s code. You can paste the code instead.')
+        setError(t('PeerSky needs the camera to scan the other device\'s code. You can paste the code instead.'))
         return
       }
     }
@@ -608,11 +610,11 @@ function SyncSheet ({
       deviceType?: string
     }
     if (result.kind === 'empty') {
-      setError('There is no code on the clipboard.')
+      setError(t('There is no code on the clipboard.'))
       return
     }
     if (result.kind === 'invalid') {
-      setError(result.error || 'That is not a PeerSky code.')
+      setError(result.error || t('That is not a PeerSky code.'))
       return
     }
     // Each tab takes one kind of code. A pairing code on Receive here is the
@@ -620,11 +622,11 @@ function SyncSheet ({
     // from this phone instead; a transfer on Send from here is the other way
     // round. Say which code belongs where rather than switching direction.
     if (result.kind === 'pairing' && direction === 'receive') {
-      setError('That is the other device\'s code for receiving, so it does not go here. Once the other device starts sending to this phone, scan the code it shows then. To send from this phone instead, switch to Send from here.')
+      setError(t('That is the other device\'s code for receiving, so it does not go here. Once the other device starts sending to this phone, scan the code it shows then. To send from this phone instead, switch to Send from here.'))
       return
     }
     if (result.kind === 'transfer' && direction === 'send') {
-      setError('That code is a transfer for this phone to receive. Switch to Receive here and scan it there.')
+      setError(t('That code is a transfer for this phone to receive. Switch to Receive here and scan it there.'))
       return
     }
     if (result.kind === 'transfer' && result.url) {
@@ -637,10 +639,10 @@ function SyncSheet ({
   async function receive (url: string) {
     setError(null)
     setProgress(null)
-    setBusy('Getting your data')
+    setBusy(t('Getting your data'))
     try {
       const response = await call(RPC_IDENTITY_RESTORE_FROM_HYPER, { hyperUrl: url })
-      if (!response.ok) throw new Error(response.error || 'The transfer did not come through.')
+      if (!response.ok) throw new Error(response.error || t('The transfer did not come through.'))
       if (!visibleRef.current) {
         void call(RPC_IDENTITY_DISCARD_RESTORE, { restoreId: response.restoreId }).catch(() => {})
         return
@@ -656,19 +658,25 @@ function SyncSheet ({
   function confirmRestore (response: RpcResult) {
     const what = describeBackupContents(response.contents)
     const fromDesktop = response.source === 'desktop'
+    // The code the other device shows comes first, above what happens next.
+    const code = response.sas
     Alert.alert(
-      'Does the other device show this code?',
-      `${response.sas}\n\n${fromDesktop
-        ? `${what || 'Your data'} from the desktop will be added to this phone.`
-        : `${what || 'Everything'} from the other phone will replace what is on this one.`} PeerSky restarts to finish.`,
+      t('Does the other device show this code?'),
+      fromDesktop
+        ? what
+          ? t('{code}\n\n{what} from the desktop will be added to this phone. PeerSky restarts to finish.', { code, what })
+          : t('{code}\n\nYour data from the desktop will be added to this phone. PeerSky restarts to finish.', { code })
+        : what
+          ? t('{code}\n\n{what} from the other phone will replace what is on this one. PeerSky restarts to finish.', { code, what })
+          : t('{code}\n\nEverything from the other phone will replace what is on this one. PeerSky restarts to finish.', { code }),
       [
         {
-          text: 'Cancel',
+          text: t('Cancel'),
           style: 'cancel',
           onPress: () => void call(RPC_IDENTITY_DISCARD_RESTORE, { restoreId: response.restoreId }).catch(() => {})
         },
         {
-          text: 'It matches',
+          text: t('It matches'),
           style: fromDesktop ? 'default' : 'destructive',
           onPress: () => onConfirmRestore(response.restoreId)
         }
@@ -677,18 +685,21 @@ function SyncSheet ({
   }
 
   function confirmSend (code: string, toDesktop: boolean) {
+    const toDesktopMessage = [
+      t('It gets the pages open on this phone and your bookmarks, added to its own, and can open your private files.'),
+      // A desktop says in its code whether it takes PeerChat and P2PMD notes.
+      /[?&]chat=1(&|$)/.test(code) ? t('PeerChat there takes your name and rooms.') : '',
+      /[?&]notes=1(&|$)/.test(code) ? t('P2PMD there gets your recent notes.') : '',
+      t('Nothing passes through a server.')
+    ].filter(Boolean).join(' ')
     Alert.alert(
-      toDesktop ? 'Send to PeerSky Desktop?' : 'Send this phone to the other one?',
+      toDesktop ? t('Send to PeerSky Desktop?') : t('Send this phone to the other one?'),
       toDesktop
-        ? 'It gets the pages open on this phone and your bookmarks, added to its own, and can open your private files.' +
-          // A desktop says in its code whether it takes PeerChat and P2PMD notes.
-          (/[?&]chat=1(&|$)/.test(code) ? ' PeerChat there takes your name and rooms.' : '') +
-          (/[?&]notes=1(&|$)/.test(code) ? ' P2PMD there gets your recent notes.' : '') +
-          ' Nothing passes through a server.'
-        : 'It gets everything on this phone: tabs, bookmarks, history, settings, chats, notes and files. Nothing passes through a server.',
+        ? toDesktopMessage
+        : t('It gets everything on this phone: tabs, bookmarks, history, settings, chats, notes and files. Nothing passes through a server.'),
       [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Send', onPress: () => void send(code, toDesktop) }
+        { text: t('Cancel'), style: 'cancel' },
+        { text: t('Send'), onPress: () => void send(code, toDesktop) }
       ]
     )
   }
@@ -697,14 +708,14 @@ function SyncSheet ({
     setError(null)
     setProgress(null)
     setLinkCopied(false)
-    setBusy(toDesktop ? 'Getting your tabs and bookmarks ready' : 'Packing up your data')
+    setBusy(toDesktop ? t('Getting your tabs and bookmarks ready') : t('Packing up your data'))
     try {
       const response = await call(RPC_IDENTITY_SEND, {
         pairingCode: code,
         peerskyVersion: PEERSKY_VERSION,
         platform: Platform.OS
       })
-      if (!response.ok) throw new Error(response.error || 'Could not send')
+      if (!response.ok) throw new Error(response.error || t('Could not send'))
       // Kept even if the sheet was closed while packing: it shows the next
       // time the sheet opens.
       if (toDesktop) emitP2pmdNotesShared(response.sharedNotes)
@@ -744,7 +755,7 @@ function SyncSheet ({
   }
 
   return (
-    <SheetFrame title='Sync with another device' visible={visible} onClose={close} closeLabel='Close'>
+    <SheetFrame title={t('Sync with another device')} visible={visible} onClose={close} closeLabel={t('Close')}>
       {error && <Banner kind='error' text={error} onDismiss={() => setError(null)} />}
 
       {busy
@@ -753,20 +764,20 @@ function SyncSheet ({
           ? (
             <View style={styles.sheetBlock}>
               <Text style={[styles.sheetHeading, isDark ? darkStyles.text : null]}>
-                {sending.toDesktop ? 'Open this on the desktop' : 'Scan this on the other phone'}
+                {sending.toDesktop ? t('Open this on the desktop') : t('Scan this on the other phone')}
               </Text>
               <Text style={[styles.sheetText, isDark ? darkStyles.muted : null]}>
                 {sending.toDesktop
-                  ? 'In PeerSky Desktop, open Backup & Restore. Under Restore from the network, paste this link or scan it, then press Download.'
-                  : 'In Sync with another device on the other phone, tap Scan code and point it here.'}
+                  ? t('In PeerSky Desktop, open Backup & Restore. Under Restore from the network, paste this link or scan it, then press Download.')
+                  : t('In Sync with another device on the other phone, tap Scan code and point it here.')}
               </Text>
               <QrCodeView value={sending.url} size={220} />
               <Pressable accessibilityRole='button' hitSlop={8} onPress={copyLink}>
-                <Text style={styles.linkText}>{linkCopied ? 'Link copied' : 'Copy link'}</Text>
+                <Text style={styles.linkText}>{linkCopied ? t('Link copied') : t('Copy link')}</Text>
               </Pressable>
               <View style={[styles.codeBox, isDark ? darkStyles.codeBox : null]}>
                 <Text style={[styles.codeLabel, isDark ? darkStyles.muted : null]}>
-                  {sending.toDesktop ? 'Both screens show' : 'Both phones show'}
+                  {sending.toDesktop ? t('Both screens show') : t('Both phones show')}
                 </Text>
                 <Text style={[styles.codeValue, isDark ? darkStyles.text : null]}>{sending.code}</Text>
               </View>
@@ -777,8 +788,8 @@ function SyncSheet ({
               )}
               <Text style={[styles.sheetText, isDark ? darkStyles.muted : null]}>
                 {sending.toDesktop
-                  ? 'Keep PeerSky open on this phone until the desktop has it. The screen stays on meanwhile. You can close this; the link keeps working until it runs out or you stop it.'
-                  : 'Keep PeerSky open on both phones until it finishes. The screen stays on meanwhile. You can close this; the link keeps working until it runs out or you stop it.'}
+                  ? t('Keep PeerSky open on this phone until the desktop has it. The screen stays on meanwhile. You can close this; the link keeps working until it runs out or you stop it.')
+                  : t('Keep PeerSky open on both phones until it finishes. The screen stays on meanwhile. You can close this; the link keeps working until it runs out or you stop it.')}
               </Text>
               {sending.expiresAt > 0 && (
                 <Text style={[styles.sheetNote, isDark ? darkStyles.muted : null]}>
@@ -790,11 +801,11 @@ function SyncSheet ({
                 style={({ pressed }) => [styles.secondaryButton, isDark ? darkStyles.secondaryButton : null, pressed ? styles.pressed : null]}
                 onPress={stopSending}
               >
-                <Text style={[styles.secondaryButtonText, isDark ? darkStyles.text : null]}>Stop sending</Text>
+                <Text style={[styles.secondaryButtonText, isDark ? darkStyles.text : null]}>{t('Stop sending')}</Text>
               </Pressable>
               {!sending.toDesktop && (
                 <Text style={[styles.sheetNote, isDark ? darkStyles.muted : null]}>
-                  Moving for good? Once the new phone has everything, remove your data from this one, so the two are not using the same chats.
+                  {t('Moving for good? Once the new phone has everything, remove your data from this one, so the two are not using the same chats.')}
                 </Text>
               )}
             </View>
@@ -803,8 +814,8 @@ function SyncSheet ({
             <View style={styles.sheetBlock}>
               <Segmented
                 options={[
-                  { id: 'receive', title: 'Receive here' },
-                  { id: 'send', title: 'Send from here' }
+                  { id: 'receive', title: t('Receive here') },
+                  { id: 'send', title: t('Send from here') }
                 ]}
                 selected={direction}
                 onSelect={(value) => {
@@ -815,20 +826,20 @@ function SyncSheet ({
 
               {sendEnded && direction === 'send' && (
                 <Text style={[styles.sheetNote, isDark ? darkStyles.muted : null]}>
-                  The last link ran out, so it no longer works. Scan the other device's code again to send a new one.
+                  {t('The last link ran out, so it no longer works. Scan the other device\'s code again to send a new one.')}
                 </Text>
               )}
 
               {direction === 'receive'
                 ? (
                   <>
-                    <Step number={1} text='On the phone that has your data, open Link Device and tap Sync with another device. On PeerSky Desktop, open Backup & Restore and use Identity transfer.' />
-                    <Step number={2} text='Scan this code with it, or paste it there.' />
+                    <Step number={1} text={t('On the phone that has your data, open Link Device and tap Sync with another device. On PeerSky Desktop, open Backup & Restore and use Identity transfer.')} />
+                    <Step number={2} text={t('Scan this code with it, or paste it there.')} />
                     {pairingCode
                       ? <QrCodeView value={pairingCode} size={200} />
                       : <ActivityIndicator style={styles.qrLoading} />}
                     <Pressable accessibilityRole='button' disabled={!pairingCode} hitSlop={8} onPress={copyCode}>
-                      <Text style={styles.linkText}>{copied ? 'Code copied' : 'Copy code instead'}</Text>
+                      <Text style={styles.linkText}>{copied ? t('Code copied') : t('Copy code instead')}</Text>
                     </Pressable>
                     {pairingCode !== '' && pairingExpiresAt > 0 && (
                       <Text style={[styles.sheetNote, isDark ? darkStyles.muted : null]}>
@@ -837,16 +848,16 @@ function SyncSheet ({
                     )}
                     {pairingRenewed && (
                       <Text style={[styles.sheetNote, isDark ? darkStyles.muted : null]}>
-                        The last code ran out, so this is a new one. If the other device has the old code, scan this one there instead.
+                        {t('The last code ran out, so this is a new one. If the other device has the old code, scan this one there instead.')}
                       </Text>
                     )}
-                    <Step number={3} text='It then shows a code of its own. Scan that one here.' />
+                    <Step number={3} text={t('It then shows a code of its own. Scan that one here.')} />
                   </>
                   )
                 : (
                   <>
-                    <Step number={1} text='On the other phone, open Link Device and tap Sync with another device. On PeerSky Desktop, open Backup & Restore.' />
-                    <Step number={2} text='Scan the code it shows. A phone gets everything on this one. The desktop gets your open pages, bookmarks, PeerChat rooms and recent notes.' />
+                    <Step number={1} text={t('On the other phone, open Link Device and tap Sync with another device. On PeerSky Desktop, open Backup & Restore.')} />
+                    <Step number={2} text={t('Scan the code it shows. A phone gets everything on this one. The desktop gets your open pages, bookmarks, PeerChat rooms and recent notes.')} />
                   </>
                   )}
 
@@ -857,14 +868,14 @@ function SyncSheet ({
                   onPress={() => void openScanner()}
                 >
                   <QrScanIcon width={18} height={18} color='#ffffff' />
-                  <Text style={styles.primaryButtonText}>Scan code</Text>
+                  <Text style={styles.primaryButtonText}>{t('Scan code')}</Text>
                 </Pressable>
                 <Pressable
                   accessibilityRole='button'
                   style={({ pressed }) => [styles.secondaryButton, isDark ? darkStyles.secondaryButton : null, pressed ? styles.pressed : null]}
                   onPress={() => void pasteCode()}
                 >
-                  <Text style={[styles.secondaryButtonText, isDark ? darkStyles.text : null]}>Paste code</Text>
+                  <Text style={[styles.secondaryButtonText, isDark ? darkStyles.text : null]}>{t('Paste code')}</Text>
                 </Pressable>
               </View>
             </View>
@@ -892,9 +903,9 @@ function SyncSheet ({
             />
           )}
           <SafeAreaView edges={['top', 'right', 'bottom', 'left']} style={styles.scannerOverlay}>
-            <Text style={styles.scannerHint}>Point the camera at the code on the other device</Text>
+            <Text style={styles.scannerHint}>{t('Point the camera at the code on the other device')}</Text>
             <Pressable accessibilityRole='button' style={styles.scannerClose} onPress={() => setScanning(false)}>
-              <Text style={styles.scannerCloseText}>Cancel</Text>
+              <Text style={styles.scannerCloseText}>{t('Cancel')}</Text>
             </Pressable>
           </SafeAreaView>
         </View>
@@ -975,7 +986,7 @@ function BackupSheet ({
 
     setError(null)
     setProgress(null)
-    setBusy('Packing up your data')
+    setBusy(t('Packing up your data'))
     const file = new File(Paths.cache, createBackupFileName())
     try {
       if (file.exists) file.delete()
@@ -985,7 +996,7 @@ function BackupSheet ({
         peerskyVersion: PEERSKY_VERSION,
         platform: Platform.OS
       })
-      if (!response.ok) throw new Error(response.error || 'Could not make the backup')
+      if (!response.ok) throw new Error(response.error || t('Could not make the backup'))
       if (!visibleRef.current) {
         deleteCachedFile(file.uri)
         return
@@ -1006,9 +1017,9 @@ function BackupSheet ({
 
   async function shareBackup (uri: string) {
     try {
-      if (!await Sharing.isAvailableAsync()) throw new Error('Sharing is not available on this phone')
+      if (!await Sharing.isAvailableAsync()) throw new Error(t('Sharing is not available on this phone'))
       await Sharing.shareAsync(uri, {
-        dialogTitle: 'Save your PeerSky backup',
+        dialogTitle: t('Save your PeerSky backup'),
         mimeType: 'application/octet-stream',
         UTI: 'public.data'
       })
@@ -1020,32 +1031,35 @@ function BackupSheet ({
   async function restoreBackup () {
     if (!restoreFile) return
     if (restoreFile.needsPassphrase && !passphrase) {
-      setError('Enter the passphrase for this backup.')
+      setError(t('Enter the passphrase for this backup.'))
       return
     }
 
     setError(null)
     setProgress(null)
-    setBusy('Unpacking your backup')
+    setBusy(t('Unpacking your backup'))
     try {
       const response = await call(RPC_BACKUP_RESTORE_FILE, { path: restoreFile.path, passphrase })
-      if (!response.ok) throw new Error(response.error || 'Could not open the backup')
+      if (!response.ok) throw new Error(response.error || t('Could not open the backup'))
       if (!visibleRef.current) {
         void call(RPC_IDENTITY_DISCARD_RESTORE, { restoreId: response.restoreId }).catch(() => {})
         return
       }
       setBusy(null)
+      const what = describeBackupContents(response.contents)
       Alert.alert(
-        'Replace what is on this phone?',
-        `${describeBackupContents(response.contents) || 'Everything'} from the backup will replace what is on this phone. PeerSky restarts to finish.`,
+        t('Replace what is on this phone?'),
+        what
+          ? t('{what} from the backup will replace what is on this phone. PeerSky restarts to finish.', { what })
+          : t('Everything from the backup will replace what is on this phone. PeerSky restarts to finish.'),
         [
           {
-            text: 'Cancel',
+            text: t('Cancel'),
             style: 'cancel',
             onPress: () => void call(RPC_IDENTITY_DISCARD_RESTORE, { restoreId: response.restoreId }).catch(() => {})
           },
           {
-            text: 'Restore',
+            text: t('Restore'),
             style: 'destructive',
             onPress: () => onConfirmRestore(response.restoreId)
           }
@@ -1061,10 +1075,10 @@ function BackupSheet ({
 
   return (
     <SheetFrame
-      title={isRestore ? 'Restore from a backup' : 'Save a backup file'}
+      title={isRestore ? t('Restore from a backup') : t('Save a backup file')}
       visible={visible}
       onClose={close}
-      closeLabel={savedFile ? 'Done' : 'Close'}
+      closeLabel={savedFile ? t('Done') : t('Close')}
     >
       {error && <Banner kind='error' text={error} onDismiss={() => setError(null)} />}
 
@@ -1073,16 +1087,16 @@ function BackupSheet ({
         : savedFile
           ? (
             <View style={styles.sheetBlock}>
-              <Banner kind='success' text={`Your backup is ready (${savedFile.size}).`} />
+              <Banner kind='success' text={t('Your backup is ready ({size}).', { size: savedFile.size })} />
               <Text style={[styles.sheetText, isDark ? darkStyles.muted : null]}>
-                Keep the file somewhere that is not this phone, like iCloud Drive, Google Drive or your computer, and keep the passphrase with it. PeerSky cannot open the file without it.
+                {t('Keep the file somewhere that is not this phone, like iCloud Drive, Google Drive or your computer, and keep the passphrase with it. PeerSky cannot open the file without it.')}
               </Text>
               <Pressable
                 accessibilityRole='button'
                 style={({ pressed }) => [styles.primaryButton, pressed ? styles.pressed : null]}
                 onPress={() => void shareBackup(savedFile.uri)}
               >
-                <Text style={styles.primaryButtonText}>Save or send it again</Text>
+                <Text style={styles.primaryButtonText}>{t('Save or send it again')}</Text>
               </Pressable>
             </View>
             )
@@ -1102,18 +1116,22 @@ function BackupSheet ({
                   )
                 : (
                   <Text style={[styles.sheetText, isDark ? darkStyles.muted : null]}>
-                    One file with your tabs, bookmarks, history, settings, chats, notes and files{estimate !== null ? `, about ${formatBackupSize(estimate)}` : ''}. It is locked with a passphrase you choose, and you will need it to restore.
+                    {estimate !== null
+                      ? t('One file with your tabs, bookmarks, history, settings, chats, notes and files, about {size}. It is locked with a passphrase you choose, and you will need it to restore.', { size: formatBackupSize(estimate) })
+                      : t('One file with your tabs, bookmarks, history, settings, chats, notes and files. It is locked with a passphrase you choose, and you will need it to restore.')}
                   </Text>
                   )}
 
               {(!isRestore || restoreFile.needsPassphrase) && (
                 <>
                   <TextInput
-                    accessibilityLabel='Passphrase'
+                    accessibilityLabel={t('Passphrase')}
                     autoCapitalize='none'
                     autoComplete='off'
                     autoCorrect={false}
-                    placeholder={isRestore ? 'Passphrase' : `Passphrase, at least ${MIN_BACKUP_PASSPHRASE_LENGTH} characters`}
+                    placeholder={isRestore
+                      ? t('Passphrase')
+                      : tp({ one: 'Passphrase, at least {count} character', other: 'Passphrase, at least {count} characters' }, MIN_BACKUP_PASSPHRASE_LENGTH)}
                     placeholderTextColor={isDark ? '#6f7b91' : '#8a96a8'}
                     secureTextEntry={!showPassphrase}
                     style={[styles.input, isDark ? darkStyles.input : null]}
@@ -1126,11 +1144,11 @@ function BackupSheet ({
                   />
                   {!isRestore && (
                     <TextInput
-                      accessibilityLabel='Confirm passphrase'
+                      accessibilityLabel={t('Confirm passphrase')}
                       autoCapitalize='none'
                       autoComplete='off'
                       autoCorrect={false}
-                      placeholder='Type it again'
+                      placeholder={t('Type it again')}
                       placeholderTextColor={isDark ? '#6f7b91' : '#8a96a8'}
                       secureTextEntry={!showPassphrase}
                       style={[styles.input, isDark ? darkStyles.input : null]}
@@ -1143,11 +1161,11 @@ function BackupSheet ({
                     />
                   )}
                   <Pressable accessibilityRole='button' hitSlop={8} onPress={() => setShowPassphrase((value) => !value)}>
-                    <Text style={styles.linkText}>{showPassphrase ? 'Hide passphrase' : 'Show passphrase'}</Text>
+                    <Text style={styles.linkText}>{showPassphrase ? t('Hide passphrase') : t('Show passphrase')}</Text>
                   </Pressable>
                   {!isRestore && (
                     <Text style={[styles.sheetNote, isDark ? darkStyles.muted : null]}>
-                      PeerSky cannot recover a forgotten passphrase. Write it down.
+                      {t('PeerSky cannot recover a forgotten passphrase. Write it down.')}
                     </Text>
                   )}
                 </>
@@ -1164,7 +1182,7 @@ function BackupSheet ({
                 ]}
                 onPress={() => void (isRestore ? restoreBackup() : createBackup())}
               >
-                <Text style={styles.primaryButtonText}>{isRestore ? 'Restore' : 'Create backup'}</Text>
+                <Text style={styles.primaryButtonText}>{isRestore ? t('Restore') : t('Create backup')}</Text>
               </Pressable>
             </KeyboardAvoidingView>
             )}
@@ -1270,7 +1288,7 @@ function LinkRow ({
 
   return (
     <Pressable
-      accessibilityLabel={description ? `${title}. ${description}` : title}
+      accessibilityLabel={description ? t('{title}. {description}', { title, description }) : title}
       accessibilityRole='button'
       disabled={busy}
       style={({ pressed }) => [...rowStyle, pressed ? styles.pressed : null]}
@@ -1346,7 +1364,7 @@ function Working ({ title, progress }: { title: string, progress: LinkDeviceProg
         </View>
       )}
       {described?.detail ? <Text style={[styles.sheetText, isDark ? darkStyles.muted : null]}>{described.detail}</Text> : null}
-      <Text style={[styles.sheetNote, isDark ? darkStyles.muted : null]}>Keep PeerSky open until this finishes.</Text>
+      <Text style={[styles.sheetNote, isDark ? darkStyles.muted : null]}>{t('Keep PeerSky open until this finishes.')}</Text>
     </View>
   )
 }

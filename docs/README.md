@@ -22,6 +22,7 @@
 
 - [Building and running](building.md): what you need, the first iPhone build, and the Android ad blocker setup.
 - [Testing guide](testing.md): what the suites cover and how to run them.
+- [Translations](translations.md): the 25 languages, how text goes through `t()`, and how to add text or a language.
 - [Releasing](store-release.md): what to do in App Store Connect and the Play Console, and what to tell the reviewers.
 
 ## Features

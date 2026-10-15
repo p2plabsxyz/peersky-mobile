@@ -4,6 +4,8 @@
 // leaves the sender, so explicit media never reaches the room. A modified
 // build can skip it, as with the text filters, but it stops the ordinary case.
 
+import { t, tp } from '../i18n/i18n.mjs'
+
 export const MEDIA_ALLOWED = 'allowed'
 export const MEDIA_BLOCKED = 'blocked'
 export const MEDIA_UNSCANNED = 'unscanned'
@@ -84,8 +86,10 @@ export function verdictFromPredictions (predictions, thresholds = {}) {
 }
 
 export function describeBlockedUpload (fileName) {
-  const name = fileName ? `'${fileName}'` : 'That file'
-  return `${name} looks explicit, so it was not sent. It would be shared with people who did not ask to see it.`
+  if (fileName) {
+    return t("'{name}' looks explicit, so it was not sent. It would be shared with people who did not ask to see it.", { name: fileName })
+  }
+  return t('That file looks explicit, so it was not sent. It would be shared with people who did not ask to see it.')
 }
 
 // Says what to do with a batch before any of it is uploaded: one refusal stops
@@ -105,7 +109,10 @@ export function isTooManyFiles (count, max = MAX_UPLOAD_BATCH) {
 }
 
 export function describeTooManyFiles (count, max = MAX_UPLOAD_BATCH) {
-  return `Pick up to ${max} files at a time. You chose ${count}.`
+  return tp({
+    one: 'Pick up to {count} file at a time. You chose {chosen}.',
+    other: 'Pick up to {count} files at a time. You chose {chosen}.'
+  }, max, { chosen: count })
 }
 
 // Evenly spaced, skipping the very first and last frame: a lot of clips open on

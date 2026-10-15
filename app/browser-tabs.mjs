@@ -5,6 +5,7 @@ import {
   MAX_BROWSER_HISTORY_ENTRIES,
   MAX_BROWSER_URL_LENGTH
 } from './browser-shell.mjs'
+import { t } from './i18n/i18n.mjs'
 import { getRuntimeAppFromUrl, getRuntimeAppUrl } from './internal-apps-registry.mjs'
 import { parsePeerChatDirectInvite, parsePeerChatInvite } from './peerchat/peerchat-invite.mjs'
 
@@ -22,7 +23,7 @@ const RECENTLY_CLOSED_VERSION = 1
 const SESSION_VERSION = 1
 // An incognito tab keeps no history, no preview and no cookies past its own
 // session, and is never written into the saved session.
-export function createBrowserTab (id, title = 'New tab', { incognito = false, now = Date.now() } = {}) {
+export function createBrowserTab (id, title = t('New tab'), { incognito = false, now = Date.now() } = {}) {
   return {
     id,
     title,
@@ -64,7 +65,7 @@ export function addBrowserTabState (state, { incognito = false } = {}) {
   if (state.tabs.length >= MAX_BROWSER_TABS) return state
 
   const id = `tab-${state.nextTabIndex}`
-  const tab = createBrowserTab(id, 'New tab', { incognito })
+  const tab = createBrowserTab(id, t('New tab'), { incognito })
 
   return {
     ...state,
@@ -89,7 +90,7 @@ export function addOpeningBrowserTabState (state, url, { incognito = false } = {
   })
 }
 
-export function addBackgroundBrowserTabState (state, url, title = 'New tab', { incognito = false } = {}) {
+export function addBackgroundBrowserTabState (state, url, title = t('New tab'), { incognito = false } = {}) {
   const previousActiveTabId = state.activeTabId
   const nextState = addBrowserTabState(state, { incognito })
   if (nextState === state) return state

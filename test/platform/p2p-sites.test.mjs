@@ -58,6 +58,6 @@ test('searching matches the titles shown, ignoring case', () => {
 test('P2P Data in Settings opens the P2P sites list', async () => {
   const { readFile } = await import('node:fs/promises')
   const page = await readFile(new URL('../../app/settings/P2PStorage.tsx', import.meta.url), 'utf8')
-  assert.match(page, /<SettingsSection title='P2P sites'>/)
+  assert.match(page, /<SettingsSection title=\{t\('P2P sites'\)\}>/)
   assert.match(page, /onPress=\{\(\) => onOpenUrl\(BROWSER_P2P_URL\)\}/)
 })

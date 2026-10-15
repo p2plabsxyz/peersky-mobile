@@ -150,6 +150,10 @@ import { SettingsScreen } from './settings/SettingsScreen'
 import type { SettingsPage } from './settings/SettingsScreen'
 import { BrowserOverflowMenu } from './settings/BrowserOverflowMenu'
 import { useBrowserPreferences } from './settings/useBrowserPreferences'
+import { applyLanguageSetting, resolveLanguage } from './i18n/apply-language'
+import { t, tp } from './i18n/i18n.mjs'
+import { languageNamed } from './i18n/languages.mjs'
+import { useT } from './i18n/useT'
 import { getOneOffSearchEngines } from './search/search-suggestions.mjs'
 import { getSiteDataHosts } from './privacy/site-data.mjs'
 import { BrowserToolbar, type AddressBarAction } from './BrowserToolbar'
@@ -434,6 +438,8 @@ type BrowserTabsState = {
 
 const DESKTOP_BROWSER_USER_AGENT = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 PeerSkyMobile/1.0'
 export default function App () {
+  // Every screen hangs off this one, so a new language re-renders them all.
+  useT()
   const systemColorScheme = useColorScheme()
   const browserInsets = useSafeAreaInsets()
   const { height: browserWindowHeight, width: browserWindowWidth } = useWindowDimensions()
@@ -463,6 +469,8 @@ export default function App () {
   const lastExternalLinkPromptAtRef = useRef(0)
   const [isBooting, setIsBooting] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
+  // The status line shows only on the Holesail screen, which only development
+  // builds have, so its text stays in English.
   const [status, setStatus] = useState('Starting Hyper runtime...')
   const [identityStoragePath, setIdentityStoragePath] = useState('')
   const [browserAddress, setBrowserAddress] = useState('')
@@ -487,7 +495,7 @@ export default function App () {
     historyIndex: number
   } | null>(null)
   const [browserCurrentUrl, setBrowserCurrentUrl] = useState(BROWSER_HOME_URL)
-  const [browserTitle, setBrowserTitle] = useState('New tab')
+  const [browserTitle, setBrowserTitle] = useState(t('New tab'))
   const [browserFavicon, setBrowserFavicon] = useState<string | null>(null)
   const [browserSource, setBrowserSource] = useState<BrowserSource>({ kind: 'home' })
   const [browserHistory, setBrowserHistory] = useState<BrowserHistoryEntry[]>([
@@ -505,6 +513,7 @@ export default function App () {
     setAddressBarPosition,
     setAppLogoColor,
     setForceDarkWebsites,
+    setLanguage: setLanguagePreference,
     setSearchSuggestionsEnabled,
     setAddressBarButton,
     setContentBlockingEnabled: setContentBlockingPreference,
@@ -520,6 +529,24 @@ export default function App () {
     setWebsiteTextScale,
     setYoutubeAdBlockingEnabled
   } = useBrowserPreferences()
+  // The text is in the language picked from the first frame (i18n/setup.ts).
+  // Once the preferences are read, which way the screens are laid out follows
+  // it too, from the next start.
+  useEffect(() => {
+    if (browserPreferencesReady) applyLanguageSetting(browserPreferences.language)
+  }, [browserPreferencesReady])
+
+  function changeLanguage (language: string) {
+    if (!setLanguagePreference(language)) return
+    if (!applyLanguageSetting(language)) return
+    const name = languageNamed(resolveLanguage(language))?.native || ''
+    Alert.alert(
+      t('Restart PeerSky'),
+      t('Close PeerSky and open it again to finish switching to {language}.', { language: name }),
+      [{ text: t('OK') }]
+    )
+  }
+
   const networkState = useNetworkState()
   const hyperOfflineNetworkAllowed = browserPreferencesReady && canUseNetworkForOfflineHyper({
     downloadOnlyOnWifi: browserPreferences.downloadOnlyOnWifi,
@@ -1184,7 +1211,7 @@ export default function App () {
     const rpc = rpcRef.current
 
     if (!rpc) {
-      throw new Error('Worklet is not ready')
+      throw new Error(t('Worklet is not ready'))
     }
 
     const request = rpc.request(command)
@@ -1194,7 +1221,7 @@ export default function App () {
     request.send(JSON.stringify(requestPayload))
 
     const reply = await request.reply()
-    if (!reply) return { ok: false, error: 'Missing response' }
+    if (!reply) return { ok: false, error: t('Missing response') }
 
     if (typeof reply === 'string') {
       return JSON.parse(reply)
@@ -1390,7 +1417,7 @@ export default function App () {
 
     if (nextUrl.length > MAX_BROWSER_URL_LENGTH) {
       cancelPendingBrowserLoad()
-      showBrowserError(BROWSER_HOME_URL, 'URL is too long')
+      showBrowserError(BROWSER_HOME_URL, t('URL is too long'))
       return
     }
 
@@ -1419,7 +1446,7 @@ export default function App () {
     if (isBrowserP2pUrl(nextUrl)) {
       cancelPendingBrowserLoad()
       commitBrowserEntry(BROWSER_P2P_URL, { kind: 'p2p' })
-      setBrowserTitle('P2P sites')
+      setBrowserTitle(t('P2P sites'))
       return
     }
 
@@ -1449,7 +1476,7 @@ export default function App () {
     }
 
     cancelPendingBrowserLoad()
-    showBrowserError(nextUrl, 'Unsupported URL scheme')
+    showBrowserError(nextUrl, t('Unsupported URL scheme'))
   }
 
   async function loadRestoredBrowserUrl (url: string) {
@@ -1457,7 +1484,7 @@ export default function App () {
 
     if (url === BROWSER_HOME_URL) {
       replaceBrowserEntry(BROWSER_HOME_URL, { kind: 'home' })
-      setBrowserTitle('New tab')
+      setBrowserTitle(t('New tab'))
       return
     }
 
@@ -1468,7 +1495,7 @@ export default function App () {
 
     if (isBrowserP2pUrl(url)) {
       replaceBrowserEntry(BROWSER_P2P_URL, { kind: 'p2p' })
-      setBrowserTitle('P2P sites')
+      setBrowserTitle(t('P2P sites'))
       return
     }
 
@@ -1495,7 +1522,7 @@ export default function App () {
       return
     }
 
-    showBrowserError(url, 'Unsupported restored URL scheme')
+    showBrowserError(url, t('Unsupported restored URL scheme'))
   }
 
   async function loadHyperBrowserUrl (
@@ -1505,7 +1532,7 @@ export default function App () {
   ) {
     const loadSeq = ++browserLoadSeqRef.current
     setBrowserIsLoading(true)
-    setBrowserTitle('Loading Hyper...')
+    setBrowserTitle(t('Loading Hyper...'))
     setStatus(`Loading ${nextUrl}`)
 
     try {
@@ -1517,12 +1544,12 @@ export default function App () {
       if (isStaleBrowserLoad(loadSeq, browserLoadSeqRef.current)) return
 
       if (!response.ok) {
-        throw new Error(response.error || response.statusText || 'Unable to load Hyper page')
+        throw new Error(response.error || response.statusText || t('Unable to load Hyper page'))
       }
 
       if (response.downloadUrl) {
         if (!allowDownload) {
-          throw new Error('Open this Hyper file from the address bar to download it.')
+          throw new Error(t('Open this Hyper file from the address bar to download it.'))
         }
 
         const accepted = await requestBrowserDownload(response.downloadUrl)
@@ -1589,7 +1616,7 @@ export default function App () {
         replaceBrowserEntry(nextUrl, source)
       }
 
-      setBrowserTitle('Page failed')
+      setBrowserTitle(t('Page failed'))
       setStatus(message)
     } finally {
       if (loadSeq === browserLoadSeqRef.current) {
@@ -1600,7 +1627,7 @@ export default function App () {
 
   function openBrowserHome () {
     commitBrowserEntry(BROWSER_HOME_URL, { kind: 'home' })
-    setBrowserTitle('New tab')
+    setBrowserTitle(t('New tab'))
     setStatus('Browser home')
   }
 
@@ -1684,14 +1711,14 @@ export default function App () {
         callRpc(RPC_PEERTUNES_START, {}),
         new Promise<never>((_resolve, reject) => {
           setTimeout(
-            () => reject(new Error('PeerTunes took too long to start. Try again.')),
+            () => reject(new Error(t('PeerTunes took too long to start. Try again.'))),
             PEERTUNES_START_TIMEOUT_MS
           )
         })
       ])
 
       if (!response.ok || !response.localUrl || !response.token) {
-        const message = response.error || 'Failed starting PeerTunes'
+        const message = response.error || t('Failed starting PeerTunes')
         setPeertunesError(message)
         setStatus(message)
         return
@@ -1721,7 +1748,7 @@ export default function App () {
     }
 
     commitBrowserEntry(targetUrl, source)
-    setBrowserTitle('Page failed')
+    setBrowserTitle(t('Page failed'))
     setStatus(message)
   }
 
@@ -1814,11 +1841,11 @@ export default function App () {
 
     const prompt = new Promise<boolean>((resolve) => {
       Alert.alert(
-        'Let this site publish?',
-        `${formatBridgeSite(siteId)} wants to create hyper:// drives on this phone and save files to them. Anyone with the link can read what it publishes.`,
+        t('Let this site publish?'),
+        t('{site} wants to create hyper:// drives on this phone and save files to them. Anyone with the link can read what it publishes.', { site: formatBridgeSite(siteId) }),
         [
-          { text: 'Don\'t allow', style: 'cancel', onPress: () => { setPublishingSite(siteId, 'block'); resolve(false) } },
-          { text: 'Allow', onPress: () => { setPublishingSite(siteId, 'allow'); resolve(true) } }
+          { text: t('Don\'t allow'), style: 'cancel', onPress: () => { setPublishingSite(siteId, 'block'); resolve(false) } },
+          { text: t('Allow'), onPress: () => { setPublishingSite(siteId, 'allow'); resolve(true) } }
         ],
         { cancelable: true, onDismiss: () => resolve(false) }
       )
@@ -2069,7 +2096,7 @@ export default function App () {
     setBrowserTabsVisible(false)
     setBrowserMenuVisible(false)
     setBrowserMediaTarget(null)
-    setBrowserTitle('New tab')
+    setBrowserTitle(t('New tab'))
     return true
   }
 
@@ -2102,8 +2129,9 @@ export default function App () {
   function onBrowserNewIncognitoTab () {
     if (!privateBrowsingSupported) {
       Alert.alert(
-        'Incognito needs a newer WebView',
-        'Update Android System WebView from Google Play, then try again.'
+        t('Incognito needs a newer WebView'),
+        t('Update Android System WebView from Google Play, then try again.'),
+        [{ text: t('OK') }]
       )
       return
     }
@@ -2122,9 +2150,9 @@ export default function App () {
     const result = toggleBrowserBookmark(page)
 
     if (result === 'limit-reached') {
-      const message = 'Delete a bookmark before adding another.'
+      const message = t('Delete a bookmark before adding another.')
       setStatus(`Maximum of 200 bookmarks reached. ${message}`)
-      Alert.alert('Bookmark limit reached', message)
+      Alert.alert(t('Bookmark limit reached'), message, [{ text: t('OK') }])
     } else if (result) {
       setStatus(result === 'added' ? 'Bookmark added' : 'Bookmark removed')
       // A new bookmark can go straight into a folder. A removed one can come
@@ -2132,14 +2160,14 @@ export default function App () {
       setBrowserToast(result === 'added'
         ? {
             id: Date.now(),
-            message: 'Bookmarked',
-            actionLabel: 'Add to folder',
+            message: t('Bookmarked'),
+            actionLabel: t('Add to folder'),
             onAction: () => setBookmarkFolderUrl(page.url)
           }
         : {
             id: Date.now(),
-            message: 'Bookmark removed',
-            actionLabel: 'Undo',
+            message: t('Bookmark removed'),
+            actionLabel: t('Undo'),
             onAction: () => { if (place) restoreBrowserBookmark(place) }
           })
     } else {
@@ -2158,8 +2186,9 @@ export default function App () {
 
     if (result === 'limit-reached') {
       Alert.alert(
-        'Home is full',
-        `Remove one of your ${MAX_BROWSER_FAVOURITES} favourites to add this one.`
+        t('Home is full'),
+        tp({ one: 'Remove one of your {count} favourites to add this one.', other: 'Remove one of your {count} favourites to add this one.' }, MAX_BROWSER_FAVOURITES),
+        [{ text: t('OK') }]
       )
     } else if (result) {
       setStatus(result === 'added' ? 'Added to home' : 'Removed from home')
@@ -2171,11 +2200,11 @@ export default function App () {
   function onBrowserRemoveFavourite (favourite: { title: string, url: string }) {
     Alert.alert(
       favourite.title,
-      'Remove this from the home screen?',
+      t('Remove this from the home screen?'),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('Cancel'), style: 'cancel' },
         {
-          text: 'Remove',
+          text: t('Remove'),
           style: 'destructive',
           onPress: () => {
             if (removeBrowserFavourite(favourite.url)) setStatus('Removed from home')
@@ -2212,7 +2241,7 @@ export default function App () {
     updateBrowserTabsState((state) => addBackgroundBrowserTabState(
       state,
       targetUrl,
-      title || 'Media',
+      title || t('Media'),
       { incognito: isIncognitoTab(state.activeTabId) }
     ) as BrowserTabsState)
     setBrowserMediaTarget(null)
@@ -2230,11 +2259,11 @@ export default function App () {
     leaveFileHandoff(tabId, downloadUrl, webViewTag)
     const { name, host } = describeBrowserDownload(downloadUrl)
     Alert.alert(
-      'Download this file?',
-      host ? `${name}\nfrom ${host}` : name,
+      t('Download this file?'),
+      host ? t('{name}\nfrom {host}', { name, host }) : name,
       [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Download', onPress: () => startBrowserDownload(downloadUrl, tabId) }
+        { text: t('Cancel'), style: 'cancel' },
+        { text: t('Download'), onPress: () => startBrowserDownload(downloadUrl, tabId) }
       ]
     )
   }
@@ -2610,7 +2639,7 @@ export default function App () {
     if (!closed) return
     const currentTabsState = browserTabsStateRef.current
     if (currentTabsState.tabs.length >= MAX_BROWSER_TABS) {
-      Alert.alert('Too many tabs', `Close a tab first. PeerSky keeps up to ${MAX_BROWSER_TABS} open.`)
+      Alert.alert(t('Too many tabs'), tp({ one: 'Close a tab first. PeerSky keeps up to {count} open.', other: 'Close a tab first. PeerSky keeps up to {count} open.' }, MAX_BROWSER_TABS), [{ text: t('OK') }])
       return
     }
     browserUserInteractedRef.current = true
@@ -2666,12 +2695,12 @@ export default function App () {
   // nothing is left to say where you have been or what you searched for.
   function onBrowserBurnTabs () {
     Alert.alert(
-      'Burn tabs, history and cached data?',
-      'This closes every tab and deletes your browsing and search history and cached website files. Bookmarks and downloads stay.',
+      t('Burn tabs, history and cached data?'),
+      t('This closes every tab and deletes your browsing and search history and cached website files. Bookmarks and downloads stay.'),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('Cancel'), style: 'cancel' },
         {
-          text: 'Burn',
+          text: t('Burn'),
           style: 'destructive',
           onPress: () => {
             // The flames go up first and the tabs go under their cover.
@@ -2694,7 +2723,7 @@ export default function App () {
     const historyCleared = clearBrowserHistory()
     updateRecentlyClosedTabs([])
     setBrowserTabsVisible(false)
-    setBrowserTitle('New tab')
+    setBrowserTitle(t('New tab'))
     setStatus(
       !sessionSaved
         ? 'Tabs burned, but the fresh session could not be saved'
@@ -2708,12 +2737,12 @@ export default function App () {
 
   function onBrowserCloseAllTabs () {
     Alert.alert(
-      'Close all tabs?',
-      'This closes every open tab without clearing cached website data.',
+      t('Close all tabs?'),
+      t('This closes every open tab without clearing cached website data.'),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('Cancel'), style: 'cancel' },
         {
-          text: 'Close all',
+          text: t('Close all'),
           style: 'destructive',
           onPress: () => {
             const closedAt = Date.now()
@@ -2723,7 +2752,7 @@ export default function App () {
             updateRecentlyClosedTabs(rememberClosedBrowserTabs(recentlyClosedTabsRef.current, closed) as ClosedBrowserTab[])
             const { previewCacheCleared, sessionSaved } = onBrowserResetTabs()
             setBrowserTabsVisible(false)
-            setBrowserTitle('New tab')
+            setBrowserTitle(t('New tab'))
             setStatus(
               !sessionSaved
                 ? 'All tabs closed, but the fresh session could not be saved'
@@ -2893,12 +2922,15 @@ export default function App () {
     }
 
     Alert.alert(
-      'Open another app?',
-      `This page wants to open ${getExternalAppName(externalLink.scheme)}:\n\n${formatExternalLinkForPrompt(externalLink.url)}`,
+      t('Open another app?'),
+      t('This page wants to open {app}:\n\n{link}', {
+        app: getExternalAppName(externalLink.scheme),
+        link: formatExternalLinkForPrompt(externalLink.url)
+      }),
       [
-        { text: 'Cancel', style: 'cancel', onPress: resetPrompt },
+        { text: t('Cancel'), style: 'cancel', onPress: resetPrompt },
         {
-          text: 'Open',
+          text: t('Open'),
           onPress: () => launchExternalAppLink(externalLink.url)
         }
       ],
@@ -2928,17 +2960,17 @@ export default function App () {
   function offerExternalLinkFallback (scheme: string, targetUrl: string) {
     const target = getExternalLinkTarget(targetUrl)
     if (!target) {
-      Alert.alert('Unable to open link', 'No app on this device can open this link.')
+      Alert.alert(t('Unable to open link'), t('No app on this device can open this link.'), [{ text: t('OK') }])
       return
     }
 
     Alert.alert(
-      `No app for ${getExternalAppName(scheme)}`,
+      t('No app for {app}', { app: getExternalAppName(scheme) }),
       target,
       [
-        { text: 'Close', style: 'cancel' },
+        { text: t('Close'), style: 'cancel' },
         {
-          text: 'Copy',
+          text: t('Copy'),
           onPress: () => {
             Clipboard.setString(target)
             setStatus('Copied')
@@ -2981,7 +3013,7 @@ export default function App () {
     const webView = browserWebViewRefs.current.get(tabId)
 
     if (!token || !webView) {
-      Alert.alert('Unable to print', 'This page cannot be printed')
+      Alert.alert(t('Unable to print'), t('This page cannot be printed'), [{ text: t('OK') }])
       return
     }
     webView.injectJavaScript(createBrowserPrintScript(token))
@@ -2995,7 +3027,7 @@ export default function App () {
     const webView = browserWebViewRefs.current.get(tabId)
 
     if (!token || !webView) {
-      setBrowserToast({ id: Date.now(), message: 'Reader view is not available on this page' })
+      setBrowserToast({ id: Date.now(), message: t('Reader view is not available on this page') })
       return
     }
     webView.injectJavaScript(createReaderScript(token))
@@ -3014,8 +3046,8 @@ export default function App () {
       if (response.noDevices) {
         setBrowserToast({
           id: Date.now(),
-          message: 'Link another device to send pages to it',
-          actionLabel: 'Link Device',
+          message: t('Link another device to send pages to it'),
+          actionLabel: t('Link Device'),
           onAction: () => {
             setBrowserSettingsInitialPage('link-device')
             setBrowserSettingsCloseOnBack(true)
@@ -3025,11 +3057,11 @@ export default function App () {
       } else {
         setBrowserToast({
           id: Date.now(),
-          message: response.waiting ? 'It goes to your other device once that is online' : 'Sent to your devices'
+          message: response.waiting ? t('It goes to your other device once that is online') : t('Sent to your devices')
         })
       }
     } catch {
-      setBrowserToast({ id: Date.now(), message: 'This page could not be sent to your devices' })
+      setBrowserToast({ id: Date.now(), message: t('This page could not be sent to your devices') })
     }
   }
 
@@ -3043,10 +3075,10 @@ export default function App () {
     const icon = browserFavicon && /^https?:\/\//i.test(browserFavicon) ? browserFavicon : null
     try {
       if (!await homeScreen.addPage(browserCurrentUrl, browserTitle, icon)) {
-        setBrowserToast({ id: Date.now(), message: 'This home screen does not take shortcuts' })
+        setBrowserToast({ id: Date.now(), message: t('This home screen does not take shortcuts') })
       }
     } catch {
-      setBrowserToast({ id: Date.now(), message: 'This page could not be added to the home screen' })
+      setBrowserToast({ id: Date.now(), message: t('This page could not be added to the home screen') })
     }
   }
 
@@ -3132,7 +3164,7 @@ export default function App () {
   function applyP2pmdJoinKey (value: string) {
     const roomKey = normalizeP2pmdRoomKey(value)
     if (!roomKey) {
-      setP2pmdSetupError('Invalid note key. Use an hs:// note key.')
+      setP2pmdSetupError(t('Invalid note key. Use an hs:// note key.'))
       return false
     }
 
@@ -3145,12 +3177,12 @@ export default function App () {
     try {
       const clipboardValue = await Clipboard.getString()
       if (!clipboardValue.trim()) {
-        setP2pmdSetupError('The clipboard does not contain a note key.')
+        setP2pmdSetupError(t('The clipboard does not contain a note key.'))
         return
       }
       applyP2pmdJoinKey(clipboardValue)
     } catch (error) {
-      setP2pmdSetupError(error instanceof Error ? error.message : 'Unable to read the clipboard.')
+      setP2pmdSetupError(error instanceof Error ? error.message : t('Unable to read the clipboard.'))
     }
   }
 
@@ -3159,7 +3191,7 @@ export default function App () {
       ? p2pmdCameraPermission
       : await requestP2pmdCameraPermission()
     if (!permission.granted) {
-      setP2pmdSetupError('Camera permission is required to scan a note key.')
+      setP2pmdSetupError(t('Camera permission is required to scan a note key.'))
       return
     }
 
@@ -3177,7 +3209,7 @@ export default function App () {
   function onP2pmdNameSave () {
     const saved = saveP2pmdPeerDisplayName(p2pmdNameDraft)
     if (!saved.ok) {
-      setP2pmdSetupError('Pick a name first. Anything up to 32 characters works.')
+      setP2pmdSetupError(t('Pick a name first. Anything up to 32 characters works.'))
       return
     }
     tapFeedback()
@@ -3216,7 +3248,7 @@ export default function App () {
     setP2pmdPublishUrl(null)
     setP2pmdEditorHtml(null)
     setP2pmdSetupError(null)
-    setP2pmdSyncStatus(isReopening ? 'Restoring room...' : 'Creating room...')
+    setP2pmdSyncStatus(isReopening ? t('Restoring room...') : t('Creating room...'))
 
     try {
       const response = await callRpc(RPC_P2PMD_ROOM_CREATE, {
@@ -3227,7 +3259,7 @@ export default function App () {
       })
 
       if (!response.ok || !response.room) {
-        const message = response.error || 'Failed creating P2PMD room'
+        const message = response.error || t('Failed creating P2PMD room')
         setP2pmdSetupError(message)
         setP2pmdSyncStatus('Ready')
         setStatus(message)
@@ -3264,7 +3296,7 @@ export default function App () {
     setP2pmdPublishUrl(null)
     setP2pmdEditorHtml(null)
     setP2pmdSetupError(null)
-    setP2pmdSyncStatus('Joining room...')
+    setP2pmdSyncStatus(t('Joining room...'))
 
     try {
       const response = await callRpc(RPC_P2PMD_ROOM_JOIN, {
@@ -3273,7 +3305,7 @@ export default function App () {
       })
 
       if (!response.ok || !response.room) {
-        const message = response.error || 'Failed joining P2PMD room'
+        const message = response.error || t('Failed joining P2PMD room')
         setP2pmdSetupError(message)
         setP2pmdSyncStatus('Ready')
         setStatus(message)
@@ -3289,7 +3321,7 @@ export default function App () {
       setP2pmdRoom(response.room)
       setP2pmdUrl(response.room.localUrl)
       rememberP2pmdRoom(response.room.key, 'client')
-      setP2pmdSyncStatus(response.warning || 'Joining room page...')
+      setP2pmdSyncStatus(response.warning || t('Joining room page...'))
       setStatus('P2PMD room joined')
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
@@ -3305,7 +3337,7 @@ export default function App () {
   // that device has it open, so both edit the same note, and hosted from this
   // phone's copy only when nobody answers.
   async function onP2pmdSharedNoteOpen (roomKey: string) {
-    const looking = 'Looking for this note on your other devices...'
+    const looking = t('Looking for this note on your other devices...')
     ensureP2pmdPeerName()
     setIsLoading(true)
     setStatus(looking)
@@ -3328,14 +3360,14 @@ export default function App () {
         setP2pmdRoom(response.room)
         setP2pmdUrl(response.room.localUrl)
         rememberP2pmdRoom(response.room.key, 'host')
-        setP2pmdSyncStatus('Joining room page...')
+        setP2pmdSyncStatus(t('Joining room page...'))
         setStatus('Joined the note on your other device')
         return
       }
       if (response.noHost) {
         hostCopy = true
       } else {
-        const message = response.error || 'Failed opening the note'
+        const message = response.error || t('Failed opening the note')
         setP2pmdSetupError(message)
         setP2pmdSyncStatus('Ready')
         setStatus(message)
@@ -3397,11 +3429,11 @@ export default function App () {
   function confirmForgetP2pmdRoom (room: P2pmdRoomHistoryEntry) {
     const name = room.label || formatP2pmdRoomHistoryKey(room.key)
     Alert.alert(
-      'Remove from recents?',
-      `"${name}" goes off this list. The note itself stays in the room and in Settings > P2P Data.`,
+      t('Remove from recents?'),
+      t('"{name}" goes off this list. The note itself stays in the room and in Settings > P2P Data.', { name }),
       [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Remove', style: 'destructive', onPress: () => forgetP2pmdRoom(room.key) }
+        { text: t('Cancel'), style: 'cancel' },
+        { text: t('Remove'), style: 'destructive', onPress: () => forgetP2pmdRoom(room.key) }
       ]
     )
   }
@@ -3466,8 +3498,8 @@ export default function App () {
 
     try {
       await shareLink({
-        title: 'Join my P2PMD note',
-        message: `Join my P2PMD note:\n${p2pmdRoom.key}`
+        title: t('Join my P2PMD note'),
+        message: t('Join my P2PMD note:\n{key}', { key: p2pmdRoom.key })
       })
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error))
@@ -3477,7 +3509,7 @@ export default function App () {
   async function loadP2pmdEditorHtml () {
     const response = await callRpc(RPC_P2PMD_EDITOR_PAGE, {})
     if (!response.ok || typeof response.html !== 'string') {
-      throw new Error(response.error || 'Unable to load P2PMD editor page')
+      throw new Error(response.error || t('Unable to load P2PMD editor page'))
     }
 
     setP2pmdEditorHtml(response.html)
@@ -3505,12 +3537,12 @@ export default function App () {
   function onP2pmdPublishToHyper () {
     if (p2pmdPublishInFlightRef.current) return
     Alert.alert(
-      'Who can open it?',
-      'Public: anyone with the link can open it, straight from this phone.\n\nPrivate: encrypted, so only your linked devices, the ones that share your identity, can open it.',
+      t('Who can open it?'),
+      t('Public: anyone with the link can open it, straight from this phone.\n\nPrivate: encrypted, so only your linked devices, the ones that share your identity, can open it.'),
       [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Private', onPress: chooseP2pmdPrivatePublish },
-        { text: 'Public', onPress: () => requestP2pmdPublish('public') }
+        { text: t('Cancel'), style: 'cancel' },
+        { text: t('Private'), onPress: chooseP2pmdPrivatePublish },
+        { text: t('Public'), onPress: () => requestP2pmdPublish('public') }
       ],
       { cancelable: true }
     )
@@ -3525,12 +3557,12 @@ export default function App () {
       return
     }
     Alert.alert(
-      'Link PeerSky Desktop first',
-      'A private note is encrypted with your identity\'s key, so only your linked devices can open it. Bring your identity over in Link Device, then publish again.',
+      t('Link PeerSky Desktop first'),
+      t('A private note is encrypted with your identity\'s key, so only your linked devices can open it. Bring your identity over in Link Device, then publish again.'),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('Cancel'), style: 'cancel' },
         {
-          text: 'Link Device',
+          text: t('Link Device'),
           onPress: () => {
             setBrowserSettingsInitialPage('link-device')
             setBrowserSettingsCloseOnBack(true)
@@ -3544,7 +3576,7 @@ export default function App () {
 
   function requestP2pmdPublish (visibility: 'public' | 'private') {
     if (p2pmdPublishInFlightRef.current) return
-    setP2pmdSyncStatus('Publishing to Hyper...')
+    setP2pmdSyncStatus(t('Publishing to Hyper...'))
     const nonce = createP2pmdNonce(Crypto.getRandomValues(new Uint8Array(16)))
     p2pmdPublishNonceRef.current = nonce
     p2pmdPublishVisibilityRef.current = visibility
@@ -3562,7 +3594,7 @@ export default function App () {
     if (p2pmdPublishInFlightRef.current) return
 
     if (typeof content !== 'string') {
-      setP2pmdSyncStatus('Publish failed')
+      setP2pmdSyncStatus(t('Publish failed'))
       setStatus('Unable to publish P2PMD document: invalid document content')
       return
     }
@@ -3579,17 +3611,17 @@ export default function App () {
       })
 
       if (!response.ok || typeof response.url !== 'string') {
-        throw new Error(response.error || 'Unable to publish document to Hyper')
+        throw new Error(response.error || t('Unable to publish document to Hyper'))
       }
 
       setP2pmdPublishedVisibility(visibility)
       setP2pmdPublishUrl(response.url)
-      setP2pmdSyncStatus('Published to Hyper')
+      setP2pmdSyncStatus(t('Published to Hyper'))
       setStatus(`P2PMD published: ${response.url}`)
       promptPublishedLink(response.url, mode === 'slides')
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      setP2pmdSyncStatus(`Publish failed: ${message}`)
+      setP2pmdSyncStatus(t('Publish failed: {error}', { error: message }))
       setStatus(message)
     } finally {
       p2pmdPublishInFlightRef.current = false
@@ -3692,7 +3724,7 @@ export default function App () {
           setStatus(`P2PMD remote update received (${parsed.contentLength} characters)`)
           break
         case 'p2pmd-document-error':
-          setP2pmdSyncStatus(parsed.error ? `Error: ${parsed.error}` : 'Sync error')
+          setP2pmdSyncStatus(parsed.error ? t('Error: {error}', { error: parsed.error }) : t('Sync error'))
           setStatus(parsed.error || 'P2PMD document request failed')
           break
         case 'p2pmd-view-mode':
@@ -3738,6 +3770,8 @@ export default function App () {
     p2pmdRoomHistory,
     p2pmdRoomHistory.length > P2PMD_RECENT_SEARCH_AFTER ? p2pmdRecentQuery : ''
   ) as P2pmdRoomHistoryEntry[]
+  // The name keeps its own style wherever the language puts it in the sentence.
+  const [p2pmdNameBefore, p2pmdNameAfter = ''] = t('You are {name}').split('{name}')
   // The Hyperdrive screen's own page colour, so its welcome sits on the same.
   const hyperdrivePageColor = browserIsDark ? '#1f2027' : '#f5f7fb'
 
@@ -4138,6 +4172,8 @@ export default function App () {
             appLogoColor={browserPreferences.appLogoColor}
             deviceSyncRevision={deviceSyncRevision}
             forceDarkWebsites={browserPreferences.forceDarkWebsites}
+            language={browserPreferences.language}
+            onLanguageChange={changeLanguage}
             contentBlockingEnabled={browserPreferences.contentBlockingEnabled}
             customSearchUrl={browserPreferences.customSearchUrl}
             downloadOnlyOnWifi={browserPreferences.downloadOnlyOnWifi}
@@ -4253,8 +4289,8 @@ export default function App () {
           <Text style={[styles.p2pmdWorkspaceTitle, p2pmdTheme?.p2pmdWorkspaceTitle]}>P2PMD</Text>
           <Pressable
             accessibilityRole='button'
-            accessibilityLabel={`Peers: ${p2pmdParticipants ?? 'unknown'}`}
-            accessibilityHint='Open the room peer dashboard'
+            accessibilityLabel={t('Peers: {count}', { count: p2pmdParticipants ?? t('unknown') })}
+            accessibilityHint={t('Open the room peer dashboard')}
             style={[styles.p2pmdWorkspaceParticipants, p2pmdTheme?.p2pmdWorkspaceParticipants]}
             onPress={onP2pmdOpenPeerDashboard}
           >
@@ -4262,7 +4298,7 @@ export default function App () {
               numberOfLines={1}
               style={[styles.p2pmdWorkspaceParticipantsText, p2pmdTheme?.p2pmdWorkspaceParticipantsText]}
             >
-              Peers: {p2pmdParticipants ?? '-'}
+              {t('Peers: {count}', { count: p2pmdParticipants ?? '-' })}
             </Text>
           </Pressable>
           <Pressable
@@ -4284,14 +4320,14 @@ export default function App () {
                   </View>
                   )}
               <Text style={styles.p2pmdPreviewButtonText}>
-                {p2pmdViewMode === 'edit' ? 'Preview' : 'Edit'}
+                {p2pmdViewMode === 'edit' ? t('Preview') : t('Edit')}
               </Text>
             </View>
           </Pressable>
           {/* The tabs, as on the toolbar. A note fills the screen, and the way
               to another tab was the menu's New tab and then the tab list. */}
           <Pressable
-            accessibilityLabel={`Open tabs, ${browserTabsState.tabs.length} open`}
+            accessibilityLabel={tp({ one: 'Open tabs, {count} open', other: 'Open tabs, {count} open' }, browserTabsState.tabs.length)}
             accessibilityRole='button'
             style={styles.p2pmdTabsButton}
             onPress={() => {
@@ -4327,12 +4363,12 @@ export default function App () {
         {!isP2pmdLandscapeSlides && <View style={[styles.p2pmdWorkspaceMeta, p2pmdTheme?.p2pmdWorkspaceMeta]}>
           <View style={styles.p2pmdRoomIdentity}>
             <View style={styles.p2pmdWorkspaceKeyRow}>
-              <Text style={[styles.p2pmdWorkspaceKeyLabel, p2pmdTheme?.p2pmdWorkspaceKeyLabel]}>Key</Text>
+              <Text style={[styles.p2pmdWorkspaceKeyLabel, p2pmdTheme?.p2pmdWorkspaceKeyLabel]}>{t('Key')}</Text>
               <Text numberOfLines={1} ellipsizeMode='middle' style={[styles.p2pmdWorkspaceKey, p2pmdTheme?.p2pmdWorkspaceKey]}>
                 {p2pmdRoom.key}
               </Text>
               {p2pmdSyncDisplay.kind === 'dot' && (
-                <View accessible accessibilityLabel='Unsaved changes' style={styles.p2pmdUnsavedDot} />
+                <View accessible accessibilityLabel={t('Unsaved changes')} style={styles.p2pmdUnsavedDot} />
               )}
             </View>
             <View style={styles.p2pmdWorkspaceUrlRow}>
@@ -4340,21 +4376,21 @@ export default function App () {
                 {p2pmdRoom.localUrl}
               </Text>
               <Text style={[styles.p2pmdWorkspaceRole, styles.p2pmdWorkspaceRoleInline, p2pmdTheme?.p2pmdWorkspaceRole, p2pmdRoom.role === 'host' ? [styles.p2pmdWorkspaceRoleHost, p2pmdTheme?.p2pmdWorkspaceRoleHost] : null]}>
-                {p2pmdRoom.role}
+                {p2pmdRoom.role === 'host' ? t('host') : t('client')}
               </Text>
             </View>
             {p2pmdPublishUrl && (
               <Pressable
-                accessibilityHint='Shows the published link to share or copy'
+                accessibilityHint={t('Shows the published link to share or copy')}
                 accessibilityRole='button'
                 onPress={() => setP2pmdPublishSheet(p2pmdPublishedModeRef.current)}
                 style={styles.p2pmdPublishedUrlRow}
               >
-                <Text style={[styles.p2pmdPublishedUrlLabel, p2pmdTheme?.p2pmdPublishedUrlLabel]}>Published</Text>
+                <Text style={[styles.p2pmdPublishedUrlLabel, p2pmdTheme?.p2pmdPublishedUrlLabel]}>{t('Published')}</Text>
                 <Text numberOfLines={1} ellipsizeMode='middle' style={[styles.p2pmdPublishedUrl, p2pmdTheme?.p2pmdPublishedUrl]}>
                   {p2pmdPublishUrl}
                 </Text>
-                <Text style={[styles.p2pmdPublishedUrlAction, p2pmdTheme?.p2pmdPublishedUrlAction]}>Share</Text>
+                <Text style={[styles.p2pmdPublishedUrlAction, p2pmdTheme?.p2pmdPublishedUrlAction]}>{t('Share')}</Text>
               </Pressable>
             )}
             {p2pmdSyncDisplay.kind === 'text' && (
@@ -4364,7 +4400,7 @@ export default function App () {
             )}
           </View>
           <Pressable
-            accessibilityLabel='Share note'
+            accessibilityLabel={t('Share note')}
             accessibilityRole='button'
             style={[styles.p2pmdMetaButton, p2pmdTheme?.p2pmdMetaButton, styles.p2pmdMetaIconButton]}
             onPress={() => void onP2pmdShareRoom()}
@@ -4377,14 +4413,14 @@ export default function App () {
             onPress={onP2pmdPublishToHyper}
             disabled={isBooting || isLoading || isP2pmdPublishing}
           >
-            <Text style={[styles.p2pmdMetaButtonText, p2pmdTheme?.p2pmdMetaButtonText]}>Publish</Text>
+            <Text style={[styles.p2pmdMetaButtonText, p2pmdTheme?.p2pmdMetaButtonText]}>{t('Publish')}</Text>
           </Pressable>
           <Pressable
             style={[styles.p2pmdMetaButton, p2pmdTheme?.p2pmdMetaButton, styles.p2pmdMetaButtonDanger, p2pmdTheme?.p2pmdMetaButtonDanger]}
             onPress={() => void onP2pmdRoomDisconnect()}
             disabled={isBooting || isLoading}
           >
-            <Text style={[styles.p2pmdMetaButtonText, p2pmdTheme?.p2pmdMetaButtonText]}>Leave</Text>
+            <Text style={[styles.p2pmdMetaButtonText, p2pmdTheme?.p2pmdMetaButtonText]}>{t('Leave')}</Text>
           </Pressable>
         </View>}
         <View style={styles.p2pmdWorkspaceEditor}>
@@ -4459,12 +4495,12 @@ export default function App () {
         <PublishedLinkSheet
           isDark={browserIsDark}
           message={p2pmdPublishedVisibility === 'private'
-            ? 'Only your linked devices can open it. It is encrypted, and loads straight from this phone, so keep PeerSky open while they open it.'
-            : 'Share it with other peers! It loads straight from this phone, so keep PeerSky open while they open it.'}
-          shareTitle={p2pmdPublishSheet === 'slides' ? 'Published P2PMD presentation' : 'Published P2PMD note'}
+            ? t('Only your linked devices can open it. It is encrypted, and loads straight from this phone, so keep PeerSky open while they open it.')
+            : t('Share it with other peers! It loads straight from this phone, so keep PeerSky open while they open it.')}
+          shareTitle={p2pmdPublishSheet === 'slides' ? t('Published P2PMD presentation') : t('Published P2PMD note')}
           title={p2pmdPublishedVisibility === 'private'
-            ? (p2pmdPublishSheet === 'slides' ? 'Your private slides are ready' : 'Your private note is ready')
-            : (p2pmdPublishSheet === 'slides' ? 'Your slides are live' : 'Your note is live')}
+            ? (p2pmdPublishSheet === 'slides' ? t('Your private slides are ready') : t('Your private note is ready'))
+            : (p2pmdPublishSheet === 'slides' ? t('Your slides are live') : t('Your note is live'))}
           url={p2pmdPublishUrl}
           visible={p2pmdPublishSheet !== null}
           onClose={() => setP2pmdPublishSheet(null)}
@@ -4484,13 +4520,13 @@ export default function App () {
     switch (browserPreferences.addressBarButton) {
       case 'share':
         return browserShareActionAvailable
-          ? { id: 'share', label: 'Share page', onPress: () => void onBrowserSharePage() }
+          ? { id: 'share', label: t('Share page'), onPress: () => void onBrowserSharePage() }
           : null
       case 'bookmark':
         return browserBookmarkActionAvailable && browserBookmarksReady
           ? {
               id: 'bookmark',
-              label: browserPageIsBookmarked ? 'Remove bookmark' : 'Bookmark page',
+              label: browserPageIsBookmarked ? t('Remove bookmark') : t('Bookmark page'),
               active: browserPageIsBookmarked,
               onPress: onBrowserToggleBookmark
             }
@@ -4500,38 +4536,38 @@ export default function App () {
         return browserBookmarkActionAvailable && browserFavouritesReady
           ? {
               id: 'favourite',
-              label: favourited ? 'Remove favourite' : 'Add favourite',
+              label: favourited ? t('Remove favourite') : t('Add favourite'),
               active: favourited,
               onPress: onBrowserToggleFavourite
             }
           : null
       }
       case 'reader':
-        return pageAvailable ? { id: 'reader', label: 'Reader view', onPress: onBrowserReaderView } : null
+        return pageAvailable ? { id: 'reader', label: t('Reader view'), onPress: onBrowserReaderView } : null
       case 'send':
         return pageAvailable
-          ? { id: 'send', label: 'Send to your devices', onPress: () => void onBrowserSendToDevices() }
+          ? { id: 'send', label: t('Send to your devices'), onPress: () => void onBrowserSendToDevices() }
           : null
       case 'zoom':
         return browserShareActionAvailable
-          ? { id: 'zoom', label: 'Zoom', onPress: () => setBrowserZoomVisible(true) }
+          ? { id: 'zoom', label: t('Zoom'), onPress: () => setBrowserZoomVisible(true) }
           : null
       case 'desktop':
         return browserShareActionAvailable
           ? {
               id: 'desktop',
-              label: 'Desktop view',
+              label: t('Desktop view'),
               active: activeBrowserDesktopView,
               onPress: onBrowserToggleDesktopView
             }
           : null
       case 'print':
         return canPrintBrowserUrl(browserCurrentUrl)
-          ? { id: 'print', label: 'Print', onPress: onBrowserPrintPage }
+          ? { id: 'print', label: t('Print'), onPress: onBrowserPrintPage }
           : null
       case 'new-tab':
         return browserTabsState.tabs.length < MAX_BROWSER_TABS
-          ? { id: 'new-tab', label: 'New tab', onPress: onBrowserNewTab }
+          ? { id: 'new-tab', label: t('New tab'), onPress: onBrowserNewTab }
           : null
       default:
         return null
@@ -4678,7 +4714,7 @@ export default function App () {
       id: tab.id,
       isActive: tab.id === browserTabsState.activeTabId,
       isInactive: isInactiveBrowserTab(tab, browserTabsState.activeTabId, browserTabManagerNow),
-      label: tab.incognito ? `Incognito · ${getBrowserTabLabel(tab)}` : getBrowserTabLabel(tab),
+      label: tab.incognito ? t('Incognito · {title}', { title: getBrowserTabLabel(tab) }) : getBrowserTabLabel(tab),
       preview
     }
   })
@@ -5058,7 +5094,7 @@ export default function App () {
                       <View style={styles.p2pmdHeaderCopy}>
                         <Text style={[styles.sectionTitle, p2pmdTheme?.sectionTitle, styles.p2pmdTitle, p2pmdTheme?.p2pmdTitle]}>P2PMD</Text>
                         <Text style={[styles.helperText, p2pmdTheme?.helperText]}>
-                          A real-time peer-to-peer Markdown editor for writing notes and collaboration.
+                          {t('A real-time peer-to-peer Markdown editor for writing notes and collaboration.')}
                         </Text>
                       </View>
                     </View>
@@ -5066,17 +5102,17 @@ export default function App () {
                       ? (
                         <View style={styles.p2pmdSetupBlock}>
                           <Text style={[styles.emptyRoomTitle, p2pmdTheme?.emptyRoomTitle]}>
-                            {p2pmdPeerDisplayName ? 'Change your name' : 'Choose a name to get started'}
+                            {p2pmdPeerDisplayName ? t('Change your name') : t('Choose a name to get started')}
                           </Text>
                           <Text style={[styles.helperText, p2pmdTheme?.helperText]}>
-                            People in a note see it next to your edits. Keep this fun one, shuffle for another, or type your own.
+                            {t('People in a note see it next to your edits. Keep this fun one, shuffle for another, or type your own.')}
                           </Text>
                           <View style={styles.p2pmdNameRow}>
                             <TextInput
-                              accessibilityLabel='Your name'
+                              accessibilityLabel={t('Your name')}
                               autoCorrect={false}
                               maxLength={32}
-                              placeholder='Your name'
+                              placeholder={t('Your name')}
                               placeholderTextColor='#6f7484'
                               returnKeyType='done'
                               style={[styles.input, styles.p2pmdInput, styles.p2pmdNameInput, p2pmdTheme?.p2pmdInput]}
@@ -5088,7 +5124,7 @@ export default function App () {
                               onSubmitEditing={onP2pmdNameSave}
                             />
                             <Pressable
-                              accessibilityLabel='Suggest another name'
+                              accessibilityLabel={t('Suggest another name')}
                               accessibilityRole='button'
                               onPress={() => {
                                 tapFeedback()
@@ -5101,7 +5137,7 @@ export default function App () {
                                 pressed ? [styles.p2pmdRecentRoomPressed, p2pmdTheme?.p2pmdRecentRoomPressed] : null
                               ]}
                             >
-                              <Text style={[styles.p2pmdTextActionText, p2pmdTheme?.p2pmdTextActionText]}>Shuffle</Text>
+                              <Text style={[styles.p2pmdTextActionText, p2pmdTheme?.p2pmdTextActionText]}>{t('Shuffle')}</Text>
                             </Pressable>
                           </View>
                           {p2pmdSetupError && (
@@ -5117,7 +5153,7 @@ export default function App () {
                               style={[styles.p2pmdPrimaryAction, !p2pmdNameDraft.trim() ? styles.p2pmdActionDisabled : null]}
                             >
                               <Text style={styles.p2pmdPrimaryActionText}>
-                                {p2pmdPeerDisplayName ? 'Save' : 'Get Started'}
+                                {p2pmdPeerDisplayName ? t('Save') : t('Get Started')}
                               </Text>
                             </Pressable>
                             {p2pmdPeerDisplayName && (
@@ -5130,7 +5166,7 @@ export default function App () {
                                 }}
                                 style={[styles.p2pmdTextAction, p2pmdTheme?.p2pmdTextAction]}
                               >
-                                <Text style={[styles.p2pmdTextActionText, p2pmdTheme?.p2pmdTextActionText]}>Cancel</Text>
+                                <Text style={[styles.p2pmdTextActionText, p2pmdTheme?.p2pmdTextActionText]}>{t('Cancel')}</Text>
                               </Pressable>
                             )}
                           </View>
@@ -5140,9 +5176,9 @@ export default function App () {
                         <>
                       {!p2pmdRoom && (
                         <View style={styles.p2pmdSetupBlock}>
-                          <Text style={[styles.emptyRoomTitle, p2pmdTheme?.emptyRoomTitle]}>Start a collaborative note</Text>
+                          <Text style={[styles.emptyRoomTitle, p2pmdTheme?.emptyRoomTitle]}>{t('Start a collaborative note')}</Text>
                           <Text style={[styles.helperText, p2pmdTheme?.helperText]}>
-                            Create a note to host from this phone, or paste an hs:// key to join a note hosted elsewhere.
+                            {t('Create a note to host from this phone, or paste an hs:// key to join a note hosted elsewhere.')}
                           </Text>
                           <View style={styles.p2pmdActionRow}>
                             <Pressable
@@ -5151,7 +5187,7 @@ export default function App () {
                               disabled={isBooting || isLoading}
                             >
                               <PencilSquareIcon width={18} height={18} color='#ffffff' />
-                              <Text style={styles.p2pmdPrimaryActionText}>Create Note</Text>
+                              <Text style={styles.p2pmdPrimaryActionText}>{t('Create Note')}</Text>
                             </Pressable>
                           </View>
                           <P2pmdNewNoteSheet
@@ -5165,10 +5201,10 @@ export default function App () {
                           />
                           <View style={styles.p2pmdNameSummary}>
                             <Text numberOfLines={1} style={[styles.helperText, p2pmdTheme?.helperText, styles.p2pmdNameSummaryText]}>
-                              You are <Text style={styles.p2pmdNameSummaryName}>{p2pmdPeerDisplayName}</Text>
+                              {p2pmdNameBefore}<Text style={styles.p2pmdNameSummaryName}>{p2pmdPeerDisplayName}</Text>{p2pmdNameAfter}
                             </Text>
                             <Pressable
-                              accessibilityLabel='Change your name'
+                              accessibilityLabel={t('Change your name')}
                               accessibilityRole='button'
                               hitSlop={8}
                               onPress={() => {
@@ -5176,7 +5212,7 @@ export default function App () {
                                 setIsEditingP2pmdName(true)
                               }}
                             >
-                              <Text style={[styles.p2pmdTextActionText, p2pmdTheme?.p2pmdTextActionText]}>Change</Text>
+                              <Text style={[styles.p2pmdTextActionText, p2pmdTheme?.p2pmdTextActionText]}>{t('Change')}</Text>
                             </Pressable>
                           </View>
                         </View>
@@ -5184,12 +5220,12 @@ export default function App () {
 
                       <View style={styles.p2pmdDividerRow}>
                         <View style={[styles.p2pmdDividerLine, p2pmdTheme?.p2pmdDividerLine]} />
-                        <Text style={[styles.p2pmdDividerText, p2pmdTheme?.p2pmdDividerText]}>or join</Text>
+                        <Text style={[styles.p2pmdDividerText, p2pmdTheme?.p2pmdDividerText]}>{t('or join')}</Text>
                         <View style={[styles.p2pmdDividerLine, p2pmdTheme?.p2pmdDividerLine]} />
                       </View>
 
                       <View style={styles.p2pmdSetupBlock}>
-                        <Text style={[styles.fieldLabel, p2pmdTheme?.fieldLabel]}>Join existing note</Text>
+                        <Text style={[styles.fieldLabel, p2pmdTheme?.fieldLabel]}>{t('Join existing note')}</Text>
                         <TextInput
                           style={[styles.input, styles.p2pmdInput, p2pmdTheme?.p2pmdInput]}
                           autoCapitalize='none'
@@ -5200,7 +5236,7 @@ export default function App () {
                             if (p2pmdSetupError) setP2pmdSetupError(null)
                           }}
                           placeholderTextColor='#6f7484'
-                          placeholder='hs://... note key'
+                          placeholder={t('hs://... note key')}
                         />
                         <View style={styles.p2pmdJoinTools}>
                           <Pressable
@@ -5214,7 +5250,7 @@ export default function App () {
                               isBooting || isLoading ? styles.p2pmdActionDisabled : null
                             ]}
                           >
-                            <Text style={[styles.p2pmdTextActionText, p2pmdTheme?.p2pmdTextActionText]}>Paste</Text>
+                            <Text style={[styles.p2pmdTextActionText, p2pmdTheme?.p2pmdTextActionText]}>{t('Paste')}</Text>
                           </Pressable>
                           <Pressable
                             accessibilityRole='button'
@@ -5227,7 +5263,7 @@ export default function App () {
                               isBooting || isLoading ? styles.p2pmdActionDisabled : null
                             ]}
                           >
-                            <Text style={[styles.p2pmdTextActionText, p2pmdTheme?.p2pmdTextActionText]}>Scan QR</Text>
+                            <Text style={[styles.p2pmdTextActionText, p2pmdTheme?.p2pmdTextActionText]}>{t('Scan QR')}</Text>
                           </Pressable>
                         </View>
                         {p2pmdSetupError && (
@@ -5244,21 +5280,21 @@ export default function App () {
                           onPress={() => void onP2pmdRoomJoin()}
                           disabled={isBooting || isLoading || !p2pmdJoinKey.trim()}
                         >
-                          <Text style={[styles.p2pmdJoinActionText, p2pmdTheme?.p2pmdJoinActionText]}>Join Note</Text>
+                          <Text style={[styles.p2pmdJoinActionText, p2pmdTheme?.p2pmdJoinActionText]}>{t('Join Note')}</Text>
                         </Pressable>
                       </View>
 
                       {p2pmdRoomHistory.length > 0 && (
                         <View style={styles.p2pmdRecentRooms}>
-                          <Text style={[styles.fieldLabel, p2pmdTheme?.fieldLabel]}>Recent notes</Text>
+                          <Text style={[styles.fieldLabel, p2pmdTheme?.fieldLabel]}>{t('Recent notes')}</Text>
                           {p2pmdRoomHistory.length > P2PMD_RECENT_SEARCH_AFTER && (
                             <TextInput
-                              accessibilityLabel='Search recent notes'
+                              accessibilityLabel={t('Search recent notes')}
                               autoCapitalize='none'
                               autoCorrect={false}
                               clearButtonMode='while-editing'
                               onChangeText={setP2pmdRecentQuery}
-                              placeholder='Search notes'
+                              placeholder={t('Search notes')}
                               placeholderTextColor='#6f7484'
                               returnKeyType='search'
                               style={[styles.input, styles.p2pmdInput, p2pmdTheme?.p2pmdInput]}
@@ -5266,18 +5302,19 @@ export default function App () {
                             />
                           )}
                           {p2pmdRecentShown.length === 0 && (
-                            <Text style={[styles.helperText, p2pmdTheme?.helperText]}>No notes by that name.</Text>
+                            <Text style={[styles.helperText, p2pmdTheme?.helperText]}>{t('No notes by that name.')}</Text>
                           )}
                           {p2pmdRecentShown.map((room) => {
                             const isPrivate = isPrivateP2pmdNoteKey(room.key)
                             const PrivacyIcon = isPrivate ? ShieldLockIcon : GlobeIcon
+                            const roomName = room.label || formatP2pmdRoomHistoryKey(room.key)
                             return (
                             <Pressable
                               key={room.key}
-                              accessibilityLabel={`Reopen ${isPrivate ? 'private' : 'public'} P2PMD note ${room.label || formatP2pmdRoomHistoryKey(room.key)}`}
+                              accessibilityLabel={isPrivate ? t('Reopen private P2PMD note {name}', { name: roomName }) : t('Reopen public P2PMD note {name}', { name: roomName })}
                               accessibilityRole='button'
                               disabled={isBooting || isLoading}
-                              accessibilityHint='Press and hold to remove this note from the list'
+                              accessibilityHint={t('Press and hold to remove this note from the list')}
                               onLongPress={() => {
                                 tapFeedback()
                                 confirmForgetP2pmdRoom(room)
@@ -5299,13 +5336,13 @@ export default function App () {
                                 {room.label || formatP2pmdRoomHistoryKey(room.key)}
                               </Text>
                               <Text style={[styles.p2pmdRecentRoomAction, p2pmdTheme?.p2pmdRecentRoomAction]}>
-                                {room.role === 'host' ? 'Reopen' : 'Join'}
+                                {room.role === 'host' ? t('Reopen') : t('Join')}
                               </Text>
                             </Pressable>
                             )
                           })}
                           <Pressable
-                            accessibilityLabel='Manage stored note data'
+                            accessibilityLabel={t('Manage stored note data')}
                             accessibilityRole='button'
                             onPress={() => {
                               setBrowserSettingsInitialPage('p2p-storage')
@@ -5318,10 +5355,10 @@ export default function App () {
                             ]}
                           >
                             <Text numberOfLines={1} style={[styles.p2pmdRecentRoomKey, p2pmdTheme?.p2pmdRecentRoomKey]}>
-                              Stored note data
+                              {t('Stored note data')}
                             </Text>
                             <Text style={[styles.p2pmdRecentRoomAction, p2pmdTheme?.p2pmdRecentRoomAction]}>
-                              Manage
+                              {t('Manage')}
                             </Text>
                           </Pressable>
                         </View>
@@ -5352,7 +5389,7 @@ export default function App () {
                             <View style={[styles.p2pmdScanCorner, styles.p2pmdScanBottomLeft]} />
                             <View style={[styles.p2pmdScanCorner, styles.p2pmdScanBottomRight]} />
                           </View>
-                          <Text style={styles.p2pmdScanHint}>Align the P2PMD room QR code inside the frame</Text>
+                          <Text style={styles.p2pmdScanHint}>{t('Align the P2PMD room QR code inside the frame')}</Text>
                           {/* Placed absolutely, it ignores the safe area's padding, so the
                               insets are added here or it sits on the status bar. */}
                           <Pressable
@@ -5360,7 +5397,7 @@ export default function App () {
                             onPress={() => setIsP2pmdScanning(false)}
                             style={[styles.p2pmdScannerClose, { right: 16 + browserInsets.right, top: 12 + browserInsets.top }]}
                           >
-                            <Text style={styles.p2pmdScannerCloseText}>Cancel</Text>
+                            <Text style={styles.p2pmdScannerCloseText}>{t('Cancel')}</Text>
                           </Pressable>
                         </SafeAreaView>
                       </View>
@@ -5377,14 +5414,14 @@ export default function App () {
               : (
                 <View style={styles.browserRestorePage}>
                   <ActivityIndicator size='small' color='#1f6fd1' />
-                  <Text style={styles.browserRestoreText}>Restoring tab...</Text>
+                  <Text style={styles.browserRestoreText}>{t('Restoring tab...')}</Text>
                 </View>
                 )
             : !contentBlockingReady && isBrowserWebViewSource(browserSource)
                 ? (
                   <View style={styles.browserRestorePage}>
                     <ActivityIndicator size='small' color='#1f6fd1' />
-                    <Text style={styles.browserRestoreText}>Turning on tracker protection...</Text>
+                    <Text style={styles.browserRestoreText}>{t('Turning on tracker protection...')}</Text>
                   </View>
                   )
                 : null}
@@ -5726,7 +5763,7 @@ export default function App () {
                 if (printHtml) {
                   void printBrowserPage(printHtml, pageUrl)
                     .then((problem) => {
-                      if (problem) Alert.alert('Unable to print', problem)
+                      if (problem) Alert.alert(t('Unable to print'), problem, [{ text: t('OK') }])
                     })
                   return
                 }
@@ -5740,7 +5777,7 @@ export default function App () {
                   if (readerArticle.ok) {
                     setReaderPage({ article: readerArticle, pageUrl, incognito: tabIncognito })
                   } else {
-                    setBrowserToast({ id: Date.now(), message: 'This page has no article to show in Reader view' })
+                    setBrowserToast({ id: Date.now(), message: t('This page has no article to show in Reader view') })
                   }
                   return
                 }
@@ -5774,7 +5811,7 @@ export default function App () {
 
                 if (browserTabsStateRef.current.activeTabId === tab.id) {
                   replaceBrowserEntry(failedUrl, errorSource)
-                  setBrowserTitle('Page failed')
+                  setBrowserTitle(t('Page failed'))
                   setStatus(event.nativeEvent.description)
                 } else {
                   updateBackgroundBrowserEntry(tab.id, entry, failedUrl, errorSource, true)
@@ -5810,7 +5847,7 @@ export default function App () {
           onCreateFolder={createBrowserBookmarkFolder}
           onPick={(folderId, title) => {
             if (bookmarkFolderUrl && moveBrowserBookmark(bookmarkFolderUrl, folderId)) {
-              setBrowserToast({ id: Date.now(), message: `Saved in ${title}` })
+              setBrowserToast({ id: Date.now(), message: t('Saved in {folder}', { folder: title }) })
             }
           }}
         />
@@ -6055,15 +6092,15 @@ function getNativeViewTag (event: { nativeEvent: object }) {
 
 function getBrowserEntryTitle (entry: BrowserHistoryEntry) {
   if (entry.source.kind === 'app') return getRuntimeAppTitle(entry.source.app)
-  return entry.url === BROWSER_HOME_URL ? 'New tab' : entry.url
+  return entry.url === BROWSER_HOME_URL ? t('New tab') : entry.url
 }
 
 function getBrowserTabLabel (tab: BrowserTab) {
   const entry = tab.history[tab.historyIndex]
-  if (entry?.url === BROWSER_HOME_URL) return 'New tab'
+  if (entry?.url === BROWSER_HOME_URL) return t('New tab')
   if (tab.title && tab.title !== BROWSER_HOME_URL) return tab.title
 
-  if (!entry) return 'New tab'
+  if (!entry) return t('New tab')
 
   return getBrowserEntryTitle(entry)
 }

@@ -8,10 +8,10 @@ const index = await readFile(new URL('../../app/index.tsx', import.meta.url), 'u
 
 describe('browser chrome layout', () => {
   test('five slots: two that change, then burn, tabs and the menu', () => {
-    assert.match(navBar, /label='Go back'/)
-    assert.match(navBar, /label='Go forward'/)
-    assert.match(navBar, /burn: \{ label: 'Burn tabs, history and cached data', onPress: onBurnTabs \}/)
-    assert.match(navBar, /Open tabs, \$\{tabCount\} open/)
+    assert.match(navBar, /label=\{t\('Go back'\)\}/)
+    assert.match(navBar, /label=\{t\('Go forward'\)\}/)
+    assert.match(navBar, /burn: \{ label: t\('Burn tabs, history and cached data'\), onPress: onBurnTabs \}/)
+    assert.match(navBar, /tp\(\{ one: 'Open tabs, \{count\} open', other: 'Open tabs, \{count\} open' \}, tabCount\)/)
     assert.match(navBar, /<BrowserOverflowMenu[\s>]/)
   })
 
@@ -20,8 +20,8 @@ describe('browser chrome layout', () => {
     assert.match(navBar, /const middleAction = middle\[toolbarButton\] \|\| middle\.burn/)
     assert.match(navBar, /disabled=\{middleAction\.disabled\}\s+icon=\{middleIcon\}\s+label=\{middleAction\.label\}/)
     // Off where it has nothing to act on, like back and forward.
-    assert.match(navBar, /share: \{ label: 'Share', disabled: !shareActionAvailable, onPress: onSharePage \}/)
-    assert.match(navBar, /home: \{ label: 'Home', disabled: isHome, onPress: onGoHome \}/)
+    assert.match(navBar, /share: \{ label: t\('Share'\), disabled: !shareActionAvailable, onPress: onSharePage \}/)
+    assert.match(navBar, /home: \{ label: t\('Home'\), disabled: isHome, onPress: onGoHome \}/)
     assert.match(navBar, /\.\.\.\(burnsFromMenu\(toolbarButton\) \? \{ onBurnTabs: \(\) => afterMenuCloses\(onBurnTabs\) \} : \{\}\)/)
     assert.match(index, /toolbarButton=\{browserPreferences\.toolbarButton\}/)
   })
@@ -29,10 +29,10 @@ describe('browser chrome layout', () => {
   test('the home screen has no history, so those two slots go elsewhere', () => {
     const home = navBar.slice(navBar.indexOf('{isHome'), navBar.indexOf('unless another button was chosen'))
 
-    assert.match(home, /label='Bookmarks'/)
-    assert.match(home, /label='Nearby devices'/)
+    assert.match(home, /label=\{t\('Bookmarks'\)\}/)
+    assert.match(home, /label=\{t\('Nearby devices'\)\}/)
     // And back and forward are still there for every other page.
-    assert.match(home, /label='Go back'/)
+    assert.match(home, /label=\{t\('Go back'\)\}/)
   })
 
   test('no second line where the two bars meet', () => {
@@ -46,11 +46,11 @@ describe('browser chrome layout', () => {
     // The whole point of moving the rest off: the address gets the width, and
     // it can sit at either end without the controls following it around.
     assert.doesNotMatch(toolbar, /Go back|Go forward|Open tabs|BrowserOverflowMenu/)
-    assert.match(toolbar, /accessibilityLabel='Browser address'/)
+    assert.match(toolbar, /accessibilityLabel=\{t\('Browser address'\)\}/)
     assert.match(toolbar, /Reload page/)
     // One button after reload, Share unless another is chosen.
     assert.match(toolbar, /<AddressBarActionButton/)
-    assert.match(index, /case 'share':\s+return browserShareActionAvailable\s+\? \{ id: 'share', label: 'Share page'/)
+    assert.match(index, /case 'share':\s+return browserShareActionAvailable\s+\? \{ id: 'share', label: t\('Share page'\)/)
   })
 
   test('the address bar moves, the navigation bar does not', () => {

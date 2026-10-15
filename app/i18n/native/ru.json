@@ -1,0 +1,18 @@
+{
+  "ios": {
+    "NSCameraUsageDescription": "PeerSky использует камеру, чтобы сканировать QR-коды, когда вы привязываете устройство или открываете общую комнату или диск, а также когда сайт запрашивает доступ и вы его разрешаете.",
+    "NSLocalNetworkUsageDescription": "PeerSky использует локальную сеть, чтобы находить устройства PeerSky поблизости и подключаться к ним.",
+    "NSLocationWhenInUseUsageDescription": "PeerSky использует вашу геолокацию, только когда сайт запрашивает доступ и вы его разрешаете.",
+    "NSMicrophoneUsageDescription": "PeerSky использует микрофон, только когда сайт запрашивает доступ и вы его разрешаете.",
+    "NSPhotoLibraryAddUsageDescription": "PeerSky сохраняет фото или видео в вашу медиатеку, когда вы выбираете «Сохранить в Фото».",
+    "ShortcutPasteAndGo": "Вставить и перейти",
+    "ShortcutNewTab": "Новая вкладка",
+    "ShortcutNewIncognitoTab": "Новая вкладка инкогнито",
+    "ShortcutAppIcon": "Значок приложения"
+  },
+  "android": {
+    "peerchat_background_text": "Подключение поддерживается, чтобы сообщения доходили до вас",
+    "peerchat_background_channel": "Фоновое подключение PeerChat",
+    "peerchat_background_channel_description": "Поддерживает подключение PeerChat, пока PeerSky работает в фоновом режиме"
+  }
+}

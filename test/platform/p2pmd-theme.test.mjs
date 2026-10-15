@@ -114,8 +114,11 @@ test('the P2PMD tab says note, not room', async () => {
   const start = app.indexOf("activeTab === 'p2pmd' && (")
   const tab = app.slice(start, app.indexOf('onBarcodeScanned', start))
 
-  // Only what a reader sees. roomKey, p2pmdRoom and the rest are the wire
-  // names and stay as they are.
-  const labels = [...tab.matchAll(/>([^<>{}]*\broom\b[^<>{}]*)</gi)].map((m) => m[1].trim())
+  // Only what a reader sees, written in place or through t(). roomKey,
+  // p2pmdRoom and the rest are the wire names and stay as they are.
+  const labels = [
+    ...[...tab.matchAll(/>([^<>{}]*\broom\b[^<>{}]*)</gi)].map((m) => m[1].trim()),
+    ...[...tab.matchAll(/\bt\('((?:[^'\\]|\\.)*\broom\b(?:[^'\\]|\\.)*)'/gi)].map((m) => m[1])
+  ]
   assert.deepEqual(labels, [], `still says room: ${labels.join(' | ')}`)
 })

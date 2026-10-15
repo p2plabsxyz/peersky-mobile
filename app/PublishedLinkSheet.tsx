@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Clipboard, Modal, Platform, Pressable, StyleSheet, Text, View } from 'react-native'
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { BROWSER_PALETTES } from './browser-appearance.mjs'
+import { t } from './i18n/i18n.mjs'
 import { MODAL_ORIENTATIONS } from './modal-orientations'
 import { shareLink } from './share'
 import { tapFeedback } from './haptics'
@@ -62,7 +63,7 @@ export function PublishedLinkSheet ({
       onRequestClose={onClose}
     >
       <SafeAreaView style={styles.overlay} edges={['top', 'left', 'right']}>
-        <Pressable accessibilityLabel='Close' style={styles.backdrop} onPress={onClose} />
+        <Pressable accessibilityLabel={t('Close')} style={styles.backdrop} onPress={onClose} />
         <View style={[styles.sheet, { backgroundColor: palette.surface, paddingBottom: 24 + insets.bottom }]}>
           <View style={styles.header}>
             <View style={styles.badge}>
@@ -73,7 +74,7 @@ export function PublishedLinkSheet ({
           <Text style={[styles.message, { color: palette.mutedText }]}>{message}</Text>
 
           <Pressable
-            accessibilityHint='Copies the link'
+            accessibilityHint={t('Copies the link')}
             accessibilityRole='button'
             onPress={copy}
             style={({ pressed }) => [
@@ -84,7 +85,7 @@ export function PublishedLinkSheet ({
           >
             <Text selectable numberOfLines={3} style={[styles.linkText, { color: palette.text }]}>{url}</Text>
             <Text style={[styles.linkHint, { color: palette.selectedControl }]}>
-              {copied ? 'Copied' : 'Tap to copy'}
+              {copied ? t('Copied') : t('Tap to copy')}
             </Text>
           </Pressable>
 
@@ -95,7 +96,7 @@ export function PublishedLinkSheet ({
               style={({ pressed }) => [styles.primary, pressed ? styles.pressed : null]}
             >
               <ShareIcon width={17} height={17} color='#ffffff' />
-              <Text style={styles.primaryText}>Share</Text>
+              <Text style={styles.primaryText}>{t('Share')}</Text>
             </Pressable>
             <Pressable
               accessibilityRole='button'
@@ -107,7 +108,7 @@ export function PublishedLinkSheet ({
               ]}
             >
               <CopyIcon width={16} height={16} color={palette.text} />
-              <Text style={[styles.secondaryText, { color: palette.text }]}>{copied ? 'Copied' : 'Copy link'}</Text>
+              <Text style={[styles.secondaryText, { color: palette.text }]}>{copied ? t('Copied') : t('Copy link')}</Text>
             </Pressable>
           </View>
 
@@ -115,12 +116,12 @@ export function PublishedLinkSheet ({
             {onOpen && url
               ? (
                 <Pressable accessibilityRole='button' hitSlop={8} onPress={() => onOpen(url)}>
-                  <Text style={[styles.footerAction, { color: palette.selectedControl }]}>Open it</Text>
+                  <Text style={[styles.footerAction, { color: palette.selectedControl }]}>{t('Open it')}</Text>
                 </Pressable>
                 )
               : <View />}
             <Pressable accessibilityRole='button' hitSlop={8} onPress={onClose}>
-              <Text style={[styles.footerAction, { color: palette.mutedText }]}>Done</Text>
+              <Text style={[styles.footerAction, { color: palette.mutedText }]}>{t('Done')}</Text>
             </Pressable>
           </View>
         </View>

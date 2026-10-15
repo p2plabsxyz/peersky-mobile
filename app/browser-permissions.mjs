@@ -1,3 +1,5 @@
+import { t } from './i18n/i18n.mjs'
+
 export const EXTERNAL_LINK_BEHAVIORS = ['ask', 'allow', 'block']
 export const MAX_EXTERNAL_LINK_LENGTH = 2048
 export const EXTERNAL_LINK_LAUNCH_COOLDOWN_MS = 3000
@@ -22,11 +24,11 @@ export function parseExternalAppLink (url) {
 }
 
 export function getExternalAppName (scheme) {
-  if (scheme === 'mailto') return 'your email app'
-  if (scheme === 'tel') return 'your phone app'
-  if (scheme === 'sms') return 'your messaging app'
-  if (scheme === 'geo') return 'your maps app'
-  return 'another app'
+  if (scheme === 'mailto') return t('your email app')
+  if (scheme === 'tel') return t('your phone app')
+  if (scheme === 'sms') return t('your messaging app')
+  if (scheme === 'geo') return t('your maps app')
+  return t('another app')
 }
 
 // What a link is actually addressed to, for when no app can open it. A mailto:

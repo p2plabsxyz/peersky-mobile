@@ -12,6 +12,7 @@ import {
   normalizeBrowserDownloads,
   normalizeBrowserDownloadUrl
 } from './browser-downloads.mjs'
+import { t } from '../i18n/i18n.mjs'
 
 export type BrowserDownload = {
   id: string
@@ -81,7 +82,7 @@ export function useBrowserDownloads ({ enabled = false } = {}) {
     } catch (refreshError) {
       if (sequence !== refreshSequence.current) return []
       console.error('Failed loading browser downloads:', refreshError)
-      setError('Unable to load downloads.')
+      setError(t('Unable to load downloads.'))
       return []
     } finally {
       if (sequence === refreshSequence.current) setIsReady(true)
@@ -112,25 +113,25 @@ export function useBrowserDownloads ({ enabled = false } = {}) {
   async function requestDownload (url: string, { incognito = false }: { incognito?: boolean } = {}) {
     const normalizedUrl = normalizeBrowserDownloadUrl(url)
     if (!normalizedUrl) {
-      setError('This download URL is not supported.')
+      setError(t('This download URL is not supported.'))
       return false
     }
 
     if (Platform.OS === 'android') {
       try {
         const accepted = await getAndroidDownloads().requestDownload(normalizedUrl, incognito)
-        setError(accepted ? null : 'Unable to start this download.')
+        setError(accepted ? null : t('Unable to start this download.'))
         return accepted
       } catch (downloadError) {
         console.error('Failed requesting Android download:', downloadError)
-        setError('Unable to start this download.')
+        setError(t('Unable to start this download.'))
         return false
       }
     }
 
     if (activeIosDownloads.current.has(normalizedUrl)) return false
     if (activeIosDownloads.current.size >= MAX_CONCURRENT_IOS_DOWNLOADS) {
-      setError('Too many downloads are already running.')
+      setError(t('Too many downloads are already running.'))
       return false
     }
 
@@ -190,7 +191,7 @@ export function useBrowserDownloads ({ enabled = false } = {}) {
       console.error('Failed downloading file:', downloadError)
       transfer.task = null
       transfer.record = { ...transfer.record, status: 'failed', reason: 'network-error' }
-      setError('Unable to download this file.')
+      setError(t('Unable to download this file.'))
       await refresh()
       return false
     } finally {
@@ -223,7 +224,7 @@ export function useBrowserDownloads ({ enabled = false } = {}) {
       return result?.action === 'saved'
     } catch (saveError) {
       console.error('Failed saving download to Files:', saveError)
-      setError('Unable to save this download to Files.')
+      setError(t('Unable to save this download to Files.'))
       return false
     }
   }
@@ -247,7 +248,7 @@ export function useBrowserDownloads ({ enabled = false } = {}) {
       return true
     } catch (removeError) {
       console.error('Failed removing browser download:', removeError)
-      setError('Unable to remove this download.')
+      setError(t('Unable to remove this download.'))
       return false
     }
   }
@@ -258,7 +259,7 @@ export function useBrowserDownloads ({ enabled = false } = {}) {
       !download.id.startsWith('r:') ||
       !['pending', 'running'].includes(download.status)
     ) {
-      setError('This download cannot be paused.')
+      setError(t('This download cannot be paused.'))
       return false
     }
 
@@ -269,7 +270,7 @@ export function useBrowserDownloads ({ enabled = false } = {}) {
       return true
     } catch (pauseError) {
       console.error('Failed pausing browser download:', pauseError)
-      setError('Unable to pause this download.')
+      setError(t('Unable to pause this download.'))
       return false
     }
   }
@@ -290,7 +291,7 @@ export function useBrowserDownloads ({ enabled = false } = {}) {
       return true
     } catch (openError) {
       console.error('Failed opening browser download:', openError)
-      setError('No app is available to open this download.')
+      setError(t('No app is available to open this download.'))
       return false
     }
   }
@@ -304,11 +305,11 @@ export function useBrowserDownloads ({ enabled = false } = {}) {
 
     try {
       const opened = await getAndroidDownloads().openLocalFile(uri, name)
-      setError(opened ? null : 'No app is available to open this file.')
+      setError(opened ? null : t('No app is available to open this file.'))
       return opened
     } catch (openError) {
       console.error('Failed opening local file:', openError)
-      setError('No app is available to open this file.')
+      setError(t('No app is available to open this file.'))
       return false
     }
   }
@@ -316,7 +317,7 @@ export function useBrowserDownloads ({ enabled = false } = {}) {
   async function retryDownload (download: BrowserDownload, sourceUrl = download.sourceUrl) {
     const normalizedUrl = normalizeBrowserDownloadUrl(sourceUrl)
     if (!['failed', 'paused'].includes(download.status) || !normalizedUrl) {
-      setError('This download cannot be retried.')
+      setError(t('This download cannot be retried.'))
       return false
     }
 
@@ -340,7 +341,7 @@ export function useBrowserDownloads ({ enabled = false } = {}) {
         return true
       } catch (resumeError) {
         console.error('Failed resuming browser download:', resumeError)
-        setError('Unable to resume this download.')
+        setError(t('Unable to resume this download.'))
         return false
       }
     }

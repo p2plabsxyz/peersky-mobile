@@ -3,6 +3,8 @@ import { DEFAULT_APP_LOGO_COLOR, normalizeAppLogoColor } from '../app-logo-color
 import { EXTERNAL_LINK_BEHAVIORS } from '../browser-permissions.mjs'
 import { isBridgeSiteId, normalizeCustomSearchUrl } from '../browser-shell.mjs'
 import { DEFAULT_TOOLBAR_BUTTON, normalizeToolbarButton } from '../toolbar-button.mjs'
+import { msg } from '../i18n/i18n.mjs'
+import { SYSTEM_LANGUAGE, isLanguageCode } from '../i18n/languages.mjs'
 
 export const DEFAULT_BROWSER_PREFERENCES = {
   addressBarButton: DEFAULT_ADDRESS_BAR_BUTTON,
@@ -14,6 +16,8 @@ export const DEFAULT_BROWSER_PREFERENCES = {
   enforceManualPageZoom: false,
   externalLinkBehavior: 'ask',
   forceDarkWebsites: false,
+  // 'system' follows the phone's language; otherwise a code from LANGUAGES.
+  language: SYSTEM_LANGUAGE,
   publishingSites: {},
   searchEngine: 'duckduckgo',
   searchSuggestionsEnabled: true,
@@ -30,13 +34,15 @@ export const MAX_PUBLISHING_SITES = 200
 export const BROWSER_THEMES = ['system', 'light', 'dark']
 export const WEBSITE_TEXT_SCALES = [80, 100, 120, 150]
 
+// Whatever shows these titles passes them through tKey(). Brand names stay
+// as they are in every language.
 export const SEARCH_ENGINES = /** @type {const} */ ([
   { id: 'duckduckgo', title: 'DuckDuckGo' },
-  { id: 'duckduckgo-noai', title: 'DuckDuckGo (no AI)' },
+  { id: 'duckduckgo-noai', title: msg('DuckDuckGo (no AI)') },
   { id: 'startpage', title: 'Startpage' },
   { id: 'ecosia', title: 'Ecosia' },
   { id: 'kagi', title: 'Kagi' },
-  { id: 'custom', title: 'Custom' }
+  { id: 'custom', title: msg('Custom') }
 ])
 
 export function parseBrowserPreferences (serialized) {
@@ -70,6 +76,7 @@ export function parseBrowserPreferences (serialized) {
     forceDarkWebsites: typeof value?.forceDarkWebsites === 'boolean'
       ? value.forceDarkWebsites
       : DEFAULT_BROWSER_PREFERENCES.forceDarkWebsites,
+    language: isLanguageCode(value?.language) ? value.language : SYSTEM_LANGUAGE,
     publishingSites: normalizePublishingSites(value?.publishingSites),
     searchEngine: SEARCH_ENGINES.some((engine) => engine.id === value?.searchEngine)
       ? value.searchEngine

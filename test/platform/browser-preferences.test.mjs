@@ -23,6 +23,7 @@ describe('browser preferences', () => {
       enforceManualPageZoom: true,
       externalLinkBehavior: 'allow',
       forceDarkWebsites: true,
+      language: 'mr',
       publishingSites: {
         ['a'.repeat(64)]: 'allow',
         ['b'.repeat(52)]: 'block',

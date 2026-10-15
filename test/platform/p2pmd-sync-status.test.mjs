@@ -21,6 +21,6 @@ test('errors and publishing are still spelled out', () => {
 
 test('the dot sits at the end of the key row', async () => {
   const app = await readFile(new URL('../../app/index.tsx', import.meta.url), 'utf8')
-  assert.match(app, /\{p2pmdRoom\.key\}\s+<\/Text>\s+\{p2pmdSyncDisplay\.kind === 'dot' && \(\s+<View accessible accessibilityLabel='Unsaved changes' style=\{styles\.p2pmdUnsavedDot\} \/>/)
+  assert.match(app, /\{p2pmdRoom\.key\}\s+<\/Text>\s+\{p2pmdSyncDisplay\.kind === 'dot' && \(\s+<View accessible accessibilityLabel=\{t\('Unsaved changes'\)\} style=\{styles\.p2pmdUnsavedDot\} \/>/)
   assert.doesNotMatch(app, /\{p2pmdSyncStatus\}/)
 })

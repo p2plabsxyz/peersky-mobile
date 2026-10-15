@@ -9,7 +9,7 @@ const source = await readFile(new URL('../../app/permission-prompt.ts', import.m
 test('a refusal the system will not revisit offers the way back', () => {
   assert.match(source, /if \(permission\.canAskAgain === false\) offerPermissionSettings/)
   assert.match(source, /Linking\.openSettings\(\)/)
-  assert.match(source, /text: 'Open settings'/)
+  assert.match(source, /text: t\('Open settings'\)/)
 })
 
 test('a plain no is not argued with', () => {
@@ -40,7 +40,7 @@ test('a failed local discovery explains itself and offers settings', async () =>
   // Only on a real failure, which the backend reports; "no peers nearby" is
   // the normal case and says nothing.
   assert.match(settings, /lanStatus && !lanStatus\.available &&/)
-  assert.match(settings, /offerPermissionSettings\(LAN_PERMISSION_TITLE, LAN_PERMISSION_HELP\)/)
+  assert.match(settings, /offerPermissionSettings\(tKey\(LAN_PERMISSION_TITLE\), tKey\(LAN_PERMISSION_HELP\)\)/)
 
   // Each system keeps the switch somewhere different, so the words differ.
   assert.match(source, /Platform\.OS === 'ios'/)
@@ -54,7 +54,7 @@ test('a failed local discovery explains itself and offers settings', async () =>
 // a refusal there offers the way back to Settings.
 test('the local network has its own row in Permissions', async () => {
   const permissions = await readFile(new URL('../../app/settings/Permissions.tsx', import.meta.url), 'utf8')
-  assert.match(permissions, /title='Local network'/)
+  assert.match(permissions, /title=\{t\('Local network'\)\}/)
   assert.match(permissions, /onCallRpc\(RPC_HYPER_LAN_STATUS, \{\}\)/)
-  assert.match(permissions, /else offerPermissionSettings\(LAN_PERMISSION_TITLE, LAN_PERMISSION_HELP\)/)
+  assert.match(permissions, /else offerPermissionSettings\(tKey\(LAN_PERMISSION_TITLE\), tKey\(LAN_PERMISSION_HELP\)\)/)
 })

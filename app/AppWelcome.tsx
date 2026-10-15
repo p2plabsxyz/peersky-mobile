@@ -14,7 +14,10 @@ import {
 import type { SvgProps } from 'react-native-svg'
 
 import { BROWSER_PALETTES } from './browser-appearance.mjs'
+import { tKey } from './i18n/i18n.mjs'
 
+// The text is English marked with msg(), and is shown in the language picked.
+// The title is the app's name and stays as it is.
 export type AppWelcomeContent = {
   icon: ImageSourcePropType
   title: string
@@ -76,7 +79,7 @@ export function AppWelcome ({ content, isDark, backgroundColor, onDone }: AppWel
         <Animated.View style={[styles.header, rise(appear[0])]}>
           <Image source={content.icon} style={styles.icon} />
           <Text style={[styles.title, { color: palette.text }]}>{content.title}</Text>
-          <Text style={[styles.lead, { color: palette.mutedText }]}>{content.lead}</Text>
+          <Text style={[styles.lead, { color: palette.mutedText }]}>{tKey(content.lead)}</Text>
         </Animated.View>
 
         <View style={styles.points}>
@@ -86,8 +89,8 @@ export function AppWelcome ({ content, isDark, backgroundColor, onDone }: AppWel
                 <Icon width={20} height={20} color={palette.selectedControl} />
               </View>
               <View style={styles.pointCopy}>
-                <Text style={[styles.pointTitle, { color: palette.text }]}>{title}</Text>
-                <Text style={[styles.pointBody, { color: palette.mutedText }]}>{body}</Text>
+                <Text style={[styles.pointTitle, { color: palette.text }]}>{tKey(title)}</Text>
+                <Text style={[styles.pointBody, { color: palette.mutedText }]}>{tKey(body)}</Text>
               </View>
             </Animated.View>
           ))}
@@ -99,7 +102,7 @@ export function AppWelcome ({ content, isDark, backgroundColor, onDone }: AppWel
         onPress={onDone}
         style={({ pressed }) => [styles.start, pressed ? styles.startPressed : null]}
       >
-        <Text style={styles.startText}>{content.action}</Text>
+        <Text style={styles.startText}>{tKey(content.action)}</Text>
       </Pressable>
     </View>
   )

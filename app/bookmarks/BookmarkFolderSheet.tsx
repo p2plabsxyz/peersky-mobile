@@ -6,6 +6,7 @@ import CheckIcon from '../../assets/icons/bootstrap/check2.svg'
 import FolderIcon from '../../assets/icons/bootstrap/folder.svg'
 import PlusIcon from '../../assets/icons/bootstrap/plus-lg.svg'
 import { BROWSER_PALETTES } from '../browser-appearance.mjs'
+import { t } from '../i18n/i18n.mjs'
 import { MODAL_ORIENTATIONS } from '../modal-orientations'
 import type { BrowserBookmarkFolder } from './useBrowserBookmarks'
 
@@ -18,7 +19,7 @@ export function BookmarkFolderSheet ({
   currentFolder,
   folders,
   isDark,
-  title = 'Add to folder',
+  title = t('Add to folder'),
   visible,
   onClose,
   onCreateFolder,
@@ -68,7 +69,7 @@ export function BookmarkFolderSheet ({
     >
       {/* The name field is at the bottom, where the keyboard comes up. */}
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.fill}>
-        <Pressable accessibilityLabel='Close' style={styles.backdrop} onPress={onClose} />
+        <Pressable accessibilityLabel={t('Close')} style={styles.backdrop} onPress={onClose} />
         <View style={[styles.sheet, { backgroundColor: palette.shell, paddingBottom: insets.bottom + 12 }]}>
           <Text accessibilityRole='header' style={[styles.title, { color: palette.text }]}>{title}</Text>
           <ScrollView keyboardShouldPersistTaps='handled' style={styles.list}>
@@ -76,10 +77,10 @@ export function BookmarkFolderSheet ({
               accessibilityRole='button'
               accessibilityState={{ selected: currentFolder === null }}
               style={({ pressed }) => row(pressed)}
-              onPress={() => pick(null, 'Bookmarks')}
+              onPress={() => pick(null, t('Bookmarks'))}
             >
               <BookmarksIcon width={19} height={19} color={palette.text} />
-              <Text style={[styles.rowText, { color: palette.text }]}>Bookmarks</Text>
+              <Text style={[styles.rowText, { color: palette.text }]}>{t('Bookmarks')}</Text>
               {currentFolder === null && <CheckIcon width={18} height={18} color={palette.accent} />}
             </Pressable>
             {folders.map((folder) => (
@@ -100,9 +101,9 @@ export function BookmarkFolderSheet ({
                 <View style={styles.nameRow}>
                   <TextInput
                     autoFocus
-                    accessibilityLabel='Folder name'
+                    accessibilityLabel={t('Folder name')}
                     maxLength={64}
-                    placeholder='Folder name'
+                    placeholder={t('Folder name')}
                     placeholderTextColor={palette.mutedText}
                     returnKeyType='done'
                     style={[styles.input, { borderColor: palette.border, color: palette.text }]}
@@ -117,7 +118,7 @@ export function BookmarkFolderSheet ({
                     style={[styles.createButton, !name.trim() ? styles.disabled : null]}
                     onPress={createAndPick}
                   >
-                    <Text style={styles.createText}>Create</Text>
+                    <Text style={styles.createText}>{t('Create')}</Text>
                   </Pressable>
                 </View>
                 )
@@ -128,7 +129,7 @@ export function BookmarkFolderSheet ({
                   onPress={() => setNaming(true)}
                 >
                   <PlusIcon width={18} height={18} color={palette.accent} />
-                  <Text style={[styles.rowText, { color: palette.accent }]}>New folder</Text>
+                  <Text style={[styles.rowText, { color: palette.accent }]}>{t('New folder')}</Text>
                 </Pressable>
                 )}
           </ScrollView>
@@ -180,9 +181,9 @@ export function FolderNameDialog ({
           <Text accessibilityRole='header' style={[styles.title, styles.dialogTitle, { color: palette.text }]}>{title}</Text>
           <TextInput
             autoFocus
-            accessibilityLabel='Folder name'
+            accessibilityLabel={t('Folder name')}
             maxLength={64}
-            placeholder='Folder name'
+            placeholder={t('Folder name')}
             placeholderTextColor={palette.mutedText}
             returnKeyType='done'
             selectTextOnFocus
@@ -193,7 +194,7 @@ export function FolderNameDialog ({
           />
           <View style={styles.dialogActions}>
             <Pressable accessibilityRole='button' hitSlop={8} onPress={onClose}>
-              <Text style={[styles.dialogButton, { color: palette.text }]}>Cancel</Text>
+              <Text style={[styles.dialogButton, { color: palette.text }]}>{t('Cancel')}</Text>
             </Pressable>
             <Pressable
               accessibilityRole='button'
@@ -202,7 +203,7 @@ export function FolderNameDialog ({
               hitSlop={8}
               onPress={save}
             >
-              <Text style={[styles.dialogButton, styles.dialogButtonStrong, !name.trim() ? styles.disabled : null]}>Save</Text>
+              <Text style={[styles.dialogButton, styles.dialogButtonStrong, !name.trim() ? styles.disabled : null]}>{t('Save')}</Text>
             </Pressable>
           </View>
         </View>

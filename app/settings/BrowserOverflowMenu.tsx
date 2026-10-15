@@ -22,6 +22,7 @@ import StarFillIcon from '../../assets/icons/bootstrap/star-fill.svg'
 import StarIcon from '../../assets/icons/bootstrap/star.svg'
 import ZoomIcon from '../../assets/icons/bootstrap/zoom-in.svg'
 import { BROWSER_PALETTES } from '../browser-appearance.mjs'
+import { t } from '../i18n/i18n.mjs'
 import { MODAL_ORIENTATIONS } from '../modal-orientations'
 import { dimWhenPressed, ICON_RIPPLE, ROUND_PRESS, ROW_RIPPLE } from '../press-feedback'
 
@@ -144,7 +145,7 @@ export function BrowserOverflowMenu ({
         disabled={bookmarksDisabled}
         icon={isBookmarked ? <BookmarkFillIcon {...iconProps} /> : <BookmarkIcon {...iconProps} />}
         isDark={isDark}
-        label={isBookmarked ? 'Remove Bookmark' : 'Add Bookmark'}
+        label={isBookmarked ? t('Remove Bookmark') : t('Add Bookmark')}
         onPress={onToggleBookmark}
       />
     )
@@ -157,7 +158,7 @@ export function BrowserOverflowMenu ({
         disabled={favouritesDisabled}
         icon={isFavourited ? <StarFillIcon {...iconProps} /> : <StarIcon {...iconProps} />}
         isDark={isDark}
-        label={isFavourited ? 'Remove Favourite' : 'Add Favourite'}
+        label={isFavourited ? t('Remove Favourite') : t('Add Favourite')}
         onPress={onToggleFavourite}
       />
     )
@@ -169,7 +170,7 @@ export function BrowserOverflowMenu ({
         cardColor={cardColor}
         icon={<ShareIcon {...iconProps} />}
         isDark={isDark}
-        label='Share'
+        label={t('Share')}
         onPress={onSharePage}
       />
     )
@@ -180,7 +181,7 @@ export function BrowserOverflowMenu ({
           cardColor={cardColor}
           icon={<PhoneIcon {...iconProps} />}
           isDark={isDark}
-          label='Send to Your Devices'
+          label={t('Send to Your Devices')}
           onPress={onSendToDevices}
         />
       )
@@ -192,7 +193,7 @@ export function BrowserOverflowMenu ({
           cardColor={cardColor}
           icon={<HouseIcon {...iconProps} />}
           isDark={isDark}
-          label='Add to Home Screen'
+          label={t('Add to Home Screen')}
           onPress={onAddToHomeScreen}
         />
       )
@@ -204,7 +205,7 @@ export function BrowserOverflowMenu ({
           cardColor={cardColor}
           icon={<FileTextIcon {...iconProps} />}
           isDark={isDark}
-          label='Reader View'
+          label={t('Reader View')}
           onPress={onReaderView}
         />
       )
@@ -216,7 +217,7 @@ export function BrowserOverflowMenu ({
           cardColor={cardColor}
           icon={<ZoomIcon {...iconProps} />}
           isDark={isDark}
-          label='Zoom'
+          label={t('Zoom')}
           onPress={onOpenZoom}
         />
       )
@@ -228,7 +229,7 @@ export function BrowserOverflowMenu ({
           cardColor={cardColor}
           icon={<PrinterIcon {...iconProps} />}
           isDark={isDark}
-          label='Print'
+          label={t('Print')}
           onPress={onPrintPage}
         />
       )
@@ -240,7 +241,7 @@ export function BrowserOverflowMenu ({
           cardColor={cardColor}
           icon={<DisplayIcon {...iconProps} />}
           isDark={isDark}
-          label='Desktop View'
+          label={t('Desktop View')}
           onPress={onToggleDesktopView}
           selected={desktopView}
         />
@@ -251,7 +252,7 @@ export function BrowserOverflowMenu ({
   return (
     <>
       <Pressable
-        accessibilityLabel='Open browser menu'
+        accessibilityLabel={t('Open browser menu')}
         accessibilityRole='button'
         android_ripple={ICON_RIPPLE}
         style={({ pressed }) => [styles.trigger, ROUND_PRESS, dimWhenPressed(pressed)]}
@@ -275,7 +276,7 @@ export function BrowserOverflowMenu ({
         <SafeAreaView style={styles.overlay} edges={['top', 'left', 'right']}>
           <Animated.View style={[styles.backdrop, { opacity: open }]}>
             <Pressable
-              accessibilityLabel='Close browser menu'
+              accessibilityLabel={t('Close browser menu')}
               style={StyleSheet.absoluteFill}
               onPress={onClose}
             />
@@ -310,14 +311,14 @@ export function BrowserOverflowMenu ({
                   disabled={newTabDisabled}
                   icon={<PlusIcon {...cardIconProps} />}
                   isDark={isDark}
-                  label='New Tab'
+                  label={t('New Tab')}
                   onPress={onNewTab}
                 />
                 <BigAction
                   cardColor={cardColor}
                   icon={<GearIcon {...cardIconProps} />}
                   isDark={isDark}
-                  label='Settings'
+                  label={t('Settings')}
                   onPress={onOpenSettings}
                 />
               </View>
@@ -338,7 +339,7 @@ export function BrowserOverflowMenu ({
                         disabled={newTabDisabled}
                         icon={<IncognitoIcon {...iconProps} />}
                         isDark={isDark}
-                        label='New Incognito Tab'
+                        label={t('New Incognito Tab')}
                         onPress={onNewIncognitoTab}
                       />
                       ]
@@ -349,7 +350,7 @@ export function BrowserOverflowMenu ({
                     disabled={bookmarksDisabled}
                     icon={<BookmarksIcon {...iconProps} />}
                     isDark={isDark}
-                    label='Bookmarks'
+                    label={t('Bookmarks')}
                     onPress={onOpenBookmarks}
                   />,
                   <MenuItem
@@ -357,7 +358,7 @@ export function BrowserOverflowMenu ({
                     cardColor={cardColor}
                     icon={<HistoryIcon {...iconProps} />}
                     isDark={isDark}
-                    label='History'
+                    label={t('History')}
                     onPress={onOpenHistory}
                   />,
                   <MenuItem
@@ -365,7 +366,7 @@ export function BrowserOverflowMenu ({
                     cardColor={cardColor}
                     icon={<DownloadIcon {...iconProps} />}
                     isDark={isDark}
-                    label='Downloads'
+                    label={t('Downloads')}
                     onPress={onOpenDownloads}
                   />,
                   ...(onBurnTabs
@@ -375,7 +376,7 @@ export function BrowserOverflowMenu ({
                         cardColor={cardColor}
                         icon={<FireIcon {...iconProps} />}
                         isDark={isDark}
-                        label='Burn Tabs and Data'
+                        label={t('Burn Tabs and Data')}
                         onPress={onBurnTabs}
                       />
                       ]

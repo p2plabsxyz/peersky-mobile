@@ -237,7 +237,7 @@ test('an invite link asks before it joins a room or sends a request', async () =
     screen.indexOf('if (!requestedRoomKey || !isInitialized'),
     screen.indexOf('[isInitialized, onRequestedRoomHandled, profile?.username, requestedRoomKey, rooms]')
   )
-  assert.match(roomEffect, /Alert\.alert\(\s*'Join this chat\?'/)
+  assert.match(roomEffect, /Alert\.alert\(\s*t\('Join this chat\?'\)/)
   assert.match(roomEffect, /onPress: \(\) => \{ void joinRoomByKey\(requestedRoomKey\) \}/)
   assert.doesNotMatch(roomEffect, /^\s*void joinRoomByKey\(requestedRoomKey\)/m)
 
@@ -245,7 +245,7 @@ test('an invite link asks before it joins a room or sends a request', async () =
     screen.indexOf('if (!requestedPeerId || !isInitialized'),
     screen.indexOf('[isInitialized, onRequestedPeerHandled, profile?.username, requestedPeerId, rooms]')
   )
-  assert.match(peerEffect, /Alert\.alert\(\s*'Send a message request\?'/)
+  assert.match(peerEffect, /Alert\.alert\(\s*t\('Send a message request\?'\)/)
   assert.match(peerEffect, /onPress: \(\) => \{ void requestDirectMessage\(requestedPeerId\) \}/)
   assert.doesNotMatch(peerEffect, /^\s*void requestDirectMessage\(requestedPeerId\)/m)
 })

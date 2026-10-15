@@ -6,7 +6,7 @@ const screen = await readFile(new URL('../../app/peerchat/PeerChatScreen.tsx', i
 
 // The chat list's search found chats by name and by their last message only.
 test('the chat list searches rooms and every message, chats first', () => {
-  assert.match(screen, /placeholder='Search rooms and messages'/)
+  assert.match(screen, /placeholder=\{t\('Search rooms and messages'\)\}/)
   const items = screen.slice(screen.indexOf('const landingItems: PeerChatListItem[] = ['), screen.indexOf('const directory ='))
   assert.ok(items.indexOf("kind: 'room'") < items.indexOf("kind: 'message'"), 'chats whose name matches, then messages')
   assert.match(screen, /data=\{landingItems\}/)
@@ -20,7 +20,7 @@ test('the chat list searches rooms and every message, chats first', () => {
 test('a found message shows its chat, who sent it, the words around the match and the time', () => {
   const row = screen.slice(screen.indexOf('function renderSearchResult ('), screen.indexOf('  return (\n    <>\n      <FlatList'))
   assert.match(row, /\{result\.roomName\}/)
-  assert.match(row, /const sender = result\.self \? 'You' : result\.isDM \? '' : result\.senderName/)
+  assert.match(row, /const sender = result\.self \? t\('You'\) : result\.isDM \? '' : result\.senderName/)
   assert.match(row, /splitPeerChatSearchMatch\(result\.message, roomSearchQuery\)/)
   assert.match(row, /styles\.searchMatch/)
   assert.match(row, /formatListTime\(result\.timestamp\)/)
@@ -53,7 +53,7 @@ test('a message to show is loaded, scrolled to and marked', () => {
 
 test('tapping a reply\'s quote goes to the message it quotes', () => {
   assert.match(screen, /onPress=\{\(\) => jumpToMessage\(item\.replyTo\?\.id \|\| ''\)\}/)
-  assert.match(screen, /accessibilityHint='Shows the message this replies to'/)
+  assert.match(screen, /accessibilityHint=\{t\('Shows the message this replies to'\)\}/)
   const jump = screen.slice(screen.indexOf('function jumpToMessage ('), screen.indexOf('function showMessageAt ('))
   // The whole chat, not search results, is where it is looked for.
   assert.match(jump, /setIsSearching\(false\)/)
@@ -74,7 +74,7 @@ test('Accept shows it is working until the chat opens', () => {
 // On a Samsung phone the keyboard offered saved passwords over the message box
 // once a message was sent.
 test('the message box is never taken for a login', () => {
-  const composer = screen.slice(screen.indexOf("placeholder='Message'"), screen.indexOf("placeholder='Message'") + 600)
+  const composer = screen.slice(screen.indexOf("placeholder={t('Message')}"), screen.indexOf("placeholder={t('Message')}") + 600)
   assert.match(composer, /autoComplete='off'/)
   assert.match(composer, /importantForAutofill='no'/)
   assert.match(composer, /textContentType='none'/)

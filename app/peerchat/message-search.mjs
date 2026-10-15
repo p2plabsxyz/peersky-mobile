@@ -1,3 +1,5 @@
+import { t } from '../i18n/i18n.mjs'
+
 export const PEERCHAT_SEARCH_QUERY_MAX_CHARACTERS = 100
 
 export function filterPeerChatMessages (messages, query) {
@@ -70,17 +72,17 @@ export function formatPeerChatDateLabel (timestamp, now = Date.now()) {
   const todayDay = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate())
   const daysAgo = Math.round((todayDay - dateDay) / 86_400_000)
 
-  if (daysAgo === 0) return 'Today'
-  if (daysAgo === 1) return 'Yesterday'
+  if (daysAgo === 0) return t('Today')
+  if (daysAgo === 1) return t('Yesterday')
   if (daysAgo > 1 && daysAgo < 7) return date.toLocaleDateString([], { weekday: 'long' })
   return date.toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' })
 }
 
 export function formatPeerChatMessageDetails (timestamp) {
-  if (!Number.isSafeInteger(timestamp) || timestamp < 0) return 'Sent time unavailable'
+  if (!Number.isSafeInteger(timestamp) || timestamp < 0) return t('Sent time unavailable')
   const date = new Date(timestamp)
   const day = date.toLocaleDateString([], { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
-  return `Sent ${day} at ${date.toLocaleTimeString()}`
+  return t('Sent {day} at {time}', { day, time: date.toLocaleTimeString() })
 }
 
 export function isPeerChatNearBottom (metrics, threshold = 80) {

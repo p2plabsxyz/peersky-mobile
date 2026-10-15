@@ -1,3 +1,5 @@
+import { t } from '../i18n/i18n.mjs'
+
 export const PEERCHAT_NOTIFICATION_PREFERENCES_VERSION = 1
 export const PEERCHAT_NOTIFICATION_PREFERENCES_MAX_BYTES = 256
 export const MAX_PEERCHAT_NOTIFICATIONS_PER_POLL = 3
@@ -63,7 +65,7 @@ export function collectPeerChatNotificationCandidates (previousRooms, nextRooms)
       body: truncateText(
         room.isDM === true
           ? room.lastMessage.message
-          : `${room.lastMessage.senderName || 'Peer'}: ${room.lastMessage.message}`,
+          : t('{name}: {message}', { name: room.lastMessage.senderName || t('Peer'), message: room.lastMessage.message }),
         180
       )
     }))

@@ -102,13 +102,13 @@ test('forwarding thirty messages never reaches the spam limit of any chat', () =
 
 test('Select picks messages, Forward sends them on a moment apart, files sealed again, and they show as forwarded', async () => {
   const screen = await read('app/peerchat/PeerChatScreen.tsx')
-  assert.match(screen, /onPress=\{\(\) => startSelectingMessages\(messageActionTarget\)\} style=\{styles\.actionSheetAction\}>\s+<Text style=\{\[styles\.actionSheetActionText, \{ color: colors\.text \}\]\}>Select<\/Text>/)
+  assert.match(screen, /onPress=\{\(\) => startSelectingMessages\(messageActionTarget\)\} style=\{styles\.actionSheetAction\}>\s+<Text style=\{\[styles\.actionSheetActionText, \{ color: colors\.text \}\]\}>\{t\('Select'\)\}<\/Text>/)
   // While picking, a tap picks, nothing inside the message opens, and the
   // message box gives way to the count and Forward.
   assert.match(screen, /onPress=\{selectedMessageIds \? \(\) => toggleSelectedMessage\(item\) : undefined\}/)
   assert.match(screen, /pointerEvents=\{selectedMessageIds \? 'box-only' : 'auto'\}/)
-  assert.match(screen, /\{selectedMessageIds\.size\} selected/)
-  assert.match(screen, /showChatNote\('Notices from the app cannot be forwarded\.'\)/)
+  assert.match(screen, /\{tp\(\{ one: '\{count\} selected', other: '\{count\} selected' \}, selectedMessageIds\.size\)\}/)
+  assert.match(screen, /showChatNote\(t\('Notices from the app cannot be forwarded\.'\)\)/)
 
   const forward = screen.slice(screen.indexOf('function forwardSelectedMessages'), screen.indexOf('function showChatNote'))
   assert.match(forward, /const gap = forwardGapMs\(target\.moderation\?\.spamRateLimit\)/)
@@ -123,7 +123,7 @@ test('Select picks messages, Forward sends them on a moment apart, files sealed 
   assert.match(forward, /fileEnc: true,\s+\.\.\.\(upload\.item\.fileKey && \{ fileKey: upload\.item\.fileKey \}\),\s+forwarded: true/)
   assert.ok(forward.indexOf('screenUploadBytes') < forward.indexOf('RPC_PEERCHAT_ATTACHMENT_FORWARD'), 'screened before it is sealed')
 
-  assert.match(screen, /\{item\.forwarded && \(\s+<Text style=\{\[styles\.forwardedLabel, media \? styles\.messageBubbleMediaInset : null, \{ color: colors\.muted \}\]\}>Forwarded<\/Text>/)
+  assert.match(screen, /\{item\.forwarded && \(\s+<Text style=\{\[styles\.forwardedLabel, media \? styles\.messageBubbleMediaInset : null, \{ color: colors\.muted \}\]\}>\{t\('Forwarded'\)\}<\/Text>/)
   assert.match(screen, /forwardedLabel: \{ fontSize: 12, fontStyle: 'italic'/)
   // Back ends picking before it leaves the chat.
   assert.match(screen, /if \(selectedMessageIds\) \{\s+setSelectedMessageIds\(null\)\s+return true\s+\}/)

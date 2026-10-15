@@ -20,11 +20,11 @@ test('a published note opens a sheet that can be opened again', async () => {
   // silently, and it says Share so it reads as something to press.
   const row = app.slice(app.indexOf('{p2pmdPublishUrl && ('), app.indexOf('p2pmdWorkspaceSyncStatus'))
   assert.match(row, /onPress=\{\(\) => setP2pmdPublishSheet\(p2pmdPublishedModeRef\.current\)\}/)
-  assert.match(row, />Share<\/Text>/)
+  assert.match(row, />\{t\('Share'\)\}<\/Text>/)
 
   const sheet = app.slice(app.indexOf('<PublishedLinkSheet'), app.indexOf('/>', app.indexOf('<PublishedLinkSheet')))
-  assert.match(sheet, /: 'Share it with other peers! It loads straight from this phone/)
-  assert.match(sheet, /\? 'Only your linked devices can open it\./)
+  assert.match(sheet, /: t\('Share it with other peers! It loads straight from this phone/)
+  assert.match(sheet, /\? t\('Only your linked devices can open it\./)
   assert.match(sheet, /url=\{p2pmdPublishUrl\}/)
 })
 
@@ -33,19 +33,19 @@ test('Publish asks who can open the note, and a private one needs a linked ident
   const choice = app.slice(app.indexOf('function onP2pmdPublishToHyper'), app.indexOf('function chooseP2pmdPrivatePublish'))
 
   // Each option says who can open the note.
-  assert.match(choice, /'Public: anyone with the link can open it, straight from this phone\./)
-  assert.match(choice, /Private: encrypted, so only your linked devices, the ones that share your identity, can open it\.'/)
-  assert.match(choice, /\{ text: 'Private', onPress: chooseP2pmdPrivatePublish \}/)
-  assert.match(choice, /\{ text: 'Public', onPress: \(\) => requestP2pmdPublish\('public'\) \}/)
+  assert.match(choice, /t\('Public: anyone with the link can open it, straight from this phone\./)
+  assert.match(choice, /Private: encrypted, so only your linked devices, the ones that share your identity, can open it\.'\)/)
+  assert.match(choice, /\{ text: t\('Private'\), onPress: chooseP2pmdPrivatePublish \}/)
+  assert.match(choice, /\{ text: t\('Public'\), onPress: \(\) => requestP2pmdPublish\('public'\) \}/)
   // Android shows at most three buttons and drops the rest without a word.
-  assert.ok((choice.match(/\{ text: '/g) || []).length <= 3)
+  assert.ok((choice.match(/\{ text: /g) || []).length <= 3)
 
   // As in Hyperdrive, no identity means no private note: Link Device is
   // offered instead.
   const gate = app.slice(app.indexOf('function chooseP2pmdPrivatePublish'), app.indexOf('function requestP2pmdPublish'))
   assert.match(gate, /if \(hasLinkedIdentity\(\)\) \{\s*requestP2pmdPublish\('private'\)/)
-  assert.match(gate, /'Link PeerSky Desktop first'/)
-  assert.match(gate, /text: 'Link Device'/)
+  assert.match(gate, /t\('Link PeerSky Desktop first'\)/)
+  assert.match(gate, /text: t\('Link Device'\)/)
   assert.match(gate, /setBrowserSettingsInitialPage\('link-device'\)/)
 
   // The choice goes along with the note to the backend.
@@ -61,7 +61,7 @@ test('the published link sheet keeps the link, and shares or copies it', async (
   // Copying does not close the sheet: the link stays on screen.
   const copy = sheet.slice(sheet.indexOf('function copy ()'), sheet.indexOf('function share ()'))
   assert.doesNotMatch(copy, /onClose/)
-  assert.match(sheet, /\{copied \? 'Copied' : 'Tap to copy'\}/)
+  assert.match(sheet, /\{copied \? t\('Copied'\) : t\('Tap to copy'\)\}/)
 })
 
 test('a Hyperdrive upload that can be shared says so', async () => {

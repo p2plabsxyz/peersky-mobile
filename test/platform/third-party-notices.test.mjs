@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
-import { describeNotice, parseThirdPartyNotices, splitNoticeText } from '../../app/settings/third-party-notices.mjs'
+import { SECTION_TITLES, describeNotice, parseThirdPartyNotices, splitNoticeText } from '../../app/settings/third-party-notices.mjs'
 
 const read = (path) => readFile(new URL(`../../${path}`, import.meta.url), 'utf8')
 const readLines = async (path) => (await read(path)).split('\n').map((line) => line.trim()).filter(Boolean)
@@ -103,6 +103,19 @@ test('each app lists only its own platform', async () => {
 
   const screen = await read('app/settings/Licenses.tsx')
   assert.match(screen, /parseThirdPartyNotices\(await copy\.text\(\), Platform\.OS\)/)
+})
+
+// The screen shows each heading from the file through tKey(), so a heading
+// is translated only while the same words are marked for the catalogs.
+// PeerSky's own section is the app's name and stays as it is.
+test('every section heading is marked for translation', async () => {
+  const { notices } = await shipped()
+  for (const section of notices.sections) {
+    if (section.id === 'peersky') assert.equal(section.title, 'PeerSky')
+    else assert.equal(SECTION_TITLES[section.id], section.title, section.id)
+  }
+  const screen = await read('app/settings/Licenses.tsx')
+  assert.match(screen, /\{tKey\(section\.title\)\}/)
 })
 
 // On iOS the asset stays inside the app bundle, which expo-file-system copies

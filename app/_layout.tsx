@@ -1,3 +1,5 @@
+// First, so the first screen is already in the language picked.
+import './i18n/setup'
 import { Slot } from 'expo-router'
 import { SafeAreaProvider, initialWindowMetrics } from 'react-native-safe-area-context'
 

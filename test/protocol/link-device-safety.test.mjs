@@ -128,7 +128,7 @@ describe('one Link Device job at a time', () => {
     const replace = screen.slice(screen.indexOf('const replaceData = useCallback'), screen.indexOf('const commitRestore = useCallback'))
     assert.ok(replace.indexOf('onRestartRequired()') < replace.indexOf('await call(command, data)'))
     assert.match(replace, /Nothing on this phone was changed/)
-    assert.match(screen, /void replaceData\(RPC_IDENTITY_REMOVE, \{\}, 'Your data was not removed'\)/)
+    assert.match(screen, /void replaceData\(RPC_IDENTITY_REMOVE, \{\}, t\('Your data was not removed'\)\)/)
   })
 
   // Found on a simulator: the restart screen never showed. Link Device is in

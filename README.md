@@ -23,7 +23,6 @@ We are building a surveillance-free internet where you own your tools, your data
 
 - [ ] Local private LLM search
 - [ ] Web Monetization
-- [ ] Translations for the whole app
 - [ ] PeerChat
   - [ ] Blind peers for messages, with notifications on iPhone when PeerSky is closed
   - [ ] Voice and video calls

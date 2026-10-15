@@ -1,0 +1,18 @@
+{
+  "ios": {
+    "NSCameraUsageDescription": "PeerSky menggunakan kamera untuk memindai kode QR saat Anda menautkan perangkat atau membuka ruang atau drive yang dibagikan, dan saat situs web yang Anda kunjungi memintanya dan Anda mengizinkan akses.",
+    "NSLocalNetworkUsageDescription": "PeerSky menggunakan jaringan lokal Anda untuk menemukan dan terhubung ke perangkat PeerSky di sekitar.",
+    "NSLocationWhenInUseUsageDescription": "PeerSky hanya menggunakan lokasi Anda saat situs web yang Anda kunjungi memintanya dan Anda mengizinkan akses.",
+    "NSMicrophoneUsageDescription": "PeerSky hanya menggunakan mikrofon saat situs web yang Anda kunjungi memintanya dan Anda mengizinkan akses.",
+    "NSPhotoLibraryAddUsageDescription": "PeerSky menyimpan gambar atau video ke perpustakaan foto Anda saat Anda memilih Simpan ke Foto.",
+    "ShortcutPasteAndGo": "Tempel dan Buka",
+    "ShortcutNewTab": "Tab Baru",
+    "ShortcutNewIncognitoTab": "Tab Samaran Baru",
+    "ShortcutAppIcon": "Ikon Aplikasi"
+  },
+  "android": {
+    "peerchat_background_text": "Tetap terhubung agar pesan sampai ke Anda",
+    "peerchat_background_channel": "Koneksi latar belakang PeerChat",
+    "peerchat_background_channel_description": "Menjaga PeerChat tetap terhubung saat PeerSky berjalan di latar belakang"
+  }
+}
