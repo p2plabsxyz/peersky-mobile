@@ -4,10 +4,17 @@ import http from 'node:http'
 import b4a from 'b4a'
 import * as Y from 'yjs'
 import { buildLineReplaceUpdate } from '../fixtures/yjs-helpers.mjs'
+import { LOOPBACK_TOKEN_HEADER, createLoopbackToken } from '../../backend/loopback-request.mjs'
 import { resetDocumentState } from '../../backend/p2pmd/document.mjs'
-import { createP2pmdHttpServer } from '../../backend/p2pmd/server.mjs'
+import { createP2pmdHttpServer, startP2pmdServer, stopP2pmdServer } from '../../backend/p2pmd/server.mjs'
 
 const activeStreams = new Set()
+const TOKEN = createLoopbackToken()
+
+// The editor puts the room's token on every request, so these do too. The
+// tests of what happens without it call globalThis.fetch.
+const withToken = (url, token = TOKEN) => `${url}${url.includes('?') ? '&' : '?'}token=${token}`
+const fetch = (url, init) => globalThis.fetch(withToken(String(url)), init)
 
 describe('p2pmd HTTP endpoints with injectable Node server', () => {
   let server
@@ -15,7 +22,7 @@ describe('p2pmd HTTP endpoints with injectable Node server', () => {
 
   beforeEach(async () => {
     resetDocumentState()
-    server = createP2pmdHttpServer({ httpImpl: http })
+    server = createP2pmdHttpServer({ httpImpl: http, token: TOKEN })
     localUrl = await listen(server)
   })
 
@@ -55,11 +62,13 @@ describe('p2pmd HTTP endpoints with injectable Node server', () => {
     assert.equal(editor.status, 200)
 
     // A phone or desktop joining through Holesail reaches the room on its own
-    // loopback port, which is what its Host and Origin then say.
-    const joiner = await requestWithHeaders(localUrl, '/doc', { host: '127.0.0.1:41999', origin: 'http://127.0.0.1:41999' })
+    // loopback port, which is what its Host and Origin then say. The note's
+    // tunnel puts the token on its request.
+    const fromTunnel = { [LOOPBACK_TOKEN_HEADER]: TOKEN }
+    const joiner = await requestWithHeaders(localUrl, '/doc', { host: '127.0.0.1:41999', origin: 'http://127.0.0.1:41999', ...fromTunnel }, 'GET', null, null)
     assert.equal(joiner.status, 200)
 
-    const desktop = await requestWithHeaders(localUrl, '/doc', { origin: 'peersky://p2p', 'sec-fetch-site': 'cross-site' })
+    const desktop = await requestWithHeaders(localUrl, '/doc', { origin: 'peersky://p2p', 'sec-fetch-site': 'cross-site', ...fromTunnel }, 'GET', null, null)
     assert.equal(desktop.status, 200)
     assert.equal(desktop.headers['access-control-allow-origin'], 'peersky://p2p')
     const preflight = await requestWithHeaders(localUrl, '/doc', { origin: 'peersky://p2p' }, 'OPTIONS')
@@ -80,6 +89,63 @@ describe('p2pmd HTTP endpoints with injectable Node server', () => {
     const write = await requestWithHeaders(localUrl, '/doc', { origin: 'https://evil.example', host }, 'POST', '{"content":"pwned"}')
     assert.equal(write.status, 403)
     assert.notEqual((await getJson(`${localUrl}/doc`)).content, 'pwned')
+  })
+
+  // Another app on the phone sends no Origin and no Sec-Fetch-Site, which the
+  // loopback check lets through, and any header it likes. It could read and
+  // rewrite the open note, and watch everyone in it.
+  it('answers nothing but the editor page without this run\'s token', async () => {
+    await postJson(`${localUrl}/doc`, { content: 'the real note' })
+    const routes = [
+      ['GET', '/status'],
+      ['GET', '/activity'],
+      ['GET', '/doc'],
+      ['GET', '/doc/yjsstate'],
+      ['GET', '/events?clientId=spy&role=client&name=Spy'],
+      ['GET', `/hyper/file?url=${encodeURIComponent('hyper://abc/image.png')}`],
+      ['POST', '/doc', '{"content":"pwned"}'],
+      ['POST', '/doc/update', '{"update":""}'],
+      ['POST', '/presence', '{"clientId":"spy","role":"client","name":"Spy"}'],
+      ['POST', '/', '{}'],
+      ['GET', '/missing']
+    ]
+    for (const token of [null, '', '0'.repeat(TOKEN.length), createLoopbackToken(), TOKEN.slice(0, -1), `${TOKEN}0`]) {
+      for (const [method, path, body = null] of routes) {
+        const address = token === null ? path : withToken(path, token)
+        const response = await requestWithHeaders(localUrl, address, {}, method, body, null)
+        assert.equal(response.status, 403, `${method} ${address}`)
+        assert.deepEqual(JSON.parse(response.body), { ok: false, error: 'Forbidden' })
+      }
+    }
+
+    // Only the token counts, under its own name.
+    for (const [path, headers] of [
+      [`/doc?Token=${TOKEN}`, {}],
+      [`/doc?tokens=${TOKEN}`, {}],
+      ['/doc', { 'X-PeerSky-Tokens': TOKEN }],
+      ['/doc', { [LOOPBACK_TOKEN_HEADER]: createLoopbackToken() }],
+      ['/doc', { [LOOPBACK_TOKEN_HEADER]: `${TOKEN}, ${createLoopbackToken()}` }]
+    ]) {
+      const response = await requestWithHeaders(localUrl, path, headers, 'GET', null, null)
+      assert.equal(response.status, 403, `${path} ${JSON.stringify(headers)}`)
+    }
+
+    const status = await getJson(`${localUrl}/status`)
+    assert.equal(status.peers, 0)
+    assert.ok(!status.peerList.some((peer) => peer.clientId === 'spy'))
+    assert.ok(!(await getJson(`${localUrl}/activity`)).activity.some((entry) => entry.clientId === 'spy'))
+    assert.equal((await getJson(`${localUrl}/doc`)).content, 'the real note')
+  })
+
+  it('serves the editor page without the token, and the page holds none', async () => {
+    for (const path of ['/', '/index.html']) {
+      const response = await requestWithHeaders(localUrl, path, {}, 'GET', null, null)
+      assert.equal(response.status, 200, path)
+      assert.ok(!response.body.includes(TOKEN), path)
+      assert.doesNotMatch(response.body, /[0-9a-f]{64}/, path)
+      // It reads the one the app hands it.
+      assert.match(response.body, /window\.peerskyServerToken/)
+    }
   })
 
   // Only the app renders previews, through its bridge. Over Holesail this was
@@ -521,6 +587,31 @@ describe('p2pmd HTTP endpoints with injectable Node server', () => {
   })
 })
 
+// Each run of the real server, on Node's http instead of Bare's.
+describe('p2pmd server runs', () => {
+  it('makes a new token for each run', async () => {
+    try {
+      const first = await startP2pmdServer({ httpImpl: http })
+      assert.match(first.token, /^[0-9a-f]{64}$/)
+      // Asked again while it runs: the same run, the same token.
+      assert.equal((await startP2pmdServer({ httpImpl: http })).token, first.token)
+      assert.equal((await globalThis.fetch(`${first.localUrl}/doc`)).status, 403)
+      assert.equal((await globalThis.fetch(withToken(`${first.localUrl}/doc`, first.token))).status, 200)
+      await stopP2pmdServer()
+
+      const second = await startP2pmdServer({ httpImpl: http })
+      assert.match(second.token, /^[0-9a-f]{64}$/)
+      assert.notEqual(second.token, first.token)
+      // The last run's token reads nothing now.
+      assert.equal((await globalThis.fetch(withToken(`${second.localUrl}/doc`, first.token))).status, 403)
+      assert.equal((await globalThis.fetch(withToken(`${second.localUrl}/doc`, second.token))).status, 200)
+    } finally {
+      await stopP2pmdServer()
+      resetDocumentState()
+    }
+  })
+})
+
 function listen (server) {
   return new Promise((resolve, reject) => {
     server.once('error', reject)
@@ -548,8 +639,11 @@ async function getJson (url) {
   return response.json()
 }
 
-function requestWithHeaders (baseUrl, path, headers, method = 'GET', body = null) {
+// With the room's token in the address unless the path already says token=,
+// or token is null.
+function requestWithHeaders (baseUrl, path, headers, method = 'GET', body = null, token = TOKEN) {
   const { hostname, port } = new URL(baseUrl)
+  if (token !== null && !/[?&]token=/.test(path)) path = withToken(path, token)
   return new Promise((resolve, reject) => {
     const request = http.request({ hostname, port, path, method, headers }, (response) => {
       let text = ''

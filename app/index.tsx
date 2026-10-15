@@ -284,6 +284,7 @@ import {
   getP2pmdEditorRequestAction,
   isP2pmdEditorMessage
 } from './p2pmd-editor.mjs'
+import { createServerTokenScript } from './server-token.mjs'
 import { MODAL_ORIENTATIONS } from './modal-orientations'
 import { shareLink } from './share'
 import { BrowserToast, type BrowserToastMessage } from './BrowserToast'
@@ -326,6 +327,8 @@ type P2pmdRoom = {
   port: number
   secure: boolean
   udp: boolean
+  // What the room's local port answers to. Only the editor's WebView gets it.
+  token: string
 }
 
 type P2pmdViewMode = 'edit' | 'preview' | 'slides'
@@ -666,6 +669,7 @@ export default function App () {
   const [hsConnectHost, setHsConnectHost] = useState('127.0.0.1')
   const [p2pmdUrl, setP2pmdUrl] = useState<string | null>(null)
   const [peertunesUrl, setPeertunesUrl] = useState<string | null>(null)
+  const [peertunesToken, setPeertunesToken] = useState<string | null>(null)
   const [peertunesLaunchSuffix, setPeertunesLaunchSuffix] = useState('')
   const [peertunesError, setPeertunesError] = useState<string | null>(null)
   // Goes up when folders are removed in Settings, P2P Data, so PeerTunes
@@ -1686,7 +1690,7 @@ export default function App () {
         })
       ])
 
-      if (!response.ok || !response.localUrl) {
+      if (!response.ok || !response.localUrl || !response.token) {
         const message = response.error || 'Failed starting PeerTunes'
         setPeertunesError(message)
         setStatus(message)
@@ -1694,6 +1698,9 @@ export default function App () {
       }
 
       setPeertunesUrl(response.localUrl)
+      // Only the PeerTunes view gets it. A restarted server has a new one,
+      // and the view loads the page again with it.
+      setPeertunesToken(response.token)
 
       // The library lives in this origin's IndexedDB, so a different port means
       // an empty library. Say so rather than letting the music look lost.
@@ -3739,9 +3746,11 @@ export default function App () {
   useEffect(() => {
     p2pmdWebViewRef.current?.injectJavaScript(p2pmdThemeScript(browserIsDark))
   }, [browserIsDark])
+  // A new token, from a room opened again, means a new nonce too, so the
+  // editor loads again and is handed the new token.
   const p2pmdEditorNonce = useMemo(
     () => createP2pmdNonce(Crypto.getRandomValues(new Uint8Array(16))),
-    [p2pmdRoom?.key, p2pmdRoom?.role, p2pmdUrl]
+    [p2pmdRoom?.key, p2pmdRoom?.role, p2pmdUrl, p2pmdRoom?.token]
   )
   // Starts the editor over from its own page. A reload would ask the room's
   // server for it instead.
@@ -4402,8 +4411,9 @@ export default function App () {
             }}
             // The page cannot see the browser's own light/dark/system setting,
             // so it is told. Set before first paint so the editor never flashes
-            // the wrong theme on the way in.
-            injectedJavaScriptBeforeContentLoaded={p2pmdThemeScript(browserIsDark)}
+            // the wrong theme on the way in. The room's token goes in the same
+            // way, so only this view has it.
+            injectedJavaScriptBeforeContentLoaded={`${createServerTokenScript(p2pmdRoom.token)}\n${p2pmdThemeScript(browserIsDark)}`}
             allowsFullscreenVideo={true}
             // The slide styles lay out <video>, which WKWebView will not play
             // inline on iPhone without this.
@@ -5394,6 +5404,7 @@ export default function App () {
               isDark={browserIsDark}
               launchSuffix={peertunesLaunchSuffix}
               localUrl={peertunesUrl}
+              serverToken={peertunesToken}
               onEnsureServer={() => void ensurePeerTunesServer()}
               onKeepOffline={keepPeerTunesFolderOffline}
               onKeptFolders={peerTunesKeptFolders}

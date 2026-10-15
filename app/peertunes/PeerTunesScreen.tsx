@@ -12,6 +12,7 @@ import {
   createPeerTunesMediaCommandScript,
   createPeerTunesNowPlayingScript,
   createPeerTunesPageUrl,
+  isPeerTunesDataRequest,
   isPeerTunesPageRequest,
   parsePeerTunesHapticRequest,
   parsePeerTunesKeepOfflineRequest,
@@ -24,6 +25,7 @@ import { AppLoading } from '../AppLoading'
 import { PAUSE_ALL_MEDIA_SCRIPT } from '../browser-media.mjs'
 import { parsePeerTunesWidgetTap } from '../home-shortcuts.mjs'
 import { MODAL_ORIENTATIONS } from '../modal-orientations'
+import { createServerTokenScript } from '../server-token.mjs'
 import { WEBVIEW_DECELERATION_RATE } from '../webview-scroll.mjs'
 import { tapFeedback } from '../haptics'
 import { forgetPeerTunesWidgetState, idlePeerTunesWidget, updatePeerTunesWidget } from '../widgets'
@@ -71,6 +73,8 @@ type Props = {
   isDark: boolean
   launchSuffix: string
   localUrl: string | null
+  // The server's token for this run. Reading a drive or keeping songs needs it.
+  serverToken: string | null
   onEnsureServer: () => void
   onKeepOffline: (url: string) => Promise<{ ok: boolean, status?: string, error?: string }>
   onKeptFolders: (urls: string[]) => Promise<{ ok: boolean, kept?: string[], error?: string }>
@@ -85,6 +89,7 @@ export function PeerTunesScreen ({
   isDark,
   launchSuffix,
   localUrl,
+  serverToken,
   onEnsureServer,
   onKeepOffline,
   onKeptFolders,
@@ -96,6 +101,10 @@ export function PeerTunesScreen ({
   // pressure and leaves an empty view behind. Remounting on that signal is
   // what stops the player going blank until the tab is closed and reopened.
   const [reloadNonce, setReloadNonce] = useState(0)
+  // A restarted server has a new token, which a page only gets as it loads,
+  // so a new one loads the page again.
+  const [tokenRun, setTokenRun] = useState({ token: serverToken, run: 0 })
+  if (tokenRun.token !== serverToken) setTokenRun({ token: serverToken, run: tokenRun.run + 1 })
   const [scanRequestId, setScanRequestId] = useState<string | null>(null)
   const [cameraPermission, requestCameraPermission] = useCameraPermissions()
   const webViewRef = useRef<WebView | null>(null)
@@ -265,7 +274,7 @@ export function PeerTunesScreen ({
     )
   }
 
-  if (!localUrl) {
+  if (!localUrl || !serverToken) {
     return (
       <AppLoading app='peertunes' isDark={isDark} />
     )
@@ -276,7 +285,7 @@ export function PeerTunesScreen ({
   return (
     <>
     <WebView
-      key={`${pageUrl}:${reloadNonce}`}
+      key={`${pageUrl}:${reloadNonce}:${tokenRun.run}`}
       ref={webViewRef}
       source={{ uri: pageUrl }}
       // This view only ever shows the loopback app, so pin it. The navigation
@@ -285,7 +294,9 @@ export function PeerTunesScreen ({
       // Left unset, react-native-webview gives iOS a deceleration of 0, and a
       // swipe through the library stopped the moment the finger lifted.
       decelerationRate={WEBVIEW_DECELERATION_RATE}
-      injectedJavaScriptBeforeContentLoaded={PEERTUNES_BEFORE_LOAD_SCRIPT}
+      // The token goes in before the page's own scripts run. The server never
+      // sends it, so only this view has it.
+      injectedJavaScriptBeforeContentLoaded={`${createServerTokenScript(serverToken)}\n${PEERTUNES_BEFORE_LOAD_SCRIPT}`}
       onMessage={(event) => {
         const nowPlaying = parsePeerTunesNowPlaying(event.nativeEvent.data)
         if (nowPlaying) {
@@ -322,6 +333,7 @@ export function PeerTunesScreen ({
       textZoom={100}
       style={styles.webView}
       onShouldStartLoadWithRequest={(request) => {
+        if (isPeerTunesDataRequest(request.url, localUrl)) return false
         if (isPeerTunesPageRequest(request.url, localUrl)) return true
         // Only a real top-frame navigation should leave PeerTunes. A subframe
         // pointing elsewhere used to take the whole tab with it and stop the
@@ -330,7 +342,10 @@ export function PeerTunesScreen ({
         onOpenUrl(request.url)
         return false
       }}
-      onOpenWindow={(event) => onOpenUrl(event.nativeEvent.targetUrl)}
+      onOpenWindow={(event) => {
+        if (isPeerTunesDataRequest(event.nativeEvent.targetUrl, localUrl)) return
+        onOpenUrl(event.nativeEvent.targetUrl)
+      }}
       onLoadStart={() => { pageLoadedRef.current = false }}
       onLoadEnd={() => {
         audioExternalRef.current = null

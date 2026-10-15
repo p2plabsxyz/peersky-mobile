@@ -12,7 +12,10 @@ export async function startHolesailLive ({
   host,
   connector,
   secure = true,
-  udp = false
+  udp = false,
+  // The local server's token, which P2PMD passes so its room can tell people
+  // who came in with the note's address from other apps on the phone.
+  token = null
 } = {}) {
   return withSessionTransition(async () => {
     if (udp) return { ok: false, error: UDP_UNSUPPORTED }
@@ -39,7 +42,8 @@ export async function startHolesailLive ({
       key: connectorKey.key,
       secure: Boolean(secure),
       port: livePort.port,
-      host: liveHost.host
+      host: liveHost.host,
+      token: typeof token === 'string' && token ? token : null
     })
 
     session = instance
@@ -79,7 +83,10 @@ export async function connectHolesail ({
   // Listen on the port the host advertises, as the desktop does, so a note's
   // address reads the same on every device. The host's record has it.
   hostPort = false,
-  udp = false
+  udp = false,
+  // A token the requests made to the local port must carry. P2PMD passes one,
+  // so another app on the phone cannot use a joined note.
+  token = null
 } = {}) {
   return withSessionTransition(async () => {
     if (udp) return { ok: false, error: UDP_UNSUPPORTED }
@@ -108,7 +115,8 @@ export async function connectHolesail ({
       instance = new TunnelGuest({
         key: targetKey.key,
         host: targetHost.host,
-        port: targetPort.port
+        port: targetPort.port,
+        token: typeof token === 'string' && token ? token : null
       })
     } catch {
       return { ok: false, error: 'Invalid holesail key. Use hs://... or an alphanumeric key.' }

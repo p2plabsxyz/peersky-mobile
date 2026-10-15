@@ -21,10 +21,11 @@ npm run test:load:p2pmd -- --people 20 --typing 3 --seconds 20
 
 ## What it runs
 
-- **The host:** `createP2pmdHttpServer({ httpImpl: http })` from
+- **The host:** `createP2pmdHttpServer({ httpImpl: http, token })` from
   `backend/p2pmd/server.mjs`, on Node's `http` and bound to `127.0.0.1`, the
-  way `test/protocol/p2pmd-http.test.mjs` runs it. `startP2pmdServer` needs
-  Bare, so it is not used. The host has a process of its own, so its CPU and
+  way `test/protocol/p2pmd-http.test.mjs` runs it. Each request gets the
+  server's token, as the note's tunnel would give it to someone who joined
+  with the note's address. The host has a process of its own, so its CPU and
   memory are its own.
 - **The note:** about 60 lines of team notes that three people wrote earlier,
   with each line's author kept in the note as P2PMD keeps them, and a line for

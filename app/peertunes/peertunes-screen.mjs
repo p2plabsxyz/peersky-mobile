@@ -29,6 +29,18 @@ export function isPeerTunesPageRequest (requestUrl, localUrl) {
   }
 }
 
+// The server's drive reads and song checks carry the run's token in their
+// address. Loaded as a page, one could end up in a download with the token in
+// it, so the view never loads them. The page fetches them; it never opens one.
+export function isPeerTunesDataRequest (requestUrl, localUrl) {
+  if (!isPeerTunesPageRequest(requestUrl, localUrl)) return false
+  try {
+    return new URL(String(requestUrl)).pathname.startsWith('/hyper/')
+  } catch {
+    return false
+  }
+}
+
 // PeerTunes asks native to scan, because WKWebView has no BarcodeDetector and
 // the native scanner is the one the rest of the app already uses. The page sees
 // a promise; native runs the camera and resolves it.

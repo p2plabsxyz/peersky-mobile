@@ -57,7 +57,6 @@ These follow from how PeerSky works rather than being open bugs:
 - Content published to a public Hyper drive is public. Joining a swarm or a PeerChat room shows your IP address to its peers, and one key identifies this device for browsing, PeerChat and nearby discovery.
 - P2P Republic keeps one key for good, so someone removed from it still holds it. A room made before 0.1.2 keeps its key too, until removing somebody moves it to a new one. In a room made before 0.1.3, who made it is taken from the first device that says so on its own connection, unless the invite said. P2P Republic's maker is pinned in the app.
 - Keys sit in the app's private storage rather than the Keychain or Android Keystore, so anyone with control of an unlocked, rooted or jailbroken device can read them.
-- Any app on an Android phone can connect to the loopback ports. The checks above stop web pages, not native apps, so another app that finds the port of an open P2PMD note can read and edit it.
 - A link preview is fetched by the sender's phone, so the linked site sees the sender's IP address.
 
 ## Security review
@@ -85,6 +84,7 @@ Fixed as a result:
 - A member about to be removed could have a spare key noted by everyone in the room, and be handed the room's new key under it.
 - Following a long line of moves made a phone join a room for each one.
 - One connection could fill the list of messages a phone asks its neighbours for with made-up ids, so real ones from other rooms were not fetched.
+- Any other app on an Android phone could read the user's private drives, decrypted, through PeerTunes' local server and make it start downloads, and could read and rewrite an open P2PMD note. Both now answer only requests that carry a secret made for each run, which PeerSky hands only to its own PeerTunes and P2PMD pages.
 
 Not covered in depth: native modules and upstream libraries beyond advisory triage.
 

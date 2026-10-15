@@ -9,6 +9,7 @@ import b4a from 'b4a'
 import Corestore from 'corestore'
 import Hyperdrive from 'hyperdrive'
 
+import { createLoopbackToken } from '../../backend/loopback-request.mjs'
 import { HYPER_BRIDGE_SCRIPT, KEEP_SONGS_HEADER, createPeerTunesHttpServer } from '../../backend/peertunes/server.mjs'
 import { MAX_KEEP_DRIVES, MAX_KEEP_SONGS_PER_REQUEST, createSongKeeper, songState, within } from '../../backend/peertunes/song-keeper.mjs'
 
@@ -262,11 +263,13 @@ describe('PeerTunes song keeper', () => {
 })
 
 describe('PeerTunes keep endpoint', () => {
+  const TOKEN = createLoopbackToken()
   // What the PeerTunes page's own fetch sends.
   const asPage = { [KEEP_SONGS_HEADER]: '1', 'Sec-Fetch-Site': 'same-origin' }
+  const keepUrl = (localUrl, query, token = TOKEN) => `${localUrl}/hyper/keep?${query}${token === null ? '' : `&token=${token}`}`
 
   async function withServer (keepSongs, run) {
-    const server = createPeerTunesHttpServer({ httpImpl: http, fetch: async () => ({ ok: false, status: 404 }), keepSongs })
+    const server = createPeerTunesHttpServer({ httpImpl: http, fetch: async () => ({ ok: false, status: 404 }), keepSongs, token: TOKEN })
     const localUrl = await new Promise((resolve, reject) => {
       server.once('error', reject)
       server.listen(0, '127.0.0.1', () => resolve(`http://127.0.0.1:${server.address().port}`))
@@ -287,25 +290,26 @@ describe('PeerTunes keep endpoint', () => {
     await withServer(keepSongs, async (localUrl) => {
       const a = 'hyper://abc/mix/01 One.mp3'
       const b = 'hyper://abc/mix/02 Two.mp3'
-      const response = await fetch(`${localUrl}/hyper/keep?url=${encodeURIComponent(a)}&url=${encodeURIComponent(b)}`, { headers: asPage })
+      const response = await fetch(keepUrl(localUrl, `url=${encodeURIComponent(a)}&url=${encodeURIComponent(b)}`), { headers: asPage })
       assert.equal(response.status, 200)
       assert.equal(response.headers.get('content-type'), 'application/json; charset=utf-8')
       assert.deepEqual(await response.json(), { ok: true, saved: [a], saving: [], waiting: [b] })
+      // The token is not a song.
       assert.deepEqual(asked, [[a, b]])
     })
   })
 
   it('refuses a check with no songs, too many, or a write', async () => {
     await withServer(async () => ({ ok: true }), async (localUrl) => {
-      assert.equal((await fetch(`${localUrl}/hyper/keep`, { headers: asPage })).status, 400)
+      assert.equal((await fetch(`${localUrl}/hyper/keep?token=${TOKEN}`, { headers: asPage })).status, 400)
       const many = Array.from({ length: MAX_KEEP_SONGS_PER_REQUEST + 1 }, (_, index) => `url=hyper%3A%2F%2Fabc%2F${index}.mp3`).join('&')
-      assert.equal((await fetch(`${localUrl}/hyper/keep?${many}`, { headers: asPage })).status, 400)
-      assert.equal((await fetch(`${localUrl}/hyper/keep?url=hyper%3A%2F%2Fabc%2Fa.mp3`, { method: 'POST', body: 'x', headers: asPage })).status, 405)
-      const head = await fetch(`${localUrl}/hyper/keep?url=hyper%3A%2F%2Fabc%2Fa.mp3`, { method: 'HEAD', headers: asPage })
+      assert.equal((await fetch(keepUrl(localUrl, many), { headers: asPage })).status, 400)
+      assert.equal((await fetch(keepUrl(localUrl, 'url=hyper%3A%2F%2Fabc%2Fa.mp3'), { method: 'POST', body: 'x', headers: asPage })).status, 405)
+      const head = await fetch(keepUrl(localUrl, 'url=hyper%3A%2F%2Fabc%2Fa.mp3'), { method: 'HEAD', headers: asPage })
       assert.equal(head.status, 405)
     })
     await withServer(null, async (localUrl) => {
-      assert.equal((await fetch(`${localUrl}/hyper/keep?url=hyper%3A%2F%2Fabc%2Fa.mp3`, { headers: asPage })).status, 404)
+      assert.equal((await fetch(keepUrl(localUrl, 'url=hyper%3A%2F%2Fabc%2Fa.mp3'), { headers: asPage })).status, 404)
     })
   })
 
@@ -314,7 +318,7 @@ describe('PeerTunes keep endpoint', () => {
   it('starts nothing for a tab, an image or another page, which cannot send the header', async () => {
     let asked = 0
     await withServer(async () => { asked++; return { ok: true } }, async (localUrl) => {
-      const keep = `${localUrl}/hyper/keep?url=hyper%3A%2F%2Fabc%2Fa.mp3`
+      const keep = keepUrl(localUrl, 'url=hyper%3A%2F%2Fabc%2Fa.mp3')
       assert.equal((await fetch(keep, { headers: { 'Sec-Fetch-Site': 'none', 'Sec-Fetch-Mode': 'navigate' } })).status, 403)
       assert.equal((await fetch(keep)).status, 403)
       assert.equal((await fetch(keep, { headers: { ...asPage, Origin: 'https://site.example' } })).status, 403)
@@ -324,10 +328,27 @@ describe('PeerTunes keep endpoint', () => {
     assert.equal(asked, 0)
   })
 
+  // Another app on the phone can send the header, and no Origin or
+  // Sec-Fetch-Site at all. It opened drives and started downloads.
+  it('starts nothing for a request without this run\'s token, header or not', async () => {
+    let asked = 0
+    await withServer(async () => { asked++; return { ok: true } }, async (localUrl) => {
+      const query = 'url=hyper%3A%2F%2Fabc%2Fa.mp3'
+      for (const token of [null, '', '0'.repeat(TOKEN.length), createLoopbackToken(), TOKEN.slice(1)]) {
+        assert.equal((await fetch(keepUrl(localUrl, query, token), { headers: { [KEEP_SONGS_HEADER]: '1' } })).status, 403, String(token))
+        assert.equal((await fetch(keepUrl(localUrl, query, token), { headers: asPage })).status, 403, String(token))
+      }
+      assert.equal((await fetch(keepUrl(localUrl, query, null), { headers: { ...asPage, 'X-PeerSky-Token': TOKEN } })).status, 403)
+      assert.equal(asked, 0)
+      assert.equal((await fetch(keepUrl(localUrl, query), { headers: { [KEEP_SONGS_HEADER]: '1' } })).status, 200)
+    })
+    assert.equal(asked, 1)
+  })
+
   it('gives the page a keep function that asks a few songs at a time and adds up the answers', async () => {
     const script = HYPER_BRIDGE_SCRIPT.replace(/^<script>/, '').replace(/<\/script>$/, '')
     const requested = []
-    const window = {}
+    const window = { peerskyServerToken: TOKEN }
     const context = vm.createContext({
       window,
       encodeURIComponent,
@@ -347,6 +368,8 @@ describe('PeerTunes keep endpoint', () => {
     const answer = await window.peerskyKeepSongs(songs)
     assert.equal(requested.length, 3)
     assert.ok(requested.every((url) => url.startsWith('/hyper/keep?url=')))
+    // The page's token, added as the page asks.
+    assert.ok(requested.every((url) => new URL(url, 'http://127.0.0.1').searchParams.get('token') === TOKEN))
     assert.ok(requested[0].includes(encodeURIComponent(songs[0])))
     assert.equal(answer.ok, true)
     assert.deepEqual([...answer.saved], [songs[0], songs[10], songs[20]])
@@ -355,5 +378,22 @@ describe('PeerTunes keep endpoint', () => {
     // A server that cannot answer gives null, as a host without it would.
     context.fetch = async () => ({ ok: false, status: 404 })
     assert.equal(await window.peerskyKeepSongs(songs), null)
+  })
+
+  it('asks the server the page came from, with the page\'s token', async () => {
+    const asked = []
+    await withServer(async (urls) => { asked.push(urls); return { ok: true, saved: urls, saving: [], waiting: [] } }, async (localUrl) => {
+      const window = { peerskyServerToken: TOKEN }
+      vm.runInNewContext(HYPER_BRIDGE_SCRIPT.replace(/^<script>/, '').replace(/<\/script>$/, ''), {
+        window,
+        encodeURIComponent,
+        // Same origin, as from the page.
+        fetch: (url, init) => fetch(`${localUrl}${url}`, { ...init, headers: { ...init.headers, 'Sec-Fetch-Site': 'same-origin' } })
+      })
+      const answer = await window.peerskyKeepSongs(['hyper://abc/a.mp3', 'hyper://abc/b.mp3'])
+      assert.equal(answer.ok, true)
+      assert.deepEqual([...answer.saved], ['hyper://abc/a.mp3', 'hyper://abc/b.mp3'])
+    })
+    assert.deepEqual(asked, [['hyper://abc/a.mp3', 'hyper://abc/b.mp3']])
   })
 })

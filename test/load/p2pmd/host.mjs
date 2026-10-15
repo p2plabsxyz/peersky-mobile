@@ -1,11 +1,12 @@
 // The phone's P2PMD host for the load test: createP2pmdHttpServer from
 // backend/p2pmd/server.mjs on Node's http, the way
 // test/protocol/p2pmd-http.test.mjs runs it, bound to 127.0.0.1.
-// startP2pmdServer needs Bare, so it is not used, and nothing here starts
-// Holesail. run.mjs starts this process and asks it for measurements.
+// startP2pmdServer is not used, and nothing here starts Holesail. run.mjs
+// starts this process and asks it for measurements.
 import dc from 'node:diagnostics_channel'
 import http from 'node:http'
 import { monitorEventLoopDelay, performance } from 'node:perf_hooks'
+import { LOOPBACK_TOKEN_HEADER, createLoopbackToken } from '../../../backend/loopback-request.mjs'
 import { resetDocumentState } from '../../../backend/p2pmd/document.mjs'
 import { createP2pmdHttpServer } from '../../../backend/p2pmd/server.mjs'
 
@@ -13,7 +14,14 @@ const LOOP_EVERY_MS = 10
 
 const meter = createMeter()
 resetDocumentState()
-const server = createP2pmdHttpServer({ httpImpl: http })
+const token = createLoopbackToken()
+const server = createP2pmdHttpServer({ httpImpl: http, token })
+// Each editor stands for someone who joined with the note's address. The
+// note's tunnel puts the server's token on their requests, so it goes on here,
+// and run.mjs and editors.mjs stay the same as the desktop's.
+server.prependListener('request', (req) => {
+  req.headers[LOOPBACK_TOKEN_HEADER.toLowerCase()] = token
+})
 const url = await new Promise((resolve, reject) => {
   server.once('error', reject)
   server.listen(0, '127.0.0.1', () => resolve(`http://127.0.0.1:${server.address().port}`))

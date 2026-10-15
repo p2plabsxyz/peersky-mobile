@@ -1,5 +1,5 @@
 import b4a from 'b4a'
-import { isOwnLoopbackRequest } from '../loopback-request.mjs'
+import { createLoopbackToken, isLoopbackToken, isOwnLoopbackRequest } from '../loopback-request.mjs'
 import { streamHyperAsset } from '../hyper/asset-server-core.mjs'
 import { isPeerDiscoveryError } from '../hyper/fetch-retry.mjs'
 import { headersToObject } from '../hyper/assets.mjs'
@@ -55,13 +55,24 @@ const KEEP_SONGS_BATCH = 10
 // another origin that adds it is refused at the preflight.
 export const KEEP_SONGS_HEADER = 'X-PeerTunes-Keep'
 
+// Reading a drive and keeping songs both need this run's token. Another app on
+// the phone can reach this port and send any header, so the loopback check
+// alone left it the person's private drives, decrypted.
+const TOKEN_ROUTES = new Set(['/hyper/asset', '/hyper/keep'])
+
+// The app gives the token to its own WebView before this page loads, as
+// window.peerskyServerToken. It is read on each call and never sent from here:
+// any app on the phone can fetch this page.
+const TOKEN_SCRIPT = 'function token(){var value=window.peerskyServerToken;' +
+  'return typeof value==="string"&&value?"&token="+encodeURIComponent(value):""}'
+
 // PeerTunes asks which songs of a kept playlist are on the device, and the
 // server fetches the ones that are not. A few at a time, then one answer.
 const KEEP_SONGS_SCRIPT = 'window.peerskyKeepSongs=function(urls){' +
   'var list=Array.isArray(urls)?urls.map(String):[],batches=[];' +
   `for(var i=0;i<list.length;i+=${KEEP_SONGS_BATCH})batches.push(list.slice(i,i+${KEEP_SONGS_BATCH}));` +
   'return Promise.all(batches.map(function(batch){' +
-  `return fetch("/hyper/keep?"+batch.map(function(url){return"url="+encodeURIComponent(url)}).join("&"),{headers:{"${KEEP_SONGS_HEADER}":"1"}})` +
+  `return fetch("/hyper/keep?"+batch.map(function(url){return"url="+encodeURIComponent(url)}).join("&")+token(),{headers:{"${KEEP_SONGS_HEADER}":"1"}})` +
   '.then(function(res){if(!res.ok)throw new Error("keep "+res.status);return res.json()})' +
   '})).then(function(parts){' +
   'var out={ok:true,saved:[],saving:[],waiting:[]};' +
@@ -72,10 +83,10 @@ const KEEP_SONGS_SCRIPT = 'window.peerskyKeepSongs=function(urls){' +
 
 // PeerTunes looks for this global and sends its hyper:// reads through it,
 // because the WebView cannot fetch hyper:// on its own. The path is relative,
-// so the page never handles a proxy token.
+// and the token is added when the page asks, so the page as served holds none.
 // peerskyProtocols: the phone reads hyper:// only, so PeerTunes offers no other
 // p2p link.
-export const HYPER_BRIDGE_SCRIPT = `<script>window.peerskyProtocols=["hyper"];window.peerskyHyperAsset=function(url){return"/hyper/asset?url="+encodeURIComponent(String(url))};${KEEP_SONGS_SCRIPT}</script>`
+export const HYPER_BRIDGE_SCRIPT = `<script>(function(){${TOKEN_SCRIPT}window.peerskyProtocols=["hyper"];window.peerskyHyperAsset=function(url){return"/hyper/asset?url="+encodeURIComponent(String(url))+token()};${KEEP_SONGS_SCRIPT}})()</script>`
 
 let server = null
 let serverInfo = null
@@ -84,7 +95,10 @@ let bareHttp = null
 let hyperFetchModule = null
 let hyperRuntimeModule = null
 
-export async function startPeerTunesServer () {
+// The app passes nothing. Tests pass Node's http, port 0 and stand-ins for
+// the Hyper calls, since Bare's HTTP and the Hyper fetch do not load under
+// Node.
+export async function startPeerTunesServer ({ httpImpl: testHttp = null, port = PEERTUNES_LOOPBACK_PORT, hyper: testHyper = null } = {}) {
   return withServerTransition(async () => {
     if (server && serverInfo) {
       return {
@@ -94,10 +108,10 @@ export async function startPeerTunesServer () {
       }
     }
 
-    const httpImpl = await getBareHttp()
-    const { ensureFetchGlobals, refreshHyperNetworkFor, routedHyperFetch, routedHyperRangeFetch } = await getHyperFetchModule()
-    const { withHyperRuntimeForAddress } = await getHyperRuntimeModule()
-    const { hyperOfflineNetworkAllowed } = await import('../hyper/offline-manager.mjs')
+    const httpImpl = testHttp || await getBareHttp()
+    const { ensureFetchGlobals, refreshHyperNetworkFor, routedHyperFetch, routedHyperRangeFetch } = testHyper || await getHyperFetchModule()
+    const { withHyperRuntimeForAddress } = testHyper || await getHyperRuntimeModule()
+    const { hyperOfflineNetworkAllowed } = testHyper || await import('../hyper/offline-manager.mjs')
     const keeper = createSongKeeper({
       openDrive: (address, task) => withHyperRuntimeForAddress(address, async (runtime) => {
         const drive = await within(runtime.getDrive(address), KEEP_DRIVE_OPEN_TIMEOUT_MS)
@@ -108,19 +122,23 @@ export async function startPeerTunesServer () {
       // Download only on Wi-Fi holds for kept songs as for kept folders.
       mayDownload: hyperOfflineNetworkAllowed
     })
+    // A new token each run. The app hands it to the page, and reloads the
+    // page when a restart brings a new one.
+    const token = createLoopbackToken()
     const options = {
       httpImpl,
       fetch: routedHyperFetch,
       fetchRange: routedHyperRangeFetch,
       ensureGlobals: ensureFetchGlobals,
       refreshNetwork: refreshHyperNetworkFor,
-      keepSongs: keeper.keep
+      keepSongs: keeper.keep,
+      token
     }
 
     let bound
     let usingFallbackPort = false
     try {
-      bound = await bindServer(options, PEERTUNES_LOOPBACK_PORT)
+      bound = await bindServer(options, port)
     } catch (error) {
       // Something else holds the fixed port. The app still works, but the
       // library lives in the origin's IndexedDB, so a different port means the
@@ -136,7 +154,8 @@ export async function startPeerTunesServer () {
       host: PEERTUNES_LOOPBACK_HOST,
       port: bound.port,
       localUrl: `http://${PEERTUNES_LOOPBACK_HOST}:${bound.port}`,
-      usingFallbackPort
+      usingFallbackPort,
+      token
     }
 
     return {
@@ -178,7 +197,8 @@ export function createPeerTunesHttpServer ({
   fetchRange,
   ensureGlobals = () => {},
   refreshNetwork = async () => {},
-  keepSongs = null
+  keepSongs = null,
+  token
 } = {}) {
   if (!httpImpl?.createServer) {
     throw new Error('PeerTunes HTTP server requires an HTTP implementation.')
@@ -186,9 +206,12 @@ export function createPeerTunesHttpServer ({
   if (typeof fetch !== 'function') {
     throw new Error('PeerTunes HTTP server requires a Hyper fetch implementation.')
   }
+  if (typeof token !== 'string' || token.length < 32) {
+    throw new Error('PeerTunes HTTP server requires a token.')
+  }
 
   return httpImpl.createServer((req, res) => {
-    handleRequest(req, res, { fetch, fetchRange, ensureGlobals, refreshNetwork, keepSongs })
+    handleRequest(req, res, { fetch, fetchRange, ensureGlobals, refreshNetwork, keepSongs, token })
   })
 }
 
@@ -221,7 +244,7 @@ export function injectHyperBridge (html) {
   return `${source.slice(0, insertAt)}${HYPER_BRIDGE_SCRIPT}${source.slice(insertAt)}`
 }
 
-function handleRequest (req, res, { fetch, fetchRange, ensureGlobals, refreshNetwork, keepSongs }) {
+function handleRequest (req, res, { fetch, fetchRange, ensureGlobals, refreshNetwork, keepSongs, token }) {
   const requestUrl = parseRequestUrl(req.url)
   if (!requestUrl) {
     sendText(res, 400, 'Bad request')
@@ -240,6 +263,11 @@ function handleRequest (req, res, { fetch, fetchRange, ensureGlobals, refreshNet
 
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     sendText(res, 405, 'Method not allowed')
+    return
+  }
+
+  if (TOKEN_ROUTES.has(requestUrl.pathname) && !isLoopbackToken(requestUrl.searchParams.get('token'), token)) {
+    sendText(res, 403, 'Forbidden')
     return
   }
 

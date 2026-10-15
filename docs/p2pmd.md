@@ -36,6 +36,8 @@ This mirrors the desktop direction at the protocol level: local HTTP endpoints e
 
 Previews are rendered by the app through its own bridge, not by the room's server.
 
+Everything but the editor page needs the room's token for this run, as `token=` in the address or, from the note's tunnel, an `X-PeerSky-Token` header. Without it the server answers `403` and reads or changes nothing.
+
 ## Runtime flow
 
 1. React Native sends an RPC command to create or join a P2PMD room.
@@ -70,6 +72,16 @@ flowchart LR
 
 The host's server holds the document. A guest's editor makes the same requests
 to its own Holesail client, which carries them to the host.
+
+Any app on the phone can reach both ports, so both answer only requests that
+carry a token the app gives its editor WebView before the page loads
+(`injectedJavaScriptBeforeContentLoaded`, `app/server-token.mjs`). The editor
+adds it to every request. On the host, the server makes a token each run, and
+the Holesail side puts it on the first request of each connection from someone
+who came in with the note's address (`backend/holesail/request-gate.mjs`). On
+a guest, the local port lets through only requests with the guest's own token
+and takes it out before they go on, so the host never sees it. Nothing about
+the token crosses the wire, so older phones and the desktop are unaffected.
 
 ## How many people a note holds
 
@@ -110,6 +122,7 @@ Create Note asks one thing: private or public. Every new note starts private, th
 - The editor WebView loads nothing but the editor. Links in a note open in a browser tab, and other apps are never opened from it.
 - The app acts on editor messages only when they come from the editor page, and publishes only with a nonce it handed over when you tapped Publish.
 - The room's server answers the editor and desktop P2PMD (`peersky://p2p`), and turns away pages on any other origin, other loopback servers included.
+- The room's server and a joined note's local port answer only requests with this run's token, compared in constant time, so another app on the phone that finds the port can neither read nor edit the note.
 - The local server binds to loopback only.
 - Android cleartext HTTP is scoped to localhost/127.0.0.1 through network security config.
 - Raw HTML is disabled in Markdown preview because preview HTML is injected into the page.
@@ -121,7 +134,8 @@ Create Note asks one thing: private or public. Every new note starts private, th
 P2PMD coverage lives under `test/protocol/`:
 
 - `p2pmd-document.test.mjs` covers Yjs document state, update validation, full-state sync, and subscriber behavior.
-- `p2pmd-http.test.mjs` covers the real HTTP endpoint contract with an injectable Node HTTP server, including edits going out at once while the whole note and the people list are paced.
+- `p2pmd-http.test.mjs` covers the real HTTP endpoint contract with an injectable Node HTTP server, including edits going out at once while the whole note and the people list are paced, and every endpoint but the editor page refusing a request without the run's token.
+- `note-tunnel.test.mjs` carries notes over a local DHT, with Holesail on the other end too, and checks that the token gets the editor through both ends, keeps other apps out, and never reaches the other device.
 - `p2pmd-peers.test.mjs` covers peer counting, disconnect pruning, gutter line ownership, and line authors going out again only when they change.
 - `p2pmd-preview.test.mjs` covers Markdown rendering and Hyper image URL rewriting.
 

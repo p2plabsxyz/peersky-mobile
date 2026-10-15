@@ -31,9 +31,9 @@ Protocol tests live in `test/protocol/` and cover behavior that should stay stab
 
 - `hyper-url.test.mjs` validates `hyper://` parsing, malformed URL handling, and path traversal rejection.
 - `holesail-session.test.mjs` validates Holesail ports, keys, loopback host restrictions, and safe failure behavior.
-- `note-tunnel.test.mjs` checks the phone's tunnel makes the same keys and addresses as Holesail, and joins and is joined by Holesail's own classes on a local hyperdht test network.
+- `note-tunnel.test.mjs` checks the phone's tunnel makes the same keys and addresses as Holesail, joins and is joined by Holesail's own classes on a local hyperdht test network, and lets only requests with the room's token through either end.
 - `p2pmd-document.test.mjs` validates document state, Yjs update application, full-state sync, size limits, and subscribers.
-- `p2pmd-http.test.mjs` starts a real HTTP server with the shared P2PMD request handler and checks `/status`, `/doc`, `/doc/update`, `/doc/yjsstate`, `/presence`, and `/events`, and that pages on other origins are turned away.
+- `p2pmd-http.test.mjs` starts a real HTTP server with the shared P2PMD request handler and checks `/status`, `/doc`, `/doc/update`, `/doc/yjsstate`, `/presence`, and `/events`, and that pages on other origins, and requests without the run's token, are turned away.
 - `p2pmd-peers.test.mjs` validates peer count, peer pruning, and line ownership used by gutter marks.
 - `p2pmd-preview.test.mjs` validates Markdown preview rendering, raw HTML escaping, and Hyper image URL rewriting.
 - `phone-backup.test.mjs` backs a real Hyper store up and restores it into a second phone folder, then opens it the ordinary way. It also covers wrong passphrases, damaged and cut-off files, path traversal, and transfers meant for another phone.
@@ -73,7 +73,7 @@ The child processes are needed because the mobile Holesail runtime keeps one act
 
 ## Why Node HTTP is used in P2PMD endpoint tests
 
-Production mobile uses `bare-http1`. Tests inject Node's `node:http` into `createP2pmdHttpServer({ httpImpl })` so the same P2PMD route handler can be tested on the development machine.
+Production mobile uses `bare-http1`. Tests inject Node's `node:http` into `createP2pmdHttpServer({ httpImpl, token })` so the same P2PMD route handler can be tested on the development machine.
 
 The socket implementation changes, but the request handling logic is shared:
 

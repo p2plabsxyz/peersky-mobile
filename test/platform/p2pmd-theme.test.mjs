@@ -46,7 +46,8 @@ test('the app tells the page which theme it is in', async () => {
 
   // The browser has its own light/dark/system setting and the WebView cannot
   // see it, so the media query alone would follow the phone instead.
-  assert.match(app, /injectedJavaScriptBeforeContentLoaded=\{p2pmdThemeScript\(browserIsDark\)\}/)
+  // After the room's token, which goes in the same way.
+  assert.match(app, /injectedJavaScriptBeforeContentLoaded=\{`\$\{createServerTokenScript\(p2pmdRoom\.token\)\}\\n\$\{p2pmdThemeScript\(browserIsDark\)\}`\}/)
   assert.match(app, /document\.documentElement\.dataset\.theme/)
   // And again when the setting changes with the editor already open.
   assert.match(app, /useEffect\(\(\) => \{\s*p2pmdWebViewRef\.current\?\.injectJavaScript\(p2pmdThemeScript\(browserIsDark\)\)/)
