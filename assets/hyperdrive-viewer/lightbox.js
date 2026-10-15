@@ -911,6 +911,12 @@ export function openLightbox (ctx, items, startIndex = 0, options = {}) {
     }
   }, { signal: lifetime.signal })
 
+  // On a narrow screen the details come up from the bottom, and the photo
+  // moves into the room above them, as it moves aside on a wide screen.
+  const sheet = new ResizeObserver(() => root.style.setProperty('--hd-lb-sheet', infoPanel.offsetHeight + 'px'))
+  sheet.observe(infoPanel)
+  lifetime.signal.addEventListener('abort', () => sheet.disconnect())
+
   document.body.append(root)
   document.documentElement.classList.add('hd-no-scroll')
   goTo(index)

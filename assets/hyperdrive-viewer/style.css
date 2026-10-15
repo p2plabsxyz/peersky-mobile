@@ -2032,7 +2032,7 @@ a.hd-crumb:hover {
   position: absolute;
   inset: 0;
   overflow: hidden;
-  transition: right 0.25s var(--hd-ease), left 0.25s var(--hd-ease);
+  transition: right 0.25s var(--hd-ease), left 0.25s var(--hd-ease), bottom 0.25s var(--hd-ease);
 }
 
 .hd-lb-track {
@@ -2458,6 +2458,10 @@ a.hd-crumb:hover {
     border: 0;
     border-radius: 18px 18px 0 0;
     transform: translateY(100%);
+  }
+
+  .hd-lightbox.is-info-open .hd-lb-stage {
+    bottom: var(--hd-lb-sheet, 62%);
   }
 }
 
