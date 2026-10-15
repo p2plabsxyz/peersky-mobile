@@ -168,7 +168,9 @@
         "expo-build-properties",
         {
           "android": {
-            "minSdkVersion": 29
+            "minSdkVersion": 29,
+            "enableMinifyInReleaseBuilds": true,
+            "extraProguardRules": "# PeerSky: the P2P engine's native code calls these classes by name.\n-keep class to.holepunch.** { *; }\n# The content blocker's native code finds this class by name.\n-keep class xyz.p2plabs.peersky.PeerSkyAdBlockEngine { *; }\n# PeerSkyAppIconModule reaches these through reflection.\n-keep class me.leolin.shortcutbadger.ShortcutBadger { *; }\n-keep class expo.modules.notifications.badge.BadgeHelper { *; }\n# Methods pages call through a WebView bridge.\n-keepclassmembers class * { @android.webkit.JavascriptInterface <methods>; }\n# expo-camera still names ML Kit, which PeerSky leaves out (its scanner is ZXing).\n-dontwarn com.google.mlkit.**"
           },
           "ios": {
             "deploymentTarget": "16.0"
