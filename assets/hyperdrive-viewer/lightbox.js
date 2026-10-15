@@ -859,7 +859,10 @@ export function openLightbox (ctx, items, startIndex = 0, options = {}) {
     }
   }
 
-  function onMouseMove () {
+  // The controls fade after a still mouse, never on a touch screen, where a
+  // tap shows and hides them: iOS sends a mousemove after every tap.
+  function onMouseMove (event) {
+    if (event && event.pointerType !== 'mouse') return
     root.classList.remove('is-idle')
     clearTimeout(idleTimer)
     idleTimer = setTimeout(() => {
@@ -898,7 +901,7 @@ export function openLightbox (ctx, items, startIndex = 0, options = {}) {
   stage.addEventListener('pointercancel', onPointerUp)
   stage.addEventListener('wheel', onWheel, { passive: false })
   stage.addEventListener('dblclick', (event) => event.preventDefault())
-  root.addEventListener('mousemove', onMouseMove)
+  root.addEventListener('pointermove', onMouseMove)
   document.addEventListener('keydown', onKey, true)
   window.addEventListener('resize', () => {
     const slide = current()
@@ -915,7 +918,7 @@ export function openLightbox (ctx, items, startIndex = 0, options = {}) {
     root.classList.add('is-open')
     root.focus({ preventScroll: true })
   })
-  onMouseMove()
+  if (window.matchMedia('(hover: hover) and (pointer: fine)').matches) onMouseMove()
   if (options.slideshow && items.length > 1) toggleSlideshow()
 
   return {

@@ -1,5 +1,5 @@
-/* Videos: a library like a streaming app's, always dark (app.js sets
-   data-hd-force-dark). videos.js adds this file when the view mounts.
+/* Videos: a library like a streaming app's, in the browser theme's
+   own colours. videos.js adds this file when the view mounts.
    Everything here is scoped to .hd-vid-* or to the Videos view. */
 
 :root[data-hd-view='videos'] {
@@ -9,7 +9,6 @@
   --hd-vid-gap: 12px;
   --hd-vid-pad-left: calc(var(--hd-gutter) + var(--hd-safe-left));
   --hd-vid-pad-right: calc(var(--hd-gutter) + var(--hd-safe-right));
-  --hd-vid-shade: 11 11 13;
 }
 
 @media (max-width: 599px) {
@@ -23,8 +22,8 @@
 
 /* The bar turns solid once the hero has scrolled away. */
 :root[data-hd-view='videos'][data-hd-vid-solid] .hd-bar.is-overlay {
-  background: rgb(var(--hd-vid-shade) / 0.94);
-  border-bottom-color: rgb(255 255 255 / 0.06);
+  background: color-mix(in srgb, var(--hd-bg-solid) 94%, transparent);
+  border-bottom-color: color-mix(in srgb, var(--hd-text) 6%, transparent);
   -webkit-backdrop-filter: saturate(1.4) blur(18px);
   backdrop-filter: saturate(1.4) blur(18px);
 }
@@ -363,7 +362,7 @@
   width: calc(var(--hd-gutter) + 26px);
   height: auto;
   border-radius: 0;
-  color: #ffffff;
+  color: var(--hd-text);
   opacity: 0;
   transition: opacity 0.2s ease, background-color 0.2s ease;
 }
@@ -377,20 +376,20 @@
 
 .hd-vid-arrow--prev {
   inset-inline-start: 0;
-  background: linear-gradient(to right, rgb(var(--hd-vid-shade) / 0.9), rgb(var(--hd-vid-shade) / 0));
+  background: linear-gradient(to right, color-mix(in srgb, var(--hd-bg-solid) 90%, transparent), color-mix(in srgb, var(--hd-bg-solid) 0%, transparent));
 }
 
 .hd-vid-arrow--next {
   inset-inline-end: 0;
-  background: linear-gradient(to left, rgb(var(--hd-vid-shade) / 0.9), rgb(var(--hd-vid-shade) / 0));
+  background: linear-gradient(to left, color-mix(in srgb, var(--hd-bg-solid) 90%, transparent), color-mix(in srgb, var(--hd-bg-solid) 0%, transparent));
 }
 
 [dir='rtl'] .hd-vid-arrow--prev {
-  background: linear-gradient(to left, rgb(var(--hd-vid-shade) / 0.9), rgb(var(--hd-vid-shade) / 0));
+  background: linear-gradient(to left, color-mix(in srgb, var(--hd-bg-solid) 90%, transparent), color-mix(in srgb, var(--hd-bg-solid) 0%, transparent));
 }
 
 [dir='rtl'] .hd-vid-arrow--next {
-  background: linear-gradient(to right, rgb(var(--hd-vid-shade) / 0.9), rgb(var(--hd-vid-shade) / 0));
+  background: linear-gradient(to right, color-mix(in srgb, var(--hd-bg-solid) 90%, transparent), color-mix(in srgb, var(--hd-bg-solid) 0%, transparent));
 }
 
 .hd-vid-arrow:hover:not(:disabled) {
@@ -467,7 +466,7 @@
   z-index: -1;
   inset: 0;
   overflow: hidden;
-  background: radial-gradient(120% 90% at 70% 20%, #24242c, #0b0b0d 70%);
+  background: radial-gradient(120% 90% at 70% 20%, var(--hd-surface-strong), var(--hd-bg-solid) 70%);
 }
 
 .hd-vid-backdrop-img,
@@ -508,16 +507,16 @@
   position: absolute;
   inset: 0;
   background:
-    linear-gradient(to top, var(--hd-bg-solid) 0%, rgb(var(--hd-vid-shade) / 0.72) 20%, rgb(var(--hd-vid-shade) / 0) 52%),
-    linear-gradient(to right, rgb(var(--hd-vid-shade) / 0.9) 0%, rgb(var(--hd-vid-shade) / 0.5) 34%, rgb(var(--hd-vid-shade) / 0) 64%),
-    linear-gradient(to bottom, rgb(0 0 0 / 0.5), rgb(0 0 0 / 0) 26%);
+    linear-gradient(to top, var(--hd-bg-solid) 0%, color-mix(in srgb, var(--hd-bg-solid) 72%, transparent) 20%, color-mix(in srgb, var(--hd-bg-solid) 0%, transparent) 52%),
+    linear-gradient(to right, color-mix(in srgb, var(--hd-bg-solid) 90%, transparent) 0%, color-mix(in srgb, var(--hd-bg-solid) 50%, transparent) 34%, color-mix(in srgb, var(--hd-bg-solid) 0%, transparent) 64%),
+    linear-gradient(to bottom, color-mix(in srgb, var(--hd-bg-solid) 50%, transparent), color-mix(in srgb, var(--hd-bg-solid) 0%, transparent) 26%);
 }
 
 [dir='rtl'] .hd-vid-backdrop::after {
   background:
-    linear-gradient(to top, var(--hd-bg-solid) 0%, rgb(var(--hd-vid-shade) / 0.72) 20%, rgb(var(--hd-vid-shade) / 0) 52%),
-    linear-gradient(to left, rgb(var(--hd-vid-shade) / 0.9) 0%, rgb(var(--hd-vid-shade) / 0.5) 34%, rgb(var(--hd-vid-shade) / 0) 64%),
-    linear-gradient(to bottom, rgb(0 0 0 / 0.5), rgb(0 0 0 / 0) 26%);
+    linear-gradient(to top, var(--hd-bg-solid) 0%, color-mix(in srgb, var(--hd-bg-solid) 72%, transparent) 20%, color-mix(in srgb, var(--hd-bg-solid) 0%, transparent) 52%),
+    linear-gradient(to left, color-mix(in srgb, var(--hd-bg-solid) 90%, transparent) 0%, color-mix(in srgb, var(--hd-bg-solid) 50%, transparent) 34%, color-mix(in srgb, var(--hd-bg-solid) 0%, transparent) 64%),
+    linear-gradient(to bottom, color-mix(in srgb, var(--hd-bg-solid) 50%, transparent), color-mix(in srgb, var(--hd-bg-solid) 0%, transparent) 26%);
 }
 
 .hd-vid-back {
@@ -542,7 +541,7 @@
   flex: 1 1 auto;
   min-width: 0;
   max-width: 640px;
-  color: #ffffff;
+  color: var(--hd-text);
 }
 
 .hd-vid-head-poster {
@@ -555,7 +554,7 @@
 
 .hd-vid-kicker {
   margin: 0 0 6px;
-  color: rgb(255 255 255 / 0.72);
+  color: color-mix(in srgb, var(--hd-text) 72%, transparent);
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.14em;
@@ -586,7 +585,7 @@
   align-items: center;
   gap: 4px 0;
   margin: 12px 0 0;
-  color: rgb(255 255 255 / 0.82);
+  color: color-mix(in srgb, var(--hd-text) 82%, transparent);
   font-size: 14.5px;
   font-weight: 600;
 }
@@ -607,7 +606,7 @@
   height: 20px;
   margin-inline-start: 10px;
   padding: 0 6px;
-  border: 1px solid rgb(255 255 255 / 0.55);
+  border: 1px solid color-mix(in srgb, var(--hd-text) 55%, transparent);
   border-radius: 4px;
   font-size: 11.5px;
   font-weight: 800;
@@ -635,7 +634,7 @@
   display: -webkit-box;
   margin: 0;
   overflow: hidden;
-  color: rgb(255 255 255 / 0.86);
+  color: color-mix(in srgb, var(--hd-text) 86%, transparent);
   font-size: 15.5px;
   line-height: 1.5;
   overflow-wrap: anywhere;
@@ -650,7 +649,7 @@
 
 .hd-vid-more {
   margin-top: 4px;
-  color: #ffffff;
+  color: var(--hd-text);
   font-size: 14px;
   text-decoration: underline;
   text-underline-offset: 3px;
@@ -661,7 +660,7 @@
   align-items: flex-start;
   gap: 8px;
   margin: 14px 0 0;
-  color: rgb(255 255 255 / 0.82);
+  color: color-mix(in srgb, var(--hd-text) 82%, transparent);
   font-size: 13.5px;
   line-height: 1.45;
 }
@@ -687,13 +686,13 @@
 
 .hd-btn.hd-vid-play {
   padding-inline: 26px;
-  background: #ffffff;
-  color: #0b0b0d;
+  background: var(--hd-text);
+  color: var(--hd-bg-solid);
   font-size: 16px;
 }
 
 .hd-btn.hd-vid-play:hover:not(:disabled) {
-  background: rgb(255 255 255 / 0.84);
+  background: color-mix(in srgb, var(--hd-text) 84%, transparent);
   filter: none;
 }
 
@@ -726,8 +725,8 @@
   .hd-vid-backdrop::after,
   [dir='rtl'] .hd-vid-backdrop::after {
     background:
-      linear-gradient(to top, var(--hd-bg-solid) 3%, rgb(var(--hd-vid-shade) / 0.6) 30%, rgb(var(--hd-vid-shade) / 0) 62%),
-      linear-gradient(to bottom, rgb(0 0 0 / 0.55), rgb(0 0 0 / 0) 34%);
+      linear-gradient(to top, var(--hd-bg-solid) 3%, color-mix(in srgb, var(--hd-bg-solid) 60%, transparent) 30%, color-mix(in srgb, var(--hd-bg-solid) 0%, transparent) 62%),
+      linear-gradient(to bottom, color-mix(in srgb, var(--hd-bg-solid) 55%, transparent), color-mix(in srgb, var(--hd-bg-solid) 0%, transparent) 34%);
   }
 
   .hd-vid-backdrop.is-fit .hd-vid-backdrop-img,
@@ -806,10 +805,10 @@
   min-height: 38px;
   margin: 0;
   padding: 8px 16px;
-  border: 1px solid rgb(255 255 255 / 0.18);
+  border: 1px solid color-mix(in srgb, var(--hd-text) 18%, transparent);
   border-radius: 999px;
   background: none;
-  color: rgb(255 255 255 / 0.82);
+  color: color-mix(in srgb, var(--hd-text) 82%, transparent);
   font: inherit;
   font-size: 14px;
   font-weight: 600;
@@ -819,13 +818,13 @@
 }
 
 .hd-vid-season:hover {
-  border-color: rgb(255 255 255 / 0.4);
+  border-color: color-mix(in srgb, var(--hd-text) 40%, transparent);
 }
 
 .hd-vid-season[aria-selected='true'] {
-  border-color: #ffffff;
-  background: #ffffff;
-  color: #0b0b0d;
+  border-color: var(--hd-text);
+  background: var(--hd-text);
+  color: var(--hd-bg-solid);
 }
 
 .hd-vid-season-title {
@@ -855,7 +854,7 @@
 }
 
 .hd-vid-episode:hover {
-  background: rgb(255 255 255 / 0.05);
+  background: color-mix(in srgb, var(--hd-text) 5%, transparent);
 }
 
 .hd-vid-episode-main {
@@ -961,7 +960,7 @@
 
 .hd-vid-episode-number {
   flex: none;
-  color: rgb(255 255 255 / 0.55);
+  color: color-mix(in srgb, var(--hd-text) 55%, transparent);
   font-variant-numeric: tabular-nums;
 }
 
@@ -978,7 +977,7 @@
 .hd-vid-episode-plot {
   display: -webkit-box;
   overflow: hidden;
-  color: rgb(255 255 255 / 0.74);
+  color: color-mix(in srgb, var(--hd-text) 74%, transparent);
   font-size: 14px;
   line-height: 1.45;
   overflow-wrap: anywhere;
@@ -1022,7 +1021,7 @@
   gap: 16px 28px;
   margin: 4px 0 0;
   padding: 20px 0 4px;
-  border-top: 1px solid rgb(255 255 255 / 0.08);
+  border-top: 1px solid color-mix(in srgb, var(--hd-text) 8%, transparent);
 }
 
 .hd-vid-fact {
@@ -1066,7 +1065,7 @@
   padding: 8px 10px;
   border: 0;
   border-radius: 12px;
-  background: rgb(255 255 255 / 0.05);
+  background: color-mix(in srgb, var(--hd-text) 5%, transparent);
   color: inherit;
   font: inherit;
   text-align: start;
@@ -1074,7 +1073,7 @@
 }
 
 .hd-vid-also-item:hover {
-  background: rgb(255 255 255 / 0.09);
+  background: color-mix(in srgb, var(--hd-text) 9%, transparent);
 }
 
 .hd-vid-also-name {

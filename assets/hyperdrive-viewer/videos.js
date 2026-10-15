@@ -199,7 +199,6 @@ export async function mount (ctx) {
   const rtl = () => html.dir === 'rtl'
   const signal = ctx.signal
 
-  shell.setDark(true)
   const waiting = h('div', { class: 'hd-vid-waiting' }, skeleton({ count: 8 }))
   ctx.root.append(waiting)
   await loadStyles()

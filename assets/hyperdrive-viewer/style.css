@@ -1,7 +1,7 @@
 /* The Hyperdrive viewer. Phone colors follow PeerSky's light or dark mode;
    on desktop every color comes from the browser theme's variables
    (browser://theme/index.css, loaded by app.js before this file), with the
-   default dark theme as the fallback. Videos are always dark. */
+   default dark theme as the fallback. */
 
 /* ---------- Tokens ---------- */
 
@@ -68,7 +68,7 @@
   --hd-bg-solid: #18181b;
 }
 
-/* Videos: dark like a cinema, whatever the theme. */
+/* A view that asks for dark whatever the theme (shell.setDark). */
 :root[data-hd-force-dark] {
   --hd-bg: #0b0b0d;
   --hd-bg-solid: #0b0b0d;

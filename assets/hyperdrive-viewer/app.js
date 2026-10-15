@@ -369,9 +369,6 @@ async function boot () {
 
   function showLoading (route) {
     resetShell()
-    // Videos is always dark, so its loading screen is too, rather than a
-    // light page that turns dark once the folder is listed.
-    if (route.view === 'videos' && !route.auto) shell.setDark(true)
     const status = h('p', { class: 'hd-loading-text' }, t('Finding files...'))
     const slow = h('div', { class: 'hd-loading-slow', hidden: true },
       h('p', null, t('Still looking for someone who has this drive.')),
