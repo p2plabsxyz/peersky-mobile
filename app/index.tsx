@@ -385,6 +385,8 @@ type RpcResponse = {
   mediaName?: string
   mediaType?: 'image' | 'audio' | 'video'
   mediaUrl?: string
+  // The file came from a private drive.
+  private?: boolean
   html?: string
   storagePath?: string
   encryptionPublicKey?: string
@@ -408,7 +410,8 @@ type BrowserSource =
   | { kind: 'p2p' }
   | { kind: 'app', app: RuntimeTab }
   | { kind: 'web', uri: string }
-  | { kind: 'hyper', html: string, baseUrl: string }
+  // private: from a private drive, so no picture of it is kept for the tab list.
+  | { kind: 'hyper', html: string, baseUrl: string, private?: boolean }
   // A hyper:// folder's Files, Photos or Videos view, under its
   // peersky://p2p/hyperdrive/... address (hyperdrive/viewer-route.mjs).
   | { kind: 'viewer' }
@@ -797,6 +800,8 @@ export default function App () {
       // No picture of an incognito page is ever written to disk.
       if (tab?.incognito) return false
       const currentEntry = tab?.history[tab.historyIndex]
+      // Nor of a file from a private drive.
+      if (currentEntry?.source.kind === 'hyper' && currentEntry.source.private) return false
       return Boolean(
         currentEntry &&
         currentEntry.source.kind === entry.source.kind &&
@@ -1643,7 +1648,8 @@ export default function App () {
         html: Platform.OS === 'android' && !isMedia
           ? withHyperBridgeScript(html, getBrowserTabToken(browserTabsStateRef.current.activeTabId))
           : html,
-        baseUrl: nextUrl
+        baseUrl: nextUrl,
+        ...(response.private ? { private: true } : {})
       }
 
       if (shouldCommit) {
