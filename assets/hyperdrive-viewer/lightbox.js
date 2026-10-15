@@ -4,7 +4,7 @@ import { h, icon, iconButton, button, toast, copyWithToast, openMenu, closeMenu,
 import { t, formatDate, formatBytes, formatNumber, formatDuration, regionName } from '/hyperdrive/viewer/i18n.js'
 import { kindOf } from '/hyperdrive/viewer/lib/kinds.js'
 import { createPlaceIndex, nearestPlace } from '/hyperdrive/viewer/lib/places.js'
-import { parentPath, folderTitle } from '/hyperdrive/viewer/route.js'
+import { displayName, parentPath, folderTitle } from '/hyperdrive/viewer/route.js'
 
 // Photos and clips one at a time, over everything else: prev and next by
 // arrow, key or swipe, zoom by wheel, pinch or double tap, swipe down or Esc
@@ -29,6 +29,8 @@ function placesTable () {
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value))
 const nameOf = (path) => path.split('/').pop()
+// For showing; downloads and shares keep the name as stored.
+const shownName = (path) => displayName(nameOf(path))
 
 function exposureText (seconds) {
   if (!(seconds > 0)) return ''
@@ -120,7 +122,7 @@ export function openLightbox (ctx, items, startIndex = 0, options = {}) {
     replace(slide.element, h('div', { class: 'hd-lb-cannot' },
       h('div', { class: 'hd-lb-cannot-icon' }, icon('alert')),
       h('p', { class: 'hd-lb-cannot-title' }, title),
-      h('p', { class: 'hd-lb-cannot-file' }, nameOf(entry.path), entry.size ? ` · ${formatBytes(entry.size)}` : ''),
+      h('p', { class: 'hd-lb-cannot-file' }, shownName(entry.path), entry.size ? ` · ${formatBytes(entry.size)}` : ''),
       h('div', { class: 'hd-lb-cannot-actions' },
         button({ label: t('Download'), icon: 'download', variant: 'primary', onClick: () => source.download(host, entry.path, nameOf(entry.path)) }),
         button({ label: t('Open in new tab'), icon: 'external', variant: 'overlay', onClick: () => source.open(host, entry.path) }))))
@@ -130,14 +132,15 @@ export function openLightbox (ctx, items, startIndex = 0, options = {}) {
     const entry = slide.item
     const box = h('div', { class: 'hd-lb-zoom' })
     const placeholder = h('img', { class: 'hd-lb-placeholder', alt: '', draggable: 'false' })
-    const picture = h('img', { class: 'hd-lb-image', alt: nameOf(entry.path), draggable: 'false', decoding: 'async' })
+    const picture = h('img', { class: 'hd-lb-image', alt: shownName(entry.path), draggable: 'false', decoding: 'async' })
     const spinner = h('div', { class: 'hd-spinner hd-lb-spinner', 'aria-hidden': 'true' })
     box.append(placeholder, picture)
     slide.element.append(box, spinner)
     slide.box = box
     slide.picture = picture
 
-    thumbs.photo(entry, { size: 'grid', signal: slide.signal }).then((url) => {
+    const entries = ctx.listing && ctx.listing.entries
+    thumbs.photo(entry, { size: 'grid', entries, signal: slide.signal }).then((url) => {
       if (url && !slide.disposed && !slide.loaded) placeholder.setAttribute('src', url)
     }, () => {})
 
@@ -148,7 +151,7 @@ export function openLightbox (ctx, items, startIndex = 0, options = {}) {
         picture.removeAttribute('src')
         thumbs.originalFailed(entry)
       }
-      thumbs.photo(entry, { size: 'hero', signal: slide.signal }).then((url) => {
+      thumbs.photo(entry, { size: 'hero', entries, signal: slide.signal }).then((url) => {
         if (slide.disposed) return
         if (!url && slide.showMotionStill && slide.showMotionStill()) return
         if (!url) {
@@ -167,10 +170,13 @@ export function openLightbox (ctx, items, startIndex = 0, options = {}) {
     slide.load = () => {
       if (slide.requested) return
       slide.requested = true
-      if (thumbs.canShowOriginal(entry)) {
+      // A HEIC photo this engine cannot draw shows its JPEG copy, when the
+      // listing has one, before it gives up to the small preview.
+      const copy = thumbs.copyOf(entry, entries)
+      if (thumbs.canShowOriginal(entry) || copy) {
         picture.addEventListener('load', () => loaded(slide), { once: true })
         picture.addEventListener('error', usePreview, { once: true })
-        picture.setAttribute('src', source.fileUrl(host, entry.path))
+        picture.setAttribute('src', source.fileUrl(host, (copy || entry).path))
       } else {
         usePreview()
       }
@@ -273,7 +279,7 @@ export function openLightbox (ctx, items, startIndex = 0, options = {}) {
   function makeSlide (at) {
     const entry = items[at]
     const controller = new AbortController()
-    const element = h('div', { class: 'hd-lb-slide', role: 'group', 'aria-roledescription': t('slide'), 'aria-label': nameOf(entry.path) })
+    const element = h('div', { class: 'hd-lb-slide', role: 'group', 'aria-roledescription': t('slide'), 'aria-label': shownName(entry.path) })
     const slide = {
       index: at,
       item: entry,
@@ -355,7 +361,7 @@ export function openLightbox (ctx, items, startIndex = 0, options = {}) {
       slide.video.play().catch(() => {})
     }
     const entry = item()
-    nameLine.textContent = nameOf(entry.path)
+    nameLine.textContent = shownName(entry.path)
     counter.textContent = items.length > 1 ? t('{index} of {count}', { index: formatNumber(index + 1), count: formatNumber(items.length) }) : ''
     prevButton.disabled = index === 0
     nextButton.disabled = index === items.length - 1
@@ -700,7 +706,7 @@ export function openLightbox (ctx, items, startIndex = 0, options = {}) {
     }
     if (kind === 'video' && Number.isFinite(meta.duration)) facts.push(formatDuration(meta.duration))
     if (entry.size) facts.push(formatBytes(entry.size))
-    rows.push(row(kind === 'video' ? 'video' : 'image', nameOf(entry.path), facts.join(' · ')))
+    rows.push(row(kind === 'video' ? 'video' : 'image', shownName(entry.path), facts.join(' · ')))
 
     const folder = parentPath(entry.path)
     const folderButton = h('button', {

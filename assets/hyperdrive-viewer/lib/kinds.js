@@ -99,6 +99,36 @@ export function isJunk (path) {
   return false
 }
 
+const PREVIEW_FOLDER = '/.peersky/previews'
+
+/**
+ * Where PeerSky Mobile keeps a JPEG copy of a HEIC photo, for engines that
+ * cannot draw HEIC: the photo's own path under /.peersky/previews, plus .jpg.
+ */
+export function previewPathFor (path) {
+  return `${PREVIEW_FOLDER}/${String(path ?? '').replace(/^\/+/, '')}.jpg`
+}
+
+// One lookup table per listing, made the first time a copy is asked for.
+const previewIndexes = new WeakMap()
+
+/**
+ * The listed entry holding a photo's JPEG copy, or null. Looked up in the
+ * listing only; nothing is fetched to find out.
+ */
+export function previewEntryFor (path, entries) {
+  if (!Array.isArray(entries)) return null
+  let index = previewIndexes.get(entries)
+  if (!index) {
+    index = new Map()
+    for (const entry of entries) {
+      if (entry.path.startsWith(PREVIEW_FOLDER + '/')) index.set(entry.path, entry)
+    }
+    previewIndexes.set(entries, index)
+  }
+  return index.get(previewPathFor(path)) || null
+}
+
 let collator = null
 
 /** Names in the order people expect: 'IMG 2' before 'IMG 10', case aside. */

@@ -40,7 +40,7 @@
  *   getProgress/putProgress/deleteProgress, listProgress() (newest first;
  *   each value { path, size, mtime, position, duration, done, title }).
  * - thumbs: thumbs.js. photo(entry, { size: 'grid' | 'hero', signal,
- *   priority }) and video(entry, { size, entries, prefer: 'poster' | 'frame',
+ *   priority, entries: the listing, for a HEIC photo's JPEG copy }) and video(entry, { size, entries, prefer: 'poster' | 'frame',
  *   signal, priority }) resolve to an object URL or null; attach(img, entry,
  *   { kind: 'photo' | 'video', size, entries, prefer, onResult }) fills an
  *   <img> once it is near the screen and returns a detach function;

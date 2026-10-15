@@ -17,6 +17,7 @@ import {
   withPrivateHyperRuntimeOperation,
   withSyncedPrivateHyperRuntimeOperation
 } from './runtime.mjs'
+import { isHeicName, previewPathFor } from './heic-preview.mjs'
 import { normalizePickedLocalFile } from './local-file.mjs'
 import { isUnreadableDriveError, PRIVATE_DRIVE_ERROR } from './linked-private-drives.mjs'
 import { normalizeDriveAddressId } from './runtime-routing.mjs'
@@ -209,7 +210,9 @@ export async function uploadHyperdriveFile ({
   contentBase64,
   fileUri,
   byteLength,
-  visibility
+  visibility,
+  previewUri,
+  previewByteLength
 } = {}, options = {}) {
   const filename = normalizeFilename(name)
   if (!filename) return { ok: false, error: 'Invalid file name.' }
@@ -257,6 +260,7 @@ export async function uploadHyperdriveFile ({
     ) {
       throw new Error('The uploaded file could not be verified in Hyperdrive.')
     }
+    if (isHeicName(filename)) await writePreview(drive, pathname, previewUri, previewByteLength, options)
 
     const item = createFileItem(`hyper://${drive.id}/`, pathname, {
       blob: { byteLength: expectedByteLength }
@@ -281,6 +285,16 @@ export async function uploadHyperdriveFile ({
       }
     }
   }, { address: undefined, privateRuntime: visibility === 'device', syncedPrivate: visibility === 'private' }))
+}
+
+// The JPEG copy of a HEIC photo, next to it in the drive. The photo is stored
+// already, so a copy that cannot be read or written leaves it as it is.
+async function writePreview (drive, pathname, previewUri, previewByteLength, options) {
+  try {
+    const localFile = normalizePickedLocalFile(previewUri, previewByteLength)
+    if (!localFile) return
+    await writeLocalUpload(drive, previewPathFor(pathname), localFile, options)
+  } catch {}
 }
 
 function decodeInlineUpload (contentBase64) {

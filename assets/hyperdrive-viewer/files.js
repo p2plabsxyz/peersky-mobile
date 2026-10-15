@@ -5,7 +5,7 @@ import { t, tp, msg, tKey, formatBytes, formatDate, formatNumber, compareText } 
 import { kindOf, isJunk, livePhotoPairs } from '/hyperdrive/viewer/lib/kinds.js'
 import { parseVideoName } from '/hyperdrive/viewer/lib/names.js'
 import { renderMarkdown } from '/hyperdrive/viewer/markdown.js'
-import { routeHref, decodePath, folderPath, folderTitle, parentPath, shortHost, encodePath } from '/hyperdrive/viewer/route.js'
+import { routeHref, decodePath, displayName, folderPath, folderTitle, parentPath, shortHost, encodePath } from '/hyperdrive/viewer/route.js'
 
 // Files: the folder as a file browser. Folders first, then files, sorted by
 // name the way people count, or by date, size or kind; a filter that looks
@@ -56,6 +56,9 @@ function nameOf (path) {
   return path.replace(/\/$/, '').split('/').pop()
 }
 
+// For showing; downloads keep the name as stored.
+const shownName = (path) => displayName(nameOf(path))
+
 /** Mounts the Files view; see app.js for what ctx holds. */
 export function mount (ctx) {
   const { source, route, listing, thumbs, shell } = ctx
@@ -80,7 +83,7 @@ export function mount (ctx) {
     if (!rest || isJunk('/' + rest)) continue
     const kind = kindOf(entry.path, entry.size)
     const slash = rest.indexOf('/')
-    const file = { ...entry, name: rest.slice(rest.lastIndexOf('/') + 1), kind, isFolder: false }
+    const file = { ...entry, name: displayName(rest.slice(rest.lastIndexOf('/') + 1)), kind, isFolder: false }
     below.push(file)
     if (slash === -1) {
       files.push(file)
@@ -92,7 +95,7 @@ export function mount (ctx) {
       const path = base + parts.slice(0, depth + 1).join('/') + '/'
       let folder = folders.get(path)
       if (!folder) {
-        folder = { path, name: parts[depth], kind: 'folder', isFolder: true, top: depth === 0, count: 0, size: 0, mtime: null, site: null }
+        folder = { path, name: displayName(parts[depth]), kind: 'folder', isFolder: true, top: depth === 0, count: 0, size: 0, mtime: null, site: null }
         folders.set(path, folder)
       }
       folder.count++
@@ -140,7 +143,7 @@ export function mount (ctx) {
   crumbList.append(h('li', null, crumbLink('/', shortHost(host), parts.length === 0, 'drive')))
   parts.forEach((part, index) => {
     const path = '/' + parts.slice(0, index + 1).join('/') + '/'
-    crumbList.append(h('li', null, h('span', { class: 'hd-crumb-sep', 'aria-hidden': 'true' }, '/'), crumbLink(path, part, index === parts.length - 1)))
+    crumbList.append(h('li', null, h('span', { class: 'hd-crumb-sep', 'aria-hidden': 'true' }, '/'), crumbLink(path, displayName(part), index === parts.length - 1)))
   })
   crumbs.append(crumbList)
 
@@ -300,11 +303,11 @@ export function mount (ctx) {
     if (!query) return null
     const folder = parentPath(item.path)
     if (folder === base) return null
-    return h('span', { class: 'hd-row-where' }, icon('folder'), folder.slice(base.length - 1))
+    return h('span', { class: 'hd-row-where' }, icon('folder'), displayName(folder.slice(base.length - 1)))
   }
 
   function rowMenu (item, anchor) {
-    const name = item.isFolder ? item.name : nameOf(item.path)
+    const name = item.isFolder ? item.name : shownName(item.path)
     openMenu(anchor, [
       item.isFolder
         ? { label: t('Open'), icon: 'folder', onSelect: () => activate(item) }
@@ -320,12 +323,12 @@ export function mount (ctx) {
     if (item.isFolder || !(item.kind === 'image' || item.kind === 'raw' || item.kind === 'video')) return null
     const img = h('img', { class: 'hd-tile-img', alt: '', draggable: 'false', decoding: 'async' })
     const isVideo = item.kind === 'video'
-    thumbs.attach(img, item, isVideo ? { kind: 'video', entries: listing.entries, prefer: 'frame' } : { kind: 'photo' })
+    thumbs.attach(img, item, isVideo ? { kind: 'video', entries: listing.entries, prefer: 'frame' } : { kind: 'photo', entries: listing.entries })
     return img
   }
 
   function renderItem (item, index) {
-    const name = item.isFolder ? item.name : nameOf(item.path)
+    const name = item.isFolder ? item.name : shownName(item.path)
     const grid = prefs.layout === 'grid'
     const main = item.isFolder
       ? h('a', {
@@ -540,7 +543,7 @@ export function mount (ctx) {
   // Text, code and Markdown, at most the first 1 MB.
   function openReader (item, { fromHash = false } = {}) {
     if (reader) reader.close()
-    const name = nameOf(item.path)
+    const name = shownName(item.path)
     const body = h('div', { class: 'hd-reader-body' }, h('div', { class: 'hd-spinner', 'aria-label': t('Loading') }))
     const isMarkdown = item.kind === 'markdown'
     let wrap = isMarkdown || item.kind === 'text'
@@ -682,7 +685,7 @@ export function mount (ctx) {
 
   // Everything else: what it is, and Open, Download, Copy link.
   function openDetails (item, { fromHash = false } = {}) {
-    const name = nameOf(item.path)
+    const name = shownName(item.path)
     const overlay = ctx.overlay(item.path, { fromHash, onPop: () => sheet.close() })
     const opensElsewhere = item.kind === 'html' || item.kind === 'svg' || item.kind === 'pdf' || /\.xml$/i.test(item.path)
     const sheet = openSheet({
@@ -737,7 +740,7 @@ export function mount (ctx) {
       if (!audio || at < 0 || at >= audio.tracks.length) return
       index = at
       const track = audio.tracks[at]
-      const name = nameOf(track.path)
+      const name = shownName(track.path)
       audio.title.textContent = name.replace(/\.[^.]+$/, '')
       audio.where.textContent = folderTitle(host, parentPath(track.path))
       audio.prev.disabled = at === 0
@@ -772,7 +775,7 @@ export function mount (ctx) {
   // The folder's README, under the list.
   if (readme) {
     readmeBox.hidden = false
-    const name = nameOf(readme.path)
+    const name = shownName(readme.path)
     const content = h('div', { class: 'hd-readme-body' }, h('div', { class: 'hd-spinner', 'aria-label': t('Loading') }))
     readmeBox.append(h('header', { class: 'hd-readme-head' }, icon('document'), h('span', null, name)), content)
     source.text(host, readme.path, { maxBytes: READ_LIMIT, signal: ctx.signal }).then((text) => {

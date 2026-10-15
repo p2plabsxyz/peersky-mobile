@@ -76,11 +76,21 @@ export function lastSegment (path) {
   return parts.length ? parts[parts.length - 1] : ''
 }
 
+/**
+ * A file or folder name as people should read it. The drive keeps a name
+ * with ? or # as %3F or %23 (it decodes a path once, and these two survive),
+ * so those two come back here. Never for a path used in an address, a read
+ * or a link.
+ */
+export function displayName (name) {
+  return String(name ?? '').replace(/%(3F|23)/gi, (_, code) => (code === '23' ? '#' : '?'))
+}
+
 /** The name a folder goes by: its last segment, or the short host at the root. */
 // The drive's own name, when the device knows it, stands for its root.
 export function folderTitle (host, path, name) {
   const known = typeof name === 'string' ? name.trim() : ''
-  return lastSegment(path) || known || shortHost(host)
+  return displayName(lastSegment(path)) || known || shortHost(host)
 }
 
 /**

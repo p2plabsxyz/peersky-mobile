@@ -6,7 +6,7 @@ import { kindOf, isJunk, isImageKind, livePhotoPairs, sidecarsOf, fileName, fold
 import { dateFromName, isUtcName } from '/hyperdrive/viewer/lib/names.js'
 import { parseTakeoutJson, wallClockOf } from '/hyperdrive/viewer/lib/sidecars.js'
 import { createPlaceIndex, nearestPlace, placeKey } from '/hyperdrive/viewer/lib/places.js'
-import { routeHref, folderPath, parentPath } from '/hyperdrive/viewer/route.js'
+import { displayName, routeHref, folderPath, parentPath } from '/hyperdrive/viewer/route.js'
 
 // Photos: the folder as a camera roll, made only from its files. A timeline
 // by month and day, newest first; albums from its folders; places from where
@@ -707,6 +707,7 @@ export async function mount (ctx) {
     }
     thumbs.attach(img, item.entry, {
       kind: 'photo',
+      entries,
       onResult: (url) => {
         if (url || !item.motion) done(url)
         else thumbs.attach(img, item.motion, { kind: 'video', entries, prefer: 'frame', onResult: done })
@@ -733,7 +734,7 @@ export async function mount (ctx) {
     const el = h('button', {
       type: 'button',
       class: ['hd-ph-tile', item.kind === 'video' && 'is-clip', item.motion && 'is-live'],
-      'aria-label': item.name
+      'aria-label': displayName(item.name)
     }, img, h('span', { class: 'hd-ph-format', 'aria-hidden': 'true' }, icon(item.kind === 'video' ? 'video' : 'image'), h('span', null, thumbs.badge(item.entry))))
     const tile = { el, img, item, time: null, cancel: null }
     if (item.motion) el.append(h('span', { class: 'hd-ph-live', 'aria-hidden': 'true' }, icon('live'), h('span', null, t('LIVE'))))
@@ -1227,7 +1228,7 @@ export async function mount (ctx) {
     const rows = others.map((path) => {
       const entry = lib.byPath.get(path)
       const folder = folderOf(path)
-      const where = folder === base ? '' : folder.slice(base.length, -1)
+      const where = folder === base ? '' : displayName(folder.slice(base.length, -1))
       const hash = { item: path }
       return h('li', null, h('a', {
         class: 'hd-ph-other',
@@ -1240,7 +1241,7 @@ export async function mount (ctx) {
       },
       kindBadge(kindOf(path, entry.size)),
       h('span', { class: 'hd-ph-other-text' },
-        h('span', { class: 'hd-ph-other-name' }, fileName(path)),
+        h('span', { class: 'hd-ph-other-name' }, displayName(fileName(path))),
         h('span', { class: 'hd-ph-other-meta' }, [formatBytes(entry.size), where].filter(Boolean).join(' · ')))))
     })
     return h('section', { class: 'hd-ph-others' },
@@ -1274,7 +1275,7 @@ export async function mount (ctx) {
       if (item.folder === base) continue
       let album = groups.get(item.folder)
       if (!album) {
-        album = { path: item.folder, name: fileName(item.folder), items: [], where: '' }
+        album = { path: item.folder, name: displayName(fileName(item.folder)), items: [], where: '' }
         groups.set(item.folder, album)
       }
       album.items.push(item)
@@ -1284,7 +1285,7 @@ export async function mount (ctx) {
     for (const album of albums) names.set(album.name.toLowerCase(), (names.get(album.name.toLowerCase()) || 0) + 1)
     // Two albums with one name: each says which folder it is in.
     for (const album of albums) {
-      if (names.get(album.name.toLowerCase()) > 1) album.where = parentPath(album.path).slice(base.length, -1)
+      if (names.get(album.name.toLowerCase()) > 1) album.where = displayName(parentPath(album.path).slice(base.length, -1))
     }
     const newest = (album) => (album.items[0].ms === null ? -Infinity : album.items[0].ms)
     return albums.sort((a, b) => newest(b) - newest(a) || naturalCompare(a.name, b.name))

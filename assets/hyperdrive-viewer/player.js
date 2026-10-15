@@ -4,6 +4,7 @@ import { h, icon, iconButton, button, toast, replace, closeMenu } from '/hyperdr
 import { t, formatDuration, languageName, getLanguage } from '/hyperdrive/viewer/i18n.js'
 import { extensionOf } from '/hyperdrive/viewer/lib/kinds.js'
 import { cleanTitle } from '/hyperdrive/viewer/lib/names.js'
+import { displayName } from '/hyperdrive/viewer/route.js'
 import { srtToVtt, subtitlesFor } from '/hyperdrive/viewer/lib/subtitles.js'
 
 // A video over everything else: the engine's own controls, subtitles found
@@ -268,7 +269,7 @@ export function openPlayer (ctx, entry, options = {}) {
     root.classList.remove('has-error')
     clearTracks()
     wantedTrack = null
-    const name = item.path.split('/').pop()
+    const name = displayName(item.path.split('/').pop())
     titleLine.textContent = info.title || cleanTitle(name) || name
     subtitleLine.textContent = info.subtitle || ''
     root.setAttribute('aria-label', titleLine.textContent)

@@ -6,6 +6,7 @@ import { kindOf, isJunk, isImageKind, sidecarsOf, livePhotoPairs, naturalCompare
 import { parseVideoName, cleanTitle, dateFromName, isUtcName } from '/hyperdrive/viewer/lib/names.js'
 import { nfoFor, parseNfo, wallClockOf } from '/hyperdrive/viewer/lib/sidecars.js'
 import { subtitlesFor } from '/hyperdrive/viewer/lib/subtitles.js'
+import { displayName } from '/hyperdrive/viewer/route.js'
 import { canPlay } from '/hyperdrive/viewer/player.js'
 
 // Videos: a library like a streaming app's, made only from the folder's own
@@ -108,7 +109,7 @@ const folderTitles = new Map()
 function folderTitleOf (folder) {
   let title = folderTitles.get(folder)
   if (title === undefined) {
-    const name = fileName(folder)
+    const name = displayName(fileName(folder))
     title = cleanTitle(name).replace(/\s*[([]\s*(?:19|20)\d{2}\s*[)\]]\s*$/, '').trim() || name
     if (folderTitles.size > 5000) folderTitles.clear()
     folderTitles.set(folder, title)
@@ -473,7 +474,7 @@ export async function mount (ctx) {
       mostCommon(episodes.map((info) => info.nfo && info.nfo.show)) ||
       mostCommon(episodes.map((info) => info.parsed.show)) ||
       (place.folder ? folderTitleOf(place.folder) : '') ||
-      episodes[0].title || cleanTitle(episodes[0].name)
+      episodes[0].title || cleanTitle(displayName(episodes[0].name))
     return {
       type: 'show',
       id: place.id,
@@ -566,7 +567,7 @@ export async function mount (ctx) {
       const key = folder || base
       let group = groups.get(key)
       if (!group) {
-        group = { id: key, folder, name: folder ? fileName(folder) : '', items: [], shape: 'frame' }
+        group = { id: key, folder, name: folder ? displayName(fileName(folder)) : '', items: [], shape: 'frame' }
         groups.set(key, group)
       }
       group.items.push(clip)
@@ -721,7 +722,7 @@ export async function mount (ctx) {
   function episodeName (info) {
     if (info.episodeTitle) return info.episodeTitle
     if (info.episode !== null) return t('Episode {number}', { number: formatNumber(info.episode) })
-    return cleanTitle(info.name) || info.name
+    return cleanTitle(displayName(info.name)) || displayName(info.name)
   }
 
   function seasonsLine (show) {
@@ -1373,7 +1374,7 @@ export async function mount (ctx) {
         const entry = byPath.get(path)
         return h('li', null, h('button', { type: 'button', class: 'hd-vid-also-item', title: path.slice(base.length), onClick: () => openOther(path) },
           kindBadge(kindOf(path, entry && entry.size)),
-          h('span', { class: 'hd-vid-also-name', dir: 'auto' }, fileName(path))))
+          h('span', { class: 'hd-vid-also-name', dir: 'auto' }, displayName(fileName(path)))))
       })),
       paths.length > shown.length ? button({ label: t('Show all in Files'), icon: 'folder', variant: 'quiet', onClick: () => ctx.navigate({ view: 'files' }) }) : null)
   }
@@ -1678,7 +1679,7 @@ export async function mount (ctx) {
     add(t('Genre'), info.genre)
     add(t('Original title'), info.originalTitle)
     add(t('Added'), info.mtime ? formatDate(info.mtime) : '')
-    add(t('File'), info.name)
+    add(t('File'), displayName(info.name))
     return h('dl', { class: 'hd-vid-facts' }, rows)
   }
 

@@ -3,7 +3,7 @@
 import { readImageMeta } from '/hyperdrive/viewer/lib/exif.js'
 import { readVideoMeta } from '/hyperdrive/viewer/lib/video-meta.js'
 import { artworkFor, parseTakeoutJson, takeoutJsonFor, wallClockOf } from '/hyperdrive/viewer/lib/sidecars.js'
-import { extensionOf, kindOf } from '/hyperdrive/viewer/lib/kinds.js'
+import { extensionOf, kindOf, previewEntryFor } from '/hyperdrive/viewer/lib/kinds.js'
 import { dateFromName, isUtcName } from '/hyperdrive/viewer/lib/names.js'
 
 // Small pictures for grids and the hero, and what is read from inside the
@@ -12,7 +12,9 @@ import { dateFromName, isUtcName } from '/hyperdrive/viewer/lib/names.js'
 // A photo: the cached picture; else the preview the camera wrote into the
 // file (one ranged read, turned upright); else the whole file when this
 // engine can draw it, made small on a canvas; else nothing, and the grid
-// shows the format (HEIC, RAW, TIFF). A video: the cached picture; else the
+// shows the format (HEIC, RAW, TIFF). Where the listing holds a JPEG copy of
+// a HEIC photo (PeerSky Mobile makes one on upload), that is drawn instead.
+// A video: the cached picture; else the
 // cover inside an MP4 or MKV; else a poster or thumb next to it; else a
 // frame from the video itself.
 //
@@ -418,7 +420,26 @@ export function createThumbs ({ source, store, host }) {
   }
 
   // A Blob, a URL to show as is, or null.
-  async function makePhoto (entry, target, mode, signal) {
+  // The JPEG copy of a photo this engine cannot draw, from the listing. A
+  // Blob, a URL to show as is, or null.
+  async function fromCopy (copy, target, mode, signal) {
+    let whole = null
+    try {
+      whole = await wholePicture(copy, target, null, signal)
+    } catch (error) {
+      if (isAbort(error)) throw error
+      if (error instanceof TypeError && source.desktop) return source.fileUrl(host, copy.path)
+      return null
+    }
+    try {
+      return await drawSmall(whole, target, { mode, background: '#ffffff' })
+    } finally {
+      whole.close()
+    }
+  }
+
+  async function makePhoto (entry, target, mode, signal, entries) {
+    const copy = previewEntryFor(entry.path, entries)
     let meta = null
     try {
       meta = await imageMeta(entry, { signal })
@@ -426,6 +447,10 @@ export function createThumbs ({ source, store, host }) {
       if (isAbort(error)) throw error
     }
     const canDraw = drawable(entry.path) && entry.size > 0 && entry.size <= MAX_WHOLE_IMAGE
+    if (copy && !canDraw) {
+      const made = await fromCopy(copy, target, mode, signal)
+      if (made) return made
+    }
     let preview = null
     try {
       preview = await embeddedPicture(entry, meta && meta.thumbnail, 'image/jpeg', signal, { preview: true })
@@ -462,6 +487,10 @@ export function createThumbs ({ source, store, host }) {
           } finally {
             whole.close()
           }
+        }
+        if (copy) {
+          const made = await fromCopy(copy, target, mode, signal)
+          if (made) return made
         }
       }
       if (preview) return await drawSmall(preview, target, { mode, orientation, background: '#ffffff' })
@@ -545,7 +574,7 @@ export function createThumbs ({ source, store, host }) {
     if (!path) return null
     const art = entries.find((item) => item.path === path)
     if (!art) return null
-    const made = await makePhoto(art, target, mode, signal)
+    const made = await makePhoto(art, target, mode, signal, entries)
     return made
   }
 
@@ -619,12 +648,13 @@ export function createThumbs ({ source, store, host }) {
   /**
    * A photo's small picture as an object URL, or null. size: 'grid' (320 px
    * on the short side, for square crops) or 'hero' (1280 px on the long side).
+   * entries: the listing, for the JPEG copy of a HEIC photo.
    */
-  function photo (entry, { size = 'grid', signal, priority } = {}) {
+  function photo (entry, { size = 'grid', signal, priority, entries } = {}) {
     const target = size === 'hero' ? HERO : GRID
     const mode = size === 'hero' ? 'contain' : 'cover'
     const key = `${store.keyOf(entry)}|p${target}.${CACHE_VERSION}`
-    return picture(key, (jobSignal) => makePhoto(entry, target, mode, jobSignal), photoQueue, { signal, priority })
+    return picture(key, (jobSignal) => makePhoto(entry, target, mode, jobSignal, entries), photoQueue, { signal, priority })
   }
 
   /**
@@ -646,6 +676,11 @@ export function createThumbs ({ source, store, host }) {
     if (RAW.has(extension) || kindOf(entry.path, entry.size) === 'raw') return 'RAW'
     if (extension === 'tif' || extension === 'tiff') return 'TIFF'
     return extension ? extension.toUpperCase().slice(0, 5) : ''
+  }
+
+  /** The listed JPEG copy of a photo, for an engine that cannot draw it, or null. */
+  function copyOf (entry, entries) {
+    return drawable(entry.path) ? null : previewEntryFor(entry.path, entries)
   }
 
   /** True when this engine can show the original image itself. */
@@ -743,7 +778,7 @@ export function createThumbs ({ source, store, host }) {
     const { kind = 'photo', size = 'grid', entries, prefer } = record.options
     const job = kind === 'video'
       ? video(record.entry, { size, entries, prefer, signal: controller.signal })
-      : photo(record.entry, { size, signal: controller.signal })
+      : photo(record.entry, { size, entries, signal: controller.signal })
     job.then((url) => {
       if (record.controller !== controller) return
       record.done = true
@@ -821,6 +856,7 @@ export function createThumbs ({ source, store, host }) {
     videoMeta,
     takenAt,
     badge,
+    copyOf,
     canShowOriginal,
     originalFailed,
     attach,
