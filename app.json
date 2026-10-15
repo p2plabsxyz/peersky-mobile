@@ -179,6 +179,7 @@
       "./plugins/with-ios-pod-deployment-target",
       "./plugins/with-ios-prebuilt-deps-guard",
       "./plugins/with-android-16kb-libs",
+      "./plugins/with-one-ndk",
       "./plugins/with-android-app-category",
       "./plugins/with-android-loopback-cleartext",
       "./plugins/with-browser-downloads",

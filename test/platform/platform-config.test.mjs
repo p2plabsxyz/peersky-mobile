@@ -527,3 +527,19 @@ class MainApplication : Application(), ReactApplication {
   }
 }
 `
+
+describe('android NDK', () => {
+  // A library that named no NDK got the Android Gradle Plugin's default, which
+  // Gradle downloaded by itself mid-build and CI once got cut short.
+  it('builds every library with the app NDK', async () => {
+    const appJson = JSON.parse(await readFile(repoFile('app.json'), 'utf8'))
+    const { pinLibraryNdk } = require('../../plugins/with-one-ndk.js')
+    const root = 'apply plugin: "expo-root-project"\n'
+    const once = pinLibraryNdk(root)
+
+    assert.equal(hasExpoPlugin(appJson.expo?.plugins || [], './plugins/with-one-ndk'), true)
+    assert.match(once, /plugins\.withId\('com\.android\.library'\)/)
+    assert.match(once, /project\.android\.ndkVersion = rootProject\.ext\.ndkVersion/)
+    assert.equal(pinLibraryNdk(once), once)
+  })
+})
