@@ -156,9 +156,13 @@ describe('adaptive icon layers', () => {
     // A change in either library must not fail the switch itself.
     assert.match(move, /catch \(error: Exception\)/)
 
-    // Release builds keep class and field names, which this looks up by name.
-    const gradle = await readFile(new URL('../../app.json', import.meta.url), 'utf8')
-    assert.doesNotMatch(gradle, /enableMinifyInReleaseBuilds|enableProguardInReleaseBuilds/)
+    // Release builds are shrunk by R8, which renames classes and fields, so
+    // the two this looks up by name keep theirs.
+    const appJson = JSON.parse(await readFile(new URL('../../app.json', import.meta.url), 'utf8'))
+    const buildProperties = appJson.expo.plugins.find((plugin) => Array.isArray(plugin) && plugin[0] === 'expo-build-properties')
+    const rules = buildProperties[1].android.extraProguardRules
+    assert.match(rules, /-keep class me\.leolin\.shortcutbadger\.ShortcutBadger \{ \*; \}/)
+    assert.match(rules, /-keep class expo\.modules\.notifications\.badge\.BadgeHelper \{ \*; \}/)
   })
 
   // A prebuild over an existing android folder finds the launcher entry
