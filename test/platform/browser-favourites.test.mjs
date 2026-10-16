@@ -87,8 +87,8 @@ describe('home favourites', () => {
 
     // Two rows, two icons. The star used to do duty for bookmarks, which is
     // what made the two look like the same thing.
-    assert.match(menu, /label=\{isBookmarked \? 'Remove Bookmark' : 'Add Bookmark'\}/)
-    assert.match(menu, /label=\{isFavourited \? 'Remove Favourite' : 'Add Favourite'\}/)
+    assert.match(menu, /label=\{isBookmarked \? t\('Remove Bookmark'\) : t\('Add Bookmark'\)\}/)
+    assert.match(menu, /label=\{isFavourited \? t\('Remove Favourite'\) : t\('Add Favourite'\)\}/)
     assert.match(menu, /isBookmarked \? <BookmarkFillIcon/)
     assert.match(menu, /isFavourited \? <StarFillIcon/)
   })

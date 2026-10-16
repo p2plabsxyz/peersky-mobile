@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { View, StyleSheet, Text } from 'react-native'
 import Svg, { Path } from 'react-native-svg'
+import { t } from '../i18n/i18n.mjs'
 import { createQrMatrix } from './qrcode-matrix.mjs'
 
 type QrCodeViewProps = {
@@ -21,7 +22,7 @@ export function QrCodeView ({ value, size = 220 }: QrCodeViewProps) {
   if (error) {
     return (
       <View style={[styles.placeholder, { width: size, height: size, justifyContent: 'center', alignItems: 'center' }]}>
-        <Text style={{ color: 'red', textAlign: 'center', padding: 8 }}>QR Error: {error}</Text>
+        <Text style={{ color: 'red', textAlign: 'center', padding: 8 }}>{t('QR Error: {error}', { error })}</Text>
       </View>
     )
   }

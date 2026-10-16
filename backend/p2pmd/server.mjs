@@ -1,8 +1,14 @@
 import { readHyperFile } from '../hyper/drive.mjs'
-import { isOwnLoopbackRequest } from '../loopback-request.mjs'
+import {
+  LOOPBACK_TOKEN_HEADER,
+  createLoopbackToken,
+  isLoopbackToken,
+  isOwnLoopbackRequest
+} from '../loopback-request.mjs'
 import {
   applyDocumentUpdate,
   getEncodedDocumentState,
+  getDocumentSnapshot,
   getDocumentState,
   getMaxDocumentLength,
   subscribeToDocumentUpdates,
@@ -74,8 +80,10 @@ Any questions?
 
 <!-- Speaker notes: Open floor for Q&A -->`
 
-subscribeToDocumentUpdates(({ document, origin, update }) => {
-  scheduleP2pmdRoomSnapshot(document)
+subscribeToDocumentUpdates(({ origin, update }) => {
+  // The note as it is when the snapshot is saved, after a pause, rather than
+  // put together on every edit.
+  scheduleP2pmdRoomSnapshot(getDocumentSnapshot)
   if (origin !== 'line-attribution-update') {
     broadcastEvent('yjsupdate', update)
   }
@@ -91,8 +99,9 @@ function scheduleDocumentBroadcast () {
 }
 
 // preferredPort: the one this note was on before, so its address stays the
-// same. If something else has it now, the system picks another.
-export async function startP2pmdServer ({ preferredPort = null } = {}) {
+// same. If something else has it now, the system picks another. Tests pass
+// Node's http as httpImpl, since Bare's HTTP does not load under Node.
+export async function startP2pmdServer ({ preferredPort = null, httpImpl: testHttp = null } = {}) {
   return withServerTransition(async () => {
     if (server && serverInfo) {
       return {
@@ -102,8 +111,10 @@ export async function startP2pmdServer ({ preferredPort = null } = {}) {
       }
     }
 
-    const httpImpl = await getBareHttp()
-    let instance = createP2pmdHttpServer({ httpImpl })
+    const httpImpl = testHttp || await getBareHttp()
+    // A new token each run, for the app's editor and the note's tunnel.
+    const token = createLoopbackToken()
+    let instance = createP2pmdHttpServer({ httpImpl, token })
 
     try {
       let address
@@ -112,7 +123,7 @@ export async function startP2pmdServer ({ preferredPort = null } = {}) {
       } catch (error) {
         if (!preferredPort) throw error
         try { instance.close() } catch {}
-        instance = createP2pmdHttpServer({ httpImpl })
+        instance = createP2pmdHttpServer({ httpImpl, token })
         address = await listen(instance, 0)
       }
       const port = typeof address === 'object' && address ? address.port : null
@@ -125,7 +136,8 @@ export async function startP2pmdServer ({ preferredPort = null } = {}) {
       serverInfo = {
         host: P2PMD_LOOPBACK_HOST,
         port,
-        localUrl: `http://${P2PMD_LOOPBACK_HOST}:${port}`
+        localUrl: `http://${P2PMD_LOOPBACK_HOST}:${port}`,
+        token
       }
 
       return {
@@ -143,13 +155,16 @@ export async function startP2pmdServer ({ preferredPort = null } = {}) {
   })
 }
 
-export function createP2pmdHttpServer ({ httpImpl } = {}) {
+export function createP2pmdHttpServer ({ httpImpl, token } = {}) {
   if (!httpImpl?.createServer) {
     throw new Error('P2PMD HTTP server requires an HTTP implementation.')
   }
+  if (typeof token !== 'string' || token.length < 32) {
+    throw new Error('P2PMD HTTP server requires a token.')
+  }
 
   if (eventClients.size === 0) resetPeerState()
-  return httpImpl.createServer(handleRequest)
+  return httpImpl.createServer((req, res) => handleRequest(req, res, token))
 }
 
 export function getP2pmdServerStatus () {
@@ -212,7 +227,7 @@ async function getBareHttp () {
 // through its own Holesail port.
 const DESKTOP_P2PMD_ORIGINS = ['peersky://p2p']
 
-function handleRequest (req, res) {
+function handleRequest (req, res, token) {
   const pathname = String(req.url || '/').split('?')[0]
 
   // Remote peers arrive through Holesail on their own loopback port, so only a
@@ -229,6 +244,16 @@ function handleRequest (req, res) {
 
   if (req.method === 'OPTIONS') {
     sendEmpty(res, 204)
+    return
+  }
+
+  // Another app on the phone can reach this port and send any header it
+  // likes, so the loopback check alone let it read and rewrite the open note.
+  // Everything but the editor page, which is the app's own code and holds
+  // nothing, needs the token.
+  const editorPage = req.method === 'GET' && (pathname === '/' || pathname === '/index.html')
+  if (!editorPage && !hasRoomToken(req, token)) {
+    sendJson(res, 403, { ok: false, error: 'Forbidden' })
     return
   }
 
@@ -692,6 +717,16 @@ function getQueryParam (rawUrl, key) {
   } catch {
     return ''
   }
+}
+
+// This phone's editor puts the token in the address of each request. The
+// note's tunnel puts it in a header on the first request of each connection,
+// which is all one carries: every answer here but the event stream closes the
+// connection, and the stream lasts as long as the connection does.
+function hasRoomToken (req, token) {
+  const header = req.headers?.[LOOPBACK_TOKEN_HEADER.toLowerCase()]
+  return isLoopbackToken(Array.isArray(header) ? header[0] : header, token) ||
+    isLoopbackToken(getQueryParam(req.url, 'token'), token)
 }
 
 export function getP2pmdEditorPage () {
@@ -1828,9 +1863,14 @@ export function getP2pmdEditorPage () {
         return ''
       }
 
+      // The app hands this page the room's token before it loads, and every
+      // request carries it: without it the room answers only with this page.
+      // Read on each call, so the page as served holds none.
       function roomUrl(path) {
-        if (!roomBaseUrl) return path
-        return roomBaseUrl + path
+        const url = (roomBaseUrl || '') + path
+        const token = typeof window.peerskyServerToken === 'string' ? window.peerskyServerToken : ''
+        if (!token) return url
+        return url + (url.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token)
       }
 
       function delay(ms) {

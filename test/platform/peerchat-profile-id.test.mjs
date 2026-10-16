@@ -11,8 +11,8 @@ test('the profile card shows the short ID between the name and the status', asyn
   const screen = await readFile(new URL('../../app/peerchat/PeerChatScreen.tsx', import.meta.url), 'utf8')
   const card = screen.slice(screen.indexOf('function PeerProfileModal'), screen.indexOf('function PeerChatQuestions'))
   const name = card.indexOf('{member.username}</Text>')
-  const id = card.indexOf('ID {member.id}')
-  const status = card.indexOf("member.self ? 'You' : formatMemberPresence(member)")
+  const id = card.indexOf("{t('ID {id}', { id: member.id })}")
+  const status = card.indexOf("member.self ? t('You') : formatMemberPresence(member)")
   assert.ok(name > -1 && id > name && status > id, 'the ID sits between the name and the status')
   // Selectable, so it can be copied and compared in another app.
   assert.match(card.slice(name, status), /selectable/)

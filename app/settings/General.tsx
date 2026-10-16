@@ -15,6 +15,7 @@ import {
   CUSTOM_SEARCH_QUERY_PLACEHOLDER,
   normalizeCustomSearchUrl
 } from '../browser-shell.mjs'
+import { t, tKey } from '../i18n/i18n.mjs'
 import { SEARCH_ENGINES } from './browser-preferences.mjs'
 import {
   ChoiceGroup,
@@ -80,9 +81,9 @@ export function General ({
   function saveCustomSearchUrl () {
     const normalizedUrl = normalizeCustomSearchUrl(draftUrl)
     if (!normalizedUrl) {
-      setValidationError(
-        `Enter a valid HTTPS search URL, for example https://www.ecosia.org/search?q=${CUSTOM_SEARCH_QUERY_PLACEHOLDER}`
-      )
+      setValidationError(t('Enter a valid HTTPS search URL, for example {example}', {
+        example: `https://www.ecosia.org/search?q=${CUSTOM_SEARCH_QUERY_PLACEHOLDER}`
+      }))
       return
     }
 
@@ -96,17 +97,17 @@ export function General ({
     try {
       await Linking.sendIntent('android.settings.MANAGE_DEFAULT_APPS_SETTINGS')
     } catch {
-      setDefaultBrowserError('Unable to open default browser settings.')
+      setDefaultBrowserError(t('Unable to open default browser settings.'))
     }
   }
 
   function confirmResetTabs () {
     Alert.alert(
-      'Reset tab session?',
-      'This will close every open tab and return to the home page.',
+      t('Reset tab session?'),
+      t('This will close every open tab and return to the home page.'),
       [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Reset', style: 'destructive', onPress: onResetTabs }
+        { text: t('Cancel'), style: 'cancel' },
+        { text: t('Reset'), style: 'destructive', onPress: onResetTabs }
       ]
     )
   }
@@ -123,18 +124,18 @@ export function General ({
           grants nothing and revokes nothing. It sat under Permissions, where
           nobody looking for it would think to check. */}
       {Platform.OS === 'android' && (
-        <SettingsSection title='Default browser'>
+        <SettingsSection title={t('Default browser')}>
           <View style={styles.settingRow}>
             <SettingCopy
-              title='Open web links with PeerSky'
-              description='Choose PeerSky as the app that opens web links.'
+              title={t('Open web links with PeerSky')}
+              description={t('Choose PeerSky as the app that opens web links.')}
             />
             <Pressable
               accessibilityRole='button'
               style={({ pressed }) => [styles.saveButton, pressed ? styles.saveButtonDisabled : null]}
               onPress={() => void openDefaultBrowserSettings()}
             >
-              <Text style={styles.saveButtonText}>Choose</Text>
+              <Text style={styles.saveButtonText}>{t('Choose')}</Text>
             </Pressable>
           </View>
           {defaultBrowserError && <Text style={styles.validationError}>{defaultBrowserError}</Text>}
@@ -144,14 +145,14 @@ export function General ({
       {/* Off by default. Inverting a page is a blunt instrument and plenty of
           sites now ship their own dark theme, so this is for the ones that
           never did rather than something to leave on and forget. */}
-      <SettingsSection title='Dark websites'>
+      <SettingsSection title={t('Dark websites')}>
         <View style={styles.settingRow}>
           <SettingCopy
-            title='Force dark mode'
-            description='Darken sites that have no dark theme of their own. Sites that are already dark are left as they are.'
+            title={t('Force dark mode')}
+            description={t('Darken sites that have no dark theme of their own. Sites that are already dark are left as they are.')}
           />
           <Switch
-            accessibilityLabel='Force dark mode on websites'
+            accessibilityLabel={t('Force dark mode on websites')}
             value={forceDarkWebsites}
             onValueChange={onForceDarkWebsitesChange}
             trackColor={{ false: '#bac3d2', true: '#7eb2ee' }}
@@ -160,19 +161,19 @@ export function General ({
         </View>
       </SettingsSection>
 
-      <SettingsSection title='Search engine'>
+      <SettingsSection title={t('Search engine')}>
         <ChoiceGroup
-          options={SEARCH_ENGINES}
+          options={SEARCH_ENGINES.map((engine) => ({ id: engine.id, title: tKey(engine.title) }))}
           selected={selectedEngine}
           onSelect={selectSearchEngine}
         />
         {selectedEngine === 'custom' && (
           <View style={[styles.customSearch, isDark ? styles.customSearchDark : null]}>
             <Text style={[styles.label, isDark ? styles.primaryTextDark : null]}>
-              Search URL
+              {t('Search URL')}
             </Text>
             <Text style={[styles.description, isDark ? styles.secondaryTextDark : null]}>
-              Use {CUSTOM_SEARCH_QUERY_PLACEHOLDER} where the search text should appear.
+              {t('Use {placeholder} where the search text should appear.', { placeholder: CUSTOM_SEARCH_QUERY_PLACEHOLDER })}
             </Text>
             <TextInput
               autoCapitalize='none'
@@ -190,7 +191,7 @@ export function General ({
             {validationError && <Text style={styles.validationError}>{validationError}</Text>}
             {!customSearchUrl && !validationError && (
               <Text style={[styles.fallback, isDark ? styles.secondaryTextDark : null]}>
-                DuckDuckGo is used until a valid custom URL is saved.
+                {t('DuckDuckGo is used until a valid custom URL is saved.')}
               </Text>
             )}
             <Pressable
@@ -205,7 +206,7 @@ export function General ({
               onPress={saveCustomSearchUrl}
             >
               <Text style={styles.saveButtonText}>
-                {isCustomSearchSaved ? 'Saved' : 'Save'}
+                {isCustomSearchSaved ? t('Saved') : t('Save')}
               </Text>
             </Pressable>
           </View>
@@ -215,13 +216,13 @@ export function General ({
             incognito tab. */}
         <View style={[styles.settingRow, styles.suggestionsRow, isDark ? styles.customSearchDark : null]}>
           <SettingCopy
-            title='Search suggestions'
+            title={t('Search suggestions')}
             description={searchEngine === 'custom'
-              ? 'A custom engine has no suggestions to show.'
-              : 'Searches from your search engine as you type. Never in incognito tabs, and never for addresses.'}
+              ? t('A custom engine has no suggestions to show.')
+              : t('Searches from your search engine as you type. Never in incognito tabs, and never for addresses.')}
           />
           <Switch
-            accessibilityLabel='Search suggestions'
+            accessibilityLabel={t('Search suggestions')}
             value={searchSuggestionsEnabled}
             onValueChange={onSearchSuggestionsChange}
             trackColor={{ false: '#bac3d2', true: '#7eb2ee' }}
@@ -230,13 +231,13 @@ export function General ({
         </View>
       </SettingsSection>
 
-      <SettingsSection title='Tabs'>
+      <SettingsSection title={t('Tabs')}>
         <Pressable style={styles.actionRow} onPress={confirmResetTabs}>
           <SettingCopy
-            title='Reset tab session'
-            description='Close all saved tabs and open a fresh home tab.'
+            title={t('Reset tab session')}
+            description={t('Close all saved tabs and open a fresh home tab.')}
           />
-          <Text style={styles.destructiveAction}>Reset</Text>
+          <Text style={styles.destructiveAction}>{t('Reset')}</Text>
         </Pressable>
       </SettingsSection>
     </View>

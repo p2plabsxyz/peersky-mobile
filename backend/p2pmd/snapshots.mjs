@@ -39,7 +39,8 @@ export function loadP2pmdRoomSnapshot (roomKey, storagePath = getHyperStoragePat
     return {
       content: parsed.content,
       lineAttributions: parsed.lineAttributions,
-      updatedAt: normalizeTimestamp(parsed.updatedAt)
+      updatedAt: normalizeTimestamp(parsed.updatedAt),
+      ...(typeof parsed.yjsState === 'string' && parsed.yjsState && { yjsState: parsed.yjsState })
     }
   } catch {
     return null
@@ -51,11 +52,17 @@ export function saveP2pmdRoomSnapshot (roomKey, document, storagePath = getHyper
   const snapshot = normalizeSnapshot(document)
   if (!target || !snapshot) return false
 
-  const serialized = JSON.stringify({
+  let serialized = JSON.stringify({
     version: 1,
     key: target.roomKey,
     ...snapshot
   })
+  // A long-edited note's Yjs state can outgrow the limit. The text alone still
+  // opens it, with a new history.
+  if (b4a.byteLength(serialized) > MAX_SNAPSHOT_FILE_BYTES && snapshot.yjsState) {
+    const { yjsState, ...text } = snapshot
+    serialized = JSON.stringify({ version: 1, key: target.roomKey, ...text })
+  }
   if (b4a.byteLength(serialized) > MAX_SNAPSHOT_FILE_BYTES) return false
 
   const temporaryPath = `${target.filePath}.tmp`
@@ -79,6 +86,8 @@ export function activateP2pmdRoomSnapshot (roomKey, document) {
   if (activeRoomKey && document) saveP2pmdRoomSnapshot(activeRoomKey, document)
 }
 
+// document can be a function that gives it, called only when the snapshot is
+// saved.
 export function scheduleP2pmdRoomSnapshot (document) {
   if (!activeRoomKey) return
 
@@ -93,7 +102,7 @@ export function scheduleP2pmdRoomSnapshot (document) {
 export function deactivateP2pmdRoomSnapshot (document = null) {
   clearSnapshotTimer()
   if (activeRoomKey && (document || pendingDocument)) {
-    saveP2pmdRoomSnapshot(activeRoomKey, document || pendingDocument)
+    saveP2pmdRoomSnapshot(activeRoomKey, document || documentOf(pendingDocument))
   }
   activeRoomKey = null
   pendingDocument = null
@@ -102,9 +111,13 @@ export function deactivateP2pmdRoomSnapshot (document = null) {
 export function flushP2pmdRoomSnapshot () {
   if (!activeRoomKey || !pendingDocument) return false
 
-  const document = pendingDocument
+  const document = documentOf(pendingDocument)
   pendingDocument = null
   return saveP2pmdRoomSnapshot(activeRoomKey, document)
+}
+
+function documentOf (pending) {
+  return typeof pending === 'function' ? pending() : pending
 }
 
 function normalizeSnapshot (document) {
@@ -115,7 +128,8 @@ function normalizeSnapshot (document) {
   return {
     content: document.content,
     lineAttributions: document.lineAttributions,
-    updatedAt: normalizeTimestamp(document.updatedAt)
+    updatedAt: normalizeTimestamp(document.updatedAt),
+    ...(typeof document.yjsState === 'string' && document.yjsState && { yjsState: document.yjsState })
   }
 }
 

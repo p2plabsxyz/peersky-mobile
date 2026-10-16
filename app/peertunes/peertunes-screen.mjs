@@ -29,6 +29,18 @@ export function isPeerTunesPageRequest (requestUrl, localUrl) {
   }
 }
 
+// The server's drive reads and song checks carry the run's token in their
+// address. Loaded as a page, one could end up in a download with the token in
+// it, so the view never loads them. The page fetches them; it never opens one.
+export function isPeerTunesDataRequest (requestUrl, localUrl) {
+  if (!isPeerTunesPageRequest(requestUrl, localUrl)) return false
+  try {
+    return new URL(String(requestUrl)).pathname.startsWith('/hyper/')
+  } catch {
+    return false
+  }
+}
+
 // PeerTunes asks native to scan, because WKWebView has no BarcodeDetector and
 // the native scanner is the one the rest of the app already uses. The page sees
 // a promise; native runs the camera and resolves it.
@@ -198,6 +210,13 @@ export function createAudioRouteScript (external) {
   return `window.peerskyAudioRoute = { external: ${external === true} }; window.dispatchEvent(new Event('peersky-audio-route')); true;`
 }
 
+// A PeerTunes song id: a letter for where the song came from and a short hash.
+export const PEERTUNES_SONG_ID = /^[A-Za-z0-9]{1,64}$/
+
+export function cleanPeerTunesSongId (value) {
+  return typeof value === 'string' && PEERTUNES_SONG_ID.test(value) ? value : ''
+}
+
 // Headset and car buttons, on Android. A WebView never hands its audio to the
 // system, so play and pause from earbuds had nowhere to go. This keeps the
 // page's own Media Session handlers where the app can call them, and says what
@@ -276,6 +295,17 @@ export const PEERTUNES_MEDIA_BRIDGE_SCRIPT = `(function () {
     }
     return false;
   }
+  // The song's id in PeerTunes, so a tap on the widget can ask for that song.
+  function songId () {
+    try {
+      var player = window.PeerTunes && window.PeerTunes.player;
+      var track = player && typeof player.current === 'function' ? player.current() : null;
+      var id = track && track.id;
+      return typeof id === 'string' && ${PEERTUNES_SONG_ID}.test(id) ? id : '';
+    } catch (e) {
+      return '';
+    }
+  }
   function report () {
     if (!window.ReactNativeWebView) return;
     var metadata = session.metadata || {};
@@ -285,6 +315,7 @@ export const PEERTUNES_MEDIA_BRIDGE_SCRIPT = `(function () {
       title: String(metadata.title || ''),
       artist: String(metadata.artist || ''),
       album: String(metadata.album || ''),
+      id: songId(),
       artwork: coverFor(metadata)
     });
     if (state === last) return;
@@ -357,6 +388,7 @@ export function parsePeerTunesNowPlaying (raw) {
       title: cleanNowPlayingText(parsed.title),
       artist: cleanNowPlayingText(parsed.artist),
       album: cleanNowPlayingText(parsed.album),
+      id: cleanPeerTunesSongId(parsed.id),
       // Checked again where it is written: readArtworkBase64.
       artwork: typeof parsed.artwork === 'string' && parsed.artwork.length <= MAX_NOW_PLAYING_ARTWORK
         ? parsed.artwork
@@ -379,4 +411,12 @@ function cleanNowPlayingText (value) {
 export function createPeerTunesMediaCommandScript (command) {
   if (!MEDIA_COMMANDS.has(command)) return null
   return `window.__peerskyMediaCommand && window.__peerskyMediaCommand(${JSON.stringify(command)}); true;`
+}
+
+// A tap on the widget, handed to the page: Now Playing with the song the
+// widget shows, ready to play. With no song, Now Playing with whatever the
+// page has loaded.
+export function createPeerTunesNowPlayingScript (song) {
+  const id = JSON.stringify(cleanPeerTunesSongId(song))
+  return `window.PeerTunes && window.PeerTunes.openNowPlaying && window.PeerTunes.openNowPlaying(${id}); true;`
 }

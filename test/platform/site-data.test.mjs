@@ -73,7 +73,7 @@ test('Android expires each cookie for the site and the domains above it, and is 
 
 test('Data Clearing leads to the list, and clearing there still keeps cookies', async () => {
   const clearing = await read('app/settings/DataClearing.tsx')
-  assert.match(clearing, /title='Cookies and site data'/)
+  assert.match(clearing, /title=\{t\('Cookies and site data'\)\}/)
   assert.match(clearing, /onPress=\{onOpenSiteData\}/)
   const settings = await read('app/settings/SettingsScreen.tsx')
   assert.match(settings, /onOpenSiteData=\{\(\) => changePage\('site-data', 1\)\}/)

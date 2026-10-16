@@ -12,6 +12,7 @@ import {
   readBrowserHistoryFile,
   replaceBrowserHistoryFile
 } from './browser-history-storage.mjs'
+import { t } from '../i18n/i18n.mjs'
 
 export type BrowserHistoryItem = {
   url: string
@@ -62,7 +63,7 @@ export function useBrowserHistory () {
           setItems(pendingHistory)
           readyRef.current = true
           setIsReady(true)
-          setPersistenceError('Unable to load browser history.')
+          setPersistenceError(t('Unable to load browser history.'))
         }
       }
     }
@@ -87,7 +88,7 @@ export function useBrowserHistory () {
 
   function persistItems (nextItems: BrowserHistoryItem[], immediate = false) {
     if (!readyRef.current) {
-      setPersistenceError('Browser history is still loading. Try again in a moment.')
+      setPersistenceError(t('Browser history is still loading. Try again in a moment.'))
       return false
     }
 
@@ -124,7 +125,7 @@ export function useBrowserHistory () {
     } catch (error) {
       console.error('Failed saving browser history:', error)
       if (mountedRef.current) {
-        setPersistenceError('Unable to save browser history. Changes may be lost after restart.')
+        setPersistenceError(t('Unable to save browser history. Changes may be lost after restart.'))
       }
       return false
     }
@@ -182,7 +183,7 @@ async function loadStoredHistory () {
     if (recovered.ok && recovered.exists) {
       return {
         items: recovered.items as BrowserHistoryItem[],
-        warning: 'Browser history was recovered after an interrupted save.'
+        warning: t('Browser history was recovered after an interrupted save.')
       }
     }
   }

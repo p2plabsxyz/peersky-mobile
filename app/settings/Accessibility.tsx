@@ -1,5 +1,6 @@
 import { StyleSheet, Switch, Text, View } from 'react-native'
 import { BROWSER_PALETTES } from '../browser-appearance.mjs'
+import { t } from '../i18n/i18n.mjs'
 import { WEBSITE_TEXT_SCALES } from './browser-preferences.mjs'
 import type { WebsiteTextScale } from './useBrowserPreferences'
 import {
@@ -17,11 +18,6 @@ type AccessibilityProps = {
   onWebsiteTextScaleChange: (scale: WebsiteTextScale) => void
 }
 
-const TEXT_SCALE_OPTIONS = WEBSITE_TEXT_SCALES.map((scale) => ({
-  id: scale.toString() as `${WebsiteTextScale}`,
-  title: `${scale}%`
-}))
-
 export function Accessibility ({
   enforceManualPageZoom,
   persistenceError,
@@ -30,6 +26,10 @@ export function Accessibility ({
   onWebsiteTextScaleChange
 }: AccessibilityProps) {
   const isDark = useSettingsDarkMode()
+  const textScaleOptions = WEBSITE_TEXT_SCALES.map((scale) => ({
+    id: scale.toString() as `${WebsiteTextScale}`,
+    title: t('{percent}%', { percent: scale })
+  }))
 
   return (
     <View style={[styles.page, isDark ? styles.pageDark : null]}>
@@ -39,22 +39,22 @@ export function Accessibility ({
         </View>
       )}
 
-      <SettingsSection title='Website text size'>
+      <SettingsSection title={t('Website text size')}>
         <ChoiceGroup
-          options={TEXT_SCALE_OPTIONS}
+          options={textScaleOptions}
           selected={websiteTextScale.toString() as `${WebsiteTextScale}`}
           onSelect={(scale) => onWebsiteTextScaleChange(Number(scale) as WebsiteTextScale)}
         />
       </SettingsSection>
 
-      <SettingsSection title='Page zoom'>
+      <SettingsSection title={t('Page zoom')}>
         <View style={styles.settingRow}>
           <SettingCopy
-            title='Enforce manual page zoom'
-            description='Allow pinch zoom even when a website normally prevents it.'
+            title={t('Enforce manual page zoom')}
+            description={t('Allow pinch zoom even when a website normally prevents it.')}
           />
           <Switch
-            accessibilityLabel='Enforce manual page zoom'
+            accessibilityLabel={t('Enforce manual page zoom')}
             value={enforceManualPageZoom}
             onValueChange={onEnforceManualPageZoomChange}
             trackColor={{ false: '#bac3d2', true: '#7eb2ee' }}

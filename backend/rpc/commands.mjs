@@ -85,10 +85,26 @@ export const RPC_PEERCHAT_PRESENCE = 74
 // { message } from the browser's Send to your devices, into your chat with
 // yourself.
 export const RPC_PEERCHAT_SEND_TO_DEVICES = 75
+// A file or picture from one chat, opened and sealed again for another, to be
+// forwarded there.
+export const RPC_PEERCHAT_ATTACHMENT_FORWARD = 76
+// { query } over the messages kept on this phone, every chat at once. Nothing
+// is asked of anyone else.
+export const RPC_PEERCHAT_SEARCH = 77
+// The transfer Link Device is sending now, if any, so its screen can show the
+// same link and code after it was closed: { sending: { url, verificationCode,
+// expiresAt, deviceType, sent } | null }.
+export const RPC_IDENTITY_SEND_STATUS = 78
 
 export const RPC_IDENTITY_REMOVE = 68
 
 export const RPC_PEERTUNES_START = 70
+// Starts the Hyperdrive viewer's loopback server: the Files, Photos and Videos
+// views a hyper:// folder opens in (backend/hyperdrive-viewer/server.mjs).
+export const RPC_HYPERDRIVE_VIEWER_START = 79
+// { url, name }: the address to download one file of a drive through that
+// server, signed for that file alone.
+export const RPC_HYPERDRIVE_VIEWER_DOWNLOAD = 80
 
 // Backend to app pushes. Separate range so they never collide with the
 // app-initiated commands above.

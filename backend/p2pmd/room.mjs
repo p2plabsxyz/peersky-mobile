@@ -5,6 +5,7 @@ import {
   startHolesailLive,
   stopHolesail
 } from '../holesail/session.mjs'
+import { createLoopbackToken } from '../loopback-request.mjs'
 import { P2PMD_LOOPBACK_HOST } from './constants.mjs'
 import { findNotePort, isUsableNotePort, rememberNotePort } from './note-ports.mjs'
 import {
@@ -13,9 +14,9 @@ import {
   stopP2pmdServer
 } from './server.mjs'
 import {
-  getDocumentState,
+  getDocumentSnapshot,
   resetDocumentState,
-  updateDocumentState
+  restoreDocumentState
 } from './document.mjs'
 import {
   activateP2pmdRoomSnapshot,
@@ -73,7 +74,7 @@ export async function createP2pmdRoom ({
     if (connector) {
       const snapshot = loadP2pmdRoomSnapshot(connector)
       if (snapshot) {
-        const restored = updateDocumentState(snapshot.content, snapshot.lineAttributions)
+        const restored = restoreDocumentState(snapshot)
         if (!restored.ok) return restored
       } else if (requireCopy) {
         return {
@@ -88,13 +89,16 @@ export async function createP2pmdRoom ({
     if (!serverResult.ok) return serverResult
 
     try {
+      // People who come in with the note's address get the server's token
+      // from the tunnel, so the server can refuse everyone else on the phone.
       const holesailResult = await startHolesailLive({
         host: serverResult.host,
         port: serverResult.port,
         connector: hostKey,
         secure: isPrivate,
         udp,
-        log
+        log,
+        token: serverResult.token
       })
 
       if (!holesailResult.ok) {
@@ -119,7 +123,9 @@ export async function createP2pmdRoom ({
         host: serverResult.host,
         port: serverResult.port,
         secure: isPrivate,
-        udp: Boolean(udp)
+        udp: Boolean(udp),
+        // For the app's editor only. It never goes over the tunnel.
+        token: serverResult.token
       }
 
       if (connector && room.key !== connector.trim()) {
@@ -138,7 +144,7 @@ export async function createP2pmdRoom ({
         return { ok: false, error: 'Unable to keep this public note on the phone, so it was not opened.' }
       }
 
-      activateP2pmdRoomSnapshot(room.key, getDocumentState())
+      activateP2pmdRoomSnapshot(room.key, getDocumentSnapshot())
       rememberNotePort(room.key, room.port)
 
       return {
@@ -169,7 +175,10 @@ export async function joinP2pmdRoom ({
   return withRoomTransition(async () => {
     await disconnectRoomInternal()
 
-    const holesailResult = await connectOnNotePort({ key, udp, log })
+    // The joined note's local port answers only requests with this token,
+    // which only the app's editor is given.
+    const token = createLoopbackToken()
+    const holesailResult = await connectOnNotePort({ key, udp, log, token })
     if (!holesailResult.ok) return holesailResult
 
     const roomKey = holesailResult.info?.url
@@ -192,7 +201,7 @@ export async function joinP2pmdRoom ({
 
     let warning = null
     try {
-      await waitForJoinedRoomReady(boundPort, probe ? SHARED_NOTE_LOOK_MS : null)
+      await waitForJoinedRoomReady(boundPort, token, probe ? SHARED_NOTE_LOOK_MS : null)
     } catch (error) {
       if (probe) {
         await stopHolesail()
@@ -209,7 +218,10 @@ export async function joinP2pmdRoom ({
       host: P2PMD_LOOPBACK_HOST,
       port: boundPort,
       secure: holesailResult.info?.secure === true,
-      udp: Boolean(udp)
+      udp: Boolean(udp),
+      // For the app's editor only. The local port takes it out of each
+      // request, so the host never sees it.
+      token
     }
 
     return {
@@ -227,12 +239,12 @@ export async function joinP2pmdRoom ({
  * port is taken here, or belongs to another server in the app, the system
  * picks one instead.
  */
-async function connectOnNotePort ({ key, udp, log }) {
+async function connectOnNotePort ({ key, udp, log, token }) {
   const saved = findNotePort(key)
-  const preferred = await connectHolesail({ key, port: saved, hostPort: true, udp, log })
+  const preferred = await connectHolesail({ key, port: saved, hostPort: true, udp, log, token })
   if (preferred.ok && isUsableNotePort(preferred.info?.port)) return preferred
   if (preferred.ok) await stopHolesail()
-  return connectHolesail({ key, anyPort: true, udp, log })
+  return connectHolesail({ key, anyPort: true, udp, log, token })
 }
 
 export function getP2pmdRoomStatus () {
@@ -264,7 +276,7 @@ export async function disconnectP2pmdRoom () {
 }
 
 async function disconnectRoomInternal () {
-  deactivateP2pmdRoomSnapshot(room?.role === 'host' ? getDocumentState() : null)
+  deactivateP2pmdRoomSnapshot(room?.role === 'host' ? getDocumentSnapshot() : null)
   const results = await Promise.allSettled([
     stopHolesail(),
     stopP2pmdServer()
@@ -303,7 +315,7 @@ async function withRoomTransition (operation) {
 }
 
 // Tries a fixed number of times, or, given a time budget, until it runs out.
-async function waitForJoinedRoomReady (port, budgetMs = null) {
+async function waitForJoinedRoomReady (port, token, budgetMs = null) {
   let lastError = null
   const deadline = budgetMs === null ? null : Date.now() + budgetMs
 
@@ -312,7 +324,7 @@ async function waitForJoinedRoomReady (port, budgetMs = null) {
       const timeoutMs = deadline === null
         ? JOIN_READY_REQUEST_TIMEOUT_MS
         : Math.min(JOIN_READY_REQUEST_TIMEOUT_MS, Math.max(500, deadline - Date.now()))
-      if (await requestP2pmdStatus(port, timeoutMs)) return
+      if (await requestP2pmdStatus(port, token, timeoutMs)) return
     } catch (error) {
       lastError = error
     }
@@ -323,7 +335,7 @@ async function waitForJoinedRoomReady (port, budgetMs = null) {
   throw new Error(lastError?.message || 'Timed out waiting for joined P2PMD room.')
 }
 
-function requestP2pmdStatus (port, timeoutMs = JOIN_READY_REQUEST_TIMEOUT_MS) {
+function requestP2pmdStatus (port, token, timeoutMs = JOIN_READY_REQUEST_TIMEOUT_MS) {
   return new Promise((resolve, reject) => {
     let body = ''
     let settled = false
@@ -340,7 +352,7 @@ function requestP2pmdStatus (port, timeoutMs = JOIN_READY_REQUEST_TIMEOUT_MS) {
       host: P2PMD_LOOPBACK_HOST,
       port,
       method: 'GET',
-      path: '/status'
+      path: `/status?token=${token}`
     }, (res) => {
       res.on('data', (chunk) => {
         body += chunk.toString()

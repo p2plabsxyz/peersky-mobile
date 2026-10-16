@@ -12,6 +12,7 @@ import { WebView } from 'react-native-webview'
 import ChevronRightIcon from '../../assets/icons/bootstrap/chevron-right.svg'
 import { BROWSER_PALETTES } from '../browser-appearance.mjs'
 import { clearWebsiteData } from '../browser-data.mjs'
+import { t } from '../i18n/i18n.mjs'
 import {
   SettingCopy,
   SettingsSection,
@@ -41,7 +42,7 @@ export function DataClearing ({
     if (!clearAction) return
 
     const timer = setTimeout(() => {
-      failClearing('The browser cache did not respond. Please try again.')
+      failClearing(t('The browser cache did not respond. Please try again.'))
     }, CLEAR_WEBVIEW_TIMEOUT_MS)
 
     return () => clearTimeout(timer)
@@ -54,26 +55,26 @@ export function DataClearing ({
 
   function confirmClearBrowsingData () {
     Alert.alert(
-      'Delete tabs and cached website data?',
+      t('Delete tabs and cached website data?'),
       Platform.OS === 'ios'
-        ? 'This closes every tab and removes cached files and local website storage. Cookies and browser preferences are kept.'
-        : 'This closes every tab and removes cached website files. Cookies and browser preferences are kept.',
+        ? t('This closes every tab and removes cached files and local website storage. Cookies and browser preferences are kept.')
+        : t('This closes every tab and removes cached website files. Cookies and browser preferences are kept.'),
       [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Delete', style: 'destructive', onPress: () => startClearing('all') }
+        { text: t('Cancel'), style: 'cancel' },
+        { text: t('Delete'), style: 'destructive', onPress: () => startClearing('all') }
       ]
     )
   }
 
   function confirmClearCache () {
     Alert.alert(
-      'Clear cached website data?',
+      t('Clear cached website data?'),
       Platform.OS === 'ios'
-        ? 'This removes cached files and local website storage without closing tabs. Cookies and browser preferences are kept.'
-        : 'This removes cached website files without closing tabs. Cookies and browser preferences are kept.',
+        ? t('This removes cached files and local website storage without closing tabs. Cookies and browser preferences are kept.')
+        : t('This removes cached website files without closing tabs. Cookies and browser preferences are kept.'),
       [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Clear', style: 'destructive', onPress: () => startClearing('cache') }
+        { text: t('Cancel'), style: 'cancel' },
+        { text: t('Clear'), style: 'destructive', onPress: () => startClearing('cache') }
       ]
     )
   }
@@ -89,7 +90,7 @@ export function DataClearing ({
       webViews: [clearWebViewRef.current]
     })) {
       clearStartedRef.current = false
-      failClearing('The browser cache could not be accessed. Please try again.')
+      failClearing(t('The browser cache could not be accessed. Please try again.'))
       return
     }
 
@@ -99,13 +100,14 @@ export function DataClearing ({
       setClearAction(null)
       const sessionSaved = onClearBrowsingData()
       if (!previewCacheCleared || !sessionSaved) {
-        const failedParts = [
-          !previewCacheCleared ? 'some tab preview files could not be removed' : null,
-          !sessionSaved ? 'the fresh tab session could not be saved' : null
-        ].filter(Boolean)
         Alert.alert(
-          'Data clearing incomplete',
-          `Your tabs were closed, but ${failedParts.join(' and ')}. Please try again.`
+          t('Data clearing incomplete'),
+          !previewCacheCleared && !sessionSaved
+            ? t('Your tabs were closed, but some tab preview files could not be removed and the fresh tab session could not be saved. Please try again.')
+            : !previewCacheCleared
+              ? t('Your tabs were closed, but some tab preview files could not be removed. Please try again.')
+              : t('Your tabs were closed, but the fresh tab session could not be saved. Please try again.'),
+              [{ text: t('OK') }]
         )
       }
       return
@@ -114,11 +116,12 @@ export function DataClearing ({
     setClearAction(null)
     Alert.alert(
       previewCacheCleared
-        ? 'Cached website data cleared'
-        : 'Unable to clear all cached data',
+        ? t('Cached website data cleared')
+        : t('Unable to clear all cached data'),
       previewCacheCleared
         ? undefined
-        : 'Some tab preview files could not be removed. Please try again.'
+        : t('Some tab preview files could not be removed. Please try again.'),
+        [{ text: t('OK') }]
     )
   }
 
@@ -126,28 +129,28 @@ export function DataClearing ({
     if (clearStartedRef.current) return
     clearStartedRef.current = true
     setClearAction(null)
-    Alert.alert('Unable to clear cached data', message)
+    Alert.alert(t('Unable to clear cached data'), message, [{ text: t('OK') }])
   }
 
   return (
     <View style={[styles.page, isDark ? styles.pageDark : null]}>
       {/* Clearing below keeps cookies, so nobody is signed out of every site
           at once. They go one site at a time, or all together, here. */}
-      <SettingsSection title='Cookies'>
+      <SettingsSection title={t('Cookies')}>
         <Pressable
           accessibilityRole='button'
           style={({ pressed }) => [styles.actionRow, pressed ? styles.actionPressed : null]}
           onPress={onOpenSiteData}
         >
           <SettingCopy
-            title='Cookies and site data'
-            description='See which sites keep cookies or data on this phone, and remove them.'
+            title={t('Cookies and site data')}
+            description={t('See which sites keep cookies or data on this phone, and remove them.')}
           />
           <ChevronRightIcon width={16} height={16} color={isDark ? BROWSER_PALETTES.dark.mutedText : '#8190a7'} />
         </Pressable>
       </SettingsSection>
 
-      <SettingsSection title='Cache'>
+      <SettingsSection title={t('Cache')}>
         <Pressable
           accessibilityRole='button'
           disabled={isClearing}
@@ -159,18 +162,18 @@ export function DataClearing ({
           onPress={confirmClearCache}
         >
           <SettingCopy
-            title='Clear cached website data'
+            title={t('Clear cached website data')}
             description={Platform.OS === 'ios'
-              ? 'Remove cached files and local website storage without closing tabs.'
-              : 'Remove cached website files without closing your tabs.'}
+              ? t('Remove cached files and local website storage without closing tabs.')
+              : t('Remove cached website files without closing your tabs.')}
           />
           <Text style={[styles.clearAction, isDark ? styles.clearActionDark : null]}>
-            {clearAction === 'cache' ? 'Clearing...' : 'Clear'}
+            {clearAction === 'cache' ? t('Clearing...') : t('Clear')}
           </Text>
         </Pressable>
       </SettingsSection>
 
-      <SettingsSection title='Tabs and cache'>
+      <SettingsSection title={t('Tabs and cache')}>
         <Pressable
           accessibilityRole='button'
           disabled={isClearing}
@@ -182,20 +185,20 @@ export function DataClearing ({
           onPress={confirmClearBrowsingData}
         >
           <SettingCopy
-            title='Delete tabs and cached website data'
+            title={t('Delete tabs and cached website data')}
             description={Platform.OS === 'ios'
-              ? 'Close all tabs and remove cached files, local website storage, and the saved session.'
-              : 'Close all tabs, clear the saved session, and remove cached website files.'}
+              ? t('Close all tabs and remove cached files, local website storage, and the saved session.')
+              : t('Close all tabs, clear the saved session, and remove cached website files.')}
           />
           <Text style={[styles.destructiveAction, isDark ? styles.destructiveActionDark : null]}>
-            {clearAction === 'all' ? 'Deleting...' : 'Delete'}
+            {clearAction === 'all' ? t('Deleting...') : t('Delete')}
           </Text>
         </Pressable>
       </SettingsSection>
 
       <View style={[styles.notice, isDark ? styles.noticeDark : null]}>
         <Text style={[styles.noticeText, isDark ? styles.noticeTextDark : null]}>
-          Cookies and your search, appearance, and accessibility preferences are not deleted here.
+          {t('Cookies and your search, appearance, and accessibility preferences are not deleted here.')}
         </Text>
       </View>
 
@@ -205,7 +208,7 @@ export function DataClearing ({
           accessibilityElementsHidden={true}
           source={{ html: '<!doctype html><title>Clear browser data</title>' }}
           style={styles.clearWebView}
-          onError={() => failClearing('The browser cache could not be accessed. Please try again.')}
+          onError={() => failClearing(t('The browser cache could not be accessed. Please try again.'))}
           onLoadEnd={clearBrowsingData}
         />
       )}

@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 
+import { encodeMessagePayload } from '../../backend/peerchat/link-preview.mjs'
 import { checkPeerChatContent } from '../../backend/peerchat/moderation.mjs'
 import { encryptPeerChatMessage } from '../../backend/peerchat/protocol.mjs'
 import { PeerChatService } from '../../backend/peerchat/service.mjs'
@@ -49,6 +50,47 @@ test('a direct message sends what a group refuses, and takes it in', async (t) =
   const room = await service.getSnapshot({ roomKey: group.roomKey, version: -1 })
   assert.equal(room.messages.some((message) => message.message === TEXT), false)
   assert.equal(room.messages.filter((message) => message.system).length, 1)
+})
+
+// A file's name shows in the chat list, a search and a notification, so in a
+// group it goes through the same filters as words. A direct message skips them.
+test('a file\'s name goes through a group\'s filters as words do, and a direct message skips them', async (t) => {
+  const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-dm-filters-'))
+  t.after(() => rm(storagePath, { recursive: true, force: true }))
+  const service = await new PeerChatService({ sdk: createFakeSdk(), storagePath }).start()
+  t.after(() => service.close())
+  service.setProfile({ username: 'Sam', bio: '' })
+
+  const group = await service.createRoom({ name: 'Group', username: 'Sam' })
+  const peer = createFakePeer('ab12cd34', 'Alice', [group.roomKey, DM_KEY])
+  service.peers.set(peer.connection, peer)
+  service.rooms.set(DM_KEY, service.createDirectRoom({ roomKey: DM_KEY, peerId: peer.id, username: 'Alice', pendingAcceptance: false }))
+  const address = `hyper://${'a'.repeat(52)}/1700000000000-0123456789abcdef.bin`
+  const NAME = 'you bastard.png'
+
+  // Sending one: refused in a group, as words would be, and fine in a DM.
+  await assert.rejects(service.sendMessage({ roomKey: group.roomKey, message: address, fileName: NAME, fileSize: 10 }), /Message blocked: .* in the file name/)
+  await service.sendMessage({ roomKey: DM_KEY, message: address, fileName: NAME, fileSize: 10 })
+
+  // Taking one in. In a room whose keys rotate the name is inside the body,
+  // and in an older room beside it; both are read.
+  const sealed = (roomKey, outside) => outside
+    ? { ...encryptPeerChatMessage(address, roomKey), fileName: NAME, fileSize: 10 }
+    : encryptPeerChatMessage(encodeMessagePayload(address, null, '', { fileName: NAME, fileSize: 10 }), roomKey)
+  await service.handlePeerMessage(peer, { id: 'file-in-group', roomKey: group.roomKey, sn: 'Alice', ...sealed(group.roomKey, false), ts: Date.now() })
+  const room = await service.getSnapshot({ roomKey: group.roomKey, version: -1 })
+  assert.equal(room.messages.some((message) => message.fileName === NAME), false)
+  assert.equal(room.messages.filter((message) => message.system).length, 1)
+  assert.equal(service.rooms.get(group.roomKey).lastMessage?.message?.includes('bastard') || false, false)
+
+  await service.handlePeerMessage(peer, { id: 'file-in-dm', roomKey: DM_KEY, sn: 'Alice', ...sealed(DM_KEY, true), ts: Date.now() })
+  const dm = await service.getSnapshot({ roomKey: DM_KEY, version: -1 })
+  assert.deepEqual(dm.messages.filter((message) => !message.system).map((message) => message.fileName), [NAME, NAME])
+
+  // A name that passes is shown as ever.
+  await service.handlePeerMessage(peer, { id: 'fine-in-group', roomKey: group.roomKey, sn: 'Alice', ...encryptPeerChatMessage(encodeMessagePayload(address, null, '', { fileName: 'holiday.jpg', fileSize: 10 }), group.roomKey), ts: Date.now() })
+  const after = await service.getSnapshot({ roomKey: group.roomKey, version: -1 })
+  assert.ok(after.messages.some((message) => message.fileName === 'holiday.jpg'))
 })
 
 function createFakeSdk () {

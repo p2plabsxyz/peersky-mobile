@@ -21,7 +21,7 @@ describe('opening a note that is on another device too', () => {
   it('looks for it there first, and reports nobody rather than joining an empty room', async () => {
     const source = await read('backend/p2pmd/room.mjs')
     const join = between(source, 'export async function joinP2pmdRoom', 'export function getP2pmdRoomStatus')
-    assert.match(join, /waitForJoinedRoomReady\(boundPort, probe \? SHARED_NOTE_LOOK_MS : null\)/)
+    assert.match(join, /waitForJoinedRoomReady\(boundPort, token, probe \? SHARED_NOTE_LOOK_MS : null\)/)
     assert.match(join, /if \(probe\) \{\s*await stopHolesail\(\)\s*return \{ ok: false, noHost: true/)
   })
 

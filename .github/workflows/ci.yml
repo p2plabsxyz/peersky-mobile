@@ -56,6 +56,31 @@ jobs:
       - name: Run live Holesail integration test
         run: npm run test:holesail:live
 
+  peerchat-scale:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The app's own PeerChat code on a thousand phones, connected in memory.
+      # They take about 2.3 GB of JavaScript heap together, so the heap gets
+      # room above that whatever the runner's default.
+      - name: A thousand phones in one PeerChat room
+        run: npm run test:scale:peerchat
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
+
   android-content-blocking:
     runs-on: ubuntu-latest
     timeout-minutes: 45

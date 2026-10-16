@@ -1,3 +1,5 @@
+import { t } from '../i18n/i18n.mjs'
+
 // Sites with cookies or data on the phone, as Settings lists them. The app's
 // own loopback pages are never among them: PeerTunes keeps its library there.
 const APP_OWN_HOSTS = new Set(['127.0.0.1', 'localhost'])
@@ -43,10 +45,10 @@ export function normalizeSiteDataList (value) {
 }
 
 export function describeSiteData (site) {
-  if (site.cookies && site.storage) return 'Cookies and site data'
-  if (site.cookies) return 'Cookies'
-  if (site.storage) return 'Site data'
-  return 'Cached files'
+  if (site.cookies && site.storage) return t('Cookies and site data')
+  if (site.cookies) return t('Cookies')
+  if (site.storage) return t('Site data')
+  return t('Cached files')
 }
 
 export function filterSiteData (sites, query) {

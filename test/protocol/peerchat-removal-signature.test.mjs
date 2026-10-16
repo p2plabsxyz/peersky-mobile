@@ -154,20 +154,26 @@ test('a room made here gets a signed list, again each time it changes, and keeps
   const watcher = connect(service, 'cc00cc00')
   watcher.rooms = [room.roomKey]
 
-  await service.removeRoomMember({ roomKey: room.roomKey, peerId: 'deadbeef' })
+  const { movedTo } = await service.removeRoomMember({ roomKey: room.roomKey, peerId: 'deadbeef' })
   const sent = watcher.lists(room.roomKey).find((frame) => frame.bans.some((ban) => ban.id === 'deadbeef'))
   assert.ok(sent, 'the new list went out')
   assert.equal(checkSignedRemovals({ topic: wireRoom(room.roomKey), creatorKey: PHONE.publicKey.toString('hex'), bans: sent.bans, signed: sent.signed }), true)
 
+  // The room moved to a new key with the removal (see
+  // peerchat-room-move.test.mjs), so letting somebody back in is a list in
+  // the new room, signed again.
+  assert.match(movedTo, /^[0-9a-f]{64}$/)
+  watcher.rooms = [movedTo]
   await service.restoreRoomMember({ roomKey: room.roomKey, peerId: 'deadbeef' })
-  const after = watcher.lists(room.roomKey).find((frame) => frame.signed?.v > sent.signed.v)
+  const after = watcher.lists(movedTo).find((frame) => frame.signed?.v > sent.signed.v)
   assert.deepEqual(after.bans, [])
-  assert.equal(checkSignedRemovals({ topic: wireRoom(room.roomKey), creatorKey: PHONE.publicKey.toString('hex'), bans: after.bans, signed: after.signed }), true)
+  assert.equal(checkSignedRemovals({ topic: wireRoom(movedTo), creatorKey: PHONE.publicKey.toString('hex'), bans: after.bans, signed: after.signed }), true)
 
   service.persistNow()
   await service.close()
   const restarted = await startService(t, storagePath)
-  assert.deepEqual(restarted.rooms.get(room.roomKey).bansSigned, after.signed)
+  assert.deepEqual(restarted.rooms.get(movedTo).bansSigned, after.signed)
+  assert.equal(restarted.rooms.get(room.roomKey).movedTo.to, movedTo)
 })
 
 function createFakeSdk () {

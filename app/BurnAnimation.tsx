@@ -10,6 +10,7 @@ import {
 import Svg, { Defs, LinearGradient, Path, Rect, Stop } from 'react-native-svg'
 
 import { tapFeedback } from './haptics'
+import { t } from './i18n/i18n.mjs'
 
 // The everyday bird, angry and on fire. scripts/generate-burn-bird.mjs makes it.
 const BURN_BIRD = require('../assets/images/burn-bird.png')
@@ -159,7 +160,7 @@ export function BurnAnimation ({ onBurn, onDone }: { onBurn: () => void, onDone:
 
   return (
     <Animated.View
-      accessibilityLabel='Burning tabs'
+      accessibilityLabel={t('Burning tabs')}
       accessibilityLiveRegion='polite'
       pointerEvents='none'
       style={[StyleSheet.absoluteFill, styles.overlay]}

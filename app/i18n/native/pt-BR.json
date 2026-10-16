@@ -1,0 +1,18 @@
+{
+  "ios": {
+    "NSCameraUsageDescription": "O PeerSky usa a câmera para escanear códigos QR quando você vincula um dispositivo ou abre uma sala ou um drive que alguém compartilhou, e quando um site que você visita pede e você permite o acesso.",
+    "NSLocalNetworkUsageDescription": "O PeerSky usa sua rede local para encontrar dispositivos PeerSky por perto e se conectar a eles.",
+    "NSLocationWhenInUseUsageDescription": "O PeerSky usa sua localização só quando um site que você visita pede e você permite o acesso.",
+    "NSMicrophoneUsageDescription": "O PeerSky usa o microfone só quando um site que você visita pede e você permite o acesso.",
+    "NSPhotoLibraryAddUsageDescription": "O PeerSky salva uma foto ou um vídeo na sua fototeca quando você escolhe Salvar em Fotos.",
+    "ShortcutPasteAndGo": "Colar e ir",
+    "ShortcutNewTab": "Nova aba",
+    "ShortcutNewIncognitoTab": "Nova aba anônima",
+    "ShortcutAppIcon": "Ícone do app"
+  },
+  "android": {
+    "peerchat_background_text": "Conectado para que as mensagens cheguem até você",
+    "peerchat_background_channel": "Conexão do PeerChat em segundo plano",
+    "peerchat_background_channel_description": "Mantém o PeerChat conectado enquanto o PeerSky está em segundo plano"
+  }
+}

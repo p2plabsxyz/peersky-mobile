@@ -11,6 +11,7 @@ import {
   View
 } from 'react-native'
 import { BROWSER_PALETTES } from '../browser-appearance.mjs'
+import { t, tp } from '../i18n/i18n.mjs'
 import {
   describeSiteData,
   filterSiteData,
@@ -63,7 +64,7 @@ export function SiteData ({
       setError(null)
     } catch {
       setSites([])
-      setError('The list of sites could not be read. Please try again.')
+      setError(t('The list of sites could not be read. Please try again.'))
     }
   }, [available, browserData])
 
@@ -77,7 +78,7 @@ export function SiteData ({
     try {
       await browserData.removeSites?.(names)
     } catch {
-      setError('Some sites could not be removed. Please try again.')
+      setError(t('Some sites could not be removed. Please try again.'))
     } finally {
       setBusy(false)
       void load()
@@ -86,11 +87,15 @@ export function SiteData ({
 
   function confirmRemoveAll (names: string[]) {
     Alert.alert(
-      `Remove data for ${names.length === 1 ? 'one site' : names.length === 2 ? 'both sites' : `all ${names.length} sites`}?`,
-      'Their cookies and stored data are removed, so you will be signed out of them.',
+      names.length === 1
+        ? t('Remove data for one site?')
+        : names.length === 2
+          ? t('Remove data for both sites?')
+          : tp({ one: 'Remove data for all {count} site?', other: 'Remove data for all {count} sites?' }, names.length),
+      t('Their cookies and stored data are removed, so you will be signed out of them.'),
       [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Remove all', style: 'destructive', onPress: () => void remove(names) }
+        { text: t('Cancel'), style: 'cancel' },
+        { text: t('Remove all'), style: 'destructive', onPress: () => void remove(names) }
       ]
     )
   }
@@ -99,7 +104,7 @@ export function SiteData ({
     return (
       <View style={[styles.page, isDark ? styles.pageDark : null]}>
         <View style={styles.notice}>
-          <Text style={[styles.noticeText, { color: palette.mutedText }]}>This version of PeerSky cannot list site data.</Text>
+          <Text style={[styles.noticeText, { color: palette.mutedText }]}>{t('This version of PeerSky cannot list site data.')}</Text>
         </View>
       </View>
     )
@@ -112,8 +117,8 @@ export function SiteData ({
       <View style={styles.notice}>
         <Text style={[styles.noticeText, { color: palette.mutedText }]}>
           {Platform.OS === 'android'
-            ? 'Sites from your history, tabs and bookmarks that keep cookies on this phone. Removing one signs you out of it.'
-            : 'Sites that keep cookies or other data on this phone. Removing one signs you out of it.'}
+            ? t('Sites from your history, tabs and bookmarks that keep cookies on this phone. Removing one signs you out of it.')
+            : t('Sites that keep cookies or other data on this phone. Removing one signs you out of it.')}
         </Text>
       </View>
       {error && <Text style={styles.error}>{error}</Text>}
@@ -121,9 +126,9 @@ export function SiteData ({
         ? <ActivityIndicator color={palette.accent} style={styles.loading} />
         : sites.length === 0
           ? (
-            <SettingsSection title='Sites'>
+            <SettingsSection title={t('Sites')}>
               <View style={[styles.row, isDark ? styles.rowDark : null]}>
-                <SettingCopy title='No site data' description='No site keeps cookies or data on this phone right now.' />
+                <SettingCopy title={t('No site data')} description={t('No site keeps cookies or data on this phone right now.')} />
               </View>
             </SettingsSection>
             )
@@ -131,23 +136,23 @@ export function SiteData ({
             <>
               {sites.length > SEARCH_FROM && (
                 <TextInput
-                  accessibilityLabel='Search sites'
+                  accessibilityLabel={t('Search sites')}
                   autoCapitalize='none'
                   autoCorrect={false}
                   clearButtonMode='while-editing'
-                  placeholder='Search sites'
+                  placeholder={t('Search sites')}
                   placeholderTextColor={palette.mutedText}
                   style={[styles.search, { backgroundColor: palette.address, borderColor: palette.border, color: palette.text }]}
                   value={query}
                   onChangeText={setQuery}
                 />
               )}
-              <SettingsSection title={`${sites.length === 1 ? 'One site' : `${sites.length} sites`}`}>
+              <SettingsSection title={sites.length === 1 ? t('One site') : tp({ one: '{count} site', other: '{count} sites' }, sites.length)}>
                 {shown.map((site) => (
                   <View key={site.name} style={[styles.row, isDark ? styles.rowDark : null]}>
                     <SettingCopy title={site.name} description={describeSiteData(site)} />
                     <Pressable
-                      accessibilityLabel={`Remove data for ${site.name}`}
+                      accessibilityLabel={t('Remove data for {site}', { site: site.name })}
                       accessibilityRole='button'
                       accessibilityState={{ disabled: busy }}
                       disabled={busy}
@@ -155,17 +160,17 @@ export function SiteData ({
                       style={({ pressed }) => [styles.removeButton, pressed ? styles.pressed : null, busy ? styles.disabled : null]}
                       onPress={() => void remove([site.name])}
                     >
-                      <Text style={[styles.removeText, isDark ? styles.removeTextDark : null]}>Remove</Text>
+                      <Text style={[styles.removeText, isDark ? styles.removeTextDark : null]}>{t('Remove')}</Text>
                     </Pressable>
                   </View>
                 ))}
                 {shown.length === 0 && (
                   <View style={[styles.row, isDark ? styles.rowDark : null]}>
-                    <SettingCopy title='No match' description={`No site with "${query.trim()}" in its name.`} />
+                    <SettingCopy title={t('No match')} description={t('No site with "{query}" in its name.', { query: query.trim() })} />
                   </View>
                 )}
               </SettingsSection>
-              <SettingsSection title='All sites'>
+              <SettingsSection title={t('All sites')}>
                 <Pressable
                   accessibilityRole='button'
                   accessibilityState={{ disabled: busy }}
@@ -173,8 +178,8 @@ export function SiteData ({
                   style={({ pressed }) => [styles.row, isDark ? styles.rowDark : null, pressed ? styles.pressed : null, busy ? styles.disabled : null]}
                   onPress={() => confirmRemoveAll(sites.map((site) => site.name))}
                 >
-                  <SettingCopy title='Remove all site data' description='Signs you out of every site in this list.' />
-                  <Text style={[styles.removeText, isDark ? styles.removeTextDark : null]}>{busy ? 'Removing...' : 'Remove all'}</Text>
+                  <SettingCopy title={t('Remove all site data')} description={t('Signs you out of every site in this list.')} />
+                  <Text style={[styles.removeText, isDark ? styles.removeTextDark : null]}>{busy ? t('Removing...') : t('Remove all')}</Text>
                 </Pressable>
               </SettingsSection>
             </>

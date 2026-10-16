@@ -59,7 +59,7 @@ test('the welcome screen leads with device to device', async () => {
   const { readFile } = await import('node:fs/promises')
   const screen = await readFile(new URL('../../app/WelcomeScreen.tsx', import.meta.url), 'utf8')
   const cards = screen.slice(screen.indexOf('const QUALITIES'), screen.indexOf('const PEERSKY_WELCOME'))
-  const titles = [...cards.matchAll(/title: '([^']+)'/g)].map((match) => match[1])
+  const titles = [...cards.matchAll(/title: msg\('([^']+)'\)/g)].map((match) => match[1])
 
   assert.deepEqual(titles, [
     'Device to device',

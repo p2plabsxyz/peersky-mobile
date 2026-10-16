@@ -1,0 +1,18 @@
+{
+  "ios": {
+    "NSCameraUsageDescription": "PeerSky; bir cihazı bağladığınızda, paylaşılan bir odayı veya sürücüyü açtığınızda ve ziyaret ettiğiniz bir web sitesi isteyip siz izin verdiğinizde QR kodlarını taramak için kamerayı kullanır.",
+    "NSLocalNetworkUsageDescription": "PeerSky, yakındaki PeerSky cihazlarını bulmak ve onlara bağlanmak için yerel ağınızı kullanır.",
+    "NSLocationWhenInUseUsageDescription": "PeerSky konumunuzu yalnızca ziyaret ettiğiniz bir web sitesi istediğinde ve siz izin verdiğinizde kullanır.",
+    "NSMicrophoneUsageDescription": "PeerSky mikrofonu yalnızca ziyaret ettiğiniz bir web sitesi istediğinde ve siz izin verdiğinizde kullanır.",
+    "NSPhotoLibraryAddUsageDescription": "“Fotoğraflar'a Kaydet” seçeneğini seçtiğinizde PeerSky bir resmi veya videoyu fotoğraf arşivinize kaydeder.",
+    "ShortcutPasteAndGo": "Yapıştır ve git",
+    "ShortcutNewTab": "Yeni sekme",
+    "ShortcutNewIncognitoTab": "Yeni gizli sekme",
+    "ShortcutAppIcon": "Uygulama simgesi"
+  },
+  "android": {
+    "peerchat_background_text": "Mesajlar size ulaşsın diye bağlı kalınıyor",
+    "peerchat_background_channel": "PeerChat arka plan bağlantısı",
+    "peerchat_background_channel_description": "PeerSky arka plandayken PeerChat'i bağlı tutar"
+  }
+}

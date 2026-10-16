@@ -56,7 +56,7 @@ test('PeerChat states its rules, and the terms they come from', async () => {
 
   const screen = await readFile(new URL('../../app/peerchat/PeerChatScreen.tsx', import.meta.url), 'utf8')
   const intro = screen.slice(screen.indexOf('if (showIntro) {'), screen.indexOf('if (isInitialized && !profile?.username)'))
-  assert.ok(intro.indexOf('PEERCHAT_RULES.map') < intro.indexOf('>I understand<'))
+  assert.ok(intro.indexOf('PEERCHAT_RULES.map') < intro.indexOf("{t('I understand')}"))
   assert.match(intro, /onPress=\{\(\) => onOpenUrl\(PEERCHAT_TERMS_URL\)\}/)
   assert.doesNotMatch(intro, /Agree and continue/)
 })

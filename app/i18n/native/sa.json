@@ -1,0 +1,18 @@
+{
+  "ios": {
+    "NSCameraUsageDescription": "भवान् यदा उपकरणं योजयति, वितरितं प्रकोष्ठं भाण्डारं वा उद्घाटयति, तदा QR-सङ्केतान् पठितुं PeerSky छायाग्राहकम् उपयुङ्क्ते; यदा च भवता दृष्टं जालस्थानं तत् याचते भवान् च अनुमतिं ददाति, तदा अपि।",
+    "NSLocalNetworkUsageDescription": "समीपस्थानि PeerSky-उपकरणानि अन्वेष्टुं तैः सह संयोक्तुं च PeerSky भवतः स्थानीयजालम् उपयुङ्क्ते।",
+    "NSLocationWhenInUseUsageDescription": "यदा भवता दृष्टं जालस्थानं भवतः स्थानं याचते भवान् च अनुमतिं ददाति, तदा एव PeerSky तत् उपयुङ्क्ते।",
+    "NSMicrophoneUsageDescription": "यदा भवता दृष्टं जालस्थानं ध्वनिग्राहकं याचते भवान् च अनुमतिं ददाति, तदा एव PeerSky तत् उपयुङ्क्ते।",
+    "NSPhotoLibraryAddUsageDescription": "भवान् यदा ‘छायाचित्रेषु रक्षतु’ इति चिनोति, तदा PeerSky चित्रं चलचित्रं वा भवतः छायाचित्रसङ्ग्रहे रक्षति।",
+    "ShortcutPasteAndGo": "निवेश्य गच्छतु",
+    "ShortcutNewTab": "नूतनं पत्रकम्",
+    "ShortcutNewIncognitoTab": "नूतनं गुप्तपत्रकम्",
+    "ShortcutAppIcon": "अनुप्रयोगचिह्नम्"
+  },
+  "android": {
+    "peerchat_background_text": "सन्देशाः भवन्तं प्राप्नुयुः इति संयोगः रक्ष्यते",
+    "peerchat_background_channel": "PeerChat-पृष्ठभूमिसंयोगः",
+    "peerchat_background_channel_description": "PeerSky यावत् पृष्ठभूमौ अस्ति, तावत् PeerChat संयुक्तं रक्षति"
+  }
+}

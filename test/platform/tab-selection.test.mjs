@@ -9,7 +9,7 @@ const screen = await readFile(new URL('../../app/tabs/BrowserTabsScreen.tsx', im
 const shell = await readFile(new URL('../../app/index.tsx', import.meta.url), 'utf8')
 
 test('the menu and a long press both start picking tabs, and a tap then picks', () => {
-  assert.match(screen, /Select tabs<\/Text>/)
+  assert.match(screen, /\{t\('Select tabs'\)\}<\/Text>/)
   // A long press picks the tab up; let go without dragging, and it is picked.
   assert.match(screen, /setDragArmedId\(null\)\s+setSelected\(new Set\(\[item\.id\]\)\)/)
   assert.match(screen, /onPress=\{\(\) => selecting \? toggleSelected\(item\.id\) : onSwitchTab\(item\.id\)\}/)
@@ -18,8 +18,8 @@ test('the menu and a long press both start picking tabs, and a tap then picks', 
 })
 
 test('the picked tabs copy, share or close together, and closing them can be undone', () => {
-  assert.match(screen, /label='Copy links'/)
-  assert.match(screen, /label='Share'/)
+  assert.match(screen, /label=\{t\('Copy links'\)\}/)
+  assert.match(screen, /label=\{t\('Share'\)\}/)
   assert.match(screen, /onAction: \(\) => onReopenClosedTabs\(keys\)/)
   assert.match(shell, /const urls = getBrowserTabUrls\(browserTabsStateRef\.current, tabIds\) as string\[\]\s+if \(urls\.length > 0\) Clipboard\.setString\(urls\.join\('\\n'\)\)/)
   assert.match(shell, /const nextState = closeBrowserTabsState\(currentTabsState, ids\) as BrowserTabsState/)

@@ -45,7 +45,9 @@ import { RPC_APP_BACKUP_PROGRESS } from '../rpc/commands.mjs'
 // made a store out of two backups. A restore waits decrypted in staging until
 // the person compares the code and confirms, and carries an id so a
 // confirmation only applies the restore it was shown for. One transfer goes
-// out at a time, taken down when the screen closes or it expires.
+// out at a time. It stays up when the screen closes, so the screen can show
+// the same link and code again, and comes down when it expires or the person
+// stops it.
 const TRANSFER_DIR = '.peersky-transfer'
 // Names the drive an outgoing transfer is on, written before anything is put
 // on it, so if the app is killed while sending the next start can clear it.
@@ -361,7 +363,17 @@ export function sendTransfer ({ pairingCode, peerskyVersion, platform } = {}) {
         stopOutgoingTransfer().catch(() => {})
       }, Math.max(0, created.expiresAt - Date.now()) + 60 * 1000)
       if (typeof timer?.unref === 'function') timer.unref()
-      outgoingTransfer = { driveName, expiresAt: created.expiresAt, timer }
+      outgoingTransfer = {
+        driveName,
+        expiresAt: created.expiresAt,
+        timer,
+        url: published.url,
+        verificationCode: created.verificationCode,
+        deviceType: target.deviceType,
+        uploaded: new Set(),
+        blocks: 0
+      }
+      watchTransferUploads(outgoingTransfer).catch(() => {})
 
       return {
         ok: true,
@@ -379,6 +391,39 @@ export function sendTransfer ({ pairingCode, peerskyVersion, platform } = {}) {
       // The drive holds its own copy now.
       rmSync(filePath, { force: true })
     }
+  })
+}
+
+/**
+ * The transfer going out now, if any, for the screen to show again: its link,
+ * its code, when it runs out, and how much of it the other device has taken.
+ */
+export function getOutgoingTransfer (now = Date.now()) {
+  const current = outgoingTransfer
+  if (!current || now >= current.expiresAt) return { ok: true, sending: null }
+  return {
+    ok: true,
+    sending: {
+      url: current.url,
+      verificationCode: current.verificationCode,
+      expiresAt: current.expiresAt,
+      deviceType: current.deviceType,
+      sent: current.blocks > 0 ? Math.min(1, current.uploaded.size / current.blocks) : 0
+    }
+  }
+}
+
+// Counts the blocks of the transfer this phone has sent, so the screen can
+// say when the other device has all of it and it is safe to stop.
+async function watchTransferUploads (transfer) {
+  await withHyperRuntimeOperation(async (runtime) => {
+    const drive = await runtime.getDrive(transfer.driveName)
+    const blobs = await drive.getBlobs()
+    if (!blobs?.core || outgoingTransfer !== transfer) return
+    transfer.blocks = blobs.core.length
+    blobs.core.on('upload', (index) => {
+      if (outgoingTransfer === transfer) transfer.uploaded.add(index)
+    })
   })
 }
 

@@ -3,6 +3,7 @@ import { File, Paths } from 'expo-file-system'
 import { memo, useCallback, useEffect, useState } from 'react'
 import { ActivityIndicator, Platform, Pressable, SectionList, StyleSheet, Text, View } from 'react-native'
 import { BROWSER_PALETTES } from '../browser-appearance.mjs'
+import { t, tKey } from '../i18n/i18n.mjs'
 import { useSettingsDarkMode } from './SettingsUI'
 import { describeNotice, parseThirdPartyNotices, splitNoticeText } from './third-party-notices.mjs'
 
@@ -31,7 +32,7 @@ const COPY_PREFIX = 'third-party-notices-'
 // the asset's hash so a new version of the app makes a new one.
 async function loadThirdPartyNotices () {
   const asset = await Asset.fromModule(require('../../assets/licenses/third-party-notices.txt')).downloadAsync()
-  if (!asset.localUri) throw new Error('The licenses file is missing from the app.')
+  if (!asset.localUri) throw new Error(t('The licenses file is missing from the app.'))
   const copy = new File(Paths.cache, `${COPY_PREFIX}${asset.hash || 'bundled'}.txt`)
   for (const item of Paths.cache.list()) {
     if (item instanceof File && item.name.startsWith(COPY_PREFIX) && item.name !== copy.name) item.delete()
@@ -98,14 +99,12 @@ export function Licenses ({ onOpenUrl }: { onOpenUrl: (url: string) => void }) {
       initialNumToRender={24}
       ListHeaderComponent={(
         <Text style={[styles.intro, isDark ? darkStyles.mutedText : null]}>
-          PeerSky is free software under the MIT License. It is built on the
-          work of the people and projects below, {count} in all, each under
-          its own license. Tap one to read it.
+          {t('PeerSky is free software under the MIT License. It is built on the work of the people and projects below, {count} in all, each under its own license. Tap one to read it.', { count })}
         </Text>
       )}
       renderSectionHeader={({ section }) => (
         <Text style={[styles.sectionTitle, isDark ? darkStyles.sectionTitle : null]}>
-          {section.title}
+          {tKey(section.title)}
         </Text>
       )}
       renderItem={({ item }) => (
@@ -139,7 +138,7 @@ const NoticeRow = memo(function NoticeRow ({
       <Pressable
         accessibilityRole='button'
         accessibilityState={{ expanded: open }}
-        accessibilityHint={open ? 'Hides the license' : 'Shows the license'}
+        accessibilityHint={open ? t('Hides the license') : t('Shows the license')}
         style={({ pressed }) => [styles.rowButton, pressed ? styles.pressed : null]}
         onPress={() => onToggle(item.key)}
       >

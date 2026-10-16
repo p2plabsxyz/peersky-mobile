@@ -1,0 +1,18 @@
+{
+  "ios": {
+    "NSCameraUsageDescription": "PeerSky کیمرے سے QR کوڈز تب اسکین کرتا ہے جب آپ کوئی آلہ لنک کرتے ہیں یا کوئی شیئر کیا ہوا روم یا ڈرائیو کھولتے ہیں، اور تب بھی جب آپ کی کھولی ہوئی کوئی ویب سائٹ کیمرا مانگتی ہے اور آپ رسائی کی اجازت دیتے ہیں۔",
+    "NSLocalNetworkUsageDescription": "PeerSky قریبی PeerSky آلات کو ڈھونڈنے اور ان سے جڑنے کے لیے آپ کا مقامی نیٹ ورک استعمال کرتا ہے۔",
+    "NSLocationWhenInUseUsageDescription": "PeerSky آپ کا مقام صرف تب استعمال کرتا ہے جب آپ کی کھولی ہوئی کوئی ویب سائٹ اسے مانگتی ہے اور آپ رسائی کی اجازت دیتے ہیں۔",
+    "NSMicrophoneUsageDescription": "PeerSky مائیکروفون صرف تب استعمال کرتا ہے جب آپ کی کھولی ہوئی کوئی ویب سائٹ اسے مانگتی ہے اور آپ رسائی کی اجازت دیتے ہیں۔",
+    "NSPhotoLibraryAddUsageDescription": "جب آپ ‘تصاویر میں محفوظ کریں’ منتخب کرتے ہیں، تو PeerSky کوئی تصویر یا ویڈیو آپ کی فوٹو لائبریری میں محفوظ کرتا ہے۔",
+    "ShortcutPasteAndGo": "پیسٹ کریں اور جائیں",
+    "ShortcutNewTab": "نیا ٹیب",
+    "ShortcutNewIncognitoTab": "نیا پوشیدہ ٹیب",
+    "ShortcutAppIcon": "ایپ آئیکن"
+  },
+  "android": {
+    "peerchat_background_text": "منسلک رہ کر آپ تک پیغامات پہنچا رہا ہے",
+    "peerchat_background_channel": "PeerChat پس منظر کنکشن",
+    "peerchat_background_channel_description": "PeerSky کے پس منظر میں ہونے پر PeerChat کو منسلک رکھتا ہے"
+  }
+}

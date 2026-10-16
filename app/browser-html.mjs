@@ -1,5 +1,6 @@
 import { SAD_BIRD_DATA_URI } from './browser-error-art.mjs'
 import { describeBrowserError } from './browser-error-copy.mjs'
+import { t } from './i18n/i18n.mjs'
 
 export function createHyperBrowserHtml (response, targetUrl, isDark = false) {
   const body = response.body || ''
@@ -31,7 +32,7 @@ function createHyperDirectoryHtml (body, targetUrl, isDark) {
 
     return createBrowserDocumentHtml(
       targetUrl,
-      `<h1>Index of ${escapeHtml(targetUrl)}</h1><ul>${links || '<li>No files found.</li>'}</ul>`,
+      `<h1>${escapeHtml(t('Index of {address}', { address: targetUrl }))}</h1><ul>${links || `<li>${escapeHtml(t('No files found.'))}</li>`}</ul>`,
       isDark
     )
   } catch {
@@ -53,14 +54,14 @@ export function createBrowserErrorHtml (targetUrl, message, isDark = false) {
   <h1>${escapeHtml(title)}</h1>
   <p class="lead">${escapeHtml(body)}</p>
   <p class="address">${escapeHtml(targetUrl)}</p>
-  ${detail ? `<details><summary>What went wrong</summary><pre>${escapeHtml(detail)}</pre></details>` : ''}
+  ${detail ? `<details><summary>${escapeHtml(t('What went wrong'))}</summary><pre>${escapeHtml(detail)}</pre></details>` : ''}
 </div>`,
     isDark
   )
 }
 
 export function createHyperMediaHtml ({ mediaName, mediaType, mediaUrl }) {
-  const name = escapeHtml(String(mediaName || 'Hyper media'))
+  const name = escapeHtml(String(mediaName || t('Hyper media')))
   const source = escapeHtmlAttribute(String(mediaUrl || ''))
   const media = mediaType === 'image'
     ? `<img src="${source}" alt="${name}" />`

@@ -59,7 +59,7 @@ test('an incognito tab keeps no history, no preview and no cache', async () => {
   assert.match(app, /tabIncognito && browserIncognitoSession \? \{ incognitoSession: browserIncognitoSession \} : \{\}/)
 
   const menu = await read('app/settings/BrowserOverflowMenu.tsx')
-  assert.match(menu, /label='New Incognito Tab'/)
+  assert.match(menu, /label=\{t\('New Incognito Tab'\)\}/)
   assert.match(menu, /<IncognitoIcon/)
 })
 

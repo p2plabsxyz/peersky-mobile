@@ -153,11 +153,17 @@ test('the one PeerChat screen follows the tab it is shown in', async () => {
   // tab switch is handled before it.
   assert.ok(screen.indexOf('const roomKey = peerChatRoomForTab(uiStateRef.current, tabId)') <
     screen.indexOf('if (!requestedRoomKey || !isInitialized || !profile?.username) return'))
-  assert.match(screen, /const restoredRoomKey = requestedRoomKey \? null : peerChatRoomForTab\(restoredUiState, tabId\)/)
+  assert.match(screen, /const savedRoomKey = requestedRoomKey \? null : peerChatRoomForTab\(restoredUiState, tabId\)/)
+  // A room that moved to a new key carries on under it, in every tab.
+  assert.match(screen, /const restoredRoomKey = savedRoomKey \? shownKey\(savedRoomKey\) : null/)
+  assert.match(screen, /const shown = roomKey \? movedRoomsRef\.current\[roomKey\] \|\| roomKey : null/)
 
   // An invite is read once and kept out of the tab's address, where its room
   // key showed and opened the invite again after a restart.
-  assert.match(shell, /const appUrl = `\$\{getRuntimeAppUrl\(app\)\}\$\{invitedRoom \|\| invitedPeer \? '' : launchSuffix\}`/)
+  // A shared PeerTunes playlist is left out of the address too, so a restart
+  // opens the page where it was, not the playlist again.
+  assert.match(shell, /const appUrl = `\$\{getRuntimeAppUrl\(app\)\}\$\{invitedRoom \|\| invitedPeer \|\| app === 'peertunes' \? '' : launchSuffix\}`/)
+  assert.match(shell, /setPeertunesLaunchSuffix\(launchSuffix\)/)
 })
 
 test('the tabs remembered are bounded like the tabs themselves', () => {
@@ -237,9 +243,9 @@ test('a long press offers a room its key and a direct message its answers', asyn
 
   // The two arms of the same branch: direct message first, room second.
   const dm = sheet.slice(sheet.indexOf('roomActionTarget.isDM'), sheet.indexOf('Copy room key'))
-  assert.match(dm, /Report</)
+  assert.match(dm, /t\('Report'\)\}</)
   assert.match(dm, /confirmBlockPeer\(peer\)/)
-  assert.match(dm, /isMemberBlocked\(directMessagePeer\(roomActionTarget\)\) \? 'Unblock' : 'Block'/)
+  assert.match(dm, /isMemberBlocked\(directMessagePeer\(roomActionTarget\)\) \? t\('Unblock'\) : t\('Block'\)/)
   // Neither of these means anything for a conversation with one person.
   assert.doesNotMatch(dm, /Copy room key/)
   assert.doesNotMatch(dm, /Copy invite link/)
@@ -280,7 +286,7 @@ test('room details show the room picture to everyone, not only the host', async 
   const screen = await readFile(new URL('../../app/peerchat/PeerChatScreen.tsx', import.meta.url), 'utf8')
   const details = screen.slice(screen.indexOf('visible={showRoomInfo}'), screen.indexOf('{!activeRoom.isDM && (\n              <View style={styles.roomProvenance}>'))
   assert.doesNotMatch(details, /isHost/)
-  assert.match(details, /accessibilityLabel=\{`Picture of \$\{activeRoom\.name\}`\}/)
+  assert.match(details, /accessibilityLabel=\{t\('Picture of \{name\}', \{ name: activeRoom\.name \}\)\}/)
   assert.match(details, /<Image source=\{\{ uri: activeRoom\.avatar \}\} style=\{styles\.roomInfoAvatar\} \/>/)
   assert.match(details, /getRoomInitials\(activeRoom\.name\)/)
 })
@@ -308,16 +314,6 @@ test('a created or joined room takes its place in the list at once', async () =>
   assert.match(router, /const room = await peerChat\.joinRoom\(parseJsonMessage\(req\.data\)\)\s+replyJson\(req, \{ ok: true, room, rooms: peerChat\.listRooms\(\) \}\)/)
   assert.match(screen, /setRooms\(\(current\) => response\.rooms \|\| \[response\.room as PeerChatRoom, \.\.\.current\]\)/)
   assert.equal((screen.match(/setRooms\(\(current\) => response\.rooms \|\| \[\n/g) || []).length, 2)
-})
-
-// Desktop says so on its create form, and the phone said nothing, then offered
-// an editor whose changes no device took.
-test('a group says what cannot change once it is made, and nobody edits it later', async () => {
-  const { readFile } = await import('node:fs/promises')
-  const screen = await readFile(new URL('../../app/peerchat/PeerChatScreen.tsx', import.meta.url), 'utf8')
-  assert.match(screen, /Group name, picture, description and link cannot be edited after creation\./)
-  assert.match(screen, /Settings are fixed once the group is created\./)
-  assert.doesNotMatch(screen, /Save room details|saveRoomDetails|RPC_PEERCHAT_ROOM_UPDATE/)
 })
 
 // Find had nowhere to scan someone's code, though that is where people go

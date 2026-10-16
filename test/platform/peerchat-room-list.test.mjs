@@ -39,6 +39,6 @@ test('a row keeps the same height with or without a pin or unread count', () => 
 // preview, which in an older room is the room's secret. The desktop says
 // "No messages yet", and now the phone does too.
 test('a room with no messages yet says so instead of showing its key', () => {
-  assert.match(screen, /\? `\$\{item\.lastMessage\.senderName\}: \$\{item\.lastMessage\.message\}`\s+: 'No messages yet'/)
+  assert.match(screen, /\? t\('\{name\}: \{message\}', \{ name: item\.lastMessage\.senderName, message: item\.lastMessage\.message \}\)\s+: t\('No messages yet'\)/)
   assert.doesNotMatch(screen, /item\.roomKey\.slice\(0, 10\)/)
 })

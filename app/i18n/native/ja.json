@@ -1,0 +1,18 @@
+{
+  "ios": {
+    "NSCameraUsageDescription": "PeerSkyは、デバイスをリンクするときや共有されたルームやドライブを開くときにQRコードをスキャンするため、また、アクセスしたウェブサイトから要求があり、あなたが許可したときにカメラを使用します。",
+    "NSLocalNetworkUsageDescription": "PeerSkyはローカルネットワークを使って、付近のPeerSkyデバイスを見つけて接続します。",
+    "NSLocationWhenInUseUsageDescription": "PeerSkyが位置情報を使用するのは、アクセスしたウェブサイトから要求があり、あなたが許可したときだけです。",
+    "NSMicrophoneUsageDescription": "PeerSkyがマイクを使用するのは、アクセスしたウェブサイトから要求があり、あなたが許可したときだけです。",
+    "NSPhotoLibraryAddUsageDescription": "「写真に保存」を選ぶと、PeerSkyは写真や動画をフォトライブラリに保存します。",
+    "ShortcutPasteAndGo": "ペーストして移動",
+    "ShortcutNewTab": "新しいタブ",
+    "ShortcutNewIncognitoTab": "新しいシークレットタブ",
+    "ShortcutAppIcon": "アプリアイコン"
+  },
+  "android": {
+    "peerchat_background_text": "メッセージを受け取れるよう接続を維持しています",
+    "peerchat_background_channel": "PeerChatのバックグラウンド接続",
+    "peerchat_background_channel_description": "PeerSkyがバックグラウンドにあるときも、PeerChatの接続を維持します"
+  }
+}

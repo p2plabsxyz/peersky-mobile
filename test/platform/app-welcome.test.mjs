@@ -10,7 +10,7 @@ test('P2PMD says what it is in four lines, without the plumbing', async () => {
   const p2pmd = welcomes.slice(welcomes.indexOf('export const P2PMD_WELCOME'), welcomes.indexOf('export const HYPERDRIVE_WELCOME'))
   assert.equal(p2pmd.match(/\bid: '/g).length, 4)
   assert.match(p2pmd, /Every new note is private/)
-  assert.match(p2pmd, /action: 'Start writing'/)
+  assert.match(p2pmd, /action: msg\('Start writing'\)/)
   assert.doesNotMatch(p2pmd, /hs:\/\/|hyper:\/\/|Holesail|Yjs|DHT/)
 })
 
@@ -35,7 +35,7 @@ test('Hyperdrive says what it is in the words its own buttons use', async () => 
   for (const label of ['Private', 'This device only', 'Keep folders offline']) {
     assert.ok(hyperdrive.includes(label), label)
   }
-  assert.match(hyperdrive, /action: 'Get started'/)
+  assert.match(hyperdrive, /action: msg\('Get started'\)/)
   assert.doesNotMatch(hyperdrive, /hyper:\/\/|Corestore|Hypercore|DHT/)
 
   const screen = await read('app/hyperdrive/HyperdriveScreen.tsx')

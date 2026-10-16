@@ -15,6 +15,7 @@ import {
   restoreBrowserBookmark,
   serializeBrowserBookmarks
 } from './browser-bookmarks.mjs'
+import { t } from '../i18n/i18n.mjs'
 
 export type BrowserBookmark = {
   url: string
@@ -77,7 +78,7 @@ export function useBrowserBookmarks () {
         }
       } catch (error) {
         console.error('Failed loading browser bookmarks:', error)
-        if (!cancelled) setPersistenceError('Unable to load bookmarks.')
+        if (!cancelled) setPersistenceError(t('Unable to load bookmarks.'))
       } finally {
         if (!cancelled) setIsReady(true)
       }
@@ -91,7 +92,7 @@ export function useBrowserBookmarks () {
 
   function persistBookmarks (nextBookmarks: BrowserBookmark[], nextFolders: BrowserBookmarkFolder[] = foldersRef.current) {
     if (!isReady) {
-      setPersistenceError('Bookmarks are still loading. Try again in a moment.')
+      setPersistenceError(t('Bookmarks are still loading. Try again in a moment.'))
       return false
     }
 
@@ -107,7 +108,7 @@ export function useBrowserBookmarks () {
       return true
     } catch (error) {
       console.error('Failed saving browser bookmarks:', error)
-      setPersistenceError('Unable to save bookmarks. Your previous bookmarks are unchanged.')
+      setPersistenceError(t('Unable to save bookmarks. Your previous bookmarks are unchanged.'))
       return false
     }
   }

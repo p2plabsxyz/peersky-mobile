@@ -35,6 +35,7 @@ import ShareIcon from '../../assets/icons/bootstrap/arrow-bar-up.svg'
 import CloseIcon from '../../assets/icons/bootstrap/x-lg.svg'
 import { getTabDropIndex, isHorizontalSwipe, shouldCloseOnRelease } from './tab-swipe.mjs'
 import { formatClosedTabTime } from './recently-closed-time.mjs'
+import { t, tp } from '../i18n/i18n.mjs'
 import { MODAL_ORIENTATIONS } from '../modal-orientations'
 
 const TAB_ACTION_ICON_SIZE = 21
@@ -177,8 +178,10 @@ export function BrowserTabsScreen ({
     if (keys.length === 0) return
     setToast({
       id: Date.now(),
-      message: keys.length === 1 ? 'Inactive tab closed' : `${keys.length} inactive tabs closed`,
-      actionLabel: 'Undo',
+      message: keys.length === 1
+        ? t('Inactive tab closed')
+        : tp({ one: '{count} inactive tab closed', other: '{count} inactive tabs closed' }, keys.length),
+      actionLabel: t('Undo'),
       onAction: () => onReopenClosedTabs(keys)
     })
   }
@@ -198,8 +201,10 @@ export function BrowserTabsScreen ({
     if (keys.length === 0) return
     setToast({
       id: Date.now(),
-      message: keys.length === 1 ? 'Tab closed' : `${keys.length} tabs closed`,
-      actionLabel: 'Undo',
+      message: keys.length === 1
+        ? t('Tab closed')
+        : tp({ one: '{count} tab closed', other: '{count} tabs closed' }, keys.length),
+      actionLabel: t('Undo'),
       onAction: () => onReopenClosedTabs(keys)
     })
   }
@@ -224,8 +229,8 @@ export function BrowserTabsScreen ({
     if (!key) return
     setToast({
       id: Date.now(),
-      message: 'Tab closed',
-      actionLabel: 'Undo',
+      message: t('Tab closed'),
+      actionLabel: t('Undo'),
       onAction: () => onReopenClosedTab(key, { restorePlace: true })
     })
   }
@@ -298,10 +303,10 @@ export function BrowserTabsScreen ({
             <View style={[styles.browserTabsHeader, { borderBottomColor: palette.border }]}>
               <View>
                 <Text style={[styles.browserTabsTitle, { color: palette.text }]}>
-                  {selectedIds.length} selected
+                  {tp({ one: '{count} selected', other: '{count} selected' }, selectedIds.length)}
                 </Text>
                 <Text style={[styles.browserTabsSubtitle, { color: palette.mutedText }]}>
-                  Tap tabs to pick them
+                  {t('Tap tabs to pick them')}
                 </Text>
               </View>
               <View style={local.selectionHeaderActions}>
@@ -313,11 +318,11 @@ export function BrowserTabsScreen ({
                   )}
                 >
                   <Text style={[local.headerTextButton, { color: palette.text }]}>
-                    {selectedIds.length === items.length ? 'None' : 'All'}
+                    {selectedIds.length === items.length ? t('None') : t('All')}
                   </Text>
                 </Pressable>
                 <Pressable accessibilityRole='button' hitSlop={8} onPress={() => setSelected(null)}>
-                  <Text style={[local.headerTextButton, local.headerTextButtonStrong]}>Done</Text>
+                  <Text style={[local.headerTextButton, local.headerTextButtonStrong]}>{t('Done')}</Text>
                 </Pressable>
               </View>
             </View>
@@ -325,14 +330,14 @@ export function BrowserTabsScreen ({
           : (
         <View style={[styles.browserTabsHeader, { borderBottomColor: palette.border }]}>
           <View>
-            <Text style={[styles.browserTabsTitle, { color: palette.text }]}>Tabs</Text>
+            <Text style={[styles.browserTabsTitle, { color: palette.text }]}>{t('Tabs')}</Text>
             <Text style={[styles.browserTabsSubtitle, { color: palette.mutedText }]}>
-              {items.length} open
+              {tp({ one: '{count} open', other: '{count} open' }, items.length)}
             </Text>
           </View>
           <View style={styles.browserTabsHeaderActions}>
             <Pressable
-              accessibilityLabel={isList ? 'Switch to grid view' : 'Switch to list view'}
+              accessibilityLabel={isList ? t('Switch to grid view') : t('Switch to list view')}
               accessibilityRole='button'
               style={[styles.browserTabsViewButton, { backgroundColor: palette.button }]}
               onPress={onToggleView}
@@ -342,7 +347,7 @@ export function BrowserTabsScreen ({
                 : <ListIcon {...actionIconProps} />}
             </Pressable>
             <Pressable
-              accessibilityLabel='Burn tabs, history and cached data'
+              accessibilityLabel={t('Burn tabs, history and cached data')}
               accessibilityRole='button'
               style={styles.browserTabsBurnButton}
               onPress={onBurnTabs}
@@ -353,7 +358,7 @@ export function BrowserTabsScreen ({
                 occasional actions, so the bar keeps four buttons on a
                 narrow phone. */}
             <Pressable
-              accessibilityLabel='More tab actions'
+              accessibilityLabel={t('More tab actions')}
               accessibilityRole='button'
               accessibilityState={{ expanded: menuOpen }}
               style={[styles.browserTabsViewButton, { backgroundColor: palette.button }]}
@@ -362,7 +367,7 @@ export function BrowserTabsScreen ({
               <MoreIcon {...actionIconProps} />
             </Pressable>
             <Pressable
-              accessibilityLabel='Open new tab'
+              accessibilityLabel={t('Open new tab')}
               accessibilityRole='button'
               accessibilityState={{ disabled: newTabDisabled }}
               style={[
@@ -438,11 +443,13 @@ export function BrowserTabsScreen ({
               ]}
             >
               <Pressable
-                accessibilityLabel={selecting ? `Select ${item.label} tab` : `Open ${item.label} tab`}
+                accessibilityLabel={selecting
+                  ? t('Select {name} tab', { name: item.label })
+                  : t('Open {name} tab', { name: item.label })}
                 accessibilityRole={selecting ? 'checkbox' : 'button'}
                 accessibilityState={selecting ? { checked: selected?.has(item.id) } : { selected: item.isActive }}
-                accessibilityHint={selecting ? undefined : 'Press and hold to move it, or to select several tabs'}
-                accessibilityActions={selecting ? undefined : [{ name: 'longpress', label: 'Select several tabs' }]}
+                accessibilityHint={selecting ? undefined : t('Press and hold to move it, or to select several tabs')}
+                accessibilityActions={selecting ? undefined : [{ name: 'longpress', label: t('Select several tabs') }]}
                 onAccessibilityAction={() => {
                   if (!selecting) setSelected(new Set([item.id]))
                 }}
@@ -543,7 +550,7 @@ export function BrowserTabsScreen ({
                   )
                 : (
                   <Pressable
-                    accessibilityLabel={`Close ${item.label}`}
+                    accessibilityLabel={t('Close {name}', { name: item.label })}
                     accessibilityRole='button'
                     hitSlop={8}
                     style={[styles.browserTabCardClose, { backgroundColor: palette.button }]}
@@ -561,21 +568,25 @@ export function BrowserTabsScreen ({
             <SelectionAction
               disabled={selectedIds.length === 0}
               icon={<CopyIcon width={18} height={18} color={palette.text} />}
-              label='Copy links'
+              label={t('Copy links')}
               palette={palette}
               onPress={() => {
                 const count = onCopyTabLinks(selectedIds)
                 setSelected(null)
                 setToast({
                   id: Date.now(),
-                  message: count === 0 ? 'No links to copy' : count === 1 ? 'Link copied' : `${count} links copied`
+                  message: count === 0
+                    ? t('No links to copy')
+                    : count === 1
+                      ? t('Link copied')
+                      : tp({ one: '{count} link copied', other: '{count} links copied' }, count)
                 })
               }}
             />
             <SelectionAction
               disabled={selectedIds.length === 0}
               icon={<ShareIcon width={18} height={18} color={palette.text} />}
-              label='Share'
+              label={t('Share')}
               palette={palette}
               onPress={() => {
                 onShareTabLinks(selectedIds)
@@ -586,7 +597,9 @@ export function BrowserTabsScreen ({
               destructive
               disabled={selectedIds.length === 0}
               icon={<CloseIcon width={16} height={16} color='#d44a3a' />}
-              label={selectedIds.length > 1 ? `Close ${selectedIds.length}` : 'Close'}
+              label={selectedIds.length > 1
+                ? tp({ one: 'Close {count}', other: 'Close {count}' }, selectedIds.length)
+                : t('Close')}
               palette={palette}
               onPress={closeSelected}
             />
@@ -653,7 +666,7 @@ function TabsMenu ({
   onSelect: () => void
 }) {
   return (
-    <Pressable accessibilityLabel='Close menu' style={StyleSheet.absoluteFill} onPress={onClose}>
+    <Pressable accessibilityLabel={t('Close menu')} style={StyleSheet.absoluteFill} onPress={onClose}>
       <View
         accessibilityRole='menu'
         style={[local.menu, { backgroundColor: palette.address, borderColor: palette.border }]}
@@ -664,7 +677,7 @@ function TabsMenu ({
           onPress={onSelect}
         >
           <CheckIcon width={18} height={18} color={palette.text} />
-          <Text style={[local.menuText, { color: palette.text }]}>Select tabs</Text>
+          <Text style={[local.menuText, { color: palette.text }]}>{t('Select tabs')}</Text>
         </Pressable>
         <Pressable
           accessibilityRole='menuitem'
@@ -672,7 +685,7 @@ function TabsMenu ({
           onPress={onRecentlyClosed}
         >
           <ClockHistoryIcon width={18} height={18} color={palette.text} />
-          <Text style={[local.menuText, { color: palette.text }]}>Recently closed tabs</Text>
+          <Text style={[local.menuText, { color: palette.text }]}>{t('Recently closed tabs')}</Text>
           {recentlyClosedCount > 0 && (
             <Text style={[local.menuCount, { color: palette.mutedText }]}>{recentlyClosedCount}</Text>
           )}
@@ -683,7 +696,7 @@ function TabsMenu ({
           onPress={onCloseAll}
         >
           <CloseIcon width={17} height={17} color={palette.text} />
-          <Text style={[local.menuText, { color: palette.text }]}>Close all tabs</Text>
+          <Text style={[local.menuText, { color: palette.text }]}>{t('Close all tabs')}</Text>
         </Pressable>
       </View>
     </Pressable>
@@ -717,8 +730,10 @@ function InactiveTabs ({
         onPress={onToggle}
       >
         <View style={local.inactiveHeaderCopy}>
-          <Text style={[local.inactiveTitle, { color: palette.text }]}>Inactive tabs ({items.length})</Text>
-          <Text style={[local.inactiveHint, { color: palette.mutedText }]}>Not opened in two weeks</Text>
+          <Text style={[local.inactiveTitle, { color: palette.text }]}>
+            {t('Inactive tabs ({count})', { count: items.length })}
+          </Text>
+          <Text style={[local.inactiveHint, { color: palette.mutedText }]}>{t('Not opened in two weeks')}</Text>
         </View>
         <ChevronRightIcon
           width={16}
@@ -732,7 +747,7 @@ function InactiveTabs ({
           {items.map((item) => (
             <View key={item.id} style={[local.inactiveRow, { borderTopColor: palette.border }]}>
               <Pressable
-                accessibilityLabel={`Open ${item.label} tab`}
+                accessibilityLabel={t('Open {name} tab', { name: item.label })}
                 accessibilityRole='button'
                 style={local.inactiveRowBody}
                 onPress={() => onOpenTab(item.id)}
@@ -741,7 +756,7 @@ function InactiveTabs ({
                 <Text numberOfLines={1} style={[local.inactiveRowTitle, { color: palette.text }]}>{item.label}</Text>
               </Pressable>
               <Pressable
-                accessibilityLabel={`Close ${item.label}`}
+                accessibilityLabel={t('Close {name}', { name: item.label })}
                 accessibilityRole='button'
                 hitSlop={8}
                 style={[styles.browserTabCardClose, local.inactiveRowClose, { backgroundColor: palette.button }]}
@@ -760,7 +775,7 @@ function InactiveTabs ({
             ]}
             onPress={onCloseAll}
           >
-            <Text style={local.inactiveCloseAllText}>Close all inactive tabs</Text>
+            <Text style={local.inactiveCloseAllText}>{t('Close all inactive tabs')}</Text>
           </Pressable>
         </>
       )}
@@ -821,7 +836,7 @@ function RecentlyClosedPanel ({
       <View style={[styles.browserTabsHeader, { borderBottomColor: palette.border }]}>
         <View style={local.panelTitleRow}>
           <Pressable
-            accessibilityLabel='Back to tabs'
+            accessibilityLabel={t('Back to tabs')}
             accessibilityRole='button'
             hitSlop={8}
             style={[styles.browserTabsViewButton, { backgroundColor: palette.button }]}
@@ -829,11 +844,11 @@ function RecentlyClosedPanel ({
           >
             <ChevronLeftIcon width={20} height={20} color={palette.text} />
           </Pressable>
-          <Text style={[local.panelTitle, { color: palette.text }]}>Recently closed</Text>
+          <Text style={[local.panelTitle, { color: palette.text }]}>{t('Recently closed')}</Text>
         </View>
         {items.length > 0 && (
           <Pressable accessibilityRole='button' hitSlop={8} onPress={onClear}>
-            <Text style={[local.clearText, { color: palette.text }]}>Clear</Text>
+            <Text style={[local.clearText, { color: palette.text }]}>{t('Clear')}</Text>
           </Pressable>
         )}
       </View>
@@ -843,12 +858,12 @@ function RecentlyClosedPanel ({
         contentContainerStyle={local.closedList}
         ListEmptyComponent={(
           <Text style={[local.emptyText, { color: palette.mutedText }]}>
-            Tabs you close show up here, so you can open them again.
+            {t('Tabs you close show up here, so you can open them again.')}
           </Text>
         )}
         renderItem={({ item }) => (
           <Pressable
-            accessibilityLabel={`Open ${item.title} again`}
+            accessibilityLabel={t('Open {name} again', { name: item.title })}
             accessibilityRole='button'
             style={({ pressed }) => [
               local.closedRow,

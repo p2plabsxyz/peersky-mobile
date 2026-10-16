@@ -1,3 +1,5 @@
+import { cleanPeerTunesSongId } from './peertunes/peertunes-screen.mjs'
+
 // What the app leaves for its home screen widgets (targets/widgets). They
 // cannot open the app's own files, so it is written to an App Group both can
 // read, as small JSON strings the Swift side decodes.
@@ -41,7 +43,8 @@ export function toWidgetBookmarks (bookmarks, limit = MAX_WIDGET_BOOKMARKS) {
 /**
  * The PeerTunes widget's state. Live while the player page is open and can
  * take the widget's buttons; otherwise the widget shows the last song and
- * opens PeerTunes when tapped.
+ * opens PeerTunes when tapped. The song's id goes in the tap's link, so
+ * PeerTunes opens Now Playing with that song.
  */
 export function toPeerTunesWidgetState (nowPlaying, { live = true } = {}) {
   return {
@@ -49,7 +52,8 @@ export function toPeerTunesWidgetState (nowPlaying, { live = true } = {}) {
     playing: live === true && nowPlaying?.playing === true,
     title: cleanWidgetText(nowPlaying?.title),
     artist: cleanWidgetText(nowPlaying?.artist),
-    album: cleanWidgetText(nowPlaying?.album)
+    album: cleanWidgetText(nowPlaying?.album),
+    id: cleanPeerTunesSongId(nowPlaying?.id)
   }
 }
 

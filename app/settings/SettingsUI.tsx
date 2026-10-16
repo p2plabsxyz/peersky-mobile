@@ -15,7 +15,8 @@ export function ChoiceGroup<T extends string> ({
   selected,
   onSelect
 }: {
-  options: ReadonlyArray<{ id: T; title: string }>
+  // A description is a second, smaller line under the title.
+  options: ReadonlyArray<{ id: T; title: string; description?: string }>
   selected: T
   onSelect: (value: T) => void
 }) {
@@ -38,14 +39,23 @@ export function ChoiceGroup<T extends string> ({
             ]}
             onPress={() => onSelect(option.id)}
           >
-            <Text style={[
-              styles.choiceText,
-              isDark ? darkStyles.primaryText : null,
-              isSelected ? styles.choiceTextSelected : null,
-              isSelected && isDark ? darkStyles.choiceTextSelected : null
-            ]}>
-              {option.title}
-            </Text>
+            <View style={styles.choiceCopy}>
+              <Text style={[
+                styles.choiceText,
+                isDark ? darkStyles.primaryText : null,
+                isSelected ? styles.choiceTextSelected : null,
+                isSelected && isDark ? darkStyles.choiceTextSelected : null
+              ]}>
+                {option.title}
+              </Text>
+              {option.description
+                ? (
+                  <Text style={[styles.choiceDescription, isDark ? darkStyles.secondaryText : null]}>
+                    {option.description}
+                  </Text>
+                  )
+                : null}
+            </View>
             <View style={[
               styles.radio,
               isSelected ? styles.radioSelected : null,
@@ -170,10 +180,19 @@ const styles = StyleSheet.create({
   choiceSelected: {
     backgroundColor: '#edf5ff'
   },
+  choiceCopy: {
+    flex: 1,
+    gap: 2,
+    paddingVertical: 8
+  },
   choiceText: {
     color: '#384158',
     fontSize: 14,
     fontWeight: '600'
+  },
+  choiceDescription: {
+    color: '#687086',
+    fontSize: 12
   },
   choiceTextSelected: {
     color: '#1f6fd1'

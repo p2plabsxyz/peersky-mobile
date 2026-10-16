@@ -17,6 +17,7 @@ import MoreIcon from '../../assets/icons/bootstrap/three-dots-vertical.svg'
 import PlusIcon from '../../assets/icons/bootstrap/plus-lg.svg'
 import TrashIcon from '../../assets/icons/bootstrap/trash.svg'
 import { BROWSER_PALETTES } from '../browser-appearance.mjs'
+import { t, tp } from '../i18n/i18n.mjs'
 import { getBrowserBookmarksInFolder } from './browser-bookmarks.mjs'
 import { BookmarkFolderSheet, FolderNameDialog } from './BookmarkFolderSheet'
 import type { BrowserBookmark, BrowserBookmarkFolder } from './useBrowserBookmarks'
@@ -80,16 +81,16 @@ export function BookmarksScreen ({
 
   function folderActions (folder: BrowserBookmarkFolder) {
     Alert.alert(folder.title, undefined, [
-      { text: 'Rename', onPress: () => setNameDialog({ renameId: folder.id }) },
+      { text: t('Rename'), onPress: () => setNameDialog({ renameId: folder.id }) },
       {
-        text: 'Delete folder',
+        text: t('Delete folder'),
         style: 'destructive',
         onPress: () => {
           onDeleteFolder(folder.id)
           if (openFolderId === folder.id) setOpenFolderId(null)
         }
       },
-      { text: 'Cancel', style: 'cancel' }
+      { text: t('Cancel'), style: 'cancel' }
     ])
   }
 
@@ -97,7 +98,7 @@ export function BookmarksScreen ({
     <View style={[styles.screen, { backgroundColor: palette.shell }]}>
       <View style={[styles.header, { borderBottomColor: palette.border }]}>
         <Pressable
-          accessibilityLabel={openFolder ? 'Back to Bookmarks' : 'Close Bookmarks'}
+          accessibilityLabel={openFolder ? t('Back to Bookmarks') : t('Close Bookmarks')}
           accessibilityRole='button'
           hitSlop={10}
           style={({ pressed }) => [styles.backButton, pressed ? styles.pressed : null]}
@@ -106,12 +107,12 @@ export function BookmarksScreen ({
           <ArrowLeftIcon width={22} height={22} color={palette.text} />
         </Pressable>
         <Text numberOfLines={1} style={[styles.title, { color: palette.text }]}>
-          {openFolder ? openFolder.title : 'Bookmarks'}
+          {openFolder ? openFolder.title : t('Bookmarks')}
         </Text>
         {isReady && (openFolder
           ? (
             <Pressable
-              accessibilityLabel={`Rename or delete ${openFolder.title}`}
+              accessibilityLabel={t('Rename or delete {name}', { name: openFolder.title })}
               accessibilityRole='button'
               hitSlop={10}
               style={({ pressed }) => [styles.backButton, pressed ? styles.pressed : null]}
@@ -128,7 +129,7 @@ export function BookmarksScreen ({
               onPress={() => setNameDialog('create')}
             >
               <PlusIcon width={15} height={15} color={palette.accent} />
-              <Text style={[styles.newFolderText, { color: palette.accent }]}>New folder</Text>
+              <Text style={[styles.newFolderText, { color: palette.accent }]}>{t('New folder')}</Text>
             </Pressable>
             ))}
       </View>
@@ -144,7 +145,7 @@ export function BookmarksScreen ({
           <View style={styles.empty}>
             <ActivityIndicator color={palette.accent} />
             <Text style={[styles.emptyCopy, { color: palette.mutedText }]}>
-              Loading bookmarks...
+              {t('Loading bookmarks...')}
             </Text>
           </View>
           )
@@ -155,12 +156,12 @@ export function BookmarksScreen ({
               ? <FolderIcon width={30} height={30} color={palette.mutedText} />
               : <BookmarkIcon width={30} height={30} color={palette.mutedText} />}
             <Text style={[styles.emptyTitle, { color: palette.text }]}>
-              {openFolder ? 'Nothing in this folder' : 'No bookmarks yet'}
+              {openFolder ? t('Nothing in this folder') : t('No bookmarks yet')}
             </Text>
             <Text style={[styles.emptyCopy, { color: palette.mutedText }]}>
               {openFolder
-                ? 'Move a bookmark here with the folder button next to it.'
-                : 'Tap the star in the address bar to bookmark a page.'}
+                ? t('Move a bookmark here with the folder button next to it.')
+                : t('Tap the star in the address bar to bookmark a page.')}
             </Text>
           </View>
           )
@@ -172,8 +173,8 @@ export function BookmarksScreen ({
             renderItem={({ item }) => item.kind === 'folder'
               ? (
                 <Pressable
-                  accessibilityHint='Press and hold to rename or delete it'
-                  accessibilityLabel={`${item.folder.title}, ${item.count} bookmark${item.count === 1 ? '' : 's'}`}
+                  accessibilityHint={t('Press and hold to rename or delete it')}
+                  accessibilityLabel={tp({ one: '{name}, {count} bookmark', other: '{name}, {count} bookmarks' }, item.count, { name: item.folder.title })}
                   accessibilityRole='button'
                   style={({ pressed }) => [styles.row, { borderBottomColor: palette.border }, pressed ? styles.pressed : null]}
                   onLongPress={() => folderActions(item.folder)}
@@ -185,7 +186,7 @@ export function BookmarksScreen ({
                   <View style={styles.rowCopy}>
                     <Text style={[styles.rowTitle, { color: palette.text }]} numberOfLines={1}>{item.folder.title}</Text>
                     <Text style={[styles.rowUrl, { color: palette.mutedText }]}>
-                      {item.count} bookmark{item.count === 1 ? '' : 's'}
+                      {tp({ one: '{count} bookmark', other: '{count} bookmarks' }, item.count)}
                     </Text>
                   </View>
                   <ChevronRightIcon width={16} height={16} color={palette.mutedText} />
@@ -206,7 +207,7 @@ export function BookmarksScreen ({
         currentFolder={moving?.folder || null}
         folders={folders}
         isDark={isDark}
-        title='Move to folder'
+        title={t('Move to folder')}
         visible={moving !== null}
         onClose={() => setMovingUrl(null)}
         onCreateFolder={onCreateFolder}
@@ -217,7 +218,7 @@ export function BookmarksScreen ({
       <FolderNameDialog
         initialName={renaming?.title || ''}
         isDark={isDark}
-        title={renaming ? 'Rename folder' : 'New folder'}
+        title={renaming ? t('Rename folder') : t('New folder')}
         visible={nameDialog !== null}
         onClose={() => setNameDialog(null)}
         onSave={(name) => {
@@ -266,7 +267,7 @@ function BookmarkRow ({
                   </View>
                 </Pressable>
                 <Pressable
-                  accessibilityLabel={`Move ${bookmark.title} to a folder`}
+                  accessibilityLabel={t('Move {name} to a folder', { name: bookmark.title })}
                   accessibilityRole='button'
                   hitSlop={8}
                   style={({ pressed }) => [styles.removeButton, pressed ? styles.pressed : null]}
@@ -275,7 +276,7 @@ function BookmarkRow ({
                   <FolderIcon width={19} height={19} color={palette.mutedText} />
                 </Pressable>
                 <Pressable
-                  accessibilityLabel={`Remove ${bookmark.title}`}
+                  accessibilityLabel={t('Remove {name}', { name: bookmark.title })}
                   accessibilityRole='button'
                   hitSlop={8}
                   style={({ pressed }) => [styles.removeButton, pressed ? styles.pressed : null]}

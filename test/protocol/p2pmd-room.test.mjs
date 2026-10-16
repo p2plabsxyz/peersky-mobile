@@ -24,7 +24,7 @@ describe('p2pmd room connection', () => {
   // that port too. The phone picked a new one each time, so every device and
   // every restart showed a different address for the same note.
   it('joins on the port it used before, or the host\'s, as the desktop does', () => {
-    assert.match(roomSource, /const preferred = await connectHolesail\(\{ key, port: saved, hostPort: true, udp, log \}\)/)
+    assert.match(roomSource, /const preferred = await connectHolesail\(\{ key, port: saved, hostPort: true, udp, log, token \}\)/)
     assert.match(sessionSource, /: hostPort && \(port === undefined \|\| port === null\)\s+\? \{ ok: true, port: undefined \}/)
     assert.match(roomSource, /rememberNotePort\(roomKey, boundPort\)/)
   })
@@ -32,7 +32,7 @@ describe('p2pmd room connection', () => {
   // The port a host advertises can belong to another server in the app, and
   // a note on it put the editor on that server's origin: PeerTunes' for one.
   it('takes a port the system picks when that one is taken or is the app\'s own', () => {
-    assert.match(roomSource, /if \(preferred\.ok && isUsableNotePort\(preferred\.info\?\.port\)\) return preferred\s+if \(preferred\.ok\) await stopHolesail\(\)\s+return connectHolesail\(\{ key, anyPort: true, udp, log \}\)/)
+    assert.match(roomSource, /if \(preferred\.ok && isUsableNotePort\(preferred\.info\?\.port\)\) return preferred\s+if \(preferred\.ok\) await stopHolesail\(\)\s+return connectHolesail\(\{ key, anyPort: true, udp, log, token \}\)/)
     assert.equal(isUsableNotePort(PEERTUNES_LOOPBACK_PORT), false)
     assert.equal(isUsableNotePort(80), false)
     assert.equal(isUsableNotePort(8989), true)

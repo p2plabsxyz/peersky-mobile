@@ -71,7 +71,7 @@ describe('formatting in PeerChat messages', () => {
 describe('formatted messages on screen', () => {
   test('code can be copied, and holding it still opens the message actions', async () => {
     const screen = await readFile(new URL('../../app/peerchat/PeerChatScreen.tsx', import.meta.url), 'utf8')
-    assert.match(screen, /accessibilityLabel='Copy code'[\s\S]{0,200}onPress=\{\(\) => handlers\.onCopyCode\(block\.text\)\}/)
+    assert.match(screen, /accessibilityLabel=\{t\('Copy code'\)\}[\s\S]{0,200}onPress=\{\(\) => handlers\.onCopyCode\(block\.text\)\}/)
     assert.match(screen, /onPress=\{\(\) => handlers\.onCopyCode\(span\.text\)\}/)
     assert.match(screen, /function copyMessageCode \(code: string\) \{\s+Clipboard\.setString\(code\)/)
     // Code, and a mention, which opens a profile on a tap.

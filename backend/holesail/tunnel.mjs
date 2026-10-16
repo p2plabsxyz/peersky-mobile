@@ -3,6 +3,7 @@ import net from 'net'
 import { createHash, randomBytes } from 'node:crypto'
 import b4a from 'b4a'
 import z32 from 'z32'
+import { FORBIDDEN_RESPONSE, createRequestGate, createRequestStamp } from './request-gate.mjs'
 
 // P2PMD notes travel over Holesail's protocol, which the desktop speaks
 // through the Holesail package. That package is AGPL, which cannot ship in an
@@ -20,6 +21,10 @@ import z32 from 'z32'
 // - The host keeps a signed record under its public key saying where its
 //   local server listens, as JSON { host, udp, port }.
 // - Each connection carries the bytes of one TCP connection to that server.
+//
+// Given a token, both ends also keep other apps on the phone out of the note
+// (request-gate.mjs). The token never crosses the wire, so what the other end
+// sees is unchanged.
 
 const PRIVATE_FLAGS = 's000'
 const PUBLIC_FLAGS = '0000'
@@ -55,11 +60,15 @@ function createDht ({ keyPair, bootstrap } = {}) {
 
 /** Hosts a local TCP server under a note address. */
 export class TunnelHost {
-  constructor ({ key, secure = true, host = LOOPBACK, port = DEFAULT_PORT, bootstrap } = {}) {
+  constructor ({ key, secure = true, host = LOOPBACK, port = DEFAULT_PORT, token = null, bootstrap } = {}) {
     const parsed = parseNoteAddress(key)
     this.secure = parsed.secure ?? Boolean(secure)
     this.host = host
     this.port = port
+    // The local server's token. It goes on the requests of whoever came in
+    // with the note's address, which is how the server tells them from
+    // another app on this phone that found its port.
+    this.token = token
     this.bootstrap = bootstrap
     // A private note with no key yet gets a new one. A public note always
     // comes with its seed from the caller, or it could never be hosted again.
@@ -85,7 +94,7 @@ export class TunnelHost {
       reusableSocket: true
     }, (remote) => {
       const local = net.connect({ port: this.port, host: this.host, allowHalfOpen: true })
-      bridge(local, remote, this.sockets)
+      bridge(local, remote, this.sockets, this.token ? { toLocal: createRequestStamp(this.token) } : {})
     })
 
     this.state = 'opening'
@@ -137,12 +146,15 @@ export class TunnelHost {
 
 /** Listens on a local port and carries each connection to a note's host. */
 export class TunnelGuest {
-  constructor ({ key, secure, host = LOOPBACK, port, bootstrap } = {}) {
+  constructor ({ key, secure, host = LOOPBACK, port, token = null, bootstrap } = {}) {
     const parsed = parseNoteAddress(key)
     this.secure = parsed.secure ?? Boolean(secure)
     this.key = parsed.key
     this.host = host
     this.port = port
+    // This phone's editor puts the token on each request it makes here. A
+    // connection from another app on the phone never reaches the host.
+    this.token = token
     this.bootstrap = bootstrap
     this.state = 'closed'
     this.dht = null
@@ -182,8 +194,15 @@ export class TunnelGuest {
     const port = this.port ?? advertisedPort ?? DEFAULT_PORT
 
     const proxy = net.createServer({ allowHalfOpen: true }, (local) => {
-      const remote = this.dht.connect(this.remotePublicKey, { reusableSocket: true })
-      bridge(local, remote, this.sockets)
+      if (!this.token) {
+        const remote = this.dht.connect(this.remotePublicKey, { reusableSocket: true })
+        bridge(local, remote, this.sockets)
+        return
+      }
+      // The host is called only once a request has shown the token, and the
+      // tunnel may have closed by then.
+      const connect = () => this.dht ? this.dht.connect(this.remotePublicKey, { reusableSocket: true }) : null
+      admit(local, createRequestGate(this.token), connect, this.sockets)
     })
     this.proxy = proxy
     await new Promise((resolve, reject) => {
@@ -254,12 +273,48 @@ async function putRecord (dht, keyPair, value) {
   await dht.mutablePut(keyPair, data, { seq })
 }
 
+// Holds a joined note's local connection until its first request shows the
+// token, and only then reaches the host. One that does not is answered here,
+// so another app on the phone cannot even make this phone call the host.
+function admit (local, gate, connect, sockets) {
+  sockets.add(local)
+  const forget = () => sockets.delete(local)
+  const drop = () => {
+    forget()
+    local.destroy()
+  }
+  const onData = (data) => {
+    const first = gate.push(data)
+    if (first !== null && !first.byteLength) return
+    local.off('data', onData)
+    local.off('end', drop)
+    if (first === null) {
+      // Answered and closed. Anything else it sends goes nowhere.
+      local.once('finish', drop)
+      local.end(b4a.from(FORBIDDEN_RESPONSE))
+      return
+    }
+
+    const remote = connect()
+    if (!remote) return drop()
+    local.off('error', drop)
+    local.off('close', forget)
+    bridge(local, remote, sockets, { toRemote: gate.push })
+    remote.write(first)
+  }
+  local.on('data', onData)
+  local.on('end', drop)
+  local.on('error', drop)
+  local.on('close', forget)
+}
+
 // Carries bytes both ways until either end closes, and closes the other with
 // it. A half close (end) is passed on, so a request can finish while its
 // answer is still on the way. That needs both local sockets opened with
 // allowHalfOpen, as Holesail opens them; otherwise a socket closes its own
 // side as soon as the other does, and the answer is lost.
-function bridge (local, remote, sockets) {
+// toRemote and toLocal change what goes each way: null from one closes both.
+function bridge (local, remote, sockets, { toRemote = null, toLocal = null } = {}) {
   sockets.add(local)
   sockets.add(remote)
   let closed = false
@@ -271,10 +326,12 @@ function bridge (local, remote, sockets) {
     local.destroy()
     remote.destroy()
   }
-  for (const [from, to] of [[local, remote], [remote, local]]) {
+  for (const [from, to, change] of [[local, remote, toRemote], [remote, local, toLocal]]) {
     let waiting = false
     from.on('data', (data) => {
-      if (to.write(data) !== false || waiting) return
+      if (change) data = change(data)
+      if (data === null) return close()
+      if (!data.byteLength || to.write(data) !== false || waiting) return
       waiting = true
       from.pause()
       to.once('drain', () => {

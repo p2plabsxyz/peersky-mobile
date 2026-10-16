@@ -134,12 +134,12 @@ describe('private uploads use the key the desktop sent', () => {
     assert.equal(isLinkedPrivateKey('not json'), false)
 
     const screen = await read('app/hyperdrive/HyperdriveScreen.tsx')
-    assert.match(screen, /\{ text: 'Private', onPress: \(\) => choosePrivate\(source\) \}/)
+    assert.match(screen, /\{ text: t\('Private'\), onPress: \(\) => choosePrivate\(source\) \}/)
     const gate = screen.slice(screen.indexOf('function choosePrivate'), screen.indexOf('async function uploadFile'))
     assert.match(gate, /if \(hasLinkedIdentity\(\)\) \{\s*void uploadFile\('private', source\)/)
     assert.match(gate, /'Link PeerSky Desktop first'/)
-    assert.match(gate, /\{ text: 'This device only', onPress: \(\) => void uploadFile\('device', source\) \}/)
-    assert.match(gate, /\{ text: 'Link Device', onPress: onOpenLinkDevice \}/)
+    assert.match(gate, /\{ text: t\('This device only'\), onPress: \(\) => void uploadFile\('device', source\) \}/)
+    assert.match(gate, /\{ text: t\('Link Device'\), onPress: onOpenLinkDevice \}/)
 
     const app = await read('app/index.tsx')
     assert.match(app, /onOpenLinkDevice=\{\(\) => \{\s*setBrowserSettingsInitialPage\('link-device'\)/)

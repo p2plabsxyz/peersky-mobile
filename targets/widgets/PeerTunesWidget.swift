@@ -70,7 +70,7 @@ struct PeerTunesWidgetView: View {
         small
       }
     }
-    .widgetURL(WidgetLinks.peerTunes)
+    .widgetURL(WidgetLinks.peerTunes(showing: song))
     .containerBackground(for: .widget) { background }
   }
 
@@ -107,11 +107,11 @@ struct PeerTunesWidgetView: View {
           }
         }
         Spacer(minLength: 0)
-        Text(song?.title ?? "Nothing playing")
+        Text(song?.title ?? String(localized: "Nothing playing"))
           .font(.system(size: 15, weight: .bold))
           .foregroundStyle(.white)
           .lineLimit(2)
-        Text(song.map(subtitle) ?? "Tap to open PeerTunes")
+        Text(song.map(subtitle) ?? String(localized: "Tap to open PeerTunes"))
           .font(.system(size: 12))
           .foregroundStyle(.white.opacity(0.8))
           .lineLimit(1)
@@ -134,11 +134,11 @@ struct PeerTunesWidgetView: View {
             .foregroundStyle(.white.opacity(0.75))
             .textCase(.uppercase)
         }
-        Text(song?.title ?? "Nothing playing")
+        Text(song?.title ?? String(localized: "Nothing playing"))
           .font(.system(size: 16, weight: .bold))
           .foregroundStyle(.white)
           .lineLimit(2)
-        Text(song.map(subtitle) ?? "Tap to open PeerTunes")
+        Text(song.map(subtitle) ?? String(localized: "Tap to open PeerTunes"))
           .font(.system(size: 13))
           .foregroundStyle(.white.opacity(0.8))
           .lineLimit(1)
@@ -207,10 +207,12 @@ struct PeerTunesWidgetView: View {
       .contentShape(Rectangle())
   }
 
+  // A String, not a literal Text, so the words are looked up here, in
+  // Localizable.xcstrings, as a literal Text would look them up itself.
   private var status: String {
     guard let song else { return "PeerTunes" }
-    if song.playing { return "Now playing" }
-    return song.live ? "Paused" : "Last played"
+    if song.playing { return String(localized: "Now playing") }
+    return song.live ? String(localized: "Paused") : String(localized: "Last played")
   }
 
   private func subtitle(_ song: PeerSkyWidgetStore.NowPlaying) -> String {

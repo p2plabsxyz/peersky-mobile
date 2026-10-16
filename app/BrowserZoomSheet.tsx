@@ -5,6 +5,7 @@ import {
   DEFAULT_BROWSER_PAGE_ZOOM
 } from './browser-tabs.mjs'
 import { BROWSER_PALETTES } from './browser-appearance.mjs'
+import { t } from './i18n/i18n.mjs'
 import ZoomOutIcon from '../assets/icons/bootstrap/dash-lg.svg'
 import ZoomInIcon from '../assets/icons/bootstrap/plus-lg.svg'
 import { MODAL_ORIENTATIONS } from './modal-orientations'
@@ -43,18 +44,18 @@ export function BrowserZoomSheet ({
       onRequestClose={onClose}
     >
       <SafeAreaView style={styles.overlay} edges={['top', 'left', 'right']}>
-        <Pressable accessibilityLabel='Close zoom controls' style={styles.backdrop} onPress={onClose} />
+        <Pressable accessibilityLabel={t('Close zoom controls')} style={styles.backdrop} onPress={onClose} />
         <View style={[styles.sheet, isDark ? darkStyles.sheet : null, { paddingBottom: 28 + insets.bottom }]}>
           <View style={styles.header}>
-            <Text style={[styles.title, isDark ? darkStyles.primaryText : null]}>Zoom</Text>
-            <Pressable accessibilityLabel='Close zoom controls' onPress={onClose}>
-              <Text style={[styles.closeText, isDark ? darkStyles.secondaryText : null]}>Close</Text>
+            <Text style={[styles.title, isDark ? darkStyles.primaryText : null]}>{t('Zoom')}</Text>
+            <Pressable accessibilityLabel={t('Close zoom controls')} onPress={onClose}>
+              <Text style={[styles.closeText, isDark ? darkStyles.secondaryText : null]}>{t('Close')}</Text>
             </Pressable>
           </View>
 
           <View style={styles.controls}>
             <Pressable
-              accessibilityLabel='Zoom out'
+              accessibilityLabel={t('Zoom out')}
               accessibilityRole='button'
               accessibilityState={{ disabled: !canZoomOut }}
               disabled={!canZoomOut}
@@ -63,9 +64,9 @@ export function BrowserZoomSheet ({
             >
               <ZoomOutIcon width={24} height={24} color={iconColor} />
             </Pressable>
-            <Text style={[styles.zoomValue, isDark ? darkStyles.primaryText : null]}>{pageZoom}%</Text>
+            <Text style={[styles.zoomValue, isDark ? darkStyles.primaryText : null]}>{t('{zoom}%', { zoom: pageZoom })}</Text>
             <Pressable
-              accessibilityLabel='Zoom in'
+              accessibilityLabel={t('Zoom in')}
               accessibilityRole='button'
               accessibilityState={{ disabled: !canZoomIn }}
               disabled={!canZoomIn}
@@ -77,14 +78,14 @@ export function BrowserZoomSheet ({
           </View>
 
           <Pressable
-            accessibilityLabel='Reset zoom'
+            accessibilityLabel={t('Reset zoom')}
             accessibilityRole='button'
             accessibilityState={{ disabled: pageZoom === DEFAULT_BROWSER_PAGE_ZOOM }}
             disabled={pageZoom === DEFAULT_BROWSER_PAGE_ZOOM}
             style={[styles.resetButton, isDark ? darkStyles.resetButton : null, pageZoom === DEFAULT_BROWSER_PAGE_ZOOM ? styles.disabled : null]}
             onPress={onReset}
           >
-            <Text style={[styles.resetText, isDark ? darkStyles.resetText : null]}>Reset to 100%</Text>
+            <Text style={[styles.resetText, isDark ? darkStyles.resetText : null]}>{t('Reset to 100%')}</Text>
           </Pressable>
         </View>
       </SafeAreaView>

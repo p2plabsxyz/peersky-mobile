@@ -13,7 +13,7 @@ normalizes the input and routes it through one of three paths:
 | --- | --- |
 | `http://` and `https://` | Loaded directly by the platform WebView |
 | `hyper://` | Fetched by the Bare runtime through `hypercore-fetch`, then rendered by a WebView |
-| `peersky://` | Resolved to a local app registered in `app/internal-apps-registry.mjs` |
+| `peersky://` | Resolved to a local app registered in `app/internal-apps-registry.mjs`, or for `peersky://p2p/hyperdrive/<view>/...` the Hyperdrive viewer |
 
 Inputs without a URL scheme are treated as either a web address or a search.
 The default search engine is DuckDuckGo; a custom HTTPS search template can be
@@ -73,6 +73,12 @@ this path:
    `backend/hyper/assets.mjs`.
 5. The resulting HTML is rendered by a WebView with its Hyper URL retained as
    the visible browser address.
+
+A folder that comes back as hypercore-fetch's list of names, with no index
+file and no `raw` in its address, opens in the Hyperdrive viewer in the same
+tab instead (`app/hyperdrive/viewer-route.mjs`). The viewer is a page of its
+own, served from `127.0.0.1`, under its `peersky://p2p/hyperdrive/` address;
+see [Hyper](hyper.md#folders-files-photos-and-videos).
 
 ```mermaid
 sequenceDiagram

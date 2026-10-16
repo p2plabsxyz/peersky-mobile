@@ -3,11 +3,16 @@ const { withAppDelegate, withInfoPlist } = require('@expo/config-plugins')
 // Quick actions on the app icon: a long press on the home screen. Each opens
 // as a peersky://shortcut/ link, which the app follows like any other link it
 // is opened with (app/home-shortcuts.mjs). iOS shows at most four.
+//
+// Info.plist gets each title as a key, and each language's InfoPlist.strings
+// gives the words for it, English included (SHORTCUT_TEXT in
+// app/i18n/native-strings.mjs): iOS looks a title up there by the title, and
+// a title with a space in it would break the file Expo writes.
 const SHORTCUTS = [
-  { type: 'peersky.shortcut.paste', title: 'Paste and Go', symbol: 'doc.on.clipboard' },
-  { type: 'peersky.shortcut.new-tab', title: 'New Tab', symbol: 'plus' },
-  { type: 'peersky.shortcut.incognito', title: 'New Incognito Tab', symbol: 'eyeglasses' },
-  { type: 'peersky.shortcut.app-icon', title: 'App Icon', symbol: 'paintpalette' }
+  { type: 'peersky.shortcut.paste', title: 'Paste and Go', titleKey: 'ShortcutPasteAndGo', symbol: 'doc.on.clipboard' },
+  { type: 'peersky.shortcut.new-tab', title: 'New Tab', titleKey: 'ShortcutNewTab', symbol: 'plus' },
+  { type: 'peersky.shortcut.incognito', title: 'New Incognito Tab', titleKey: 'ShortcutNewIncognitoTab', symbol: 'eyeglasses' },
+  { type: 'peersky.shortcut.app-icon', title: 'App Icon', titleKey: 'ShortcutAppIcon', symbol: 'paintpalette' }
 ]
 
 const MARKER = '// PeerSky home screen quick actions'
@@ -81,7 +86,7 @@ module.exports = function withHomeShortcuts (config) {
   config = withInfoPlist(config, (iosConfig) => {
     iosConfig.modResults.UIApplicationShortcutItems = SHORTCUTS.map((shortcut) => ({
       UIApplicationShortcutItemType: shortcut.type,
-      UIApplicationShortcutItemTitle: shortcut.title,
+      UIApplicationShortcutItemTitle: shortcut.titleKey,
       UIApplicationShortcutItemIconSymbolName: shortcut.symbol
     }))
     return iosConfig

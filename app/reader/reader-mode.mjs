@@ -6,6 +6,8 @@ export const MAX_READER_HTML_LENGTH = 1024 * 1024
 // results page, a login form, a list of links.
 export const MIN_READER_TEXT_LENGTH = 500
 export const READER_TEXT_SCALES = [85, 100, 115, 130, 150]
+// The page's colour, which the screen and the WebView around it take too.
+export const READER_BACKGROUNDS = Object.freeze({ dark: '#16181d', light: '#fbfbf9' })
 const MAX_READER_TITLE_LENGTH = 300
 const MAX_READER_BYLINE_LENGTH = 200
 
@@ -282,8 +284,8 @@ function readerAttribute (attributes, name) {
 export function createReaderHtml (article, { isDark = false, textScale = 100 } = {}) {
   const scale = READER_TEXT_SCALES.includes(textScale) ? textScale : 100
   const colors = isDark
-    ? { background: '#16181d', text: '#e6e8ee', muted: '#9aa3b5', link: '#8fc0ff', rule: '#2c313c', code: '#232730' }
-    : { background: '#fbfbf9', text: '#1d2230', muted: '#667085', link: '#1f6fd1', rule: '#e4e7ec', code: '#f0f2f5' }
+    ? { background: READER_BACKGROUNDS.dark, text: '#e6e8ee', muted: '#9aa3b5', link: '#8fc0ff', rule: '#2c313c', code: '#232730' }
+    : { background: READER_BACKGROUNDS.light, text: '#1d2230', muted: '#667085', link: '#1f6fd1', rule: '#e4e7ec', code: '#f0f2f5' }
   const lang = article.lang ? ` lang="${escapeAttribute(article.lang)}"` : ''
 
   return `<!doctype html>

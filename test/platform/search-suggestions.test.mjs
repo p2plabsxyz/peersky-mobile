@@ -75,5 +75,5 @@ test('suggestions are on unless turned off, and asked for without cookies only w
   const toolbar = await read('app/BrowserToolbar.tsx')
   assert.match(toolbar, /useSearchSuggestions\(address, \{\s+active: isAddressFocused,\s+enabled: searchSuggestionsEnabled,\s+incognito: isIncognito,/)
   const general = await read('app/settings/General.tsx')
-  assert.match(general, /title='Search suggestions'/)
+  assert.match(general, /title=\{t\('Search suggestions'\)\}/)
 })

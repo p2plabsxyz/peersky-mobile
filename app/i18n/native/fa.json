@@ -1,0 +1,18 @@
+{
+  "ios": {
+    "NSCameraUsageDescription": "برنامه PeerSky از دوربین برای اسکن کدهای QR استفاده می‌کند، وقتی دستگاهی را پیوند می‌دهید یا یک اتاق یا درایو مشترک را باز می‌کنید، و وقتی وب‌سایتی که بازدید می‌کنید آن را درخواست کند و شما اجازه دهید.",
+    "NSLocalNetworkUsageDescription": "برنامه PeerSky از شبکه محلی شما برای پیدا کردن دستگاه‌های PeerSky نزدیک و وصل شدن به آن‌ها استفاده می‌کند.",
+    "NSLocationWhenInUseUsageDescription": "برنامه PeerSky فقط وقتی از مکان شما استفاده می‌کند که وب‌سایتی که بازدید می‌کنید آن را درخواست کند و شما اجازه دهید.",
+    "NSMicrophoneUsageDescription": "برنامه PeerSky فقط وقتی از میکروفون استفاده می‌کند که وب‌سایتی که بازدید می‌کنید آن را درخواست کند و شما اجازه دهید.",
+    "NSPhotoLibraryAddUsageDescription": "وقتی «ذخیره در عکس‌ها» را انتخاب می‌کنید، PeerSky یک عکس یا ویدیو را در کتابخانه عکس‌هایتان ذخیره می‌کند.",
+    "ShortcutPasteAndGo": "جای‌گذاری و رفتن",
+    "ShortcutNewTab": "برگه جدید",
+    "ShortcutNewIncognitoTab": "برگه ناشناس جدید",
+    "ShortcutAppIcon": "نماد برنامه"
+  },
+  "android": {
+    "peerchat_background_text": "در حال حفظ اتصال تا پیام‌ها به شما برسند",
+    "peerchat_background_channel": "اتصال پس‌زمینه PeerChat",
+    "peerchat_background_channel_description": "اتصال PeerChat را تا وقتی PeerSky در پس‌زمینه است برقرار نگه می‌دارد"
+  }
+}

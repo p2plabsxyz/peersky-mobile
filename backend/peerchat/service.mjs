@@ -85,6 +85,7 @@ import {
   isPeerChatRoomCreator,
   normalizePeerChatCreatorKey,
   normalizePeerChatRoomBans,
+  PINNED_PEERCHAT_CREATOR_KEYS,
   removePeerChatRoomBan,
   resolvePeerChatCreatorKey
 } from './room-moderation.mjs'
@@ -106,6 +107,32 @@ import {
   normalizeTransfer
 } from './device-link.mjs'
 import { checkRoomProof, roomProof } from './room-proof.mjs'
+import {
+  checkCreatorProof,
+  checkMove,
+  knownBefore,
+  makeCreatorRoomKey,
+  normalizeKnownKeys,
+  normalizeMove,
+  noteKnownKey,
+  signMove
+} from './room-move.mjs'
+import {
+  avatarHash,
+  checkRoomDetails,
+  nextDetailsVersion,
+  normalizeRoomDetails,
+  signRoomDetails
+} from './room-details.mjs'
+import { attachmentLabel } from './attachment-label.mjs'
+import {
+  MAX_PEERCHAT_SEARCH_CACHE_CHARACTERS,
+  MAX_PEERCHAT_SEARCH_RESULTS,
+  MAX_PEERCHAT_SEARCHED_CHARACTERS,
+  MAX_PEERCHAT_SEARCHED_ENTRIES,
+  normalizePeerChatSearchQuery,
+  peerChatSearchSnippet
+} from './search.mjs'
 
 const MAX_ROOMS = 50
 const MAX_BLOCKED_PEERS = 500
@@ -129,6 +156,10 @@ const MAX_SYNC_MESSAGES = 200
 const MAX_SEEN_MESSAGE_IDS_PER_ROOM = MAX_RETURNED_ENTRIES + 500
 const MAX_FRAME_LENGTH = MAX_PEERCHAT_FRAME_BYTES
 export const MAX_PEERCHAT_STORED_MESSAGES_PER_ROOM = 5000
+// A chat asks for more than it shows when it opens only to reach a message a
+// reply quotes or a search found, and never for more than a room keeps.
+const MAX_HISTORY_MESSAGES = MAX_PEERCHAT_STORED_MESSAGES_PER_ROOM
+const ENTRIES_PER_RETURNED_MESSAGE = MAX_RETURNED_ENTRIES / MAX_RETURNED_MESSAGES
 export const MAX_PEERCHAT_ROOM_STORAGE_BYTES = 16 * 1024 * 1024
 export const MAX_PEERCHAT_TOTAL_STORAGE_BYTES = 128 * 1024 * 1024
 const LIVE_RATE_WINDOW_MS = 60_000
@@ -141,6 +172,24 @@ const MAX_PASSED_MESSAGES_PER_WINDOW = 1200
 // Passing on is for what is being said now. Anything older comes in history,
 // which starts at the right time for each person.
 const MAX_PASSED_MESSAGE_AGE_MS = 10 * 60 * 1000
+// Ids first: a newer build hears only the id of each new message from most of
+// its connections, and asks one of them for the message itself. See passOn.
+const HAVE_BATCH_MS = 50
+const MAX_IDS_PER_FRAME = 256
+const MAX_HAVE_IDS_PER_WINDOW = 6000
+const MAX_WANT_IDS_PER_WINDOW = 6000
+// How long an asked-for message has to arrive before the next neighbour that
+// has it is asked, and how long to keep trying at all.
+const WANT_RETRY_MS = 3000
+const WANT_GIVE_UP_MS = 30_000
+const MAX_WANTED = 4096
+// Of those, how many one connection and one room may have waiting. One
+// connection in P2P Republic could fill the whole list with made-up ids, and a
+// real one from another room was then never asked for.
+const MAX_WANTED_PER_CONNECTION = 512
+const MAX_WANTED_PER_ROOM = 2048
+const MAX_REMEMBERED_PASSES = 4096
+const MAX_IDS_HEARD_PER_PEER = 2048
 const MAX_AUTHOR_RATES = 4096
 const MAX_PROVEN_KEYS = 4096
 const MAX_TOPIC_FRAMES_PER_WINDOW = 120
@@ -155,6 +204,20 @@ const PERSIST_DELAY_MS = 500
 const PING_INTERVAL_MS = 25_000
 const PEER_LIVENESS_TIMEOUT_MS = 60_000
 const MAX_ANNOUNCED_TOPICS = 512
+// Rooms that moved to a new key when somebody was removed. See room-move.mjs.
+// Kept for their history and for whoever missed the move, outside MAX_ROOMS.
+const MAX_MOVED_ROOMS = 100
+const MAX_MOVES = 32
+const MAX_MOVE_FUTURE_MS = 5 * 60_000
+// A line of rooms, each moved to the next, is followed at most this many moves
+// in any hour, unless this phone made them. The rest are taken once the hour
+// allows: they come again with the line on the next connection.
+const MAX_MOVES_PER_HOUR = 10
+const MOVE_HOUR_MS = 60 * 60_000
+// A room that moved stays joined this long after its move, for whoever was
+// away then. After that it is left, with its record and history kept.
+const MOVED_ROOM_KEPT_MS = 14 * 24 * 60 * 60_000
+const MOVED_ROOM_CHECK_MS = 60 * 60_000
 
 // A room's key never goes over the wire. Frames name a room by its topic,
 // which only means something to someone who already holds the key. The two
@@ -273,6 +336,14 @@ export class PeerChatService {
     this.signingKeys = null
     // How much each person has said lately, wherever it came from.
     this.authorRates = new Map()
+    // Messages this phone passed on lately, by id, for anyone who asks for one,
+    // and the ones it asked for, with who else has them. See passOn.
+    this.recentPasses = new Map()
+    this.wantedIds = new Map()
+    // How many of those each room has waiting. Each connection keeps its own
+    // count, as peer.wanting.
+    this.wantedPerRoom = new Map()
+    this.wantTimer = null
     // The whole key behind each short id, as connections proved them, so a
     // key ground to match somebody's id cannot sign as them.
     this.provenKeys = new Map()
@@ -287,6 +358,16 @@ export class PeerChatService {
     this.seenIds = new Map()
     this.seenFrom = new Map()
     this.olderIdLoads = new Map()
+    // Each feed's messages as text, opened once for the chat list's search.
+    // See searchMessages.
+    this.searchTexts = new Map()
+    this.searchTextCharacters = 0
+    this.searchQueue = Promise.resolve()
+    // Rooms dropped when the move that made them turned out not to be the
+    // creator's, and the room each one came from, so a screen still on one
+    // goes back there. See undoMove.
+    this.undoneMoves = new Map()
+    this.movedRoomTimer = null
     this.activeRoomKey = null
     this.version = 0
     this.persistTimer = null
@@ -316,13 +397,26 @@ export class PeerChatService {
     // internet down, and every PeerChat call waited for all of them, one room
     // after another, so PeerChat sat loading after a restart.
     await Promise.all([...this.rooms.keys()].map((roomKey) => (
-      this.joinRoomNetwork(roomKey, { flush: false }).catch((error) => {
+      this.rejoinRoom(roomKey).catch((error) => {
         console.warn(`[peerchat] Unable to rejoin ${roomKey.slice(0, 8)}: ${error.message}`)
       })
     )))
     this.sdk.swarm.flush().catch(() => {})
+    this.movedRoomTimer = setInterval(() => this.leaveOldMovedRooms(), MOVED_ROOM_CHECK_MS)
+    this.movedRoomTimer.unref?.()
 
     return this
+  }
+
+  // A room as PeerChat starts. A room that moved is joined only for 14 days
+  // after its move, and after that only its history is opened, for the room it
+  // went to. A room a line of moves only passed through was never joined, and
+  // has nothing to open.
+  rejoinRoom (roomKey) {
+    const room = this.rooms.get(roomKey)
+    if (room?.passedThrough) return Promise.resolve()
+    if (this.movedLongAgo(room)) return this.openRoomFeed(roomKey)
+    return this.joinRoomNetwork(roomKey, { flush: false })
   }
 
   getProfile () {
@@ -345,7 +439,7 @@ export class PeerChatService {
   }
 
   hasRoom (roomKey) {
-    return this.rooms.has(normalizePeerChatRoomKey(roomKey))
+    return this.rooms.has(this.roomKeyFor(roomKey))
   }
 
   setProfile ({ username, bio, avatar, linkPreview }) {
@@ -407,10 +501,14 @@ export class PeerChatService {
 
   async createRoom ({ name, username, bio, link, avatar, moderation }) {
     this.ensureProfile(username)
-    if (this.rooms.size >= MAX_ROOMS) throw new Error(`PeerChat supports up to ${MAX_ROOMS} rooms.`)
+    if (this.activeRoomCount() >= MAX_ROOMS) throw new Error(`PeerChat supports up to ${MAX_ROOMS} rooms.`)
 
-    // Marked, with a chain, so its keys rotate. See key-chain.mjs.
-    const roomKey = makeRotatingRoomKey()
+    // Marked, with a chain, so its keys rotate (key-chain.mjs), and made from
+    // this phone's key, so anyone in the room can check who made it
+    // (room-move.mjs).
+    const { roomKey, creatorProof } = this.localKey
+      ? makeCreatorRoomKey(this.localKey)
+      : { roomKey: makeRotatingRoomKey(), creatorProof: '' }
     const now = Date.now()
     const normalizedLink = normalizePeerChatLink(link)
     const normalizedAvatar = normalizePeerChatAvatar(avatar)
@@ -434,6 +532,7 @@ export class PeerChatService {
       // The whole key, because the eight characters above are a label and a
       // removal has to be checked against something that cannot be ground out.
       creatorKey: this.localKey,
+      ...(creatorProof && { creatorProof }),
       createdByName: this.myName(),
       moderation: normalizePeerChatModeration(moderation),
       bans: [],
@@ -450,25 +549,34 @@ export class PeerChatService {
       throw error
     }
     this.offerRoomToSiblings(roomKey)
+    // Signed from the start, so whoever joins takes them from anyone.
+    this.signDetails(roomKey)
     this.schedulePersist()
     this.bumpVersion()
 
     return this.publicRoom(room)
   }
 
-  async joinRoom ({ roomKey, username }) {
+  // creatorKey and creatorProof come from an invite that says who made the
+  // room. See app/peerchat/peerchat-invite.mjs.
+  async joinRoom ({ roomKey, username, creatorKey, creatorProof }) {
     this.ensureProfile(username)
-    return this.joinRoomWithoutProfile(roomKey)
+    return this.joinRoomWithoutProfile(roomKey, { creatorKey, creatorProof })
   }
 
-  async joinRoomWithoutProfile (roomKey) {
-    const normalized = normalizePeerChatRoomKey(roomKey)
+  async joinRoomWithoutProfile (roomKey, invite = {}) {
+    // The room the invite names, before any move it made here: its creator
+    // and proof are for that key.
+    const invited = normalizePeerChatRoomKey(roomKey)
+    const creator = inviteCreatorFor(invited, invite)
+    if (creator && this.rooms.has(invited)) this.takeInviteCreator(invited, creator)
+    const normalized = this.roomKeyFor(roomKey)
     if (!normalized) throw new Error('Enter a valid 64-character PeerChat room key.')
 
     let room = this.rooms.get(normalized)
     const isNewRoom = !room
     if (!room) {
-      if (this.rooms.size >= MAX_ROOMS) throw new Error(`PeerChat supports up to ${MAX_ROOMS} rooms.`)
+      if (this.activeRoomCount() >= MAX_ROOMS) throw new Error(`PeerChat supports up to ${MAX_ROOMS} rooms.`)
       room = {
         roomKey: normalized,
         name: `${normalized.slice(0, 8)}...`,
@@ -493,6 +601,9 @@ export class PeerChatService {
         room.bans = removal.bans
       }
       this.rooms.set(normalized, room)
+      // Who made it, from the invite, so this phone knows from the start and
+      // does not take the first member to claim it.
+      if (creator && normalized === invited) this.takeInviteCreator(normalized, creator)
     }
 
     try {
@@ -512,6 +623,7 @@ export class PeerChatService {
 
   listRooms () {
     return [...this.rooms.values()]
+      .filter((room) => !room.movedTo)
       .map((room) => this.publicRoom(room))
       .sort((left, right) => {
         if (left.isPinned !== right.isPinned) return left.isPinned ? -1 : 1
@@ -524,6 +636,7 @@ export class PeerChatService {
   getUnreadTotal () {
     let total = 0
     for (const room of this.rooms.values()) {
+      if (room.movedTo) continue
       total += normalizeUnreadCount(room.unreadCount)
       if (total >= Number.MAX_SAFE_INTEGER) return Number.MAX_SAFE_INTEGER
     }
@@ -572,7 +685,7 @@ export class PeerChatService {
     let room = this.rooms.get(roomKey)
     const createdRoom = !room
     if (!room) {
-      if (this.rooms.size >= MAX_ROOMS) throw new Error(`PeerChat supports up to ${MAX_ROOMS} rooms.`)
+      if (this.activeRoomCount() >= MAX_ROOMS) throw new Error(`PeerChat supports up to ${MAX_ROOMS} rooms.`)
       room = this.createDirectRoom({
         roomKey,
         peerId: normalizedPeerId,
@@ -659,7 +772,7 @@ export class PeerChatService {
     const normalized = normalizePeerChatRoomKey(roomKey)
     const pending = this.pendingDirectMessages.get(normalized)
     if (!pending) throw new Error('PeerChat direct-message request not found.')
-    if (this.rooms.size >= MAX_ROOMS) throw new Error(`PeerChat supports up to ${MAX_ROOMS} rooms.`)
+    if (this.activeRoomCount() >= MAX_ROOMS) throw new Error(`PeerChat supports up to ${MAX_ROOMS} rooms.`)
 
     // Bound to the key the invite came from. A request kept from before keys
     // were recorded falls back to the only key behind the short id.
@@ -677,7 +790,11 @@ export class PeerChatService {
     this.rooms.set(normalized, room)
     this.pendingDirectMessages.delete(normalized)
     try {
-      await this.joinRoomNetwork(normalized)
+      // Not held up while the room is announced, which took several seconds:
+      // the person who asked is connected already, and hears of the room on
+      // that connection. The announce goes on behind it.
+      await this.joinRoomNetwork(normalized, { flush: false })
+      this.sdk.swarm?.flush?.()?.catch?.(() => {})
     } catch (error) {
       this.rooms.delete(normalized)
       this.pendingDirectMessages.set(normalized, pending)
@@ -789,7 +906,7 @@ export class PeerChatService {
   }
 
   setRoomPinned ({ roomKey, pinned } = {}) {
-    const normalized = normalizePeerChatRoomKey(roomKey)
+    const normalized = this.roomKeyFor(roomKey)
     const room = this.rooms.get(normalized)
     if (!room) throw new Error('PeerChat room not found.')
     if (typeof pinned !== 'boolean') throw new Error('Invalid PeerChat pin state.')
@@ -801,7 +918,7 @@ export class PeerChatService {
   }
 
   setRoomMuted ({ roomKey, muted } = {}) {
-    const normalized = normalizePeerChatRoomKey(roomKey)
+    const normalized = this.roomKeyFor(roomKey)
     const room = this.rooms.get(normalized)
     if (!room) throw new Error('PeerChat room not found.')
     if (typeof muted !== 'boolean') throw new Error('Invalid PeerChat mute state.')
@@ -812,25 +929,32 @@ export class PeerChatService {
     return { room: this.publicRoom(room), rooms: this.listRooms(), version: this.version }
   }
 
-  updateRoom ({ roomKey, name, bio, link, avatar } = {}) {
-    const normalized = normalizePeerChatRoomKey(roomKey)
+  // A room's details are its creator's to change, and the change goes to
+  // everyone in it, signed. See room-details.mjs.
+  updateRoom ({ roomKey, name, bio, link, avatar, moderation } = {}) {
+    const normalized = this.roomKeyFor(roomKey)
     const room = this.rooms.get(normalized)
     if (!room) throw new Error('PeerChat room not found.')
-    if (!room.isHost) throw new Error('Only the room host can edit room details.')
+    if (room.isDM) throw new Error('A direct message has no room details to change.')
+    if (!this.isRoomCreator(normalized)) throw new Error('Only the person who made this room can change it.')
 
     const normalizedAvatar = avatar === undefined ? room.avatar || null : normalizePeerChatAvatar(avatar)
     if (avatar != null && avatar !== '' && !normalizedAvatar) {
       throw new Error('Choose a supported PeerChat room image under 192 KB.')
     }
-    room.name = name === undefined ? room.name : normalizePeerChatRoomName(name)
-    room.bio = bio === undefined ? room.bio || '' : normalizePeerChatBio(bio)
-    if (link !== undefined) {
-      room.link = normalizePeerChatLink(link)
-      if (typeof link === 'string' && link.trim() && !room.link) {
-        throw new Error('Room link must be a valid HTTP or HTTPS URL.')
-      }
+    // Checked before anything changes, so a refused link leaves the room as
+    // it was.
+    const normalizedLink = link === undefined ? room.link || '' : normalizePeerChatLink(link)
+    if (typeof link === 'string' && link.trim() && !normalizedLink) {
+      throw new Error('Room link must be a valid HTTP or HTTPS URL.')
     }
+    // An empty name keeps the one it had.
+    room.name = name === undefined ? room.name : normalizePeerChatRoomName(name, room.name)
+    room.bio = bio === undefined ? room.bio || '' : normalizePeerChatBio(bio)
+    room.link = normalizedLink
     room.avatar = normalizedAvatar
+    if (moderation !== undefined) room.moderation = normalizePeerChatModeration(moderation)
+    this.signDetails(normalized)
     this.schedulePersist()
     this.bumpVersion()
     this.announceRoom(normalized)
@@ -838,7 +962,7 @@ export class PeerChatService {
   }
 
   setActiveRoom ({ roomKey } = {}) {
-    const normalized = roomKey == null || roomKey === '' ? null : normalizePeerChatRoomKey(roomKey)
+    const normalized = roomKey == null || roomKey === '' ? null : this.roomKeyFor(roomKey)
     if (roomKey != null && roomKey !== '' && !normalized) throw new Error('Invalid PeerChat room key.')
     if (normalized && !this.rooms.has(normalized)) throw new Error('PeerChat room not found.')
 
@@ -854,8 +978,10 @@ export class PeerChatService {
     return { rooms: this.listRooms(), version: this.version }
   }
 
-  async getSnapshot ({ roomKey, version }) {
-    const normalized = normalizePeerChatRoomKey(roomKey)
+  // limit is how many of the newest messages to send, more than a chat shows
+  // when it opens only when it is reaching for an older one.
+  async getSnapshot ({ roomKey, version, limit }) {
+    const normalized = this.roomKeyFor(roomKey)
     const room = this.rooms.get(normalized)
     if (!room) throw new Error('PeerChat room not found.')
     if (!this.feeds.has(normalized)) await this.joinRoomNetwork(normalized)
@@ -863,18 +989,22 @@ export class PeerChatService {
     const unchanged = Number.isSafeInteger(version) && version === this.version
     // Read first: this is where authors are lifted out of the feed, and the
     // room payload below has to include them.
-    const messages = unchanged ? null : await this.readMessages(normalized)
+    const history = unchanged ? null : await this.readMessages(normalized, { limit })
     return {
       version: this.version,
       profile: this.getProfile(),
       room: this.publicRoom(room),
       rooms: this.listRooms(),
-      messages
+      // Where each room that moved went, for a screen still on an old key.
+      movedRooms: this.movedRoomsMap(),
+      messages: history ? history.messages : null,
+      // Whether there is more before the first of them.
+      ...(history && { hasOlder: history.hasOlder })
     }
   }
 
   async sendMessage ({ roomKey, message, replyTo, fileName, fileSize, fileEnc, preview, forwarded, fileKey }) {
-    const normalizedRoomKey = normalizePeerChatRoomKey(roomKey)
+    const normalizedRoomKey = this.roomKeyFor(roomKey)
     const room = this.rooms.get(normalizedRoomKey)
     if (!room) throw new Error('PeerChat room not found.')
     if (room.isDM && room.pendingAcceptance) throw new Error('Wait for the peer to accept this message request.')
@@ -904,6 +1034,17 @@ export class PeerChatService {
     )
     if (!moderation.allowed) {
       throw new Error(`Message blocked: ${moderation.reason}. Please rephrase it.`)
+    }
+    // A file's name too, as everyone in a group checks it. See
+    // receiveChatMessage.
+    const named = normalizePeerChatAttachment({ message: normalizedMessage, fileName })
+    const nameCheck = named && this.moderator.checkMessage(this.localId, normalizedRoomKey, named.fileName, {
+      allowKick: false,
+      checkSpam: false,
+      settings: this.moderationFor(room)
+    })
+    if (nameCheck && !nameCheck.allowed) {
+      throw new Error(`Message blocked: ${nameCheck.reason} in the file name. Please rename the file.`)
     }
 
     let normalizedPreview = this.sanitizeModeratedPreview(preview, this.moderationFor(room))
@@ -973,7 +1114,7 @@ export class PeerChatService {
   }
 
   async reactToMessage ({ roomKey, msgId, emoji }) {
-    const normalizedRoomKey = normalizePeerChatRoomKey(roomKey)
+    const normalizedRoomKey = this.roomKeyFor(roomKey)
     if (!this.rooms.has(normalizedRoomKey)) throw new Error('PeerChat room not found.')
     if (!this.profile.username) throw new Error('Set a PeerChat name before reacting.')
     if (!this.feeds.has(normalizedRoomKey)) await this.joinRoomNetwork(normalizedRoomKey)
@@ -1005,8 +1146,11 @@ export class PeerChatService {
   }
 
   async leaveRoom ({ roomKey }) {
-    const normalized = normalizePeerChatRoomKey(roomKey)
+    const normalized = this.roomKeyFor(roomKey)
     if (!this.rooms.has(normalized)) throw new Error('PeerChat room not found.')
+    // The rooms it moved from go with it: they were only kept for its history
+    // and for anyone who missed the move.
+    const before = this.roomsBefore(normalized)
 
     this.relayToRoom(normalized, {
       type: 'leave',
@@ -1018,6 +1162,7 @@ export class PeerChatService {
     })
 
     await this.dropRoomLocally(normalized)
+    for (const key of before) await this.dropRoomLocally(key)
     return { ok: true }
   }
 
@@ -1074,6 +1219,10 @@ export class PeerChatService {
     this.notifyTimer = null
     if (this.presenceTimer) clearTimeout(this.presenceTimer)
     this.presenceTimer = null
+    if (this.wantTimer) clearInterval(this.wantTimer)
+    this.wantTimer = null
+    if (this.movedRoomTimer) clearInterval(this.movedRoomTimer)
+    this.movedRoomTimer = null
     this.presence.clear()
 
     this.sdk.swarm.off?.('connection', this.onConnection)
@@ -1098,7 +1247,7 @@ export class PeerChatService {
     this.joinedRooms.clear()
     this.discoveryKeys.clear()
     this.moderator.clear()
-    this.persistNow()
+    this.persistNow({ final: true })
   }
 
   ensureProfile (username) {
@@ -1178,20 +1327,18 @@ export class PeerChatService {
     }
     this.feedListeners.set(roomKey, onAppend)
     feed.on('append', onAppend)
+    // A preview saved by an earlier build may be a file's address. It reads
+    // as the file from the feed.
+    if (isAttachmentAddress(this.rooms.get(roomKey)?.lastMessage?.message)) {
+      this.updateLastMessage(roomKey).catch(() => {})
+    }
     return true
   }
 
-  handleConnection (connection, info = {}) {
-    const sharedRooms = getSharedPeerChatRooms(info.topics, this.discoveryKeys)
-    const hasTopics = Array.isArray(info.topics)
-      ? info.topics.length > 0
-      : !!info.topics?.length
-    // Found under one of our topics, or arriving without any (inbound ones
-    // can). Either way it starts in no room: anyone can announce a topic, so
-    // rooms open one by one as the peer proves it holds their keys.
-    if (this.closed || (sharedRooms.length === 0 && (hasTopics || this.discoveryKeys.size === 0))) return
-
-    const peer = {
+  // A connection's peer, before its transport: the key the handshake
+  // established, and nothing the peer says about itself.
+  newPeer (connection) {
+    return {
       connection,
       id: connection.remotePublicKey
         ? b4a.toString(connection.remotePublicKey, 'hex').slice(0, 8).toLowerCase()
@@ -1219,6 +1366,19 @@ export class PeerChatService {
       syncingRooms: new Map(),
       transport: null
     }
+  }
+
+  handleConnection (connection, info = {}) {
+    const sharedRooms = getSharedPeerChatRooms(info.topics, this.discoveryKeys)
+    const hasTopics = Array.isArray(info.topics)
+      ? info.topics.length > 0
+      : !!info.topics?.length
+    // Found under one of our topics, or arriving without any (inbound ones
+    // can). Either way it starts in no room: anyone can announce a topic, so
+    // rooms open one by one as the peer proves it holds their keys.
+    if (this.closed || (sharedRooms.length === 0 && (hasTopics || this.discoveryKeys.size === 0))) return
+
+    const peer = this.newPeer(connection)
     this.pendingPeers.set(connection, peer)
 
     const transport = attachPeerChatTransport(
@@ -1392,6 +1552,10 @@ export class PeerChatService {
       peer.handshake = true
       // A newer build passes messages on and takes them passed on. See passOn.
       if (message.pass === true) peer.passes = true
+      // Takes ids first, and asks for what it lacks. See passOn.
+      if (message.have === true) peer.haves = true
+      // And takes a room's move to a new key. See room-move.mjs.
+      if (message.move === true) peer.moves = true
       const added = []
       for (const entry of message.rooms.slice(0, MAX_ANNOUNCED_TOPICS)) {
         const topic = typeof entry?.topic === 'string' ? entry.topic.toLowerCase() : ''
@@ -1400,10 +1564,20 @@ export class PeerChatService {
         const roomKey = this.discoveryKeys.get(topic)
         if (!roomKey || peer.rooms.includes(roomKey) || added.includes(roomKey)) continue
         if (!checkRoomProof(roomKey, peer.connection.handshakeHash, peer.key, entry.proof)) continue
+        // A room that moved opens only to a key that proved it here before.
+        // Held here in case they prove to be another of this person's
+        // devices once their profile comes.
+        if (this.rooms.get(roomKey)?.movedTo && !this.movedRoomWelcomes(roomKey, peer)) {
+          (peer.closedRooms ||= new Set()).add(roomKey)
+          continue
+        }
         added.push(roomKey)
       }
       if (!added.length) return
       peer.rooms.push(...added)
+      // Proved on this connection: the one way into the list of who is handed
+      // a move. See noteKnown.
+      for (const roomKey of added) this.noteKnown(roomKey, peer.key)
       // Our proofs before anything of ours about these rooms, or the other side
       // drops our join as coming from outside the room. Every time, not once:
       // one of these may be a room we joined after our last proofs went out.
@@ -1415,6 +1589,8 @@ export class PeerChatService {
         this.sendPresence(peer)
       }
       for (const roomKey of added) this.shareRoom(peer, roomKey)
+      // Back after a room moved: where it went.
+      for (const roomKey of added) this.sendMoves(peer, roomKey)
       if (peer.active) this.rememberPeerPresence(peer)
       this.bumpVersion()
       return
@@ -1451,6 +1627,14 @@ export class PeerChatService {
           // And a chat it asked for before it had proved itself here.
           for (const pending of this.listPendingDirectMessages()) {
             if (pending.fromKey && pending.fromKey === peer.key) this.acceptSiblingDirectMessage(pending.roomKey)
+          }
+          // And where any room it is still in under an old key went.
+          for (const roomKey of [...(peer.closedRooms || [])]) {
+            if (!this.movedRoomWelcomes(roomKey, peer)) continue
+            peer.closedRooms.delete(roomKey)
+            if (!peer.rooms.includes(roomKey)) peer.rooms.push(roomKey)
+            this.shareRoom(peer, roomKey)
+            this.sendMoves(peer, roomKey)
           }
         }
       }
@@ -1543,12 +1727,33 @@ export class PeerChatService {
     // name rooms by topic now, which anyone can know. Both sides send their
     // proofs before their joins, so a join never arrives ahead of its proof.
     const roomKey = normalizePeerChatRoomKey(message.roomKey)
-    if (!roomKey || !peer.rooms.includes(roomKey) || !this.rooms.has(roomKey)) return
+    if (!roomKey || !this.rooms.has(roomKey)) return
+    // Who made a room, shown by the secret behind its key, counts from anyone
+    // who proved they hold the key, even somebody this phone keeps out of the
+    // room. While it has the creator only on somebody's word, that somebody
+    // may have removed the very people who can set it right, or moved the room
+    // away from them. See replaceCreator.
+    if (message.type === 'room-meta' && message.creatorProof && !this.creatorKeyProven(roomKey) &&
+        (peer.closedRooms?.has(roomKey) || (peer.rooms.includes(roomKey) && this.isPeerRemovedFromRoom(roomKey, peer)))) {
+      if (!this.consumeControlRate(peer)) return
+      if (this.takeCreatorProof(roomKey, this.rooms.get(roomKey), message.creatorKey, message.creatorProof, peer)) this.schedulePersist()
+    }
+    if (!peer.rooms.includes(roomKey)) return
     if (this.moderator.isKicked(peer.id, roomKey)) return
 
-    // Removed by whoever made the room. Nothing they send counts, including
-    // the removal list itself, so this sits above the handlers below.
+    // Removed by whoever made the room. Nothing else they send counts,
+    // including the removal list itself, so this sits above the handlers
+    // below.
     if (this.isPeerRemovedFromRoom(roomKey, peer)) return
+
+    // Where a room went when somebody was removed from it, from anyone in it.
+    // Each move is checked against the creator key of the room it leaves. See
+    // room-move.mjs.
+    if (message.type === 'room-moved') {
+      if (!this.consumeControlRate(peer) || !Array.isArray(message.moves)) return
+      this.takeMoves(roomKey, message.moves, peer)
+      return
+    }
 
     // A room's current key, from somebody in it. Only a room whose key carries
     // the mark has a chain, so nobody can give an older room one. Taken once,
@@ -1607,25 +1812,28 @@ export class PeerChatService {
         const placeholder = `${roomKey.slice(0, 8)}...`
         const incomingName = normalizePeerChatRoomName(message.name, '')
         let changed = false
-        if (room.name === placeholder && incomingName && incomingName !== placeholder) {
+        // Once the creator's signed details are here, they are what the room
+        // says, and nothing unsigned changes it. See room-details.mjs.
+        const signedHeld = Boolean(normalizeRoomDetails(room.details))
+        if (!signedHeld && room.name === placeholder && incomingName && incomingName !== placeholder) {
           room.name = incomingName
           changed = true
         }
-        if (!room.bio) {
+        if (!signedHeld && !room.bio) {
           const bio = normalizePeerChatBio(message.bio)
           if (bio) {
             room.bio = bio
             changed = true
           }
         }
-        if (!room.link) {
+        if (!signedHeld && !room.link) {
           const link = normalizePeerChatLink(message.link)
           if (link) {
             room.link = link
             changed = true
           }
         }
-        if (!room.avatar) {
+        if (!signedHeld && !room.avatar) {
           const avatar = normalizePeerChatAvatar(message.avatar)
           if (avatar) {
             room.avatar = avatar
@@ -1644,8 +1852,14 @@ export class PeerChatService {
           room.createdBy = message.createdBy.slice(0, 200)
           changed = true
         }
-        // Only from the creator, and only once. The connection is what proves
-        // it: whoever is announcing has to be the key they are announcing.
+        const knewCreator = Boolean(resolvePeerChatCreatorKey(roomKey, room.creatorKey))
+        // From anyone, with the secret that made the room's key out of the
+        // creator's, which also replaces a creator taken on somebody's word.
+        // See room-move.mjs.
+        if (this.takeCreatorProof(roomKey, room, message.creatorKey, message.creatorProof, peer)) changed = true
+        // Otherwise only from the creator, and only once. The connection is
+        // what proves it: whoever is announcing has to be the key they are
+        // announcing.
         if (acceptsPeerChatCreatorKey({
           roomKey,
           storedKey: room.creatorKey,
@@ -1656,14 +1870,29 @@ export class PeerChatService {
           room.creatorKey = normalizePeerChatCreatorKey(message.creatorKey)
           changed = true
         }
-        if (!room.createdByName) {
+        if (!knewCreator && resolvePeerChatCreatorKey(roomKey, room.creatorKey) && this.learnedCreator(roomKey, peer)) {
+          changed = true
+        }
+        // The creator's name, from the creator's own connection and nobody
+        // else's: anyone could name anybody.
+        if (isPeerChatRoomCreator({ roomKey, storedKey: room.creatorKey, connectionKey: peer.key })) {
           const creatorName = normalizeMemberName(message.createdByName)
-          if (creatorName) {
+          if (creatorName && creatorName !== room.createdByName) {
             room.createdByName = creatorName
             changed = true
           }
         }
-        if (message.moderation) {
+        if (message.details && this.takeRoomDetails(roomKey, room, message.details, message.avatar)) {
+          changed = true
+          // On to everyone else in the room, as they came.
+          this.broadcastRoomMeta(roomKey, peer)
+        } else if (message.moderation && !normalizeRoomDetails(room.details) && isPeerChatRoomCreator({
+          roomKey,
+          storedKey: room.creatorKey,
+          connectionKey: peer.key
+        })) {
+          // Unsigned, as an older creator sends them, the room's settings count
+          // only from the creator's own connection.
           const moderation = normalizePeerChatModeration(message.moderation)
           if (JSON.stringify(moderation) !== JSON.stringify(room.moderation)) {
             room.moderation = moderation
@@ -1718,11 +1947,26 @@ export class PeerChatService {
     // A message somebody passed on, in a wrapper an older build drops. Only a
     // signed one counts, and it is its author's, not the sender's.
     if (message.type === 'pass') {
-      if (!this.consumePassRate(peer)) return
       const inner = message.m
       if (!inner || typeof inner !== 'object' || Array.isArray(inner)) return
+      // One this phone asked for comes outside the budget for the ones nobody
+      // asked for, once from each neighbour asked. It stops being asked for
+      // only once a copy that checks out is kept, so a forged answer does not
+      // end the asking. See passOn.
+      const wanted = isMessageId(inner.id) ? this.wantedIds.get(inner.id) : null
+      const asked = Boolean(wanted) && wanted.sources.includes(peer) && !wanted.answered?.has(peer)
+      if (!asked && !this.consumePassRate(peer)) return
+      if (asked) (wanted.answered ||= new Set()).add(peer)
       if (inner.type === 'reaction') await this.receiveReaction(peer, roomKey, inner, 'pass')
       else if (inner.type === undefined) await this.receiveChatMessage(peer, roomKey, inner, 'pass')
+      return
+    }
+
+    // Ids a neighbour has, and ids a neighbour asks for. See passOn.
+    if (message.type === 'have' || message.type === 'want') {
+      if (!Array.isArray(message.ids)) return
+      if (message.type === 'have') this.takeHaves(peer, roomKey, message.ids)
+      else this.answerWants(peer, roomKey, message.ids)
       return
     }
 
@@ -1829,11 +2073,20 @@ export class PeerChatService {
     if (!normalizedMessage) return
     const source = signed ? signed.header : message
     const sn = normalizeMemberName(source.sn) || (via === 'live' ? peer.username : '') || authorId
-    const moderation = via === 'sync'
-      ? checkPeerChatContent(normalizedMessage, this.moderationFor(room))
-      : this.moderator.checkMessage(authorId, roomKey, normalizedMessage, {
-        settings: this.moderationFor(room)
-      })
+    const settings = this.moderationFor(room)
+    const check = (text, options = {}) => via === 'sync'
+      ? checkPeerChatContent(text, settings)
+      : this.moderator.checkMessage(authorId, roomKey, text, { settings, ...options })
+    let moderation = check(normalizedMessage)
+    // A file's name shows in the chat list, a search and a notification, so
+    // in a group it goes through the room's filters as words do, counted once
+    // for spam with them. A direct message skips them (moderationFor). In a
+    // room whose keys rotate the name is inside the body.
+    const named = normalizePeerChatAttachment({
+      message: normalizedMessage,
+      fileName: decodedPayload.fileName || source.fileName
+    })
+    if (named && !moderation.flagged && moderation.allowed !== false) moderation = check(named.fileName, { checkSpam: false })
     if (moderation.flagged || moderation.allowed === false) {
       await this.appendModerationNotice(roomKey, message.id, via === 'live' ? peer : { id: authorId, username: sn }, {
         action: moderation.action || 'warn',
@@ -1882,13 +2135,151 @@ export class PeerChatService {
   // A copy a neighbour already has stops at its first check, so a message
   // crosses the room in a few steps. It goes in a wrapper an older build
   // drops, and only to peers whose handshake said they take it.
+  //
+  // Ids first: to a peer whose handshake said it takes them (have: true), only
+  // the message's id goes, in a batch, and the peer asks for the message itself
+  // if it does not have it yet (want), from whichever neighbour told it first.
+  // Sending the whole message on every connection meant a device took in a copy
+  // from each of its connections, about a hundred in a big room. Now it takes
+  // the message once, and an id from the rest. An older build gets the whole
+  // message as before.
   passOn (roomKey, entry, fromPeer) {
     if (!entry?.as) return
+    this.rememberPass(roomKey, entry)
     const frame = { type: 'pass', roomKey, m: entry }
     for (const peer of this.peers.values()) {
       if (peer === fromPeer || !peer.passes || !peer.rooms.includes(roomKey)) continue
       if (peer.key === entry.ak || this.isPeerRemovedFromRoom(roomKey, peer)) continue
+      if (peer.haves) {
+        if (!peer.heardIds?.has(entry.id)) this.announceId(peer, roomKey, entry.id)
+        continue
+      }
       this.sendToPeer(peer, frame)
+    }
+  }
+
+  // Kept for ten minutes, as long as a message is passed on at all, for anyone
+  // who asks for it by id.
+  rememberPass (roomKey, entry) {
+    const now = Date.now()
+    this.recentPasses.delete(entry.id)
+    this.recentPasses.set(entry.id, { roomKey, entry, at: now })
+    for (const [id, kept] of this.recentPasses) {
+      if (this.recentPasses.size <= MAX_REMEMBERED_PASSES && now - kept.at < MAX_PASSED_MESSAGE_AGE_MS) break
+      this.recentPasses.delete(id)
+    }
+  }
+
+  announceId (peer, roomKey, id) {
+    if (!peer.haveQueue) peer.haveQueue = new Map()
+    const ids = peer.haveQueue.get(roomKey) || []
+    ids.push(id)
+    peer.haveQueue.set(roomKey, ids)
+    if (peer.haveTimer) return
+    peer.haveTimer = setTimeout(() => {
+      peer.haveTimer = null
+      const queue = peer.haveQueue
+      peer.haveQueue = new Map()
+      if (peer.connection.destroyed || this.closed) return
+      for (const [key, list] of queue) {
+        for (let index = 0; index < list.length; index += MAX_IDS_PER_FRAME) {
+          this.sendToPeer(peer, { type: 'have', roomKey: key, ids: list.slice(index, index + MAX_IDS_PER_FRAME) })
+        }
+      }
+    }, HAVE_BATCH_MS)
+    peer.haveTimer.unref?.()
+  }
+
+  // A budget of ids per connection a minute, for what neighbours say they have
+  // and what they ask for.
+  consumeIdRate (peer, field, count, max) {
+    const now = Date.now()
+    if (!peer[field] || now >= peer[field].resetsAt) peer[field] = { count: 0, resetsAt: now + LIVE_RATE_WINDOW_MS }
+    if (peer[field].count + count > max) return false
+    peer[field].count += count
+    return true
+  }
+
+  // Ids a neighbour has: anything new is asked for, from the first one to say
+  // so, and the rest are kept as the next to ask.
+  takeHaves (peer, roomKey, ids) {
+    const list = ids.filter(isMessageId).slice(0, MAX_IDS_PER_FRAME)
+    if (!list.length || !this.consumeIdRate(peer, 'haveRate', list.length, MAX_HAVE_IDS_PER_WINDOW)) return
+    if (!peer.heardIds) peer.heardIds = new Set()
+    const seen = this.seenIds.get(roomKey)
+    const ask = []
+    const now = Date.now()
+    for (const id of list) {
+      peer.heardIds.add(id)
+      if (peer.heardIds.size > MAX_IDS_HEARD_PER_PEER) peer.heardIds.delete(peer.heardIds.values().next().value)
+      if (seen?.has(id)) continue
+      const wanted = this.wantedIds.get(id)
+      if (wanted) {
+        if (!wanted.sources.includes(peer)) wanted.sources.push(peer)
+        continue
+      }
+      if (this.wantedIds.size >= MAX_WANTED) continue
+      // Within what one connection and one room may have waiting, so neither
+      // crowds out the rest.
+      const inRoom = this.wantedPerRoom.get(roomKey) || 0
+      if ((peer.wanting || 0) >= MAX_WANTED_PER_CONNECTION || inRoom >= MAX_WANTED_PER_ROOM) continue
+      this.wantedIds.set(id, { roomKey, sources: [peer], asked: 0, askedAt: now, since: now })
+      peer.wanting = (peer.wanting || 0) + 1
+      this.wantedPerRoom.set(roomKey, inRoom + 1)
+      ask.push(id)
+    }
+    if (ask.length) this.sendToPeer(peer, { type: 'want', roomKey, ids: ask })
+    if (this.wantedIds.size && !this.wantTimer) {
+      this.wantTimer = setInterval(() => this.retryWants(), 1000)
+      this.wantTimer.unref?.()
+    }
+  }
+
+  // A message asked for that has not come: the next neighbour that has it is
+  // asked, until none is left or it has been too long.
+  retryWants () {
+    const now = Date.now()
+    for (const [id, wanted] of this.wantedIds) {
+      if (this.seenIds.get(wanted.roomKey)?.has(id) || now - wanted.since > WANT_GIVE_UP_MS) {
+        this.forgetWanted(id, wanted)
+        continue
+      }
+      if (now - wanted.askedAt < WANT_RETRY_MS) continue
+      let next = wanted.asked + 1
+      while (next < wanted.sources.length && (wanted.sources[next].connection.destroyed || !wanted.sources[next].rooms.includes(wanted.roomKey))) next += 1
+      if (next >= wanted.sources.length) {
+        this.forgetWanted(id, wanted)
+        continue
+      }
+      wanted.asked = next
+      wanted.askedAt = now
+      this.sendToPeer(wanted.sources[next], { type: 'want', roomKey: wanted.roomKey, ids: [id] })
+    }
+    if (!this.wantedIds.size && this.wantTimer) {
+      clearInterval(this.wantTimer)
+      this.wantTimer = null
+    }
+  }
+
+  // An id no longer waited for, off the count of the connection that first
+  // had it, which is the one that put it there, and of its room.
+  forgetWanted (id, wanted) {
+    this.wantedIds.delete(id)
+    const first = wanted.sources[0]
+    if (first?.wanting > 0) first.wanting -= 1
+    const left = (this.wantedPerRoom.get(wanted.roomKey) || 0) - 1
+    if (left > 0) this.wantedPerRoom.set(wanted.roomKey, left)
+    else this.wantedPerRoom.delete(wanted.roomKey)
+  }
+
+  // Messages a neighbour asked this phone for, which it passed on lately.
+  answerWants (peer, roomKey, ids) {
+    const list = ids.filter(isMessageId).slice(0, MAX_IDS_PER_FRAME)
+    if (!list.length || !this.consumeIdRate(peer, 'wantRate', list.length, MAX_WANT_IDS_PER_WINDOW)) return
+    for (const id of list) {
+      const kept = this.recentPasses.get(id)
+      if (!kept || kept.roomKey !== roomKey) continue
+      this.sendToPeer(peer, { type: 'pass', roomKey, m: kept.entry })
     }
   }
 
@@ -2145,7 +2536,10 @@ export class PeerChatService {
       if (proof) rooms.push({ topic, proof })
       if (rooms.length === MAX_ANNOUNCED_TOPICS) break
     }
-    this.sendToPeer(peer, { type: 'topics', rooms, pass: true })
+    // pass: takes messages passed on. have: takes their ids first and asks
+    // for what it lacks. move: takes a room's move to a new key. An older
+    // build ignores all three and never gets any of them.
+    this.sendToPeer(peer, { type: 'topics', rooms, pass: true, have: true, move: true })
   }
 
   sendProfile (peer) {
@@ -2196,7 +2590,8 @@ export class PeerChatService {
    * blocked, which would only send them a second request.
    */
   sharedRoomEntry (room) {
-    if (!room || this.isRemovedFromRoom(room.roomKey)) return null
+    // A room that moved is where it went now.
+    if (!room || room.movedTo || this.isRemovedFromRoom(room.roomKey)) return null
     if (room.isDM && (room.pendingAcceptance || room.rejected || room.blockedByPeer || !room.dmWith)) return null
     return {
       roomKey: room.roomKey,
@@ -2210,6 +2605,7 @@ export class PeerChatService {
       createdBy: room.createdBy || (room.isHost ? this.localId : ''),
       createdByName: room.createdByName || '',
       creatorKey: room.creatorKey || '',
+      ...(this.creatorProofFor(room.roomKey) && { creatorProof: this.creatorProofFor(room.roomKey) }),
       // The person's other device reads the room's history as this one does.
       ...(this.roomChainFor(room.roomKey) && { chain: this.roomChainFor(room.roomKey) })
     }
@@ -2271,11 +2667,15 @@ export class PeerChatService {
       const existing = this.rooms.get(room.roomKey)
       if (existing) {
         if (room.creatorKey && !existing.creatorKey) existing.creatorKey = room.creatorKey
+        // With the secret behind the room key, as from anyone in the room: it
+        // fills in what was missing, or replaces a creator this phone took on
+        // somebody's word.
+        if (room.creatorProof) this.takeCreatorProof(room.roomKey, existing, room.creatorKey, room.creatorProof)
         if (room.chain && roomRotates(room.roomKey)) existing.chain = earlierKeyChain(existing.chain, room.chain)
         continue
       }
       if (this.leftRooms.has(room.roomKey)) continue
-      if (this.rooms.size >= MAX_ROOMS) break
+      if (this.activeRoomCount() >= MAX_ROOMS) break
       const now = Date.now()
       this.rooms.set(room.roomKey, {
         roomKey: room.roomKey,
@@ -2296,6 +2696,7 @@ export class PeerChatService {
         joinedAt: room.joinedAt || room.createdAt || now,
         createdBy: room.createdBy,
         creatorKey: room.creatorKey,
+        ...(room.creatorProof && checkCreatorProof(room.roomKey, room.creatorKey, room.creatorProof) && { creatorProof: room.creatorProof }),
         bans: [],
         ...(room.chain && roomRotates(room.roomKey) && { chain: room.chain }),
         createdByName: normalizeMemberName(room.createdByName),
@@ -2314,8 +2715,14 @@ export class PeerChatService {
   // Rooms go only to a peer whose profile proved, on its own connection, that
   // it is another of this person's devices.
   sendRoomsToSibling (peer, rooms) {
-    if (!rooms.length || !peer?.sibling) return
-    this.sendToPeer(peer, { type: 'link-rooms', rooms })
+    if (!peer?.sibling) return
+    // Never a room that device was removed from, under its key now or one from
+    // before a move: a stolen phone removed from a room would get the new key
+    // from its owner's other devices.
+    const allowed = rooms.filter((entry) =>
+      ![...this.roomsBefore(entry.roomKey), entry.roomKey].some((key) => this.isPeerRemovedFromRoom(key, peer)))
+    if (!allowed.length) return
+    this.sendToPeer(peer, { type: 'link-rooms', rooms: allowed })
   }
 
   // A room joined here goes to this person's other devices that are online.
@@ -2378,6 +2785,11 @@ export class PeerChatService {
   sendRoomMeta (peer, roomKey) {
     const room = this.rooms.get(roomKey)
     if (!room || (!room.isHost && room.name === `${roomKey.slice(0, 8)}...`)) return
+    // Without the secret that made the room's key, a creator key counts only
+    // from the creator's own connection, so only the creator sends one. With
+    // it, anyone in the room can, and the other side checks it against the key.
+    const creatorProof = this.creatorProofFor(roomKey)
+    const details = this.roomDetailsFor(roomKey)
     this.sendToPeer(peer, {
       type: 'room-meta',
       roomKey,
@@ -2385,14 +2797,598 @@ export class PeerChatService {
       bio: room.bio || '',
       link: room.link || '',
       avatar: room.avatar || null,
+      // The creator's signed details, passed on exactly as they came. An older
+      // build ignores them and reads the fields around them.
+      ...(details && { details }),
       createdAt: normalizePeerChatReadTimestamp(room.createdAt),
       createdBy: room.createdBy || (room.isHost ? this.localId : ''),
-      // Announced by the creator alone. A peer passing this along cannot prove
-      // it, so the other side will not take it from them.
-      creatorKey: room.isHost ? this.localKey : '',
+      creatorKey: room.isHost ? this.localKey : creatorProof ? resolvePeerChatCreatorKey(roomKey, room.creatorKey) : '',
+      ...(creatorProof && { creatorProof }),
       createdByName: room.createdByName || (room.isHost ? this.myName() : ''),
       moderation: normalizePeerChatModeration(room.moderation)
     })
+  }
+
+  // Room details to everyone else in the room, for the creator key this phone
+  // just learned, so it goes on through the room.
+  broadcastRoomMeta (roomKey, exceptPeer = null) {
+    for (const peer of this.peers.values()) {
+      if (peer === exceptPeer || !peer.rooms.includes(roomKey)) continue
+      this.sendRoomMeta(peer, roomKey)
+    }
+  }
+
+  // The secret that shows who made a room, when this phone holds one that
+  // checks out against the creator key it trusts. See room-move.mjs.
+  creatorProofFor (roomKey) {
+    const room = this.rooms.get(roomKey)
+    const creatorKey = resolvePeerChatCreatorKey(roomKey, room?.creatorKey)
+    return room?.creatorProof && creatorKey && checkCreatorProof(roomKey, creatorKey, room.creatorProof)
+      ? room.creatorProof
+      : ''
+  }
+
+  // Whether this phone's creator key for a room cannot be wrong: pinned in the
+  // app, or shown by the secret that made the room's key out of it. Two keys
+  // cannot both make one room key. Any other creator key is somebody's word
+  // for it, and a proof replaces it. See takeCreatorProof.
+  creatorKeyProven (roomKey) {
+    return Boolean(PINNED_PEERCHAT_CREATOR_KEYS[roomKey]) || Boolean(this.creatorProofFor(roomKey))
+  }
+
+  // The creator key from anyone in the room, when it comes with the secret
+  // that made the room's key out of it. Before this, only the creator's own
+  // connection could say who made a room, so in a room bigger than one
+  // device's connections most members never learned it, and dropped every
+  // removal list as unchecked. A proof always wins over a creator key this
+  // phone has only on somebody's word: the first member to claim a room used
+  // to keep it for good. True when the room learned something.
+  takeCreatorProof (roomKey, room, announcedKey, proof, fromPeer = null) {
+    if (room.isDM) return false
+    const key = normalizePeerChatCreatorKey(announcedKey)
+    if (!key || !checkCreatorProof(roomKey, key, proof)) return false
+    const held = resolvePeerChatCreatorKey(roomKey, room.creatorKey)
+    if (held && held !== key) {
+      if (this.creatorKeyProven(roomKey)) return false
+      this.replaceCreator(roomKey, room, key, proof, fromPeer)
+      return true
+    }
+    let changed = false
+    if (!room.creatorKey) {
+      room.creatorKey = key
+      changed = true
+    }
+    if (!this.creatorProofFor(roomKey)) {
+      room.creatorProof = proof.toLowerCase()
+      changed = true
+    }
+    // The short id is a label, and whoever said it first may have been wrong.
+    if (room.createdBy !== key.slice(0, 8)) {
+      room.createdBy = key.slice(0, 8)
+      changed = true
+    }
+    return changed
+  }
+
+  // Somebody was taken for the room's creator on their word, and the secret
+  // behind the room's key names somebody else. Whatever was checked against
+  // the wrong key goes: the signed details and the filters they set, the
+  // removal list, the creator's name, and any move this room followed. The
+  // real creator's details are then taken whatever their version, since fake
+  // ones could carry any version at all. What waited meanwhile is checked
+  // again under the right key.
+  replaceCreator (roomKey, room, key, proof, fromPeer = null) {
+    room.creatorKey = key
+    room.creatorProof = proof.toLowerCase()
+    room.createdBy = key.slice(0, 8)
+    room.createdByName = ''
+    delete room.details
+    room.moderation = { ...DEFAULT_PEERCHAT_MODERATION }
+    room.bans = []
+    room.bansSigned = { v: 0, sig: '' }
+    this.removedRooms.delete(roomKey)
+    const hop = normalizeMove(room.movedTo)
+    const undo = Boolean(hop) && !checkMove({ fromTopic: wireTopic(roomKey), creatorKey: key, move: hop, topicOf: wireTopic })
+    if (undo) this.undoMove(roomKey)
+    this.learnedCreator(roomKey, fromPeer)
+    // Only now, with the real creator's removals in place, so nobody they
+    // removed is handed the room on the way.
+    if (undo) this.letInHeldPeers(roomKey)
+    this.persistNow()
+    this.bumpVersion()
+  }
+
+  // A creator key this phone did not have before, or had wrong: a removal
+  // list or details that waited for it are checked now, and the room's details
+  // go on through the room when they carry the secret. True when the details
+  // changed.
+  learnedCreator (roomKey, exceptPeer = null) {
+    this.applyPendingBans(roomKey)
+    const changed = this.applyPendingDetails(roomKey)
+    if (this.creatorProofFor(roomKey)) this.broadcastRoomMeta(roomKey, exceptPeer)
+    return changed
+  }
+
+  // Who made a room, as an invite says. The key is taken when this phone has
+  // none, and with the secret behind the room's key it counts as that secret
+  // does from anyone: it replaces a key taken on somebody's word. True when
+  // the room learned something.
+  takeInviteCreator (roomKey, { creatorKey, creatorProof }) {
+    const room = this.rooms.get(roomKey)
+    if (!room || room.isDM) return false
+    const knew = Boolean(resolvePeerChatCreatorKey(roomKey, room.creatorKey))
+    let took = false
+    if (creatorProof) {
+      took = this.takeCreatorProof(roomKey, room, creatorKey, creatorProof)
+    } else if (!knew) {
+      room.creatorKey = creatorKey
+      room.createdBy = creatorKey.slice(0, 8)
+      took = true
+    }
+    if (!took) return false
+    if (!knew) this.learnedCreator(roomKey)
+    this.schedulePersist()
+    this.bumpVersion()
+    return true
+  }
+
+  // A signed removal list that came before this phone knew who made the room,
+  // checked now that it does. It used to be dropped, and the next one came
+  // only with the next removal. One that does not check out under a creator
+  // key this phone has only on somebody's word keeps waiting, for a proof that
+  // may name somebody else.
+  applyPendingBans (roomKey, exceptPeer = null) {
+    const room = this.rooms.get(roomKey)
+    const pending = room?.pendingBans
+    const creatorKey = resolvePeerChatCreatorKey(roomKey, room?.creatorKey)
+    if (!pending || !creatorKey) return
+    const signed = normalizeSignedRemovals(pending.signed)
+    if (!checkSignedRemovals({ topic: wireTopic(roomKey), creatorKey, bans: pending.bans, signed })) {
+      if (this.creatorKeyProven(roomKey)) delete room.pendingBans
+      return
+    }
+    delete room.pendingBans
+    if (signed.v <= normalizeSignedRemovals(room.bansSigned).v) return
+    this.applyRoomBans(roomKey, pending.bans)
+    room.bansSigned = signed
+    this.persistNow()
+    this.bumpVersion()
+    this.broadcastRoomBans(roomKey, exceptPeer)
+  }
+
+  /**
+   * A room's details, signed by the person who made it, so they can change
+   * them and everyone in the room takes the change. See room-details.mjs.
+   */
+
+  // This phone's signature on a room it made, over the details it has now.
+  signDetails (roomKey) {
+    const room = this.rooms.get(roomKey)
+    if (!room || room.isDM || !this.signingKeys || !this.isRoomCreator(roomKey)) return null
+    const details = signRoomDetails({
+      topic: wireTopic(roomKey),
+      v: nextDetailsVersion(room.details),
+      name: room.name || '',
+      bio: room.bio || '',
+      link: room.link || '',
+      avatar: room.avatar || '',
+      moderation: normalizePeerChatModeration(room.moderation),
+      keyPair: this.signingKeys
+    })
+    if (details) room.details = details
+    return details
+  }
+
+  // The signed details that go out with a room: the creator's, signed the
+  // first time if this phone made a room before any were.
+  roomDetailsFor (roomKey) {
+    const room = this.rooms.get(roomKey)
+    if (!room || room.isDM) return null
+    const held = normalizeRoomDetails(room.details)
+    if (held) return held
+    if (!this.signDetails(roomKey)) return null
+    this.schedulePersist()
+    return room.details
+  }
+
+  // Signed details from anyone in the room, taken when the creator signed them
+  // for this room and they are newer than the ones here. Before the creator
+  // key is known they wait, as a removal list does, and so do details that do
+  // not check out while this phone has the creator only on somebody's word: a
+  // proof may yet name somebody else, and details held under a key that may be
+  // wrong say nothing about which version is newest. True when anything
+  // changed.
+  takeRoomDetails (roomKey, room, raw, avatar) {
+    const details = normalizeRoomDetails(raw)
+    if (!details || room.isDM) return false
+    const held = normalizeRoomDetails(room.details)
+    const proven = this.creatorKeyProven(roomKey)
+    if (proven && held && held.v > details.v) return false
+    const creatorKey = resolvePeerChatCreatorKey(roomKey, room.creatorKey)
+    if (!creatorKey || !checkRoomDetails({ topic: wireTopic(roomKey), creatorKey, details })) {
+      if (proven) return false
+      const waiting = normalizeRoomDetails(room.pendingDetails?.details)
+      if (!waiting || waiting.v < details.v) room.pendingDetails = { details, avatar: normalizePeerChatAvatar(avatar) }
+      return false
+    }
+    if (held && held.v > details.v) return false
+    // The picture travels beside the details, so only one that matches what
+    // was signed is taken. These same details can bring it later from
+    // somebody else.
+    const picture = normalizePeerChatAvatar(avatar)
+    const pictureFits = Boolean(picture) && avatarHash(picture) === details.avatar
+    if (held && held.v === details.v) {
+      if (!details.avatar || !pictureFits || avatarHash(room.avatar || '') === details.avatar) return false
+      room.avatar = picture
+      return true
+    }
+    room.details = details
+    room.name = normalizePeerChatRoomName(details.name, room.name)
+    room.bio = normalizePeerChatBio(details.bio)
+    room.link = normalizePeerChatLink(details.link)
+    room.moderation = normalizePeerChatModeration(details.moderation)
+    if (!details.avatar) room.avatar = null
+    else if (pictureFits) room.avatar = picture
+    return true
+  }
+
+  // Signed details that came before this phone knew who made the room, or
+  // knew it for sure. Ones that still do not check out wait again, unless it
+  // knows for sure now.
+  applyPendingDetails (roomKey) {
+    const room = this.rooms.get(roomKey)
+    const pending = room?.pendingDetails
+    if (!pending || !resolvePeerChatCreatorKey(roomKey, room.creatorKey)) return false
+    delete room.pendingDetails
+    return this.takeRoomDetails(roomKey, room, pending.details, pending.avatar)
+  }
+
+  /**
+   * Rooms that move to a new key when somebody is removed. See room-move.mjs.
+   *
+   * The old room stays here, under its old key, for two things only: its
+   * history, shown with the new room's, and anyone who was offline when it
+   * moved, who hears where it went when they come back within 14 days, if
+   * they proved the room to this phone before. Nobody new is let in, and
+   * nothing is sent in it from here. After 14 days only its history is kept.
+   * A room a line of moves only passed through on the way here is a record
+   * and nothing more.
+   */
+
+  // Where a room's people are now: the end of its moves.
+  finalRoomKey (roomKey) {
+    let key = roomKey
+    for (let i = 0; i < MAX_MOVES; i += 1) {
+      const next = this.rooms.get(key)?.movedTo?.to
+      if (!next || !this.rooms.has(next)) return key
+      key = next
+    }
+    return key
+  }
+
+  // A room key as asked for: a room that moved answers as the room it went to,
+  // so a screen still showing the old one carries on in the new one, and a room
+  // dropped with a move that was not the creator's answers as the room it came
+  // from. See undoMove.
+  roomKeyFor (roomKey) {
+    const asked = normalizePeerChatRoomKey(roomKey)
+    const normalized = (!this.rooms.has(asked) && this.undoneMoves.get(asked)) || asked
+    return normalized && this.rooms.has(normalized) ? this.finalRoomKey(normalized) : normalized
+  }
+
+  // Where each room that moved went, for a screen still on an old key, and
+  // where each room dropped with a move that was not the creator's went back.
+  movedRoomsMap () {
+    const moved = {}
+    for (const room of this.rooms.values()) {
+      if (room.movedTo) moved[room.roomKey] = this.finalRoomKey(room.roomKey)
+    }
+    for (const [key, back] of this.undoneMoves) {
+      if (!this.rooms.has(key) && this.rooms.has(back)) moved[key] = this.finalRoomKey(back)
+    }
+    return moved
+  }
+
+  activeRoomCount () {
+    let count = 0
+    for (const room of this.rooms.values()) if (!room.movedTo) count += 1
+    return count
+  }
+
+  // The moves from a room to where its people are now, oldest first.
+  movesFrom (roomKey) {
+    const moves = []
+    let key = roomKey
+    for (let i = 0; i < MAX_MOVES; i += 1) {
+      const hop = normalizeMove(this.rooms.get(key)?.movedTo)
+      if (!hop) break
+      moves.push(hop)
+      key = hop.to
+    }
+    return moves
+  }
+
+  // The rooms a room moved from, oldest first, whose history is its own.
+  roomsBefore (roomKey) {
+    const before = []
+    let key = this.rooms.get(roomKey)?.movedFrom
+    for (let i = 0; i < MAX_MOVES && key && this.rooms.has(key); i += 1) {
+      before.unshift(key)
+      key = this.rooms.get(key).movedFrom
+    }
+    return before
+  }
+
+  // Somebody who proved the room on a connection to this phone, by key, with
+  // when this phone first saw them. Only that: anyone can sign a message with a
+  // spare key, so the authors of what is passed on or synced are not noted,
+  // or a member about to be removed could get a spare key handed the room
+  // after the move.
+  noteKnown (roomKey, key) {
+    const room = this.rooms.get(roomKey)
+    if (!room || room.isDM || room.movedTo || !key) return
+    if (!room.knownKeys) room.knownKeys = {}
+    if (noteKnownKey(room.knownKeys, key)) this.schedulePersist()
+  }
+
+  // Whether removing somebody moves this room: a room of people made here, not
+  // a direct message, and not one whose creator key ships with the app, since
+  // its key ships with the app too.
+  movesOnRemoval (roomKey) {
+    const room = this.rooms.get(roomKey)
+    return Boolean(room) && !room.isDM && !room.movedTo && !PINNED_PEERCHAT_CREATOR_KEYS[roomKey] &&
+      Boolean(this.signingKeys) && Boolean(this.localKey) && this.isRoomCreator(roomKey)
+  }
+
+  // Whether a moved room opens to this peer: a key that proved the room to this
+  // phone before it moved, or another of this person's own devices, and not
+  // removed. Anyone else, the person removed under a new key included, gets
+  // nothing.
+  movedRoomWelcomes (roomKey, peer) {
+    const room = this.rooms.get(roomKey)
+    const hop = normalizeMove(room?.movedTo)
+    if (!hop || !peer) return false
+    const final = this.finalRoomKey(roomKey)
+    if (this.isPeerRemovedFromRoom(roomKey, peer) || this.isPeerRemovedFromRoom(final, peer)) return false
+    return peer.sibling === true || knownBefore(room.knownKeys, peer.key, hop.at)
+  }
+
+  // Where a room went, to somebody in it who takes moves.
+  sendMoves (peer, roomKey) {
+    const moves = this.movesFrom(roomKey)
+    if (!peer?.moves || !moves.length) return
+    this.sendToPeer(peer, { type: 'room-moved', roomKey, moves })
+  }
+
+  // A move on to everyone else in the old room who proved it to this phone
+  // before it moved. Anyone else is let out of the old room on this side.
+  passMovesOn (roomKey, exceptPeer = null) {
+    for (const peer of this.peers.values()) {
+      if (peer === exceptPeer || !peer.rooms.includes(roomKey)) continue
+      if (this.movedRoomWelcomes(roomKey, peer)) this.sendMoves(peer, roomKey)
+      else peer.rooms = peer.rooms.filter((key) => key !== roomKey)
+    }
+  }
+
+  // The new room in place of the old one: everything this phone knew of the
+  // old one, the chain the move brought, and joined unless it is only on the
+  // way to another. False when there was nothing to do.
+  adoptMove (fromKey, hop, { join = true } = {}) {
+    const from = this.rooms.get(fromKey)
+    if (!from || from.movedTo) return false
+    from.movedTo = hop
+    const existing = this.rooms.get(hop.to)
+    if (existing) {
+      // Here already, from another of this person's devices.
+      if (!existing.movedFrom) existing.movedFrom = fromKey
+    } else {
+      const joinedAt = from.joinedAt || from.createdAt || Date.now()
+      const creatorKey = resolvePeerChatCreatorKey(fromKey, from.creatorKey)
+      this.rooms.set(hop.to, {
+        roomKey: hop.to,
+        name: from.name,
+        bio: from.bio || '',
+        link: from.link || '',
+        avatar: from.avatar || null,
+        isDM: false,
+        dmWith: null,
+        pendingAcceptance: false,
+        rejected: false,
+        isHost: from.isHost === true,
+        isPinned: from.isPinned === true,
+        isMuted: from.isMuted === true,
+        createdAt: from.createdAt || Date.now(),
+        joinedAt,
+        createdBy: from.createdBy || '',
+        creatorKey,
+        creatorProof: hop.proof,
+        chain: hop.chain,
+        movedFrom: fromKey,
+        bans: normalizePeerChatRoomBans(from.bans),
+        bansSigned: { v: normalizeSignedRemovals(from.bansSigned).v, sig: '' },
+        createdByName: from.createdByName || '',
+        moderation: normalizePeerChatModeration(from.moderation),
+        lastMessage: from.lastMessage || null,
+        unreadCount: from.unreadCount || 0,
+        unreadMentions: from.unreadMentions || 0,
+        lastReadTs: from.lastReadTs || 0,
+        // Members already, so the new room does not greet them again.
+        members: (from.members || []).map((member) => ({ ...member, joinedAt: member.joinedAt || joinedAt })),
+        // Whoever proved the old room here counts in the new one, so a later
+        // move reaches them too.
+        knownKeys: { ...(from.knownKeys || {}) }
+      })
+    }
+    from.unreadCount = 0
+    from.unreadMentions = 0
+    if (this.activeRoomKey === fromKey) this.activeRoomKey = hop.to
+    this.persistNow()
+    if (join) this.joinMovedRoom(hop)
+    this.bumpVersion()
+    return true
+  }
+
+  // The room a move ends in, joined, with a line in it saying so.
+  joinMovedRoom (hop) {
+    this.joinRoomNetwork(hop.to)
+      .then(async () => {
+        await this.appendMoveNotice(hop)
+        this.announceRoom(hop.to)
+      })
+      .catch((error) => console.warn(`[peerchat] Unable to join moved room ${hop.to.slice(0, 8)}: ${error.message}`))
+  }
+
+  async appendMoveNotice (hop) {
+    const id = `moved-${wireTopic(hop.to)}`
+    if (!this.feeds.has(hop.to) || !this.trackMessageId(hop.to, id)) return
+    try {
+      await this.appendEntry(hop.to, {
+        id,
+        type: 'system',
+        moderationNotice: true,
+        message: 'This room has a new key, so people removed from it cannot follow. Invites from before no longer work.',
+        ts: hop.at
+      })
+    } catch (error) {
+      console.warn('[peerchat] Unable to record a move:', error)
+    }
+  }
+
+  // Moves somebody in a room passed on: each checked against the creator key
+  // of the room it leaves and taken, until one does not check out, then passed
+  // on. Only the room at the end is joined. A room on the way gets a record, so
+  // the line from the old key to the new one holds, and nothing else: no feed,
+  // no swarm topic and no notice. A creator could otherwise have a phone join
+  // thirty-two rooms with one frame.
+  takeMoves (roomKey, moves, fromPeer) {
+    let key = roomKey
+    const taken = []
+    const made = new Set()
+    for (const raw of moves.slice(0, MAX_MOVES)) {
+      const room = this.rooms.get(key)
+      const hop = normalizeMove(raw)
+      if (!room || room.isDM || !hop) break
+      if (room.movedTo) {
+        if (room.movedTo.to !== hop.to) break
+        key = hop.to
+        continue
+      }
+      const creatorKey = resolvePeerChatCreatorKey(key, room.creatorKey)
+      if (!creatorKey || hop.at > Date.now() + MAX_MOVE_FUTURE_MS) break
+      if (!checkMove({ fromTopic: wireTopic(key), creatorKey, move: hop, topicOf: wireTopic })) break
+      // Removed here: not ours to follow, whoever passed it on.
+      if (this.isRemovedFromRoom(key)) break
+      // Ten moves an hour along the line at most, unless this phone made them.
+      // The rest wait, and come again with the line on the next connection.
+      if (creatorKey !== this.localKey && this.movesInLastHour(key) >= MAX_MOVES_PER_HOUR) break
+      // Made by the move before this one, and left at once: never joined.
+      if (made.has(key)) room.passedThrough = true
+      const fresh = !this.rooms.has(hop.to)
+      if (!this.adoptMove(key, hop, { join: false })) break
+      if (fresh) made.add(hop.to)
+      taken.push({ from: key, hop })
+      key = hop.to
+    }
+    if (!taken.length) return
+    this.joinMovedRoom(taken[taken.length - 1].hop)
+    // Each with every move from it to the end, now all of them are taken.
+    for (const { from } of taken) this.passMovesOn(from, fromPeer)
+  }
+
+  // How many moves the line of rooms leading to this one made in the last
+  // hour, by the time each move says it was made.
+  movesInLastHour (roomKey, now = Date.now()) {
+    let count = 0
+    for (const key of this.roomsBefore(roomKey)) {
+      if (this.rooms.get(key)?.movedTo?.at > now - MOVE_HOUR_MS) count += 1
+    }
+    return count
+  }
+
+  // A room that moved more than 14 days ago: whoever missed the move has had
+  // that long to come back and hear where it went.
+  movedLongAgo (room, now = Date.now()) {
+    const at = normalizeMove(room?.movedTo)?.at
+    return Boolean(at) && now - at > MOVED_ROOM_KEPT_MS
+  }
+
+  // Run every hour: a room that moved more than 14 days ago is left, its
+  // record and history kept for the room it went to.
+  leaveOldMovedRooms (now = Date.now()) {
+    for (const [roomKey, room] of this.rooms) {
+      if (!this.joinedRooms.has(roomKey) || !this.movedLongAgo(room, now)) continue
+      this.leaveRoomTopic(roomKey).catch(() => {})
+    }
+  }
+
+  // Out of a room's swarm topic, its feed still open for its history.
+  async leaveRoomTopic (roomKey) {
+    this.joinedRooms.delete(roomKey)
+    this.discoveryKeys.delete(wireTopic(roomKey))
+    for (const peer of this.peers.values()) {
+      peer.rooms = peer.rooms.filter((key) => key !== roomKey)
+      peer.closedRooms?.delete(roomKey)
+    }
+    this.bumpVersion()
+    await this.sdk.leave(derivePeerChatTopic(roomKey))
+  }
+
+  // A move this room followed that does not check out under the creator key it
+  // now knows to be right, so it came from whoever was wrongly taken for the
+  // creator. The rooms that line of moves made here go, as leaving them does,
+  // and nobody is told. Whoever was looking at one is back in this room.
+  undoMove (roomKey) {
+    const room = this.rooms.get(roomKey)
+    if (!room?.movedTo) return
+    const made = []
+    let from = roomKey
+    let next = normalizeMove(room.movedTo)?.to
+    for (let i = 0; i < MAX_MOVES && next && this.rooms.get(next)?.movedFrom === from; i += 1) {
+      made.push(next)
+      from = next
+      next = normalizeMove(this.rooms.get(next).movedTo)?.to
+    }
+    delete room.movedTo
+    const watched = made.includes(this.activeRoomKey)
+    for (const key of made) {
+      this.undoneMoves.delete(key)
+      this.undoneMoves.set(key, roomKey)
+      this.dropRoomLocally(key).catch(() => {})
+    }
+    while (this.undoneMoves.size > MAX_MOVED_ROOMS) this.undoneMoves.delete(this.undoneMoves.keys().next().value)
+    if (watched) this.activeRoomKey = roomKey
+  }
+
+  // Everyone held out of a room while it had moved, who proved it on their
+  // connection, let in now it has not.
+  letInHeldPeers (roomKey) {
+    for (const peer of this.peers.values()) {
+      if (!peer.closedRooms?.delete(roomKey) || peer.rooms.includes(roomKey)) continue
+      peer.rooms.push(roomKey)
+      this.noteKnown(roomKey, peer.key)
+      this.shareRoom(peer, roomKey)
+    }
+  }
+
+  // The creator's side of a removal: the room moves to a new key, made from
+  // this phone's, and everyone still in it is told.
+  moveRoom (roomKey) {
+    if (!this.movesOnRemoval(roomKey)) return ''
+    const { roomKey: next, creatorProof } = makeCreatorRoomKey(this.localKey)
+    const hop = signMove({
+      fromTopic: wireTopic(roomKey),
+      topicOf: wireTopic,
+      to: next,
+      proof: creatorProof,
+      chain: newKeyChain(),
+      at: Date.now(),
+      keyPair: this.signingKeys
+    })
+    if (!hop || !this.adoptMove(roomKey, hop)) return ''
+    // Signed again for the new room: a signature names the room it was made for.
+    if (this.signDetails(next)) this.schedulePersist()
+    this.passMovesOn(roomKey)
+    return next
   }
 
   // What a room's messages are checked against. directMessage is never stored
@@ -2700,14 +3696,17 @@ export class PeerChatService {
       : projectedRoomBytes
     this.roomStorageBytes.set(roomKey, measuredRoomBytes)
     this.totalStoredBytes += measuredRoomBytes - roomBytes
-    await this.updateLastMessage(roomKey, entry)
-    this.updateUnreadState(roomKey, entry)
+    // Something new in a room that moved, from somebody who has not moved
+    // yet, counts in the room it went to.
+    const shown = this.finalRoomKey(roomKey)
+    await this.updateLastMessage(roomKey, entry, shown)
+    this.updateUnreadState(roomKey, entry, shown)
     this.bumpVersion()
   }
 
-  updateUnreadState (roomKey, entry) {
-    const room = this.rooms.get(roomKey)
-    if (!room || this.activeRoomKey === roomKey) return
+  updateUnreadState (roomKey, entry, shown = roomKey) {
+    const room = this.rooms.get(shown)
+    if (!room || this.activeRoomKey === shown) return
 
     const sender = String(entry?.sender || '').toLowerCase()
     // What you wrote on another of your devices is not news to you.
@@ -2734,8 +3733,8 @@ export class PeerChatService {
     this.schedulePersist()
   }
 
-  async updateLastMessage (roomKey, suppliedEntry = null) {
-    const room = this.rooms.get(roomKey)
+  async updateLastMessage (roomKey, suppliedEntry = null, shown = roomKey) {
+    const room = this.rooms.get(shown)
     const feed = this.feeds.get(roomKey)
     if (!room || !feed || feed.length === 0) return
     if (suppliedEntry && this.isPeerBlocked(suppliedEntry.sender)) return
@@ -2765,7 +3764,9 @@ export class PeerChatService {
       room.lastMessage = {
         sender: message.sender,
         senderName: message.senderName,
-        message: message.message.slice(0, 120),
+        // A file's message is its hyper:// address, which says nothing in a
+        // chat list or a notification. See attachment-label.mjs.
+        message: message.fileName ? attachmentLabel(message.fileName).slice(0, 120) : message.message.slice(0, 120),
         timestamp: message.timestamp
       }
       this.schedulePersist()
@@ -2785,50 +3786,192 @@ export class PeerChatService {
     return null
   }
 
-  async readMessages (roomKey) {
+  async readMessages (roomKey, { limit } = {}) {
     const feed = this.feeds.get(roomKey)
-    if (!feed) return []
+    if (!feed) return { messages: [], hasOlder: false }
+    const wanted = Number.isSafeInteger(limit)
+      ? Math.min(MAX_HISTORY_MESSAGES, Math.max(MAX_RETURNED_MESSAGES, limit))
+      : MAX_RETURNED_MESSAGES
+
+    // With the history of the rooms it moved from, oldest first, read as far
+    // back as one room's always was, or further when more is asked for. A
+    // message from an older room keeps that room's key, which is what opens
+    // its files.
+    const sources = []
+    let budget = wanted * ENTRIES_PER_RETURNED_MESSAGE
+    let hasOlder = false
+    for (const key of [roomKey, ...this.roomsBefore(roomKey).reverse()]) {
+      const source = this.feeds.get(key)
+      if (!source) continue
+      if (budget <= 0) {
+        if (source.length > 0) hasOlder = true
+        continue
+      }
+      const take = Math.min(source.length, budget)
+      if (take < source.length) hasOlder = true
+      sources.unshift({ key, feed: source, from: source.length - take })
+      budget -= take
+    }
 
     const messages = []
     const reactions = new Map()
     const authors = new Map()
     const ids = new Set()
-    const firstIndex = Math.max(0, feed.length - MAX_RETURNED_ENTRIES)
-    for (let index = firstIndex; index < feed.length; index += 1) {
-      try {
-        const entry = await feed.get(index)
-        // A copy stored a second time, as earlier builds could after a
-        // restart, shows once, where it first came.
-        if (entry?.id) {
-          if (ids.has(entry.id)) continue
-          ids.add(entry.id)
-        }
-        this.collectEntryAuthor(authors, entry)
-        if (this.isPeerBlocked(entry?.sender)) continue
-        if (entry?.type === 'reaction') {
-          this.collectReaction(reactions, entry)
-          continue
-        }
-        // Every line this phone wrote about the room, who joined as well as the
-        // moderation notices. Only the notices used to come back, so a join
-        // was written into the room and never shown.
-        if (entry?.type === 'system') {
-          const notice = this.entryToSystemMessage(entry)
-          if (notice) messages.push(notice)
-          continue
-        }
-        if (!entry?.ct) continue
-        messages.push(this.entryToMessage(entry, roomKey))
-      } catch {}
+    for (const { key, feed: source, from } of sources) {
+      for (let index = from; index < source.length; index += 1) {
+        try {
+          const entry = await source.get(index)
+          // A copy stored a second time, as earlier builds could after a
+          // restart, shows once, where it first came.
+          if (entry?.id) {
+            if (ids.has(entry.id)) continue
+            ids.add(entry.id)
+          }
+          this.collectEntryAuthor(authors, entry)
+          if (this.isPeerBlocked(entry?.sender)) continue
+          if (entry?.type === 'reaction') {
+            this.collectReaction(reactions, entry)
+            continue
+          }
+          // Every line this phone wrote about the room, who joined as well as the
+          // moderation notices. Only the notices used to come back, so a join
+          // was written into the room and never shown.
+          if (entry?.type === 'system') {
+            const notice = this.entryToSystemMessage(entry)
+            if (notice) messages.push(notice)
+            continue
+          }
+          if (!entry?.ct) continue
+          const message = this.entryToMessage(entry, key)
+          messages.push(key === roomKey ? message : { ...message, roomKey: key })
+        } catch {}
+      }
     }
     this.rememberFeedAuthors(roomKey, authors)
-    return messages
-      .slice(-MAX_RETURNED_MESSAGES)
-      .map((message) => ({
-        ...message,
-        reactions: this.summarizeReactions(reactions.get(message.id))
-      }))
-      .sort((left, right) => left.timestamp - right.timestamp)
+    if (messages.length > wanted) hasOlder = true
+    return {
+      messages: messages
+        .slice(-wanted)
+        .map((message) => ({
+          ...message,
+          reactions: this.summarizeReactions(reactions.get(message.id))
+        }))
+        .sort((left, right) => left.timestamp - right.timestamp),
+      hasOlder
+    }
+  }
+
+  /**
+   * The chat list's search: the newest messages, in every chat on this phone,
+   * whose words or file name have the query in them. Only what is stored here
+   * is read, and nothing goes out to anyone, so a search tells nobody what was
+   * looked for.
+   *
+   * Each chat is searched as far back as MAX_PEERCHAT_SEARCHED_ENTRIES, and
+   * the text of what was opened is kept for the next search, which is the next
+   * letter typed. One search at a time, so two never open the same messages
+   * at once. See search.mjs.
+   */
+  searchMessages (request = {}) {
+    const run = this.searchQueue.then(() => this.runSearch(request))
+    this.searchQueue = run.catch(() => {})
+    return run
+  }
+
+  async runSearch ({ query, limit } = {}) {
+    const needle = normalizePeerChatSearchQuery(query)
+    if (!needle) return { results: [] }
+    const wanted = Number.isSafeInteger(limit) && limit > 0
+      ? Math.min(limit, MAX_PEERCHAT_SEARCH_RESULTS)
+      : MAX_PEERCHAT_SEARCH_RESULTS
+
+    const results = []
+    for (const room of [...this.rooms.values()]) {
+      // A room that moved is searched as part of the room it went to.
+      if (room.movedTo || !this.rooms.has(room.roomKey)) continue
+      const shown = this.roomName(room)
+      let found = 0
+      // A message stored in a room and in the one it moved from shows once.
+      const ids = new Set()
+      // Newest first: this room, then the ones it moved from.
+      for (const key of [room.roomKey, ...this.roomsBefore(room.roomKey).reverse()]) {
+        const texts = await this.searchTextsFor(key)
+        for (let index = texts.length - 1; index >= 0 && found < wanted; index -= 1) {
+          const text = texts[index]
+          if (this.isPeerBlocked(text.sender) || ids.has(text.id)) continue
+          if (!text.words.toLocaleLowerCase().includes(needle)) continue
+          ids.add(text.id)
+          found += 1
+          results.push({
+            roomKey: room.roomKey,
+            roomName: shown,
+            isDM: room.isDM === true,
+            id: text.id,
+            sender: text.sender,
+            senderName: text.senderName,
+            self: this.isOwnDevice(text.sender),
+            message: text.fileName ? attachmentLabel(text.fileName) : peerChatSearchSnippet(text.words, needle),
+            ...(text.fileName && { fileName: text.fileName }),
+            timestamp: text.timestamp
+          })
+        }
+        if (found >= wanted) break
+      }
+    }
+    results.sort((left, right) => right.timestamp - left.timestamp)
+    return { results: results.slice(0, wanted) }
+  }
+
+  // A feed's newest messages as text, oldest first, opened once and added to
+  // as the feed grows. Reactions and notices are left out.
+  async searchTextsFor (feedKey) {
+    const feed = this.feeds.get(feedKey)
+    if (!feed) return []
+    const floor = Math.max(0, feed.length - MAX_PEERCHAT_SEARCHED_ENTRIES)
+    let kept = this.searchTexts.get(feedKey)
+    if (!kept || kept.length > feed.length) {
+      this.forgetSearchTexts(feedKey)
+      kept = { length: floor, texts: [], characters: 0 }
+    }
+    for (let index = Math.max(floor, kept.length); index < feed.length; index += 1) {
+      try {
+        const entry = await feed.get(index)
+        if (!entry?.ct || entry.type === 'reaction' || entry.type === 'system') continue
+        const message = this.entryToMessage(entry, feedKey)
+        const words = message.fileName || message.message.slice(0, MAX_PEERCHAT_SEARCHED_CHARACTERS)
+        kept.texts.push({
+          index,
+          id: message.id,
+          sender: message.sender,
+          senderName: message.senderName,
+          words,
+          ...(message.fileName && { fileName: message.fileName }),
+          timestamp: message.timestamp
+        })
+        kept.characters += words.length
+      } catch {}
+    }
+    kept.length = feed.length
+    // What fell below the window as the feed grew.
+    while (kept.texts.length && kept.texts[0].index < floor) kept.characters -= kept.texts.shift().words.length
+    this.searchTextCharacters -= this.searchTexts.get(feedKey)?.counted || 0
+    if (this.searchTextCharacters + kept.characters > MAX_PEERCHAT_SEARCH_CACHE_CHARACTERS) {
+      // Too much to keep with the rest: this search uses it, and the next one
+      // opens it again.
+      this.searchTexts.delete(feedKey)
+      return kept.texts
+    }
+    kept.counted = kept.characters
+    this.searchTextCharacters += kept.counted
+    this.searchTexts.set(feedKey, kept)
+    return kept.texts
+  }
+
+  forgetSearchTexts (feedKey) {
+    const kept = this.searchTexts.get(feedKey)
+    if (!kept) return
+    this.searchTextCharacters -= kept.counted || 0
+    this.searchTexts.delete(feedKey)
   }
 
   collectEntryAuthor (authors, entry) {
@@ -2970,12 +4113,16 @@ export class PeerChatService {
     }
   }
 
+  // A direct chat with another of your devices is a chat with yourself.
+  roomName (room) {
+    return room.isDM && room.dmWith && this.isOwnDevice(room.dmWith) ? 'You' : room.name
+  }
+
   publicRoom (room) {
     const peerCount = this.countRoomPeers(room.roomKey)
     return {
       roomKey: room.roomKey,
-      // A direct chat with another of your devices is a chat with yourself.
-      name: room.isDM && room.dmWith && this.isOwnDevice(room.dmWith) ? 'You' : room.name,
+      name: this.roomName(room),
       bio: room.bio || '',
       link: room.link || '',
       avatar: room.avatar || null,
@@ -3004,8 +4151,22 @@ export class PeerChatService {
       lastReadTs: normalizePeerChatReadTimestamp(room.lastReadTs),
       members: this.listRoomMembers(room.roomKey),
       peerCount,
-      connectionState: this.getRoomConnectionState(room.roomKey, peerCount)
+      connectionState: this.getRoomConnectionState(room.roomKey, peerCount),
+      ...this.inviteCreator(room)
     }
+  }
+
+  // Who made a room, for its invite, so whoever joins from it knows from the
+  // start: the creator key, and the secret behind the room's key when this
+  // phone holds one that checks out. Never for a direct message, and never for
+  // P2P Republic, whose creator key ships with the app. The secret is as
+  // private as the room key. See app/peerchat/peerchat-invite.mjs.
+  inviteCreator (room) {
+    if (room.isDM || PINNED_PEERCHAT_CREATOR_KEYS[room.roomKey]) return {}
+    const key = resolvePeerChatCreatorKey(room.roomKey, room.creatorKey)
+    if (!key) return {}
+    const proof = this.creatorProofFor(room.roomKey)
+    return { creatorKey: key, ...(proof && { creatorProof: proof }) }
   }
 
   getRoomConnectionState (roomKey, peerCount = this.countRoomPeers(roomKey)) {
@@ -3153,7 +4314,7 @@ export class PeerChatService {
   // its message: only in a room whose messages use a chain, as only a device
   // that can read those knows to look for it.
   filesHaveOwnKeys (roomKey) {
-    return Boolean(this.roomChainFor(normalizePeerChatRoomKey(roomKey)))
+    return Boolean(this.roomChainFor(this.roomKeyFor(roomKey)))
   }
 
   // Sealing now: the hour's key, and the hour as e, in a room with a chain.
@@ -3270,6 +4431,20 @@ export class PeerChatService {
       return
     }
 
+    // Signed, but this phone does not know who made the room yet, or knows it
+    // only on somebody's word and the list does not check out under that:
+    // kept, newest only, and checked once it does know. A list held under a
+    // key that may be wrong says nothing about which version is newest. See
+    // applyPendingBans.
+    if (signed.sig && !this.creatorKeyProven(roomKey)) {
+      const pendingV = normalizeSignedRemovals(room.pendingBans?.signed).v
+      if (signed.v > pendingV && (creatorKey || signed.v > held.v)) {
+        room.pendingBans = { bans: normalizePeerChatRoomBans(bans), signed }
+        this.schedulePersist()
+      }
+      return
+    }
+
     // Unsigned, from an older build: only the creator, proven by the
     // connection rather than claimed in the payload.
     if (!isPeerChatRoomCreator({
@@ -3310,7 +4485,7 @@ export class PeerChatService {
 
   /** Drop anyone in the room who is no longer welcome in it. */
   async removeRoomMember ({ roomKey, peerId }) {
-    const normalized = normalizePeerChatRoomKey(roomKey)
+    const normalized = this.roomKeyFor(roomKey)
     const room = this.rooms.get(normalized)
     if (!room) throw new Error('PeerChat room not found.')
     if (room.isDM) throw new Error('There is nobody to remove from a direct message.')
@@ -3337,13 +4512,17 @@ export class PeerChatService {
     this.broadcastRoomBans(normalized)
     this.persistNow()
     this.bumpVersion()
+    // And the room moves to a new key for the people still in it, which the
+    // device removed never hears. See room-move.mjs.
+    const movedTo = this.moveRoom(normalized)
+    const shown = this.rooms.get(movedTo) || room
     // The room back, so the list on screen updates from the answer rather than
     // waiting on the next poll to notice.
-    return { ok: true, room: this.publicRoom(room), rooms: this.listRooms() }
+    return { ok: true, room: this.publicRoom(shown), rooms: this.listRooms(), ...(movedTo && { movedTo }) }
   }
 
   async restoreRoomMember ({ roomKey, peerId }) {
-    const normalized = normalizePeerChatRoomKey(roomKey)
+    const normalized = this.roomKeyFor(roomKey)
     const room = this.rooms.get(normalized)
     if (!room) throw new Error('PeerChat room not found.')
     if (!this.isRoomCreator(normalized)) {
@@ -3636,7 +4815,12 @@ export class PeerChatService {
         })
       }
 
-      const rooms = Array.isArray(parsed?.rooms) ? parsed.rooms.slice(0, MAX_ROOMS) : []
+      // Rooms that moved are kept apart from the limit on rooms.
+      const saved = Array.isArray(parsed?.rooms) ? parsed.rooms : []
+      const rooms = [
+        ...saved.filter((value) => !value?.movedTo).slice(0, MAX_ROOMS),
+        ...saved.filter((value) => value?.movedTo).slice(0, MAX_MOVED_ROOMS)
+      ]
       for (const value of rooms) {
         const roomKey = normalizePeerChatRoomKey(value?.roomKey)
         if (!roomKey) continue
@@ -3673,6 +4857,18 @@ export class PeerChatService {
             (value?.isHost === true && !isDM ? this.localKey : ''),
           bans: isDM ? [] : normalizePeerChatRoomBans(value?.bans),
           bansSigned: normalizeSignedRemovals(isDM ? null : value?.bansSigned),
+          ...(!isDM && /^[0-9a-f]{64}$/.test(value?.creatorProof || '') && { creatorProof: value.creatorProof }),
+          ...(!isDM && normalizeMove(value?.movedTo) && { movedTo: normalizeMove(value.movedTo) }),
+          ...(!isDM && normalizePeerChatRoomKey(value?.movedFrom) && { movedFrom: normalizePeerChatRoomKey(value.movedFrom) }),
+          ...(!isDM && value?.passedThrough === true && normalizeMove(value?.movedTo) && { passedThrough: true }),
+          ...(!isDM && value?.knownKeys && { knownKeys: normalizeKnownKeys(value.knownKeys) }),
+          ...(!isDM && value?.pendingBans?.signed && {
+            pendingBans: { bans: normalizePeerChatRoomBans(value.pendingBans.bans), signed: normalizeSignedRemovals(value.pendingBans.signed) }
+          }),
+          ...(!isDM && normalizeRoomDetails(value?.details) && { details: normalizeRoomDetails(value.details) }),
+          ...(!isDM && normalizeRoomDetails(value?.pendingDetails?.details) && {
+            pendingDetails: { details: normalizeRoomDetails(value.pendingDetails.details), avatar: normalizePeerChatAvatar(value.pendingDetails.avatar) }
+          }),
           chain: normalizeKeyChain(value?.chain),
           createdByName: normalizeMemberName(value?.createdByName),
           moderation: isDM
@@ -3719,7 +4915,12 @@ export class PeerChatService {
     }, PERSIST_DELAY_MS)
   }
 
-  persistNow () {
+  persistNow ({ final = false } = {}) {
+    // A PeerChat that has closed writes once more as it closes, and never
+    // after: a request still on its way finished later and wrote what it held
+    // back, folder and all, after Clear all P2P data had removed it, so the
+    // profile and rooms came back.
+    if (this.closed && !final) return
     const temporaryPath = `${this.stateFilePath}.tmp`
     try {
       mkdirSync(this.storagePath, { recursive: true })
@@ -3760,8 +4961,29 @@ export class PeerChatService {
     this.seenIds.delete(roomKey)
     this.seenFrom.delete(roomKey)
     this.olderIdLoads.delete(roomKey)
+    this.forgetSearchTexts(roomKey)
     if (feed?.close) await feed.close().catch(() => {})
   }
+}
+
+// The address an attachment is stored under, as opaqueAttachmentPath makes it.
+function isAttachmentAddress (value) {
+  return typeof value === 'string' && /^hyper:\/\/[^/\s]+\/\d+-[0-9a-f]{16}\.bin$/i.test(value)
+}
+
+function isMessageId (id) {
+  return typeof id === 'string' && id.length > 0 && id.length <= 128
+}
+
+// Who an invite says made the room, or null. The secret has to make the room's
+// key with the creator key beside it. One that does not means the link was not
+// made by anyone who knew, so the creator key goes too, as if the link carried
+// neither.
+function inviteCreatorFor (roomKey, { creatorKey, creatorProof } = {}) {
+  const key = normalizePeerChatCreatorKey(creatorKey)
+  if (!roomKey || !key) return null
+  if (creatorProof === undefined || creatorProof === null || creatorProof === '') return { creatorKey: key, creatorProof: '' }
+  return checkCreatorProof(roomKey, key, creatorProof) ? { creatorKey: key, creatorProof: creatorProof.toLowerCase() } : null
 }
 
 function roomJoinTime (room) {

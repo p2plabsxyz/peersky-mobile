@@ -207,9 +207,19 @@ export async function fetchHyper ({
     // the page.
     if (otherPage) return { ok: false, status: 403, error: PAGE_PRIVATE_DRIVE_ERROR }
     if (await isPrivateHyperAddress(target.driveAddress) ||
-      await adoptLinkedPrivateDriveIfReadable(target.driveAddress)) return read()
+      await adoptLinkedPrivateDriveIfReadable(target.driveAddress)) {
+      return markPrivateDrive(await read(), target.driveAddress)
+    }
     return { ok: false, status: 403, error: PRIVATE_DRIVE_ERROR }
   }
+  return markPrivateDrive(result, target.driveAddress)
+}
+
+// A tab shows a file from a private drive like any other, but must keep no
+// copy of it on the phone: the app takes no picture of such a tab for the tab
+// list. Told here, since only the backend knows which drives are private.
+async function markPrivateDrive (result, driveAddress) {
+  if (result?.ok && await isPrivateHyperAddress(driveAddress)) return { ...result, private: true }
   return result
 }
 

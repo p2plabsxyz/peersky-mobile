@@ -13,7 +13,7 @@ const meta = workspace.slice(workspace.indexOf('styles.p2pmdWorkspaceMeta'))
 // A note fills the screen, so the way to another tab was the menu, New tab,
 // and then the tab list. The tabs sit in the header as on the toolbar.
 test('an open note has the tabs button beside its menu', () => {
-  assert.match(header, /accessibilityLabel=\{`Open tabs, \$\{browserTabsState\.tabs\.length\} open`\}/)
+  assert.match(header, /accessibilityLabel=\{tp\(\{ one: 'Open tabs, \{count\} open', other: 'Open tabs, \{count\} open' \}, browserTabsState\.tabs\.length\)\}/)
   assert.match(header, /onPress=\{\(\) => \{\s+browserUserInteractedRef\.current = true\s+setBrowserTabsVisible\(true\)/)
   assert.ok(header.indexOf('Open tabs') < header.indexOf('<BrowserOverflowMenu'))
   // The tab list is drawn under the note, which steps aside while it is open.
@@ -21,8 +21,9 @@ test('an open note has the tabs button beside its menu', () => {
 })
 
 test('the host or client tag sits beside the local address, leaving the header room', () => {
-  assert.doesNotMatch(header, /\{p2pmdRoom\.role\}/)
+  assert.doesNotMatch(header, /\{p2pmdRoom\.role\b/)
   const urlRow = meta.slice(meta.indexOf('styles.p2pmdWorkspaceUrlRow'))
-  assert.ok(urlRow.indexOf('{p2pmdRoom.localUrl}') < urlRow.indexOf('{p2pmdRoom.role}'))
+  const tag = urlRow.indexOf("{p2pmdRoom.role === 'host' ? t('host') : t('client')}")
+  assert.ok(tag > 0 && urlRow.indexOf('{p2pmdRoom.localUrl}') < tag)
   assert.match(urlRow, /styles\.p2pmdWorkspaceRoleInline/)
 })

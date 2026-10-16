@@ -38,6 +38,25 @@ export function parseHomeShortcut (url) {
   return { name, target }
 }
 
+const PEERTUNES_APP_URL = /^peersky:\/\/p2p\/peertunes\/?$/i
+const WIDGET_SONG_ID = /^[A-Za-z0-9]{0,64}$/
+
+/**
+ * A tap on the PeerTunes widget while it shows a song, as { song }: PeerTunes
+ * opens Now Playing with that song. Null for any other link, the widget with
+ * nothing on it included. The song comes in a parameter of its own, beside
+ * the address, so the PeerTunes tab keeps its plain address and a restart
+ * does not ask for that song again.
+ */
+export function parsePeerTunesWidgetTap (url) {
+  const shortcut = parseHomeShortcut(url)
+  if (shortcut?.name !== 'open' || !PEERTUNES_APP_URL.test(shortcut.target)) return null
+  const query = /\?([^#]*)$/.exec(String(url).trim())
+  const song = readQueryValue(query ? query[1] : '', 'song')
+  if (song === null || !WIDGET_SONG_ID.test(song)) return null
+  return { song }
+}
+
 // URLSearchParams in React Native does not read a query string, so this does
 // it by hand.
 function readQueryValue (query, key) {

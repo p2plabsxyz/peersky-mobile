@@ -594,7 +594,7 @@ test('PeerChat persists profile metadata and lets only hosts update room metadat
   await client.joinRoom({ roomKey: ROOM_KEY, username: 'Client' })
   assert.throws(
     () => client.updateRoom({ roomKey: ROOM_KEY, name: 'Spoofed' }),
-    /Only the room host/
+    /Only the person who made this room/
   )
   await client.close()
 })
@@ -630,11 +630,24 @@ test('PeerChat persists and synchronizes host-owned room moderation settings', a
   t.after(() => rm(clientPath, { recursive: true, force: true }))
   const client = await new PeerChatService({ sdk: createFakeSdk(), storagePath: clientPath }).start()
   await client.joinRoom({ roomKey: room.roomKey, username: 'Client' })
-  const hostPeer = createFakePeer('desktop-peer', 'Host')
+  // Unsigned settings, as an older build sends them, count only from the
+  // creator's own connection. Signed ones come from anyone: see
+  // peerchat-room-details-flow.test.mjs.
+  const stranger = createFakePeer('0c0c0c0c', 'Stranger')
+  stranger.rooms = [room.roomKey]
+  await client.handlePeerMessage(stranger, {
+    type: 'room-meta',
+    roomKey: room.roomKey,
+    moderation: { abuseFilter: false, nsfwFilter: false, spamRateLimit: 50 }
+  })
+  assert.deepEqual(client.listRooms()[0].moderation, { abuseFilter: true, nsfwFilter: true, spamRateLimit: 10 })
+  const hostPeer = createFakePeer('07070707', 'Host')
   hostPeer.rooms = [room.roomKey]
   await client.handlePeerMessage(hostPeer, {
     type: 'room-meta',
     roomKey: room.roomKey,
+    createdBy: '07070707',
+    creatorKey: '07'.repeat(32),
     moderation: room.moderation
   })
   assert.deepEqual(client.listRooms()[0].moderation, room.moderation)
@@ -1645,6 +1658,10 @@ test('PeerChat keeps the first message of a conversation, sent the moment it is 
   await deliver(service, bob, hello)
   await deliver(service, bob, { ...hello, type: 'sync' })
 
+  // And the chat opens without waiting for the room to be announced, which
+  // held Accept for seconds: Bob hears of it on the connection he has.
+  const opened = await Promise.race([accepting.then(() => true), new Promise((resolve) => setTimeout(() => resolve(false), 1000))])
+  assert.equal(opened, true)
   release()
   await accepting
   const kept = service.feeds.get(dmKey).entries.filter((entry) => entry.id === 'first-from-bob')
@@ -2213,6 +2230,25 @@ test('leaving a room this phone was never removed from remembers no removal', as
   await service.joinRoom({ roomKey: ROOM_KEY, username: 'Sam' })
   assert.equal(service.listRooms().find((entry) => entry.roomKey === ROOM_KEY).removedByCreator, false)
   await service.close()
+})
+
+// Clear all P2P data closes PeerChat, then removes its folder. A request still
+// on its way finished after that and saved what it held, folder and all, so
+// the profile and rooms came back once PeerSky started again.
+test('PeerChat writes nothing once it has closed, so a cleared folder stays gone', async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-closed-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const storagePath = path.join(root, 'hyper-sdk')
+  const service = await new PeerChatService({ sdk: createFakeSdk(), storagePath }).start()
+  await service.completeOnboarding({ username: 'Ada' })
+  await service.close()
+  // The one save as it closes still happens.
+  assert.match(await readFile(path.join(storagePath, 'peerchat-mobile.json'), 'utf8'), /"username":"Ada"/)
+
+  await rm(storagePath, { recursive: true, force: true })
+  service.persistNow()
+  service.setProfile({ username: 'Ada again' })
+  await assert.rejects(readFile(path.join(storagePath, 'peerchat-mobile.json'), 'utf8'), { code: 'ENOENT' })
 })
 
 function createFakeSdk (feeds = new Map(), publicKeyByte = 7) {

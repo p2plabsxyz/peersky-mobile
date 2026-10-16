@@ -1,3 +1,5 @@
+import { t } from '../i18n/i18n.mjs'
+
 // Flags links that look like a scam so the preview can say so. Heuristics, not
 // a blocklist: phishing domains live for hours, and a bundled list is stale by
 // then. Judged by the reader at render time and never sent, since a sender
@@ -86,21 +88,21 @@ export function assessLink (rawUrl) {
   // Anything left of an @ is ignored by the browser, so the link can read as
   // one site and land on another. The oldest trick there is.
   if (parsed.userinfo) {
-    reasons.push('the address is written to look like a different site')
+    reasons.push(t('the address is written to look like a different site'))
   }
 
   if (isAddressHost(hostname)) {
-    reasons.push('it points at a bare IP address instead of a site name')
+    reasons.push(t('it points at a bare IP address instead of a site name'))
   }
 
   // Punycode renders as characters that look like ordinary letters.
   if (hostname.split('.').some((label) => label.startsWith('xn--'))) {
-    reasons.push('the name uses characters that imitate ordinary letters')
+    reasons.push(t('the name uses characters that imitate ordinary letters'))
   }
 
   const tld = hostname.split('.').pop() || ''
   if (RISKY_TLDS.has(tld)) {
-    reasons.push(`a ".${tld}" address is easily mistaken for a file`)
+    reasons.push(t('a ".{tld}" address is easily mistaken for a file', { tld }))
   }
 
   const registrable = registrableDomain(hostname)
@@ -110,12 +112,12 @@ export function assessLink (rawUrl) {
     // secure-paypal.xyz and paypal.com.login.xyz are not.
     const tokens = new Set(hostname.split(/[.-]/))
     const brand = IMPERSONATED.find((name) => tokens.has(name))
-    if (brand) reasons.push(`it says "${brand}" but is not ${brand}'s real site`)
+    if (brand) reasons.push(t('it says "{brand}" but is not {brand}\'s real site', { brand }))
   }
 
   if (reasons.length > 0) return { level: LINK_SUSPICIOUS, reasons }
   if (SHORTENERS.has(registrable)) {
-    return { level: LINK_OPAQUE, reasons: ['a shortened link hides where it goes'] }
+    return { level: LINK_OPAQUE, reasons: [t('a shortened link hides where it goes')] }
   }
   return { level: LINK_OK, reasons }
 }
@@ -125,8 +127,8 @@ export function describeLinkRisk (assessment) {
   const level = assessment?.level
   if (level !== LINK_SUSPICIOUS && level !== LINK_OPAQUE) return ''
   const [first] = assessment.reasons
-  if (level === LINK_OPAQUE) return `Careful: ${first}.`
-  return first ? `Possible scam: ${first}.` : 'This link may be a scam.'
+  if (level === LINK_OPAQUE) return t('Careful: {reason}.', { reason: first })
+  return first ? t('Possible scam: {reason}.', { reason: first }) : t('This link may be a scam.')
 }
 
 export function warnAboutLink (rawUrl) {

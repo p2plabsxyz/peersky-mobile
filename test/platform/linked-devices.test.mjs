@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 import {
+  describeDeviceFile,
   describeLinkedDevice,
   isMeteredNetwork,
   labelLinkedDevices,
+  numberLinkedDevices,
   sortLinkedDevices
 } from '../../app/linked-devices.mjs'
 
@@ -22,6 +24,21 @@ describe('linked devices', () => {
     assert.equal(labels.get('late'), 'Desktop 2')
     assert.equal(labels.get('phone'), 'Phone')
     assert.equal(labels.has('odd'), false)
+  })
+
+  // A whole sentence for each kind of device, so a language never has to fit
+  // a name it cannot change into the middle of one.
+  test('a file on another device says which one, in a sentence of its own', () => {
+    const numbered = numberLinkedDevices([
+      { id: 'late', type: 'desktop', firstSeen: 20 },
+      { id: 'early', type: 'desktop', firstSeen: 10 },
+      { id: 'phone', type: 'phone', firstSeen: 30 }
+    ])
+    assert.deepEqual(numbered.get('early'), { type: 'desktop', number: 1 })
+    assert.deepEqual(numbered.get('phone'), { type: 'phone', number: null })
+    assert.equal(describeDeviceFile(numbered.get('phone'), '3.0 MB'), 'On your phone - 3.0 MB')
+    assert.equal(describeDeviceFile(numbered.get('late'), '1 KB'), 'On your desktop 2 - 1 KB')
+    assert.equal(describeDeviceFile({ type: 'desktop', number: null }, 'Folder'), 'On your desktop - Folder')
   })
 
   test('online devices come first, then the one seen last', () => {

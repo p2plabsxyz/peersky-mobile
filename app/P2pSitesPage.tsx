@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native'
 
+import { t } from './i18n/i18n.mjs'
 import { listP2pSites } from './p2p-sites.mjs'
 
 type P2pSitesHistoryItem = { url: string, title: string, visitedAt: number }
@@ -39,17 +40,17 @@ export function P2pSitesPage ({
       keyboardDismissMode='on-drag'
       keyboardShouldPersistTaps='handled'
     >
-      <Text accessibilityRole='header' style={[pageStyles.heading, { color: palette.text }]}>P2P sites</Text>
+      <Text accessibilityRole='header' style={[pageStyles.heading, { color: palette.text }]}>{t('P2P sites')}</Text>
       <Text style={[pageStyles.note, { color: palette.mutedText }]}>
-        Sites you opened over hyper://. Their pages stay on this phone, so they open without a connection.
+        {t('Sites you opened over hyper://. Their pages stay on this phone, so they open without a connection.')}
       </Text>
       {allSites.length > 0 && (
         <TextInput
-          accessibilityLabel='Search P2P sites by title'
+          accessibilityLabel={t('Search P2P sites by title')}
           autoCapitalize='none'
           autoCorrect={false}
           clearButtonMode='while-editing'
-          placeholder='Search by title'
+          placeholder={t('Search by title')}
           placeholderTextColor={palette.mutedText}
           returnKeyType='search'
           style={[pageStyles.search, { borderColor: palette.border, color: palette.text }]}
@@ -61,7 +62,7 @@ export function P2pSitesPage ({
         <Pressable
           key={site.url}
           accessibilityRole='link'
-          accessibilityLabel={`Open ${site.title}`}
+          accessibilityLabel={t('Open {title}', { title: site.title })}
           style={[pageStyles.row, { borderColor: palette.border }]}
           onPress={() => onOpen(site.url)}
         >
@@ -72,13 +73,13 @@ export function P2pSitesPage ({
       {allSites.length === 0 && (
         <View style={pageStyles.empty}>
           <Text style={{ color: palette.mutedText }}>
-            No P2P sites yet. A hyper:// site you open shows up here.
+            {t('No P2P sites yet. A hyper:// site you open shows up here.')}
           </Text>
         </View>
       )}
       {allSites.length > 0 && sites.length === 0 && (
         <View style={pageStyles.empty}>
-          <Text style={{ color: palette.mutedText }}>No site has that in its title.</Text>
+          <Text style={{ color: palette.mutedText }}>{t('No site has that in its title.')}</Text>
         </View>
       )}
     </ScrollView>

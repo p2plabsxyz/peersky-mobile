@@ -43,9 +43,9 @@ test('every choice has an icon and an action, and None leaves only reload', asyn
 
 test('Appearance opens the address bar button page, and back returns there', async () => {
   const appearance = await read('app/settings/Appearance.tsx')
-  assert.match(appearance, /<SettingsSection title='Address bar button'>/)
+  assert.match(appearance, /<SettingsSection title=\{t\('Address bar button'\)\}>/)
   assert.match(appearance, /onPress=\{onOpenAddressBarButton\}/)
-  assert.ok(appearance.indexOf("title='Address bar button'") > appearance.indexOf("title='Toolbar button'"))
+  assert.ok(appearance.indexOf("title={t('Address bar button')}") > appearance.indexOf("title={t('Toolbar button')}"))
   const settings = await read('app/settings/SettingsScreen.tsx')
   assert.match(settings, /onOpenAddressBarButton=\{\(\) => changePage\('address-bar-button', 1\)\}/)
   assert.match(settings, /'address-bar-button': 'appearance'/)

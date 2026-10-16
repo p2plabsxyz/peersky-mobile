@@ -90,15 +90,34 @@ test('a removal outlives a restart', () => {
 test('the app is told whose room it is and whether it was removed', () => {
   assert.match(service, /isCreator: this\.isRoomCreator\(room\.roomKey\)/)
   assert.match(service, /removedByCreator: this\.isRemovedFromRoom\(room\.roomKey\)/)
-  // The key itself never reaches the app. Nothing on screen needs it, and the
-  // one thing that did was copying it out to pin, which is done.
+  // The key reaches the app only for a room's invite, never for a direct
+  // message or P2P Republic (peerchat-creator-proof-wins.test.mjs), and never
+  // as a field every room carries whatever it is.
   assert.doesNotMatch(service, /creatorKey: resolvePeerChatCreatorKey/)
+  assert.match(service, /\.\.\.this\.inviteCreator\(room\)/)
 })
 
 test('the room screen offers removing only to whoever made the room', () => {
   assert.match(screen, /activeRoom\.isCreator && !member\.self/)
   // And it says what it means before doing it.
   assert.match(screen, /will not be able to come back to this room/)
+})
+
+// The new key goes to everyone this phone saw in the room, and a person's other
+// devices are members of their own, so "a new key they never get" said more
+// than is so. What it says now is what happens, and what to do about it.
+test('removing somebody says the new key is for the people still in the room, and to remove their other devices too', async () => {
+  const confirm = screen.slice(screen.indexOf('function confirmRemoveMember ('), screen.indexOf('function leaveRoom ('))
+  assert.doesNotMatch(confirm, /never get/)
+  assert.match(confirm, /The room also moves to a new key for the people still in it, so invites from before stop working\. If they use PeerChat on another device too, remove that one as well\./)
+
+  const { PEERCHAT_QUESTIONS } = await import('../../app/peerchat/questions.mjs')
+  const answer = PEERCHAT_QUESTIONS.find(({ q }) => /kicked out of a room/.test(q))?.a || ''
+  assert.doesNotMatch(answer, /faked|never gets|made on this version|older room keeps its key/)
+  assert.match(answer, /new key for the people still in it/)
+  assert.match(answer, /another device too, remove that one as well/)
+  assert.match(answer, /older version of PeerSky stays on the old key/)
+  assert.match(answer, /P2P Republic keeps its key/)
 })
 
 test('somebody removed is told, and their composer says so', () => {
@@ -124,11 +143,12 @@ test('the creator key is recorded when a room is made and nowhere else', () => {
   assert.match(create, /isHost: true/)
   assert.match(create, /creatorKey: this\.localKey/)
 
-  // Every other assignment is either the room-meta announcement, which is
-  // guarded by the connection, or reading one back.
+  // Every other assignment is either the room-meta announcement, which the
+  // other side checks against the connection, or against the secret that made
+  // the room's key, or reading one back.
   const assignments = [...service.matchAll(/creatorKey: this\.localKey/g)]
   assert.equal(assignments.length, 1, 'only the room being created gets it')
-  assert.match(service, /creatorKey: room\.isHost \? this\.localKey : ''/)
+  assert.match(service, /creatorKey: room\.isHost \? this\.localKey : creatorProof \? resolvePeerChatCreatorKey\(roomKey, room\.creatorKey\) : ''/)
 })
 
 // P2P Republic predates all of this and its own record names a device whose
