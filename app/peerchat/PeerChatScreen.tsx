@@ -5173,13 +5173,13 @@ function PeerChatAttachment ({
           uri: mediaUrl,
           fileName: item.fileName
         })}
-        style={[styles.inlineMedia, fit]}
+        style={[styles.inlineMediaFrame, fit]}
       >
         <Image
           onLoad={({ nativeEvent }) => noteMediaSize(nativeEvent.source)}
           resizeMode='cover'
           source={{ uri: mediaUrl }}
-          style={fit}
+          style={[styles.inlineMediaFrame, fit]}
         />
       </Pressable>
     )
@@ -6162,6 +6162,9 @@ const styles = StyleSheet.create({
   attachmentCard: { alignItems: 'center', borderRadius: 10, borderWidth: 1, flexDirection: 'row', gap: 9, minWidth: 190, padding: 9 },
   // Sized from the picture or video itself. See media-fit.mjs.
   inlineMedia: { borderRadius: 12, overflow: 'hidden' },
+  // Rounded by the picture itself rather than clipped by its parent: on
+  // Android a picture clipped by a rounded parent was never painted.
+  inlineMediaFrame: { borderRadius: 12 },
   mediaNotice: { alignItems: 'center', gap: 4, justifyContent: 'center', minHeight: 110, padding: 12 },
   mediaNoticeText: { fontSize: 13, fontWeight: '600' },
   mediaNoticeAction: { marginTop: 8, paddingVertical: 4 },
