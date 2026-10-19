@@ -660,7 +660,26 @@ test('a link on the first page in a tab keeps that page behind it on iOS', async
   assert.match(app, /onLoadStart=\{\(event\) => \{\s+browserLoadStartsRef\.current\.add\(event\.nativeEvent\)/)
   const start = app.indexOf('onNavigationStateChange={(navigationState) => {')
   const change = app.slice(start, app.indexOf('onMessage={(event) => {', start))
-  assert.match(change, /const loading = navigationState\.loading \|\| browserLoadStartsRef\.current\.has\(navigationState\)/)
+  assert.match(change, /const loading = navigationState\.loading \|\|\s+\(Platform\.OS === 'ios' && browserLoadStartsRef\.current\.has\(navigationState\)\)/)
   assert.doesNotMatch(change, /navigationState\.loading(?! \|\|)/)
   assert.match(change, /canGoForward: navigationState\.canGoForward,\s+loading\s+\}, tab\.id\)/)
+})
+
+// Android sends a page that moves on its own (history.pushState: a video
+// picked on YouTube, most single page sites) as a load start with loading
+// false, and no load end follows. Taken as a start, as iOS needs, it was never
+// recorded: back went past every page of the site, straight to Home.
+test('a page that moves on its own is a step back on Android', () => {
+  const web = (url) => ({ kind: 'web', uri: url })
+  const youtube = 'https://m.youtube.com/'
+  const video = 'https://m.youtube.com/watch?v=abc'
+  let state = commitBrowserEntryState(
+    { history: [{ url: BROWSER_HOME_URL, source: { kind: 'home' } }], historyIndex: 0 },
+    youtube,
+    web(youtube)
+  )
+  // The pushState: loading false, the WebView has the page before it.
+  state = recordBrowserWebNavigationState(state, video, web(video), null, true, false)
+  assert.deepEqual(state.history.map((entry) => entry.url), [BROWSER_HOME_URL, youtube, video])
+  assert.equal(getBrowserBackState(state).currentUrl, youtube)
 })

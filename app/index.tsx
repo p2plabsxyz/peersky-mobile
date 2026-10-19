@@ -5909,8 +5909,13 @@ export default function App () {
                 // reports the start with loading false, since the page being
                 // left is done, and read as a page that had landed, a link on
                 // the first page in a tab looked like that page redirecting:
-                // the new page took its place, and back skipped it.
-                const loading = navigationState.loading || browserLoadStartsRef.current.has(navigationState)
+                // the new page took its place, and back skipped it. Android
+                // says loading true for a real start, and sends a page that
+                // moves on its own, like a video picked on YouTube, as a start
+                // with loading false that no load end follows; taken as a
+                // start too, it was never recorded and back went past it.
+                const loading = navigationState.loading ||
+                  (Platform.OS === 'ios' && browserLoadStartsRef.current.has(navigationState))
 
                 if (!loading) {
                   recordCompletedBrowserVisit(
