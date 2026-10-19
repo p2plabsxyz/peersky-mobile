@@ -217,7 +217,14 @@
       ],
       "expo-sharing",
       "expo-video",
-      "./plugins/with-app-languages"
+      "./plugins/with-app-languages",
+      [
+        "expo-secure-store",
+        {
+          "faceIDPermission": false,
+          "configureAndroidBackup": false
+        }
+      ]
     ],
     "extra": {
       "router": {},

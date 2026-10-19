@@ -46,6 +46,7 @@ import {
   onHyperdriveRecentsCleared,
   persistHyperdriveRecents
 } from './recents-store'
+import { onLocalSealKey } from '../privacy/local-seal-key'
 import { MODAL_ORIENTATIONS } from '../modal-orientations'
 import { tapFeedback } from '../haptics'
 import { PublishedLinkSheet } from '../PublishedLinkSheet'
@@ -126,6 +127,8 @@ export function HyperdriveScreen ({ deviceSyncRevision = 0, offlineNetworkAllowe
   const [recents, setRecents] = useState<HyperdriveItem[]>(loadHyperdriveRecents)
   // Settings, P2P Data clears recents with this screen still open underneath.
   useEffect(() => onHyperdriveRecentsCleared(() => setRecents(loadHyperdriveRecents())), [])
+  // Read again once the key that locks the list is known (privacy/local-seal-key.ts).
+  useEffect(() => onLocalSealKey(() => setRecents(loadHyperdriveRecents())), [])
   const [items, setItems] = useState<HyperdriveItem[] | null>(null)
   const [location, setLocation] = useState<HyperdriveItem | null>(null)
   const [listingTruncated, setListingTruncated] = useState(false)

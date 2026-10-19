@@ -299,6 +299,14 @@ Hyperdrive uploads support three visibility modes:
 > [!NOTE]
 > The key starts on the desktop. A desktop identity transfer carries it to the phone, along with the desktop's private drives, which the phone adopts read-only. Sending the phone's tabs and bookmarks to the desktop from Link Device also tells the desktop the phone's private drive address, and the desktop adds it to its own private drives, read-only. A phone that made a private drive before it was linked keeps that drive's own key, so that drive opens on the phone only. See `docs/link-device.md`.
 
+### Private keys and names on the phone
+
+The private drive keys (`private-drive-key.json`, in the identity folder and in the synced private store), the desktop's list of private drive names (`privateHyperdrives.json`), the names and sizes of the files in your other devices' private drives (`device-sync.json`) and the Recent list (`hyperdrive-recents.json`, which names private uploads) are locked with a key the system keeps: the iOS Keychain, or encrypted under an Android Keystore key (`expo-secure-store`, `AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY`, `app/privacy/local-seal-key.ts`). The app hands that key to the backend as it starts (`Bare.argv[1]`), and both lock with the same NaCl secretbox (`backend/hyper/sealed-file.mjs`, `app/privacy/sealed-text.mjs`). A copy of those files taken off the phone shows nothing, and nobody is asked for anything. The key is in no backup and never leaves the phone.
+
+Files from an earlier version are locked at the first start after the update (`sealPrivateFilesAtRest`, at `RPC_HYPER_INIT`), and the Recent list the first time it is read. A locked key file that cannot be opened stops private drives rather than making a new key, which would lose every private drive. A backup or a Link Device transfer packs these files unlocked inside its own encryption (`backend/backup/backup-archive.mjs`), since the phone or desktop it goes to has a key of its own and locks them again there. When the system's secure storage cannot be used, the files stay as they were.
+
+A file in **This device only** is not encrypted on the phone: that drive is opened with no key. It never leaves the phone, and the phone's own storage protection covers it.
+
 ## Private files on your other devices
 
 A private upload shows up in Hyperdrive on the person's other devices on its

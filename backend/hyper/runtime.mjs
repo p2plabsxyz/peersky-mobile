@@ -18,9 +18,12 @@ import {
   getPrivateDriveKeyRecord,
   hasPrivateDriveKey,
   linkedPrivateDriveKey,
+  PRIVATE_DRIVE_KEY_FILE,
   rememberPrivateDriveId,
   resetPrivateDriveKeyCache
 } from './private-keys.mjs'
+import { sealFilesAtRest } from './sealed-file.mjs'
+import { PRIVATE_DRIVE_REGISTRY_FILE } from '../hyperdrive-viewer/drive-names.mjs'
 import {
   closeRuntimeCandidates,
   createRuntimeCoordinator,
@@ -53,6 +56,7 @@ import { getDefaultIdentityStoragePath } from '../backup/device-keys.mjs'
 import { attachDeviceSync } from './device-sync.mjs'
 import { createHyperUrl } from './url.mjs'
 import {
+  DEVICE_SYNC_FILE,
   forgetSyncedDevice,
   readDeviceSyncState,
   resetDeviceSyncStateCache
@@ -844,4 +848,20 @@ function joinSiblingPath (filepath, siblingName) {
   if (separatorIndex === -1) return `${normalized}-${siblingName}`
 
   return `${normalized.slice(0, separatorIndex + 1)}${siblingName}`
+}
+
+/**
+ * Locks the private drive keys and the lists of private file names written
+ * before locking came in, or put back by a restore (sealed-file.mjs). Run once
+ * the stores are open: one key file lives inside a store's folder.
+ */
+export function sealPrivateFilesAtRest () {
+  const identity = getDefaultIdentityStoragePath()
+  const synced = getSyncedPrivateHyperStoragePath()
+  return sealFilesAtRest([
+    identity && identity !== '.' && join(identity, PRIVATE_DRIVE_KEY_FILE),
+    identity && identity !== '.' && join(identity, PRIVATE_DRIVE_REGISTRY_FILE),
+    identity && identity !== '.' && join(identity, DEVICE_SYNC_FILE),
+    synced && join(synced, PRIVATE_DRIVE_KEY_FILE)
+  ].filter(Boolean))
 }

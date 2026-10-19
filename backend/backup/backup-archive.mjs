@@ -1,5 +1,6 @@
-import { closeSync, fstatSync, openSync, readSync } from 'node:fs'
+import { closeSync, fstatSync, openSync, readFileSync, readSync } from 'node:fs'
 import b4a from 'b4a'
+import { openSealedForBackup } from '../hyper/sealed-file.mjs'
 
 // The encrypted payload is a run of records, each a JSON header and then, for
 // a file, its bytes:
@@ -12,6 +13,8 @@ import b4a from 'b4a'
 // early even when every frame before it authenticated.
 const MAX_HEADER_BYTES = 16 * 1024
 const READ_CHUNK_BYTES = 256 * 1024
+// Locked files are small lists and keys; anything bigger is not one.
+const MAX_SEALED_FILE_BYTES = 4 * 1024 * 1024
 const ENTRY_TYPES = new Set(['about', 'dir', 'file', 'end'])
 
 export function createArchiveWriter (sink) {
@@ -59,6 +62,18 @@ export function createArchiveWriter (sink) {
       }
       try {
         const size = fstatSync(fd).size
+        // A file locked with this phone's secure storage goes in unlocked:
+        // the backup is encrypted itself, and the phone it is restored on has
+        // a key of its own, which locks it again there (sealed-file.mjs).
+        if (size <= MAX_SEALED_FILE_BYTES && name.endsWith('.json')) {
+          const unlocked = openSealedForBackup(readFileSync(filePath), name)
+          if (unlocked) {
+            await writeHeader({ type: 'file', name, size: unlocked.byteLength })
+            await sink(unlocked)
+            fileBytes += unlocked.byteLength
+            return true
+          }
+        }
         await writeHeader({ type: 'file', name, size })
         let offset = 0
         while (offset < size) {

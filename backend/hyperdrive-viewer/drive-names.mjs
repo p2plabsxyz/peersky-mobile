@@ -1,6 +1,7 @@
-import { readFileSync, statSync } from 'node:fs'
+import { statSync } from 'node:fs'
 import { join } from 'node:path'
 import { normalizeDriveAddressId } from '../hyper/runtime-routing.mjs'
+import { readSealedJson } from '../hyper/sealed-file.mjs'
 
 // The name a person gave a drive, which the viewer shows at its top in place
 // of the key. A name is never made up from an address or from what the drive
@@ -30,7 +31,8 @@ export function readPrivateDriveRecords (directory) {
   try {
     const file = join(directory, PRIVATE_DRIVE_REGISTRY_FILE)
     if (statSync(file).size > MAX_REGISTRY_BYTES) return []
-    const entries = JSON.parse(readFileSync(file, 'utf8'))
+    // Locked with the phone's secure storage (sealed-file.mjs).
+    const entries = readSealedJson(file)?.value
     if (!Array.isArray(entries)) return []
     const records = []
     for (const entry of entries) {

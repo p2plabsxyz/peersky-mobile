@@ -156,6 +156,7 @@ import { languageNamed } from './i18n/languages.mjs'
 import { useT } from './i18n/useT'
 import { getOneOffSearchEngines } from './search/search-suggestions.mjs'
 import { getSiteDataHosts } from './privacy/site-data.mjs'
+import { loadLocalSealKey } from './privacy/local-seal-key'
 import { BrowserToolbar, type AddressBarAction } from './BrowserToolbar'
 import { BrowserNavBar } from './BrowserNavBar'
 import { BrowserBackSwipe } from './BrowserBackSwipe'
@@ -1198,8 +1199,11 @@ export default function App () {
         ? `${toBareFsPath(Paths.document.uri)}/hyper-storage`
         : 'hyper-storage'
 
+      // The key that locks private keys and file names on disk, from the
+      // Keychain or the Android Keystore (privacy/local-seal-key.ts).
+      const sealKey = await loadLocalSealKey()
       const worklet = new Worklet()
-      worklet.start('/app.bundle', bundle, [storageDir])
+      worklet.start('/app.bundle', bundle, [storageDir, sealKey || ''])
 
       // The backend pushes here when PeerChat changes, so a new message shows
       // the moment it lands instead of waiting for the next poll.

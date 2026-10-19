@@ -116,7 +116,8 @@ import {
   refreshDeviceSync,
   refreshHyperNetworking,
   setDeviceSyncMetered,
-  withHyperRuntimeOperation
+  withHyperRuntimeOperation,
+  sealPrivateFilesAtRest
 } from '../hyper/runtime.mjs'
 import { getOrCreatePairingNonceRecord } from '../backup/pairing-nonce.mjs'
 import { clearAllP2pData, clearP2pCache, deleteP2pAppData, listP2pAppData } from '../hyper/storage.mjs'
@@ -148,6 +149,11 @@ export async function routeRpcRequest (req) {
       const options = parseJsonMessage(req.data)
       await withHyperRuntimeOperation(() => {})
       clearOrphanedTransfer()
+      try {
+        sealPrivateFilesAtRest()
+      } catch (error) {
+        console.error('[hyper] Could not lock private files:', error)
+      }
       replyJson(req, {
         ok: true,
         storagePath: getHyperStoragePath(),

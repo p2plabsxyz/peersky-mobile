@@ -1,6 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import b4a from 'b4a'
+import { readSealedJson, writeSealedJson } from './sealed-file.mjs'
 import { DEVICE_TYPES, MAX_ANNOUNCED_DRIVES } from './device-sync-protocol.mjs'
 
 // The person's other devices this phone has met, and what is in the private
@@ -91,7 +90,11 @@ export function readDeviceSyncState (directory) {
   let state = emptyState()
   try {
     const filePath = join(directory, DEVICE_SYNC_FILE)
-    if (existsSync(filePath)) state = normalizeState(JSON.parse(b4a.toString(readFileSync(filePath), 'utf8')))
+    // The names and sizes of private files, so locked with the phone's secure
+    // storage (sealed-file.mjs). One that cannot be opened is only a listing,
+    // and is heard again from the devices.
+    const read = readSealedJson(filePath)
+    if (read) state = normalizeState(read.value)
   } catch {}
   cache.set(directory, state)
   return state
@@ -100,11 +103,7 @@ export function readDeviceSyncState (directory) {
 function writeState (directory, state) {
   const normalized = normalizeState(state)
   try {
-    mkdirSync(directory, { recursive: true })
-    const filePath = join(directory, DEVICE_SYNC_FILE)
-    const temporary = `${filePath}.tmp`
-    writeFileSync(temporary, JSON.stringify(normalized, null, 2))
-    renameSync(temporary, filePath)
+    writeSealedJson(join(directory, DEVICE_SYNC_FILE), normalized)
   } catch {
     return readDeviceSyncState(directory)
   }
