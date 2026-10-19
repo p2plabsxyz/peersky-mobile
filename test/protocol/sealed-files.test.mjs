@@ -27,6 +27,7 @@ import {
   resetDeviceSyncStateCache
 } from '../../backend/hyper/device-sync-state.mjs'
 import { openText, sealText } from '../../app/privacy/sealed-text.mjs'
+import { isLinkedPrivateKeyFile } from '../../app/hyperdrive/private-upload.mjs'
 
 // The private drive key and the names of private files sat in plain files on
 // the phone. They are locked now with a key the system keeps (the Keychain,
@@ -127,6 +128,21 @@ describe('private files locked with the phone\'s secure storage', () => {
     writeSealedJson(join(dir, 'x.json'), { a: 1 })
     assert.deepEqual(JSON.parse(readFileSync(join(dir, 'x.json'), 'utf8')), { a: 1 })
     assert.equal(readSealedJson(join(dir, 'x.json')).sealed, false)
+  })
+
+  // The screen asks whether a desktop's key is here before a private upload
+  // or a private note. Read as plain JSON, a locked file said no, and a
+  // linked phone was told to link first.
+  it('the app sees a linked phone as linked once its key file is locked', () => {
+    importPrivateDriveKey(dir, { key: 'd4'.repeat(32), driveId: 'e5'.repeat(32) })
+    const onDisk = readFileSync(join(dir, 'private-drive-key.json'), 'utf8')
+    assert.ok(onDisk.includes('peersky-sealed'))
+    assert.equal(isLinkedPrivateKeyFile(onDisk, KEY), true)
+    assert.equal(isLinkedPrivateKeyFile(onDisk, OTHER_KEY), false)
+    assert.equal(isLinkedPrivateKeyFile(onDisk, null), false)
+    assert.equal(isLinkedPrivateKeyFile(JSON.stringify({ version: 3, key: 'd4'.repeat(32) }), null), true)
+    assert.equal(isLinkedPrivateKeyFile(JSON.stringify({ key: 'd4'.repeat(32), encrypted: false }), KEY), false)
+    assert.equal(isLinkedPrivateKeyFile('', KEY), false)
   })
 
   it('the app locks the Recent list the way the backend does, so a backup opens it too', () => {
