@@ -109,6 +109,8 @@ Data in counts the replies to an editor's own requests too, and out from the hos
 
 A note is live only while its host has it open. iOS suspends PeerSky a few minutes after it leaves the screen, and a note the phone hosts goes offline with it until it comes back; edits made meanwhile merge then. The phone saves the note's Yjs history with its copy, so even after PeerSky was closed, the note opens again with the history its editors share, and their edits merge into it instead of the note being written out twice. For a big or long-running room, host from a desktop.
 
+A note also opens between devices on the same Wi-Fi with no internet, as when the router has no connection: the host is on the local network too, and a device joining looks there first. See [With no internet](holesail.md#with-no-internet).
+
 ## Private and public notes
 
 Create Note asks one thing: private or public. Every new note starts private, the same as on the desktop. The desktop's UDP, host and port options are left off the phone.

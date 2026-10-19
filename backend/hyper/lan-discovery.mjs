@@ -173,6 +173,14 @@ function isPortInUseError (error) {
   return message.includes('already in use') || message.includes('eaddrinuse')
 }
 
+/**
+ * The public store's LAN instance, for P2PMD notes, which host and join on its
+ * DHT with no internet (holesail/lan.mjs). Null when local discovery is off.
+ */
+export function getLANInstance () {
+  return lan && !lan.destroyed ? lan : null
+}
+
 export function getLANDiscoveryStatus () {
   return {
     ...status,

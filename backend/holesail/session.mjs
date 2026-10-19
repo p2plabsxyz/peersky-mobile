@@ -1,3 +1,4 @@
+import { getLANInstance } from '../hyper/lan-discovery.mjs'
 import { TunnelGuest, TunnelHost } from './tunnel.mjs'
 
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost'])
@@ -43,7 +44,9 @@ export async function startHolesailLive ({
       secure: Boolean(secure),
       port: livePort.port,
       host: liveHost.host,
-      token: typeof token === 'string' && token ? token : null
+      token: typeof token === 'string' && token ? token : null,
+      // On the local network too, so the note opens over Wi-Fi with no internet.
+      lan: getLANInstance()
     })
 
     session = instance
@@ -116,7 +119,9 @@ export async function connectHolesail ({
         key: targetKey.key,
         host: targetHost.host,
         port: targetPort.port,
-        token: typeof token === 'string' && token ? token : null
+        token: typeof token === 'string' && token ? token : null,
+        // Looked for on the local network first.
+        lan: getLANInstance()
       })
     } catch {
       return { ok: false, error: 'Invalid holesail key. Use hs://... or an alphanumeric key.' }

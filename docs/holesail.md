@@ -66,6 +66,7 @@ the address.
 - `backend/rpc/router.mjs` - RPC command routing
 - `backend/holesail/session.mjs` - Holesail session lifecycle + validation + transition guard
 - `backend/holesail/tunnel.mjs` - the tunnel: hosting, joining, keys and the host's record
+- `backend/holesail/lan.mjs` - the same note on the local network, for when there is no internet
 - `app/index.tsx` - the runtime check page, development builds only
 
 ## RPC / API contract
@@ -85,6 +86,17 @@ the address.
   - `localhost`
 - This avoids exposing Holesail forwarding/bind to LAN interfaces (for example `0.0.0.0`, `192.168.x.x`).
 - IPv6 validation is stricter than broad hex+colon matching to avoid malformed host acceptance.
+
+## With no internet
+
+A note's host is found on the public HyperDHT, which is on the internet, so with the router's cable out a note did not open even with both devices on the same Wi-Fi, and a note could not even be hosted, since the host's record could not be put. Now (`lan.mjs`):
+
+- The host also listens on the LAN DHT that Hyperdrive and PeerChat already use over Wi-Fi (`getLANInstance()` in `backend/hyper/lan-discovery.mjs`), under the note's own key pair, and says over mDNS that it has a topic made from the note's key. Only someone who has the address can work out the topic, and a private note still lets in only the key its address carries.
+- A device joining looks on the local network first (2.5 seconds, under a second when no other PeerSky is around) and uses it if the host answers there within 3 seconds. Otherwise it goes to the internet as before.
+- With no internet, hosting goes on after 3 seconds with the note on the local network alone, and the record is tried again every minute until the internet answers.
+- The topic is the desktop's (`p2pmd-lan.js` there), so a phone and a desktop find each other too. The local server's token works the same over both.
+
+`info` says which: `lan` is true when the note is on, or was joined over, the local network, and a host's `internet` is true once its record is on the internet DHT. Tests: `test/protocol/note-lan.test.mjs`.
 
 ## Concurrency and lifecycle notes
 
