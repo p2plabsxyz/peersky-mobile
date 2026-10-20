@@ -489,7 +489,8 @@ room with its key, a fixed label for the new device (`ada@mobile`,
 `ada@desktop1`), and a link the devices use to prove to each other that they
 belong to the same person. Each device stays its own member of a room, so
 messages reach all of them, and renames and newly joined rooms follow between
-them. See [link-device.md](link-device.md).
+them, even when they share no room: they also meet under a topic made from the
+link, which nobody without it can work out. See [link-device.md](link-device.md).
 
 ## Resource limits
 

@@ -55,9 +55,11 @@ What goes (`backend/peerchat/device-link.mjs`, the same rules as `lib/device-lin
 
 A device takes PeerChat only when its pairing code says `chat=1`, which this phone's code does. An older app refuses files it does not know, so it is sent none.
 
-A name, bio or picture changed on one device reaches the others the next time they are in a room together. Every profile a device sends carries a proof: an HMAC-SHA256 with the link key over the name without its label, the bio, the picture's SHA-256, when they were set, the labels it knows and the sending device's network key. A device takes a newer profile only with a proof it can check on that same connection, so nobody else can rename a person's devices or pass a proof on as theirs, and a name one of them holds does not count as taken.
+A name, bio or picture changed on one device reaches the others the next time they connect. Every profile a device sends carries a proof: an HMAC-SHA256 with the link key over the name without its label, the bio, the picture's SHA-256, when they were set, the labels it knows and the sending device's network key. A device takes a newer profile only with a proof it can check on that same connection, so nobody else can rename a person's devices or pass a proof on as theirs, and a name one of them holds does not count as taken.
 
 Devices that have proved this to each other also send each other the rooms they are in, with their keys (`link-rooms`): a room joined on one device appears on the others that are online, or the next time they connect. A room left on a device stays left there, and is not taken back from the others until it is joined again. A direct conversation goes along once the other person has accepted it.
+
+A person's devices find each other even when they share no room, as when both left P2P Republic. Each joins a topic made from the link, `SHA-256("peersky-chat:devices:" + key)`, which nobody without the link can work out, and its `topics` frame carries a proof of the link, `devices`, an HMAC-SHA256 under `SHA-256("peersky-chat:devices-proof:" + key)` over `"peersky-chat/2 devices\n" + handshake hash + "\n" + sender key`, good on that connection alone. A device that proves it gets the profile, room or no room, and the proof in the profile makes it one of this person's devices. Before this, devices met only inside a room they shared, so a room made on one never reached another that shared none. The desktop pins the same vector (`test/devices-meet.test.js` in PeerChat, `test/protocol/peerchat-devices-meet.test.mjs` here).
 
 ## Backup files
 

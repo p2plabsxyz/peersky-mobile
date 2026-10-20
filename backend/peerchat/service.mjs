@@ -104,7 +104,10 @@ import {
   normalizeLink,
   normalizeMemberName,
   normalizeSharedRooms,
-  normalizeTransfer
+  normalizeTransfer,
+  devicesTopic,
+  devicesProof,
+  checkDevicesProof
 } from './device-link.mjs'
 import { checkRoomProof, roomProof } from './room-proof.mjs'
 import {
@@ -297,6 +300,9 @@ export class PeerChatService {
     // devices share. See device-link.mjs.
     this.device = { label: '' }
     this.link = null
+    // The topic this person's devices meet under, joined while there is a
+    // link. See devicesTopic in device-link.mjs.
+    this.devicesTopicHex = ''
     // Peers whose profile carried a proof made with the link: this person's
     // other devices. Kept, so their messages are still this person's after a
     // restart, before they have been seen again.
@@ -382,6 +388,8 @@ export class PeerChatService {
     this.started = true
     this.loadState()
     this.takeIncomingTransfer()
+    // Where this person's other devices are found, with or without a room.
+    this.joinDevicesTopic()
     this.loadSigningKeys().catch(() => {})
 
     // Nothing listens for the swarm's topic changes. Anyone can announce a
@@ -1376,7 +1384,13 @@ export class PeerChatService {
     // Found under one of our topics, or arriving without any (inbound ones
     // can). Either way it starts in no room: anyone can announce a topic, so
     // rooms open one by one as the peer proves it holds their keys.
-    if (this.closed || (sharedRooms.length === 0 && (hasTopics || this.discoveryKeys.size === 0))) return
+    // Or under the topic this person's devices meet under, which they look
+    // for with no room at all.
+    const foundOurDevices = Boolean(this.devicesTopicHex) && [...(info.topics || [])].some((topic) => {
+      try { return b4a.toString(topic, 'hex').toLowerCase() === this.devicesTopicHex } catch { return false }
+    })
+    if (this.closed || (sharedRooms.length === 0 && !foundOurDevices &&
+      (hasTopics || (this.discoveryKeys.size === 0 && !this.devicesTopicHex)))) return
 
     const peer = this.newPeer(connection)
     this.pendingPeers.set(connection, peer)
@@ -1556,6 +1570,15 @@ export class PeerChatService {
       if (message.have === true) peer.haves = true
       // And takes a room's move to a new key. See room-move.mjs.
       if (message.move === true) peer.moves = true
+      // Another of this person's devices, shown by the link, room or no room.
+      // Our proofs and our profile go to it, and the proof in the profile
+      // makes it a sibling, which then gets every room.
+      if (!peer.ownDevice && this.link &&
+          checkDevicesProof(this.link, peer.connection.handshakeHash, peer.key, message.devices)) {
+        peer.ownDevice = true
+        this.shareTopics(peer)
+        this.sendProfile(peer)
+      }
       const added = []
       for (const entry of message.rooms.slice(0, MAX_ANNOUNCED_TOPICS)) {
         const topic = typeof entry?.topic === 'string' ? entry.topic.toLowerCase() : ''
@@ -2538,8 +2561,10 @@ export class PeerChatService {
     }
     // pass: takes messages passed on. have: takes their ids first and asks
     // for what it lacks. move: takes a room's move to a new key. An older
-    // build ignores all three and never gets any of them.
-    this.sendToPeer(peer, { type: 'topics', rooms, pass: true, have: true, move: true })
+    // build ignores all three and never gets any of them. devices: shows one
+    // of this person's other devices that this is one too.
+    const devices = this.link ? devicesProof(this.link, handshakeHash, publicKey) : ''
+    this.sendToPeer(peer, { type: 'topics', rooms, pass: true, have: true, move: true, ...(devices && { devices }) })
   }
 
   sendProfile (peer) {
@@ -2629,7 +2654,24 @@ export class PeerChatService {
     const label = nextLabel(this.link, targetType === 'mobile' ? 'mobile' : 'desktop')
     this.link = { ...this.link, labels: mergeLabels(this.link.labels, [label]) }
     this.persistNow()
+    this.joinDevicesTopic()
     return makeTransfer({ link: this.link, label, profile: this.profile, rooms })
+  }
+
+  joinDevicesTopic () {
+    const topic = devicesTopic(this.link)
+    const hex = topic ? b4a.toString(topic, 'hex') : ''
+    if (this.closed || hex === this.devicesTopicHex) return
+    if (this.devicesTopicHex) {
+      Promise.resolve(this.sdk.leave?.(b4a.from(this.devicesTopicHex, 'hex'))).catch(() => {})
+    }
+    this.devicesTopicHex = hex
+    if (!topic) return
+    try {
+      this.sdk.join(topic, { client: true, server: true })
+    } catch (error) {
+      console.warn('[peerchat] Could not look for your other devices:', error?.message || error)
+    }
   }
 
   /**
@@ -2653,6 +2695,7 @@ export class PeerChatService {
 
     const added = this.addRooms(transfer.rooms)
     this.schedulePersist()
+    this.joinDevicesTopic()
     this.bumpVersion()
     return added
   }
