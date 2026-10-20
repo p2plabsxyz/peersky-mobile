@@ -773,7 +773,7 @@ function SyncSheet ({
               </Text>
               <Text style={[styles.sheetText, isDark ? darkStyles.muted : null]}>
                 {sending.toDesktop
-                  ? t('In PeerSky Desktop, open Backup & Restore. Under Restore from the network, paste this link or scan it, then press Download.')
+                  ? t('In PeerSky Desktop, under Receive here, paste this link or scan it.')
                   : t('In Sync with another device on the other phone, tap Scan code and point it here.')}
               </Text>
               <QrCodeView value={sending.url} size={220} />
@@ -838,7 +838,7 @@ function SyncSheet ({
               {direction === 'receive'
                 ? (
                   <>
-                    <Step number={1} text={t('On the phone that has your data, open Link Device and tap Sync with another device. On PeerSky Desktop, open Backup & Restore and use Identity transfer.')} />
+                    <Step number={1} text={t('On the phone that has your data, open Link Device and tap Sync with another device. On PeerSky Desktop, open Link Device in Settings and choose Send from here.')} />
                     <Step number={2} text={t('Scan this code with it, or paste it there.')} />
                     {pairingCode
                       ? <QrCodeView value={pairingCode} size={200} />
@@ -861,7 +861,7 @@ function SyncSheet ({
                   )
                 : (
                   <>
-                    <Step number={1} text={t('On the other phone, open Link Device and tap Sync with another device. On PeerSky Desktop, open Backup & Restore.')} />
+                    <Step number={1} text={t('On the other phone, open Link Device and tap Sync with another device. On PeerSky Desktop, open Link Device in Settings.')} />
                     <Step number={2} text={t('Scan the code it shows. A phone gets everything on this one. The desktop gets your open pages, bookmarks, PeerChat rooms and recent notes.')} />
                   </>
                   )}

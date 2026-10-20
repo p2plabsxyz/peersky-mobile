@@ -104,7 +104,7 @@ The sender keeps the transfer up when its sheet is closed, so opening the sheet 
 
 ## Phone to desktop
 
-On the desktop, Backup & Restore shows a pairing code with `deviceType=desktop`. The phone scans it in *Send from here*, and sends what a desktop can use: the open tabs, the bookmarks and favourites, its private drive with the key to it (see Private files), and PeerChat (see PeerChat on your phone and desktops) when the desktop's code has `chat=1`. Messages, notes, history and the stores stay on the phone. None of it needs the stores closed.
+On the desktop, Link Device in Settings shows a pairing code with `deviceType=desktop` under *Sync with another device*, *Receive here*. The phone scans it in *Send from here*, and sends what a desktop can use: the open tabs, the bookmarks and favourites, its private drive with the key to it (see Private files), and PeerChat (see PeerChat on your phone and desktops) when the desktop's code has `chat=1`. Messages, notes, history and the stores stay on the phone. None of it needs the stores closed.
 
 It goes in the desktop's own transfer format (`backend/backup/desktop-sync.mjs`), so the desktop checks it with the code it already has for transfers:
 
@@ -113,7 +113,7 @@ It goes in the desktop's own transfer format (`backend/backup/desktop-sync.mjs`)
 3. The manifest is signed with the phone's Ed25519 key over the same fields the desktop signs, with `targetDeviceType: 'desktop'`.
 4. The file is put on a drive at `/backup.zip`, so the drive's bare address works on the desktop too. The phone shows it as a QR code with **Copy link**, and the six characters.
 
-On the desktop, *Restore from the network* takes the link. It downloads it, checks that it was made for a code this desktop showed in the last hour, checks the signature, decrypts it, and shows the six characters. Only once the person confirms does anything change: the bookmarks are added after the desktop's own, the tabs open asleep in a collapsed group called Phone, and the phone's private drive is added to the desktop's private drives, read-only, as a drive adopted from another device always is, and PeerChat there takes the phone's name with its own label and joins the phone's rooms. A bookmark or tab the desktop already has is skipped. Nothing else is replaced and nothing restarts. The code is used up, and the page shows a fresh one.
+On the desktop, *Receive here* takes the link. It downloads it, checks that it was made for a code this desktop showed in the last hour, checks the signature, decrypts it, and shows the six characters. Only once the person confirms does anything change: the bookmarks are added after the desktop's own, the tabs open asleep in a collapsed group called Phone, and the phone's private drive is added to the desktop's private drives, read-only, as a drive adopted from another device always is, and PeerChat there takes the phone's name with its own label and joins the phone's rooms. A bookmark or tab the desktop already has is skipped. Nothing else is replaced and nothing restarts. The code is used up, and the page shows a fresh one.
 
 A desktop that is still in its first-run screen takes the same link there, under *Restore a backup, or bring tabs from your phone*, and opens its first window with the phone's tabs beside Home.
 
