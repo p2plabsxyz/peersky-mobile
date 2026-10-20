@@ -164,3 +164,16 @@ describe('pages over https://, which WebKit will not load browser:// into', () =
     assert.match(before, /browserThemeScript\n/)
   })
 })
+
+describe('frames on Android', () => {
+  test('are decided by the client, as the app decides them on iOS', () => {
+    // react-native-webview gives the app no isTopFrame on Android, so a
+    // frame's data: preview was refused as a whole tab sent to data: would be.
+    const client = read('plugins/templates/PeerSkyWebViewClient.kt.template')
+    assert.match(client, /if \(!request\.isForMainFrame\) return !frameMayLoad\(request\.url\)/)
+    const rules = client.slice(client.indexOf('internal fun frameMayLoad'), client.indexOf('internal fun themeResponse'))
+    assert.match(rules, /"about:blank" \|\| url == "about:srcdoc"/)
+    assert.match(rules, /"http", "https", "data", "blob" -> true/)
+    assert.match(rules, /else -> false/)
+  })
+})

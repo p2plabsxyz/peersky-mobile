@@ -53,6 +53,17 @@ class PeerSkyWebViewClient : RNCWebViewClient() {
     super.onPageStarted(view, url, favicon)
   }
 
+  // react-native-webview hands the app a frame's load as if it were the
+  // tab's, with no isTopFrame, so the app judged it as one: it refused a
+  // frame's own data: document as it refuses a tab sent to data:, which left
+  // Agregore's scratchpad with no live preview, and a web embed on a hyper://
+  // page would take the whole tab. A frame is decided here, by the rules the
+  // app keeps for iOS frames (getBrowserRequestAction in browser-shell.mjs).
+  override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+    if (!request.isForMainFrame) return !frameMayLoad(request.url)
+    return super.shouldOverrideUrlLoading(view, request)
+  }
+
   override fun shouldInterceptRequest(
     view: WebView,
     request: WebResourceRequest
@@ -60,6 +71,18 @@ class PeerSkyWebViewClient : RNCWebViewClient() {
     themeResponse(request.url)?.let { return it }
     if (shouldBlock(request)) return blockedResponse()
     return super.shouldInterceptRequest(view, request)
+  }
+
+  // The web, and a document the page made for the frame. hyper://, an app's
+  // link or anything else goes nowhere from inside a frame.
+  internal fun frameMayLoad(uri: Uri?): Boolean {
+    if (uri == null) return false
+    val url = uri.toString()
+    if (url == "about:blank" || url == "about:srcdoc") return true
+    return when (uri.scheme?.lowercase(Locale.ROOT)) {
+      "http", "https", "data", "blob" -> true
+      else -> false
+    }
   }
 
   // browser://theme/ and agregore://theme/, as the desktop serves them: the
