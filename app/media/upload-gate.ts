@@ -80,7 +80,8 @@ AppState.addEventListener('change', (state) => {
 
 async function pickImages (
   source: 'library' | 'camera',
-  multiple: boolean
+  multiple: boolean,
+  imagesOnly = false
 ): Promise<ImagePicker.ImagePickerResult | null> {
   supersedePendingPick()
 
@@ -98,7 +99,7 @@ async function pickImages (
 
   const options: ImagePicker.ImagePickerOptions = {
     allowsMultipleSelection: source === 'library' && multiple,
-    mediaTypes: ['images', 'videos'],
+    mediaTypes: imagesOnly ? ['images'] : ['images', 'videos'],
     quality: 1
   }
 
@@ -283,7 +284,8 @@ export async function pickUploads ({
 } = {}): Promise<UploadAsset[]> {
   const picked = source === 'files'
     ? await pickFromFiles(multiple, type)
-    : await pickFromPhotos(source, multiple)
+    // A picture asked for, as a profile or room picture is, offers no videos.
+    : await pickFromPhotos(source, multiple, [type].flat().every((value) => typeof value === 'string' && value.startsWith('image/')))
   if (picked.length === 0) return []
 
   if (isTooManyFiles(picked.length)) {
@@ -318,9 +320,10 @@ async function pickFromFiles (multiple: boolean, type?: string | string[]): Prom
 
 async function pickFromPhotos (
   source: 'library' | 'camera',
-  multiple: boolean
+  multiple: boolean,
+  imagesOnly = false
 ): Promise<UploadAsset[]> {
-  const selection = await pickImages(source, multiple)
+  const selection = await pickImages(source, multiple, imagesOnly)
   if (!selection || selection.canceled || !selection.assets?.length) return []
 
   return selection.assets.map((asset) => {

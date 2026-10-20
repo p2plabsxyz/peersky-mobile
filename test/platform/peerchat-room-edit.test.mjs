@@ -52,3 +52,23 @@ test('the create sheet says the room can be changed later', () => {
   assert.match(screen, /You can change these later too\./)
   assert.doesNotMatch(screen, /cannot be edited after creation|fixed once the group is created/)
 })
+
+// A group, room or profile picture could only come from Files, so a photo had
+// to be saved there first. It is picked like an attachment now.
+test('a chat picture comes from the photo library, the camera or a file, and only pictures are offered', async () => {
+  const choose = screen.slice(screen.indexOf('function chooseAvatar ('), screen.indexOf('\n  }\n', screen.indexOf('function chooseAvatar (')))
+  assert.match(choose, /const select = \(source: UploadSource\) => void runAction\(async \(\) => \{[\s\S]{0,200}pickUploads\(\{ source, type: 'image\/\*' \}\)/)
+  assert.match(choose, /\{ text: t\('Photo library'\), onPress: \(\) => select\('library'\) \}/)
+  assert.match(choose, /\{ text: t\('Take a photo'\), onPress: \(\) => select\('camera'\) \}/)
+  assert.match(choose, /\{ text: t\('Choose file'\), onPress: \(\) => select\('files'\) \}/)
+  // Android drops a fourth button, so Cancel is left to Back there.
+  assert.match(choose, /\.\.\.\(Platform\.OS === 'android' \? \[\] : \[\{ text: t\('Cancel'\), style: 'cancel' as const \}\]\)/)
+  assert.match(choose, /\{ text: t\('Choose image'\), onPress: chooseSource \}/)
+  for (const call of ['chooseAvatar(roomDraft.avatar, (avatar) => changeRoomDraft({ avatar }))', 'chooseAvatar(profileAvatar, setProfileAvatar)', 'chooseAvatar(roomAvatar, setRoomAvatar)']) {
+    assert.ok(screen.includes(call), call)
+  }
+
+  const gate = await readFile(new URL('../../app/media/upload-gate.ts', import.meta.url), 'utf8')
+  assert.match(gate, /pickFromPhotos\(source, multiple, \[type\]\.flat\(\)\.every\(\(value\) => typeof value === 'string' && value\.startsWith\('image\/'\)\)\)/)
+  assert.match(gate, /mediaTypes: imagesOnly \? \['images'\] : \['images', 'videos'\]/)
+})

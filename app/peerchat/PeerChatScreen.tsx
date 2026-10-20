@@ -1365,10 +1365,10 @@ export function PeerChatScreen ({
 
   function chooseAvatar (current: string | null, onChange: (avatar: string | null) => void) {
     if (isBusy) return
-    const select = () => void runAction(async () => {
+    const select = (source: UploadSource) => void runAction(async () => {
       // A profile picture is broadcast to everyone in your rooms, so it goes
       // through the same gate as an attachment.
-      const [asset] = await pickUploads({ type: 'image/*' })
+      const [asset] = await pickUploads({ source, type: 'image/*' })
       if (!asset) return
       if (asset.size > MAX_PEERCHAT_AVATAR_SOURCE_BYTES) {
         throw new Error(t('Choose an image smaller than 25 MB.'))
@@ -1407,14 +1407,25 @@ export function PeerChatScreen ({
       if (mountedRef.current) onChange(avatar)
     })
 
+    // From the photo library, the camera or a file, as an attachment can be.
+    // Only files were offered, so a picture had to be saved to Files first.
+    // Android shows at most three buttons and drops the rest, so there Back is
+    // the way out instead of Cancel.
+    const chooseSource = () => Alert.alert(t('Chat image'), undefined, [
+      ...(Platform.OS === 'android' ? [] : [{ text: t('Cancel'), style: 'cancel' as const }]),
+      { text: t('Photo library'), onPress: () => select('library') },
+      { text: t('Take a photo'), onPress: () => select('camera') },
+      { text: t('Choose file'), onPress: () => select('files') }
+    ], { cancelable: true })
+
     if (!current) {
-      select()
+      chooseSource()
       return
     }
     Alert.alert(t('Chat image'), t('Choose a new image or remove the current one.'), [
       { text: t('Cancel'), style: 'cancel' },
       { text: t('Remove'), style: 'destructive', onPress: () => onChange(null) },
-      { text: t('Choose image'), onPress: select }
+      { text: t('Choose image'), onPress: chooseSource }
     ])
   }
 
