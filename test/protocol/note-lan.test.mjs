@@ -5,7 +5,7 @@ import http from 'node:http'
 import HyperDHT from 'hyperdht'
 import HyperDHTmDNS from '@p2plabs/hyperdht-mdns'
 import createTestnet from 'hyperdht/testnet.js'
-import { findNoteRouteOnLan, notePortKeyPair, noteTopic } from '../../backend/holesail/lan.mjs'
+import { LAN_OPEN_MS, findNoteRouteOnLan, notePortKeyPair, noteTopic } from '../../backend/holesail/lan.mjs'
 import { TunnelGuest, TunnelHost } from '../../backend/holesail/tunnel.mjs'
 import { LOOPBACK_TOKEN_HEADER, createLoopbackToken } from '../../backend/loopback-request.mjs'
 
@@ -57,11 +57,9 @@ describe('P2PMD notes over the local network, with no internet', () => {
   const bus = new Set()
   const lans = []
   const closers = []
-  let nextPort = 52000 + (process.pid % 3000)
 
   async function device () {
-    const lan = new HyperDHTmDNS({ host: '127.0.0.1', port: nextPort++, allowLoopback: true, adapter: new MemoryAdapter(bus) })
-    await lan.ready()
+    const lan = await lanDevice(bus)
     lans.push(lan)
     return lan
   }
@@ -124,6 +122,46 @@ describe('P2PMD notes over the local network, with no internet', () => {
     const guest = await open(new TunnelGuest({ key: host.info.url, bootstrap: OFFLINE, lan: other }))
     assert.equal(guest.info.lan, true)
     assert.equal(guest.info.port, port)
+  })
+
+  // A network change, or the stores closing for a backup, starts the local
+  // network again as a new instance. Offline a note stopped syncing once its
+  // host dropped off and came back, while online it carried on.
+  it('a note moves to a new local network instance on the host, and its guest finds it there', { timeout: 60000 }, async () => {
+    let hostLan = await device()
+    const guestLan = await device()
+    const port = await noteServer('# Still here')
+    const host = await open(new TunnelHost({ port, bootstrap: OFFLINE, lan: hostLan, getLan: () => hostLan, settleMs: 300 }))
+    const guest = await open(new TunnelGuest({ key: host.info.url, port: 0, bootstrap: OFFLINE, lan: guestLan, getLan: () => guestLan }))
+    assert.equal(await get(guest.info.port), '# Still here')
+
+    // The host's instance goes with no word to anyone, and a new one starts.
+    await hostLan.destroy()
+    hostLan = await device()
+    let text = null
+    for (let i = 0; i < 40 && text !== '# Still here'; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 500))
+      text = await get(guest.info.port).catch(() => null)
+    }
+    assert.equal(text, '# Still here')
+    assert.equal(host.lanHost.lan, hostLan)
+    assert.equal(guest.lanRoute.lan, guestLan)
+  })
+
+  it('drops a connection to a host that is gone instead of waiting on it forever', { timeout: 30000 }, async () => {
+    const hostLan = await device()
+    const guestLan = await device()
+    const port = await noteServer('# Gone soon')
+    const host = new TunnelHost({ port, bootstrap: OFFLINE, lan: hostLan, settleMs: 300 })
+    await host.open()
+    const guest = await open(new TunnelGuest({ key: host.info.url, port: 0, bootstrap: OFFLINE, lan: guestLan }))
+    assert.equal(await get(guest.info.port), '# Gone soon')
+
+    await host.close()
+    const started = Date.now()
+    assert.equal(await get(guest.info.port).catch(() => null), null)
+    assert.ok(Date.now() - started < LAN_OPEN_MS + 3000, `took ${Date.now() - started} ms`)
+    assert.ok(guest.lanRoute.failedAt > 0)
   })
 
   it('a private note hosted with no internet opens over the Wi-Fi from its address alone', async () => {
@@ -205,7 +243,6 @@ describe('P2PMD notes with the internet and the local network', () => {
   const bus = new Set()
   const lans = []
   const closers = []
-  let nextPort = 55000 + (process.pid % 3000)
 
   before(async () => {
     testnet = await createTestnet(3)
@@ -218,8 +255,7 @@ describe('P2PMD notes with the internet and the local network', () => {
   })
 
   async function device () {
-    const lan = new HyperDHTmDNS({ host: '127.0.0.1', port: nextPort++, allowLoopback: true, adapter: new MemoryAdapter(bus) })
-    await lan.ready()
+    const lan = await lanDevice(bus)
     lans.push(lan)
     return lan
   }
@@ -248,6 +284,19 @@ describe('P2PMD notes with the internet and the local network', () => {
     assert.equal(text, '# Both')
   })
 })
+
+// Devices' ports are below 30000. macOS and Linux hand out ports above 32768
+// on their own, and the suite runs files side by side, so a port above that
+// was at times taken already: the device failed to start, and as destroying
+// an instance that never started does not free it, this file never ended.
+// The other local network tests here keep to 30000 and up.
+let nextLanPort = 20000 + (process.pid % 4000) * 2
+
+async function lanDevice (bus) {
+  const lan = new HyperDHTmDNS({ host: '127.0.0.1', port: nextLanPort++, allowLoopback: true, adapter: new MemoryAdapter(bus) })
+  await lan.ready()
+  return lan
+}
 
 async function freePort () {
   const server = http.createServer().listen(0, '127.0.0.1')

@@ -45,8 +45,10 @@ export async function startHolesailLive ({
       port: livePort.port,
       host: liveHost.host,
       token: typeof token === 'string' && token ? token : null,
-      // On the local network too, so the note opens over Wi-Fi with no internet.
-      lan: getLANInstance()
+      // On the local network too, so the note opens over Wi-Fi with no internet,
+      // kept on the instance in use as it changes.
+      lan: getLANInstance(),
+      getLan: getLANInstance
     })
 
     session = instance
@@ -121,7 +123,8 @@ export async function connectHolesail ({
         port: targetPort.port,
         token: typeof token === 'string' && token ? token : null,
         // Looked for on the local network first.
-        lan: getLANInstance()
+        lan: getLANInstance(),
+        getLan: getLANInstance
       })
     } catch {
       return { ok: false, error: 'Invalid holesail key. Use hs://... or an alphanumeric key.' }

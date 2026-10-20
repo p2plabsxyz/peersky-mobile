@@ -31,6 +31,32 @@ export function noteTopic (publicKey) {
 // How long a join waits for the host to say which port it keeps the note on.
 export const LAN_PORT_MS = 1500
 
+// A tunnel on the local network says it is alive this often, and is dropped
+// after this long with nothing from the other end. A local network instance
+// can go outright, after a network change or when the app's stores close for
+// a backup, and the other end of each of its tunnels was never told: they
+// stayed open with nothing behind them. One that has not opened in time is
+// dropped too: a tunnel to a host that was away could wait for its handshake
+// forever, and the editor's event stream was one of those, so the note never
+// reconnected when its host came back. As on the desktop (p2pmd-lan.js).
+export const LAN_KEEP_ALIVE_MS = 5000
+export const LAN_STREAM_TIMEOUT_MS = 15000
+export const LAN_OPEN_MS = 8000
+
+function keepTunnelAlive (socket) {
+  socket.setKeepAlive?.(LAN_KEEP_ALIVE_MS)
+  socket.setTimeout?.(LAN_STREAM_TIMEOUT_MS)
+  return socket
+}
+
+function openWithin (socket, ms) {
+  const timer = setTimeout(() => socket.destroy(new Error('The note did not answer on the local network')), ms)
+  timer.unref?.()
+  socket.once('open', () => clearTimeout(timer))
+  socket.once('close', () => clearTimeout(timer))
+  return socket
+}
+
 /**
  * The key pair a host answers "which port?" under on the LAN DHT. Over the
  * internet a joiner reads the port from the host's record and listens on the
@@ -53,7 +79,7 @@ function usable (lan) {
 export async function hostNoteOnLan (lan, { keyPair, secure, port = null, onConnection }) {
   if (!usable(lan) || !keyPair) return null
   const firewall = secure ? (remotePublicKey) => !b4a.equals(remotePublicKey, keyPair.publicKey) : undefined
-  const server = lan.dht.createServer({ firewall, reusableSocket: true }, onConnection)
+  const server = lan.dht.createServer({ firewall, reusableSocket: true }, (socket) => onConnection(keepTunnelAlive(socket)))
   await server.listen(keyPair)
   // Lets in the same keys as the note: a private note's port goes only to
   // someone with its address.
@@ -78,6 +104,9 @@ export async function hostNoteOnLan (lan, { keyPair, secure, port = null, onConn
   }
   let closed = false
   return {
+    // Which local network instance the note is on: when a new one starts,
+    // the note has to be hosted there again (TunnelHost keeps it so).
+    lan,
     async close () {
       if (closed) return
       closed = true
@@ -215,9 +244,40 @@ export async function findNoteRouteOnLan (lan, { publicKey, keyPair = null, find
     askNotePortOnLan(lan, { publicKey, keyPair, address })
   ])
   if (!reached) return null
-  return {
+  // Where each connection goes: a local network instance and the host's
+  // address on it. Both can change while the note is open, and moveTo()
+  // points the next connections there (TunnelGuest keeps it current).
+  // failedAt says a connection failed since the route last worked.
+  const route = {
+    lan,
     address,
     port,
-    connect: () => usable(lan) ? connect() : null
+    failedAt: 0,
+    connect () {
+      const current = route.lan
+      if (!usable(current)) {
+        route.failedAt = Date.now()
+        return null
+      }
+      try {
+        const socket = openWithin(keepTunnelAlive(current.dht.connect(publicKey, {
+          ...(keyPair ? { keyPair } : {}),
+          relayAddresses: [route.address],
+          reusableSocket: true
+        })), LAN_OPEN_MS)
+        socket.once('open', () => { route.failedAt = 0 })
+        socket.once('error', () => { route.failedAt = Date.now() })
+        return socket
+      } catch {
+        route.failedAt = Date.now()
+        return null
+      }
+    },
+    moveTo (nextLan, nextAddress) {
+      route.lan = nextLan
+      route.address = nextAddress
+      route.failedAt = 0
+    }
   }
+  return route
 }

@@ -3,7 +3,7 @@ import net from 'net'
 import { createHash, randomBytes } from 'node:crypto'
 import b4a from 'b4a'
 import z32 from 'z32'
-import { findNoteRouteOnLan, hostNoteOnLan } from './lan.mjs'
+import { findNoteOnLan, findNoteRouteOnLan, hostNoteOnLan } from './lan.mjs'
 import { FORBIDDEN_RESPONSE, createRequestGate, createRequestStamp } from './request-gate.mjs'
 
 // P2PMD notes travel over Holesail's protocol, which the desktop speaks
@@ -69,8 +69,15 @@ function createDht ({ keyPair, bootstrap } = {}) {
 }
 
 /** Hosts a local TCP server under a note address. */
+// How often an open note checks it is on the local network instance in use.
+// A network change, or the app's stores closing for a backup, starts a new
+// instance: a note hosted on the old one could no longer be reached over the
+// Wi-Fi, and one joined over it no longer reached its host, while the same
+// note carried on over the internet. As on the desktop (hs-handler.js).
+export const LAN_KEEP_MS = 5000
+
 export class TunnelHost {
-  constructor ({ key, secure = true, host = LOOPBACK, port = DEFAULT_PORT, token = null, bootstrap, lan = null, settleMs = INTERNET_SETTLE_MS } = {}) {
+  constructor ({ key, secure = true, host = LOOPBACK, port = DEFAULT_PORT, token = null, bootstrap, lan = null, getLan = null, settleMs = INTERNET_SETTLE_MS } = {}) {
     const parsed = parseNoteAddress(key)
     this.secure = parsed.secure ?? Boolean(secure)
     this.host = host
@@ -91,7 +98,10 @@ export class TunnelHost {
     this.retry = null
     this.sockets = new Set()
     this.lan = lan
+    // The local network instance in use now, when it can change.
+    this.getLan = typeof getLan === 'function' ? getLan : null
     this.lanHost = null
+    this.lanKeeper = null
     this.settleMs = settleMs
     // Whether the host's record is on the internet DHT, so joiners there find it.
     this.internet = false
@@ -108,6 +118,7 @@ export class TunnelHost {
       const local = net.connect({ port: this.port, host: this.host, allowHalfOpen: true })
       bridge(local, remote, this.sockets, this.token ? { toLocal: createRequestStamp(this.token) } : {})
     }
+    this.serve = serve
     this.server = this.dht.createServer({
       // Only someone holding the same key pair, that is the address, gets in.
       firewall: this.secure ? (remotePublicKey) => !b4a.equals(remotePublicKey, ownKey) : undefined,
@@ -131,6 +142,8 @@ export class TunnelHost {
         })
     }
 
+    this.keepOnLan()
+
     const record = JSON.stringify({ host: this.host, udp: false, port: this.port })
     const put = putRecord(this.dht, this.keyPair, record)
     if (!this.lanHost) {
@@ -151,6 +164,33 @@ export class TunnelHost {
       new Promise((resolve) => { timer = setTimeout(resolve, this.settleMs) })
     ])
     clearTimeout(timer)
+  }
+
+  // Hosted on the local network instance in use: again on a new one, and on
+  // one that shows up after the note opened.
+  keepOnLan () {
+    if (!this.getLan || this.lanKeeper) return
+    let keeping = false
+    this.lanKeeper = setInterval(async () => {
+      if (keeping || this.state === 'closed') return
+      const lan = this.getLan()
+      if (!lan || lan.destroyed || this.lanHost?.lan === lan) return
+      keeping = true
+      try {
+        const next = await hostNoteOnLan(lan, { keyPair: this.keyPair, secure: this.secure, port: this.port, onConnection: this.serve }).catch(() => null)
+        if (!next) return
+        if (this.state === 'closed') {
+          await next.close()
+          return
+        }
+        const previous = this.lanHost
+        this.lanHost = next
+        await previous?.close().catch(() => {})
+      } finally {
+        keeping = false
+      }
+    }, LAN_KEEP_MS)
+    this.lanKeeper.unref?.()
   }
 
   keepRecord (record) {
@@ -206,6 +246,8 @@ export class TunnelHost {
     this.refresh = null
     if (this.retry) clearInterval(this.retry)
     this.retry = null
+    if (this.lanKeeper) clearInterval(this.lanKeeper)
+    this.lanKeeper = null
     const lanHost = this.lanHost
     this.lanHost = null
     if (lanHost) await lanHost.close()
@@ -220,7 +262,7 @@ export class TunnelHost {
 
 /** Listens on a local port and carries each connection to a note's host. */
 export class TunnelGuest {
-  constructor ({ key, secure, host = LOOPBACK, port, token = null, bootstrap, lan = null } = {}) {
+  constructor ({ key, secure, host = LOOPBACK, port, token = null, bootstrap, lan = null, getLan = null } = {}) {
     const parsed = parseNoteAddress(key)
     this.secure = parsed.secure ?? Boolean(secure)
     this.key = parsed.key
@@ -235,8 +277,10 @@ export class TunnelGuest {
     this.proxy = null
     this.sockets = new Set()
     this.lan = lan
+    this.getLan = typeof getLan === 'function' ? getLan : null
     // Set when the host was found on the local network and is reached there.
     this.lanRoute = null
+    this.lanKeeper = null
     if (this.secure) {
       this.keyPair = keyPairFor(this.key)
       this.remotePublicKey = this.keyPair.publicKey
@@ -315,6 +359,30 @@ export class TunnelGuest {
     })
     this.port = proxy.address()?.port || port
     this.state = 'listening'
+    this.keepOnLan()
+  }
+
+  // The host looked for again when this phone's local network instance went,
+  // or when it stopped answering at the address it had.
+  keepOnLan () {
+    if (!this.getLan || !this.lanRoute || this.lanKeeper) return
+    let keeping = false
+    this.lanKeeper = setInterval(async () => {
+      const route = this.lanRoute
+      if (keeping || !route || this.state === 'closed') return
+      const lan = this.getLan()
+      if (!lan || lan.destroyed || (route.lan === lan && !route.failedAt)) return
+      keeping = true
+      try {
+        const address = await findNoteOnLan(lan, this.remotePublicKey).catch(() => null)
+        if (this.lanRoute !== route) return
+        if (address) route.moveTo(lan, address)
+        else if (route.lan !== lan) route.moveTo(lan, route.address)
+      } finally {
+        keeping = false
+      }
+    }, LAN_KEEP_MS)
+    this.lanKeeper.unref?.()
   }
 
   get info () {
@@ -334,6 +402,8 @@ export class TunnelGuest {
 
   async close () {
     this.state = 'closed'
+    if (this.lanKeeper) clearInterval(this.lanKeeper)
+    this.lanKeeper = null
     this.lanRoute = null
     for (const socket of this.sockets) socket.destroy()
     this.sockets.clear()
