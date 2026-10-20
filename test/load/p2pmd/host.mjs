@@ -1,11 +1,14 @@
 // The phone's P2PMD host for the load test: createP2pmdHttpServer from
 // backend/p2pmd/server.mjs on Node's http, the way
 // test/protocol/p2pmd-http.test.mjs runs it, bound to 127.0.0.1.
-// startP2pmdServer is not used, and nothing here starts Holesail. run.mjs
-// starts this process and asks it for measurements.
+// startP2pmdServer is not used. With --lan the note is also hosted with the
+// phone's own TunnelHost on a local network instance (lan.mjs), as with no
+// internet; otherwise nothing here starts Holesail. run.mjs starts this
+// process and asks it for measurements.
 import dc from 'node:diagnostics_channel'
 import http from 'node:http'
 import { monitorEventLoopDelay, performance } from 'node:perf_hooks'
+import { TunnelHost } from '../../../backend/holesail/tunnel.mjs'
 import { LOOPBACK_TOKEN_HEADER, createLoopbackToken } from '../../../backend/loopback-request.mjs'
 import { resetDocumentState } from '../../../backend/p2pmd/document.mjs'
 import { createP2pmdHttpServer } from '../../../backend/p2pmd/server.mjs'
@@ -26,16 +29,35 @@ const url = await new Promise((resolve, reject) => {
   server.once('error', reject)
   server.listen(0, '127.0.0.1', () => resolve(`http://127.0.0.1:${server.address().port}`))
 })
+const onLan = process.env.P2PMD_LOAD_LAN ? await hostOnLan(server.address().port) : null
 
 answer({
   sample: ({ reset }) => meter.sample(reset),
   async close () {
+    await onLan?.close()
     server.closeAllConnections()
     await new Promise((resolve) => server.close(resolve))
     return {}
   }
 })
-process.send({ type: 'ready', url, host: 'phone' })
+process.send({ type: 'ready', url, host: 'phone', lan: onLan && { address: onLan.address } })
+
+// A public note, as the desktop's load test makes, hosted as the phone hosts
+// one with no internet: on the local network alone.
+async function hostOnLan (port) {
+  const { OFFLINE, startLan } = await import('./lan.mjs')
+  const lan = await startLan()
+  const tunnel = new TunnelHost({ secure: false, port, token, bootstrap: OFFLINE, lan, getLan: () => lan, settleMs: 0 })
+  await tunnel.open()
+  if (!tunnel.lanHost) throw new Error('The note could not be hosted on the local network')
+  return {
+    address: tunnel.info.url,
+    async close () {
+      await tunnel.close().catch(() => {})
+      await lan.destroy().catch(() => {})
+    }
+  }
+}
 
 // What the host process does: bytes on every connection it accepts, CPU time,
 // memory, and how late its event loop runs.

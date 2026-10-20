@@ -7,6 +7,7 @@ It is not part of `npm test`.
 ```bash
 npm run test:load:p2pmd
 npm run test:load:p2pmd -- --people 20 --typing 3 --seconds 20
+npm run test:load:p2pmd -- --lan
 ```
 
 ## Options
@@ -17,6 +18,8 @@ npm run test:load:p2pmd -- --people 20 --typing 3 --seconds 20
 | `--typing` | 10 | how many of them type |
 | `--seconds` | 60 | how long they type |
 | `--editor` | `desktop` | which P2PMD editor they act like: `desktop` or `phone` |
+| `--lan` | off | each editor a device of its own, reaching the note through a tunnel on the local network, as with no internet |
+| `--join-every` | 20 | one person joins every this many milliseconds, so 100 take two seconds |
 | `--out` | | also write the results to a JSON file |
 
 ## What it runs
@@ -32,10 +35,19 @@ npm run test:load:p2pmd -- --people 20 --typing 3 --seconds 20
   each typist.
 - **The editors:** 25 to a process. Each makes the requests its editor makes to
   open a note, opens `/events`, and keeps its own Yjs copy of the note from
-  the host's `yjsupdate` events.
+  the host's `yjsupdate` events. One whose join fails presses Join again a
+  second later, up to three times, and the results say how many had to.
 - **The typists:** each types on its own line, a character every 100 ms, and
   sends the Yjs change to `/doc/update`. Every tenth edit is a token, timed
   until every other editor has it.
+
+- **With `--lan`:** the host also puts the note on a local network instance
+  with the phone's own `TunnelHost`, as the phone does with no internet. Each
+  editor is a device of its own, with its own instance
+  (`@p2plabs/hyperdht-mdns`, found over real mDNS) that is up before anyone
+  joins, and joins with the phone's own `TunnelGuest`, so its requests go
+  through an encrypted tunnel of its own. `lan.mjs` has both, and is the
+  checkout's own, as `host.mjs` is.
 
 `--editor` picks the editor:
 
@@ -56,6 +68,7 @@ which is more.
 | Row | What it is |
 |---|---|
 | People connected | how many the host counts in `/status` |
+| Joins that needed another try | shown only when some did |
 | Edits sent | `/doc/update` requests while typing, and how many the host refused |
 | Every editor ended with the host's text | each editor's copy against `/doc`, once typing stops |
 | Time until every editor saw an edit | from a typist sending a token until the last other editor had it |
@@ -74,15 +87,21 @@ unanswered, or a stream dropped.
 
 ## What it never does
 
-- Everything binds to and connects to `127.0.0.1`. Holesail, Hyperswarm and
-  the DHT are never started: the editors reach the host directly.
+- Without `--lan`, everything binds to and connects to `127.0.0.1`.
+  Holesail, Hyperswarm and the DHT are never started: the editors reach the
+  host directly.
+- With `--lan`, the devices find each other over mDNS on this machine's
+  network, and their tunnels run over UDP on it. Nothing goes to the
+  internet: the DHT for it is given nobody to bootstrap from.
 - The host keeps the note in memory and writes nothing to disk.
 
 ## What it cannot tell
 
 - How a phone copes: the host runs under Node on this machine, not in Bare on
   a phone, and on Node's `http` instead of `bare-http1`.
-- What Holesail and a real network add: delay, bandwidth, dropped connections.
+- What a real network adds: delay, bandwidth, dropped connections. With
+  `--lan` the tunnels' encryption is in the host's CPU, but every device is
+  on this one machine.
 - What the editors spend drawing the note, the line gutter and the preview.
 - People joining, leaving or reconnecting while others type, and typists
   adding lines, which moves the line numbers of everyone below.
