@@ -103,7 +103,7 @@ import {
   createHyperBrowserHtml,
   createHyperMediaHtml
 } from './browser-html.mjs'
-import { browserThemeFiles } from './browser-theme.mjs'
+import { browserThemeFiles, createBrowserThemeScript } from './browser-theme.mjs'
 import {
   BROWSER_PALETTES,
   getBrowserPalette,
@@ -3956,6 +3956,7 @@ export default function App () {
   // What browser://theme/ answers in the tabs (browser-theme.mjs), made again
   // only when the app goes light or dark.
   const browserThemeFilesForTabs = useMemo(() => browserThemeFiles(browserIsDark), [browserIsDark])
+  const browserThemeScript = useMemo(() => createBrowserThemeScript(browserIsDark), [browserIsDark])
   const browserStatusBarStyle = getBrowserStatusBarStyle(Platform.OS, browserPreferences.theme, browserIsDark)
   const browserChrome = getBrowserPalette(browserIsDark)
   // P2PMD is written dark, so light is a set of overrides laid on top. Null
@@ -5766,7 +5767,10 @@ export default function App () {
             createHyperBridgeScript(browserMediaToken),
             browserAccessibilityScript,
             browserContentBlockingScript,
-            browserMediaScript
+            browserMediaScript,
+            // browser://theme/ for https:// pages, which WebKit will not load
+            // it into (browser-theme.mjs).
+            browserThemeScript
           )
 
           const webViewGeneration = browserWebViewGenerations[tab.id] || 0

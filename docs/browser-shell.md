@@ -118,6 +118,13 @@ WebViews answer those two schemes for the `theme` host: on iOS a
 `themeResponse` in `PeerSkyWebViewClient.kt.template`, before any content
 blocking. Anything else on those schemes is not found.
 
+WebKit counts those schemes as insecure beside `https://`, so it does not load
+them into an `https://` page at all. Every tab therefore also runs
+`createBrowserThemeScript` at document start: when a `<link>` or `<style>`
+asks for the theme, it puts the variables in a `<style>` just before it and
+points a link to `style.css` at a `data:` copy. A page that never asks is left
+alone, and the script stops watching once the page has loaded.
+
 The files come from `app/browser-theme.mjs`, handed to every tab as the
 `themeFiles` prop. `vars.css` sets the `--browser-theme-*` variables (font,
 background, page background, text, primary and secondary highlight, hover and

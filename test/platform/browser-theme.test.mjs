@@ -3,8 +3,9 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { describe, test } from 'node:test'
+import vm from 'node:vm'
 
-import { BROWSER_THEME_SCHEMES, browserThemeFiles, browserThemeVarsCss } from '../../app/browser-theme.mjs'
+import { BROWSER_THEME_SCHEMES, browserThemeFiles, browserThemeVarsCss, createBrowserThemeScript } from '../../app/browser-theme.mjs'
 import STYLE_CSS from '../../app/browser-theme-style.mjs'
 
 const read = (path) => readFileSync(new URL(`../../${path}`, import.meta.url), 'utf8')
@@ -68,5 +69,98 @@ describe('the WebView answers browser:// and agregore://', () => {
     assert.match(manager, /propName == "themeFiles"/)
     assert.match(manager, /client\.themeFiles = themeFiles\[view\.webView\]/)
     assert.match(manager, /clients\[wrapper\.webView\]\?\.themeFiles = next/)
+  })
+})
+
+// Just enough of a page for the script: elements with attributes, text
+// nodes, a parent that takes insertBefore, and a MutationObserver the test
+// feeds by hand.
+function fakePage () {
+  const inserted = []
+  let observer = null
+  let loaded = null
+  const element = (tagName, attributes = {}, text = '') => ({
+    nodeType: 1,
+    tagName,
+    attributes: { ...attributes },
+    textContent: text,
+    parentNode: null,
+    getAttribute (name) { return this.attributes[name] ?? null },
+    setAttribute (name, value) { this.attributes[name] = String(value) },
+    hasAttribute (name) { return name in this.attributes }
+  })
+  const head = { tagName: 'HEAD', insertBefore (node, before) { inserted.push({ node, before }) } }
+  const document = { createElement: (tag) => element(tag.toUpperCase()) }
+  const window = { addEventListener: (type, listener) => { if (type === 'load') loaded = listener } }
+  class MutationObserver {
+    constructor (callback) { this.callback = callback; observer = this }
+    observe () {}
+    disconnect () { this.disconnected = true }
+  }
+  return {
+    run (script) { vm.runInNewContext(script, { document, window, MutationObserver }) },
+    add (node) { node.parentNode = node.parentNode || head; observer.callback([{ addedNodes: [node] }]) },
+    element,
+    head,
+    inserted,
+    load () { loaded() },
+    observer: () => observer
+  }
+}
+
+describe('pages over https://, which WebKit will not load browser:// into', () => {
+  test('a link to style.css gets a data: copy, with the variables just before it', () => {
+    const page = fakePage()
+    page.run(createBrowserThemeScript(true))
+    const link = page.element('LINK', { rel: 'stylesheet', href: 'browser://theme/style.css' })
+    page.add(link)
+    assert.match(link.getAttribute('href'), /^data:text\/css;charset=utf-8,/)
+    const css = decodeURIComponent(link.getAttribute('href').split(',')[1])
+    assert.equal(css, STYLE_CSS.replace("@import url('browser://theme/vars.css');", ''))
+    assert.equal(page.inserted.length, 1)
+    assert.equal(page.inserted[0].before, link)
+    assert.equal(page.inserted[0].node.textContent, browserThemeVarsCss(true))
+
+    // Agregore's own name for it is taken the same way, and the variables go in once.
+    const agregore = page.element('LINK', { rel: 'stylesheet', href: 'agregore://theme/style.css?v=1' })
+    page.add(agregore)
+    assert.match(agregore.getAttribute('href'), /^data:text\/css/)
+    assert.equal(page.inserted.length, 1)
+  })
+
+  test('a style that imports vars.css gets the variables, its text early or late', () => {
+    const early = fakePage()
+    early.run(createBrowserThemeScript(false))
+    const style = early.element('STYLE', {}, '@import url("browser://theme/vars.css");')
+    early.add(style)
+    assert.equal(early.inserted[0]?.before, style)
+
+    const late = fakePage()
+    late.run(createBrowserThemeScript(false))
+    const empty = late.element('STYLE')
+    late.add(empty)
+    assert.equal(late.inserted.length, 0)
+    late.add({ nodeType: 3, data: '@import url("agregore://theme/vars.css");', parentNode: empty })
+    assert.equal(late.inserted[0]?.before, empty)
+    assert.equal(late.inserted[0].node.textContent, browserThemeVarsCss(false))
+  })
+
+  test('a page that never asks is left alone, and the watch ends when it has loaded', () => {
+    const page = fakePage()
+    page.run(createBrowserThemeScript(false))
+    const link = page.element('LINK', { rel: 'stylesheet', href: 'https://example.com/site.css' })
+    page.add(link)
+    page.add(page.element('STYLE', {}, 'body { color: red }'))
+    assert.equal(link.getAttribute('href'), 'https://example.com/site.css')
+    assert.equal(page.inserted.length, 0)
+    page.load()
+    assert.equal(page.observer().disconnected, true)
+  })
+
+  test('every tab runs it, made again only when the app goes light or dark', () => {
+    const app = read('app/index.tsx')
+    assert.match(app, /useMemo\(\(\) => createBrowserThemeScript\(browserIsDark\), \[browserIsDark\]\)/)
+    const before = app.slice(app.indexOf('const browserBeforeContentScript'), app.indexOf('const webViewGeneration'))
+    assert.match(before, /browserThemeScript\n/)
   })
 })
