@@ -90,7 +90,7 @@ export function createHyperMediaHtml ({ mediaName, mediaType, mediaUrl }) {
 // media query follows the system, and the app has its own theme setting that
 // can disagree with it, so a page built here would come out light while every
 // piece of chrome around it was dark. These are the palette's own colours.
-const DOCUMENT_THEMES = {
+export const DOCUMENT_THEMES = {
   light: {
     page: '#ffffff',
     ink: '#151821',

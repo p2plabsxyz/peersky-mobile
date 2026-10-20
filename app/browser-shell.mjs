@@ -249,6 +249,13 @@ export function getBrowserRequestAction ({
     return { action: 'allow' }
   }
 
+  // A document a page makes for a frame of its own: data:, blob: or srcdoc.
+  // Every browser loads these in a frame, and only refuses a whole tab sent to
+  // data:. Refused here, Agregore's scratchpad showed no live preview.
+  if (!isTopFrame && /^(?:data:|blob:|about:srcdoc$)/i.test(url)) {
+    return { action: 'allow' }
+  }
+
   if (isHyperUrl(url)) {
     // A hyper:// frame cannot load in place, and turning it into a navigation
     // let any embed or ad take the whole tab to a page of its choosing.

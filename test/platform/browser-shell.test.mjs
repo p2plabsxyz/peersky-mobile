@@ -289,6 +289,18 @@ describe('browser shell navigation helpers', () => {
     assert.deepEqual(getBrowserRequestAction({ requestUrl: 'https://example.com', currentSourceKind: 'web' }), { action: 'allow' })
   })
 
+  test('a frame may show a document its page made, a tab may not', () => {
+    // Agregore's scratchpad draws its live preview into a data: frame, which
+    // stayed blank.
+    for (const requestUrl of ['data:text/html;base64,PHA+b2s8L3A+', 'blob:https://agregore.mauve.moe/0b6f', 'about:srcdoc']) {
+      for (const currentSourceKind of ['web', 'hyper']) {
+        assert.deepEqual(getBrowserRequestAction({ requestUrl, currentSourceKind, isTopFrame: false }), { action: 'allow' })
+      }
+    }
+    assert.deepEqual(getBrowserRequestAction({ requestUrl: 'data:text/html,ok', currentSourceKind: 'web', isTopFrame: true }), { action: 'block' })
+    assert.deepEqual(getBrowserRequestAction({ requestUrl: 'about:srcdocx', currentSourceKind: 'web', isTopFrame: false }), { action: 'block' })
+  })
+
   test('a hyper:// frame never takes the whole tab with it', () => {
     // An ad or embed pointing at hyper:// used to become a full navigation, so
     // any page could send the tab to a hyper site of its choosing.

@@ -44,17 +44,65 @@ internal fun isYoutubeAdBreakRequest(
 class PeerSkyWebViewClient : RNCWebViewClient() {
   private val documentUrl = AtomicReference("")
 
+  // What browser://theme/ and agregore://theme/ answer, handed over by the
+  // manager from the app (app/browser-theme.mjs).
+  @Volatile var themeFiles: Map<String, String> = emptyMap()
+
   override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
     documentUrl.set(url)
     super.onPageStarted(view, url, favicon)
+  }
+
+  // react-native-webview hands the app a frame's load as if it were the
+  // tab's, with no isTopFrame, so the app judged it as one: it refused a
+  // frame's own data: document as it refuses a tab sent to data:, which left
+  // Agregore's scratchpad with no live preview, and a web embed on a hyper://
+  // page would take the whole tab. A frame is decided here, by the rules the
+  // app keeps for iOS frames (getBrowserRequestAction in browser-shell.mjs).
+  override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+    if (!request.isForMainFrame) return !frameMayLoad(request.url)
+    return super.shouldOverrideUrlLoading(view, request)
   }
 
   override fun shouldInterceptRequest(
     view: WebView,
     request: WebResourceRequest
   ): WebResourceResponse? {
+    themeResponse(request.url)?.let { return it }
     if (shouldBlock(request)) return blockedResponse()
     return super.shouldInterceptRequest(view, request)
+  }
+
+  // The web, and a document the page made for the frame. hyper://, an app's
+  // link or anything else goes nowhere from inside a frame.
+  internal fun frameMayLoad(uri: Uri?): Boolean {
+    if (uri == null) return false
+    val url = uri.toString()
+    if (url == "about:blank" || url == "about:srcdoc") return true
+    return when (uri.scheme?.lowercase(Locale.ROOT)) {
+      "http", "https", "data", "blob" -> true
+      else -> false
+    }
+  }
+
+  // browser://theme/ and agregore://theme/, as the desktop serves them: the
+  // browser's colours (vars.css) and its look (style.css) for pages made for
+  // PeerSky or Agregore. Anything else on those schemes is not found.
+  internal fun themeResponse(uri: Uri?): WebResourceResponse? {
+    if (uri == null) return null
+    val scheme = uri.scheme?.lowercase(Locale.ROOT) ?: return null
+    if (scheme != "browser" && scheme != "agregore") return null
+    val css = if (uri.host.equals("theme", ignoreCase = true)) {
+      themeFiles[uri.path.orEmpty().removePrefix("/")]
+    } else {
+      null
+    }
+    val headers = mapOf("Access-Control-Allow-Origin" to "*", "Cache-Control" to "no-cache")
+    return if (css != null) {
+      WebResourceResponse("text/css", "utf-8", 200, "OK", headers, ByteArrayInputStream(css.toByteArray(Charsets.UTF_8)))
+    } else {
+      WebResourceResponse("text/plain", "utf-8", 404, "Not Found", headers, ByteArrayInputStream("Not found".toByteArray(Charsets.UTF_8)))
+    }
   }
 
   private fun shouldBlock(request: WebResourceRequest): Boolean {

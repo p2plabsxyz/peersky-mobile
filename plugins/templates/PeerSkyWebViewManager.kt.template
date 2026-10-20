@@ -17,6 +17,7 @@ import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import com.facebook.react.bridge.ReadableArray
+import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.uimanager.annotations.ReactProp
 import com.facebook.react.uimanager.ThemedReactContext
 import com.facebook.react.uimanager.ViewManagerDelegate
@@ -31,6 +32,8 @@ class PeerSkyWebViewManager : RNCWebViewManager() {
   private val mediaLongPressPoints = WeakHashMap<WebView, TouchPoint>()
   private val contentBlockerBridges = WeakHashMap<WebView, PeerSkyContentBlockerBridge>()
   private val privateWebViews = WeakHashMap<WebView, String>()
+  private val themeFiles = WeakHashMap<WebView, Map<String, String>>()
+  private val clients = WeakHashMap<WebView, PeerSkyWebViewClient>()
 
   override fun getName() = "PeerSkyWebView"
 
@@ -42,6 +45,8 @@ class PeerSkyWebViewManager : RNCWebViewManager() {
           setMediaLongPressToken(view, value as? String)
         } else if (propName == "contentBlockingToken") {
           setContentBlockingToken(view, value as? String)
+        } else if (propName == "themeFiles") {
+          setThemeFiles(view, value as? ReadableMap)
         } else if (propName == "incognitoSession") {
           setIncognitoSession(view, value as? String)
         } else if (propName == "userAgent") {
@@ -69,7 +74,26 @@ class PeerSkyWebViewManager : RNCWebViewManager() {
     view: RNCWebViewWrapper
   ) {
     super.addEventEmitters(context, view)
-    view.webView.webViewClient = PeerSkyWebViewClient()
+    val client = PeerSkyWebViewClient()
+    client.themeFiles = themeFiles[view.webView] ?: emptyMap()
+    clients[view.webView] = client
+    view.webView.webViewClient = client
+  }
+
+  // What browser://theme/ and agregore://theme/ answer in this WebView, in
+  // the app's light or dark colours (app/browser-theme.mjs).
+  @ReactProp(name = "themeFiles")
+  fun setThemeFiles(wrapper: RNCWebViewWrapper, files: ReadableMap?) {
+    val next = mutableMapOf<String, String>()
+    if (files != null) {
+      val keys = files.keySetIterator()
+      while (keys.hasNextKey()) {
+        val name = keys.nextKey()
+        files.getString(name)?.let { next[name] = it }
+      }
+    }
+    themeFiles[wrapper.webView] = next
+    clients[wrapper.webView]?.themeFiles = next
   }
 
   // Every WebView shares one cookie jar, cache and storage, so incognito tabs
@@ -118,6 +142,8 @@ class PeerSkyWebViewManager : RNCWebViewManager() {
 
   override fun onDropViewInstance(view: RNCWebViewWrapper) {
     privateWebViews.remove(view.webView)
+    themeFiles.remove(view.webView)
+    clients.remove(view.webView)
     super.onDropViewInstance(view)
   }
 
