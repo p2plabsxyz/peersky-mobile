@@ -103,6 +103,7 @@ import {
   createHyperBrowserHtml,
   createHyperMediaHtml
 } from './browser-html.mjs'
+import { browserThemeFiles } from './browser-theme.mjs'
 import {
   BROWSER_PALETTES,
   getBrowserPalette,
@@ -3952,6 +3953,9 @@ export default function App () {
   const canBrowserGoForward = browserCanGoForward || driveViewerCanGoForward
   const browserIncognitoSession = getBrowserIncognitoSession(browserTabsState.tabs)
   const browserIsDark = resolveBrowserDarkMode(browserPreferences.theme, systemColorScheme)
+  // What browser://theme/ answers in the tabs (browser-theme.mjs), made again
+  // only when the app goes light or dark.
+  const browserThemeFilesForTabs = useMemo(() => browserThemeFiles(browserIsDark), [browserIsDark])
   const browserStatusBarStyle = getBrowserStatusBarStyle(Platform.OS, browserPreferences.theme, browserIsDark)
   const browserChrome = getBrowserPalette(browserIsDark)
   // P2PMD is written dark, so light is a set of overrides laid on top. Null
@@ -5710,7 +5714,9 @@ export default function App () {
                   contentBlockingToken: browserPreferences.contentBlockingEnabled
                     ? browserMediaToken
                     : null,
-                  mediaLongPressToken: browserMediaToken
+                  mediaLongPressToken: browserMediaToken,
+                  // browser://theme/ and agregore://theme/, in the app's colours.
+                  themeFiles: browserThemeFilesForTabs
                 },
                 // Incognito cookies live apart from normal tabs, in one store
                 // (on Android a WebView profile) for each run of incognito tabs.

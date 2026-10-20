@@ -44,6 +44,10 @@ internal fun isYoutubeAdBreakRequest(
 class PeerSkyWebViewClient : RNCWebViewClient() {
   private val documentUrl = AtomicReference("")
 
+  // What browser://theme/ and agregore://theme/ answer, handed over by the
+  // manager from the app (app/browser-theme.mjs).
+  @Volatile var themeFiles: Map<String, String> = emptyMap()
+
   override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
     documentUrl.set(url)
     super.onPageStarted(view, url, favicon)
@@ -53,8 +57,29 @@ class PeerSkyWebViewClient : RNCWebViewClient() {
     view: WebView,
     request: WebResourceRequest
   ): WebResourceResponse? {
+    themeResponse(request.url)?.let { return it }
     if (shouldBlock(request)) return blockedResponse()
     return super.shouldInterceptRequest(view, request)
+  }
+
+  // browser://theme/ and agregore://theme/, as the desktop serves them: the
+  // browser's colours (vars.css) and its look (style.css) for pages made for
+  // PeerSky or Agregore. Anything else on those schemes is not found.
+  internal fun themeResponse(uri: Uri?): WebResourceResponse? {
+    if (uri == null) return null
+    val scheme = uri.scheme?.lowercase(Locale.ROOT) ?: return null
+    if (scheme != "browser" && scheme != "agregore") return null
+    val css = if (uri.host.equals("theme", ignoreCase = true)) {
+      themeFiles[uri.path.orEmpty().removePrefix("/")]
+    } else {
+      null
+    }
+    val headers = mapOf("Access-Control-Allow-Origin" to "*", "Cache-Control" to "no-cache")
+    return if (css != null) {
+      WebResourceResponse("text/css", "utf-8", 200, "OK", headers, ByteArrayInputStream(css.toByteArray(Charsets.UTF_8)))
+    } else {
+      WebResourceResponse("text/plain", "utf-8", 404, "Not Found", headers, ByteArrayInputStream("Not found".toByteArray(Charsets.UTF_8)))
+    }
   }
 
   private fun shouldBlock(request: WebResourceRequest): Boolean {

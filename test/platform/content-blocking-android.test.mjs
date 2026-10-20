@@ -66,7 +66,7 @@ describe('Android content blocking', () => {
     assert.match(managerSource, /setToken\(token[?][.]takeIf\(::isValidToken\)\)/)
     assert.match(
       managerSource,
-      /super[.]addEventEmitters\(context, view\)[\s\S]*webViewClient = PeerSkyWebViewClient\(\)/
+      /super[.]addEventEmitters\(context, view\)[\s\S]*val client = PeerSkyWebViewClient\(\)[\s\S]*webViewClient = client/
     )
   })
 
