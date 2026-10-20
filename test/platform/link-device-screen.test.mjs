@@ -227,7 +227,7 @@ test('sending to a desktop says what it gets and shows a link to paste there', a
 
   const sheet = screen.slice(screen.indexOf(': sending'), screen.indexOf('{direction === \'receive\''))
   assert.match(sheet, /sending\.toDesktop \? t\('Open this on the desktop'\)/)
-  assert.match(sheet, /Under Restore from the network, paste this link or scan it/)
+  assert.match(sheet, /under Receive here, paste this link or scan it/)
   assert.match(sheet, /onPress=\{copyLink\}/)
   assert.match(screen, /Clipboard\.setString\(sending\.url\)/)
 })
