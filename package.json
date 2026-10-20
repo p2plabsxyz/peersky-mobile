@@ -136,6 +136,7 @@
   "standard": {
     "ignore": [
       "app/app.bundle.mjs",
+      "app/vendor/**",
       "backend/peerchat/moderation-data.mjs",
       "backend/p2pmd/ieee-runtime.mjs",
       "backend/p2pmd/katex-runtime.mjs",
