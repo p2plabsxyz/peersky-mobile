@@ -29,6 +29,15 @@ recoverLinkDeviceStorage()
 recoverInterruptedP2pReset()
 createRpc()
 
+// A promise rejected with nobody to catch it aborts Bare, and the app with it.
+// HyperDHT left one each time a connection to a note's host failed or was
+// given up before it opened, as when the host left (patched in
+// patches/hyperdht+6.32.0.patch). Logged instead, as the desktop does, so one
+// that is still left somewhere never takes the app down.
+Bare.on('unhandledRejection', (reason) => {
+  console.error('[backend] Unhandled rejection:', reason?.code || reason?.message || reason)
+})
+
 function createRpc () {
   const rpc = new RPC(IPC, routeRpcRequest)
 

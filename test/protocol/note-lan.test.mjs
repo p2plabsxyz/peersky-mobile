@@ -164,6 +164,41 @@ describe('P2PMD notes over the local network, with no internet', () => {
     assert.ok(guest.lanRoute.failedAt > 0)
   })
 
+  it('a host whose device left leaves no rejection unhandled, which would abort the app', { timeout: 30000 }, async () => {
+    // A connection to a host that had answered before, failing before it
+    // opened, left HyperDHT with a promise nobody caught, about 4 s on, and
+    // Bare aborts the app on one of those (patches/hyperdht+6.32.0.patch).
+    const hostLan = await device()
+    const port = await noteServer('# Left')
+    const host = new TunnelHost({ port, bootstrap: OFFLINE, lan: hostLan, settleMs: 300 })
+    await host.open()
+    const guest = await open(new TunnelGuest({ key: host.info.url, port: 0, bootstrap: OFFLINE, lan: await device() }))
+    // Each request on a connection of its own, closed once answered.
+    const ask = () => new Promise((resolve, reject) => {
+      http.get({ host: '127.0.0.1', port: guest.info.port, path: '/', agent: false }, (res) => {
+        let text = ''
+        res.on('data', (chunk) => { text += chunk })
+        res.on('end', () => resolve(text))
+      }).on('error', reject)
+    })
+    assert.equal(await ask(), '# Left')
+    // Once that connection has closed: one still closing when the host goes
+    // fails, and HyperDHT forgets the way to the host instead of trying it.
+    await new Promise((resolve) => setTimeout(resolve, 500))
+
+    const unhandled = []
+    const onUnhandled = (reason) => unhandled.push(reason?.code || reason?.message || String(reason))
+    process.on('unhandledRejection', onUnhandled)
+    try {
+      await host.close()
+      await hostLan.destroy()
+      assert.equal(await ask().catch(() => null), null)
+    } finally {
+      process.off('unhandledRejection', onUnhandled)
+    }
+    assert.deepEqual(unhandled, [])
+  })
+
   it('a private note hosted with no internet opens over the Wi-Fi from its address alone', async () => {
     const phone = await device()
     const other = await device()
