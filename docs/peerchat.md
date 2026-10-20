@@ -72,6 +72,7 @@ Important files:
 - `backend/peerchat/room-proof.mjs`: the proof a peer gives that it holds a room's key.
 - `backend/peerchat/key-chain.mjs`: hourly message keys for rooms made on 0.1.2 or later.
 - `backend/peerchat/removal-signature.mjs`: the creator's signature on a room's removal list.
+- `backend/peerchat/person-proof.mjs`: the proof each of a person's devices gives that it is theirs.
 - `backend/peerchat/room-move.mjs`: room keys that say who made the room, and a room's move to a new key when somebody is removed.
 - `backend/peerchat/message-signature.mjs`: every message's signature by whoever wrote it.
 - `backend/peerchat/transport.mjs`: bounded newline-delimited peer frames.
@@ -98,8 +99,22 @@ and every device checks it against the creator's key, which is how a removal
 reaches people who never meet the creator. A list from an older build carries
 no signature and counts only from the creator's own connection. On 0.1.3 the
 room also moves to a new key for the people still in it (see
-[Removing somebody moves the room](#removing-somebody-moves-the-room)). A
-person's other devices are members of their own, so each has to be removed.
+[Removing somebody moves the room](#removing-somebody-moves-the-room)).
+
+Each of a person's devices is a member of its own, so removing one used to leave
+the others in the room. Now each device signs its own network key with a key
+pair made from the person's link, `SHA-256("peersky-chat:person:" + link key)`,
+and sends `person: { key, sig }` with its profile, `sig` being the Ed25519
+signature over `"peersky-chat/2 person\n" + its network key`
+(`backend/peerchat/person-proof.mjs`, the same bytes as the desktop's, with one
+pinned vector). It counts only when the signature checks out for the key the
+connection came in with, so nobody can take someone else out by claiming to be
+them. When the creator removes one device, every device that proved the same
+person key goes too, each in the signed removal list by its full key, so older
+builds remove them as well. The creator's phone keeps the person key and
+removes another of their devices that turns up later, once it proves whose it
+is. Letting one back in lets them all back in. One of the creator's own other
+devices is removed on its own.
 
 The picture check runs the vendored model in a hidden WebView
 (`app/media/NsfwScanner.tsx`). iOS ends a WebView's page process while the app

@@ -109,6 +109,7 @@ import {
   devicesProof,
   checkDevicesProof
 } from './device-link.mjs'
+import { checkPersonProof, makePersonProof, personKey } from './person-proof.mjs'
 import { checkRoomProof, roomProof } from './room-proof.mjs'
 import {
   checkCreatorProof,
@@ -1669,6 +1670,12 @@ export class PeerChatService {
         }
       }
       let changed = false
+      // Only as this connection's own key signed it.
+      const person = checkPersonProof(message.person, peer.key)
+      if (person !== (peer.person || '')) {
+        peer.person = person
+        changed = true
+      }
       const name = normalizeMemberName(message.username)
       if (name && name !== peer.username) {
         peer.username = name
@@ -1694,6 +1701,7 @@ export class PeerChatService {
         this.schedulePersist()
         this.bumpVersion()
       }
+      if (person) await this.removeLateDevices(peer, person)
       return
     }
 
@@ -2589,6 +2597,7 @@ export class PeerChatService {
   sendProfile (peer) {
     if (!this.profile.username) return
     const proof = makeProfileProof(this.link, this.profile, this.localKey)
+    const person = this.link ? makePersonProof(this.link, this.localKey) : null
     this.sendToPeer(peer, {
       type: 'profile',
       peerId: this.localId,
@@ -2598,7 +2607,10 @@ export class PeerChatService {
       rooms: peer.rooms,
       // This device's label, and a proof only this person's other devices
       // can check. Apps without either ignore them.
-      ...(proof && { device: this.device.label || '', link: proof })
+      ...(proof && { device: this.device.label || '', link: proof }),
+      // For anyone: which person this device is, so removing one of their
+      // devices removes them all (person-proof.mjs).
+      ...(person && { person })
     })
   }
 
@@ -4558,28 +4570,92 @@ export class PeerChatService {
     if (!id) throw new Error('Invalid PeerChat member.')
     if (id === this.localId) throw new Error('You cannot remove yourself from your own room.')
 
-    // Their full key if they are here to take it from, so the removal catches
-    // that person rather than anyone sharing their first eight characters.
-    const connected = [...this.peers.values()]
-      .find((peer) => peer.id === id && peer.rooms.includes(normalized))
-    const name = (room.members || []).find((member) => member.id === id)?.username ||
-      connected?.username || id
-    // The name goes with the removal, for anyone in the room who never met them.
-    room.bans = addPeerChatRoomBan(room.bans, { id, key: connected?.key || '', name })
-    this.unsignRemovals(room)
-    room.members = (room.members || []).filter((member) => member.id !== id)
-
-    await this.appendRemovalNotice(normalized, id, name)
-    this.broadcastRoomBans(normalized)
-    this.persistNow()
-    this.bumpVersion()
-    // And the room moves to a new key for the people still in it, which the
-    // device removed never hears. See room-move.mjs.
-    const movedTo = this.moveRoom(normalized)
+    // Every one of the person's devices goes, not only the one picked: each
+    // device is a member of its own, and removing one left the rest in the
+    // room. A device is theirs only by the person key its own profile proved
+    // (person-proof.mjs). One of this person's own devices is not them leaving
+    // their room, so only that one goes.
+    const person = this.personOf(id)
+    const everyDevice = Boolean(person) && person !== (this.link ? personKey(this.link) : '')
+    const ids = everyDevice ? [id, ...this.devicesOfPerson(person).filter((other) => other !== id)] : [id]
+    if (everyDevice) rememberRemovedPerson(room, person)
+    // And the room moves to a new key for the people still in it, which none
+    // of the devices removed hears. See room-move.mjs.
+    const movedTo = await this.removeFromRoom(normalized, ids)
     const shown = this.rooms.get(movedTo) || room
     // The room back, so the list on screen updates from the answer rather than
     // waiting on the next poll to notice.
-    return { ok: true, room: this.publicRoom(shown), rooms: this.listRooms(), ...(movedTo && { movedTo }) }
+    return { ok: true, removed: ids, room: this.publicRoom(shown), rooms: this.listRooms(), ...(movedTo && { movedTo }) }
+  }
+
+  // Out of the room, each by their own removal, the full key wherever it is
+  // known. The list goes to everyone, and the room moves to a new key that
+  // none of them hears.
+  async removeFromRoom (roomKey, ids) {
+    const room = this.rooms.get(roomKey)
+    const targets = ids.map(normalizePeerChatPeerId).filter((id) => id && id !== this.localId)
+    if (!room || targets.length === 0) return null
+    for (const id of targets) {
+      const connected = [...this.peers.values()]
+        .find((peer) => peer.id === id && peer.rooms.includes(roomKey))
+      const known = this.knownMember(id)
+      const name = (room.members || []).find((member) => member.id === id)?.username ||
+        connected?.username || known?.username || id
+      // The name goes with the removal, for anyone in the room who never met them.
+      room.bans = addPeerChatRoomBan(room.bans, { id, key: connected?.key || known?.key || '', name })
+      room.members = (room.members || []).filter((member) => member.id !== id)
+      await this.appendRemovalNotice(roomKey, id, name)
+    }
+    this.unsignRemovals(room)
+    this.broadcastRoomBans(roomKey)
+    this.persistNow()
+    this.bumpVersion()
+    return this.moveRoom(roomKey)
+  }
+
+  // The person a member is, by the person key their own profile proved over
+  // their own connection, or ''.
+  personOf (peerId) {
+    const id = normalizePeerChatPeerId(peerId)
+    if (!id) return ''
+    for (const peer of this.peers.values()) {
+      if (peer.id === id && peer.person) return peer.person
+    }
+    return this.knownMember(id)?.person || ''
+  }
+
+  // A member of any room here with a person key on record, for one that is offline.
+  knownMember (peerId) {
+    for (const room of this.rooms.values()) {
+      const member = (room.members || []).find((entry) => entry.id === peerId && entry.person)
+      if (member) return member
+    }
+    return null
+  }
+
+  // Every device known to be this person, by a proof that checked out.
+  devicesOfPerson (person) {
+    if (!person) return []
+    const ids = new Set()
+    for (const room of this.rooms.values()) {
+      for (const member of room.members || []) if (member.person === person) ids.add(member.id)
+    }
+    for (const peer of this.peers.values()) if (peer.person === person) ids.add(normalizePeerChatPeerId(peer.id))
+    ids.delete(this.localId)
+    ids.delete('')
+    return [...ids]
+  }
+
+  // A device of somebody this phone removed, proving it is theirs: out of every
+  // room of ours they were removed from.
+  async removeLateDevices (peer, person) {
+    const id = normalizePeerChatPeerId(peer.id)
+    for (const [roomKey, room] of [...this.rooms.entries()]) {
+      if (!Array.isArray(room.removedPersons) || !room.removedPersons.includes(person)) continue
+      if (!this.isRoomCreator(roomKey)) continue
+      if ((room.bans || []).some((ban) => ban.id === id)) continue
+      await this.removeFromRoom(roomKey, [id])
+    }
   }
 
   async restoreRoomMember ({ roomKey, peerId }) {
@@ -4590,7 +4666,15 @@ export class PeerChatService {
       throw new Error('Only the person who made this room can let people back in.')
     }
 
-    room.bans = removePeerChatRoomBan(room.bans, peerId)
+    // Back in, with every one of their devices, as they went.
+    const restored = normalizePeerChatPeerId(peerId)
+    const person = this.personOf(restored)
+    for (const id of new Set([restored, ...(person ? this.devicesOfPerson(person) : [])])) {
+      room.bans = removePeerChatRoomBan(room.bans, id)
+    }
+    if (person && Array.isArray(room.removedPersons)) {
+      room.removedPersons = room.removedPersons.filter((removed) => removed !== person)
+    }
     this.unsignRemovals(room)
     this.broadcastRoomBans(normalized)
     this.persistNow()
@@ -4736,12 +4820,17 @@ export class PeerChatService {
     const joinedAt = earlier
       ? announced
       : existing?.joinedAt ?? (announcedJoinedAt === undefined ? undefined : announced)
+    // The person they proved they are on their own connection, with the key
+    // it was proved for, so a removal can take every device of theirs even
+    // while some are offline. Never from anyone else's member list.
+    const person = peer.person || (existing?.key === peer.key ? existing?.person : '')
     const member = {
       id,
       username,
       bio: normalizePeerChatBio(peer.bio),
       avatar: normalizePeerChatAvatar(peer.avatar),
-      ...(Number.isFinite(joinedAt) && { joinedAt })
+      ...(Number.isFinite(joinedAt) && { joinedAt }),
+      ...(person && /^[0-9a-f]{64}$/.test(peer.key || '') && { person, key: peer.key })
     }
     if (existing && JSON.stringify(existing) === JSON.stringify(member)) return false
 
@@ -4907,6 +4996,7 @@ export class PeerChatService {
             (value?.isHost === true && !isDM ? this.localKey : ''),
           bans: isDM ? [] : normalizePeerChatRoomBans(value?.bans),
           bansSigned: normalizeSignedRemovals(isDM ? null : value?.bansSigned),
+          ...(!isDM && normalizeRemovedPersons(value?.removedPersons).length && { removedPersons: normalizeRemovedPersons(value.removedPersons) }),
           ...(!isDM && /^[0-9a-f]{64}$/.test(value?.creatorProof || '') && { creatorProof: value.creatorProof }),
           ...(!isDM && normalizeMove(value?.movedTo) && { movedTo: normalizeMove(value.movedTo) }),
           ...(!isDM && normalizePeerChatRoomKey(value?.movedFrom) && { movedFrom: normalizePeerChatRoomKey(value.movedFrom) }),
@@ -5069,6 +5159,20 @@ function normalizePersistedLastMessage (value) {
   }
 }
 
+// Kept here only: a device of a person this phone removed that turns up later
+// goes too.
+const MAX_REMOVED_PERSONS = 64
+const PERSON_KEY = /^[0-9a-f]{64}$/
+
+function normalizeRemovedPersons (value) {
+  if (!Array.isArray(value)) return []
+  return [...new Set(value.filter((person) => typeof person === 'string' && PERSON_KEY.test(person)))].slice(0, MAX_REMOVED_PERSONS)
+}
+
+function rememberRemovedPerson (room, person) {
+  room.removedPersons = normalizeRemovedPersons([person, ...(room.removedPersons || [])])
+}
+
 function normalizePersistedRoomMembers (value, localId) {
   if (!Array.isArray(value)) return []
   const members = []
@@ -5086,7 +5190,8 @@ function normalizePersistedRoomMembers (value, localId) {
       username,
       bio: normalizePeerChatBio(candidate?.bio),
       avatar: normalizePeerChatAvatar(candidate?.avatar),
-      ...(joinedAt > 0 && { joinedAt })
+      ...(joinedAt > 0 && { joinedAt }),
+      ...(PERSON_KEY.test(candidate?.person || '') && PERSON_KEY.test(candidate?.key || '') && { person: candidate.person, key: candidate.key })
     })
   }
   return members

@@ -79,7 +79,7 @@ test('only the creator can remove, and not themselves', () => {
   assert.match(remove, /There is nobody to remove from a direct message/)
   // Their whole key when they are here to take it from, so the removal catches
   // that person and not everyone sharing their first eight characters.
-  assert.match(remove, /key: connected\?\.key \|\| ''/)
+  assert.match(remove, /key: connected\?\.key \|\| known\?\.key \|\| ''/)
 })
 
 test('a removal outlives a restart', () => {
@@ -206,7 +206,7 @@ test('a removal is said out loud in the room, by everyone who honours it', () =>
 
   // The creator says it when they do it.
   const remove = service.slice(service.indexOf('async removeRoomMember ('), service.indexOf('async restoreRoomMember ('))
-  assert.match(remove, /await this\.appendRemovalNotice\(normalized, id, name\)/)
+  assert.match(remove, /await this\.appendRemovalNotice\(roomKey, id, name\)/)
 
   // And everyone else says it when the removal reaches them, for bans that
   // are new to them and made since they joined, rather than for the whole
@@ -220,7 +220,7 @@ test('a removal is said out loud in the room, by everyone who honours it', () =>
 
 test('a removal says who it was by the name the creator gave', () => {
   const remove = service.slice(service.indexOf('async removeRoomMember ('), service.indexOf('async restoreRoomMember ('))
-  assert.match(remove, /addPeerChatRoomBan\(room\.bans, \{ id, key: connected\?\.key \|\| '', name \}\)/)
+  assert.match(remove, /addPeerChatRoomBan\(room\.bans, \{ id, key: connected\?\.key \|\| known\?\.key \|\| '', name \}\)/)
   const receive = service.slice(service.indexOf('receiveRoomBans (roomKey, peer, bans, signedValue)'), service.indexOf('enforceRoomBans (roomKey)'))
   assert.match(receive, /this\.appendRemovalNotice\(roomKey, ban\.id, ban\.name, ban\.at\)/)
 })
