@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import b4a from 'b4a'
+import HyperDHT from 'hyperdht'
 
 // P2PMD notes over the local network, with no internet. A note's host is found
 // on the public HyperDHT, which lives on the internet, so with the router's
@@ -27,6 +28,20 @@ export function noteTopic (publicKey) {
   return createHash('sha256').update('peersky-p2pmd-lan/1').update(publicKey).digest()
 }
 
+// How long a join waits for the host to say which port it keeps the note on.
+export const LAN_PORT_MS = 1500
+
+/**
+ * The key pair a host answers "which port?" under on the LAN DHT. Over the
+ * internet a joiner reads the port from the host's record and listens on the
+ * same one, so a note has one address on every device; on the local network
+ * there is no record. Worked out from the note's public key, as the desktop
+ * does (p2pmd-lan.js there), so the two ask each other too.
+ */
+export function notePortKeyPair (publicKey) {
+  return HyperDHT.keyPair(createHash('sha256').update('peersky-p2pmd-lan-port/1').update(publicKey).digest())
+}
+
 function usable (lan) {
   return Boolean(lan?.dht) && !lan.destroyed
 }
@@ -35,18 +50,30 @@ function usable (lan) {
  * The host: the note served on the LAN DHT too, each connection handed to
  * onConnection as the internet ones are, and its topic said over mDNS.
  */
-export async function hostNoteOnLan (lan, { keyPair, secure, onConnection }) {
+export async function hostNoteOnLan (lan, { keyPair, secure, port = null, onConnection }) {
   if (!usable(lan) || !keyPair) return null
-  const server = lan.dht.createServer({
-    firewall: secure ? (remotePublicKey) => !b4a.equals(remotePublicKey, keyPair.publicKey) : undefined,
-    reusableSocket: true
-  }, onConnection)
+  const firewall = secure ? (remotePublicKey) => !b4a.equals(remotePublicKey, keyPair.publicKey) : undefined
+  const server = lan.dht.createServer({ firewall, reusableSocket: true }, onConnection)
   await server.listen(keyPair)
+  // Lets in the same keys as the note: a private note's port goes only to
+  // someone with its address.
+  let portServer = null
+  if (Number.isInteger(port) && port > 0) {
+    portServer = lan.dht.createServer({ firewall, reusableSocket: true }, (socket) => {
+      socket.on('error', () => {})
+      socket.end(b4a.from(JSON.stringify({ port })))
+    })
+    await portServer.listen(notePortKeyPair(keyPair.publicKey)).catch(async () => {
+      await portServer.close().catch(() => {})
+      portServer = null
+    })
+  }
   const topic = noteTopic(keyPair.publicKey)
   try {
     lan.join(topic, { server: true, client: false })
   } catch (error) {
     await server.close().catch(() => {})
+    await portServer?.close().catch(() => {})
     throw error
   }
   let closed = false
@@ -58,8 +85,52 @@ export async function hostNoteOnLan (lan, { keyPair, secure, onConnection }) {
         lan.leave(topic)
       } catch {}
       await server.close().catch(() => {})
+      await portServer?.close().catch(() => {})
     }
   }
+}
+
+/**
+ * The port the host at address keeps the note on, or null from a host that
+ * does not say, as an older PeerSky, or not in time.
+ */
+export function askNotePortOnLan (lan, { publicKey, keyPair = null, address, timeoutMs = LAN_PORT_MS }) {
+  if (!usable(lan)) return Promise.resolve(null)
+  return new Promise((resolve) => {
+    let done = false
+    let socket = null
+    let text = ''
+    const finish = (port) => {
+      if (done) return
+      done = true
+      clearTimeout(timer)
+      socket?.destroy()
+      resolve(port)
+    }
+    const timer = setTimeout(() => finish(null), timeoutMs)
+    try {
+      socket = lan.dht.connect(notePortKeyPair(publicKey).publicKey, {
+        ...(keyPair ? { keyPair } : {}),
+        relayAddresses: [address],
+        reusableSocket: true
+      })
+    } catch {
+      return finish(null)
+    }
+    socket.on('data', (chunk) => {
+      text += b4a.toString(chunk)
+      if (text.length > 64) finish(null)
+    })
+    socket.once('end', () => {
+      let port = null
+      try {
+        port = JSON.parse(text).port
+      } catch {}
+      finish(Number.isInteger(port) && port > 0 && port < 65536 ? port : null)
+    })
+    socket.once('error', () => finish(null))
+    socket.once('close', () => finish(null))
+  })
 }
 
 /** The host's address on the local network, or null when no host says so in time. */
@@ -138,10 +209,15 @@ export async function findNoteRouteOnLan (lan, { publicKey, keyPair = null, find
     reusableSocket: true
   })
   // Found but not answering, as on a Wi-Fi that keeps devices apart: the
-  // internet is the way.
-  if (!await reachNoteOnLan(connect, reachMs)) return null
+  // internet is the way. The host's port is asked meanwhile.
+  const [reached, port] = await Promise.all([
+    reachNoteOnLan(connect, reachMs),
+    askNotePortOnLan(lan, { publicKey, keyPair, address })
+  ])
+  if (!reached) return null
   return {
     address,
+    port,
     connect: () => usable(lan) ? connect() : null
   }
 }

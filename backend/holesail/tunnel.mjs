@@ -124,7 +124,7 @@ export class TunnelHost {
     })
 
     if (this.lan) {
-      this.lanHost = await hostNoteOnLan(this.lan, { keyPair: this.keyPair, secure: this.secure, onConnection: serve })
+      this.lanHost = await hostNoteOnLan(this.lan, { keyPair: this.keyPair, secure: this.secure, port: this.port, onConnection: serve })
         .catch((error) => {
           console.warn('[holesail] Unable to host the note on the local network:', error?.message || error)
           return null
@@ -260,12 +260,13 @@ export class TunnelGuest {
 
     // With no port asked for, use the one the host's server is on, as the
     // desktop does, so a note's local address is the same on every device.
-    // Found on the local network, the host's record may be out of reach, and
-    // the port asked for, or the usual one, is used.
+    // Found on the local network, the host says it there; an older one does
+    // not, and the port asked for, or the usual one, is used.
     let advertised = {}
     let connect
     if (this.lanRoute) {
       const route = this.lanRoute
+      if (route.port) advertised = { port: route.port }
       connect = () => this.proxy ? route.connect() : null
     } else {
       this.dht = createDht({ keyPair: this.keyPair, bootstrap: this.bootstrap })

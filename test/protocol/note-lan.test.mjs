@@ -5,7 +5,7 @@ import http from 'node:http'
 import HyperDHT from 'hyperdht'
 import HyperDHTmDNS from '@p2plabs/hyperdht-mdns'
 import createTestnet from 'hyperdht/testnet.js'
-import { findNoteRouteOnLan, noteTopic } from '../../backend/holesail/lan.mjs'
+import { findNoteRouteOnLan, notePortKeyPair, noteTopic } from '../../backend/holesail/lan.mjs'
 import { TunnelGuest, TunnelHost } from '../../backend/holesail/tunnel.mjs'
 import { LOOPBACK_TOKEN_HEADER, createLoopbackToken } from '../../backend/loopback-request.mjs'
 
@@ -105,6 +105,25 @@ describe('P2PMD notes over the local network, with no internet', () => {
 
   it('finds a note under the same topic the desktop uses, so a phone and a desktop find each other', () => {
     assert.equal(b(noteTopic(Buffer.alloc(32, 0xab))), 'ac8036871e559a7bd01d651a1fe6e2f92d9d7397c89c638fdf693f6ca76614de')
+  })
+
+  it('works out the key a host tells its port under as the desktop does', () => {
+    assert.equal(b(notePortKeyPair(Buffer.alloc(32, 1)).publicKey), '34ae754ccc5daf1768b69dc12407461e7ecbdb5259a738f5883b458a95d745e3')
+  })
+
+  // Over the internet a joiner listens on the port in the host's record. On
+  // the Wi-Fi there is no record, so the host says it there.
+  it('a note joined over the Wi-Fi listens on the port its host keeps it on', async () => {
+    const phone = await device()
+    const other = await device()
+    const port = await freePort()
+    const host = await open(new TunnelHost({ port, bootstrap: OFFLINE, lan: phone, settleMs: 300 }))
+    const route = await findNoteRouteOnLan(other, { publicKey: host.keyPair.publicKey, keyPair: host.keyPair })
+    assert.equal(route.port, port)
+
+    const guest = await open(new TunnelGuest({ key: host.info.url, bootstrap: OFFLINE, lan: other }))
+    assert.equal(guest.info.lan, true)
+    assert.equal(guest.info.port, port)
   })
 
   it('a private note hosted with no internet opens over the Wi-Fi from its address alone', async () => {
@@ -229,6 +248,14 @@ describe('P2PMD notes with the internet and the local network', () => {
     assert.equal(text, '# Both')
   })
 })
+
+async function freePort () {
+  const server = http.createServer().listen(0, '127.0.0.1')
+  await new Promise((resolve) => server.on('listening', resolve))
+  const { port } = server.address()
+  await new Promise((resolve) => server.close(resolve))
+  return port
+}
 
 function b (bytes) {
   return Buffer.from(bytes).toString('hex')
