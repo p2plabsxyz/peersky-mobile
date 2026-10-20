@@ -42,6 +42,13 @@
     "url": "https://heroicons.com/"
   },
   {
+    "name": "QR Creator",
+    "license": "MIT",
+    "copyright": "2017 The Nimiq Foundation",
+    "url": "https://github.com/nimiq/qr-creator",
+    "textFile": "app/vendor/qr-creator/LICENSE"
+  },
+  {
     "name": "qrcode-generator",
     "license": "MIT",
     "copyright": "2009 Kazuhiko Arase",
