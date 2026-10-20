@@ -201,7 +201,14 @@ const MAX_TOPIC_FRAMES_PER_WINDOW = 120
 const MAX_PRESENCE_FRAMES_PER_WINDOW = 30
 const MAX_INITIAL_SYNC_MESSAGES_PER_CONNECTION = 500
 const MAX_PENDING_MESSAGES_PER_CONNECTION = 256
-const MAX_RETURNED_ROOM_MEMBERS = 100
+// A room keeps everyone who has been in it, with no limit, as on desktop: a
+// phone that kept 99 had someone who came later as plain text in "@name" and
+// missing from the room's people. What travels and what is kept from others
+// stays bounded instead: each connection is sent the newest 100, as desktop
+// sends, and pictures from someone else's list are kept for up to 100 people
+// a room, so a big room does not fill the phone with everyone's picture.
+const MAX_SHARED_MEMBERS = 100
+const MAX_LISTED_PICTURES = 100
 const MAX_PENDING_DIRECT_MESSAGES = 50
 const PERSIST_DELAY_MS = 500
 const PING_INTERVAL_MS = 25_000
@@ -2409,7 +2416,10 @@ export class PeerChatService {
   // to, while desktop shows the whole room.
   shareMembers (peer, roomKey) {
     const room = this.rooms.get(roomKey)
-    const members = room?.members || []
+    const members = (room?.members || [])
+      .filter((member) => member?.id && member?.username)
+      .sort((left, right) => (Number.isFinite(right.joinedAt) ? right.joinedAt : 0) - (Number.isFinite(left.joinedAt) ? left.joinedAt : 0))
+      .slice(0, MAX_SHARED_MEMBERS)
     if (members.length === 0) return
 
     let batch = {}
@@ -2448,6 +2458,15 @@ export class PeerChatService {
     if (!room || !incoming || typeof incoming !== 'object') return false
 
     const members = Array.isArray(room.members) ? [...room.members] : []
+    const indexById = new Map(members.map((member, index) => [member.id, index]))
+    let pictures = members.filter((member) => member.avatar).length
+    // A picture from someone else's list, while the room has room for one.
+    const listedPicture = (value) => {
+      if (pictures >= MAX_LISTED_PICTURES) return null
+      const avatar = normalizePeerChatAvatar(value?.avatar)
+      if (avatar) pictures++
+      return avatar
+    }
     let changed = false
 
     for (const [rawId, value] of Object.entries(incoming)) {
@@ -2458,13 +2477,13 @@ export class PeerChatService {
       // has not heard yet cannot put them back into it.
       if (this.isPeerIdRemovedFromRoom(roomKey, id)) continue
 
-      const index = members.findIndex((member) => member.id === id)
+      const index = indexById.get(id) ?? -1
       if (index >= 0) {
         // Someone lifted out of the feed arrives with a name and nothing else.
         // Fill the gaps from a peer that knows them, but never overwrite what
         // we have seen from that person directly.
         const existing = members[index]
-        const avatar = existing.avatar || normalizePeerChatAvatar(value?.avatar)
+        const avatar = existing.avatar || listedPicture(value)
         const bio = existing.bio || normalizePeerChatBio(value?.bio)
         if (avatar === existing.avatar && bio === existing.bio) continue
         members[index] = { ...existing, avatar, bio }
@@ -2472,14 +2491,14 @@ export class PeerChatService {
         continue
       }
 
-      if (members.length >= MAX_RETURNED_ROOM_MEMBERS - 1) break
       // joinedAt is deliberately not taken from a third party. It decides which
       // history a peer is sent, and only that peer gets to announce it.
+      indexById.set(id, members.length)
       members.push({
         id,
         username,
         bio: normalizePeerChatBio(value?.bio),
-        avatar: normalizePeerChatAvatar(value?.avatar)
+        avatar: listedPicture(value)
       })
       changed = true
     }
@@ -4035,7 +4054,6 @@ export class PeerChatService {
     let changed = false
     for (const [id, username] of authors) {
       if (members.some((member) => member.id === id)) continue
-      if (members.length >= MAX_RETURNED_ROOM_MEMBERS - 1) break
       // No joinedAt on purpose: that belongs to an announced join and drives
       // which history a peer is sent.
       members.push({ id, username, bio: '', avatar: null })
@@ -4644,14 +4662,12 @@ export class PeerChatService {
         self: false,
         online: false
       })
-      if (members.size >= MAX_RETURNED_ROOM_MEMBERS) break
     }
     for (const peer of this.peers.values()) {
       if (!peer.rooms.includes(roomKey)) continue
       const id = normalizePeerChatPeerId(peer.id)
       const username = normalizeMemberName(peer.username)
       if (!id || !username) continue
-      if (!members.has(id) && members.size >= MAX_RETURNED_ROOM_MEMBERS) break
       members.set(id, {
         id,
         username,
@@ -4660,7 +4676,6 @@ export class PeerChatService {
         self: false,
         online: true
       })
-      if (members.size >= MAX_RETURNED_ROOM_MEMBERS) break
     }
     // Someone removed is not in the room, so they are not in its list. Without
     // this they came straight back: the list is rebuilt from what peers relay,
@@ -4729,14 +4744,6 @@ export class PeerChatService {
       ...(Number.isFinite(joinedAt) && { joinedAt })
     }
     if (existing && JSON.stringify(existing) === JSON.stringify(member)) return false
-    if (!existing && members.length >= MAX_RETURNED_ROOM_MEMBERS - 1) {
-      // Full. A name lifted out of the feed is the one worth losing: a live
-      // peer needs the slot to get their join time recorded, and without that
-      // we never sync them any history at all.
-      const feedOnly = members.findIndex((entry) => !Number.isFinite(entry.joinedAt))
-      if (feedOnly < 0) return false
-      members.splice(feedOnly, 1)
-    }
 
     room.members = members
     if (index >= 0) room.members[index] = member
@@ -5066,7 +5073,7 @@ function normalizePersistedRoomMembers (value, localId) {
   if (!Array.isArray(value)) return []
   const members = []
   const seen = new Set()
-  for (const candidate of value.slice(0, MAX_RETURNED_ROOM_MEMBERS - 1)) {
+  for (const candidate of value) {
     const id = normalizePeerChatPeerId(candidate?.id)
     const username = normalizeMemberName(candidate?.username)
     if (!id || id === localId || !username || seen.has(id)) continue

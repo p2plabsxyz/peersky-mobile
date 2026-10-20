@@ -495,13 +495,19 @@ link, which nobody without it can work out. See [link-device.md](link-device.md)
 ## Resource limits
 
 The service limits room count, returned and stored history, room and total
-storage bytes, frame and message size, pending direct-message requests, peer
-members, initial synchronization, queued frames, live/control message rates,
+storage bytes, frame and message size, pending direct-message requests,
+initial synchronization, queued frames, live/control message rates,
 messages passed on per connection and per author, ids asked for per connection
 and per room, moves followed per hour and how long a moved room stays joined,
 tracked moderation state, and link-preview work. It releases feed listeners,
 timers, transports, pending joins, swarm topics, and room state during leave,
 runtime reset, P2P clearing, and application shutdown.
+
+There is no limit on who is in a room. A room keeps everyone who has been in it,
+as on desktop. What travels and what is kept from others is bounded instead:
+each connection is sent the newest 100 people, as desktop sends, and pictures
+from someone else's list are kept for up to 100 people a room. A picture from
+the person themselves is always kept.
 
 These limits protect a mobile process from unbounded memory, storage, and
 network use. A room that reaches its local storage limit must be left or cleared
