@@ -2,7 +2,9 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  messageFromMentioned,
   normalizePeerChatMentionSpacing,
+  peerChatMentionNames,
   splitPeerChatMessageParts,
   splitPeerChatMentions
 } from '../../app/peerchat/message-text.mjs'
@@ -105,6 +107,38 @@ test('https is still https, not an hs link', () => {
   assert.deepEqual(parts.filter((part) => part.link).map((part) => part.link), ['https://example.com'])
 })
 
+// The member list holds at most 100 people. In a big room someone past them
+// was plain text on the phone and a link on the desktop.
+test('someone who wrote in the room is a mention even when not in the member list', () => {
+  const members = [{ username: 'Ada' }]
+  const messages = [
+    { sender: 'aa11', senderName: 'Grace', self: false },
+    { sender: 'bb22', senderName: 'Sam', self: true }
+  ]
+  const names = peerChatMentionNames('Sam', members, messages)
+  assert.deepEqual(names, ['Sam', 'Ada', 'Grace'])
+  assert.deepEqual(splitPeerChatMentions('Hey @Grace', names), [
+    { text: 'Hey ', mention: false },
+    { text: '@Grace', mention: true }
+  ])
+  assert.deepEqual(splitPeerChatMentions('Hey @Grace', peerChatMentionNames('Sam', members, [])), [
+    { text: 'Hey @Grace', mention: false }
+  ])
+})
+
+test('a mention of someone not in the member list opens them from their newest message', () => {
+  const messages = [
+    { sender: 'aa11', senderName: 'Grace', self: false, text: 'first' },
+    { sender: 'cc33', senderName: 'Grace@mobile', self: false, text: 'from the phone' },
+    { sender: 'aa11', senderName: 'Grace', self: false, text: 'newest' },
+    { sender: 'bb22', senderName: 'Sam', self: true, text: 'mine' }
+  ]
+  assert.equal(messageFromMentioned(messages, '@grace').text, 'newest')
+  assert.equal(messageFromMentioned(messages, '@Grace@mobile').sender, 'cc33')
+  assert.equal(messageFromMentioned(messages, '@Sam'), null)
+  assert.equal(messageFromMentioned(messages, '@Linus'), null)
+})
+
 // Tapping a mention opens the profile of whoever it names, as tapping a
 // sender's name does.
 test('a mention in a message opens the profile it names', async () => {
@@ -116,4 +150,6 @@ test('a mention in a message opens the profile it names', async () => {
   const open = screen.slice(screen.indexOf('function openMentionProfile ('), screen.indexOf('function viewProfileAvatar ('))
   assert.match(open, /personName\(candidate\.username\)\.toLowerCase\(\) === personName\(name\)/)
   assert.match(open, /setProfileTarget\(member\)/)
+  assert.match(open, /const written = messageFromMentioned\(messages, mention\)\s+if \(written\) openMessageSenderProfile\(written\)/)
+  assert.match(screen, /renderMessageText\(\s+item\.message,\s+mentionNames,/)
 })

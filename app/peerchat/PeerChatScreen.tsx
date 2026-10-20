@@ -55,7 +55,7 @@ import {
   PEERCHAT_SEARCH_QUERY_MAX_CHARACTERS,
   splitPeerChatSearchMatch
 } from './message-search.mjs'
-import { normalizePeerChatMentionSpacing, splitPeerChatMessageParts } from './message-text.mjs'
+import { messageFromMentioned, normalizePeerChatMentionSpacing, peerChatMentionNames, splitPeerChatMessageParts } from './message-text.mjs'
 import {
   isPeerChatNotificationBlocked,
   openPeerChatNotificationSettings
@@ -643,6 +643,10 @@ export function PeerChatScreen ({
   // The chat list's search over what was said in every chat.
   const [messageResults, setMessageResults] = useState<PeerChatSearchResult[]>([])
   const [isSearchingMessages, setIsSearchingMessages] = useState(false)
+  const mentionNames = useMemo(
+    () => peerChatMentionNames(profile?.username, activeRoom?.members, messages),
+    [profile?.username, activeRoom?.members, messages]
+  )
   const mentionCandidates = getMentionCandidates(
     composer,
     activeRoom?.members || [],
@@ -1580,7 +1584,11 @@ export function PeerChatScreen ({
     }
     if (profile && profile.username.toLowerCase() === name) {
       setProfileTarget({ id: profile.id, username: profile.username, bio: profile.bio || '', avatar: profile.avatar || null, self: true, online: true })
+      return
     }
+    // Someone past the member list's first 100 who wrote here.
+    const written = messageFromMentioned(messages, mention)
+    if (written) openMessageSenderProfile(written)
   }
 
   function viewProfileAvatar (member: PeerChatMember) {
@@ -3318,7 +3326,7 @@ export function PeerChatScreen ({
                     <>
                       {renderMessageText(
                         item.message,
-                        [profile?.username || '', ...activeRoom.members.map((member) => member.username)],
+                        mentionNames,
                         colors,
                         {
                           onCopyCode: copyMessageCode,
