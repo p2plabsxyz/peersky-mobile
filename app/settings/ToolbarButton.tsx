@@ -1,6 +1,7 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native'
 
 import { BROWSER_PALETTES } from '../browser-appearance.mjs'
+import { t, tKey } from '../i18n/i18n.mjs'
 import { TOOLBAR_BUTTON_ICONS } from '../toolbar-button-icons'
 import { TOOLBAR_BUTTONS } from '../toolbar-button.mjs'
 import type { ToolbarButton } from './useBrowserPreferences'
@@ -26,14 +27,16 @@ export function ToolbarButtonSettings ({
   const isDark = useSettingsDarkMode()
   const colors = isDark ? DARK : LIGHT
   const SelectedIcon = TOOLBAR_BUTTON_ICONS[selected] || TOOLBAR_BUTTON_ICONS.burn
+  const selectedButton = TOOLBAR_BUTTONS.find((button) => button.id === selected)
+  const selectedTitle = selectedButton ? tKey(selectedButton.title) : t('Burn Tabs and Data')
 
   return (
     <View style={[styles.page, { backgroundColor: colors.page }]}>
-      <SettingsSection title='Toolbar button'>
+      <SettingsSection title={t('Toolbar button')}>
         <View style={styles.previewWrap}>
           <View
             accessible
-            accessibilityLabel={`The bottom bar, with ${TOOLBAR_BUTTONS.find((button) => button.id === selected)?.title || 'Burn Tabs and Data'} in the middle`}
+            accessibilityLabel={t('The bottom bar, with {button} in the middle', { button: selectedTitle })}
             style={[styles.preview, { borderColor: colors.outline }]}
           >
             <BackIcon width={PREVIEW_ICON_SIZE} height={PREVIEW_ICON_SIZE} color={colors.muted} />
@@ -64,7 +67,7 @@ export function ToolbarButtonSettings ({
                 onPress={() => onSelect(button.id as ToolbarButton)}
               >
                 <Icon width={ICON_SIZE} height={ICON_SIZE} color={colors.text} />
-                <Text style={[styles.rowText, { color: colors.text }]}>{button.title}</Text>
+                <Text style={[styles.rowText, { color: colors.text }]}>{tKey(button.title)}</Text>
                 {isSelected && <CheckIcon width={20} height={20} color={colors.accent} />}
               </Pressable>
             </View>
@@ -72,7 +75,7 @@ export function ToolbarButtonSettings ({
         })}
       </SettingsSection>
       <Text style={[styles.note, { color: colors.muted }]}>
-        With another button here, Burn Tabs and Data moves to the menu.
+        {t('With another button here, Burn Tabs and Data moves to the menu.')}
       </Text>
     </View>
   )

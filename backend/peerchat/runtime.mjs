@@ -1,6 +1,6 @@
 import { rmSync } from 'node:fs'
 import { join } from 'node:path'
-import { getHyperRuntime, getHyperStoragePath } from '../hyper/runtime.mjs'
+import { getHyperRuntime, getHyperStoragePath, waitForHyperStores } from '../hyper/runtime.mjs'
 import { getDefaultIdentityStoragePath } from '../backup/device-keys.mjs'
 import { attachmentDriveName, getAttachmentCacheDirectory } from './attachments.mjs'
 import { PEERCHAT_INCOMING_FILE } from './device-link.mjs'
@@ -25,6 +25,12 @@ export function setPeerChatIdle (value) {
 
 export async function getPeerChatService () {
   if (serviceClosing) await serviceClosing
+  // A clear or a restore holds the stores shut while it closes PeerChat and
+  // removes or replaces its files, and the store itself stays open a moment
+  // after PeerChat closes. A PeerChat started in that moment, by the chat
+  // screen asking for its rooms, read the files that were going and wrote
+  // them back afterwards, so a cleared profile and its rooms came back.
+  if (!service) await waitForHyperStores()
   const generation = serviceGeneration
   const sdk = await getHyperRuntime()
   if (serviceClosing) {

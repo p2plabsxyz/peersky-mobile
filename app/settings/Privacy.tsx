@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Pressable, StyleSheet, Switch, Text, View } from 'react-native'
 import ChevronRightIcon from '../../assets/icons/bootstrap/chevron-right.svg'
 import { BROWSER_PALETTES } from '../browser-appearance.mjs'
+import { t, tp } from '../i18n/i18n.mjs'
 import {
   getContentBlockingStatus,
   updateContentBlockingLists
@@ -56,7 +57,7 @@ export function Privacy ({
       })
       .catch((error) => {
         console.warn('Unable to read content-blocking status:', error)
-        if (active) setStatusError('Unable to read filter-list status.')
+        if (active) setStatusError(t('Unable to read filter-list status.'))
       })
       .finally(() => {
         if (active) setIsLoading(false)
@@ -75,21 +76,21 @@ export function Privacy ({
 
     try {
       const updated = await updateContentBlockingLists()
-      if (!updated) throw new Error('Native content blocker is unavailable.')
+      if (!updated) throw new Error(t('Native content blocker is unavailable.'))
       onFilterListsUpdated()
       try {
         await refreshStatus()
       } catch (error) {
         console.warn('Unable to read content-blocking status:', error)
         if (mountedRef.current) {
-          setStatusError('Filter lists were updated, but their status could not be read.')
+          setStatusError(t('Filter lists were updated, but their status could not be read.'))
         }
       }
     } catch (error) {
       console.warn('Unable to update content-blocking lists:', error)
       if (mountedRef.current) {
-        const reason = error instanceof Error ? error.message : 'Unknown update error.'
-        setStatusError(`Unable to update filter lists. The current lists remain active. ${reason}`)
+        const reason = error instanceof Error ? error.message : t('Unknown update error.')
+        setStatusError(t('Unable to update filter lists. The current lists remain active. {reason}', { reason }))
       }
     } finally {
       if (mountedRef.current) setIsUpdating(false)
@@ -107,19 +108,21 @@ export function Privacy ({
       console.warn('Unable to change content-blocking preference:', error)
       if (mountedRef.current) {
         setStatusError(enabled
-          ? 'Unable to enable protection. Check your connection and try again.'
-          : 'Unable to disable protection. Try again.')
+          ? t('Unable to enable protection. Check your connection and try again.')
+          : t('Unable to disable protection. Try again.'))
       }
     } finally {
       if (mountedRef.current) setIsChanging(false)
     }
   }
 
+  const listSize = status ? formatBytes(status.lists.reduce((total, list) => total + list.byteLength, 0)) : ''
+  // The English has always said "lists", whatever the count.
   const listDescription = isLoading
-    ? 'Loading filter-list status...'
+    ? t('Loading filter-list status...')
     : status
-      ? `${status.lists.length} lists, ${formatBytes(status.lists.reduce((total, list) => total + list.byteLength, 0))}`
-      : 'No validated filter lists are available.'
+      ? tp({ one: '{count} lists, {size}', other: '{count} lists, {size}' }, status.lists.length, { size: listSize })
+      : t('No validated filter lists are available.')
 
   return (
     <View style={[styles.page, isDark ? styles.pageDark : null]}>
@@ -129,14 +132,14 @@ export function Privacy ({
         </View>
       )}
 
-      <SettingsSection title='Protection'>
+      <SettingsSection title={t('Protection')}>
         <View style={styles.settingRow}>
           <SettingCopy
-            title='Block ads and trackers'
-            description='Use EasyList and EasyPrivacy to block matching website requests.'
+            title={t('Block ads and trackers')}
+            description={t('Use EasyList and EasyPrivacy to block matching website requests.')}
           />
           <Switch
-            accessibilityLabel='Block ads and trackers'
+            accessibilityLabel={t('Block ads and trackers')}
             disabled={isChanging || isUpdating}
             value={contentBlockingEnabled}
             onValueChange={(enabled) => void changeProtection(enabled)}
@@ -147,14 +150,14 @@ export function Privacy ({
         {/* Nobody should take a browser's word for this, least of all ours.
             The EFF's test is run by people with no stake in the answer. */}
         <Pressable
-          accessibilityLabel='Open the Cover Your Tracks test'
+          accessibilityLabel={t('Open the Cover Your Tracks test')}
           accessibilityRole='link'
           style={styles.linkRow}
           onPress={() => onOpenUrl('https://coveryourtracks.eff.org/')}
         >
           <SettingCopy
-            title='Test this browser'
-            description='Cover Your Tracks, from the Electronic Frontier Foundation, shows what trackers can see when you visit a page.'
+            title={t('Test this browser')}
+            description={t('Cover Your Tracks, from the Electronic Frontier Foundation, shows what trackers can see when you visit a page.')}
           />
           <ChevronRightIcon
             width={16}
@@ -167,11 +170,11 @@ export function Privacy ({
       <SettingsSection title='YouTube'>
         <View style={styles.settingRow}>
           <SettingCopy
-            title='Block YouTube ads'
-            description='Apply YouTube-specific network rules.'
+            title={t('Block YouTube ads')}
+            description={t('Apply YouTube-specific network rules.')}
           />
           <Switch
-            accessibilityLabel='Block YouTube ads'
+            accessibilityLabel={t('Block YouTube ads')}
             disabled={isChanging || isUpdating}
             value={youtubeAdBlockingEnabled}
             onValueChange={onYoutubeAdBlockingEnabledChange}
@@ -181,17 +184,17 @@ export function Privacy ({
         </View>
       </SettingsSection>
 
-      <SettingsSection title='Filter lists'>
+      <SettingsSection title={t('Filter lists')}>
         <View style={styles.statusRow}>
           <SettingCopy
-            title='EasyList and EasyPrivacy'
+            title={t('EasyList and EasyPrivacy')}
             description={listDescription}
           />
         </View>
         <View style={[styles.updateRow, isDark ? styles.updateRowDark : null]}>
           <SettingCopy
-            title='Last updated'
-            description={status ? formatUpdatedAt(status.updatedAt) : 'Not available'}
+            title={t('Last updated')}
+            description={status ? formatUpdatedAt(status.updatedAt) : t('Not available')}
           />
           <Pressable
             accessibilityRole='button'
@@ -206,21 +209,21 @@ export function Privacy ({
             onPress={() => void updateLists()}
           >
             <Text style={[styles.updateButtonText, isDark ? styles.updateButtonTextDark : null]}>
-              {isUpdating ? 'Updating...' : 'Update now'}
+              {isUpdating ? t('Updating...') : t('Update now')}
             </Text>
           </Pressable>
         </View>
         {/* The lists come with the app and are shared under CC BY-SA 3.0,
             which asks that whoever passes them on names the authors. */}
         <Pressable
-          accessibilityLabel='Open easylist.to'
+          accessibilityLabel={t('Open {name}', { name: 'easylist.to' })}
           accessibilityRole='link'
           style={styles.linkRow}
           onPress={() => onOpenUrl('https://easylist.to/')}
         >
           <SettingCopy
-            title='Made by the EasyList authors'
-            description='EasyList and EasyPrivacy are from easylist.to, used under the Creative Commons Attribution-ShareAlike 3.0 license.'
+            title={t('Made by the EasyList authors')}
+            description={t('EasyList and EasyPrivacy are from easylist.to, used under the Creative Commons Attribution-ShareAlike 3.0 license.')}
           />
           <ChevronRightIcon
             width={16}
@@ -230,16 +233,16 @@ export function Privacy ({
         </Pressable>
       </SettingsSection>
 
-      <SettingsSection title='Privacy policy and terms'>
+      <SettingsSection title={t('Privacy policy and terms')}>
         <Pressable
-          accessibilityLabel='Open PeerSky privacy policy'
+          accessibilityLabel={t('Open PeerSky privacy policy')}
           accessibilityRole='link'
           style={styles.linkRow}
           onPress={() => onOpenUrl('https://github.com/p2plabsxyz/peersky-mobile/blob/main/PRIVACY.md')}
         >
           <SettingCopy
-            title='Read privacy policy'
-            description='Learn how PeerSky handles browser and device data.'
+            title={t('Read privacy policy')}
+            description={t('Learn how PeerSky handles browser and device data.')}
           />
           <ChevronRightIcon
             width={16}
@@ -248,14 +251,14 @@ export function Privacy ({
           />
         </Pressable>
         <Pressable
-          accessibilityLabel='Open PeerSky terms of use'
+          accessibilityLabel={t('Open PeerSky terms of use')}
           accessibilityRole='link'
           style={styles.linkRow}
           onPress={() => onOpenUrl('https://github.com/p2plabsxyz/peersky-mobile/blob/main/TERMS.md')}
         >
           <SettingCopy
-            title='Read terms of use'
-            description='The rules for PeerChat, how reports are handled, and how to send a copyright notice.'
+            title={t('Read terms of use')}
+            description={t('The rules for PeerChat, how reports are handled, and how to send a copyright notice.')}
           />
           <ChevronRightIcon
             width={16}
@@ -269,12 +272,12 @@ export function Privacy ({
 }
 
 function formatBytes (bytes: number) {
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  return t('{size} MB', { size: (bytes / (1024 * 1024)).toFixed(1) })
 }
 
 function formatUpdatedAt (updatedAt: number) {
   const date = new Date(updatedAt)
-  return Number.isNaN(date.getTime()) ? 'Not available' : date.toLocaleString()
+  return Number.isNaN(date.getTime()) ? t('Not available') : date.toLocaleString()
 }
 
 const styles = StyleSheet.create({

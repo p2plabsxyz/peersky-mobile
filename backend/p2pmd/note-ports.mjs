@@ -8,6 +8,7 @@ import {
 } from 'node:fs'
 import { getHyperStoragePath } from '../hyper/runtime.mjs'
 import { PEERTUNES_LOOPBACK_PORT } from '../peertunes/constants.mjs'
+import { HYPERDRIVE_VIEWER_LOOPBACK_PORT } from '../hyperdrive-viewer/constants.mjs'
 
 // The local port each note was last open on, hosted or joined. The desktop
 // keeps a note on one port, and a device that joins it listens on that same
@@ -19,8 +20,9 @@ const MAX_NOTES = 30
 
 // Ports other servers in the app keep for themselves. A note on one would
 // take that server's origin, and the server would lose its port: PeerTunes'
-// library lives in its origin, so it would open empty.
-const RESERVED_PORTS = new Set([PEERTUNES_LOOPBACK_PORT])
+// library lives in its origin, so it would open empty, and the Hyperdrive
+// viewer would make its small pictures again.
+const RESERVED_PORTS = new Set([PEERTUNES_LOOPBACK_PORT, HYPERDRIVE_VIEWER_LOOPBACK_PORT])
 
 export function isUsableNotePort (port) {
   return Number.isInteger(port) && port >= 1024 && port <= 65535 && !RESERVED_PORTS.has(port)

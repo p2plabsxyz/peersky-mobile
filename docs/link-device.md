@@ -9,7 +9,7 @@ It is the only way PeerSky data moves. The app keeps it out of iCloud, computer 
 - **This device**, the person's other devices, then **Sync with another device**. The other devices are the ones met under the private files key, listed as Desktop or Phone with when each was last online (see Private files on your other devices in [hyper.md](hyper.md)). **Sync with another device** is one sheet for both directions. *Receive here* shows this phone's pairing code; *Send from here* is for scanning the other device's. The scan decides what happens either way: a pairing code (`peersky-identity:`) means "send this phone there", and a `hyper://` code is a transfer another device has ready for this one. A desktop's pairing code sends the tabs and bookmarks to that desktop.
 - **Save a backup file** and **Restore from a backup file**.
 - **Get the desktop browser**.
-- **Remove my data from this phone**, for handing a phone on or finishing a move.
+- **Remove my data from this phone**, for handing a phone on or finishing a move. Settings, P2P Data, Clear all P2P data takes this phone's identity too (its Link Device keys, a desktop's identity and private files key, and the list of your other devices, which stop syncing with it), but keeps tabs, bookmarks, history, downloads and settings.
 
 ## What moves
 
@@ -55,9 +55,11 @@ What goes (`backend/peerchat/device-link.mjs`, the same rules as `lib/device-lin
 
 A device takes PeerChat only when its pairing code says `chat=1`, which this phone's code does. An older app refuses files it does not know, so it is sent none.
 
-A name, bio or picture changed on one device reaches the others the next time they are in a room together. Every profile a device sends carries a proof: an HMAC-SHA256 with the link key over the name without its label, the bio, the picture's SHA-256, when they were set, the labels it knows and the sending device's network key. A device takes a newer profile only with a proof it can check on that same connection, so nobody else can rename a person's devices or pass a proof on as theirs, and a name one of them holds does not count as taken.
+A name, bio or picture changed on one device reaches the others the next time they connect. Every profile a device sends carries a proof: an HMAC-SHA256 with the link key over the name without its label, the bio, the picture's SHA-256, when they were set, the labels it knows and the sending device's network key. A device takes a newer profile only with a proof it can check on that same connection, so nobody else can rename a person's devices or pass a proof on as theirs, and a name one of them holds does not count as taken.
 
 Devices that have proved this to each other also send each other the rooms they are in, with their keys (`link-rooms`): a room joined on one device appears on the others that are online, or the next time they connect. A room left on a device stays left there, and is not taken back from the others until it is joined again. A direct conversation goes along once the other person has accepted it.
+
+A person's devices find each other even when they share no room, as when both left P2P Republic. Each joins a topic made from the link, `SHA-256("peersky-chat:devices:" + key)`, which nobody without the link can work out, and its `topics` frame carries a proof of the link, `devices`, an HMAC-SHA256 under `SHA-256("peersky-chat:devices-proof:" + key)` over `"peersky-chat/2 devices\n" + handshake hash + "\n" + sender key`, good on that connection alone. A device that proves it gets the profile, room or no room, and the proof in the profile makes it one of this person's devices. Before this, devices met only inside a room they shared, so a room made on one never reached another that shared none. The desktop pins the same vector (`test/devices-meet.test.js` in PeerChat, `test/protocol/peerchat-devices-meet.test.mjs` here).
 
 ## Backup files
 
@@ -98,11 +100,11 @@ sequenceDiagram
   Note right of R: restores only once<br/>the person says they match
 ```
 
-The sender clears the transfer when its sheet is closed, or 15 minutes after it was made. Each send uses a new drive. Hyperdrive's `purge()` calls a method that does not exist in the hypercore release in use, so the file's blocks are cleared instead; the drive's index is kept, because clearing it leaves a drive that hangs whenever it is opened again. A send cut short by the app being killed leaves a marker, and the next start clears its drive.
+The sender keeps the transfer up when its sheet is closed, so opening the sheet again shows the same link and code, with the time it has left and how much of it the other device has taken (counted from the blocks the phone has sent). It comes down when the person presses Stop sending, or a minute after its 15 minutes are up. Closing the sheet used to clear it, and a desktop given the link afterwards had nothing to download. The other device still needs PeerSky open on this phone: iOS stops an app in the background from sending. So the screen stays on (`expo-keep-awake`) while a transfer is going out, until the other device has all of it, it runs out or it is stopped, and while one is packed or comes in. The desktop says when a download goes quiet, looks for the phone again, and gives up after two minutes with a plain message. Each send uses a new drive. Hyperdrive's `purge()` calls a method that does not exist in the hypercore release in use, so the file's blocks are cleared instead; the drive's index is kept, because clearing it leaves a drive that hangs whenever it is opened again. A send cut short by the app being killed leaves a marker, and the next start clears its drive.
 
 ## Phone to desktop
 
-On the desktop, Backup & Restore shows a pairing code with `deviceType=desktop`. The phone scans it in *Send from here*, and sends what a desktop can use: the open tabs, the bookmarks and favourites, its private drive with the key to it (see Private files), and PeerChat (see PeerChat on your phone and desktops) when the desktop's code has `chat=1`. Messages, notes, history and the stores stay on the phone. None of it needs the stores closed.
+On the desktop, Link Device in Settings shows a pairing code with `deviceType=desktop` under *Sync with another device*, *Receive here*. The phone scans it in *Send from here*, and sends what a desktop can use: the open tabs, the bookmarks and favourites, its private drive with the key to it (see Private files), and PeerChat (see PeerChat on your phone and desktops) when the desktop's code has `chat=1`. Messages, notes, history and the stores stay on the phone. None of it needs the stores closed.
 
 It goes in the desktop's own transfer format (`backend/backup/desktop-sync.mjs`), so the desktop checks it with the code it already has for transfers:
 
@@ -111,7 +113,7 @@ It goes in the desktop's own transfer format (`backend/backup/desktop-sync.mjs`)
 3. The manifest is signed with the phone's Ed25519 key over the same fields the desktop signs, with `targetDeviceType: 'desktop'`.
 4. The file is put on a drive at `/backup.zip`, so the drive's bare address works on the desktop too. The phone shows it as a QR code with **Copy link**, and the six characters.
 
-On the desktop, *Restore from the network* takes the link. It downloads it, checks that it was made for a code this desktop showed in the last hour, checks the signature, decrypts it, and shows the six characters. Only once the person confirms does anything change: the bookmarks are added after the desktop's own, the tabs open asleep in a collapsed group called Phone, and the phone's private drive is added to the desktop's private drives, read-only, as a drive adopted from another device always is, and PeerChat there takes the phone's name with its own label and joins the phone's rooms. A bookmark or tab the desktop already has is skipped. Nothing else is replaced and nothing restarts. The code is used up, and the page shows a fresh one.
+On the desktop, *Receive here* takes the link. It downloads it, checks that it was made for a code this desktop showed in the last hour, checks the signature, decrypts it, and shows the six characters. Only once the person confirms does anything change: the bookmarks are added after the desktop's own, the tabs open asleep in a collapsed group called Phone, and the phone's private drive is added to the desktop's private drives, read-only, as a drive adopted from another device always is, and PeerChat there takes the phone's name with its own label and joins the phone's rooms. A bookmark or tab the desktop already has is skipped. Nothing else is replaced and nothing restarts. The code is used up, and the page shows a fresh one.
 
 A desktop that is still in its first-run screen takes the same link there, under *Restore a backup, or bring tabs from your phone*, and opens its first window with the phone's tabs beside Home.
 
@@ -191,6 +193,7 @@ Once linked, private files no longer need a send to reach the desktop: the two m
 | `RPC_BACKUP_RESTORE_FILE` (36) | `{ path, passphrase }` | `{ ok, restoreId, restoredFiles, contents, about }` |
 | `RPC_IDENTITY_SEND` (37) | `{ pairingCode, peerskyVersion, platform }` | `{ ok, url, verificationCode, expiresAt, bytes, deviceType, sent }`; `sent` counts tabs, bookmarks, private drives and PeerChat rooms for a desktop |
 | `RPC_IDENTITY_SEND_STOP` (38) | `{}` | `{ ok }` |
+| `RPC_IDENTITY_SEND_STATUS` (78) | `{}` | `{ ok, sending: { url, verificationCode, expiresAt, deviceType, sent } \| null }`; `sent` is how much of it the other device has taken, 0 to 1 |
 | `RPC_IDENTITY_DISCARD_RESTORE` (39) | `{ restoreId }` | `{ ok }` |
 | `RPC_IDENTITY_REMOVE` (68) | `{}` | `{ ok, requiresRestart: true }` |
 

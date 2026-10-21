@@ -1,6 +1,8 @@
 import * as Notifications from 'expo-notifications'
 import { Linking, Platform } from 'react-native'
 
+import { t } from '../i18n/i18n.mjs'
+
 const PEERCHAT_SOUND_CHANNEL = 'peerchat-messages-v2'
 const PEERCHAT_SILENT_CHANNEL = 'peerchat-messages-silent-v2'
 
@@ -22,8 +24,8 @@ export async function preparePeerChatNotifications () {
 
   channelsOpening = Promise.all([
     Notifications.setNotificationChannelAsync(PEERCHAT_SOUND_CHANNEL, {
-      name: 'PeerChat messages',
-      description: 'New PeerChat message notifications',
+      name: t('PeerChat messages'),
+      description: t('New PeerChat message notifications'),
       importance: Notifications.AndroidImportance.HIGH,
       showBadge: true
       // No sound key here on purpose. For an Android channel, omitting it means
@@ -32,8 +34,8 @@ export async function preparePeerChatNotifications () {
       // hunt for a file by that name and log a console error on every launch.
     }),
     Notifications.setNotificationChannelAsync(PEERCHAT_SILENT_CHANNEL, {
-      name: 'PeerChat messages (silent)',
-      description: 'New PeerChat messages without sound',
+      name: t('PeerChat messages (silent)'),
+      description: t('New PeerChat messages without sound'),
       importance: Notifications.AndroidImportance.DEFAULT,
       showBadge: true,
       sound: null

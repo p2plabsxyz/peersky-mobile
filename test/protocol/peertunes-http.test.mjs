@@ -2,16 +2,24 @@ import { afterEach, beforeEach, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import http from 'node:http'
 import { readFile } from 'node:fs/promises'
+import { createRequire } from 'node:module'
+import vm from 'node:vm'
+import { createLoopbackToken } from '../../backend/loopback-request.mjs'
 import * as commands from '../../backend/rpc/commands.mjs'
 import {
   HYPER_BRIDGE_SCRIPT,
   createPeerTunesHttpServer,
   injectHyperBridge,
   resolveStaticAsset,
-  sendError
+  sendError,
+  startPeerTunesServer,
+  stopPeerTunesServer
 } from '../../backend/peertunes/server.mjs'
+import peertunesAssets from '../../backend/peertunes/peertunes-runtime.mjs'
 
+const require = createRequire(import.meta.url)
 const SONG_BYTES = new Uint8Array([0x49, 0x44, 0x33, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
+const TOKEN = createLoopbackToken()
 
 describe('PeerTunes loopback server with injectable Node server', () => {
   let server
@@ -19,13 +27,17 @@ describe('PeerTunes loopback server with injectable Node server', () => {
   let fetchCalls
   let refreshed
 
+  // What the PeerTunes page asks for: a drive read with this run's token.
+  const asset = (url) => `${localUrl}/hyper/asset?url=${encodeURIComponent(url)}&token=${TOKEN}`
+
   beforeEach(async () => {
     fetchCalls = []
     refreshed = []
     server = createPeerTunesHttpServer({
       httpImpl: http,
       fetch: createFakeHyperFetch(fetchCalls),
-      refreshNetwork: async (url) => { refreshed.push(url) }
+      refreshNetwork: async (url) => { refreshed.push(url) },
+      token: TOKEN
     })
     localUrl = await listen(server)
   })
@@ -105,21 +117,21 @@ describe('PeerTunes loopback server with injectable Node server', () => {
   })
 
   it('validates the hyper asset url before touching the network', async () => {
-    const missing = await fetch(`${localUrl}/hyper/asset`)
+    const missing = await fetch(`${localUrl}/hyper/asset?token=${TOKEN}`)
     assert.equal(missing.status, 400)
 
-    const wrongScheme = await fetch(`${localUrl}/hyper/asset?url=${encodeURIComponent('https://example.com/song.mp3')}`)
+    const wrongScheme = await fetch(asset('https://example.com/song.mp3'))
     assert.equal(wrongScheme.status, 400)
     assert.match(await wrongScheme.text(), /Only hyper:\/\/ URLs are supported/)
 
-    const badPath = await fetch(`${localUrl}/hyper/asset?url=${encodeURIComponent('hyper://abc/..%2F..%2Fetc')}`)
+    const badPath = await fetch(asset('hyper://abc/..%2F..%2Fetc'))
     assert.equal(badPath.status, 400)
 
     assert.equal(fetchCalls.length, 0)
   })
 
   it('forwards Accept for folder listings so hypercore-fetch answers with JSON', async () => {
-    const response = await fetch(`${localUrl}/hyper/asset?url=${encodeURIComponent('hyper://abc/music/')}`, {
+    const response = await fetch(asset('hyper://abc/music/'), {
       headers: { Accept: 'application/json' }
     })
     const listing = await response.json()
@@ -133,7 +145,7 @@ describe('PeerTunes loopback server with injectable Node server', () => {
   })
 
   it('streams song bytes and honours range requests', async () => {
-    const full = await fetch(`${localUrl}/hyper/asset?url=${encodeURIComponent('hyper://abc/music/01 Song.mp3')}`)
+    const full = await fetch(asset('hyper://abc/music/01 Song.mp3'))
     const fullBytes = new Uint8Array(await full.arrayBuffer())
 
     assert.equal(full.status, 200)
@@ -141,7 +153,7 @@ describe('PeerTunes loopback server with injectable Node server', () => {
     assert.equal(full.headers.get('accept-ranges'), 'bytes')
     assert.deepEqual(fullBytes, SONG_BYTES)
 
-    const partial = await fetch(`${localUrl}/hyper/asset?url=${encodeURIComponent('hyper://abc/music/01 Song.mp3')}`, {
+    const partial = await fetch(asset('hyper://abc/music/01 Song.mp3'), {
       headers: { Range: 'bytes=0-3' }
     })
     const partialBytes = new Uint8Array(await partial.arrayBuffer())
@@ -153,7 +165,7 @@ describe('PeerTunes loopback server with injectable Node server', () => {
   })
 
   it('maps upstream failures to an error status without crashing', async () => {
-    const response = await fetch(`${localUrl}/hyper/asset?url=${encodeURIComponent('hyper://abc/missing.mp3')}`)
+    const response = await fetch(asset('hyper://abc/missing.mp3'))
     assert.equal(response.status, 404)
   })
 
@@ -163,7 +175,7 @@ describe('PeerTunes loopback server with injectable Node server', () => {
     assert.equal(crossOrigin.status, 403)
 
     // <audio src> and friends send no Origin at all; Sec-Fetch-Site catches those.
-    const noCors = await requestWithHeaders(localUrl, '/hyper/asset?url=hyper%3A%2F%2Fabc%2Fmusic%2F', {
+    const noCors = await requestWithHeaders(localUrl, `/hyper/asset?url=hyper%3A%2F%2Fabc%2Fmusic%2F&token=${TOKEN}`, {
       'sec-fetch-site': 'cross-site'
     })
     assert.equal(noCors.status, 403)
@@ -186,8 +198,71 @@ describe('PeerTunes loopback server with injectable Node server', () => {
     assert.equal(ownOrigin.status, 200)
   })
 
+  // Another app on the phone sends no Origin and no Sec-Fetch-Site, which the
+  // loopback check lets through, and it can send any header it likes. It got
+  // songs, folder listings and private drives, decrypted.
+  it('reads nothing for a request without this run\'s token', async () => {
+    const song = encodeURIComponent('hyper://abc/music/01 Song.mp3')
+    const folder = encodeURIComponent('hyper://abc/music/')
+    for (const token of [
+      null,
+      '',
+      '0'.repeat(TOKEN.length),
+      createLoopbackToken(),
+      TOKEN.slice(0, -1),
+      `${TOKEN}0`
+    ]) {
+      const query = token === null ? '' : `&token=${token}`
+      const read = await requestWithHeaders(localUrl, `/hyper/asset?url=${song}${query}`, {})
+      assert.equal(read.status, 403, String(token))
+      assert.equal(read.body, 'Forbidden')
+      const listing = await requestWithHeaders(localUrl, `/hyper/asset?url=${folder}${query}`, { accept: 'application/json' })
+      assert.equal(listing.status, 403, String(token))
+      const head = await requestWithHeaders(localUrl, `/hyper/asset?url=${song}${query}`, { range: 'bytes=0-3' }, 'HEAD')
+      assert.equal(head.status, 403, String(token))
+    }
+
+    // The token goes in the address. A header with it, or another name for
+    // it, counts for nothing.
+    const inHeader = await requestWithHeaders(localUrl, `/hyper/asset?url=${song}`, { 'x-peersky-token': TOKEN })
+    assert.equal(inHeader.status, 403)
+    const otherName = await requestWithHeaders(localUrl, `/hyper/asset?url=${song}&Token=${TOKEN}`, {})
+    assert.equal(otherName.status, 403)
+
+    assert.deepEqual(fetchCalls, [])
+    assert.deepEqual(refreshed, [])
+  })
+
+  // PeerTunes itself, unchanged, maps a hyper:// song through the bridge when
+  // it reads it, and the address it gets carries the page's token.
+  it('answers the addresses PeerTunes builds through the bridge with the token it was given', async (t) => {
+    const PT = require('../../assets/peertunes/js/metadata.js')
+    const window = { peerskyServerToken: TOKEN }
+    vm.runInNewContext(bridgeScript(), { window, encodeURIComponent })
+    globalThis.window = window
+    t.after(() => { delete globalThis.window })
+
+    const mapped = PT.mapP2p('hyper://abc/music/01 Song.mp3')
+    assert.equal(mapped, `/hyper/asset?url=${encodeURIComponent('hyper://abc/music/01 Song.mp3')}&token=${TOKEN}`)
+    const response = await fetch(`${localUrl}${mapped}`)
+    assert.equal(response.status, 200)
+    assert.deepEqual(new Uint8Array(await response.arrayBuffer()), SONG_BYTES)
+  })
+
+  // Anyone on the phone can fetch these, so the token is in none of them.
+  it('needs no token for the page and its files, and sends none', async () => {
+    const keys = Object.keys(peertunesAssets)
+    assert.ok(keys.includes('index.html') && keys.length > 5)
+    for (const key of keys) {
+      const response = await requestWithHeaders(localUrl, `/${key}`, {})
+      assert.equal(response.status, 200, key)
+      assert.ok(!response.body.includes(TOKEN), key)
+      assert.doesNotMatch(response.body, /[0-9a-f]{64}/, key)
+    }
+  })
+
   it('keeps proxied drive content unreadable by other sites and unrenderable', async () => {
-    const response = await fetch(`${localUrl}/hyper/asset?url=${encodeURIComponent('hyper://abc/evil.html')}`)
+    const response = await fetch(asset('hyper://abc/evil.html'))
 
     assert.equal(response.status, 200)
     // A drive must not be able to run scripts on the PeerTunes origin, which is
@@ -196,7 +271,7 @@ describe('PeerTunes loopback server with injectable Node server', () => {
     // And no website may read drive bytes back through the proxy.
     assert.equal(response.headers.get('access-control-allow-origin'), null)
 
-    const audio = await fetch(`${localUrl}/hyper/asset?url=${encodeURIComponent('hyper://abc/music/01 Song.mp3')}`)
+    const audio = await fetch(asset('hyper://abc/music/01 Song.mp3'))
     assert.equal(audio.headers.get('content-type'), 'audio/mpeg')
   })
 
@@ -209,7 +284,7 @@ describe('PeerTunes loopback server with injectable Node server', () => {
       const request = http.request({
         hostname,
         port,
-        path: `/hyper/asset?url=${encodeURIComponent('hyper://abc/long.mp3')}`,
+        path: `/hyper/asset?url=${encodeURIComponent('hyper://abc/long.mp3')}&token=${TOKEN}`,
         method: 'GET'
       }, (response) => {
         response.once('data', () => {
@@ -271,7 +346,7 @@ describe('PeerTunes loopback server with injectable Node server', () => {
     }
 
     try {
-      const response = await fetch(`${localUrl}/hyper/asset?url=${encodeURIComponent('hyper://abc/streamed/')}`, {
+      const response = await fetch(asset('hyper://abc/streamed/'), {
         headers: { accept: 'application/json' }
       })
 
@@ -287,7 +362,7 @@ describe('PeerTunes loopback server with injectable Node server', () => {
   it('passes the upstream reason through instead of a generic failure', async () => {
     // Without this every failure looked identical in the UI, which made a
     // folder that works on one device and not another impossible to diagnose.
-    const response = await fetch(`${localUrl}/hyper/asset?url=${encodeURIComponent('hyper://abc/broken/')}`, {
+    const response = await fetch(asset('hyper://abc/broken/'), {
       headers: { accept: 'application/json' }
     })
 
@@ -301,7 +376,7 @@ describe('PeerTunes loopback server with injectable Node server', () => {
     // Each attempt keeps whatever blocks it fetched, so a cold folder warms up
     // rather than failing outright. This is the Android "/Classic/ fails but /
     // works" shape: the root needs far fewer reads than a folder of tracks.
-    const response = await fetch(`${localUrl}/hyper/asset?url=${encodeURIComponent('hyper://abc/flaky/')}`, {
+    const response = await fetch(asset('hyper://abc/flaky/'), {
       headers: { accept: 'application/json' }
     })
 
@@ -311,7 +386,7 @@ describe('PeerTunes loopback server with injectable Node server', () => {
 
     // A 404 is an answer, not a hiccup, so it must not be retried.
     fetchCalls.length = 0
-    const missing = await fetch(`${localUrl}/hyper/asset?url=${encodeURIComponent('hyper://abc/missing/')}`, {
+    const missing = await fetch(asset('hyper://abc/missing/'), {
       headers: { accept: 'application/json' }
     })
     assert.equal(missing.status, 404)
@@ -322,7 +397,7 @@ describe('PeerTunes loopback server with injectable Node server', () => {
   // connects. The first add of a new drive used to fail on that, and the
   // second worked.
   it('waits for peers on a drive it has not read before', async () => {
-    const response = await fetch(`${localUrl}/hyper/asset?url=${encodeURIComponent('hyper://cold/')}`, {
+    const response = await fetch(asset('hyper://cold/'), {
       headers: { accept: 'application/json' }
     })
 
@@ -341,7 +416,7 @@ describe('PeerTunes loopback server with injectable Node server', () => {
   })
 
   it('refuses a listing that would not fit in memory', async () => {
-    const response = await fetch(`${localUrl}/hyper/asset?url=${encodeURIComponent('hyper://abc/huge/')}`, {
+    const response = await fetch(asset('hyper://abc/huge/'), {
       headers: { accept: 'application/json' }
     })
 
@@ -369,9 +444,78 @@ describe('PeerTunes server helpers', () => {
     assert.equal(injectHyperBridge('<p>hi</p>'), `${HYPER_BRIDGE_SCRIPT}<p>hi</p>`)
   })
 
-  it('keeps the bridge path relative so no proxy token reaches the page', () => {
-    assert.ok(!/token/i.test(HYPER_BRIDGE_SCRIPT))
+  // The served page holds no token. The bridge adds the one the app gave the
+  // page, read when the page asks, so a page loaded again with a new one uses
+  // that.
+  it('keeps the bridge path relative and adds the page\'s token only when asked', () => {
+    assert.doesNotMatch(HYPER_BRIDGE_SCRIPT, /[0-9a-f]{64}/)
     assert.match(HYPER_BRIDGE_SCRIPT, /"\/hyper\/asset\?url="/)
+
+    const window = {}
+    vm.runInNewContext(bridgeScript(), { window, encodeURIComponent })
+    assert.equal(JSON.stringify(window.peerskyProtocols), '["hyper"]')
+    assert.equal(window.peerskyHyperAsset('hyper://abc/a b.mp3'), '/hyper/asset?url=hyper%3A%2F%2Fabc%2Fa%20b.mp3')
+    window.peerskyServerToken = TOKEN
+    assert.equal(window.peerskyHyperAsset('hyper://abc/a b.mp3'), `/hyper/asset?url=hyper%3A%2F%2Fabc%2Fa%20b.mp3&token=${TOKEN}`)
+    const next = createLoopbackToken()
+    window.peerskyServerToken = next
+    assert.ok(window.peerskyHyperAsset('hyper://abc/a.mp3').endsWith(`&token=${next}`))
+  })
+})
+
+// Each run of the real server, on Node's http instead of Bare's, with
+// stand-ins for the Hyper calls.
+describe('PeerTunes server runs', () => {
+  it('makes a new token for each run, and logs neither', async () => {
+    const reads = []
+    const hyper = {
+      ensureFetchGlobals () {},
+      refreshHyperNetworkFor: async () => {},
+      routedHyperFetch: createFakeHyperFetch(reads),
+      routedHyperRangeFetch: null,
+      withHyperRuntimeForAddress: async () => { throw new Error('No drives in this test') },
+      hyperOfflineNetworkAllowed: () => true
+    }
+    const start = () => startPeerTunesServer({ httpImpl: http, port: 0, hyper })
+    const song = `url=${encodeURIComponent('hyper://abc/music/01 Song.mp3')}`
+
+    const logged = []
+    const levels = ['log', 'info', 'warn', 'error', 'debug']
+    const kept = Object.fromEntries(levels.map((level) => [level, console[level]]))
+    for (const level of levels) console[level] = (...args) => { logged.push(args.map(String).join(' ')) }
+
+    let first
+    let second
+    try {
+      first = await start()
+      assert.equal(first.ok, true)
+      assert.match(first.token, /^[0-9a-f]{64}$/)
+      // Asked again while it runs: the same run, the same token.
+      assert.equal((await start()).token, first.token)
+
+      const page = await fetch(`${first.localUrl}/`)
+      assert.equal(page.status, 200)
+      assert.ok(!(await page.text()).includes(first.token))
+      assert.equal((await fetch(`${first.localUrl}/hyper/asset?${song}`)).status, 403)
+      assert.equal((await fetch(`${first.localUrl}/hyper/asset?${song}&token=${first.token}`)).status, 200)
+      await stopPeerTunesServer()
+
+      second = await start()
+      assert.match(second.token, /^[0-9a-f]{64}$/)
+      assert.notEqual(second.token, first.token)
+      // The last run's token reads nothing now.
+      assert.equal((await fetch(`${second.localUrl}/hyper/asset?${song}&token=${first.token}`)).status, 403)
+      assert.equal((await fetch(`${second.localUrl}/hyper/asset?${song}&token=${second.token}`)).status, 200)
+    } finally {
+      await stopPeerTunesServer()
+      Object.assign(console, kept)
+    }
+
+    assert.equal(reads.length, 2)
+    for (const line of logged) {
+      assert.ok(!line.includes(first.token), line)
+      assert.ok(!line.includes(second.token), line)
+    }
   })
 })
 
@@ -543,10 +687,10 @@ function createFakeHyperFetch (calls) {
   }
 }
 
-function requestWithHeaders (baseUrl, path, headers) {
+function requestWithHeaders (baseUrl, path, headers, method = 'GET') {
   const { hostname, port } = new URL(baseUrl)
   return new Promise((resolve, reject) => {
-    const request = http.request({ hostname, port, path, method: 'GET', headers }, (response) => {
+    const request = http.request({ hostname, port, path, method, headers }, (response) => {
       let body = ''
       response.setEncoding('utf8')
       response.on('data', (chunk) => { body += chunk })
@@ -555,6 +699,11 @@ function requestWithHeaders (baseUrl, path, headers) {
     request.on('error', reject)
     request.end()
   })
+}
+
+// The bridge as the page runs it, without its script tags.
+function bridgeScript () {
+  return HYPER_BRIDGE_SCRIPT.replace(/^<script>/, '').replace(/<\/script>$/, '')
 }
 
 function readHeader (headers, name) {

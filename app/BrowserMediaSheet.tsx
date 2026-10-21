@@ -8,6 +8,7 @@ import PlusIcon from '../assets/icons/bootstrap/plus-lg.svg'
 import ShareIcon from '../assets/icons/bootstrap/arrow-bar-up.svg'
 import XIcon from '../assets/icons/bootstrap/x-circle.svg'
 import { BROWSER_PALETTES } from './browser-appearance.mjs'
+import { t } from './i18n/i18n.mjs'
 import { WEBVIEW_DECELERATION_RATE } from './webview-scroll.mjs'
 import { isDownloadableBrowserMediaUrl } from './browser-media.mjs'
 import { MODAL_ORIENTATIONS } from './modal-orientations'
@@ -49,7 +50,11 @@ export function BrowserMediaSheet ({
 
   if (!target) return null
 
-  const mediaLabel = target.kind === 'video' ? 'video' : 'image'
+  // Each line is written out whole for each kind, so it reads as a sentence
+  // to whoever translates it.
+  const isLink = target.kind === 'link'
+  const isVideo = target.kind === 'video'
+  const previewLabel = isVideo ? t('Preview video') : t('Preview image')
   const primaryUrl = target.kind === 'link' ? target.linkUrl : target.mediaUrl
   const iconColor = isDark ? BROWSER_PALETTES.dark.text : BROWSER_PALETTES.light.text
 
@@ -68,10 +73,10 @@ export function BrowserMediaSheet ({
         <SafeAreaView style={[styles.preview, isDark ? darkStyles.preview : null]}>
           <View style={[styles.previewHeader, isDark ? darkStyles.border : null]}>
             <Text numberOfLines={1} style={[styles.previewTitle, isDark ? darkStyles.primaryText : null]}>
-              {target.title || `Preview ${mediaLabel}`}
+              {target.title || previewLabel}
             </Text>
             <Pressable
-              accessibilityLabel='Close media preview'
+              accessibilityLabel={t('Close media preview')}
               accessibilityRole='button'
               hitSlop={10}
               onPress={() => setPreviewVisible(false)}
@@ -102,20 +107,20 @@ export function BrowserMediaSheet ({
       onRequestClose={onClose}
     >
       <SafeAreaView style={styles.overlay} edges={['top', 'left', 'right']}>
-        <Pressable accessibilityLabel='Close media actions' style={styles.backdrop} onPress={onClose} />
+        <Pressable accessibilityLabel={t('Close media actions')} style={styles.backdrop} onPress={onClose} />
         {/* The sheet reaches the bottom edge, under the home indicator or the
             navigation bar, and only its rows step clear of them. */}
         <View style={[styles.sheet, isDark ? darkStyles.sheet : null, { paddingBottom: 26 + insets.bottom }]}>
           <View style={styles.header}>
             <View style={styles.targetDetails}>
               <Text numberOfLines={1} style={[styles.title, isDark ? darkStyles.primaryText : null]}>
-                {target.title || (target.kind === 'link' ? 'Link' : `${mediaLabel[0].toUpperCase()}${mediaLabel.slice(1)}`)}
+                {target.title || (isLink ? t('Link') : isVideo ? t('Video') : t('Image'))}
               </Text>
               <Text numberOfLines={1} style={[styles.url, isDark ? darkStyles.secondaryText : null]}>
                 {primaryUrl}
               </Text>
             </View>
-            <Pressable accessibilityLabel='Close media actions' accessibilityRole='button' hitSlop={10} onPress={onClose}>
+            <Pressable accessibilityLabel={t('Close media actions')} accessibilityRole='button' hitSlop={10} onPress={onClose}>
               <XIcon width={20} height={20} color={iconColor} stroke={iconColor} strokeWidth={MEDIA_ACTION_ICON_STROKE_WIDTH} />
             </Pressable>
           </View>
@@ -124,7 +129,7 @@ export function BrowserMediaSheet ({
             <Action
               icon={<PlusIcon width={20} height={20} color={iconColor} />}
               isDark={isDark}
-              label={`Open ${target.kind === 'link' ? 'link' : mediaLabel} in new tab`}
+              label={isLink ? t('Open link in new tab') : isVideo ? t('Open video in new tab') : t('Open image in new tab')}
               onPress={() => onOpenInNewTab(primaryUrl)}
             />
           )}
@@ -132,7 +137,7 @@ export function BrowserMediaSheet ({
             <Action
               icon={<PlusIcon width={20} height={20} color={iconColor} />}
               isDark={isDark}
-              label={`Open ${target.kind === 'link' ? 'link' : mediaLabel} in background tab`}
+              label={isLink ? t('Open link in background tab') : isVideo ? t('Open video in background tab') : t('Open image in background tab')}
               onPress={() => onOpenInBackgroundTab(primaryUrl, target.title)}
             />
           )}
@@ -140,7 +145,7 @@ export function BrowserMediaSheet ({
             <Action
               icon={<DisplayIcon width={20} height={20} color={iconColor} />}
               isDark={isDark}
-              label={`Preview ${mediaLabel}`}
+              label={previewLabel}
               onPress={() => setPreviewVisible(true)}
             />
           )}
@@ -148,7 +153,7 @@ export function BrowserMediaSheet ({
             <Action
               icon={<PlusIcon width={20} height={20} color={iconColor} />}
               isDark={isDark}
-              label='Open link in new tab'
+              label={t('Open link in new tab')}
               onPress={() => onOpenInNewTab(target.linkUrl as string)}
             />
           )}
@@ -156,7 +161,7 @@ export function BrowserMediaSheet ({
             <Action
               icon={<DownloadIcon width={20} height={20} color={iconColor} />}
               isDark={isDark}
-              label={`Download ${target.kind === 'link' ? 'link' : mediaLabel}`}
+              label={isLink ? t('Download link') : isVideo ? t('Download video') : t('Download image')}
               onPress={() => {
                 onClose()
                 onDownload(primaryUrl)
@@ -167,7 +172,7 @@ export function BrowserMediaSheet ({
             <Action
               icon={<ShareIcon width={20} height={20} color={iconColor} stroke={iconColor} strokeWidth={MEDIA_ACTION_ICON_STROKE_WIDTH} />}
               isDark={isDark}
-              label={`Share ${target.kind === 'link' ? 'link' : `${mediaLabel} link`}`}
+              label={isLink ? t('Share link') : isVideo ? t('Share video link') : t('Share image link')}
               onPress={() => {
                 onClose()
                 onShare(primaryUrl, target.title)

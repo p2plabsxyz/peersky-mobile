@@ -1,11 +1,12 @@
 import b4a from 'b4a'
-import { isOwnLoopbackRequest } from '../loopback-request.mjs'
+import { createLoopbackToken, isLoopbackToken, isOwnLoopbackRequest } from '../loopback-request.mjs'
 import { streamHyperAsset } from '../hyper/asset-server-core.mjs'
 import { isPeerDiscoveryError } from '../hyper/fetch-retry.mjs'
 import { headersToObject } from '../hyper/assets.mjs'
 import { parseHyperUrl } from '../hyper/url.mjs'
 import { PEERTUNES_LOOPBACK_HOST, PEERTUNES_LOOPBACK_PORT } from './constants.mjs'
 import peertunesAssets from './peertunes-runtime.mjs'
+import { MAX_KEEP_SONGS_PER_REQUEST, createSongKeeper, within } from './song-keeper.mjs'
 
 // A folder listing or playlist manifest is a small document. Anything larger is
 // either the wrong branch or an attempt to exhaust the worklet's heap, so it is
@@ -41,20 +42,63 @@ const STATIC_CONTENT_TYPES = {
   webmanifest: 'application/manifest+json'
 }
 
+// A drive this phone has not opened yet can take a moment. Checking a kept
+// song does not wait longer than this for it.
+const KEEP_DRIVE_OPEN_TIMEOUT_MS = 4000
+// Songs asked about in one request, so its address stays short.
+const KEEP_SONGS_BATCH = 10
+
+// Asking starts downloads, so only the PeerTunes page may ask: it sends this
+// header. A tab or an image another page points here cannot send one, and the
+// loopback check lets those through when the app opened the tab, or when an
+// older WebView says nothing about where a request came from. A fetch from
+// another origin that adds it is refused at the preflight.
+export const KEEP_SONGS_HEADER = 'X-PeerTunes-Keep'
+
+// Reading a drive and keeping songs both need this run's token. Another app on
+// the phone can reach this port and send any header, so the loopback check
+// alone left it the person's private drives, decrypted.
+const TOKEN_ROUTES = new Set(['/hyper/asset', '/hyper/keep'])
+
+// The app gives the token to its own WebView before this page loads, as
+// window.peerskyServerToken. It is read on each call and never sent from here:
+// any app on the phone can fetch this page.
+const TOKEN_SCRIPT = 'function token(){var value=window.peerskyServerToken;' +
+  'return typeof value==="string"&&value?"&token="+encodeURIComponent(value):""}'
+
+// PeerTunes asks which songs of a kept playlist are on the device, and the
+// server fetches the ones that are not. A few at a time, then one answer.
+const KEEP_SONGS_SCRIPT = 'window.peerskyKeepSongs=function(urls){' +
+  'var list=Array.isArray(urls)?urls.map(String):[],batches=[];' +
+  `for(var i=0;i<list.length;i+=${KEEP_SONGS_BATCH})batches.push(list.slice(i,i+${KEEP_SONGS_BATCH}));` +
+  'return Promise.all(batches.map(function(batch){' +
+  `return fetch("/hyper/keep?"+batch.map(function(url){return"url="+encodeURIComponent(url)}).join("&")+token(),{headers:{"${KEEP_SONGS_HEADER}":"1"}})` +
+  '.then(function(res){if(!res.ok)throw new Error("keep "+res.status);return res.json()})' +
+  '})).then(function(parts){' +
+  'var out={ok:true,saved:[],saving:[],waiting:[]};' +
+  'parts.forEach(function(part){["saved","saving","waiting"].forEach(function(key){' +
+  'if(part&&Array.isArray(part[key]))out[key]=out[key].concat(part[key])})});' +
+  'return out' +
+  '}).catch(function(){return null})}'
+
 // PeerTunes looks for this global and sends its hyper:// reads through it,
 // because the WebView cannot fetch hyper:// on its own. The path is relative,
-// so the page never handles a proxy token.
+// and the token is added when the page asks, so the page as served holds none.
 // peerskyProtocols: the phone reads hyper:// only, so PeerTunes offers no other
 // p2p link.
-export const HYPER_BRIDGE_SCRIPT = '<script>window.peerskyProtocols=["hyper"];window.peerskyHyperAsset=function(url){return"/hyper/asset?url="+encodeURIComponent(String(url))}</script>'
+export const HYPER_BRIDGE_SCRIPT = `<script>(function(){${TOKEN_SCRIPT}window.peerskyProtocols=["hyper"];window.peerskyHyperAsset=function(url){return"/hyper/asset?url="+encodeURIComponent(String(url))+token()};${KEEP_SONGS_SCRIPT}})()</script>`
 
 let server = null
 let serverInfo = null
 let serverTransition = Promise.resolve()
 let bareHttp = null
 let hyperFetchModule = null
+let hyperRuntimeModule = null
 
-export async function startPeerTunesServer () {
+// The app passes nothing. Tests pass Node's http, port 0 and stand-ins for
+// the Hyper calls, since Bare's HTTP and the Hyper fetch do not load under
+// Node.
+export async function startPeerTunesServer ({ httpImpl: testHttp = null, port = PEERTUNES_LOOPBACK_PORT, hyper: testHyper = null } = {}) {
   return withServerTransition(async () => {
     if (server && serverInfo) {
       return {
@@ -64,20 +108,37 @@ export async function startPeerTunesServer () {
       }
     }
 
-    const httpImpl = await getBareHttp()
-    const { ensureFetchGlobals, refreshHyperNetworkFor, routedHyperFetch, routedHyperRangeFetch } = await getHyperFetchModule()
+    const httpImpl = testHttp || await getBareHttp()
+    const { ensureFetchGlobals, refreshHyperNetworkFor, routedHyperFetch, routedHyperRangeFetch } = testHyper || await getHyperFetchModule()
+    const { withHyperRuntimeForAddress } = testHyper || await getHyperRuntimeModule()
+    const { hyperOfflineNetworkAllowed } = testHyper || await import('../hyper/offline-manager.mjs')
+    const keeper = createSongKeeper({
+      openDrive: (address, task) => withHyperRuntimeForAddress(address, async (runtime) => {
+        const drive = await within(runtime.getDrive(address), KEEP_DRIVE_OPEN_TIMEOUT_MS)
+        if (!drive) throw new Error('The drive did not open in time.')
+        return task(drive)
+      }),
+      refreshNetwork: refreshHyperNetworkFor,
+      // Download only on Wi-Fi holds for kept songs as for kept folders.
+      mayDownload: hyperOfflineNetworkAllowed
+    })
+    // A new token each run. The app hands it to the page, and reloads the
+    // page when a restart brings a new one.
+    const token = createLoopbackToken()
     const options = {
       httpImpl,
       fetch: routedHyperFetch,
       fetchRange: routedHyperRangeFetch,
       ensureGlobals: ensureFetchGlobals,
-      refreshNetwork: refreshHyperNetworkFor
+      refreshNetwork: refreshHyperNetworkFor,
+      keepSongs: keeper.keep,
+      token
     }
 
     let bound
     let usingFallbackPort = false
     try {
-      bound = await bindServer(options, PEERTUNES_LOOPBACK_PORT)
+      bound = await bindServer(options, port)
     } catch (error) {
       // Something else holds the fixed port. The app still works, but the
       // library lives in the origin's IndexedDB, so a different port means the
@@ -93,7 +154,8 @@ export async function startPeerTunesServer () {
       host: PEERTUNES_LOOPBACK_HOST,
       port: bound.port,
       localUrl: `http://${PEERTUNES_LOOPBACK_HOST}:${bound.port}`,
-      usingFallbackPort
+      usingFallbackPort,
+      token
     }
 
     return {
@@ -134,7 +196,9 @@ export function createPeerTunesHttpServer ({
   fetch,
   fetchRange,
   ensureGlobals = () => {},
-  refreshNetwork = async () => {}
+  refreshNetwork = async () => {},
+  keepSongs = null,
+  token
 } = {}) {
   if (!httpImpl?.createServer) {
     throw new Error('PeerTunes HTTP server requires an HTTP implementation.')
@@ -142,9 +206,12 @@ export function createPeerTunesHttpServer ({
   if (typeof fetch !== 'function') {
     throw new Error('PeerTunes HTTP server requires a Hyper fetch implementation.')
   }
+  if (typeof token !== 'string' || token.length < 32) {
+    throw new Error('PeerTunes HTTP server requires a token.')
+  }
 
   return httpImpl.createServer((req, res) => {
-    handleRequest(req, res, { fetch, fetchRange, ensureGlobals, refreshNetwork })
+    handleRequest(req, res, { fetch, fetchRange, ensureGlobals, refreshNetwork, keepSongs, token })
   })
 }
 
@@ -177,7 +244,7 @@ export function injectHyperBridge (html) {
   return `${source.slice(0, insertAt)}${HYPER_BRIDGE_SCRIPT}${source.slice(insertAt)}`
 }
 
-function handleRequest (req, res, { fetch, fetchRange, ensureGlobals, refreshNetwork }) {
+function handleRequest (req, res, { fetch, fetchRange, ensureGlobals, refreshNetwork, keepSongs, token }) {
   const requestUrl = parseRequestUrl(req.url)
   if (!requestUrl) {
     sendText(res, 400, 'Bad request')
@@ -199,8 +266,23 @@ function handleRequest (req, res, { fetch, fetchRange, ensureGlobals, refreshNet
     return
   }
 
+  if (TOKEN_ROUTES.has(requestUrl.pathname) && !isLoopbackToken(requestUrl.searchParams.get('token'), token)) {
+    sendText(res, 403, 'Forbidden')
+    return
+  }
+
   if (requestUrl.pathname === '/hyper/asset') {
     serveHyperAsset(req, res, { fetch, fetchRange, ensureGlobals, refreshNetwork }, requestUrl.searchParams.get('url'))
+      .catch((error) => sendError(req, res, error))
+    return
+  }
+
+  if (requestUrl.pathname === '/hyper/keep') {
+    if (req.headers?.[KEEP_SONGS_HEADER.toLowerCase()] !== '1') {
+      sendText(res, 403, 'Forbidden')
+      return
+    }
+    serveKeptSongs(req, res, keepSongs, requestUrl.searchParams.getAll('url'))
       .catch((error) => sendError(req, res, error))
     return
   }
@@ -246,6 +328,27 @@ async function serveHyperAsset (req, res, { fetch, fetchRange, ensureGlobals, re
   }
 
   await streamHyperAsset(fetch, fetchRange, assetUrl, req, guardProxyResponse(res), null)
+}
+
+// Which songs of a kept playlist are on the device. Asking also fetches the
+// ones that are not, so a song that could not be saved before, because the
+// person sharing it was offline, is tried again each time.
+async function serveKeptSongs (req, res, keepSongs, urls) {
+  if (typeof keepSongs !== 'function') {
+    sendText(res, 404, 'Not found')
+    return
+  }
+  if (req.method !== 'GET') {
+    sendText(res, 405, 'Method not allowed')
+    return
+  }
+  if (!urls.length || urls.length > MAX_KEEP_SONGS_PER_REQUEST) {
+    sendText(res, 400, `Ask about 1 to ${MAX_KEEP_SONGS_PER_REQUEST} songs`)
+    return
+  }
+
+  const answer = await keepSongs(urls)
+  sendText(res, 200, JSON.stringify(answer), 'application/json; charset=utf-8')
 }
 
 function sendStaticAsset (req, res, asset) {
@@ -341,6 +444,15 @@ async function getHyperFetchModule () {
   }
 
   return hyperFetchModule
+}
+
+// The drives behind kept songs, opened the same way the reads above open them.
+async function getHyperRuntimeModule () {
+  if (!hyperRuntimeModule) {
+    hyperRuntimeModule = await import('../hyper/runtime.mjs')
+  }
+
+  return hyperRuntimeModule
 }
 
 function wantsJson (req) {

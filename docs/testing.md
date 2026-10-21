@@ -31,11 +31,16 @@ Protocol tests live in `test/protocol/` and cover behavior that should stay stab
 
 - `hyper-url.test.mjs` validates `hyper://` parsing, malformed URL handling, and path traversal rejection.
 - `holesail-session.test.mjs` validates Holesail ports, keys, loopback host restrictions, and safe failure behavior.
-- `note-tunnel.test.mjs` checks the phone's tunnel makes the same keys and addresses as Holesail, and joins and is joined by Holesail's own classes on a local hyperdht test network.
+- `note-tunnel.test.mjs` checks the phone's tunnel makes the same keys and addresses as Holesail, joins and is joined by Holesail's own classes on a local hyperdht test network, and lets only requests with the room's token through either end.
 - `p2pmd-document.test.mjs` validates document state, Yjs update application, full-state sync, size limits, and subscribers.
-- `p2pmd-http.test.mjs` starts a real HTTP server with the shared P2PMD request handler and checks `/status`, `/doc`, `/doc/update`, `/doc/yjsstate`, `/presence`, and `/events`, and that pages on other origins are turned away.
+- `p2pmd-http.test.mjs` starts a real HTTP server with the shared P2PMD request handler and checks `/status`, `/doc`, `/doc/update`, `/doc/yjsstate`, `/presence`, and `/events`, and that pages on other origins, and requests without the run's token, are turned away.
 - `p2pmd-peers.test.mjs` validates peer count, peer pruning, and line ownership used by gutter marks.
 - `p2pmd-preview.test.mjs` validates Markdown preview rendering, raw HTML escaping, and Hyper image URL rewriting.
+- `hyperdrive-viewer-http.test.mjs` starts the Hyperdrive viewer's server with Node's `http` and checks its pages and files, path traversal, requests from other sites, the content types and headers a drive's files get, Range and HEAD, the secret both drive endpoints need, downloads signed for one file, and the listing's shape and errors.
+- `hyperdrive-viewer-list.test.mjs` lists fake drives: every file at any depth, the caps, waiting for a peer, private and blocked drives, timeouts, stopping when the viewer stops waiting, and a drive's name at its top from the desktop's private drive list, never made up.
+- `hyperdrive-viewer-private.test.mjs` opens this phone's own encrypted drive under a stand-in Bare and reads it through the viewer's server: ranges come back as 206, a video seeks, and the listing says the drive is private.
+- `hyperdrive-viewer-folders.test.mjs` opens folders of a real drive as a tab does: the file hypercore-fetch served for a folder is in the canonical link, so a README sends the folder to the viewer and an index.html keeps it a website. The listing names the drive at its top.
+- `hyperdrive-viewer-token.test.mjs` starts the viewer's server the way the app does: each start makes a new secret, its drive reads need it, and a download signed before a restart is refused after it.
 - `phone-backup.test.mjs` backs a real Hyper store up and restores it into a second phone folder, then opens it the ordinary way. It also covers wrong passphrases, damaged and cut-off files, path traversal, and transfers meant for another phone.
 - `link-device.test.mjs` restores desktop transfers built the way PeerSky Desktop builds them (`test/fixtures/desktop-transfer.mjs`), including tampered, expired and oversized ones.
 - `phone-transfer-publish.test.mjs` puts a transfer on a drive, replicates it to a second store, and clears it.
@@ -73,7 +78,7 @@ The child processes are needed because the mobile Holesail runtime keeps one act
 
 ## Why Node HTTP is used in P2PMD endpoint tests
 
-Production mobile uses `bare-http1`. Tests inject Node's `node:http` into `createP2pmdHttpServer({ httpImpl })` so the same P2PMD route handler can be tested on the development machine.
+Production mobile uses `bare-http1`. Tests inject Node's `node:http` into `createP2pmdHttpServer({ httpImpl, token })` so the same P2PMD route handler can be tested on the development machine.
 
 The socket implementation changes, but the request handling logic is shared:
 

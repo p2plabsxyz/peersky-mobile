@@ -1,6 +1,6 @@
 # PeerSky Mobile Privacy Policy
 
-Last updated: October 10, 2026
+Last updated: October 13, 2026
 
 PeerSky Mobile is a web and peer-to-peer browser. There are no accounts, no
 analytics and no servers of ours, so there is nowhere for us to collect anything
@@ -67,7 +67,7 @@ If you sent us a report, ask at contact@p2plabs.xyz and we delete it, unless the
 
 ## Deleting Your Data
 
-There is no account on a server to delete. In PeerChat, Settings, Delete PeerChat profile removes your name, bio, photo, chats and keys from this device. Settings, P2P Data, Clear all P2P data removes everything peer-to-peer, and uninstalling PeerSky removes the rest. Messages you already sent stay on the devices of the people you sent them to, and we have no way to reach them.
+There is no account on a server to delete. In PeerChat, Settings, Delete PeerChat profile removes your name, bio, photo, chats and keys from this device. Settings, P2P Data, Clear all P2P data removes everything peer-to-peer, including this device's identity and its links to your other devices, and uninstalling PeerSky removes the rest. Messages you already sent stay on the devices of the people you sent them to, and we have no way to reach them.
 
 ## Children
 

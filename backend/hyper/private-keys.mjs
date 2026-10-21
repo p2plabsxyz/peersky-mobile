@@ -1,6 +1,7 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync } from 'node:fs'
 import b4a from 'b4a'
 import { randomBytes } from 'hypercore-crypto'
+import { readSealedJson, writeSealedJson } from './sealed-file.mjs'
 
 export const PRIVATE_DRIVE_KEY_FILE = 'private-drive-key.json'
 export const PRIVATE_DRIVE_KEY_BYTES = 32
@@ -13,12 +14,14 @@ export function getPrivateDriveKeyRecord (storagePath) {
   if (!storagePath) return { ok: false }
   const filePath = getPrivateDriveKeyFile(storagePath)
 
+  // Locked with the phone's secure storage (sealed-file.mjs). One that cannot
+  // be opened says so, and is never taken for no key at all.
   try {
-    if (!existsSync(filePath)) return { ok: false }
-    const parsed = JSON.parse(b4a.toString(readFileSync(filePath), 'utf8'))
-    return normalizePrivateDriveKeyRecord(parsed)
-  } catch {
-    return { ok: false }
+    const read = readSealedJson(filePath)
+    if (!read) return { ok: false }
+    return normalizePrivateDriveKeyRecord(read.value)
+  } catch (error) {
+    return error?.code === 'SEALED_FILE_LOCKED' ? { ok: false, locked: true } : { ok: false }
   }
 }
 
@@ -31,6 +34,7 @@ export function getPrivateDriveKey (storagePath, { linkedKey = null } = {}) {
   if (cachedEntry && cachedEntry.path === storagePath) return cachedEntry.key
 
   const record = getPrivateDriveKeyRecord(storagePath)
+  if (record.locked) throw new Error('The private drive key is locked with this phone\'s secure storage and could not be opened.')
   const key = record.ok ? record.key : loadOrCreatePrivateDriveKey(storagePath, linkedKey)
   cachedEntry = { path: storagePath, key }
   return key
@@ -81,11 +85,12 @@ export function rememberPrivateDriveId (storagePath, driveId) {
   try {
     const record = getPrivateDriveKeyRecord(storagePath)
     if (!record.ok) return false
-    const parsed = JSON.parse(b4a.toString(readFileSync(filePath), 'utf8'))
+    const parsed = readSealedJson(filePath)?.value
+    if (!parsed || typeof parsed !== 'object') return false
     const createdAt = typeof parsed.createdAt === 'string' ? parsed.createdAt : new Date().toISOString()
 
     if (record.version === 3) {
-      writeFileSync(filePath, JSON.stringify({
+      writeSealedJson(filePath, {
         version: 3,
         createdAt,
         key: record.key ? b4a.toString(record.key, 'hex') : null,
@@ -93,7 +98,7 @@ export function rememberPrivateDriveId (storagePath, driveId) {
         encrypted: !!record.encrypted,
         ...(record.announce !== undefined ? { announce: record.announce } : {}),
         ...(record.source ? { source: record.source } : {})
-      }, null, 2))
+      })
       resetPrivateDriveKeyCache()
       return true
     }
@@ -101,7 +106,7 @@ export function rememberPrivateDriveId (storagePath, driveId) {
     if (!normalizePrivateDriveKey(parsed.key)) return false
     parsed.version = 2
     parsed.driveId = String(driveId).toLowerCase()
-    writeFileSync(filePath, JSON.stringify(parsed, null, 2))
+    writeSealedJson(filePath, parsed)
     resetPrivateDriveKeyCache()
     return true
   } catch {
@@ -135,7 +140,7 @@ export function importPrivateDriveKey (storagePath, { key, driveId, source, anno
     if (!isValidPrivateDriveId(driveId)) {
       throw new Error('Adopting an unencrypted drive requires a drive identity.')
     }
-    writeFileSync(getPrivateDriveKeyFile(storagePath), JSON.stringify({
+    writeSealedJson(getPrivateDriveKeyFile(storagePath), {
       version: 3,
       createdAt: new Date().toISOString(),
       key: null,
@@ -143,7 +148,7 @@ export function importPrivateDriveKey (storagePath, { key, driveId, source, anno
       encrypted: false,
       ...(announce !== undefined ? { announce } : { announce: false }),
       ...(source ? { source } : {})
-    }, null, 2))
+    })
     resetPrivateDriveKeyCache()
     return null
   }
@@ -156,7 +161,7 @@ export function importPrivateDriveKey (storagePath, { key, driveId, source, anno
     ...(announce !== undefined ? { announce } : {})
   }
 
-  writeFileSync(getPrivateDriveKeyFile(storagePath), JSON.stringify(serialized, null, 2))
+  writeSealedJson(getPrivateDriveKeyFile(storagePath), serialized)
   resetPrivateDriveKeyCache()
   return keyBytes
 }
@@ -207,8 +212,9 @@ function loadOrCreatePrivateDriveKey (storagePath, linkedKey = null) {
   const filePath = getPrivateDriveKeyFile(storagePath)
 
   try {
-    if (existsSync(filePath)) {
-      const record = normalizePrivateDriveKeyRecord(JSON.parse(b4a.toString(readFileSync(filePath), 'utf8')))
+    const read = readSealedJson(filePath)
+    if (read) {
+      const record = normalizePrivateDriveKeyRecord(read.value)
       if (record.ok) return record.key
     }
   } catch {
@@ -217,19 +223,21 @@ function loadOrCreatePrivateDriveKey (storagePath, linkedKey = null) {
   const key = linkedKey && linkedKey.byteLength === PRIVATE_DRIVE_KEY_BYTES
     ? b4a.from(linkedKey)
     : randomBytes(PRIVATE_DRIVE_KEY_BYTES)
-  const serialized = JSON.stringify({
+  const serialized = {
     version: 2,
     createdAt: new Date().toISOString(),
     key: b4a.toString(key, 'hex')
-  })
+  }
 
+  // Written only where there is no file: one that is there and cannot be
+  // read, locked or damaged, still holds the key the private files need.
   try {
     mkdirSync(storagePath, { recursive: true })
-    writeFileSync(filePath, serialized, { flag: 'wx' })
+    writeSealedJson(filePath, serialized, { flag: 'wx' })
   } catch (error) {
     if (!existsSync(filePath)) throw error
     try {
-      const record = normalizePrivateDriveKeyRecord(JSON.parse(b4a.toString(readFileSync(filePath), 'utf8')))
+      const record = normalizePrivateDriveKeyRecord(readSealedJson(filePath)?.value)
       if (record.ok) return record.key
     } catch {}
     throw error

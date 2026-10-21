@@ -10,6 +10,8 @@ import {
   describeBackupOrigin,
   describePairingCodeLife,
   describeProgress,
+  describeSendLinkLife,
+  describeSendProgress,
   formatBackupSize,
   MIN_BACKUP_PASSPHRASE_LENGTH,
   parseProgressEvent,
@@ -67,7 +69,8 @@ test('what a backup holds is said the way a person would say it', () => {
   assert.equal(formatBackupSize(120 * 1024 * 1024), '120 MB')
   assert.equal(formatBackupSize(2.5 * 1024 * 1024 * 1024), '2.5 GB')
 
-  assert.equal(describeBackupOrigin({ createdAt: '2026-09-29T12:00:00.000Z', platform: 'ios' }), 'Made on an iPhone, September 29, 2026')
+  const day = new Date('2026-09-29T12:00:00.000Z').toLocaleDateString([], { year: 'numeric', month: 'long', day: 'numeric' })
+  assert.equal(describeBackupOrigin({ createdAt: '2026-09-29T12:00:00.000Z', platform: 'ios' }), `Made on an iPhone, ${day}`)
   assert.equal(describeBackupOrigin({ platform: 'android' }), 'Made on an Android phone')
   assert.equal(describeBackupOrigin({ createdAt: 'not a date' }), 'Made on a phone')
 })
@@ -113,7 +116,7 @@ test('Link Device is laid out like a sync screen, not a debug page', async () =>
   // Sections and rows, in the order they appear. The other devices are rows of
   // their own between this one and the sync row, with one standing in for them
   // until the first is met.
-  const titles = [...main.matchAll(/title='([^']+)'/g)].map((match) => match[1])
+  const titles = [...main.matchAll(/title=\{t\('([^']+)'\)\}/g)].map((match) => match[1])
   assert.deepEqual(titles, [
     'My devices',
     'No other device yet',
@@ -126,14 +129,14 @@ test('Link Device is laid out like a sync screen, not a debug page', async () =>
     'This phone',
     'Remove my data from this phone'
   ])
-  assert.match(main, /title=\{Platform\.OS === 'ios' \? \(Platform\.isPad \? 'iPad' : 'iPhone'\) : 'Android phone'\}\s*trailing='This device'/)
+  assert.match(main, /title=\{Platform\.OS === 'ios' \? \(Platform\.isPad \? 'iPad' : 'iPhone'\) : t\('Android phone'\)\}\s*trailing=\{t\('This device'\)\}/)
   // The old page showed the key file's location and a hyper:// text field.
   assert.doesNotMatch(screen, /Identity key file location/)
   assert.doesNotMatch(screen, /placeholder='hyper:\/\/\.\.\.'/)
 
   const settings = await read('app/settings/SettingsScreen.tsx')
   assert.match(settings, /import \{ LinkDeviceSettings \} from '\.\/LinkDevice'/)
-  assert.match(settings, /description: 'Sync with another device, or save a backup'/)
+  assert.match(settings, /description: msg\('Sync with another device, or save a backup'\)/)
   assert.doesNotMatch(settings, /function LinkDeviceSettings/)
 })
 
@@ -155,6 +158,40 @@ test('Receive here says how long its code has left, and renews it with a note wh
   assert.match(renew, /if \(!visible \|\| direction !== 'receive' \|\| sending \|\| busy \|\| !pairingExpiresAt\) return/)
   assert.match(screen, /describePairingCodeLife\(pairingExpiresAt - clock\)/)
   assert.match(screen, /The last code ran out, so this is a new one\. If the other device has the old code, scan this one there instead\./)
+})
+
+test('Send from here keeps sending when the sheet closes, shows the same link again, and stops only when asked', async () => {
+  assert.equal(describeSendLinkLife(15 * 60 * 1000), 'This link works for 15 more minutes.')
+  assert.equal(describeSendLinkLife(61 * 1000), 'This link works for 1 more minute.')
+  assert.equal(describeSendLinkLife(30 * 1000), 'This link works for less than a minute more.')
+  assert.equal(describeSendLinkLife(0), 'This link has run out.')
+  assert.equal(describeSendProgress(0, true), '')
+  assert.equal(describeSendProgress(0.426, true), 'The desktop has 42% of it so far.')
+  assert.equal(describeSendProgress(1, true), 'The desktop has all of it. You can stop sending now.')
+  assert.equal(describeSendProgress(1, false), 'The other phone has all of it. You can stop sending now.')
+  assert.equal(commands.RPC_IDENTITY_SEND_STATUS, 78)
+
+  const screen = await read('app/settings/LinkDevice.tsx')
+  // Closing used to stop the transfer, and a desktop given the link then
+  // waited on nothing.
+  const close = screen.slice(screen.indexOf('  function close ()'), screen.indexOf('  function stopSending ()'))
+  assert.doesNotMatch(close, /RPC_IDENTITY_SEND_STOP/)
+  assert.doesNotMatch(screen, /if \(!visibleRef\.current\) \{\s*void call\(RPC_IDENTITY_SEND_STOP\)/)
+  assert.match(screen, /function stopSending \(\) \{\s*void call\(RPC_IDENTITY_SEND_STOP\)/)
+  assert.match(screen, />\{t\('Stop sending'\)\}</)
+  // Opening the sheet shows a transfer still going out, on Send from here.
+  const open = screen.slice(screen.indexOf('    setSendEnded(false)'), screen.indexOf('// The code works for 15 minutes'))
+  assert.match(open, /call\(RPC_IDENTITY_SEND_STATUS\)/)
+  assert.match(open, /setDirection\('send'\)\s*setSending\(current\)/)
+  assert.match(screen, /describeSendLinkLife\(sending\.expiresAt - clock\)/)
+  assert.match(screen, /describeSendProgress\(sending\.sent, sending\.toDesktop\)/)
+
+  // The screen stays on while the transfer is out, or one is packed or comes
+  // in: iOS stops PeerSky sending once the phone locks.
+  assert.match(screen, /import \{ activateKeepAwakeAsync, deactivateKeepAwake \} from 'expo-keep-awake'/)
+  const awake = screen.slice(screen.indexOf('const sendingUrl ='), screen.indexOf('function close ()'))
+  assert.match(awake, /const out = sendingUrl !== '' && !sendDone\s+if \(!out && !busy\) return\s+void activateKeepAwakeAsync\(LINK_DEVICE_KEEP_AWAKE\)/)
+  assert.match(awake, /return \(\) => \{\s+if \(timer\) clearTimeout\(timer\)\s+void deactivateKeepAwake\(LINK_DEVICE_KEEP_AWAKE\)/)
 })
 
 test('what the camera sees decides the direction', async () => {
@@ -189,8 +226,8 @@ test('sending to a desktop says what it gets and shows a link to paste there', a
   assert.match(confirm, /can open your private files/)
 
   const sheet = screen.slice(screen.indexOf(': sending'), screen.indexOf('{direction === \'receive\''))
-  assert.match(sheet, /sending\.toDesktop \? 'Open this on the desktop'/)
-  assert.match(sheet, /Under Restore from the network, paste this link or scan it/)
+  assert.match(sheet, /sending\.toDesktop \? t\('Open this on the desktop'\)/)
+  assert.match(sheet, /under Receive here, paste this link or scan it/)
   assert.match(sheet, /onPress=\{copyLink\}/)
   assert.match(screen, /Clipboard\.setString\(sending\.url\)/)
 })
@@ -206,8 +243,11 @@ test('a restore waits for the code to be compared, and a cancel frees the space'
     assert.match(flow, /style: 'cancel',\s*onPress: \(\) => void call\(RPC_IDENTITY_DISCARD_RESTORE, \{ restoreId: response\.restoreId \}\)/)
     assert.match(flow, /onPress: \(\) => onConfirmRestore\(response\.restoreId\)/)
   }
-  // The code the other device shows is the first thing in the question.
-  assert.match(screen, /'Does the other device show this code\?',\s*`\$\{response\.sas\}/)
+  // The code the other device shows is the first thing in the question,
+  // whichever way the data goes.
+  const confirm = screen.slice(screen.indexOf('function confirmRestore'), screen.indexOf('function confirmSend'))
+  assert.match(confirm, /const code = response\.sas\s+Alert\.alert\(\s+t\('Does the other device show this code\?'\),/)
+  assert.equal((confirm.match(/t\('\{code\}\\n\\n/g) || []).length, 4)
 })
 
 test('packing stops offline downloads, so the app starts them again', async () => {

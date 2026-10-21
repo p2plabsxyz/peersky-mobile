@@ -1,10 +1,24 @@
 // Reads assets/licenses/third-party-notices.txt, which
 // scripts/generate-third-party-notices.mjs writes. Kept apart from the screen
 // so a test can check the shipped file the way the app reads it.
+import { msg, t } from '../i18n/i18n.mjs'
 
 // Sections whose libraries ship on one platform only. Each app lists its own,
 // and the App Store turns down an iOS app that names other mobile platforms.
 const PLATFORM_ONLY_SECTIONS = { ios: 'ios', android: 'android', rust: 'android' }
+
+// The headings the generator gives the sections, marked so the catalogs have
+// them. The screen passes each heading through tKey(). PeerSky's own section
+// is the app's name, which stays as it is.
+export const SECTION_TITLES = Object.freeze({
+  app: msg('App'),
+  engine: msg('Peer-to-peer engine'),
+  runtime: msg('Bare runtime and native add-ons'),
+  ios: msg('iOS libraries'),
+  android: msg('Android libraries'),
+  rust: msg('Ad blocker on Android'),
+  content: msg('Data, media and models')
+})
 
 /**
  * The sections of the licenses screen, each item with its license text,
@@ -14,7 +28,7 @@ const PLATFORM_ONLY_SECTIONS = { ios: 'ios', android: 'android', rust: 'android'
 export function parseThirdPartyNotices (text, platform) {
   const parsed = JSON.parse(text)
   if (parsed?.version !== 1 || !Array.isArray(parsed.sections) || !Array.isArray(parsed.texts)) {
-    throw new Error('The licenses file is not one PeerSky can read.')
+    throw new Error(t('The licenses file is not one PeerSky can read.'))
   }
   const shipped = parsed.sections.filter((section) => {
     const only = PLATFORM_ONLY_SECTIONS[section.id]
@@ -25,7 +39,7 @@ export function parseThirdPartyNotices (text, platform) {
     title: String(section.title),
     data: section.items.map((item) => {
       const text = parsed.texts[item.text]
-      if (typeof text !== 'string' || !text) throw new Error(`No license text for ${item.name}`)
+      if (typeof text !== 'string' || !text) throw new Error(t('No license text for {name}', { name: item.name }))
       return {
         key: `${section.id}:${item.name}@${item.version}`,
         name: String(item.name),

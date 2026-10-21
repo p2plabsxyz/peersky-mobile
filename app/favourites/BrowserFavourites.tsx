@@ -1,5 +1,6 @@
 import { Image, Pressable, type StyleProp, Text, type TextStyle, View } from 'react-native'
 
+import { t } from '../i18n/i18n.mjs'
 import { styles } from '../styles'
 import type { BrowserFavourite } from './useBrowserFavourites'
 
@@ -32,8 +33,8 @@ export function BrowserFavourites ({
         <Pressable
           key={favourite.url}
           accessibilityRole='button'
-          accessibilityLabel={`Open ${favourite.title}`}
-          accessibilityHint='Press and hold to remove'
+          accessibilityLabel={t('Open {name}', { name: favourite.title })}
+          accessibilityHint={t('Press and hold to remove')}
           style={styles.browserShortcut}
           onPress={() => onOpen(favourite.url)}
           onLongPress={() => onRemove(favourite)}

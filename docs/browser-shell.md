@@ -13,7 +13,7 @@ normalizes the input and routes it through one of three paths:
 | --- | --- |
 | `http://` and `https://` | Loaded directly by the platform WebView |
 | `hyper://` | Fetched by the Bare runtime through `hypercore-fetch`, then rendered by a WebView |
-| `peersky://` | Resolved to a local app registered in `app/internal-apps-registry.mjs` |
+| `peersky://` | Resolved to a local app registered in `app/internal-apps-registry.mjs`, or for `peersky://p2p/hyperdrive/<view>/...` the Hyperdrive viewer |
 
 Inputs without a URL scheme are treated as either a web address or a search.
 The default search engine is DuckDuckGo; a custom HTTPS search template can be
@@ -74,6 +74,12 @@ this path:
 5. The resulting HTML is rendered by a WebView with its Hyper URL retained as
    the visible browser address.
 
+A folder that comes back as hypercore-fetch's list of names, with no index
+file and no `raw` in its address, opens in the Hyperdrive viewer in the same
+tab instead (`app/hyperdrive/viewer-route.mjs`). The viewer is a page of its
+own, served from `127.0.0.1`, under its `peersky://p2p/hyperdrive/` address;
+see [Hyper](hyper.md#folders-files-photos-and-videos).
+
 ```mermaid
 sequenceDiagram
   participant Shell as Browser shell
@@ -101,6 +107,33 @@ memory and supports range requests used by media playback.
 Navigation sequence checks prevent an older, slower Hyper request from
 overwriting a newer page. Hyper history entries are restored by URL rather
 than by persisting remote HTML.
+
+## The browser's theme for pages
+
+Pages made for PeerSky or Agregore, like the apps at agregore.mauve.moe, load
+`browser://theme/vars.css` and `browser://theme/style.css` (Agregore's own
+pages also ask for `agregore://theme/`), as they do on the desktop. Both
+WebViews answer those two schemes for the `theme` host: on iOS a
+`WKURLSchemeHandler` in `PeerSkyWebViewManager.m.template`, on Android
+`themeResponse` in `PeerSkyWebViewClient.kt.template`, before any content
+blocking. Anything else on those schemes is not found.
+
+WebKit counts those schemes as insecure beside `https://`, so it does not load
+them into an `https://` page at all. Every tab therefore also runs
+`createBrowserThemeScript` at document start: when a `<link>` or `<style>`
+asks for the theme, it puts the variables in a `<style>` just before it and
+points a link to `style.css` at a `data:` copy. A page that never asks is left
+alone, and the script stops watching once the page has loaded.
+
+The files come from `app/browser-theme.mjs`, handed to every tab as the
+`themeFiles` prop. `vars.css` sets the `--browser-theme-*` variables (font,
+background, page background, text, primary and secondary highlight, hover and
+active) from the app's own light or dark setting, as the pages the app builds
+do, not the system's, and the desktop's highlights. Agregore's pages map their
+own `--theme-*` names from these. `style.css` is the desktop's, copied to
+`assets/browser-theme/style.css` with `node scripts/sync-browser-theme.mjs
+../peersky-browser`, which also writes `app/browser-theme-style.mjs`. A page
+picks up a change of light or dark the next time it loads.
 
 ## Internal apps
 

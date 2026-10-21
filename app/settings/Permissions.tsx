@@ -9,6 +9,7 @@ import {
 } from 'react-native'
 import { RPC_HYPER_LAN_STATUS } from '../../backend/rpc/commands.mjs'
 import { BROWSER_PALETTES } from '../browser-appearance.mjs'
+import { t, tKey } from '../i18n/i18n.mjs'
 import { LAN_PERMISSION_HELP, LAN_PERMISSION_TITLE, offerPermissionSettings } from '../permission-prompt'
 import {
   hasPeerChatNotificationPermission,
@@ -56,7 +57,7 @@ export function Permissions ({
         if (active) setNotificationsAllowed(allowed)
       } catch (error) {
         if (active) {
-          setActionError(getActionError(error, 'Unable to read notification permission.'))
+          setActionError(getActionError(error, t('Unable to read notification permission.')))
           setNotificationsAllowed(false)
         }
       }
@@ -84,7 +85,7 @@ export function Permissions ({
     try {
       await Linking.openSettings()
     } catch (error) {
-      setActionError(getActionError(error, 'Unable to open device settings.'))
+      setActionError(getActionError(error, t('Unable to open device settings.')))
     }
   }
 
@@ -101,7 +102,7 @@ export function Permissions ({
       setNotificationsAllowed(allowed)
       if (!allowed) await Linking.openSettings()
     } catch (error) {
-      setActionError(getActionError(error, 'Unable to request notification permission.'))
+      setActionError(getActionError(error, t('Unable to request notification permission.')))
     } finally {
       setIsRequestingNotifications(false)
     }
@@ -115,49 +116,49 @@ export function Permissions ({
         </View>
       )}
 
-      <SettingsSection title='Device access'>
+      <SettingsSection title={t('Device access')}>
         <PermissionRow
-          title='Camera, microphone, and location'
-          description='Websites ask through the native permission prompt. Manage previously allowed or denied access in device settings.'
-          action='Open settings'
+          title={t('Camera, microphone, and location')}
+          description={t('Websites ask through the native permission prompt. Manage previously allowed or denied access in device settings.')}
+          action={t('Open settings')}
           isDark={isDark}
           onPress={() => void openAppSettings()}
         />
         <PermissionRow
-          title='Notifications'
+          title={t('Notifications')}
           description={notificationsAllowed
-            ? 'Notifications are allowed. Tap Allowed to manage or disable them in device settings.'
-            : 'Allow PeerSky to display notifications. You can change this later in device settings.'}
+            ? t('Notifications are allowed. Tap Allowed to manage or disable them in device settings.')
+            : t('Allow PeerSky to display notifications. You can change this later in device settings.')}
           action={isRequestingNotifications
-            ? 'Requesting...'
+            ? t('Requesting...')
             : notificationsAllowed
-              ? 'Allowed'
-              : 'Allow'}
+              ? t('Allowed')
+              : t('Allow')}
           disabled={isRequestingNotifications || notificationsAllowed === null}
           isDark={isDark}
           onPress={() => void requestNotifications()}
         />
         <PermissionRow
-          title='Local network'
+          title={t('Local network')}
           description={localNetworkWorks === false
-            ? 'Nearby devices cannot reach PeerSky right now. Local network access may be turned off for PeerSky, or Wi-Fi is off.'
-            : 'Lets nearby PeerSky devices find this one and connect to it over Wi-Fi, with no internet needed.'}
-          action={localNetworkWorks === null ? 'Checking...' : localNetworkWorks ? 'Allowed' : 'Turn on'}
+            ? t('Nearby devices cannot reach PeerSky right now. Local network access may be turned off for PeerSky, or Wi-Fi is off.')
+            : t('Lets nearby PeerSky devices find this one and connect to it over Wi-Fi, with no internet needed.')}
+          action={localNetworkWorks === null ? t('Checking...') : localNetworkWorks ? t('Allowed') : t('Turn on')}
           disabled={localNetworkWorks === null}
           isDark={isDark}
           onPress={() => {
             if (localNetworkWorks) void openAppSettings()
-            else offerPermissionSettings(LAN_PERMISSION_TITLE, LAN_PERMISSION_HELP)
+            else offerPermissionSettings(tKey(LAN_PERMISSION_TITLE), tKey(LAN_PERMISSION_HELP))
           }}
         />
       </SettingsSection>
 
-      <SettingsSection title='External app links'>
+      <SettingsSection title={t('External app links')}>
         <ChoiceGroup
           options={[
-            { id: 'ask', title: 'Ask every time' },
-            { id: 'allow', title: 'Always allow' },
-            { id: 'block', title: 'Block external links' }
+            { id: 'ask', title: t('Ask every time') },
+            { id: 'allow', title: t('Always allow') },
+            { id: 'block', title: t('Block external links') }
           ]}
           selected={externalLinkBehavior}
           onSelect={onExternalLinkBehaviorChange}
@@ -166,17 +167,17 @@ export function Permissions ({
 
       <View style={styles.notice}>
         <Text style={[styles.noticeText, isDark ? styles.noticeTextDark : null]}>
-          Controls links that open email (mailto:), phone (tel:), messaging (sms:), and map (geo:) apps. Web and Hyper links continue to open in PeerSky. Always allow skips confirmation, so only enable it if you trust the sites you visit.
+          {t('Controls links that open email (mailto:), phone (tel:), messaging (sms:), and map (geo:) apps. Web and Hyper links continue to open in PeerSky. Always allow skips confirmation, so only enable it if you trust the sites you visit.')}
         </Text>
       </View>
 
-      <SettingsSection title='Publishing from sites'>
+      <SettingsSection title={t('Publishing from sites')}>
         {Object.keys(publishingSites).length === 0
           ? (
             <View style={[styles.permissionRow, isDark ? styles.permissionRowDark : null]}>
               <SettingCopy
-                title='No site has asked yet'
-                description='A site asks before it creates hyper:// drives on this phone or saves files to them. Your answers show up here.'
+                title={t('No site has asked yet')}
+                description={t('A site asks before it creates hyper:// drives on this phone or saves files to them. Your answers show up here.')}
               />
             </View>
             )
@@ -184,8 +185,8 @@ export function Permissions ({
             <PermissionRow
               key={siteId}
               title={formatBridgeSite(siteId)}
-              description={decision === 'allow' ? 'Can publish from this phone.' : 'Blocked from publishing.'}
-              action='Forget'
+              description={decision === 'allow' ? t('Can publish from this phone.') : t('Blocked from publishing.')}
+              action={t('Forget')}
               isDark={isDark}
               onPress={() => onPublishingSiteChange(siteId, null)}
             />

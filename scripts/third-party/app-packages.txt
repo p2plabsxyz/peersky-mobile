@@ -1,6 +1,7 @@
 node_modules/@babel/runtime
 node_modules/@expo-google-fonts/material-symbols
 node_modules/@expo/metro-runtime
+node_modules/@noble/ciphers
 node_modules/@preeternal/react-native-cookie-manager
 node_modules/@radix-ui/react-compose-refs
 node_modules/@radix-ui/react-slot
@@ -43,12 +44,14 @@ node_modules/expo-glass-effect
 node_modules/expo-haptics
 node_modules/expo-image-manipulator
 node_modules/expo-image-picker
+node_modules/expo-keep-awake
 node_modules/expo-linking
 node_modules/expo-modules-core
 node_modules/expo-network
 node_modules/expo-notifications
 node_modules/expo-print
 node_modules/expo-router
+node_modules/expo-secure-store
 node_modules/expo-sharing
 node_modules/expo-symbols
 node_modules/expo-video

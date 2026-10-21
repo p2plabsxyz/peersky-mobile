@@ -1,0 +1,18 @@
+{
+  "ios": {
+    "NSCameraUsageDescription": "PeerSky ใช้กล้องเพื่อสแกนรหัส QR เมื่อเชื่อมโยงอุปกรณ์หรือเปิดห้องหรือไดรฟ์ที่แชร์ไว้ และเมื่อเว็บไซต์ที่เข้าชมขอใช้และคุณอนุญาต",
+    "NSLocalNetworkUsageDescription": "PeerSky ใช้เครือข่ายเฉพาะที่เพื่อค้นหาและเชื่อมต่อกับอุปกรณ์ PeerSky ที่อยู่ใกล้เคียง",
+    "NSLocationWhenInUseUsageDescription": "PeerSky จะใช้ตำแหน่งของคุณเฉพาะเมื่อเว็บไซต์ที่เข้าชมขอใช้และคุณอนุญาตเท่านั้น",
+    "NSMicrophoneUsageDescription": "PeerSky จะใช้ไมโครโฟนเฉพาะเมื่อเว็บไซต์ที่เข้าชมขอใช้และคุณอนุญาตเท่านั้น",
+    "NSPhotoLibraryAddUsageDescription": "PeerSky จะบันทึกรูปภาพหรือวิดีโอลงในคลังรูปภาพเมื่อเลือก “บันทึกไปยังรูปภาพ”",
+    "ShortcutPasteAndGo": "วางและไป",
+    "ShortcutNewTab": "แท็บใหม่",
+    "ShortcutNewIncognitoTab": "แท็บใหม่ที่ไม่ระบุตัวตน",
+    "ShortcutAppIcon": "ไอคอนแอป"
+  },
+  "android": {
+    "peerchat_background_text": "กำลังเชื่อมต่อไว้เพื่อให้ข้อความส่งถึงคุณ",
+    "peerchat_background_channel": "การเชื่อมต่อเบื้องหลังของ PeerChat",
+    "peerchat_background_channel_description": "ให้ PeerChat เชื่อมต่ออยู่ขณะที่ PeerSky ทำงานในเบื้องหลัง"
+  }
+}

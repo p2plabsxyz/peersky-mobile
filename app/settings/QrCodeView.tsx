@@ -1,52 +1,44 @@
 import { useMemo } from 'react'
 import { View, StyleSheet, Text } from 'react-native'
 import Svg, { Path } from 'react-native-svg'
-import { createQrMatrix } from './qrcode-matrix.mjs'
+import { t } from '../i18n/i18n.mjs'
+import { drawQrCode } from './qr-elf.mjs'
 
 type QrCodeViewProps = {
   value: string
   size?: number
 }
 
+type QrLayer = { fill: string, d: string }
+
+// Drawn by qr-creator, as the desktop's qr-code elf draws its codes
+// (qr-elf.mjs): black on white, rounded dots.
 export function QrCodeView ({ value, size = 220 }: QrCodeViewProps) {
-  const { matrix, error } = useMemo(() => {
-    if (!value) return { matrix: [], error: null }
+  const { code, error } = useMemo(() => {
+    if (!value) return { code: null, error: null }
     try {
-      return { matrix: createQrMatrix(value, 'M'), error: null }
+      return { code: drawQrCode(value, { fg: '#000000', bg: '#ffffff' }) as { size: number, layers: QrLayer[] }, error: null }
     } catch (err) {
-      return { matrix: [], error: err instanceof Error ? err.message : String(err) }
+      return { code: null, error: err instanceof Error ? err.message : String(err) }
     }
   }, [value])
 
   if (error) {
     return (
       <View style={[styles.placeholder, { width: size, height: size, justifyContent: 'center', alignItems: 'center' }]}>
-        <Text style={{ color: 'red', textAlign: 'center', padding: 8 }}>QR Error: {error}</Text>
+        <Text style={{ color: 'red', textAlign: 'center', padding: 8 }}>{t('QR Error: {error}', { error })}</Text>
       </View>
     )
   }
 
-  if (!matrix || matrix.length === 0) {
+  if (!code) {
     return <View style={[styles.placeholder, { width: size, height: size }]} />
   }
 
-  const moduleCount = matrix.length
-  const cellSize = Math.floor(size / moduleCount)
-  const actualSize = cellSize * moduleCount
-
-  let path = ''
-  for (let rIndex = 0; rIndex < moduleCount; rIndex++) {
-    for (let cIndex = 0; cIndex < moduleCount; cIndex++) {
-      if (matrix[rIndex][cIndex]) {
-        path += `M${cIndex * cellSize},${rIndex * cellSize}h${cellSize}v${cellSize}h-${cellSize}z `
-      }
-    }
-  }
-
   return (
-    <View style={[styles.container, { width: actualSize + 16, height: actualSize + 16 }]}>
-      <Svg width={actualSize} height={actualSize} viewBox={`0 0 ${actualSize} ${actualSize}`}>
-        <Path d={path} fill="#000000" />
+    <View style={[styles.container, { width: size + 16, height: size + 16 }]}>
+      <Svg width={size} height={size} viewBox={`0 0 ${code.size} ${code.size}`}>
+        {code.layers.map((layer, index) => <Path key={index} d={layer.d} fill={layer.fill} />)}
       </Svg>
     </View>
   )

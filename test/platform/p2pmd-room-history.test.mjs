@@ -288,9 +288,9 @@ describe('a longer list of recent notes', () => {
   test('each row starts with a lock or a globe, and the box shows past ten', async () => {
     const { readFile } = await import('node:fs/promises')
     const app = await readFile(new URL('../../app/index.tsx', import.meta.url), 'utf8')
-    assert.match(app, /\{p2pmdRoomHistory\.length > P2PMD_RECENT_SEARCH_AFTER && \(\s+<TextInput\s+accessibilityLabel='Search recent notes'/)
+    assert.match(app, /\{p2pmdRoomHistory\.length > P2PMD_RECENT_SEARCH_AFTER && \(\s+<TextInput\s+accessibilityLabel=\{t\('Search recent notes'\)\}/)
     assert.match(app, /const PrivacyIcon = isPrivate \? ShieldLockIcon : GlobeIcon/)
-    const row = app.slice(app.indexOf('const PrivacyIcon'), app.indexOf("{room.role === 'host' ? 'Reopen' : 'Join'}"))
+    const row = app.slice(app.indexOf('const PrivacyIcon'), app.indexOf("{room.role === 'host' ? t('Reopen') : t('Join')}"))
     assert.ok(row.indexOf('<PrivacyIcon') < row.indexOf('styles.p2pmdRecentRoomKey'))
   })
 })

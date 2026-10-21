@@ -2,6 +2,7 @@ import { Modal, Pressable, StyleSheet, Text, View } from 'react-native'
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { BROWSER_PALETTES } from './browser-appearance.mjs'
+import { t } from './i18n/i18n.mjs'
 import { describeSiteSecurity, getSiteSecurity, SITE_SECURITY } from './site-security.mjs'
 import { MODAL_ORIENTATIONS } from './modal-orientations'
 import ShieldCheckIcon from '../assets/icons/bootstrap/shield-check.svg'
@@ -44,7 +45,7 @@ export function BrowserSiteInfoSheet ({
       onRequestClose={onClose}
     >
       <SafeAreaView style={styles.overlay} edges={['top', 'left', 'right']}>
-        <Pressable accessibilityLabel='Close connection information' style={styles.backdrop} onPress={onClose} />
+        <Pressable accessibilityLabel={t('Close connection information')} style={styles.backdrop} onPress={onClose} />
         <View style={[
           styles.sheet,
           // The home indicator is the only thing that needs clearing here.
@@ -72,12 +73,12 @@ export function BrowserSiteInfoSheet ({
             />
             <View style={styles.copy}>
               <Text style={[styles.title, { color: palette.text }]}>
-                {blockingEnabled ? 'Ads and trackers are blocked' : 'Ads and trackers are not blocked'}
+                {blockingEnabled ? t('Ads and trackers are blocked') : t('Ads and trackers are not blocked')}
               </Text>
               <Text style={[styles.body, { color: palette.mutedText }]}>
                 {blockingEnabled
-                  ? 'EasyList and EasyPrivacy rules are applied by the engine itself, so a page cannot load them in the first place.'
-                  : 'Protection is switched off, so pages can load ads and trackers.'}
+                  ? t('EasyList and EasyPrivacy rules are applied by the engine itself, so a page cannot load them in the first place.')
+                  : t('Protection is switched off, so pages can load ads and trackers.')}
               </Text>
             </View>
           </View>
@@ -88,14 +89,14 @@ export function BrowserSiteInfoSheet ({
               style={({ pressed }) => [styles.action, pressed ? styles.actionPressed : null]}
               onPress={onOpenPrivacySettings}
             >
-              <Text style={[styles.actionText, { color: palette.selectedControl }]}>Privacy settings</Text>
+              <Text style={[styles.actionText, { color: palette.selectedControl }]}>{t('Privacy settings')}</Text>
             </Pressable>
             <Pressable
               accessibilityRole='button'
               style={({ pressed }) => [styles.action, pressed ? styles.actionPressed : null]}
               onPress={onClose}
             >
-              <Text style={[styles.actionText, { color: palette.mutedText }]}>Close</Text>
+              <Text style={[styles.actionText, { color: palette.mutedText }]}>{t('Close')}</Text>
             </Pressable>
           </View>
         </View>

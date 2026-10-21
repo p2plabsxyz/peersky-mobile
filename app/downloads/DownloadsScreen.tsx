@@ -22,15 +22,16 @@ import TrashIcon from '../../assets/icons/bootstrap/trash.svg'
 import { BROWSER_PALETTES } from '../browser-appearance.mjs'
 import { getProxiedHyperUrl, sortBrowserDownloads } from './browser-downloads.mjs'
 import type { BrowserDownload } from './useBrowserDownloads'
+import { msg, t, tKey } from '../i18n/i18n.mjs'
 import { MODAL_ORIENTATIONS } from '../modal-orientations'
 
 type DownloadSort = 'newest' | 'oldest' | 'name' | 'size'
 
 const DOWNLOAD_SORT_OPTIONS: Array<{ id: DownloadSort, label: string }> = [
-  { id: 'newest', label: 'Newest' },
-  { id: 'oldest', label: 'Oldest' },
-  { id: 'name', label: 'Name' },
-  { id: 'size', label: 'Size' }
+  { id: 'newest', label: msg('Newest') },
+  { id: 'oldest', label: msg('Oldest') },
+  { id: 'name', label: msg('Name') },
+  { id: 'size', label: msg('Size') }
 ]
 
 type DownloadsScreenProps = {
@@ -69,12 +70,13 @@ export function DownloadsScreen ({
     () => sortBrowserDownloads(downloads, sort) as BrowserDownload[],
     [downloads, sort]
   )
+  const sortLabel = DOWNLOAD_SORT_OPTIONS.find((option) => option.id === sort)?.label || sort
 
   return (
     <View style={[styles.screen, { backgroundColor: palette.shell }]}>
       <View style={[styles.header, { borderBottomColor: palette.border }]}>
         <Pressable
-          accessibilityLabel='Close Downloads'
+          accessibilityLabel={t('Close Downloads')}
           accessibilityRole='button'
           hitSlop={10}
           style={({ pressed }) => [styles.iconButton, pressed ? styles.pressed : null]}
@@ -82,20 +84,20 @@ export function DownloadsScreen ({
         >
           <ArrowLeftIcon width={22} height={22} color={palette.text} />
         </Pressable>
-        <Text style={[styles.title, { color: palette.text }]}>Downloads</Text>
+        <Text style={[styles.title, { color: palette.text }]}>{t('Downloads')}</Text>
         {isReady && downloads.length > 0 && (
           <Pressable
-            accessibilityLabel={`Sort downloads, currently ${sort}`}
+            accessibilityLabel={t('Sort downloads, currently {sort}', { sort: tKey(sortLabel).toLowerCase() })}
             accessibilityRole='button'
             hitSlop={8}
             style={({ pressed }) => [styles.sortButton, pressed ? styles.pressed : null]}
             onPress={() => setIsSortOpen(true)}
           >
-            <Text style={[styles.sortButtonText, { color: palette.accent }]}>Sort</Text>
+            <Text style={[styles.sortButtonText, { color: palette.accent }]}>{t('Sort')}</Text>
           </Pressable>
         )}
         <Pressable
-          accessibilityLabel='Refresh Downloads'
+          accessibilityLabel={t('Refresh Downloads')}
           accessibilityRole='button'
           hitSlop={10}
           style={({ pressed }) => [styles.iconButton, pressed ? styles.pressed : null]}
@@ -116,7 +118,7 @@ export function DownloadsScreen ({
           <View style={styles.empty}>
             <ActivityIndicator color={palette.accent} />
             <Text style={[styles.emptyCopy, { color: palette.mutedText }]}>
-              Loading downloads...
+              {t('Loading downloads...')}
             </Text>
           </View>
           )
@@ -124,9 +126,9 @@ export function DownloadsScreen ({
         ? (
           <View style={styles.empty}>
             <DownloadIcon width={30} height={30} color={palette.mutedText} />
-            <Text style={[styles.emptyTitle, { color: palette.text }]}>No downloads yet</Text>
+            <Text style={[styles.emptyTitle, { color: palette.text }]}>{t('No downloads yet')}</Text>
             <Text style={[styles.emptyCopy, { color: palette.mutedText }]}>
-              Files downloaded from websites will appear here.
+              {t('Files downloaded from websites will appear here.')}
             </Text>
           </View>
           )
@@ -138,7 +140,7 @@ export function DownloadsScreen ({
             renderItem={({ item: download }) => (
               <View style={[styles.row, { borderBottomColor: palette.border }]}>
                 <Pressable
-                  accessibilityLabel={`Open ${download.name}`}
+                  accessibilityLabel={t('Open {name}', { name: download.name })}
                   accessibilityRole='button'
                   disabled={download.status !== 'complete'}
                   style={({ pressed }) => [
@@ -170,7 +172,7 @@ export function DownloadsScreen ({
                   download.id.startsWith('r:') &&
                   Platform.OS === 'android' && (
                   <Pressable
-                    accessibilityLabel={`Pause ${download.name}`}
+                    accessibilityLabel={t('Pause {name}', { name: download.name })}
                     accessibilityRole='button'
                     accessibilityState={{ disabled: pausingDownloadId === download.id }}
                     disabled={Boolean(pausingDownloadId)}
@@ -193,7 +195,7 @@ export function DownloadsScreen ({
                 )}
                 {download.status === 'complete' && Platform.OS === 'ios' && onSaveToFiles && (
                   <Pressable
-                    accessibilityLabel={`Save ${download.name} to Files`}
+                    accessibilityLabel={t('Save {name} to Files', { name: download.name })}
                     accessibilityRole='button'
                     hitSlop={8}
                     style={({ pressed }) => [styles.downloadAction, pressed ? styles.pressed : null]}
@@ -204,7 +206,9 @@ export function DownloadsScreen ({
                 )}
                 {['failed', 'paused'].includes(download.status) && download.sourceUrl && (
                   <Pressable
-                    accessibilityLabel={`${getDownloadRetryLabel(download)} ${download.name}`}
+                    accessibilityLabel={canResumeDownload(download)
+                      ? t('Resume {name}', { name: download.name })
+                      : t('Retry {name}', { name: download.name })}
                     accessibilityRole='button'
                     accessibilityState={{ disabled: retryingDownloadId === download.id }}
                     disabled={retryingDownloadId === download.id}
@@ -222,24 +226,24 @@ export function DownloadsScreen ({
                   >
                     {retryingDownloadId === download.id
                       ? <ActivityIndicator size='small' color={palette.accent} />
-                      : getDownloadRetryLabel(download) === 'Resume'
+                      : canResumeDownload(download)
                         ? <PlayIcon width={22} height={22} color={palette.accent} />
                         : <ReloadIcon width={20} height={20} color={palette.accent} />}
                   </Pressable>
                 )}
                 <Pressable
-                  accessibilityLabel={`Remove ${download.name}`}
+                  accessibilityLabel={t('Remove {name}', { name: download.name })}
                   accessibilityRole='button'
                   hitSlop={8}
                   style={({ pressed }) => [styles.iconButton, pressed ? styles.pressed : null]}
                   onPress={() => {
                     Alert.alert(
-                      'Remove download?',
-                      `Delete ${download.name} from this device?`,
+                      t('Remove download?'),
+                      t('Delete {name} from this device?', { name: download.name }),
                       [
-                        { text: 'Cancel', style: 'cancel' },
+                        { text: t('Cancel'), style: 'cancel' },
                         {
-                          text: 'Remove',
+                          text: t('Remove'),
                           style: 'destructive',
                           onPress: () => onRemove(download.id)
                         }
@@ -262,7 +266,7 @@ export function DownloadsScreen ({
         onRequestClose={() => setIsSortOpen(false)}
       >
         <Pressable
-          accessibilityLabel='Close sort options'
+          accessibilityLabel={t('Close sort options')}
           accessibilityRole='button'
           style={styles.modalBackdrop}
           onPress={() => setIsSortOpen(false)}
@@ -276,7 +280,7 @@ export function DownloadsScreen ({
               }
             ]}
           >
-            <Text style={[styles.sortTitle, { color: palette.text }]}>Sort by</Text>
+            <Text style={[styles.sortTitle, { color: palette.text }]}>{t('Sort by')}</Text>
             {DOWNLOAD_SORT_OPTIONS.map((option) => {
               const isSelected = option.id === sort
               return (
@@ -295,7 +299,7 @@ export function DownloadsScreen ({
                   }}
                 >
                   <Text style={[styles.sortOptionText, { color: palette.text }]}>
-                    {option.label}
+                    {tKey(option.label)}
                   </Text>
                   {isSelected && (
                     <CheckIcon width={20} height={20} color={palette.accent} />
@@ -353,19 +357,32 @@ function DownloadProgress ({
 function formatDownloadMeta (download: BrowserDownload) {
   const status = download.status === 'paused'
     ? formatPausedStatus(download.reason)
-    : download.status.charAt(0).toUpperCase() + download.status.slice(1)
+    : formatDownloadStatus(download.status)
   const totalBytes = download.totalBytes || download.size
   const downloadedBytes = download.downloadedBytes || 0
   const progress = totalBytes > 0 && ['pending', 'running', 'paused'].includes(download.status)
-    ? `${Math.min(100, Math.floor((downloadedBytes / totalBytes) * 100))}%`
+    ? t('{percent}%', { percent: Math.min(100, Math.floor((downloadedBytes / totalBytes) * 100)) })
     : null
   if (download.size < 1 && totalBytes < 1) return progress ? `${status} · ${progress}` : status
 
-  const units = ['B', 'KB', 'MB', 'GB']
   const displaySize = totalBytes || download.size
-  const unitIndex = Math.min(Math.floor(Math.log(displaySize) / Math.log(1024)), units.length - 1)
-  const size = displaySize / Math.pow(1024, unitIndex)
-  return `${status}${progress ? ` · ${progress}` : ''} · ${size.toFixed(unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`
+  return `${status}${progress ? ` · ${progress}` : ''} · ${formatDownloadSize(displaySize)}`
+}
+
+function formatDownloadStatus (status: BrowserDownload['status']) {
+  if (status === 'pending') return t('Pending')
+  if (status === 'running') return t('Running')
+  if (status === 'complete') return t('Complete')
+  return t('Failed')
+}
+
+function formatDownloadSize (bytes: number) {
+  const unitIndex = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), 3)
+  const size = (bytes / Math.pow(1024, unitIndex)).toFixed(unitIndex === 0 ? 0 : 1)
+  if (unitIndex === 0) return t('{size} B', { size })
+  if (unitIndex === 1) return t('{size} KB', { size })
+  if (unitIndex === 2) return t('{size} MB', { size })
+  return t('{size} GB', { size })
 }
 
 function getDownloadFailureMessage (download: BrowserDownload) {
@@ -374,12 +391,12 @@ function getDownloadFailureMessage (download: BrowserDownload) {
   const nativeReason = getFailureReason(download.reason)
   if (nativeReason) return nativeReason
   return getProxiedHyperUrl(download.sourceUrl)
-    ? 'Peer went offline, please try again.'
-    : 'Download failed. Please try again.'
+    ? t('Peer went offline, please try again.')
+    : t('Download failed. Please try again.')
 }
 
-function getDownloadRetryLabel (download: BrowserDownload) {
-  if (
+function canResumeDownload (download: BrowserDownload) {
+  return (
     download.id.startsWith('r:') &&
     (
       download.status === 'paused' ||
@@ -389,36 +406,35 @@ function getDownloadRetryLabel (download: BrowserDownload) {
         ['network-error', 'incomplete-response'].includes(download.reason || '')
       )
     )
-  ) return 'Resume'
-  return 'Retry'
+  )
 }
 
 function formatPausedStatus (reason?: string) {
-  if (reason === 'user-paused') return 'Paused by you'
-  if (reason === 'interrupted') return 'Paused after app closed'
-  return 'Paused by Android'
+  if (reason === 'user-paused') return t('Paused by you')
+  if (reason === 'interrupted') return t('Paused after app closed')
+  return t('Paused by Android')
 }
 
 function getPausedReason (reason?: string) {
   if (reason === 'user-paused' || reason === 'interrupted') return null
-  if (reason === 'waiting-for-network') return 'Waiting for a network connection. Android will resume automatically.'
-  if (reason === 'queued-for-wifi') return 'Waiting for Wi-Fi. Android will resume automatically.'
-  if (reason === 'waiting-to-retry') return 'A network request failed. Android is waiting to retry.'
-  return 'Android paused this download and should resume it automatically.'
+  if (reason === 'waiting-for-network') return t('Waiting for a network connection. Android will resume automatically.')
+  if (reason === 'queued-for-wifi') return t('Waiting for Wi-Fi. Android will resume automatically.')
+  if (reason === 'waiting-to-retry') return t('A network request failed. Android is waiting to retry.')
+  return t('Android paused this download and should resume it automatically.')
 }
 
 function getFailureReason (reason?: string) {
-  if (reason === 'insufficient-space') return 'There is not enough storage space for this download.'
-  if (reason === 'file-exists') return 'A file already exists at the download destination.'
-  if (reason === 'cannot-resume') return 'Android could not resume this download. Please retry it.'
-  if (reason === 'device-unavailable') return 'The download storage is unavailable.'
-  if (reason === 'too-many-redirects') return 'The download failed after too many redirects.'
-  if (reason === 'unhandled-http') return 'The server returned an unsupported response.'
-  if (reason === 'http-data-error') return 'The connection ended while Android was receiving this file.'
-  if (reason === 'file-error') return 'Android could not write this file.'
-  if (reason === 'network-error') return 'The connection ended. Resume or retry this download.'
-  if (reason === 'http-error') return 'The server returned an error response.'
-  if (reason === 'incomplete-response') return 'The server stopped before the file was complete.'
+  if (reason === 'insufficient-space') return t('There is not enough storage space for this download.')
+  if (reason === 'file-exists') return t('A file already exists at the download destination.')
+  if (reason === 'cannot-resume') return t('Android could not resume this download. Please retry it.')
+  if (reason === 'device-unavailable') return t('The download storage is unavailable.')
+  if (reason === 'too-many-redirects') return t('The download failed after too many redirects.')
+  if (reason === 'unhandled-http') return t('The server returned an unsupported response.')
+  if (reason === 'http-data-error') return t('The connection ended while Android was receiving this file.')
+  if (reason === 'file-error') return t('Android could not write this file.')
+  if (reason === 'network-error') return t('The connection ended. Resume or retry this download.')
+  if (reason === 'http-error') return t('The server returned an error response.')
+  if (reason === 'incomplete-response') return t('The server stopped before the file was complete.')
   return null
 }
 

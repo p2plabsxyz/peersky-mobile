@@ -10,8 +10,8 @@ const shell = await readFile(new URL('../../app/index.tsx', import.meta.url), 'u
 
 test('inactive tabs leave the grid for a folded group, and close together with Undo', () => {
   assert.match(screen, /const gridItems = selecting \? items : items\.filter\(\(item\) => !item\.isInactive\)/)
-  assert.match(screen, /Inactive tabs \(\{items\.length\}\)/)
-  assert.match(screen, /Close all inactive tabs<\/Text>/)
+  assert.match(screen, /t\('Inactive tabs \(\{count\}\)', \{ count: items\.length \}\)/)
+  assert.match(screen, /\{t\('Close all inactive tabs'\)\}<\/Text>/)
   assert.match(screen, /const keys = onCloseTabs\(inactiveItems\.map\(\(item\) => item\.id\)\)/)
 })
 

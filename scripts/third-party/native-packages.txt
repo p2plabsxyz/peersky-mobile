@@ -12,4 +12,4 @@ node_modules/expo-manifests
 node_modules/expo-splash-screen
 node_modules/expo-system-ui
 node_modules/expo-updates-interface
-node_modules/expo/node_modules/expo-keep-awake
+node_modules/expo-keep-awake

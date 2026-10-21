@@ -1,6 +1,7 @@
 import { printAsync } from 'expo-print'
 
 import { canPrintBrowserUrl, withPrintBaseHref } from './browser-print.mjs'
+import { t } from './i18n/i18n.mjs'
 
 export {
   canPrintBrowserUrl,
@@ -9,7 +10,7 @@ export {
 } from './browser-print.mjs'
 
 export async function printBrowserPage (html: string, pageUrl: string): Promise<string | null> {
-  if (!canPrintBrowserUrl(pageUrl)) return 'This page cannot be printed'
+  if (!canPrintBrowserUrl(pageUrl)) return t('This page cannot be printed')
 
   try {
     await printAsync({ html: withPrintBaseHref(html, pageUrl) })

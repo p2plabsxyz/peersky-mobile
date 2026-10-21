@@ -3,7 +3,8 @@ export const FORCE_DARK_STYLE_ID = 'peersky-force-dark'
 /**
  * Dark mode on a site that never built one. Inverting the page and rotating
  * the hue back works on any site without knowing its styles. Pictures, video
- * and anything drawn are inverted again so they come out the right way round.
+ * and anything drawn are inverted again so they come out the right way round,
+ * all but icons drawn in the text's own colour, which go with the text.
  *
  * A page that is already dark is left alone, since inverting it would turn it
  * white. That is judged from what is on screen, not from the page's root: a
@@ -14,9 +15,17 @@ export const FORCE_DARK_STYLE_ID = 'peersky-force-dark'
  *
  * A page that says it is dark is believed first: YouTube marks its dark theme
  * on the root, and a Short is nothing but video, where sampling finds nothing
- * to go on. The page is read with this rule switched off, since the white the
- * rule paints the root with was read back as the page being light, and an
- * inverted page then stayed inverted.
+ * to go on. The page is read with this rule switched off, since the root the
+ * rule paints was read back as the page's own: white then, and an inverted
+ * page stayed inverted.
+ *
+ * The filter only darkens what the page draws. Where the page draws nothing,
+ * in parts not drawn yet while it scrolls fast, iOS shows the page's colour as
+ * the page set it, the root's or the body's over it, and the rule had set the
+ * root white. So the page's colour is drawn as a picture the filter darkens,
+ * the body's is cleared, and the root's is what the filter makes of it. Above
+ * the top, while the page is pulled down, iOS shows that colour or the one the
+ * app gave the WebView, which the app makes dark while this is on (index.tsx).
  */
 export function createForceDarkScript (enabled) {
   if (!enabled) return createForceDarkRemovalScript()
@@ -100,16 +109,61 @@ export function createForceDarkScript (enabled) {
     }
 
     const MEDIA = 'img,picture,video,canvas,svg,iframe,embed,object,[style*="background-image"]'
+    // An icon drawn only in the colour of the text beside it goes with the
+    // text. Turned back, a dark icon stayed dark on the darkened page and was
+    // lost, like the menu, search and tick icons on DuckDuckGo. A drawing with
+    // colours of its own, like DuckDuckGo's logo, is still turned back.
+    const TEXT_COLOURED = '[fill="currentColor" i],[stroke="currentColor" i]'
+    const OWN_COLOURS = '[fill]:not([fill="currentColor" i],[fill="none" i]),[stroke]:not([stroke="currentColor" i],[stroke="none" i])'
+    const ICON = 'svg:is(' + TEXT_COLOURED + ',:has(' + TEXT_COLOURED + ')):not(:has(' + OWN_COLOURS + '))'
+    const WHITE = 'rgb(255, 255, 255)'
+
+    // The page's own colour, the body's or else the root's, when it is solid
+    // and light. A dark one on a page taken for light would come out light.
+    const pageColor = () => {
+      for (const element of [document.body, document.documentElement]) {
+        const color = element ? String(getComputedStyle(element).backgroundColor) : ''
+        if (/^rgb\\(/.test(color)) return luminance(color) >= 128 ? color : WHITE
+      }
+      return WHITE
+    }
+
+    // What the filter makes of a colour: inverted, then turned by the matrix
+    // CSS gives hue-rotate(180deg).
+    const filtered = (color) => {
+      const [red, green, blue] = color.match(/[0-9.]+/g).map((value) => 255 - Number(value))
+      const channel = (r, g, b) => Math.round(Math.min(255, Math.max(0, r * red + g * green + b * blue)))
+      return 'rgb(' + [channel(-0.574, 1.43, 0.144), channel(0.426, 0.43, 0.144), channel(0.426, 1.43, -0.856)].join(', ') + ')'
+    }
+
+    const rules = (color) => [
+      // The page's colour is drawn as one picture, ten million pixels each way
+      // from the page's corner, so no page reaches its edge, where the root's
+      // own colour would show through and come out light. That colour is the
+      // dark one iOS shows where nothing is drawn yet. The body's colour is
+      // read over the root's, so it goes, and the same colour shows through
+      // from the picture.
+      'html{filter:invert(1) hue-rotate(180deg) !important;background:' + filtered(color) + ' linear-gradient(' + color + ',' + color + ') no-repeat -10000000px -10000000px/20000000px 20000000px !important;}',
+      'body{background-color:transparent !important;}',
+      MEDIA + '{filter:invert(1) hue-rotate(180deg) !important;}',
+      // Once is enough: a picture in a picture turned back twice came out
+      // a negative again.
+      ':is(' + MEDIA + ') :is(' + MEDIA + '){filter:none !important;}',
+      ICON + '{filter:none !important;}'
+    ].join('')
 
     const check = () => {
       const existing = document.getElementById(STYLE_ID)
       let dark = false
+      let color = WHITE
       if (window.__peerskyForceDarkOn) {
-        // Read the page as it is without this rule, which paints the root white.
+        // Read the page as it is without this rule, which paints over the
+        // root and the body.
         const sheet = existing && existing.sheet
         if (sheet) sheet.disabled = true
         try {
           dark = isAlreadyDark()
+          if (!dark) color = pageColor()
         } finally {
           if (sheet) sheet.disabled = false
         }
@@ -118,17 +172,16 @@ export function createForceDarkScript (enabled) {
         if (existing) existing.remove()
         return
       }
-      if (existing) return
+      const css = rules(color)
+      if (existing) {
+        // The page changed its colour for another light one.
+        if (existing.textContent !== css) existing.textContent = css
+        return
+      }
 
       const style = document.createElement('style')
       style.id = STYLE_ID
-      style.textContent = [
-        'html{filter:invert(1) hue-rotate(180deg) !important;background:#ffffff !important;}',
-        MEDIA + '{filter:invert(1) hue-rotate(180deg) !important;}',
-        // Once is enough: a picture in a picture turned back twice came out
-        // a negative again.
-        ':is(' + MEDIA + ') :is(' + MEDIA + '){filter:none !important;}'
-      ].join('')
+      style.textContent = css
       ;(document.head || document.documentElement).appendChild(style)
     }
 

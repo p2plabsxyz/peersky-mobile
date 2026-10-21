@@ -66,6 +66,7 @@ the address.
 - `backend/rpc/router.mjs` - RPC command routing
 - `backend/holesail/session.mjs` - Holesail session lifecycle + validation + transition guard
 - `backend/holesail/tunnel.mjs` - the tunnel: hosting, joining, keys and the host's record
+- `backend/holesail/lan.mjs` - the same note on the local network, for when there is no internet
 - `app/index.tsx` - the runtime check page, development builds only
 
 ## RPC / API contract
@@ -85,6 +86,21 @@ the address.
   - `localhost`
 - This avoids exposing Holesail forwarding/bind to LAN interfaces (for example `0.0.0.0`, `192.168.x.x`).
 - IPv6 validation is stricter than broad hex+colon matching to avoid malformed host acceptance.
+
+## With no internet
+
+A note's host is found on the public HyperDHT, which is on the internet, so with the router's cable out a note did not open even with both devices on the same Wi-Fi, and a note could not even be hosted, since the host's record could not be put. Now (`lan.mjs`):
+
+- The host also listens on the LAN DHT that Hyperdrive and PeerChat already use over Wi-Fi (`getLANInstance()` in `backend/hyper/lan-discovery.mjs`), under the note's own key pair, and says over mDNS that it has a topic made from the note's key. Only someone who has the address can work out the topic, and a private note still lets in only the key its address carries.
+- A device joining looks on the local network first (2.5 seconds, under a second when no other PeerSky is around) and uses it if the host answers there within 3 seconds. Otherwise it goes to the internet as before.
+- With no internet, hosting goes on after 3 seconds with the note on the local network alone, and the record is tried again every minute until the internet answers.
+- The host also says which port it keeps the note on, under a key pair worked out from the note's key and letting in the same keys as the note. A joiner listens on that port, as it does with the port in the host's record over the internet, so the note has the same address on every device. An older host does not say, and the port asked for, or the usual one, is used.
+- The topic is the desktop's (`p2pmd-lan.js` there), so a phone and a desktop find each other too. The local server's token works the same over both.
+- A tunnel on the local network says it is alive every 5 seconds and is dropped after 15 with nothing from the other end, and one that has not opened in 8 seconds is dropped too. The local network instance is replaced after a network change or a backup, and the tunnels on the old one were never told: they stayed open with nothing behind them, and the editor's event stream was one of them, so the note stopped syncing when its host or a guest dropped off and came back.
+- Every 5 seconds a host checks it is on the instance in use now and hosts the note there again when it is not, and a guest looks for the host again when its instance changed or the host stopped answering, so later connections go where the host is (`TunnelHost` and `TunnelGuest` in `tunnel.mjs`, given `getLan`). As the desktop does.
+- HyperDHT left a rejected promise nobody caught each time a connection to a host it had reached before failed or was given up before it opened, as when the host left the Wi-Fi, and Bare aborts the app on one of those. `patches/hyperdht+6.32.0.patch` catches it in `connect.js`, and `backend/main.mjs` logs any other such rejection instead of aborting, as the desktop does.
+
+`info` says which: `lan` is true when the note is on, or was joined over, the local network, and a host's `internet` is true once its record is on the internet DHT. Tests: `test/protocol/note-lan.test.mjs`.
 
 ## Concurrency and lifecycle notes
 

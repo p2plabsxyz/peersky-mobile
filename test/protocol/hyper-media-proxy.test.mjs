@@ -71,7 +71,8 @@ describe('hyper media proxy server', () => {
           headers: {
             'content-type': 'video/mp4',
             'content-length': '11',
-            etag: 'asset-etag'
+            etag: 'asset-etag',
+            'cache-control': 'public, max-age=300'
           }
         })
       }
@@ -87,6 +88,9 @@ describe('hyper media proxy server', () => {
       assert.equal(response.headers.get('x-content-type-options'), 'nosniff')
       assert.equal(response.headers.get('content-security-policy'), 'sandbox')
       assert.equal(response.headers.get('etag'), 'asset-etag')
+      // A private drive's file kept in the WebView's cache would sit there
+      // decrypted, so nothing from here is cached, whatever the drive says.
+      assert.equal(response.headers.get('cache-control'), 'no-store')
       assert.equal(await response.text(), 'hello video')
       assert.equal(calls.length, 1)
       assert.equal(calls[0].url, assetUrl)

@@ -508,6 +508,12 @@ export const styles = StyleSheet.create({
     backgroundColor: '#ffffff',
     flex: 1
   },
+  // Black, what Force dark mode makes of a white page. iOS only: Android has
+  // no band above the top, and its WebView shows this colour through a page
+  // that paints no background, so black text would sit on black until it loaded.
+  browserWebViewForceDark: {
+    backgroundColor: '#000000'
+  },
   browserWebViewCapture: {
     flex: 1
   },

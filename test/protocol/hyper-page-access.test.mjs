@@ -146,7 +146,7 @@ test('a page gets no private drive, also one found to be private only as it aske
   const refused = unreadable.indexOf('if (otherPage) return { ok: false, status: 403, error: PAGE_PRIVATE_DRIVE_ERROR }')
   assert.ok(refused > -1, 'a page is not turned away when the drive reads as ciphertext')
   assert.ok(refused < unreadable.indexOf('adoptLinkedPrivateDriveIfReadable'), 'the keys are tried before the page is turned away')
-  assert.ok(refused < unreadable.indexOf('return read()'), 'the drive is read again for the page')
+  assert.ok(refused < unreadable.indexOf('await read()'), 'the drive is read again for the page')
   // Its own pages still read it, and the app itself is no page.
   assert.match(fetchSource, /const otherPage = Boolean\(pageSite\) && normalizeDriveAddressId\(target\.driveAddress\) !== pageSite/)
   assert.match(fetchSource, /if \(otherPage && await isPrivateHyperAddress\(target\.driveAddress\)\)/)
@@ -160,4 +160,15 @@ test('the fetch path applies all of it to page requests', () => {
   assert.match(fetchSource, /namespacePageDriveRequest\(requestUrl, pageSite\)/)
   assert.match(fetchSource, /A page can only write to drives it created/)
   assert.match(fetchSource, /rememberPageDrive\(pageSite, responseText\)/)
+})
+
+// A private photo opened in a tab was kept decrypted on the phone: the WebView
+// cached it and the tab list took a picture of it.
+test('a private drive file opened in a tab leaves no copy behind', async () => {
+  const app = await readFile(new URL('../../app/index.tsx', import.meta.url), 'utf8')
+  assert.match(fetchSource, /if \(result\?\.ok && await isPrivateHyperAddress\(driveAddress\)\) return \{ \.\.\.result, private: true \}/)
+  assert.match(fetchSource, /return markPrivateDrive\(result, target\.driveAddress\)/)
+  assert.match(fetchSource, /return markPrivateDrive\(await read\(\), target\.driveAddress\)/)
+  assert.match(app, /\.\.\.\(response\.private \? \{ private: true \} : \{\}\)/)
+  assert.match(app, /if \(currentEntry\?\.source\.kind === 'hyper' && currentEntry\.source\.private\) return false/)
 })

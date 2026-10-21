@@ -4,7 +4,8 @@ import { createRequire } from 'node:module'
 import { describe, test } from 'node:test'
 import { gunzipSync } from 'node:zlib'
 
-import { HOME_SHORTCUTS, parseHomeShortcut } from '../../app/home-shortcuts.mjs'
+import { HOME_SHORTCUTS, parseHomeShortcut, parsePeerTunesWidgetTap } from '../../app/home-shortcuts.mjs'
+import { SHORTCUT_TEXT } from '../../app/i18n/native-strings.mjs'
 
 const require = createRequire(import.meta.url)
 const plugin = require('../../plugins/with-home-shortcuts')
@@ -81,6 +82,28 @@ describe('quick actions on the app icon', () => {
     }
   })
 
+  // The PeerTunes widget names the song it shows, beside the address, so the
+  // PeerTunes tab keeps its plain address and PeerTunes opens that song.
+  test('read the song a PeerTunes widget tap asks for, and nothing else', () => {
+    const peertunes = `peersky://shortcut/open?url=${encodeURIComponent('peersky://p2p/peertunes/')}`
+    assert.deepEqual(parsePeerTunesWidgetTap(`${peertunes}&song=u15hrfys1q`), { song: 'u15hrfys1q' })
+    // A song the widget had no id for: Now Playing with whatever is loaded.
+    assert.deepEqual(parsePeerTunesWidgetTap(`${peertunes}&song=`), { song: '' })
+    for (const url of [
+      peertunes,
+      `${peertunes}&song=u1%20x`,
+      `${peertunes}&song=${'a'.repeat(65)}`,
+      `${peertunes}&song=%E0%A4%A`,
+      `peersky://shortcut/open?url=${encodeURIComponent('peersky://p2p/peerchat/')}&song=u1`,
+      `peersky://shortcut/open?url=${encodeURIComponent('peersky://p2p/peertunes/#playlist=x')}&song=u1`,
+      'peersky://shortcut/search?song=u1',
+      'peersky://p2p/peertunes/?song=u1',
+      null
+    ]) {
+      assert.equal(parsePeerTunesWidgetTap(url), null, String(url))
+    }
+  })
+
   test('are on the icon, at most the four iOS shows', async () => {
     assert.ok(appJson.expo.plugins.includes('./plugins/with-home-shortcuts'))
     assert.ok(HOME_SHORTCUTS.length <= 4)
@@ -94,7 +117,14 @@ describe('quick actions on the app icon', () => {
     for (const item of modResults.UIApplicationShortcutItems) {
       assert.ok(item.UIApplicationShortcutItemTitle)
       assert.ok(item.UIApplicationShortcutItemIconSymbolName)
+      // A key, whose words each language's InfoPlist.strings gives.
+      assert.ok(SHORTCUT_TEXT[item.UIApplicationShortcutItemTitle], item.UIApplicationShortcutItemTitle)
+      for (const code of Object.keys(appJson.expo.locales)) {
+        const native = JSON.parse(await readFile(new URL(`../../app/i18n/native/${code}.json`, import.meta.url), 'utf8'))
+        assert.ok(native.ios[item.UIApplicationShortcutItemTitle], `${code} ${item.UIApplicationShortcutItemTitle}`)
+      }
     }
+    assert.deepEqual(plugin.SHORTCUTS.map((shortcut) => [shortcut.titleKey, shortcut.title]), Object.entries(SHORTCUT_TEXT))
   })
 
   test('reach the app whether it was running or not, and once', async () => {

@@ -52,9 +52,10 @@ import {
   filterPeerChatRooms,
   formatPeerChatDateLabel,
   formatPeerChatMessageDetails,
-  PEERCHAT_SEARCH_QUERY_MAX_CHARACTERS
+  PEERCHAT_SEARCH_QUERY_MAX_CHARACTERS,
+  splitPeerChatSearchMatch
 } from './message-search.mjs'
-import { normalizePeerChatMentionSpacing, splitPeerChatMessageParts } from './message-text.mjs'
+import { messageFromMentioned, normalizePeerChatMentionSpacing, peerChatMentionNames, splitPeerChatMessageParts } from './message-text.mjs'
 import {
   isPeerChatNotificationBlocked,
   openPeerChatNotificationSettings
@@ -75,10 +76,15 @@ import {
   createPeerChatAvatarDataUrl,
   MAX_PEERCHAT_AVATAR_FILE_BYTES
 } from './avatar.mjs'
-import { forwardableText, forwardTexts } from './forwarding.mjs'
+import { describeForwarding, forwardGapMs, forwardItems, isForwardable } from './forwarding.mjs'
+import { groupPeerChatMessages } from './message-groups.mjs'
+import { fitPeerChatMedia } from './media-fit.mjs'
+import { canSavePeerChatMedia, peerChatMediaType } from './media-save.mjs'
+import { savePeerChatMedia } from './media-save'
 import { PressPop } from './PressPop'
 import {
   RPC_HYPER_FETCH,
+  RPC_PEERCHAT_ATTACHMENT_FORWARD,
   RPC_PEERCHAT_ATTACHMENT_OPEN,
   RPC_PEERCHAT_ATTACHMENT_UPLOAD,
   RPC_PEERCHAT_DM_ACCEPT,
@@ -95,8 +101,10 @@ import {
   RPC_PEERCHAT_ROOM_MUTE,
   RPC_PEERCHAT_ROOM_PIN,
   RPC_PEERCHAT_ROOM_REMOVE_MEMBER,
+  RPC_PEERCHAT_ROOM_UPDATE,
   RPC_PEERCHAT_ROOMS,
   RPC_PEERCHAT_REACT,
+  RPC_PEERCHAT_SEARCH,
   RPC_PEERCHAT_SET_ACTIVE,
   RPC_PEERCHAT_SEND,
   RPC_PEERCHAT_SNAPSHOT,
@@ -104,6 +112,8 @@ import {
 } from '../../backend/rpc/commands.mjs'
 import BackIcon from '../../assets/icons/bootstrap/arrow-left.svg'
 import CopyIcon from '../../assets/icons/bootstrap/copy.svg'
+import DownloadIcon from '../../assets/icons/bootstrap/download.svg'
+import PlayIcon from '../../assets/icons/bootstrap/play-fill.svg'
 import ChevronRightIcon from '../../assets/icons/bootstrap/chevron-right.svg'
 import ShareIcon from '../../assets/icons/bootstrap/share.svg'
 import CloseIcon from '../../assets/icons/bootstrap/x-lg.svg'
@@ -123,18 +133,21 @@ import {
   isPeerChatDirectRoomFor,
   parsePeerChatDirectInvite,
   parsePeerChatInvite,
+  parsePeerChatRoomInvite,
+  peerChatJoinRequest,
   splitPeerChatDirectPeer
 } from './peerchat-invite.mjs'
 import { PRE_JOINED_PEERCHAT_ROOM_KEY } from '../../backend/peerchat/rooms.mjs'
 import { mentionQueryStart, personName } from '../../backend/peerchat/mentions.mjs'
 import { QrCodeView } from '../settings/QrCodeView'
-import { pickUploads } from '../media/upload-gate'
+import { pickUploads, screenUploadBytes } from '../media/upload-gate'
 import type { UploadSource } from '../media/upload-gate'
 import { scanMedia } from '../media/NsfwScanner'
 import { MEDIA_BLOCKED } from '../media/media-moderation.mjs'
 import { AppLoading } from '../AppLoading'
 import { MODAL_ORIENTATIONS } from '../modal-orientations'
 import { tapFeedback } from '../haptics'
+import { t, tKey, tp } from '../i18n/i18n.mjs'
 
 type PeerChatMessage = {
   id: string
@@ -154,6 +167,9 @@ type PeerChatMessage = {
   system?: boolean
   // Sent on from another chat, and shown so.
   forwarded?: boolean
+  // From a room this one moved from, whose key opens its files. See
+  // backend/peerchat/room-move.mjs.
+  roomKey?: string
 }
 
 type PeerChatModeration = {
@@ -227,6 +243,11 @@ type PeerChatRoom = {
   createdAt: number
   createdBy: string
   createdByName: string
+  // Who made the room, for its invite: the key, and the secret behind the
+  // room key when this phone has it. Neither for a direct message or P2P
+  // Republic. See peerchat-invite.mjs.
+  creatorKey?: string
+  creatorProof?: string
   isCreator: boolean
   removedByCreator: boolean
   moderation: PeerChatModeration
@@ -258,6 +279,54 @@ type PeerChatMediaTarget = {
   kind: 'image' | 'video'
   label: string
   uri: string
+  // A picture or video from a message, which can be saved. A profile or room
+  // picture has none.
+  fileName?: string
+}
+
+// A message the chat list's search found, in any chat. See searchMessages in
+// backend/peerchat/service.mjs.
+type PeerChatSearchResult = {
+  roomKey: string
+  roomName: string
+  isDM: boolean
+  id: string
+  sender: string
+  senderName: string
+  self: boolean
+  message: string
+  fileName?: string
+  timestamp: number
+}
+
+// A file or picture to forward, and how it was sealed. See forwarding.mjs.
+type PeerChatForwardFile = {
+  url: string
+  fileName: string
+  fileSize: number
+  fileKey: string
+  roomKey: string
+}
+
+type PeerChatForwardItem = { text: string, file?: undefined } | { file: PeerChatForwardFile, text?: undefined }
+
+// A row of the chat list: a chat, or while searching, a heading or a message
+// found in one.
+type PeerChatListItem =
+  | { kind: 'room', key: string, room: PeerChatRoom }
+  | { kind: 'heading', key: string, title: string }
+  | { kind: 'message', key: string, result: PeerChatSearchResult }
+
+// The room's details as the person who made it is changing them.
+type PeerChatRoomDraft = {
+  roomKey: string
+  name: string
+  bio: string
+  link: string
+  avatar: string | null
+  abuseFilter: boolean
+  nsfwFilter: boolean
+  spamRateLimit: number
 }
 
 type PeerChatProfile = {
@@ -284,6 +353,7 @@ type PeerChatDirectInvite = {
 }
 
 export type PeerChatResponse = {
+  movedRooms?: Record<string, string>
   ok: boolean
   error?: string
   profile?: PeerChatProfile
@@ -299,6 +369,9 @@ export type PeerChatResponse = {
   mediaType?: 'image' | 'video' | 'audio'
   mediaUrl?: string
   localUri?: string
+  // Whether a chat has more before the first message sent.
+  hasOlder?: boolean
+  results?: PeerChatSearchResult[]
 }
 
 type PeerChatScreenProps = {
@@ -320,6 +393,7 @@ type PeerChatScreenProps = {
   onSoundsEnabledChange: (enabled: boolean) => boolean
   onStatus: (message: string) => void
   soundsEnabled: boolean
+  // A room key, or a whole invite link that may also say who made the room.
   requestedRoomKey: string | null
   // The person a link names: their whole key, or the short id of an older link.
   requestedPeerId?: string | null
@@ -332,6 +406,19 @@ type PeerChatScreenProps = {
 
 const POLL_INTERVAL_MS = 1500
 const ROOM_LIST_POLL_INTERVAL_MS = 3000
+// How many messages a chat reads when it opens, and how far it reads back to
+// reach an older one a reply quotes or a search found: as far as a room keeps.
+const DEFAULT_HISTORY_MESSAGES = 200
+const MAX_HISTORY_MESSAGES = 5000
+// How long a message reached that way stays marked.
+const HIGHLIGHT_MS = 2000
+// A line in the chat about what just happened.
+const CHAT_NOTE_MS = 5000
+// The chat list's search over messages waits for typing to pause.
+const MESSAGE_SEARCH_DELAY_MS = 250
+// Join takes a room key or a whole invite link, which says who made the room
+// too and runs to about 240 characters.
+const MAX_JOIN_INPUT_LENGTH = 512
 const MAX_PEERCHAT_AVATAR_SOURCE_BYTES = 25 * 1024 * 1024
 type PeerChatBlockedPeer = {
   peerId: string
@@ -389,6 +476,22 @@ const AUTO_INLINE_MEDIA_MAX_BYTES = 100 * 1024 * 1024
  * is unique per file and is what the screen ran against.
  */
 const revealedAttachments = new Set<string>()
+/**
+ * Each picture's and video's own size once it has loaded, by address, so a row
+ * drawn again as the list scrolls has its shape at once instead of growing
+ * into it. Outside the component for the same reason as above.
+ */
+const inlineMediaSizes = new Map<string, { width: number, height: number }>()
+const MAX_REMEMBERED_MEDIA_SIZES = 500
+
+function rememberMediaSize (address: string, size: { width: number, height: number }) {
+  inlineMediaSizes.delete(address)
+  inlineMediaSizes.set(address, size)
+  if (inlineMediaSizes.size > MAX_REMEMBERED_MEDIA_SIZES) {
+    const oldest = inlineMediaSizes.keys().next().value
+    if (oldest !== undefined) inlineMediaSizes.delete(oldest)
+  }
+}
 
 export function PeerChatScreen ({
   isDark,
@@ -415,6 +518,9 @@ export function PeerChatScreen ({
   const callRpcRef = useRef(onCallRpc)
   const messageListRef = useRef<FlatList<PeerChatMessage> | null>(null)
   const versionRef = useRef(-1)
+  // Where each room that moved to a new key went, so a tab still on the old
+  // key carries on in the new one. See backend/peerchat/room-move.mjs.
+  const movedRoomsRef = useRef<Record<string, string>>({})
   const activeRoomRef = useRef<PeerChatRoom | null>(null)
   const pollInFlightRef = useRef(false)
   const refreshAgainRef = useRef<boolean | 'poll'>(false)
@@ -503,6 +609,44 @@ export function PeerChatScreen ({
   const [landingAction, setLandingAction] = useState<LandingAction>(null)
   const [restoredUiState, setRestoredUiState] = useState<PeerChatUiState | null>(null)
   const [recentEmojis, setRecentEmojis] = useState<string[]>([])
+  // The person who made the room, changing it. See openEditRoom.
+  const [roomDraft, setRoomDraft] = useState<PeerChatRoomDraft | null>(null)
+  // A line in the chat about what is going on, such as messages being
+  // forwarded a moment apart. Errors have their own line.
+  const [chatNote, setChatNote] = useState<string | null>(null)
+  const chatNoteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // The message request being accepted, until its chat opens.
+  const [acceptingRoomKey, setAcceptingRoomKey] = useState<string | null>(null)
+  // The request being accepted, kept on screen with its spinner until the chat
+  // opens: the backend takes it off the waiting list as soon as it starts.
+  const acceptingInviteRef = useRef<PeerChatDirectInvite | null>(null)
+  const acceptingInvite = acceptingRoomKey ? acceptingInviteRef.current : null
+  const shownRequests = acceptingInvite && !pendingDirectMessages.some((invite) => invite.roomKey === acceptingInvite.roomKey)
+    ? [acceptingInvite, ...pendingDirectMessages]
+    : pendingDirectMessages
+  // A message to show once it is loaded: one a reply quotes, or one the chat
+  // list's search found. Older messages are read in until it is there.
+  const jumpTargetRef = useRef<{ roomKey: string, messageId: string } | null>(null)
+  const historyLimitRef = useRef(DEFAULT_HISTORY_MESSAGES)
+  const hasOlderRef = useRef(false)
+  const historyLoadedRef = useRef(false)
+  const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null)
+  const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const scrollRetryRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const scrollAttemptsRef = useRef(0)
+  // The message being scrolled to, found again in the list as it is when the
+  // scroll happens, which may not be the list it was asked for in.
+  const scrollTargetRef = useRef<string | null>(null)
+  const displayedMessagesRef = useRef<PeerChatMessage[]>([])
+  // Bumped to look for the message to show again, even when nothing loaded.
+  const [jumpRequest, setJumpRequest] = useState(0)
+  // The chat list's search over what was said in every chat.
+  const [messageResults, setMessageResults] = useState<PeerChatSearchResult[]>([])
+  const [isSearchingMessages, setIsSearchingMessages] = useState(false)
+  const mentionNames = useMemo(
+    () => peerChatMentionNames(profile?.username, activeRoom?.members, messages),
+    [profile?.username, activeRoom?.members, messages]
+  )
   const mentionCandidates = getMentionCandidates(
     composer,
     activeRoom?.members || [],
@@ -514,7 +658,26 @@ export function PeerChatScreen ({
     [isSearching, messages, searchQuery]
   )
   const displayedMessages = useMemo(() => [...visibleMessages].reverse(), [visibleMessages])
+  displayedMessagesRef.current = displayedMessages
+  // Back-to-back messages from one person, under one name. See
+  // message-groups.mjs.
+  const messagePlaces = useMemo(() => {
+    const places = groupPeerChatMessages(visibleMessages, (message: PeerChatMessage) => formatMessageTime(message.timestamp))
+    return new Map(visibleMessages.map((message, index) => [message.id, places[index]]))
+  }, [visibleMessages])
   const visibleRooms = filterPeerChatRooms(rooms, roomSearchQuery) as PeerChatRoom[]
+  // Searching, the chats whose name matches come first, then the messages
+  // found in any chat, the newest first, as other chat apps list them.
+  const isSearchingList = roomSearchQuery.trim() !== ''
+  const showMessageResults = isSearchingList && (messageResults.length > 0 || isSearchingMessages)
+  const landingItems: PeerChatListItem[] = [
+    ...(showMessageResults && visibleRooms.length > 0 ? [{ kind: 'heading' as const, key: 'heading:chats', title: t('Chats') }] : []),
+    ...visibleRooms.map((room) => ({ kind: 'room' as const, key: room.roomKey, room })),
+    ...(showMessageResults
+      ? [{ kind: 'heading' as const, key: 'heading:messages', title: messageResults.length > 0 ? t('Messages') : t('Searching messages...') }]
+      : []),
+    ...(isSearchingList ? messageResults : []).map((result) => ({ kind: 'message' as const, key: `message:${result.roomKey}:${result.id}`, result }))
+  ]
   // The welcome room is the only place everyone is, so its member list is the
   // nearest thing PeerChat has to a directory. Nothing is uploaded anywhere for
   // this: it is the same list the room already keeps.
@@ -614,6 +777,10 @@ export function PeerChatScreen ({
       if (pendingModalTimerRef.current) clearTimeout(pendingModalTimerRef.current)
       pendingModalTimerRef.current = null
       pendingModalRef.current = null
+      for (const timer of [chatNoteTimerRef, highlightTimerRef, scrollRetryRef]) {
+        if (timer.current) clearTimeout(timer.current)
+        timer.current = null
+      }
     }
   }, [])
 
@@ -727,7 +894,9 @@ export function PeerChatScreen ({
     if (!uiStateRestoredRef.current || shownTabIdRef.current === tabId) return
     shownTabIdRef.current = tabId
     const roomKey = peerChatRoomForTab(uiStateRef.current, tabId)
-    const room = roomKey ? rooms.find((item) => item.roomKey === roomKey) || null : null
+    // A room that moved to a new key is where it went now.
+    const shown = roomKey ? movedRoomsRef.current[roomKey] || roomKey : null
+    const room = shown ? rooms.find((item) => item.roomKey === shown) || null : null
     if (room) {
       if (activeRoomRef.current?.roomKey !== room.roomKey) openRoom(room)
     } else {
@@ -746,11 +915,11 @@ export function PeerChatScreen ({
     }
     // A link can come from anywhere, and a request shows them who you are.
     Alert.alert(
-      'Send a message request?',
-      'They will see your name, bio and photo, and can accept it, decline it or block you.',
+      t('Send a message request?'),
+      t('They will see your name, bio and photo, and can accept it, decline it or block you.'),
       [
-        { text: 'Not now', style: 'cancel' },
-        { text: 'Send request', onPress: () => { void requestDirectMessage(requestedPeerId) } }
+        { text: t('Not now'), style: 'cancel' },
+        { text: t('Send request'), onPress: () => { void requestDirectMessage(requestedPeerId) } }
       ]
     )
   }, [isInitialized, onRequestedPeerHandled, profile?.username, requestedPeerId, rooms])
@@ -761,10 +930,18 @@ export function PeerChatScreen ({
     // away. It used to clear the request and then fail the join, which left the
     // link doing nothing once they were finally through.
     if (!requestedRoomKey || !isInitialized || !profile?.username) return
-    const room = rooms.find((item) => item.roomKey === requestedRoomKey)
+    // A room key from a notification, or a whole invite from a link, which may
+    // say who made the room. A room that moved is where it went now.
+    const invite = parsePeerChatRoomInvite(requestedRoomKey)
+    const shownKey = invite ? movedRoomsRef.current[invite.roomKey] || invite.roomKey : ''
+    const room = rooms.find((item) => item.roomKey === shownKey)
     if (room) {
       openRoom(room)
       onRequestedRoomHandled()
+      // In it already, and who made it still counts: PeerChat takes the
+      // creator when it has none, and a proof over one it took on somebody's
+      // word.
+      if (invite?.creatorKey) void callRpcRef.current(RPC_PEERCHAT_ROOM_JOIN, peerChatJoinRequest(requestedRoomKey)).catch(() => {})
       return
     }
 
@@ -772,11 +949,11 @@ export function PeerChatScreen ({
     // name, bio and photo, and a link can come from anywhere, so it asks.
     onRequestedRoomHandled()
     Alert.alert(
-      'Join this chat?',
-      'Everyone in it will see your name, bio and photo, and can message you.',
+      t('Join this chat?'),
+      t('Everyone in it will see your name, bio and photo, and can message you.'),
       [
-        { text: 'Not now', style: 'cancel' },
-        { text: 'Join', onPress: () => { void joinRoomByKey(requestedRoomKey) } }
+        { text: t('Not now'), style: 'cancel' },
+        { text: t('Join'), onPress: () => { void joinRoomByKey(requestedRoomKey) } }
       ]
     )
   }, [isInitialized, onRequestedRoomHandled, profile?.username, requestedRoomKey, rooms])
@@ -787,7 +964,7 @@ export function PeerChatScreen ({
     void callRpc(RPC_PEERCHAT_INIT, {})
       .then((response) => {
         if (cancelled) return
-        if (!response.ok) throw new Error(response.error || 'Unable to start PeerChat.')
+        if (!response.ok) throw new Error(response.error || t('Unable to start PeerChat.'))
         const nextProfile = response.profile || null
         setProfile(nextProfile)
         setProfileName(nextProfile?.username || '')
@@ -795,6 +972,7 @@ export function PeerChatScreen ({
         setProfileAvatar(nextProfile?.avatar || null)
         setLinkPreviewsEnabled(nextProfile?.linkPreview !== false)
         setRooms(response.rooms || [])
+        movedRoomsRef.current = response.movedRooms || {}
         setPendingDirectMessages(response.pendingDirectMessages || [])
         setBlockedPeers(response.blockedPeers || [])
         versionRef.current = Number.isSafeInteger(response.version) ? response.version as number : -1
@@ -816,11 +994,16 @@ export function PeerChatScreen ({
     if (!isInitialized || !restoredUiState || uiStateRestoredRef.current) return
 
     const roomKeys = new Set(rooms.map((room) => room.roomKey))
+    // A room that moved keeps its draft and its tabs, under its new key.
+    const shownKey = (roomKey: string) => movedRoomsRef.current[roomKey] || roomKey
     const drafts = Object.fromEntries(
-      Object.entries(restoredUiState.drafts || {}).filter(([roomKey]) => roomKeys.has(roomKey))
+      Object.entries(restoredUiState.drafts || {})
+        .map(([roomKey, draft]) => [shownKey(roomKey), draft])
+        .filter(([roomKey]) => roomKeys.has(roomKey))
     )
     // The chat this tab was on. An invite being opened comes first.
-    const restoredRoomKey = requestedRoomKey ? null : peerChatRoomForTab(restoredUiState, tabId)
+    const savedRoomKey = requestedRoomKey ? null : peerChatRoomForTab(restoredUiState, tabId)
+    const restoredRoomKey = savedRoomKey ? shownKey(savedRoomKey) : null
     const restoredRoom = restoredRoomKey
       ? rooms.find((room) => room.roomKey === restoredRoomKey) || null
       : null
@@ -858,15 +1041,22 @@ export function PeerChatScreen ({
     }
     pollInFlightRef.current = true
     const sentBefore = sentCountRef.current
+    // Further back than a chat opens with only while reaching for an older
+    // message, and from then on while the chat is open.
+    const limit = historyLimitRef.current
 
     try {
       const response = await callRpc(RPC_PEERCHAT_SNAPSHOT, {
         roomKey: room.roomKey,
-        version: force ? -1 : versionRef.current
+        version: force ? -1 : versionRef.current,
+        ...(limit > DEFAULT_HISTORY_MESSAGES && { limit })
       })
-      if (!response.ok) throw new Error(response.error || 'Unable to refresh PeerChat room.')
+      if (!response.ok) throw new Error(response.error || t('Unable to refresh PeerChat room.'))
       if (!mountedRef.current || activeRoomRef.current?.roomKey !== room.roomKey) return
 
+      // A room that moved answers as the room it went to, so this is where the
+      // tab goes on.
+      if (response.movedRooms) movedRoomsRef.current = response.movedRooms
       if (response.room) setActiveRoom(response.room)
       if (response.rooms) setRooms(response.rooms)
       // A snapshot read before our own message went out would take that
@@ -895,6 +1085,9 @@ export function PeerChatScreen ({
         }
         observedMessageIdsRef.current = new Set(response.messages.map((message) => message.id))
         observedReactionsRef.current = new Map(response.messages.map((message) => [message.id, countOthersReactions(message)]))
+        hasOlderRef.current = response.hasOlder === true
+        // Read as far back as asked, and not by a refresh that started before.
+        historyLoadedRef.current = limit === historyLimitRef.current
         setMessages(response.messages)
       }
       if (Number.isSafeInteger(response.version)) versionRef.current = response.version as number
@@ -944,6 +1137,28 @@ export function PeerChatScreen ({
     void refreshRoom(true)
   }, [revision, refreshRoom])
 
+  // A message to show: scrolled to and marked once it is loaded, with twice as
+  // many older messages read in each time it is not, as far back as a room
+  // keeps. See jumpToMessage.
+  useEffect(() => {
+    const target = jumpTargetRef.current
+    if (!target || target.roomKey !== activeRoom?.roomKey || !historyLoadedRef.current) return
+    const index = displayedMessages.findIndex((message) => message.id === target.messageId)
+    if (index >= 0) {
+      jumpTargetRef.current = null
+      showMessageAt(index, target.messageId)
+      return
+    }
+    if (hasOlderRef.current && historyLimitRef.current < MAX_HISTORY_MESSAGES) {
+      historyLimitRef.current = Math.min(MAX_HISTORY_MESSAGES, historyLimitRef.current * 2)
+      historyLoadedRef.current = false
+      void refreshRoom(true)
+      return
+    }
+    jumpTargetRef.current = null
+    showChatNote(t('That message is not on this phone.'))
+  }, [activeRoom?.roomKey, displayedMessages, jumpRequest, refreshRoom])
+
   useEffect(() => {
     if (!isReady || activeRoom) return
     let cancelled = false
@@ -954,7 +1169,7 @@ export function PeerChatScreen ({
       roomListPollInFlightRef.current = true
       try {
         const response = await callRpc(RPC_PEERCHAT_ROOMS, {})
-        if (!response.ok) throw new Error(response.error || 'Unable to refresh PeerChat rooms.')
+        if (!response.ok) throw new Error(response.error || t('Unable to refresh PeerChat rooms.'))
         if (cancelled || !mountedRef.current) return
         if (response.profile) setProfile((current) => mergePeerChatProfile(current, response.profile))
         setRooms(response.rooms || [])
@@ -988,6 +1203,45 @@ export function PeerChatScreen ({
     }
   }, [activeRoom, callRpc, isReady])
 
+  // The chat list's search reads what was said in every chat too, from what
+  // this phone keeps, once typing pauses. Nothing is sent to anyone.
+  const isRoomOpen = Boolean(activeRoom)
+  useEffect(() => {
+    const query = roomSearchQuery.trim()
+    if (isRoomOpen || !query) {
+      setMessageResults([])
+      setIsSearchingMessages(false)
+      return
+    }
+    let cancelled = false
+    setIsSearchingMessages(true)
+    const timer = setTimeout(() => {
+      void callRpc(RPC_PEERCHAT_SEARCH, { query })
+        .then((response) => {
+          if (!cancelled && mountedRef.current) setMessageResults(response.ok ? response.results || [] : [])
+        })
+        .catch(() => {
+          if (!cancelled && mountedRef.current) setMessageResults([])
+        })
+        .finally(() => {
+          if (!cancelled && mountedRef.current) setIsSearchingMessages(false)
+        })
+    }, MESSAGE_SEARCH_DELAY_MS)
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [callRpc, isRoomOpen, roomSearchQuery])
+
+  // Opens the chat a found message is in, at that message.
+  function openSearchResult (result: PeerChatSearchResult) {
+    const room = rooms.find((candidate) => candidate.roomKey === result.roomKey)
+    if (!room) return
+    openRoom(room)
+    jumpTargetRef.current = { roomKey: room.roomKey, messageId: result.id }
+    setJumpRequest((current) => current + 1)
+  }
+
   async function saveProfile () {
     const response = await callRpc(RPC_PEERCHAT_PROFILE_SET, {
       username: profileName,
@@ -996,7 +1250,7 @@ export function PeerChatScreen ({
       linkPreview: linkPreviewsEnabled
     })
     if (!response.ok || !response.profile) {
-      throw new Error(response.error || 'Unable to save PeerChat name.')
+      throw new Error(response.error || t('Unable to save PeerChat name.'))
     }
     if (!mountedRef.current) return
     setProfile(response.profile)
@@ -1054,21 +1308,21 @@ export function PeerChatScreen ({
     void runAction(async () => {
       const enabled = !notificationsEnabled
       if (await onNotificationsEnabledChange(enabled)) {
-        onStatus(enabled ? 'PeerChat notifications enabled' : 'PeerChat notifications disabled')
+        onStatus(enabled ? t('PeerChat notifications enabled') : t('PeerChat notifications disabled'))
         if (enabled) await offerBatteryExemption()
         return
       }
-      if (!enabled) throw new Error('Unable to save notification preference.')
+      if (!enabled) throw new Error(t('Unable to save notification preference.'))
       if (!await isPeerChatNotificationBlocked()) {
-        onStatus('PeerChat notifications stay off')
+        onStatus(t('PeerChat notifications stay off'))
         return
       }
       Alert.alert(
-        'Notifications are turned off',
-        `${Platform.OS === 'ios' ? 'iOS' : 'Android'} is blocking alerts for PeerSky, so PeerChat cannot tell you about new messages. You can turn them back on in Settings.`,
+        t('Notifications are turned off'),
+        t('{system} is blocking alerts for PeerSky, so PeerChat cannot tell you about new messages. You can turn them back on in Settings.', { system: Platform.OS === 'ios' ? 'iOS' : 'Android' }),
         [
-          { text: 'Not now', style: 'cancel' },
-          { text: 'Open settings', onPress: () => void openPeerChatNotificationSettings() }
+          { text: t('Not now'), style: 'cancel' },
+          { text: t('Open settings'), onPress: () => void openPeerChatNotificationSettings() }
         ]
       )
     })
@@ -1084,17 +1338,17 @@ export function PeerChatScreen ({
     // different place, so that sentence only earns its space on a Samsung.
     const isSamsung = /samsung/i.test(Platform.constants?.Manufacturer || '')
     const samsungHint = isSamsung
-      ? '\n\nOn this phone also open Battery, Background usage limits, and take PeerSky out of Sleeping apps.'
+      ? `\n\n${t('On this phone also open Battery, Background usage limits, and take PeerSky out of Sleeping apps.')}`
       : ''
 
     Alert.alert(
-      'Keep PeerChat reachable',
-      `Android puts apps it thinks are unused to sleep, which takes you offline for everyone. Setting PeerSky to unrestricted keeps messages arriving.${samsungHint}`,
+      t('Keep PeerChat reachable'),
+      `${t('Android puts apps it thinks are unused to sleep, which takes you offline for everyone. Setting PeerSky to unrestricted keeps messages arriving.')}${samsungHint}`,
       [
-        { text: 'Not now', style: 'cancel' },
+        { text: t('Not now'), style: 'cancel' },
         {
-          text: 'Open settings',
-          onPress: () => void openPeerChatBatterySettings().catch(() => onStatus('Unable to open battery settings'))
+          text: t('Open settings'),
+          onPress: () => void openPeerChatBatterySettings().catch(() => onStatus(t('Unable to open battery settings')))
         }
       ]
     )
@@ -1103,21 +1357,21 @@ export function PeerChatScreen ({
   function changeNotificationSounds () {
     const enabled = !soundsEnabled
     if (!onSoundsEnabledChange(enabled)) {
-      setError('Unable to save notification sound preference.')
+      setError(t('Unable to save notification sound preference.'))
       return
     }
-    onStatus(enabled ? 'PeerChat notification sound enabled' : 'PeerChat notification sound disabled')
+    onStatus(enabled ? t('PeerChat notification sound enabled') : t('PeerChat notification sound disabled'))
   }
 
   function chooseAvatar (current: string | null, onChange: (avatar: string | null) => void) {
     if (isBusy) return
-    const select = () => void runAction(async () => {
+    const select = (source: UploadSource) => void runAction(async () => {
       // A profile picture is broadcast to everyone in your rooms, so it goes
       // through the same gate as an attachment.
-      const [asset] = await pickUploads({ type: 'image/*' })
+      const [asset] = await pickUploads({ source, type: 'image/*' })
       if (!asset) return
       if (asset.size > MAX_PEERCHAT_AVATAR_SOURCE_BYTES) {
-        throw new Error('Choose an image smaller than 25 MB.')
+        throw new Error(t('Choose an image smaller than 25 MB.'))
       }
 
       const manipulation = ImageManipulator.manipulate(asset.uri)
@@ -1149,18 +1403,29 @@ export function PeerChatScreen ({
         resizedImage?.release()
         manipulation.release()
       }
-      if (!avatar) throw new Error('Unable to reduce the selected image below 143 KB.')
+      if (!avatar) throw new Error(t('Unable to reduce the selected image below 143 KB.'))
       if (mountedRef.current) onChange(avatar)
     })
 
+    // From the photo library, the camera or a file, as an attachment can be.
+    // Only files were offered, so a picture had to be saved to Files first.
+    // Android shows at most three buttons and drops the rest, so there Back is
+    // the way out instead of Cancel.
+    const chooseSource = () => Alert.alert(t('Chat image'), undefined, [
+      ...(Platform.OS === 'android' ? [] : [{ text: t('Cancel'), style: 'cancel' as const }]),
+      { text: t('Photo library'), onPress: () => select('library') },
+      { text: t('Take a photo'), onPress: () => select('camera') },
+      { text: t('Choose file'), onPress: () => select('files') }
+    ], { cancelable: true })
+
     if (!current) {
-      select()
+      chooseSource()
       return
     }
-    Alert.alert('Chat image', 'Choose a new image or remove the current one.', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Remove', style: 'destructive', onPress: () => onChange(null) },
-      { text: 'Choose image', onPress: select }
+    Alert.alert(t('Chat image'), t('Choose a new image or remove the current one.'), [
+      { text: t('Cancel'), style: 'cancel' },
+      { text: t('Remove'), style: 'destructive', onPress: () => onChange(null) },
+      { text: t('Choose image'), onPress: chooseSource }
     ])
   }
 
@@ -1174,6 +1439,13 @@ export function PeerChatScreen ({
     versionRef.current = -1
     observedMessageIdsRef.current = null
     roomOpenedAtRef.current = Date.now()
+    // With its newest messages. A message to show in it is set after this,
+    // by whatever opened it.
+    jumpTargetRef.current = null
+    historyLimitRef.current = DEFAULT_HISTORY_MESSAGES
+    hasOlderRef.current = false
+    historyLoadedRef.current = false
+    setHighlightedMessageId(null)
     setMessages([])
     setReplyTarget(null)
     setIsSearching(false)
@@ -1188,7 +1460,7 @@ export function PeerChatScreen ({
       ? { ...item, unreadCount: 0, unreadMentions: 0 }
       : item))
     setError(null)
-    onStatus(`Opened PeerChat room ${room.name}`)
+    onStatus(t('Opened PeerChat room {name}', { name: room.name }))
   }
 
   function insertComposerEmoji (emoji: string) {
@@ -1217,7 +1489,7 @@ export function PeerChatScreen ({
     const { id: peerId, key: peerKey } = splitPeerChatDirectPeer(peer)
     if (!peerId) return
     if (peerId === profile?.id) {
-      onStatus('That is your own code')
+      onStatus(t('That is your own code'))
       return
     }
     const known = (rooms.find((room) => room.roomKey === PRE_JOINED_PEERCHAT_ROOM_KEY)?.members || [])
@@ -1231,12 +1503,12 @@ export function PeerChatScreen ({
         avatar: known?.avatar || null
       })
       if (!response.ok || !response.room || !response.rooms) {
-        throw new Error(response.error || 'Unable to send that message request.')
+        throw new Error(response.error || t('Unable to send that message request.'))
       }
       if (!mountedRef.current) return
       setRooms(response.rooms)
       openRoom(response.room)
-      onStatus(`Message request sent to ${known?.username || peerId}`)
+      onStatus(t('Message request sent to {name}', { name: known?.username || peerId }))
     })
   }
 
@@ -1259,13 +1531,13 @@ export function PeerChatScreen ({
         avatar: member.avatar
       })
       if (!response.ok || !response.room || !response.rooms) {
-        throw new Error(response.error || 'Unable to start direct message.')
+        throw new Error(response.error || t('Unable to start direct message.'))
       }
       if (!mountedRef.current) return
       setRooms(response.rooms)
       openRoom(response.room)
       // Another device of someone you already talk to opens that chat instead.
-      if (response.room.pendingAcceptance) onStatus(`Message request sent to ${member.username}`)
+      if (response.room.pendingAcceptance) onStatus(t('Message request sent to {name}', { name: member.username }))
     })
   }
 
@@ -1323,7 +1595,11 @@ export function PeerChatScreen ({
     }
     if (profile && profile.username.toLowerCase() === name) {
       setProfileTarget({ id: profile.id, username: profile.username, bio: profile.bio || '', avatar: profile.avatar || null, self: true, online: true })
+      return
     }
+    // Someone past the member list's first 100 who wrote here.
+    const written = messageFromMentioned(messages, mention)
+    if (written) openMessageSenderProfile(written)
   }
 
   function viewProfileAvatar (member: PeerChatMember) {
@@ -1331,7 +1607,7 @@ export function PeerChatScreen ({
     const avatar = member.avatar
     replaceModal(
       () => setProfileTarget(null),
-      () => setMediaTarget({ kind: 'image', label: `${member.username}'s avatar`, uri: avatar })
+      () => setMediaTarget({ kind: 'image', label: t("{name}'s avatar", { name: member.username }), uri: avatar })
     )
   }
 
@@ -1343,6 +1619,59 @@ export function PeerChatScreen ({
       () => setShowRoomInfo(false),
       () => setMediaTarget({ kind: 'image', label: name, uri: picture })
     )
+  }
+
+  /**
+   * Changing a room, which only the person who made it can do: its picture,
+   * name, description, link and moderation. The change is signed and goes to
+   * everyone in the room, who all see it. See backend/peerchat/room-details.mjs.
+   */
+  function openEditRoom () {
+    const room = activeRoomRef.current
+    if (!room || !canEditRoom(room)) return
+    const draft: PeerChatRoomDraft = {
+      roomKey: room.roomKey,
+      name: room.name || '',
+      bio: room.bio || '',
+      link: room.link || '',
+      avatar: room.avatar || null,
+      abuseFilter: room.moderation?.abuseFilter !== false,
+      nsfwFilter: room.moderation?.nsfwFilter !== false,
+      spamRateLimit: room.moderation?.spamRateLimit || 10
+    }
+    replaceModal(() => setShowRoomInfo(false), () => setRoomDraft(draft))
+  }
+
+  function changeRoomDraft (change: Partial<PeerChatRoomDraft>) {
+    setRoomDraft((current) => (current ? { ...current, ...change } : current))
+  }
+
+  function saveRoomDraft () {
+    const draft = roomDraft
+    if (!draft || !draft.name.trim() || isBusy) return
+    void runAction(async () => {
+      const response = await callRpc(RPC_PEERCHAT_ROOM_UPDATE, {
+        roomKey: draft.roomKey,
+        name: draft.name,
+        bio: draft.bio,
+        link: draft.link,
+        avatar: draft.avatar,
+        moderation: {
+          abuseFilter: draft.abuseFilter,
+          nsfwFilter: draft.nsfwFilter,
+          spamRateLimit: draft.spamRateLimit
+        }
+      })
+      if (!response.ok || !response.room) throw new Error(response.error || t('Unable to save the room.'))
+      if (!mountedRef.current) return
+      // Straight from the answer, so the header, Room info and the chat list
+      // show it at once.
+      const saved = response.room
+      if (activeRoomRef.current?.roomKey === saved.roomKey) setActiveRoom(saved)
+      if (response.rooms) setRooms(response.rooms)
+      setRoomDraft(null)
+      onStatus(t('Room saved'))
+    })
   }
 
   function openHeaderDetails () {
@@ -1381,23 +1710,23 @@ export function PeerChatScreen ({
   function blockDirectMessageRequest (invite: PeerChatDirectInvite) {
     if (isBusy) return
     Alert.alert(
-      `Block ${invite.fromUsername}?`,
-      'Their request goes away and they cannot send another. You can unblock them in settings.',
+      t('Block {name}?', { name: invite.fromUsername }),
+      t('Their request goes away and they cannot send another. You can unblock them in settings.'),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('Cancel'), style: 'cancel' },
         {
-          text: 'Block',
+          text: t('Block'),
           style: 'destructive',
           onPress: () => void runAction(async () => {
             const response = await callRpc(RPC_PEERCHAT_BLOCK, {
               peerId: invite.fromId,
               username: invite.fromUsername
             })
-            if (!response.ok) throw new Error(response.error || 'Unable to block this person.')
+            if (!response.ok) throw new Error(response.error || t('Unable to block this person.'))
             if (!mountedRef.current) return
             setPendingDirectMessages(response.pendingDirectMessages || [])
             if (response.blockedPeers) setBlockedPeers(response.blockedPeers)
-            onStatus(`${invite.fromUsername} blocked`)
+            onStatus(t('{name} blocked', { name: invite.fromUsername }))
           })
         }
       ]
@@ -1407,15 +1736,26 @@ export function PeerChatScreen ({
   function respondToDirectMessage (invite: PeerChatDirectInvite, accept: boolean) {
     if (isBusy) return
     void runAction(async () => {
-      const response = await callRpc(accept ? RPC_PEERCHAT_DM_ACCEPT : RPC_PEERCHAT_DM_REJECT, {
-        roomKey: invite.roomKey
-      })
-      if (!response.ok) throw new Error(response.error || 'Unable to respond to message request.')
-      if (!mountedRef.current) return
-      setPendingDirectMessages(response.pendingDirectMessages || [])
-      if (response.rooms) setRooms(response.rooms)
-      if (accept && response.room) openRoom(response.room)
-      onStatus(accept ? 'Message request accepted' : 'Message request declined')
+      // Accepting joins the conversation, which takes a moment. The button
+      // shows it is working until the chat opens.
+      if (accept) {
+        acceptingInviteRef.current = invite
+        setAcceptingRoomKey(invite.roomKey)
+      }
+      try {
+        const response = await callRpc(accept ? RPC_PEERCHAT_DM_ACCEPT : RPC_PEERCHAT_DM_REJECT, {
+          roomKey: invite.roomKey
+        })
+        if (!response.ok) throw new Error(response.error || t('Unable to respond to message request.'))
+        if (!mountedRef.current) return
+        setPendingDirectMessages(response.pendingDirectMessages || [])
+        if (response.rooms) setRooms(response.rooms)
+        if (accept && response.room) openRoom(response.room)
+        onStatus(accept ? t('Message request accepted') : t('Message request declined'))
+      } finally {
+        if (accept) acceptingInviteRef.current = null
+        if (accept && mountedRef.current) setAcceptingRoomKey(null)
+      }
     })
   }
 
@@ -1434,7 +1774,7 @@ export function PeerChatScreen ({
         }
       })
       if (!response.ok || !response.room) {
-        throw new Error(response.error || 'Unable to create PeerChat room.')
+        throw new Error(response.error || t('Unable to create PeerChat room.'))
       }
       if (!mountedRef.current) return
       // In the backend's order, pinned rooms first. Put at the very top, the
@@ -1451,18 +1791,19 @@ export function PeerChatScreen ({
       // room to a half-filled panel that looks like nothing happened.
       setLandingAction(null)
       openRoom(response.room)
-      onStatus('PeerChat room created')
+      onStatus(t('PeerChat room created'))
     })
   }
 
   // Shared by the Join button, an invite link and a scanned QR code. A function
-  // declaration so the invite effect above can call it.
-  async function joinRoomByKey (roomKey: string) {
+  // declaration so the invite effect above can call it. Takes a room key or a
+  // whole invite, which may say who made the room.
+  async function joinRoomByKey (invite: string) {
     await runAction(async () => {
       await saveProfile()
-      const response = await callRpc(RPC_PEERCHAT_ROOM_JOIN, { roomKey })
+      const response = await callRpc(RPC_PEERCHAT_ROOM_JOIN, peerChatJoinRequest(invite))
       if (!response.ok || !response.room) {
-        throw new Error(response.error || 'Unable to join PeerChat room.')
+        throw new Error(response.error || t('Unable to join PeerChat room.'))
       }
       if (!mountedRef.current) return
       setRooms((current) => response.rooms || [
@@ -1472,7 +1813,7 @@ export function PeerChatScreen ({
       setJoinKey('')
       setLandingAction(null)
       openRoom(response.room)
-      onStatus('PeerChat room joined')
+      onStatus(t('PeerChat room joined'))
     })
   }
 
@@ -1505,18 +1846,18 @@ export function PeerChatScreen ({
   ) {
     setProfileTarget(null)
     Alert.alert(
-      `Block ${member.username}?`,
-      'You will not see anything they send, in any chat, and they cannot message you directly. You can unblock them in PeerChat settings.',
+      t('Block {name}?', { name: member.username }),
+      t('You will not see anything they send, in any chat, and they cannot message you directly. You can unblock them in PeerChat settings.'),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('Cancel'), style: 'cancel' },
         {
-          text: 'Block and report',
+          text: t('Block and report'),
           onPress: () => {
             void blockMember(member)
             void reportMember(member, from, message)
           }
         },
-        { text: 'Block', style: 'destructive', onPress: () => void blockMember(member) }
+        { text: t('Block'), style: 'destructive', onPress: () => void blockMember(member) }
       ]
     )
   }
@@ -1525,12 +1866,12 @@ export function PeerChatScreen ({
     setProfileTarget(null)
     await runAction(async () => {
       const response = await callRpc(RPC_PEERCHAT_BLOCK, { peerId: member.id, username: member.username })
-      if (!response.ok) throw new Error(response.error || 'Unable to block this person.')
+      if (!response.ok) throw new Error(response.error || t('Unable to block this person.'))
       if (!mountedRef.current) return
       setBlockedPeers(response.blockedPeers || [])
       setPendingDirectMessages(response.pendingDirectMessages || [])
       versionRef.current = -1
-      onStatus(`Blocked ${member.username}`)
+      onStatus(t('Blocked {name}', { name: member.username }))
     })
   }
 
@@ -1538,11 +1879,11 @@ export function PeerChatScreen ({
     setProfileTarget(null)
     await runAction(async () => {
       const response = await callRpc(RPC_PEERCHAT_UNBLOCK, { peerId })
-      if (!response.ok) throw new Error(response.error || 'Unable to unblock this person.')
+      if (!response.ok) throw new Error(response.error || t('Unable to unblock this person.'))
       if (!mountedRef.current) return
       setBlockedPeers(response.blockedPeers || [])
       versionRef.current = -1
-      onStatus(`Unblocked ${username}`)
+      onStatus(t('Unblocked {name}', { name: username }))
     })
   }
 
@@ -1554,11 +1895,11 @@ export function PeerChatScreen ({
   // here, everything that came with it included.
   function confirmDeleteProfile () {
     Alert.alert(
-      'Delete your PeerChat profile?',
-      'This removes your name, bio and photo, every chat with its messages and files, and your blocks from this device. Each room sees you leave. Messages you already sent stay with the people who got them. This cannot be undone.',
+      t('Delete your PeerChat profile?'),
+      t('This removes your name, bio and photo, every chat with its messages and files, and your blocks from this device. Each room sees you leave. Messages you already sent stay with the people who got them. This cannot be undone.'),
       [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Delete', style: 'destructive', onPress: () => void deleteProfile() }
+        { text: t('Cancel'), style: 'cancel' },
+        { text: t('Delete'), style: 'destructive', onPress: () => void deleteProfile() }
       ]
     )
   }
@@ -1566,7 +1907,7 @@ export function PeerChatScreen ({
   async function deleteProfile () {
     await runAction(async () => {
       const response = await callRpc(RPC_PEERCHAT_DELETE_PROFILE, {})
-      if (!response.ok) throw new Error(response.error || 'Unable to delete your PeerChat profile.')
+      if (!response.ok) throw new Error(response.error || t('Unable to delete your PeerChat profile.'))
       const fresh = await callRpc(RPC_PEERCHAT_INIT, {})
       if (!mountedRef.current) return
       setShowPeerChatSettings(false)
@@ -1582,7 +1923,7 @@ export function PeerChatScreen ({
       composerRoomKeyRef.current = null
       setComposer('')
       versionRef.current = -1
-      onStatus('Your PeerChat profile was deleted from this device')
+      onStatus(t('Your PeerChat profile was deleted from this device'))
     })
   }
 
@@ -1604,12 +1945,12 @@ export function PeerChatScreen ({
     Linking.openURL(report.url).catch(() => {
       // No mail app set up. The report still has to be able to leave.
       Alert.alert(
-        'No email app',
-        `Send this report to ${PEERCHAT_REPORT_EMAIL} from any email app.`,
+        t('No email app'),
+        t('Send this report to {email} from any email app.', { email: PEERCHAT_REPORT_EMAIL }),
         [
-          { text: 'Close', style: 'cancel' },
+          { text: t('Close'), style: 'cancel' },
           {
-            text: 'Copy report',
+            text: t('Copy report'),
             onPress: () => Clipboard.setString(`To: ${PEERCHAT_REPORT_EMAIL}\nSubject: ${report.subject}\n\n${report.body}`)
           }
         ]
@@ -1620,7 +1961,7 @@ export function PeerChatScreen ({
   async function openInviteScanner () {
     const permission = cameraPermission?.granted ? cameraPermission : await requestCameraPermission()
     if (!permission?.granted) {
-      onStatus('Camera access is needed to scan an invite')
+      onStatus(t('Camera access is needed to scan an invite'))
       return
     }
     inviteScanHandledRef.current = false
@@ -1643,21 +1984,22 @@ export function PeerChatScreen ({
     // Accepts an invite link or a bare room key, so either kind of QR works.
     const roomKey = parsePeerChatInvite(value)
     if (!roomKey) {
-      onStatus('That QR code is not a PeerChat invite')
+      onStatus(t('That QR code is not a PeerChat invite'))
       return
     }
     setJoinKey(roomKey)
-    void joinRoomByKey(roomKey)
+    // The whole invite, so who made the room comes with it.
+    void joinRoomByKey(value)
   }
 
   function joinRoom () {
     void runAction(async () => {
       await saveProfile()
-      const response = await callRpc(RPC_PEERCHAT_ROOM_JOIN, {
-        roomKey: joinKey
-      })
+      // A room key or a whole invite pasted in, which may say who made the
+      // room.
+      const response = await callRpc(RPC_PEERCHAT_ROOM_JOIN, peerChatJoinRequest(joinKey))
       if (!response.ok || !response.room) {
-        throw new Error(response.error || 'Unable to join PeerChat room.')
+        throw new Error(response.error || t('Unable to join PeerChat room.'))
       }
       if (!mountedRef.current) return
       setRooms((current) => response.rooms || [
@@ -1667,7 +2009,7 @@ export function PeerChatScreen ({
       setJoinKey('')
       setLandingAction(null)
       openRoom(response.room)
-      onStatus('PeerChat room joined')
+      onStatus(t('PeerChat room joined'))
     })
   }
 
@@ -1684,12 +2026,14 @@ export function PeerChatScreen ({
         [preference]: isMuted ? !room.isMuted : !room.isPinned
       })
       if (!response.ok || !response.rooms) {
-        throw new Error(response.error || 'Unable to update the chat preference.')
+        throw new Error(response.error || t('Unable to update the chat preference.'))
       }
       if (!mountedRef.current) return
       setRooms(response.rooms)
       const enabled = isMuted ? !room.isMuted : !room.isPinned
-      onStatus(`PeerChat room ${enabled ? '' : 'un'}${preference}`)
+      onStatus(isMuted
+        ? (enabled ? t('PeerChat room muted') : t('PeerChat room unmuted'))
+        : (enabled ? t('PeerChat room pinned') : t('PeerChat room unpinned')))
     })
   }
 
@@ -1709,7 +2053,7 @@ export function PeerChatScreen ({
         message,
         replyTo: selectedReply
       })
-      if (!response.ok) throw new Error(response.error || 'Unable to send PeerChat message.')
+      if (!response.ok) throw new Error(response.error || t('Unable to send PeerChat message.'))
       if (!mountedRef.current) return
       setComposer('')
       setReplyTarget(null)
@@ -1722,7 +2066,7 @@ export function PeerChatScreen ({
       versionRef.current = -1
       await refreshRoom(true)
       if (soundsEnabled) playPeerChatSound('send', require('../../assets/sounds/peerchat/send.mp3'))
-      onStatus('PeerChat message sent')
+      onStatus(t('PeerChat message sent'))
     })
   }
 
@@ -1737,7 +2081,7 @@ export function PeerChatScreen ({
         work,
         new Promise<PeerChatResponse>((_resolve, reject) => {
           timer = setTimeout(
-            () => reject(new Error(`${fileName} is taking too long to upload. It may be too large to share here.`)),
+            () => reject(new Error(t('{name} is taking too long to upload. It may be too large to share here.', { name: fileName }))),
             getPeerChatUploadTimeout(byteLength)
           )
         })
@@ -1751,7 +2095,7 @@ export function PeerChatScreen ({
   // serves, so it opens in a tab rather than being handed to the system.
   function openMessageLink (url: string) {
     if (url.startsWith('mailto:')) {
-      Linking.openURL(url).catch(() => onStatus('Unable to open your email app'))
+      Linking.openURL(url).catch(() => onStatus(t('Unable to open your email app')))
       return
     }
     onOpenUrl(url)
@@ -1786,7 +2130,12 @@ export function PeerChatScreen ({
         source,
         // A room shows a picture to everyone at once, so it is screened. A
         // direct message reaches one person, who can block the sender.
-        screen: !activeRoom.isDM
+        screen: !activeRoom.isDM,
+        // The check takes a moment, and with nothing said the screen looked
+        // stuck between the picker closing and the upload starting.
+        onPicked: (picked) => onStatus(picked.length === 1
+          ? t('Checking {name}', { name: picked[0].name })
+          : tp({ one: 'Checking {count} file', other: 'Checking {count} files' }, picked.length))
       })
       if (assets.length === 0) return
 
@@ -1794,14 +2143,14 @@ export function PeerChatScreen ({
         // A video takes a while to encrypt and write, and without this the
         // spinner is indistinguishable from the app having hung.
         onStatus(assets.length === 1
-          ? `Uploading ${asset.name}`
-          : `Uploading ${index + 1} of ${assets.length}: ${asset.name}`)
+          ? t('Uploading {name}', { name: asset.name })
+          : t('Uploading {number} of {count}: {name}', { number: index + 1, count: assets.length, name: asset.name }))
         const upload = await withUploadTimeout(callRpc(RPC_PEERCHAT_ATTACHMENT_UPLOAD, {
           roomKey: activeRoom.roomKey,
           fileUri: asset.uri,
           byteLength: asset.size
         }), asset.name, asset.size)
-        if (!upload.ok || !upload.item) throw new Error(upload.error || 'Unable to upload attachment.')
+        if (!upload.ok || !upload.item) throw new Error(upload.error || t('Unable to upload attachment.'))
 
         const response = await callRpc(RPC_PEERCHAT_SEND, {
           roomKey: activeRoom.roomKey,
@@ -1811,13 +2160,15 @@ export function PeerChatScreen ({
           fileEnc: true,
           ...(upload.item.fileKey && { fileKey: upload.item.fileKey })
         })
-        if (!response.ok) throw new Error(response.error || 'Unable to send attachment.')
+        if (!response.ok) throw new Error(response.error || t('Unable to send attachment.'))
       }
 
       versionRef.current = -1
       await refreshRoom(true)
       if (soundsEnabled) playPeerChatSound('send', require('../../assets/sounds/peerchat/send.mp3'))
-      onStatus(assets.length === 1 ? `Sent ${assets[0].name}` : `Sent ${assets.length} files`)
+      onStatus(assets.length === 1
+        ? t('Sent {name}', { name: assets[0].name })
+        : tp({ one: 'Sent {count} file', other: 'Sent {count} files' }, assets.length))
     })
   }
 
@@ -1829,20 +2180,27 @@ export function PeerChatScreen ({
    */
   function confirmRemoveMember (member: PeerChatMember) {
     if (!activeRoom || isBusy) return
+    // Every room but P2P Republic, whose key ships with the app, moves to a
+    // new key when somebody is removed. See backend/peerchat/room-move.mjs.
+    // The new key goes to everyone who proved the room to this phone before,
+    // and a person's other devices are members of their own, so it says to
+    // remove those too.
+    const movesKey = activeRoom.roomKey !== PRE_JOINED_PEERCHAT_ROOM_KEY
     Alert.alert(
-      `Remove ${member.username}?`,
-      'They will not be able to come back to this room. Everyone running PeerChat will stop passing their messages on.',
+      t('Remove {name}?', { name: member.username }),
+      t('They will not be able to come back to this room. Everyone running PeerChat will stop passing their messages on.') +
+        (movesKey ? ` ${t('The room also moves to a new key for the people still in it, so invites from before stop working. If they use PeerChat on another device too, remove that one as well.')}` : ''),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('Cancel'), style: 'cancel' },
         {
-          text: 'Remove',
+          text: t('Remove'),
           style: 'destructive',
           onPress: () => void runAction(async () => {
             const response = await callRpc(RPC_PEERCHAT_ROOM_REMOVE_MEMBER, {
               roomKey: activeRoom.roomKey,
               peerId: member.id
             })
-            if (!response.ok) throw new Error(response.error || 'Unable to remove this person.')
+            if (!response.ok) throw new Error(response.error || t('Unable to remove this person.'))
             if (!mountedRef.current) return
             // Straight from the answer. Waiting on the next poll meant the
             // person you just removed sat there until it came round.
@@ -1850,7 +2208,7 @@ export function PeerChatScreen ({
             if (response.rooms) setRooms(response.rooms)
             versionRef.current = -1
             await refreshRoom(true)
-            onStatus(`${member.username} was removed from the room`)
+            onStatus(t('{name} was removed from the room', { name: member.username }))
           })
         }
       ]
@@ -1864,7 +2222,7 @@ export function PeerChatScreen ({
       const response = await callRpc(RPC_PEERCHAT_ROOM_LEAVE, {
         roomKey: room.roomKey
       })
-      if (!response.ok) throw new Error(response.error || 'Unable to leave PeerChat room.')
+      if (!response.ok) throw new Error(response.error || t('Unable to leave PeerChat room.'))
       if (!mountedRef.current) return
       setRooms((current) => current.filter((item) => item.roomKey !== room.roomKey))
       draftsRef.current = setPeerChatDraft(draftsRef.current, room.roomKey, '')
@@ -1879,7 +2237,7 @@ export function PeerChatScreen ({
         setIsSearching(false)
         setSearchQuery('')
       }
-      onStatus('PeerChat room removed')
+      onStatus(t('PeerChat room removed'))
     })
   }
 
@@ -1887,10 +2245,11 @@ export function PeerChatScreen ({
     if (!activeRoom) return
     try {
       // The link, not the bare key. Tapping it joins the room; a 64 character
-      // key has to be copied into Join Room by hand.
+      // key has to be copied into Join Room by hand. It says who made the
+      // room too, so whoever joins knows from the start.
       await shareLink({
-        title: `Join ${activeRoom.name} on PeerChat`,
-        message: buildPeerChatInviteUrl(activeRoom.roomKey) || activeRoom.roomKey
+        title: t('Join {name} on PeerChat', { name: activeRoom.name }),
+        message: buildPeerChatInviteUrl(activeRoom.roomKey, activeRoom.creatorKey, activeRoom.creatorProof) || activeRoom.roomKey
       })
     } catch (cause) {
       if (!mountedRef.current) return
@@ -1905,7 +2264,7 @@ export function PeerChatScreen ({
   // a message request. Plain text: see shareLink.
   async function inviteFriends () {
     try {
-      await shareLink({ title: 'Invite friends to PeerChat', message: buildPeerChatAppInviteMessage(myInviteUrl), plain: true })
+      await shareLink({ title: t('Invite friends to PeerChat'), message: buildPeerChatAppInviteMessage(myInviteUrl), plain: true })
     } catch (cause) {
       if (!mountedRef.current) return
       const message = cause instanceof Error ? cause.message : String(cause)
@@ -1921,15 +2280,19 @@ export function PeerChatScreen ({
 
   // Forwarding: messages are picked in the open chat, then sent on to another
   // as new messages of yours, each marked as forwarded, the same as on the
-  // desktop. Only words travel: a file is sealed to the chat it was sent to.
+  // desktop. Words go as they are; a file or picture is opened and sealed
+  // again for the chat it goes to.
   function startSelectingMessages (message: PeerChatMessage) {
     setMessageActionTarget(null)
-    setSelectedMessageIds(new Set(forwardableText(message) ? [message.id] : []))
+    setSelectedMessageIds(new Set(isForwardable(message) ? [message.id] : []))
+    // Picked from search results, the search stays open with the message in
+    // view, rather than the whole chat coming back somewhere else.
+    if (isSearching) scrollToMessage(message.id)
   }
 
   function toggleSelectedMessage (message: PeerChatMessage) {
-    if (!forwardableText(message)) {
-      onStatus('Only text can be forwarded. Files and pictures stay in their chat.')
+    if (!isForwardable(message)) {
+      showChatNote(t('Notices from the app cannot be forwarded.'))
       return
     }
     tapFeedback()
@@ -1942,27 +2305,200 @@ export function PeerChatScreen ({
   }
 
   function forwardSelectedMessages (target: PeerChatRoom) {
-    const texts = forwardTexts(messages, selectedMessageIds || new Set())
+    const fromRoom = activeRoomRef.current
+    const items = forwardItems(messages, selectedMessageIds || new Set()) as PeerChatForwardItem[]
     setIsForwardOpen(false)
     setSelectedMessageIds(null)
-    if (!texts.length || isBusy) return
+    if (!fromRoom || !items.length || isBusy) return
     openRoom(target)
+    // A moment apart, under the chat's spam limit, so many at once never get
+    // you removed for spam. The same rule as the desktop.
+    const gap = forwardGapMs(target.moderation?.spamRateLimit)
+    const note = describeForwarding(items.length)
+    if (note) showChatNote(note, true)
     void runAction(async () => {
-      for (const text of texts) {
-        const response = await callRpc(RPC_PEERCHAT_SEND, {
-          roomKey: target.roomKey,
-          message: text,
-          forwarded: true
-        })
-        // A chat's filters apply to what is forwarded into it, as to anything
-        // typed there. The rest wait rather than arrive out of order.
-        if (!response.ok) throw new Error(response.error || 'Unable to forward that message.')
+      try {
+        for (const [index, item] of items.entries()) {
+          if (index > 0) await new Promise((resolve) => setTimeout(resolve, gap))
+          if (!mountedRef.current) return
+          if (item.file) {
+            await forwardFile(item.file, fromRoom.roomKey, target)
+          } else {
+            const response = await callRpc(RPC_PEERCHAT_SEND, {
+              roomKey: target.roomKey,
+              message: item.text,
+              forwarded: true
+            })
+            // A chat's filters apply to what is forwarded into it, as to
+            // anything typed there. The rest wait rather than arrive out of
+            // order.
+            if (!response.ok) throw new Error(response.error || t('Unable to forward that message.'))
+          }
+          sentCountRef.current += 1
+          // Each one shows as it goes, the slower ones a moment apart.
+          if (activeRoomRef.current?.roomKey === target.roomKey) {
+            versionRef.current = -1
+            void refreshRoom(true)
+          }
+        }
+        if (!mountedRef.current) return
+        if (soundsEnabled) playPeerChatSound('send', require('../../assets/sounds/peerchat/send.mp3'))
+        if (note) showChatNote(tp({ one: '{count} message forwarded.', other: '{count} messages forwarded.' }, items.length))
+        onStatus(items.length === 1
+          ? t('Message forwarded')
+          : tp({ one: '{count} message forwarded', other: '{count} messages forwarded' }, items.length))
+      } catch (cause) {
+        if (note && mountedRef.current) showChatNote('')
+        throw cause
       }
-      if (!mountedRef.current) return
-      versionRef.current = -1
-      await refreshRoom(true)
-      if (soundsEnabled) playPeerChatSound('send', require('../../assets/sounds/peerchat/send.mp3'))
-      onStatus(texts.length === 1 ? 'Message forwarded' : `${texts.length} messages forwarded`)
+    })
+  }
+
+  /**
+   * A picture or file from the chat it was sent to, opened with its key and
+   * sealed again for the one it goes to, then sent there as forwarded. A
+   * picture or video going to a group is screened first, the same as one
+   * picked on this phone: a group shows it to everyone at once.
+   */
+  async function forwardFile (file: PeerChatForwardFile, fromRoomKey: string, target: PeerChatRoom) {
+    const sourceRoomKey = file.roomKey || fromRoomKey
+    const sealedWith = file.fileKey ? { fileKey: file.fileKey } : {}
+    if (!target.isDM && getPeerChatAttachmentMediaKind(file.fileName, file.url)) {
+      const opened = await callRpc(RPC_PEERCHAT_ATTACHMENT_OPEN, {
+        roomKey: sourceRoomKey,
+        url: file.url,
+        fileName: file.fileName,
+        fileSize: file.fileSize,
+        encrypted: true,
+        ...sealedWith
+      })
+      if (!opened.ok || !opened.localUri) throw new Error(opened.error || t('{name} could not be opened to forward it.', { name: file.fileName }))
+      await screenUploadBytes({
+        uri: opened.localUri,
+        name: file.fileName,
+        size: file.fileSize,
+        mimeType: peerChatMediaType(file.fileName)
+      })
+    }
+    onStatus(t('Forwarding {name}', { name: file.fileName }))
+    const upload = await withUploadTimeout(callRpc(RPC_PEERCHAT_ATTACHMENT_FORWARD, {
+      roomKey: target.roomKey,
+      fromRoomKey: sourceRoomKey,
+      url: file.url,
+      fileName: file.fileName,
+      fileSize: file.fileSize,
+      ...sealedWith
+    }), file.fileName, file.fileSize)
+    if (!upload.ok || !upload.item) throw new Error(upload.error || t('{name} could not be forwarded.', { name: file.fileName }))
+    const response = await callRpc(RPC_PEERCHAT_SEND, {
+      roomKey: target.roomKey,
+      message: upload.item.url,
+      fileName: file.fileName,
+      fileSize: upload.item.byteLength ?? file.fileSize,
+      fileEnc: true,
+      ...(upload.item.fileKey && { fileKey: upload.item.fileKey }),
+      forwarded: true
+    })
+    if (!response.ok) throw new Error(response.error || t('{name} could not be forwarded.', { name: file.fileName }))
+  }
+
+  // A line in the chat that goes by itself, or stays while what it describes
+  // is still going on. An empty one takes it away.
+  function showChatNote (note: string, hold = false) {
+    if (chatNoteTimerRef.current) clearTimeout(chatNoteTimerRef.current)
+    chatNoteTimerRef.current = null
+    setChatNote(note || null)
+    if (!note || hold) return
+    chatNoteTimerRef.current = setTimeout(() => {
+      chatNoteTimerRef.current = null
+      setChatNote(null)
+    }, CHAT_NOTE_MS)
+  }
+
+  // A message picked from the results stays in view once the whole chat
+  // comes back.
+  function closeMessageSearch () {
+    setIsSearching(false)
+    setSearchQuery('')
+    const picked = selectedMessageIds ? messages.filter((message) => selectedMessageIds.has(message.id)) : []
+    const last = picked[picked.length - 1]
+    if (!last) return
+    const index = messages.length - 1 - messages.findIndex((message) => message.id === last.id)
+    isNearMessageBottomRef.current = index < 3
+    setShowScrollToLatest(index >= 3)
+    scrollToMessage(last.id)
+  }
+
+  // Shows a message: the one a reply quotes, or one the chat list's search
+  // found. The whole chat comes back if a search is open, and older messages
+  // are read in until it is there. See the effect that follows jumpRequest.
+  function jumpToMessage (messageId: string) {
+    const room = activeRoomRef.current
+    if (!room || !messageId) return
+    setIsSearching(false)
+    setSearchQuery('')
+    jumpTargetRef.current = { roomKey: room.roomKey, messageId }
+    setJumpRequest((current) => current + 1)
+  }
+
+  function showMessageAt (index: number, messageId: string) {
+    // Away from the newest, so new messages do not pull the chat back down.
+    isNearMessageBottomRef.current = index < 3
+    setShowScrollToLatest(index >= 3)
+    scrollToMessage(messageId)
+    setHighlightedMessageId(messageId)
+    if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current)
+    highlightTimerRef.current = setTimeout(() => {
+      highlightTimerRef.current = null
+      setHighlightedMessageId((current) => (current === messageId ? null : current))
+    }, HIGHLIGHT_MS)
+  }
+
+  // Into the middle of the list, once it has drawn what just changed, found
+  // by id in the list as it is then. A message far up is not drawn yet, so the
+  // list goes near it first and tries again: see onScrollToIndexFailed.
+  function scrollToMessage (messageId: string, again = false) {
+    if (!again) scrollAttemptsRef.current = 0
+    scrollTargetRef.current = messageId
+    if (scrollRetryRef.current) clearTimeout(scrollRetryRef.current)
+    scrollRetryRef.current = setTimeout(() => {
+      scrollRetryRef.current = null
+      const index = displayedMessagesRef.current.findIndex((message) => message.id === messageId)
+      if (index >= 0) messageListRef.current?.scrollToIndex({ animated: true, index, viewPosition: 0.5 })
+    }, 60)
+  }
+
+  // A picture or video this phone can open, which is what a save copies.
+  function canSaveMessageMedia (message: PeerChatMessage) {
+    return message.fileEnc === true && !message.system &&
+      getPeerChatAttachmentMediaKind(message.fileName || '', message.message) !== null &&
+      Boolean(peerChatMediaType(message.fileName))
+  }
+
+  // The sheet closes first: iOS shows its own sheet to save to Photos, and one
+  // cannot open while another is still closing.
+  function saveMessageMedia (message: PeerChatMessage) {
+    const room = activeRoomRef.current
+    if (!room || !message.fileName) return
+    const fileName = message.fileName
+    replaceModal(() => setMessageActionTarget(null), () => {
+      void (async () => {
+        try {
+          const opened = await callRpc(RPC_PEERCHAT_ATTACHMENT_OPEN, {
+            roomKey: message.roomKey || room.roomKey,
+            url: message.message,
+            fileName,
+            fileSize: message.fileSize,
+            encrypted: true,
+            ...(message.fileKey && { fileKey: message.fileKey })
+          })
+          if (!opened.ok || !opened.localUri) throw new Error(opened.error || t('{name} could not be opened to save it.', { name: fileName }))
+          const saved = await savePeerChatMedia({ uri: opened.localUri, fileName })
+          if (saved?.message && mountedRef.current) showChatNote(saved.message)
+        } catch (cause) {
+          if (mountedRef.current) showError(cause instanceof Error ? cause.message : String(cause))
+        }
+      })()
     })
   }
 
@@ -1972,26 +2508,26 @@ export function PeerChatScreen ({
       id: message.id,
       sender: message.sender,
       sn: message.senderName,
-      text: message.message
+      text: messagePreviewText(message)
     })
   }
 
   function copyMessageCode (code: string) {
     Clipboard.setString(code)
     tapFeedback()
-    onStatus('Code copied')
+    onStatus(t('Code copied'))
   }
 
   function copyMessageText (message: PeerChatMessage) {
     Clipboard.setString(message.message)
     setMessageActionTarget(null)
-    onStatus('Message copied')
+    onStatus(t('Message copied'))
   }
 
   function copyMessageLink (url: string) {
     Clipboard.setString(url)
     setLinkActionTarget(null)
-    onStatus('Link copied')
+    onStatus(t('Link copied'))
   }
 
   function showMessageInfo () {
@@ -2034,7 +2570,7 @@ export function PeerChatScreen ({
         msgId: messageId,
         emoji: currentEmoji === emoji ? '' : emoji
       })
-      if (!response.ok) throw new Error(response.error || 'Unable to update PeerChat reaction.')
+      if (!response.ok) throw new Error(response.error || t('Unable to update PeerChat reaction.'))
       if (!mountedRef.current) return
       if (soundsEnabled && currentEmoji !== emoji) {
         playPeerChatSound('pop', require('../../assets/sounds/peerchat/pop.mp3'))
@@ -2056,7 +2592,7 @@ export function PeerChatScreen ({
       PEERCHAT_INTRO_FILE.write(serializePeerChatIntroState())
     } catch (cause) {
       console.warn('Unable to save PeerChat intro state:', cause)
-      onStatus('PeerChat will show the introduction again next time.')
+      onStatus(t('PeerChat will show the introduction again next time.'))
     }
     setShowIntro(false)
   }
@@ -2071,7 +2607,7 @@ export function PeerChatScreen ({
         linkPreview: linkPreviewsEnabled
       })
       if (!response.ok || !response.profile || !response.rooms) {
-        throw new Error(response.error || 'Unable to create PeerChat profile.')
+        throw new Error(response.error || t('Unable to create PeerChat profile.'))
       }
       if (!mountedRef.current) return
       setProfile(response.profile)
@@ -2082,8 +2618,8 @@ export function PeerChatScreen ({
       setRooms(response.rooms)
       const notificationsAllowed = await onNotificationsEnabledChange(true)
       onStatus(notificationsAllowed
-        ? 'PeerChat profile created and notifications enabled'
-        : 'PeerChat profile created; notifications remain disabled')
+        ? t('PeerChat profile created and notifications enabled')
+        : t('PeerChat profile created; notifications remain disabled'))
     })
   }
 
@@ -2096,18 +2632,23 @@ export function PeerChatScreen ({
   }
 
   if (showIntro) {
+    // The link sits wherever the language puts it in the sentence.
+    const [termsBefore, termsAfter] = textAround(
+      t('There is no tolerance for objectionable content or abusive users. Tapping I understand means you agree to these rules and the {terms}.'),
+      '{terms}'
+    )
     return (
       <View style={[styles.introScreen, { backgroundColor: colors.background }]}>
         <ScrollView contentContainerStyle={styles.introContent}>
           <Image source={PEERCHAT_ICON} style={styles.introLogo} />
-          <Text style={[styles.introTitle, { color: colors.text }]}>Chat directly with your peers</Text>
+          <Text style={[styles.introTitle, { color: colors.text }]}>{t('Chat directly with your peers')}</Text>
           <View style={styles.introPoints}>
             {PEERCHAT_INTRO_POINTS.map((point, index) => (
               <View key={point} style={styles.introPointRow}>
                 <View style={[styles.introPointNumber, { backgroundColor: colors.accentSoft }]}>
                   <Text style={[styles.introPointNumberText, { color: colors.accent }]}>{index + 1}</Text>
                 </View>
-                <Text style={[styles.introPointText, { color: colors.text }]}>{point}</Text>
+                <Text style={[styles.introPointText, { color: colors.text }]}>{tKey(point)}</Text>
               </View>
             ))}
           </View>
@@ -2115,27 +2656,27 @@ export function PeerChatScreen ({
             What people ask, folded so the screen stays short. The button comes
             after them, so whoever agrees has scrolled past every one.
           */}
-          <Text style={[styles.introQuestionsTitle, { color: colors.text }]}>Questions people ask</Text>
+          <Text style={[styles.introQuestionsTitle, { color: colors.text }]}>{t('Questions people ask')}</Text>
           <PeerChatQuestions colors={colors} questions={PEERCHAT_WELCOME_QUESTIONS} />
           {/* Right above the button, so agreeing means having seen them. */}
-          <Text style={[styles.introQuestionsTitle, { color: colors.text }]}>The rules</Text>
+          <Text style={[styles.introQuestionsTitle, { color: colors.text }]}>{t('The rules')}</Text>
           <View style={[styles.introRules, { backgroundColor: colors.input }]}>
             {PEERCHAT_RULES.map((rule) => (
               <View key={rule} style={styles.introRuleRow}>
                 <Text style={[styles.introRuleText, { color: colors.text }]}>{'\u2022'}</Text>
-                <Text style={[styles.introRuleText, styles.introRuleBody, { color: colors.text }]}>{rule}</Text>
+                <Text style={[styles.introRuleText, styles.introRuleBody, { color: colors.text }]}>{tKey(rule)}</Text>
               </View>
             ))}
             <Text style={[styles.introRuleText, { color: colors.muted }]}>
-              There is no tolerance for objectionable content or abusive users. Tapping I understand means you agree to these rules and the{' '}
+              {termsBefore}
               <Text
                 accessibilityRole='link'
                 onPress={() => onOpenUrl(PEERCHAT_TERMS_URL)}
                 style={[styles.introRuleLink, { color: colors.accent }]}
               >
-                full terms
+                {t('full terms')}
               </Text>
-              .
+              {termsAfter}
             </Text>
           </View>
           <Pressable
@@ -2143,7 +2684,7 @@ export function PeerChatScreen ({
             onPress={continueFromIntro}
             style={[styles.introContinue, styles.introAgree, { backgroundColor: colors.accent }]}
           >
-            <Text style={styles.introContinueText}>I understand</Text>
+            <Text style={styles.introContinueText}>{t('I understand')}</Text>
           </Pressable>
         </ScrollView>
       </View>
@@ -2161,28 +2702,28 @@ export function PeerChatScreen ({
           keyboardShouldPersistTaps='handled'
         >
           <Image source={PEERCHAT_ICON} style={styles.onboardingLogo} />
-          <Text style={[styles.onboardingTitle, { color: colors.text }]}>Set up your profile</Text>
-          <Text style={[styles.onboardingHelper, { color: colors.muted }]}>Choose the name other peers will see in rooms and direct messages.</Text>
+          <Text style={[styles.onboardingTitle, { color: colors.text }]}>{t('Set up your profile')}</Text>
+          <Text style={[styles.onboardingHelper, { color: colors.muted }]}>{t('Choose the name other peers will see in rooms and direct messages.')}</Text>
           <View style={styles.onboardingFields}>
-            <Text style={[styles.onboardingLabel, { color: colors.text }]}>Name</Text>
+            <Text style={[styles.onboardingLabel, { color: colors.text }]}>{t('Name')}</Text>
             <TextInput
               autoCapitalize='words'
               autoCorrect={false}
               autoFocus
               maxLength={50}
               onChangeText={setProfileName}
-              placeholder='Your display name'
+              placeholder={t('Your display name')}
               placeholderTextColor={colors.muted}
               returnKeyType='next'
               style={[styles.input, { backgroundColor: colors.input, color: colors.text }]}
               value={profileName}
             />
-            <Text style={[styles.onboardingLabel, { color: colors.text }]}>Bio</Text>
+            <Text style={[styles.onboardingLabel, { color: colors.text }]}>{t('Bio')}</Text>
             <TextInput
               maxLength={300}
               multiline
               onChangeText={setProfileBio}
-              placeholder='A short bio (optional)'
+              placeholder={t('A short bio (optional)')}
               placeholderTextColor={colors.muted}
               style={[styles.input, styles.onboardingBio, { backgroundColor: colors.input, color: colors.text }]}
               value={profileBio}
@@ -2202,7 +2743,7 @@ export function PeerChatScreen ({
         >
           {isBusy
             ? <ActivityIndicator color='#ffffff' />
-            : <Text style={styles.introContinueText}>Continue</Text>}
+            : <Text style={styles.introContinueText}>{t('Continue')}</Text>}
         </Pressable>
       </KeyboardAvoidingView>
     )
@@ -2220,7 +2761,7 @@ export function PeerChatScreen ({
             <BackIcon width={CHAT_HEADER_ICON_SIZE} height={CHAT_HEADER_ICON_SIZE} color={colors.accent} />
           </Pressable>
           <Pressable
-            accessibilityHint={activeRoom.isDM ? 'Opens peer profile' : 'Opens room information'}
+            accessibilityHint={activeRoom.isDM ? t('Opens peer profile') : t('Opens room information')}
             accessibilityRole='button'
             onPress={openHeaderDetails}
             style={styles.chatHeaderCopy}
@@ -2248,11 +2789,11 @@ export function PeerChatScreen ({
                 search button moves out to the corner where share would be. */}
             {activeRoom.isDM && <View style={styles.headerAction} />}
             <Pressable
-              accessibilityLabel={isSearching ? 'Close message search' : 'Find messages'}
+              accessibilityLabel={isSearching ? t('Close message search') : t('Find messages')}
               accessibilityRole='button'
               onPress={() => {
-                setIsSearching((current) => !current)
-                if (isSearching) setSearchQuery('')
+                if (isSearching) closeMessageSearch()
+                else setIsSearching(true)
               }}
               style={styles.headerAction}
             >
@@ -2262,8 +2803,8 @@ export function PeerChatScreen ({
             </Pressable>
             {!activeRoom.isDM && (
               <Pressable
-                accessibilityHint='Shares a link that joins this room'
-                accessibilityLabel='Share room'
+                accessibilityHint={t('Shares a link that joins this room')}
+                accessibilityLabel={t('Share room')}
                 accessibilityRole='button'
                 onPress={() => void shareRoom()}
                 style={styles.headerAction}
@@ -2288,7 +2829,7 @@ export function PeerChatScreen ({
             style={styles.roomInfoModalRoot}
           >
             <Pressable
-              accessibilityLabel='Close room information'
+              accessibilityLabel={t('Close room information')}
               accessibilityRole='button'
               onPress={() => setShowRoomInfo(false)}
               style={styles.roomInfoBackdrop}
@@ -2298,9 +2839,9 @@ export function PeerChatScreen ({
               style={[styles.roomInfoPanel, { backgroundColor: colors.surface }]}
             >
               <View style={[styles.roomInfoHeader, { borderBottomColor: colors.border }]}>
-                <Text style={[styles.roomInfoHeading, { color: colors.text }]}>Room info</Text>
+                <Text style={[styles.roomInfoHeading, { color: colors.text }]}>{t('Room info')}</Text>
                 <Pressable
-                  accessibilityLabel='Close room information'
+                  accessibilityLabel={t('Close room information')}
                   accessibilityRole='button'
                   hitSlop={8}
                   onPress={() => setShowRoomInfo(false)}
@@ -2313,16 +2854,15 @@ export function PeerChatScreen ({
                 keyboardShouldPersistTaps='handled'
                 contentContainerStyle={styles.roomInfo}
               >
-            {/* The same for everyone, the person who made the room too: its
-                name, picture, description and link are set once, when it is
-                made, as on the desktop. No device takes a change to them
-                later. */}
+            {/* Its name, picture, description and link, the same for
+                everyone. Only the person who made the room changes them, with
+                Edit room, and everyone in it sees the change. */}
             <View style={styles.roomInfoIdentity}>
               {activeRoom.avatar
                 ? (
                   <Pressable
-                    accessibilityHint='Shows the picture full size'
-                    accessibilityLabel={`Picture of ${activeRoom.name}`}
+                    accessibilityHint={t('Shows the picture full size')}
+                    accessibilityLabel={t('Picture of {name}', { name: activeRoom.name })}
                     accessibilityRole='imagebutton'
                     onPress={() => viewRoomPicture(activeRoom.name, activeRoom.avatar)}
                   >
@@ -2343,47 +2883,65 @@ export function PeerChatScreen ({
               </Pressable>
             )}
             {!activeRoom.bio && !activeRoom.link && (
-              <Text style={[styles.helper, { color: colors.muted }]}>No room details shared.</Text>
+              <Text style={[styles.helper, { color: colors.muted }]}>{t('No room details shared.')}</Text>
+            )}
+            {canEditRoom(activeRoom) && (
+              <Pressable
+                accessibilityHint={t('Changes the room picture, name, description, link and moderation for everyone in it')}
+                accessibilityRole='button'
+                disabled={isBusy}
+                onPress={openEditRoom}
+                style={[styles.roomInfoSave, { backgroundColor: colors.accentSoft }, isBusy ? styles.disabled : null]}
+              >
+                <Text style={[styles.memberMessage, { color: colors.accent }]}>{t('Edit room')}</Text>
+              </Pressable>
             )}
             {!activeRoom.isDM && (
               <View style={styles.roomProvenance}>
                 <Text style={[styles.helper, { color: colors.muted }]}>
-                  Created by {activeRoom.createdByName || 'Unknown'}{formatRoomCreatedAt(activeRoom.createdAt)}
+                  {formatRoomCreator(activeRoom)}
                 </Text>
                 <Pressable
                   accessibilityRole='button'
                   onPress={() => {
                     Clipboard.setString(activeRoom.roomKey)
-                    onStatus('PeerChat room key copied')
+                    onStatus(t('PeerChat room key copied'))
                   }}
                 >
-                  <Text style={[styles.memberMessage, { color: colors.accent }]}>Copy room key</Text>
+                  <Text style={[styles.memberMessage, { color: colors.accent }]}>{t('Copy room key')}</Text>
                 </Pressable>
-                <Text style={[styles.roomInfoTitle, { color: colors.text }]}>Moderation</Text>
-                <Text style={[styles.helper, { color: colors.muted }]}>Abuse filter: {activeRoom.moderation.abuseFilter ? 'On' : 'Off'}</Text>
-                <Text style={[styles.helper, { color: colors.muted }]}>Profanity &amp; slurs: {activeRoom.moderation.nsfwFilter ? 'On' : 'Off'}</Text>
-                <Text style={[styles.helper, { color: colors.muted }]}>Spam limit: {activeRoom.moderation.spamRateLimit} messages / 10 seconds</Text>
-                <Text style={[styles.helper, { color: colors.muted }]}>Adult-domain links: Always blocked</Text>
+                <Text style={[styles.roomInfoTitle, { color: colors.text }]}>{t('Moderation')}</Text>
+                <Text style={[styles.helper, { color: colors.muted }]}>
+                  {activeRoom.moderation.abuseFilter ? t('Abuse filter: On') : t('Abuse filter: Off')}
+                </Text>
+                <Text style={[styles.helper, { color: colors.muted }]}>
+                  {activeRoom.moderation.nsfwFilter ? t('Profanity & slurs: On') : t('Profanity & slurs: Off')}
+                </Text>
+                {/* The English has always read "messages", whatever the count. */}
+                <Text style={[styles.helper, { color: colors.muted }]}>
+                  {tp({ one: 'Spam limit: {count} messages / 10 seconds', other: 'Spam limit: {count} messages / 10 seconds' }, activeRoom.moderation.spamRateLimit)}
+                </Text>
+                <Text style={[styles.helper, { color: colors.muted }]}>{t('Adult-domain links: Always blocked')}</Text>
               </View>
             )}
             {activeRoom.members.length > 0 && (
               <View style={styles.memberList}>
                 <Text style={[styles.roomInfoTitle, { color: colors.text }]}>
-                  People ({activeRoom.members.length})
+                  {t('People ({count})', { count: activeRoom.members.length })}
                 </Text>
                 <TextInput
                   autoCapitalize='none'
                   autoCorrect={false}
                   maxLength={PEERCHAT_SEARCH_QUERY_MAX_CHARACTERS}
                   onChangeText={setMemberSearchQuery}
-                  placeholder='Search people'
+                  placeholder={t('Search people')}
                   placeholderTextColor={colors.muted}
                   style={[styles.input, { backgroundColor: colors.input, color: colors.text }]}
                   value={memberSearchQuery}
                 />
                 {visibleMembers.map((member) => (
                   <Pressable
-                    accessibilityHint='Opens peer profile'
+                    accessibilityHint={t('Opens peer profile')}
                     accessibilityRole='button'
                     key={member.id}
                     onPress={() => replaceModal(() => setShowRoomInfo(false), () => setProfileTarget(member))}
@@ -2406,23 +2964,23 @@ export function PeerChatScreen ({
                       </Text>
                     </View>
                     <Text style={[styles.memberMessage, { color: member.self ? colors.muted : colors.accent }]}>
-                      {member.self ? 'You' : 'Message'}
+                      {member.self ? t('You') : t('Message')}
                     </Text>
                     {activeRoom.isCreator && !member.self && (
                       <Pressable
-                        accessibilityHint={`Removes ${member.username} from this room`}
+                        accessibilityHint={t('Removes {name} from this room', { name: member.username })}
                         accessibilityRole='button'
                         hitSlop={6}
                         onPress={() => confirmRemoveMember(member)}
                         style={styles.memberRemove}
                       >
-                        <Text style={[styles.memberMessage, { color: colors.danger }]}>Remove</Text>
+                        <Text style={[styles.memberMessage, { color: colors.danger }]}>{t('Remove')}</Text>
                       </Pressable>
                     )}
                   </Pressable>
                 ))}
                 {visibleMembers.length === 0 && (
-                  <Text style={[styles.helper, { color: colors.muted }]}>No matching people.</Text>
+                  <Text style={[styles.helper, { color: colors.muted }]}>{t('No matching people.')}</Text>
                 )}
               </View>
             )}
@@ -2431,23 +2989,155 @@ export function PeerChatScreen ({
           </KeyboardAvoidingView>
         </Modal>
 
+        <Modal
+          supportedOrientations={MODAL_ORIENTATIONS}
+          animationType='fade'
+          onDismiss={flushPendingModal}
+          onRequestClose={() => setRoomDraft(null)}
+          statusBarTranslucent
+          transparent
+          visible={roomDraft !== null}
+        >
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            style={styles.roomInfoModalRoot}
+          >
+            <Pressable
+              accessibilityLabel={t('Close edit room')}
+              accessibilityRole='button'
+              onPress={() => setRoomDraft(null)}
+              style={styles.roomInfoBackdrop}
+            />
+            <SafeAreaView
+              edges={['bottom', 'left', 'right']}
+              style={[styles.roomInfoPanel, { backgroundColor: colors.surface }]}
+            >
+              <View style={[styles.roomInfoHeader, { borderBottomColor: colors.border }]}>
+                <Text style={[styles.roomInfoHeading, { color: colors.text }]}>{t('Edit room')}</Text>
+                <Pressable
+                  accessibilityLabel={t('Close edit room')}
+                  accessibilityRole='button'
+                  hitSlop={8}
+                  onPress={() => setRoomDraft(null)}
+                  style={styles.roomInfoClose}
+                >
+                  <CloseIcon width={18} height={18} color={colors.muted} />
+                </Pressable>
+              </View>
+              {roomDraft && (
+                <ScrollView keyboardShouldPersistTaps='handled' contentContainerStyle={styles.roomInfo}>
+                  <Pressable
+                    accessibilityRole='button'
+                    disabled={isBusy}
+                    onPress={() => chooseAvatar(roomDraft.avatar, (avatar) => changeRoomDraft({ avatar }))}
+                    style={styles.avatarEditor}
+                  >
+                    {roomDraft.avatar
+                      ? <Image source={{ uri: roomDraft.avatar }} style={styles.avatarEditorImage} />
+                      : <View style={[styles.avatarEditorImage, { backgroundColor: colors.accentSoft }]} />}
+                    <Text style={[styles.memberMessage, { color: colors.accent }]}>
+                      {roomDraft.avatar ? t('Change room picture') : t('Add room picture')}
+                    </Text>
+                  </Pressable>
+                  <TextInput
+                    value={roomDraft.name}
+                    onChangeText={(name) => changeRoomDraft({ name })}
+                    maxLength={80}
+                    placeholder={t('Room name')}
+                    placeholderTextColor={colors.muted}
+                    style={[styles.input, { backgroundColor: colors.input, color: colors.text }]}
+                  />
+                  <TextInput
+                    value={roomDraft.bio}
+                    onChangeText={(bio) => changeRoomDraft({ bio })}
+                    maxLength={300}
+                    multiline
+                    placeholder={t('Description (optional)')}
+                    placeholderTextColor={colors.muted}
+                    style={[styles.input, styles.bioInput, { backgroundColor: colors.input, color: colors.text }]}
+                  />
+                  <TextInput
+                    value={roomDraft.link}
+                    onChangeText={(link) => changeRoomDraft({ link })}
+                    autoCapitalize='none'
+                    autoCorrect={false}
+                    maxLength={512}
+                    placeholder={t('https:// link (optional)')}
+                    placeholderTextColor={colors.muted}
+                    style={[styles.input, { backgroundColor: colors.input, color: colors.text }]}
+                  />
+                  <Text style={[styles.actionSectionTitle, { color: colors.text }]}>{t('Room moderation')}</Text>
+                  <Pressable
+                    accessibilityRole='switch'
+                    accessibilityState={{ checked: roomDraft.abuseFilter }}
+                    onPress={() => changeRoomDraft({ abuseFilter: !roomDraft.abuseFilter })}
+                    style={[styles.preferenceRow, { backgroundColor: colors.input }]}
+                  >
+                    <View style={styles.preferenceCopy}>
+                      <Text style={[styles.memberName, { color: colors.text }]}>{t('Abuse filter')}</Text>
+                      <Text style={[styles.attachmentMeta, { color: colors.muted }]}>{t('Block threats and targeted harassment')}</Text>
+                    </View>
+                    <Text style={[styles.preferenceState, { color: roomDraft.abuseFilter ? colors.accent : colors.muted }]}>{roomDraft.abuseFilter ? t('On') : t('Off')}</Text>
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole='switch'
+                    accessibilityState={{ checked: roomDraft.nsfwFilter }}
+                    onPress={() => changeRoomDraft({ nsfwFilter: !roomDraft.nsfwFilter })}
+                    style={[styles.preferenceRow, { backgroundColor: colors.input }]}
+                  >
+                    <View style={styles.preferenceCopy}>
+                      <Text style={[styles.memberName, { color: colors.text }]}>{t('Profanity & slurs')}</Text>
+                      <Text style={[styles.attachmentMeta, { color: colors.muted }]}>{t('Filter the shared PeerChat word list')}</Text>
+                    </View>
+                    <Text style={[styles.preferenceState, { color: roomDraft.nsfwFilter ? colors.accent : colors.muted }]}>{roomDraft.nsfwFilter ? t('On') : t('Off')}</Text>
+                  </Pressable>
+                  <Pressable
+                    accessibilityHint={t('Cycles between 5, 10, and 15 messages per 10 seconds')}
+                    accessibilityRole='button'
+                    onPress={() => changeRoomDraft({ spamRateLimit: nextSpamRateLimit(roomDraft.spamRateLimit) })}
+                    style={[styles.preferenceRow, { backgroundColor: colors.input }]}
+                  >
+                    <View style={styles.preferenceCopy}>
+                      <Text style={[styles.memberName, { color: colors.text }]}>{t('Spam limit')}</Text>
+                      <Text style={[styles.attachmentMeta, { color: colors.muted }]}>{t('Per peer, within 10 seconds')}</Text>
+                    </View>
+                    <Text style={[styles.preferenceState, { color: colors.accent }]}>{roomDraft.spamRateLimit}</Text>
+                  </Pressable>
+                  <Text style={[styles.helper, { color: colors.muted }]}>{t('Everyone in the room sees the change.')}</Text>
+                  {error && <Text accessibilityRole='alert' style={[styles.modalError, { color: colors.danger }]}>{error}</Text>}
+                  <Pressable
+                    accessibilityRole='button'
+                    disabled={!roomDraft.name.trim() || isBusy}
+                    onPress={saveRoomDraft}
+                    style={[styles.actionSubmit, { backgroundColor: colors.accent }, !roomDraft.name.trim() || isBusy ? styles.disabled : null]}
+                  >
+                    {isBusy
+                      ? <ActivityIndicator color='#ffffff' />
+                      : <Text style={styles.actionSubmitText}>{t('Save')}</Text>}
+                  </Pressable>
+                </ScrollView>
+              )}
+            </SafeAreaView>
+          </KeyboardAvoidingView>
+        </Modal>
+
         {activeRoom.removedByCreator && (
           <Text style={[styles.dmStatus, { color: colors.danger, backgroundColor: colors.surface }]}>
-            You were removed from this room by {activeRoom.createdByName || 'whoever made it'}.
+            {t('You were removed from this room by {name}.', { name: activeRoom.createdByName || t('whoever made it') })}
           </Text>
         )}
 
         {activeRoom.isDM && activeRoom.pendingAcceptance && (
-          <Text style={[styles.dmStatus, { color: colors.muted, backgroundColor: colors.surface }]}>Waiting for this peer to accept your message request.</Text>
+          <Text style={[styles.dmStatus, { color: colors.muted, backgroundColor: colors.surface }]}>{t('Waiting for this peer to accept your message request.')}</Text>
         )}
 
         {moderationWarning && (
           <View style={[styles.moderationWarning, { backgroundColor: colors.surface, borderColor: colors.danger }]}>
             <Text numberOfLines={2} style={[styles.moderationWarningText, { color: colors.text }]}>
-              Message blocked: {moderationWarning}
+              {t('Message blocked: {reason}', { reason: moderationWarning })}
             </Text>
             <Pressable
-              accessibilityLabel='Dismiss moderation warning'
+              accessibilityLabel={t('Dismiss moderation warning')}
               accessibilityRole='button'
               hitSlop={8}
               onPress={() => setModerationWarning(null)}
@@ -2458,23 +3148,22 @@ export function PeerChatScreen ({
           </View>
         )}
         {activeRoom.isDM && activeRoom.rejected && (
-          <Text style={[styles.dmStatus, { color: colors.danger, backgroundColor: colors.surface }]}>This peer declined the message request.</Text>
+          <Text style={[styles.dmStatus, { color: colors.danger, backgroundColor: colors.surface }]}>{t('This peer declined the message request.')}</Text>
         )}
 
         {offlineDirectPeer && !isDirectMessageBlocked && !activeRoom.rejected && (
           <Text style={[styles.dmStatus, { color: colors.muted, backgroundColor: colors.surface }]}>
-            {offlineDirectPeer.username} is offline. Your message arrives the next time you are both online
             {Platform.OS === 'ios'
-              ? ', and iOS suspends apps in the background, so keep PeerSky open.'
-              : ', so keep PeerSky running in the background.'}
+              ? t('{name} is offline. Your message arrives the next time you are both online, and iOS suspends apps in the background, so keep PeerSky open.', { name: offlineDirectPeer.username })
+              : t('{name} is offline. Your message arrives the next time you are both online, so keep PeerSky running in the background.', { name: offlineDirectPeer.username })}
           </Text>
         )}
 
         {isDirectMessageBlocked && (
           <Text style={[styles.dmStatus, { color: colors.danger, backgroundColor: colors.surface }]}>
             {blockedTheDirectMessage
-              ? 'You blocked this person. Unblock them in PeerChat settings to message them again.'
-              : 'This peer blocked your direct messages.'}
+              ? t('You blocked this person. Unblock them in PeerChat settings to message them again.')
+              : t('This peer blocked your direct messages.')}
           </Text>
         )}
 
@@ -2484,7 +3173,7 @@ export function PeerChatScreen ({
               autoFocus
               maxLength={PEERCHAT_SEARCH_QUERY_MAX_CHARACTERS}
               onChangeText={setSearchQuery}
-              placeholder='Search messages'
+              placeholder={t('Search messages')}
               placeholderTextColor={colors.muted}
               returnKeyType='search'
               style={[styles.searchInput, { backgroundColor: colors.input, color: colors.text }]}
@@ -2522,6 +3211,11 @@ export function PeerChatScreen ({
               animated: false,
               offset: Math.max(0, averageItemLength * index)
             })
+            // Near it now, so it has been drawn: once more, to land on it.
+            const target = scrollTargetRef.current
+            if (!target || scrollAttemptsRef.current >= 5) return
+            scrollAttemptsRef.current += 1
+            scrollToMessage(target, true)
           }}
           renderItem={({ item, index }) => {
             const dateLabel = formatPeerChatDateLabel(item.timestamp)
@@ -2531,6 +3225,15 @@ export function PeerChatScreen ({
             const senderMember = !item.self && !item.system
               ? activeRoom.members.find((member) => member.id === item.sender)
               : null
+            // Back to back from one person: one name, close together.
+            const place = messagePlaces.get(item.id)
+            // A picture or video shown in the chat gets a bubble that fits it.
+            const media = isInlinePeerChatMedia(item)
+            const marked = selectedMessageIds?.has(item.id) === true || highlightedMessageId === item.id
+            const holdMessage = () => {
+              tapFeedback()
+              showMessageActions(item)
+            }
             return (
               <View>
               {!!dateLabel && dateLabel !== previousDateLabel && (
@@ -2540,11 +3243,17 @@ export function PeerChatScreen ({
                   <View style={[styles.dateDividerLine, { backgroundColor: colors.border }]} />
                 </View>
               )}
-              <View style={[styles.messageRow, item.self ? styles.messageRowSelf : null, item.system ? styles.systemMessageRow : null]}>
+              <View style={[
+                styles.messageRow,
+                item.self ? styles.messageRowSelf : null,
+                item.system ? styles.systemMessageRow : null,
+                place?.followed ? styles.messageRowFollowed : null
+              ]}
+              >
               <PressPop
                 accessibilityHint={selectedMessageIds
-                  ? selectedMessageIds.has(item.id) ? 'Picked to forward. Tap to leave it out' : 'Tap to pick it to forward'
-                  : 'Long press for message actions'}
+                  ? selectedMessageIds.has(item.id) ? t('Picked to forward. Tap to leave it out') : t('Tap to pick it to forward')
+                  : t('Long press for message actions')}
                 accessibilityRole={item.system ? 'text' : 'button'}
                 accessibilityState={selectedMessageIds ? { selected: selectedMessageIds.has(item.id) } : undefined}
                 disabled={item.system}
@@ -2564,18 +3273,21 @@ export function PeerChatScreen ({
                 style={[
                   styles.messageBubble,
                   item.system ? styles.systemMessage : null,
+                  media ? styles.messageBubbleMedia : null,
+                  place?.followed ? (item.self ? styles.messageBubbleFollowedSelf : styles.messageBubbleFollowed) : null,
                   { backgroundColor: item.system ? colors.input : item.self ? colors.selfBubble : colors.peerBubble },
-                  selectedMessageIds?.has(item.id) ? [styles.messageBubblePicked, { borderColor: colors.accent }] : null
+                  // Picked to forward, or the message a reply or a search led to.
+                  marked ? [styles.messageBubblePicked, { borderColor: colors.accent }] : null
                 ]}
               >
-                {!item.self && !item.system && (
+                {!item.self && !item.system && !place?.grouped && (
                   <Pressable
-                    accessibilityHint={`Opens ${item.senderName}'s profile`}
+                    accessibilityHint={t("Opens {name}'s profile", { name: item.senderName })}
                     accessibilityRole='button'
                     hitSlop={4}
                     onPress={() => openMessageSenderProfile(item)}
                   >
-                    <View style={styles.messageSenderRow}>
+                    <View style={[styles.messageSenderRow, media ? styles.messageBubbleMediaInset : null]}>
                       {senderMember?.avatar
                         ? <Image source={{ uri: senderMember.avatar }} style={styles.messageSenderAvatar} />
                         : (
@@ -2588,17 +3300,24 @@ export function PeerChatScreen ({
                   </Pressable>
                 )}
                 {item.forwarded && (
-                  <Text style={[styles.forwardedLabel, { color: colors.muted }]}>Forwarded</Text>
+                  <Text style={[styles.forwardedLabel, media ? styles.messageBubbleMediaInset : null, { color: colors.muted }]}>{t('Forwarded')}</Text>
                 )}
                 {item.replyTo && (
-                  <View style={[styles.quotedReply, { borderLeftColor: colors.accent, backgroundColor: colors.input }]}>
+                  // Tapping the quote goes to the message it quotes.
+                  <Pressable
+                    accessibilityHint={t('Shows the message this replies to')}
+                    accessibilityRole='button'
+                    onLongPress={holdMessage}
+                    onPress={() => jumpToMessage(item.replyTo?.id || '')}
+                    style={[styles.quotedReply, media ? styles.quotedReplyMedia : null, { borderLeftColor: colors.accent, backgroundColor: colors.input }]}
+                  >
                     <Text numberOfLines={1} style={[styles.quotedReplySender, { color: colors.accent }]}>
                       {item.replyTo.sn || item.replyTo.sender}
                     </Text>
                     <Text numberOfLines={2} style={[styles.quotedReplyText, { color: colors.muted }]}>
                       {item.replyTo.text}
                     </Text>
-                  </View>
+                  </Pressable>
                 )}
                 {item.fileName
                   ? (
@@ -2608,10 +3327,7 @@ export function PeerChatScreen ({
                       onCallRpc={callRpc}
                       onOpenLocalFile={onOpenLocalFile}
                       onOpenUrl={onOpenUrl}
-                      onShowActions={() => {
-                        tapFeedback()
-                        showMessageActions(item)
-                      }}
+                      onShowActions={holdMessage}
                       onStatus={onStatus}
                       roomKey={activeRoom.roomKey}
                       onViewMedia={setMediaTarget}
@@ -2621,7 +3337,7 @@ export function PeerChatScreen ({
                     <>
                       {renderMessageText(
                         item.message,
-                        [profile?.username || '', ...activeRoom.members.map((member) => member.username)],
+                        mentionNames,
                         colors,
                         {
                           onCopyCode: copyMessageCode,
@@ -2647,7 +3363,7 @@ export function PeerChatScreen ({
                 <View style={[styles.reactionRow, item.self ? styles.reactionRowSelf : null]}>
                   {item.reactions.map((reaction) => (
                     <Pressable
-                      accessibilityLabel={`${reaction.emoji}, ${reaction.count} reaction${reaction.count === 1 ? '' : 's'}`}
+                      accessibilityLabel={tp({ one: '{emoji}, {count} reaction', other: '{emoji}, {count} reactions' }, reaction.count, { emoji: reaction.emoji })}
                       accessibilityRole='button'
                       disabled={isBusy}
                       key={reaction.emoji}
@@ -2666,9 +3382,13 @@ export function PeerChatScreen ({
                   ))}
                 </View>
               )}
-              <Text style={[styles.messageTime, item.system ? styles.systemMessageTime : null, { color: colors.muted }]}>
-                {formatMessageTime(item.timestamp)}
-              </Text>
+              {/* Left off when the next one in the group says the same, so the
+                  last of a group always has its time. */}
+              {!place?.sameTime && (
+                <Text style={[styles.messageTime, item.system ? styles.systemMessageTime : null, { color: colors.muted }]}>
+                  {formatMessageTime(item.timestamp)}
+                </Text>
+              )}
               </View>
               </View>
             )
@@ -2676,19 +3396,19 @@ export function PeerChatScreen ({
           ListEmptyComponent={(
             <View style={styles.emptyState}>
               <Text style={[styles.emptyTitle, { color: colors.text }]}>
-                {isSearching && searchQuery.trim() ? 'No matching messages' : 'No messages yet'}
+                {isSearching && searchQuery.trim() ? t('No matching messages') : t('No messages yet')}
               </Text>
               <Text style={[styles.helper, styles.emptyHelper, { color: colors.muted }]}>
                 {isSearching && searchQuery.trim()
-                  ? 'Try another search term.'
-                  : 'Share the room key, then start the conversation.'}
+                  ? t('Try another search term.')
+                  : t('Share the room key, then start the conversation.')}
               </Text>
             </View>
           )}
           />
           {showScrollToLatest && !isSearching && (
             <Pressable
-              accessibilityHint='Scrolls to the newest message'
+              accessibilityHint={t('Scrolls to the newest message')}
               accessibilityRole='button'
               onPress={() => {
                 isNearMessageBottomRef.current = true
@@ -2703,19 +3423,22 @@ export function PeerChatScreen ({
         </View>
 
         {error && <Text style={[styles.inlineError, { color: colors.danger }]}>{error}</Text>}
+        {chatNote && (
+          <Text accessibilityLiveRegion='polite' style={[styles.chatNote, { color: colors.muted }]}>{chatNote}</Text>
+        )}
 
         {replyTarget && (
           <View style={[styles.replyComposer, { borderTopColor: colors.border, backgroundColor: colors.input }]}>
             <View style={styles.replyComposerCopy}>
               <Text numberOfLines={1} style={[styles.quotedReplySender, { color: colors.accent }]}>
-                Replying to {replyTarget.sn || replyTarget.sender}
+                {t('Replying to {name}', { name: replyTarget.sn || replyTarget.sender })}
               </Text>
               <Text numberOfLines={1} style={[styles.quotedReplyText, { color: colors.muted }]}>
                 {replyTarget.text}
               </Text>
             </View>
             <Pressable
-              accessibilityLabel='Cancel reply'
+              accessibilityLabel={t('Cancel reply')}
               accessibilityRole='button'
               hitSlop={8}
               onPress={() => setReplyTarget(null)}
@@ -2731,7 +3454,7 @@ export function PeerChatScreen ({
               <View style={styles.mentionSuggestionRow}>
                 {mentionCandidates.map((member) => (
                   <Pressable
-                    accessibilityLabel={`Mention ${member.username}`}
+                    accessibilityLabel={t('Mention {name}', { name: member.username })}
                     accessibilityRole='button'
                     key={member.id}
                     onPress={() => setComposer((current) => insertMention(current, member.username))}
@@ -2749,7 +3472,7 @@ export function PeerChatScreen ({
             <View style={styles.emojiQuickRow}>
               {QUICK_REACTIONS.map((emoji) => (
                 <Pressable
-                  accessibilityLabel={`Insert ${emoji}`}
+                  accessibilityLabel={t('Insert {emoji}', { emoji })}
                   accessibilityRole='button'
                   key={emoji}
                   onPress={() => insertComposerEmoji(emoji)}
@@ -2761,7 +3484,7 @@ export function PeerChatScreen ({
             </View>
             {recentEmojis.length > 0 && !emojiSearchQuery.trim() && (
               <View>
-                <Text style={[styles.emojiSectionLabel, { color: colors.muted }]}>Recent</Text>
+                <Text style={[styles.emojiSectionLabel, { color: colors.muted }]}>{t('Recent')}</Text>
                 <ScrollView
                   horizontal
                   keyboardShouldPersistTaps='handled'
@@ -2769,7 +3492,7 @@ export function PeerChatScreen ({
                 >
                   {recentEmojis.map((emoji) => (
                     <Pressable
-                      accessibilityLabel={`Insert ${emoji}`}
+                      accessibilityLabel={t('Insert {emoji}', { emoji })}
                       accessibilityRole='button'
                       key={emoji}
                       onPress={() => insertComposerEmoji(emoji)}
@@ -2786,7 +3509,7 @@ export function PeerChatScreen ({
               autoCorrect={false}
               maxLength={PEERCHAT_EMOJI_SEARCH_MAX_CHARACTERS}
               onChangeText={setEmojiSearchQuery}
-              placeholder='Search emoji, e.g. cat'
+              placeholder={t('Search emoji, e.g. cat')}
               placeholderTextColor={colors.muted}
               style={[styles.emojiSearch, { backgroundColor: colors.input, color: colors.text }]}
               value={emojiSearchQuery}
@@ -2797,12 +3520,12 @@ export function PeerChatScreen ({
               initialNumToRender={64}
               keyboardShouldPersistTaps='handled'
               keyExtractor={(item) => item.emoji}
-              ListEmptyComponent={<Text style={[styles.emojiEmpty, { color: colors.muted }]}>No emoji found</Text>}
+              ListEmptyComponent={<Text style={[styles.emojiEmpty, { color: colors.muted }]}>{t('No emoji found')}</Text>}
               maxToRenderPerBatch={64}
               numColumns={8}
               renderItem={({ item }) => (
                 <Pressable
-                  accessibilityLabel={`Insert ${item.keywords[0]?.replaceAll('_', ' ') || item.emoji}`}
+                  accessibilityLabel={t('Insert {emoji}', { emoji: item.keywords[0]?.replaceAll('_', ' ') || item.emoji })}
                   accessibilityRole='button'
                   onPress={() => insertComposerEmoji(item.emoji)}
                   style={styles.emojiGridButton}
@@ -2823,10 +3546,10 @@ export function PeerChatScreen ({
                 onPress={() => setSelectedMessageIds(null)}
                 style={[styles.selectBarButton, { backgroundColor: colors.input }]}
               >
-                <Text style={[styles.selectBarButtonText, { color: colors.text }]}>Cancel</Text>
+                <Text style={[styles.selectBarButtonText, { color: colors.text }]}>{t('Cancel')}</Text>
               </Pressable>
               <Text accessibilityLiveRegion='polite' style={[styles.selectBarCount, { color: colors.muted }]}>
-                {selectedMessageIds.size} selected
+                {tp({ one: '{count} selected', other: '{count} selected' }, selectedMessageIds.size)}
               </Text>
               <Pressable
                 accessibilityRole='button'
@@ -2837,14 +3560,14 @@ export function PeerChatScreen ({
                 }}
                 style={[styles.selectBarButton, { backgroundColor: colors.accent }, selectedMessageIds.size === 0 || isBusy ? styles.disabled : null]}
               >
-                <Text style={[styles.selectBarButtonText, { color: '#ffffff' }]}>Forward</Text>
+                <Text style={[styles.selectBarButtonText, { color: '#ffffff' }]}>{t('Forward')}</Text>
               </Pressable>
             </View>
             )
           : (
         <View style={[styles.composer, { borderTopColor: colors.border }]}> 
           <Pressable
-            accessibilityLabel='Choose emoji'
+            accessibilityLabel={t('Choose emoji')}
             accessibilityRole='button'
             disabled={isBusy || activeRoom.pendingAcceptance || activeRoom.rejected || isDirectMessageBlocked || isRemovedFromRoom}
             onPress={() => {
@@ -2856,7 +3579,7 @@ export function PeerChatScreen ({
             <Text style={[styles.emojiButtonText, { color: colors.accent }]}>:)</Text>
           </Pressable>
           <Pressable
-            accessibilityLabel='Attach file'
+            accessibilityLabel={t('Attach file')}
             accessibilityRole='button'
             disabled={isBusy || activeRoom.pendingAcceptance || activeRoom.rejected || isDirectMessageBlocked || isRemovedFromRoom}
             onPress={attachFile}
@@ -2871,9 +3594,15 @@ export function PeerChatScreen ({
           <TextInput
             value={composer}
             onChangeText={setComposer}
-            placeholder='Message'
+            placeholder={t('Message')}
             placeholderTextColor={colors.muted}
             multiline
+            // A message box, never a login. Without these, Android took it for
+            // one once a message was sent and offered saved passwords over the
+            // keyboard.
+            autoComplete='off'
+            importantForAutofill='no'
+            textContentType='none'
             editable={!activeRoom.pendingAcceptance && !activeRoom.rejected && !isDirectMessageBlocked}
             maxLength={64 * 1024}
             style={[
@@ -2905,7 +3634,7 @@ export function PeerChatScreen ({
         >
           <KeyboardAvoidingView behavior='padding' style={styles.roomInfoModalRoot}>
             <Pressable
-              accessibilityLabel='Close forward'
+              accessibilityLabel={t('Close forward')}
               accessibilityRole='button'
               onPress={() => setIsForwardOpen(false)}
               style={styles.roomInfoBackdrop}
@@ -2915,9 +3644,9 @@ export function PeerChatScreen ({
               style={[styles.roomInfoPanel, { backgroundColor: colors.surface }]}
             >
               <View style={[styles.roomInfoHeader, { borderBottomColor: colors.border }]}>
-                <Text style={[styles.roomInfoHeading, { color: colors.text }]}>Forward to</Text>
+                <Text style={[styles.roomInfoHeading, { color: colors.text }]}>{t('Forward to')}</Text>
                 <Pressable
-                  accessibilityLabel='Close forward'
+                  accessibilityLabel={t('Close forward')}
                   accessibilityRole='button'
                   hitSlop={8}
                   onPress={() => setIsForwardOpen(false)}
@@ -2931,7 +3660,7 @@ export function PeerChatScreen ({
                   autoCorrect={false}
                   maxLength={PEERCHAT_SEARCH_QUERY_MAX_CHARACTERS}
                   onChangeText={setForwardQuery}
-                  placeholder='Search chats'
+                  placeholder={t('Search chats')}
                   placeholderTextColor={colors.muted}
                   returnKeyType='search'
                   style={[styles.input, { backgroundColor: colors.input, color: colors.text }]}
@@ -2942,7 +3671,7 @@ export function PeerChatScreen ({
                     (!forwardQuery.trim() || room.name.toLowerCase().includes(forwardQuery.trim().toLowerCase())))
                   .map((room) => (
                     <Pressable
-                      accessibilityHint={`Forwards the picked messages to ${room.name}`}
+                      accessibilityHint={t('Forwards the picked messages to {name}', { name: room.name })}
                       accessibilityRole='button'
                       key={room.roomKey}
                       onPress={() => forwardSelectedMessages(room)}
@@ -2969,6 +3698,7 @@ export function PeerChatScreen ({
         <Modal
           supportedOrientations={MODAL_ORIENTATIONS}
           animationType='fade'
+          onDismiss={flushPendingModal}
           onRequestClose={() => setMessageActionTarget(null)}
           statusBarTranslucent
           transparent
@@ -2976,7 +3706,7 @@ export function PeerChatScreen ({
         >
           <View accessibilityViewIsModal style={styles.actionSheetRoot}>
             <Pressable
-              accessibilityLabel='Close message actions'
+              accessibilityLabel={t('Close message actions')}
               accessibilityRole='button'
               onPress={() => setMessageActionTarget(null)}
               style={styles.actionSheetBackdrop}
@@ -2987,16 +3717,16 @@ export function PeerChatScreen ({
                 style={[styles.actionSheet, { backgroundColor: colors.surface }]}
               >
                 <Text numberOfLines={1} style={[styles.actionSheetTitle, { color: colors.text }]}>
-                  {messageActionTarget.self ? 'You' : messageActionTarget.senderName}
+                  {messageActionTarget.self ? t('You') : messageActionTarget.senderName}
                 </Text>
                 <Text numberOfLines={2} style={[styles.actionSheetPreview, { color: colors.muted }]}>
-                  {Array.from(messageActionTarget.message).slice(0, 200).join('')}
+                  {Array.from(messagePreviewText(messageActionTarget)).slice(0, 200).join('')}
                 </Text>
                 {!isMessageInfoVisible && (
                   <View style={[styles.actionSheetReactionRow, { backgroundColor: colors.input }]}>
                     {QUICK_REACTIONS.map((emoji) => (
                       <Pressable
-                        accessibilityLabel={`React with ${emoji}`}
+                        accessibilityLabel={t('React with {emoji}', { emoji })}
                         accessibilityRole='button'
                         disabled={isBusy}
                         key={emoji}
@@ -3016,38 +3746,45 @@ export function PeerChatScreen ({
                         {formatPeerChatMessageDetails(messageActionTarget.timestamp)}
                       </Text>
                       <Pressable accessibilityRole='button' onPress={() => setIsMessageInfoVisible(false)} style={styles.actionSheetAction}>
-                        <Text style={[styles.actionSheetActionText, { color: colors.accent }]}>Back</Text>
+                        <Text style={[styles.actionSheetActionText, { color: colors.accent }]}>{t('Back')}</Text>
                       </Pressable>
                     </>
                     )
                   : (
                     <>
                       <Pressable accessibilityRole='button' onPress={() => replyToMessage(messageActionTarget)} style={styles.actionSheetAction}>
-                        <Text style={[styles.actionSheetActionText, { color: colors.text }]}>Reply</Text>
+                        <Text style={[styles.actionSheetActionText, { color: colors.text }]}>{t('Reply')}</Text>
                       </Pressable>
                       <Pressable accessibilityRole='button' onPress={() => copyMessageText(messageActionTarget)} style={styles.actionSheetAction}>
-                        <Text style={[styles.actionSheetActionText, { color: colors.text }]}>Copy text</Text>
+                        <Text style={[styles.actionSheetActionText, { color: colors.text }]}>{t('Copy text')}</Text>
                       </Pressable>
                       <Pressable accessibilityRole='button' onPress={() => startSelectingMessages(messageActionTarget)} style={styles.actionSheetAction}>
-                        <Text style={[styles.actionSheetActionText, { color: colors.text }]}>Select</Text>
+                        <Text style={[styles.actionSheetActionText, { color: colors.text }]}>{t('Select')}</Text>
                       </Pressable>
+                      {canSaveMessageMedia(messageActionTarget) && (
+                        <Pressable accessibilityRole='button' onPress={() => saveMessageMedia(messageActionTarget)} style={styles.actionSheetAction}>
+                          <Text style={[styles.actionSheetActionText, { color: colors.text }]}>
+                            {Platform.OS === 'ios' ? t('Save to Photos') : t('Save to gallery')}
+                          </Text>
+                        </Pressable>
+                      )}
                       <Pressable accessibilityRole='button' onPress={showMessageInfo} style={styles.actionSheetAction}>
-                        <Text style={[styles.actionSheetActionText, { color: colors.text }]}>Info</Text>
+                        <Text style={[styles.actionSheetActionText, { color: colors.text }]}>{t('Info')}</Text>
                       </Pressable>
                       {!messageActionTarget.self && !messageActionTarget.system && (
                         <>
                           <Pressable accessibilityRole='button' onPress={() => reportMessage(messageActionTarget)} style={styles.actionSheetAction}>
-                            <Text style={[styles.actionSheetActionText, { color: colors.danger }]}>Report</Text>
+                            <Text style={[styles.actionSheetActionText, { color: colors.danger }]}>{t('Report')}</Text>
                           </Pressable>
                           <Pressable accessibilityRole='button' onPress={() => blockMessageSender(messageActionTarget)} style={styles.actionSheetAction}>
                             <Text style={[styles.actionSheetActionText, { color: colors.danger }]}>
-                              Block {messageActionTarget.senderName}
+                              {t('Block {name}', { name: messageActionTarget.senderName })}
                             </Text>
                           </Pressable>
                         </>
                       )}
                       <Pressable accessibilityRole='button' onPress={() => setMessageActionTarget(null)} style={styles.actionSheetAction}>
-                        <Text style={[styles.actionSheetActionText, { color: colors.accent }]}>Cancel</Text>
+                        <Text style={[styles.actionSheetActionText, { color: colors.accent }]}>{t('Cancel')}</Text>
                       </Pressable>
                     </>
                     )}
@@ -3068,7 +3805,7 @@ export function PeerChatScreen ({
         >
           <View accessibilityViewIsModal style={styles.actionSheetRoot}>
             <Pressable
-              accessibilityLabel='Close the attachment choices'
+              accessibilityLabel={t('Close the attachment choices')}
               accessibilityRole='button'
               onPress={() => setIsAttachSheetOpen(false)}
               style={styles.actionSheetBackdrop}
@@ -3077,35 +3814,35 @@ export function PeerChatScreen ({
               edges={['bottom', 'left', 'right']}
               style={[styles.actionSheet, { backgroundColor: colors.surface }]}
             >
-              <Text style={[styles.actionSheetTitle, { color: colors.text }]}>Attachments</Text>
+              <Text style={[styles.actionSheetTitle, { color: colors.text }]}>{t('Attachments')}</Text>
               <View style={[styles.actionSheetDivider, { backgroundColor: colors.border }]} />
               <Pressable
                 accessibilityRole='button'
                 onPress={() => attachFrom('library')}
                 style={styles.actionSheetAction}
               >
-                <Text style={[styles.actionSheetActionText, { color: colors.text }]}>Photo library</Text>
+                <Text style={[styles.actionSheetActionText, { color: colors.text }]}>{t('Photo library')}</Text>
               </Pressable>
               <Pressable
                 accessibilityRole='button'
                 onPress={() => attachFrom('camera')}
                 style={styles.actionSheetAction}
               >
-                <Text style={[styles.actionSheetActionText, { color: colors.text }]}>Take a photo</Text>
+                <Text style={[styles.actionSheetActionText, { color: colors.text }]}>{t('Take a photo')}</Text>
               </Pressable>
               <Pressable
                 accessibilityRole='button'
                 onPress={() => attachFrom('files')}
                 style={styles.actionSheetAction}
               >
-                <Text style={[styles.actionSheetActionText, { color: colors.text }]}>Choose files</Text>
+                <Text style={[styles.actionSheetActionText, { color: colors.text }]}>{t('Choose files')}</Text>
               </Pressable>
               <Pressable
                 accessibilityRole='button'
                 onPress={() => setIsAttachSheetOpen(false)}
                 style={styles.actionSheetAction}
               >
-                <Text style={[styles.actionSheetActionText, { color: colors.accent }]}>Cancel</Text>
+                <Text style={[styles.actionSheetActionText, { color: colors.accent }]}>{t('Cancel')}</Text>
               </Pressable>
             </SafeAreaView>
           </View>
@@ -3120,7 +3857,7 @@ export function PeerChatScreen ({
         >
           <View accessibilityViewIsModal style={styles.actionSheetRoot}>
             <Pressable
-              accessibilityLabel='Close link actions'
+              accessibilityLabel={t('Close link actions')}
               accessibilityRole='button'
               onPress={() => setLinkActionTarget(null)}
               style={styles.actionSheetBackdrop}
@@ -3130,7 +3867,7 @@ export function PeerChatScreen ({
                 edges={['bottom', 'left', 'right']}
                 style={[styles.actionSheet, { backgroundColor: colors.surface }]}
               >
-                <Text numberOfLines={1} style={[styles.actionSheetTitle, { color: colors.text }]}>Link</Text>
+                <Text numberOfLines={1} style={[styles.actionSheetTitle, { color: colors.text }]}>{t('Link')}</Text>
                 <Text numberOfLines={3} style={[styles.actionSheetPreview, { color: colors.muted }]}>
                   {linkActionTarget}
                 </Text>
@@ -3140,7 +3877,7 @@ export function PeerChatScreen ({
                   onPress={() => copyMessageLink(linkActionTarget)}
                   style={styles.actionSheetAction}
                 >
-                  <Text style={[styles.actionSheetActionText, { color: colors.text }]}>Copy link</Text>
+                  <Text style={[styles.actionSheetActionText, { color: colors.text }]}>{t('Copy link')}</Text>
                 </Pressable>
                 <Pressable
                   accessibilityRole='button'
@@ -3150,14 +3887,14 @@ export function PeerChatScreen ({
                   }}
                   style={styles.actionSheetAction}
                 >
-                  <Text style={[styles.actionSheetActionText, { color: colors.text }]}>Open link</Text>
+                  <Text style={[styles.actionSheetActionText, { color: colors.text }]}>{t('Open link')}</Text>
                 </Pressable>
                 <Pressable
                   accessibilityRole='button'
                   onPress={() => setLinkActionTarget(null)}
                   style={styles.actionSheetAction}
                 >
-                  <Text style={[styles.actionSheetActionText, { color: colors.accent }]}>Cancel</Text>
+                  <Text style={[styles.actionSheetActionText, { color: colors.accent }]}>{t('Cancel')}</Text>
                 </Pressable>
               </SafeAreaView>
             )}
@@ -3186,21 +3923,141 @@ export function PeerChatScreen ({
     )
   }
 
+  // One chat in the list.
+  function renderRoomRow (item: PeerChatRoom) {
+    return (
+      <Pressable
+        accessibilityHint={t('Long press for chat options')}
+        accessibilityRole='button'
+        onLongPress={() => {
+          tapFeedback()
+          showRoomActions(item)
+        }}
+        onPress={() => openRoom(item)}
+        style={({ pressed }) => [
+          styles.roomRow,
+          { borderBottomColor: colors.border },
+          pressed ? { backgroundColor: colors.input } : null
+        ]}
+      >
+        {item.avatar
+          ? <Image source={{ uri: item.avatar }} style={styles.roomAvatarImage} />
+          : (
+            <View style={[styles.roomAvatar, { backgroundColor: colors.accentSoft }]}>
+              <Text style={[styles.roomAvatarText, { color: colors.accent }]}>{getRoomInitials(item.name)}</Text>
+            </View>
+            )}
+        <View style={styles.roomCopy}>
+          <View style={styles.roomTitleRow}>
+            <Text numberOfLines={1} style={[styles.roomTitle, { color: colors.text }]}>{item.name}</Text>
+          </View>
+          <Text numberOfLines={1} style={[styles.roomPreview, { color: colors.muted }]}>
+            {/* A room with nothing in it yet says so, as the desktop does.
+                It used to show the start of the room key, which is the
+                room's secret in an older room. */}
+            {item.lastMessage
+              ? t('{name}: {message}', { name: item.lastMessage.senderName, message: item.lastMessage.message })
+              : t('No messages yet')}
+          </Text>
+        </View>
+        <View style={styles.roomMeta}>
+          <Text style={[styles.roomTime, { color: colors.muted }]}>{formatRoomTime(item)}</Text>
+          <View style={styles.roomStateRow}>
+            {/* Mentions and messages in bubbles of their own, "1 @" then
+                "2". A muted chat greys its count, as most apps do, and
+                still shows a mention. */}
+            {item.unreadMentions > 0 && (
+              <View
+                accessibilityLabel={tp({ one: '{count} unread mention', other: '{count} unread mentions' }, item.unreadMentions)}
+                style={[styles.unreadBadge, { backgroundColor: colors.accent }]}
+              >
+                <Text style={styles.unreadBadgeText}>{item.unreadMentions} @</Text>
+              </View>
+            )}
+            {item.unreadCount > 0 && (
+              <View
+                accessibilityLabel={tp({ one: '{count} unread message', other: '{count} unread messages' }, item.unreadCount)}
+                style={[styles.unreadBadge, { backgroundColor: item.isMuted ? colors.muted : colors.accent }]}
+              >
+                <Text style={styles.unreadBadgeText}>{item.unreadCount}</Text>
+              </View>
+            )}
+            {item.isMuted && (
+              <MuteIcon width={ROOM_STATE_ICON_SIZE} height={ROOM_STATE_ICON_SIZE} color={colors.muted} />
+            )}
+            {item.isPinned && (
+              <PinIcon width={ROOM_STATE_ICON_SIZE} height={ROOM_STATE_ICON_SIZE} color={colors.accent} />
+            )}
+          </View>
+          <Text style={[styles.roomPeerCount, { color: isRoomIdle(item) ? colors.idleText : (item.isDM ? isRoomOnline(item) : item.peerCount > 0) ? colors.success : colors.muted }]}>
+            {formatRoomConnection(item, true)}
+          </Text>
+        </View>
+      </Pressable>
+    )
+  }
+
+  // A message the search found, under the chat it is in, with the words that
+  // matched in bold. Tapping it opens the chat at that message.
+  function renderSearchResult (result: PeerChatSearchResult) {
+    const room = rooms.find((candidate) => candidate.roomKey === result.roomKey)
+    // A direct message is named after the other person, so only your own
+    // words need a name in front of them, as in a notification.
+    const sender = result.self ? t('You') : result.isDM ? '' : result.senderName
+    // The name goes where the language puts it, before or after the words.
+    const [beforeMessage, afterMessage] = textAround(t('{name}: {message}'), '{message}')
+      .map((part) => part.split('{name}').join(sender))
+    return (
+      <Pressable
+        accessibilityHint={t('Opens {name} at this message', { name: result.roomName })}
+        accessibilityRole='button'
+        onPress={() => openSearchResult(result)}
+        style={({ pressed }) => [
+          styles.roomRow,
+          { borderBottomColor: colors.border },
+          pressed ? { backgroundColor: colors.input } : null
+        ]}
+      >
+        {room?.avatar
+          ? <Image source={{ uri: room.avatar }} style={styles.roomAvatarImage} />
+          : (
+            <View style={[styles.roomAvatar, { backgroundColor: colors.accentSoft }]}>
+              <Text style={[styles.roomAvatarText, { color: colors.accent }]}>{getRoomInitials(result.roomName)}</Text>
+            </View>
+            )}
+        <View style={styles.roomCopy}>
+          <View style={styles.roomTitleRow}>
+            <Text numberOfLines={1} style={[styles.roomTitle, { color: colors.text }]}>{result.roomName}</Text>
+          </View>
+          <Text numberOfLines={2} style={[styles.roomPreview, { color: colors.muted }]}>
+            {sender ? beforeMessage : ''}
+            {splitPeerChatSearchMatch(result.message, roomSearchQuery).map((part, index) => (
+              <Text key={index} style={part.match ? [styles.searchMatch, { color: colors.text }] : null}>{part.text}</Text>
+            ))}
+            {sender ? afterMessage : ''}
+          </Text>
+        </View>
+        <Text style={[styles.searchResultTime, { color: colors.muted }]}>{formatListTime(result.timestamp)}</Text>
+      </Pressable>
+    )
+  }
+
   return (
     <>
       <FlatList
       style={[styles.screen, { backgroundColor: colors.background }]}
       contentContainerStyle={styles.landingContent}
-      data={visibleRooms}
-      keyExtractor={(item) => item.roomKey}
+      data={landingItems}
+      keyExtractor={(entry) => entry.key}
+      keyboardShouldPersistTaps='handled'
       ListHeaderComponent={(
         <View style={styles.landingHeader}>
           <View style={styles.titleRow}>
             <Image source={PEERCHAT_ICON} style={styles.logo} />
             <Text style={[styles.title, styles.titleCopy, { color: colors.text }]}>PeerChat</Text>
             <Pressable
-              accessibilityHint='Shows your invite code and finds people to message'
-              accessibilityLabel='Find people'
+              accessibilityHint={t('Shows your invite code and finds people to message')}
+              accessibilityLabel={t('Find people')}
               accessibilityRole='button'
               hitSlop={8}
               onPress={openDiscover}
@@ -3209,7 +4066,7 @@ export function PeerChatScreen ({
               <SearchIcon width={21} height={21} color={colors.muted} />
             </Pressable>
             <Pressable
-              accessibilityLabel='PeerChat settings'
+              accessibilityLabel={t('PeerChat settings')}
               accessibilityRole='button'
               hitSlop={8}
               onPress={openPeerChatSettings}
@@ -3220,7 +4077,7 @@ export function PeerChatScreen ({
           </View>
 
           <Pressable
-            accessibilityHint='Opens your PeerChat profile'
+            accessibilityHint={t('Opens your PeerChat profile')}
             accessibilityRole='button'
             onPress={() => {
               if (!profile?.username) {
@@ -3246,7 +4103,7 @@ export function PeerChatScreen ({
                 </View>
                 )}
             <Text numberOfLines={1} style={[styles.profileSummaryName, { color: colors.text }]}>
-              {profileName ? `${profileName}${profile?.device ? `@${profile.device}` : ''}` : 'Set up your profile'}
+              {profileName ? `${profileName}${profile?.device ? `@${profile.device}` : ''}` : t('Set up your profile')}
             </Text>
           </Pressable>
 
@@ -3269,7 +4126,7 @@ export function PeerChatScreen ({
               style={styles.roomInfoModalRoot}
             >
               <Pressable
-                accessibilityLabel='Close PeerChat settings'
+                accessibilityLabel={t('Close PeerChat settings')}
                 accessibilityRole='button'
                 onPress={() => setShowPeerChatSettings(false)}
                 style={styles.roomInfoBackdrop}
@@ -3281,7 +4138,7 @@ export function PeerChatScreen ({
                 <View style={[styles.roomInfoHeader, { borderBottomColor: colors.border }]}>
                   {settingsPage === 'about' && (
                     <Pressable
-                      accessibilityLabel='Back to PeerChat settings'
+                      accessibilityLabel={t('Back to PeerChat settings')}
                       accessibilityRole='button'
                       hitSlop={8}
                       onPress={() => setSettingsPage('main')}
@@ -3291,10 +4148,10 @@ export function PeerChatScreen ({
                     </Pressable>
                   )}
                   <Text style={[styles.roomInfoHeading, { color: colors.text }]}>
-                    {settingsPage === 'about' ? 'About PeerChat' : 'PeerChat settings'}
+                    {settingsPage === 'about' ? t('About PeerChat') : t('PeerChat settings')}
                   </Text>
                   <Pressable
-                    accessibilityLabel='Close PeerChat settings'
+                    accessibilityLabel={t('Close PeerChat settings')}
                     accessibilityRole='button'
                     hitSlop={8}
                     onPress={() => setShowPeerChatSettings(false)}
@@ -3310,7 +4167,7 @@ export function PeerChatScreen ({
                 <ScrollView keyboardShouldPersistTaps='handled' contentContainerStyle={styles.profileSettings}>
                   <View style={styles.profileRow}>
                     <Pressable
-                      accessibilityLabel='Change profile image'
+                      accessibilityLabel={t('Change profile image')}
                       accessibilityRole='button'
                       onPress={() => chooseAvatar(profileAvatar, setProfileAvatar)}
                     >
@@ -3328,14 +4185,14 @@ export function PeerChatScreen ({
                       autoCapitalize='words'
                       autoCorrect={false}
                       maxLength={50}
-                      placeholder='Your display name'
+                      placeholder={t('Your display name')}
                       placeholderTextColor={colors.muted}
                       style={[styles.input, styles.profileInput, { backgroundColor: colors.input, color: colors.text }]}
                     />
                     {profile?.device
                       ? (
                         <Text
-                          accessibilityLabel={`This device shows as ${profile.device}. That stays the same when the name changes.`}
+                          accessibilityLabel={t('This device shows as {device}. That stays the same when the name changes.', { device: profile.device })}
                           style={[styles.profileDevice, { color: colors.muted }]}
                         >
                           @{profile.device}
@@ -3347,7 +4204,7 @@ export function PeerChatScreen ({
                     maxLength={300}
                     multiline
                     onChangeText={setProfileBio}
-                    placeholder='Bio (optional)'
+                    placeholder={t('Bio (optional)')}
                     placeholderTextColor={colors.muted}
                     style={[styles.input, styles.bioInput, { backgroundColor: colors.input, color: colors.text }]}
                     value={profileBio}
@@ -3359,11 +4216,11 @@ export function PeerChatScreen ({
                     style={[styles.preferenceRow, { backgroundColor: colors.input }]}
                   >
                     <View style={styles.preferenceCopy}>
-                      <Text style={[styles.memberName, { color: colors.text }]}>Link previews</Text>
-                      <Text style={[styles.attachmentMeta, { color: colors.muted }]}>Fetch page details only when you send a link</Text>
+                      <Text style={[styles.memberName, { color: colors.text }]}>{t('Link previews')}</Text>
+                      <Text style={[styles.attachmentMeta, { color: colors.muted }]}>{t('Fetch page details only when you send a link')}</Text>
                     </View>
                     <Text style={[styles.preferenceState, { color: linkPreviewsEnabled ? colors.accent : colors.muted }]}>
-                      {linkPreviewsEnabled ? 'On' : 'Off'}
+                      {linkPreviewsEnabled ? t('On') : t('Off')}
                     </Text>
                   </Pressable>
                   <Pressable
@@ -3374,15 +4231,15 @@ export function PeerChatScreen ({
                     style={[styles.preferenceRow, { backgroundColor: colors.input }, !notificationPreferencesReady || isBusy ? styles.disabled : null]}
                   >
                     <View style={styles.preferenceCopy}>
-                      <Text style={[styles.memberName, { color: colors.text }]}>Message notifications</Text>
+                      <Text style={[styles.memberName, { color: colors.text }]}>{t('Message notifications')}</Text>
                       <Text style={[styles.attachmentMeta, { color: colors.muted }]}>
                         {Platform.OS === 'ios'
-                          ? 'Background delivery is best effort and stops when iOS suspends PeerSky'
-                          : 'Keep PeerChat connected and notify for unread messages in the background'}
+                          ? t('Background delivery is best effort and stops when iOS suspends PeerSky')
+                          : t('Keep PeerChat connected and notify for unread messages in the background')}
                       </Text>
                     </View>
                     <Text style={[styles.preferenceState, { color: notificationsEnabled ? colors.accent : colors.muted }]}>
-                      {notificationsEnabled ? 'On' : 'Off'}
+                      {notificationsEnabled ? t('On') : t('Off')}
                     </Text>
                   </Pressable>
                   <Pressable
@@ -3393,42 +4250,42 @@ export function PeerChatScreen ({
                     style={[styles.preferenceRow, { backgroundColor: colors.input }, isBusy ? styles.disabled : null]}
                   >
                     <View style={styles.preferenceCopy}>
-                      <Text style={[styles.memberName, { color: colors.text }]}>Chat sounds</Text>
-                      <Text style={[styles.attachmentMeta, { color: colors.muted }]}>Play a sound when messages are sent or received</Text>
+                      <Text style={[styles.memberName, { color: colors.text }]}>{t('Chat sounds')}</Text>
+                      <Text style={[styles.attachmentMeta, { color: colors.muted }]}>{t('Play a sound when messages are sent or received')}</Text>
                     </View>
                     <Text style={[styles.preferenceState, { color: soundsEnabled ? colors.accent : colors.muted }]}>
-                      {soundsEnabled ? 'On' : 'Off'}
+                      {soundsEnabled ? t('On') : t('Off')}
                     </Text>
                   </Pressable>
                   {blockedPeers.length > 0 && (
                     <View style={styles.settingsSection}>
-                      <Text style={[styles.settingsSectionTitle, { color: colors.muted }]}>Blocked people</Text>
+                      <Text style={[styles.settingsSectionTitle, { color: colors.muted }]}>{t('Blocked people')}</Text>
                       {blockedPeers.map((blocked) => (
                         <View key={blocked.peerId} style={[styles.preferenceRow, { backgroundColor: colors.input }]}>
                           <View style={styles.preferenceCopy}>
                             <Text numberOfLines={1} style={[styles.memberName, { color: colors.text }]}>{blocked.username}</Text>
-                            <Text style={[styles.attachmentMeta, { color: colors.muted }]}>Hidden everywhere, and cannot message you</Text>
+                            <Text style={[styles.attachmentMeta, { color: colors.muted }]}>{t('Hidden everywhere, and cannot message you')}</Text>
                           </View>
                           <Pressable
                             accessibilityRole='button'
                             disabled={isBusy}
                             onPress={() => void unblockPeerId(blocked.peerId, blocked.username)}
                           >
-                            <Text style={[styles.preferenceState, { color: colors.accent }]}>Unblock</Text>
+                            <Text style={[styles.preferenceState, { color: colors.accent }]}>{t('Unblock')}</Text>
                           </Pressable>
                         </View>
                       ))}
                     </View>
                   )}
                   <Pressable
-                    accessibilityHint='Explains how PeerChat works'
+                    accessibilityHint={t('Explains how PeerChat works')}
                     accessibilityRole='button'
                     onPress={() => setSettingsPage('about')}
                     style={[styles.preferenceRow, { backgroundColor: colors.input }]}
                   >
                     <View style={styles.preferenceCopy}>
-                      <Text style={[styles.memberName, { color: colors.text }]}>About PeerChat</Text>
-                      <Text style={[styles.attachmentMeta, { color: colors.muted }]}>How it works, in plain words</Text>
+                      <Text style={[styles.memberName, { color: colors.text }]}>{t('About PeerChat')}</Text>
+                      <Text style={[styles.attachmentMeta, { color: colors.muted }]}>{t('How it works, in plain words')}</Text>
                     </View>
                     <Text style={[styles.preferenceState, { color: colors.muted }]}>›</Text>
                   </Pressable>
@@ -3438,10 +4295,10 @@ export function PeerChatScreen ({
                     style={[styles.preferenceRow, { backgroundColor: colors.input }]}
                   >
                     <View style={styles.preferenceCopy}>
-                      <Text style={[styles.memberName, { color: colors.text }]}>Source code</Text>
-                      <Text style={[styles.attachmentMeta, { color: colors.muted }]}>Anyone can read how this works</Text>
+                      <Text style={[styles.memberName, { color: colors.text }]}>{t('Source code')}</Text>
+                      <Text style={[styles.attachmentMeta, { color: colors.muted }]}>{t('Anyone can read how this works')}</Text>
                     </View>
-                    <Text style={[styles.preferenceState, { color: colors.accent }]}>Open</Text>
+                    <Text style={[styles.preferenceState, { color: colors.accent }]}>{t('Open')}</Text>
                   </Pressable>
                   <Pressable
                     accessibilityRole='button'
@@ -3450,8 +4307,8 @@ export function PeerChatScreen ({
                     style={[styles.preferenceRow, { backgroundColor: colors.input }, isBusy ? styles.disabled : null]}
                   >
                     <View style={styles.preferenceCopy}>
-                      <Text style={[styles.memberName, { color: colors.danger }]}>Delete PeerChat profile</Text>
-                      <Text style={[styles.attachmentMeta, { color: colors.muted }]}>Your name, chats and files, gone from this device</Text>
+                      <Text style={[styles.memberName, { color: colors.danger }]}>{t('Delete PeerChat profile')}</Text>
+                      <Text style={[styles.attachmentMeta, { color: colors.muted }]}>{t('Your name, chats and files, gone from this device')}</Text>
                     </View>
                   </Pressable>
                   {error && <Text accessibilityRole='alert' style={[styles.modalError, { color: colors.danger }]}>{error}</Text>}
@@ -3468,7 +4325,7 @@ export function PeerChatScreen ({
                         })}
                         style={[styles.profileSaveButton, { backgroundColor: colors.accent }, !profileName.trim() || isBusy ? styles.disabled : null]}
                       >
-                        <Text style={styles.profileSaveText}>Save changes</Text>
+                        <Text style={styles.profileSaveText}>{t('Save changes')}</Text>
                       </Pressable>
                   )}
                 </ScrollView>
@@ -3487,7 +4344,7 @@ export function PeerChatScreen ({
               ]}
             >
               <Text style={[styles.quickActionSymbol, { color: landingAction === 'create' ? '#ffffff' : colors.accent }]}>+</Text>
-              <Text style={[styles.quickActionText, { color: landingAction === 'create' ? '#ffffff' : colors.text }]}>Create group</Text>
+              <Text style={[styles.quickActionText, { color: landingAction === 'create' ? '#ffffff' : colors.text }]}>{t('Create group')}</Text>
             </Pressable>
             <Pressable
               accessibilityRole='button'
@@ -3498,7 +4355,7 @@ export function PeerChatScreen ({
               ]}
             >
               <Text style={[styles.quickActionSymbol, { color: landingAction === 'join' ? '#ffffff' : colors.accent }]}>#</Text>
-              <Text style={[styles.quickActionText, { color: landingAction === 'join' ? '#ffffff' : colors.text }]}>Join group</Text>
+              <Text style={[styles.quickActionText, { color: landingAction === 'join' ? '#ffffff' : colors.text }]}>{t('Join group')}</Text>
             </Pressable>
           </View>
 
@@ -3512,13 +4369,13 @@ export function PeerChatScreen ({
                 {roomAvatar
                   ? <Image source={{ uri: roomAvatar }} style={styles.avatarEditorImage} />
                   : <View style={[styles.avatarEditorImage, { backgroundColor: colors.accentSoft }]} />}
-                <Text style={[styles.memberMessage, { color: colors.accent }]}>Add group image</Text>
+                <Text style={[styles.memberMessage, { color: colors.accent }]}>{t('Add group image')}</Text>
               </Pressable>
               <TextInput
                 value={roomName}
                 onChangeText={setRoomName}
                 maxLength={80}
-                placeholder='Group name'
+                placeholder={t('Group name')}
                 placeholderTextColor={colors.muted}
                 style={[styles.input, styles.createActionInput, { backgroundColor: colors.input, color: colors.text }]}
               />
@@ -3526,7 +4383,7 @@ export function PeerChatScreen ({
                 value={roomBio}
                 onChangeText={setRoomBio}
                 maxLength={300}
-                placeholder='Group description (optional)'
+                placeholder={t('Group description (optional)')}
                 placeholderTextColor={colors.muted}
                 style={[styles.input, styles.createActionInput, { backgroundColor: colors.input, color: colors.text }]}
               />
@@ -3536,16 +4393,16 @@ export function PeerChatScreen ({
                 autoCapitalize='none'
                 autoCorrect={false}
                 maxLength={512}
-                placeholder='https:// link (optional)'
+                placeholder={t('https:// link (optional)')}
                 placeholderTextColor={colors.muted}
                 style={[styles.input, styles.createActionInput, { backgroundColor: colors.input, color: colors.text }]}
               />
               <Text style={[styles.helper, { color: colors.muted }]}>
-                Group name, picture, description and link cannot be edited after creation.
+                {t('You can change these later, and everyone in the room sees the change.')}
               </Text>
-              <Text style={[styles.actionSectionTitle, { color: colors.text }]}>Room moderation</Text>
+              <Text style={[styles.actionSectionTitle, { color: colors.text }]}>{t('Room moderation')}</Text>
               <Text style={[styles.helper, { color: colors.muted }]}>
-                Settings are fixed once the group is created.
+                {t('You can change these later too.')}
               </Text>
               <Pressable
                 accessibilityRole='switch'
@@ -3554,10 +4411,10 @@ export function PeerChatScreen ({
                 style={[styles.preferenceRow, { backgroundColor: colors.input }]}
               >
                 <View style={styles.preferenceCopy}>
-                  <Text style={[styles.memberName, { color: colors.text }]}>Abuse filter</Text>
-                  <Text style={[styles.attachmentMeta, { color: colors.muted }]}>Block threats and targeted harassment</Text>
+                  <Text style={[styles.memberName, { color: colors.text }]}>{t('Abuse filter')}</Text>
+                  <Text style={[styles.attachmentMeta, { color: colors.muted }]}>{t('Block threats and targeted harassment')}</Text>
                 </View>
-                <Text style={[styles.preferenceState, { color: roomAbuseFilter ? colors.accent : colors.muted }]}>{roomAbuseFilter ? 'On' : 'Off'}</Text>
+                <Text style={[styles.preferenceState, { color: roomAbuseFilter ? colors.accent : colors.muted }]}>{roomAbuseFilter ? t('On') : t('Off')}</Text>
               </Pressable>
               <Pressable
                 accessibilityRole='switch'
@@ -3566,20 +4423,20 @@ export function PeerChatScreen ({
                 style={[styles.preferenceRow, { backgroundColor: colors.input }]}
               >
                 <View style={styles.preferenceCopy}>
-                  <Text style={[styles.memberName, { color: colors.text }]}>Profanity &amp; slurs</Text>
-                  <Text style={[styles.attachmentMeta, { color: colors.muted }]}>Filter the shared PeerChat word list</Text>
+                  <Text style={[styles.memberName, { color: colors.text }]}>{t('Profanity & slurs')}</Text>
+                  <Text style={[styles.attachmentMeta, { color: colors.muted }]}>{t('Filter the shared PeerChat word list')}</Text>
                 </View>
-                <Text style={[styles.preferenceState, { color: roomNsfwFilter ? colors.accent : colors.muted }]}>{roomNsfwFilter ? 'On' : 'Off'}</Text>
+                <Text style={[styles.preferenceState, { color: roomNsfwFilter ? colors.accent : colors.muted }]}>{roomNsfwFilter ? t('On') : t('Off')}</Text>
               </Pressable>
               <Pressable
-                accessibilityHint='Cycles between 5, 10, and 15 messages per 10 seconds'
+                accessibilityHint={t('Cycles between 5, 10, and 15 messages per 10 seconds')}
                 accessibilityRole='button'
-                onPress={() => setRoomSpamRateLimit((limit) => limit === 5 ? 10 : limit === 10 ? 15 : 5)}
+                onPress={() => setRoomSpamRateLimit(nextSpamRateLimit)}
                 style={[styles.preferenceRow, { backgroundColor: colors.input }]}
               >
                 <View style={styles.preferenceCopy}>
-                  <Text style={[styles.memberName, { color: colors.text }]}>Spam limit</Text>
-                  <Text style={[styles.attachmentMeta, { color: colors.muted }]}>Per peer, within 10 seconds</Text>
+                  <Text style={[styles.memberName, { color: colors.text }]}>{t('Spam limit')}</Text>
+                  <Text style={[styles.attachmentMeta, { color: colors.muted }]}>{t('Per peer, within 10 seconds')}</Text>
                 </View>
                 <Text style={[styles.preferenceState, { color: colors.accent }]}>{roomSpamRateLimit}</Text>
               </Pressable>
@@ -3589,7 +4446,7 @@ export function PeerChatScreen ({
                 onPress={createRoom}
                 style={[styles.actionSubmit, { backgroundColor: colors.accent }, !profileName.trim() || isBusy ? styles.disabled : null]}
               >
-                <Text style={styles.actionSubmitText}>Create</Text>
+                <Text style={styles.actionSubmitText}>{t('Create')}</Text>
               </Pressable>
             </View>
           )}
@@ -3598,7 +4455,8 @@ export function PeerChatScreen ({
               "Scan invite or room QR": the buttons took their text width first
               and the field, which starts at zero and only grows into what is
               left, collapsed to a sliver. The key gets its own line, the same
-              way the create panel does it. */}
+              way the create panel does it. It takes a whole invite link too,
+              which may also say who made the room. */}
           {landingAction === 'join' && (
             <View style={[styles.actionPanel, styles.createActionPanel, { backgroundColor: colors.surface }]}>
               <TextInput
@@ -3606,8 +4464,8 @@ export function PeerChatScreen ({
                 onChangeText={setJoinKey}
                 autoCapitalize='none'
                 autoCorrect={false}
-                maxLength={64}
-                placeholder='64-character room key'
+                maxLength={MAX_JOIN_INPUT_LENGTH}
+                placeholder={t('Room key or invite link')}
                 placeholderTextColor={colors.muted}
                 style={[styles.input, styles.createActionInput, styles.roomKeyInput, { backgroundColor: colors.input, color: colors.text }]}
               />
@@ -3618,15 +4476,15 @@ export function PeerChatScreen ({
                   onPress={() => void openInviteScanner()}
                   style={[styles.actionSubmit, styles.actionSubmitGrow, { backgroundColor: colors.input }, isBusy ? styles.disabled : null]}
                 >
-                  <Text style={[styles.actionSubmitText, { color: colors.text }]}>Scan invite or room QR</Text>
+                  <Text style={[styles.actionSubmitText, { color: colors.text }]}>{t('Scan invite or room QR')}</Text>
                 </Pressable>
                 <Pressable
                   accessibilityRole='button'
-                  disabled={!profileName.trim() || joinKey.trim().length !== 64 || isBusy}
+                  disabled={!profileName.trim() || !parsePeerChatInvite(joinKey) || isBusy}
                   onPress={joinRoom}
-                  style={[styles.actionSubmit, { backgroundColor: colors.accent }, !profileName.trim() || joinKey.trim().length !== 64 || isBusy ? styles.disabled : null]}
+                  style={[styles.actionSubmit, { backgroundColor: colors.accent }, !profileName.trim() || !parsePeerChatInvite(joinKey) || isBusy ? styles.disabled : null]}
                 >
-                  <Text style={styles.actionSubmitText}>Join</Text>
+                  <Text style={styles.actionSubmitText}>{t('Join')}</Text>
                 </Pressable>
               </View>
             </View>
@@ -3635,19 +4493,19 @@ export function PeerChatScreen ({
           {error && <Text style={[styles.error, { color: colors.danger }]}>{error}</Text>}
           {isBusy && <ActivityIndicator color={colors.accent} />}
           <View style={styles.sectionHeading}>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>Recent chats</Text>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>{t('Recent chats')}</Text>
             {/* A line of text rather than a list. Requests used to sit open
                 above the chats and push them down, which with more than one or
                 two left the chats you actually use off the bottom. */}
             {pendingDirectMessages.length > 0 && (
               <Pressable
-                accessibilityHint='Opens the people asking to message you'
+                accessibilityHint={t('Opens the people asking to message you')}
                 accessibilityRole='button'
                 onPress={() => setIsRequestsOpen(true)}
                 style={styles.requestsButton}
               >
                 <Text style={[styles.requestsButtonText, { color: colors.accent }]}>
-                  Requests ({pendingDirectMessages.length})
+                  {t('Requests ({count})', { count: pendingDirectMessages.length })}
                 </Text>
               </Pressable>
             )}
@@ -3658,7 +4516,7 @@ export function PeerChatScreen ({
               autoCorrect={false}
               maxLength={PEERCHAT_SEARCH_QUERY_MAX_CHARACTERS}
               onChangeText={setRoomSearchQuery}
-              placeholder='Search chats'
+              placeholder={t('Search rooms and messages')}
               placeholderTextColor={colors.muted}
               returnKeyType='search'
               style={[styles.roomSearchInput, { backgroundColor: colors.input, color: colors.text }]}
@@ -3667,85 +4525,22 @@ export function PeerChatScreen ({
           )}
         </View>
       )}
-      renderItem={({ item }) => (
-        <Pressable
-          accessibilityHint='Long press for chat options'
-          accessibilityRole='button'
-          onLongPress={() => {
-            tapFeedback()
-            showRoomActions(item)
-          }}
-          onPress={() => openRoom(item)}
-          style={({ pressed }) => [
-            styles.roomRow,
-            { borderBottomColor: colors.border },
-            pressed ? { backgroundColor: colors.input } : null
-          ]}
-        >
-          {item.avatar
-            ? <Image source={{ uri: item.avatar }} style={styles.roomAvatarImage} />
-            : (
-              <View style={[styles.roomAvatar, { backgroundColor: colors.accentSoft }]}>
-                <Text style={[styles.roomAvatarText, { color: colors.accent }]}>{getRoomInitials(item.name)}</Text>
-              </View>
-              )}
-          <View style={styles.roomCopy}>
-            <View style={styles.roomTitleRow}>
-              <Text numberOfLines={1} style={[styles.roomTitle, { color: colors.text }]}>{item.name}</Text>
-            </View>
-            <Text numberOfLines={1} style={[styles.roomPreview, { color: colors.muted }]}>
-              {/* A room with nothing in it yet says so, as the desktop does.
-                  It used to show the start of the room key, which is the
-                  room's secret in an older room. */}
-              {item.lastMessage
-                ? `${item.lastMessage.senderName}: ${item.lastMessage.message}`
-                : 'No messages yet'}
-            </Text>
-          </View>
-          <View style={styles.roomMeta}>
-            <Text style={[styles.roomTime, { color: colors.muted }]}>{formatRoomTime(item)}</Text>
-            <View style={styles.roomStateRow}>
-              {/* Mentions and messages in bubbles of their own, "1 @" then
-                  "2". A muted chat greys its count, as most apps do, and
-                  still shows a mention. */}
-              {item.unreadMentions > 0 && (
-                <View
-                  accessibilityLabel={`${item.unreadMentions} unread mention${item.unreadMentions === 1 ? '' : 's'}`}
-                  style={[styles.unreadBadge, { backgroundColor: colors.accent }]}
-                >
-                  <Text style={styles.unreadBadgeText}>{item.unreadMentions} @</Text>
-                </View>
-              )}
-              {item.unreadCount > 0 && (
-                <View
-                  accessibilityLabel={`${item.unreadCount} unread message${item.unreadCount === 1 ? '' : 's'}`}
-                  style={[styles.unreadBadge, { backgroundColor: item.isMuted ? colors.muted : colors.accent }]}
-                >
-                  <Text style={styles.unreadBadgeText}>{item.unreadCount}</Text>
-                </View>
-              )}
-              {item.isMuted && (
-                <MuteIcon width={ROOM_STATE_ICON_SIZE} height={ROOM_STATE_ICON_SIZE} color={colors.muted} />
-              )}
-              {item.isPinned && (
-                <PinIcon width={ROOM_STATE_ICON_SIZE} height={ROOM_STATE_ICON_SIZE} color={colors.accent} />
-              )}
-            </View>
-            <Text style={[styles.roomPeerCount, { color: isRoomIdle(item) ? colors.idleText : (item.isDM ? isRoomOnline(item) : item.peerCount > 0) ? colors.success : colors.muted }]}>
-              {formatRoomConnection(item, true)}
-            </Text>
-          </View>
-        </Pressable>
-      )}
+      renderItem={({ item: entry }) => {
+        if (entry.kind === 'heading') {
+          return <Text style={[styles.searchHeading, { color: colors.muted }]}>{entry.title}</Text>
+        }
+        if (entry.kind === 'message') return renderSearchResult(entry.result)
+        return renderRoomRow(entry.room)
+      }}
       ListEmptyComponent={(
         <View style={styles.emptyState}>
           <Text style={[styles.emptyTitle, { color: colors.text }]}>
-            {roomSearchQuery.trim() ? 'No matching chats' : 'No rooms yet'}
+            {roomSearchQuery.trim() ? t('No matching chats or messages') : t('No rooms yet')}
           </Text>
           <Text style={[styles.helper, { color: colors.muted }]}>
             {roomSearchQuery.trim()
-              ? 'Try another room name, key, or message.'
-              : 'Create a room or join one shared from PeerSky Desktop.'}
+              ? t('Try another name or word.')
+              : t('Create a room or join one shared from PeerSky Desktop.')}
           </Text>
         </View>
       )}
@@ -3780,7 +4575,7 @@ export function PeerChatScreen ({
       >
         <KeyboardAvoidingView behavior='padding' style={styles.roomInfoModalRoot}>
           <Pressable
-            accessibilityLabel='Close find people'
+            accessibilityLabel={t('Close find people')}
             accessibilityRole='button'
             onPress={() => setIsDiscoverOpen(false)}
             style={styles.roomInfoBackdrop}
@@ -3790,9 +4585,9 @@ export function PeerChatScreen ({
             style={[styles.roomInfoPanel, { backgroundColor: colors.surface }]}
           >
             <View style={[styles.roomInfoHeader, { borderBottomColor: colors.border }]}>
-              <Text style={[styles.roomInfoHeading, { color: colors.text }]}>Find people</Text>
+              <Text style={[styles.roomInfoHeading, { color: colors.text }]}>{t('Find people')}</Text>
               <Pressable
-                accessibilityLabel='Close find people'
+                accessibilityLabel={t('Close find people')}
                 accessibilityRole='button'
                 hitSlop={8}
                 onPress={() => setIsDiscoverOpen(false)}
@@ -3808,23 +4603,19 @@ export function PeerChatScreen ({
                       <QrCodeView value={myInviteUrl} size={190} />
                     </View>
                     <Text style={[styles.helper, { color: colors.muted }]}>
-                      Your code. Anyone who scans it sends you a message request,
-                      which you can accept, decline or block. It is not a way in:
-                      nothing happens until you say so.
+                      {t('Your code. Anyone who scans it sends you a message request, which you can accept, decline or block. It is not a way in: nothing happens until you say so.')}
                     </Text>
                   </>
                   )
                 : (
                   <Text style={[styles.helper, { color: colors.muted }]}>
-                    Set a display name first and your code appears here.
+                    {t('Set a display name first and your code appears here.')}
                   </Text>
                   )}
 
-              <Text style={[styles.roomInfoTitle, { color: colors.text }]}>Search people</Text>
+              <Text style={[styles.roomInfoTitle, { color: colors.text }]}>{t('Search people')}</Text>
               <Text style={[styles.helper, { color: colors.muted }]}>
-                Type a name to find someone in Peer-to-Peer Republic, the room
-                everyone joins. No directory is kept anywhere: this searches the
-                room's own member list.
+                {t("Type a name to find someone in Peer-to-Peer Republic, the room everyone joins. No directory is kept anywhere: this searches the room's own member list.")}
               </Text>
               <View style={styles.discoverSearchRow}>
                 <TextInput
@@ -3832,7 +4623,7 @@ export function PeerChatScreen ({
                   autoCorrect={false}
                   maxLength={PEERCHAT_SEARCH_QUERY_MAX_CHARACTERS}
                   onChangeText={setDiscoverQuery}
-                  placeholder='Search by name'
+                  placeholder={t('Search by name')}
                   placeholderTextColor={colors.muted}
                   returnKeyType='search'
                   style={[styles.input, styles.discoverSearchInput, { backgroundColor: colors.input, color: colors.text }]}
@@ -3841,8 +4632,8 @@ export function PeerChatScreen ({
                 {/* Someone's code, scanned: a message request to them. A room's
                     code joins the room, the same as from Join. */}
                 <Pressable
-                  accessibilityHint='Scans a PeerChat code: a person gets a message request, a room is joined'
-                  accessibilityLabel='Scan a code'
+                  accessibilityHint={t('Scans a PeerChat code: a person gets a message request, a room is joined')}
+                  accessibilityLabel={t('Scan a code')}
                   accessibilityRole='button'
                   disabled={isBusy}
                   hitSlop={6}
@@ -3853,17 +4644,17 @@ export function PeerChatScreen ({
                 </Pressable>
               </View>
               <Pressable
-                accessibilityHint='Opens the share sheet with a link to install PeerChat'
+                accessibilityHint={t('Opens the share sheet with a link to install PeerChat')}
                 accessibilityRole='button'
                 onPress={() => { void inviteFriends() }}
                 style={({ pressed }) => [styles.discoverInviteRow, { backgroundColor: pressed ? colors.accentSoft : colors.input }]}
               >
                 <ShareIcon width={17} height={17} color={colors.accent} />
-                <Text style={[styles.discoverInviteText, { color: colors.accent }]}>Invite friends to PeerChat</Text>
+                <Text style={[styles.discoverInviteText, { color: colors.accent }]}>{t('Invite friends to PeerChat')}</Text>
               </Pressable>
               {directory.map((member) => (
                 <Pressable
-                  accessibilityHint={`Sends ${member.username} a message request`}
+                  accessibilityHint={t('Sends {name} a message request', { name: member.username })}
                   accessibilityRole='button'
                   key={member.id}
                   onPress={() => startDirectMessageFromDiscover(member)}
@@ -3885,11 +4676,11 @@ export function PeerChatScreen ({
                       {member.bio || formatMemberPresence(member)}
                     </Text>
                   </View>
-                  <Text style={[styles.memberMessage, { color: colors.accent }]}>Message</Text>
+                  <Text style={[styles.memberMessage, { color: colors.accent }]}>{t('Message')}</Text>
                 </Pressable>
               ))}
               {directory.length === 0 && discoverQuery.trim() !== '' && (
-                <Text style={[styles.helper, { color: colors.muted }]}>Nobody by that name.</Text>
+                <Text style={[styles.helper, { color: colors.muted }]}>{t('Nobody by that name.')}</Text>
               )}
             </ScrollView>
           </SafeAreaView>
@@ -3906,7 +4697,7 @@ export function PeerChatScreen ({
       >
         <View accessibilityViewIsModal style={styles.actionSheetRoot}>
           <Pressable
-            accessibilityLabel='Close message requests'
+            accessibilityLabel={t('Close message requests')}
             accessibilityRole='button'
             onPress={() => setIsRequestsOpen(false)}
             style={styles.actionSheetBackdrop}
@@ -3915,10 +4706,9 @@ export function PeerChatScreen ({
             edges={['bottom', 'left', 'right']}
             style={[styles.actionSheet, { backgroundColor: colors.surface }]}
           >
-            <Text style={[styles.actionSheetTitle, { color: colors.text }]}>Message requests</Text>
+            <Text style={[styles.actionSheetTitle, { color: colors.text }]}>{t('Message requests')}</Text>
             <Text style={[styles.actionSheetPreview, { color: colors.muted }]}>
-              Somebody has to ask before they can message you. Blocking one stops
-              them asking again.
+              {t('Somebody has to ask before they can message you. Blocking one stops them asking again.')}
             </Text>
             <View style={[styles.actionSheetDivider, { backgroundColor: colors.border }]} />
             <ScrollView
@@ -3930,7 +4720,7 @@ export function PeerChatScreen ({
                   buttons were 27 points tall and a long name pushed them off
                   the right edge, where Android clips rather than overflows, so
                   there was nothing left to press. */}
-              {pendingDirectMessages.map((invite) => (
+              {shownRequests.map((invite) => (
                 <View key={invite.roomKey} style={[styles.directRequest, { backgroundColor: colors.input }]}>
                   <View style={styles.directRequestWho}>
                     {invite.fromAvatar
@@ -3942,32 +4732,44 @@ export function PeerChatScreen ({
                         )}
                     <View style={styles.memberCopy}>
                       <Text numberOfLines={1} style={[styles.memberName, { color: colors.text }]}>{invite.fromUsername}</Text>
-                      <Text numberOfLines={1} style={[styles.attachmentMeta, { color: colors.muted }]}>wants to message you</Text>
+                      <Text numberOfLines={1} style={[styles.attachmentMeta, { color: colors.muted }]}>{t('wants to message you')}</Text>
                     </View>
                   </View>
                   <View style={styles.directRequestActions}>
-                    <Pressable accessibilityRole='button' onPress={() => blockDirectMessageRequest(invite)} style={[styles.requestAction, { backgroundColor: colors.surface }]}>
-                      <Text style={[styles.requestActionText, { color: colors.danger }]}>Block</Text>
+                    <Pressable accessibilityRole='button' disabled={isBusy} onPress={() => blockDirectMessageRequest(invite)} style={[styles.requestAction, { backgroundColor: colors.surface }]}>
+                      <Text style={[styles.requestActionText, { color: colors.danger }]}>{t('Block')}</Text>
                     </Pressable>
-                    <Pressable accessibilityRole='button' onPress={() => respondToDirectMessage(invite, false)} style={[styles.requestAction, { backgroundColor: colors.surface }]}>
-                      <Text style={[styles.requestActionText, { color: colors.muted }]}>Decline</Text>
+                    <Pressable accessibilityRole='button' disabled={isBusy} onPress={() => respondToDirectMessage(invite, false)} style={[styles.requestAction, { backgroundColor: colors.surface }]}>
+                      <Text style={[styles.requestActionText, { color: colors.muted }]}>{t('Decline')}</Text>
                     </Pressable>
-                    <Pressable accessibilityRole='button' onPress={() => respondToDirectMessage(invite, true)} style={[styles.requestAction, { backgroundColor: colors.accent }]}>
-                      <Text style={[styles.requestActionText, { color: '#ffffff' }]}>Accept</Text>
+                    {/* Joining the conversation takes a moment, so Accept
+                        shows it is working until the chat opens. */}
+                    <Pressable
+                      accessibilityLabel={acceptingRoomKey === invite.roomKey ? t('Accepting') : t('Accept')}
+                      accessibilityRole='button'
+                      accessibilityState={{ busy: acceptingRoomKey === invite.roomKey }}
+                      disabled={isBusy}
+                      onPress={() => respondToDirectMessage(invite, true)}
+                      style={[styles.requestAction, { backgroundColor: colors.accent }]}
+                    >
+                      {acceptingRoomKey === invite.roomKey
+                        ? <ActivityIndicator color='#ffffff' />
+                        : <Text style={[styles.requestActionText, { color: '#ffffff' }]}>{t('Accept')}</Text>}
                     </Pressable>
                   </View>
                 </View>
               ))}
-              {pendingDirectMessages.length === 0 && (
-                <Text style={[styles.helper, { color: colors.muted }]}>Nobody is waiting.</Text>
+              {shownRequests.length === 0 && (
+                <Text style={[styles.helper, { color: colors.muted }]}>{t('Nobody is waiting.')}</Text>
               )}
+              {error && <Text accessibilityRole='alert' style={[styles.modalError, { color: colors.danger }]}>{error}</Text>}
             </ScrollView>
             <Pressable
               accessibilityRole='button'
               onPress={() => setIsRequestsOpen(false)}
               style={styles.actionSheetAction}
             >
-              <Text style={[styles.actionSheetActionText, { color: colors.accent }]}>Close</Text>
+              <Text style={[styles.actionSheetActionText, { color: colors.accent }]}>{t('Close')}</Text>
             </Pressable>
           </SafeAreaView>
         </View>
@@ -3989,13 +4791,13 @@ export function PeerChatScreen ({
             />
           )}
           <SafeAreaView style={styles.peerchatScannerOverlay} edges={['top', 'right', 'bottom', 'left']}>
-            <Text style={styles.peerchatScanHint}>Scan an invite link or a room key QR code</Text>
+            <Text style={styles.peerchatScanHint}>{t('Scan an invite link or a room key QR code')}</Text>
             <Pressable
               accessibilityRole='button'
               onPress={() => setIsScanningInvite(false)}
               style={styles.peerchatScannerClose}
             >
-              <Text style={styles.peerchatScannerCloseText}>Cancel</Text>
+              <Text style={styles.peerchatScannerCloseText}>{t('Cancel')}</Text>
             </Pressable>
           </SafeAreaView>
         </View>
@@ -4014,7 +4816,7 @@ export function PeerChatScreen ({
       >
         <View accessibilityViewIsModal style={styles.actionSheetRoot}>
           <Pressable
-            accessibilityLabel='Close chat actions'
+            accessibilityLabel={t('Close chat actions')}
             accessibilityRole='button'
             onPress={() => {
               setRoomActionTarget(null)
@@ -4032,8 +4834,8 @@ export function PeerChatScreen ({
               </Text>
               <Text numberOfLines={2} style={[styles.actionSheetPreview, { color: colors.muted }]}>
                 {isConfirmingRoomLeave
-                  ? 'Remove this chat and its local history from this device?'
-                  : 'Manage this chat on this device.'}
+                  ? t('Remove this chat and its local history from this device?')
+                  : t('Manage this chat on this device.')}
               </Text>
               <View style={[styles.actionSheetDivider, { backgroundColor: colors.border }]} />
               {isConfirmingRoomLeave
@@ -4044,14 +4846,14 @@ export function PeerChatScreen ({
                       onPress={() => leaveRoom(roomActionTarget)}
                       style={styles.actionSheetAction}
                     >
-                      <Text style={[styles.actionSheetActionText, { color: colors.danger }]}>Leave chat</Text>
+                      <Text style={[styles.actionSheetActionText, { color: colors.danger }]}>{t('Leave chat')}</Text>
                     </Pressable>
                     <Pressable
                       accessibilityRole='button'
                       onPress={() => setIsConfirmingRoomLeave(false)}
                       style={styles.actionSheetAction}
                     >
-                      <Text style={[styles.actionSheetActionText, { color: colors.accent }]}>Cancel</Text>
+                      <Text style={[styles.actionSheetActionText, { color: colors.accent }]}>{t('Cancel')}</Text>
                     </Pressable>
                   </>
                   )
@@ -4067,7 +4869,7 @@ export function PeerChatScreen ({
                       style={styles.actionSheetAction}
                     >
                       <Text style={[styles.actionSheetActionText, { color: colors.text }]}>
-                        {roomActionTarget.isPinned ? 'Unpin chat' : 'Pin chat'}
+                        {roomActionTarget.isPinned ? t('Unpin chat') : t('Pin chat')}
                       </Text>
                     </Pressable>
                     <Pressable
@@ -4080,7 +4882,7 @@ export function PeerChatScreen ({
                       style={styles.actionSheetAction}
                     >
                       <Text style={[styles.actionSheetActionText, { color: colors.text }]}>
-                        {roomActionTarget.isMuted ? 'Unmute notifications' : 'Mute notifications'}
+                        {roomActionTarget.isMuted ? t('Unmute notifications') : t('Mute notifications')}
                       </Text>
                     </Pressable>
                     {/* A room key is the way into a room, so it is a room
@@ -4106,7 +4908,7 @@ export function PeerChatScreen ({
                             style={styles.actionSheetAction}
                           >
                             <Text style={[styles.actionSheetActionText, { color: colors.danger }]}>
-                              {isMemberBlocked(directMessagePeer(roomActionTarget)) ? 'Unblock' : 'Block'}
+                              {isMemberBlocked(directMessagePeer(roomActionTarget)) ? t('Unblock') : t('Block')}
                             </Text>
                           </Pressable>
                           <Pressable
@@ -4120,7 +4922,7 @@ export function PeerChatScreen ({
                             }}
                             style={styles.actionSheetAction}
                           >
-                            <Text style={[styles.actionSheetActionText, { color: colors.text }]}>Report</Text>
+                            <Text style={[styles.actionSheetActionText, { color: colors.text }]}>{t('Report')}</Text>
                           </Pressable>
                         </>
                         )
@@ -4131,23 +4933,24 @@ export function PeerChatScreen ({
                             onPress={() => {
                               Clipboard.setString(roomActionTarget.roomKey)
                               setRoomActionTarget(null)
-                              onStatus('PeerChat room key copied')
+                              onStatus(t('PeerChat room key copied'))
                             }}
                             style={styles.actionSheetAction}
                           >
-                            <Text style={[styles.actionSheetActionText, { color: colors.text }]}>Copy room key</Text>
+                            <Text style={[styles.actionSheetActionText, { color: colors.text }]}>{t('Copy room key')}</Text>
                           </Pressable>
                           <Pressable
                             accessibilityRole='button'
                             onPress={() => {
-                              // A link anyone can tap to join, same shape as desktop.
-                              Clipboard.setString(buildPeerChatInviteUrl(roomActionTarget.roomKey))
+                              // A link anyone can tap to join, same shape as
+                              // desktop, saying who made the room.
+                              Clipboard.setString(buildPeerChatInviteUrl(roomActionTarget.roomKey, roomActionTarget.creatorKey, roomActionTarget.creatorProof))
                               setRoomActionTarget(null)
-                              onStatus('PeerChat invite link copied')
+                              onStatus(t('PeerChat invite link copied'))
                             }}
                             style={styles.actionSheetAction}
                           >
-                            <Text style={[styles.actionSheetActionText, { color: colors.text }]}>Copy invite link</Text>
+                            <Text style={[styles.actionSheetActionText, { color: colors.text }]}>{t('Copy invite link')}</Text>
                           </Pressable>
                         </>
                         )}
@@ -4156,14 +4959,14 @@ export function PeerChatScreen ({
                       onPress={() => setIsConfirmingRoomLeave(true)}
                       style={styles.actionSheetAction}
                     >
-                      <Text style={[styles.actionSheetActionText, { color: colors.danger }]}>Leave chat</Text>
+                      <Text style={[styles.actionSheetActionText, { color: colors.danger }]}>{t('Leave chat')}</Text>
                     </Pressable>
                     <Pressable
                       accessibilityRole='button'
                       onPress={() => setRoomActionTarget(null)}
                       style={styles.actionSheetAction}
                     >
-                      <Text style={[styles.actionSheetActionText, { color: colors.accent }]}>Cancel</Text>
+                      <Text style={[styles.actionSheetActionText, { color: colors.accent }]}>{t('Cancel')}</Text>
                     </Pressable>
                   </>
                   )}
@@ -4202,7 +5005,7 @@ function PeerChatLinkCard ({
 
   return (
     <Pressable
-      accessibilityHint='Opens the linked page'
+      accessibilityHint={t('Opens the linked page')}
       accessibilityRole='link'
       onPress={() => onOpenUrl(preview.url || '')}
       style={[
@@ -4250,9 +5053,18 @@ function PeerChatAttachment ({
   onViewMedia: (target: PeerChatMediaTarget) => void
 }) {
   const mediaKind = getPeerChatAttachmentMediaKind(item.fileName || '', item.message)
-  const canPreview = mediaKind !== null && Number.isFinite(item.fileSize) &&
-    Number(item.fileSize) > 0 && Number(item.fileSize) <= AUTO_INLINE_MEDIA_MAX_BYTES
+  const canPreview = isInlinePeerChatMedia(item)
   const [mediaUrl, setMediaUrl] = useState<string | null>(null)
+  // Shown at its own shape, which it says once it loads. See media-fit.mjs.
+  const [mediaSize, setMediaSize] = useState(() => inlineMediaSizes.get(item.message) || null)
+  const fit = fitPeerChatMedia(mediaSize)
+  const noteMediaSize = useCallback((size: { width: number, height: number }) => {
+    if (!(size?.width > 0 && size?.height > 0)) return
+    rememberMediaSize(item.message, { width: size.width, height: size.height })
+    setMediaSize((current) => (current?.width === size.width && current?.height === size.height
+      ? current
+      : { width: size.width, height: size.height }))
+  }, [item.message])
   const [isOpening, setIsOpening] = useState(false)
   const [isExplicit, setIsExplicit] = useState(false)
   const [isScreening, setIsScreening] = useState(false)
@@ -4289,7 +5101,7 @@ function PeerChatAttachment ({
     const command = item.fileEnc === true ? RPC_PEERCHAT_ATTACHMENT_OPEN : RPC_HYPER_FETCH
     const request = item.fileEnc === true
       ? {
-          roomKey,
+          roomKey: item.roomKey || roomKey,
           url: item.message,
           fileName: item.fileName,
           fileSize: item.fileSize,
@@ -4310,7 +5122,7 @@ function PeerChatAttachment ({
     return () => {
       cancelled = true
     }
-  }, [canPreview, item.fileEnc, item.fileKey, item.fileName, item.fileSize, item.message, mediaKind, onCallRpc, roomKey])
+  }, [canPreview, item.fileEnc, item.fileKey, item.fileName, item.fileSize, item.message, item.roomKey, mediaKind, onCallRpc, roomKey])
 
   async function openAttachment () {
     if (isOpening) return
@@ -4321,7 +5133,7 @@ function PeerChatAttachment ({
     setIsOpening(true)
     try {
       const response = await onCallRpc(RPC_PEERCHAT_ATTACHMENT_OPEN, {
-        roomKey,
+        roomKey: item.roomKey || roomKey,
         url: item.message,
         fileName: item.fileName,
         fileSize: item.fileSize,
@@ -4329,10 +5141,10 @@ function PeerChatAttachment ({
         ...(item.fileKey && { fileKey: item.fileKey })
       })
       if (!response.ok || !response.localUri) {
-        throw new Error(response.error || 'Unable to open encrypted attachment.')
+        throw new Error(response.error || t('Unable to open encrypted attachment.'))
       }
       if (!await onOpenLocalFile(response.localUri, item.fileName || 'PeerChat attachment')) {
-        throw new Error('No app is available to open this attachment.')
+        throw new Error(t('No app is available to open this attachment.'))
       }
     } catch (error) {
       onStatus(error instanceof Error ? error.message : String(error))
@@ -4341,15 +5153,17 @@ function PeerChatAttachment ({
     }
   }
 
+  // A picture or video fills its bubble, which keeps only a thin edge, and
+  // shows no name and size: it shows itself.
   if (mediaUrl && mediaKind === 'image' && (isScreening || (isExplicit && !isRevealed))) {
     return (
-      <View style={[styles.inlineMediaCard, styles.mediaNotice, { backgroundColor: colors.input, borderColor: colors.muted }]}>
+      <View style={[styles.inlineMedia, styles.mediaNotice, { backgroundColor: colors.input, width: fit.width }]}>
         <Text style={[styles.mediaNoticeText, { color: isExplicit ? colors.danger : colors.muted }]}>
-          {isExplicit ? 'Hidden: this looks explicit' : 'Checking this picture'}
+          {isExplicit ? t('Hidden: this looks explicit') : t('Checking this picture')}
         </Text>
         {isExplicit && (
           <Pressable
-            accessibilityHint='Shows a picture the check hid'
+            accessibilityHint={t('Shows a picture the check hid')}
             accessibilityRole='button'
             onLongPress={onShowActions}
             onPress={() => {
@@ -4358,10 +5172,9 @@ function PeerChatAttachment ({
             }}
             style={({ pressed }) => [styles.mediaNoticeAction, pressed ? styles.disabled : null]}
           >
-            <Text style={[styles.mediaNoticeActionText, { color: colors.accent }]}>Show anyway</Text>
+            <Text style={[styles.mediaNoticeActionText, { color: colors.accent }]}>{t('Show anyway')}</Text>
           </Pressable>
         )}
-        <AttachmentCaption colors={colors} inline item={item} />
       </View>
     )
   }
@@ -4369,37 +5182,51 @@ function PeerChatAttachment ({
   if (mediaUrl && mediaKind === 'image') {
     return (
       <Pressable
-        accessibilityHint='Opens this image full screen. Long press for message actions'
+        accessibilityHint={t('Opens this image full screen. Long press for message actions')}
+        accessibilityLabel={item.fileName || t('Image attachment')}
         accessibilityRole='imagebutton'
         onLongPress={onShowActions}
         onPress={() => onViewMedia({
           kind: 'image',
-          label: item.fileName || 'Image attachment',
-          uri: mediaUrl
+          label: item.fileName || t('Image attachment'),
+          uri: mediaUrl,
+          fileName: item.fileName
         })}
-        style={[styles.inlineMediaCard, { borderColor: colors.muted }]}
+        style={[styles.inlineMediaFrame, fit]}
       >
-        <Image resizeMode='cover' source={{ uri: mediaUrl }} style={styles.inlineMediaImage} />
-        <AttachmentCaption colors={colors} inline item={item} />
+        <Image
+          onLoad={({ nativeEvent }) => noteMediaSize(nativeEvent.source)}
+          resizeMode='cover'
+          source={{ uri: mediaUrl }}
+          style={[styles.inlineMediaFrame, fit]}
+        />
       </Pressable>
     )
   }
 
   if (mediaUrl && mediaKind === 'video') {
     return (
-      <View style={[styles.inlineMediaCard, { borderColor: colors.muted }]}>
-        <PeerChatVideo mediaUrl={mediaUrl} />
+      <View style={[styles.inlineMedia, fit]}>
+        <PeerChatVideo mediaUrl={mediaUrl} onSize={noteMediaSize} />
+        {/* Over the video, which has no controls of its own here: a tap
+            plays it full screen, and holding it opens the message's actions,
+            as on a picture. */}
         <Pressable
-          accessibilityHint='Opens this video full screen. Long press for message actions'
+          accessibilityHint={t('Plays this video full screen. Long press for message actions')}
+          accessibilityLabel={item.fileName || t('Video attachment')}
           accessibilityRole='button'
           onLongPress={onShowActions}
           onPress={() => onViewMedia({
             kind: 'video',
-            label: item.fileName || 'Video attachment',
-            uri: mediaUrl
+            label: item.fileName || t('Video attachment'),
+            uri: mediaUrl,
+            fileName: item.fileName
           })}
+          style={styles.inlineVideoCover}
         >
-          <AttachmentCaption colors={colors} inline item={item} />
+          <View style={styles.inlineVideoPlay}>
+            <PlayIcon width={22} height={22} color='#ffffff' />
+          </View>
         </Pressable>
       </View>
     )
@@ -4407,7 +5234,7 @@ function PeerChatAttachment ({
 
   return (
     <Pressable
-      accessibilityHint='Opens this Hyperdrive attachment. Long press for message actions'
+      accessibilityHint={t('Opens this Hyperdrive attachment. Long press for message actions')}
       accessibilityRole='link'
       disabled={isOpening}
       onLongPress={onShowActions}
@@ -4415,17 +5242,39 @@ function PeerChatAttachment ({
       style={[styles.attachmentCard, { backgroundColor: colors.input, borderColor: colors.muted }]}
     >
       <Text style={[styles.attachmentIcon, { color: colors.accent }]}>+</Text>
-      <AttachmentCaption colors={colors} item={item} status={isOpening ? 'Opening...' : undefined} />
+      <AttachmentCaption colors={colors} item={item} status={isOpening ? t('Opening...') : undefined} />
     </Pressable>
   )
 }
 
-function PeerChatVideo ({ fullScreen = false, mediaUrl }: { fullScreen?: boolean, mediaUrl: string }) {
+function PeerChatVideo ({
+  fullScreen = false,
+  mediaUrl,
+  onSize
+}: {
+  fullScreen?: boolean
+  mediaUrl: string
+  // Its size once known, so the chat can show it at its own shape.
+  onSize?: (size: { width: number, height: number }) => void
+}) {
   const player = useVideoPlayer(mediaUrl)
+  useEffect(() => {
+    if (!onSize) return
+    const report = (size?: { width: number, height: number } | null) => {
+      if (size && size.width > 0 && size.height > 0) onSize(size)
+    }
+    report(player.videoTrack?.size)
+    const subscriptions = [
+      player.addListener('sourceLoad', ({ availableVideoTracks }) => report(availableVideoTracks[0]?.size)),
+      player.addListener('videoTrackChange', ({ videoTrack }) => report(videoTrack?.size))
+    ]
+    return () => subscriptions.forEach((subscription) => subscription.remove())
+  }, [onSize, player])
   return (
     <VideoView
       contentFit='contain'
-      nativeControls
+      // In the chat it plays full screen, from a tap on it.
+      nativeControls={fullScreen}
       player={player}
       style={fullScreen ? styles.fullScreenMedia : styles.inlineMediaVideo}
       surfaceType={Platform.OS === 'android' ? 'textureView' : undefined}
@@ -4468,7 +5317,7 @@ function PeerProfileModal ({
     >
       <View accessibilityViewIsModal style={styles.profileModalRoot}>
         <Pressable
-          accessibilityLabel='Close peer profile'
+          accessibilityLabel={t('Close peer profile')}
           accessibilityRole='button'
           onPress={onClose}
           style={styles.roomInfoBackdrop}
@@ -4479,7 +5328,7 @@ function PeerProfileModal ({
             style={[styles.peerProfileCard, { backgroundColor: colors.surface }]}
           >
             <Pressable
-              accessibilityLabel='Close peer profile'
+              accessibilityLabel={t('Close peer profile')}
               accessibilityRole='button'
               hitSlop={8}
               onPress={onClose}
@@ -4488,7 +5337,7 @@ function PeerProfileModal ({
               <CloseIcon width={18} height={18} color={colors.muted} />
             </Pressable>
             <Pressable
-              accessibilityHint={member.avatar ? 'Opens avatar full screen' : undefined}
+              accessibilityHint={member.avatar ? t('Opens avatar full screen') : undefined}
               accessibilityRole={member.avatar ? 'imagebutton' : 'image'}
               disabled={!member.avatar}
               onPress={() => onViewAvatar(member)}
@@ -4506,17 +5355,17 @@ function PeerProfileModal ({
                 the start of their key, the same one PeerChat on the desktop
                 knows them by, and it is what tells them apart. */}
             <Text
-              accessibilityLabel={`ID ${member.id.split('').join(' ')}`}
+              accessibilityLabel={t('ID {id}', { id: member.id.split('').join(' ') })}
               selectable
               style={[styles.peerProfileId, { color: colors.muted }]}
             >
-              ID {member.id}
+              {t('ID {id}', { id: member.id })}
             </Text>
             <Text style={[styles.peerProfileStatus, { color: member.self ? colors.success : memberTextColor(member, colors) }]}>
-              {member.self ? 'You' : formatMemberPresence(member)}
+              {member.self ? t('You') : formatMemberPresence(member)}
             </Text>
             <Text style={[styles.peerProfileBio, { color: colors.muted }]}>
-              {member.bio || 'No bio shared.'}
+              {member.bio || t('No bio shared.')}
             </Text>
             {!member.self && (
               <>
@@ -4533,19 +5382,19 @@ function PeerProfileModal ({
                   ]}
                 >
                   <Text style={[styles.profileSaveText, isBlocked ? { color: colors.muted } : null]}>
-                    {isBlocked ? 'Blocked' : 'Message'}
+                    {isBlocked ? t('Blocked') : t('Message')}
                   </Text>
                 </Pressable>
                 <Pressable
                   accessibilityHint={isBlocked
-                    ? 'Shows what this person sends again, and lets them message you'
-                    : 'Hides everything this person sends, in every chat, and stops their direct messages'}
+                    ? t('Shows what this person sends again, and lets them message you')
+                    : t('Hides everything this person sends, in every chat, and stops their direct messages')}
                   accessibilityRole='button'
                   onPress={() => (isBlocked ? onUnblock(member) : onBlock(member))}
                   style={styles.peerProfileSecondary}
                 >
                   <Text style={[styles.peerProfileSecondaryText, { color: colors.danger }]}>
-                    {isBlocked ? 'Unblock' : 'Block'}
+                    {isBlocked ? t('Unblock') : t('Block')}
                   </Text>
                 </Pressable>
                 <Pressable
@@ -4553,7 +5402,7 @@ function PeerProfileModal ({
                   onPress={() => onReport(member)}
                   style={styles.peerProfileSecondary}
                 >
-                  <Text style={[styles.peerProfileSecondaryText, { color: colors.muted }]}>Report</Text>
+                  <Text style={[styles.peerProfileSecondaryText, { color: colors.muted }]}>{t('Report')}</Text>
                 </Pressable>
               </>
             )}
@@ -4586,7 +5435,7 @@ function PeerChatQuestions ({
               onPress={() => setOpen(expanded ? null : entry.q)}
               style={styles.questionHeader}
             >
-              <Text style={[styles.questionText, { color: colors.text }]}>{entry.q}</Text>
+              <Text style={[styles.questionText, { color: colors.text }]}>{tKey(entry.q)}</Text>
               <ChevronRightIcon
                 width={14}
                 height={14}
@@ -4594,7 +5443,7 @@ function PeerChatQuestions ({
                 style={expanded ? styles.questionChevronOpen : null}
               />
             </Pressable>
-            {expanded && <Text style={[styles.questionAnswer, { color: colors.muted }]}>{entry.a}</Text>}
+            {expanded && <Text style={[styles.questionAnswer, { color: colors.muted }]}>{tKey(entry.a)}</Text>}
           </View>
         )
       })}
@@ -4606,14 +5455,13 @@ function PeerChatAboutPage ({ colors }: { colors: typeof lightColors }) {
   return (
     <ScrollView contentContainerStyle={styles.profileSettings}>
       <Text style={[styles.aboutLead, { color: colors.text }]}>
-        PeerChat is chat straight between devices. No accounts, no servers, works
-        without internet, and every message is end to end encrypted.
+        {t('PeerChat is chat straight between devices. No accounts, no servers, works without internet, and every message is end to end encrypted.')}
       </Text>
 
       <PeerChatQuestions colors={colors} />
 
       <Text style={[styles.aboutVersion, { color: colors.muted }]}>
-        Version {Constants.expoConfig?.version || 'unknown'}
+        {t('Version {version}', { version: Constants.expoConfig?.version || t('unknown') })}
       </Text>
     </ScrollView>
   )
@@ -4626,6 +5474,37 @@ function PeerChatMediaViewer ({
   onClose: () => void
   target: PeerChatMediaTarget | null
 }) {
+  const [isSaving, setIsSaving] = useState(false)
+  const [saveNote, setSaveNote] = useState('')
+  const canSave = canSavePeerChatMedia(target)
+
+  useEffect(() => {
+    setIsSaving(false)
+    setSaveNote('')
+  }, [target?.uri])
+
+  useEffect(() => {
+    if (!saveNote) return
+    const timer = setTimeout(() => setSaveNote(''), CHAT_NOTE_MS)
+    return () => clearTimeout(timer)
+  }, [saveNote])
+
+  // To Photos on iOS, from its share sheet, and to the gallery on Android. See
+  // media-save.ts.
+  async function save () {
+    if (!target?.fileName || isSaving) return
+    setIsSaving(true)
+    setSaveNote('')
+    try {
+      const saved = await savePeerChatMedia({ uri: target.uri, fileName: target.fileName })
+      if (saved?.message) setSaveNote(saved.message)
+    } catch (cause) {
+      setSaveNote(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
   return (
     <Modal
       supportedOrientations={MODAL_ORIENTATIONS}
@@ -4643,8 +5522,22 @@ function PeerChatMediaViewer ({
       <SafeAreaView edges={['top', 'bottom', 'left', 'right']} style={styles.mediaViewer}>
         <View style={styles.mediaViewerHeader}>
           <Text numberOfLines={1} style={styles.mediaViewerTitle}>{target?.label}</Text>
+          {canSave && (
+            <Pressable
+              accessibilityLabel={Platform.OS === 'ios' ? t('Save to Photos') : t('Save to gallery')}
+              accessibilityRole='button'
+              disabled={isSaving}
+              hitSlop={8}
+              onPress={() => void save()}
+              style={styles.mediaViewerClose}
+            >
+              {isSaving
+                ? <ActivityIndicator color='#f2f3f7' />
+                : <DownloadIcon width={20} height={20} color='#f2f3f7' />}
+            </Pressable>
+          )}
           <Pressable
-            accessibilityLabel='Close media viewer'
+            accessibilityLabel={t('Close media viewer')}
             accessibilityRole='button'
             hitSlop={8}
             onPress={onClose}
@@ -4653,6 +5546,9 @@ function PeerChatMediaViewer ({
             <CloseIcon width={22} height={22} color='#f2f3f7' />
           </Pressable>
         </View>
+        {!!saveNote && (
+          <Text accessibilityLiveRegion='polite' style={styles.mediaViewerNote}>{saveNote}</Text>
+        )}
         <View style={styles.mediaViewerContent}>
           {target?.kind === 'image' && (
             <Image resizeMode='contain' source={{ uri: target.uri }} style={styles.fullScreenMedia} />
@@ -4667,21 +5563,34 @@ function PeerChatMediaViewer ({
 
 function AttachmentCaption ({
   colors,
-  inline = false,
   item,
   status
 }: {
   colors: typeof lightColors
-  inline?: boolean
   item: PeerChatMessage
   status?: string
 }) {
   return (
-    <View style={inline ? styles.inlineMediaCaption : styles.attachmentCopy}>
+    <View style={styles.attachmentCopy}>
       <Text numberOfLines={1} style={[styles.attachmentName, { color: colors.text }]}>{item.fileName}</Text>
       <Text style={[styles.attachmentMeta, { color: colors.muted }]}>{status || formatFileSize(item.fileSize)}</Text>
     </View>
   )
+}
+
+// A message in a line of its own, as a reply quotes it: a file by its name,
+// never its hyper:// address, the same as the desktop's replies.
+function messagePreviewText (message: PeerChatMessage) {
+  return message.fileName ? `\u{1F4CE} ${message.fileName}` : message.message
+}
+
+// A picture or video small enough to show in the chat by itself. Bigger ones
+// wait for a tap, as a file does.
+function isInlinePeerChatMedia (message: PeerChatMessage) {
+  return Boolean(message.fileName) && !message.system &&
+    getPeerChatAttachmentMediaKind(message.fileName || '', message.message) !== null &&
+    Number.isFinite(message.fileSize) && Number(message.fileSize) > 0 &&
+    Number(message.fileSize) <= AUTO_INLINE_MEDIA_MAX_BYTES
 }
 
 function getPeerChatAttachmentMediaKind (fileName: string, url: string): 'image' | 'video' | null {
@@ -4709,6 +5618,24 @@ function getPeerChatAttachmentMimeType (fileName: string) {
     webp: 'image/webp'
   }
   return byExtension[extension] || ''
+}
+
+// Only the person who made a room changes it. A direct message has nothing of
+// the kind, and a device the room removed has no say in it.
+function canEditRoom (room: PeerChatRoom | null) {
+  return Boolean(room?.isCreator && !room.isDM && !room.removedByCreator)
+}
+
+// Translated text with a placeholder for something drawn on its own, such as
+// a link: the text before it and the text after it.
+function textAround (text: string, placeholder: string) {
+  const at = text.indexOf(placeholder)
+  return at < 0 ? [text, ''] : [text.slice(0, at), text.slice(at + placeholder.length)]
+}
+
+// The spam limits a room offers, one tap to the next.
+function nextSpamRateLimit (limit: number) {
+  return limit === 5 ? 10 : limit === 10 ? 15 : 5
 }
 
 function getRoomInitials (name: string) {
@@ -4745,9 +5672,9 @@ function renderMessageText (
           return (
             <View key={`code-${index}`} style={[styles.codeBlock, { backgroundColor: colors.input, borderColor: colors.border }]}>
               <View style={styles.codeBlockHeader}>
-                <Text style={[styles.codeBlockLabel, { color: colors.muted }]}>Code</Text>
+                <Text style={[styles.codeBlockLabel, { color: colors.muted }]}>{t('Code')}</Text>
                 <Pressable
-                  accessibilityLabel='Copy code'
+                  accessibilityLabel={t('Copy code')}
                   accessibilityRole='button'
                   hitSlop={8}
                   onLongPress={handlers.onHold}
@@ -4755,7 +5682,7 @@ function renderMessageText (
                   style={({ pressed }) => [styles.codeBlockCopy, pressed ? styles.disabled : null]}
                 >
                   <CopyIcon width={13} height={13} color={colors.accent} />
-                  <Text style={[styles.codeBlockCopyText, { color: colors.accent }]}>Copy</Text>
+                  <Text style={[styles.codeBlockCopyText, { color: colors.accent }]}>{t('Copy')}</Text>
                 </Pressable>
               </View>
               <Text selectable style={[styles.codeText, { color: colors.text }]}>{block.text}</Text>
@@ -4800,7 +5727,7 @@ function renderMessageSpan (
     return (
       <Text
         key={`${index}-code`}
-        accessibilityHint='Copies this code. Long press for message actions'
+        accessibilityHint={t('Copies this code. Long press for message actions')}
         accessibilityRole='button'
         onLongPress={handlers.onHold}
         onPress={() => handlers.onCopyCode(span.text)}
@@ -4815,7 +5742,7 @@ function renderMessageSpan (
     return (
       <Text
         key={`${index}-link`}
-        accessibilityHint='Long press to copy this link'
+        accessibilityHint={t('Long press to copy this link')}
         accessibilityRole='link'
         style={[style, { color: colors.accent, textDecorationLine: span.strike ? 'underline line-through' : 'underline' }]}
         onPress={() => handlers.onOpenLink(link)}
@@ -4835,7 +5762,7 @@ function renderMessageSpan (
     return (
       <Text
         key={`${index}-mention`}
-        accessibilityHint="Opens this person's profile"
+        accessibilityHint={t("Opens this person's profile")}
         accessibilityRole='button'
         style={[style, { color: colors.accent }]}
         onPress={() => handlers.onOpenMention(mention)}
@@ -4900,14 +5827,18 @@ function formatMessageTime (timestamp: number) {
 }
 
 function formatFileSize (value?: number) {
-  if (!Number.isFinite(value) || Number(value) < 0) return 'Hyperdrive attachment'
-  if (Number(value) < 1024) return `${value} B`
-  if (Number(value) < 1024 * 1024) return `${(Number(value) / 1024).toFixed(1)} KB`
-  return `${(Number(value) / (1024 * 1024)).toFixed(1)} MB`
+  if (!Number.isFinite(value) || Number(value) < 0) return t('Hyperdrive attachment')
+  if (Number(value) < 1024) return t('{size} B', { size: Number(value) })
+  if (Number(value) < 1024 * 1024) return t('{size} KB', { size: (Number(value) / 1024).toFixed(1) })
+  return t('{size} MB', { size: (Number(value) / (1024 * 1024)).toFixed(1) })
 }
 
 function formatRoomTime (room: PeerChatRoom) {
-  const timestamp = room.lastMessage?.timestamp || room.createdAt
+  return formatListTime(room.lastMessage?.timestamp || room.createdAt)
+}
+
+// The time today, or the day before that.
+function formatListTime (timestamp: number) {
   if (!Number.isFinite(timestamp)) return ''
   const date = new Date(timestamp)
   const today = new Date()
@@ -4917,9 +5848,12 @@ function formatRoomTime (room: PeerChatRoom) {
   return date.toLocaleDateString([], { day: '2-digit', month: 'short' })
 }
 
-function formatRoomCreatedAt (timestamp: number) {
-  if (!Number.isSafeInteger(timestamp) || timestamp <= 0) return ''
-  return ` on ${new Date(timestamp).toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' })}`
+// Who made a room, and when, if that is known.
+function formatRoomCreator (room: PeerChatRoom) {
+  const name = room.createdByName || t('Unknown')
+  if (!Number.isSafeInteger(room.createdAt) || room.createdAt <= 0) return t('Created by {name}', { name })
+  const date = new Date(room.createdAt).toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' })
+  return t('Created by {name} on {date}', { name, date })
 }
 
 function isRoomOnline (room: PeerChatRoom) {
@@ -4935,8 +5869,8 @@ function isRoomIdle (room: PeerChatRoom) {
 }
 
 function formatMemberPresence (member: PeerChatMember) {
-  if (!member.online) return 'Offline'
-  return member.idle ? 'Idle' : 'Online'
+  if (!member.online) return t('Offline')
+  return member.idle ? t('Idle') : t('Online')
 }
 
 function memberDotColor (member: PeerChatMember, colors: typeof lightColors) {
@@ -4950,18 +5884,18 @@ function memberTextColor (member: PeerChatMember, colors: typeof lightColors) {
 }
 
 function formatRoomConnection (room: PeerChatRoom, compact = false) {
-  if (room.connectionState === 'connecting') return 'Connecting...'
-  if (room.connectionState === 'syncing') return 'Syncing...'
+  if (room.connectionState === 'connecting') return t('Connecting...')
+  if (room.connectionState === 'syncing') return t('Syncing...')
   // A direct message has exactly one other person in it, so counting them
   // reads as a stray number. Either they are there or they are not, the same
   // as their dot in any room.
-  if (room.isDM) return isRoomIdle(room) ? 'Idle' : isRoomOnline(room) ? 'Online' : 'Offline'
+  if (room.isDM) return isRoomIdle(room) ? t('Idle') : isRoomOnline(room) ? t('Online') : t('Offline')
   if (room.connectionState === 'connected') {
     return compact
-      ? `${room.peerCount} online`
-      : `${room.peerCount} peer${room.peerCount === 1 ? '' : 's'} connected`
+      ? tp({ one: '{count} online', other: '{count} online' }, room.peerCount)
+      : tp({ one: '{count} peer connected', other: '{count} peers connected' }, room.peerCount)
   }
-  return compact ? 'No peers' : 'Waiting for peers'
+  return compact ? t('No peers') : t('Waiting for peers')
 }
 
 function persistPeerChatUiState (state: PeerChatUiState) {
@@ -5118,6 +6052,9 @@ const styles = StyleSheet.create({
   requestActionText: { fontSize: 13, fontWeight: '800' },
   sectionTitle: { fontSize: 16, fontWeight: '900' },
   roomSearchInput: { borderRadius: 16, fontSize: 14, minHeight: 38, paddingHorizontal: 12, paddingVertical: 8 },
+  searchHeading: { fontSize: 12, fontWeight: '800', letterSpacing: 0.4, paddingBottom: 4, paddingHorizontal: 16, paddingTop: 14, textTransform: 'uppercase' },
+  searchMatch: { fontWeight: '800' },
+  searchResultTime: { alignSelf: 'flex-start', fontSize: 10, marginTop: 3 },
   roomRow: { alignItems: 'center', borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: 'row', gap: 11, minHeight: 72, paddingHorizontal: 16, paddingVertical: 10 },
   roomAvatar: { alignItems: 'center', borderRadius: 22, height: 44, justifyContent: 'center', width: 44 },
   roomAvatarImage: { borderRadius: 22, height: 44, width: 44 },
@@ -5201,15 +6138,25 @@ const styles = StyleSheet.create({
   dateDividerText: { fontSize: 11, fontWeight: '600' },
   messageRow: { alignItems: 'flex-start', marginBottom: 9 },
   messageRowSelf: { alignItems: 'flex-end' },
+  // Followed by another from the same person: close together, and the bubbles
+  // joined along the sender's side, as on the desktop.
+  messageRowFollowed: { marginBottom: 2 },
   messageSenderRow: { alignItems: 'center', flexDirection: 'row', gap: 6, marginBottom: 3 },
   messageSenderAvatar: { borderRadius: 9, height: 18, width: 18 },
   messageSenderAvatarFallback: { alignItems: 'center', borderRadius: 9, height: 18, justifyContent: 'center', width: 18 },
   messageSenderAvatarText: { fontSize: 7, fontWeight: '900' },
   systemMessageRow: { alignItems: 'center' },
   messageBubble: { borderRadius: 15, maxWidth: '84%', minWidth: 84, paddingHorizontal: 12, paddingVertical: 8 },
+  messageBubbleFollowed: { borderBottomLeftRadius: 5 },
+  messageBubbleFollowedSelf: { borderBottomRightRadius: 5 },
+  // A picture or video on its own: the bubble fits it, with a thin edge.
+  messageBubbleMedia: { minWidth: 0, paddingHorizontal: 4, paddingVertical: 4 },
+  // What sits above the picture in such a bubble keeps off its edge.
+  messageBubbleMediaInset: { marginHorizontal: 6, marginTop: 2 },
   systemMessage: { maxWidth: '92%' },
   systemMessageTime: { alignSelf: 'center' },
   quotedReply: { borderLeftWidth: 3, borderRadius: 7, marginBottom: 6, paddingHorizontal: 8, paddingVertical: 5 },
+  quotedReplyMedia: { marginHorizontal: 4, marginTop: 2 },
   quotedReplySender: { fontSize: 11, fontWeight: '800' },
   quotedReplyText: { fontSize: 11, lineHeight: 15 },
   // Desktop hangs reactions under the bubble instead of inside it, so a long
@@ -5232,20 +6179,25 @@ const styles = StyleSheet.create({
   codeBlockCopyText: { fontSize: 12, fontWeight: '800' },
   codeText: { fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', fontSize: 12.5, lineHeight: 18 },
   attachmentCard: { alignItems: 'center', borderRadius: 10, borderWidth: 1, flexDirection: 'row', gap: 9, minWidth: 190, padding: 9 },
-  inlineMediaCard: { borderRadius: 10, borderWidth: 1, maxWidth: 260, overflow: 'hidden', width: 240 },
+  // Sized from the picture or video itself. See media-fit.mjs.
+  inlineMedia: { borderRadius: 12, overflow: 'hidden' },
+  // Rounded by the picture itself rather than clipped by its parent: on
+  // Android a picture clipped by a rounded parent was never painted.
+  inlineMediaFrame: { borderRadius: 12 },
   mediaNotice: { alignItems: 'center', gap: 4, justifyContent: 'center', minHeight: 110, padding: 12 },
   mediaNoticeText: { fontSize: 13, fontWeight: '600' },
   mediaNoticeAction: { marginTop: 8, paddingVertical: 4 },
   mediaNoticeActionText: { fontSize: 13, fontWeight: '700' },
-  inlineMediaImage: { height: 170, width: '100%' },
-  inlineMediaVideo: { height: 180, width: '100%' },
+  inlineMediaVideo: { height: '100%', width: '100%' },
+  inlineVideoCover: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
+  inlineVideoPlay: { alignItems: 'center', backgroundColor: 'rgba(0, 0, 0, 0.5)', borderRadius: 22, height: 44, justifyContent: 'center', paddingLeft: 3, width: 44 },
   mediaViewer: { backgroundColor: '#090a0d', flex: 1 },
   mediaViewerHeader: { alignItems: 'center', flexDirection: 'row', minHeight: 52, paddingHorizontal: 12 },
   mediaViewerTitle: { color: '#f2f3f7', flex: 1, fontSize: 14, fontWeight: '700' },
   mediaViewerClose: { alignItems: 'center', height: 40, justifyContent: 'center', width: 40 },
   mediaViewerContent: { flex: 1 },
+  mediaViewerNote: { color: '#c9ccd6', fontSize: 13, paddingBottom: 8, paddingHorizontal: 14, textAlign: 'center' },
   fullScreenMedia: { height: '100%', width: '100%' },
-  inlineMediaCaption: { paddingHorizontal: 9, paddingVertical: 8 },
   attachmentIcon: { fontSize: 24, fontWeight: '500' },
   attachmentCopy: { flex: 1 },
   attachmentName: { fontSize: 13, fontWeight: '800' },
@@ -5271,6 +6223,7 @@ const styles = StyleSheet.create({
   messageTime: { fontSize: 10, marginTop: 4 },
   scrollToLatest: { alignItems: 'center', borderRadius: 18, bottom: 10, elevation: 3, height: 36, justifyContent: 'center', position: 'absolute', right: 14, width: 36 },
   inlineError: { fontSize: 12, paddingHorizontal: 14, paddingVertical: 5, textAlign: 'center' },
+  chatNote: { fontSize: 12, lineHeight: 17, paddingHorizontal: 14, paddingVertical: 5, textAlign: 'center' },
   reactionPickerButton: { alignItems: 'center', borderRadius: 18, height: 36, justifyContent: 'center', width: 36 },
   reactionPickerEmoji: { fontSize: 22 },
   emojiPanel: { borderTopWidth: 1, gap: 7, maxHeight: 300, paddingHorizontal: 10, paddingVertical: 8 },

@@ -13,6 +13,163 @@ says what it does in four lines, once per phone (`AppWelcome`, marker
 - DNS-style Hyper aliases, such as `hyper://agregore.mauve.moe/`, are resolved
   by the Hyper runtime.
 
+## Folders: Files, Photos and Videos
+
+A `hyper://` folder that is not a website opens in the Hyperdrive viewer
+rather than as a list of names: Files for anything mixed, Photos for a camera
+roll, Videos for shows and movies. The viewer is the page PeerSky Desktop
+shows too, written in [p2plabsxyz/upload](https://github.com/p2plabsxyz/upload)
+under `viewer/`, and copied here to `assets/hyperdrive-viewer/`.
+
+Its address is `peersky://p2p/hyperdrive/<view>/<host><path>`
+(`app/hyperdrive/viewer-route.mjs`). `<view>` is `files`, `photos` or
+`videos`, `<host>` the drive's key or name in lower case, and `<path>` the
+folder, starting and ending with `/`, each segment percent-encoded. `?auto`
+lets the viewer pick the view from what the folder holds, and the fragment
+holds what is open inside it, as `#album=/2024/Goa/`. The address bar shows
+this address, and typing it, a link to it or a restored tab opens the viewer.
+
+When it opens on its own: a `hyper://` folder that is not a website opens
+`peersky://p2p/hyperdrive/files/<host><path>?auto` in the same tab, in place
+of what came back (`getFolderViewerRedirect`). That is a folder that comes
+back as hypercore-fetch's JSON listing, or as an index file that is not a
+web page: `README.md`, `README.org`, `index.md`, `index.gmi`, `index.gemini`
+or `index.org`, in any case, which the viewer shows under the list. Only
+`index.html` and `index.htm` keep a folder a website. hypercore-fetch names
+the file it served for a folder in its canonical link
+(`Link: <hyper://<key>/docs/README.md>; rel="canonical"`), and
+`RPC_HYPER_FETCH` hands the app its headers, so that is what the app goes by;
+the response's own address is still the folder's. History keeps the
+`hyper://` address, as it did for the list. `raw` or `noResolve` in the
+query, as `hyper://<key>/photos/?raw`, shows what came back, and so does the
+README's own address. The viewer's Open raw listing asks for both. A page's own `fetch()` of a folder goes through the
+bridge and is never sent to the viewer. The Hyperdrive screen's folders open
+in the app as before; a drive opened from Settings > P2P Data opens in the
+viewer's Files view.
+
+How it loads:
+
+1. `RPC_HYPERDRIVE_VIEWER_START` starts the viewer's server
+   (`backend/hyperdrive-viewer/server.mjs`) on `127.0.0.1:47318`. The port is
+   fixed so the page's origin, and what the viewer keeps in its IndexedDB,
+   stay the same from one launch to the next. If something else holds it, a
+   random port works for that session. A P2PMD note never takes it.
+2. `app/hyperdrive/DriveViewerScreen.tsx` loads
+   `http://127.0.0.1:47318/hyperdrive/<view>/<host><path>` in a WebView, with
+   the browser's address bar and tabs around it, and sets
+   `window.peerskyViewer` before the page runs:
+   `{ platform, language, strings, dark, incognito, epoch, safeArea, token }`.
+   `strings` are the viewer's texts from the catalog in force (see
+   [Translations](translations.md)), `safeArea` is all zero, since the
+   browser's bars sit around the page, and `token` is the server's secret
+   for this run (below). The script sets nothing on a page of any other
+   origin.
+3. The page moves between folders itself and says where it is with a message.
+   The tab's address and title follow, in the same history entry, so back
+   leaves the viewer for the page before it. Back and forward first step
+   through the viewer's own folders and the photo or video open in it.
+
+| Endpoint | Method | Purpose |
+|---|---|---|
+| `/hyperdrive/files/...`, `/hyperdrive/photos/...`, `/hyperdrive/videos/...` | `GET`, `HEAD` | The viewer's page, one for every view and folder. It reads where it is from its address, and no other page may frame it |
+| `/hyperdrive/viewer/<file>` | `GET`, `HEAD` | The viewer's scripts, styles and data, from `backend/hyperdrive-viewer/viewer-runtime.mjs` |
+| `/hyper/asset?url=hyper://...&token=...` | `GET`, `HEAD` | A file of the drive, with `Range`. HTML, SVG, XML and anything but images, audio, video, plain text, subtitles (`text/vtt`) and JSON come back as `application/octet-stream`, every file with `X-Content-Type-Options: nosniff`, `Content-Security-Policy: sandbox` and `Cache-Control: no-store`, and none with CORS. A download is `&download=1&name=...&sig=...` in place of `token` (below), and saves the file under that name |
+| `/api/list?url=hyper://...&recursive=1&token=...` | `GET` | Every file under the folder: `{ entries: [{ path, size, mtime }], truncated, private, writable }`, and `name` at the top of a drive whose name this phone knows |
+
+Anything else answers 404, a write 405, and a request another site made 403
+(`backend/loopback-request.mjs`).
+
+The origin checks keep websites out, but another app on the phone can call
+`127.0.0.1` as well, and it sends no `Origin` at all. So `/api/list` and
+`/hyper/asset` also answer 403 unless the address carries `token=` with the
+secret the server made when it started: 32 random bytes in hex, new with
+every start, compared in constant time and never logged. The start RPC hands
+it to the app, which gives it to the viewer's page in
+`window.peerskyViewer.token` and to nothing else: never the tab's address,
+its history, a download, the clipboard, the share sheet or a new tab. A
+message from the page that carries it is refused whole. The page puts it on
+every `/api/list` and `/hyper/asset` address it makes, `<img>`, `<video>` and
+`<track>` included. A server started again has a new secret, and the viewer
+loads again with it. The page and the viewer's own files need no secret.
+
+A download stays in Downloads with its address, so it carries a signature
+instead: `RPC_HYPERDRIVE_VIEWER_DOWNLOAD` hands back the address with
+`sig=`, the HMAC-SHA256 of that one file's `hyper://` address keyed with this
+run's secret, as `signHyperAssetUrl` in `backend/hyper/assets.mjs` signs the
+asset server's links. `/hyper/asset` takes a `sig` only with `download=1`
+and only for that file, and `/api/list` never does, so the address opens
+nothing else. A retry has the backend sign it again, since a server started
+again refuses the old signature.
+
+The listing (`backend/hyperdrive-viewer/drive-list.mjs`) reads the drive in
+the worklet with `drive.list`, the same shape and caps as the desktop's: files
+only, `path` as the drive has it, `size` in bytes, `mtime` in milliseconds
+from the file's metadata or `null`, and at most 50,000 files, or 16 MB of
+paths, with `truncated` past that. A drive this phone knows nothing about
+waits up to 30 seconds for a peer, and the listing itself up to two minutes.
+A failure is `{ code, message }` with a status to match: `not-found` 404,
+`private` 403, `no-peers` 503, `timeout` 504, `too-large` 413 and `unknown`
+500, or 400 for an address that is not a drive's. When the viewer stops
+waiting, the listing stops too.
+
+`name` is the name a person gave the drive, and only at its top; the viewer
+shows it in place of the key (`backend/hyperdrive-viewer/drive-names.mjs`).
+It is never made up from the address or from what the drive holds. This
+phone names none of the drives it makes: uploads go into Public, Private and
+This device only, which nobody named, as the desktop calls an upload with no
+name `Drive` and leaves it out. What it knows is the desktop's list of
+private drives, `privateHyperdrives.json`, by the names they were made under
+there, which Link Device keeps beside the phone's identity. It is read again
+for each drive's top, matched by the drive's key.
+
+Private drives: the viewer is one of the app's own pages, so it reads drives
+the way the app does, not the way a site does. This phone's private drive, the
+drives adopted from a desktop and the device-only drive open with their keys,
+and a private drive a linked device made since the link is tried with this
+phone's keys, as `fetch.mjs` does. Anyone else's private drive answers
+`private`. `private` in the listing is true for all of these, and the viewer
+then keeps nothing it makes of them past the page; the server sends every
+file with `no-store`, so none reaches the WebView's disk cache either.
+`writable` is whether this phone writes the drive. A private file answers a
+`Range` with 206 like any other, so a private video seeks.
+
+What the page can ask of the app, each checked in
+`app/hyperdrive/drive-viewer.mjs` and taken only from the viewer's own origin:
+
+- `route`: the tab's address and title.
+- `download`: the file, saved through `/hyper/asset` under its name with a
+  signature for that file alone, and listed in Downloads, where a retry is
+  signed again.
+- `open`: a `hyper://` or `http(s)://` address in a new tab. A drive's page,
+  picture or document never renders inside the viewer, and only the viewer's
+  own pages load in its WebView.
+- `copy` and `share`: a link, to the clipboard or the share sheet.
+
+An incognito tab's viewer is told so, and keeps what it makes in memory. On
+iOS its WebView has a store of its own that is never written to disk; on
+Android it does not, since react-native-webview's `incognito` empties every
+tab's cookies there.
+
+The viewer keeps the small pictures and details it makes of public drives in
+its IndexedDB, and empties them whenever `epoch` changes. That number is the
+`hyperdriveViewerEpoch` browser preference: Burn Tabs and Data, Clear all P2P
+data, Remove my data and a restore move it on, to the time they ran and never
+to a number it had before. A phone with none, a new one or one Remove my data
+emptied, gets one before the viewer first opens, and a restore moves it on in
+the preferences the restore brought. Burning the tabs keeps the app's own
+pages' storage, as PeerTunes' library needs, so this is what clears the
+viewer's.
+
+To bring in a new version of the viewer, run
+`node scripts/sync-hyperdrive-viewer.mjs <path to the upload repo>`. It copies
+`viewer/` to `assets/hyperdrive-viewer/` and writes
+`backend/hyperdrive-viewer/viewer-runtime.mjs` (which `npm run bundle:bare`
+also writes), `app/i18n/viewer-strings.json` and `app/i18n/strings.json`.
+`node scripts/i18n.mjs --check` then lists the viewer's new texts each catalog
+still needs. The place names the Photos view uses come from
+[GeoNames](https://www.geonames.org) under CC BY 4.0, credited in Settings >
+Licenses.
+
 ## What a page can do with hyper://
 
 A page served over `hyper://`, under a drive key or a domain name, or over
@@ -137,10 +294,18 @@ Hyperdrive uploads support three visibility modes:
 
 - **Public**: written to the announced `hyperdrive-public` drive. Anyone with the URL can read it and browse the rest of that drive.
 - **Private**: written to the `hyperdrive-private` drive, encrypted at the block level using a 32-byte `encryptionKey` (`hyperdrive@13.3.3` passes it to `hypercore@11.35.2`, which does block encryption). The drive is announced and replicated (the synced store runs `autoJoin: false`, `doReplicate: true`), so any device that holds the key can open it. The key is the one PeerSky Desktop sends with its identity through Link Device, so the desktop can open the phone's private files. Until a desktop has sent one, choosing Private asks to link the desktop first. The drive's key is kept in `private-drive-key.json` inside the synced private storage (`hyper-sdk-synced-private`), taken from the desktop's key at the top of Documents the first time the drive is opened.
-- **This device only**: written to the isolated `hyperdrive-device` drive with discovery and replication disabled (`autoJoin: false`, `doReplicate: false`). It never leaves the phone, so it is the right choice when nothing should leave the device at all.
+- **This device only**: written to the isolated `hyperdrive-device` drive with discovery and replication disabled (`autoJoin: false`, `doReplicate: false`). It never leaves the phone, so it is the right choice when nothing should leave the device at all. Its blocks are not encrypted by PeerSky, unlike a private drive's, which travel to other devices. On the phone they are kept by the system instead: iOS and Android encrypt each app's files on disk, only PeerSky can read its own, and its files are kept out of iCloud, computer and Android backups (`plugins/with-no-device-backup.js`). Someone able to read PeerSky's files on a phone they hold could also read a key kept beside them, so a second layer would protect next to nothing, and it would move every existing file to a new address. A phone backup made in Link Device carries the drive inside its own encryption.
 
 > [!NOTE]
 > The key starts on the desktop. A desktop identity transfer carries it to the phone, along with the desktop's private drives, which the phone adopts read-only. Sending the phone's tabs and bookmarks to the desktop from Link Device also tells the desktop the phone's private drive address, and the desktop adds it to its own private drives, read-only. A phone that made a private drive before it was linked keeps that drive's own key, so that drive opens on the phone only. See `docs/link-device.md`.
+
+### Private keys and names on the phone
+
+The private drive keys (`private-drive-key.json`, in the identity folder and in the synced private store), the desktop's list of private drive names (`privateHyperdrives.json`), the names and sizes of the files in your other devices' private drives (`device-sync.json`) and the Recent list (`hyperdrive-recents.json`, which names private uploads) are locked with a key the system keeps: the iOS Keychain, or encrypted under an Android Keystore key (`expo-secure-store`, `AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY`, `app/privacy/local-seal-key.ts`). The app hands that key to the backend as it starts (`Bare.argv[1]`), and both lock with the same NaCl secretbox (`backend/hyper/sealed-file.mjs`, `app/privacy/sealed-text.mjs`). A copy of those files taken off the phone shows nothing, and nobody is asked for anything. The key is in no backup and never leaves the phone.
+
+Files from an earlier version are locked at the first start after the update (`sealPrivateFilesAtRest`, at `RPC_HYPER_INIT`), and the Recent list the first time it is read. A locked key file that cannot be opened stops private drives rather than making a new key, which would lose every private drive. A backup or a Link Device transfer packs these files unlocked inside its own encryption (`backend/backup/backup-archive.mjs`), since the phone or desktop it goes to has a key of its own and locks them again there. When the system's secure storage cannot be used, the files stay as they were.
+
+A file in **This device only** is not encrypted on the phone: that drive is opened with no key. It never leaves the phone, and the phone's own storage protection covers it.
 
 ## Private files on your other devices
 
@@ -208,8 +373,31 @@ handshake hash `0e` x64 and sender `0d` x32 give the topic
 proof `8beb43aaede8fa35e6b0558e88ebeae7c1b3e809c00a68ec98e698fdae438c6c`.
 
 ## Developer notes
+
+Hyperdrive opens its core exclusively, so a second open of one drive waits for
+the first to close, which a drive hyper-sdk keeps never does.
+`backend/hyper/shared-drive-opens.mjs` makes opens of one drive share one, by
+address, key or name. A drive this phone made is opened by name and by address
+too (a PeerChat room's files drive, by name to upload and by address to show a
+picture sent earlier), so an open by name first reads the drive's key from a
+session on its core that takes no lock, and shares the open of that key. Before
+that, an upload after a restart could wait forever, and every upload after it
+queued behind.
 **Clear all P2P data** is broader than **Remove offline**. It closes active P2P
-runtimes and removes local Hyper and PeerChat data from the device.
+runtimes and removes local Hyper and PeerChat data from the device, and this
+device's identity with it, the way the desktop's Reset P2P data starts it over
+on the network: the Link Device keys and last pairing code, a desktop's
+identity record, the key private files are encrypted with, the private drives
+it sent, the list of other devices and their drives, what other devices sent
+that the apps have not taken yet, and the apps' own lists of that data (the
+list is in `backend/hyper/p2p-reset.mjs`). Tabs, bookmarks, history, downloads
+and settings stay, which is what sets it apart from Remove my data from this
+phone in Link Device. Link Device first drops a restore that is waiting and a
+transfer going out, and a note this phone hosts is closed. Everything goes
+into `.peersky-p2p-reset` first and is then deleted, so a clear the app is
+killed in is finished at the next start, before any store opens
+(`backend/main.mjs`). The app shows its restart screen before anything is
+removed, since what is on screen belongs to the identity going.
 
 ## Implementation
 
@@ -217,6 +405,10 @@ The React Native UI communicates with the Bare backend through `bare-rpc`.
 Relevant files include:
 
 - `app/hyperdrive/HyperdriveScreen.tsx`: folder actions and progress UI.
+- `app/hyperdrive/DriveViewerScreen.tsx`, `viewer-route.mjs` and
+  `drive-viewer.mjs`: the Files, Photos and Videos views, their addresses and
+  their messages.
+- `backend/hyperdrive-viewer/`: the viewer's server and folder listing.
 - `app/hyperdrive/offline-network.mjs`: Wi-Fi policy decision.
 - `app/settings/P2PStorage.tsx`: offline-folder management UI.
 - `backend/hyper/offline-core.mjs`: validation and bounded manifest entries.
@@ -245,6 +437,21 @@ Run the automated runtime tests:
 ```sh
 npm run test:runtime
 ```
+
+The Hyperdrive viewer's server, listing, secret, addresses and messages are
+covered in `test/protocol/hyperdrive-viewer-http.test.mjs`,
+`test/protocol/hyperdrive-viewer-list.test.mjs`,
+`test/protocol/hyperdrive-viewer-token.test.mjs` and
+`test/platform/hyperdrive-viewer.test.mjs`.
+`test/protocol/hyperdrive-viewer-private.test.mjs` reads this phone's own
+encrypted drive through the server's real wiring: a range of a private file
+comes back as 206 with only those bytes, a video in windows a player can seek
+through, and the listing says the drive is private.
+`test/protocol/hyperdrive-viewer-folders.test.mjs` opens folders of a real
+drive the way a tab does, through `fetchHyper`: one served as its README,
+README.org or index.gmi opens the viewer, one with an index.html stays a
+website, and the README's own address and `?noResolve` show as they are. Its
+listing names the drive at its top from a kept `privateHyperdrives.json`.
 
 Offline coverage is primarily in:
 

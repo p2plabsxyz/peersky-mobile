@@ -179,10 +179,10 @@ test('PeerChat draws away in yellow and says Idle, and a group header still coun
   const screen = await read('app/peerchat/PeerChatScreen.tsx')
   assert.match(screen, /idle: '#f0b232'/)
   assert.match(screen, /idle: '#e5a50a',\s+idleText: '#9a6700'/)
-  assert.match(screen, /if \(room\.isDM\) return isRoomIdle\(room\) \? 'Idle' : isRoomOnline\(room\) \? 'Online' : 'Offline'/)
+  assert.match(screen, /if \(room\.isDM\) return isRoomIdle\(room\) \? t\('Idle'\) : isRoomOnline\(room\) \? t\('Online'\) : t\('Offline'\)/)
   assert.equal(screen.match(/backgroundColor: memberDotColor\(member, colors\)/g)?.length, 2)
   assert.equal(screen.match(/member\.bio \|\| formatMemberPresence\(member\)/g)?.length, 2)
-  assert.match(screen, /\? `\$\{room\.peerCount\} online`/)
+  assert.match(screen, /\? tp\(\{ one: '\{count\} online', other: '\{count\} online' \}, room\.peerCount\)/)
 })
 
 function createFakeSdk () {

@@ -1,3 +1,5 @@
+import { t } from './i18n/i18n.mjs'
+
 /**
  * What the padlock in a browser actually tells you, for the schemes PeerSky
  * speaks.
@@ -46,30 +48,30 @@ function isLoopbackHost (url) {
 export function describeSiteSecurity (state) {
   if (state === SITE_SECURITY.SECURE) {
     return {
-      title: 'Connection is encrypted',
-      body: 'Nobody between this phone and the site can read or change what you send.'
+      title: t('Connection is encrypted'),
+      body: t('Nobody between this phone and the site can read or change what you send.')
     }
   }
   if (state === SITE_SECURITY.INSECURE) {
     return {
-      title: 'Connection is not encrypted',
-      body: 'Anybody on the same network can read and change what you send. Do not enter a password or card number here.'
+      title: t('Connection is not encrypted'),
+      body: t('Anybody on the same network can read and change what you send. Do not enter a password or card number here.')
     }
   }
   if (state === SITE_SECURITY.PEER) {
     return {
-      title: 'Served by peers',
-      body: 'This came from other devices rather than a server, and its address is a key: the content is verified against it, so nobody can hand you something else.'
+      title: t('Served by peers'),
+      body: t('This came from other devices rather than a server, and its address is a key: the content is verified against it, so nobody can hand you something else.')
     }
   }
   if (state === SITE_SECURITY.INTERNAL) {
     return {
-      title: 'Part of PeerSky',
-      body: 'This page is the app itself. Nothing left the device to show it.'
+      title: t('Part of PeerSky'),
+      body: t('This page is the app itself. Nothing left the device to show it.')
     }
   }
   return {
-    title: 'No connection information',
-    body: 'PeerSky cannot say anything about how this page was loaded.'
+    title: t('No connection information'),
+    body: t('PeerSky cannot say anything about how this page was loaded.')
   }
 }

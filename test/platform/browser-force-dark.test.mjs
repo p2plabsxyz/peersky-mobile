@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
 import { describe, test } from 'node:test'
 import vm from 'node:vm'
 import {
@@ -11,6 +12,7 @@ import {
 // every point on the screen lands on `hit`: the page's content, or a video.
 function createPage ({
   root = 'rgb(255, 255, 255)',
+  body: bodyColor = 'rgba(0, 0, 0, 0)',
   content = 'rgba(0, 0, 0, 0)',
   hit = 'MAIN',
   attributes = {},
@@ -28,7 +30,7 @@ function createPage ({
     getAttribute (name) { return name in this.attributes ? this.attributes[name] : null }
   })
   const documentElement = make('HTML', root, null, { attributes, classes })
-  const body = make('BODY', 'rgba(0, 0, 0, 0)', documentElement)
+  const body = make('BODY', bodyColor, documentElement)
   const main = make(hit, content, body)
   const timers = []
   const listeners = {}
@@ -46,9 +48,14 @@ function createPage ({
       : null,
     addEventListener: () => {}
   }
-  // The rule paints the root white while it is on, as a browser would say.
-  const painted = (element) => element === documentElement &&
-    [...styles.values()].some((style) => !style.sheet.disabled)
+  // While the rule is on, a browser says the root is dark and the body clear.
+  const ruleOn = () => [...styles.values()].some((style) => !style.sheet.disabled)
+  const backgroundOf = (element) => {
+    if (!ruleOn()) return element.backgroundColor
+    if (element === documentElement) return 'rgb(0, 0, 0)'
+    if (element === body) return 'rgba(0, 0, 0, 0)'
+    return element.backgroundColor
+  }
   const history = { pushState () {}, replaceState () {} }
   const window = {}
   const context = vm.createContext({
@@ -58,7 +65,7 @@ function createPage ({
     innerWidth: 400,
     innerHeight: 800,
     getComputedStyle: (element) => ({
-      backgroundColor: painted(element) ? 'rgb(255, 255, 255)' : element.backgroundColor,
+      backgroundColor: backgroundOf(element),
       colorScheme: 'normal'
     }),
     matchMedia: () => ({ matches: false }),
@@ -73,6 +80,7 @@ function createPage ({
   return {
     context,
     documentElement,
+    body,
     main,
     history,
     css: () => styles.get(FORCE_DARK_STYLE_ID)?.textContent || '',
@@ -203,8 +211,8 @@ describe('force dark mode', () => {
     assert.equal(light.inverted(), true)
   })
 
-  // The rule paints the root white. Read back, that made a dark page look
-  // light, so a page inverted once by mistake stayed inverted for good.
+  // The rule used to paint the root white. Read back, that made a dark page
+  // look light, so a page inverted once by mistake stayed inverted for good.
   test('an inverted page is read without the rule, so a dark one comes back', () => {
     const page = createPage({ hit: 'VIDEO' })
     run(page, createForceDarkScript(true))
@@ -256,5 +264,101 @@ describe('force dark mode', () => {
 
     assert.match(script, /document\.head \|\| document\.documentElement/)
     assert.match(script, /readyState === 'loading'/)
+  })
+
+  // Where the page draws nothing yet, and above the top while it is pulled
+  // down, iOS shows the page's colour as the page set it, unfiltered. The rule
+  // made the root white, so that showed white over a darkened page.
+  test('past the page it stays dark: the root reads dark and the page\'s colour is drawn as a picture', () => {
+    const page = createPage({ content: 'rgb(255, 255, 255)' })
+    run(page, createForceDarkScript(true))
+    assert.ok(page.css().startsWith(
+      'html{filter:invert(1) hue-rotate(180deg) !important;background:rgb(0, 0, 0) ' +
+      'linear-gradient(rgb(255, 255, 255),rgb(255, 255, 255)) no-repeat -10000000px -10000000px/20000000px 20000000px !important;}' +
+      'body{background-color:transparent !important;}'
+    ), page.css())
+  })
+
+  // Past the picture's edge the root's dark colour would come out light. Ten
+  // million pixels each way is past any page, and under the 33 million or so
+  // that WebKit and Chrome can lay out.
+  test('the picture reaches past any page without leaving what browsers can lay out', () => {
+    const page = createPage({ content: 'rgb(255, 255, 255)' })
+    run(page, createForceDarkScript(true))
+    const [, offset, size] = /no-repeat (-\d+)px \1px\/(\d+)px \2px/.exec(page.css()) || []
+    assert.ok(offset && size, page.css())
+    assert.equal(Number(size), -2 * Number(offset))
+    assert.ok(Number(size) / 2 >= 10000000)
+    assert.ok(Number(size) < 2 ** 25)
+  })
+
+  // react-native-webview gives the WebView's colour to iOS's scroll view as
+  // well, which shows above the top of a page pulled down. It was white.
+  test('on iOS the WebView is black while force dark is on, as a darkened white page is', async () => {
+    const app = await readFile(new URL('../../app/index.tsx', import.meta.url), 'utf8')
+    const styles = await readFile(new URL('../../app/styles.ts', import.meta.url), 'utf8')
+    assert.match(app, /style=\{\[\s*styles\.browserWebView,\s*Platform\.OS === 'ios' && browserPreferences\.forceDarkWebsites \? styles\.browserWebViewForceDark : null\s*\]\}/)
+    assert.match(styles, /browserWebViewForceDark: \{\s*backgroundColor: '#000000'\s*\}/)
+
+    const page = createPage({ content: 'rgb(255, 255, 255)' })
+    run(page, createForceDarkScript(true))
+    assert.match(page.css(), /^html\{[^}]*background:rgb\(0, 0, 0\) /)
+  })
+
+  // The body's colour is read over the root's, so it is cleared, and the
+  // picture under it carries it instead. A grey page with white cards keeps
+  // its cards apart once darkened.
+  test('a light body keeps its colour, and the root takes what the filter makes of it', () => {
+    const page = createPage({ content: 'rgb(255, 255, 255)', body: 'rgb(240, 242, 245)' })
+    run(page, createForceDarkScript(true))
+    assert.match(page.css(), /^html\{[^}]*background:rgb\(11, 13, 16\) linear-gradient\(rgb\(240, 242, 245\),rgb\(240, 242, 245\)\)/)
+    assert.match(page.css(), /body\{background-color:transparent !important;\}/)
+  })
+
+  test('a see-through body leaves the colour to the root, and a dark one on a light page is drawn white', () => {
+    const clear = createPage({ content: 'rgb(255, 255, 255)', body: 'rgba(255, 255, 255, 0.6)', root: 'rgb(250, 250, 250)' })
+    run(clear, createForceDarkScript(true))
+    assert.match(clear.css(), /background:rgb\(5, 5, 5\) linear-gradient\(rgb\(250, 250, 250\),rgb\(250, 250, 250\)\)/)
+
+    // Drawn dark under the filter, it would come out light.
+    const dark = createPage({ content: 'rgb(255, 255, 255)', body: 'rgb(20, 20, 20)' })
+    run(dark, createForceDarkScript(true))
+    assert.match(dark.css(), /background:rgb\(0, 0, 0\) linear-gradient\(rgb\(255, 255, 255\),rgb\(255, 255, 255\)\)/)
+  })
+
+  test('a page that moves to another light colour is drawn in it', () => {
+    const page = createPage({ content: 'rgb(255, 255, 255)' })
+    run(page, createForceDarkScript(true))
+    assert.match(page.css(), /linear-gradient\(rgb\(255, 255, 255\)/)
+
+    page.body.backgroundColor = 'rgb(250, 250, 250)'
+    page.mutate()
+    assert.match(page.css(), /background:rgb\(5, 5, 5\) linear-gradient\(rgb\(250, 250, 250\)/)
+    assert.equal(page.sheetDisabled(), false)
+  })
+
+  // The root reads dark while the rule is on. Read back that way, a light
+  // page whose colour comes from its root would look dark and lose the rule.
+  test('a light page painted by its root stays inverted when looked at again', () => {
+    const page = createPage({ hit: 'VIDEO' })
+    run(page, createForceDarkScript(true))
+    assert.equal(page.inverted(), true)
+
+    page.mutate()
+    page.runTimers()
+    assert.equal(page.inverted(), true)
+  })
+
+  // DuckDuckGo draws its menu, search and tick icons in the text's colour.
+  // Turned back like a picture, they stayed dark on the darkened page. Its
+  // logo has colours of its own, and the wordmark in it the text's.
+  test('icons drawn only in the text\'s colour go with the text, drawings with their own colours are turned back', () => {
+    const page = createPage({ content: 'rgb(255, 255, 255)' })
+    run(page, createForceDarkScript(true))
+    const textColoured = '[fill="currentColor" i],[stroke="currentColor" i]'
+    const ownColours = '[fill]:not([fill="currentColor" i],[fill="none" i]),[stroke]:not([stroke="currentColor" i],[stroke="none" i])'
+    assert.ok(page.css().endsWith(
+      `svg:is(${textColoured},:has(${textColoured})):not(:has(${ownColours})){filter:none !important;}`
+    ), page.css())
   })
 })

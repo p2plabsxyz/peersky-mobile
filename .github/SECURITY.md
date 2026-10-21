@@ -37,13 +37,14 @@ Out of scope: third-party websites, and upstream projects such as React Native, 
   - Writing asks once per site (**Publishing from sites** in Settings, Permissions). A page's named drives get a prefix of its own, so it never reaches the app's drives by name, and it writes only to drives it created.
   - Media links to the local asset server are signed one address at a time, so a page can fetch what it was handed and nothing else.
   - `hyper://` never loads in a frame.
-- The local servers (P2PMD rooms, PeerTunes, Hyper assets) bind `127.0.0.1` and answer only their own origin, which rules out other local servers too. The one other origin is desktop P2PMD (`peersky://p2p`) on a P2PMD room. Drive files from the asset server are sandboxed, so an HTML file cannot run on a loopback origin.
+- The local servers (P2PMD rooms, PeerTunes, Hyper assets) bind `127.0.0.1` and answer only their own origin, which rules out other local servers too. The one other origin is desktop P2PMD (`peersky://p2p`) on a P2PMD room. Drive files from the asset server are sandboxed, so an HTML file cannot run on a loopback origin. PeerTunes' request to keep songs, which starts downloads, also needs a header only its own page sends, so a tab or an image another page points at it does nothing.
 - The built-in apps:
   - The P2PMD editor runs only the app's own code: yjs ships inside the page, nothing loads in its place, links open in a browser tab, and it publishes only with a nonce the app hands over when you tap Publish. A phone joining a note listens on a port it picks itself.
   - The PeerTunes WebView stays on its own origin.
 - PeerChat:
   - Messages and attachments are end to end encrypted with the room's key. A room opens to a peer only after it proves it holds the key, with an HMAC over the connection's handshake, and the key never crosses the wire. A direct message's key is sealed to the other person's public key.
   - Invite links ask before they join a room or send a request. Blocking someone hides everything they send, everywhere. Reports never include a room key.
+  - Messages and reactions are signed by whoever wrote them, so nobody who passes one on can change it or who wrote it. A room made on 0.1.3 or later has a key worked out from its maker's key, so anyone in it can check who made it, and invite links carry that. Removing somebody moves the room to a new key for the people still in it.
 - Links to other apps (`mailto:`, `tel:`, `sms:` and `geo:`) open only after a confirmation. `javascript:`, `data:`, `file:`, `intent:` and `content:` are refused.
 - A download a page starts waits for a yes. A downloaded APK opens in the system's Downloads: PeerSky does not hold the permission to install apps.
 - Keys and chats leave the phone only through Link Device (sealed to the receiving device, after both screens show the same six characters) or a backup file (Argon2id and an authenticated stream cipher, under a passphrase of at least 12 characters). iCloud, computer and Google backups and Android's phone-to-phone copy leave them out.
@@ -54,9 +55,8 @@ Out of scope: third-party websites, and upstream projects such as React Native, 
 These follow from how PeerSky works rather than being open bugs:
 
 - Content published to a public Hyper drive is public. Joining a swarm or a PeerChat room shows your IP address to its peers, and one key identifies this device for browsing, PeerChat and nearby discovery.
-- A PeerChat room key never rotates, so someone removed from a room still holds it. When a member syncs past messages to you, that member is trusted to say who wrote each one. Who made a room is learned the first time it is seen, except for P2P Republic, whose maker is pinned in the app.
+- P2P Republic keeps one key for good, so someone removed from it still holds it. A room made before 0.1.2 keeps its key too, until removing somebody moves it to a new one. In a room made before 0.1.3, who made it is taken from the first device that says so on its own connection, unless the invite said. P2P Republic's maker is pinned in the app.
 - Keys sit in the app's private storage rather than the Keychain or Android Keystore, so anyone with control of an unlocked, rooted or jailbroken device can read them.
-- Any app on an Android phone can connect to the loopback ports. The checks above stop web pages, not native apps, so another app that finds the port of an open P2PMD note can read and edit it.
 - A link preview is fetched by the sender's phone, so the linked site sees the sender's IP address.
 
 ## Security review
@@ -77,6 +77,14 @@ Fixed as a result:
 - Keys, chats and P2P stores went into iCloud, Google and phone-to-phone backups.
 - Downloads started without asking, APKs went straight to the installer, and the app declared install, storage and overlay permissions it did not need.
 - Shipped dependencies included vulnerable versions of `markdown-it` and `linkify-it`.
+- A tab another page got PeerSky to open, or on iOS before 16.4 an image on any page, could make PeerTunes keep songs from any drive: up to twenty drives a request, downloading on cellular and staying open.
+- Kept songs downloaded on cellular with Download only on Wi-Fi on.
+- The picture check left a small copy of every picture it checked, pictures sent in rooms included, and the copies that Save and Share made stayed after Clear all P2P data.
+- A member of a room could get a phone that had just joined it from a bare room key to take them for its maker, then rename the room, change its settings, remove people and move the phone into a room of their own.
+- A member about to be removed could have a spare key noted by everyone in the room, and be handed the room's new key under it.
+- Following a long line of moves made a phone join a room for each one.
+- One connection could fill the list of messages a phone asks its neighbours for with made-up ids, so real ones from other rooms were not fetched.
+- Any other app on an Android phone could read the user's private drives, decrypted, through PeerTunes' local server and make it start downloads, and could read and rewrite an open P2PMD note. Both now answer only requests that carry a secret made for each run, which PeerSky hands only to its own PeerTunes and P2PMD pages.
 
 Not covered in depth: native modules and upstream libraries beyond advisory triage.
 

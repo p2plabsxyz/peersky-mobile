@@ -7,7 +7,7 @@ const screen = await readFile(new URL('../../app/peerchat/PeerChatScreen.tsx', i
 // Requests used to sit open above the chat list and push it down, so with more
 // than one or two the chats you actually use went off the bottom.
 test('requests are a line of text, not a list in the way', () => {
-  assert.match(screen, /Requests \(\{pendingDirectMessages\.length\}\)/)
+  assert.match(screen, /t\('Requests \(\{count\}\)', \{ count: pendingDirectMessages\.length \}\)/)
   assert.match(screen, /onPress=\{\(\) => setIsRequestsOpen\(true\)\}/)
   // Shown only when somebody is actually waiting.
   assert.match(screen, /\{pendingDirectMessages\.length > 0 && \(\s*\n\s*<Pressable/)
@@ -33,7 +33,7 @@ test('a request can be blocked from the request itself', () => {
 
 test('every request is reachable, not just the newest', () => {
   const sheet = screen.slice(screen.indexOf('visible={isRequestsOpen}'))
-  assert.match(sheet, /pendingDirectMessages\.map\(\(invite\) =>/)
+  assert.match(sheet, /shownRequests\.map\(\(invite\) =>/)
   assert.match(sheet, /Nobody is waiting/)
 })
 

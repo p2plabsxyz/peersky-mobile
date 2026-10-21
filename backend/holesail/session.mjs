@@ -1,3 +1,4 @@
+import { getLANInstance } from '../hyper/lan-discovery.mjs'
 import { TunnelGuest, TunnelHost } from './tunnel.mjs'
 
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost'])
@@ -12,7 +13,10 @@ export async function startHolesailLive ({
   host,
   connector,
   secure = true,
-  udp = false
+  udp = false,
+  // The local server's token, which P2PMD passes so its room can tell people
+  // who came in with the note's address from other apps on the phone.
+  token = null
 } = {}) {
   return withSessionTransition(async () => {
     if (udp) return { ok: false, error: UDP_UNSUPPORTED }
@@ -39,7 +43,12 @@ export async function startHolesailLive ({
       key: connectorKey.key,
       secure: Boolean(secure),
       port: livePort.port,
-      host: liveHost.host
+      host: liveHost.host,
+      token: typeof token === 'string' && token ? token : null,
+      // On the local network too, so the note opens over Wi-Fi with no internet,
+      // kept on the instance in use as it changes.
+      lan: getLANInstance(),
+      getLan: getLANInstance
     })
 
     session = instance
@@ -79,7 +88,10 @@ export async function connectHolesail ({
   // Listen on the port the host advertises, as the desktop does, so a note's
   // address reads the same on every device. The host's record has it.
   hostPort = false,
-  udp = false
+  udp = false,
+  // A token the requests made to the local port must carry. P2PMD passes one,
+  // so another app on the phone cannot use a joined note.
+  token = null
 } = {}) {
   return withSessionTransition(async () => {
     if (udp) return { ok: false, error: UDP_UNSUPPORTED }
@@ -108,7 +120,11 @@ export async function connectHolesail ({
       instance = new TunnelGuest({
         key: targetKey.key,
         host: targetHost.host,
-        port: targetPort.port
+        port: targetPort.port,
+        token: typeof token === 'string' && token ? token : null,
+        // Looked for on the local network first.
+        lan: getLANInstance(),
+        getLan: getLANInstance
       })
     } catch {
       return { ok: false, error: 'Invalid holesail key. Use hs://... or an alphanumeric key.' }

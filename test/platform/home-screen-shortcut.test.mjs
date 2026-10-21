@@ -12,7 +12,7 @@ test('the menu offers it on Android, for websites and hyper:// sites, never in i
   assert.match(app, /homeScreenActionAvailable=\{\s+Platform\.OS === 'android' &&\s+canUseReaderView\(browserCurrentUrl\) &&\s+!browserTabsState\.tabs\.some\(\(tab\) => tab\.id === browserTabsState\.activeTabId && tab\.incognito === true\)/)
   assert.match(app, /homeScreen\.addPage\(browserCurrentUrl, browserTitle, icon\)/)
   const menu = await read('app/settings/BrowserOverflowMenu.tsx')
-  assert.match(menu, /label='Add to Home Screen'/)
+  assert.match(menu, /label=\{t\('Add to Home Screen'\)\}/)
 })
 
 test('the launcher is asked for a shortcut that opens the page as a link would', async () => {

@@ -42,6 +42,13 @@
     "url": "https://heroicons.com/"
   },
   {
+    "name": "QR Creator",
+    "license": "MIT",
+    "copyright": "2017 The Nimiq Foundation",
+    "url": "https://github.com/nimiq/qr-creator",
+    "textFile": "app/vendor/qr-creator/LICENSE"
+  },
+  {
     "name": "qrcode-generator",
     "license": "MIT",
     "copyright": "2009 Kazuhiko Arase",
@@ -104,6 +111,13 @@
     "copyright": "Pixabay",
     "url": "https://pixabay.com/",
     "notice": "The send, receive and pop sounds in PeerChat come from Pixabay, https://pixabay.com/, and are used under the Pixabay Content License, https://pixabay.com/service/license-summary/."
+  },
+  {
+    "name": "GeoNames",
+    "license": "CC-BY-4.0",
+    "copyright": "GeoNames",
+    "url": "https://www.geonames.org/",
+    "notice": "The Hyperdrive viewer names the places photos were taken with place names from GeoNames, https://www.geonames.org, licensed under the Creative Commons Attribution 4.0 International License, https://creativecommons.org/licenses/by/4.0/. It keeps the name, country, latitude and longitude of each place of 15,000 people or more."
   },
   {
     "name": "Start page wallpaper",

@@ -3,6 +3,8 @@ import net from 'net'
 import { createHash, randomBytes } from 'node:crypto'
 import b4a from 'b4a'
 import z32 from 'z32'
+import { findNoteOnLan, findNoteRouteOnLan, hostNoteOnLan } from './lan.mjs'
+import { FORBIDDEN_RESPONSE, createRequestGate, createRequestStamp } from './request-gate.mjs'
 
 // P2PMD notes travel over Holesail's protocol, which the desktop speaks
 // through the Holesail package. That package is AGPL, which cannot ship in an
@@ -20,6 +22,13 @@ import z32 from 'z32'
 // - The host keeps a signed record under its public key saying where its
 //   local server listens, as JSON { host, udp, port }.
 // - Each connection carries the bytes of one TCP connection to that server.
+//
+// Given a token, both ends also keep other apps on the phone out of the note
+// (request-gate.mjs). The token never crosses the wire, so what the other end
+// sees is unchanged.
+//
+// Given the LAN DHT, the host is on the local network too and a guest looks
+// there first, so a note opens over Wi-Fi with no internet (lan.mjs).
 
 const PRIVATE_FLAGS = 's000'
 const PUBLIC_FLAGS = '0000'
@@ -27,6 +36,12 @@ const DEFAULT_PORT = 8989
 const LOOPBACK = '127.0.0.1'
 // Records on the DHT expire, so the host puts its record back this often.
 const RECORD_REFRESH_MS = 50 * 60 * 1000
+// With no internet the record cannot be put, and the note is on the local
+// network only. It is tried again this often until the internet answers.
+const RECORD_RETRY_MS = 60 * 1000
+// How long a host on the local network waits for its record before going on
+// without it.
+const INTERNET_SETTLE_MS = 3000
 
 /** The key in a note address and whether the address says it is private. */
 export function parseNoteAddress (address) {
@@ -54,12 +69,23 @@ function createDht ({ keyPair, bootstrap } = {}) {
 }
 
 /** Hosts a local TCP server under a note address. */
+// How often an open note checks it is on the local network instance in use.
+// A network change, or the app's stores closing for a backup, starts a new
+// instance: a note hosted on the old one could no longer be reached over the
+// Wi-Fi, and one joined over it no longer reached its host, while the same
+// note carried on over the internet. As on the desktop (hs-handler.js).
+export const LAN_KEEP_MS = 5000
+
 export class TunnelHost {
-  constructor ({ key, secure = true, host = LOOPBACK, port = DEFAULT_PORT, bootstrap } = {}) {
+  constructor ({ key, secure = true, host = LOOPBACK, port = DEFAULT_PORT, token = null, bootstrap, lan = null, getLan = null, settleMs = INTERNET_SETTLE_MS } = {}) {
     const parsed = parseNoteAddress(key)
     this.secure = parsed.secure ?? Boolean(secure)
     this.host = host
     this.port = port
+    // The local server's token. It goes on the requests of whoever came in
+    // with the note's address, which is how the server tells them from
+    // another app on this phone that found its port.
+    this.token = token
     this.bootstrap = bootstrap
     // A private note with no key yet gets a new one. A public note always
     // comes with its seed from the caller, or it could never be hosted again.
@@ -69,7 +95,16 @@ export class TunnelHost {
     this.dht = null
     this.server = null
     this.refresh = null
+    this.retry = null
     this.sockets = new Set()
+    this.lan = lan
+    // The local network instance in use now, when it can change.
+    this.getLan = typeof getLan === 'function' ? getLan : null
+    this.lanHost = null
+    this.lanKeeper = null
+    this.settleMs = settleMs
+    // Whether the host's record is on the internet DHT, so joiners there find it.
+    this.internet = false
   }
 
   get publicKey () {
@@ -79,14 +114,16 @@ export class TunnelHost {
   async open () {
     this.dht = createDht({ bootstrap: this.bootstrap })
     const ownKey = this.keyPair.publicKey
+    const serve = (remote) => {
+      const local = net.connect({ port: this.port, host: this.host, allowHalfOpen: true })
+      bridge(local, remote, this.sockets, this.token ? { toLocal: createRequestStamp(this.token) } : {})
+    }
+    this.serve = serve
     this.server = this.dht.createServer({
       // Only someone holding the same key pair, that is the address, gets in.
       firewall: this.secure ? (remotePublicKey) => !b4a.equals(remotePublicKey, ownKey) : undefined,
       reusableSocket: true
-    }, (remote) => {
-      const local = net.connect({ port: this.port, host: this.host, allowHalfOpen: true })
-      bridge(local, remote, this.sockets)
-    })
+    }, serve)
 
     this.state = 'opening'
     // Announcing waits on the network. Joiners find the host once it lands,
@@ -97,14 +134,93 @@ export class TunnelHost {
       console.error('[holesail] Unable to announce the note:', error?.message || error)
     })
 
+    if (this.lan) {
+      this.lanHost = await hostNoteOnLan(this.lan, { keyPair: this.keyPair, secure: this.secure, port: this.port, onConnection: serve })
+        .catch((error) => {
+          console.warn('[holesail] Unable to host the note on the local network:', error?.message || error)
+          return null
+        })
+    }
+
+    this.keepOnLan()
+
     const record = JSON.stringify({ host: this.host, udp: false, port: this.port })
-    await putRecord(this.dht, this.keyPair, record)
+    const put = putRecord(this.dht, this.keyPair, record)
+    if (!this.lanHost) {
+      await put
+      this.keepRecord(record)
+      return
+    }
+    // On the local network already: with no internet, putting the record
+    // fails after a while, and the note goes on there alone.
+    put.then(() => this.keepRecord(record), (error) => {
+      if (this.state === 'closed') return
+      console.warn('[holesail] Hosting the note on the local network until the internet answers:', error?.message || error)
+      this.retryRecord(record)
+    })
+    let timer = null
+    await Promise.race([
+      put.catch(() => {}),
+      new Promise((resolve) => { timer = setTimeout(resolve, this.settleMs) })
+    ])
+    clearTimeout(timer)
+  }
+
+  // Hosted on the local network instance in use: again on a new one, and on
+  // one that shows up after the note opened.
+  keepOnLan () {
+    if (!this.getLan || this.lanKeeper) return
+    let keeping = false
+    this.lanKeeper = setInterval(async () => {
+      if (keeping || this.state === 'closed') return
+      const lan = this.getLan()
+      if (!lan || lan.destroyed || this.lanHost?.lan === lan) return
+      keeping = true
+      try {
+        const next = await hostNoteOnLan(lan, { keyPair: this.keyPair, secure: this.secure, port: this.port, onConnection: this.serve }).catch(() => null)
+        if (!next) return
+        if (this.state === 'closed') {
+          await next.close()
+          return
+        }
+        const previous = this.lanHost
+        this.lanHost = next
+        await previous?.close().catch(() => {})
+      } finally {
+        keeping = false
+      }
+    }, LAN_KEEP_MS)
+    this.lanKeeper.unref?.()
+  }
+
+  keepRecord (record) {
+    if (this.state === 'closed' || this.refresh) return
+    this.internet = true
     this.refresh = setInterval(() => {
       putRecord(this.dht, this.keyPair, record).catch((error) => {
         console.error('[holesail] Unable to refresh the note record:', error?.message || error)
       })
     }, RECORD_REFRESH_MS)
     if (typeof this.refresh?.unref === 'function') this.refresh.unref()
+  }
+
+  retryRecord (record) {
+    if (this.state === 'closed' || this.retry) return
+    let trying = false
+    this.retry = setInterval(async () => {
+      if (trying || !this.dht) return
+      trying = true
+      try {
+        await putRecord(this.dht, this.keyPair, record)
+        clearInterval(this.retry)
+        this.retry = null
+        this.keepRecord(record)
+      } catch {
+      } finally {
+        trying = false
+      }
+    }, RECORD_RETRY_MS)
+    if (typeof this.retry?.unref === 'function') this.retry.unref()
   }
 
   get info () {
@@ -118,7 +234,9 @@ export class TunnelHost {
       protocol: 'tcp',
       key,
       url: noteAddress(key, this.secure),
-      publicKey: this.publicKey
+      publicKey: this.publicKey,
+      lan: Boolean(this.lanHost),
+      internet: this.internet
     }
   }
 
@@ -126,6 +244,13 @@ export class TunnelHost {
     this.state = 'closed'
     if (this.refresh) clearInterval(this.refresh)
     this.refresh = null
+    if (this.retry) clearInterval(this.retry)
+    this.retry = null
+    if (this.lanKeeper) clearInterval(this.lanKeeper)
+    this.lanKeeper = null
+    const lanHost = this.lanHost
+    this.lanHost = null
+    if (lanHost) await lanHost.close()
     for (const socket of this.sockets) socket.destroy()
     this.sockets.clear()
     const dht = this.dht
@@ -137,17 +262,25 @@ export class TunnelHost {
 
 /** Listens on a local port and carries each connection to a note's host. */
 export class TunnelGuest {
-  constructor ({ key, secure, host = LOOPBACK, port, bootstrap } = {}) {
+  constructor ({ key, secure, host = LOOPBACK, port, token = null, bootstrap, lan = null, getLan = null } = {}) {
     const parsed = parseNoteAddress(key)
     this.secure = parsed.secure ?? Boolean(secure)
     this.key = parsed.key
     this.host = host
     this.port = port
+    // This phone's editor puts the token on each request it makes here. A
+    // connection from another app on the phone never reaches the host.
+    this.token = token
     this.bootstrap = bootstrap
     this.state = 'closed'
     this.dht = null
     this.proxy = null
     this.sockets = new Set()
+    this.lan = lan
+    this.getLan = typeof getLan === 'function' ? getLan : null
+    // Set when the host was found on the local network and is reached there.
+    this.lanRoute = null
+    this.lanKeeper = null
     if (this.secure) {
       this.keyPair = keyPairFor(this.key)
       this.remotePublicKey = this.keyPair.publicKey
@@ -163,18 +296,32 @@ export class TunnelGuest {
   }
 
   async open () {
-    this.dht = createDht({ keyPair: this.keyPair, bootstrap: this.bootstrap })
     this.state = 'waiting'
+    if (this.lan) {
+      this.lanRoute = await findNoteRouteOnLan(this.lan, { publicKey: this.remotePublicKey, keyPair: this.keyPair })
+        .catch(() => null)
+    }
 
     // With no port asked for, use the one the host's server is on, as the
     // desktop does, so a note's local address is the same on every device.
+    // Found on the local network, the host says it there; an older one does
+    // not, and the port asked for, or the usual one, is used.
     let advertised = {}
-    try {
-      const record = await this.dht.mutableGet(this.remotePublicKey, { latest: true })
-      if (record?.value) advertised = JSON.parse(b4a.toString(record.value))
-    } catch {}
-    if (advertised?.udp === true) {
-      throw Object.assign(new Error('This note is shared over UDP, which PeerSky cannot join.'), { code: 'UDP_NOTE' })
+    let connect
+    if (this.lanRoute) {
+      const route = this.lanRoute
+      if (route.port) advertised = { port: route.port }
+      connect = () => this.proxy ? route.connect() : null
+    } else {
+      this.dht = createDht({ keyPair: this.keyPair, bootstrap: this.bootstrap })
+      try {
+        const record = await this.dht.mutableGet(this.remotePublicKey, { latest: true })
+        if (record?.value) advertised = JSON.parse(b4a.toString(record.value))
+      } catch {}
+      if (advertised?.udp === true) {
+        throw Object.assign(new Error('This note is shared over UDP, which PeerSky cannot join.'), { code: 'UDP_NOTE' })
+      }
+      connect = () => this.dht ? this.dht.connect(this.remotePublicKey, { reusableSocket: true }) : null
     }
     const advertisedPort = Number.isInteger(advertised?.port) && advertised.port > 0 && advertised.port < 65536
       ? advertised.port
@@ -182,8 +329,15 @@ export class TunnelGuest {
     const port = this.port ?? advertisedPort ?? DEFAULT_PORT
 
     const proxy = net.createServer({ allowHalfOpen: true }, (local) => {
-      const remote = this.dht.connect(this.remotePublicKey, { reusableSocket: true })
-      bridge(local, remote, this.sockets)
+      if (!this.token) {
+        const remote = connect()
+        if (!remote) return local.destroy()
+        bridge(local, remote, this.sockets)
+        return
+      }
+      // The host is called only once a request has shown the token, and the
+      // tunnel may have closed by then.
+      admit(local, createRequestGate(this.token), connect, this.sockets)
     })
     this.proxy = proxy
     await new Promise((resolve, reject) => {
@@ -205,6 +359,30 @@ export class TunnelGuest {
     })
     this.port = proxy.address()?.port || port
     this.state = 'listening'
+    this.keepOnLan()
+  }
+
+  // The host looked for again when this phone's local network instance went,
+  // or when it stopped answering at the address it had.
+  keepOnLan () {
+    if (!this.getLan || !this.lanRoute || this.lanKeeper) return
+    let keeping = false
+    this.lanKeeper = setInterval(async () => {
+      const route = this.lanRoute
+      if (keeping || !route || this.state === 'closed') return
+      const lan = this.getLan()
+      if (!lan || lan.destroyed || (route.lan === lan && !route.failedAt)) return
+      keeping = true
+      try {
+        const address = await findNoteOnLan(lan, this.remotePublicKey).catch(() => null)
+        if (this.lanRoute !== route) return
+        if (address) route.moveTo(lan, address)
+        else if (route.lan !== lan) route.moveTo(lan, route.address)
+      } finally {
+        keeping = false
+      }
+    }, LAN_KEEP_MS)
+    this.lanKeeper.unref?.()
   }
 
   get info () {
@@ -217,12 +395,16 @@ export class TunnelGuest {
       protocol: 'tcp',
       key: this.key,
       url: noteAddress(this.key, this.secure),
-      publicKey: this.publicKey
+      publicKey: this.publicKey,
+      lan: Boolean(this.lanRoute)
     }
   }
 
   async close () {
     this.state = 'closed'
+    if (this.lanKeeper) clearInterval(this.lanKeeper)
+    this.lanKeeper = null
+    this.lanRoute = null
     for (const socket of this.sockets) socket.destroy()
     this.sockets.clear()
     const proxy = this.proxy
@@ -254,12 +436,48 @@ async function putRecord (dht, keyPair, value) {
   await dht.mutablePut(keyPair, data, { seq })
 }
 
+// Holds a joined note's local connection until its first request shows the
+// token, and only then reaches the host. One that does not is answered here,
+// so another app on the phone cannot even make this phone call the host.
+function admit (local, gate, connect, sockets) {
+  sockets.add(local)
+  const forget = () => sockets.delete(local)
+  const drop = () => {
+    forget()
+    local.destroy()
+  }
+  const onData = (data) => {
+    const first = gate.push(data)
+    if (first !== null && !first.byteLength) return
+    local.off('data', onData)
+    local.off('end', drop)
+    if (first === null) {
+      // Answered and closed. Anything else it sends goes nowhere.
+      local.once('finish', drop)
+      local.end(b4a.from(FORBIDDEN_RESPONSE))
+      return
+    }
+
+    const remote = connect()
+    if (!remote) return drop()
+    local.off('error', drop)
+    local.off('close', forget)
+    bridge(local, remote, sockets, { toRemote: gate.push })
+    remote.write(first)
+  }
+  local.on('data', onData)
+  local.on('end', drop)
+  local.on('error', drop)
+  local.on('close', forget)
+}
+
 // Carries bytes both ways until either end closes, and closes the other with
 // it. A half close (end) is passed on, so a request can finish while its
 // answer is still on the way. That needs both local sockets opened with
 // allowHalfOpen, as Holesail opens them; otherwise a socket closes its own
 // side as soon as the other does, and the answer is lost.
-function bridge (local, remote, sockets) {
+// toRemote and toLocal change what goes each way: null from one closes both.
+function bridge (local, remote, sockets, { toRemote = null, toLocal = null } = {}) {
   sockets.add(local)
   sockets.add(remote)
   let closed = false
@@ -271,10 +489,12 @@ function bridge (local, remote, sockets) {
     local.destroy()
     remote.destroy()
   }
-  for (const [from, to] of [[local, remote], [remote, local]]) {
+  for (const [from, to, change] of [[local, remote, toRemote], [remote, local, toLocal]]) {
     let waiting = false
     from.on('data', (data) => {
-      if (to.write(data) !== false || waiting) return
+      if (change) data = change(data)
+      if (data === null) return close()
+      if (!data.byteLength || to.write(data) !== false || waiting) return
       waiting = true
       from.pause()
       to.once('drain', () => {

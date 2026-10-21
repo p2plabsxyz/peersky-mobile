@@ -289,6 +289,18 @@ describe('browser shell navigation helpers', () => {
     assert.deepEqual(getBrowserRequestAction({ requestUrl: 'https://example.com', currentSourceKind: 'web' }), { action: 'allow' })
   })
 
+  test('a frame may show a document its page made, a tab may not', () => {
+    // Agregore's scratchpad draws its live preview into a data: frame, which
+    // stayed blank.
+    for (const requestUrl of ['data:text/html;base64,PHA+b2s8L3A+', 'blob:https://agregore.mauve.moe/0b6f', 'about:srcdoc']) {
+      for (const currentSourceKind of ['web', 'hyper']) {
+        assert.deepEqual(getBrowserRequestAction({ requestUrl, currentSourceKind, isTopFrame: false }), { action: 'allow' })
+      }
+    }
+    assert.deepEqual(getBrowserRequestAction({ requestUrl: 'data:text/html,ok', currentSourceKind: 'web', isTopFrame: true }), { action: 'block' })
+    assert.deepEqual(getBrowserRequestAction({ requestUrl: 'about:srcdocx', currentSourceKind: 'web', isTopFrame: false }), { action: 'block' })
+  })
+
   test('a hyper:// frame never takes the whole tab with it', () => {
     // An ad or embed pointing at hyper:// used to become a full navigation, so
     // any page could send the tab to a hyper site of its choosing.
@@ -587,7 +599,7 @@ test('the P2PMD button names the view it takes you to', async () => {
     index.indexOf('<BrowserOverflowMenu')
   )
   // Editing offers Preview; anything else offers Edit.
-  assert.match(button, /p2pmdViewMode === 'edit' \? 'Preview' : 'Edit'/)
+  assert.match(button, /p2pmdViewMode === 'edit' \? t\('Preview'\) : t\('Edit'\)/)
   // And the icon agrees with the words: a pencil to go and edit, an eye to go
   // and look.
   assert.ok(button.indexOf('p2pmdViewMode !== \'edit\'') < button.indexOf('p2pmdPencilIcon'))
@@ -625,7 +637,7 @@ test('the p2p address lists the P2P sites this phone has opened', async () => {
   const screen = index.slice(p2pStart, index.indexOf("browserSource.kind === 'home'", p2pStart))
   assert.ok(p2pStart > 0 && screen.length > 0)
   assert.match(screen, /<P2pSitesPage\s+history=\{browserVisitHistory\}/)
-  assert.equal((index.match(/setBrowserTitle\('P2P sites'\)/g) || []).length, 2)
+  assert.equal((index.match(/setBrowserTitle\(t\('P2P sites'\)\)/g) || []).length, 2)
   assert.ok(!P2P_APPS.some((app) => app.id === 'holesail'))
 
   test('following a search result keeps the search behind it', () => {
@@ -660,7 +672,26 @@ test('a link on the first page in a tab keeps that page behind it on iOS', async
   assert.match(app, /onLoadStart=\{\(event\) => \{\s+browserLoadStartsRef\.current\.add\(event\.nativeEvent\)/)
   const start = app.indexOf('onNavigationStateChange={(navigationState) => {')
   const change = app.slice(start, app.indexOf('onMessage={(event) => {', start))
-  assert.match(change, /const loading = navigationState\.loading \|\| browserLoadStartsRef\.current\.has\(navigationState\)/)
+  assert.match(change, /const loading = navigationState\.loading \|\|\s+\(Platform\.OS === 'ios' && browserLoadStartsRef\.current\.has\(navigationState\)\)/)
   assert.doesNotMatch(change, /navigationState\.loading(?! \|\|)/)
   assert.match(change, /canGoForward: navigationState\.canGoForward,\s+loading\s+\}, tab\.id\)/)
+})
+
+// Android sends a page that moves on its own (history.pushState: a video
+// picked on YouTube, most single page sites) as a load start with loading
+// false, and no load end follows. Taken as a start, as iOS needs, it was never
+// recorded: back went past every page of the site, straight to Home.
+test('a page that moves on its own is a step back on Android', () => {
+  const web = (url) => ({ kind: 'web', uri: url })
+  const youtube = 'https://m.youtube.com/'
+  const video = 'https://m.youtube.com/watch?v=abc'
+  let state = commitBrowserEntryState(
+    { history: [{ url: BROWSER_HOME_URL, source: { kind: 'home' } }], historyIndex: 0 },
+    youtube,
+    web(youtube)
+  )
+  // The pushState: loading false, the WebView has the page before it.
+  state = recordBrowserWebNavigationState(state, video, web(video), null, true, false)
+  assert.deepEqual(state.history.map((entry) => entry.url), [BROWSER_HOME_URL, youtube, video])
+  assert.equal(getBrowserBackState(state).currentUrl, youtube)
 })

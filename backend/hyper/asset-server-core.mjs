@@ -278,7 +278,9 @@ function sendProxyAssetHeaders (res, {
   setAssetCorsHeaders(res)
   res.statusCode = status
   res.setHeader('Accept-Ranges', headers['accept-ranges'] || 'bytes')
-  res.setHeader('Cache-Control', headers['cache-control'] || 'public, max-age=300')
+  // Never cached: the drive is already on the phone, and a private drive's
+  // file kept in the WebView's cache would sit there decrypted.
+  res.setHeader('Cache-Control', 'no-store')
   res.setHeader('Content-Type', contentType)
   res.setHeader('X-Content-Type-Options', 'nosniff')
   // Drive files are someone else's. Opened as a page, an HTML file would run

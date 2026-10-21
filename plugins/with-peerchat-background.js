@@ -1,7 +1,9 @@
 const {
+  AndroidConfig,
   withAndroidManifest,
   withDangerousMod,
-  withMainApplication
+  withMainApplication,
+  withStringsXml
 } = require('@expo/config-plugins')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -17,11 +19,23 @@ const PACKAGE_REGISTRATION = 'add(PeerChatBackgroundPackage())'
 const SERVICE_NAME = '.PeerChatBackgroundService'
 const BOOT_RECEIVER_NAME = '.PeerChatBootReceiver'
 const TEMPLATE_DIRECTORY = path.join(__dirname, 'templates')
+// The notification's words in English, for the default strings.xml, which a
+// language without its own falls back to. Each language's copy comes from the
+// locales in app.json; scripts/i18n.mjs writes both into app/i18n/native.
+const ENGLISH_TEXT = path.join(__dirname, '..', 'app', 'i18n', 'native', 'en.json')
 
 module.exports = function withPeerChatBackground (config) {
   config = withAndroidManifest(config, (androidConfig) => {
     androidConfig.modResults.manifest = addPeerChatBackgroundManifest(
       androidConfig.modResults.manifest
+    )
+    return androidConfig
+  })
+
+  config = withStringsXml(config, (androidConfig) => {
+    androidConfig.modResults = addPeerChatBackgroundStrings(
+      androidConfig.modResults,
+      JSON.parse(fs.readFileSync(ENGLISH_TEXT, 'utf8')).android
     )
     return androidConfig
   })
@@ -121,6 +135,15 @@ function addPeerChatBackgroundManifest (manifest) {
   return manifest
 }
 
+// Written between double quotes, as Expo writes each language's copy, so the
+// same escaped value means the same text in both.
+function addPeerChatBackgroundStrings (strings, text) {
+  return AndroidConfig.Strings.setStringItem(
+    Object.entries(text).map(([name, value]) => ({ $: { name }, _: `"${value}"` })),
+    strings
+  )
+}
+
 function addPeerChatBackgroundPackage (contents) {
   const marker = 'PackageList(this).packages.apply {'
   if (!contents.includes(marker)) throw new Error('Unable to register the PeerChat background package.')
@@ -130,3 +153,4 @@ function addPeerChatBackgroundPackage (contents) {
 
 module.exports.addPeerChatBackgroundManifest = addPeerChatBackgroundManifest
 module.exports.addPeerChatBackgroundPackage = addPeerChatBackgroundPackage
+module.exports.addPeerChatBackgroundStrings = addPeerChatBackgroundStrings

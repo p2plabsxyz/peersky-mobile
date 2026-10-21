@@ -1,4 +1,4 @@
-import { findMentions } from '../../backend/peerchat/mentions.mjs'
+import { findMentions, personName } from '../../backend/peerchat/mentions.mjs'
 
 // What desktop linkifies, plus hs://, which is how a P2PMD note is shared and
 // was the one address in this list that stayed plain text on both. peersky://
@@ -63,6 +63,35 @@ export function splitPeerChatMentions (message, usernames) {
   }
   if (cursor < text.length) parts.push({ text: text.slice(cursor), mention: false })
   return parts
+}
+
+/**
+ * The names a mention in a room is read against: this person, the member
+ * list, and everyone who wrote there, as the @ suggestions offer. The member
+ * list holds at most 100 people, so in a big room like P2P Republic someone
+ * past them was plain text here while the desktop, which keeps every member,
+ * made them a link.
+ */
+export function peerChatMentionNames (ownName, members = [], messages = []) {
+  const names = [ownName || '']
+  for (const member of members || []) names.push(member?.username || '')
+  for (const message of messages || []) {
+    if (!message?.self && message?.senderName) names.push(message.senderName)
+  }
+  return names
+}
+
+/**
+ * The newest message from whoever a mention names, so a tap opens their
+ * profile as a tap on their name does, when they are not in the member list.
+ */
+export function messageFromMentioned (messages, mention) {
+  const name = String(mention || '').replace(/^@/, '').toLowerCase()
+  if (!name) return null
+  const written = (messages || []).filter((message) => !message?.self && message?.senderName).reverse()
+  return written.find((message) => message.senderName.toLowerCase() === name) ||
+    written.find((message) => personName(message.senderName).toLowerCase() === personName(name)) ||
+    null
 }
 
 export function normalizePeerChatMentionSpacing (message, usernames) {

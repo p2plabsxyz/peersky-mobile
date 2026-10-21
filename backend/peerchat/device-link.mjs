@@ -98,6 +98,46 @@ export function linkId (link) {
   return link?.key ? sha256(`peerchat-device-link\n${link.key}`).slice(0, 32) : ''
 }
 
+// Where the person's devices meet when they share no room: a topic only the
+// link's holders can work out, the link id included, since that one is sent
+// with every profile. A room was the only place they met before, so two
+// devices linked when neither was in a room never met at all, and a room made
+// on one later never reached the other. Desktop PeerChat makes the same bytes
+// (devicesTopic in lib/device-link.js), and both pin one vector.
+const DEVICES_TOPIC_CONTEXT = 'peersky-chat:devices:'
+const DEVICES_PROOF_CONTEXT = 'peersky-chat:devices-proof:'
+const DEVICES_PROOF_LABEL = 'peersky-chat/2 devices'
+const HEX_RE = /^(?:[0-9a-f]{2})+$/
+
+export function devicesTopic (link) {
+  if (!link?.key || !KEY_RE.test(link.key)) return null
+  return createHash('sha256').update(DEVICES_TOPIC_CONTEXT + link.key).digest()
+}
+
+function toHex (value) {
+  if (typeof value === 'string') return value.toLowerCase()
+  if (ArrayBuffer.isView(value)) return b4a.toString(b4a.from(value.buffer, value.byteOffset, value.byteLength), 'hex')
+  return ''
+}
+
+// Sent on every connection, like a room's proof (room-proof.mjs): made with
+// the link, over this connection's handshake and the sender's network key, so
+// it shows the other side one of the person's devices is here and tells
+// anyone else nothing. Good on this connection alone.
+export function devicesProof (link, handshakeHash, senderKey) {
+  if (!link?.key || !KEY_RE.test(link.key)) return ''
+  const handshake = toHex(handshakeHash)
+  const sender = toHex(senderKey)
+  if (!HEX_RE.test(handshake) || !KEY_RE.test(sender)) return ''
+  const key = createHash('sha256').update(DEVICES_PROOF_CONTEXT + link.key).digest()
+  return createHmac('sha256', key).update(`${DEVICES_PROOF_LABEL}\n${handshake}\n${sender}`).digest('hex')
+}
+
+export function checkDevicesProof (link, handshakeHash, senderKey, proof) {
+  if (typeof proof !== 'string' || !KEY_RE.test(proof)) return false
+  return sameHex(proof, devicesProof(link, handshakeHash, senderKey))
+}
+
 // The label a new device gets. There is one phone; desktops are numbered, and
 // the device the name was made on counts as the first desktop when it is one.
 export function nextLabel (link, targetType) {
@@ -174,6 +214,7 @@ function normalizeTransferRoom (raw) {
   const dmWith = typeof raw.dmWith === 'string' ? raw.dmWith.toLowerCase() : ''
   if (isDM && !PEER_ID_RE.test(dmWith)) return null
   const creatorKey = typeof raw.creatorKey === 'string' ? raw.creatorKey.toLowerCase() : ''
+  const creatorProof = typeof raw.creatorProof === 'string' ? raw.creatorProof.toLowerCase() : ''
   const createdBy = typeof raw.createdBy === 'string' ? raw.createdBy.toLowerCase() : ''
   return {
     roomKey,
@@ -189,6 +230,9 @@ function normalizeTransferRoom (raw) {
     createdBy: PEER_ID_RE.test(createdBy) ? createdBy : '',
     createdByName: clamp(raw.createdByName, MAX_NAME + 20),
     creatorKey: KEY_RE.test(creatorKey) ? creatorKey : '',
+    // The secret that made the room's key out of the creator's, which the
+    // receiving device checks before it keeps it. See room-move.mjs.
+    ...(KEY_RE.test(creatorProof) && { creatorProof }),
     // A room whose keys rotate: from the earliest hour this device holds, so
     // the other device reads the same history. See key-chain.mjs.
     ...(normalizeKeyChain(raw.chain) && { chain: normalizeKeyChain(raw.chain) })

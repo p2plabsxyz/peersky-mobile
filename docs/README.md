@@ -22,6 +22,7 @@
 
 - [Building and running](building.md): what you need, the first iPhone build, and the Android ad blocker setup.
 - [Testing guide](testing.md): what the suites cover and how to run them.
+- [Translations](translations.md): the 25 languages, how text goes through `t()`, and how to add text or a language.
 - [Releasing](store-release.md): what to do in App Store Connect and the Play Console, and what to tell the reviewers.
 
 ## Features
@@ -110,6 +111,7 @@
   - [x] Copy or share the link of what you uploaded
   - [x] Fetch a `hyper://` address, pasted or scanned from a QR code
   - [x] Browse a drive's folders and open its files
+  - [x] A `hyper://` folder that is not a website opens as Files, Photos or Videos, made for what it holds, at `peersky://p2p/hyperdrive/<view>/...`
   - [x] Keep a folder offline, with pause, resume and progress, and an option to download only on Wi-Fi
   - [x] Recent, with what you uploaded and fetched
   - [x] From your devices: private files from your other devices show up here on their own, and this phone's show up there, with a copy kept on your desktop
@@ -127,10 +129,12 @@
 - [x] PeerChat (`peersky://p2p/peerchat/`):
 
   - [x] Group rooms and direct messages, with no account and no server
-  - [x] Every message is encrypted and signed by whoever wrote it, and passed on from device to device
+  - [x] Every message is encrypted and signed by whoever wrote it, and passed on from device to device, as an id first so each device takes it in once
   - [x] Rooms and direct messages made on 0.1.2 or later change their key every hour
-  - [x] Replies, reactions, mentions and search
-  - [x] Files and pictures, encrypted with the room, and link previews
+  - [x] Replies, reactions, mentions, and search in a chat or across every chat
+  - [x] Files and pictures, encrypted with the room, saved to the phone, and link previews
+  - [x] Forwarding messages, pictures, videos and files, paced under the chat's spam limit
+  - [x] Rooms their creator can edit, and messages grouped by sender
   - [x] Message requests to accept or decline
   - [x] Invite links and QR codes, and invites sent through any app
   - [x] A profile with a name, a bio, a picture and a short ID
@@ -139,6 +143,7 @@
   - [x] Notifications and sounds
   - [x] Moderation
     - Whoever made a room can remove anyone from it, and the removal reaches everyone in the room
+    - Removing somebody moves the room to a new key that everyone else follows on their own, so the person removed cannot read on
     - Block or report anyone, from a message or their profile
     - Groups hold back threats, slurs and adult links, and refuse explicit pictures before they are sent
   - [x] Works on the same Wi-Fi with no internet
@@ -194,13 +199,13 @@ flowchart TB
   subgraph app["React Native app"]
     shell["Browser shell<br/>app/index.tsx"]
     native["Native screens<br/>Hyperdrive, PeerChat, Settings"]
-    webviews["WebViews<br/>web and hyper:// pages,<br/>P2PMD, PeerTunes"]
+    webviews["WebViews<br/>web and hyper:// pages,<br/>P2PMD, PeerTunes,<br/>Hyperdrive viewer"]
   end
 
   subgraph worklet["Bare worklet, backend/"]
     router["RPC router"]
     hyper["Hyper node<br/>hyper-sdk: Corestore,<br/>Hyperswarm, LAN mDNS"]
-    loopback["Servers on 127.0.0.1<br/>Hyper assets, P2PMD room,<br/>PeerTunes"]
+    loopback["Servers on 127.0.0.1<br/>Hyper assets, P2PMD room,<br/>PeerTunes, Hyperdrive viewer"]
     chat["PeerChat service"]
     holesail["Holesail tunnel"]
     link["Link Device<br/>and backups"]

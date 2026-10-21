@@ -115,7 +115,7 @@ test('the Bookmarks screen lists folders first, opens them, and moves a bookmark
   const screen = await readFile(new URL('../../app/bookmarks/BookmarksScreen.tsx', import.meta.url), 'utf8')
   assert.match(screen, /\.\.\.folders\.map\(\(folder\) => \(\{\s+kind: 'folder' as const/)
   assert.match(screen, /onPress=\{\(\) => setOpenFolderId\(item\.folder\.id\)\}/)
-  assert.match(screen, /accessibilityLabel=\{`Move \$\{bookmark\.title\} to a folder`\}/)
+  assert.match(screen, /accessibilityLabel=\{t\('Move \{name\} to a folder', \{ name: bookmark\.title \}\)\}/)
   assert.match(screen, /if \(moving\) onMoveBookmark\(moving\.url, folderId\)/)
   assert.match(screen, /Tap the star in the address bar to bookmark a page\./)
 })

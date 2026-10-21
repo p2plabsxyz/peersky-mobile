@@ -12,7 +12,12 @@ import z32 from 'z32'
 import Holesail from 'holesail'
 import HolesailServer from 'holesail-server'
 import HolesailClient from 'holesail-client'
+import b4a from 'b4a'
+import { createRequestGate, createRequestStamp } from '../../backend/holesail/request-gate.mjs'
 import { noteAddress, parseNoteAddress, TunnelGuest, TunnelHost } from '../../backend/holesail/tunnel.mjs'
+import { LOOPBACK_TOKEN_HEADER, createLoopbackToken } from '../../backend/loopback-request.mjs'
+import { resetDocumentState } from '../../backend/p2pmd/document.mjs'
+import { createP2pmdHttpServer } from '../../backend/p2pmd/server.mjs'
 
 const PRIVATE_KEY = 'e7ad5d0b29335d515472b594ae9f9baedd317ad2e0c7df3580f369360b44b651'
 const PUBLIC_SEED = '3f1c2b0d9e8a7f6e5d4c3b2a19087f6e5d4c3b2a19087f6e5d4c3b2a19087f6e'
@@ -65,6 +70,90 @@ describe('the same keys as Holesail', () => {
     const ours = new TunnelHost({ secure: true })
     assert.match(ours.info.url, /^hs:\/\/s000[0-9a-f]{64}$/)
     assert.equal(ours.publicKey, z32.encode(HyperDHT.keyPair(sha256(ours.key)).publicKey))
+  })
+})
+
+// Both ends of a note's tunnel sit on 127.0.0.1, where any app on the phone
+// can reach them. A joined note's port lets through only the requests of this
+// phone's editor, which carry its token, and takes the token out. A hosted
+// note's tunnel gives its server's token to whoever came in with the address.
+describe('the token on a note tunnel', () => {
+  const TOKEN = createLoopbackToken()
+
+  // What a gate passes on for these pieces of a connection, or null when it
+  // drops it.
+  function throughGate (pieces, token = TOKEN) {
+    const gate = createRequestGate(token)
+    const out = []
+    for (const piece of pieces) {
+      const bytes = gate.push(b4a.from(piece, 'latin1'))
+      if (bytes === null) return null
+      out.push(bytes)
+    }
+    return b4a.toString(b4a.concat(out), 'latin1')
+  }
+
+  it('takes the token out of each request and passes everything else as it was', () => {
+    // A body that looks like a request is a body all the same.
+    const body = `GET /doc?token=${TOKEN} HTTP/1.1\r\n\r\n`
+    const sent = [
+      `GET /events?clientId=a&role=client&name=Ana%20B&token=${TOKEN} HTTP/1.1\r\nHost: 127.0.0.1:5000\r\nAccept: text/event-stream\r\n\r\n`,
+      `POST /doc/update?token=${TOKEN} HTTP/1.1\r\nHost: 127.0.0.1:5000\r\nContent-Type: application/json\r\nContent-Length: ${body.length}\r\n\r\n${body}`,
+      `GET /status?token=${TOKEN}&x= HTTP/1.1\r\nHost: 127.0.0.1:5000\r\nUser-Agent: caf\xe9\r\n\r\n`
+    ].join('')
+    const expected = [
+      'GET /events?clientId=a&role=client&name=Ana%20B HTTP/1.1\r\nHost: 127.0.0.1:5000\r\nAccept: text/event-stream\r\n\r\n',
+      `POST /doc/update HTTP/1.1\r\nHost: 127.0.0.1:5000\r\nContent-Type: application/json\r\nContent-Length: ${body.length}\r\n\r\n${body}`,
+      'GET /status?x= HTTP/1.1\r\nHost: 127.0.0.1:5000\r\nUser-Agent: caf\xe9\r\n\r\n'
+    ].join('')
+
+    assert.equal(throughGate([sent]), expected)
+    assert.equal(throughGate(sent.split('')), expected)
+    for (let at = 1; at < sent.length; at++) {
+      assert.equal(throughGate([sent.slice(0, at), sent.slice(at)]), expected, `split at ${at}`)
+    }
+  })
+
+  it('drops a connection at a request without the token, or one the editor never sends', () => {
+    const other = createLoopbackToken()
+    for (const request of [
+      'GET /doc HTTP/1.1\r\n\r\n',
+      'GET /doc?token= HTTP/1.1\r\n\r\n',
+      `GET /doc?token=${other} HTTP/1.1\r\n\r\n`,
+      `GET /doc?token=${'0'.repeat(TOKEN.length)} HTTP/1.1\r\n\r\n`,
+      `GET /doc?token=${TOKEN.slice(1)} HTTP/1.1\r\n\r\n`,
+      `GET /doc?token=${TOKEN}&token=${TOKEN} HTTP/1.1\r\n\r\n`,
+      `GET /doc?Token=${TOKEN} HTTP/1.1\r\n\r\n`,
+      `GET /doc?tok%65n=${TOKEN} HTTP/1.1\r\n\r\n`,
+      `GET http://127.0.0.1:5000/doc?token=${TOKEN} HTTP/1.1\r\n\r\n`,
+      'CONNECT 127.0.0.1:5000 HTTP/1.1\r\n\r\n',
+      `\r\nGET /doc?token=${TOKEN} HTTP/1.1\r\n\r\n`,
+      `GET /a\nb?token=${TOKEN} HTTP/1.1\r\n\r\n`,
+      `GET /doc?token=${TOKEN} HTTP/2\r\n\r\n`,
+      `POST /doc?token=${TOKEN} HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n`,
+      `GET /events?token=${TOKEN} HTTP/1.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n`,
+      `POST /doc?token=${TOKEN} HTTP/1.1\r\nContent-Length: 1\r\nContent-Length: 1\r\n\r\nx`,
+      `POST /doc?token=${TOKEN} HTTP/1.1\r\nContent-Length: -1\r\n\r\n`,
+      `GET /doc?token=${TOKEN} HTTP/1.1\r\nX: a\nContent-Length: 5\r\n\r\n`,
+      `GET /doc?token=${TOKEN} HTTP/1.1\r\n folded\r\n\r\n`,
+      `GET /doc?token=${TOKEN} HTTP/1.1\r\nNo colon\r\n\r\n`,
+      `GET /doc?token=${TOKEN} HTTP/1.1\r\nX: ${'a'.repeat(17 * 1024)}`
+    ]) {
+      assert.equal(throughGate([request]), null, JSON.stringify(request.slice(0, 80)))
+    }
+    // A good request first lets nothing after it through without the token.
+    assert.equal(throughGate([`GET /doc?token=${TOKEN} HTTP/1.1\r\n\r\nGET /doc HTTP/1.1\r\n\r\n`]), null)
+    assert.equal(throughGate([`GET /doc?token=${TOKEN} HTTP/1.1\r\n\r\n`, `GET /doc?token=${other} HTTP/1.1\r\n\r\n`]), null)
+  })
+
+  it('puts the server\'s token on the first request of a hosted connection only', () => {
+    const stamp = createRequestStamp(TOKEN)
+    const pieces = ['GET /d', 'oc HTTP/1.1\r', '\nHost: a\r\n\r\n', 'GET /status HTTP/1.1\r\n\r\n']
+    const out = pieces.map((piece) => b4a.toString(stamp(b4a.from(piece)), 'latin1')).join('')
+    assert.equal(out, `GET /doc HTTP/1.1\r\n${LOOPBACK_TOKEN_HEADER}: ${TOKEN}\r\nHost: a\r\n\r\nGET /status HTTP/1.1\r\n\r\n`)
+
+    // A first line that never ends is dropped.
+    assert.equal(createRequestStamp(TOKEN)(b4a.from('G'.repeat(17 * 1024))), null)
   })
 })
 
@@ -161,6 +250,146 @@ describe('notes over a local test network', () => {
     assert.equal(await fetchText(joined.info.port, '/to-holesail'), 'origin /to-holesail')
   })
 
+  it('lets this phone\'s editor through a joined note, and keeps its token from the host', async () => {
+    const seen = await startRecorder()
+    closing.push(() => new Promise((resolve) => seen.server.close(resolve)))
+    const hostToken = createLoopbackToken()
+    const guestToken = createLoopbackToken()
+    const hosted = await host({ secure: true, port: seen.port, token: hostToken })
+    const joined = await guest({ key: hosted.info.url, token: guestToken })
+
+    const read = await fetch(`http://127.0.0.1:${joined.info.port}/doc?x=1&token=${guestToken}`)
+    assert.equal(read.status, 200)
+    const write = await fetch(`http://127.0.0.1:${joined.info.port}/doc/update?token=${guestToken}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{"update":"AQ=="}'
+    })
+    assert.equal(write.status, 200)
+
+    assert.deepEqual(seen.requests.map(({ method, url, body }) => [method, url, body]), [
+      ['GET', '/doc?x=1', ''],
+      ['POST', '/doc/update', '{"update":"AQ=="}']
+    ])
+    // The host's server is told by its own tunnel, and never sees this phone's token.
+    for (const request of seen.requests) assert.equal(request.headers[LOOPBACK_TOKEN_HEADER.toLowerCase()], hostToken)
+    assert.ok(!JSON.stringify(seen.requests).includes(guestToken))
+  })
+
+  it('answers another app at a joined note\'s port itself, and never calls the host', async () => {
+    const seen = await startRecorder()
+    closing.push(() => new Promise((resolve) => seen.server.close(resolve)))
+    const hosted = await host({ secure: true, port: seen.port, token: createLoopbackToken() })
+    const token = createLoopbackToken()
+    const joined = await guest({ key: hosted.info.url, token })
+    let calls = 0
+    const connect = joined.dht.connect.bind(joined.dht)
+    joined.dht.connect = (...args) => {
+      calls++
+      return connect(...args)
+    }
+
+    for (const path of ['/doc', '/doc?token=', `/doc?token=${createLoopbackToken()}`, `/doc?token=${token.toUpperCase()}x`]) {
+      const response = await fetch(`http://127.0.0.1:${joined.info.port}${path}`)
+      assert.equal(response.status, 403, path)
+      assert.equal(await response.text(), 'Forbidden')
+    }
+    assert.match(await sendAndEnd(joined.info.port, 'not http at all\r\n\r\n'), /^HTTP\/1\.1 403 Forbidden\r\n/)
+    assert.equal(calls, 0)
+    assert.equal(seen.connections, 0)
+
+    // Its own editor gets through.
+    assert.equal((await fetch(`http://127.0.0.1:${joined.info.port}/doc?token=${token}`)).status, 200)
+    assert.equal(calls, 1)
+  })
+
+  it('carries a room that wants the token between two phones, and keeps other apps out of both ends', async () => {
+    resetDocumentState()
+    const roomToken = createLoopbackToken()
+    const room = createP2pmdHttpServer({ httpImpl: http, token: roomToken })
+    const roomPort = await listenOn(room)
+    closing.push(() => new Promise((resolve) => room.close(resolve)))
+    const hosted = await host({ secure: true, port: roomPort, token: roomToken })
+    const guestToken = createLoopbackToken()
+    const joined = await guest({ key: hosted.info.url, token: guestToken })
+    const joinedUrl = `http://127.0.0.1:${joined.info.port}`
+
+    const write = await fetch(`${joinedUrl}/doc?token=${guestToken}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: 'from the joined phone' })
+    })
+    assert.equal(write.status, 200)
+    const read = await fetch(`${joinedUrl}/doc?token=${guestToken}`)
+    assert.equal((await read.json()).content, 'from the joined phone')
+
+    // The event stream, which stays open, comes through the same way.
+    const events = await fetch(`${joinedUrl}/events?clientId=joined&role=client&name=Joined&token=${guestToken}`)
+    assert.equal(events.status, 200)
+    const reader = events.body.getReader()
+    let stream = ''
+    while (!stream.includes('from the joined phone')) {
+      const { value, done } = await reader.read()
+      if (done) break
+      stream += b4a.toString(value)
+    }
+    await reader.cancel()
+    assert.match(stream, /^event: peers\ndata: 1\n\n/)
+    assert.match(stream, /from the joined phone/)
+
+    // The room's own port and the joined port, as another app would ask.
+    assert.equal((await fetch(`http://127.0.0.1:${roomPort}/doc`)).status, 403)
+    assert.equal((await fetch(`${joinedUrl}/doc`)).status, 403)
+    // Neither end's token opens the other end.
+    assert.equal((await fetch(`http://127.0.0.1:${roomPort}/doc?token=${guestToken}`)).status, 403)
+    assert.equal((await fetch(`${joinedUrl}/doc?token=${roomToken}`)).status, 403)
+    resetDocumentState()
+  })
+
+  it('lets Holesail, as the desktop joins, into a room that wants the token', async () => {
+    resetDocumentState()
+    const roomToken = createLoopbackToken()
+    const room = createP2pmdHttpServer({ httpImpl: http, token: roomToken })
+    const roomPort = await listenOn(room)
+    closing.push(() => new Promise((resolve) => room.close(resolve)))
+    const key = createLoopbackToken()
+    await host({ key: 'hs://s000' + key, port: roomPort, token: roomToken })
+    const theirs = holesailClient(key)
+    closing.push(() => theirs.destroy())
+    await new Promise((resolve) => theirs.connect({ port: 0, host: '127.0.0.1' }, resolve))
+
+    const desktopUrl = `http://127.0.0.1:${theirs.proxy.address().port}`
+    const status = await fetch(`${desktopUrl}/status`, { headers: { Origin: 'peersky://p2p' } })
+    assert.equal(status.status, 200)
+    assert.equal((await status.json()).service, 'p2pmd')
+    const write = await fetch(`${desktopUrl}/doc`, {
+      method: 'POST',
+      headers: { Origin: 'peersky://p2p', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: 'from the desktop' })
+    })
+    assert.equal(write.status, 200)
+    assert.equal((await (await fetch(`http://127.0.0.1:${roomPort}/doc?token=${roomToken}`)).json()).content, 'from the desktop')
+    resetDocumentState()
+  })
+
+  it('joins a note Holesail hosts, and the desktop never sees the token', async () => {
+    const seen = await startRecorder()
+    closing.push(() => new Promise((resolve) => seen.server.close(resolve)))
+    const key = 'c'.repeat(64)
+    const theirs = holesailServer()
+    closing.push(() => theirs.destroy())
+    await theirs.start({ port: seen.port, host: '127.0.0.1', seed: sha256(key).toString('hex'), secure: true, udp: false })
+
+    const token = createLoopbackToken()
+    const joined = await guest({ key: 'hs://s000' + key, token })
+    for (const path of ['/doc', '/status']) {
+      const response = await fetch(`http://127.0.0.1:${joined.info.port}${path}?token=${token}`)
+      assert.equal(response.status, 200)
+    }
+    assert.deepEqual(seen.requests.map(({ url }) => url), ['/doc', '/status'])
+    assert.ok(!JSON.stringify(seen.requests).includes(token))
+  })
+
   // Holesail's classes make their own DHT on the live network in their
   // constructors, so these build the same objects on the test network.
   function holesailServer () {
@@ -233,5 +462,34 @@ function sendAndEnd (port, request) {
     socket.on('end', () => resolve(answer))
     socket.on('error', reject)
     socket.end(request)
+  })
+}
+
+// Keeps what reaches it: each request's method, address, headers and body.
+// It closes each connection after its answer, as the room's server does.
+function startRecorder () {
+  const seen = { requests: [], connections: 0 }
+  seen.server = http.createServer((req, res) => {
+    let body = ''
+    req.setEncoding('utf8')
+    req.on('data', (chunk) => { body += chunk })
+    req.on('end', () => {
+      seen.requests.push({ method: req.method, url: req.url, headers: req.headers, body })
+      res.writeHead(200, { 'Content-Type': 'text/plain', Connection: 'close' })
+      res.end('ok')
+    })
+  })
+  seen.server.on('connection', () => { seen.connections++ })
+  return new Promise((resolve) => {
+    seen.server.listen(0, '127.0.0.1', () => {
+      seen.port = seen.server.address().port
+      resolve(seen)
+    })
+  })
+}
+
+function listenOn (server) {
+  return new Promise((resolve) => {
+    server.listen(0, '127.0.0.1', () => resolve(server.address().port))
   })
 }

@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import { Animated, Easing, Image, StyleSheet, View } from 'react-native'
 
 import { BROWSER_PALETTES } from './browser-appearance.mjs'
+import { t } from './i18n/i18n.mjs'
 
 const LOADING_ICONS = {
   p2pmd: require('../assets/images/loading/p2pmd.png'),
@@ -56,7 +57,7 @@ export function AppLoading ({ app, isDark }: { app: LoadingApp, isDark: boolean 
     <View
       style={styles.centered}
       accessibilityRole='progressbar'
-      accessibilityLabel={`Opening ${APP_NAMES[app]}`}
+      accessibilityLabel={t('Opening {app}', { app: APP_NAMES[app] })}
     >
       <Animated.View style={[styles.content, { opacity: appear }]}>
         <Image source={LOADING_ICONS[app]} style={styles.icon} />

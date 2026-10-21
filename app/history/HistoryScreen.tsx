@@ -11,6 +11,7 @@ import ArrowLeftIcon from '../../assets/icons/bootstrap/arrow-left.svg'
 import HistoryIcon from '../../assets/icons/bootstrap/clock-history.svg'
 import TrashIcon from '../../assets/icons/bootstrap/trash.svg'
 import { BROWSER_PALETTES } from '../browser-appearance.mjs'
+import { t } from '../i18n/i18n.mjs'
 import type { BrowserHistoryItem } from './useBrowserHistory'
 
 type HistoryScreenProps = {
@@ -37,9 +38,9 @@ export function HistoryScreen ({
   const palette = isDark ? BROWSER_PALETTES.dark : BROWSER_PALETTES.light
 
   function confirmClear () {
-    Alert.alert('Clear browsing history?', 'This removes every saved history entry.', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Clear', style: 'destructive', onPress: onClear }
+    Alert.alert(t('Clear browsing history?'), t('This removes every saved history entry.'), [
+      { text: t('Cancel'), style: 'cancel' },
+      { text: t('Clear'), style: 'destructive', onPress: onClear }
     ])
   }
 
@@ -47,7 +48,7 @@ export function HistoryScreen ({
     <View style={[styles.screen, { backgroundColor: palette.shell }]}>
       <View style={[styles.header, { borderBottomColor: palette.border }]}>
         <Pressable
-          accessibilityLabel='Close History'
+          accessibilityLabel={t('Close History')}
           accessibilityRole='button'
           hitSlop={10}
           style={({ pressed }) => [styles.iconButton, pressed ? styles.pressed : null]}
@@ -55,9 +56,9 @@ export function HistoryScreen ({
         >
           <ArrowLeftIcon width={22} height={22} color={palette.text} />
         </Pressable>
-        <Text style={[styles.title, { color: palette.text }]}>History</Text>
+        <Text style={[styles.title, { color: palette.text }]}>{t('History')}</Text>
         <Pressable
-          accessibilityLabel='Clear browsing history'
+          accessibilityLabel={t('Clear browsing history')}
           accessibilityRole='button'
           disabled={!isReady || items.length === 0}
           hitSlop={10}
@@ -82,14 +83,14 @@ export function HistoryScreen ({
         ? (
           <View style={styles.empty}>
             <ActivityIndicator color={palette.accent} />
-            <Text style={[styles.emptyText, { color: palette.mutedText }]}>Loading history...</Text>
+            <Text style={[styles.emptyText, { color: palette.mutedText }]}>{t('Loading history...')}</Text>
           </View>
           )
         : items.length === 0
           ? (
             <View style={styles.empty}>
               <HistoryIcon width={30} height={30} color={palette.mutedText} />
-              <Text style={[styles.emptyText, { color: palette.mutedText }]}>No browsing history yet.</Text>
+              <Text style={[styles.emptyText, { color: palette.mutedText }]}>{t('No browsing history yet.')}</Text>
             </View>
             )
           : (
@@ -100,7 +101,7 @@ export function HistoryScreen ({
               renderItem={({ item }) => (
                 <View style={[styles.row, { borderBottomColor: palette.border }]}>
                   <Pressable
-                    accessibilityLabel={`Open ${item.title}`}
+                    accessibilityLabel={t('Open {name}', { name: item.title })}
                     accessibilityRole='link'
                     style={({ pressed }) => [styles.rowContent, pressed ? styles.pressed : null]}
                     onPress={() => onOpen(item.url)}
@@ -109,7 +110,7 @@ export function HistoryScreen ({
                     <Text numberOfLines={1} style={[styles.itemUrl, { color: palette.mutedText }]}>{item.url}</Text>
                   </Pressable>
                   <Pressable
-                    accessibilityLabel={`Remove ${item.title} from history`}
+                    accessibilityLabel={t('Remove {name} from history', { name: item.title })}
                     accessibilityRole='button'
                     hitSlop={8}
                     style={({ pressed }) => [styles.removeButton, pressed ? styles.pressed : null]}

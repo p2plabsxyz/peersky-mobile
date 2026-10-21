@@ -33,5 +33,6 @@ test('holding a picture, video or file opens the message actions', async () => {
   const screen = await read('app/peerchat/PeerChatScreen.tsx')
   const attachment = screen.slice(screen.indexOf('function PeerChatAttachment ('), screen.indexOf('function PeerChatVideo ('))
   assert.equal((attachment.match(/onLongPress=\{onShowActions\}/g) || []).length, 4)
-  assert.match(screen, /onShowActions=\{\(\) => \{\s+tapFeedback\(\)\s+showMessageActions\(item\)\s+\}\}/)
+  assert.match(screen, /const holdMessage = \(\) => \{\s+tapFeedback\(\)\s+showMessageActions\(item\)\s+\}/)
+  assert.match(screen, /onShowActions=\{holdMessage\}/)
 })

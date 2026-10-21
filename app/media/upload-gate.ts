@@ -1,7 +1,7 @@
 import * as DocumentPicker from 'expo-document-picker'
 import * as ImagePicker from 'expo-image-picker'
 import { Directory, File, Paths } from 'expo-file-system'
-import { AppState } from 'react-native'
+import { AppState, Platform } from 'react-native'
 
 import {
   describeTooManyFiles,
@@ -10,6 +10,7 @@ import {
   MEDIA_UNSCANNED,
   screenUploadBatch
 } from './media-moderation.mjs'
+import { t } from '../i18n/i18n.mjs'
 import { ensurePermission } from '../permission-prompt'
 
 export type UploadAsset = {
@@ -37,8 +38,15 @@ let scanner: UploadScanner | null = null
 // Leaving the app while the picker is open means its result never arrives, and
 // the promise stays pending for the rest of the session. Whatever awaited it
 // stays busy, which hides the attach button behind its own spinner. Coming back
-// to the app is the signal to give up on it.
-const ABANDONED_PICK_GRACE_MS = 2000
+// to the app is the signal to give up on it, on Android.
+//
+// On Android every return from a picker comes back to the app this way, and a
+// big video or a photo kept in the cloud takes a while to copy before the
+// result arrives: two seconds dropped those without a word. On iOS the picker
+// runs inside the app, and a photo that has to download from iCloud first is
+// still on its way when the app comes back, so iOS never gives up on return;
+// the timeout below covers a picker that never appeared.
+const ABANDONED_PICK_GRACE_MS = 15_000
 // And a picker that never appeared at all never answers either, and the app
 // never left the foreground for the listener below to notice. Long enough that
 // nobody browsing their photo library trips it, short enough that a session
@@ -61,7 +69,7 @@ function supersedePendingPick () {
 }
 
 AppState.addEventListener('change', (state) => {
-  if (state !== 'active' || !abandonPick) return
+  if (Platform.OS === 'ios' || state !== 'active' || !abandonPick) return
   // Returning from a pick that did work also lands here, a moment before the
   // result arrives, so the grace period is what tells the two apart.
   const giveUp = abandonPick
@@ -72,7 +80,8 @@ AppState.addEventListener('change', (state) => {
 
 async function pickImages (
   source: 'library' | 'camera',
-  multiple: boolean
+  multiple: boolean,
+  imagesOnly = false
 ): Promise<ImagePicker.ImagePickerResult | null> {
   supersedePendingPick()
 
@@ -82,15 +91,15 @@ async function pickImages (
   if (source === 'camera') {
     const allowed = await ensurePermission({
       request: () => ImagePicker.requestCameraPermissionsAsync(),
-      title: 'Camera access is off',
-      message: 'PeerSky needs the camera to take a photo. Turn it on in Settings.'
+      title: t('Camera access is off'),
+      message: t('PeerSky needs the camera to take a photo. Turn it on in Settings.')
     })
-    if (!allowed) throw new Error('PeerSky needs camera access to take a photo.')
+    if (!allowed) throw new Error(t('PeerSky needs camera access to take a photo.'))
   }
 
   const options: ImagePicker.ImagePickerOptions = {
     allowsMultipleSelection: source === 'library' && multiple,
-    mediaTypes: ['images', 'videos'],
+    mediaTypes: imagesOnly ? ['images'] : ['images', 'videos'],
     quality: 1
   }
 
@@ -204,7 +213,7 @@ export async function pickUploadFolder (): Promise<UploadAsset[]> {
 
   const found: File[] = []
   collectFiles(folder, 0, found)
-  if (found.length === 0) throw new Error('That folder has no files in it.')
+  if (found.length === 0) throw new Error(t('That folder has no files in it.'))
 
   const staging = new Directory(Paths.cache, STAGING_FOLDER)
   if (staging.exists) staging.delete()
@@ -257,28 +266,35 @@ export async function pickUploadFolder (): Promise<UploadAsset[]> {
  * @param screen Whether to run the classifier. It is for rooms, where a picture
  *   lands in front of everyone at once. A direct message goes to one person
  *   who can block the sender, so screening it protects nobody.
+ * @param onPicked Told what was picked before it is screened, so the screen
+ *   can say it is being checked rather than look stuck.
  */
 export async function pickUploads ({
   multiple = false,
   screen = true,
   source = 'files',
-  type
+  type,
+  onPicked
 }: {
   multiple?: boolean
   screen?: boolean
   source?: UploadSource
   type?: string | string[]
+  onPicked?: (assets: UploadAsset[]) => void
 } = {}): Promise<UploadAsset[]> {
   const picked = source === 'files'
     ? await pickFromFiles(multiple, type)
-    : await pickFromPhotos(source, multiple)
+    // A picture asked for, as a profile or room picture is, offers no videos.
+    : await pickFromPhotos(source, multiple, [type].flat().every((value) => typeof value === 'string' && value.startsWith('image/')))
   if (picked.length === 0) return []
 
   if (isTooManyFiles(picked.length)) {
     throw new Error(describeTooManyFiles(picked.length, MAX_UPLOAD_BATCH))
   }
 
-  return screen ? await screenAssets(picked) : picked
+  if (!screen) return picked
+  onPicked?.(picked)
+  return await screenAssets(picked)
 }
 
 async function pickFromFiles (multiple: boolean, type?: string | string[]): Promise<UploadAsset[]> {
@@ -292,7 +308,7 @@ async function pickFromFiles (multiple: boolean, type?: string | string[]): Prom
   return selection.assets.map((asset) => {
     const file = new File(asset.uri)
     const size = asset.size ?? file.size
-    if (!Number.isSafeInteger(size) || !size) throw new Error('Choose a non-empty file.')
+    if (!Number.isSafeInteger(size) || !size) throw new Error(t('Choose a non-empty file.'))
     return {
       uri: file.uri,
       name: asset.name,
@@ -304,15 +320,16 @@ async function pickFromFiles (multiple: boolean, type?: string | string[]): Prom
 
 async function pickFromPhotos (
   source: 'library' | 'camera',
-  multiple: boolean
+  multiple: boolean,
+  imagesOnly = false
 ): Promise<UploadAsset[]> {
-  const selection = await pickImages(source, multiple)
+  const selection = await pickImages(source, multiple, imagesOnly)
   if (!selection || selection.canceled || !selection.assets?.length) return []
 
   return selection.assets.map((asset) => {
     const file = new File(asset.uri)
     const size = asset.fileSize ?? file.size
-    if (!Number.isSafeInteger(size) || !size) throw new Error('Choose a non-empty file.')
+    if (!Number.isSafeInteger(size) || !size) throw new Error(t('Choose a non-empty file.'))
     return {
       uri: file.uri,
       // The camera roll does not always hand over a name, and a photo with no

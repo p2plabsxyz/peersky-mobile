@@ -21,6 +21,7 @@ static const WKNavigationActionPolicy PeerSkyAllowWithoutOpeningApp = (WKNavigat
 @property (nonatomic, assign) BOOL forceDarkScheme;
 @property (nonatomic, assign) BOOL hyperSession;
 @property (nonatomic, copy) NSString *mediaLongPressToken;
+@property (nonatomic, copy) NSDictionary *themeFiles;
 - (NSString *)hyperPageForURL:(NSURL *)url;
 @end
 
@@ -91,6 +92,61 @@ static PeerSkyHyperSchemeHandler *PeerSkySharedHyperSchemeHandler(void)
   static dispatch_once_t once;
   dispatch_once(&once, ^{
     handler = [PeerSkyHyperSchemeHandler new];
+  });
+  return handler;
+}
+
+// browser://theme/ and agregore://theme/, as the desktop serves them: the
+// browser's colours (vars.css) and its look (style.css) for pages made for
+// PeerSky or Agregore. The app hands each WebView the files for its light or
+// dark setting (app/browser-theme.mjs). Anything else is not found.
+@interface PeerSkyThemeSchemeHandler : NSObject <WKURLSchemeHandler>
+@end
+
+@implementation PeerSkyThemeSchemeHandler
+
+- (void)webView:(WKWebView *)webView startURLSchemeTask:(id<WKURLSchemeTask>)task
+{
+  NSURL *url = task.request.URL;
+  NSString *css = nil;
+  if ([url.host.lowercaseString isEqualToString:@"theme"]) {
+    NSString *name = [url.path hasPrefix:@"/"] ? [url.path substringFromIndex:1] : url.path;
+    for (UIView *view = webView.superview; view; view = view.superview) {
+      if ([view isKindOfClass:[PeerSkyWebViewImpl class]]) {
+        id file = ((PeerSkyWebViewImpl *)view).themeFiles[name];
+        if ([file isKindOfClass:[NSString class]]) css = file;
+        break;
+      }
+    }
+  }
+  NSData *body = [(css ?: @"Not found") dataUsingEncoding:NSUTF8StringEncoding];
+  NSHTTPURLResponse *response = [[NSHTTPURLResponse alloc]
+    initWithURL:url
+    statusCode:css ? 200 : 404
+    HTTPVersion:@"HTTP/1.1"
+    headerFields:@{
+      @"Content-Type": css ? @"text/css; charset=utf-8" : @"text/plain; charset=utf-8",
+      @"Content-Length": [NSString stringWithFormat:@"%lu", (unsigned long)body.length],
+      @"Access-Control-Allow-Origin": @"*",
+      @"Cache-Control": @"no-cache"
+    }];
+  [task didReceiveResponse:response];
+  [task didReceiveData:body];
+  [task didFinish];
+}
+
+- (void)webView:(WKWebView *)webView stopURLSchemeTask:(id<WKURLSchemeTask>)task
+{
+}
+
+@end
+
+static PeerSkyThemeSchemeHandler *PeerSkySharedThemeSchemeHandler(void)
+{
+  static PeerSkyThemeSchemeHandler *handler;
+  static dispatch_once_t once;
+  dispatch_once(&once, ^{
+    handler = [PeerSkyThemeSchemeHandler new];
   });
   return handler;
 }
@@ -177,6 +233,11 @@ static NSString *PeerSkyBrowserApplicationName(void)
   [[PeerSkyContentBlocker shared] configureWebView:configuration];
   if (![configuration urlSchemeHandlerForURLScheme:@"hyper"]) {
     [configuration setURLSchemeHandler:PeerSkySharedHyperSchemeHandler() forURLScheme:@"hyper"];
+  }
+  for (NSString *scheme in @[ @"browser", @"agregore" ]) {
+    if (![configuration urlSchemeHandlerForURLScheme:scheme]) {
+      [configuration setURLSchemeHandler:PeerSkySharedThemeSchemeHandler() forURLScheme:scheme];
+    }
   }
   return configuration;
 }
@@ -427,6 +488,7 @@ RCT_EXPORT_VIEW_PROPERTY(incognitoSession, NSString)
 RCT_EXPORT_VIEW_PROPERTY(forceDarkScheme, BOOL)
 RCT_EXPORT_VIEW_PROPERTY(hyperSession, BOOL)
 RCT_EXPORT_VIEW_PROPERTY(mediaLongPressToken, NSString)
+RCT_EXPORT_VIEW_PROPERTY(themeFiles, NSDictionary)
 
 - (UIView *)view
 {

@@ -2,22 +2,24 @@
 // you choose another in Settings > Appearance > Toolbar button, the way
 // DuckDuckGo lets you swap its Fire Button.
 
+import { msg } from './i18n/i18n.mjs'
+
 export const DEFAULT_TOOLBAR_BUTTON = 'burn'
 
 // In the order the settings list shows them.
 export const TOOLBAR_BUTTONS = Object.freeze([
-  { id: 'bookmark', title: 'Add Bookmark' },
-  { id: 'favourite', title: 'Add Favourite' },
-  { id: 'bookmarks', title: 'Bookmarks' },
-  { id: 'burn', title: 'Burn Tabs and Data' },
-  { id: 'downloads', title: 'Downloads' },
-  { id: 'history', title: 'History' },
-  { id: 'home', title: 'Home' },
-  { id: 'incognito', title: 'New Incognito Tab' },
-  { id: 'new-tab', title: 'New Tab' },
-  { id: 'settings', title: 'Settings' },
-  { id: 'share', title: 'Share' },
-  { id: 'zoom', title: 'Zoom' }
+  { id: 'bookmark', title: msg('Add Bookmark') },
+  { id: 'favourite', title: msg('Add Favourite') },
+  { id: 'bookmarks', title: msg('Bookmarks') },
+  { id: 'burn', title: msg('Burn Tabs and Data') },
+  { id: 'downloads', title: msg('Downloads') },
+  { id: 'history', title: msg('History') },
+  { id: 'home', title: msg('Home') },
+  { id: 'incognito', title: msg('New Incognito Tab') },
+  { id: 'new-tab', title: msg('New Tab') },
+  { id: 'settings', title: msg('Settings') },
+  { id: 'share', title: msg('Share') },
+  { id: 'zoom', title: msg('Zoom') }
 ])
 
 export function normalizeToolbarButton (value) {

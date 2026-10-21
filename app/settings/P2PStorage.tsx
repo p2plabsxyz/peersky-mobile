@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
+  BackHandler,
   Clipboard,
+  Platform,
   Pressable,
   StyleSheet,
   Switch,
@@ -25,6 +27,9 @@ import { BROWSER_P2P_URL, getHyperDriveListingUrl } from '../browser-shell.mjs'
 import ChevronRightIcon from '../../assets/icons/bootstrap/chevron-right.svg'
 import CopyIcon from '../../assets/icons/bootstrap/copy.svg'
 import { clearHyperdriveRecents } from '../hyperdrive/recents-store'
+import { viewerUrlFor } from '../hyperdrive/viewer-route.mjs'
+import { msg, t, tKey, tp } from '../i18n/i18n.mjs'
+import { clearChatFileCopies } from '../peerchat/media-save'
 import { SettingsSection, useSettingsDarkMode } from './SettingsUI'
 
 type P2pAppData = {
@@ -106,14 +111,23 @@ type P2PStorageProps = {
   // P2PMD's notes are gone from this device, so its Recent notes go too.
   // False when they could not be cleared.
   onP2pmdDataDeleted: () => boolean
+  // Swaps the app for a screen asking for a restart. Clear all P2P data takes
+  // this device's identity, and what is on screen still belongs to it.
+  onRestartRequired: () => void
 }
 
 const PAGE_SIZE = 5
+// The archive's filters, and the badge on each item, by source.
+const ARCHIVE_SOURCE_TITLES: Record<HyperArchiveSource, string> = {
+  all: msg('All'),
+  published: msg('Published'),
+  fetched: msg('Fetched')
+}
 // Long enough that a search settles while someone is still typing, short enough
 // that it does not feel like a pause.
 const ARCHIVE_SEARCH_DELAY_MS = 250
 
-export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallRpc, onDownloadOnlyOnWifiChange, onOfflineFoldersChanged, onOpenItem, onOpenUrl, onP2pmdDataDeleted }: P2PStorageProps) {
+export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallRpc, onDownloadOnlyOnWifiChange, onOfflineFoldersChanged, onOpenItem, onOpenUrl, onP2pmdDataDeleted, onRestartRequired }: P2PStorageProps) {
   const isDark = useSettingsDarkMode()
   const requestSequence = useRef(0)
   const offlineRequestSequence = useRef(0)
@@ -192,7 +206,7 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
         includeAppData
       })
       if (sequence !== requestSequence.current) return
-      if (!response.ok) throw new Error(response.error || 'Unable to read P2P data.')
+      if (!response.ok) throw new Error(response.error || t('Unable to read P2P data.'))
 
       if (response.items) {
         setItems(response.items)
@@ -219,7 +233,7 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
     try {
       const response = await onCallRpc(RPC_HYPER_OFFLINE_LIST) as HyperOfflineResponse
       if (sequence !== offlineRequestSequence.current) return
-      if (!response.ok) throw new Error(response.error || 'Unable to read offline folders.')
+      if (!response.ok) throw new Error(response.error || t('Unable to read offline folders.'))
       setOfflineItems(response.items || [])
     } catch (loadError) {
       if (sequence !== offlineRequestSequence.current) return
@@ -231,12 +245,12 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
 
   function confirmRemoveOffline (item: HyperOfflineItem) {
     Alert.alert(
-      'Remove offline copy?',
-      `${formatOfflineName(item)} will remain available from peers, but its downloaded files will be removed from this device, and any songs PeerTunes took from it leave PeerTunes.`,
+      t('Remove offline copy?'),
+      t('{name} will remain available from peers, but its downloaded files will be removed from this device, and any songs PeerTunes took from it leave PeerTunes.', { name: formatOfflineName(item) }),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('Cancel'), style: 'cancel' },
         {
-          text: 'Remove',
+          text: t('Remove'),
           style: 'destructive',
           onPress: () => void runOfflineAction(item, RPC_HYPER_OFFLINE_REMOVE)
         }
@@ -257,11 +271,11 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
         ? { driveKey: item.driveKey, path: item.path, wait: false }
         : { driveKey: item.driveKey, path: item.path }
       const response = await onCallRpc(command, payload) as HyperOfflineResponse
-      if (!response.ok) throw new Error(response.error || 'Unable to update the offline folder.')
+      if (!response.ok) throw new Error(response.error || t('Unable to update the offline folder.'))
       if (command === RPC_HYPER_OFFLINE_REMOVE) onOfflineFoldersChanged()
       if (mountedRef.current) {
         setNotice(response.item?.status === 'waiting-for-wifi'
-          ? 'Offline download is waiting for Wi-Fi.'
+          ? t('Offline download is waiting for Wi-Fi.')
           : response.warning || null)
         await loadOfflineItems(false)
       }
@@ -277,12 +291,12 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
 
   function confirmDeleteApp (item: P2pAppData) {
     Alert.alert(
-      `Delete ${item.title} P2P data?`,
-      'This permanently removes locally owned files for this app. Published copies may remain available from other peers.',
+      t('Delete {app} P2P data?', { app: item.title }),
+      t('This permanently removes locally owned files for this app. Published copies may remain available from other peers.'),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('Cancel'), style: 'cancel' },
         {
-          text: 'Delete',
+          text: t('Delete'),
           style: 'destructive',
           onPress: () => void deleteApp(item)
         }
@@ -299,11 +313,11 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
 
     try {
       const response = await onCallRpc(RPC_HYPER_STORAGE_DELETE_APP, { appId: item.id })
-      if (!response.ok) throw new Error(response.error || `Unable to delete ${item.title} data.`)
+      if (!response.ok) throw new Error(response.error || t('Unable to delete {app} data.', { app: item.title }))
       const recentWarning = item.id === 'hyperdrive' && !clearHyperdriveRecents('uploaded')
-        ? 'App data was deleted, but Hyperdrive Recent could not be updated.'
+        ? t('App data was deleted, but Hyperdrive Recent could not be updated.')
         : item.id === 'p2pmd' && !onP2pmdDataDeleted()
-          ? 'App data was deleted, but P2PMD Recent notes could not be cleared.'
+          ? t('App data was deleted, but P2PMD Recent notes could not be cleared.')
           : null
       if (mountedRef.current) {
         setNotice(joinNotices(response.warning, recentWarning))
@@ -321,11 +335,11 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
 
   function confirmClearCache () {
     Alert.alert(
-      'Clear downloaded P2P cache?',
-      'This removes Hyper data downloaded from other peers. Locally owned P2PMD and Hyperdrive files, PeerChat rooms, and message history are kept.',
+      t('Clear downloaded P2P cache?'),
+      t('This removes Hyper data downloaded from other peers. Locally owned P2PMD and Hyperdrive files, PeerChat rooms, and message history are kept.'),
       [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Clear', style: 'destructive', onPress: () => void clearCache() }
+        { text: t('Cancel'), style: 'cancel' },
+        { text: t('Clear'), style: 'destructive', onPress: () => void clearCache() }
       ]
     )
   }
@@ -339,13 +353,17 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
 
     try {
       const response = await onCallRpc(RPC_HYPER_STORAGE_CLEAR_CACHE)
-      if (!response.ok) throw new Error(response.error || 'Unable to clear downloaded P2P cache.')
+      if (!response.ok) throw new Error(response.error || t('Unable to clear downloaded P2P cache.'))
       const recentWarning = !clearHyperdriveRecents('fetched')
-        ? 'Downloaded data was cleared, but Hyperdrive Recent could not be updated.'
+        ? t('Downloaded data was cleared, but Hyperdrive Recent could not be updated.')
         : null
       if (mountedRef.current) {
         setNotice(joinNotices(response.warning, recentWarning))
-        Alert.alert('P2P cache cleared', `${response.clearedCores || 0} cached data stores removed.`)
+        Alert.alert(
+          t('P2P cache cleared'),
+          // The English has always said "stores", whatever the count.
+          tp({ one: '{count} cached data stores removed.', other: '{count} cached data stores removed.' }, response.clearedCores || 0)
+        )
         await refreshArchive()
       }
     } catch (clearError) {
@@ -360,15 +378,24 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
 
   function confirmClearAllData () {
     Alert.alert(
-      'Clear all P2P data?',
-      'This permanently removes locally owned P2PMD and Hyperdrive files, PeerChat rooms and message history, downloaded Hyper data, and signing keys from this device. You will permanently lose the ability to update previously shared Hyper URLs, leaving them frozen unless another peer retains their signing keys.',
+      t('Clear all P2P data and this device\'s identity?'),
       [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Clear all', style: 'destructive', onPress: () => void clearAllData() }
+        t('This permanently removes locally owned P2PMD and Hyperdrive files, PeerChat rooms and message history, downloaded Hyper data, folders kept offline, and signing keys from this device. You will permanently lose the ability to update previously shared Hyper URLs, leaving them frozen unless another peer retains their signing keys.'),
+        t('This device\'s identity goes too: your PeerChat profile and keys, the key your private files are encrypted with, and this phone\'s links to your other devices. Link Device forgets them and they stop syncing with this phone, as after Remove my data from this phone. Your tabs, bookmarks, history, downloads and settings stay.'),
+        t('PeerSky needs a fresh start afterwards.')
+      ].join('\n\n'),
+      [
+        { text: t('Cancel'), style: 'cancel' },
+        { text: t('Clear all'), style: 'destructive', onPress: () => void clearAllData() }
       ]
     )
   }
 
+  // The same steps as Remove my data from this phone (LinkDevice.tsx). The
+  // restart screen goes up before anything is removed, since what is on screen
+  // belongs to the identity going, and PeerChat writes what it holds as it
+  // closes. It stays until PeerSky starts again. A clear that stops part way
+  // is finished by the backend as it starts.
   async function clearAllData () {
     if (activeActionRef.current) return
     activeActionRef.current = 'all'
@@ -376,27 +403,25 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
     setError(null)
     setNotice(null)
 
+    // Time for the dialog to close before the screens under it go.
+    await new Promise((resolve) => setTimeout(resolve, 450))
+    onRestartRequired()
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    clearChatFileCopies()
     try {
       const response = await onCallRpc(RPC_HYPER_STORAGE_CLEAR_ALL)
-      if (!response.ok || !response.cleared) throw new Error(response.error || 'Unable to clear P2P data.')
-      onOfflineFoldersChanged()
-      const recentWarning = !clearHyperdriveRecents()
-        ? 'P2P data was cleared, but Hyperdrive Recent could not be updated.'
-        : !onP2pmdDataDeleted()
-          ? 'P2P data was cleared, but P2PMD Recent notes could not be cleared.'
-          : null
-      if (mountedRef.current) {
-        setNotice(joinNotices(response.warning, recentWarning))
-        Alert.alert('P2P data cleared', 'All local Hyper and PeerChat data was removed from this device.')
-        await refreshArchive()
+      if (!response.ok || !response.cleared) throw new Error(response.error || t('Unable to clear P2P data.'))
+      if (response.warning) {
+        Alert.alert(t('P2P data cleared'), t('{message}\n\nClose PeerSky and open it again to finish.', { message: response.warning }), [{ text: t('OK') }])
+        return
       }
+      if (Platform.OS === 'android') BackHandler.exitApp()
     } catch (clearError) {
-      if (mountedRef.current) {
-        setError(clearError instanceof Error ? clearError.message : String(clearError))
-      }
-    } finally {
-      activeActionRef.current = null
-      if (mountedRef.current) setActiveAction(null)
+      Alert.alert(
+        t('P2P data was not all cleared'),
+        t('{message}\n\nClose PeerSky and open it again to finish.', { message: clearError instanceof Error ? clearError.message : String(clearError) }),
+        [{ text: t('OK') }]
+      )
     }
   }
 
@@ -420,7 +445,7 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
     try {
       Clipboard.setString(item.url)
       setError(null)
-      setNotice('Hyper URL copied.')
+      setNotice(t('Hyper URL copied.'))
     } catch (copyError) {
       setError(copyError instanceof Error ? copyError.message : String(copyError))
     }
@@ -429,17 +454,17 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
   return (
     <>
       {/* The list at peersky://p2p, which nothing else in Settings led to. */}
-      <SettingsSection title='P2P sites'>
+      <SettingsSection title={t('P2P sites')}>
         <Pressable
-          accessibilityHint='Opens the list of hyper:// sites you have opened'
+          accessibilityHint={t('Opens the list of hyper:// sites you have opened')}
           accessibilityRole='link'
           onPress={() => onOpenUrl(BROWSER_P2P_URL)}
           style={({ pressed }) => [styles.sitesRow, pressed ? styles.buttonPressed : null]}
         >
           <View style={styles.copy}>
-            <Text style={[styles.title, isDark ? darkStyles.primaryText : null]}>Sites you opened</Text>
+            <Text style={[styles.title, isDark ? darkStyles.primaryText : null]}>{t('Sites you opened')}</Text>
             <Text style={[styles.description, isDark ? darkStyles.secondaryText : null]}>
-              The hyper:// sites you opened, by title. Their pages stay on this phone, so they open without a connection.
+              {t('The hyper:// sites you opened, by title. Their pages stay on this phone, so they open without a connection.')}
             </Text>
           </View>
           <ChevronRightIcon
@@ -450,7 +475,7 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
         </Pressable>
       </SettingsSection>
 
-      <SettingsSection title='App data'>
+      <SettingsSection title={t('App data')}>
         {isLoading && items.length === 0
           ? <ActivityIndicator style={styles.loading} />
           : items.map((item, index) => (
@@ -466,14 +491,14 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
                 <Text style={[styles.title, isDark ? darkStyles.primaryText : null]}>{item.title}</Text>
                 <Text style={[styles.description, isDark ? darkStyles.secondaryText : null]}>
                   {item.exists
-                    ? `${formatFileCount(item.fileCount, item.truncated)} - ${formatBytes(item.byteLength)} file content`
-                    : 'No local data'}
+                    ? t('{files} - {size} file content', { files: formatFileCount(item.fileCount, item.truncated), size: formatBytes(item.byteLength) })
+                    : t('No local data')}
                 </Text>
                 {item.exists && item.url && (
                   <Pressable
-                    accessibilityHint='Lists the files in this drive'
+                    accessibilityHint={t('Lists the files in this drive')}
                     accessibilityRole='link'
-                    onPress={() => onOpenUrl(getHyperDriveListingUrl(item.url))}
+                    onPress={() => onOpenUrl(driveFilesUrl(item.url))}
                   >
                     <Text numberOfLines={1} style={[styles.url, styles.urlLink, isDark ? darkStyles.urlLink : null]}>
                       {item.url}
@@ -490,9 +515,9 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
                         {formatFileCount(drive.fileCount, drive.truncated)} - {formatBytes(drive.byteLength)}
                       </Text>
                       <Pressable
-                        accessibilityHint='Lists the files in this drive'
+                        accessibilityHint={t('Lists the files in this drive')}
                         accessibilityRole='link'
-                        onPress={() => onOpenUrl(getHyperDriveListingUrl(drive.url))}
+                        onPress={() => onOpenUrl(driveFilesUrl(drive.url))}
                       >
                         <Text numberOfLines={1} style={[styles.driveUrl, styles.urlLink, isDark ? darkStyles.urlLink : null]}>
                           {drive.url}
@@ -508,7 +533,7 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
                 ))}
               </View>
               <Pressable
-                accessibilityLabel={`Delete ${item.title} P2P data`}
+                accessibilityLabel={t('Delete {app} P2P data', { app: item.title })}
                 accessibilityRole='button'
                 accessibilityState={{ disabled: activeAction !== null || !item.exists }}
                 disabled={activeAction !== null || !item.exists}
@@ -519,23 +544,23 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
                   activeAction !== null || !item.exists ? styles.disabled : null
                 ]}
               >
-                <Text style={styles.deleteText}>{activeAction === item.id ? 'Deleting...' : 'Delete'}</Text>
+                <Text style={styles.deleteText}>{activeAction === item.id ? t('Deleting...') : t('Delete')}</Text>
               </Pressable>
             </View>
           ))}
 
       </SettingsSection>
 
-      <SettingsSection title='Offline Hyper folders'>
+      <SettingsSection title={t('Offline Hyper folders')}>
         <View style={[styles.offlinePreference, isDark ? darkStyles.divider : null]}>
           <View style={styles.copy}>
-            <Text style={[styles.title, isDark ? darkStyles.primaryText : null]}>Download only on Wi-Fi</Text>
+            <Text style={[styles.title, isDark ? darkStyles.primaryText : null]}>{t('Download only on Wi-Fi')}</Text>
             <Text style={[styles.description, isDark ? darkStyles.secondaryText : null]}>
-              Wait for Wi-Fi before saving Hyper folders for offline use.
+              {t('Wait for Wi-Fi before saving Hyper folders for offline use.')}
             </Text>
           </View>
           <Switch
-            accessibilityLabel='Download offline Hyper folders only on Wi-Fi'
+            accessibilityLabel={t('Download offline Hyper folders only on Wi-Fi')}
             value={downloadOnlyOnWifi}
             onValueChange={onDownloadOnlyOnWifiChange}
             trackColor={{ false: '#bac3d2', true: '#7eb2ee' }}
@@ -545,7 +570,7 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
         {isOfflineLoading && offlineItems.length === 0
           ? <ActivityIndicator style={styles.loading} />
           : offlineItems.length === 0
-            ? <Text style={[styles.empty, isDark ? darkStyles.secondaryText : null]}>No folders are kept offline.</Text>
+            ? <Text style={[styles.empty, isDark ? darkStyles.secondaryText : null]}>{t('No folders are kept offline.')}</Text>
             : offlineItems.map((item, index) => {
               const actionId = `offline:${item.driveKey}:${item.path}`
               const isActive = activeAction === actionId
@@ -574,34 +599,34 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
                   <View style={styles.offlineActions}>
                     {item.status === 'downloading' && (
                       <Pressable
-                        accessibilityLabel={`Pause ${formatOfflineName(item)} offline download`}
+                        accessibilityLabel={t('Pause {name} offline download', { name: formatOfflineName(item) })}
                         accessibilityRole='button'
                         disabled={activeAction !== null}
                         onPress={() => void runOfflineAction(item, RPC_HYPER_OFFLINE_PAUSE)}
                         style={({ pressed }) => [styles.offlineAction, pressed ? styles.buttonPressed : null, activeAction !== null ? styles.disabled : null]}
                       >
-                        <Text style={[styles.clearText, isDark ? darkStyles.actionText : null]}>{isActive ? 'Pausing...' : 'Pause'}</Text>
+                        <Text style={[styles.clearText, isDark ? darkStyles.actionText : null]}>{isActive ? t('Pausing...') : t('Pause')}</Text>
                       </Pressable>
                     )}
                     {canResume && (
                       <Pressable
-                        accessibilityLabel={`Resume ${formatOfflineName(item)} offline download`}
+                        accessibilityLabel={t('Resume {name} offline download', { name: formatOfflineName(item) })}
                         accessibilityRole='button'
                         disabled={activeAction !== null}
                         onPress={() => void runOfflineAction(item, RPC_HYPER_OFFLINE_RESUME)}
                         style={({ pressed }) => [styles.offlineAction, pressed ? styles.buttonPressed : null, activeAction !== null ? styles.disabled : null]}
                       >
-                        <Text style={[styles.clearText, isDark ? darkStyles.actionText : null]}>{isActive ? 'Starting...' : 'Resume'}</Text>
+                        <Text style={[styles.clearText, isDark ? darkStyles.actionText : null]}>{isActive ? t('Starting...') : t('Resume')}</Text>
                       </Pressable>
                     )}
                     <Pressable
-                      accessibilityLabel={`Remove ${formatOfflineName(item)} offline copy`}
+                      accessibilityLabel={t('Remove {name} offline copy', { name: formatOfflineName(item) })}
                       accessibilityRole='button'
                       disabled={activeAction !== null}
                       onPress={() => confirmRemoveOffline(item)}
                       style={({ pressed }) => [styles.offlineAction, pressed ? styles.buttonPressed : null, activeAction !== null ? styles.disabled : null]}
                     >
-                      <Text style={styles.deleteText}>{isActive ? 'Working...' : 'Remove'}</Text>
+                      <Text style={styles.deleteText}>{isActive ? t('Working...') : t('Remove')}</Text>
                     </Pressable>
                   </View>
                 </View>
@@ -613,14 +638,14 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
 
       {notice && <Text accessibilityRole='alert' style={styles.notice}>{notice}</Text>}
 
-      <SettingsSection title='Hyper archive'>
+      <SettingsSection title={t('Hyper archive')}>
         <TextInput
-          accessibilityLabel='Search the Hyper archive'
+          accessibilityLabel={t('Search the Hyper archive')}
           autoCapitalize='none'
           autoCorrect={false}
           clearButtonMode='while-editing'
           onChangeText={setArchiveSearch}
-          placeholder='Search by name or address'
+          placeholder={t('Search by name or address')}
           placeholderTextColor={isDark ? '#7b8494' : '#6f7484'}
           style={[styles.search, isDark ? darkStyles.search : null]}
           value={archiveSearch}
@@ -644,7 +669,7 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
                 archiveSource === source ? styles.filterTextSelected : null,
                 archiveSource === source && isDark ? darkStyles.filterTextSelected : null
               ]}>
-                {source[0].toUpperCase() + source.slice(1)}
+                {tKey(ARCHIVE_SOURCE_TITLES[source])}
               </Text>
             </Pressable>
           ))}
@@ -655,7 +680,7 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
           : archiveItems.length === 0
             ? (
               <Text style={[styles.empty, isDark ? darkStyles.secondaryText : null]}>
-                {archiveQuery ? `Nothing here matches "${archiveQuery}".` : 'No Hyper activity yet.'}
+                {archiveQuery ? t('Nothing here matches "{query}".', { query: archiveQuery }) : t('No Hyper activity yet.')}
               </Text>
               )
             : archiveItems.map((item, index) => (
@@ -668,7 +693,7 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
                 ]}
               >
                 <Pressable
-                  accessibilityLabel={`Open ${item.name}`}
+                  accessibilityLabel={t('Open {name}', { name: item.name })}
                   accessibilityRole='button'
                   onPress={() => onOpenItem(item)}
                   style={({ pressed }) => [styles.copy, pressed ? styles.buttonPressed : null]}
@@ -681,14 +706,14 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
                       styles.source,
                       item.source === 'published' ? styles.published : styles.fetched
                     ]}>
-                      {item.source}
+                      {tKey(ARCHIVE_SOURCE_TITLES[item.source])}
                     </Text>
                   </View>
                   <Text numberOfLines={1} style={[styles.url, isDark ? darkStyles.secondaryText : null]}>{item.url}</Text>
                   <Text style={[styles.timestamp, isDark ? darkStyles.secondaryText : null]}>{formatTimestamp(item.updatedAt)}</Text>
                 </Pressable>
                 <Pressable
-                  accessibilityLabel={`Copy ${item.name} Hyper URL`}
+                  accessibilityLabel={t('Copy {name} Hyper URL', { name: item.name })}
                   accessibilityRole='button'
                   hitSlop={6}
                   onPress={() => copyArchiveUrl(item)}
@@ -701,21 +726,21 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
 
         {archiveTotalPages > 1 && (
           <View style={[styles.pagination, isDark ? darkStyles.divider : null]}>
-            <PageButton isDark={isDark} title='Previous' disabled={archivePage <= 1 || isLoading} onPress={() => setArchivePage((value) => value - 1)} />
+            <PageButton isDark={isDark} title={t('Previous')} disabled={archivePage <= 1 || isLoading} onPress={() => setArchivePage((value) => value - 1)} />
             <Text style={[styles.pageText, isDark ? darkStyles.secondaryText : null]}>
-              {archivePage} of {archiveTotalPages} ({archiveTotal})
+              {t('{page} of {pages} ({total})', { page: archivePage, pages: archiveTotalPages, total: archiveTotal })}
             </Text>
-            <PageButton isDark={isDark} title='Next' disabled={archivePage >= archiveTotalPages || isLoading} onPress={() => setArchivePage((value) => value + 1)} />
+            <PageButton isDark={isDark} title={t('Next')} disabled={archivePage >= archiveTotalPages || isLoading} onPress={() => setArchivePage((value) => value + 1)} />
           </View>
         )}
       </SettingsSection>
 
-      <SettingsSection title='Downloaded cache'>
+      <SettingsSection title={t('Downloaded cache')}>
         <View style={styles.cacheRow}>
           <View style={styles.copy}>
-            <Text style={[styles.title, isDark ? darkStyles.primaryText : null]}>Clear P2P cache</Text>
+            <Text style={[styles.title, isDark ? darkStyles.primaryText : null]}>{t('Clear P2P cache')}</Text>
             <Text style={[styles.description, isDark ? darkStyles.secondaryText : null]}>
-              Remove downloaded Hyper data while keeping files owned by your apps.
+              {t('Remove downloaded Hyper data while keeping files owned by your apps.')}
             </Text>
           </View>
           <Pressable
@@ -729,17 +754,20 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
               activeAction !== null ? styles.disabled : null
             ]}
           >
-            <Text style={[styles.clearText, isDark ? darkStyles.actionText : null]}>{activeAction === 'cache' ? 'Clearing...' : 'Clear'}</Text>
+            <Text style={[styles.clearText, isDark ? darkStyles.actionText : null]}>{activeAction === 'cache' ? t('Clearing...') : t('Clear')}</Text>
           </Pressable>
         </View>
       </SettingsSection>
 
-      <SettingsSection title='All P2P data'>
+      <SettingsSection title={t('All P2P data')}>
         <View style={styles.cacheRow}>
           <View style={styles.copy}>
-            <Text style={[styles.title, isDark ? darkStyles.primaryText : null]}>Clear all P2P data</Text>
+            <Text style={[styles.title, isDark ? darkStyles.primaryText : null]}>{t('Clear all P2P data')}</Text>
             <Text style={[styles.description, isDark ? darkStyles.secondaryText : null]}>
-              Permanently remove owned app files and downloaded Hyper data from this device.
+              {t('Permanently remove owned app files and downloaded Hyper data from this device.')}
+            </Text>
+            <Text style={[styles.dangerNote, isDark ? darkStyles.dangerNote : null]}>
+              {t("This device's identity goes too: your PeerChat profile and keys, and this phone's links to your other devices in Link Device. Your chats, notes and files go as they would with Remove my data from this phone, but tabs, bookmarks, history, downloads and settings stay.")}
             </Text>
           </View>
           <Pressable
@@ -753,7 +781,7 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
               activeAction !== null ? styles.disabled : null
             ]}
           >
-            <Text style={styles.deleteText}>{activeAction === 'all' ? 'Clearing...' : 'Clear all'}</Text>
+            <Text style={styles.deleteText}>{activeAction === 'all' ? t('Clearing...') : t('Clear all')}</Text>
           </Pressable>
         </View>
       </SettingsSection>
@@ -787,16 +815,25 @@ function PageButton ({
   )
 }
 
-function formatBytes (bytes: number) {
-  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B'
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+// A drive's files, in the Hyperdrive viewer's Files view, rather than the page
+// its index.html makes of it: P2PMD publishes a note as one. The list of
+// names, if the address cannot be the viewer's.
+function driveFilesUrl (url: string) {
+  return viewerUrlFor(url, { view: 'files', auto: false }) || getHyperDriveListingUrl(url)
 }
 
+function formatBytes (bytes: number) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return t('{size} B', { size: 0 })
+  if (bytes < 1024) return t('{size} B', { size: bytes })
+  if (bytes < 1024 * 1024) return t('{size} KB', { size: (bytes / 1024).toFixed(1) })
+  return t('{size} MB', { size: (bytes / (1024 * 1024)).toFixed(1) })
+}
+
+// A count that was cut short is at least that many, and says so with a plus.
 function formatFileCount (count: number, truncated?: boolean) {
-  const value = `${count}${truncated ? '+' : ''}`
-  return `${value} ${count === 1 ? 'file' : 'files'}`
+  return truncated
+    ? tp({ one: '{count}+ file', other: '{count}+ files' }, count)
+    : tp({ one: '{count} file', other: '{count} files' }, count)
 }
 
 function formatTimestamp (timestamp: number) {
@@ -805,7 +842,7 @@ function formatTimestamp (timestamp: number) {
 }
 
 function formatOfflineName (item: HyperOfflineItem) {
-  if (item.path === '/') return 'Entire drive'
+  if (item.path === '/') return t('Entire drive')
   const parts = item.path.split('/').filter(Boolean)
   const name = parts[parts.length - 1] || item.path
   try {
@@ -824,14 +861,14 @@ function shortOfflineUrl (item: HyperOfflineItem) {
 
 function formatOfflineStatus (item: HyperOfflineItem) {
   if (item.status === 'available') {
-    if (item.sizeUnavailable) return 'Available offline - size unavailable'
+    if (item.sizeUnavailable) return t('Available offline - size unavailable')
     const suffix = item.sizeTruncated ? '+' : ''
-    return `Available offline - ${formatBytes(item.byteLength || 0)}${suffix}`
+    return t('Available offline - {size}', { size: `${formatBytes(item.byteLength || 0)}${suffix}` })
   }
-  if (item.status === 'downloading') return 'Downloading for offline use'
-  if (item.status === 'waiting-for-wifi') return 'Waiting for Wi-Fi'
-  if (item.status === 'error') return item.error || 'Download failed'
-  return 'Paused'
+  if (item.status === 'downloading') return t('Downloading for offline use')
+  if (item.status === 'waiting-for-wifi') return t('Waiting for Wi-Fi')
+  if (item.status === 'error') return item.error || t('Download failed')
+  return t('Paused')
 }
 
 function joinNotices (...notices: Array<string | null | undefined>) {
@@ -923,6 +960,14 @@ const styles = StyleSheet.create({
     color: '#687086',
     fontSize: 12,
     lineHeight: 17
+  },
+  // What cannot be undone, in the red of the delete buttons.
+  dangerNote: {
+    color: '#bd3552',
+    fontSize: 12,
+    fontWeight: '600',
+    lineHeight: 17,
+    marginTop: 2
   },
   driveRow: {
     alignItems: 'flex-start',
@@ -1118,5 +1163,10 @@ const darkStyles = StyleSheet.create({
   },
   warningText: {
     color: '#e0b030'
+  },
+  // The light red is too dark to read on the dark rows, so PeerChat's dark
+  // red is used there.
+  dangerNote: {
+    color: '#ff8278'
   }
 })

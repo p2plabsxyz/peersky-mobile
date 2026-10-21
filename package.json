@@ -12,7 +12,7 @@
     "eas-build-pre-install": "node scripts/setup-content-blocking.mjs --eas && node scripts/update-content-blocking-snapshot.mjs",
     "eas-build-post-install": "npm run bundle:bare",
     "update:content-blocking-snapshot": "node scripts/update-content-blocking-snapshot.mjs",
-    "bundle:bare": "npm run update:content-blocking-snapshot && npm run generate:yjs-runtime && npm run generate:katex-runtime && npm run generate:ieee-runtime && npm run generate:peertunes-runtime && bare-pack --host android-arm64 --host android-arm --host android-ia32 --host android-x64 --host ios-arm64 --host ios-arm64-simulator --host ios-x64-simulator --imports backend/bare-imports.json --linked --out app/app.bundle.mjs backend/backend.mjs",
+    "bundle:bare": "npm run update:content-blocking-snapshot && npm run generate:yjs-runtime && npm run generate:katex-runtime && npm run generate:ieee-runtime && npm run generate:peertunes-runtime && npm run generate:hyperdrive-viewer-runtime && bare-pack --host android-arm64 --host android-arm --host android-ia32 --host android-x64 --host ios-arm64 --host ios-arm64-simulator --host ios-x64-simulator --imports backend/bare-imports.json --linked --out app/app.bundle.mjs backend/backend.mjs",
     "start": "expo start",
     "preandroid": "npm run bundle:bare",
     "android": "expo run:android",
@@ -24,7 +24,12 @@
     "test:runtime": "node --test ./test/protocol/*.test.mjs ./test/platform/*.test.mjs",
     "test:bundle": "npm run bundle:bare",
     "test:holesail:live": "node --test --test-force-exit ./test/integration/holesail-live.test.mjs",
-    "generate:peertunes-runtime": "node scripts/generate-peertunes-runtime.mjs"
+    "test:load:peerchat": "node ./test/load/peerchat/run.mjs",
+    "test:scale:peerchat": "node --test --test-force-exit ./test/scale/*.test.mjs",
+    "test:load:p2pmd": "node ./test/load/p2pmd/run.mjs",
+    "generate:peertunes-runtime": "node scripts/generate-peertunes-runtime.mjs",
+    "generate:hyperdrive-viewer-runtime": "node scripts/generate-hyperdrive-viewer-runtime.mjs",
+    "sync:hyperdrive-viewer": "node scripts/sync-hyperdrive-viewer.mjs"
   },
   "repository": {
     "type": "git",
@@ -38,6 +43,7 @@
   "homepage": "https://github.com/p2plabsxyz/peersky-mobile#readme",
   "dependencies": {
     "@bacons/apple-targets": "~5.0.0",
+    "@noble/ciphers": "^1.3.0",
     "@p2plabs/hyperdht-mdns": "^1.3.0",
     "@preeternal/react-native-cookie-manager": "^6.4.0",
     "@vscode/markdown-it-katex": "^1.1.2",
@@ -72,11 +78,13 @@
     "expo-haptics": "~55.0.18",
     "expo-image-manipulator": "~55.0.21",
     "expo-image-picker": "~55.0.24",
+    "expo-keep-awake": "~55.0.8",
     "expo-linking": "~55.0.16",
     "expo-network": "~55.0.18",
     "expo-notifications": "~55.0.27",
     "expo-print": "~55.0.19",
     "expo-router": "~55.0.17",
+    "expo-secure-store": "~55.0.18",
     "expo-sharing": "~55.0.22",
     "expo-splash-screen": "~55.0.25",
     "expo-system-ui": "~55.0.20",
@@ -128,12 +136,15 @@
   "standard": {
     "ignore": [
       "app/app.bundle.mjs",
+      "app/vendor/**",
       "backend/peerchat/moderation-data.mjs",
       "backend/p2pmd/ieee-runtime.mjs",
       "backend/p2pmd/katex-runtime.mjs",
       "app/privacy/generated/*.mjs",
       "assets/peertunes/**",
-      "backend/peertunes/peertunes-runtime.mjs"
+      "backend/peertunes/peertunes-runtime.mjs",
+      "assets/hyperdrive-viewer/**",
+      "backend/hyperdrive-viewer/viewer-runtime.mjs"
     ]
   }
 }

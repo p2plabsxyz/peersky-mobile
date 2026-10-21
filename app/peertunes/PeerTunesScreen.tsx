@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { AppState, DeviceEventEmitter, Modal, NativeEventEmitter, NativeModules, Platform, Pressable, StyleSheet, Text, View } from 'react-native'
+import { AppState, DeviceEventEmitter, Linking, Modal, NativeEventEmitter, NativeModules, Platform, Pressable, StyleSheet, Text, View } from 'react-native'
 import { CameraView, useCameraPermissions } from 'expo-camera'
 import { initialWindowMetrics, SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context'
 import { WebView } from 'react-native-webview'
@@ -10,7 +10,9 @@ import {
   PEERTUNES_SCAN_BRIDGE_SCRIPT,
   createAudioRouteScript,
   createPeerTunesMediaCommandScript,
+  createPeerTunesNowPlayingScript,
   createPeerTunesPageUrl,
+  isPeerTunesDataRequest,
   isPeerTunesPageRequest,
   parsePeerTunesHapticRequest,
   parsePeerTunesKeepOfflineRequest,
@@ -21,7 +23,10 @@ import {
 } from './peertunes-screen.mjs'
 import { AppLoading } from '../AppLoading'
 import { PAUSE_ALL_MEDIA_SCRIPT } from '../browser-media.mjs'
+import { t } from '../i18n/i18n.mjs'
+import { parsePeerTunesWidgetTap } from '../home-shortcuts.mjs'
 import { MODAL_ORIENTATIONS } from '../modal-orientations'
+import { createServerTokenScript } from '../server-token.mjs'
 import { WEBVIEW_DECELERATION_RATE } from '../webview-scroll.mjs'
 import { tapFeedback } from '../haptics'
 import { forgetPeerTunesWidgetState, idlePeerTunesWidget, updatePeerTunesWidget } from '../widgets'
@@ -45,11 +50,32 @@ const AUDIO_ROUTE_POLL_MS = 3000
 // Long enough for the page to have started or stopped the song.
 const MEDIA_REPORT_DELAY_MS = 800
 
+// A tap on the PeerTunes widget asks for Now Playing with the song it shows.
+// The app brings PeerTunes forward by itself; this hands the song to the page,
+// which may not be open yet: PeerTunes can be closed, or the whole app can be
+// starting from the tap. Heard at module scope, so a tap that comes before
+// the screen mounts still counts. A page that loads within a minute gets it,
+// including one that reloads straight after.
+const WIDGET_TAP_MS = 60 * 1000
+type WidgetTap = { song: string, at: number }
+let widgetTap: WidgetTap | null = null
+const widgetTapListeners = new Set<() => void>()
+function hearWidgetTap (url: string | null) {
+  const tap = parsePeerTunesWidgetTap(url)
+  if (!tap) return
+  widgetTap = { song: tap.song, at: Date.now() }
+  for (const listener of widgetTapListeners) listener()
+}
+Linking.addEventListener('url', (event) => hearWidgetTap(event.url))
+void Linking.getInitialURL().then(hearWidgetTap).catch(() => {})
+
 type Props = {
   error: string | null
   isDark: boolean
   launchSuffix: string
   localUrl: string | null
+  // The server's token for this run. Reading a drive or keeping songs needs it.
+  serverToken: string | null
   onEnsureServer: () => void
   onKeepOffline: (url: string) => Promise<{ ok: boolean, status?: string, error?: string }>
   onKeptFolders: (urls: string[]) => Promise<{ ok: boolean, kept?: string[], error?: string }>
@@ -64,6 +90,7 @@ export function PeerTunesScreen ({
   isDark,
   launchSuffix,
   localUrl,
+  serverToken,
   onEnsureServer,
   onKeepOffline,
   onKeptFolders,
@@ -75,13 +102,35 @@ export function PeerTunesScreen ({
   // pressure and leaves an empty view behind. Remounting on that signal is
   // what stops the player going blank until the tab is closed and reopened.
   const [reloadNonce, setReloadNonce] = useState(0)
+  // A restarted server has a new token, which a page only gets as it loads,
+  // so a new one loads the page again.
+  const [tokenRun, setTokenRun] = useState({ token: serverToken, run: 0 })
+  if (tokenRun.token !== serverToken) setTokenRun({ token: serverToken, run: tokenRun.run + 1 })
   const [scanRequestId, setScanRequestId] = useState<string | null>(null)
   const [cameraPermission, requestCameraPermission] = useCameraPermissions()
   const webViewRef = useRef<WebView | null>(null)
   const scanHandledRef = useRef(false)
+  const pageLoadedRef = useRef(false)
 
-  const recover = useCallback((reason: string) => {
-    onStatus(`PeerTunes reloaded after ${reason}`)
+  // The widget's song goes to a page that has loaded: now, or when it has.
+  const showWidgetSong = useCallback(() => {
+    const tap = widgetTap
+    if (!tap || !pageLoadedRef.current) return
+    if (Date.now() - tap.at > WIDGET_TAP_MS) {
+      widgetTap = null
+      return
+    }
+    webViewRef.current?.injectJavaScript(createPeerTunesNowPlayingScript(tap.song))
+  }, [])
+
+  useEffect(() => {
+    widgetTapListeners.add(showWidgetSong)
+    return () => { widgetTapListeners.delete(showWidgetSong) }
+  }, [showWidgetSong])
+
+  // The message says what PeerTunes was reloaded after.
+  const recover = useCallback((message: string) => {
+    onStatus(message)
     onEnsureServer()
     setReloadNonce((value) => value + 1)
   }, [onEnsureServer, onStatus])
@@ -204,7 +253,7 @@ export function PeerTunesScreen ({
       webViewRef.current?.injectJavaScript(
         `window.__peerskyResolveScan(${serializeScanResult(requestId)}, null); true;`
       )
-      onStatus('Camera access is needed to scan a QR code')
+      onStatus(t('Camera access is needed to scan a QR code'))
       return
     }
 
@@ -218,16 +267,16 @@ export function PeerTunesScreen ({
         <Text style={[styles.message, isDark ? styles.messageDark : null]}>{error}</Text>
         <Pressable
           accessibilityRole='button'
-          onPress={() => recover('a retry')}
+          onPress={() => recover(t('PeerTunes reloaded after a retry'))}
           style={styles.retry}
         >
-          <Text style={styles.retryText}>Try again</Text>
+          <Text style={styles.retryText}>{t('Try again')}</Text>
         </Pressable>
       </View>
     )
   }
 
-  if (!localUrl) {
+  if (!localUrl || !serverToken) {
     return (
       <AppLoading app='peertunes' isDark={isDark} />
     )
@@ -238,7 +287,7 @@ export function PeerTunesScreen ({
   return (
     <>
     <WebView
-      key={`${pageUrl}:${reloadNonce}`}
+      key={`${pageUrl}:${reloadNonce}:${tokenRun.run}`}
       ref={webViewRef}
       source={{ uri: pageUrl }}
       // This view only ever shows the loopback app, so pin it. The navigation
@@ -247,7 +296,9 @@ export function PeerTunesScreen ({
       // Left unset, react-native-webview gives iOS a deceleration of 0, and a
       // swipe through the library stopped the moment the finger lifted.
       decelerationRate={WEBVIEW_DECELERATION_RATE}
-      injectedJavaScriptBeforeContentLoaded={PEERTUNES_BEFORE_LOAD_SCRIPT}
+      // The token goes in before the page's own scripts run. The server never
+      // sends it, so only this view has it.
+      injectedJavaScriptBeforeContentLoaded={`${createServerTokenScript(serverToken)}\n${PEERTUNES_BEFORE_LOAD_SCRIPT}`}
       onMessage={(event) => {
         const nowPlaying = parsePeerTunesNowPlaying(event.nativeEvent.data)
         if (nowPlaying) {
@@ -284,6 +335,7 @@ export function PeerTunesScreen ({
       textZoom={100}
       style={styles.webView}
       onShouldStartLoadWithRequest={(request) => {
+        if (isPeerTunesDataRequest(request.url, localUrl)) return false
         if (isPeerTunesPageRequest(request.url, localUrl)) return true
         // Only a real top-frame navigation should leave PeerTunes. A subframe
         // pointing elsewhere used to take the whole tab with it and stop the
@@ -292,15 +344,21 @@ export function PeerTunesScreen ({
         onOpenUrl(request.url)
         return false
       }}
-      onOpenWindow={(event) => onOpenUrl(event.nativeEvent.targetUrl)}
+      onOpenWindow={(event) => {
+        if (isPeerTunesDataRequest(event.nativeEvent.targetUrl, localUrl)) return
+        onOpenUrl(event.nativeEvent.targetUrl)
+      }}
+      onLoadStart={() => { pageLoadedRef.current = false }}
       onLoadEnd={() => {
         audioExternalRef.current = null
         void pushAudioRoute()
+        pageLoadedRef.current = true
+        showWidgetSong()
       }}
-      onRenderProcessGone={() => recover('a renderer restart')}
-      onContentProcessDidTerminate={() => recover('a renderer restart')}
+      onRenderProcessGone={() => recover(t('PeerTunes reloaded after a renderer restart'))}
+      onContentProcessDidTerminate={() => recover(t('PeerTunes reloaded after a renderer restart'))}
       onError={(event) => {
-        recover(`a load failure (${event.nativeEvent.description})`)
+        recover(t('PeerTunes reloaded after a load failure ({error})', { error: event.nativeEvent.description }))
       }}
     />
     <Modal
@@ -324,13 +382,13 @@ export function PeerTunesScreen ({
           />
         )}
         <SafeAreaView style={styles.scannerOverlay} edges={['top', 'right', 'bottom', 'left']}>
-          <Text style={styles.scanHint}>Align the QR code inside the frame</Text>
+          <Text style={styles.scanHint}>{t('Align the QR code inside the frame')}</Text>
           <Pressable
             accessibilityRole='button'
             onPress={() => finishScan(null)}
             style={styles.scannerClose}
           >
-            <Text style={styles.scannerCloseText}>Cancel</Text>
+            <Text style={styles.scannerCloseText}>{t('Cancel')}</Text>
           </Pressable>
         </SafeAreaView>
       </View>

@@ -74,7 +74,7 @@ test('a folder counts as kept the moment PeerSky says it keeps it', async () => 
   const library = await read('assets/peertunes/js/library.js')
   assert.match(library, /\.then\(\(kept\) => \(kept && kept\.ok \? this\.markSourceKept\(url\) : null\)\)/)
   const ui = await read('assets/peertunes/js/ui.js')
-  assert.match(ui, /if \(res && res\.ok\) \{\n {8}this\.lib\.markSourceKept\(url\)/)
+  assert.match(ui, /if \(res && res\.ok\) \{\n {8}await this\.lib\.markSourceKept\(url\)/)
 })
 
 test('forgetting a folder removes its songs and its empty playlist only', async () => {
@@ -173,9 +173,14 @@ test('deleting app data in P2P Data clears the lists that pointed at it', async 
   const storage = await read('app/settings/P2PStorage.tsx')
   assert.match(storage, /item\.id === 'p2pmd' && !onP2pmdDataDeleted\(\)/)
   assert.match(storage, /if \(command === RPC_HYPER_OFFLINE_REMOVE\) onOfflineFoldersChanged\(\)/)
+  // Clear all P2P data asks for a fresh start, and the backend takes these
+  // lists with everything else, so they are gone when PeerSky opens again.
   const clearAll = storage.slice(storage.indexOf('async function clearAllData'), storage.indexOf('async function refreshArchive'))
-  assert.match(clearAll, /onOfflineFoldersChanged\(\)/)
-  assert.match(clearAll, /!onP2pmdDataDeleted\(\)/)
+  assert.match(clearAll, /onRestartRequired\(\)/)
+  const reset = await read('backend/hyper/p2p-reset.mjs')
+  for (const list of ['\'p2pmd-room-history.json\'', '\'hyperdrive-recents.json\'', '\'-offline.json\'']) {
+    assert.ok(reset.includes(list), list)
+  }
 
   const settings = await read('app/settings/SettingsScreen.tsx')
   assert.match(settings, /onP2pmdDataDeleted=\{props\.onP2pmdDataDeleted\}/)

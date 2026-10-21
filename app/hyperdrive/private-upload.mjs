@@ -6,9 +6,24 @@
 // The backend reads the same file (linkedPrivateDriveKey in
 // backend/hyper/private-keys.mjs). This copy is here because the screen
 // cannot import backend code that pulls in native modules.
+import { openText } from '../privacy/sealed-text.mjs'
+
 export const LINKED_PRIVATE_KEY_FILE = 'private-drive-key.json'
 
 const HEX_KEY = /^[0-9a-f]{64}$/i
+
+/**
+ * The key file as it is on disk: locked with the phone's own key since
+ * 0.1.3 (backend/hyper/sealed-file.mjs), plain before. False when it is
+ * locked and sealKey does not open it, or no key was read yet.
+ */
+export function isLinkedPrivateKeyFile (text, sealKey) {
+  try {
+    return isLinkedPrivateKey(openText(String(text || ''), sealKey).text)
+  } catch {
+    return false
+  }
+}
 
 export function isLinkedPrivateKey (text) {
   try {

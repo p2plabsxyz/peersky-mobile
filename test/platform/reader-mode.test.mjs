@@ -8,6 +8,7 @@ import {
   createReaderScript,
   MAX_READER_HTML_LENGTH,
   parseReaderMessage,
+  READER_BACKGROUNDS,
   READER_MESSAGE_TYPE,
   sanitizeReaderHtml
 } from '../../app/reader/reader-mode.mjs'
@@ -78,6 +79,21 @@ test('the reader page allows no scripts and no forms, and follows the chosen siz
   assert.match(dark, /&lt;b&gt;x&lt;\/b&gt;/)
 })
 
+// A see-through WebView is blended with the screen under it on every frame of
+// a scroll on iOS. It is drawn in the page's own colour instead, so it looks
+// the same.
+test('the reader WebView is opaque, in the colour of the page it shows', async () => {
+  const view = await readFile(new URL('../../app/reader/ReaderView.tsx', import.meta.url), 'utf8')
+  assert.match(view, /const pageColor = isDark \? READER_BACKGROUNDS\.dark : READER_BACKGROUNDS\.light/)
+  assert.match(view, /style=\{\[styles\.page, \{ backgroundColor: pageColor \}\]\}/)
+  assert.match(view, /style=\{\[styles\.screen, \{ backgroundColor: pageColor \}\]\}/)
+  assert.doesNotMatch(view, /'transparent'/)
+
+  const article = parseReaderMessage(message({}), TOKEN)
+  assert.match(createReaderHtml(article), new RegExp(`background: ${READER_BACKGROUNDS.light};`))
+  assert.match(createReaderHtml(article, { isDark: true }), new RegExp(`background: ${READER_BACKGROUNDS.dark};`))
+})
+
 test('the reader view runs no scripts and opens links in the tab', async () => {
   const view = await readFile(new URL('../../app/reader/ReaderView.tsx', import.meta.url), 'utf8')
   assert.match(view, /javaScriptEnabled=\{false\}/)
@@ -86,5 +102,5 @@ test('the reader view runs no scripts and opens links in the tab', async () => {
   assert.match(view, /<SafeAreaProvider initialMetrics=\{initialWindowMetrics\}>/)
   assert.match(view, /onOpenLink\(request\.url\)/)
   const menu = await readFile(new URL('../../app/settings/BrowserOverflowMenu.tsx', import.meta.url), 'utf8')
-  assert.match(menu, /label='Reader View'/)
+  assert.match(menu, /label=\{t\('Reader View'\)\}/)
 })

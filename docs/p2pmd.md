@@ -36,6 +36,8 @@ This mirrors the desktop direction at the protocol level: local HTTP endpoints e
 
 Previews are rendered by the app through its own bridge, not by the room's server.
 
+Everything but the editor page needs the room's token for this run, as `token=` in the address or, from the note's tunnel, an `X-PeerSky-Token` header. Without it the server answers `403` and reads or changes nothing.
+
 ## Runtime flow
 
 1. React Native sends an RPC command to create or join a P2PMD room.
@@ -71,6 +73,16 @@ flowchart LR
 The host's server holds the document. A guest's editor makes the same requests
 to its own Holesail client, which carries them to the host.
 
+Any app on the phone can reach both ports, so both answer only requests that
+carry a token the app gives its editor WebView before the page loads
+(`injectedJavaScriptBeforeContentLoaded`, `app/server-token.mjs`). The editor
+adds it to every request. On the host, the server makes a token each run, and
+the Holesail side puts it on the first request of each connection from someone
+who came in with the note's address (`backend/holesail/request-gate.mjs`). On
+a guest, the local port lets through only requests with the guest's own token
+and takes it out before they go on, so the host never sees it. Nothing about
+the token crosses the wire, so older phones and the desktop are unaffected.
+
 ## How many people a note holds
 
 A note is meant for a team, up to about 100 people. Every editor talks to the host, so the host's upload is what limits a room:
@@ -80,9 +92,37 @@ A note is meant for a team, up to about 100 people. Every editor talks to the ho
 - A person's line authors are in that list only when they changed since the last one. Someone who joins gets everyone's in full.
 - The whole note as text, which the editor reads line authors from, goes out at most twice a second, and every two seconds at 100 people.
 
-Measured on this phone's room server under Node, with 100 people in a note and 10 of them typing: each device receives about 34 KB a second and the host sends about 3.3 MB a second. Sending the whole note and the people list with every keystroke was 4.3 MB a second to each device and 426 MB a second from the host.
+`npm run test:load:p2pmd` measures this on one machine: this phone's room server under Node, with simulated editors that make the same requests as the real ones (see [test/load/p2pmd](../test/load/p2pmd/README.md)). PeerSky Desktop has the same test for its host. Run on 2026-10-12 on a MacBook Air (Apple M5, 10 cores, 32 GB, Node 24.21), each typist typing a character every 100 ms on a line of their own:
 
-A note is live only while its host has it open. iOS suspends PeerSky a few minutes after it leaves the screen, and a note the phone hosts goes offline with it until it comes back; edits made meanwhile merge then. For a big or long-running room, host from a desktop.
+| 100 people, 10 typing for 60 s | Phone host, desktop editors | Phone host, phone editors | Desktop host, desktop editors | Desktop host, phone editors |
+|---|---|---|---|---|
+| Edits sent, none refused | 5,977 (100 a second) | 5,971 (100 a second) | 5,950 (99 a second) | 5,942 (99 a second) |
+| Every editor ended with the host's text | yes | yes | yes | yes |
+| Time until every editor saw an edit (median, slowest) | 3 ms, 7.1 ms | 66.3 ms, 89.1 ms | 2.5 ms, 5.4 ms | 59.7 ms, 85.4 ms |
+| Data in per editor | 44 KB/s | 44 KB/s | 33 KB/s | 32 KB/s |
+| Out from the host | 4.5 MB/s | 4.4 MB/s | 3.4 MB/s | 3.3 MB/s |
+| Host CPU, first and last 5 s | 14%, 10% | 13%, 10% | 13%, 10% | 12%, 8% |
+| Host memory at most | 173 MB | 173 MB | 139 MB | 137 MB |
+| Yjs state at the start and end | 8.6 KB, 73.2 KB | 8.6 KB, 116.9 KB | 2.4 KB, 12.1 KB | 2.4 KB, 12.1 KB |
+
+Data in counts the replies to an editor's own requests too, and out from the host counts headers, so these run higher than earlier measurements of the events alone. The phone editor applies what the host sends every 80 ms, which sets its times. Until 0.1.3 the phone host did more for each edit: it tried the edit on a copy made from the note's whole Yjs state and answered with the whole note, so its CPU climbed while people typed (from 19% of a core to 30% with desktop editors and 43% with phone editors over this minute), and a phone editor's edit set every line's author again (at 20 people with 3 typing the Yjs state reached 395 KB in 20 seconds, against 18 KB now). Now it tries each edit on a copy kept in step with the note and answers with ok alone, as the desktop host does, so an edit costs the same however long the note has been edited. Sending the whole note and the people list with every keystroke, as P2PMD once did, was 4.3 MB a second to each device and 426 MB a second from the host.
+
+Over the local network (`npm run test:load:p2pmd -- --lan`), each editor is a device of its own, with its own local network instance found over real mDNS and an encrypted tunnel to the host, as with no internet. Run on 2026-10-20 on the same Mac:
+
+| 100 people, 10 typing for 60 s, over the local network | Phone host, desktop editors | Phone host, phone editors | Desktop host, desktop editors | Desktop host, phone editors |
+|---|---|---|---|---|
+| Edits sent, none lost | 5,974 | 5,979 | 5,984 | 5,988 |
+| Every editor ended with the host's text | yes | yes | yes | yes |
+| Time until every editor saw an edit (median, 95%, slowest) | 15 ms, 30 ms, 316 ms | 85 ms, 94 ms, 119 ms | 11 ms, 23 ms, 72 ms | 72 ms, 157 ms, 7 s |
+| Data in per editor | 43 KB/s | 43 KB/s | 33 KB/s | 32 KB/s |
+| Host CPU, first and last 5 s | 54%, 46% | 52%, 44% | 37%, 25% | 36%, 35% |
+| Host memory at most | 472 MB | 468 MB | 299 MB | 362 MB |
+
+The tunnels cost the host about three times the CPU of the run without them, and the memory is their buffers, which level off. The internet has the same tunnels, so these are the numbers for people on other devices either way. With phone editors on the desktop host, a few connections only opened after seconds, which sets the slowest time there. All 101 devices share one machine's CPU and mDNS, so with the Mac busy, some of 100 joins within two seconds failed, and with the joins spread out most devices did not find the host in time: one machine cannot stand in for 100 phones reliably. Five people over the local network pass at any time.
+
+A note is live only while its host has it open. iOS suspends PeerSky a few minutes after it leaves the screen, and a note the phone hosts goes offline with it until it comes back; edits made meanwhile merge then. The phone saves the note's Yjs history with its copy, so even after PeerSky was closed, the note opens again with the history its editors share, and their edits merge into it instead of the note being written out twice. For a big or long-running room, host from a desktop.
+
+A note also opens between devices on the same Wi-Fi with no internet, as when the router has no connection: the host is on the local network too, and a device joining looks there first. See [With no internet](holesail.md#with-no-internet).
 
 ## Private and public notes
 
@@ -97,6 +137,7 @@ Create Note asks one thing: private or public. Every new note starts private, th
 - The editor WebView loads nothing but the editor. Links in a note open in a browser tab, and other apps are never opened from it.
 - The app acts on editor messages only when they come from the editor page, and publishes only with a nonce it handed over when you tapped Publish.
 - The room's server answers the editor and desktop P2PMD (`peersky://p2p`), and turns away pages on any other origin, other loopback servers included.
+- The room's server and a joined note's local port answer only requests with this run's token, compared in constant time, so another app on the phone that finds the port can neither read nor edit the note.
 - The local server binds to loopback only.
 - Android cleartext HTTP is scoped to localhost/127.0.0.1 through network security config.
 - Raw HTML is disabled in Markdown preview because preview HTML is injected into the page.
@@ -108,7 +149,8 @@ Create Note asks one thing: private or public. Every new note starts private, th
 P2PMD coverage lives under `test/protocol/`:
 
 - `p2pmd-document.test.mjs` covers Yjs document state, update validation, full-state sync, and subscriber behavior.
-- `p2pmd-http.test.mjs` covers the real HTTP endpoint contract with an injectable Node HTTP server, including edits going out at once while the whole note and the people list are paced.
+- `p2pmd-http.test.mjs` covers the real HTTP endpoint contract with an injectable Node HTTP server, including edits going out at once while the whole note and the people list are paced, and every endpoint but the editor page refusing a request without the run's token.
+- `note-tunnel.test.mjs` carries notes over a local DHT, with Holesail on the other end too, and checks that the token gets the editor through both ends, keeps other apps out, and never reaches the other device.
 - `p2pmd-peers.test.mjs` covers peer counting, disconnect pruning, gutter line ownership, and line authors going out again only when they change.
 - `p2pmd-preview.test.mjs` covers Markdown rendering and Hyper image URL rewriting.
 

@@ -4,6 +4,7 @@ import { addressBarButtonTitle } from '../address-bar-button.mjs'
 import { AppLogo } from '../AppLogo'
 import { APP_LOGO_COLORS } from '../app-logo-colors.mjs'
 import { BROWSER_PALETTES } from '../browser-appearance.mjs'
+import { t, tKey } from '../i18n/i18n.mjs'
 import { TOOLBAR_BUTTON_ICONS } from '../toolbar-button-icons'
 import { TOOLBAR_BUTTONS } from '../toolbar-button.mjs'
 import type {
@@ -53,7 +54,8 @@ export function Appearance ({
 }: AppearanceProps) {
   const isDark = useSettingsDarkMode()
   const ToolbarIcon = TOOLBAR_BUTTON_ICONS[toolbarButton] || TOOLBAR_BUTTON_ICONS.burn
-  const toolbarTitle = TOOLBAR_BUTTONS.find((button) => button.id === toolbarButton)?.title || 'Burn Tabs and Data'
+  const toolbarEntry = TOOLBAR_BUTTONS.find((button) => button.id === toolbarButton)
+  const toolbarTitle = toolbarEntry ? tKey(toolbarEntry.title) : t('Burn Tabs and Data')
   const AddressIcon = ADDRESS_BAR_BUTTON_ICONS[addressBarButton] || ADDRESS_BAR_BUTTON_ICONS.share
   const addressTitle = addressBarButtonTitle(addressBarButton)
 
@@ -65,23 +67,23 @@ export function Appearance ({
         </View>
       )}
 
-      <SettingsSection title='Theme'>
+      <SettingsSection title={t('Theme')}>
         <ChoiceGroup
           options={[
-            { id: 'system', title: 'System default' },
-            { id: 'light', title: 'Light' },
-            { id: 'dark', title: 'Dark' }
+            { id: 'system', title: t('System default') },
+            { id: 'light', title: t('Light') },
+            { id: 'dark', title: t('Dark') }
           ]}
           selected={theme}
           onSelect={onThemeChange}
         />
       </SettingsSection>
 
-      <SettingsSection title='Address bar'>
+      <SettingsSection title={t('Address bar')}>
         <ChoiceGroup
           options={[
-            { id: 'top', title: 'Top' },
-            { id: 'bottom', title: 'Bottom' }
+            { id: 'top', title: t('Top') },
+            { id: 'bottom', title: t('Bottom') }
           ]}
           selected={addressBarPosition}
           onSelect={onAddressBarPositionChange}
@@ -89,11 +91,11 @@ export function Appearance ({
         <View style={[styles.divider, isDark ? styles.dividerDark : null]} />
         <View style={styles.settingRow}>
           <SettingCopy
-            title='Show full website address'
-            description='Show the complete URL instead of only the site address.'
+            title={t('Show full website address')}
+            description={t('Show the complete URL instead of only the site address.')}
           />
           <Switch
-            accessibilityLabel='Show full website address'
+            accessibilityLabel={t('Show full website address')}
             value={showFullAddress}
             onValueChange={onShowFullAddressChange}
             trackColor={{ false: '#bac3d2', true: '#7eb2ee' }}
@@ -104,7 +106,7 @@ export function Appearance ({
 
       {/* Shown large rather than as six coloured dots: the thing being picked
           is the logo, so the logo is what you pick from. */}
-      <SettingsSection title='Logo'>
+      <SettingsSection title={t('Logo')}>
         <View style={styles.logoRow}>
           {APP_LOGO_COLORS.map((color) => {
             const selected = color.id === appLogoColor
@@ -112,7 +114,7 @@ export function Appearance ({
               <Pressable
                 key={color.id}
                 accessibilityRole='button'
-                accessibilityLabel={`${color.title} logo`}
+                accessibilityLabel={t('{color} logo', { color: tKey(color.title) })}
                 accessibilityState={{ selected }}
                 style={({ pressed }) => [styles.logoOption, pressed ? styles.logoPressed : null]}
                 onPress={() => onAppLogoColorChange(color.id)}
@@ -126,7 +128,7 @@ export function Appearance ({
                   <AppLogo color={color.id} size={48} />
                 </View>
                 <Text style={[styles.logoLabel, isDark ? styles.logoLabelDark : null]}>
-                  {color.title}
+                  {tKey(color.title)}
                 </Text>
               </Pressable>
             )
@@ -136,10 +138,10 @@ export function Appearance ({
 
       {/* The button in the middle of the bar at the bottom, the burn button
           unless another is chosen. */}
-      <SettingsSection title='Toolbar button'>
+      <SettingsSection title={t('Toolbar button')}>
         <Pressable
           accessibilityRole='button'
-          accessibilityLabel={`Toolbar button, ${toolbarTitle}`}
+          accessibilityLabel={t('Toolbar button, {button}', { button: toolbarTitle })}
           style={({ pressed }) => [styles.settingRow, pressed ? styles.logoPressed : null]}
           onPress={onOpenToolbarButton}
         >
@@ -151,10 +153,10 @@ export function Appearance ({
 
       {/* The one after reload in the address bar: Share, or whichever button
           you reach for most on a page. */}
-      <SettingsSection title='Address bar button'>
+      <SettingsSection title={t('Address bar button')}>
         <Pressable
           accessibilityRole='button'
-          accessibilityLabel={`Address bar button, ${addressTitle}`}
+          accessibilityLabel={t('Address bar button, {button}', { button: addressTitle })}
           style={({ pressed }) => [styles.settingRow, pressed ? styles.logoPressed : null]}
           onPress={onOpenAddressBarButton}
         >

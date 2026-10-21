@@ -28,6 +28,7 @@ import {
   RPC_IDENTITY_REMOVE,
   RPC_IDENTITY_SEND,
   RPC_IDENTITY_SEND_STOP,
+  RPC_IDENTITY_SEND_STATUS,
   RPC_IDENTITY_DISCARD_RESTORE,
   RPC_BACKUP_CREATE,
   RPC_BACKUP_ESTIMATE,
@@ -68,7 +69,11 @@ import {
   RPC_PEERCHAT_ONBOARD,
   RPC_PEERCHAT_ATTACHMENT_UPLOAD,
   RPC_PEERCHAT_ATTACHMENT_OPEN,
-  RPC_PEERTUNES_START
+  RPC_PEERCHAT_ATTACHMENT_FORWARD,
+  RPC_PEERCHAT_SEARCH,
+  RPC_PEERTUNES_START,
+  RPC_HYPERDRIVE_VIEWER_DOWNLOAD,
+  RPC_HYPERDRIVE_VIEWER_START
 } from './commands.mjs'
 import {
   getDefaultIdentityStoragePath,
@@ -81,6 +86,7 @@ import {
   createBackupFile,
   discardPendingRestore,
   estimateBackup,
+  getOutgoingTransfer,
   inspectBackup,
   receiveTransfer,
   removeIdentity,
@@ -110,7 +116,8 @@ import {
   refreshDeviceSync,
   refreshHyperNetworking,
   setDeviceSyncMetered,
-  withHyperRuntimeOperation
+  withHyperRuntimeOperation,
+  sealPrivateFilesAtRest
 } from '../hyper/runtime.mjs'
 import { getOrCreatePairingNonceRecord } from '../backup/pairing-nonce.mjs'
 import { clearAllP2pData, clearP2pCache, deleteP2pAppData, listP2pAppData } from '../hyper/storage.mjs'
@@ -131,9 +138,10 @@ import { takeP2pmdNotes } from '../p2pmd/notes-transfer.mjs'
 import { inlineHyperPreviewImages, renderP2pmdPreview } from '../p2pmd/preview.mjs'
 import { getP2pmdEditorPage } from '../p2pmd/server.mjs'
 import { startPeerTunesServer } from '../peertunes/server.mjs'
+import { createHyperdriveViewerDownload, startHyperdriveViewerServer } from '../hyperdrive-viewer/server.mjs'
 import { parseJsonMessage, replyJson } from './messages.mjs'
 import { deletePeerChatProfile, getPeerChatService, setPeerChatIdle } from '../peerchat/runtime.mjs'
-import { openPeerChatAttachment, uploadPeerChatAttachment } from '../peerchat/attachments.mjs'
+import { forwardPeerChatAttachment, openPeerChatAttachment, uploadPeerChatAttachment } from '../peerchat/attachments.mjs'
 
 export async function routeRpcRequest (req) {
   try {
@@ -141,6 +149,11 @@ export async function routeRpcRequest (req) {
       const options = parseJsonMessage(req.data)
       await withHyperRuntimeOperation(() => {})
       clearOrphanedTransfer()
+      try {
+        sealPrivateFilesAtRest()
+      } catch (error) {
+        console.error('[hyper] Could not lock private files:', error)
+      }
       replyJson(req, {
         ok: true,
         storagePath: getHyperStoragePath(),
@@ -306,6 +319,11 @@ export async function routeRpcRequest (req) {
       return
     }
 
+    if (req.command === RPC_IDENTITY_SEND_STATUS) {
+      replyJson(req, getOutgoingTransfer())
+      return
+    }
+
     if (req.command === RPC_BACKUP_ESTIMATE) {
       replyJson(req, estimateBackup())
       return
@@ -406,6 +424,8 @@ export async function routeRpcRequest (req) {
         ok: true,
         profile: peerChat.getProfile(),
         rooms: peerChat.listRooms(),
+        // Where each room that moved to a new key went. See peerchat/room-move.mjs.
+        movedRooms: peerChat.movedRoomsMap(),
         unreadTotal: peerChat.getUnreadTotal(),
         pendingDirectMessages: peerChat.listPendingDirectMessages(),
         blockedPeers: peerChat.listBlockedPeers(),
@@ -454,6 +474,8 @@ export async function routeRpcRequest (req) {
         ok: true,
         profile: peerChat.getProfile(),
         rooms: peerChat.listRooms(),
+        // Where each room that moved to a new key went. See peerchat/room-move.mjs.
+        movedRooms: peerChat.movedRoomsMap(),
         unreadTotal: peerChat.getUnreadTotal(),
         pendingDirectMessages: peerChat.listPendingDirectMessages(),
         blockedPeers: peerChat.listBlockedPeers(),
@@ -543,6 +565,25 @@ export async function routeRpcRequest (req) {
         return
       }
       replyJson(req, await openPeerChatAttachment(body))
+      return
+    }
+
+    if (req.command === RPC_PEERCHAT_ATTACHMENT_FORWARD) {
+      const body = parseJsonMessage(req.data)
+      const peerChat = await getPeerChatService()
+      if (!peerChat.hasRoom(body.roomKey) || !peerChat.hasRoom(body.fromRoomKey)) {
+        replyJson(req, { ok: false, error: 'PeerChat room not found.' })
+        return
+      }
+      // Sealed for the chat it goes to, with a key of its own where that
+      // chat's files have one.
+      replyJson(req, await forwardPeerChatAttachment({ ...body, ownKey: peerChat.filesHaveOwnKeys(body.roomKey) }))
+      return
+    }
+
+    if (req.command === RPC_PEERCHAT_SEARCH) {
+      const peerChat = await getPeerChatService()
+      replyJson(req, { ok: true, ...await peerChat.searchMessages(parseJsonMessage(req.data)) })
       return
     }
 
@@ -637,6 +678,16 @@ export async function routeRpcRequest (req) {
 
     if (req.command === RPC_PEERTUNES_START) {
       replyJson(req, await startPeerTunesServer())
+      return
+    }
+
+    if (req.command === RPC_HYPERDRIVE_VIEWER_START) {
+      replyJson(req, await startHyperdriveViewerServer())
+      return
+    }
+
+    if (req.command === RPC_HYPERDRIVE_VIEWER_DOWNLOAD) {
+      replyJson(req, await createHyperdriveViewerDownload(parseJsonMessage(req.data)))
       return
     }
 

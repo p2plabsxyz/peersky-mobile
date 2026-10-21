@@ -527,3 +527,43 @@ class MainApplication : Application(), ReactApplication {
   }
 }
 `
+
+describe('android NDK', () => {
+  // A library that named no NDK got the Android Gradle Plugin's default, which
+  // Gradle downloaded by itself mid-build and CI once got cut short.
+  it('builds every library with the app NDK', async () => {
+    const appJson = JSON.parse(await readFile(repoFile('app.json'), 'utf8'))
+    const { pinLibraryNdk } = require('../../plugins/with-one-ndk.js')
+    const root = 'apply plugin: "expo-root-project"\n'
+    const once = pinLibraryNdk(root)
+
+    assert.equal(hasExpoPlugin(appJson.expo?.plugins || [], './plugins/with-one-ndk'), true)
+    assert.match(once, /plugins\.withId\('com\.android\.library'\)/)
+    assert.match(once, /project\.android\.ndkVersion = rootProject\.ext\.ndkVersion/)
+    assert.equal(pinLibraryNdk(once), once)
+  })
+})
+
+describe('android release shrinking', () => {
+  // Google Play flagged the app's code as barely optimized (2% obfuscated).
+  // R8 now shrinks and renames release code, but native code and reflection
+  // look these classes up by name, so they must keep theirs.
+  it('shrinks release code and keeps what is found by name', async () => {
+    const appJson = JSON.parse(await readFile(repoFile('app.json'), 'utf8'))
+    const buildProperties = (appJson.expo?.plugins || [])
+      .find((plugin) => Array.isArray(plugin) && plugin[0] === 'expo-build-properties')
+    const android = buildProperties?.[1]?.android || {}
+
+    assert.equal(android.enableMinifyInReleaseBuilds, true)
+    for (const rule of [
+      '-keep class to.holepunch.** { *; }',
+      '-keep class xyz.p2plabs.peersky.PeerSkyAdBlockEngine { *; }',
+      '-keep class me.leolin.shortcutbadger.ShortcutBadger { *; }',
+      '-keep class expo.modules.notifications.badge.BadgeHelper { *; }',
+      '-keepclassmembers class * { @android.webkit.JavascriptInterface <methods>; }',
+      '-dontwarn com.google.mlkit.**'
+    ]) {
+      assert.ok(android.extraProguardRules.includes(rule), rule)
+    }
+  })
+})

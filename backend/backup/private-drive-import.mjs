@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import z32 from 'z32'
+import { readSealedJson } from '../hyper/sealed-file.mjs'
 import {
   getPrivateDriveId,
   isValidPrivateDriveId,
@@ -22,9 +23,14 @@ function extractTransferredPrivateDrives (storagePath) {
 
   const candidates = []
 
+  // Locked with the phone's secure storage once it is here (sealed-file.mjs).
   const keyFile = join(storagePath, PRIVATE_DRIVE_TRANSFER_ENTRY)
-  if (existsSync(keyFile)) {
-    candidates.push(...extractSerializedPrivateDriveKey(readFileSync(keyFile, 'utf8')))
+  let keyRecord = null
+  try {
+    keyRecord = readSealedJson(keyFile)
+  } catch {}
+  if (keyRecord) {
+    candidates.push(...extractSerializedPrivateDriveKey(JSON.stringify(keyRecord.value)))
   }
 
   for (const registryEntry of extractDesktopPrivateDriveRegistryEntries(storagePath)) {
@@ -139,7 +145,7 @@ function extractDesktopPrivateDriveRegistryEntries (storagePath) {
 
   let entries
   try {
-    const parsed = JSON.parse(readFileSync(registryPath, 'utf8'))
+    const parsed = readSealedJson(registryPath)?.value
     if (!Array.isArray(parsed)) return []
     entries = parsed.map(normalizeRegistryEntry).filter((entry) => entry !== null)
   } catch {

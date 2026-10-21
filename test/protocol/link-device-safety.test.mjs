@@ -75,6 +75,20 @@ describe('keeping the stores shut while Link Device works on them', () => {
   })
 })
 
+describe('a transfer going out', () => {
+  it('stays up when the screen closes, so the screen can show it again, and comes down when stopped or out of time', async () => {
+    const source = await read('backend/backup/link-device.mjs')
+    const send = source.slice(source.indexOf('export function sendTransfer ('), source.indexOf('export function getOutgoingTransfer'))
+    assert.match(send, /url: published\.url,\s*verificationCode: created\.verificationCode,\s*deviceType: target\.deviceType/)
+    assert.match(send, /stopOutgoingTransfer\(\)\.catch\(\(\) => \{\}\)\s*\}, Math\.max\(0, created\.expiresAt - Date\.now\(\)\) \+ 60 \* 1000\)/)
+    const status = source.slice(source.indexOf('export function getOutgoingTransfer'), source.indexOf('async function watchTransferUploads'))
+    assert.match(status, /now >= current\.expiresAt\) return \{ ok: true, sending: null \}/)
+    assert.match(status, /sent: current\.blocks > 0 \? Math\.min\(1, current\.uploaded\.size \/ current\.blocks\) : 0/)
+    const stop = source.slice(source.indexOf('export async function stopOutgoingTransfer'), source.indexOf('async function clearTransferDrive'))
+    assert.match(stop, /outgoingTransfer = null/)
+  })
+})
+
 describe('one Link Device job at a time', () => {
   it('packing, sending, receiving, unpacking, restoring and removing never overlap', async () => {
     const source = await read('backend/backup/link-device.mjs')
@@ -114,7 +128,7 @@ describe('one Link Device job at a time', () => {
     const replace = screen.slice(screen.indexOf('const replaceData = useCallback'), screen.indexOf('const commitRestore = useCallback'))
     assert.ok(replace.indexOf('onRestartRequired()') < replace.indexOf('await call(command, data)'))
     assert.match(replace, /Nothing on this phone was changed/)
-    assert.match(screen, /void replaceData\(RPC_IDENTITY_REMOVE, \{\}, 'Your data was not removed'\)/)
+    assert.match(screen, /void replaceData\(RPC_IDENTITY_REMOVE, \{\}, t\('Your data was not removed'\)\)/)
   })
 
   // Found on a simulator: the restart screen never showed. Link Device is in

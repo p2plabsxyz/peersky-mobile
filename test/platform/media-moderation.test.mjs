@@ -182,8 +182,11 @@ test('a file pick abandoned by leaving the app does not wedge the screen', async
   // Coming back from a pick that did work also fires active, a moment before
   // the result lands, so there has to be a grace period between the two.
   assert.match(gate, /setTimeout\([\s\S]{0,120}ABANDONED_PICK_GRACE_MS\)/)
-  const grace = gate.match(/ABANDONED_PICK_GRACE_MS = (\d+)/)
-  assert.ok(grace && Number(grace[1]) >= 1000, 'too short and a real pick gets thrown away')
+  const grace = gate.match(/ABANDONED_PICK_GRACE_MS = ([\d_]+)/)
+  assert.ok(grace && Number(grace[1].replace(/_/g, '')) >= 10_000, 'too short and a big or cloud file gets thrown away')
+  // On iOS the picker's result still comes after a return, a photo from
+  // iCloud included, so it is never given up on there.
+  assert.match(gate, /if \(Platform\.OS === 'ios' \|\| state !== 'active' \|\| !abandonPick\) return/)
 
   // Android rejects a second pick outright; the user can do nothing with that.
   assert.match(gate, /document picking in progress/i)
@@ -538,4 +541,28 @@ test('a picture the reader opened stays open', async () => {
   // And it is not screened again, which is what put "Checking this picture"
   // back over a picture already on screen.
   assert.match(screen, /if \(revealedAttachments\.has\(item\.message\)\) return/)
+})
+
+// iOS ends a hidden WebView's page process while the app is in the background,
+// and the page then answered nothing again: every picture sent in a room waited
+// the whole timeout, and seemed to go only once the app was put away and back,
+// when the overdue timer fired. The page is loaded again when its process goes,
+// and a picture is posted only to a page that said it is ready.
+test('the classifier page comes back after its process is ended, and gets only what it can answer', async () => {
+  const host = await readFile(new URL('../../app/media/NsfwScanner.tsx', import.meta.url), 'utf8')
+  assert.match(host, /onContentProcessDidTerminate=\{restart\}/)
+  assert.match(host, /onRenderProcessGone=\{restart\}/)
+  assert.match(host, /key=\{generation\}/)
+  assert.match(host, /classifierReady = false\s*setGeneration\(\(value\) => value \+ 1\)/)
+  assert.match(host, /if \(classifierReady\) liveWebView\?\.postMessage\(request\)/)
+  // Waiting scans go to the page as soon as it is ready, or give up at once if
+  // it failed to start.
+  assert.match(host, /classifierReady = true\s*for \(const entry of pending\.values\(\)\) liveWebView\?\.postMessage\(entry\.request\)/)
+  assert.match(host, /for \(const id of \[\.\.\.pending\.keys\(\)\]\) settle\(id, MEDIA_UNSCANNED\)\s*\}\s*return/)
+
+  // And the screen says a picture is being checked, rather than looking stuck.
+  const gate = await readFile(new URL('../../app/media/upload-gate.ts', import.meta.url), 'utf8')
+  assert.match(gate, /onPicked\?\.\(picked\)\s*return await screenAssets\(picked\)/)
+  const chat = await readFile(new URL('../../app/peerchat/PeerChatScreen.tsx', import.meta.url), 'utf8')
+  assert.match(chat, /onPicked: \(picked\) => onStatus\(/)
 })

@@ -27,8 +27,8 @@ describe('browser menu', () => {
   })
 
   test('two big actions, then grouped rows', () => {
-    assert.match(menu, /<BigAction[\s\S]{0,400}label='New Tab'/)
-    assert.match(menu, /<BigAction[\s\S]{0,400}label='Settings'/)
+    assert.match(menu, /<BigAction[\s\S]{0,400}label=\{t\('New Tab'\)\}/)
+    assert.match(menu, /<BigAction[\s\S]{0,400}label=\{t\('Settings'\)\}/)
     assert.match(menu, /function withDividers/)
     // Dividers start past the icon, so the rows read as one card.
     assert.match(menu, /divider: \{[\s\S]{0,120}marginLeft: 56/)

@@ -2,10 +2,12 @@ import { useEffect, useRef, useState } from 'react'
 import { File, Paths } from 'expo-file-system'
 import {
   DEFAULT_BROWSER_PREFERENCES,
+  nextHyperdriveViewerEpoch,
   parseBrowserPreferences,
   serializeBrowserPreferences
 } from './browser-preferences.mjs'
 import { normalizeCustomSearchUrl } from '../browser-shell.mjs'
+import { t } from '../i18n/i18n.mjs'
 
 export type SearchEngine =
   | 'duckduckgo'
@@ -57,6 +59,10 @@ export type BrowserPreferences = {
   enforceManualPageZoom: boolean
   externalLinkBehavior: ExternalLinkBehavior
   forceDarkWebsites: boolean
+  // See nextHyperdriveViewerEpoch in browser-preferences.mjs. 0 is none yet.
+  hyperdriveViewerEpoch: number
+  // 'system', or a code from LANGUAGES in i18n/languages.mjs.
+  language: string
   publishingSites: Record<string, PublishingDecision>
   searchEngine: SearchEngine
   searchSuggestionsEnabled: boolean
@@ -90,7 +96,7 @@ export function useBrowserPreferences () {
         }
       } catch (error) {
         console.error('Failed loading browser preferences:', error)
-        if (!cancelled) setPersistenceError('Unable to load browser preferences. Defaults are being used.')
+        if (!cancelled) setPersistenceError(t('Unable to load browser preferences. Defaults are being used.'))
       } finally {
         if (!cancelled) setIsReady(true)
       }
@@ -104,7 +110,7 @@ export function useBrowserPreferences () {
 
   function updatePreferences (patch: Partial<BrowserPreferences>) {
     if (!isReady) {
-      setPersistenceError('Browser preferences are still loading. Try again in a moment.')
+      setPersistenceError(t('Browser preferences are still loading. Try again in a moment.'))
       return false
     }
 
@@ -117,7 +123,7 @@ export function useBrowserPreferences () {
       return true
     } catch (error) {
       console.error('Failed saving browser preferences:', error)
-      setPersistenceError('Unable to save this preference. Your previous setting is unchanged.')
+      setPersistenceError(t('Unable to save this preference. Your previous setting is unchanged.'))
       return false
     }
   }
@@ -152,6 +158,9 @@ export function useBrowserPreferences () {
     setForceDarkWebsites: (forceDarkWebsites: boolean) => {
       return updatePreferences({ forceDarkWebsites })
     },
+    setLanguage: (language: string) => {
+      return updatePreferences({ language })
+    },
     setAddressBarButton: (addressBarButton: AddressBarButton) => {
       return updatePreferences({ addressBarButton })
     },
@@ -167,6 +176,12 @@ export function useBrowserPreferences () {
     },
     setAppLogoColor: (appLogoColor: AppLogoColor) => {
       return updatePreferences({ appLogoColor })
+    },
+    // The Hyperdrive viewer empties its cache the next time it opens.
+    bumpHyperdriveViewerEpoch: () => {
+      return updatePreferences({
+        hyperdriveViewerEpoch: nextHyperdriveViewerEpoch(preferencesRef.current.hyperdriveViewerEpoch)
+      })
     },
     setSearchEngine: (searchEngine: SearchEngine) => {
       return updatePreferences({ searchEngine })
@@ -191,6 +206,26 @@ export function useBrowserPreferences () {
 
 function getPreferencesFile () {
   return new File(Paths.document, 'browser-preferences.json')
+}
+
+/**
+ * A restore puts its own copy of the preferences in place, after the screen
+ * holding the old ones has gone, so the viewer's epoch moves on in the file
+ * itself. Only the epoch changes: the rest is what the restore brought.
+ */
+export function bumpSavedHyperdriveViewerEpoch () {
+  try {
+    const file = getPreferencesFile()
+    const saved = parseBrowserPreferences(file.exists ? file.textSync() : null) as BrowserPreferences
+    writePreferences({
+      ...saved,
+      hyperdriveViewerEpoch: nextHyperdriveViewerEpoch(saved.hyperdriveViewerEpoch)
+    })
+    return true
+  } catch (error) {
+    console.error('Failed moving the Hyperdrive viewer on after a restore:', error)
+    return false
+  }
 }
 
 function writePreferences (preferences: BrowserPreferences) {

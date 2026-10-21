@@ -22,6 +22,7 @@ import {
   decryptAttachment,
   deriveAttachmentKey,
   encryptAttachment,
+  forwardPeerChatAttachment,
   isEncryptedAttachment,
   openPeerChatAttachment,
   opaqueAttachmentPath,
@@ -86,10 +87,20 @@ test('PeerChat streams encrypted files through a room-specific drive and decrypt
     }
   }
   const requestedDrives = []
+  // The drive is announced alongside the upload, never before it: an announce
+  // that never ends must not hold the file up.
+  drive.core = { discovery: null }
+  let joined = 0
+  const driveOptions = []
   const runtime = {
-    async getDrive (name) {
+    async getDrive (name, opts) {
       requestedDrives.push(name)
+      driveOptions.push(opts)
       return drive
+    },
+    joinCore () {
+      joined++
+      return new Promise(() => {})
     }
   }
 
@@ -103,6 +114,8 @@ test('PeerChat streams encrypted files through a room-specific drive and decrypt
     randomBytes: () => Buffer.alloc(8, 9)
   })
   assert.equal(uploaded.ok, true)
+  assert.equal(driveOptions[0]?.autoJoin, false)
+  assert.equal(joined, 1)
   assert.equal(requestedDrives[0], attachmentDriveName(ROOM_KEY))
   assert.equal(isEncryptedAttachment(stored.values().next().value), true)
   assert.equal(stored.values().next().value.includes(plaintext), false)
@@ -600,4 +613,198 @@ test('the upload wait grows with the file', async () => {
   // Ten minutes of headroom for a 2 GB film, and it keeps growing past that.
   assert.ok(getPeerChatUploadTimeout(limit) > 10 * 60 * 1000)
   assert.ok(getPeerChatUploadTimeout(limit * 4) > getPeerChatUploadTimeout(limit) * 3)
+})
+
+// A drive per room, each with an id of its own, as the runtime opens them: by
+// name to write a room's files, by address to read one.
+function createRoomDrives () {
+  const drives = new Map()
+  const reads = []
+  function driveFor (id) {
+    const stored = new Map()
+    return {
+      id,
+      stored,
+      createWriteStream (pathname) {
+        const chunks = []
+        return new Writable({
+          write (chunk, encoding, callback) {
+            chunks.push(Buffer.from(chunk))
+            callback()
+          },
+          final (callback) {
+            stored.set(pathname, Buffer.concat(chunks))
+            callback()
+          }
+        })
+      },
+      createReadStream (pathname) {
+        reads.push(`${id}${pathname}`)
+        return Readable.from([stored.get(pathname)])
+      },
+      async entry (pathname) {
+        const bytes = stored.get(pathname)
+        return bytes ? { value: { blob: { byteLength: bytes.byteLength } } } : null
+      }
+    }
+  }
+  const ids = new Map([
+    [attachmentDriveName(ROOM_KEY), 'a'.repeat(52)],
+    [attachmentDriveName(OTHER_ROOM_KEY), 'b'.repeat(52)]
+  ])
+  return {
+    drives,
+    reads,
+    runtime: {
+      async getDrive (nameOrAddress) {
+        const id = ids.get(nameOrAddress) || nameOrAddress.replace(/^hyper:\/\/([^/]+)\/$/, '$1')
+        if (!drives.has(id)) drives.set(id, driveFor(id))
+        return drives.get(id)
+      }
+    }
+  }
+}
+
+// Forwarding a picture or file opens it with the key it was sealed with and
+// seals it again for the chat it goes to, so it opens there and nowhere else.
+test('a forwarded file is sealed again for the chat it goes to', async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-forward-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const pickerDirectory = path.join(root, 'cache', 'imagepicker')
+  await mkdir(pickerDirectory, { recursive: true })
+  const sourcePath = path.join(pickerDirectory, 'beach.jpg')
+  const plaintext = Buffer.from('a picture from the first chat')
+  await writeFile(sourcePath, plaintext)
+  const { drives, runtime } = createRoomDrives()
+
+  const sent = await uploadPeerChatAttachment({
+    roomKey: ROOM_KEY,
+    fileUri: pathToFileURL(sourcePath).toString(),
+    byteLength: plaintext.byteLength
+  }, { runtime })
+  assert.equal(sent.ok, true, sent.error)
+
+  const forwarded = await forwardPeerChatAttachment({
+    roomKey: OTHER_ROOM_KEY,
+    fromRoomKey: ROOM_KEY,
+    url: sent.item.url,
+    fileName: 'beach.jpg',
+    fileSize: plaintext.byteLength
+  }, { runtime, storagePath: root })
+  assert.equal(forwarded.ok, true, forwarded.error)
+  assert.equal(forwarded.item.byteLength, plaintext.byteLength)
+  assert.equal(forwarded.item.fileKey, undefined)
+  // In the other room's drive, at an address of its own, and sealed.
+  assert.match(forwarded.item.url, new RegExp(`^hyper://${'b'.repeat(52)}/\\d+-[0-9a-f]{16}[.]bin$`))
+  assert.notEqual(forwarded.item.url, sent.item.url)
+  const sealed = [...drives.get('b'.repeat(52)).stored.values()][0]
+  assert.equal(isEncryptedAttachment(sealed), true)
+  assert.equal(sealed.includes(plaintext), false)
+
+  // It opens with the chat it went to, and not with the one it came from.
+  const opened = await openPeerChatAttachment({
+    roomKey: OTHER_ROOM_KEY,
+    url: forwarded.item.url,
+    fileName: 'beach.jpg',
+    fileSize: plaintext.byteLength,
+    encrypted: true
+  }, { runtime, storagePath: path.join(root, 'other') })
+  assert.equal(opened.ok, true, opened.error)
+  assert.deepEqual(await readFile(new URL(opened.localUri)), plaintext)
+  const wrongRoom = await openPeerChatAttachment({
+    roomKey: ROOM_KEY,
+    url: forwarded.item.url,
+    fileName: 'beach.jpg',
+    fileSize: plaintext.byteLength,
+    encrypted: true
+  }, { runtime, storagePath: path.join(root, 'wrong') })
+  assert.equal(wrongRoom.ok, false)
+})
+
+test('a file with a key of its own forwards into a room whose files get one too', async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-forward-own-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const pickerDirectory = path.join(root, 'cache', 'documentpicker')
+  await mkdir(pickerDirectory, { recursive: true })
+  const sourcePath = path.join(pickerDirectory, 'notes.pdf')
+  const plaintext = Buffer.from('a file sealed with a key of its own')
+  await writeFile(sourcePath, plaintext)
+  const { runtime } = createRoomDrives()
+
+  const sent = await uploadPeerChatAttachment({
+    roomKey: ROOM_KEY,
+    fileUri: pathToFileURL(sourcePath).toString(),
+    byteLength: plaintext.byteLength,
+    ownKey: true
+  }, { runtime })
+  assert.match(sent.item.fileKey, /^[0-9a-f]{64}$/)
+
+  // Without its key it does not open, so nothing is sealed for the other chat.
+  const keyless = await forwardPeerChatAttachment({
+    roomKey: OTHER_ROOM_KEY,
+    fromRoomKey: ROOM_KEY,
+    url: sent.item.url,
+    fileName: 'notes.pdf',
+    fileSize: plaintext.byteLength
+  }, { runtime, storagePath: path.join(root, 'keyless') })
+  assert.equal(keyless.ok, false)
+  assert.match(keyless.error, /decryption failed/)
+
+  const forwarded = await forwardPeerChatAttachment({
+    roomKey: OTHER_ROOM_KEY,
+    fromRoomKey: ROOM_KEY,
+    url: sent.item.url,
+    fileName: 'notes.pdf',
+    fileSize: plaintext.byteLength,
+    fileKey: sent.item.fileKey,
+    ownKey: true
+  }, { runtime, storagePath: root })
+  assert.equal(forwarded.ok, true, forwarded.error)
+  assert.match(forwarded.item.fileKey, /^[0-9a-f]{64}$/)
+  assert.notEqual(forwarded.item.fileKey, sent.item.fileKey)
+
+  const opened = await openPeerChatAttachment({
+    roomKey: OTHER_ROOM_KEY,
+    url: forwarded.item.url,
+    fileName: 'notes.pdf',
+    fileSize: plaintext.byteLength,
+    encrypted: true,
+    fileKey: forwarded.item.fileKey
+  }, { runtime, storagePath: path.join(root, 'opened') })
+  assert.equal(opened.ok, true, opened.error)
+  assert.deepEqual(await readFile(new URL(opened.localUri)), plaintext)
+})
+
+test('forwarding refuses a bad room, and reads nothing but the attachment', async () => {
+  const { reads, runtime } = createRoomDrives()
+  const badRoom = await forwardPeerChatAttachment({
+    roomKey: 'not a room',
+    fromRoomKey: ROOM_KEY,
+    url: `hyper://${'a'.repeat(52)}/1-0123456789abcdef.bin`,
+    fileName: 'beach.jpg',
+    fileSize: 10
+  }, { runtime })
+  assert.equal(badRoom.ok, false)
+  assert.match(badRoom.error, /Invalid PeerChat room key/)
+
+  // A local file is no attachment: the forward goes by its hyper address only.
+  const local = await forwardPeerChatAttachment({
+    roomKey: OTHER_ROOM_KEY,
+    fromRoomKey: ROOM_KEY,
+    url: 'file:///etc/hosts',
+    fileName: 'hosts',
+    fileSize: 10
+  }, { runtime })
+  assert.equal(local.ok, false)
+
+  const missing = await forwardPeerChatAttachment({
+    roomKey: OTHER_ROOM_KEY,
+    fromRoomKey: ROOM_KEY,
+    url: `hyper://${'a'.repeat(52)}/1-0123456789abcdef.bin`,
+    fileName: 'beach.jpg',
+    fileSize: 10
+  }, { runtime })
+  assert.equal(missing.ok, false)
+  assert.match(missing.error, /not found/)
+  assert.deepEqual(reads, [])
 })

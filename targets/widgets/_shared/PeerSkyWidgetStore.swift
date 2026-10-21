@@ -23,6 +23,9 @@ enum PeerSkyWidgetStore {
     var title: String
     var artist: String
     var album: String
+    /// The song's id in PeerTunes, so a tap opens it in Now Playing. What an
+    /// older version of the app wrote has none.
+    var id: String?
   }
 
   private static var defaults: UserDefaults? {

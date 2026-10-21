@@ -10,10 +10,12 @@ PeerSky Mobile ships PeerTunes, the click-wheel player for local and `hyper://` 
 
 ```js
 window.peerskyProtocols = ['hyper']
-window.peerskyHyperAsset = (url) => '/hyper/asset?url=' + encodeURIComponent(url)
+window.peerskyHyperAsset = (url) => '/hyper/asset?url=' + encodeURIComponent(url) + '&token=' + window.peerskyServerToken
 ```
 
-PeerTunes checks for those globals. `peerskyHyperAsset` routes folder listings, tag reads and audio playback through the proxy, and the path is relative, so the page never sees a proxy token. `peerskyProtocols` tells it the phone reads `hyper://` only.
+PeerTunes checks for those globals. `peerskyHyperAsset` routes folder listings, tag reads and audio playback through the proxy. `peerskyProtocols` tells it the phone reads `hyper://` only.
+
+Reading a drive and keeping songs need the server's token for this run. Any app on the phone can reach the port and fetch the page, so the token is in nothing the server sends: the app hands it to the PeerTunes WebView before the page loads (`injectedJavaScriptBeforeContentLoaded`, `app/server-token.mjs`), and the bridge reads `window.peerskyServerToken` each time the page asks.
 
 To update the app, replace the files under `assets/peertunes/`, update `manifest.json`, and run `npm run generate:peertunes-runtime`.
 
@@ -22,16 +24,21 @@ To update the app, replace the files under `assets/peertunes/`, update `manifest
 | Endpoint | Method | Purpose |
 |---|---|---|
 | `/` and bundled files | `GET`, `HEAD` | The app page, scripts, styles and icons |
-| `/hyper/asset?url=hyper://...` | `GET`, `HEAD` | Streams a file from a drive with `Range` support. With `Accept: application/json` it returns the folder listing instead |
+| `/hyper/asset?url=hyper://...&token=...` | `GET`, `HEAD` | Streams a file from a drive with `Range` support. With `Accept: application/json` it returns the folder listing instead. Without this run's token it answers `403` and reads nothing |
+| `/hyper/keep` | `GET` | For Keep On This Device: each song of a kept playlist as saved, saving or waiting (nobody who has it is online, or Download only on Wi-Fi is on and the phone is on cellular), and a download started for any song not all on the phone yet (`backend/peertunes/song-keeper.mjs`). The page reaches it through `window.peerskyKeepSongs`, which sends `X-PeerTunes-Keep: 1` and this run's token; a request without either is refused, since a tab or an image another page points here cannot send the header, and another app on the phone does not have the token |
 
 Everything else answers `404`, and any write method answers `405`. PeerTunes probes for a writable drive when publishing a share; the `405` makes it show its "publishing needs desktop PeerSky" message, since mobile drives are read-only.
 
 ## Runtime flow
 
 1. Opening `peersky://p2p/peertunes/` sends `RPC_PEERTUNES_START` to the Bare worklet.
-2. The backend starts the loopback server on the fixed port `47317` and falls back to a random port if that one is taken.
-3. React Native opens the local URL in a WebView. A share link such as `peersky://p2p/peertunes/#playlist=hyper%3A%2F%2F...` passes its fragment through, so the app can offer to import or play the playlist.
+2. The backend starts the loopback server on the fixed port `47317` and falls back to a random port if that one is taken. It makes a new token for each run and returns it with the address.
+3. React Native opens the local URL in a WebView, with the token set before the page loads. A restarted worklet means a new token, and the page loads again with it. A share link such as `peersky://p2p/peertunes/#playlist=hyper%3A%2F%2F...` passes its fragment through once, so the app can offer to import or play the playlist; the tab's address keeps only `peersky://p2p/peertunes/`, so a restart opens the page where it was rather than the playlist again.
 4. Inside the page, `hyper://` reads go to `/hyper/asset`, which uses the read-only Hyper fetch from `backend/hyper/fetch.mjs`.
+
+The page keeps its queue and the place in the song, and puts the song back paused at that place when it starts. The home screen widget shows the song playing, and a tap on it carries the song's id (`&song=` beside the address, `parsePeerTunesWidgetTap` in `app/home-shortcuts.mjs`): PeerTunes hands it to the page once it has loaded (`PeerTunes.openNowPlaying(id)`), cold start or warm, and the page opens Now Playing on that song, or says it is no longer in the library.
+
+Keep On This Device counts a song as saved only once every block of it is on the phone. Each look at `/hyper/keep` also starts a download for any song still missing, songs in other drives included, and looks for the person who shared them again at most every 30 seconds. The page asks every few seconds while the playlist or the progress screen is open, and asks for the folder to be kept again every five minutes while songs are missing, so a playlist whose sharer went offline fills in once they are back. On cellular with Download only on Wi-Fi on, nothing new starts and the song downloads that were going stop, as the kept folders' do. One keeper opens at most 100 separate drives in a session, since each drive it opens joins its swarm and stays open.
 
 A drive the phone has never read answers its first listing with 404 "Peers Not Found" until a peer connects. The proxy waits that out the way the browser does, with a network refresh and a growing delay between tries (about six seconds in all), so the first add of a new drive works. A folder listing never starts a download on its own: PeerTunes asks for the drive to be kept on the device once an import has finished, through `window.peerskyKeepOffline`. Starting it earlier competed with the listings the import was still reading, and nested folders came back empty.
 
@@ -64,11 +71,13 @@ PeerTunes plays through its WebView. iOS declares the `audio` background mode in
 
 - The server binds to loopback only, the same as the P2PMD and Hyper asset servers.
 - Only bundled files resolve. Dot segments, backslashes and bad encoding are rejected before lookup.
+- `/hyper/asset` and `/hyper/keep` answer only requests with this run's token, compared in constant time, before anything is read. The page and its files need none, and none of them holds it.
+- The WebView never loads `/hyper/` addresses as a page, so the token cannot end up in a download or a browser tab.
 - `/hyper/asset` validates the URL with `parseHyperUrl` before any network work.
 - The WebView only navigates within its own origin. Links to other sites, such as the GitHub link in About, open in the browser instead.
 - Android cleartext HTTP stays scoped to localhost through the existing network security config.
 
 ## Test coverage
 
-- `test/protocol/peertunes-http.test.mjs` covers the endpoint contract with an injectable Node HTTP server and a fake Hyper fetch: bridge injection, content types, path rejection, write rejection, URL validation, JSON listings, and range streaming.
+- `test/protocol/peertunes-http.test.mjs` covers the endpoint contract with an injectable Node HTTP server and a fake Hyper fetch: bridge injection, content types, path rejection, write rejection, the run's token (refused without it, a new one each run, never served or logged), URL validation, JSON listings, and range streaming.
 - `test/platform/internal-apps-registry.test.mjs` covers the `peersky://p2p/peertunes/` route, share link matching, and the WebView origin guard.
