@@ -160,6 +160,9 @@ test('the fetch path applies all of it to page requests', () => {
   assert.match(fetchSource, /namespacePageDriveRequest\(requestUrl, pageSite\)/)
   assert.match(fetchSource, /A page can only write to drives it created/)
   assert.match(fetchSource, /rememberPageDrive\(pageSite, responseText\)/)
+  // One of the app's own pages, such as PeerTunes, goes by a name of its own
+  // under the same rules.
+  assert.match(fetchSource, /const pageSite = site \|\| \(page === null \? null : pageSiteId\(page\)\)/)
 })
 
 // A private photo opened in a tab was kept decrypted on the phone: the WebView
