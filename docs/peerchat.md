@@ -500,9 +500,13 @@ separate and does not clear PeerChat or other P2P data.
 ## Identity transfer
 
 Link Device carries PeerChat between a person's devices: the profile, every
-room with its key, a fixed label for the new device (`ada@mobile`,
-`ada@desktop1`), and a link the devices use to prove to each other that they
-belong to the same person. Each device stays its own member of a room, so
+room with its key, a label for the new device (`ada@mobile`, `ada@desktop`),
+and a link the devices use to prove to each other that they belong to the same
+person. A desktop gets the lowest number none of the person's other devices was
+seen with (`desktop`, `desktop2`, ...). A transfer that is never used takes no
+number, and a desktop sent a transfer again with a lower number than its own
+moves down to it: builds before 1.0 kept a number for every transfer, used or
+not, so a third device could come out as `desktop5`. Each device stays its own member of a room, so
 messages reach all of them, and renames and newly joined rooms follow between
 them, even when they share no room: they also meet under a topic made from the
 link, which nobody without it can work out. See [link-device.md](link-device.md).

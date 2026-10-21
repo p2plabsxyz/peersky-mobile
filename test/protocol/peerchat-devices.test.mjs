@@ -20,6 +20,8 @@ import {
   makeProfileProof,
   makeTransfer,
   nextLabel,
+  takesLowerLabel,
+  desktopNumber,
   normalizeMemberName,
   normalizeTransfer,
   PEERCHAT_INCOMING_FILE
@@ -56,11 +58,20 @@ test('labels: one phone, numbered desktops, fixed after the name', () => {
   assert.equal(displayName('ada', 'not a label'), 'ada')
   assert.equal(displayName('a'.repeat(50), 'desktop2').length, 50)
 
-  const fromPhone = createLink('mobile')
-  assert.equal(nextLabel(fromPhone, 'desktop'), 'desktop')
-  assert.equal(nextLabel({ ...fromPhone, labels: ['desktop'] }, 'desktop'), 'desktop2')
-  assert.equal(nextLabel(createLink('desktop'), 'desktop'), 'desktop1')
-  assert.equal(nextLabel(createLink('desktop'), 'mobile'), 'mobile')
+  // The lowest number free among the devices seen, the first plain "desktop",
+  // as on the desktop (peerchat test/device-link.test.js).
+  assert.equal(nextLabel([], 'mobile'), 'mobile')
+  assert.equal(nextLabel(['mobile'], 'desktop'), 'desktop')
+  assert.equal(nextLabel(['mobile', 'desktop'], 'desktop'), 'desktop2')
+  assert.equal(nextLabel(['desktop1'], 'desktop'), 'desktop2')
+  assert.equal(nextLabel(['desktop5', '', 'bad'], 'desktop'), 'desktop')
+  assert.equal(nextLabel(['desktop', 'desktop3'], 'desktop'), 'desktop2')
+  assert.equal(takesLowerLabel('desktop5', 'desktop'), true)
+  assert.equal(takesLowerLabel('desktop', 'desktop2'), false)
+  assert.equal(takesLowerLabel('desktop1', 'desktop'), false)
+  assert.equal(takesLowerLabel('', 'desktop'), false)
+  assert.equal(takesLowerLabel('mobile', 'desktop'), false)
+  assert.equal(desktopNumber('desktop12'), 12)
 
   // What others send: a name, or a name and a label, and nothing else.
   assert.equal(normalizeMemberName('ada@desktop1'), 'ada@desktop1')
@@ -92,15 +103,15 @@ test('a desktop gets the phone\'s name, every room with its key, and a label of 
   assert.equal(first.profile.username, 'ada')
   const sent = first.rooms.find((entry) => entry.roomKey === room.roomKey)
   assert.equal(sent.creatorKey, service.localKey)
-  // Each desktop gets its own label, even before the first is heard from.
+  // A transfer never used takes no number: one made again gets the same label.
   const second = service.exportTransfer({ targetType: 'desktop' })
   assert.equal(second.link.key, first.link.key)
-  assert.equal(second.label, 'desktop2')
+  assert.equal(second.label, 'desktop')
 
   // The link is kept for the next transfer, and this phone has no label.
   const saved = JSON.parse(await readFile(path.join(storagePath, 'peerchat-mobile.json'), 'utf8'))
   assert.equal(saved.link.key, first.link.key)
-  assert.deepEqual(saved.link.labels, ['desktop', 'desktop2'])
+  assert.deepEqual(saved.link.labels, [])
   assert.equal(service.getProfile().displayName, 'ada')
   await service.close()
 })
@@ -188,6 +199,25 @@ test('takes a rename from the desktop, and from nobody else', async (t) => {
   // The label stays, and the labels the desktop knows are kept.
   assert.equal(renamed.device, 'mobile')
   assert.deepEqual(service.link.labels, ['desktop1', 'mobile'])
+  // A desktop that says which it is: the next one this phone links gets
+  // another number. Only from the person's own device.
+  await service.handlePeerMessage(desktop, {
+    type: 'profile',
+    username: 'adele@desktop',
+    device: 'desktop',
+    link: makeProfileProof(link, { username: 'adele', bio: 'new bio', avatar: null, at }, desktop.key)
+  })
+  assert.deepEqual(service.deviceLabels, ['desktop'])
+  assert.equal(service.exportTransfer({ targetType: 'desktop' }).label, 'desktop2')
+  const outsider = createFakePeer('0c0c0c0c', 'mallory', frames)
+  service.peers.set(outsider.connection, outsider)
+  await service.handlePeerMessage(outsider, {
+    type: 'profile',
+    username: 'mallory@desktop2',
+    device: 'desktop2',
+    link: makeProfileProof(createLink('desktop'), { username: 'mallory', at }, outsider.key)
+  })
+  assert.deepEqual(service.deviceLabels, ['desktop'])
   // Told on to everyone, with the time it was set.
   const resent = frames.filter((frame) => frame.type === 'profile').pop()
   assert.equal(resent.username, 'adele@mobile')

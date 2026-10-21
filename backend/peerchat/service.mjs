@@ -99,6 +99,7 @@ import {
   makeTransfer,
   mergeLabels,
   nextLabel,
+  takesLowerLabel,
   normalizeLabel,
   normalizeDeviceKey,
   normalizeLink,
@@ -305,8 +306,10 @@ export class PeerChatService {
     // devices take the newest.
     this.profile = { username: '', bio: '', avatar: null, linkPreview: true, at: 0 }
     // This device's fixed label after the name, and the link this person's
-    // devices share. See device-link.mjs.
+    // devices share. See device-link.mjs. deviceLabels: the labels the
+    // person's other devices were seen with, so a new one is given a free one.
     this.device = { label: '' }
+    this.deviceLabels = []
     this.link = null
     // The topic this person's devices meet under, joined while there is a
     // link. See devicesTopic in device-link.mjs.
@@ -1651,6 +1654,7 @@ export class PeerChatService {
           this.siblings.add(peer.id)
           this.schedulePersist()
         }
+        this.rememberDeviceLabel(message.device)
         this.takeSiblingProfile(message.link, message.avatar || null)
         if (first) {
           // Every room this phone is in, once per connection.
@@ -2614,6 +2618,15 @@ export class PeerChatService {
     })
   }
 
+  // The label another of this person's devices goes by, so no new one is
+  // given it.
+  rememberDeviceLabel (label) {
+    const value = normalizeLabel(label)
+    if (!value || this.deviceLabels.includes(value)) return
+    this.deviceLabels = mergeLabels(this.deviceLabels, [value])
+    this.schedulePersist()
+  }
+
   // A profile from another of this person's devices: the labels it knows, and
   // its name, bio and picture when they were set after ours.
   takeSiblingProfile (proof, avatar) {
@@ -2681,9 +2694,10 @@ export class PeerChatService {
     if (!this.profile.username) return null
     if (!this.link) this.link = createLink('mobile')
     const rooms = this.sharedRoomEntries()
-    // Kept as given, so the next desktop is not given the same label.
-    const label = nextLabel(this.link, targetType === 'mobile' ? 'mobile' : 'desktop')
-    this.link = { ...this.link, labels: mergeLabels(this.link.labels, [label]) }
+    // The lowest one free among the devices seen, this one's too. Nothing is
+    // kept for it: a transfer never used leaves its number free, and one sent
+    // to the same device again carries the same label.
+    const label = nextLabel([...this.deviceLabels, this.device.label], targetType === 'mobile' ? 'mobile' : 'desktop')
     this.persistNow()
     this.joinDevicesTopic()
     return makeTransfer({ link: this.link, label, profile: this.profile, rooms })
@@ -2714,13 +2728,18 @@ export class PeerChatService {
   applyTransfer (transfer) {
     const sameLink = Boolean(this.link) && linkId(this.link) === linkId(transfer.link)
     if (!sameLink) {
-      // Devices proven with the old link are not this person's any more.
+      // Devices proven with the old link are not this person's any more,
+      // and nor are the labels they went by.
       this.siblings.clear()
+      this.deviceLabels = []
       this.link = { ...transfer.link, labels: mergeLabels(transfer.link.labels, [transfer.label]) }
       this.device = { label: transfer.label }
       if (transfer.profile) this.adoptProfile(transfer.profile)
     } else {
       this.link = { ...this.link, labels: mergeLabels(this.link.labels, transfer.link.labels) }
+      // Sent again with a lower number than this device has, as one an
+      // earlier PeerChat numbered too high gets when the person sends again.
+      if (takesLowerLabel(this.device.label, transfer.label)) this.device = { label: transfer.label }
       if (transfer.profile && transfer.profile.at > (this.profile.at || 0)) this.adoptProfile(transfer.profile)
     }
 
@@ -4923,6 +4942,7 @@ export class PeerChatService {
         }
       }
       this.device = { label: normalizeLabel(parsed?.device?.label) }
+      this.deviceLabels = mergeLabels(parsed?.deviceLabels)
       this.link = normalizeLink(parsed?.link)
       for (const value of this.link && Array.isArray(parsed?.siblings) ? parsed.siblings.slice(0, MAX_SIBLINGS) : []) {
         const id = normalizePeerChatPeerId(value)
@@ -5068,6 +5088,7 @@ export class PeerChatService {
         version: 1,
         profile: this.profile,
         device: this.device,
+        deviceLabels: mergeLabels(this.deviceLabels),
         link: this.link,
         leftRooms: Object.fromEntries(this.leftRooms),
         removedRooms: Object.fromEntries(this.removedRooms),
