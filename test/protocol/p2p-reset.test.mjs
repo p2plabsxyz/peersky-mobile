@@ -14,7 +14,9 @@ import {
   listP2pResetTargets,
   P2P_IDENTITY_ENTRIES,
   P2P_RESET_DIR,
+  P2P_RESET_ID_FILE,
   P2P_RESET_TRASH_DIR,
+  readP2pResetId,
   recoverP2pReset
 } from '../../backend/hyper/p2p-reset.mjs'
 import { DEVICE_KEY_FILE } from '../../backend/backup/device-keys.mjs'
@@ -98,9 +100,36 @@ describe('Clear all P2P data and this device\'s identity', () => {
     for (const target of phone.targets) assert.equal(existsSync(target), false, target)
     assert.deepEqual(
       readdirSync(phone.identityPath).sort(),
-      [...BROWSER_FILES, 'browser-downloads'].sort()
+      [...BROWSER_FILES, 'browser-downloads', P2P_RESET_ID_FILE].sort()
     )
     assert.equal(existsSync(join(phone.identityPath, 'browser-downloads', 'report.pdf')), true)
+  })
+
+  // PeerTunes keeps its songs in its page's own storage, which no clear here
+  // reaches, so they all stayed. Each clear gives the device a new id, and the
+  // page empties its library when it sees one.
+  test('each clear gives the device a new reset id, kept apart from all it removes', (t) => {
+    const phone = documents(t)
+    fillPhone(phone)
+    const first = readP2pResetId(phone.identityPath)
+    assert.match(first, /^[0-9a-f]{32}$/)
+    assert.equal(readP2pResetId(phone.identityPath), first, 'the same until a clear')
+    assert.equal(phone.targets.includes(join(phone.identityPath, P2P_RESET_ID_FILE)), false)
+
+    beginP2pReset(phone.identityPath)
+    finishP2pReset(phone)
+    const next = readP2pResetId(phone.identityPath)
+    assert.match(next, /^[0-9a-f]{32}$/)
+    assert.notEqual(next, first)
+
+    // A clear the app was killed in gets one too, as it is finished.
+    beginP2pReset(phone.identityPath)
+    recoverP2pReset(phone)
+    assert.notEqual(readP2pResetId(phone.identityPath), next)
+
+    // Never written outside a real documents folder.
+    assert.equal(readP2pResetId('.'), '')
+    assert.equal(readP2pResetId(''), '')
   })
 
   // Half an identity is worse than either: a desktop's key with no drives, or

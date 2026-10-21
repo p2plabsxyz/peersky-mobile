@@ -121,6 +121,7 @@ import {
 } from '../hyper/runtime.mjs'
 import { getOrCreatePairingNonceRecord } from '../backup/pairing-nonce.mjs'
 import { clearAllP2pData, clearP2pCache, deleteP2pAppData, listP2pAppData } from '../hyper/storage.mjs'
+import { readP2pResetId } from '../hyper/p2p-reset.mjs'
 
 import {
   connectHolesail,
@@ -677,7 +678,8 @@ export async function routeRpcRequest (req) {
     }
 
     if (req.command === RPC_PEERTUNES_START) {
-      replyJson(req, await startPeerTunesServer())
+      const started = await startPeerTunesServer()
+      replyJson(req, started?.ok ? { ...started, resetId: readP2pResetId(getDefaultIdentityStoragePath()) } : started)
       return
     }
 

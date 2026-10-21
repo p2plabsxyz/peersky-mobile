@@ -26,7 +26,7 @@ import { PAUSE_ALL_MEDIA_SCRIPT } from '../browser-media.mjs'
 import { t } from '../i18n/i18n.mjs'
 import { parsePeerTunesWidgetTap } from '../home-shortcuts.mjs'
 import { MODAL_ORIENTATIONS } from '../modal-orientations'
-import { createServerTokenScript } from '../server-token.mjs'
+import { createResetIdScript, createServerTokenScript } from '../server-token.mjs'
 import { WEBVIEW_DECELERATION_RATE } from '../webview-scroll.mjs'
 import { tapFeedback } from '../haptics'
 import { forgetPeerTunesWidgetState, idlePeerTunesWidget, updatePeerTunesWidget } from '../widgets'
@@ -76,6 +76,9 @@ type Props = {
   localUrl: string | null
   // The server's token for this run. Reading a drive or keeping songs needs it.
   serverToken: string | null
+  // Changes each time Settings, P2P Data clears everything, and PeerTunes
+  // empties its library when it does.
+  resetId: string
   onEnsureServer: () => void
   onKeepOffline: (url: string) => Promise<{ ok: boolean, status?: string, error?: string }>
   onKeptFolders: (urls: string[]) => Promise<{ ok: boolean, kept?: string[], error?: string }>
@@ -91,6 +94,7 @@ export function PeerTunesScreen ({
   launchSuffix,
   localUrl,
   serverToken,
+  resetId,
   onEnsureServer,
   onKeepOffline,
   onKeptFolders,
@@ -298,7 +302,7 @@ export function PeerTunesScreen ({
       decelerationRate={WEBVIEW_DECELERATION_RATE}
       // The token goes in before the page's own scripts run. The server never
       // sends it, so only this view has it.
-      injectedJavaScriptBeforeContentLoaded={`${createServerTokenScript(serverToken)}\n${PEERTUNES_BEFORE_LOAD_SCRIPT}`}
+      injectedJavaScriptBeforeContentLoaded={`${createServerTokenScript(serverToken)}\n${createResetIdScript(resetId)}\n${PEERTUNES_BEFORE_LOAD_SCRIPT}`}
       onMessage={(event) => {
         const nowPlaying = parsePeerTunesNowPlaying(event.nativeEvent.data)
         if (nowPlaying) {

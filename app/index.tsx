@@ -722,6 +722,7 @@ export default function App () {
   const [p2pmdUrl, setP2pmdUrl] = useState<string | null>(null)
   const [peertunesUrl, setPeertunesUrl] = useState<string | null>(null)
   const [peertunesToken, setPeertunesToken] = useState<string | null>(null)
+  const [peertunesResetId, setPeertunesResetId] = useState('')
   const [peertunesLaunchSuffix, setPeertunesLaunchSuffix] = useState('')
   const [peertunesError, setPeertunesError] = useState<string | null>(null)
   // The Hyperdrive viewer's server, and where back and forward stand in the
@@ -1796,6 +1797,7 @@ export default function App () {
       }
 
       setPeertunesUrl(response.localUrl)
+      setPeertunesResetId(typeof response.resetId === 'string' ? response.resetId : '')
       // Only the PeerTunes view gets it. A restarted server has a new one,
       // and the view loads the page again with it.
       setPeertunesToken(response.token)
@@ -5681,6 +5683,7 @@ export default function App () {
               launchSuffix={peertunesLaunchSuffix}
               localUrl={peertunesUrl}
               serverToken={peertunesToken}
+              resetId={peertunesResetId}
               onEnsureServer={() => void ensurePeerTunesServer()}
               onKeepOffline={keepPeerTunesFolderOffline}
               onKeptFolders={peerTunesKeptFolders}
