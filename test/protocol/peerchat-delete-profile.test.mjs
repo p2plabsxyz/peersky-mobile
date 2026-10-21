@@ -5,65 +5,81 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
+import Corestore from 'corestore'
+import Hyperdrive from 'hyperdrive'
 
 import { attachmentDriveName } from '../../backend/peerchat/attachments.mjs'
-import { deletePeerChatProfile } from '../../backend/peerchat/runtime.mjs'
+import { deletePeerChatProfile, removeEmptiedRoomLogs } from '../../backend/peerchat/runtime.mjs'
 import { PeerChatService } from '../../backend/peerchat/service.mjs'
 
 const ROOM_KEY = 'ab'.repeat(32)
+const LEFT_ROOM_KEY = 'cd'.repeat(32)
 
-class FakeFeed extends EventEmitter {
-  constructor () {
-    super()
-    this.entries = []
-    this.purged = false
-  }
-
-  get length () { return this.entries.length }
-  async ready () {}
-  async get (index) { return this.entries[index] }
-  async append (entry) { this.entries.push(entry); this.emit('append') }
-  async close () {}
-  async purge () { this.purged = true; this.entries = [] }
-}
-
-function createFakeSdk () {
-  const feeds = new Map()
+// The store and drives are real: the fakes this used before let purge()
+// pass, while the real one threw and removed nothing.
+function createSdk (store) {
   const drives = new Map()
-  const sdk = {
+  return {
     publicKey: Buffer.alloc(32, 5),
     swarm: Object.assign(new EventEmitter(), { flush: async () => {} }),
     localSwarm: new EventEmitter(),
-    feeds,
-    drives,
-    corestore: {
-      get ({ name }) {
-        if (!feeds.has(name)) feeds.set(name, new FakeFeed())
-        return feeds.get(name)
-      }
-    },
+    corestore: store,
+    namespace: (name) => store.namespace(name),
     async getDrive (name) {
-      if (!drives.has(name)) drives.set(name, { purged: false, async purge () { this.purged = true } })
+      if (!drives.has(name)) {
+        const drive = new Hyperdrive(store.namespace(name))
+        await drive.ready()
+        drives.set(name, drive)
+      }
       return drives.get(name)
     },
     join () {},
     async leave () {}
   }
-  return sdk
+}
+
+function feedAlias (store, roomKey) {
+  return { name: `chat-${roomKey}`, namespace: store.ns }
+}
+
+async function logLength (store, roomKey) {
+  const log = store.get({ name: `chat-${roomKey}` })
+  await log.ready()
+  const length = log.length
+  await log.close()
+  return length
+}
+
+async function startWithRoom (t, roomKey) {
+  const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-delete-'))
+  const holder = { store: new Corestore(path.join(storagePath, 'store')) }
+  t.after(async () => {
+    await holder.store.close()
+    await rm(storagePath, { recursive: true, force: true })
+  })
+  const sdk = createSdk(holder.store)
+  const service = await new PeerChatService({ sdk, storagePath }).start()
+  service.setProfile({ username: 'Ada', bio: 'Hello' })
+  await service.joinRoom({ roomKey })
+  await service.sendMessage({ roomKey, message: 'Hi there' })
+  return { storagePath, holder, sdk, service }
 }
 
 // App Review asks that a profile made in the app can be deleted in the app.
 // There is no server account, so this is everything PeerChat keeps here.
 test('deleting the PeerChat profile leaves every room and removes what it kept', async (t) => {
-  const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-delete-'))
-  t.after(() => rm(storagePath, { recursive: true, force: true }))
-  const sdk = createFakeSdk()
-  const service = await new PeerChatService({ sdk, storagePath }).start()
-  service.setProfile({ username: 'Ada', bio: 'Hello' })
-  await service.joinRoom({ roomKey: ROOM_KEY })
-  await service.sendMessage({ roomKey: ROOM_KEY, message: 'Hi there' })
+  const { storagePath, holder: { store }, sdk, service } = await startWithRoom(t, ROOM_KEY)
   await service.blockPeer({ peerId: 'cd34cd34', username: 'Mallory' })
   service.persistNow()
+
+  // A room left earlier keeps its log, out of the room list.
+  const leftLog = store.get({ name: `chat-${LEFT_ROOM_KEY}`, valueEncoding: 'json' })
+  await leftLog.append({ id: 'old', ct: 'sealed' })
+  await leftLog.close()
+
+  // A file this phone sent in the room.
+  const sent = await sdk.getDrive(attachmentDriveName(ROOM_KEY))
+  await sent.put('/1-0123456789abcdef.bin', Buffer.alloc(4096, 1))
 
   const cache = path.join(storagePath, 'peerchat-attachment-cache')
   await mkdir(cache, { recursive: true })
@@ -86,16 +102,53 @@ test('deleting the PeerChat profile leaves every room and removes what it kept',
   assert.equal(closed, true)
   // Each room heard this device go, the way a normal leave sounds.
   assert.ok(leaves.includes(ROOM_KEY))
-  // Its messages and attachments are gone from storage, not just hidden.
-  assert.equal(sdk.feeds.get(`chat-${ROOM_KEY}`).purged, true)
-  assert.equal(sdk.drives.get(attachmentDriveName(ROOM_KEY)).purged, true)
+  // Every message is gone from storage at once, the left room's too.
+  assert.equal(await logLength(store, ROOM_KEY), 0)
+  assert.equal(await logLength(store, LEFT_ROOM_KEY), 0)
+  // The sent file's contents are gone here, and its drive still takes files.
+  assert.equal(await sent.blobs.core.has(0), false)
+  assert.equal(sent.writable, true)
   assert.equal(existsSync(service.stateFilePath), false)
   assert.equal(existsSync(cache), false)
 
   // The next PeerChat to open here has no profile, no rooms, and no blocks.
-  const fresh = await new PeerChatService({ sdk: createFakeSdk(), storagePath }).start()
+  const fresh = await new PeerChatService({ sdk, storagePath }).start()
   t.after(() => fresh.close())
   assert.equal(fresh.getProfile().username || '', '')
   assert.deepEqual(fresh.listRooms(), [])
   assert.deepEqual(fresh.listBlockedPeers(), [])
+
+  // The logs' names, which hold the rooms' keys, go on the app's next run.
+  await removeEmptiedRoomLogs(fresh)
+  assert.notEqual(await store.storage.getAlias(feedAlias(store, ROOM_KEY)), null)
+  await removeEmptiedRoomLogs(fresh, { run: 'next' })
+  for (const roomKey of [ROOM_KEY, LEFT_ROOM_KEY]) {
+    assert.equal(await store.storage.getAlias(feedAlias(store, roomKey)), null)
+  }
+  assert.equal(existsSync(path.join(storagePath, 'peerchat-emptied-logs.json')), false)
+})
+
+test('a room joined again right after a profile delete keeps its new messages', async (t) => {
+  const { storagePath, holder, sdk, service } = await startWithRoom(t, ROOM_KEY)
+  await deletePeerChatProfile({
+    getService: async () => service,
+    closeService: () => service.close()
+  })
+
+  // At once, while the emptied log may still be open in memory.
+  const again = await new PeerChatService({ sdk, storagePath }).start()
+  again.setProfile({ username: 'Grace' })
+  await again.joinRoom({ roomKey: ROOM_KEY })
+  await again.sendMessage({ roomKey: ROOM_KEY, message: 'Back again' })
+  assert.equal(await logLength(holder.store, ROOM_KEY), 1)
+  await again.close()
+
+  // The next run of the app: the room is in use again, so its log stays.
+  await holder.store.close()
+  holder.store = new Corestore(path.join(storagePath, 'store'))
+  const next = await new PeerChatService({ sdk: createSdk(holder.store), storagePath }).start()
+  t.after(() => next.close())
+  await removeEmptiedRoomLogs(next, { run: 'next' })
+  assert.equal(await logLength(holder.store, ROOM_KEY), 1)
+  assert.deepEqual(next.listRooms().map((room) => room.roomKey), [ROOM_KEY])
 })

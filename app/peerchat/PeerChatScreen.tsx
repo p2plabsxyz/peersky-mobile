@@ -1922,6 +1922,9 @@ export function PeerChatScreen ({
       draftsRef.current = {}
       composerRoomKeyRef.current = null
       setComposer('')
+      // The chat every tab was on, kept by its key, goes with the rest.
+      uiStateRef.current = { ...uiStateRef.current, activeRoomKey: null, drafts: {}, tabRooms: {} }
+      persistPeerChatUiState(uiStateRef.current)
       versionRef.current = -1
       onStatus(t('Your PeerChat profile was deleted from this device'))
     })

@@ -475,11 +475,18 @@ directory. PeerChat deliberately does not expose raw room feeds or room keys as
 ordinary named Hyperdrives in Settings.
 
 PeerChat settings has **Delete PeerChat profile**. It leaves every room, so each
-one hears this device go, then removes the room feeds, the attachment drives,
-the decrypted attachment cache and PeerChat's own state file, and PeerChat opens
-on the welcome screen again (`deletePeerChatProfile` in
+one hears this device go, then empties every room feed on the phone, rooms left
+earlier included, frees the files this phone sent, and removes the decrypted
+attachment cache and PeerChat's own state file, and PeerChat opens on the
+welcome screen again (`deletePeerChatProfile` in
 `backend/peerchat/runtime.mjs`). Messages already sent stay on the devices they
-reached.
+reached. The feeds' names, which hold the rooms' keys, go on the app's next run,
+once nothing can still have the feeds open (`removeEmptiedRoomLogs`, listed in
+`peerchat-emptied-logs.json` until then); a room joined again before that keeps
+its feed. The sent files' drives stay, emptied: the people in the room hold
+copies under the same key. This used to call `purge()`, which throws in
+hypercore 11 before it removes anything, so every message stayed on the phone.
+The chat screen's own saved state, the chat each tab was on, is cleared too.
 
 Settings -> P2P Data provides two relevant operations:
 
