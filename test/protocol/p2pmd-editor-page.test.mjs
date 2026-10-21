@@ -1,9 +1,10 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { getP2pmdEditorPage } from '../../backend/p2pmd/server.mjs'
+import { getP2pmdEditorPage, readQueryParams } from '../../backend/p2pmd/server.mjs'
 import { splitMarkdownSlides } from '../../backend/p2pmd/preview.mjs'
 import yjsBrowserScript from '../../backend/p2pmd/yjs-runtime.mjs'
 import * as Y from 'yjs'
+import vm from 'node:vm'
 
 describe('p2pmd mobile editor page routing', () => {
   it('routes collaboration endpoints through the joined room base URL', () => {
@@ -187,7 +188,72 @@ describe('p2pmd mobile editor page routing', () => {
     assert.match(html, /cursorLine: cursor\.line/)
     assert.match(html, /cursorColumn: cursor\.column/)
     assert.match(html, /markLocalPeerTyping\(\)/)
-    assert.match(html, /requestNativeBridge\('peer-profile', \{ name: nextName \}\)/)
+    assert.match(html, /callNativeBridge\('peer-profile', \{ name: nextName \}\)/)
+  })
+
+  // A new name used to go to requestNativeBridge, which the page never had,
+  // so it held for the room only and the next room had the old name back.
+  it('calls only bridge functions the page has, and every script parses', () => {
+    const html = getP2pmdEditorPage()
+
+    const called = new Set([...html.matchAll(/\b(\w*NativeBridge)\(/g)].map((match) => match[1]))
+    assert.ok(called.size > 0)
+    for (const name of called) {
+      assert.match(html, new RegExp(`function ${name}\\(|const ${name} =`), `${name} is not defined`)
+    }
+
+    const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1])
+    assert.ok(scripts.length > 0)
+    for (const script of scripts) assert.doesNotThrow(() => new vm.Script(script))
+  })
+
+  // The page sends its name as a form query, with + for a space.
+  it('reads a joining name with a space as typed', () => {
+    const params = readQueryParams('/events?clientId=a1&name=Test+Sparrow&color=%23ff00aa&sum=1%2B2#top')
+    assert.equal(params.get('name'), 'Test Sparrow')
+    assert.equal(params.get('color'), '#ff00aa')
+    assert.equal(params.get('sum'), '1+2')
+    assert.equal(readQueryParams('/events').size, 0)
+    assert.equal(readQueryParams('/events?name=%E0%A4&role=client').get('name'), undefined)
+    assert.equal(readQueryParams('/events?name=%E0%A4&role=client').get('role'), 'client')
+  })
+
+  it('draws everyone else\'s caret and says where its own is when it moves', () => {
+    const html = getP2pmdEditorPage()
+
+    assert.match(html, /<div id="peer-carets" aria-hidden="true"><\/div>/)
+    assert.match(html, /function renderPeerCarets\(\)/)
+    assert.match(html, /peer\.clientId !== clientId && Number\(peer\.cursorLine\) >= 1/)
+    assert.match(html, /caret\.dataset\.name = normalizeDisplayName\(peer\.name\)/)
+    // Drawn again when the list changes, the note scrolls, or the view changes.
+    assert.match(html, /function syncLineGutterScroll\(\) \{[\s\S]*?schedulePeerCarets\(\)/)
+    assert.match(html, /renderPeerDashboard\(\)\s+schedulePeerCarets\(\)/)
+    // A tap moves the caret without an edit.
+    assert.match(html, /document\.addEventListener\('selectionchange', \(\) => \{\s+if \(document\.activeElement === input\) schedulePresenceSend\(\)/)
+    assert.match(html, /input\.addEventListener\('focus', \(\) => schedulePresenceSend\(true\)\)/)
+    assert.match(html, /if \(!force && body === lastPresencePayload\) return/)
+  })
+
+  // As on the desktop. With spell check on, the iPhone keyboard turned a
+  // typed --- into a dash, so a deck typed on the phone had no slide breaks.
+  it('keeps typed Markdown as typed', () => {
+    const html = getP2pmdEditorPage()
+
+    assert.match(html, /<textarea id="document-input"[^>]* spellcheck="false"/)
+  })
+
+  it('does not zoom the note in when the name field is tapped', () => {
+    const html = getP2pmdEditorPage()
+
+    const size = html.match(/#peer-display-name \{[^}]*font: (\d+)px/)[1]
+    assert.ok(Number(size) >= 16)
+  })
+
+  it('tells the app what to offer when the share button is tapped', () => {
+    const html = getP2pmdEditorPage()
+
+    assert.match(html, /function shareInfo\(nonce\) \{\s+notifyNative\('p2pmd-share-info', \{\s+nonce,\s+content: input\.value,\s+slideBreaks: hasSlideBreaks\(input\.value\),/)
+    assert.match(html, /window\.__p2pmdShareInfo = shareInfo/)
   })
 
   it('keeps gutter rows aligned with editor lines', () => {

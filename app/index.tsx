@@ -173,6 +173,14 @@ import { PublishedLinkSheet } from './PublishedLinkSheet'
 import { hasLinkedIdentity } from './hyperdrive/linked-identity'
 import { useHyperNetworkRefresh } from './useHyperNetworkRefresh'
 import { P2pmdNewNoteSheet } from './P2pmdNewNoteSheet'
+import { P2pmdShareSheet } from './P2pmdShareSheet'
+import {
+  createP2pmdShareInfoScript,
+  P2PMD_SHARE_INFO_TYPE,
+  p2pmdExportFileName,
+  readP2pmdShareInfo,
+  shareP2pmdExport
+} from './p2pmd-export'
 import { getP2pmdSyncDisplay } from './p2pmd-sync-status.mjs'
 import PencilSquareIcon from '../assets/icons/bootstrap/pencil-square.svg'
 import ShareIcon from '../assets/icons/bootstrap/share.svg'
@@ -326,6 +334,7 @@ import {
   RPC_P2PMD_IMAGE_UPLOAD,
   RPC_P2PMD_PREVIEW,
   RPC_P2PMD_ROOM_JOIN,
+  RPC_P2PMD_EXPORT,
   RPC_P2PMD_ROOM_PUBLISH,
   RPC_P2PMD_ROOM_STATUS,
   RPC_P2PMD_TAKE_NOTES,
@@ -486,6 +495,10 @@ export default function App () {
   const p2pmdWebViewRef = useRef<ComponentRef<typeof WebView> | null>(null)
   const p2pmdPublishInFlightRef = useRef(false)
   const p2pmdPublishNonceRef = useRef<string | null>(null)
+  const p2pmdShareNonceRef = useRef<string | null>(null)
+  const p2pmdShareTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const p2pmdExportInFlightRef = useRef(false)
+  const p2pmdShareSheetActionRef = useRef<(() => void) | null>(null)
   const p2pmdPublishVisibilityRef = useRef<'public' | 'private'>('public')
   const browserLoadSeqRef = useRef(0)
   const browserWebViewGenerationsRef = useRef(new Map<string, number>())
@@ -782,6 +795,9 @@ export default function App () {
   const [p2pmdSetupError, setP2pmdSetupError] = useState<string | null>(null)
   const [p2pmdPublishUrl, setP2pmdPublishUrl] = useState<string | null>(null)
   const [isP2pmdPublishing, setIsP2pmdPublishing] = useState(false)
+  // The note as it was when the share button was tapped, for Export PDF and
+  // Export slides. Null while the share sheet is closed.
+  const [p2pmdShareNote, setP2pmdShareNote] = useState<{ content: string, slides: boolean, latexModeEnabled: boolean } | null>(null)
   const [p2pmdPublishSheet, setP2pmdPublishSheet] = useState<'note' | 'slides' | null>(null)
   const p2pmdPublishedModeRef = useRef<'note' | 'slides'>('note')
   const [p2pmdPublishedVisibility, setP2pmdPublishedVisibility] = useState<'public' | 'private'>('public')
@@ -3687,6 +3703,75 @@ export default function App () {
     }
   }
 
+  // The share sheet offers Export slides only for a deck, and exports the note
+  // as it is now, so the page is asked for it first. A page that does not
+  // answer, as one still loading, gets the invite straight away, as before.
+  function onP2pmdSharePress () {
+    if (!p2pmdRoom) return
+    const nonce = createP2pmdNonce(Crypto.getRandomValues(new Uint8Array(16)))
+    p2pmdShareNonceRef.current = nonce
+    if (p2pmdShareTimerRef.current) clearTimeout(p2pmdShareTimerRef.current)
+    p2pmdShareTimerRef.current = setTimeout(() => {
+      p2pmdShareTimerRef.current = null
+      if (p2pmdShareNonceRef.current !== nonce) return
+      p2pmdShareNonceRef.current = null
+      void onP2pmdShareRoom()
+    }, 1500)
+    p2pmdWebViewRef.current?.injectJavaScript(createP2pmdShareInfoScript(nonce))
+  }
+
+  function onP2pmdShareInfo (message: Record<string, unknown>) {
+    const note = readP2pmdShareInfo(message, p2pmdShareNonceRef.current)
+    if (!note) return
+    p2pmdShareNonceRef.current = null
+    if (p2pmdShareTimerRef.current) {
+      clearTimeout(p2pmdShareTimerRef.current)
+      p2pmdShareTimerRef.current = null
+    }
+    setP2pmdShareNote(note)
+  }
+
+  // iOS will not present the share sheet over a modal that is still fading
+  // out, and fails without a word, so the sheet's actions wait for it to
+  // finish leaving, as the browser menu's do. Android runs them straight away.
+  function afterP2pmdShareSheetCloses (action: () => void) {
+    if (Platform.OS === 'ios') p2pmdShareSheetActionRef.current = action
+    setP2pmdShareNote(null)
+    if (Platform.OS !== 'ios') action()
+  }
+
+  function exportP2pmdNote (kind: 'pdf' | 'slides') {
+    const note = p2pmdShareNote
+    if (!note) return
+    afterP2pmdShareSheetCloses(() => { void runP2pmdExport(note, kind) })
+  }
+
+  // The page a publish makes, with its pictures inside, as a PDF or as a
+  // slides file, handed to the share sheet to save or send.
+  async function runP2pmdExport (note: { content: string, latexModeEnabled: boolean }, kind: 'pdf' | 'slides') {
+    if (!p2pmdRoom || p2pmdExportInFlightRef.current) return
+    p2pmdExportInFlightRef.current = true
+    const statusBefore = p2pmdSyncStatus
+    setP2pmdSyncStatus(t('Exporting...'))
+    try {
+      const response = await callRpc(RPC_P2PMD_EXPORT, {
+        content: note.content,
+        mode: kind === 'slides' ? 'slides' : 'note',
+        latexModeEnabled: note.latexModeEnabled
+      })
+      if (!response.ok || typeof response.html !== 'string') {
+        throw new Error(response.error || t('Unable to export the note'))
+      }
+      const error = await shareP2pmdExport(response.html, p2pmdExportFileName(note.content, p2pmdRoom.key, kind), kind)
+      if (error) throw new Error(error)
+      setP2pmdSyncStatus(statusBefore)
+    } catch (error) {
+      setP2pmdSyncStatus(t('Export failed: {error}', { error: error instanceof Error ? error.message : String(error) }))
+    } finally {
+      p2pmdExportInFlightRef.current = false
+    }
+  }
+
   async function onP2pmdShareRoom () {
     if (!p2pmdRoom) return
 
@@ -3831,6 +3916,18 @@ export default function App () {
     setP2pmdPublishSheet(p2pmdPublishedModeRef.current)
   }
 
+  // A name changed in a note's people panel is kept for every note after it,
+  // and the P2PMD screen shows it at once rather than after the next note.
+  function saveP2pmdPeerDisplayNameFromNote (value: unknown): RpcResponse {
+    const saved = saveP2pmdPeerDisplayName(value)
+    if (saved.ok) {
+      const name = loadP2pmdPeerDisplayName()
+      setP2pmdPeerDisplayName(name)
+      if (name) setP2pmdNameDraft(name)
+    }
+    return saved
+  }
+
   async function handleP2pmdBridgeRequest (request: Record<string, unknown>) {
     const requestId = typeof request.requestId === 'string' ? request.requestId : ''
     const action = typeof request.action === 'string' ? request.action : ''
@@ -3847,7 +3944,7 @@ export default function App () {
         : action === 'hyper-image'
           ? await uploadP2pmdImage(payload as Record<string, unknown>)
           : action === 'peer-profile'
-            ? saveP2pmdPeerDisplayName(peerProfileName)
+            ? saveP2pmdPeerDisplayNameFromNote(peerProfileName)
           : { ok: false, error: `Unsupported P2PMD bridge action: ${action}` }
       resolveP2pmdBridgeRequest(requestId, response)
     } catch (error) {
@@ -3930,6 +4027,9 @@ export default function App () {
         case 'p2pmd-image-uploaded':
           setP2pmdSyncStatus('Image uploaded')
           break
+        case P2PMD_SHARE_INFO_TYPE:
+          onP2pmdShareInfo(parsed)
+          break
         case 'p2pmd-publish-requested':
           if (!parsed.nonce || parsed.nonce !== p2pmdPublishNonceRef.current) break
           p2pmdPublishNonceRef.current = null
@@ -3990,6 +4090,13 @@ export default function App () {
   // Starts the editor over from its own page. A reload would ask the room's
   // server for it instead.
   const [p2pmdEditorMount, setP2pmdEditorMount] = useState(0)
+  // The name the editor page starts with, kept while the page is open. A name
+  // changed in the note's people panel is already in the page, and a new name
+  // here would be new html, which loads the note again and closes the panel.
+  const p2pmdEditorDisplayName = useMemo(
+    () => p2pmdPeerDisplayName,
+    [p2pmdRoom?.key, p2pmdRoom?.role, p2pmdUrl, p2pmdRoom?.token, p2pmdEditorMount]
+  )
   const browserBookmarkActionAvailable = canBookmarkBrowserPage(
     browserSource.kind,
     browserCurrentUrl
@@ -4488,7 +4595,7 @@ export default function App () {
     const p2pmdEditorBaseUrl = createP2pmdEditorUrl(p2pmdEditorRoomBaseUrl, p2pmdRoom.role, p2pmdEditorNonce)
     const p2pmdEditorHtmlWithRoomBase = p2pmdEditorHtml.replace(
       '<head>',
-      `<head><script>window.__P2PMD_ROOM_BASE_URL__=${serializeInlineScriptValue(p2pmdEditorRoomBaseUrl)};window.__P2PMD_ROOM_KEY__=${serializeInlineScriptValue(p2pmdRoom.key)};window.__P2PMD_DISPLAY_NAME__=${serializeInlineScriptValue(p2pmdPeerDisplayName)};</script>`
+      `<head><script>window.__P2PMD_ROOM_BASE_URL__=${serializeInlineScriptValue(p2pmdEditorRoomBaseUrl)};window.__P2PMD_ROOM_KEY__=${serializeInlineScriptValue(p2pmdRoom.key)};window.__P2PMD_DISPLAY_NAME__=${serializeInlineScriptValue(p2pmdEditorDisplayName)};</script>`
     )
 
     browserOverlay = (
@@ -4616,7 +4723,7 @@ export default function App () {
             accessibilityLabel={t('Share note')}
             accessibilityRole='button'
             style={[styles.p2pmdMetaButton, p2pmdTheme?.p2pmdMetaButton, styles.p2pmdMetaIconButton]}
-            onPress={() => void onP2pmdShareRoom()}
+            onPress={onP2pmdSharePress}
             disabled={isBooting || isLoading}
           >
             <ShareIcon width={16} height={16} color={browserIsDark ? '#f1f2f7' : '#1f2a44'} />
@@ -4721,6 +4828,20 @@ export default function App () {
             setP2pmdPublishSheet(null)
             openBrowserUrlInNewTab(url)
           }}
+        />
+        <P2pmdShareSheet
+          visible={p2pmdShareNote !== null}
+          isDark={browserIsDark}
+          slides={p2pmdShareNote?.slides === true}
+          onClose={() => setP2pmdShareNote(null)}
+          onDismissed={() => {
+            const action = p2pmdShareSheetActionRef.current
+            p2pmdShareSheetActionRef.current = null
+            action?.()
+          }}
+          onShareInvite={() => afterP2pmdShareSheetCloses(() => { void onP2pmdShareRoom() })}
+          onExportPdf={() => exportP2pmdNote('pdf')}
+          onExportSlides={() => exportP2pmdNote('slides')}
         />
       </SafeAreaView>
     )

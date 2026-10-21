@@ -40,6 +40,7 @@ import {
   RPC_P2PMD_IMAGE_UPLOAD,
   RPC_P2PMD_PREVIEW,
   RPC_P2PMD_ROOM_JOIN,
+  RPC_P2PMD_EXPORT,
   RPC_P2PMD_ROOM_PUBLISH,
   RPC_P2PMD_ROOM_STATUS,
   RPC_P2PMD_TAKE_NOTES,
@@ -95,7 +96,7 @@ import {
   stopOutgoingTransfer
 } from '../backup/link-device.mjs'
 
-import { publishMarkdownDocument, readHyperFile, uploadHyperFile } from '../hyper/drive.mjs'
+import { exportMarkdownDocument, publishMarkdownDocument, readHyperFile, uploadHyperFile } from '../hyper/drive.mjs'
 import { listHyperdriveLocation, uploadHyperdriveFile } from '../hyper/library.mjs'
 import { fetchHyper } from '../hyper/fetch.mjs'
 import {
@@ -411,6 +412,11 @@ export async function routeRpcRequest (req) {
 
     if (req.command === RPC_P2PMD_ROOM_PUBLISH) {
       replyJson(req, await publishMarkdownDocument(parseJsonMessage(req.data)))
+      return
+    }
+
+    if (req.command === RPC_P2PMD_EXPORT) {
+      replyJson(req, await exportMarkdownDocument(parseJsonMessage(req.data)))
       return
     }
 
