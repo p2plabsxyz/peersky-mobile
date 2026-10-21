@@ -584,6 +584,12 @@ function SyncSheet ({
     setSending(null)
   }
 
+  // Once the other device has it all, nothing more goes from here.
+  function finishSending () {
+    stopSending()
+    close()
+  }
+
   async function openScanner () {
     setError(null)
     if (!permission?.granted) {
@@ -765,7 +771,36 @@ function SyncSheet ({
 
       {busy
         ? <Working title={busy} progress={progress} />
-        : sending
+        : sending && sendDone
+          ? (
+            // The other device has every part of it: the code is all that is
+            // left to check, on that device. The QR stayed up before, and a
+            // send that had worked looked as if it had not.
+            <View style={styles.sheetBlock}>
+              <Text style={[styles.sheetHeading, isDark ? darkStyles.text : null]}>
+                {describeSendProgress(sending.sent, sending.toDesktop)}
+              </Text>
+              <View style={[styles.codeBox, isDark ? darkStyles.codeBox : null]}>
+                <Text style={[styles.codeLabel, isDark ? darkStyles.muted : null]}>
+                  {sending.toDesktop ? t('Both screens show') : t('Both phones show')}
+                </Text>
+                <Text style={[styles.codeValue, isDark ? darkStyles.text : null]}>{sending.code}</Text>
+              </View>
+              <Pressable
+                accessibilityRole='button'
+                style={({ pressed }) => [styles.primaryButton, pressed ? styles.pressed : null]}
+                onPress={finishSending}
+              >
+                <Text style={styles.primaryButtonText}>{t('Done')}</Text>
+              </Pressable>
+              {!sending.toDesktop && (
+                <Text style={[styles.sheetNote, isDark ? darkStyles.muted : null]}>
+                  {t('Moving for good? Once the new phone has everything, remove your data from this one, so the two are not using the same chats.')}
+                </Text>
+              )}
+            </View>
+            )
+          : sending
           ? (
             <View style={styles.sheetBlock}>
               <Text style={[styles.sheetHeading, isDark ? darkStyles.text : null]}>
