@@ -748,7 +748,7 @@
   "PeerSky needs the camera to scan the other device's code. You can paste the code instead.": "相手のデバイスのコードをスキャンするには、PeerSkyにカメラが必要です。代わりにコードを貼り付けることもできます。",
   "PeerSky needs the camera to take a photo. Turn it on in Settings.": "写真を撮るには、PeerSkyにカメラが必要です。「設定」でオンにしてください。",
   "PeerSky saves a picture or video to your photo library when you choose Save to Photos.": "「写真に保存」を選ぶと、PeerSkyは写真や動画をフォトライブラリに保存します。",
-  "PeerSky uses the camera to scan QR codes when you link a device or open a shared room or drive, and when a website you visit requests it and you allow access.": "PeerSkyは、デバイスをリンクするときや共有されたルームやドライブを開くときにQRコードをスキャンするため、また、アクセスしたウェブサイトから要求があり、あなたが許可したときにカメラを使用します。",
+  "PeerSky uses the camera to scan QR codes when you link a device or open a shared room or drive, to take photos you send in PeerChat or set as a group picture, and when a website you visit requests it and you allow access.": "PeerSkyは、デバイスをリンクするときや共有されたルームやドライブを開くときにQRコードをスキャンするため、PeerChatで送る写真やグループの画像にする写真を撮るため、また、アクセスしたウェブサイトから要求があり、あなたが許可したときにカメラを使用します。",
   "PeerSky uses the microphone only when a website you visit requests it and you allow access.": "PeerSkyがマイクを使用するのは、アクセスしたウェブサイトから要求があり、あなたが許可したときだけです。",
   "PeerSky uses your local network to discover and connect to nearby PeerSky devices.": "PeerSkyはローカルネットワークを使って、付近のPeerSkyデバイスを見つけて接続します。",
   "PeerSky uses your location only when a website you visit requests it and you allow access.": "PeerSkyが位置情報を使用するのは、アクセスしたウェブサイトから要求があり、あなたが許可したときだけです。",

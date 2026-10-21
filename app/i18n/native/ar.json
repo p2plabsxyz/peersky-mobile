@@ -1,6 +1,6 @@
 {
   "ios": {
-    "NSCameraUsageDescription": "يستخدم PeerSky الكاميرا لمسح رموز QR عندما تربط جهازًا أو تفتح غرفة أو مساحة تخزين مشتركة، وعندما يطلبها موقع ويب تزوره وتسمح بذلك.",
+    "NSCameraUsageDescription": "يستخدم PeerSky الكاميرا لمسح رموز QR عندما تربط جهازًا أو تفتح غرفة أو مساحة تخزين مشتركة، ولالتقاط صور ترسلها في PeerChat أو تجعلها صورة لمجموعة، وعندما يطلبها موقع ويب تزوره وتسمح بذلك.",
     "NSLocalNetworkUsageDescription": "يستخدم PeerSky شبكتك المحلية لاكتشاف أجهزة PeerSky القريبة والاتصال بها.",
     "NSLocationWhenInUseUsageDescription": "يستخدم PeerSky موقعك الجغرافي فقط عندما يطلبه موقع ويب تزوره وتسمح بذلك.",
     "NSMicrophoneUsageDescription": "يستخدم PeerSky الميكروفون فقط عندما يطلبه موقع ويب تزوره وتسمح بذلك.",

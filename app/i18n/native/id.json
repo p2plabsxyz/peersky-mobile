@@ -1,6 +1,6 @@
 {
   "ios": {
-    "NSCameraUsageDescription": "PeerSky menggunakan kamera untuk memindai kode QR saat Anda menautkan perangkat atau membuka ruang atau drive yang dibagikan, dan saat situs web yang Anda kunjungi memintanya dan Anda mengizinkan akses.",
+    "NSCameraUsageDescription": "PeerSky menggunakan kamera untuk memindai kode QR saat Anda menautkan perangkat atau membuka ruang atau drive yang dibagikan, untuk mengambil foto yang Anda kirim di PeerChat atau jadikan gambar grup, dan saat situs web yang Anda kunjungi memintanya dan Anda mengizinkan akses.",
     "NSLocalNetworkUsageDescription": "PeerSky menggunakan jaringan lokal Anda untuk menemukan dan terhubung ke perangkat PeerSky di sekitar.",
     "NSLocationWhenInUseUsageDescription": "PeerSky hanya menggunakan lokasi Anda saat situs web yang Anda kunjungi memintanya dan Anda mengizinkan akses.",
     "NSMicrophoneUsageDescription": "PeerSky hanya menggunakan mikrofon saat situs web yang Anda kunjungi memintanya dan Anda mengizinkan akses.",

@@ -1,6 +1,6 @@
 {
   "ios": {
-    "NSCameraUsageDescription": "PeerSky는 기기를 연결하거나 공유된 방 또는 드라이브를 열 때 QR 코드를 스캔하기 위해, 그리고 방문한 웹사이트가 요청하고 사용자가 접근을 허용한 경우에 카메라를 사용해요.",
+    "NSCameraUsageDescription": "PeerSky는 기기를 연결하거나 공유된 방 또는 드라이브를 열 때 QR 코드를 스캔하기 위해, PeerChat에서 보내거나 그룹 사진으로 쓸 사진을 찍기 위해, 그리고 방문한 웹사이트가 요청하고 사용자가 접근을 허용한 경우에 카메라를 사용해요.",
     "NSLocalNetworkUsageDescription": "PeerSky는 로컬 네트워크를 사용해 근처의 PeerSky 기기를 찾고 연결해요.",
     "NSLocationWhenInUseUsageDescription": "PeerSky는 방문한 웹사이트가 요청하고 사용자가 접근을 허용한 경우에만 위치 정보를 사용해요.",
     "NSMicrophoneUsageDescription": "PeerSky는 방문한 웹사이트가 요청하고 사용자가 접근을 허용한 경우에만 마이크를 사용해요.",

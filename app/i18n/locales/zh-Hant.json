@@ -748,7 +748,7 @@
   "PeerSky needs the camera to scan the other device's code. You can paste the code instead.": "PeerSky 需要使用相機來掃描另一台裝置的代碼。你也可以改為貼上代碼。",
   "PeerSky needs the camera to take a photo. Turn it on in Settings.": "PeerSky 需要使用相機才能拍照。請在「設定」中開啟。",
   "PeerSky saves a picture or video to your photo library when you choose Save to Photos.": "當你選擇「儲存到照片」時，PeerSky 會將圖片或影片儲存到你的照片圖庫。",
-  "PeerSky uses the camera to scan QR codes when you link a device or open a shared room or drive, and when a website you visit requests it and you allow access.": "PeerSky 會在你連結裝置或開啟分享的聊天室或網路硬碟時使用相機掃描 QR 碼，也會在你造訪的網站要求且你允許存取時使用相機。",
+  "PeerSky uses the camera to scan QR codes when you link a device or open a shared room or drive, to take photos you send in PeerChat or set as a group picture, and when a website you visit requests it and you allow access.": "PeerSky 會在你連結裝置或開啟分享的聊天室或網路硬碟時使用相機掃描 QR 碼，在你拍攝要在 PeerChat 中傳送或設為群組圖片的照片時使用相機，也會在你造訪的網站要求且你允許存取時使用相機。",
   "PeerSky uses the microphone only when a website you visit requests it and you allow access.": "PeerSky 只會在你造訪的網站要求且你允許存取時使用麥克風。",
   "PeerSky uses your local network to discover and connect to nearby PeerSky devices.": "PeerSky 會使用你的區域網路來探索並連線到鄰近的 PeerSky 裝置。",
   "PeerSky uses your location only when a website you visit requests it and you allow access.": "PeerSky 只會在你造訪的網站要求且你允許存取時使用你的位置。",

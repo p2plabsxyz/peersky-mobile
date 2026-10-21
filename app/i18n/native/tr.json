@@ -1,6 +1,6 @@
 {
   "ios": {
-    "NSCameraUsageDescription": "PeerSky; bir cihazı bağladığınızda, paylaşılan bir odayı veya sürücüyü açtığınızda ve ziyaret ettiğiniz bir web sitesi isteyip siz izin verdiğinizde QR kodlarını taramak için kamerayı kullanır.",
+    "NSCameraUsageDescription": "PeerSky; bir cihazı bağladığınızda veya paylaşılan bir odayı ya da sürücüyü açtığınızda QR kodlarını taramak, PeerChat'te gönderdiğiniz ya da grup resmi yaptığınız fotoğrafları çekmek için ve ziyaret ettiğiniz bir web sitesi isteyip siz izin verdiğinizde kamerayı kullanır.",
     "NSLocalNetworkUsageDescription": "PeerSky, yakındaki PeerSky cihazlarını bulmak ve onlara bağlanmak için yerel ağınızı kullanır.",
     "NSLocationWhenInUseUsageDescription": "PeerSky konumunuzu yalnızca ziyaret ettiğiniz bir web sitesi istediğinde ve siz izin verdiğinizde kullanır.",
     "NSMicrophoneUsageDescription": "PeerSky mikrofonu yalnızca ziyaret ettiğiniz bir web sitesi istediğinde ve siz izin verdiğinizde kullanır.",

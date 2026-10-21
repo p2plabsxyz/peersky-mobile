@@ -1,6 +1,6 @@
 {
   "ios": {
-    "NSCameraUsageDescription": "PeerSky usa la fotocamera per scansionare i codici QR quando colleghi un dispositivo o apri una stanza o un drive condivisi, e quando un sito web che visiti lo richiede e consenti l’accesso.",
+    "NSCameraUsageDescription": "PeerSky usa la fotocamera per scansionare i codici QR quando colleghi un dispositivo o apri una stanza o un drive condivisi, per scattare foto che invii in PeerChat o usi come immagine di un gruppo, e quando un sito web che visiti lo richiede e consenti l’accesso.",
     "NSLocalNetworkUsageDescription": "PeerSky usa la tua rete locale per trovare i dispositivi PeerSky nelle vicinanze e connettersi a essi.",
     "NSLocationWhenInUseUsageDescription": "PeerSky usa la tua posizione solo quando un sito web che visiti la richiede e consenti l’accesso.",
     "NSMicrophoneUsageDescription": "PeerSky usa il microfono solo quando un sito web che visiti lo richiede e consenti l’accesso.",

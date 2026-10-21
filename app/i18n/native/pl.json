@@ -1,6 +1,6 @@
 {
   "ios": {
-    "NSCameraUsageDescription": "PeerSky używa aparatu do skanowania kodów QR, gdy łączysz urządzenie lub otwierasz udostępniony pokój albo dysk, a także gdy odwiedzana witryna o to poprosi i zezwolisz na dostęp.",
+    "NSCameraUsageDescription": "PeerSky używa aparatu do skanowania kodów QR, gdy łączysz urządzenie lub otwierasz udostępniony pokój albo dysk, do robienia zdjęć, które wysyłasz w PeerChat lub ustawiasz jako obraz grupy, a także gdy odwiedzana witryna o to poprosi i zezwolisz na dostęp.",
     "NSLocalNetworkUsageDescription": "PeerSky używa sieci lokalnej, aby znajdować pobliskie urządzenia z PeerSky i łączyć się z nimi.",
     "NSLocationWhenInUseUsageDescription": "PeerSky używa twojej lokalizacji tylko wtedy, gdy odwiedzana witryna o to poprosi i zezwolisz na dostęp.",
     "NSMicrophoneUsageDescription": "PeerSky używa mikrofonu tylko wtedy, gdy odwiedzana witryna o to poprosi i zezwolisz na dostęp.",

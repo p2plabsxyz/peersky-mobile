@@ -1,6 +1,6 @@
 {
   "ios": {
-    "NSCameraUsageDescription": "PeerSky dùng máy ảnh để quét mã QR khi bạn liên kết thiết bị hoặc mở phòng hay drive được chia sẻ, và khi trang web bạn truy cập yêu cầu và bạn cho phép.",
+    "NSCameraUsageDescription": "PeerSky dùng máy ảnh để quét mã QR khi bạn liên kết thiết bị hoặc mở phòng hay drive được chia sẻ, để chụp ảnh bạn gửi trong PeerChat hoặc đặt làm ảnh nhóm, và khi trang web bạn truy cập yêu cầu và bạn cho phép.",
     "NSLocalNetworkUsageDescription": "PeerSky dùng mạng cục bộ của bạn để tìm và kết nối với các thiết bị PeerSky ở gần.",
     "NSLocationWhenInUseUsageDescription": "PeerSky chỉ dùng vị trí của bạn khi trang web bạn truy cập yêu cầu và bạn cho phép.",
     "NSMicrophoneUsageDescription": "PeerSky chỉ dùng micrô khi trang web bạn truy cập yêu cầu và bạn cho phép.",

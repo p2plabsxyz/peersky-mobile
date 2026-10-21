@@ -748,7 +748,7 @@
   "PeerSky needs the camera to scan the other device's code. You can paste the code instead.": "PeerSky ต้องใช้กล้องเพื่อสแกนรหัสของอุปกรณ์อีกเครื่อง หรือจะวางรหัสแทนก็ได้",
   "PeerSky needs the camera to take a photo. Turn it on in Settings.": "PeerSky ต้องใช้กล้องเพื่อถ่ายรูป เปิดสิทธิ์นี้ในการตั้งค่า",
   "PeerSky saves a picture or video to your photo library when you choose Save to Photos.": "PeerSky จะบันทึกรูปภาพหรือวิดีโอลงในคลังรูปภาพเมื่อเลือก “บันทึกไปยังรูปภาพ”",
-  "PeerSky uses the camera to scan QR codes when you link a device or open a shared room or drive, and when a website you visit requests it and you allow access.": "PeerSky ใช้กล้องเพื่อสแกนรหัส QR เมื่อเชื่อมโยงอุปกรณ์หรือเปิดห้องหรือไดรฟ์ที่แชร์ไว้ และเมื่อเว็บไซต์ที่เข้าชมขอใช้และคุณอนุญาต",
+  "PeerSky uses the camera to scan QR codes when you link a device or open a shared room or drive, to take photos you send in PeerChat or set as a group picture, and when a website you visit requests it and you allow access.": "PeerSky ใช้กล้องเพื่อสแกนรหัส QR เมื่อเชื่อมโยงอุปกรณ์หรือเปิดห้องหรือไดรฟ์ที่แชร์ไว้ เพื่อถ่ายรูปที่ส่งใน PeerChat หรือตั้งเป็นรูปของกลุ่ม และเมื่อเว็บไซต์ที่เข้าชมขอใช้และคุณอนุญาต",
   "PeerSky uses the microphone only when a website you visit requests it and you allow access.": "PeerSky จะใช้ไมโครโฟนเฉพาะเมื่อเว็บไซต์ที่เข้าชมขอใช้และคุณอนุญาตเท่านั้น",
   "PeerSky uses your local network to discover and connect to nearby PeerSky devices.": "PeerSky ใช้เครือข่ายเฉพาะที่เพื่อค้นหาและเชื่อมต่อกับอุปกรณ์ PeerSky ที่อยู่ใกล้เคียง",
   "PeerSky uses your location only when a website you visit requests it and you allow access.": "PeerSky จะใช้ตำแหน่งของคุณเฉพาะเมื่อเว็บไซต์ที่เข้าชมขอใช้และคุณอนุญาตเท่านั้น",

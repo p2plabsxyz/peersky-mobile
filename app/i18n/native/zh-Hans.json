@@ -1,6 +1,6 @@
 {
   "ios": {
-    "NSCameraUsageDescription": "PeerSky 会在你关联设备或打开共享的聊天室或网盘时使用相机扫描 QR 码，也会在你访问的网站请求且你允许访问时使用相机。",
+    "NSCameraUsageDescription": "PeerSky 会在你关联设备或打开共享的聊天室或网盘时使用相机扫描 QR 码，在你拍摄要在 PeerChat 中发送或设为群组图片的照片时使用相机，也会在你访问的网站请求且你允许访问时使用相机。",
     "NSLocalNetworkUsageDescription": "PeerSky 会使用你的本地网络来发现并连接附近的 PeerSky 设备。",
     "NSLocationWhenInUseUsageDescription": "PeerSky 仅在你访问的网站请求且你允许访问时才会使用你的位置。",
     "NSMicrophoneUsageDescription": "PeerSky 仅在你访问的网站请求且你允许访问时才会使用麦克风。",

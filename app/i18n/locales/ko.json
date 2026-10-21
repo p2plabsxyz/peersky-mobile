@@ -748,7 +748,7 @@
   "PeerSky needs the camera to scan the other device's code. You can paste the code instead.": "다른 기기의 코드를 스캔하려면 PeerSky에 카메라가 필요해요. 대신 코드를 붙여넣을 수도 있어요.",
   "PeerSky needs the camera to take a photo. Turn it on in Settings.": "사진을 찍으려면 PeerSky에 카메라가 필요해요. 설정에서 켜세요.",
   "PeerSky saves a picture or video to your photo library when you choose Save to Photos.": "'사진에 저장'을 선택하면 PeerSky가 사진이나 동영상을 사진 보관함에 저장해요.",
-  "PeerSky uses the camera to scan QR codes when you link a device or open a shared room or drive, and when a website you visit requests it and you allow access.": "PeerSky는 기기를 연결하거나 공유된 방 또는 드라이브를 열 때 QR 코드를 스캔하기 위해, 그리고 방문한 웹사이트가 요청하고 사용자가 접근을 허용한 경우에 카메라를 사용해요.",
+  "PeerSky uses the camera to scan QR codes when you link a device or open a shared room or drive, to take photos you send in PeerChat or set as a group picture, and when a website you visit requests it and you allow access.": "PeerSky는 기기를 연결하거나 공유된 방 또는 드라이브를 열 때 QR 코드를 스캔하기 위해, PeerChat에서 보내거나 그룹 사진으로 쓸 사진을 찍기 위해, 그리고 방문한 웹사이트가 요청하고 사용자가 접근을 허용한 경우에 카메라를 사용해요.",
   "PeerSky uses the microphone only when a website you visit requests it and you allow access.": "PeerSky는 방문한 웹사이트가 요청하고 사용자가 접근을 허용한 경우에만 마이크를 사용해요.",
   "PeerSky uses your local network to discover and connect to nearby PeerSky devices.": "PeerSky는 로컬 네트워크를 사용해 근처의 PeerSky 기기를 찾고 연결해요.",
   "PeerSky uses your location only when a website you visit requests it and you allow access.": "PeerSky는 방문한 웹사이트가 요청하고 사용자가 접근을 허용한 경우에만 위치 정보를 사용해요.",
