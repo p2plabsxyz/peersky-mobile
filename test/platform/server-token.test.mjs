@@ -95,4 +95,3 @@ test('PeerTunes is handed the reset id, and nothing that is not one', async () =
   const router = await read('backend/rpc/router.mjs')
   assert.match(router, /resetId: readP2pResetId\(getDefaultIdentityStoragePath\(\)\)/)
 })
-
