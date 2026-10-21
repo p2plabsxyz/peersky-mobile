@@ -59,7 +59,7 @@ describe('Hyper app storage', () => {
       await deleteRegisteredP2pAppData(runtime, { appId: 'p2pmd' }),
       { ok: true, appId: 'p2pmd', deleted: true }
     )
-    assert.equal(runtime.purged.has('p2pmd'), true)
+    assert.equal(runtime.emptied.has('p2pmd'), true)
   })
 
   test('does not create missing drives while listing or deleting', async () => {
@@ -75,9 +75,9 @@ describe('Hyper app storage', () => {
     assert.equal(runtime.opened.size, 0)
   })
 
-  test('deletes a real named Hyperdrive without recreating it during listing', async () => {
+  test('empties a real named Hyperdrive in place, still this device\'s to write after a restart', async () => {
     const storagePath = await mkdtemp(join(tmpdir(), 'peersky-drive-delete-'))
-    const store = new Corestore(storagePath)
+    let store = new Corestore(storagePath)
     const namespace = store.namespace('p2pmd')
     const drive = new Hyperdrive(namespace)
 
@@ -93,9 +93,46 @@ describe('Hyper app storage', () => {
       const listed = await listRegisteredP2pAppData(runtime)
 
       assert.deepEqual(deleted, { ok: true, appId: 'p2pmd', deleted: true })
-      assert.equal(listed.items[0].exists, false)
-      assert.equal(await countStoredCores(store), 0)
+      assert.equal(listed.items[0].fileCount, 0)
+      assert.equal(await drive.blobs.core.has(0), false)
+
+      await drive.put('/new.html', Buffer.from('again'))
+      await drive.close()
+      await store.close()
+      store = new Corestore(storagePath)
+      const reopened = new Hyperdrive(store.namespace('p2pmd'))
+      await reopened.ready()
+      assert.equal(reopened.writable, true)
+      assert.deepEqual(await listNames(reopened), ['/new.html'])
+      await reopened.close()
     } finally {
+      await store.close()
+      await rm(storagePath, { recursive: true, force: true })
+    }
+  })
+
+  test('keeps the private drive the app holds open usable after Hyperdrive data is deleted', async () => {
+    const storagePath = await mkdtemp(join(tmpdir(), 'peersky-private-delete-'))
+    const store = new Corestore(storagePath)
+    // The app opens its private drive once and hands that same drive to every caller.
+    const privateDrive = new Hyperdrive(store.namespace('hyperdrive-private'))
+    const storeRuntime = { namespace: (name) => store.namespace(name) }
+    const runtime = createRoutedP2pStorageRuntime(storeRuntime, async () => storeRuntime, async () => privateDrive)
+
+    try {
+      await privateDrive.ready()
+      await privateDrive.put('/private.txt', Buffer.from('mine'))
+
+      const deleted = await deleteRegisteredP2pAppData(runtime, { appId: 'hyperdrive' })
+      const listed = await listRegisteredP2pAppData(runtime)
+      const hyperdrive = listed.items.find((item) => item.id === 'hyperdrive')
+
+      assert.deepEqual(deleted, { ok: true, appId: 'hyperdrive', deleted: true })
+      assert.deepEqual(hyperdrive.drives.map((drive) => [drive.id, drive.fileCount]), [['hyperdrive-private', 0]])
+      await privateDrive.put('/later.txt', Buffer.from('again'))
+      assert.deepEqual(await listNames(privateDrive), ['/later.txt'])
+    } finally {
+      await privateDrive.close()
       await store.close()
       await rm(storagePath, { recursive: true, force: true })
     }
@@ -278,12 +315,33 @@ describe('Hyper app storage', () => {
       appId: 'hyperdrive',
       deleted: true
     })
-    assert.deepEqual(runtime.purged, new Set([
+    assert.deepEqual(runtime.emptied, new Set([
       'hyperdrive-public',
       'hyperdrive-private',
       'hyperdrive-device',
       'hyperdrive'
     ]))
+    const after = await listRegisteredP2pAppData(runtime)
+    assert.equal(after.items.find((item) => item.id === 'hyperdrive').fileCount, 0)
+  })
+
+  test('leaves a drive this device cannot write when deleting app data', async () => {
+    const runtime = createRuntime({
+      'hyperdrive-public': [createEntry('/public.txt', 20)],
+      'hyperdrive-private': [createEntry('/desktop.txt', 30)]
+    }, { readOnly: ['hyperdrive-private'] })
+
+    assert.deepEqual(await deleteRegisteredP2pAppData(runtime, { appId: 'hyperdrive' }), {
+      ok: true,
+      appId: 'hyperdrive',
+      deleted: true
+    })
+    assert.deepEqual(runtime.emptied, new Set(['hyperdrive-public']))
+    const after = await listRegisteredP2pAppData(runtime)
+    assert.deepEqual(after.items.find((item) => item.id === 'hyperdrive').drives.map((drive) => [drive.id, drive.fileCount]), [
+      ['hyperdrive-public', 0],
+      ['hyperdrive-private', 1]
+    ])
   })
 
   test('opens the isolated runtime only for device-only Hyperdrive data', async () => {
@@ -334,12 +392,12 @@ describe('Hyper app storage', () => {
       appId: 'hyperdrive',
       deleted: true
     })
-    assert.deepEqual(networkedRuntime.purged, new Set([
+    assert.deepEqual(networkedRuntime.emptied, new Set([
       'hyperdrive-public',
       'hyperdrive-private',
       'hyperdrive'
     ]))
-    assert.deepEqual(deviceRuntime.purged, new Set(['hyperdrive-device']))
+    assert.deepEqual(deviceRuntime.emptied, new Set(['hyperdrive-device']))
   })
 
   test('clears downloaded cores while retaining writable app data', async () => {
@@ -401,12 +459,12 @@ describe('Hyper app storage', () => {
   })
 })
 
-function createRuntime (filesByDrive) {
-  const purged = new Set()
+function createRuntime (filesByDrive, { readOnly = [] } = {}) {
+  const emptied = new Set()
   const opened = new Set()
 
   return {
-    purged,
+    emptied,
     opened,
     getExistingDrive: async (name) => {
       if (!Object.hasOwn(filesByDrive, name)) return null
@@ -421,10 +479,21 @@ function createRuntime (filesByDrive) {
   function createDrive (name) {
     return {
       id: `${name}-id`,
+      writable: !readOnly.includes(name),
+      ready: async () => {},
       list: async function * () {
         yield * (filesByDrive[name] || [])
       },
-      purge: async () => { purged.add(name) }
+      batch: () => {
+        const deleted = new Set()
+        return {
+          del: async (key) => { deleted.add(key) },
+          flush: async () => {
+            filesByDrive[name] = (filesByDrive[name] || []).filter((entry) => !deleted.has(entry.key))
+          }
+        }
+      },
+      clearAll: async () => { emptied.add(name) }
     }
   }
 }
@@ -476,4 +545,10 @@ async function countStoredCores (store) {
     count += 1
   }
   return count
+}
+
+async function listNames (drive) {
+  const names = []
+  for await (const entry of drive.list('/')) names.push(entry.key)
+  return names
 }

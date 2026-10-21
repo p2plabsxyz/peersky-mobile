@@ -383,6 +383,19 @@ picture sent earlier), so an open by name first reads the drive's key from a
 session on its core that takes no lock, and shares the open of that key. Before
 that, an upload after a restart could wait forever, and every upload after it
 queued behind.
+
+**Delete** next to an app in P2P Data empties that app's drives in place:
+every file in them is deleted and the file data this phone holds is freed,
+while each drive keeps its address and stays this phone's to write. Peers and
+your other devices see the files go when they next sync, and a copy one of
+them already saved stays with it. Delete used to remove the drives' cores,
+which closed a drive the app still held open, so the list right after failed
+with SESSION_CLOSED, and left the drive's name pointing at nothing, so after a
+restart the drive no longer opened as this phone's own. Made again under the
+same key, it would clash with the copies others hold, and hypercore freezes a
+core it finds two histories for. A drive this phone cannot write is not its
+own and is left alone (`backend/hyper/storage-core.mjs`).
+
 **Clear all P2P data** is broader than **Remove offline**. It closes active P2P
 runtimes and removes local Hyper and PeerChat data from the device, and this
 device's identity with it, the way the desktop's Reset P2P data starts it over
