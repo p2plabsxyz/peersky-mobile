@@ -1419,6 +1419,7 @@
   "{name} is offline. Your message arrives the next time you are both online, and iOS suspends apps in the background, so keep PeerSky open.": "{name}はオフラインです。メッセージは次にお互いがオンラインになったときに届きます。iOSはバックグラウンドのアプリを一時停止するので、PeerSkyを開いたままにしてください。",
   "{name} is offline. Your message arrives the next time you are both online, so keep PeerSky running in the background.": "{name}はオフラインです。メッセージは次にお互いがオンラインになったときに届くので、PeerSkyをバックグラウンドで動かしたままにしてください。",
   "{name} is taking too long to upload. It may be too large to share here.": "{name}のアップロードに時間がかかりすぎています。ここで共有するには大きすぎる可能性があります。",
+  "{name} left this chat.": "{name}がこのチャットから退出しました。",
   "{name} was removed from the room": "{name}をルームから削除しました",
   "{name} will remain available from peers, but its downloaded files will be removed from this device, and any songs PeerTunes took from it leave PeerTunes.": "{name}は引き続きピアから利用できますが、ダウンロードしたファイルはこのデバイスから削除され、PeerTunesがそこから取り込んだ曲もPeerTunesから消えます。",
   "{name}'s avatar": "{name}のプロフィール画像",

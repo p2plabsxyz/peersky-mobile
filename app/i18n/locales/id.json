@@ -1419,6 +1419,7 @@
   "{name} is offline. Your message arrives the next time you are both online, and iOS suspends apps in the background, so keep PeerSky open.": "{name} sedang offline. Pesan Anda akan sampai saat Anda berdua online lagi, dan iOS menangguhkan aplikasi di latar belakang, jadi biarkan PeerSky tetap terbuka.",
   "{name} is offline. Your message arrives the next time you are both online, so keep PeerSky running in the background.": "{name} sedang offline. Pesan Anda akan sampai saat Anda berdua online lagi, jadi biarkan PeerSky tetap berjalan di latar belakang.",
   "{name} is taking too long to upload. It may be too large to share here.": "{name} terlalu lama diunggah. Mungkin ukurannya terlalu besar untuk dibagikan di sini.",
+  "{name} left this chat.": "{name} telah keluar dari obrolan ini.",
   "{name} was removed from the room": "{name} dikeluarkan dari ruang",
   "{name} will remain available from peers, but its downloaded files will be removed from this device, and any songs PeerTunes took from it leave PeerTunes.": "{name} tetap tersedia dari peer, tetapi file yang diunduh darinya akan dihapus dari perangkat ini, dan lagu yang diambil PeerTunes darinya akan hilang dari PeerTunes.",
   "{name}'s avatar": "Foto profil {name}",

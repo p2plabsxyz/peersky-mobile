@@ -1419,6 +1419,7 @@
   "{name} is offline. Your message arrives the next time you are both online, and iOS suspends apps in the background, so keep PeerSky open.": "{name}目前离线。消息会在你们下次同时在线时送达，而 iOS 会暂停后台应用，所以请保持 PeerSky 打开。",
   "{name} is offline. Your message arrives the next time you are both online, so keep PeerSky running in the background.": "{name}目前离线。消息会在你们下次同时在线时送达，所以请让 PeerSky 在后台保持运行。",
   "{name} is taking too long to upload. It may be too large to share here.": "{name}上传时间过长。它可能太大，无法在这里分享。",
+  "{name} left this chat.": "{name}已离开此聊天。",
   "{name} was removed from the room": "已将{name}移出聊天室",
   "{name} will remain available from peers, but its downloaded files will be removed from this device, and any songs PeerTunes took from it leave PeerTunes.": "{name}仍可从节点获取，但其已下载的文件将从此设备中移除，PeerTunes 从中获取的歌曲也会从 PeerTunes 中消失。",
   "{name}'s avatar": "{name}的头像",

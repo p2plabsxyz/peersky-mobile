@@ -1419,6 +1419,7 @@
   "{name} is offline. Your message arrives the next time you are both online, and iOS suspends apps in the background, so keep PeerSky open.": "المستخدم {name} غير متصل. ستصل رسالتك في المرة القادمة التي تكونان فيها متصلَين معًا، ويعلّق iOS التطبيقات في الخلفية، لذا أبقِ PeerSky مفتوحًا.",
   "{name} is offline. Your message arrives the next time you are both online, so keep PeerSky running in the background.": "المستخدم {name} غير متصل. ستصل رسالتك في المرة القادمة التي تكونان فيها متصلَين معًا، لذا أبقِ PeerSky يعمل في الخلفية.",
   "{name} is taking too long to upload. It may be too large to share here.": "يستغرق رفع {name} وقتًا طويلًا. ربما يكون كبيرًا جدًا لمشاركته هنا.",
+  "{name} left this chat.": "غادر {name} هذه الدردشة.",
   "{name} was removed from the room": "تمت إزالة {name} من الغرفة",
   "{name} will remain available from peers, but its downloaded files will be removed from this device, and any songs PeerTunes took from it leave PeerTunes.": "سيبقى «{name}» متاحًا من الأجهزة الأخرى، لكن ستُزال ملفاته التي تم تنزيلها من هذا الجهاز، وستخرج من PeerTunes أي أغانٍ أخذها PeerTunes منه.",
   "{name}'s avatar": "الصورة الرمزية لـ {name}",

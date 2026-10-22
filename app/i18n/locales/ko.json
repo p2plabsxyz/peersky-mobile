@@ -1419,6 +1419,7 @@
   "{name} is offline. Your message arrives the next time you are both online, and iOS suspends apps in the background, so keep PeerSky open.": "{name} 사용자가 오프라인이에요. 메시지는 다음에 두 사람이 모두 온라인일 때 도착하고, iOS는 백그라운드 앱을 일시 중단하므로 PeerSky를 열어 두세요.",
   "{name} is offline. Your message arrives the next time you are both online, so keep PeerSky running in the background.": "{name} 사용자가 오프라인이에요. 메시지는 다음에 두 사람이 모두 온라인일 때 도착하니 PeerSky를 백그라운드에서 계속 실행해 두세요.",
   "{name} is taking too long to upload. It may be too large to share here.": "{name} 파일을 업로드하는 데 너무 오래 걸려요. 여기서 공유하기에는 너무 클 수 있어요.",
+  "{name} left this chat.": "{name}님이 이 채팅에서 나갔어요.",
   "{name} was removed from the room": "{name} 사용자를 방에서 내보냈어요",
   "{name} will remain available from peers, but its downloaded files will be removed from this device, and any songs PeerTunes took from it leave PeerTunes.": "피어를 통해 {name}에 계속 접근할 수 있지만, 다운로드한 파일은 이 기기에서 삭제되고 PeerTunes가 여기서 가져온 노래도 PeerTunes에서 사라져요.",
   "{name}'s avatar": "{name}의 프로필 이미지",

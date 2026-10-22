@@ -237,6 +237,9 @@ type PeerChatRoom = {
   pendingAcceptance: boolean
   rejected: boolean
   blockedByPeer: boolean
+  // The other person in a direct message left it, as whom.
+  leftByPeer?: boolean
+  leftByName?: string
   isHost: boolean
   isPinned: boolean
   isMuted: boolean
@@ -357,7 +360,7 @@ export type PeerChatResponse = {
   ok: boolean
   error?: string
   profile?: PeerChatProfile
-  room?: PeerChatRoom
+  room?: PeerChatRoom | null
   rooms?: PeerChatRoom[]
   messages?: PeerChatMessage[] | null
   version?: number
@@ -713,6 +716,9 @@ export function PeerChatScreen ({
   const isDirectMessageBlocked = Boolean(
     activeRoom?.isDM && (activeRoom.blockedByPeer || blockedTheDirectMessage)
   )
+  // The other person left the chat, so nothing sent here would reach them.
+  const isDirectMessageLeft = Boolean(activeRoom?.isDM && activeRoom.leftByPeer && !isDirectMessageBlocked)
+  const isDirectMessageClosed = isDirectMessageBlocked || isDirectMessageLeft
   // Nothing sent from here would be passed on, so the composer says so rather
   // than letting messages go nowhere.
   const isRemovedFromRoom = activeRoom?.removedByCreator === true
@@ -1057,8 +1063,19 @@ export function PeerChatScreen ({
       // A room that moved answers as the room it went to, so this is where the
       // tab goes on.
       if (response.movedRooms) movedRoomsRef.current = response.movedRooms
-      if (response.room) setActiveRoom(response.room)
       if (response.rooms) setRooms(response.rooms)
+      // Gone from this phone while open: left on another of your devices, or
+      // given up for the copy the other person offered of the same chat.
+      if (response.room === null) {
+        setActiveRoom(null)
+        setMessages([])
+        setReplyTarget(null)
+        setIsSearching(false)
+        setSearchQuery('')
+        clearReadError()
+        return
+      }
+      if (response.room) setActiveRoom(response.room)
       // A snapshot read before our own message went out would take that
       // message off the screen until the next poll. The refresh queued by the
       // send brings a newer one.
@@ -3154,11 +3171,17 @@ export function PeerChatScreen ({
           <Text style={[styles.dmStatus, { color: colors.danger, backgroundColor: colors.surface }]}>{t('This peer declined the message request.')}</Text>
         )}
 
-        {offlineDirectPeer && !isDirectMessageBlocked && !activeRoom.rejected && (
+        {offlineDirectPeer && !isDirectMessageClosed && !activeRoom.rejected && (
           <Text style={[styles.dmStatus, { color: colors.muted, backgroundColor: colors.surface }]}>
             {Platform.OS === 'ios'
               ? t('{name} is offline. Your message arrives the next time you are both online, and iOS suspends apps in the background, so keep PeerSky open.', { name: offlineDirectPeer.username })
               : t('{name} is offline. Your message arrives the next time you are both online, so keep PeerSky running in the background.', { name: offlineDirectPeer.username })}
+          </Text>
+        )}
+
+        {isDirectMessageLeft && (
+          <Text style={[styles.dmStatus, { color: colors.danger, backgroundColor: colors.surface }]}>
+            {t('{name} left this chat.', { name: activeRoom.leftByName || activeRoom.name })}
           </Text>
         )}
 
@@ -3572,7 +3595,7 @@ export function PeerChatScreen ({
           <Pressable
             accessibilityLabel={t('Choose emoji')}
             accessibilityRole='button'
-            disabled={isBusy || activeRoom.pendingAcceptance || activeRoom.rejected || isDirectMessageBlocked || isRemovedFromRoom}
+            disabled={isBusy || activeRoom.pendingAcceptance || activeRoom.rejected || isDirectMessageClosed || isRemovedFromRoom}
             onPress={() => {
               setEmojiSearchQuery('')
               setShowComposerEmoji((current) => !current)
@@ -3584,12 +3607,12 @@ export function PeerChatScreen ({
           <Pressable
             accessibilityLabel={t('Attach file')}
             accessibilityRole='button'
-            disabled={isBusy || activeRoom.pendingAcceptance || activeRoom.rejected || isDirectMessageBlocked || isRemovedFromRoom}
+            disabled={isBusy || activeRoom.pendingAcceptance || activeRoom.rejected || isDirectMessageClosed || isRemovedFromRoom}
             onPress={attachFile}
             style={[
               styles.attachButton,
               { backgroundColor: colors.input },
-              isBusy || activeRoom.pendingAcceptance || activeRoom.rejected || isDirectMessageBlocked || isRemovedFromRoom ? styles.disabled : null
+              isBusy || activeRoom.pendingAcceptance || activeRoom.rejected || isDirectMessageClosed || isRemovedFromRoom ? styles.disabled : null
             ]}
           >
             <Text style={[styles.attachButtonText, { color: colors.accent }]}>+</Text>
@@ -3606,7 +3629,7 @@ export function PeerChatScreen ({
             autoComplete='off'
             importantForAutofill='no'
             textContentType='none'
-            editable={!activeRoom.pendingAcceptance && !activeRoom.rejected && !isDirectMessageBlocked}
+            editable={!activeRoom.pendingAcceptance && !activeRoom.rejected && !isDirectMessageClosed}
             maxLength={64 * 1024}
             style={[
               styles.composerInput,
@@ -3615,12 +3638,12 @@ export function PeerChatScreen ({
           />
           <Pressable
             accessibilityRole='button'
-            disabled={!composer.trim() || isBusy || activeRoom.pendingAcceptance || activeRoom.rejected || isDirectMessageBlocked || isRemovedFromRoom}
+            disabled={!composer.trim() || isBusy || activeRoom.pendingAcceptance || activeRoom.rejected || isDirectMessageClosed || isRemovedFromRoom}
             onPress={sendMessage}
             style={[
               styles.sendButton,
               { backgroundColor: colors.accent },
-              !composer.trim() || isBusy || activeRoom.pendingAcceptance || activeRoom.rejected || isDirectMessageBlocked || isRemovedFromRoom ? styles.disabled : null
+              !composer.trim() || isBusy || activeRoom.pendingAcceptance || activeRoom.rejected || isDirectMessageClosed || isRemovedFromRoom ? styles.disabled : null
             ]}
           >
             <SendIcon width={20} height={20} color='#ffffff' />

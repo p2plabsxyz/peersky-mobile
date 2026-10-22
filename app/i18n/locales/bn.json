@@ -1419,6 +1419,7 @@
   "{name} is offline. Your message arrives the next time you are both online, and iOS suspends apps in the background, so keep PeerSky open.": "{name} অফলাইনে আছেন। পরের বার আপনারা দুজনেই অনলাইনে থাকলে আপনার মেসেজ পৌঁছাবে, আর iOS ব্যাকগ্রাউন্ডে থাকা অ্যাপ থামিয়ে দেয়, তাই PeerSky খোলা রাখুন।",
   "{name} is offline. Your message arrives the next time you are both online, so keep PeerSky running in the background.": "{name} অফলাইনে আছেন। পরের বার আপনারা দুজনেই অনলাইনে থাকলে আপনার মেসেজ পৌঁছাবে, তাই PeerSky ব্যাকগ্রাউন্ডে চালু রাখুন।",
   "{name} is taking too long to upload. It may be too large to share here.": "{name} আপলোড হতে অনেক বেশি সময় নিচ্ছে। এখানে শেয়ার করার জন্য এটি হয়তো খুব বড়।",
+  "{name} left this chat.": "{name} এই চ্যাট ছেড়ে গেছেন।",
   "{name} was removed from the room": "{name}-কে রুম থেকে সরানো হয়েছে",
   "{name} will remain available from peers, but its downloaded files will be removed from this device, and any songs PeerTunes took from it leave PeerTunes.": "{name} পিয়ারদের কাছ থেকে পাওয়া যাবে, তবে এর ডাউনলোড করা ফাইলগুলো এই ডিভাইস থেকে সরিয়ে দেওয়া হবে, আর PeerTunes এখান থেকে যেসব গান নিয়েছিল সেগুলোও PeerTunes থেকে চলে যাবে।",
   "{name}'s avatar": "{name}-এর প্রোফাইল ছবি",

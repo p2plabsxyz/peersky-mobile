@@ -1583,6 +1583,7 @@
     "{name} is offline. Your message arrives the next time you are both online, and iOS suspends apps in the background, so keep PeerSky open.",
     "{name} is offline. Your message arrives the next time you are both online, so keep PeerSky running in the background.",
     "{name} is taking too long to upload. It may be too large to share here.",
+    "{name} left this chat.",
     "{name} was removed from the room",
     "{name} will remain available from peers, but its downloaded files will be removed from this device, and any songs PeerTunes took from it leave PeerTunes.",
     "{name}'s avatar",

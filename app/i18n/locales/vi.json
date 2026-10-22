@@ -1419,6 +1419,7 @@
   "{name} is offline. Your message arrives the next time you are both online, and iOS suspends apps in the background, so keep PeerSky open.": "{name} đang ngoại tuyến. Tin nhắn của bạn sẽ đến vào lần tới cả hai cùng trực tuyến, và iOS tạm ngưng ứng dụng chạy trong nền, nên hãy để PeerSky mở.",
   "{name} is offline. Your message arrives the next time you are both online, so keep PeerSky running in the background.": "{name} đang ngoại tuyến. Tin nhắn của bạn sẽ đến vào lần tới cả hai cùng trực tuyến, nên hãy để PeerSky chạy trong nền.",
   "{name} is taking too long to upload. It may be too large to share here.": "{name} tải lên quá lâu. Có thể tệp quá lớn để chia sẻ ở đây.",
+  "{name} left this chat.": "{name} đã rời khỏi cuộc trò chuyện này.",
   "{name} was removed from the room": "{name} đã bị xóa khỏi phòng",
   "{name} will remain available from peers, but its downloaded files will be removed from this device, and any songs PeerTunes took from it leave PeerTunes.": "{name} vẫn có sẵn từ các peer, nhưng các tệp đã tải xuống của thư mục này sẽ bị xóa khỏi thiết bị, và các bài hát PeerTunes lấy từ đó cũng sẽ rời khỏi PeerTunes.",
   "{name}'s avatar": "Ảnh đại diện của {name}",

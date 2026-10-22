@@ -1419,6 +1419,7 @@
   "{name} is offline. Your message arrives the next time you are both online, and iOS suspends apps in the background, so keep PeerSky open.": "{name} çevrimdışı. Mesajınız, ikiniz de bir sonraki sefer çevrimiçi olduğunuzda ulaşır; iOS arka plandaki uygulamaları askıya aldığı için PeerSky'ı açık tutun.",
   "{name} is offline. Your message arrives the next time you are both online, so keep PeerSky running in the background.": "{name} çevrimdışı. Mesajınız, ikiniz de bir sonraki sefer çevrimiçi olduğunuzda ulaşır; bu yüzden PeerSky'ı arka planda çalışır durumda tutun.",
   "{name} is taking too long to upload. It may be too large to share here.": "{name} dosyasının yüklenmesi çok uzun sürüyor. Burada paylaşmak için fazla büyük olabilir.",
+  "{name} left this chat.": "{name} bu sohbetten ayrıldı.",
   "{name} was removed from the room": "{name} kişisi odadan çıkarıldı",
   "{name} will remain available from peers, but its downloaded files will be removed from this device, and any songs PeerTunes took from it leave PeerTunes.": "{name} eşler üzerinden kullanılabilir kalacak, ancak indirilen dosyaları bu cihazdan kaldırılacak; PeerTunes uygulamasının ondan aldığı şarkılar da uygulamadan çıkacak.",
   "{name}'s avatar": "{name} kişisinin profil resmi",

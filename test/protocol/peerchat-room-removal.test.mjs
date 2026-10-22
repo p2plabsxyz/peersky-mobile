@@ -123,7 +123,7 @@ test('removing somebody says the new key is for the people still in the room, an
 test('somebody removed is told, and their composer says so', () => {
   assert.match(screen, /You were removed from this room by/)
   assert.match(screen, /const isRemovedFromRoom = activeRoom\?\.removedByCreator === true/)
-  assert.match(screen, /isDirectMessageBlocked \|\| isRemovedFromRoom/)
+  assert.match(screen, /isDirectMessageClosed \|\| isRemovedFromRoom/)
 })
 
 // P2P Republic was made long before any of this, so its record carries no

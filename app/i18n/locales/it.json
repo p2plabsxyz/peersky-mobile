@@ -1419,6 +1419,7 @@
   "{name} is offline. Your message arrives the next time you are both online, and iOS suspends apps in the background, so keep PeerSky open.": "{name} è offline. Il tuo messaggio arriverà la prossima volta che sarete entrambi online, e iOS sospende le app in background, quindi tieni PeerSky aperto.",
   "{name} is offline. Your message arrives the next time you are both online, so keep PeerSky running in the background.": "{name} è offline. Il tuo messaggio arriverà la prossima volta che sarete entrambi online, quindi tieni PeerSky attivo in background.",
   "{name} is taking too long to upload. It may be too large to share here.": "Il caricamento di {name} sta richiedendo troppo tempo. Potrebbe essere troppo grande per condividerlo qui.",
+  "{name} left this chat.": "{name} ha lasciato questa chat.",
   "{name} was removed from the room": "Hai rimosso {name} dalla stanza",
   "{name} will remain available from peers, but its downloaded files will be removed from this device, and any songs PeerTunes took from it leave PeerTunes.": "{name} resterà disponibile dai peer, ma i suoi file scaricati verranno rimossi da questo dispositivo, e i brani che PeerTunes ha preso da lì usciranno da PeerTunes.",
   "{name}'s avatar": "Foto del profilo di {name}",

@@ -1419,6 +1419,7 @@
   "{name} is offline. Your message arrives the next time you are both online, and iOS suspends apps in the background, so keep PeerSky open.": "{name} इदानीं न संयुक्तः। अग्रिमवारं यदा उभयोः पक्षयोः संयोगः भविष्यति, तदा भवतः सन्देशः प्राप्स्यते, iOS च पृष्ठभूमौ अनुप्रयोगान् स्थगयति, अतः PeerSky उद्घाटितं रक्षतु।",
   "{name} is offline. Your message arrives the next time you are both online, so keep PeerSky running in the background.": "{name} इदानीं न संयुक्तः। अग्रिमवारं यदा उभयोः पक्षयोः संयोगः भविष्यति, तदा भवतः सन्देशः प्राप्स्यते, अतः PeerSky पृष्ठभूमौ चलत् रक्षतु।",
   "{name} is taking too long to upload. It may be too large to share here.": "{name} उपारोपणे अतिदीर्घं कालं गृह्णाति। अत्र वितरणाय तत् अतिबृहत् स्यात्।",
+  "{name} left this chat.": "{name} इमं संवादं त्यक्तवान्।",
   "{name} was removed from the room": "{name} प्रकोष्ठात् अपाकृतः",
   "{name} will remain available from peers, but its downloaded files will be removed from this device, and any songs PeerTunes took from it leave PeerTunes.": "{name} सहभागिभ्यः उपलभ्यम् एव स्थास्यति, किन्तु तस्य अवारोपिताः सञ्चिकाः अस्मात् उपकरणात् अपाकरिष्यन्ते, PeerTunes तस्मात् यानि गीतानि गृहीतवत्, तानि अपि PeerTunes इत्यस्मात् निर्गमिष्यन्ति।",
   "{name}'s avatar": "{name} इत्यस्य परिचयचित्रम्",
