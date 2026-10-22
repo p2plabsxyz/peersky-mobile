@@ -271,7 +271,7 @@ describe('p2pmd mobile editor page routing', () => {
     assert.match(html, /textarea[\s\S]*font: var\(--editor-font-size\)\/var\(--editor-line-height\)/)
     assert.match(html, /const oldText = ydoc && ytext [^\n]+ getYTextSnapshot\(\) : lastInputContent/)
     assert.match(html, /const change = diffTextChange\(oldText, newText, caret\)/)
-    assert.match(html, /const gutterUpdate = markEditedLines\(oldText, newText\)/)
+    assert.match(html, /const gutterUpdate = markEditedLines\(oldText, newText, change\)/)
     assert.match(html, /applyTextDiff\(ytext, oldText, newText, Y_ORIGIN_LOCAL_INPUT, change\)/)
     assert.match(html, /if \(gutterUpdate\) renderLineGutter\(gutterUpdate\)/)
     assert.match(html, /while \(lineGutter[.]childElementCount > count\)/)
@@ -279,8 +279,8 @@ describe('p2pmd mobile editor page routing', () => {
     assert.doesNotMatch(html, /lineGutter[.]replaceChildren\(\)/)
     assert.doesNotMatch(html, /const previousLines = String\(previousContent/)
     assert.doesNotMatch(html, /const nextLines = String\(nextContent/)
-    assert.match(html, /function countMatchingPrefixLines\(previousValue, nextValue\)/)
-    assert.match(html, /function countMatchingSuffixLines\(previousValue, nextValue, availablePrevious, availableNext\)/)
+    // Lines move by the same rule as everyone else's changes (line-authors.mjs).
+    assert.match(html, /const \{ moved, written, firstLine \} = lineChangesFromDelta\(previousValue, delta\)/)
   })
 
   it('timestamps mobile line ownership for desktop conflict resolution', () => {

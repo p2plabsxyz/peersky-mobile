@@ -166,6 +166,35 @@ describe('p2pmd document protocol state', () => {
     assert.equal(getDocumentState().content, 'Line 1: base and more')
   })
 
+  // A desktop editor sends only its own lines, so the record of people who
+  // left stayed on its old line numbers when a desktop added lines above.
+  it('moves its record of who wrote each line with an edit that only sends text', () => {
+    const sam = { color: '#e345d6', name: 'Sam', clientId: 'phone-1', updatedAt: 100 }
+    const ann = { color: '#1f86c1', name: 'Ann', clientId: 'laptop-1', updatedAt: 200 }
+    updateDocumentState('one\ntwo\nthree\nfour', { 1: ann, 3: sam, 4: sam })
+    const editor = new Y.Doc()
+    Y.applyUpdate(editor, b4a.from(getEncodedDocumentState(), 'base64'))
+    let update = null
+    editor.on('update', (next) => { update = next })
+
+    editor.getText('content').insert(0, 'top A\ntop B\n')
+    assert.equal(applyDocumentUpdate(b4a.toString(update, 'base64')).ok, true)
+    assert.deepEqual(getDocumentState().lineAttributions, { 3: ann, 5: sam, 6: sam })
+
+    // Taking out a line takes its author with it.
+    editor.getText('content').delete(16, 4)
+    assert.equal(getDocumentState().content.length > 0, true)
+    assert.equal(applyDocumentUpdate(b4a.toString(update, 'base64')).ok, true)
+    assert.equal(getDocumentState().content, 'top A\ntop B\none\nthree\nfour')
+    assert.deepEqual(getDocumentState().lineAttributions, { 3: ann, 4: sam, 5: sam })
+
+    // Typing in a line leaves it as it is.
+    editor.getText('content').insert(1, 'x')
+    assert.equal(applyDocumentUpdate(b4a.toString(update, 'base64')).ok, true)
+    assert.deepEqual(getDocumentState().lineAttributions, { 3: ann, 4: sam, 5: sam })
+    editor.destroy()
+  })
+
   it('takes about as long to check an edit to a big note as to a small one', () => {
     // Every edit was tried on a copy made from the whole note's state, so each
     // one cost more the bigger the note had grown.

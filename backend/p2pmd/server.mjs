@@ -17,6 +17,7 @@ import {
 import { P2PMD_LOOPBACK_HOST } from './constants.mjs'
 import { createPeerActivityStore, createPeerPresenceStore } from './peers.mjs'
 import { hasSlideBreaks } from './preview.mjs'
+import { lineChangesFromDelta, newerLineAuthor, shiftLineAuthors } from './line-authors.mjs'
 import ieeeBrowserScript from './ieee-runtime.mjs'
 import katexCss from './katex-runtime.mjs'
 import { P2PMD_SCIENTIFIC_STYLES } from './scientific.mjs'
@@ -750,6 +751,10 @@ export function getP2pmdEditorPage () {
   // The page runs the very same function the renderer splits with, rather
   // than its own copy of the rule. They drifted apart once already.
   const embeddedSlideBreakCheck = hasSlideBreaks.toString().replace(/<\/script/gi, '<\\/script')
+  const embeddedLineAuthors = [lineChangesFromDelta, shiftLineAuthors, newerLineAuthor]
+    .map((fn) => fn.toString())
+    .join('\n\n')
+    .replace(/<\/script/gi, '<\\/script')
   const serializedSlidesTemplate = JSON.stringify(P2PMD_SLIDES_TEMPLATE).replace(/</g, '\\u003c')
   const serializedFunNameWords = JSON.stringify([FUN_PEER_NAME_ADJECTIVES, FUN_PEER_NAME_ANIMALS]).replace(/</g, '\\u003c')
   const embeddedIeeeBrowserScript = ieeeBrowserScript.replace(/<\/script/gi, '<\\/script')
@@ -1895,8 +1900,20 @@ export function getP2pmdEditorPage () {
       let lastSyncedContent = ''
       let lastInputContent = ''
       let ytextSnapshot = ''
+      // What the gutter shows: each line's newest author, from this person's
+      // own lines, everyone else's from the people list, and the host's record
+      // of the note, which keeps people who left.
       let lineAttributions = {}
+      // This person's own lines, kept here and moved with every change. They
+      // used to be read back out of the gutter, so a line stayed theirs after
+      // someone else rewrote it, and stayed on its old number when someone
+      // else added lines above it.
       let localLineAttributions = {}
+      let documentLineAttributions = {}
+      const peerLineAttributionsByClient = new Map()
+      // A reopened note has no own lines here yet. The host's record of them
+      // is taken once, the first time it comes.
+      let ownLinesTaken = false
       let latestPeerList = []
       let peerActivityLog = []
       let peerActivityLoadError = ''
@@ -2354,6 +2371,12 @@ export function getP2pmdEditorPage () {
           })
           if (!response.ok) throw new Error('Unable to update username')
           localAuthor.name = nextName
+          for (const line of Object.keys(localLineAttributions)) {
+            localLineAttributions[line] = { ...localLineAttributions[line], name: nextName }
+          }
+          rebuildLineAttributions()
+          renderLineGutter()
+          schedulePresenceSend(true)
           persistPeerDisplayName(nextName)
           latestPeerList = latestPeerList.map((peer) => {
             return peer?.clientId === clientId ? { ...peer, name: nextName } : peer
@@ -2510,7 +2533,7 @@ export function getP2pmdEditorPage () {
       }
 
       async function sendPresenceNow(force) {
-        const body = JSON.stringify(getPeerPayload())
+        const body = JSON.stringify({ ...getPeerPayload(), peerLineAttributions: localLineAttributions })
         if (!force && body === lastPresencePayload) return
         lastPresencePayload = body
         try {
@@ -2701,7 +2724,7 @@ export function getP2pmdEditorPage () {
         const oldText = ydoc && ytext ? getYTextSnapshot() : lastInputContent
         const caret = input.selectionStart === input.selectionEnd ? input.selectionStart : null
         const change = diffTextChange(oldText, newText, caret)
-        const gutterUpdate = markEditedLines(oldText, newText)
+        const gutterUpdate = markEditedLines(oldText, newText, change)
         lastInputContent = newText
         if (gutterUpdate) renderLineGutter(gutterUpdate)
         notifyNative('p2pmd-document-pending', {})
@@ -3051,6 +3074,8 @@ export function getP2pmdEditorPage () {
 
       ${embeddedSlideBreakCheck}
 
+      ${embeddedLineAuthors}
+
       function viewAsSlides() {
         if (!hasSlideBreaks(input.value)) {
           if (input.value.trim() && !window.confirm('This will clear your notes and give you a slides template. Continue?')) {
@@ -3227,12 +3252,12 @@ export function getP2pmdEditorPage () {
       }
 
       function applyLineAttributionsFromDocument(documentState) {
-        lineAttributions = normalizeLineAttributions(
+        documentLineAttributions = normalizeLineAttributions(
           documentState.lineAttributions || documentState.lineAuthors,
           documentState.content || ''
         )
-        localLineAttributions = getLocalLineAttributions(lineAttributions)
-        mergeLineAttributionsFromPeerList(latestPeerList, false)
+        takeOwnLines(documentLineAttributions)
+        rebuildLineAttributions()
         renderLineGutter()
       }
 
@@ -3249,49 +3274,77 @@ export function getP2pmdEditorPage () {
       }
 
       function mergeLineAttributionsFromPeerList(peerList, shouldRender = true) {
-        if (!Array.isArray(peerList) || peerList.length === 0) return
+        if (!Array.isArray(peerList)) return
 
-        let changed = false
         for (const peer of peerList) {
+          // A person's lines come only when they change, so a list without
+          // them keeps what came before.
           if (!peer || typeof peer !== 'object' || !peer.lineAttributions) continue
-
           const peerClientId = typeof peer.clientId === 'string' ? peer.clientId : ''
-          const peerAttributions = normalizeLineAttributions(peer.lineAttributions, input.value)
-          for (const [line, attribution] of Object.entries(peerAttributions)) {
-            const nextAttribution = {
-              ...attribution,
-              clientId: attribution.clientId || peerClientId
-            }
-            const existing = lineAttributions[line]
-            if (
-              existing?.clientId === nextAttribution.clientId &&
-              existing?.color === nextAttribution.color &&
-              existing?.name === nextAttribution.name
-            ) {
-              continue
-            }
+          if (!peerClientId) continue
 
-            lineAttributions[line] = nextAttribution
-            changed = true
+          const claims = {}
+          const normalized = normalizeLineAttributions(peer.lineAttributions, input.value)
+          for (const [line, attribution] of Object.entries(normalized)) {
+            claims[line] = { ...attribution, clientId: attribution.clientId || peerClientId }
           }
+          if (peerClientId === clientId) {
+            takeOwnLines(claims)
+            continue
+          }
+          peerLineAttributionsByClient.set(peerClientId, claims)
         }
 
-        if (!changed) return
-        localLineAttributions = getLocalLineAttributions(lineAttributions)
+        rebuildLineAttributions()
         if (shouldRender) renderLineGutter()
       }
 
-      function getLocalLineAttributions(attributions) {
-        const localAttributions = {}
-
-        Object.keys(attributions || {}).forEach((line) => {
-          const attribution = attributions[line]
-          if (attribution?.clientId === clientId) {
-            localAttributions[line] = attribution
+      function takeOwnLines(attributions) {
+        if (ownLinesTaken) return
+        let found = false
+        for (const [line, attribution] of Object.entries(attributions || {})) {
+          if (attribution?.clientId !== clientId) continue
+          found = true
+          // Under the name and color this person goes by now: the record
+          // keeps the ones from when each line was written.
+          if (!localLineAttributions[line]) {
+            localLineAttributions[line] = { ...attribution, name: localAuthor.name, color: localAuthor.color }
           }
-        })
+        }
+        if (found) ownLinesTaken = true
+      }
 
-        return localAttributions
+      // Each line's newest author, the same rule every editor and host uses.
+      function rebuildLineAttributions(content = input.value) {
+        const count = getLineCount(content)
+        const merged = {}
+        const consider = (line, attribution) => {
+          const lineNumber = Number(line)
+          if (!attribution || !Number.isInteger(lineNumber) || lineNumber < 1 || lineNumber > count) return
+          merged[line] = newerLineAuthor(merged[line], attribution)
+        }
+
+        // The record speaks for people who left. Someone here sends all of
+        // their own lines, so the record's line under them may be one they no
+        // longer have.
+        for (const [line, attribution] of Object.entries(documentLineAttributions)) {
+          if (attribution.clientId === clientId || peerLineAttributionsByClient.has(attribution.clientId)) continue
+          consider(line, attribution)
+        }
+        for (const [peerClientId, claims] of peerLineAttributionsByClient) {
+          if (peerClientId === clientId) continue
+          for (const [line, attribution] of Object.entries(claims)) consider(line, attribution)
+        }
+        for (const [line, attribution] of Object.entries(localLineAttributions)) consider(line, attribution)
+        lineAttributions = merged
+      }
+
+      function moveLineAuthors(moved) {
+        localLineAttributions = shiftLineAuthors(localLineAttributions, moved)
+        documentLineAttributions = shiftLineAuthors(documentLineAttributions, moved)
+        for (const [peerClientId, claims] of peerLineAttributionsByClient) {
+          peerLineAttributionsByClient.set(peerClientId, shiftLineAuthors(claims, moved))
+        }
       }
 
       function normalizeLineAttributions(attributions, content) {
@@ -3339,106 +3392,31 @@ export function getP2pmdEditorPage () {
         return Math.max(String(content || '').split(newline).length, 1)
       }
 
-      function countLineBreaks(text, start = 0, end = text.length) {
-        let count = 0
-        for (let index = start; index < end; index++) {
-          if (text[index] === newline) count += 1
-        }
-        return count
-      }
-
-      function linesMatch(textA, startA, endA, textB, startB, endB) {
-        const length = endA - startA
-        if (length !== endB - startB) return false
-        for (let offset = 0; offset < length; offset++) {
-          if (textA[startA + offset] !== textB[startB + offset]) return false
-        }
-        return true
-      }
-
-      function countMatchingPrefixLines(previousValue, nextValue) {
-        let previousStart = 0
-        let nextStart = 0
-        let count = 0
-        while (previousStart <= previousValue.length && nextStart <= nextValue.length) {
-          const previousBreak = previousValue.indexOf(newline, previousStart)
-          const nextBreak = nextValue.indexOf(newline, nextStart)
-          const previousEnd = previousBreak === -1 ? previousValue.length : previousBreak
-          const nextEnd = nextBreak === -1 ? nextValue.length : nextBreak
-          if (!linesMatch(previousValue, previousStart, previousEnd, nextValue, nextStart, nextEnd)) break
-
-          count += 1
-          previousStart = previousBreak === -1 ? previousValue.length + 1 : previousBreak + 1
-          nextStart = nextBreak === -1 ? nextValue.length + 1 : nextBreak + 1
-        }
-        return count
-      }
-
-      function countMatchingSuffixLines(previousValue, nextValue, availablePrevious, availableNext) {
-        let previousEnd = previousValue.length
-        let nextEnd = nextValue.length
-        let count = 0
-        while (count < availablePrevious && count < availableNext) {
-          const previousStart = previousValue.lastIndexOf(newline, previousEnd - 1) + 1
-          const nextStart = nextValue.lastIndexOf(newline, nextEnd - 1) + 1
-          if (!linesMatch(previousValue, previousStart, previousEnd, nextValue, nextStart, nextEnd)) break
-
-          count += 1
-          previousEnd = previousStart - 1
-          nextEnd = nextStart - 1
-        }
-        return count
-      }
-
-      function markEditedLines(previousContent, nextContent) {
+      function markEditedLines(previousContent, nextContent, change = null) {
         if (previousContent === nextContent) return null
 
         const previousValue = String(previousContent || '')
         const nextValue = String(nextContent || '')
-        const previousLineCount = countLineBreaks(previousValue) + 1
-        const nextLineCount = countLineBreaks(nextValue) + 1
-        const prefixLineCount = countMatchingPrefixLines(previousValue, nextValue)
-        const suffixLineCount = countMatchingSuffixLines(
-          previousValue,
-          nextValue,
-          previousLineCount - prefixLineCount,
-          nextLineCount - prefixLineCount
-        )
-        const nextAttributions = {}
-        const nextLocalAttributions = {}
+        const { prefix, oldSuffix, newSuffix } = change || diffTextChange(previousValue, nextValue)
+        const delta = []
+        if (prefix > 0) delta.push({ retain: prefix })
+        if (oldSuffix > prefix) delta.push({ delete: oldSuffix - prefix })
+        if (newSuffix > prefix) delta.push({ insert: nextValue.slice(prefix, newSuffix) })
 
-        for (const [line, attribution] of Object.entries(lineAttributions)) {
-          const previousLine = Number(line)
-          let nextLine = null
-          if (previousLine <= prefixLineCount) {
-            nextLine = previousLine
-          } else if (previousLine > previousLineCount - suffixLineCount) {
-            nextLine = previousLine + nextLineCount - previousLineCount
-          }
-          if (!nextLine || nextLine < 1 || nextLine > nextLineCount) continue
-
-          nextAttributions[String(nextLine)] = attribution
-          if (attribution.clientId === clientId) {
-            nextLocalAttributions[String(nextLine)] = attribution
-          }
-        }
-
+        const { moved, written, firstLine } = lineChangesFromDelta(previousValue, delta)
+        moveLineAuthors(moved)
         const editedAttribution = { ...localAuthor, updatedAt: Date.now() }
-        const startLine = prefixLineCount + 1
-        const editedEndLine = nextLineCount - suffixLineCount
-        for (let line = startLine; line <= editedEndLine; line++) {
-          nextAttributions[String(line)] = editedAttribution
-          nextLocalAttributions[String(line)] = editedAttribution
-        }
+        for (const line of written) localLineAttributions[String(line)] = editedAttribution
+        rebuildLineAttributions(nextValue)
 
-        lineAttributions = nextAttributions
-        localLineAttributions = nextLocalAttributions
-
+        const previousLineCount = getLineCount(previousValue)
+        const nextLineCount = getLineCount(nextValue)
+        const startLine = Math.max(1, firstLine || 1)
+        let lastWritten = startLine
+        for (const line of written) lastWritten = Math.max(lastWritten, line)
         return {
           startLine,
-          endLine: previousLineCount === nextLineCount
-            ? Math.max(startLine, editedEndLine)
-            : nextLineCount,
+          endLine: previousLineCount === nextLineCount ? lastWritten : nextLineCount,
           lineCount: nextLineCount
         }
       }
@@ -3733,6 +3711,16 @@ export function getP2pmdEditorPage () {
 
           if (newContent === input.value) return
 
+          // Someone else's change: every list moves with it, and a line it
+          // wrote on is no longer this person's.
+          const changes = lineChangesFromDelta(input.value, event.changes.delta)
+          moveLineAuthors(changes.moved)
+          for (const line of changes.written) {
+            const key = String(line)
+            delete localLineAttributions[key]
+            if (documentLineAttributions[key]?.clientId === clientId) delete documentLineAttributions[key]
+          }
+
           let selectionStart = Number.isFinite(input.selectionStart) ? input.selectionStart : 0
           let selectionEnd = Number.isFinite(input.selectionEnd) ? input.selectionEnd : selectionStart
           let position = 0
@@ -3757,8 +3745,9 @@ export function getP2pmdEditorPage () {
             Math.max(0, Math.min(selectionStart, newContent.length)),
             Math.max(0, Math.min(selectionEnd, newContent.length))
           )
-          mergeLineAttributionsFromPeerList(latestPeerList, false)
+          rebuildLineAttributions(newContent)
           renderLineGutter()
+          schedulePresenceSend()
           scheduleActiveViewRender()
           notifyNative('p2pmd-document-updated', {
             contentLength: newContent.length
