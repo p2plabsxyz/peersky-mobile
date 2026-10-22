@@ -9,8 +9,12 @@ const screen = await readFile(new URL('../../app/peerchat/PeerChatScreen.tsx', i
 // do. What keeps it from being a free-for-all is that the handshake already
 // said who is on the other end of the connection.
 
-test('a peer carries the full key the handshake established', () => {
-  assert.match(service, /key: connection\.remotePublicKey\n\s+\? b4a\.toString\(connection\.remotePublicKey, 'hex'\)\.toLowerCase\(\)/)
+test('a peer carries the full key the handshake established, or proved inside it on the local network', () => {
+  assert.match(service, /const key = provenKey \|\| connection\.remotePublicKey\n/)
+  assert.match(service, /key: key\n\s+\? b4a\.toString\(key, 'hex'\)\.toLowerCase\(\)/)
+  // A proven key comes from the identity gate alone, never from what the
+  // peer says about itself.
+  assert.match(service, /this\.identifyOnLan\(connection\)\n\s+\.then\(\(remoteKey\) => \{\n\s+if \(remoteKey && !connection\.destroyed && !this\.closed\) this\.handleConnection\(connection, info, remoteKey\)/)
   assert.match(service, /this\.localKey = sdk\.publicKey \? b4a\.toString\(sdk\.publicKey, 'hex'\)\.toLowerCase\(\) : ''/)
 })
 

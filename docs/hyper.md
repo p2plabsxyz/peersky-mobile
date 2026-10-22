@@ -329,6 +329,12 @@ exactly the ones that can already open each other's private files.
   `HMAC-SHA256(HMAC-SHA256(key, "peersky-private-sync/1 proof key"), "peersky-private-sync/1 proof\n" + handshake hash + "\n" + its own network key)`.
   It is good on that connection alone and cannot be bounced back at its
   sender, the same construction as PeerChat's room proofs.
+- On the local network with hyperdht-mdns 2, the connection's key is made up
+  for that network, so each device first proves its own network key inside
+  the channel with `identityGate` (context `peersky-device-sync`, the private
+  key as the shared secret), and only to a device that holds the same key.
+  The proven key is the one the list of devices goes by. A sync channel the
+  other side opens before this side's gate has finished is held until it has.
 - Only after the other side's proof checks out does a device send its hello:
   `phone` or `desktop`, the private drives it writes (up to 200, a drive made
   under another key with that key), and on the phone whether it is on a
@@ -371,6 +377,26 @@ files under `src/protocols/`, and both test the same vector: key `0f` x32,
 handshake hash `0e` x64 and sender `0d` x32 give the topic
 `e702b30ef6aaa58eb3694a8888c6ddeda12383813d5121dec0db65df9b9c3cc8` and the
 proof `8beb43aaede8fa35e6b0558e88ebeae7c1b3e809c00a68ec98e698fdae438c6c`.
+
+## Local network
+
+Each Hyper store that goes on the network, the public one and the private one
+shared with your devices, also runs a LAN instance
+(`backend/hyper/lan-discovery.mjs`, `@p2plabs/hyperdht-mdns`), so drives,
+PeerChat and P2PMD work over Wi-Fi with no internet. With hyperdht-mdns 2:
+
+- mDNS says only that a device is at this address and port, under a name made
+  up for the run. Topics are found through the LAN DHT, which talks to local
+  addresses only.
+- The LAN instance connects with a key made up for each network, never the
+  store's key, which is also the PeerChat id. PeerChat and private sync ask for
+  proof inside the channel (`identityGate`).
+- After a network change, instances bound to the old address are closed and
+  made again on the new one, with new keys, and what was joined is joined
+  again (`followNetworkChange`). With no address, as in airplane mode, nothing
+  changes until one comes back.
+- mDNS runs on `multicast-dns` over a Bare UDP socket
+  (`backend/hyper/mobile-mdns.mjs`).
 
 ## Developer notes
 

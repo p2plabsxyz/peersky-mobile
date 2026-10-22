@@ -7,6 +7,7 @@ import {
   writeFileSync
 } from 'node:fs'
 import b4a from 'b4a'
+import HyperDHTmDNS from '@p2plabs/hyperdht-mdns'
 
 import {
   decodeMessagePayload,
@@ -48,7 +49,7 @@ import {
 } from './protocol.mjs'
 import { RPC_APP_PEERCHAT_CHANGED } from '../rpc/commands.mjs'
 import { notifyApp } from '../rpc/notify.mjs'
-import { attachPeerChatTransport } from './transport.mjs'
+import { attachPeerChatTransport, holdPeerChatTransport } from './transport.mjs'
 import { createPeerPresence } from './presence.mjs'
 import {
   checkSignedRemovals,
@@ -298,8 +299,11 @@ function soleKeyFor (peers, shortId) {
 }
 
 export class PeerChatService {
-  constructor ({ sdk, storagePath, incomingPath = '' }) {
+  constructor ({ sdk, storagePath, incomingPath = '', identityGate = HyperDHTmDNS.identityGate }) {
     this.sdk = sdk
+    // How a device on the local network proves who it is. See handleConnection.
+    this.identityGate = typeof identityGate === 'function' ? identityGate : null
+    this.signingKeysLoading = Promise.resolve()
     this.storagePath = storagePath
     this.stateFilePath = `${storagePath}/peerchat-mobile.json`
     // Where a restore leaves PeerChat from another of this person's devices.
@@ -411,7 +415,7 @@ export class PeerChatService {
     this.takeIncomingTransfer()
     // Where this person's other devices are found, with or without a room.
     this.joinDevicesTopic()
-    this.loadSigningKeys().catch(() => {})
+    this.signingKeysLoading = this.loadSigningKeys().catch(() => {})
 
     // Nothing listens for the swarm's topic changes. Anyone can announce a
     // topic, so being found under one opens nothing, and our proofs already go
@@ -1460,15 +1464,25 @@ export class PeerChatService {
 
   // A connection's peer, before its transport: the key the handshake
   // established, and nothing the peer says about itself.
-  newPeer (connection) {
+  // provenKey: the long-term key a device on the local network proved inside
+  // the channel, which stands for it there as the connection key does on the
+  // internet.
+  newPeer (connection, provenKey = null) {
+    const key = provenKey || connection.remotePublicKey
     return {
       connection,
-      id: connection.remotePublicKey
-        ? b4a.toString(connection.remotePublicKey, 'hex').slice(0, 8).toLowerCase()
+      id: key
+        ? b4a.toString(key, 'hex').slice(0, 8).toLowerCase()
         : 'peer',
-      // The whole key the handshake established. Nothing a peer says about
-      // itself can change this, which is what makes it worth checking against.
-      key: connection.remotePublicKey
+      // The whole key the handshake established, or proven inside it. Nothing
+      // a peer says about itself can change this, which is what makes it
+      // worth checking against.
+      key: key
+        ? b4a.toString(key, 'hex').toLowerCase()
+        : '',
+      // The key this connection was made with, which proofs made for the
+      // connection name. The same as key except on the local network.
+      connectionKey: connection.remotePublicKey
         ? b4a.toString(connection.remotePublicKey, 'hex').toLowerCase()
         : '',
       rooms: [],
@@ -1491,7 +1505,26 @@ export class PeerChatService {
     }
   }
 
-  handleConnection (connection, info = {}) {
+  // provenKey: the long-term key a device on the local network proved inside
+  // the channel. (Not on info: hyperswarm's peer info has a proven flag of
+  // its own.)
+  handleConnection (connection, info = {}, provenKey = null) {
+    // On the local network a connection's key is made up for that network and
+    // says nothing about who is on the other end. Who they are is proven
+    // inside the channel, and only to someone who shares a room or this
+    // person's device link (identityGate from @p2plabs/hyperdht-mdns). From
+    // then on they are the person they proved to be.
+    if (info.lan && info.ephemeral && this.identityGate && !provenKey) {
+      connection.on('error', () => {})
+      const release = holdPeerChatTransport(connection)
+      this.identifyOnLan(connection)
+        .then((remoteKey) => {
+          if (remoteKey && !connection.destroyed && !this.closed) this.handleConnection(connection, info, remoteKey)
+        })
+        .catch(() => {})
+        .finally(release)
+      return
+    }
     const sharedRooms = getSharedPeerChatRooms(info.topics, this.discoveryKeys)
     const hasTopics = Array.isArray(info.topics)
       ? info.topics.length > 0
@@ -1504,10 +1537,10 @@ export class PeerChatService {
     const foundOurDevices = Boolean(this.devicesTopicHex) && [...(info.topics || [])].some((topic) => {
       try { return b4a.toString(topic, 'hex').toLowerCase() === this.devicesTopicHex } catch { return false }
     })
-    if (this.closed || (sharedRooms.length === 0 && !foundOurDevices &&
+    if (this.closed || (!provenKey && sharedRooms.length === 0 && !foundOurDevices &&
       (hasTopics || (this.discoveryKeys.size === 0 && !this.devicesTopicHex)))) return
 
-    const peer = this.newPeer(connection)
+    const peer = this.newPeer(connection, provenKey)
     this.pendingPeers.set(connection, peer)
 
     const transport = attachPeerChatTransport(
@@ -1688,8 +1721,10 @@ export class PeerChatService {
       // Another of this person's devices, shown by the link, room or no room.
       // Our proofs and our profile go to it, and the proof in the profile
       // makes it a sibling, which then gets every room.
+      // Proofs are made with the sender's connection key, which on the local
+      // network is not the key they go by (see handleConnection).
       if (!peer.ownDevice && this.link &&
-          checkDevicesProof(this.link, peer.connection.handshakeHash, peer.key, message.devices)) {
+          checkDevicesProof(this.link, peer.connection.handshakeHash, peer.connectionKey || peer.key, message.devices)) {
         peer.ownDevice = true
         this.shareTopics(peer)
         this.sendProfile(peer)
@@ -1702,7 +1737,7 @@ export class PeerChatService {
         // proof made with its key for this connection.
         const roomKey = this.discoveryKeys.get(topic)
         if (!roomKey || peer.rooms.includes(roomKey) || added.includes(roomKey)) continue
-        if (!checkRoomProof(roomKey, peer.connection.handshakeHash, peer.key, entry.proof)) continue
+        if (!checkRoomProof(roomKey, peer.connection.handshakeHash, peer.connectionKey || peer.key, entry.proof)) continue
         // A direct chat this person left: the device holding it hears so.
         if (!this.rooms.has(roomKey)) {
           if (this.farewells.has(roomKey) && !farewells.includes(roomKey)) farewells.push(roomKey)
@@ -4618,6 +4653,28 @@ export class PeerChatService {
       if (peer === exceptPeer || !peer.rooms.includes(roomKey)) continue
       this.sendRoomChain(peer, roomKey)
     }
+  }
+
+  // Who is on the other end of a local network connection, if they share a
+  // room with this phone (a left direct chat counts, so its leave can still
+  // reach them) or are another of this person's devices. Null otherwise:
+  // they learn nothing about who this is either. Started at once, with the
+  // signing keys still loading if need be, as the other side's gate is
+  // refused while this side has none open.
+  async identifyOnLan (connection) {
+    const result = await this.identityGate(connection, {
+      keyPair: this.signingKeysLoading.then(() => this.signingKeys),
+      secrets: this.lanSecrets(),
+      context: 'peersky-chat'
+    })
+    return result?.publicKey || null
+  }
+
+  lanSecrets () {
+    const keys = new Set([...this.rooms.keys(), ...this.farewells.keys()])
+    const secrets = [...keys].filter((key) => /^[0-9a-f]{64}$/.test(key)).map((key) => b4a.from(key, 'hex'))
+    if (this.link?.key) secrets.push(b4a.from(this.link.key, 'hex'))
+    return secrets
   }
 
   // The network key's pair, which is the one hyper-sdk connects with.

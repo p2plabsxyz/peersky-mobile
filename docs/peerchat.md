@@ -11,6 +11,12 @@ and transport formats as PeerSky Desktop.
 - Create a group or join one with its 64-character room key or an invite link,
   which says who made the room too.
 - Exchange encrypted messages with mobile and desktop peers.
+- On a local network with hyperdht-mdns 2, connect with a key made up for the
+  network and prove this phone's own key inside the encrypted channel only to
+  people it shares a room with (or a direct chat it left) and to the person's
+  other devices (`identifyOnLan` in `backend/peerchat/service.mjs`). Room
+  proofs name the connection's key, as on the internet; the rest goes by the
+  proven key.
 - Rooms and direct messages made on 0.1.2 or later change their message key
   every hour, so a key someone gets later cannot read what came before.
 - Every message is signed by whoever wrote it, and passed on from device to
