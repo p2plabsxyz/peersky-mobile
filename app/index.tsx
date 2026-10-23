@@ -123,6 +123,7 @@ import {
 } from './browser-permissions.mjs'
 import { getBrowserShortcutTitleFontSize } from './browser-home-layout.mjs'
 import { createHyperBridgeScript, withHyperBridgeScript } from './hyper-bridge.mjs'
+import { resumeBareInBackground } from './bare-background.mjs'
 import {
   createHyperBridgeReply,
   createHyperBridgeSettleScript,
@@ -479,6 +480,7 @@ export default function App () {
   const workletRef = useRef<Worklet | null>(null)
   const rpcRef = useRef<RPC | null>(null)
   const workletGenerationRef = useRef(0)
+  const stopBareBackgroundRef = useRef<(() => void) | null>(null)
   const appStateRef = useRef(AppState.currentState)
   const browserWebViewRefs = useRef(new Map<string, ComponentRef<typeof WebView>>())
   // The WebViews that have finished a page, by native view tag. One that
@@ -840,6 +842,8 @@ export default function App () {
         if (workletGenerationRef.current !== generation) return
         if (workletRef.current === worklet) workletRef.current = null
         if (rpcRef.current === rpc) rpcRef.current = null
+        stopBareBackgroundRef.current?.()
+        stopBareBackgroundRef.current = null
         worklet?.terminate()
       }, 0)
     }
@@ -1244,6 +1248,9 @@ export default function App () {
 
       workletRef.current = worklet
       rpcRef.current = rpc
+      // Without this iOS kills the app half a minute after it leaves the
+      // screen (app/bare-background.mjs).
+      if (Platform.OS === 'ios') stopBareBackgroundRef.current = resumeBareInBackground(worklet, AppState)
 
       const initResponse = await callRpc(RPC_HYPER_INIT, {})
 
