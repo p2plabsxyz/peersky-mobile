@@ -732,6 +732,19 @@ export const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700'
   },
+  p2pmdHostAway: {
+    backgroundColor: '#3a3122',
+    borderBottomColor: '#6b5a32',
+    borderBottomWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 8
+  },
+  p2pmdHostAwayText: {
+    color: '#f5dca8',
+    fontSize: 13,
+    fontWeight: '600',
+    lineHeight: 18
+  },
   p2pmdUnsavedDot: {
     backgroundColor: '#f5a524',
     borderRadius: 4,
@@ -1138,6 +1151,8 @@ export const p2pmdLight = StyleSheet.create({
   p2pmdWorkspaceKey: { color: '#1f6fd1' },
   p2pmdWorkspaceUrl: { color: '#687086' },
   p2pmdWorkspaceSyncStatus: { color: '#687086' },
+  p2pmdHostAway: { backgroundColor: '#fdf0d8', borderBottomColor: '#f0d9a8' },
+  p2pmdHostAwayText: { color: '#7a5312' },
   p2pmdWorkspaceWebView: { backgroundColor: '#ffffff' },
   p2pmdWorkspaceLoader: { backgroundColor: '#ffffff' },
   p2pmdPublishedUrlLabel: { color: '#1a5fb4' },

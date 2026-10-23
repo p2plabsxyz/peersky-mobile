@@ -366,7 +366,7 @@ describe('p2pmd mobile editor page routing', () => {
     const saved = Y.encodeStateAsUpdate(host)
     host.getText('content').insert(3, 'L2 typed before the crash\n')
     const phone = copy(host, 2)
-    phone.getText('content').insert(text(phone).length, 'L3 from the phone while the host was away\n')
+    phone.getText('content').insert(text(phone).length, 'L3 from the phone, not yet sent when the host went\n')
 
     const restarted = new Y.Doc()
     restarted.clientID = 3
@@ -378,7 +378,7 @@ describe('p2pmd mobile editor page routing', () => {
     const { shared, missing } = compareWithHost(Y, phone, Y.encodeStateAsUpdate(restarted))
     assert.equal(shared, true)
     Y.applyUpdate(restarted, missing)
-    assert.equal(text(restarted), 'L1\nL2 typed before the crash\nL3 from the phone while the host was away\n')
+    assert.equal(text(restarted), 'L1\nL2 typed before the crash\nL3 from the phone, not yet sent when the host went\n')
 
     // Nothing to send when the host has it all, and a note the host started
     // again from its text is left alone rather than written out twice.
@@ -388,6 +388,79 @@ describe('p2pmd mobile editor page routing', () => {
     assert.deepEqual(compareWithHost(Y, phone, Y.encodeStateAsUpdate(fresh)), { shared: false, missing: null })
 
     // It runs on every connection, the first one and every reconnect.
-    assert.match(html, /source[.]onopen = \(\) => \{[^}]*\}\s*void syncWithHost\(\)/)
+    assert.match(html, /source[.]onopen = \(\) => \{[^}]*\}\s*hostReachable = true\s*if \(seededFromHost\) void syncWithHost\(\)/)
+  })
+
+  // A guest typed into a note whose host was gone. It reached nobody, and was
+  // gone once the host came back: the guest had started a history of its own,
+  // one the host's never merges. A guest writes only while the host is there.
+  it('lets a guest write only while the host is there', () => {
+    const html = getP2pmdEditorPage()
+    assert.match(html, /function canEdit\(\) \{\s*return roomRole === 'host' \|\| \(hostReachable && seededFromHost\)/)
+    assert.match(html, /let hostReachable = roomRole === 'host'\s*let seededFromHost = roomRole === 'host'/)
+    assert.match(html, /input\.readOnly = !editable/)
+    // Typing, the toolbar, templates and slides all go through these two.
+    assert.match(html, /function scheduleDocumentSave\(\) \{\s*if \(!canEdit\(\)\) \{/)
+    assert.match(html, /if \(!button \|\| viewMode !== 'edit' \|\| !canEdit\(\)\) return false/)
+    // Only the host starts a history from text it already has, and a guest
+    // shows the host's note as it is.
+    assert.match(html, /if \(roomRole === 'host' && !getYTextSnapshot\(\) && input\.value\)/)
+    assert.match(html, /if \(yjsContent \|\| !input\.value \|\| roomRole !== 'host'\)/)
+    assert.match(html, /if \(roomRole !== 'host'\) seededFromHost = true/)
+    // The room's event stream says when the host is there.
+    const events = html.slice(html.indexOf('function connectEvents()'), html.indexOf('async function initializeEditor()'))
+    assert.match(events, /source\.onerror = \(\) => \{[\s\S]*?if \(roomRole !== 'host'\) \{\s*hostReachable = false\s*updateEditable\(\)\s*setHostAway\(true\)\s*\/\/[^\n]*\n\s*notifyNative\('p2pmd-peers', \{ count: 0 \}\)/)
+    // A guest whose copy no longer shares the host's history takes the host's.
+    const sync = html.slice(html.indexOf('async function syncWithHost()'), html.indexOf('async function flushYjsUpdate()'))
+    assert.match(sync, /if \(!shared\) \{\s*if \(roomRole !== 'host'\) \{\s*seededFromHost = false\s*updateEditable\(\)\s*void seedFromHost\(\)/)
+  })
+
+  it('locks a guest\'s note at once and tells the app only once the host has been gone a moment', async () => {
+    const html = getP2pmdEditorPage()
+    const source = html.slice(html.indexOf('function canEdit()'), html.indexOf('// The host\'s copy, taken whole'))
+    const notes = []
+    const classes = new Set()
+    const input = { readOnly: false }
+    const document = { body: { classList: { toggle: (name, on) => on ? classes.add(name) : classes.delete(name) } } }
+    // eslint-disable-next-line no-new-func
+    const page = new Function('input', 'document', 'notifyNative', `
+      const roomRole = 'client'
+      let hostReachable = true
+      let seededFromHost = true
+      let hostAway = false
+      let hostAwayTimer = null
+      const HOST_AWAY_NOTICE_MS = 30
+      ${source}
+      return { canEdit, updateEditable, setHostAway, reach (value) { hostReachable = value } }
+    `)(input, document, (type, details) => notes.push([type, details]))
+    const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+    page.updateEditable()
+    assert.equal(input.readOnly, false)
+
+    // A drop that comes straight back shows nothing.
+    page.reach(false)
+    page.updateEditable()
+    page.setHostAway(true)
+    assert.equal(input.readOnly, true)
+    assert.ok(classes.has('host-away'))
+    page.reach(true)
+    page.updateEditable()
+    page.setHostAway(false)
+    await wait(60)
+    assert.deepEqual(notes, [])
+    assert.equal(input.readOnly, false)
+
+    // Gone for longer: the app is told, and told again when the host is back.
+    page.reach(false)
+    page.updateEditable()
+    page.setHostAway(true)
+    await wait(60)
+    assert.deepEqual(notes, [['p2pmd-host-away', { away: true }]])
+    page.reach(true)
+    page.updateEditable()
+    page.setHostAway(false)
+    assert.deepEqual(notes.at(-1), ['p2pmd-host-away', { away: false }])
+    assert.equal(input.readOnly, false)
   })
 })

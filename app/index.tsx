@@ -409,7 +409,6 @@ type RpcResponse = {
   port?: number
   localUrl?: string
   room?: P2pmdRoom | null
-  warning?: string | null
   noHost?: boolean
   notes?: P2pmdRoomHistoryEntry[]
   // Offline folders, from RPC_HYPER_OFFLINE_LIST.
@@ -794,6 +793,12 @@ export default function App () {
   }, [activeTab, browserSource.kind, isBooting])
   const isP2pmdLandscapeSlides = p2pmdViewMode === 'slides' && browserWindowWidth > browserWindowHeight
   const [p2pmdSyncStatus, setP2pmdSyncStatus] = useState('Ready')
+  // The editor says when a joined note's host has been gone a moment; until
+  // it is back the note is read only.
+  const [p2pmdHostAway, setP2pmdHostAway] = useState(false)
+  // A join waits up to 15 seconds for the host, and the button says so
+  // rather than sitting there greyed out.
+  const [isP2pmdJoining, setIsP2pmdJoining] = useState(false)
   const [p2pmdSetupError, setP2pmdSetupError] = useState<string | null>(null)
   const [p2pmdPublishUrl, setP2pmdPublishUrl] = useState<string | null>(null)
   const [isP2pmdPublishing, setIsP2pmdPublishing] = useState(false)
@@ -3514,6 +3519,7 @@ export default function App () {
     setP2pmdEditorHtml(null)
     setP2pmdSetupError(null)
     setP2pmdSyncStatus(t('Joining room...'))
+    setIsP2pmdJoining(true)
 
     try {
       const response = await callRpc(RPC_P2PMD_ROOM_JOIN, {
@@ -3522,7 +3528,9 @@ export default function App () {
       })
 
       if (!response.ok || !response.room) {
-        const message = response.error || t('Failed joining P2PMD room')
+        const message = response.noHost
+          ? t('Nobody has this note open right now. Try again when its host opens it.')
+          : response.error || t('Failed joining P2PMD room')
         setP2pmdSetupError(message)
         setP2pmdSyncStatus('Ready')
         setStatus(message)
@@ -3538,7 +3546,7 @@ export default function App () {
       setP2pmdRoom(response.room)
       setP2pmdUrl(response.room.localUrl)
       rememberP2pmdRoom(response.room.key, 'client')
-      setP2pmdSyncStatus(response.warning || t('Joining room page...'))
+      setP2pmdSyncStatus(t('Joining room page...'))
       setStatus('P2PMD room joined')
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
@@ -3547,6 +3555,7 @@ export default function App () {
       setStatus(message)
     } finally {
       setIsLoading(false)
+      setIsP2pmdJoining(false)
     }
   }
 
@@ -4002,6 +4011,9 @@ export default function App () {
             setP2pmdParticipants(parsed.count)
           }
           break
+        case 'p2pmd-host-away':
+          setP2pmdHostAway(parsed.away === true)
+          break
         case 'p2pmd-document-loaded':
           setP2pmdSyncStatus('Loaded')
           setStatus('P2PMD document loaded')
@@ -4104,6 +4116,10 @@ export default function App () {
     () => p2pmdPeerDisplayName,
     [p2pmdRoom?.key, p2pmdRoom?.role, p2pmdUrl, p2pmdRoom?.token, p2pmdEditorMount]
   )
+  // A new editor page starts out knowing nothing of the host, and says so.
+  useEffect(() => {
+    setP2pmdHostAway(false)
+  }, [p2pmdRoom?.key, p2pmdRoom?.role, p2pmdUrl, p2pmdEditorMount])
   const browserBookmarkActionAvailable = canBookmarkBrowserPage(
     browserSource.kind,
     browserCurrentUrl
@@ -4750,6 +4766,13 @@ export default function App () {
             <Text style={[styles.p2pmdMetaButtonText, p2pmdTheme?.p2pmdMetaButtonText]}>{t('Leave')}</Text>
           </Pressable>
         </View>}
+        {p2pmdHostAway && p2pmdRoom.role !== 'host' && !isP2pmdLandscapeSlides && (
+          <View accessibilityLiveRegion='polite' style={[styles.p2pmdHostAway, p2pmdTheme?.p2pmdHostAway]}>
+            <Text style={[styles.p2pmdHostAwayText, p2pmdTheme?.p2pmdHostAwayText]}>
+              {t('The host is away. You can read the note, and editing comes back when they return.')}
+            </Text>
+          </View>
+        )}
         <View style={styles.p2pmdWorkspaceEditor}>
           <WebView
             key={`${p2pmdEditorBaseUrl}:${p2pmdEditorHtml.length}:${p2pmdEditorMount}`}
@@ -5649,7 +5672,7 @@ export default function App () {
                           onPress={() => void onP2pmdRoomJoin()}
                           disabled={isBooting || isLoading || !p2pmdJoinKey.trim()}
                         >
-                          <Text style={[styles.p2pmdJoinActionText, p2pmdTheme?.p2pmdJoinActionText]}>{t('Join Note')}</Text>
+                          <Text style={[styles.p2pmdJoinActionText, p2pmdTheme?.p2pmdJoinActionText]}>{isP2pmdJoining ? t('Looking for the host...') : t('Join Note')}</Text>
                         </Pressable>
                       </View>
 
