@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events'
 import { beforeEach, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import HyperDHTmDNS from '@p2plabs/hyperdht-mdns'
 
 import {
   addLANReadinessBarrier,
@@ -14,7 +15,7 @@ describe('Hyper LAN discovery', () => {
     resetLANDiscovery()
   })
 
-  it('attaches hyperdht-mdns with the Hyper SDK swarm identity', async () => {
+  it('attaches hyperdht-mdns, with the Hyper SDK swarm key only for version 1', async () => {
     const keyPair = { publicKey: Buffer.alloc(32, 1), secretKey: Buffer.alloc(64, 2) }
     const runtime = { swarm: { keyPair } }
     const instance = new FakeLAN('192.168.1.25', 49799)
@@ -33,7 +34,10 @@ describe('Hyper LAN discovery', () => {
       }
     })
 
-    assert.equal(createdOptions.keyPair, keyPair)
+    // Version 2 makes up a key for each network: the store's key, which is
+    // also PeerChat's id, stays off the LAN.
+    if (typeof HyperDHTmDNS.identityGate === 'function') assert.equal('keyPair' in createdOptions, false)
+    else assert.equal(createdOptions.keyPair, keyPair)
     assert.equal(attachedOptions.lan, instance)
     assert.deepEqual(status, {
       available: true,

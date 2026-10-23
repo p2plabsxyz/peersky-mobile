@@ -463,7 +463,9 @@ describe('mobile platform runtime configuration', () => {
   it('includes the LAN discovery runtime dependency', async () => {
     const packageJson = JSON.parse(await readFile(repoFile('package.json'), 'utf8'))
 
-    assert.equal(packageJson.dependencies?.['@p2plabs/hyperdht-mdns'], '^1.3.0')
+    assert.equal(packageJson.dependencies?.['@p2plabs/hyperdht-mdns'], '^2.0.0')
+    // hyperdht-mdns 2 runs mDNS on it, over a Bare socket (mobile-mdns.mjs).
+    assert.equal(typeof packageJson.dependencies?.['multicast-dns'], 'string')
     assert.equal(typeof packageJson.dependencies?.['bare-abort-controller'], 'string')
     assert.equal(typeof packageJson.dependencies?.['bare-buffer'], 'string')
     assert.equal(typeof packageJson.dependencies?.['bare-dgram'], 'string')

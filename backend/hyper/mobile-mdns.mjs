@@ -1,13 +1,23 @@
 import dgram from 'bare-dgram'
 import BonjourModule from 'bonjour-service'
+import multicastDNS from 'multicast-dns'
 
 const DefaultBonjour = BonjourModule.Bonjour || BonjourModule
 
 export function createMobileMDNSOptions (host, options = {}) {
   const createSocket = options.createSocket || ((socketOptions) => dgram.createSocket(socketOptions))
   const Bonjour = options.Bonjour || DefaultBonjour
+  const createMulticastDNS = options.multicastDNS || multicastDNS
 
   return {
+    // hyperdht-mdns 2 runs mDNS itself on multicast-dns, on this socket.
+    createMDNS: (mdnsOptions = {}) => createMulticastDNS({
+      ...mdnsOptions,
+      bind: '0.0.0.0',
+      interface: host,
+      socket: addMulticastSupport(createSocket({ reuseAddress: true }))
+    }),
+    // hyperdht-mdns 1 used bonjour-service.
     createBonjour: (onError) => {
       const socket = addMulticastSupport(createSocket({ reuseAddress: true }))
       const bonjour = new Bonjour({

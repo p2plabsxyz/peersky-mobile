@@ -94,13 +94,19 @@ export async function hostNoteOnLan (lan, { keyPair, secure, port = null, onConn
       portServer = null
     })
   }
+  // hyperdht-mdns 2 finds the note by its key on the LAN DHT (findPeer), so
+  // there is nothing more to announce. Version 1 is told the note's topic for
+  // its mDNS record.
   const topic = noteTopic(keyPair.publicKey)
-  try {
-    lan.join(topic, { server: true, client: false })
-  } catch (error) {
-    await server.close().catch(() => {})
-    await portServer?.close().catch(() => {})
-    throw error
+  const joined = typeof lan.findPeer !== 'function'
+  if (joined) {
+    try {
+      lan.join(topic, { server: true, client: false })
+    } catch (error) {
+      await server.close().catch(() => {})
+      await portServer?.close().catch(() => {})
+      throw error
+    }
   }
   let closed = false
   return {
@@ -110,9 +116,11 @@ export async function hostNoteOnLan (lan, { keyPair, secure, port = null, onConn
     async close () {
       if (closed) return
       closed = true
-      try {
-        lan.leave(topic)
-      } catch {}
+      if (joined) {
+        try {
+          lan.leave(topic)
+        } catch {}
+      }
       await server.close().catch(() => {})
       await portServer?.close().catch(() => {})
     }
@@ -123,8 +131,13 @@ export async function hostNoteOnLan (lan, { keyPair, secure, port = null, onConn
  * The port the host at address keeps the note on, or null from a host that
  * does not say, as an older PeerSky, or not in time.
  */
-export function askNotePortOnLan (lan, { publicKey, keyPair = null, address, timeoutMs = LAN_PORT_MS }) {
-  if (!usable(lan)) return Promise.resolve(null)
+export async function askNotePortOnLan (lan, { publicKey, keyPair = null, address, timeoutMs = LAN_PORT_MS }) {
+  if (!usable(lan)) return null
+  // The node that answered for the note may only relay to it, and not know
+  // the port's key: that one is looked up on its own.
+  if (typeof lan.findPeer === 'function') {
+    address = (await lan.findPeer(notePortKeyPair(publicKey).publicKey, { timeout: timeoutMs }).catch(() => null)) || address
+  }
   return new Promise((resolve) => {
     let done = false
     let socket = null
@@ -168,6 +181,11 @@ export function findNoteOnLan (lan, publicKey, { timeoutMs = LAN_FIND_MS } = {})
   if (typeof lan.dht.toArray === 'function' && lan.dht.toArray().length === 0) {
     timeoutMs = Math.min(timeoutMs, LAN_FIND_QUICK_MS)
   }
+  // hyperdht-mdns 2 says nothing about topics over mDNS: the note's host is
+  // found by its key on the LAN DHT, as Holesail finds it on the internet.
+  // The address is a node that answered for it, the host's own or one that
+  // relays to it.
+  if (typeof lan.findPeer === 'function') return lan.findPeer(publicKey, { timeout: timeoutMs }).catch(() => null)
   const topic = noteTopic(publicKey)
   return new Promise((resolve) => {
     let done = false
