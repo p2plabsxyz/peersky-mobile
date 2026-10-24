@@ -90,7 +90,7 @@ import {
   removePeerChatRoomBan,
   resolvePeerChatCreatorKey
 } from './room-moderation.mjs'
-import { PRE_JOINED_PEERCHAT_ROOM_KEY } from './rooms.mjs'
+import { PRE_JOINED_PEERCHAT_ROOM_KEY, PRE_JOINED_PEERCHAT_ROOM_NAME } from './rooms.mjs'
 import {
   checkProfileProof,
   createLink,
@@ -621,7 +621,7 @@ export class PeerChatService {
       if (this.activeRoomCount() >= MAX_ROOMS) throw new Error(`PeerChat supports up to ${MAX_ROOMS} rooms.`)
       room = {
         roomKey: normalized,
-        name: `${normalized.slice(0, 8)}...`,
+        name: normalized === PRE_JOINED_PEERCHAT_ROOM_KEY ? PRE_JOINED_PEERCHAT_ROOM_NAME : `${normalized.slice(0, 8)}...`,
         bio: '',
         link: '',
         avatar: null,
@@ -676,11 +676,14 @@ export class PeerChatService {
       })
   }
 
+  // What the app's icon and the PeerChat tile count. A muted chat counts only
+  // its unread mentions, which still notify, as WhatsApp and Signal leave muted
+  // chats out; its own count stays on its row in the chat list.
   getUnreadTotal () {
     let total = 0
     for (const room of this.rooms.values()) {
       if (room.movedTo) continue
-      total += normalizeUnreadCount(room.unreadCount)
+      total += normalizeUnreadCount(room.isMuted === true ? room.unreadMentions : room.unreadCount)
       if (total >= Number.MAX_SAFE_INTEGER) return Number.MAX_SAFE_INTEGER
     }
     return total

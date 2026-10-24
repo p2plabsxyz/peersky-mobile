@@ -46,6 +46,8 @@ test('PeerChat onboarding prejoins the welcome room before saving a unique profi
   assert.equal(result.profile.bio, 'Hello')
   assert.equal(result.rooms.length, 1)
   assert.equal(result.rooms[0].roomKey, PRE_JOINED_PEERCHAT_ROOM_KEY)
+  // Named from the start, offline too, not the start of its key.
+  assert.equal(result.rooms[0].name, 'Peer-to-Peer Republic')
   assert.equal(result.rooms[0].lastMessage, null)
   assert.deepEqual(sdk.joined, [derivePeerChatTopic(PRE_JOINED_PEERCHAT_ROOM_KEY).toString('hex')])
   await service.close()
@@ -345,6 +347,25 @@ test('PeerChat applies only the newest reaction event from a desktop peer', asyn
 
   const snapshot = await service.getSnapshot({ roomKey: room.roomKey, version: -1 })
   assert.deepEqual(snapshot.messages[0].reactions, [{ emoji: '🔥', count: 1, self: false }])
+  await service.close()
+})
+
+test('a muted chat keeps its count on its row, but the app\'s icon counts only its mentions', async (t) => {
+  const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-muted-badge-'))
+  t.after(() => rm(storagePath, { recursive: true, force: true }))
+  const service = await new PeerChatService({ sdk: createFakeSdk(), storagePath }).start()
+  service.setProfile({ username: 'Alice' })
+  await service.joinRoom({ roomKey: ROOM_KEY })
+  const room = service.rooms.get(ROOM_KEY)
+  room.unreadCount = 5
+  room.unreadMentions = 0
+  assert.equal(service.getUnreadTotal(), 5)
+  service.setRoomMuted({ roomKey: ROOM_KEY, muted: true })
+  assert.equal(service.listRooms()[0].unreadCount, 5)
+  assert.equal(service.getUnreadTotal(), 0)
+  // A mention still notifies in a muted chat, so it still counts.
+  room.unreadMentions = 2
+  assert.equal(service.getUnreadTotal(), 2)
   await service.close()
 })
 

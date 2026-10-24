@@ -35,6 +35,7 @@ type NotificationRoom = {
   name?: string
   isMuted?: boolean
   unreadCount?: number
+  unreadMentions?: number
   lastMessage?: {
     sender?: string
     senderName?: string
@@ -324,10 +325,10 @@ export function usePeerChatNotifications ({
 
 function normalizeUnreadTotal (value: unknown, rooms: NotificationRoom[]) {
   if (Number.isSafeInteger(value) && Number(value) >= 0) return Math.min(Number(value), 9999)
+  // A muted chat counts its mentions only, as getUnreadTotal does.
   return Math.min(9999, rooms.reduce((total, room) => {
-    const unread = Number.isSafeInteger(room.unreadCount) && Number(room.unreadCount) > 0
-      ? Number(room.unreadCount)
-      : 0
+    const count = room.isMuted === true ? room.unreadMentions : room.unreadCount
+    const unread = Number.isSafeInteger(count) && Number(count) > 0 ? Number(count) : 0
     return total + unread
   }, 0))
 }
