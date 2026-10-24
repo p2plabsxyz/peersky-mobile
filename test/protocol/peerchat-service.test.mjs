@@ -847,6 +847,40 @@ test('PeerChat lists everyone who has spoken in a room, not just the connected p
   await restarted.close()
 })
 
+test('a peer cannot grow a room\'s member list without end with made-up people', async (t) => {
+  const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-members-flood-'))
+  t.after(() => rm(storagePath, { recursive: true, force: true }))
+  const service = await new PeerChatService({ sdk: createFakeSdk(), storagePath }).start()
+  service.setProfile({ username: 'Alice' })
+  await service.joinRoom({ roomKey: ROOM_KEY })
+  const peer = createFakePeer('bb00bb00', 'Bob', [])
+  const people = (from, count) => Object.fromEntries(Array.from({ length: count }, (_, index) => [
+    (from + index).toString(16).padStart(8, '0'),
+    { username: `Made Up ${from + index}`, bio: '' }
+  ]))
+  const stored = () => service.rooms.get(ROOM_KEY).members.length
+
+  // A real peer shares at most 100 people, so one list adds no more than that.
+  await service.handlePeerMessage(peer, { type: 'members-list', roomKey: ROOM_KEY, members: people(0x10000, 5000) })
+  assert.equal(stored(), 100)
+
+  // And the list a phone keeps stops at 10,000 names, however many lists come.
+  service.rooms.get(ROOM_KEY).members = Object.entries(people(0x20000, 9990))
+    .map(([id, member]) => ({ id, ...member, avatar: null }))
+  service.mergeMembersList(ROOM_KEY, people(0x30000, 100))
+  assert.equal(stored(), 10000)
+  service.mergeMembersList(ROOM_KEY, people(0x40000, 100))
+  assert.equal(stored(), 10000)
+
+  // A list already grown past that by an older version is cut back on load.
+  service.rooms.get(ROOM_KEY).members = Object.entries(people(0x50000, 10500))
+    .map(([id, member]) => ({ id, ...member, avatar: null }))
+  await service.close()
+  const restarted = await new PeerChatService({ sdk: createFakeSdk(), storagePath }).start()
+  assert.equal(restarted.rooms.get(ROOM_KEY).members.length, 10000)
+  await restarted.close()
+})
+
 test('PeerChat exchanges room member lists with peers the desktop way', async (t) => {
   const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-members-list-'))
   t.after(() => rm(storagePath, { recursive: true, force: true }))

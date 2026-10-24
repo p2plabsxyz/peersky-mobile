@@ -212,6 +212,11 @@ const MAX_PENDING_MESSAGES_PER_CONNECTION = 256
 // a room, so a big room does not fill the phone with everyone's picture.
 const MAX_SHARED_MEMBERS = 100
 const MAX_LISTED_PICTURES = 100
+// Rooms have no member limit, but the list of names a phone keeps for one
+// does. Another member's list is only their word, and without this a peer
+// could send made-up people until the phone's storage was full. A peer shares
+// at most MAX_SHARED_MEMBERS, so that is all one list may add.
+const MAX_STORED_MEMBERS = 10000
 const MAX_PENDING_DIRECT_MESSAGES = 50
 const PERSIST_DELAY_MS = 500
 const PING_INTERVAL_MS = 25_000
@@ -2633,6 +2638,7 @@ export class PeerChatService {
       return avatar
     }
     let changed = false
+    let added = 0
 
     for (const [rawId, value] of Object.entries(incoming)) {
       const id = normalizePeerChatPeerId(rawId)
@@ -2656,6 +2662,8 @@ export class PeerChatService {
         continue
       }
 
+      if (added >= MAX_SHARED_MEMBERS || members.length >= MAX_STORED_MEMBERS) continue
+      added++
       // joinedAt is deliberately not taken from a third party. It decides which
       // history a peer is sent, and only that peer gets to announce it.
       indexById.set(id, members.length)
@@ -5445,6 +5453,7 @@ function normalizePersistedRoomMembers (value, localId) {
   const members = []
   const seen = new Set()
   for (const candidate of value) {
+    if (members.length >= MAX_STORED_MEMBERS) break
     const id = normalizePeerChatPeerId(candidate?.id)
     const username = normalizeMemberName(candidate?.username)
     if (!id || id === localId || !username || seen.has(id)) continue
