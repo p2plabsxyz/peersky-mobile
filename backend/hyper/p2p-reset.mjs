@@ -1,7 +1,9 @@
 // node:fs and node:path, not the bare modules: backend/bare-imports.json maps
 // them at bundle time, and this way it runs under node tests on real folders.
-import { existsSync, lstatSync, mkdirSync, readdirSync, renameSync, rmSync } from 'node:fs'
-import { basename, join } from 'node:path'
+import { randomBytes } from 'node:crypto'
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { basename, isAbsolute, join } from 'node:path'
+import b4a from 'b4a'
 
 // Clear all P2P data takes this device's identity with it, as Reset P2P data
 // with identities does on the desktop. Everything it removes is first moved
@@ -66,6 +68,33 @@ export function listP2pResetTargets ({ identityPath, stores = [] }) {
   return [...new Set(targets)].filter((target) => isInside(root, target))
 }
 
+// A new id for each clear, kept apart from all it removes. A page that keeps
+// data of its own sees the id (window.peerskyResetId) and can tell what it
+// holds is from before a clear: PeerTunes' songs live in the page's own
+// storage, which no clear here reaches.
+export const P2P_RESET_ID_FILE = 'p2p-reset-id.json'
+
+/** This device's reset id, made the first time it is asked for. */
+export function readP2pResetId (identityPath) {
+  const root = trimSlashes(identityPath)
+  if (!root || !isAbsolute(root)) return ''
+  try {
+    const { id } = JSON.parse(readFileSync(join(root, P2P_RESET_ID_FILE), 'utf8'))
+    if (typeof id === 'string' && /^[0-9a-f]{32}$/.test(id)) return id
+  } catch {}
+  return writeP2pResetId(root)
+}
+
+function writeP2pResetId (root) {
+  const id = b4a.toString(randomBytes(16), 'hex')
+  try {
+    writeFileSync(join(root, P2P_RESET_ID_FILE), JSON.stringify({ version: 1, id }))
+    return id
+  } catch {
+    return ''
+  }
+}
+
 /** Marks a clear as asked for. Nothing is removed yet. */
 export function beginP2pReset (identityPath) {
   mkdirSync(join(trimSlashes(identityPath), P2P_RESET_DIR), { recursive: true })
@@ -99,6 +128,9 @@ export function finishP2pReset ({ identityPath, targets }) {
       }
     }
   })
+
+  // Before the mark goes, so a clear the app is killed in still gets one.
+  if (isAbsolute(root)) writeP2pResetId(root)
 
   // Under a name of its own, so the mark that a clear is waiting goes in the
   // same step as everything it moved.

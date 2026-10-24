@@ -15,3 +15,11 @@ export function createServerTokenScript (token) {
   const value = typeof token === 'string' && SERVER_TOKEN.test(token) ? token : ''
   return `window.peerskyServerToken = ${JSON.stringify(value)}; true;`
 }
+
+// This device's reset id, which changes each time its P2P data is cleared.
+// PeerTunes keeps its songs in the page's own storage, out of reach of the
+// clear, and empties them when it sees a new id (p2p-reset.mjs).
+export function createResetIdScript (resetId) {
+  const value = typeof resetId === 'string' && /^[0-9a-f]{32}$/.test(resetId) ? resetId : ''
+  return `window.peerskyResetId = ${JSON.stringify(value)}; true;`
+}

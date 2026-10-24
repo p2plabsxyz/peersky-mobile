@@ -10,6 +10,17 @@ const READINESS_BARRIER = Symbol.for('peersky.hyperdht-mdns.readiness-barrier')
 let lan = null
 let lanOpening = null
 let attachedRuntime = null
+// The private store's LAN instance and its runtime, made again on a network
+// change as the public one is.
+let privateLan = null
+let privateRuntime = null
+let privateOptions = {}
+
+// hyperdht-mdns 2 makes up a key for each network and has devices prove who
+// they are inside the channel (identityGate): the store's network key, which
+// is also PeerChat's id, never goes on the local network. Version 1 is given
+// that key, as before.
+const ownLANKeys = typeof HyperDHTmDNS.identityGate === 'function'
 let status = unavailableStatus()
 const discoveredPeers = new Map()
 const activeConnections = new Map()
@@ -67,7 +78,7 @@ async function openLANDiscovery (runtime, options) {
         host,
         mdnsOptions,
         ...(port === undefined ? {} : { port }),
-        ...(keyPair ? { keyPair } : {})
+        ...(keyPair && !ownLANKeys ? { keyPair } : {})
       })
       addLANReadinessBarrier(next, options.readinessBarrierOptions)
       wireLANEvents(next, logger)
@@ -133,12 +144,16 @@ export async function attachPrivateLANDiscovery (runtime, options = {}) {
   for (let tries = 0; tries < FALLBACK_PORT_ATTEMPTS; tries++) {
     let next = null
     try {
-      next = createLAN({ host, port: pickPort(), mdnsOptions: createMobileMDNSOptions(host), keyPair })
+      next = createLAN({ host, port: pickPort(), mdnsOptions: createMobileMDNSOptions(host), ...(ownLANKeys ? {} : { keyPair }) })
       addLANReadinessBarrier(next, options.readinessBarrierOptions)
       next.on('warning', (error) => logger.warn(`[LAN private] ${errorMessage(error)}`))
       next.on('error', (error) => logger.error(`[LAN private] ${errorMessage(error)}`))
       await next.ready()
-      return await attach(runtime, { lan: next })
+      const attached = await attach(runtime, { lan: next })
+      privateLan = attached
+      privateRuntime = runtime
+      privateOptions = options
+      return attached
     } catch (error) {
       failure = error
       if (next && !next.destroyed) await next.destroy().catch(() => {})
@@ -194,9 +209,44 @@ export function resetLANDiscovery () {
   lan = null
   lanOpening = null
   attachedRuntime = null
+  privateLan = null
+  privateRuntime = null
+  privateOptions = {}
   status = unavailableStatus()
   discoveredPeers.clear()
   activeConnections.clear()
+}
+
+/**
+ * After a network change: a LAN instance bound to an address this phone no
+ * longer has is closed and made again on the new one, with a new key, and
+ * every topic joined through it is joined again (attachHyperSDK keeps them).
+ * One that never started, as when PeerSky opened with Wi-Fi off, starts now.
+ * With no address at all, as in airplane mode, nothing changes until one comes
+ * back: the same address coming back needs nothing.
+ */
+export async function followNetworkChange (runtime, options = {}) {
+  const host = options.host || localHost()
+  if (!host) return getLANDiscoveryStatus()
+  if (lanOpening) await lanOpening.catch(() => {})
+
+  if (lan && !lan.destroyed && lan.host !== host) {
+    const previous = lan
+    lan = null
+    attachedRuntime = null
+    discoveredPeers.clear()
+    activeConnections.clear()
+    await previous.destroy().catch(() => {})
+  }
+  if (runtime && (!lan || lan.destroyed)) await startLANDiscovery(runtime, options)
+
+  if (privateLan && !privateLan.destroyed && privateLan.host !== host) {
+    const previous = privateLan
+    privateLan = null
+    await previous.destroy().catch(() => {})
+    if (privateRuntime) await attachPrivateLANDiscovery(privateRuntime, privateOptions).catch(() => {})
+  }
+  return getLANDiscoveryStatus()
 }
 
 // hyper-sdk uses swarm.flush() as the end of its initial peer search. The
@@ -209,6 +259,9 @@ export function addLANReadinessBarrier (instance, {
   wait = delay
 } = {}) {
   if (!instance || instance[READINESS_BARRIER]) return instance
+  // hyperdht-mdns 2 puts no topics in mDNS: its flush already waits for the
+  // DHT, so there is nothing to wait out here.
+  if (typeof instance.findPeer === 'function') return instance
 
   Object.defineProperty(instance, READINESS_BARRIER, {
     configurable: false,
@@ -261,7 +314,7 @@ function wireLANEvents (instance, logger) {
     rememberPeer(peer, true)
   })
   instance.on('peer-down', (service) => {
-    const peerKey = servicePeerKey(service)
+    const peerKey = servicePeerKey(service) || deviceId(service)
     if (peerKey) {
       discoveredPeers.delete(peerKey)
       activeConnections.delete(peerKey)
@@ -285,8 +338,13 @@ function unavailableStatus (error) {
   }
 }
 
+// hyperdht-mdns 2 sees a device only as a made-up name at an address.
+function deviceId (peer) {
+  return typeof peer?.name === 'string' && peer.name && !peer.publicKey ? peer.name : ''
+}
+
 function rememberPeer (peer, reachable) {
-  const publicKey = publicKeyHex(peer?.publicKey)
+  const publicKey = publicKeyHex(peer?.publicKey) || deviceId(peer)
   if (!publicKey) return
 
   const previous = discoveredPeers.get(publicKey)
@@ -305,7 +363,12 @@ function rememberPeer (peer, reachable) {
 }
 
 function rememberConnection (socket, peerInfo) {
-  const publicKey = publicKeyHex(peerInfo?.publicKey || socket?.remotePublicKey)
+  // A key made up for the network names nothing on this page: the
+  // connection is shown with the device at its address.
+  const atAddress = peerInfo?.ephemeral && socket?.rawStream?.remoteHost
+    ? [...discoveredPeers.values()].find((peer) => peer.host === socket.rawStream.remoteHost)
+    : null
+  const publicKey = atAddress?.publicKey || publicKeyHex(peerInfo?.publicKey || socket?.remotePublicKey)
   if (!publicKey) return
 
   const sockets = activeConnections.get(publicKey) || new Set()
@@ -313,7 +376,7 @@ function rememberConnection (socket, peerInfo) {
   activeConnections.set(publicKey, sockets)
 
   const previous = discoveredPeers.get(publicKey)
-  const relay = Array.isArray(peerInfo?.relayAddresses) ? peerInfo.relayAddresses[0] : null
+  const relay = atAddress ? null : Array.isArray(peerInfo?.relayAddresses) ? peerInfo.relayAddresses[0] : null
   discoveredPeers.set(publicKey, {
     publicKey,
     host: typeof relay?.host === 'string' ? relay.host : previous?.host || '',

@@ -84,6 +84,63 @@ export async function uploadHyperFile ({
   })
 }
 
+// A note as a file of its own, for P2PMD's share button: the page a publish
+// makes, to print as a PDF or, for slides, to keep as a presentation. It is
+// opened where hyper:// means nothing, so the pictures go inside it, read the
+// way the phone's preview reads them (readHyperFile, this phone's own drive).
+const MAX_EXPORT_IMAGES = 40
+const MAX_EXPORT_IMAGE_TOTAL_BYTES = 20 * 1024 * 1024
+const EXPORT_IMAGE_SOURCE = /\ssrc="(hyper:\/\/[^"]+)"/g
+
+export async function exportMarkdownDocument ({ content, mode, latexModeEnabled } = {}, options = {}) {
+  if (typeof content !== 'string') {
+    return { ok: false, error: 'Invalid Markdown content. Expected a string.' }
+  }
+  if (b4a.byteLength(content) > MAX_HYPER_FILE_BYTES) {
+    return { ok: false, error: 'Markdown is too large. Maximum size is 10 MB.' }
+  }
+
+  let html
+  try {
+    html = mode === 'slides'
+      ? createPublishedSlidesHtml(content)
+      : createPublishedNoteHtml(content, latexModeEnabled === true)
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) }
+  }
+
+  return { ok: true, html: await inlineExportImages(html, options.readFile || readHyperFile) }
+}
+
+export async function inlineExportImages (html, readFile) {
+  const sources = new Map()
+  for (const match of html.matchAll(EXPORT_IMAGE_SOURCE)) {
+    if (sources.size >= MAX_EXPORT_IMAGES) break
+    if (!sources.has(match[1])) sources.set(match[1], null)
+  }
+
+  let totalBytes = 0
+  for (const attribute of sources.keys()) {
+    let result
+    try {
+      result = await readFile({ url: attribute.replace(/&amp;/g, '&') })
+    } catch {
+      continue
+    }
+    if (!result?.ok || typeof result.contentType !== 'string' || !result.contentType.startsWith('image/')) continue
+    const byteLength = result.bytes?.byteLength
+    if (!Number.isSafeInteger(byteLength) || byteLength < 1) continue
+    if (totalBytes + byteLength > MAX_EXPORT_IMAGE_TOTAL_BYTES) continue
+    totalBytes += byteLength
+    sources.set(attribute, `data:${result.contentType};base64,${b4a.toString(result.bytes, 'base64')}`)
+  }
+
+  return html.replace(EXPORT_IMAGE_SOURCE, (whole, attribute) => {
+    const inlined = sources.get(attribute)
+    return inlined ? ` src="${inlined}"` : whole
+  })
+}
+
 export async function publishMarkdownDocument ({ content, mode, latexModeEnabled, visibility } = {}, options = {}) {
   const isPrivate = visibility === 'private'
   if (typeof content !== 'string') {

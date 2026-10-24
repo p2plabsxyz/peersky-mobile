@@ -184,6 +184,7 @@
       "./plugins/with-one-ndk",
       "./plugins/with-android-app-category",
       "./plugins/with-android-loopback-cleartext",
+      "./plugins/with-android-back-keeps-app",
       "./plugins/with-browser-downloads",
       "./plugins/with-lan-discovery",
       "./plugins/with-peerchat-background",

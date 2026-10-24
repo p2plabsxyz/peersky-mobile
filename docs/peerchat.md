@@ -11,6 +11,12 @@ and transport formats as PeerSky Desktop.
 - Create a group or join one with its 64-character room key or an invite link,
   which says who made the room too.
 - Exchange encrypted messages with mobile and desktop peers.
+- On a local network with hyperdht-mdns 2, connect with a key made up for the
+  network and prove this phone's own key inside the encrypted channel only to
+  people it shares a room with (or a direct chat it left) and to the person's
+  other devices (`identifyOnLan` in `backend/peerchat/service.mjs`). Room
+  proofs name the connection's key, as on the internet; the rest goes by the
+  proven key.
 - Rooms and direct messages made on 0.1.2 or later change their message key
   every hour, so a key someone gets later cannot read what came before.
 - Every message is signed by whoever wrote it, and passed on from device to
@@ -83,15 +89,27 @@ Important files:
 ## Moderation
 
 Each phone and desktop filters what it sends and what it receives, on its own.
+Every check runs on the device, and nothing about a check is sent to the
+maintainers or to anyone else: no copy of the message or the picture, no
+result, no report.
+
 In a group, a message with threats, slurs or an adult-domain link is held back
 and a notice takes its place. So is a file whose name has them, since the name
 shows in the chat list, a search and a notification. A picture that looks
-explicit is refused before it is sent. A direct message skips the text filters,
-file names included: it is between two
+explicit is refused before it is sent, by a model that runs on the device.
+Pictures are checked again when they arrive, and one that looks explicit is
+hidden behind a warning the reader can open. The abuse filter and the
+profanity and slur list are on in every new group, and whoever made the group
+can turn either off in Edit room. That choice is signed with their key, like
+the rest of the room's details, so every device knows it came from them. The
+adult-domain check and the picture check stay on in every group.
+
+A direct message skips the text filters, file names included: it is between two
 people, and either can block the other. The spam limit still applies there, and
 a picture that looks explicit arrives hidden behind a warning the reader can
 open. Whether a room is a direct message is worked out on each device, never
-taken from a peer, so no room setting can switch a group's filters off.
+taken from a peer, so a group cannot pass itself off as a direct message to get
+out of its filters.
 
 Whoever made a room can remove anyone from it, for good. The creator signs the
 room's removal list with their own key, so anyone in the room can pass it on
@@ -455,7 +473,11 @@ brings it back. Blocking and reporting together is one tap.
 A report goes to the maintainers by email. It names the room by the first 16 hex
 characters of the SHA-256 of its key, never the key, which would let whoever
 reads the email into the room and its whole history. If the phone has no mail
-app, the report can be copied instead.
+app, the report can be copied instead. The email does not let the maintainers
+into the room, and nobody can delete a message from a device it already
+reached. The maintainers can remove someone only from P2P Republic, the public
+room they run, whose creator key is pinned in the app. In any other group, only
+whoever made it can.
 
 ## Notifications
 
@@ -475,11 +497,18 @@ directory. PeerChat deliberately does not expose raw room feeds or room keys as
 ordinary named Hyperdrives in Settings.
 
 PeerChat settings has **Delete PeerChat profile**. It leaves every room, so each
-one hears this device go, then removes the room feeds, the attachment drives,
-the decrypted attachment cache and PeerChat's own state file, and PeerChat opens
-on the welcome screen again (`deletePeerChatProfile` in
+one hears this device go, then empties every room feed on the phone, rooms left
+earlier included, frees the files this phone sent, and removes the decrypted
+attachment cache and PeerChat's own state file, and PeerChat opens on the
+welcome screen again (`deletePeerChatProfile` in
 `backend/peerchat/runtime.mjs`). Messages already sent stay on the devices they
-reached.
+reached. The feeds' names, which hold the rooms' keys, go on the app's next run,
+once nothing can still have the feeds open (`removeEmptiedRoomLogs`, listed in
+`peerchat-emptied-logs.json` until then); a room joined again before that keeps
+its feed. The sent files' drives stay, emptied: the people in the room hold
+copies under the same key. This used to call `purge()`, which throws in
+hypercore 11 before it removes anything, so every message stayed on the phone.
+The chat screen's own saved state, the chat each tab was on, is cleared too.
 
 Settings -> P2P Data provides two relevant operations:
 
@@ -500,9 +529,13 @@ separate and does not clear PeerChat or other P2P data.
 ## Identity transfer
 
 Link Device carries PeerChat between a person's devices: the profile, every
-room with its key, a fixed label for the new device (`ada@mobile`,
-`ada@desktop1`), and a link the devices use to prove to each other that they
-belong to the same person. Each device stays its own member of a room, so
+room with its key, a label for the new device (`ada@mobile`, `ada@desktop`),
+and a link the devices use to prove to each other that they belong to the same
+person. A desktop gets the lowest number none of the person's other devices was
+seen with (`desktop`, `desktop2`, ...). A transfer that is never used takes no
+number, and a desktop sent a transfer again with a lower number than its own
+moves down to it: builds before 1.0 kept a number for every transfer, used or
+not, so a third device could come out as `desktop5`. Each device stays its own member of a room, so
 messages reach all of them, and renames and newly joined rooms follow between
 them, even when they share no room: they also meet under a topic made from the
 link, which nobody without it can work out. See [link-device.md](link-device.md).

@@ -48,6 +48,7 @@
   $("sb-play").innerHTML = PT.icons.play;
   $("sb-pause").innerHTML = PT.icons.pause;
   $("sb-bt").innerHTML = PT.icons.bt;
+  $("sb-shuffle").innerHTML = PT.icons.shuffle;
   document.querySelector(".wz-menu").innerHTML = PT.icons.menu;
   document.querySelector(".wz-prev").innerHTML = PT.icons.prev;
   document.querySelector(".wz-next").innerHTML = PT.icons.next;
@@ -90,10 +91,17 @@
   // svg elements ignore the .hidden property, so toggle the attribute
   const show = (el, on) => { if (on) el.removeAttribute("hidden"); else el.setAttribute("hidden", ""); };
 
+  // Shuffle shows in the status bar, next to Bluetooth, while it is on. Every
+  // way of turning it on or off (Settings, Now Playing, a Shuffle row, Shuffle
+  // Songs) ends in a state event.
+  const showShuffle = () => show($("sb-shuffle"), player.shuffle);
+
   player.addEventListener("state", () => {
     show($("sb-play"), player.playing);
     show($("sb-pause"), player.current() && !player.playing);
+    showShuffle();
   });
+  showShuffle();
 
   // Show the bluetooth mark whenever sound is routed somewhere external. A host
   // that can see the route, like PeerSky on a phone, says so in
@@ -145,6 +153,15 @@
     writeSaved(PLACE_KEY, player.savedPlace());
   };
   player.addEventListener("queuechange", () => writeSaved(QUEUE_KEY, player.savedQueue()));
+  // An emptied library takes the song that was on with it, and it is not put
+  // back after a restart either.
+  library.addEventListener("cleared", () => {
+    player.forget();
+    try {
+      localStorage.removeItem(QUEUE_KEY);
+      localStorage.removeItem(PLACE_KEY);
+    } catch {}
+  });
   player.addEventListener("trackchange", savePlace);
   player.addEventListener("state", savePlace);
   player.addEventListener("time", () => {

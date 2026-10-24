@@ -21,8 +21,34 @@ describe('opening a note that is on another device too', () => {
   it('looks for it there first, and reports nobody rather than joining an empty room', async () => {
     const source = await read('backend/p2pmd/room.mjs')
     const join = between(source, 'export async function joinP2pmdRoom', 'export function getP2pmdRoomStatus')
-    assert.match(join, /waitForJoinedRoomReady\(boundPort, token, probe \? SHARED_NOTE_LOOK_MS : null\)/)
-    assert.match(join, /if \(probe\) \{\s*await stopHolesail\(\)\s*return \{ ok: false, noHost: true/)
+    assert.match(join, /waitForJoinedRoomReady\(boundPort, token, probe \? SHARED_NOTE_LOOK_MS : HOST_LOOK_MS\)/)
+    assert.match(join, /\} catch \{\s*await stopHolesail\(\)\s*return \{ ok: false, noHost: true/)
+  })
+
+  // A join with nobody hosting waited up to 40 seconds and then opened an
+  // empty note, and what was typed there was gone once the host came back.
+  it('says nobody has a note open instead of joining an empty room', async () => {
+    const source = await read('backend/p2pmd/room.mjs')
+    assert.match(source, /const HOST_LOOK_MS = 15000/)
+    const join = between(source, 'export async function joinP2pmdRoom', 'export function getP2pmdRoomStatus')
+    assert.doesNotMatch(join, /warning/)
+
+    const app = await read('app/index.tsx')
+    const onJoin = between(app, 'async function onP2pmdRoomJoin', 'async function onP2pmdSharedNoteOpen')
+    assert.match(onJoin, /const message = response\.noHost\s*\? t\('Nobody has this note open right now\. Try again when its host opens it\.'\)/)
+    // The wait shows on the button instead of a greyed-out screen.
+    assert.match(onJoin, /setIsP2pmdJoining\(true\)/)
+    assert.match(onJoin, /\} finally \{\s*setIsLoading\(false\)\s*setIsP2pmdJoining\(false\)/)
+    assert.match(app, /\{isP2pmdJoining \? t\('Looking for the host\.\.\.'\) : t\('Join Note'\)\}/)
+  })
+
+  it('shows a guest that the host is away while the note is read only', async () => {
+    const app = await read('app/index.tsx')
+    assert.match(app, /case 'p2pmd-host-away':\s*setP2pmdHostAway\(parsed\.away === true\)/)
+    assert.match(app, /\{p2pmdHostAway && p2pmdRoom\.role !== 'host' && !isP2pmdLandscapeSlides && \(/)
+    assert.match(app, /t\('The host is away\. You can read the note, and editing comes back when they return\.'\)/)
+    // A new editor page starts out knowing nothing of the host.
+    assert.match(app, /useEffect\(\(\) => \{\s*setP2pmdHostAway\(false\)\s*\}, \[p2pmdRoom\?\.key, p2pmdRoom\?\.role, p2pmdUrl, p2pmdEditorMount\]\)/)
   })
 
   it('hosts it only from a copy on this phone', async () => {

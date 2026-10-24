@@ -105,6 +105,9 @@ export const RPC_HYPERDRIVE_VIEWER_START = 79
 // { url, name }: the address to download one file of a drive through that
 // server, signed for that file alone.
 export const RPC_HYPERDRIVE_VIEWER_DOWNLOAD = 80
+// { content, mode: 'note' | 'slides', latexModeEnabled }: a P2PMD note as one
+// HTML file with its pictures inside, for Export PDF and Export slides.
+export const RPC_P2PMD_EXPORT = 81
 
 // Backend to app pushes. Separate range so they never collide with the
 // app-initiated commands above.

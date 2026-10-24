@@ -1,5 +1,6 @@
 import b4a from 'b4a'
 import * as Y from 'yjs'
+import { lineChangesFromDelta } from './line-authors.mjs'
 
 const MAX_DOCUMENT_LENGTH = 10 * 1024 * 1024
 const MAX_UPDATE_LENGTH = 4 * 1024 * 1024
@@ -136,7 +137,21 @@ export function applyDocumentUpdate (encodedUpdate, lineAttributions = null) {
   if (!candidateValidation.ok) return candidateValidation
 
   try {
-    Y.applyUpdate(ydoc, update, 'remote-update')
+    // The note's record of who wrote each line moves with the text. Only a
+    // phone's editor sent the whole record with its edits, so lines a desktop
+    // added above stayed where they were, under the wrong lines.
+    // Only an edit that adds or takes out text can move lines, and reading
+    // the whole note for every key typed cost more the bigger it was.
+    const before = ylineAttributions.size > 0 && mayMoveLines(update) ? ytext.toString() : ''
+    let delta = null
+    const capture = (event) => { delta = event.changes.delta }
+    if (before) ytext.observe(capture)
+    try {
+      Y.applyUpdate(ydoc, update, 'remote-update')
+    } finally {
+      if (before) ytext.unobserve(capture)
+    }
+    if (delta && before) moveLineAttributions(lineChangesFromDelta(before, delta).moved)
     if (lineAttributions !== null && lineAttributions !== undefined) {
       ydoc.transact(() => {
         mergeLineAttributions(lineAttributions, candidateValidation.lineCount)
@@ -345,6 +360,40 @@ function mergeLineAttributionsIntoMap (target, lineAttributions, lineCount) {
 function sameLineAttribution (current, next) {
   return !!current && current.color === next.color && current.name === next.name &&
     current.clientId === next.clientId && current.updatedAt === next.updatedAt
+}
+
+// Whether an update could move lines: it takes text out, or puts in a line
+// break. Typing in a line does neither.
+function mayMoveLines (update) {
+  try {
+    const { structs, ds } = Y.decodeUpdate(update)
+    if (ds.clients.size > 0) return true
+    return structs.some((struct) => typeof struct.content?.str === 'string' && struct.content.str.includes('\n'))
+  } catch {
+    return true
+  }
+}
+
+function moveLineAttributions (moved) {
+  const entries = []
+  ylineAttributions.forEach((value, key) => entries.push([key, value]))
+  const next = new Map()
+  let changed = false
+  for (const [key, value] of entries) {
+    const to = moved.get(Number(key))
+    if (to !== Number(key)) changed = true
+    if (to) next.set(String(to), value)
+  }
+  if (!changed) return
+
+  ydoc.transact(() => {
+    for (const [key] of entries) {
+      if (!next.has(key)) ylineAttributions.delete(key)
+    }
+    for (const [key, value] of next) {
+      if (!sameLineAttribution(ylineAttributions.get(key), value)) ylineAttributions.set(key, value)
+    }
+  }, 'line-attribution-update')
 }
 
 function trimLineAttributions (lineCount) {

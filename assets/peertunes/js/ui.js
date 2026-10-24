@@ -1355,16 +1355,6 @@
             },
             { label: "Share Library…", action: () => ui.shareLibrary() },
           { label: "Rescan Sources", value: String(ui.lib.sources.length), action: () => ui.runImport(() => ui.lib.rescan(), "Rescanning") },
-          {
-            label: "Reset Library…", action: () => ui.dialog({
-              msg: "Erase all music?",
-              sub: "Removes every song, cover and saved source from this device.",
-              buttons: [
-                { label: "Erase", action: () => ui.lib.clear().then(() => ui.replaceAll(ui.rootScreen())) },
-                { label: "Cancel" },
-              ],
-            }),
-          },
           ];
         },
       });
@@ -1544,7 +1534,7 @@
           if (urls.length) {
             this.dialog({
               msg: "Can't publish from here",
-              sub: "Publishing needs PeerSky for desktop right now (mobile drives are read-only). You can still share your synced folders directly.",
+              sub: "Publishing needs PeerTunes inside PeerSky. You can still share your synced folders directly.",
               buttons: [
                 { label: "Share Sources", action: () => this._offerLink(SHARE_BASE + "#" + urls.map((u) => "playlist=" + encodeURIComponent(u)).join("&")) },
                 { label: "Cancel" },
@@ -1554,7 +1544,7 @@
           } else {
             this.dialog({
               msg: "Publishing needs PeerSky",
-              sub: "Open PeerTunes in PeerSky for desktop to publish local songs to a hyper:// drive. Mobile drives are read-only for now.",
+              sub: "Open PeerTunes in PeerSky to publish local songs to a hyper:// drive.",
               buttons: [{ label: "OK" }],
             });
           }
@@ -1868,6 +1858,17 @@
           {
             label: "Backlight Dim", value: s.dim ? "On" : "Off",
             action: () => { s.dim = !s.dim; commit(); },
+          },
+          // Moved here from Add Music, where nobody looked for it.
+          {
+            label: "Clear All Songs…", action: () => ui.dialog({
+              msg: "Clear all songs?",
+              sub: "Removes every song, playlist and cover from this device. Playlists you shared stay shared.",
+              buttons: [
+                { label: "Clear", action: () => ui.lib.clear().then(() => ui.replaceAll(ui.rootScreen())) },
+                { label: "Cancel" },
+              ],
+            }),
           },
         ],
       });

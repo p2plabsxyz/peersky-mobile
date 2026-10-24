@@ -40,6 +40,7 @@ import {
   RPC_P2PMD_IMAGE_UPLOAD,
   RPC_P2PMD_PREVIEW,
   RPC_P2PMD_ROOM_JOIN,
+  RPC_P2PMD_EXPORT,
   RPC_P2PMD_ROOM_PUBLISH,
   RPC_P2PMD_ROOM_STATUS,
   RPC_P2PMD_TAKE_NOTES,
@@ -95,7 +96,7 @@ import {
   stopOutgoingTransfer
 } from '../backup/link-device.mjs'
 
-import { publishMarkdownDocument, readHyperFile, uploadHyperFile } from '../hyper/drive.mjs'
+import { exportMarkdownDocument, publishMarkdownDocument, readHyperFile, uploadHyperFile } from '../hyper/drive.mjs'
 import { listHyperdriveLocation, uploadHyperdriveFile } from '../hyper/library.mjs'
 import { fetchHyper } from '../hyper/fetch.mjs'
 import {
@@ -121,6 +122,7 @@ import {
 } from '../hyper/runtime.mjs'
 import { getOrCreatePairingNonceRecord } from '../backup/pairing-nonce.mjs'
 import { clearAllP2pData, clearP2pCache, deleteP2pAppData, listP2pAppData } from '../hyper/storage.mjs'
+import { readP2pResetId } from '../hyper/p2p-reset.mjs'
 
 import {
   connectHolesail,
@@ -413,6 +415,11 @@ export async function routeRpcRequest (req) {
       return
     }
 
+    if (req.command === RPC_P2PMD_EXPORT) {
+      replyJson(req, await exportMarkdownDocument(parseJsonMessage(req.data)))
+      return
+    }
+
     if (req.command === RPC_P2PMD_ROOM_DISCONNECT) {
       replyJson(req, await disconnectP2pmdRoom())
       return
@@ -677,7 +684,8 @@ export async function routeRpcRequest (req) {
     }
 
     if (req.command === RPC_PEERTUNES_START) {
-      replyJson(req, await startPeerTunesServer())
+      const started = await startPeerTunesServer()
+      replyJson(req, started?.ok ? { ...started, resetId: readP2pResetId(getDefaultIdentityStoragePath()) } : started)
       return
     }
 

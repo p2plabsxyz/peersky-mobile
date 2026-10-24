@@ -1185,6 +1185,211 @@ test('PeerChat blocking stops direct messages both ways, hides them, and survive
   await restarted.close()
 })
 
+// A direct chat left on one side used to tell the other side nothing, so they
+// went on writing into a chat nobody read.
+async function openDirectChat (t, prefix) {
+  const alicePath = await mkdtemp(path.join(tmpdir(), `peersky-peerchat-${prefix}-alice-`))
+  const bobPath = await mkdtemp(path.join(tmpdir(), `peersky-peerchat-${prefix}-bob-`))
+  t.after(() => rm(alicePath, { recursive: true, force: true }))
+  t.after(() => rm(bobPath, { recursive: true, force: true }))
+  const alice = await new PeerChatService({ sdk: createFakeSdk(new Map(), 21), storagePath: alicePath }).start()
+  const bob = await new PeerChatService({ sdk: createFakeSdk(new Map(), 22), storagePath: bobPath }).start()
+  alice.setProfile({ username: 'Alice' })
+  bob.setProfile({ username: 'Bob' })
+
+  const toBob = []
+  const bobAtAlice = createFakePeer(bob.localId, 'Bob', toBob)
+  alice.peers.set(bobAtAlice.connection, bobAtAlice)
+  const { room } = await alice.createDirectMessage({ peerId: bob.localId, username: 'Bob' })
+
+  const toAlice = []
+  const aliceAtBob = createFakePeer(alice.localId, 'Alice', toAlice)
+  bob.peers.set(aliceAtBob.connection, aliceAtBob)
+  await bob.handlePeerMessage(aliceAtBob, toBob.pop())
+  await bob.acceptDirectMessage({ roomKey: room.roomKey })
+  await deliver(alice, bobAtAlice, toAlice.pop())
+  bobAtAlice.rooms = [room.roomKey]
+  aliceAtBob.rooms = [room.roomKey]
+  // Accepted a minute ago, as far as Alice knows.
+  alice.rooms.get(room.roomKey).backAt = Date.now() - 60_000
+  return { alice, bob, alicePath, roomKey: room.roomKey, bobAtAlice, aliceAtBob, toAlice, toBob }
+}
+
+test('PeerChat tells the other person in a direct chat that you left, and closes it for them', async (t) => {
+  const { alice, bob, alicePath, roomKey, bobAtAlice, toAlice } = await openDirectChat(t, 'dm-left')
+  assert.equal(alice.listRooms().find((room) => room.roomKey === roomKey).leftByPeer, false)
+
+  await bob.leaveRoom({ roomKey })
+  const leave = toAlice.find((frame) => frame.type === 'leave')
+  assert.ok(leave, 'the leave goes to the other person')
+  await deliver(alice, bobAtAlice, leave)
+
+  const room = alice.listRooms().find((entry) => entry.roomKey === roomKey)
+  assert.equal(room.leftByPeer, true)
+  assert.equal(room.leftByName, 'Bob')
+  const snapshot = await alice.getSnapshot({ roomKey, version: -1 })
+  assert.deepEqual(snapshot.messages.filter((message) => message.system).map((message) => message.message), ['Bob left'])
+  await assert.rejects(alice.sendMessage({ roomKey, message: 'Still there?' }), /left the chat/)
+
+  // The same leave again, as each new connection sends it, says it once.
+  await deliver(alice, bobAtAlice, leave)
+  const again = await alice.getSnapshot({ roomKey, version: -1 })
+  assert.equal(again.messages.filter((message) => message.system).length, 1)
+
+  await alice.close()
+  const restarted = await new PeerChatService({ sdk: createFakeSdk(new Map(), 21), storagePath: alicePath }).start()
+  assert.equal(restarted.listRooms().find((entry) => entry.roomKey === roomKey).leftByPeer, true)
+  await restarted.close()
+  await bob.close()
+})
+
+test('PeerChat sends the leave to the other person when they come online later', async (t) => {
+  const { alice, bob, roomKey } = await openDirectChat(t, 'dm-farewell')
+  // Alice is offline when Bob leaves.
+  for (const peer of [...bob.peers.values()]) bob.peers.delete(peer.connection)
+  await bob.leaveRoom({ roomKey })
+  assert.equal(bob.rooms.has(roomKey), false)
+  assert.equal(bob.discoveryKeys.get(wireRoom(roomKey)), roomKey, 'its topic stays joined')
+
+  // Alice comes online and proves she holds the chat's key.
+  const frames = []
+  const aliceAtBob = createFakePeer(alice.localId, 'Alice', frames)
+  aliceAtBob.rooms = []
+  bob.peers.set(aliceAtBob.connection, aliceAtBob)
+  await bob.handlePeerMessage(aliceAtBob, {
+    type: 'topics',
+    rooms: [{ topic: wireRoom(roomKey), proof: roomProof(roomKey, aliceAtBob.connection.handshakeHash, aliceAtBob.key) }]
+  })
+  const topics = frames.findIndex((frame) => frame.type === 'topics')
+  const leave = frames.findIndex((frame) => frame.type === 'leave')
+  assert.ok(topics >= 0 && leave > topics, 'our proof first, then the leave')
+  assert.equal(frames[leave].room, wireRoom(roomKey))
+
+  // Somebody who only knows the topic hears nothing.
+  const strangerFrames = []
+  const stranger = createFakePeer('aabbccdd', 'Eve', strangerFrames)
+  stranger.rooms = []
+  bob.peers.set(stranger.connection, stranger)
+  await bob.handlePeerMessage(stranger, { type: 'topics', rooms: [{ topic: wireRoom(roomKey), proof: '00'.repeat(32) }] })
+  assert.equal(strangerFrames.some((frame) => frame.type === 'leave'), false)
+
+  // After 14 days the topic is left.
+  bob.endOldFarewells(Date.now() + 15 * 24 * 60 * 60_000)
+  assert.equal(bob.farewells.has(roomKey), false)
+  assert.equal(bob.discoveryKeys.has(wireRoom(roomKey)), false)
+  await alice.close()
+  await bob.close()
+})
+
+test('PeerChat takes a leave only about the device it came from, and opens the chat again when they are back', async (t) => {
+  const { alice, bob, roomKey, bobAtAlice } = await openDirectChat(t, 'dm-left-checks')
+  const now = Date.now() - 10_000
+
+  // Someone naming Bob is not Bob.
+  const other = createFakePeer('aabbccdd', 'Eve')
+  other.rooms = [roomKey]
+  alice.peers.set(other.connection, other)
+  await alice.handlePeerMessage(other, { type: 'leave', roomKey, peerId: bob.localId, username: 'Bob', ts: now })
+  assert.equal(alice.listRooms().find((entry) => entry.roomKey === roomKey).leftByPeer, false)
+
+  await alice.handlePeerMessage(bobAtAlice, { type: 'leave', roomKey, peerId: bob.localId, username: 'Bob', id: `${wireRoom(roomKey)}-${bob.localId}-left-${now}`, ts: now })
+  assert.equal(alice.listRooms().find((entry) => entry.roomKey === roomKey).leftByPeer, true)
+
+  // A leave takes the chat off the connection; coming back proves it again.
+  bobAtAlice.rooms = [roomKey]
+  // A join from before the leave is a device that never left.
+  await alice.handlePeerMessage(bobAtAlice, { type: 'join', roomKey, peerId: bob.localId, username: 'Bob', ts: now - 60_000 })
+  assert.equal(alice.listRooms().find((entry) => entry.roomKey === roomKey).leftByPeer, true)
+  // One after it is Bob back.
+  await alice.handlePeerMessage(bobAtAlice, { type: 'join', roomKey, peerId: bob.localId, username: 'Bob', ts: Date.now() })
+  assert.equal(alice.listRooms().find((entry) => entry.roomKey === roomKey).leftByPeer, false)
+  await alice.close()
+  await bob.close()
+})
+
+test('PeerChat leaves a direct chat on this device when another of your devices left it', async (t) => {
+  const { alice, bob, roomKey } = await openDirectChat(t, 'dm-left-sibling')
+  alice.rooms.get(roomKey).joinedAt = Date.now() - 60_000
+  const twinId = 'abcdef01'
+  alice.siblings.add(twinId)
+  const twin = createFakePeer(twinId, 'Alice')
+  twin.rooms = [roomKey]
+  alice.peers.set(twin.connection, twin)
+
+  // A leave from before this device joined the chat is not for this device.
+  await alice.handlePeerMessage(twin, { type: 'leave', roomKey, peerId: twinId, username: 'Alice', ts: 1 })
+  assert.equal(alice.rooms.has(roomKey), true)
+  twin.rooms = [roomKey]
+
+  await alice.handlePeerMessage(twin, { type: 'leave', roomKey, peerId: twinId, username: 'Alice', ts: Date.now() })
+  assert.equal(alice.rooms.has(roomKey), false)
+  assert.equal(alice.farewells.has(roomKey), true, 'and tells Bob too')
+  // A screen that had it open is told it is gone, and goes back to the list.
+  const snapshot = await alice.getSnapshot({ roomKey, version: -1 })
+  assert.equal(snapshot.room, null)
+  assert.equal(snapshot.rooms.some((room) => room.roomKey === roomKey), false)
+  await alice.close()
+  await bob.close()
+})
+
+test('PeerChat keeps a direct chat open to a leave from before you asked again or they came back', async (t) => {
+  const { alice, bob, roomKey, bobAtAlice } = await openDirectChat(t, 'dm-left-old')
+  const leftAt = Date.now() - 10_000
+  const leave = { type: 'leave', roomKey, peerId: bob.localId, username: 'Bob', id: `${wireRoom(roomKey)}-${bob.localId}-left-${leftAt}`, ts: leftAt }
+  await alice.handlePeerMessage(bobAtAlice, leave)
+  assert.equal(alice.listRooms().find((entry) => entry.roomKey === roomKey).leftByPeer, true)
+
+  // Alice asks again. One of Bob's devices that left with him sends the same
+  // leave when it meets her, and the request stays a request.
+  await alice.createDirectMessage({ peerId: bob.localId, username: 'Bob' })
+  bobAtAlice.rooms = [roomKey]
+  await alice.handlePeerMessage(bobAtAlice, leave)
+  let room = alice.listRooms().find((entry) => entry.roomKey === roomKey)
+  assert.equal(room.leftByPeer, false)
+  assert.equal(room.pendingAcceptance, true)
+
+  // Back in it, and a leave from before that changes nothing either.
+  await alice.handlePeerMessage(bobAtAlice, { type: 'dm-accept', roomKey, fromUsername: 'Bob' })
+  bobAtAlice.rooms = [roomKey]
+  await alice.handlePeerMessage(bobAtAlice, { ...leave, id: `${leave.id}-2`, ts: leftAt + 5000 })
+  room = alice.listRooms().find((entry) => entry.roomKey === roomKey)
+  assert.equal(room.leftByPeer, false)
+  await alice.sendMessage({ roomKey, message: 'Welcome back' })
+
+  // A leave after it closes the chat again.
+  bobAtAlice.rooms = [roomKey]
+  await alice.handlePeerMessage(bobAtAlice, { ...leave, id: `${leave.id}-3`, ts: Date.now() + 1 })
+  assert.equal(alice.listRooms().find((entry) => entry.roomKey === roomKey).leftByPeer, true)
+  await alice.close()
+  await bob.close()
+})
+
+// Bob left a chat with Alice and later pressed Message on her, which starts a
+// new one. Alice still has the old one and offers it back.
+test('PeerChat opens the direct chat you left when they offer it back, not a second one', async (t) => {
+  const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-dm-ask-again-'))
+  t.after(() => rm(storagePath, { recursive: true, force: true }))
+  const service = await new PeerChatService({ sdk: createFakeSdk(), storagePath }).start()
+  await service.completeOnboarding({ username: 'Akhilesh' })
+
+  const frames = []
+  const peer = createFakePeer('aabbccdd', 'Bob', frames)
+  service.peers.set(peer.connection, peer)
+  // It sorts after any new key, so going by the keys ours would stand.
+  const left = 'ff'.repeat(32)
+  service.markRoomLeft(left)
+  const { room } = await service.createDirectMessage({ peerId: 'aabbccdd', username: 'Bob' })
+  frames.length = 0
+
+  await service.handlePeerMessage(peer, {
+    type: 'dm-invite', roomKey: left, fromId: 'aabbccdd', fromUsername: 'Bob', toId: service.localId
+  })
+  assert.equal(service.rooms.has(room.roomKey), false, 'the new one, with nothing in it, gives way')
+  assert.equal(service.listPendingDirectMessages()[0].roomKey, left)
+  assert.equal(frames.some((frame) => frame.type === 'dm-invite'), false, 'and is not offered back')
+  await service.close()
+})
+
 // App Review asks that a block take the person's content out of view at once.
 // It used to stop direct messages only, and a blocked person kept talking in
 // every shared room.

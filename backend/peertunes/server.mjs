@@ -55,10 +55,19 @@ const KEEP_SONGS_BATCH = 10
 // another origin that adds it is refused at the preflight.
 export const KEEP_SONGS_HEADER = 'X-PeerTunes-Keep'
 
-// Reading a drive and keeping songs both need this run's token. Another app on
-// the phone can reach this port and send any header, so the loopback check
-// alone left it the person's private drives, decrypted.
-const TOKEN_ROUTES = new Set(['/hyper/asset', '/hyper/keep'])
+// Reading a drive, keeping songs and publishing all need this run's token.
+// Another app on the phone can reach this port and send any header, so the
+// loopback check alone left it the person's private drives, decrypted.
+const TOKEN_ROUTES = new Set(['/hyper/asset', '/hyper/keep', '/hyper/write'])
+
+// Who PeerTunes is when it writes: the name its drives are kept under, apart
+// from every web page's (hyper/page-access.mjs). A page can never be this,
+// since a page's name is its hyper:// drive or https:// origin.
+export const PEERTUNES_SITE = 'peersky-app:peertunes'
+const WRITE_METHODS = new Set(['POST', 'PUT'])
+// A song is read whole before it goes in the drive. Larger than any album
+// track, and small enough for the phone to hold.
+export const MAX_PUBLISH_FILE_BYTES = 200 * 1024 * 1024
 
 // The app gives the token to its own WebView before this page loads, as
 // window.peerskyServerToken. It is read on each call and never sent from here:
@@ -86,7 +95,9 @@ const KEEP_SONGS_SCRIPT = 'window.peerskyKeepSongs=function(urls){' +
 // and the token is added when the page asks, so the page as served holds none.
 // peerskyProtocols: the phone reads hyper:// only, so PeerTunes offers no other
 // p2p link.
-export const HYPER_BRIDGE_SCRIPT = `<script>(function(){${TOKEN_SCRIPT}window.peerskyProtocols=["hyper"];window.peerskyHyperAsset=function(url){return"/hyper/asset?url="+encodeURIComponent(String(url))+token()};${KEEP_SONGS_SCRIPT}})()</script>`
+// peerskyHyperWrite: where PeerTunes sends a publish's writes, the drive asked
+// for by name and each file put in it.
+export const HYPER_BRIDGE_SCRIPT = `<script>(function(){${TOKEN_SCRIPT}window.peerskyProtocols=["hyper"];window.peerskyHyperAsset=function(url){return"/hyper/asset?url="+encodeURIComponent(String(url))+token()};window.peerskyHyperWrite=function(url){return"/hyper/write?url="+encodeURIComponent(String(url))+token()};${KEEP_SONGS_SCRIPT}})()</script>`
 
 let server = null
 let serverInfo = null
@@ -109,7 +120,7 @@ export async function startPeerTunesServer ({ httpImpl: testHttp = null, port = 
     }
 
     const httpImpl = testHttp || await getBareHttp()
-    const { ensureFetchGlobals, refreshHyperNetworkFor, routedHyperFetch, routedHyperRangeFetch } = testHyper || await getHyperFetchModule()
+    const { ensureFetchGlobals, fetchHyper, refreshHyperNetworkFor, routedHyperFetch, routedHyperRangeFetch } = testHyper || await getHyperFetchModule()
     const { withHyperRuntimeForAddress } = testHyper || await getHyperRuntimeModule()
     const { hyperOfflineNetworkAllowed } = testHyper || await import('../hyper/offline-manager.mjs')
     const keeper = createSongKeeper({
@@ -132,6 +143,7 @@ export async function startPeerTunesServer ({ httpImpl: testHttp = null, port = 
       ensureGlobals: ensureFetchGlobals,
       refreshNetwork: refreshHyperNetworkFor,
       keepSongs: keeper.keep,
+      write: typeof fetchHyper === 'function' ? (request) => fetchHyper({ ...request, site: PEERTUNES_SITE }) : null,
       token
     }
 
@@ -198,6 +210,8 @@ export function createPeerTunesHttpServer ({
   ensureGlobals = () => {},
   refreshNetwork = async () => {},
   keepSongs = null,
+  write = null,
+  maxPublishBytes = MAX_PUBLISH_FILE_BYTES,
   token
 } = {}) {
   if (!httpImpl?.createServer) {
@@ -211,7 +225,7 @@ export function createPeerTunesHttpServer ({
   }
 
   return httpImpl.createServer((req, res) => {
-    handleRequest(req, res, { fetch, fetchRange, ensureGlobals, refreshNetwork, keepSongs, token })
+    handleRequest(req, res, { fetch, fetchRange, ensureGlobals, refreshNetwork, keepSongs, write, maxPublishBytes, token })
   })
 }
 
@@ -244,7 +258,7 @@ export function injectHyperBridge (html) {
   return `${source.slice(0, insertAt)}${HYPER_BRIDGE_SCRIPT}${source.slice(insertAt)}`
 }
 
-function handleRequest (req, res, { fetch, fetchRange, ensureGlobals, refreshNetwork, keepSongs, token }) {
+function handleRequest (req, res, { fetch, fetchRange, ensureGlobals, refreshNetwork, keepSongs, write, maxPublishBytes, token }) {
   const requestUrl = parseRequestUrl(req.url)
   if (!requestUrl) {
     sendText(res, 400, 'Bad request')
@@ -261,7 +275,8 @@ function handleRequest (req, res, { fetch, fetchRange, ensureGlobals, refreshNet
     return
   }
 
-  if (req.method !== 'GET' && req.method !== 'HEAD') {
+  const writing = requestUrl.pathname === '/hyper/write'
+  if (writing ? !WRITE_METHODS.has(req.method) : req.method !== 'GET' && req.method !== 'HEAD') {
     sendText(res, 405, 'Method not allowed')
     return
   }
@@ -273,6 +288,12 @@ function handleRequest (req, res, { fetch, fetchRange, ensureGlobals, refreshNet
 
   if (requestUrl.pathname === '/hyper/asset') {
     serveHyperAsset(req, res, { fetch, fetchRange, ensureGlobals, refreshNetwork }, requestUrl.searchParams.get('url'))
+      .catch((error) => sendError(req, res, error))
+    return
+  }
+
+  if (writing) {
+    serveHyperWrite(req, res, { write, maxPublishBytes }, requestUrl.searchParams.get('url'))
       .catch((error) => sendError(req, res, error))
     return
   }
@@ -328,6 +349,47 @@ async function serveHyperAsset (req, res, { fetch, fetchRange, ensureGlobals, re
   }
 
   await streamHyperAsset(fetch, fetchRange, assetUrl, req, guardProxyResponse(res), null)
+}
+
+// PeerTunes publishes a playlist the way it does on the desktop: it asks for
+// its drive by name (POST hyper://localhost/?key=peertunes), then puts each
+// song and the playlist file in it. The WebView cannot fetch hyper://, so
+// those come here, and are made as PeerTunes's own: its drive is one no web
+// page can name, and it writes only to drives it made.
+async function serveHyperWrite (req, res, { write, maxPublishBytes }, targetUrl) {
+  if (typeof write !== 'function') {
+    sendText(res, 404, 'Not found')
+    return
+  }
+  if (!targetUrl) {
+    sendText(res, 400, 'Missing url')
+    return
+  }
+  const body = req.method === 'PUT' ? await readRequestBody(req, maxPublishBytes) : null
+  const type = req.headers?.['content-type']
+  const result = await write({
+    url: targetUrl,
+    method: req.method,
+    body,
+    headers: type ? { 'Content-Type': String(type) } : null
+  })
+  const status = Number.isInteger(result?.status) ? result.status : result?.ok ? 200 : 400
+  const location = result?.headers?.location
+  if (location) res.setHeader('Location', String(location))
+  sendText(res, status, result?.ok ? result.body : result?.body || result?.error || 'Could not write to the drive')
+}
+
+async function readRequestBody (req, limit) {
+  const declared = Number.parseInt(req.headers?.['content-length'] || '', 10)
+  if (Number.isFinite(declared) && declared > limit) throw createHttpError(413, 'That file is too big to publish from a phone')
+  const chunks = []
+  let size = 0
+  for await (const chunk of req) {
+    size += chunk.byteLength
+    if (size > limit) throw createHttpError(413, 'That file is too big to publish from a phone')
+    chunks.push(chunk)
+  }
+  return b4a.concat(chunks)
 }
 
 // Which songs of a kept playlist are on the device. Asking also fetches the

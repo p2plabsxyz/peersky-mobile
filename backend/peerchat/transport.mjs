@@ -59,6 +59,22 @@ export function attachPeerChatTransport (connection, onMessage, options = {}) {
   }
 }
 
+// While the other end of a local network connection is still proving who it
+// is, a PeerChat channel it opens first is held, not refused: protomux
+// refuses a channel this side has not opened yet, and the two sides finish
+// proving at different moments. Returns what lets it go, once this side has
+// opened its own channel or decided not to.
+export function holdPeerChatTransport (connection) {
+  const mux = Protomux.from(connection)
+  let release = null
+  const released = new Promise((resolve) => { release = resolve })
+  mux.pair({ protocol: PEERCHAT_PROTOCOL }, () => released)
+  return () => {
+    mux.unpair({ protocol: PEERCHAT_PROTOCOL })
+    release()
+  }
+}
+
 function assertFrameSize (value) {
   if (b4a.byteLength(String(value), 'utf8') > MAX_PEERCHAT_FRAME_BYTES) {
     throw new Error('PeerChat frame is too large')
