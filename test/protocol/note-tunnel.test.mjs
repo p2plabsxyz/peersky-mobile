@@ -219,6 +219,16 @@ describe('notes over a local test network', () => {
     await assert.rejects(tunnel.open(), (error) => error.code === 'EADDRINUSE' && error.port === origin.port)
   })
 
+  // Holesail's 8989 left a note joined with no port in its host's record on
+  // 8989 here for good, whatever its host's port was.
+  it('listens on a free port, never 8989, when the host gives none', async () => {
+    const tunnel = new TunnelGuest({ key: 'hs://s000' + 'c'.repeat(64), bootstrap: testnet.bootstrap })
+    closing.push(() => tunnel.close())
+    await tunnel.open()
+    assert.ok(tunnel.info.port > 0)
+    assert.notEqual(tunnel.info.port, 8989)
+  })
+
   it('answers a request that closes its side first', async () => {
     const replies = await startReplyAtEnd()
     closing.push(() => new Promise((resolve) => replies.server.close(resolve)))

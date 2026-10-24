@@ -1561,6 +1561,11 @@ export function getP2pmdEditorPage () {
         #slides-preview .slide { animation: none; }
         #slides-progress-value { transition: none; }
       }
+      body.host-away #keyboard-toolbar,
+      body.host-away #formatting-toolbar {
+        opacity: 0.45;
+        pointer-events: none;
+      }
       #formatting-toolbar {
         display: flex;
         align-items: center;
@@ -1838,6 +1843,9 @@ export function getP2pmdEditorPage () {
       const ACTIVE_VIEW_RENDER_DELAY_MS = 120
       const INITIAL_ROOM_RETRY_ATTEMPTS = 20
       const INITIAL_ROOM_RETRY_DELAY_MS = 750
+      // The app says the host is away only once it has been for this long, so
+      // a connection that drops and comes straight back shows nothing.
+      const HOST_AWAY_NOTICE_MS = 3000
       const MAX_PENDING_UPDATE_BYTES = 2 * 1024 * 1024
       const Y_ORIGIN_REMOTE = 'remote-sse'
       const Y_ORIGIN_LOCAL_INPUT = 'local-input'
@@ -1927,6 +1935,15 @@ export function getP2pmdEditorPage () {
       const CLIENT_ID_KEY = 'p2pmd-mobile-client-id'
       const clientId = getClientId()
       const roomRole = getRoomRole()
+      // A guest writes only while the host is there. The host holds the note,
+      // and what a guest typed without it reached nobody: it was gone when the
+      // host came back. So a guest's note is read only until the host's copy
+      // is here and the room is live, and again whenever the host goes.
+      let hostReachable = roomRole === 'host'
+      let seededFromHost = roomRole === 'host'
+      let seedingFromHost = false
+      let hostAway = false
+      let hostAwayTimer = null
       let latexModeEnabled = roomRole === 'host' && loadPersistedLatexMode()
       let hasSyncedHostLatexMode = false
       const localAuthor = {
@@ -1984,6 +2001,52 @@ export function getP2pmdEditorPage () {
         }
 
         throw lastError || new Error('Room request failed')
+      }
+
+      function canEdit() {
+        return roomRole === 'host' || (hostReachable && seededFromHost)
+      }
+
+      function updateEditable() {
+        const editable = canEdit()
+        input.readOnly = !editable
+        document.body.classList.toggle('host-away', !editable)
+      }
+
+      function setHostAway(away) {
+        if (roomRole === 'host') return
+        if (hostAwayTimer) {
+          clearTimeout(hostAwayTimer)
+          hostAwayTimer = null
+        }
+        if (!away) {
+          if (!hostAway) return
+          hostAway = false
+          notifyNative('p2pmd-host-away', { away: false })
+          return
+        }
+        hostAwayTimer = setTimeout(() => {
+          hostAwayTimer = null
+          if (hostAway || canEdit()) return
+          hostAway = true
+          notifyNative('p2pmd-host-away', { away: true })
+        }, HOST_AWAY_NOTICE_MS)
+      }
+
+      // The host's copy, taken whole, for a guest that has none yet or whose
+      // copy no longer shares a history with the host's. A guest cannot write
+      // without the host, so there is nothing of its own to keep.
+      async function seedFromHost() {
+        if (seedingFromHost || roomRole === 'host') return
+        seedingFromHost = true
+        try {
+          pendingUpdate = null
+          await initializeYjs()
+        } finally {
+          seedingFromHost = false
+        }
+        updateEditable()
+        if (canEdit()) setHostAway(false)
       }
 
       // yjs ships inside this page. It used to come from the room, which ran
@@ -2718,6 +2781,12 @@ export function getP2pmdEditorPage () {
       }
 
       function scheduleDocumentSave() {
+        if (!canEdit()) {
+          // Whatever changed the text while the host is away goes back.
+          const kept = ydoc && ytext ? getYTextSnapshot() : lastInputContent
+          if (input.value !== kept) input.value = kept
+          return
+        }
         if (saveTimer) clearTimeout(saveTimer)
         markLocalPeerTyping()
         const newText = input.value
@@ -3124,7 +3193,7 @@ export function getP2pmdEditorPage () {
       }
 
       function runToolbarButton(button) {
-        if (!button || viewMode !== 'edit') return false
+        if (!button || viewMode !== 'edit' || !canEdit()) return false
         if (button.dataset.menu === 'template') {
           toggleTemplateMenu()
           return true
@@ -3557,7 +3626,14 @@ export function getP2pmdEditorPage () {
           const body = await response.json()
           if (!response.ok || typeof body.yjsState !== 'string') return
           const { shared, missing } = compareWithHost(window.Y, ydoc, base64ToBytes(body.yjsState))
-          if (!shared) return
+          if (!shared) {
+            if (roomRole !== 'host') {
+              seededFromHost = false
+              updateEditable()
+              void seedFromHost()
+            }
+            return
+          }
           queueRemoteYjsUpdate(body.yjsState)
           if (missing) pendingUpdate = pendingUpdate ? window.Y.mergeUpdates([pendingUpdate, missing]) : missing
         } catch {} finally {
@@ -3656,16 +3732,22 @@ export function getP2pmdEditorPage () {
             window.Y.applyUpdate(ydoc, base64ToBytes(result.yjsState), Y_ORIGIN_REMOTE)
             const yjsContent = ytext.toString()
             ytextSnapshot = yjsContent
-            if (yjsContent || !input.value) {
+            // A guest shows the host's note as it is, an empty one too.
+            if (yjsContent || !input.value || roomRole !== 'host') {
               input.value = yjsContent
               lastSyncedContent = yjsContent
               lastInputContent = yjsContent
               mergeLineAttributionsFromPeerList(latestPeerList)
             }
+            if (roomRole !== 'host') seededFromHost = true
           }
-        } catch {}
+        } catch {
+          if (roomRole !== 'host') setHostAway(true)
+        }
 
-        if (!getYTextSnapshot() && input.value) {
+        // Only the host starts the note's history from text it already has. A
+        // guest's own start is a second history, one the host's never merges.
+        if (roomRole === 'host' && !getYTextSnapshot() && input.value) {
           ydoc.transact(() => {
             ytext.insert(0, input.value)
           }, Y_ORIGIN_REMOTE)
@@ -3993,7 +4075,11 @@ export function getP2pmdEditorPage () {
             clearTimeout(reconnectTimer)
             reconnectTimer = null
           }
-          void syncWithHost()
+          hostReachable = true
+          if (seededFromHost) void syncWithHost()
+          else void seedFromHost()
+          updateEditable()
+          if (canEdit()) setHostAway(false)
         }
 
         source.addEventListener('peers', (event) => {
@@ -4075,6 +4161,13 @@ export function getP2pmdEditorPage () {
           } catch {}
 
           if (eventSource === source) eventSource = null
+          if (roomRole !== 'host') {
+            hostReachable = false
+            updateEditable()
+            setHostAway(true)
+            // Nobody is reachable through a host that is gone.
+            notifyNative('p2pmd-peers', { count: 0 })
+          }
           if (reconnectTimer) return
 
           reconnectTimer = setTimeout(() => {
@@ -4085,6 +4178,7 @@ export function getP2pmdEditorPage () {
       }
 
       async function initializeEditor() {
+        updateEditable()
         renderTemplateMenu()
         updateLatexControls()
         peerDisplayName.value = localAuthor.name

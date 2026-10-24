@@ -25,6 +25,8 @@ describe('p2pmd room connection', () => {
   // every restart showed a different address for the same note.
   it('joins on the port it used before, or the host\'s, as the desktop does', () => {
     assert.match(roomSource, /const preferred = await connectHolesail\(\{ key, port: saved, hostPort: true, udp, log, token \}\)/)
+    // A note kept on Holesail's 8989 is joined on its host's port instead.
+    assert.match(roomSource, /const kept = findNotePort\(key\)\s*const saved = kept === HOLESAIL_DEFAULT_PORT \? null : kept/)
     assert.match(sessionSource, /: hostPort && \(port === undefined \|\| port === null\)\s+\? \{ ok: true, port: undefined \}/)
     assert.match(roomSource, /rememberNotePort\(roomKey, boundPort\)/)
   })
