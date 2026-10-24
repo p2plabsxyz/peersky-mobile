@@ -472,5 +472,16 @@ describe('p2pmd mobile editor page routing', () => {
     page.setHostAway(false)
     assert.deepEqual(notes.at(-1), ['p2pmd-host-away', { away: false }])
     assert.equal(input.readOnly, false)
+
+    // Each failed retry says so again, sooner than the wait. The wait carries
+    // on instead of starting over, so the note still comes, and only once.
+    notes.length = 0
+    page.reach(false)
+    page.updateEditable()
+    for (let i = 0; i < 8; i++) {
+      page.setHostAway(true)
+      await wait(10)
+    }
+    assert.deepEqual(notes, [['p2pmd-host-away', { away: true }]])
   })
 })

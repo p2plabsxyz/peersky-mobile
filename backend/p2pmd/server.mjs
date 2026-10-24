@@ -2015,16 +2015,20 @@ export function getP2pmdEditorPage () {
 
       function setHostAway(away) {
         if (roomRole === 'host') return
-        if (hostAwayTimer) {
-          clearTimeout(hostAwayTimer)
-          hostAwayTimer = null
-        }
         if (!away) {
+          if (hostAwayTimer) {
+            clearTimeout(hostAwayTimer)
+            hostAwayTimer = null
+          }
           if (!hostAway) return
           hostAway = false
           notifyNative('p2pmd-host-away', { away: false })
           return
         }
+        // The events stream is tried again every 1.2 s while the host is
+        // gone, and each failure lands here. Starting the wait over each time
+        // meant the three seconds never ran out and the note never showed.
+        if (hostAway || hostAwayTimer) return
         hostAwayTimer = setTimeout(() => {
           hostAwayTimer = null
           if (hostAway || canEdit()) return
