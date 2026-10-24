@@ -1768,5 +1768,7 @@
   },
   "{count} videos": {
     "other": "{count} วิดีโอ"
-  }
+  },
+  "This page is not secure": "หน้านี้ไม่ปลอดภัย",
+  "{site} uses plain http://, which anyone on the network can read or change, so PeerSky does not open it. If it has an https:// address, use that instead.": "{site} ใช้ http:// แบบไม่เข้ารหัส ซึ่งใครก็ตามบนเครือข่ายอ่านหรือแก้ไขได้ PeerSky จึงไม่เปิด หากมีที่อยู่ https:// ให้ใช้ที่อยู่นั้นแทน"
 }

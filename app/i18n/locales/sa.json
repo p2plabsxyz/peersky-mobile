@@ -1874,5 +1874,7 @@
     "one": "{count} चलचित्रम्",
     "two": "{count} चलचित्रे",
     "other": "{count} चलचित्राणि"
-  }
+  },
+  "This page is not secure": "इदं जालपुटं सुरक्षितं नास्ति",
+  "{site} uses plain http://, which anyone on the network can read or change, so PeerSky does not open it. If it has an https:// address, use that instead.": "{site} साधारणं http:// उपयुङ्क्ते, यत् जालस्थः कोऽपि पठितुं परिवर्तयितुं वा शक्नोति, अतः PeerSky तत् न उद्घाटयति। यदि तस्य https:// सङ्केतः अस्ति, तर्हि तम् एव उपयुज्यताम्।"
 }

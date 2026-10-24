@@ -1768,5 +1768,7 @@
   },
   "{count} videos": {
     "other": "{count} video"
-  }
+  },
+  "This page is not secure": "Halaman ini tidak aman",
+  "{site} uses plain http://, which anyone on the network can read or change, so PeerSky does not open it. If it has an https:// address, use that instead.": "{site} memakai http:// biasa, yang bisa dibaca atau diubah siapa pun di jaringan, jadi PeerSky tidak membukanya. Jika ada alamat https://, gunakan itu."
 }

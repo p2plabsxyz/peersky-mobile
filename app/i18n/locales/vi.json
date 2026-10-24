@@ -1768,5 +1768,7 @@
   },
   "{count} videos": {
     "other": "{count} video"
-  }
+  },
+  "This page is not secure": "Trang này không an toàn",
+  "{site} uses plain http://, which anyone on the network can read or change, so PeerSky does not open it. If it has an https:// address, use that instead.": "{site} dùng http:// không mã hóa, ai trên mạng cũng có thể đọc hoặc sửa, nên PeerSky không mở. Nếu có địa chỉ https://, hãy dùng địa chỉ đó."
 }

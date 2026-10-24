@@ -1821,5 +1821,7 @@
   "{count} videos": {
     "one": "{count} ویڈیو",
     "other": "{count} ویڈیوز"
-  }
+  },
+  "This page is not secure": "یہ صفحہ محفوظ نہیں ہے",
+  "{site} uses plain http://, which anyone on the network can read or change, so PeerSky does not open it. If it has an https:// address, use that instead.": "{site} سادہ http:// استعمال کرتا ہے، جسے نیٹ ورک پر کوئی بھی پڑھ یا بدل سکتا ہے، اس لیے PeerSky اسے نہیں کھولتا۔ اگر اس کا کوئی https:// پتہ ہے تو وہی استعمال کریں۔"
 }

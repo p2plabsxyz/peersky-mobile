@@ -36,6 +36,16 @@ export function describeBrowserError (targetUrl, message) {
     }
   }
 
+  // A plain http:// page, which the app refuses everywhere but on this device
+  // (Android's network security config, iOS App Transport Security). "Check
+  // your connection" sent people looking for a fault that was not there.
+  if (/ERR_CLEARTEXT_NOT_PERMITTED|App Transport Security/i.test(detail)) {
+    return {
+      title: t('This page is not secure'),
+      body: t('{site} uses plain http://, which anyone on the network can read or change, so PeerSky does not open it. If it has an https:// address, use that instead.', { site: Site })
+    }
+  }
+
   if (/\b(404|not found)\b/i.test(detail)) {
     return {
       title: t('This page is missing'),

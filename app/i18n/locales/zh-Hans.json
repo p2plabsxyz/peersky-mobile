@@ -1768,5 +1768,7 @@
   },
   "{count} videos": {
     "other": "{count} 个视频"
-  }
+  },
+  "This page is not secure": "此页面不安全",
+  "{site} uses plain http://, which anyone on the network can read or change, so PeerSky does not open it. If it has an https:// address, use that instead.": "{site}使用未加密的 http://，网络上的任何人都能读取或篡改其内容，因此 PeerSky 不会打开它。如果它有 https:// 地址，请改用该地址。"
 }

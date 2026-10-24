@@ -1768,5 +1768,7 @@
   },
   "{count} videos": {
     "other": "動画{count}本"
-  }
+  },
+  "This page is not secure": "このページは安全ではありません",
+  "{site} uses plain http://, which anyone on the network can read or change, so PeerSky does not open it. If it has an https:// address, use that instead.": "{site}は暗号化されていないhttp://を使っているため、ネットワーク上の誰でも内容を読んだり書き換えたりできます。そのためPeerSkyでは開きません。https://のアドレスがあれば、そちらを使ってください。"
 }

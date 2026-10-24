@@ -1927,5 +1927,7 @@
     "few": "{count} видео",
     "many": "{count} видео",
     "other": "{count} видео"
-  }
+  },
+  "This page is not secure": "Эта страница не защищена",
+  "{site} uses plain http://, which anyone on the network can read or change, so PeerSky does not open it. If it has an https:// address, use that instead.": "{site} использует обычный http://, который любой в сети может прочитать или изменить, поэтому PeerSky его не открывает. Если у него есть адрес https://, используйте его."
 }
