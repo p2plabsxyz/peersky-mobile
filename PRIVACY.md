@@ -37,6 +37,8 @@ Opening a `hyper://` address or using PeerChat connects your device directly to 
 
 PeerChat rooms and direct messages are encrypted with keys only the people in them hold. In those made on PeerSky Mobile 0.1.2 or later, the key changes every hour and each file has a key of its own, so somebody who gets hold of a room’s key later cannot read what was said before. Those made earlier keep one key for good, so anybody who has it can read that room, past messages included. Either way, somebody removed from a room still holds its key. Every message is signed by its sender, and a message can reach you through another device in the room, still encrypted and checked against that signature. What is encrypted is the content, not the fact that two devices are talking.
 
+A photo you send in PeerChat from your library or camera goes as a fresh copy, without the location and camera details stored in the original. A file you send from Files goes as it is.
+
 Your PeerChat name, bio and photo are seen by everyone in the rooms you join. A new PeerChat profile starts in P2P Republic, a public room anyone can join, so people you do not know will see them there, along with your IP address while you are both online. You can leave it from the chat list at any time.
 
 When you send a link in PeerChat, your phone opens the page once to make a preview, so that website sees your IP address as it would on a visit. The people you send it to get the preview inside the message, and their phones do not open the page. You can turn off Link previews in PeerChat's settings.

@@ -406,6 +406,13 @@ The desktop keeps the same rules in peerchat's `lib/room-details.js`
 
 ## Attachments and link previews
 
+A photo picked from the library or taken with the camera is sent as a fresh
+copy (`app/media/chat-picture.mjs`, `chat-picture-copies.ts`): JPEG, or PNG for
+a PNG, re-encoded by the image manipulator, so none of the original's EXIF
+reaches the room, the place it was taken included, and an iPhone's HEIC arrives
+as something every desktop can show. A GIF and anything picked from Files go as
+they are. The copy is deleted once it is sent.
+
 PeerChat stores attachments in a dedicated Hyperdrive for each room. Before
 upload, file bytes are sealed with AES-256-GCM using a key derived from the room
 key, or in a room made on 0.1.2 or later from a key of the file's own that

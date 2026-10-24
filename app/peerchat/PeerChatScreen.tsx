@@ -142,7 +142,8 @@ import { PRE_JOINED_PEERCHAT_ROOM_KEY } from '../../backend/peerchat/rooms.mjs'
 import { mentionQueryStart, personName } from '../../backend/peerchat/mentions.mjs'
 import { QrCodeView } from '../settings/QrCodeView'
 import { pickUploads, screenUploadBytes } from '../media/upload-gate'
-import type { UploadSource } from '../media/upload-gate'
+import type { UploadAsset, UploadSource } from '../media/upload-gate'
+import { deleteChatPictureCopies, prepareChatPictures } from '../media/chat-picture-copies'
 import { scanMedia } from '../media/NsfwScanner'
 import { MEDIA_BLOCKED } from '../media/media-moderation.mjs'
 import { AppLoading } from '../AppLoading'
@@ -2151,7 +2152,7 @@ export function PeerChatScreen ({
     void runAction(async () => {
       // pickUploads bounds the batch and screens every file before any of it
       // is uploaded, so a refusal never leaves half a send in the room.
-      const assets = await pickUploads({
+      const picked = await pickUploads({
         multiple: true,
         source,
         // A room shows a picture to everyone at once, so it is screened. A
@@ -2163,30 +2164,15 @@ export function PeerChatScreen ({
           ? t('Checking {name}', { name: picked[0].name })
           : tp({ one: 'Checking {count} file', other: 'Checking {count} files' }, picked.length))
       })
-      if (assets.length === 0) return
+      if (picked.length === 0) return
 
-      for (const [index, asset] of assets.entries()) {
-        // A video takes a while to encrypt and write, and without this the
-        // spinner is indistinguishable from the app having hung.
-        onStatus(assets.length === 1
-          ? t('Uploading {name}', { name: asset.name })
-          : t('Uploading {number} of {count}: {name}', { number: index + 1, count: assets.length, name: asset.name }))
-        const upload = await withUploadTimeout(callRpc(RPC_PEERCHAT_ATTACHMENT_UPLOAD, {
-          roomKey: activeRoom.roomKey,
-          fileUri: asset.uri,
-          byteLength: asset.size
-        }), asset.name, asset.size)
-        if (!upload.ok || !upload.item) throw new Error(upload.error || t('Unable to upload attachment.'))
-
-        const response = await callRpc(RPC_PEERCHAT_SEND, {
-          roomKey: activeRoom.roomKey,
-          message: upload.item.url,
-          fileName: asset.name,
-          fileSize: upload.item.byteLength ?? asset.size,
-          fileEnc: true,
-          ...(upload.item.fileKey && { fileKey: upload.item.fileKey })
-        })
-        if (!response.ok) throw new Error(response.error || t('Unable to send attachment.'))
+      // Photos go as clean copies: no location from their EXIF, and no HEIC
+      // that a desktop cannot show. See app/media/chat-picture.mjs.
+      const { assets, copies } = await prepareChatPictures(picked, source)
+      try {
+        await sendAttachments(assets)
+      } finally {
+        deleteChatPictureCopies(copies)
       }
 
       versionRef.current = -1
@@ -2196,6 +2182,33 @@ export function PeerChatScreen ({
         ? t('Sent {name}', { name: assets[0].name })
         : tp({ one: 'Sent {count} file', other: 'Sent {count} files' }, assets.length))
     })
+  }
+
+  async function sendAttachments (assets: UploadAsset[]) {
+    if (!activeRoom) return
+    for (const [index, asset] of assets.entries()) {
+      // A video takes a while to encrypt and write, and without this the
+      // spinner is indistinguishable from the app having hung.
+      onStatus(assets.length === 1
+        ? t('Uploading {name}', { name: asset.name })
+        : t('Uploading {number} of {count}: {name}', { number: index + 1, count: assets.length, name: asset.name }))
+      const upload = await withUploadTimeout(callRpc(RPC_PEERCHAT_ATTACHMENT_UPLOAD, {
+        roomKey: activeRoom.roomKey,
+        fileUri: asset.uri,
+        byteLength: asset.size
+      }), asset.name, asset.size)
+      if (!upload.ok || !upload.item) throw new Error(upload.error || t('Unable to upload attachment.'))
+
+      const response = await callRpc(RPC_PEERCHAT_SEND, {
+        roomKey: activeRoom.roomKey,
+        message: upload.item.url,
+        fileName: asset.name,
+        fileSize: upload.item.byteLength ?? asset.size,
+        fileEnc: true,
+        ...(upload.item.fileKey && { fileKey: upload.item.fileKey })
+      })
+      if (!response.ok) throw new Error(response.error || t('Unable to send attachment.'))
+    }
   }
 
   /**
