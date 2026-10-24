@@ -12,6 +12,7 @@ import {
   Clipboard,
   KeyboardAvoidingView,
   Modal,
+  NativeModules,
   Platform,
   Pressable,
   ScrollView,
@@ -40,6 +41,7 @@ import {
   RPC_IDENTITY_SEND_STOP
 } from '../../backend/rpc/commands.mjs'
 import { BROWSER_PALETTES } from '../browser-appearance.mjs'
+import { removeAllWebsiteData } from '../browser-data.mjs'
 import { tapFeedback } from '../haptics'
 import { t, tp } from '../i18n/i18n.mjs'
 import { describeLinkedDevice, labelLinkedDevices, sortLinkedDevices } from '../linked-devices.mjs'
@@ -193,6 +195,11 @@ export function LinkDeviceSettings ({ deviceSyncRevision = 0, onCallRpc, onResta
     try {
       const response = await call(command, data)
       if (!response.ok) throw new Error(response.error || t('It did not go through'))
+      // Websites keep their cookies and storage outside PeerSky's own files,
+      // and without this whoever had the phone stayed signed in everywhere.
+      try {
+        await removeAllWebsiteData(NativeModules.PeerSkyBrowserData)
+      } catch {}
       // A restore brings its own preferences, with the Hyperdrive viewer's
       // epoch from wherever they were saved. It moves on from there, so the
       // viewer empties what it kept for the data that was replaced.

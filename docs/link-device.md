@@ -9,7 +9,7 @@ It is the only way PeerSky data moves. The app keeps it out of iCloud, computer 
 - **This device**, the person's other devices, then **Sync with another device**. The other devices are the ones met under the private files key, listed as Desktop or Phone with when each was last online (see Private files on your other devices in [hyper.md](hyper.md)). **Sync with another device** is one sheet for both directions. *Receive here* shows this phone's pairing code; *Send from here* is for scanning the other device's. The scan decides what happens either way: a pairing code (`peersky-identity:`) means "send this phone there", and a `hyper://` code is a transfer another device has ready for this one. A desktop's pairing code sends the tabs and bookmarks to that desktop.
 - **Save a backup file** and **Restore from a backup file**.
 - **Get the desktop browser**.
-- **Remove my data from this phone**, for handing a phone on or finishing a move. Settings, P2P Data, Clear all P2P data takes this phone's identity too (its Link Device keys, a desktop's identity and private files key, and the list of your other devices, which stop syncing with it), but keeps tabs, bookmarks, history, downloads and settings.
+- **Remove my data from this phone**, for handing a phone on or finishing a move. Websites' cookies and storage go with it (and with a restore), so whoever gets the phone is not signed in anywhere as you. Settings, P2P Data, Clear all P2P data takes this phone's identity too (its Link Device keys, a desktop's identity and private files key, and the list of your other devices, which stop syncing with it), but keeps tabs, bookmarks, history, downloads and settings.
 
 ## What moves
 
