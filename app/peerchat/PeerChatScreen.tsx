@@ -57,6 +57,7 @@ import {
 } from './message-search.mjs'
 import { messageFromMentioned, normalizePeerChatMentionSpacing, peerChatMentionNames, splitPeerChatMessageParts } from './message-text.mjs'
 import {
+  dismissPeerChatRoomNotifications,
   isPeerChatNotificationBlocked,
   openPeerChatNotificationSettings
 } from './notifications'
@@ -833,9 +834,11 @@ export function PeerChatScreen ({
 
   useEffect(() => {
     let cancelled = false
-    void callRpc(RPC_PEERCHAT_SET_ACTIVE, { roomKey: activeRoom?.roomKey || null })
+    const roomKey = activeRoom?.roomKey || null
+    void callRpc(RPC_PEERCHAT_SET_ACTIVE, { roomKey })
       .then((response) => {
         if (!cancelled && mountedRef.current && response.ok && response.rooms) setRooms(response.rooms)
+        if (roomKey && response.ok) return dismissPeerChatRoomNotifications(roomKey)
       })
       .catch(() => {})
     return () => {
@@ -865,9 +868,12 @@ export function PeerChatScreen ({
       if (state !== 'active' && uiStateRestoredRef.current) {
         persistPeerChatUiState(uiStateRef.current)
       }
-      void callRpcRef.current(RPC_PEERCHAT_SET_ACTIVE, {
-        roomKey: state === 'active' ? activeRoomRef.current?.roomKey || null : null
-      }).catch(() => {})
+      const roomKey = state === 'active' ? activeRoomRef.current?.roomKey || null : null
+      void callRpcRef.current(RPC_PEERCHAT_SET_ACTIVE, { roomKey })
+        .then((response) => {
+          if (roomKey && response?.ok) return dismissPeerChatRoomNotifications(roomKey)
+        })
+        .catch(() => {})
     })
     return () => subscription.remove()
   }, [])

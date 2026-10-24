@@ -150,6 +150,30 @@ export async function presentPeerChatNotification ({
   })
 }
 
+// What PeerChat put in the notification list and is still there, with the
+// chat each one is about.
+export async function getPresentedPeerChatNotifications () {
+  const presented = await Notifications.getPresentedNotificationsAsync()
+  return presented.map((notification) => ({
+    identifier: notification.request.identifier,
+    roomKey: notification.request.content.data?.roomKey
+  }))
+}
+
+export async function dismissPeerChatNotifications (identifiers: string[]) {
+  await Promise.all(identifiers.map((identifier) => Notifications.dismissNotificationAsync(identifier)))
+}
+
+// Opening a chat reads it, so its notifications go at once rather than on
+// the next check.
+export async function dismissPeerChatRoomNotifications (roomKey: string) {
+  const key = roomKey.toLowerCase()
+  const presented = await getPresentedPeerChatNotifications()
+  await dismissPeerChatNotifications(presented
+    .filter((item) => typeof item.roomKey === 'string' && item.roomKey.toLowerCase() === key)
+    .map((item) => item.identifier))
+}
+
 export async function setPeerChatBadgeCount (count: number) {
   return Notifications.setBadgeCountAsync(Math.max(0, Math.trunc(count)))
 }

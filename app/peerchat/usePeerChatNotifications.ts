@@ -5,19 +5,23 @@ import { AppState } from 'react-native'
 import { RPC_HYPER_REFRESH, RPC_PEERCHAT_ROOMS } from '../../backend/rpc/commands.mjs'
 import {
   collectPeerChatNotificationCandidates,
+  collectSeenPeerChatNotifications,
   DEFAULT_PEERCHAT_NOTIFICATION_PREFERENCES,
   parsePeerChatNotificationPreferences,
   PEERCHAT_NOTIFICATION_PREFERENCES_MAX_BYTES,
   serializePeerChatNotificationPreferences,
   shouldAskForPeerChatNotifications,
+  shouldClearSeenPeerChatNotifications,
   shouldEnablePeerChatBackground,
   shouldHandlePeerChatNotificationInApp
 } from './notification-state.mjs'
 import {
   canAskForPeerChatNotifications,
+  dismissPeerChatNotifications,
   hasPeerChatNotificationPermission,
   addPeerChatNotificationResponseListener,
   getPeerChatBadgeCount,
+  getPresentedPeerChatNotifications,
   presentPeerChatNotification,
   preparePeerChatNotifications,
   requestPeerChatNotificationPermission,
@@ -233,6 +237,16 @@ export function usePeerChatNotifications ({
         const previousRooms = previousRoomsRef.current
         previousRoomsRef.current = nextRooms
         warnedRef.current = false
+        if (shouldClearSeenPeerChatNotifications(previousRooms, nextRooms)) {
+          try {
+            await dismissPeerChatNotifications(collectSeenPeerChatNotifications(
+              await getPresentedPeerChatNotifications(),
+              nextRooms
+            ))
+          } catch (error) {
+            console.warn('Unable to clear read PeerChat notifications:', error)
+          }
+        }
         if (!previousRooms) return
         const candidates = collectPeerChatNotificationCandidates(previousRooms, nextRooms)
         if (candidates.length === 0) return

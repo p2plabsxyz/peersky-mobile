@@ -4,11 +4,13 @@ import test from 'node:test'
 
 import {
   collectPeerChatNotificationCandidates,
+  collectSeenPeerChatNotifications,
   DEFAULT_PEERCHAT_NOTIFICATION_PREFERENCES,
   MAX_PEERCHAT_NOTIFICATIONS_PER_POLL,
   parsePeerChatNotificationPreferences,
   serializePeerChatNotificationPreferences,
   shouldAskForPeerChatNotifications,
+  shouldClearSeenPeerChatNotifications,
   shouldEnablePeerChatBackground,
   shouldHandlePeerChatNotificationInApp
 } from '../../app/peerchat/notification-state.mjs'
@@ -185,6 +187,56 @@ test('the unread count stays on the app icon until the chat is opened', async ()
   const service = await readFile(new URL('../../backend/peerchat/service.mjs', import.meta.url), 'utf8')
   const open = service.slice(service.indexOf('  setActiveRoom ({ roomKey } = {}) {'), service.indexOf('  async getSnapshot ('))
   assert.match(open, /room\.unreadCount = 0[\s\S]*this\.schedulePersist\(\)/)
+})
+
+test('a chat\'s notifications go once nothing in it is unread', () => {
+  const read = 'a'.repeat(64)
+  const unread = 'b'.repeat(64)
+  const left = 'c'.repeat(64)
+  const rooms = [
+    { roomKey: read, unreadCount: 0 },
+    { roomKey: unread, unreadCount: 2 }
+  ]
+  const presented = [
+    { identifier: 'n1', roomKey: read },
+    { identifier: 'n2', roomKey: unread },
+    { identifier: 'n3', roomKey: left },
+    { identifier: 'n4', roomKey: read.toUpperCase() },
+    { identifier: 'n5' },
+    { identifier: 'n6', roomKey: 'not a room' },
+    { identifier: '', roomKey: read }
+  ]
+  assert.deepEqual(collectSeenPeerChatNotifications(presented, rooms), ['n1', 'n3', 'n4'])
+  assert.deepEqual(collectSeenPeerChatNotifications([], rooms), [])
+  assert.deepEqual(collectSeenPeerChatNotifications(null, rooms), [])
+
+  // Looked at on the first check, and when a chat with unread messages has
+  // none, or is gone. Not on every check.
+  assert.equal(shouldClearSeenPeerChatNotifications(null, rooms), true)
+  assert.equal(shouldClearSeenPeerChatNotifications(rooms, rooms), false)
+  assert.equal(shouldClearSeenPeerChatNotifications(rooms, [
+    { roomKey: read, unreadCount: 1 },
+    { roomKey: unread, unreadCount: 3 }
+  ]), false)
+  assert.equal(shouldClearSeenPeerChatNotifications(rooms, [
+    { roomKey: read, unreadCount: 0 },
+    { roomKey: unread, unreadCount: 0 }
+  ]), true)
+  assert.equal(shouldClearSeenPeerChatNotifications(rooms, [{ roomKey: read, unreadCount: 0 }]), true)
+})
+
+test('read chats lose their notifications after a check and the moment they are opened', async () => {
+  const hook = await readFile(new URL('../../app/peerchat/usePeerChatNotifications.ts', import.meta.url), 'utf8')
+  const check = hook.slice(hook.indexOf('previousRoomsRef.current = nextRooms'), hook.indexOf('if (!previousRooms) return'))
+  assert.match(check, /shouldClearSeenPeerChatNotifications\(previousRooms, nextRooms\)[\s\S]*dismissPeerChatNotifications\(collectSeenPeerChatNotifications\(\s*await getPresentedPeerChatNotifications\(\),\s*nextRooms/)
+
+  const screen = await readFile(new URL('../../app/peerchat/PeerChatScreen.tsx', import.meta.url), 'utf8')
+  const opens = screen.match(/RPC_PEERCHAT_SET_ACTIVE, \{ roomKey \}\)[\s\S]{0,400}?dismissPeerChatRoomNotifications\(roomKey\)/g) || []
+  assert.equal(opens.length, 2, 'opening a chat and coming back to an open chat both clear it')
+
+  const notifications = await readFile(new URL('../../app/peerchat/notifications.ts', import.meta.url), 'utf8')
+  assert.match(notifications, /data: \{ roomKey \}/)
+  assert.match(notifications, /Notifications\.dismissNotificationAsync\(identifier\)/)
 })
 
 test('PeerChat offers the Android battery exemption after notifications are turned on', async () => {
