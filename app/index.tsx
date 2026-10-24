@@ -2348,8 +2348,24 @@ export default function App () {
   // it over the top loses the chat you were reading or stops the music, so it
   // gets its own tab and the app stays where it was.
   function openBrowserUrlInNewTab (targetUrl: string) {
-    if (createBrowserTab(targetUrl)) return
+    const openerTabId = browserTabsStateRef.current.activeTabId
+    if (createBrowserTab(targetUrl)) {
+      // Back from it, with nowhere further back in it, returns to this tab:
+      // a link tapped in a chat went back to the home screen instead.
+      if (openerTabId) browserTabOpenersRef.current.set(browserTabsStateRef.current.activeTabId, openerTabId)
+      return
+    }
     void loadBrowserUrl(targetUrl)
+  }
+
+  // A tab opened from another, by a link or a page's new window, closes back
+  // to it once there is nowhere further back in it, as other browsers do.
+  function closeTabToOpener () {
+    const tabsState = browserTabsStateRef.current
+    const openerTabId = browserTabOpenersRef.current.get(tabsState.activeTabId)
+    if (!openerTabId || !tabsState.tabs.some((tab) => tab.id === openerTabId)) return false
+    onBrowserCloseTab(tabsState.activeTabId, openerTabId)
+    return true
   }
 
   // A tap on a home screen widget. An app goes back to the tab it is open in,
@@ -4404,6 +4420,7 @@ export default function App () {
     // So is a folder in the Hyperdrive viewer, or a photo open in it.
     else if (browserSource.kind === 'viewer' && driveViewerNavigationRef.current?.goBack()) return true
     else if (canBrowserGoBack) onBrowserBack()
+    else if (closeTabToOpener()) return true
     else return false
 
     return true

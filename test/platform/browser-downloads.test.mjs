@@ -71,6 +71,15 @@ describe('browser downloads', () => {
     assert.match(index, /onBrowserCloseTab\(tabId, browserTabOpenersRef\.current\.get\(tabId\)\)/)
   })
 
+  // A link tapped in a chat opens in a new tab, and back from it went to the
+  // home screen: the tab had no opener to return to.
+  test('back from a tab a link opened, with nowhere further back, returns to the tab it came from', () => {
+    const index = readFileSync(new URL('../../app/index.tsx', import.meta.url), 'utf8')
+    assert.match(index, /function openBrowserUrlInNewTab \(targetUrl: string\) \{\s+const openerTabId = browserTabsStateRef\.current\.activeTabId\s+if \(createBrowserTab\(targetUrl\)\) \{[\s\S]*?browserTabOpenersRef\.current\.set\(browserTabsStateRef\.current\.activeTabId, openerTabId\)/)
+    assert.match(index, /else if \(canBrowserGoBack\) onBrowserBack\(\)\s+else if \(closeTabToOpener\(\)\) return true\s+else return false/)
+    assert.match(index, /function closeTabToOpener \(\) \{[\s\S]*?onBrowserCloseTab\(tabsState\.activeTabId, openerTabId\)/)
+  })
+
   // Android hands a file over in its own download listener, so the app never
   // heard of it: an address typed for a file stayed in the tab over the page
   // still showing, its loading line running for good.
