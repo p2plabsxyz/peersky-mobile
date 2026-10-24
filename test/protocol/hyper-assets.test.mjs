@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
 import { test } from 'node:test'
 import {
   MAX_INLINE_ASSET_BYTES,
@@ -54,6 +55,48 @@ test('rewrites hyper media references to the local streaming proxy', () => {
   assert.match(rewritten, /<video src="http:\/\/127\.0\.0\.1:45123\/asset\?token=[0-9a-f]{64}&url=hyper%3A%2F%2Fexample\.com%2Fdocs%2Fclip\.mp4" poster="\.\/poster\.png"><\/video>/)
   assert.match(rewritten, /<a href="http:\/\/127\.0\.0\.1:45123\/asset\?token=[0-9a-f]{64}&url=hyper%3A%2F%2Fexample\.com%2Fdocs%2Fsong\.mp3">play<\/a>/)
   assert.match(rewritten, /<img src="\.\/logo\.png">/)
+})
+
+test('a page gets media and download links into another drive only when that drive may be read', async () => {
+  const own = 'a'.repeat(64)
+  const secret = 'b'.repeat(64)
+  const open = 'c'.repeat(64)
+  const asked = []
+  const html = await inlineHyperAssets({
+    html: [
+      `<a download href="hyper://${secret}/notes.txt">notes</a>`,
+      `<video src="hyper://${secret}/clip.mp4"></video>`,
+      `<video src="hyper://${open}/talk.mp4"></video>`,
+      '<video src="./mine.mp4"></video>',
+      `<a download href=hyper://${secret}/>files</a>`
+    ].join(''),
+    baseUrl: `hyper://${own}/index.html`,
+    fetch: async () => errorAssetResponse(),
+    assetBaseUrl: 'http://127.0.0.1:45123',
+    assetAuthToken,
+    mayLinkDrive: async (drive) => {
+      asked.push(drive)
+      return drive !== secret
+    }
+  })
+
+  // A private drive the page is not part of keeps its plain address, which
+  // the page cannot load: no signed link, so nothing comes back decrypted.
+  assert.match(html, new RegExp(`href="hyper://${secret}/notes\\.txt"`))
+  assert.match(html, new RegExp(`src="hyper://${secret}/clip\\.mp4"`))
+  assert.match(html, new RegExp(`href=hyper://${secret}/>`))
+  assert.doesNotMatch(html, new RegExp(`url=hyper%3A%2F%2F${secret}`))
+  // Another drive that may be read, and the page's own, are linked as before.
+  assert.match(html, new RegExp(`url=hyper%3A%2F%2F${open}%2Ftalk\\.mp4`))
+  assert.match(html, new RegExp(`url=hyper%3A%2F%2F${own}%2Fmine\\.mp4`))
+  // Each other drive is asked about once, the page's own drive never.
+  assert.deepEqual(asked.sort(), [secret, open].sort())
+})
+
+test('fetchHyper asks whether each other drive may be linked from a page', async () => {
+  const source = await readFile(new URL('../../backend/hyper/fetch.mjs', import.meta.url), 'utf8')
+  assert.match(source, /mayLinkDrive: \(drive\) => mayPageLinkDrive\(target\.driveAddress, drive\)/)
+  assert.match(source, /async function mayPageLinkDrive \(pageDrive, drive\) \{[\s\S]*?return !\(await isPrivateHyperAddress\(drive\)\)/)
 })
 
 test('builds encoded proxy asset URLs, signed for that one address', () => {

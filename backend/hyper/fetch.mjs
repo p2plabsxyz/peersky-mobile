@@ -179,7 +179,8 @@ export async function fetchHyper ({
             baseUrl: response.url || requestUrl,
             fetch,
             assetBaseUrl: proxyServer.localUrl,
-            assetAuthToken: proxyServer.authToken
+            assetAuthToken: proxyServer.authToken,
+            mayLinkDrive: (drive) => mayPageLinkDrive(target.driveAddress, drive)
           })
         }
 
@@ -399,6 +400,15 @@ async function getHyperWriteFetch (runtime) {
 /** Looks for peers of the drive behind url again, as a retry does. */
 export function refreshHyperNetworkFor (url) {
   return withHyperRuntimeForAddress(url, (runtime) => refreshHyperRuntimeNetwork(runtime))
+}
+
+// A page's media and download links are read with this phone's keys, so it
+// gets them for its own drive and public ones, never for a private drive it is
+// not a page of. The bridge refuses the same read with a 403.
+async function mayPageLinkDrive (pageDrive, drive) {
+  const driveId = normalizeDriveAddressId(drive)
+  if (driveId && driveId === normalizeDriveAddressId(pageDrive)) return true
+  return !(await isPrivateHyperAddress(drive))
 }
 
 // What the media links and PeerTunes read through. A song or a picture with
