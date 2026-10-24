@@ -36,6 +36,7 @@ const JOIN_READY_REQUEST_TIMEOUT_MS = 3000
 // How long a shared note is looked for on the person's other devices before
 // this phone hosts its own copy.
 const SHARED_NOTE_LOOK_MS = 8000
+const HOLESAIL_DEFAULT_PORT = 8989
 // How long a join waits for the note's host. Nobody there used to open an
 // empty note after up to 40 seconds of waiting, and what was typed into it
 // was gone once the host came back.
@@ -239,7 +240,10 @@ export async function joinP2pmdRoom ({
  * picks one instead.
  */
 async function connectOnNotePort ({ key, udp, log, token }) {
-  const saved = findNotePort(key)
+  // A note kept on 8989 got it from Holesail's default, not from its host, so
+  // it is joined on its host's port instead when the host has one.
+  const kept = findNotePort(key)
+  const saved = kept === HOLESAIL_DEFAULT_PORT ? null : kept
   const preferred = await connectHolesail({ key, port: saved, hostPort: true, udp, log, token })
   if (preferred.ok && isUsableNotePort(preferred.info?.port)) return preferred
   if (preferred.ok) await stopHolesail()
