@@ -17,6 +17,7 @@ import {
   getSearchUrl,
   isHyperUrl,
   isStaleBrowserLoad,
+  isUncommittedNavigationFinish,
   isWebUrl,
   MAX_BROWSER_HISTORY_ENTRIES,
   MAX_BROWSER_URL_LENGTH,
@@ -35,6 +36,28 @@ import {
 } from '../../app/internal-apps-registry.mjs'
 
 describe('browser shell navigation helpers', () => {
+  test('on Android a finish for an address nothing committed is not the page on screen', () => {
+    const page = 'https://phish.example/sign-in'
+    const committed = new Set([page])
+    // A 204 or a cancelled download reports a finish with the address it was going to.
+    assert.equal(isUncommittedNavigationFinish({ platform: 'android', isLoadStart: false, committedUrls: committed, url: 'https://www.google.com/generate_204' }), true)
+    // The page that did commit, or one it moved to with replaceState while loading, is.
+    assert.equal(isUncommittedNavigationFinish({ platform: 'android', isLoadStart: false, committedUrls: committed, url: page }), false)
+    assert.equal(isUncommittedNavigationFinish({ platform: 'android', isLoadStart: false, committedUrls: new Set([page, `${page}?clean`]), url: page }), false)
+    // A start is a commit on Android, nothing known yet decides nothing, and iOS is unchanged.
+    assert.equal(isUncommittedNavigationFinish({ platform: 'android', isLoadStart: true, committedUrls: committed, url: 'https://other.example/' }), false)
+    assert.equal(isUncommittedNavigationFinish({ platform: 'android', isLoadStart: false, committedUrls: undefined, url: 'https://other.example/' }), false)
+    assert.equal(isUncommittedNavigationFinish({ platform: 'ios', isLoadStart: false, committedUrls: committed, url: 'https://other.example/' }), false)
+  })
+
+  test('the browser keeps an aborted Android navigation out of the address bar', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const source = await readFile(new URL('../../app/index.tsx', import.meta.url), 'utf8')
+    assert.match(source, /committed\.add\(event\.nativeEvent\.url\)/)
+    assert.match(source, /if \(isUncommittedNavigationFinish\(\{[\s\S]*?committedUrls: browserCommittedUrlsRef\.current\.get\(tab\.id\),[\s\S]*?\}\)\) return/)
+    assert.match(source, /browserCommittedUrlsRef\.current\.set\(tab\.id, new Set\(\[navigationState\.url\]\)\)/)
+  })
+
   test('normalizes address bar input before routing', () => {
     assert.equal(normalizeBrowserAddress(''), BROWSER_HOME_URL)
     assert.equal(normalizeBrowserAddress('  peersky://home  '), BROWSER_HOME_URL)

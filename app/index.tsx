@@ -54,6 +54,7 @@ import {
   getSearchUrl,
   isHyperUrl,
   isStaleBrowserLoad,
+  isUncommittedNavigationFinish,
   isWebUrl,
   MAX_BROWSER_URL_LENGTH,
   normalizeBrowserAddress,
@@ -490,6 +491,9 @@ export default function App () {
   const browserTabOpenersRef = useRef(new Map<string, string>())
   // What a WebView reports as a page starts to load.
   const browserLoadStartsRef = useRef(new WeakSet<object>())
+  // On Android, the addresses each tab committed since its last finished page.
+  // See isUncommittedNavigationFinish.
+  const browserCommittedUrlsRef = useRef(new Map<string, Set<string>>())
   const browserFaviconsRef = useRef(new Map<string, string>())
   const browserLastRecordedUrlsRef = useRef(new Map<string, string>())
   const browserMediaTokensRef = useRef(new Map<string, string>())
@@ -2762,6 +2766,7 @@ export default function App () {
     removeBrowserTabPreview(tabId)
     browserFaviconsRef.current.delete(tabId)
     browserLastRecordedUrlsRef.current.delete(tabId)
+    browserCommittedUrlsRef.current.delete(tabId)
     browserMediaTokensRef.current.delete(tabId)
     browserTabOpenersRef.current.delete(tabId)
     hyperBridgePendingRef.current.delete(tabId)
@@ -6046,6 +6051,12 @@ export default function App () {
               }}
               onLoadStart={(event) => {
                 browserLoadStartsRef.current.add(event.nativeEvent)
+                // Android starts a load only for a navigation that committed.
+                if (Platform.OS === 'android' && typeof event.nativeEvent.url === 'string') {
+                  const committed = browserCommittedUrlsRef.current.get(tab.id) || new Set<string>()
+                  committed.add(event.nativeEvent.url)
+                  browserCommittedUrlsRef.current.set(tab.id, committed)
+                }
                 browserFaviconsRef.current.delete(tab.id)
                 setBrowserMediaTarget((current) => current?.tabId === tab.id ? null : current)
                 if (
@@ -6094,6 +6105,16 @@ export default function App () {
                 if (entry.source.kind !== 'web') return
                 if (!isCurrentBrowserTabEntry(browserTabsStateRef.current, tab.id, entry)) return
                 if (!isWebUrl(navigationState.url) || navigationState.url.length > MAX_BROWSER_URL_LENGTH) return
+                const isLoadStart = browserLoadStartsRef.current.has(navigationState)
+                if (isUncommittedNavigationFinish({
+                  platform: Platform.OS,
+                  isLoadStart,
+                  committedUrls: browserCommittedUrlsRef.current.get(tab.id),
+                  url: navigationState.url
+                })) return
+                if (Platform.OS === 'android' && !isLoadStart) {
+                  browserCommittedUrlsRef.current.set(tab.id, new Set([navigationState.url]))
+                }
                 // A page that has only started to load is not there yet. iOS
                 // reports the start with loading false, since the page being
                 // left is done, and read as a page that had landed, a link on
