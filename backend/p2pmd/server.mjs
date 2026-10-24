@@ -4048,6 +4048,36 @@ export function getP2pmdEditorPage () {
         })
       }
 
+      // A research paper's pages for Export PDF, laid out here as the preview
+      // lays them out. The page that prints the PDF cannot do it: Android
+      // prints with scripts off, and the layout runs in slices that can end
+      // after the PDF is taken. null for a note that is not a paper.
+      async function paperForExport(nonce) {
+        let html = null
+        try {
+          html = await renderPaperPages(input.value)
+        } catch {}
+        notifyNative('p2pmd-paper', { nonce, html })
+      }
+
+      async function renderPaperPages(content) {
+        if (!window.P2pmdIeee || !latexModeEnabled) return null
+        const result = await callNativeBridge('preview', { content, latexModeEnabled: true })
+        if (result.ieee !== true || typeof result.html !== 'string') return null
+        // The paper and the preview take turns in one layout, so a preview
+        // still being laid out is laid out again after.
+        const previewWasBusy = preview.getAttribute('aria-busy') === 'true'
+        const host = document.createElement('div')
+        host.style.cssText = 'position:fixed;left:-20000px;top:0;width:1000px;visibility:hidden;pointer-events:none'
+        document.body.appendChild(host)
+        try {
+          return await window.P2pmdIeee.render(host, result.html) ? host.innerHTML : null
+        } finally {
+          host.remove()
+          if (previewWasBusy && viewMode === 'preview') renderPreview()
+        }
+      }
+
       // The app hands over a fresh nonce each time someone taps Publish, and
       // only publishes when it comes back.
       function publishToHyper(nonce) {
@@ -4301,6 +4331,7 @@ export function getP2pmdEditorPage () {
       window.__p2pmdTogglePreview = togglePreview
       window.__p2pmdPublishToHyper = publishToHyper
       window.__p2pmdShareInfo = shareInfo
+      window.__p2pmdPaperForExport = paperForExport
       window.__p2pmdTogglePeerDashboard = (force) => {
         setPeerDashboardVisible(typeof force === 'boolean' ? force : peerDashboardBackdrop.hidden)
       }

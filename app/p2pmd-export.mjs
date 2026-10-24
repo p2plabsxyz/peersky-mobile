@@ -29,6 +29,29 @@ export function readP2pmdShareInfo (message, nonce) {
   }
 }
 
+// A research paper's pages, laid out by the editor for Export PDF
+// (paperForExport in backend/p2pmd/server.mjs).
+export const P2PMD_PAPER_TYPE = 'p2pmd-paper'
+// Several times a note's own size once laid out, KaTeX included.
+const MAX_PAPER_LENGTH = 40 * 1024 * 1024
+
+export function createP2pmdPaperScript (nonce) {
+  return `window.__p2pmdPaperForExport && window.__p2pmdPaperForExport(${JSON.stringify(String(nonce || ''))}); true;`
+}
+
+/**
+ * The editor's answer for this nonce: { html }, html being null for a note
+ * that is not a paper. null for anything that is not that answer.
+ */
+export function readP2pmdPaper (message, nonce) {
+  if (!message || message.type !== P2PMD_PAPER_TYPE) return null
+  if (!nonce || message.nonce !== nonce) return null
+  const html = typeof message.html === 'string' && message.html.length > 0 && message.html.length <= MAX_PAPER_LENGTH
+    ? message.html
+    : null
+  return { html }
+}
+
 // Named as the desktop names an export (normalizeFileBase in p2pmd's p2p.js):
 // the note's title, else its key, in lower case with dashes.
 export function p2pmdExportFileName (content, roomKey, kind) {

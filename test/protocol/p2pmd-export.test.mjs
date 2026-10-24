@@ -33,6 +33,37 @@ test('a note exports as the page a publish makes, with its pictures inside', asy
   assert.deepEqual(reads, ['hyper://abc/a.png', 'hyper://abc/gone.png'])
 })
 
+test('a note\'s tables and quotes print with their lines', async () => {
+  const result = await exportMarkdownDocument({ content: '| A | B |\n|---|---|\n| 1 | 2 |\n\n> quoted', mode: 'note' }, { readFile: files({}).readFile })
+  assert.match(result.html, /<table>/)
+  assert.match(result.html, /th,\s+td \{\s+border: 1px solid #c9ccd1;/)
+  assert.match(result.html, /thead \{\s+display: table-header-group;/)
+  assert.match(result.html, /blockquote \{\s+border-left: 3px solid #c9ccd1;/)
+})
+
+test('a research paper prints from the pages the editor laid out, a page to a sheet of A4', async () => {
+  const content = '<!-- ieee -->\n\n## A Paper\n\nText'
+  const pages = '<div class="ieee-page-stack"><div class="ieee-preview-page ieee-preview-page--first">' +
+    '<script>alert(1)</script><img src="/hyper/file?url=hyper%3A%2F%2Fabc%2Ffig.png" alt=""></div></div>'
+  const { readFile } = files({ 'hyper://abc/fig.png': { ok: true, bytes: PNG, contentType: 'image/png' } })
+  const paper = await exportMarkdownDocument({ content, mode: 'note', latexModeEnabled: true, paperHtml: pages }, { readFile })
+  assert.equal(paper.ok, true)
+  assert.equal(paper.paper, 'a4')
+  assert.match(paper.html, /class="ieee-preview-page ieee-preview-page--first"/)
+  assert.match(paper.html, /@page \{ size: A4; margin: 0; \}/)
+  assert.match(paper.html, /box-shadow: none;/)
+  // No script runs where it prints, and its pictures are read from their drive.
+  assert.doesNotMatch(paper.html, /<script/)
+  assert.match(paper.html, new RegExp(`src="data:image/png;base64,${PNG.toString('base64')}"`))
+
+  // Without the pages, or for a note that is not a paper, the note prints as before.
+  const plain = await exportMarkdownDocument({ content, mode: 'note', latexModeEnabled: true }, { readFile })
+  assert.equal(plain.paper, undefined)
+  const notPaper = await exportMarkdownDocument({ content: '## Not a paper', mode: 'note', latexModeEnabled: true, paperHtml: pages }, { readFile })
+  assert.equal(notPaper.paper, undefined)
+  assert.doesNotMatch(notPaper.html, /class="ieee-preview-page/)
+})
+
 test('slides export as the presentation a publish makes', async () => {
   const result = await exportMarkdownDocument({ content: '# One\n\n---\n\n# Two', mode: 'slides' }, { readFile: files({}).readFile })
   assert.equal(result.ok, true)

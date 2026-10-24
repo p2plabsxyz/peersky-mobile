@@ -256,6 +256,16 @@ describe('p2pmd mobile editor page routing', () => {
     assert.match(html, /window\.__p2pmdShareInfo = shareInfo/)
   })
 
+  it('lays a research paper out for Export PDF and hands the finished pages over', () => {
+    const html = getP2pmdEditorPage()
+
+    assert.match(html, /async function paperForExport\(nonce\) \{[\s\S]*?notifyNative\('p2pmd-paper', \{ nonce, html \}\)/)
+    assert.match(html, /return await window\.P2pmdIeee\.render\(host, result\.html\) \? host\.innerHTML : null/)
+    // A preview the paper interrupted is laid out again.
+    assert.match(html, /if \(previewWasBusy && viewMode === 'preview'\) renderPreview\(\)/)
+    assert.match(html, /window\.__p2pmdPaperForExport = paperForExport/)
+  })
+
   it('keeps gutter rows aligned with editor lines', () => {
     const html = getP2pmdEditorPage()
 

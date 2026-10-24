@@ -180,7 +180,10 @@ import { P2pmdShareSheet } from './P2pmdShareSheet'
 import {
   createP2pmdShareInfoScript,
   P2PMD_SHARE_INFO_TYPE,
+  createP2pmdPaperScript,
+  P2PMD_PAPER_TYPE,
   p2pmdExportFileName,
+  readP2pmdPaper,
   readP2pmdShareInfo,
   shareP2pmdExport
 } from './p2pmd-export'
@@ -368,6 +371,8 @@ type P2pmdViewMode = 'edit' | 'preview' | 'slides'
 
 const PEERTUNES_START_TIMEOUT_MS = 15000
 const DRIVE_VIEWER_START_TIMEOUT_MS = 15000
+// A long research paper takes the editor a while to lay out page by page.
+const P2PMD_PAPER_TIMEOUT_MS = 30000
 
 const HYPER_OFFLINE_NETWORK_COMMANDS = new Set([
   RPC_HYPER_INIT,
@@ -503,6 +508,8 @@ export default function App () {
   const p2pmdPublishNonceRef = useRef<string | null>(null)
   const p2pmdShareNonceRef = useRef<string | null>(null)
   const p2pmdShareTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // A research paper's pages asked of the editor for Export PDF.
+  const p2pmdPaperRequestRef = useRef<{ nonce: string, finish: (html: string | null) => void } | null>(null)
   const p2pmdExportInFlightRef = useRef(false)
   const p2pmdShareSheetActionRef = useRef<(() => void) | null>(null)
   const p2pmdPublishVisibilityRef = useRef<'public' | 'private'>('public')
@@ -3778,6 +3785,24 @@ export default function App () {
     afterP2pmdShareSheetCloses(() => { void runP2pmdExport(note, kind) })
   }
 
+  // A research paper's pages as the editor lays them out, for Export PDF.
+  // null for a note that is not a paper, an editor too old to answer, or one
+  // that takes too long, and the export goes on without them.
+  function requestP2pmdPaper (): Promise<string | null> {
+    p2pmdPaperRequestRef.current?.finish(null)
+    const nonce = createP2pmdNonce(Crypto.getRandomValues(new Uint8Array(16)))
+    return new Promise((resolve) => {
+      const finish = (html: string | null) => {
+        clearTimeout(timer)
+        if (p2pmdPaperRequestRef.current?.nonce === nonce) p2pmdPaperRequestRef.current = null
+        resolve(html)
+      }
+      const timer = setTimeout(() => finish(null), P2PMD_PAPER_TIMEOUT_MS)
+      p2pmdPaperRequestRef.current = { nonce, finish }
+      p2pmdWebViewRef.current?.injectJavaScript(createP2pmdPaperScript(nonce))
+    })
+  }
+
   // The page a publish makes, with its pictures inside, as a PDF or as a
   // slides file, handed to the share sheet to save or send.
   async function runP2pmdExport (note: { content: string, latexModeEnabled: boolean }, kind: 'pdf' | 'slides') {
@@ -3786,15 +3811,22 @@ export default function App () {
     const statusBefore = p2pmdSyncStatus
     setP2pmdSyncStatus(t('Exporting...'))
     try {
+      const paperHtml = kind === 'pdf' && note.latexModeEnabled ? await requestP2pmdPaper() : null
       const response = await callRpc(RPC_P2PMD_EXPORT, {
         content: note.content,
         mode: kind === 'slides' ? 'slides' : 'note',
-        latexModeEnabled: note.latexModeEnabled
+        latexModeEnabled: note.latexModeEnabled,
+        ...(paperHtml && { paperHtml })
       })
       if (!response.ok || typeof response.html !== 'string') {
         throw new Error(response.error || t('Unable to export the note'))
       }
-      const error = await shareP2pmdExport(response.html, p2pmdExportFileName(note.content, p2pmdRoom.key, kind), kind)
+      const error = await shareP2pmdExport(
+        response.html,
+        p2pmdExportFileName(note.content, p2pmdRoom.key, kind),
+        kind,
+        response.paper === 'a4' ? 'a4' : undefined
+      )
       if (error) throw new Error(error)
       setP2pmdSyncStatus(statusBefore)
     } catch (error) {
@@ -4065,6 +4097,12 @@ export default function App () {
         case P2PMD_SHARE_INFO_TYPE:
           onP2pmdShareInfo(parsed)
           break
+        case P2PMD_PAPER_TYPE: {
+          const request = p2pmdPaperRequestRef.current
+          const paper = request ? readP2pmdPaper(parsed, request.nonce) : null
+          if (request && paper) request.finish(paper.html)
+          break
+        }
         case 'p2pmd-publish-requested':
           if (!parsed.nonce || parsed.nonce !== p2pmdPublishNonceRef.current) break
           p2pmdPublishNonceRef.current = null

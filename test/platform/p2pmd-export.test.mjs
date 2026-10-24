@@ -3,9 +3,12 @@ import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
 import {
+  createP2pmdPaperScript,
   createP2pmdShareInfoScript,
+  P2PMD_PAPER_TYPE,
   P2PMD_SHARE_INFO_TYPE,
   p2pmdExportFileName,
+  readP2pmdPaper,
   readP2pmdShareInfo
 } from '../../app/p2pmd-export.mjs'
 
@@ -28,6 +31,23 @@ test('the page is asked with the nonce as a string', () => {
     createP2pmdShareInfoScript('ab"</script>'),
     'window.__p2pmdShareInfo && window.__p2pmdShareInfo("ab\\"</script>"); true;'
   )
+})
+
+test('a research paper is asked of the editor for Export PDF, and printed on A4', () => {
+  assert.equal(
+    createP2pmdPaperScript('ab"</script>'),
+    'window.__p2pmdPaperForExport && window.__p2pmdPaperForExport("ab\\"</script>"); true;'
+  )
+  const answer = { type: P2PMD_PAPER_TYPE, nonce: 'n1', html: '<div class="ieee-page-stack"></div>' }
+  assert.deepEqual(readP2pmdPaper(answer, 'n1'), { html: answer.html })
+  // A note that is not a paper answers with no pages.
+  assert.deepEqual(readP2pmdPaper({ ...answer, html: null }, 'n1'), { html: null })
+  assert.equal(readP2pmdPaper(answer, 'n2'), null)
+  assert.equal(readP2pmdPaper({ ...answer, type: P2PMD_SHARE_INFO_TYPE }, 'n1'), null)
+  // Export PDF asks for the pages first, only for a note with LaTeX mode on.
+  assert.match(app, /const paperHtml = kind === 'pdf' && note\.latexModeEnabled \? await requestP2pmdPaper\(\) : null/)
+  assert.match(app, /\.\.\.\(paperHtml && \{ paperHtml \}\)/)
+  assert.match(app, /response\.paper === 'a4' \? 'a4' : undefined/)
 })
 
 test('an export is named as the desktop names it', () => {
