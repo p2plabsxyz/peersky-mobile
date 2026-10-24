@@ -68,7 +68,10 @@ export async function savePeerChatMedia ({ uri, fileName }: { uri: string, fileN
 // write. The chats they came from go with Clear all P2P data, Remove my data
 // and a restore, and so do these.
 export function clearChatFileCopies () {
-  for (const name of ['peerchat-save', 'ImageManipulator']) {
+  // ImagePicker and DocumentPicker hold the full copies the pickers made of
+  // every photo and file chosen: chat pictures with their location, and
+  // files uploaded as Private.
+  for (const name of ['peerchat-save', 'ImageManipulator', 'ImagePicker', 'DocumentPicker']) {
     try {
       const folder = new Directory(Paths.cache, name)
       if (folder.exists) folder.delete()
