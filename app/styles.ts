@@ -491,14 +491,18 @@ export const styles = StyleSheet.create({
     top: 0,
     zIndex: 1
   },
+  // A browser tab behind another on Android, where the WebView is kept and not
+  // drawn. On iOS it would be taken down and built again (see the tab layer).
   browserWebViewLayerHidden: {
     display: 'none',
     zIndex: 0
   },
   // Out of sight but still attached and laid out. A WebView inside a
   // display:none view has its media suspended by the platform, which is what
-  // silenced PeerTunes the moment you switched tab. Kept full size so the page
-  // does not reflow to nothing and lose its layout while it plays on.
+  // silenced PeerTunes the moment you switched tab, and on iOS it is taken
+  // down and built again, which reloaded a browser tab every time you came
+  // back to it. Kept full size so the page does not reflow to nothing and
+  // lose its place.
   browserWebViewLayerOffscreen: {
     left: -20000,
     right: 20000,

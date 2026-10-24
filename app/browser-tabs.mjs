@@ -10,7 +10,9 @@ import { getRuntimeAppFromUrl, getRuntimeAppUrl } from './internal-apps-registry
 import { parsePeerChatDirectInvite, parsePeerChatInvite } from './peerchat/peerchat-invite.mjs'
 
 export const MAX_BROWSER_TABS = 50
-export const MAX_LIVE_BROWSER_WEBVIEWS = 5
+// Tabs whose page stays loaded behind the one in front. Each is a page held in
+// memory, and on a phone that is what gets an app closed in the background.
+export const MAX_LIVE_BROWSER_WEBVIEWS = 3
 export const MAX_BROWSER_TITLE_LENGTH = 256
 export const BROWSER_PAGE_ZOOMS = [80, 90, 100, 110, 125, 150]
 export const DEFAULT_BROWSER_PAGE_ZOOM = 100
@@ -555,6 +557,17 @@ export function touchLiveBrowserTabIds (tabIds, tabId) {
   return [...tabIds.filter((id) => id !== tabId), tabId]
     .slice(-MAX_LIVE_BROWSER_WEBVIEWS)
 }
+
+// Run in a tab as another comes to the front. The tab stays loaded behind it,
+// so a video or song in it would otherwise play on out of sight.
+export const PAUSE_TAB_MEDIA_SCRIPT = `(function () {
+  try {
+    document.querySelectorAll('video, audio').forEach(function (media) {
+      if (!media.paused) media.pause();
+    });
+  } catch (_) {}
+})();
+true;`
 
 export function suspendInactiveBrowserTabsState (state, liveTabIds) {
   const liveIds = new Set(liveTabIds)

@@ -21,6 +21,7 @@ import {
   moveBrowserTabState,
   normalizeBrowserPageZoom,
   parseRecentlyClosedBrowserTabs,
+  PAUSE_TAB_MEDIA_SCRIPT,
   rememberClosedBrowserTabs,
   reopenClosedBrowserTabState,
   restoreBrowserTabsState,
@@ -397,13 +398,37 @@ describe('browser tab state helpers', () => {
     })
   })
 
-  test('keeps only the five most recently used WebViews live', () => {
+  test('keeps only the three most recently used WebViews live', () => {
     let liveTabIds = []
-    for (const tabId of ['tab-1', 'tab-2', 'tab-3', 'tab-4', 'tab-5', 'tab-6']) {
+    for (const tabId of ['tab-1', 'tab-2', 'tab-3', 'tab-4']) {
       liveTabIds = touchLiveBrowserTabIds(liveTabIds, tabId)
     }
 
-    assert.deepEqual(liveTabIds, ['tab-2', 'tab-3', 'tab-4', 'tab-5', 'tab-6'])
+    assert.deepEqual(liveTabIds, ['tab-2', 'tab-3', 'tab-4'])
+  })
+
+  // display: 'none' got the WebView taken down and built again on iOS, so a
+  // tab reloaded every time it came back to the front, a PDF on page 1.
+  // Android keeps it, and stops drawing it.
+  test('a tab behind another keeps its page, out of sight and quiet', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const index = await readFile(new URL('../../app/index.tsx', import.meta.url), 'utf8')
+    const styles = await readFile(new URL('../../app/styles.ts', import.meta.url), 'utf8')
+
+    const layer = index.slice(index.indexOf('{browserTabsState.tabs.map((tab) => {'), index.indexOf('<WebView', index.indexOf('{browserTabsState.tabs.map((tab) => {')))
+    assert.match(layer, /isActive\s+\? null\s+: Platform\.OS === 'ios' \? styles\.browserWebViewLayerOffscreen : styles\.browserWebViewLayerHidden/)
+    const hidden = styles.slice(styles.indexOf('browserWebViewLayerHidden: {'), styles.indexOf('}', styles.indexOf('browserWebViewLayerHidden: {')))
+    assert.match(hidden, /display: 'none'/)
+
+    const left = index.slice(index.indexOf('const frontBrowserTabIdRef'), index.indexOf('}, [browserTabsState.activeTabId])', index.indexOf('const frontBrowserTabIdRef')))
+    assert.match(left, /browserWebViewRefs\.current\.get\(leftTabId\)\?\.injectJavaScript\(PAUSE_TAB_MEDIA_SCRIPT\)/)
+
+    const paused = []
+    const media = [{ paused: false, pause () { this.paused = true; paused.push('video') } }, { paused: true, pause () { paused.push('stopped audio') } }]
+    const { runInNewContext } = await import('node:vm')
+    runInNewContext(PAUSE_TAB_MEDIA_SCRIPT, { document: { querySelectorAll: (selector) => (selector === 'video, audio' ? media : []) } })
+    assert.deepEqual(paused, ['video'])
+    assert.doesNotThrow(() => runInNewContext(PAUSE_TAB_MEDIA_SCRIPT, { document: { querySelectorAll: () => { throw new Error('no page') } } }))
   })
 
   test('releases rendered state for inactive Hyper tabs', () => {

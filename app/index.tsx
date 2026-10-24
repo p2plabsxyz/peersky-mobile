@@ -81,6 +81,7 @@ import {
   normalizeBrowserPageZoom,
   normalizeBrowserTabTitle,
   parseRecentlyClosedBrowserTabs,
+  PAUSE_TAB_MEDIA_SCRIPT,
   rememberClosedBrowserTabs,
   reopenClosedBrowserTabState,
   setBrowserTabViewModeState,
@@ -1179,6 +1180,16 @@ export default function App () {
       browserTabsState.activeTabId
     ))
   }, [browserSource.kind, browserTabsState.activeTabId])
+
+  // The tab you leave stays loaded behind the new one, so its sound stops here
+  // rather than playing on where you cannot see it.
+  const frontBrowserTabIdRef = useRef(browserTabsState.activeTabId)
+  useEffect(() => {
+    const leftTabId = frontBrowserTabIdRef.current
+    frontBrowserTabIdRef.current = browserTabsState.activeTabId
+    if (leftTabId === browserTabsState.activeTabId) return
+    browserWebViewRefs.current.get(leftTabId)?.injectJavaScript(PAUSE_TAB_MEDIA_SCRIPT)
+  }, [browserTabsState.activeTabId])
 
   useEffect(() => {
     updateBrowserTabsState((state) => suspendInactiveBrowserTabsState(
@@ -5929,11 +5940,21 @@ export default function App () {
 
           const webViewGeneration = browserWebViewGenerations[tab.id] || 0
 
+          // On iOS a tab behind another is moved out of sight, not set to
+          // display: 'none'. Hidden that way, its WebView was taken down and
+          // built again, so every switch reloaded the page and lost the place
+          // in it: a PDF went back to page 1. Android keeps the WebView and
+          // stops drawing it, which a tab out of sight would not.
           return (
             <View
               key={tab.id}
               pointerEvents={isActive ? 'auto' : 'none'}
-              style={[styles.browserWebViewLayer, !isActive ? styles.browserWebViewLayerHidden : null]}
+              style={[
+                styles.browserWebViewLayer,
+                isActive
+                  ? null
+                  : Platform.OS === 'ios' ? styles.browserWebViewLayerOffscreen : styles.browserWebViewLayerHidden
+              ]}
             >
             <View
               ref={(ref) => {
