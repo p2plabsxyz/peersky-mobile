@@ -6,8 +6,10 @@ import android.net.Uri
 import android.os.Bundle
 import android.widget.Toast
 
-// Text shared to PeerSky from another app: the first web or hyper:// link in
-// it goes to MainActivity as an ordinary link, which opens it in a tab. This
+// Text shared to PeerSky from another app: the first web, hyper:// or
+// peersky:// link in it goes to MainActivity as an ordinary link, which opens
+// it in a tab. A PeerChat invite is a peersky:// link, and messengers on
+// Android do not make it tappable, so sharing it here is how it opens. This
 // activity has no window and is gone at once.
 class ShareToOpenActivity : Activity() {
   override fun onCreate(savedInstanceState: Bundle?) {
@@ -29,7 +31,7 @@ class ShareToOpenActivity : Activity() {
   }
 
   companion object {
-    private val LINK = Regex("(?:https?|hyper)://[^\\s<>\"]+", RegexOption.IGNORE_CASE)
+    private val LINK = Regex("(?:https?|hyper|peersky)://[^\\s<>\"]+", RegexOption.IGNORE_CASE)
     private const val MAX_LINK_LENGTH = 8192
 
     // A link at the end of a sentence keeps the sentence's full stop out, and

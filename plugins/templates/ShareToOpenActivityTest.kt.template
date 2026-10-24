@@ -16,6 +16,8 @@ class ShareToOpenActivityTest {
       ShareToOpenActivity.sharedLink("https://en.wikipedia.org/wiki/Hydra_(genus)")
     )
     assertEquals("HTTPS://EXAMPLE.COM/", ShareToOpenActivity.sharedLink("HTTPS://EXAMPLE.COM/"))
+    val invite = "peersky://p2p/peerchat/#room=" + "a".repeat(64) + "&creator=" + "b".repeat(64)
+    assertEquals(invite, ShareToOpenActivity.sharedLink("Join my room: $invite"))
   }
 
   @Test
