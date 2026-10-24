@@ -496,6 +496,8 @@ export default function App () {
   const browserTabOpenersRef = useRef(new Map<string, string>())
   // What a WebView reports as a page starts to load.
   const browserLoadStartsRef = useRef(new WeakSet<object>())
+  // The tab each WebView is, by native view tag, for what native code reports.
+  const browserWebViewTabsRef = useRef(new Map<number, string>())
   // On Android, the addresses each tab committed since its last finished page.
   // See isUncommittedNavigationFinish.
   const browserCommittedUrlsRef = useRef(new Map<string, Set<string>>())
@@ -2027,6 +2029,24 @@ export default function App () {
     stepBack()
   }
 
+  // Android hands a file over in native code and the page does not change, so
+  // native code says so (PeerSkyFileDownload in PeerSkyWebViewManager), and a
+  // tab sent to a file from the address bar steps back, as on iOS.
+  const leaveFileHandoffRef = useRef<typeof leaveFileHandoff | null>(null)
+  leaveFileHandoffRef.current = leaveFileHandoff
+  useEffect(() => {
+    if (Platform.OS !== 'android') return
+    const subscription = DeviceEventEmitter.addListener('PeerSkyFileDownload', (event: { url?: unknown, viewTag?: unknown }) => {
+      if (typeof event?.url !== 'string') return
+      const viewTag = typeof event.viewTag === 'number' ? event.viewTag : null
+      const tabId = (viewTag !== null && browserWebViewTabsRef.current.get(viewTag)) || browserTabsStateRef.current.activeTabId
+      if (!tabId) return
+      if (browserTabsStateRef.current.activeTabId === tabId) setBrowserIsLoading(false)
+      leaveFileHandoffRef.current?.(tabId, event.url, viewTag)
+    })
+    return () => subscription.remove()
+  }, [])
+
   // Android keeps the app running for PeerChat after a swipe away, and a tab
   // went on playing with nothing left on screen to stop it.
   useEffect(() => {
@@ -2774,6 +2794,9 @@ export default function App () {
     browserFaviconsRef.current.delete(tabId)
     browserLastRecordedUrlsRef.current.delete(tabId)
     browserCommittedUrlsRef.current.delete(tabId)
+    for (const [tag, id] of browserWebViewTabsRef.current) {
+      if (id === tabId) browserWebViewTabsRef.current.delete(tag)
+    }
     browserMediaTokensRef.current.delete(tabId)
     browserTabOpenersRef.current.delete(tabId)
     hyperBridgePendingRef.current.delete(tabId)
@@ -6089,6 +6112,8 @@ export default function App () {
               }}
               onLoadStart={(event) => {
                 browserLoadStartsRef.current.add(event.nativeEvent)
+                const startTag = getNativeViewTag(event)
+                if (startTag !== null) browserWebViewTabsRef.current.set(startTag, tab.id)
                 // Android starts a load only for a navigation that committed.
                 if (Platform.OS === 'android' && typeof event.nativeEvent.url === 'string') {
                   const committed = browserCommittedUrlsRef.current.get(tab.id) || new Set<string>()

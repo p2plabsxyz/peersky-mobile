@@ -71,6 +71,20 @@ describe('browser downloads', () => {
     assert.match(index, /onBrowserCloseTab\(tabId, browserTabOpenersRef\.current\.get\(tabId\)\)/)
   })
 
+  // Android hands a file over in its own download listener, so the app never
+  // heard of it: an address typed for a file stayed in the tab over the page
+  // still showing, its loading line running for good.
+  test('on Android a tab sent to a file from the address bar steps back too', () => {
+    const manager = readFileSync(new URL('../../plugins/templates/PeerSkyWebViewManager.kt.template', import.meta.url), 'utf8')
+    const listener = manager.slice(manager.indexOf('wrapper.webView.setDownloadListener'), manager.indexOf('confirmDownload(context, name, url, contentLength)'))
+    assert.match(listener, /\.emit\("PeerSkyFileDownload", Arguments\.createMap\(\)\.apply \{\s+putString\("url", url\)\s+putInt\("viewTag", wrapper\.id\)/)
+
+    const index = readFileSync(new URL('../../app/index.tsx', import.meta.url), 'utf8')
+    assert.match(index, /DeviceEventEmitter\.addListener\('PeerSkyFileDownload'/)
+    assert.match(index, /if \(browserTabsStateRef\.current\.activeTabId === tabId\) setBrowserIsLoading\(false\)\s+leaveFileHandoffRef\.current\?\.\(tabId, event\.url, viewTag\)/)
+    assert.match(index, /if \(startTag !== null\) browserWebViewTabsRef\.current\.set\(startTag, tab\.id\)/)
+  })
+
   // iOS fetches a page's file itself now, so it names the file the way the
   // server says.
   test('names a download from Content-Disposition, RFC 5987 first, or from its address', () => {
