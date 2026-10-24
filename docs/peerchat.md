@@ -89,15 +89,27 @@ Important files:
 ## Moderation
 
 Each phone and desktop filters what it sends and what it receives, on its own.
+Every check runs on the device, and nothing about a check is sent to the
+maintainers or to anyone else: no copy of the message or the picture, no
+result, no report.
+
 In a group, a message with threats, slurs or an adult-domain link is held back
 and a notice takes its place. So is a file whose name has them, since the name
 shows in the chat list, a search and a notification. A picture that looks
-explicit is refused before it is sent. A direct message skips the text filters,
-file names included: it is between two
+explicit is refused before it is sent, by a model that runs on the device.
+Pictures are checked again when they arrive, and one that looks explicit is
+hidden behind a warning the reader can open. The abuse filter and the
+profanity and slur list are on in every new group, and whoever made the group
+can turn either off in Edit room. That choice is signed with their key, like
+the rest of the room's details, so every device knows it came from them. The
+adult-domain check and the picture check stay on in every group.
+
+A direct message skips the text filters, file names included: it is between two
 people, and either can block the other. The spam limit still applies there, and
 a picture that looks explicit arrives hidden behind a warning the reader can
 open. Whether a room is a direct message is worked out on each device, never
-taken from a peer, so no room setting can switch a group's filters off.
+taken from a peer, so a group cannot pass itself off as a direct message to get
+out of its filters.
 
 Whoever made a room can remove anyone from it, for good. The creator signs the
 room's removal list with their own key, so anyone in the room can pass it on
@@ -461,7 +473,11 @@ brings it back. Blocking and reporting together is one tap.
 A report goes to the maintainers by email. It names the room by the first 16 hex
 characters of the SHA-256 of its key, never the key, which would let whoever
 reads the email into the room and its whole history. If the phone has no mail
-app, the report can be copied instead.
+app, the report can be copied instead. The email does not let the maintainers
+into the room, and nobody can delete a message from a device it already
+reached. The maintainers can remove someone only from P2P Republic, the public
+room they run, whose creator key is pinned in the app. In any other group, only
+whoever made it can.
 
 ## Notifications
 

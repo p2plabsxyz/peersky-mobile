@@ -334,6 +334,9 @@ test('PeerChat answers the questions a first-time user actually asks', async () 
   assert.match(answer(/bothering me/), /Everything they send disappears for you, in every chat/)
   assert.match(answer(/bothering me/), /with the message you reported/)
   assert.doesNotMatch(answer(/bothering me/), /key/)
+  // A report does not let us into a chat, and we remove people only in P2P Republic.
+  assert.match(answer(/bothering me/), /The email doesn’t let us into your chats, and we can’t delete anything/)
+  assert.match(answer(/bothering me/), /We can remove people only from P2P Republic, the room we run. In any other group, only whoever made it can do that/)
 
   // What the filters catch, never what they miss: a list of gaps is a guide
   // for whoever wants to get something past them.
@@ -341,6 +344,10 @@ test('PeerChat answers the questions a first-time user actually asks', async () 
     assert.doesNotMatch(a, /(aren|isn).t detected|not detected|can.t (detect|tell)|undetected/i)
   }
   assert.match(answer(/send anything they like/), /Nudity in pictures is refused/)
+  assert.match(answer(/send anything they like/), /a picture that looks explicit when it arrives is hidden behind a warning/)
+  // Which checks a group's maker can turn off, and that they run on the phone.
+  assert.match(answer(/send anything they like/), /whoever made the group can turn those two filters off/)
+  assert.match(answer(/send anything they like/), /All of this happens on your phone, and nothing about it is sent to us/)
 })
 
 test('PeerChat shows the questions folded, on the welcome screen and in About', async () => {
