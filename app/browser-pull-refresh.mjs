@@ -29,7 +29,12 @@ export function createPullRefreshScript (token) {
     const TOKEN = ${JSON.stringify(String(token || ''))}
     const post = (phase, distance) => {
       try {
-        window.ReactNativeWebView.postMessage(JSON.stringify({ type: TYPE, token: TOKEN, phase, distance }))
+        const message = { type: TYPE, token: TOKEN, phase, distance }
+        // The bridge's sealed sender, taken before the page could replace
+        // JSON.stringify and read the token out of this message. Only fall
+        // back to the page's JSON.stringify when the bridge is not present.
+        if (typeof window.__peerskyPostNative === 'function') window.__peerskyPostNative(message)
+        else window.ReactNativeWebView.postMessage(JSON.stringify(message))
       } catch {}
     }
     const root = () => document.scrollingElement || document.documentElement
