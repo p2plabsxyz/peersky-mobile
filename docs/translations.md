@@ -4,7 +4,7 @@ PeerSky's own screens come in 25 languages: English, Spanish, Portuguese (Brazil
 
 ## Which language
 
-Settings, Language lists each language under its own name. **Phone language**, the default, follows the phone: on iOS the languages in the app's defaults, where one picked for PeerSky alone in iOS Settings lands too, and on Android the locale the app runs in, which follows one picked for PeerSky in Android Settings (Android 13 and later). The first language PeerSky has wins, and English when it has none of them (`matchLanguage`).
+Settings, General ends with the languages, each under its own name. **Phone language**, the default, follows the phone: on iOS the languages in the app's defaults, where one picked for PeerSky alone in iOS Settings lands too, and on Android the locale the app runs in, which follows one picked for PeerSky in Android Settings (Android 13 and later). The first language PeerSky has wins, and English when it has none of them (`matchLanguage`).
 
 The choice is the `language` browser preference. `app/i18n/setup.ts` reads it straight from the preferences file before the first screen draws, so PeerSky starts in it. Picking another language changes the text on every screen at once: the root component subscribes to the language (`useT`), and everything hangs off it.
 

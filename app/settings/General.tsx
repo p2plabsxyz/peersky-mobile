@@ -17,6 +17,7 @@ import {
 } from '../browser-shell.mjs'
 import { t, tKey } from '../i18n/i18n.mjs'
 import { SEARCH_ENGINES } from './browser-preferences.mjs'
+import { LanguageSection } from './Language'
 import {
   ChoiceGroup,
   SettingCopy,
@@ -28,6 +29,8 @@ import type { SearchEngine } from './useBrowserPreferences'
 type GeneralProps = {
   customSearchUrl: string
   forceDarkWebsites: boolean
+  // 'system', or the code of the language picked in PeerSky.
+  language: string
   persistenceError: string | null
   searchEngine: SearchEngine
   searchSuggestionsEnabled: boolean
@@ -35,6 +38,7 @@ type GeneralProps = {
   onForceDarkWebsitesChange: (enabled: boolean) => void
   onSearchEngineChange: (searchEngine: SearchEngine) => void
   onSearchSuggestionsChange: (enabled: boolean) => void
+  onLanguageChange: (language: string) => void
   onResetTabs: () => void
 }
 
@@ -44,10 +48,12 @@ export function General ({
   persistenceError,
   searchEngine,
   searchSuggestionsEnabled,
+  language,
   onCustomSearchSave,
   onForceDarkWebsitesChange,
   onSearchEngineChange,
   onSearchSuggestionsChange,
+  onLanguageChange,
   onResetTabs
 }: GeneralProps) {
   const isDark = useSettingsDarkMode()
@@ -240,6 +246,8 @@ export function General ({
           <Text style={styles.destructiveAction}>{t('Reset')}</Text>
         </Pressable>
       </SettingsSection>
+
+      <LanguageSection language={language} onLanguageChange={onLanguageChange} />
     </View>
   )
 }

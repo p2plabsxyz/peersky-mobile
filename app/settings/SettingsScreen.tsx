@@ -29,7 +29,6 @@ import { ToolbarButtonSettings } from './ToolbarButton'
 import { Accessibility } from './Accessibility'
 import { DataClearing } from './DataClearing'
 import { General } from './General'
-import { LanguageSettings } from './Language'
 import { Permissions } from './Permissions'
 import { Privacy } from './Privacy'
 import { Licenses } from './Licenses'
@@ -59,7 +58,6 @@ import PaletteIcon from '../../assets/icons/bootstrap/palette.svg'
 import ShieldLockIcon from '../../assets/icons/bootstrap/shield-lock.svg'
 import LinkIcon from '../../assets/icons/bootstrap/link-45deg.svg'
 import SlidersIcon from '../../assets/icons/bootstrap/sliders.svg'
-import GlobeIcon from '../../assets/icons/bootstrap/globe.svg'
 import TrashIcon from '../../assets/icons/bootstrap/trash.svg'
 import UniversalAccessIcon from '../../assets/icons/bootstrap/universal-access-circle.svg'
 import DisplayIcon from '../../assets/icons/bootstrap/display.svg'
@@ -69,7 +67,6 @@ import { LAN_PERMISSION_HELP, LAN_PERMISSION_TITLE, offerPermissionSettings } fr
 export type SettingsPage =
   | 'main'
   | 'general'
-  | 'language'
   | 'accessibility'
   | 'appearance'
   | 'data-clearing'
@@ -246,14 +243,8 @@ const SETTINGS_PAGES: Array<{
   {
     id: 'general',
     title: msg('General'),
-    description: msg('Search and startup behavior'),
+    description: msg('Search, tabs and language'),
     icon: SlidersIcon
-  },
-  {
-    id: 'language',
-    title: msg('Language'),
-    description: msg('The language PeerSky shows in'),
-    icon: GlobeIcon
   },
   {
     id: 'accessibility',
@@ -385,9 +376,6 @@ export function SettingsScreen(props: SettingsScreenProps) {
         onBack={() => changePage('main', -1)}
       >
         {page === 'general' && <General {...props} />}
-        {page === 'language' && (
-          <LanguageSettings language={props.language} onLanguageChange={props.onLanguageChange} />
-        )}
         {page === 'accessibility' && <Accessibility {...props} />}
         {page === 'appearance' && (
           <Appearance
