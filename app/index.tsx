@@ -3862,7 +3862,7 @@ export default function App () {
       }
       const error = await shareP2pmdExport(
         response.html,
-        p2pmdExportFileName(note.content, p2pmdRoom.key, kind),
+        p2pmdExportFileName(note.content, kind),
         kind,
         response.paper === 'a4' ? 'a4' : undefined
       )

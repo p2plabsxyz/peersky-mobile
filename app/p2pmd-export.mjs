@@ -53,12 +53,12 @@ export function readP2pmdPaper (message, nonce) {
 }
 
 // Named as the desktop names an export (normalizeFileBase in p2pmd's p2p.js):
-// the note's title, else its key, in lower case with dashes.
-export function p2pmdExportFileName (content, roomKey, kind) {
-  const base = String(p2pmdNoteTitle(content) || roomKey || '')
+// the note's title in lower case with dashes. Never its key, which lets
+// whoever reads the file name into the note.
+export function p2pmdExportFileName (content, kind) {
+  const base = String(p2pmdNoteTitle(content) || '')
     .trim()
     .replace(/\.\.\.$/, '')
-    .replace(/^hs:\/\//i, '')
     .replace(/[^a-z0-9]+/gi, '-')
     .replace(/^-+|-+$/g, '')
     .toLowerCase() || 'p2pmd-document'

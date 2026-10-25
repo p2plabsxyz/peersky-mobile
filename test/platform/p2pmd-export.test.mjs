@@ -51,10 +51,17 @@ test('a research paper is asked of the editor for Export PDF, and printed on A4'
 })
 
 test('an export is named as the desktop names it', () => {
-  assert.equal(p2pmdExportFileName('# Trip to Pune!\n\nDay one', 'hs://abc', 'pdf'), 'trip-to-pune.pdf')
-  assert.equal(p2pmdExportFileName('# Trip to Pune!\n\nDay one', 'hs://abc', 'slides'), 'trip-to-pune.slides.html')
-  assert.equal(p2pmdExportFileName('', 'hs://ABC123', 'pdf'), 'abc123.pdf')
-  assert.equal(p2pmdExportFileName('', '', 'slides'), 'p2pmd-document.slides.html')
+  assert.equal(p2pmdExportFileName('# Trip to Pune!\n\nDay one', 'pdf'), 'trip-to-pune.pdf')
+  assert.equal(p2pmdExportFileName('# Trip to Pune!\n\nDay one', 'slides'), 'trip-to-pune.slides.html')
+  assert.equal(p2pmdExportFileName('', 'slides'), 'p2pmd-document.slides.html')
+})
+
+// A note's key lets whoever has it into the note, so a file name sent on or
+// saved to a shared folder must never carry it.
+test('an export is never named after the note key', () => {
+  assert.equal(p2pmdExportFileName('', 'pdf'), 'p2pmd-document.pdf')
+  assert.equal(p2pmdExportFileName('   \n\n', 'pdf'), 'p2pmd-document.pdf')
+  assert.doesNotMatch(app, /p2pmdExportFileName\([^)]*p2pmdRoom\.key/)
 })
 
 test('the share button opens the sheet, and a name from the people panel is kept', () => {
