@@ -1131,6 +1131,45 @@ test('PeerChat opens a direct room for an offline peer and invites them on recon
   await service.close()
 })
 
+// Blocked on one device, the person's other device sent the request straight
+// back. A block covers every device that proves it is that person's.
+test('PeerChat blocks every device of the person, and keeps that across a restart', async (t) => {
+  const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-block-person-'))
+  t.after(() => rm(storagePath, { recursive: true, force: true }))
+  const person = 'ab'.repeat(32)
+  const service = await new PeerChatService({ sdk: createFakeSdk(new Map(), 31), storagePath }).start()
+  service.setProfile({ username: 'Test Cai', bio: '' })
+
+  const laptop = createFakePeer('a1a1a1a1', 'Test Ana')
+  laptop.person = person
+  service.peers.set(laptop.connection, laptop)
+  const desktop = createFakePeer('a2a2a2a2', 'Test Ana@desktop')
+  desktop.connection = { ...desktop.connection }
+  desktop.person = person
+  service.peers.set(desktop.connection, desktop)
+  const stranger = createFakePeer('b3b3b3b3', 'Test Ben')
+  stranger.connection = { ...stranger.connection }
+  service.peers.set(stranger.connection, stranger)
+  service.pendingDirectMessages.set('cd'.repeat(32), { roomKey: 'cd'.repeat(32), fromId: 'a2a2a2a2', fromUsername: 'Test Ana@desktop', receivedAt: Date.now() })
+
+  const blocked = await service.blockPeer({ peerId: 'a1a1a1a1', username: 'Test Ana' })
+  assert.equal(blocked.blockedPeers[0].person, person)
+  assert.equal(service.isPeerBlocked('a1a1a1a1'), true)
+  assert.equal(service.isPeerBlocked('a2a2a2a2'), true, 'their other device')
+  assert.equal(service.isPeerBlocked('b3b3b3b3'), false, 'somebody else')
+  assert.equal(service.pendingDirectMessages.size, 0, 'the request from their other device goes')
+  await service.close()
+
+  const restarted = await new PeerChatService({ sdk: createFakeSdk(new Map(), 31), storagePath }).start()
+  t.after(() => restarted.close())
+  const back = createFakePeer('a2a2a2a2', 'Test Ana@desktop')
+  back.person = person
+  restarted.peers.set(back.connection, back)
+  assert.equal(restarted.isPeerBlocked('a2a2a2a2'), true)
+  await restarted.unblockPeer({ peerId: 'a1a1a1a1' })
+  assert.equal(restarted.isPeerBlocked('a2a2a2a2'), false)
+})
+
 test('PeerChat blocking stops direct messages both ways, hides them, and survives a restart', async (t) => {
   const senderPath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-block-sender-'))
   const receiverPath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-block-receiver-'))

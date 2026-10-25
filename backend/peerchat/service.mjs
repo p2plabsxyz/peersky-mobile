@@ -903,7 +903,20 @@ export class PeerChatService {
 
   isPeerBlocked (peerId) {
     const id = normalizePeerChatPeerId(peerId)
-    return Boolean(id) && this.blockedPeers.has(id)
+    if (!id) return false
+    if (this.blockedPeers.has(id)) return true
+    // Every device of a person blocked here, once it proves whose it is. A
+    // block on one device let their other one send the request straight back.
+    const persons = this.blockedPersons()
+    if (!persons.size) return false
+    const person = this.personOf(id)
+    return Boolean(person) && persons.has(person)
+  }
+
+  blockedPersons () {
+    const persons = new Set()
+    for (const entry of this.blockedPeers.values()) if (entry.person) persons.add(entry.person)
+    return persons
   }
 
   listBlockedPeers () {
@@ -916,18 +929,22 @@ export class PeerChatService {
     if (id === this.localId) throw new Error('You cannot block yourself.')
 
     const existing = this.blockedPeers.get(id)
+    // Not one of this phone's own person's devices: that is not someone else.
+    const found = this.personOf(id) || existing?.person || ''
+    const person = found && found !== (this.link ? personKey(this.link) : '') ? found : ''
     this.blockedPeers.set(id, {
       peerId: id,
       username: normalizeMemberName(username) || existing?.username || id,
-      blockedAt: existing?.blockedAt ?? Date.now()
+      blockedAt: existing?.blockedAt ?? Date.now(),
+      ...(person && { person })
     })
     while (this.blockedPeers.size > MAX_BLOCKED_PEERS) {
       this.blockedPeers.delete(this.blockedPeers.keys().next().value)
     }
 
-    // Drop any request they already had waiting.
+    // Drop any request they already had waiting, from any of their devices.
     for (const [key, pending] of this.pendingDirectMessages) {
-      if (pending.fromId === id) this.pendingDirectMessages.delete(key)
+      if (pending.fromId === id || (person && this.personOf(pending.fromId) === person)) this.pendingDirectMessages.delete(key)
     }
 
     await this.refreshLastMessages()
@@ -5217,10 +5234,12 @@ export class PeerChatService {
       for (const value of Array.isArray(parsed?.blockedPeers) ? parsed.blockedPeers.slice(0, MAX_BLOCKED_PEERS) : []) {
         const peerId = normalizePeerChatPeerId(value?.peerId)
         if (!peerId || peerId === this.localId) continue
+        const person = typeof value?.person === 'string' && /^[0-9a-f]{64}$/.test(value.person) ? value.person : ''
         this.blockedPeers.set(peerId, {
           peerId,
           username: normalizeMemberName(value?.username) || peerId,
-          blockedAt: normalizePeerChatTimestamp(value?.blockedAt)
+          blockedAt: normalizePeerChatTimestamp(value?.blockedAt),
+          ...(person && { person })
         })
       }
 
