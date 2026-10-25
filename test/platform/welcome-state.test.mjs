@@ -90,3 +90,11 @@ test('about offers one place to write to, not three', async () => {
   assert.doesNotMatch(settings, /Send \{platformName\} feedback/)
   assert.doesNotMatch(settings, /CONTENT_REPORT_URL/)
 })
+
+// On a first run nothing else had set the status bar yet, and Android left its
+// white icons on the white welcome screen.
+test('the welcome screen sets status bar icons that show on it', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const screen = await readFile(new URL('../../app/WelcomeScreen.tsx', import.meta.url), 'utf8')
+  assert.match(screen, /<StatusBar\s+backgroundColor=\{palette\.shell\}\s+barStyle=\{isDark \? 'light-content' : 'dark-content'\}\s+\/>/)
+})
