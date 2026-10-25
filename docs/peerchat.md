@@ -140,9 +140,11 @@ is in the background, and Android can lose its renderer, so the page is loaded
 again when that happens, and a picture goes to the page only once it says it is
 ready. The chat says it is checking a picture while it does. The small JPEG it
 makes of each picture is deleted once read, and Clear all P2P data, Remove my
-data and a restore delete the copies Save and Share made and the full copies
-the photo and file pickers keep (`clearChatFileCopies` in
-`app/peerchat/media-save.ts`).
+data and a restore delete the copies Save and Share made, the full copies
+the photo and file pickers keep, and the copy of the last file handed to
+another app (`clearChatFileCopies` in `app/peerchat/media-save.ts`). On iOS a
+file is handed to another app under its own name, from a copy in
+`peersky-open`: the picker's and the chat's copies are named by a number.
 
 ## Room-key security
 

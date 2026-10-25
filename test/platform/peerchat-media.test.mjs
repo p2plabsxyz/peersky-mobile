@@ -98,7 +98,7 @@ test('a picture check keeps no copy, and clearing the chats clears the copies', 
   const helper = await read('app/peerchat/media-save.ts')
   // The pickers' own full copies go too: chat pictures with their location,
   // and files uploaded as Private.
-  assert.match(helper, /for \(const name of \['peerchat-save', 'ImageManipulator', 'ImagePicker', 'DocumentPicker'\]\)/)
+  assert.match(helper, /for \(const name of \['peerchat-save', 'ImageManipulator', 'ImagePicker', 'DocumentPicker', OPEN_COPIES_FOLDER\]\)/)
   assert.match(helper, /new Directory\(Paths\.cache, 'peerchat-save'\)/, 'the folder Save and Share write to')
 
   const storage = await read('app/settings/P2PStorage.tsx')

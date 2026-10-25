@@ -61,6 +61,9 @@ type RecentFilter = 'all' | RecentSource
 type UploadVisibility = 'public' | 'private' | 'device'
 type UploadSource = 'files' | 'folder'
 
+const IOS_ALERT_CLOSE_MS = 400
+const IOS_SHEET_CLOSE_FALLBACK_MS = 1000
+
 type HyperdriveItem = {
   type: 'directory' | 'file'
   name: string
@@ -142,6 +145,22 @@ export function HyperdriveScreen ({ deviceSyncRevision = 0, offlineNetworkAllowe
   // The last upload that can be shared, with where it went, so the sheet can
   // say who is able to open it.
   const [sharedUpload, setSharedUpload] = useState<{ item: HyperdriveItem, visibility: UploadVisibility, count: number } | null>(null)
+  // iOS shows no share sheet over a sheet or an alert that is still closing:
+  // Open it did nothing. An upload opened from one waits until it is gone.
+  const openAfterSheet = useRef<HyperdriveItem | null>(null)
+  function openOnceClosed (item: HyperdriveItem, fromSheet = false) {
+    if (Platform.OS !== 'ios') {
+      onOpenItem(item)
+      return
+    }
+    if (fromSheet) openAfterSheet.current = item
+    // The sheet says when it has closed (onDismiss); this is in case it never does.
+    setTimeout(() => {
+      if (fromSheet && openAfterSheet.current !== item) return
+      openAfterSheet.current = null
+      onOpenItem(item)
+    }, fromSheet ? IOS_SHEET_CLOSE_FALLBACK_MS : IOS_ALERT_CLOSE_MS)
+  }
   const [offlineItem, setOfflineItem] = useState<HyperOfflineItem | null>(null)
   const [offlineBusy, setOfflineBusy] = useState(false)
   const [offlineChecking, setOfflineChecking] = useState(false)
@@ -409,7 +428,7 @@ export function HyperdriveScreen ({ deviceSyncRevision = 0, offlineNetworkAllowe
         const openItem = lastItem
         Alert.alert(t('Saved on this phone'), getUploadSuccessMessage(visibility, lastItem), [
           { text: t('Done') },
-          { text: t('Open'), onPress: () => onOpenItem(openItem) }
+          { text: t('Open'), onPress: () => openOnceClosed(openItem) }
         ])
       } else {
         setSharedUpload({ item: lastItem, visibility, count: assets.length })
@@ -787,6 +806,11 @@ export function HyperdriveScreen ({ deviceSyncRevision = 0, offlineNetworkAllowe
         onOpen={() => {
           const item = sharedUpload?.item
           setSharedUpload(null)
+          if (item) openOnceClosed(item, true)
+        }}
+        onDismiss={() => {
+          const item = openAfterSheet.current
+          openAfterSheet.current = null
           if (item) onOpenItem(item)
         }}
       />

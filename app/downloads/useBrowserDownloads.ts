@@ -13,6 +13,7 @@ import {
   normalizeBrowserDownloadUrl
 } from './browser-downloads.mjs'
 import { t } from '../i18n/i18n.mjs'
+import { OPEN_COPIES_FOLDER, openCopyName } from './open-copy.mjs'
 
 export type BrowserDownload = {
   id: string
@@ -299,7 +300,7 @@ export function useBrowserDownloads ({ enabled = false } = {}) {
   async function openLocalFile (uri: string, name?: string) {
     if (Platform.OS !== 'android') {
       if (!await Sharing.isAvailableAsync()) return false
-      await Sharing.shareAsync(uri)
+      await Sharing.shareAsync(namedOpenCopy(uri, name))
       return true
     }
 
@@ -468,4 +469,25 @@ function hasActiveDownload (downloads: BrowserDownload[]) {
   return downloads.some(({ status, reason }) =>
     status === 'pending' || status === 'running' || (status === 'paused' && reason !== 'user-paused')
   )
+}
+
+// A file is handed to another app by its own name. The picker's copy of an
+// upload and the chat's copy of an attachment are named by a number
+// (3657E1E8-....mp4), which the share sheet showed and a file saved from it
+// kept. The copy is replaced each time and goes with Remove my data.
+function namedOpenCopy (uri: string, name?: string) {
+  const fileName = openCopyName(name)
+  if (!fileName) return uri
+  try {
+    const source = new File(uri)
+    if (source.name === fileName) return uri
+    const folder = new Directory(Paths.cache, OPEN_COPIES_FOLDER)
+    if (!folder.exists) folder.create({ intermediates: true })
+    const target = new File(folder, fileName)
+    if (target.exists) target.delete()
+    source.copy(target)
+    return target.uri
+  } catch {
+    return uri
+  }
 }
