@@ -18,7 +18,7 @@ const QUALITIES = [
     id: 'together',
     Icon: PeopleIcon,
     title: msg('Device to device'),
-    body: msg('What you share goes straight between phones and computers. There is no server. Your phone is the server.')
+    body: msg('Information goes straight between phones and computers. There is no server. Your phone is the server.')
   },
   {
     id: 'product',
