@@ -104,7 +104,7 @@
 
 - [x] Hyperdrive (`peersky://p2p/hyperdrive/`):
 
-  - [x] Upload files or a folder, as:
+  - [x] Upload files or a folder, as (a folder keeps its subfolders and gets a link of its own):
     - Public: anyone with the link can open it
     - Private: encrypted, so only your own devices can open it
     - This device only: never leaves the phone

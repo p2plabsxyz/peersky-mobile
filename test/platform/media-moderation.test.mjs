@@ -566,3 +566,16 @@ test('the classifier page comes back after its process is ended, and gets only w
   const chat = await readFile(new URL('../../app/peerchat/PeerChatScreen.tsx', import.meta.url), 'utf8')
   assert.match(chat, /onPicked: \(picked\) => onStatus\(/)
 })
+
+// A folder uploaded from the phone landed loose at the top of the drive, its
+// subfolders gone, and the link was to its last file.
+test('a picked folder keeps its layout in the drive and gets its own link', async () => {
+  const gate = await readFile(new URL('../../app/media/upload-gate.ts', import.meta.url), 'utf8')
+  assert.match(gate, /collectFiles\(entry, depth \+ 1, into, path \? `\$\{path\}\/\$\{entry\.name\}` : entry\.name\)/)
+  assert.match(gate, /collectFiles\(folder, 0, found, folder\.name \|\| t\('Folder'\)\)/)
+  assert.match(gate, /mimeType: '',\s+folder: place/)
+  const screen = await readFile(new URL('../../app/hyperdrive/HyperdriveScreen.tsx', import.meta.url), 'utf8')
+  assert.match(screen, /\.\.\.\(asset\.folder \? \{ folder: asset\.folder \} : \{\}\)/)
+  assert.match(screen, /folderItem = \{ type: 'directory', name: asset\.folder\.split\('\/'\)\[0\], url: response\.folderUrl, visibility \}/)
+  assert.match(screen, /if \(folderItem\) \{\s+remember\(folderItem, 'uploaded'\)\s+lastItem = folderItem/)
+})

@@ -224,6 +224,41 @@ test('uploads with a safe unique filename', async () => {
   }])
 })
 
+// A folder uploaded from the phone landed loose at the top of the drive, its
+// subfolders gone, and the link was to its last file.
+test('a file from a picked folder keeps its place in it, and the folder gets a link', async () => {
+  const drive = createDrive({ '/Test Album/beach.jpg': { blob: { byteLength: 1 } } })
+  const upload = (name, folder) => uploadHyperdriveFile({
+    name,
+    folder,
+    contentBase64: Buffer.from('photo').toString('base64'),
+    visibility: 'public'
+  }, { runtime: { getDrive: async () => drive }, recordArchive: async () => {} })
+
+  const nested = await upload('sun.jpg', 'Test Album/Trip 2026')
+  assert.equal(nested.ok, true)
+  assert.equal(drive.writes[0].path, '/Test Album/Trip 2026/sun.jpg')
+  assert.equal(nested.folderUrl, `${DRIVE_URL}Test%20Album/`)
+  // A name taken in that folder moves aside there.
+  const again = await upload('beach.jpg', 'Test Album')
+  assert.equal(drive.writes[1].path, '/Test Album/beach (1).jpg')
+  // A dot in a folder above is not the file's extension.
+  await upload('README', 'v1.2')
+  await upload('README', 'v1.2')
+  assert.equal(drive.writes[3].path, '/v1.2/README (1)')
+  assert.equal(again.ok, true)
+
+  for (const folder of ['..', 'Test Album/../..', '.', 'a/b/c/d/e/f/g/h/i']) {
+    const refused = await upload('x.txt', folder)
+    assert.equal(refused.ok, false, folder)
+    assert.match(refused.error, /folder/)
+  }
+  // A single file still goes to the top, with no folder link.
+  const loose = await upload('note.txt')
+  assert.equal(drive.writes.at(-1).path, '/note.txt')
+  assert.equal(loose.folderUrl, undefined)
+})
+
 test('sanitizes URL delimiters and encodes uploaded file URLs', async () => {
   const drive = createDrive({})
   const response = await uploadHyperdriveFile({

@@ -394,6 +394,8 @@ export function HyperdriveScreen ({ deviceSyncRevision = 0, offlineNetworkAllowe
     setBusyAction('upload')
     try {
       let lastItem = null
+      // A folder gets its own link, which opens it whole.
+      let folderItem: HyperdriveItem | null = null
       for (const [index, asset] of assets.entries()) {
         // A folder can carry fifty files. Without this the spinner is
         // indistinguishable from the app having hung.
@@ -405,6 +407,7 @@ export function HyperdriveScreen ({ deviceSyncRevision = 0, offlineNetworkAllowe
         try {
           response = await onCallRpc(RPC_HYPER_LIBRARY_UPLOAD, {
             name: asset.name,
+            ...(asset.folder ? { folder: asset.folder } : {}),
             fileUri: asset.uri,
             byteLength: asset.size,
             visibility,
@@ -416,8 +419,15 @@ export function HyperdriveScreen ({ deviceSyncRevision = 0, offlineNetworkAllowe
         if (!response.ok || !response.item) throw new Error(response.error || t('Upload failed.'))
         lastItem = { ...response.item, localUri: asset.uri }
         remember(lastItem, 'uploaded')
+        if (!folderItem && asset.folder && typeof response.folderUrl === 'string') {
+          folderItem = { type: 'directory', name: asset.folder.split('/')[0], url: response.folderUrl, visibility }
+        }
       }
       if (!lastItem) return
+      if (folderItem) {
+        remember(folderItem, 'uploaded')
+        lastItem = folderItem
+      }
 
       onStatus(assets.length === 1
         ? t('Uploaded {name}', { name: lastItem.name })
