@@ -275,6 +275,8 @@ type PeerChatMember = {
   bio: string
   avatar: string | null
   self: boolean
+  // Another of your devices.
+  own?: boolean
   online: boolean
   // Online but away: their app in the background, or their computer idle.
   idle?: boolean
@@ -656,7 +658,8 @@ export function PeerChatScreen ({
     composer,
     activeRoom?.members || [],
     messages,
-    profile?.id || ''
+    profile?.id || '',
+    activeRoom?.isDM === true
   )
   const visibleMessages = useMemo(
     () => filterPeerChatMessages(messages, isSearching ? searchQuery : '') as PeerChatMessage[],
@@ -5830,7 +5833,8 @@ function getMentionCandidates (
   composer: string,
   members: PeerChatMember[],
   messages: PeerChatMessage[],
-  localId: string
+  localId: string,
+  isDM = false
 ) {
   // Past a device label's "@", so "@Ada@mo" still offers Ada@mobile.
   const atIndex = mentionQueryStart(composer)
@@ -5838,11 +5842,14 @@ function getMentionCandidates (
   const query = composer.slice(atIndex + 1)
   if (query.includes('\n') || Array.from(query).length > 50) return []
 
+  // Never you, on this device or another of yours. A direct chat's members
+  // are the other person's devices and yours, so it offers only theirs.
   const candidates = new Map<string, PeerChatMember>()
   for (const member of members) {
-    if (!member.self && member.id !== localId) candidates.set(member.id, member)
+    if (!member.self && !member.own && member.id !== localId) candidates.set(member.id, member)
   }
   for (const message of messages) {
+    if (isDM) break
     if (message.self || message.sender === localId || candidates.has(message.sender)) continue
     candidates.set(message.sender, {
       id: message.sender,

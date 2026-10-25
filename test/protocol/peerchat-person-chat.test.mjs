@@ -75,6 +75,57 @@ test('PeerChat opens your chat with ada when you message ada@mobile, and asks no
   await service.close()
 })
 
+// A direct chat offered a stranger's name and your own devices to mention,
+// and could leave out the person it is with.
+test('PeerChat lists a direct chat as the other person\'s devices and yours, and marks yours', async (t) => {
+  const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-dm-members-'))
+  t.after(() => rm(storagePath, { recursive: true, force: true }))
+  const service = await new PeerChatService({ sdk: createFakeSdk(), storagePath }).start()
+  t.after(() => service.close())
+  await service.completeOnboarding({ username: 'Test Cai' })
+  service.siblings.add('0c0c0c0c')
+  const ana = 'ab'.repeat(32)
+  const chat = 'ad'.repeat(32)
+  service.rooms.set(chat, {
+    roomKey: chat,
+    name: 'Test Ana',
+    isDM: true,
+    dmWith: '0a0a0a0a',
+    pendingAcceptance: false,
+    createdAt: 1,
+    members: [
+      { id: '0a0a0a0a', username: 'Test Ana', bio: '', avatar: null, person: ana },
+      { id: '0b0b0b0b', username: 'Test Ana@desktop', bio: '', avatar: null, person: ana },
+      { id: '0e0e0e0e', username: 'Test Stranger', bio: '', avatar: null },
+      { id: '0c0c0c0c', username: 'Test Cai@desktop', bio: '', avatar: null }
+    ]
+  })
+  const listed = service.publicRoom(service.rooms.get(chat)).members
+  assert.deepEqual(listed.map((member) => member.username).sort(), ['Test Ana', 'Test Ana@desktop', 'Test Cai', 'Test Cai@desktop'])
+  assert.equal(listed.find((member) => member.id === '0c0c0c0c').own, true)
+  assert.equal(listed.find((member) => member.id === '0a0a0a0a').own, undefined)
+
+  // The person it is with, before any device of theirs is listed.
+  const quiet = 'ae'.repeat(32)
+  service.rooms.set(quiet, { roomKey: quiet, name: 'Test Ben', isDM: true, dmWith: '0f0f0f0f', pendingAcceptance: false, createdAt: 1, members: [] })
+  assert.deepEqual(service.publicRoom(service.rooms.get(quiet)).members.map((member) => member.username).sort(), ['Test Ben', 'Test Cai'])
+
+  // A group keeps everyone, and still marks your other devices.
+  const group = 'af'.repeat(32)
+  service.rooms.set(group, {
+    roomKey: group,
+    name: 'Test Group',
+    createdAt: 1,
+    members: [
+      { id: '0e0e0e0e', username: 'Test Stranger', bio: '', avatar: null },
+      { id: '0c0c0c0c', username: 'Test Cai@desktop', bio: '', avatar: null }
+    ]
+  })
+  const groupMembers = service.publicRoom(service.rooms.get(group)).members
+  assert.ok(groupMembers.some((member) => member.username === 'Test Stranger'))
+  assert.equal(groupMembers.find((member) => member.id === '0c0c0c0c').own, true)
+})
+
 function createFakeSdk () {
   const feeds = new Map()
   const swarm = new EventEmitter()

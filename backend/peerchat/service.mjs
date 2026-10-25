@@ -5049,6 +5049,30 @@ export class PeerChatService {
       if (this.isPeerIdRemovedFromRoom(roomKey, id)) members.delete(id)
     }
 
+    // A direct chat is between two people: the other person's devices and
+    // yours. A name relayed in from anyone else is not in it, and the person
+    // it is with is, even before a device of theirs is listed.
+    if (room?.isDM) {
+      const partner = normalizePeerChatPeerId(room.dmWith)
+      const partnerPerson = partner ? this.personOf(partner) : ''
+      for (const id of [...members.keys()]) {
+        if (id === partner || this.isOwnDevice(id)) continue
+        if (partnerPerson && this.personOf(id) === partnerPerson) continue
+        members.delete(id)
+      }
+      const name = normalizeMemberName(room.name)
+      if (partner && name && !members.has(partner) && !this.isOwnDevice(partner)) {
+        members.set(partner, {
+          id: partner,
+          username: name,
+          bio: room.bio || '',
+          avatar: room.avatar || null,
+          self: false,
+          online: false
+        })
+      }
+    }
+
     // Online is a person, not a room. One connection carries every room two
     // people share, and a room can open on it a moment after another, so
     // counting only this room showed someone online in a direct message and
@@ -5056,6 +5080,8 @@ export class PeerChatService {
     // still counts, so their dot does not blink off and on again.
     for (const member of members.values()) {
       if (member.self) continue
+      // Another of your devices: yours, though not this one.
+      if (this.isOwnDevice(member.id)) member.own = true
       if (!member.online && this.isPeerOnline(member.id)) member.online = true
       if (member.online && this.idlePeerIds.has(member.id)) member.idle = true
     }

@@ -43,3 +43,14 @@ test('PeerChat suggests and inserts mentions from where the mention starts', asy
   assert.match(insert, /mentionQueryStart\(composer\)/)
   assert.doesNotMatch(suggest + insert, /lastIndexOf\('@'\)/)
 })
+
+// A direct chat offered your own devices to mention, and names from anyone who
+// had written in it. It offers the other person's devices only, and no chat
+// offers yours.
+test('PeerChat suggests nobody of yours, and in a direct chat only the other person', async () => {
+  const screen = await readFile(new URL('../../app/peerchat/PeerChatScreen.tsx', import.meta.url), 'utf8')
+  const suggest = screen.slice(screen.indexOf('function getMentionCandidates ('), screen.indexOf('function insertMention ('))
+  assert.match(suggest, /if \(!member\.self && !member\.own && member\.id !== localId\) candidates\.set\(member\.id, member\)/)
+  assert.match(suggest, /for \(const message of messages\) \{\s+if \(isDM\) break/)
+  assert.match(screen, /profile\?\.id \|\| '',\s+activeRoom\?\.isDM === true\s+\)/)
+})
