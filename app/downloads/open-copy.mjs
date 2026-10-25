@@ -11,3 +11,22 @@ export function openCopyName (name) {
   if (!fileName || fileName === '.' || fileName === '..') return ''
   return fileName.slice(0, 200)
 }
+
+// iOS gives the app a new folder on an update, so a path kept from before one
+// (an upload's copy in Recent) points into a folder that is gone, and opening
+// it did nothing. Where it sat under Library/Caches or Documents is the same in
+// the new folder. Null for a path that is not under either.
+export function localPathInAppFolder (uri) {
+  const value = String(uri || '')
+  for (const [marker, root] of [['/Library/Caches/', 'cache'], ['/Documents/', 'document']]) {
+    const at = value.indexOf(marker)
+    if (at < 0) continue
+    let rest = value.slice(at + marker.length)
+    try {
+      rest = decodeURIComponent(rest)
+    } catch {}
+    if (!rest || rest.split('/').some((part) => part === '..' || part === '')) return null
+    return { root, rest }
+  }
+  return null
+}

@@ -13,7 +13,7 @@ import {
   normalizeBrowserDownloadUrl
 } from './browser-downloads.mjs'
 import { t } from '../i18n/i18n.mjs'
-import { OPEN_COPIES_FOLDER, openCopyName } from './open-copy.mjs'
+import { localPathInAppFolder, OPEN_COPIES_FOLDER, openCopyName } from './open-copy.mjs'
 
 export type BrowserDownload = {
   id: string
@@ -300,7 +300,9 @@ export function useBrowserDownloads ({ enabled = false } = {}) {
   async function openLocalFile (uri: string, name?: string) {
     if (Platform.OS !== 'android') {
       if (!await Sharing.isAvailableAsync()) return false
-      await Sharing.shareAsync(namedOpenCopy(uri, name))
+      const local = currentLocalUri(uri)
+      if (!local) return false
+      await Sharing.shareAsync(namedOpenCopy(local, name))
       return true
     }
 
@@ -469,6 +471,20 @@ function hasActiveDownload (downloads: BrowserDownload[]) {
   return downloads.some(({ status, reason }) =>
     status === 'pending' || status === 'running' || (status === 'paused' && reason !== 'user-paused')
   )
+}
+
+// The file at uri, or where it is now when the path is from before an update
+// gave the app a new folder. Null when it is gone.
+function currentLocalUri (uri: string) {
+  try {
+    if (new File(uri).exists) return uri
+    const place = localPathInAppFolder(uri)
+    if (!place) return null
+    const moved = new File(place.root === 'cache' ? Paths.cache : Paths.document, place.rest)
+    return moved.exists ? moved.uri : null
+  } catch {
+    return null
+  }
 }
 
 // A file is handed to another app by its own name. The picker's copy of an

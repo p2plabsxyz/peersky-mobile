@@ -2614,7 +2614,9 @@ export default function App () {
   }) {
     if (item.type !== 'directory') {
       if (item.localUri) {
-        const opened = await openBrowserLocalFile(item.localUri, item.name)
+        // A copy that is gone, or that no app takes, falls through to the
+        // download or the file's own address rather than doing nothing.
+        const opened = await openBrowserLocalFile(item.localUri, item.name).catch(() => false)
         if (opened) {
           setStatus(`Opened ${item.name}`)
           return false
