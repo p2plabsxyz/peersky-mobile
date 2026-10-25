@@ -41,6 +41,22 @@ test('a note\'s tables and quotes print with their lines', async () => {
   assert.match(result.html, /blockquote \{\s+border-left: 3px solid #c9ccd1;/)
 })
 
+// A timesheet exported its Date, Time In and Time Out columns a letter or two
+// a line ("Da/te", "8:/00/A/M"): its cells could break anywhere, so the table
+// gave nearly all the page to the long Task column.
+test('a table keeps the words in its cells whole, so short columns keep their width', async () => {
+  const result = await exportMarkdownDocument({ content: '| Date | Task |\n|---|---|\n| Mon, Oct 19 | Long work |', mode: 'note' }, { readFile: files({}).readFile })
+  const start = result.html.indexOf('  th,\n  td {')
+  const cells = result.html.slice(start, result.html.indexOf('}', start))
+  assert.match(cells, /overflow-wrap: break-word;/)
+  assert.match(cells, /min-width: 7ch;/)
+  assert.doesNotMatch(cells, /anywhere/)
+  // Only a link or code, which can be one long word, breaks anywhere.
+  assert.match(result.html, /th a,\s+th code,\s+td a,\s+td code \{\s+overflow-wrap: anywhere;/)
+  // A screen scrolls a wide table; paper keeps it to the page.
+  assert.match(result.html, /@media screen \{\s+table \{\s+display: block;\s+overflow-x: auto;/)
+})
+
 test('a research paper prints from the pages the editor laid out, a page to a sheet of A4', async () => {
   const content = '<!-- ieee -->\n\n## A Paper\n\nText'
   const pages = '<div class="ieee-page-stack"><div class="ieee-preview-page ieee-preview-page--first">' +

@@ -528,13 +528,34 @@ window.P2pmdIeee.render(note, note.innerHTML)
     margin: 16px 0;
     max-width: 100%;
   }
+  /* Words stay whole. Breaking anywhere let a timesheet's Date and Time
+     columns shrink to a letter a line ("Da/te", "8:/00/A/M") so its Task
+     column could take the page. Each column keeps room for a short time or
+     date, and a long column wraps between its words. */
   th,
   td {
     border: 1px solid #c9ccd1;
-    overflow-wrap: anywhere;
+    min-width: 7ch;
+    overflow-wrap: break-word;
     padding: 6px 10px;
     text-align: left;
     vertical-align: top;
+  }
+  /* A link or code can be one long word. Only that breaks anywhere, so the
+     table still fits the page. */
+  th a,
+  th code,
+  td a,
+  td code {
+    overflow-wrap: anywhere;
+  }
+  /* On a screen a table too wide for it scrolls sideways; on paper it keeps
+     to the page. */
+  @media screen {
+    table {
+      display: block;
+      overflow-x: auto;
+    }
   }
   th {
     background: #f2f3f5;
