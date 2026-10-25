@@ -4,16 +4,17 @@
 //
 //   node scripts/i18n.mjs          lists any call whose text is not a plain string
 //   node scripts/i18n.mjs --write  writes app/i18n/strings.json, app/i18n/viewer-strings.json,
-//                                  app/i18n/catalogs.ts,
+//                                  app/i18n/peertunes-strings.json, app/i18n/catalogs.ts,
 //                                  each language's iOS prompts and quick actions,
 //                                  its Android notification text and the list
 //                                  of languages in app/i18n/native,
 //                                  and the widgets' Localizable.xcstrings
 //   node scripts/i18n.mjs --check  also says what each catalog is missing or has wrong
 //
-// Only files that import t, tp or msg from app/i18n/i18n.mjs are read, and the
+// Only files that import t, tp or msg from app/i18n/i18n.mjs are read, the
 // Hyperdrive viewer's files under assets/hyperdrive-viewer that import them
-// from its own i18n.js. Every call must name its English text as one plain
+// from its own i18n.js, and PeerTunes' scripts under assets/peertunes/js that
+// take them from PT.i18n. Every call must name its English text as one plain
 // string literal: a key put together at run time could never be in a
 // catalog, so this refuses it with its place. tKey() takes a variable,
 // holding text marked with msg().
@@ -23,6 +24,7 @@ import { fileURLToPath } from 'node:url'
 import { LANGUAGES, SOURCE_LANGUAGE } from '../app/i18n/languages.mjs'
 import { ANDROID_TEXT, INFO_PLIST_TEXT, SHORTCUT_TEXT, WIDGET_NAMES, WIDGET_TEXT } from '../app/i18n/native-strings.mjs'
 import { PLURAL_CATEGORIES } from '../app/i18n/plural.mjs'
+import { PEERTUNES_OWN_KEYS } from '../app/peertunes/peertunes-screen.mjs'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const APP = join(ROOT, 'app')
@@ -34,6 +36,11 @@ const I18N_IMPORT = /import\s*\{[^}]*\b(?:t|tp|msg)\b[^}]*\}\s*from\s*['"][./]*(
 // The viewer's modules load each other by absolute path, as
 // '/hyperdrive/viewer/i18n.js', or by a relative one.
 export const VIEWER_I18N_IMPORT = /import\s*\{[^}]*\b(?:t|tp|msg)\b[^}]*\}\s*from\s*['"](?:\/hyperdrive\/viewer\/|(?:\.{1,2}\/)+)(?:[\w-]+\/)*i18n\.js['"]/
+// PeerTunes, the player, a web page the app serves (backend/peertunes). Its
+// plain scripts take the words from PT.i18n, set up by its own js/i18n.js,
+// as const { t, tp } = PT.i18n || require("./i18n.js").i18n.
+export const PEERTUNES = join(ROOT, 'assets', 'peertunes')
+export const PEERTUNES_I18N_USE = /const\s*\{[^}]*\b(?:t|tp|msg)\b[^}]*\}\s*=\s*PT\.i18n\b/
 
 export function sourceFiles (dir = APP) {
   const files = []
@@ -69,6 +76,19 @@ export function viewerSourceFiles (dir = VIEWER) {
 
 function isViewerFile (file) {
   return file.startsWith(VIEWER + sep)
+}
+
+/** PeerTunes' scripts. Its icons and styles hold no text to show. */
+export function peertunesSourceFiles (dir = join(PEERTUNES, 'js')) {
+  if (!existsSync(dir)) return []
+  return readdirSync(dir, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.js'))
+    .map((entry) => join(dir, entry.name))
+    .sort()
+}
+
+function isPeerTunesFile (file) {
+  return file.startsWith(PEERTUNES + sep)
 }
 
 // A single or double quoted JavaScript string literal at `at`, read as the
@@ -187,15 +207,16 @@ export function withoutComments (source) {
 
 /**
  * The keys one file uses, and each call that does not name its text plainly.
- * A viewer file is read when it imports the viewer's own i18n.js. Comments
- * are left out.
+ * A viewer file is read when it imports the viewer's own i18n.js, and a
+ * PeerTunes script when it takes them from PT.i18n. Comments are left out.
  */
-export function scanSource (text, file = '', { viewer = false } = {}) {
+export function scanSource (text, file = '', { viewer = false, peertunes = false } = {}) {
   const strings = []
   const plurals = []
   const problems = []
   const source = withoutComments(text)
-  if (!(viewer ? VIEWER_I18N_IMPORT : I18N_IMPORT).test(source)) return { strings, plurals, problems }
+  const uses = viewer ? VIEWER_I18N_IMPORT : peertunes ? PEERTUNES_I18N_USE : I18N_IMPORT
+  if (!uses.test(source)) return { strings, plurals, problems }
 
   for (const match of source.matchAll(/(?<![\w.$])(t|msg)\(/g)) {
     let at = skipSpace(source, match.index + match[0].length)
@@ -237,7 +258,10 @@ function gather (files, strings = new Set()) {
   const plurals = new Map()
   const problems = []
   for (const file of files) {
-    const found = scanSource(readFileSync(file, 'utf8'), relative(ROOT, file), { viewer: isViewerFile(file) })
+    const found = scanSource(readFileSync(file, 'utf8'), relative(ROOT, file), {
+      viewer: isViewerFile(file),
+      peertunes: isPeerTunesFile(file)
+    })
     for (const text of found.strings) strings.add(text)
     for (const forms of found.plurals) plurals.set(forms.other, forms)
     problems.push(...found.problems)
@@ -249,13 +273,15 @@ function gather (files, strings = new Set()) {
   }
 }
 
-/** Every key the app uses, the viewer's with them: what strings.json holds. */
-export function collectStrings (files = [...sourceFiles(), ...viewerSourceFiles()]) {
-  // Every language's name, for the language list (language-name.mjs), and
-  // what iOS, the quick actions, the widgets and Android's PeerChat
-  // notification show (native-strings.mjs).
+/** Every key the app uses, the viewer's and PeerTunes' with them: what strings.json holds. */
+export function collectStrings (files = [...sourceFiles(), ...viewerSourceFiles(), ...peertunesSourceFiles()]) {
+  // Every language's name, for the language list (language-name.mjs), what
+  // iOS, the quick actions, the widgets and Android's PeerChat notification
+  // show (native-strings.mjs), and PeerTunes' own keys for words PeerSky's
+  // screens use with another meaning (peertunes-screen.mjs).
   return gather(files, new Set([
     ...LANGUAGES.map((language) => language.name),
+    ...Object.values(PEERTUNES_OWN_KEYS),
     ...Object.values(INFO_PLIST_TEXT),
     ...Object.values(SHORTCUT_TEXT),
     ...WIDGET_TEXT,
@@ -271,20 +297,31 @@ export function collectViewerStrings (files = viewerSourceFiles()) {
   return gather(files)
 }
 
+/**
+ * The keys PeerTunes uses: what peertunes-strings.json holds, and all the
+ * app hands the player of a catalog.
+ */
+export function collectPeerTunesStrings (files = peertunesSourceFiles()) {
+  return gather(files)
+}
+
 function writeJson (path, value) {
   writeFileSync(path, JSON.stringify(value, null, 2) + '\n')
 }
 
 /**
- * Writes strings.json and viewer-strings.json, and nothing else, so it can
- * run without the catalogs: the sync of the viewer does.
+ * Writes strings.json, viewer-strings.json and peertunes-strings.json, and
+ * nothing else, so it can run without the catalogs: the sync of the viewer
+ * does.
  */
 export function writeStringFiles () {
   const app = collectStrings()
   const viewer = collectViewerStrings()
+  const peertunes = collectPeerTunesStrings()
   writeJson(join(APP, 'i18n', 'strings.json'), { strings: app.strings, plurals: app.plurals })
   writeJson(join(APP, 'i18n', 'viewer-strings.json'), { strings: viewer.strings, plurals: viewer.plurals })
-  return { app, viewer, problems: app.problems }
+  writeJson(join(APP, 'i18n', 'peertunes-strings.json'), { strings: peertunes.strings, plurals: peertunes.plurals })
+  return { app, viewer, peertunes, problems: app.problems }
 }
 
 const PLACEHOLDER = /\{(\w+)\}/g

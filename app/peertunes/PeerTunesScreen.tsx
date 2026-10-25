@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AppState, DeviceEventEmitter, Linking, Modal, NativeEventEmitter, NativeModules, Platform, Pressable, StyleSheet, Text, View } from 'react-native'
 import { CameraView, useCameraPermissions } from 'expo-camera'
 import { initialWindowMetrics, SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context'
@@ -9,6 +9,7 @@ import {
   PEERTUNES_MEDIA_REPORT_SCRIPT,
   PEERTUNES_SCAN_BRIDGE_SCRIPT,
   createAudioRouteScript,
+  createPeerTunesLanguageScript,
   createPeerTunesMediaCommandScript,
   createPeerTunesNowPlayingScript,
   createPeerTunesPageUrl,
@@ -19,11 +20,15 @@ import {
   parsePeerTunesKeptFoldersRequest,
   parsePeerTunesNowPlaying,
   parsePeerTunesScanRequest,
+  peertunesEntries,
+  peertunesStringKeys,
   serializeScanResult
 } from './peertunes-screen.mjs'
 import { AppLoading } from '../AppLoading'
 import { PAUSE_ALL_MEDIA_SCRIPT } from '../browser-media.mjs'
-import { t } from '../i18n/i18n.mjs'
+import peertunesStrings from '../i18n/peertunes-strings.json'
+import { catalogEntries, getLanguage, t } from '../i18n/i18n.mjs'
+import { useT } from '../i18n/useT'
 import { parsePeerTunesWidgetTap } from '../home-shortcuts.mjs'
 import { MODAL_ORIENTATIONS } from '../modal-orientations'
 import { createResetIdScript, createServerTokenScript } from '../server-token.mjs'
@@ -37,6 +42,9 @@ const audioRoute = NativeModules.PeerSkyAudioRoute as {
   setNowPlaying?: (playing: boolean, title: string, artist: string) => void
   clearNowPlaying?: () => void
 } | undefined
+// PeerTunes is handed these texts of the catalog in force and nothing more:
+// the ones its scripts translate, as scripts/i18n.mjs lists them.
+const PEERTUNES_STRING_KEYS = peertunesStringKeys(peertunesStrings)
 // What is playing, for the Android media session and the iOS home screen
 // widget. iOS gives a WebView's media to Control Center itself.
 const PEERTUNES_BEFORE_LOAD_SCRIPT = `${PEERTUNES_SCAN_BRIDGE_SCRIPT}\n${PEERTUNES_MEDIA_BRIDGE_SCRIPT}`
@@ -115,6 +123,22 @@ export function PeerTunesScreen ({
   const webViewRef = useRef<WebView | null>(null)
   const scanHandledRef = useRef(false)
   const pageLoadedRef = useRef(false)
+
+  // The language picked and PeerTunes' words in it. A page that loads reads
+  // them before its scripts run. An open page is handed a switch and draws
+  // itself again, so a song that plays keeps playing.
+  useT()
+  const language = getLanguage()
+  const languageScript = useMemo(
+    () => createPeerTunesLanguageScript({ language, strings: peertunesEntries(catalogEntries(PEERTUNES_STRING_KEYS)) }),
+    [language]
+  )
+  const pageLanguageRef = useRef(language)
+  useEffect(() => {
+    if (pageLanguageRef.current === language) return
+    pageLanguageRef.current = language
+    webViewRef.current?.injectJavaScript(languageScript)
+  }, [language, languageScript])
 
   // The widget's song goes to a page that has loaded: now, or when it has.
   const showWidgetSong = useCallback(() => {
@@ -302,7 +326,7 @@ export function PeerTunesScreen ({
       decelerationRate={WEBVIEW_DECELERATION_RATE}
       // The token goes in before the page's own scripts run. The server never
       // sends it, so only this view has it.
-      injectedJavaScriptBeforeContentLoaded={`${createServerTokenScript(serverToken)}\n${createResetIdScript(resetId)}\n${PEERTUNES_BEFORE_LOAD_SCRIPT}`}
+      injectedJavaScriptBeforeContentLoaded={`${createServerTokenScript(serverToken)}\n${createResetIdScript(resetId)}\n${languageScript}\n${PEERTUNES_BEFORE_LOAD_SCRIPT}`}
       onMessage={(event) => {
         const nowPlaying = parsePeerTunesNowPlaying(event.nativeEvent.data)
         if (nowPlaying) {

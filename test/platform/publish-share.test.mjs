@@ -82,8 +82,8 @@ test('a PeerTunes share link asks to be passed on, and stays on screen after a c
   const ui = await read('assets/peertunes/js/ui.js')
   const offer = ui.slice(ui.indexOf('_offerLink(link) {'), ui.indexOf('urlScreen() {'))
 
-  assert.match(offer, /msg: "Share it with other peers!"/)
-  assert.match(offer, /sub: ok \? "Send it to a friend\.\\n" \+ link/)
+  assert.match(offer, /msg: t\("Share it with other peers!"\)/)
+  assert.match(offer, /sub: `\$\{ok \? t\("Send it to a friend\."\) : t\("Select the link below and copy it by hand\."\)\}\\n\$\{link\}`/)
 
   // The bundled copy has to match, or the phone still shows the old text.
   const runtime = await read('backend/peertunes/peertunes-runtime.mjs')

@@ -29,7 +29,7 @@ test('the page is handed its token, and nothing that is not one', () => {
 test('PeerTunes waits for its token, hands it over first, and loads again with a new one', async () => {
   const screen = await read('app/peertunes/PeerTunesScreen.tsx')
   assert.match(screen, /if \(!localUrl \|\| !serverToken\) \{\s*return \(\s*<AppLoading/)
-  assert.match(screen, /injectedJavaScriptBeforeContentLoaded=\{`\$\{createServerTokenScript\(serverToken\)\}\\n\$\{createResetIdScript\(resetId\)\}\\n\$\{PEERTUNES_BEFORE_LOAD_SCRIPT\}`\}/)
+  assert.match(screen, /injectedJavaScriptBeforeContentLoaded=\{`\$\{createServerTokenScript\(serverToken\)\}\\n\$\{createResetIdScript\(resetId\)\}\\n\$\{languageScript\}\\n\$\{PEERTUNES_BEFORE_LOAD_SCRIPT\}`\}/)
   assert.match(screen, /if \(tokenRun\.token !== serverToken\) setTokenRun\(\{ token: serverToken, run: tokenRun\.run \+ 1 \}\)/)
   assert.match(screen, /key=\{`\$\{pageUrl\}:\$\{reloadNonce\}:\$\{tokenRun\.run\}`\}/)
 

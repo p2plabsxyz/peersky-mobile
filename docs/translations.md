@@ -42,6 +42,18 @@ The Files, Photos and Videos views of a `hyper://` folder are a web page, `asset
 - `app/hyperdrive/DriveViewerScreen.tsx` hands the page those texts from the catalog in force, and only those, as `window.peerskyViewer.strings`, with the language for its plurals and for `Intl`: numbers, sizes, dates, and the names of countries and languages. A text the catalog lacks shows in English, and switching languages loads the page again.
 - PeerSky Desktop shows the viewer in English for now.
 
+## PeerTunes
+
+PeerTunes, the music player, is a web page too, `assets/peertunes`, copied from [p2plabsxyz/peertunes](https://github.com/p2plabsxyz/peertunes) (see [PeerTunes](peertunes.md)). Its own `js/i18n.js` has `t()`, `tp()`, `msg()` and `tKey()` with the same rules and a copy of the rules in `plural.mjs`, and its plain scripts take them from `PT.i18n`.
+
+- `node scripts/i18n.mjs` reads each of its scripts that takes these from `PT.i18n`, and refuses a call there the same way. Its texts are in `strings.json` too.
+- `--write` also writes `app/i18n/peertunes-strings.json`, the texts PeerTunes uses and nothing else.
+- `app/peertunes/PeerTunesScreen.tsx` hands the page those texts from the catalog in force, with the language, as `window.peerskyTunes` before the page loads. A switch goes to the open page, which draws its pages again where they are, so the song playing keeps playing. Arabic, Persian and Urdu turn its screen around; the wheel stays as it is.
+- Names of songs, albums and artists are never translated. "Unknown Album" and the like are, and such an album keeps its place in another language.
+- Albums and Shuffle mean something else on PeerSky's own screens: photo albums, and a new name in P2PMD. So the catalogs hold the player's meaning under keys of its own, `Albums (music)` and `Shuffle (music)`, which the player gets in their place (`PEERTUNES_OWN_KEYS` in `app/peertunes/peertunes-screen.mjs`).
+- A line too long for its place shrinks a little before it is cut, and a screen title that still does not fit takes the clock's place.
+- PeerSky Desktop shows PeerTunes in English for now.
+
 ## Outside JavaScript
 
 Some text is shown by the phone itself, from files made when the app is built. It follows the phone's language, or the one picked for PeerSky in the phone's Settings, not the one picked in PeerSky. `app/i18n/native-strings.mjs` holds its English, and `--write` makes each language's copy from the catalogs.
@@ -53,7 +65,7 @@ Some text is shown by the phone itself, from files made when the app is built. I
 
 ## Not translated
 
-- Websites, and the pages of the built-in web apps loaded into a WebView (the P2PMD editor and the PeerTunes player).
+- Websites, and the P2PMD editor, a built-in web app loaded into a WebView.
 - Messages that come from the backend.
 - The privacy policy, the terms and the open-source licenses.
 - A PeerChat report's email subject and field labels, for the people who read every report. What the person reporting sees is translated.

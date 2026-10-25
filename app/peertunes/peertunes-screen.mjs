@@ -202,6 +202,53 @@ export function keptFolderUrls (urls, items) {
   })
 }
 
+// Words PeerTunes shares with PeerSky's own screens, where they mean
+// something else: an album of photos in Hyperdrive, another name in P2PMD
+// (换一个 in Chinese, Sortear in Portuguese). The catalogs hold the music
+// meaning under a key of its own, and the player gets it under its word.
+export const PEERTUNES_OWN_KEYS = Object.freeze({
+  Albums: 'Albums (music)',
+  Shuffle: 'Shuffle (music)'
+})
+
+/** The catalog keys PeerTunes uses: each text, each plural by its other form, and its own keys. */
+export function peertunesStringKeys (list) {
+  const strings = Array.isArray(list?.strings) ? list.strings.filter((text) => typeof text === 'string') : []
+  const plurals = Array.isArray(list?.plurals)
+    ? list.plurals.map((forms) => forms?.other).filter((text) => typeof text === 'string')
+    : []
+  return [...new Set([...strings, ...plurals, ...Object.values(PEERTUNES_OWN_KEYS)])]
+}
+
+/** A catalog's entries for PeerTunes, each of its own keys put under the word the player asks for. */
+export function peertunesEntries (entries) {
+  const out = { ...entries }
+  for (const [word, own] of Object.entries(PEERTUNES_OWN_KEYS)) {
+    if (Object.prototype.hasOwnProperty.call(out, own)) out[word] = out[own]
+    delete out[own]
+  }
+  return out
+}
+
+/**
+ * The language PeerTunes shows and its words in it, as window.peerskyTunes:
+ * { language, strings }, the catalog's text for each English one the player
+ * uses. It goes in before the page loads, and again when another language is
+ * picked, when PT.setLanguage draws the pages again and the song plays on.
+ * Should a page have run its scripts first, that call is what reaches it.
+ * The two line separators are valid JSON but end a JavaScript string, so
+ * they go in escaped.
+ */
+export function createPeerTunesLanguageScript ({ language, strings } = {}) {
+  const json = JSON.stringify({
+    language: typeof language === 'string' && language ? language : 'en',
+    strings: strings && typeof strings === 'object' && !Array.isArray(strings) ? strings : {}
+  })
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029')
+  return `window.peerskyTunes = ${json}; window.PT && window.PT.setLanguage && window.PT.setLanguage(window.peerskyTunes); true;`
+}
+
 /**
  * Tells the page whether sound is going to a Bluetooth device, for its
  * Bluetooth mark. A WebView cannot see the audio outputs itself.

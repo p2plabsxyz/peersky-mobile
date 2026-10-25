@@ -17,7 +17,9 @@ PeerTunes checks for those globals. `peerskyHyperAsset` routes folder listings, 
 
 Reading a drive and keeping songs need the server's token for this run. Any app on the phone can reach the port and fetch the page, so the token is in nothing the server sends: the app hands it to the PeerTunes WebView before the page loads (`injectedJavaScriptBeforeContentLoaded`, `app/server-token.mjs`), and the bridge reads `window.peerskyServerToken` each time the page asks.
 
-To update the app, replace the files under `assets/peertunes/`, update `manifest.json`, and run `npm run generate:peertunes-runtime`.
+PeerTunes shows the language picked in PeerSky. The app hands it `window.peerskyTunes = { language, strings }` the same way, before the page loads: the catalog's text for each English one the player uses, as `app/i18n/peertunes-strings.json` lists them (`createPeerTunesLanguageScript` in `app/peertunes/peertunes-screen.mjs`). When another language is picked, the open page gets the new set through `PT.setLanguage`, which draws its pages again where they are, so a song that plays keeps playing. See [Translations](translations.md).
+
+To update the app, replace the files under `assets/peertunes/`, update `manifest.json`, and run `npm run generate:peertunes-runtime`. Then run `node scripts/i18n.mjs --write` and translate any new text in every catalog.
 
 ## Endpoints
 
