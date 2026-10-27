@@ -13,6 +13,7 @@ import {
   Clipboard,
   FlatList,
   Image,
+  Keyboard,
   KeyboardAvoidingView,
   Linking,
   Modal,
@@ -803,6 +804,14 @@ export function PeerChatScreen ({
     activeRoomRef.current = activeRoom
   }, [activeRoom])
 
+  // Back to the chat list. Android keeps the keyboard up once the message box
+  // it was typing into is gone, so it is put away first, while the box is
+  // still there to let go of it.
+  const showChatList = useCallback(() => {
+    Keyboard.dismiss()
+    setActiveRoom(null)
+  }, [])
+
   // Leaving a chat is a back step of its own. The browser owns the gesture and
   // the Android button, so it is handed a way to take that step first.
   const leaveActiveRoom = useCallback(() => {
@@ -810,9 +819,9 @@ export function PeerChatScreen ({
     setReplyTarget(null)
     setIsSearching(false)
     setSearchQuery('')
-    setActiveRoom(null)
+    showChatList()
     return true
-  }, [])
+  }, [showChatList])
 
   useEffect(() => {
     registerGoBack?.(leaveActiveRoom)
@@ -889,13 +898,13 @@ export function PeerChatScreen ({
         setSelectedMessageIds(null)
         return true
       }
-      setActiveRoom(null)
+      showChatList()
       setIsSearching(false)
       setSearchQuery('')
       return true
     })
     return () => subscription.remove()
-  }, [activeRoom, selectedMessageIds])
+  }, [activeRoom, selectedMessageIds, showChatList])
 
   // Picking belongs to the room it started in.
   useEffect(() => {
@@ -1077,7 +1086,7 @@ export function PeerChatScreen ({
       // Gone from this phone while open: left on another of your devices, or
       // given up for the copy the other person offered of the same chat.
       if (response.room === null) {
-        setActiveRoom(null)
+        showChatList()
         setMessages([])
         setReplyTarget(null)
         setIsSearching(false)
@@ -1938,7 +1947,7 @@ export function PeerChatScreen ({
       const fresh = await callRpc(RPC_PEERCHAT_INIT, {})
       if (!mountedRef.current) return
       setShowPeerChatSettings(false)
-      setActiveRoom(null)
+      showChatList()
       setProfile(fresh.profile || null)
       setProfileName('')
       setProfileBio('')
@@ -2273,7 +2282,7 @@ export function PeerChatScreen ({
         setComposer('')
       }
       if (activeRoomRef.current?.roomKey === room.roomKey) {
-        setActiveRoom(null)
+        showChatList()
         setMessages([])
         setReplyTarget(null)
         setIsSearching(false)
