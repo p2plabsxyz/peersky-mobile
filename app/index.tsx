@@ -1,6 +1,5 @@
 import { type ComponentRef, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  ActivityIndicator,
   Alert,
   Animated,
   AppState,
@@ -207,6 +206,7 @@ import {
 } from './browser-print'
 import { StartupScreen } from './StartupScreen'
 import { AppLoading } from './AppLoading'
+import { BrowserWaitPage } from './BrowserWaitPage'
 import { BrowserSiteInfoSheet } from './BrowserSiteInfoSheet'
 import { APP_WELCOME_FILE_NAMES, hasSeenWelcome, markWelcomeSeen, WELCOME_FILE_NAME } from './welcome-state.mjs'
 import { AppWelcome } from './AppWelcome'
@@ -5899,19 +5899,9 @@ export default function App () {
             ? browserSource.opening
               // A page on its way: blank, with the address bar showing it load.
               ? <View style={[styles.browserRestorePage, { backgroundColor: browserChrome.surface }]} />
-              : (
-                <View style={styles.browserRestorePage}>
-                  <ActivityIndicator size='small' color='#1f6fd1' />
-                  <Text style={styles.browserRestoreText}>{t('Restoring tab...')}</Text>
-                </View>
-                )
+              : <BrowserWaitPage label={t('Restoring tab...')} palette={browserChrome} />
             : !contentBlockingReady && isBrowserWebViewSource(browserSource)
-                ? (
-                  <View style={styles.browserRestorePage}>
-                    <ActivityIndicator size='small' color='#1f6fd1' />
-                    <Text style={styles.browserRestoreText}>{t('Turning on tracker protection...')}</Text>
-                  </View>
-                  )
+                ? <BrowserWaitPage label={t('Turning on tracker protection...')} palette={browserChrome} />
                 : null}
 
         {peertunesMounted && (

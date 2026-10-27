@@ -522,15 +522,7 @@ export const styles = StyleSheet.create({
     flex: 1
   },
   browserRestorePage: {
-    alignItems: 'center',
-    backgroundColor: '#ffffff',
-    flex: 1,
-    gap: 10,
-    justifyContent: 'center'
-  },
-  browserRestoreText: {
-    color: '#596276',
-    fontSize: 14
+    flex: 1
   },
   p2pmdWorkspace: {
     backgroundColor: '#1f2027',

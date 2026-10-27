@@ -160,6 +160,21 @@ describe('Android content blocking', () => {
     assert.match(appSource, /setContentBlockingPreference\(true\)/)
   })
 
+  // The wait flashed a white page with that line at nearly every start, even
+  // in the dark theme. It is now blank in the browser's colours, and says why
+  // only when it runs long.
+  test('the wait for the rules is a blank page in the browser\'s colours', () => {
+    const appSource = readFileSync(new URL('../../app/index.tsx', import.meta.url), 'utf8')
+    const waitPage = readFileSync(new URL('../../app/BrowserWaitPage.tsx', import.meta.url), 'utf8')
+
+    assert.match(appSource, /\? <BrowserWaitPage label=\{t\('Turning on tracker protection\.\.\.'\)\} palette=\{browserChrome\} \/>/)
+    assert.match(appSource, /<BrowserWaitPage label=\{t\('Restoring tab\.\.\.'\)\} palette=\{browserChrome\} \/>/)
+    assert.match(waitPage, /backgroundColor: palette\.surface/)
+    assert.match(waitPage, /const SAY_WHY_AFTER_MS = 2000/)
+    assert.match(waitPage, /\{sayWhy && \(/)
+    assert.doesNotMatch(waitPage, /#ffffff|#fff\b/i)
+  })
+
   test('injects native-backed fetch and XHR cancellation on Android', () => {
     const scriptSource = readFileSync(
       new URL('../../app/privacy/browserContentBlockingScript.mjs', import.meta.url),
