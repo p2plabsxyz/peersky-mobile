@@ -1,6 +1,6 @@
 # PeerSky Terms of Use
 
-Last updated: October 6, 2026
+Last updated: October 27, 2026
 
 PeerSky is a free, open source browser from P2P Labs, with PeerChat, P2PMD and
 PeerTunes built in. By using it you agree to these terms. They are short on
@@ -22,8 +22,8 @@ objectionable content or abusive users. Do not send or post:
 ## When someone breaks them
 
 - In groups, PeerChat filters messages for abuse, slurs and adult links, and
-  refuses nude pictures before they are sent. Pictures that look explicit
-  arrive hidden behind a warning.
+  refuses nude, violent or graphic pictures before they are sent. Pictures that
+  look explicit, violent or graphic arrive hidden behind a warning.
 - You can block anyone. Everything they send disappears for you, in every chat,
   and they can no longer message you directly.
 - You can report anyone, or a single message, from inside the app. Reports go to

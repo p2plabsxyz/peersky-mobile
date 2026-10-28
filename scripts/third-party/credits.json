@@ -29,6 +29,19 @@
     "url": "https://github.com/tensorflow/tfjs"
   },
   {
+    "name": "image-safety-classifier-s",
+    "version": "015042b",
+    "license": "MIT",
+    "copyright": "Owen Elliott",
+    "url": "https://huggingface.co/OwenElliott/image-safety-classifier-s"
+  },
+  {
+    "name": "SwiftFormer",
+    "license": "Apache-2.0",
+    "copyright": "Abdelrahman Shaker and the SwiftFormer authors",
+    "url": "https://github.com/Amshaker/SwiftFormer"
+  },
+  {
     "name": "Bootstrap Icons",
     "license": "MIT",
     "copyright": "The Bootstrap Authors",

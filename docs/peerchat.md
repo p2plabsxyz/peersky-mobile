@@ -96,9 +96,11 @@ result, no report.
 In a group, a message with threats, slurs or an adult-domain link is held back
 and a notice takes its place. So is a file whose name has them, since the name
 shows in the chat list, a search and a notification. A picture that looks
-explicit is refused before it is sent, by a model that runs on the device.
-Pictures are checked again when they arrive, and one that looks explicit is
-hidden behind a warning the reader can open. The abuse filter and the
+explicit, violent or graphic is refused before it is sent, by two models that
+run on the device: one for nudity, one for gore and graphic violence. The
+profile picture and a room's picture go through the same check. Pictures are
+checked again when they arrive, and one that looks explicit, violent or graphic
+is hidden behind a warning the reader can open. The abuse filter and the
 profanity and slur list are on in every new group, and whoever made the group
 can turn either off in Edit room. That choice is signed with their key, like
 the rest of the room's details, so every device knows it came from them. The
@@ -106,10 +108,10 @@ adult-domain check and the picture check stay on in every group.
 
 A direct message skips the text filters, file names included: it is between two
 people, and either can block the other. The spam limit still applies there, and
-a picture that looks explicit arrives hidden behind a warning the reader can
-open. Whether a room is a direct message is worked out on each device, never
-taken from a peer, so a group cannot pass itself off as a direct message to get
-out of its filters.
+a picture that looks explicit, violent or graphic arrives hidden behind a
+warning the reader can open. Whether a room is a direct message is worked out
+on each device, never taken from a peer, so a group cannot pass itself off as a
+direct message to get out of its filters.
 
 Whoever made a room can remove anyone from it, for good. The creator signs the
 room's removal list with their own key, so anyone in the room can pass it on

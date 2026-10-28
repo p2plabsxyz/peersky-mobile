@@ -10,11 +10,16 @@ import {
   NSFW_INPUT_SIZE,
   NSFW_LIBRARY_FILE,
   NSFW_MODEL_FILE,
-  NSFW_PAGE_FILE
+  NSFW_PAGE_FILE,
+  SAFETY_CORE_FILE,
+  SAFETY_DATA_FILE,
+  SAFETY_SCRIPT_FILE
 } from './nsfw-scanner-page.mjs'
 import {
+  combineMediaVerdicts,
   MEDIA_UNSCANNED,
-  verdictFromPredictions
+  verdictFromPredictions,
+  verdictFromSafety
 } from './media-moderation.mjs'
 import { setUploadScanner, type UploadAsset } from './upload-gate'
 
@@ -110,7 +115,7 @@ export async function scanMedia (asset: {
   })
 }
 
-// All three are .txt, which Metro already treats as an asset. Giving the
+// All of them are .txt, which Metro already treats as an asset. Giving the
 // weights their own extension would mean a resolver change, and a Metro that
 // has not been restarted then fails to build rather than falling back.
 // Copied out of the bundle into one folder so the page can pull them in with
@@ -128,7 +133,10 @@ async function stageScannerFiles () {
 
   for (const [module, name] of [
     [require('../../assets/nsfw/nsfwjs.txt'), NSFW_LIBRARY_FILE],
-    [require('../../assets/nsfw/model-data.txt'), NSFW_MODEL_FILE]
+    [require('../../assets/nsfw/model-data.txt'), NSFW_MODEL_FILE],
+    [require('../../assets/nsfw/tf-core.txt'), SAFETY_CORE_FILE],
+    [require('../../assets/nsfw/safety-model.txt'), SAFETY_SCRIPT_FILE],
+    [require('../../assets/nsfw/safety-data.txt'), SAFETY_DATA_FILE]
   ] as Array<[number, string]>) {
     const asset = Asset.fromModule(module)
     await asset.downloadAsync()
@@ -147,7 +155,8 @@ async function stageScannerFiles () {
 }
 
 /**
- * Runs the same vendored model the desktop app uses, inside a hidden WebView.
+ * Runs the same vendored models the desktop app uses, inside a hidden WebView:
+ * nsfwjs for explicit pictures, the safety model for violent or graphic ones.
  * That avoids a native classifier: no extra runtime per ABI, no model
  * conversion, and one classifier to reason about across both platforms.
  *
@@ -213,7 +222,16 @@ export const NsfwScanner = memo(function NsfwScanner () {
         allowFileAccessFromFileURLs
         allowingReadAccessToURL={folderUri || undefined}
         onMessage={(event) => {
-          let message: { id?: string, predictions?: unknown, error?: string, ready?: boolean }
+          let message: {
+            id?: string
+            predictions?: unknown
+            // The safety model's scores for a picture, or whether it started
+            // at all on the ready message.
+            safety?: Record<string, number> | boolean | null
+            error?: string
+            ready?: boolean
+            safetyError?: string
+          }
           try {
             message = JSON.parse(event.nativeEvent.data)
           } catch {
@@ -225,6 +243,8 @@ export const NsfwScanner = memo(function NsfwScanner () {
           if (message.ready !== undefined) {
             if (message.ready) {
               console.log('[nsfw] classifier ready')
+              // Explicit pictures are still caught without it.
+              if (message.safety === false) console.warn('[nsfw] violent or graphic check failed to start:', message.safetyError)
               classifierReady = true
               for (const entry of pending.values()) liveWebView?.postMessage(entry.request)
             } else {
@@ -236,7 +256,9 @@ export const NsfwScanner = memo(function NsfwScanner () {
 
           if (!message.id) return
           // A classifier that could not read the picture has not cleared it.
-          settle(message.id, message.error ? MEDIA_UNSCANNED : verdictFromPredictions(message.predictions))
+          settle(message.id, message.error
+            ? MEDIA_UNSCANNED
+            : combineMediaVerdicts(verdictFromPredictions(message.predictions), verdictFromSafety(typeof message.safety === 'object' ? message.safety : null)))
         }}
         onError={(event) => {
           console.warn('[nsfw] classifier page failed:', event.nativeEvent.description)

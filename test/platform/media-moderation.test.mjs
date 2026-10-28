@@ -3,19 +3,32 @@ import { readFile, stat } from 'node:fs/promises'
 import test from 'node:test'
 
 import {
+  combineMediaVerdicts,
+  describeBlockedUpload,
   describeTooManyFiles,
+  GRAPHIC_THRESHOLD,
+  isRefusedMedia,
   isTooManyFiles,
   isUsableImageType,
   sniffBase64ImageType,
   MAX_UPLOAD_BATCH,
   MEDIA_ALLOWED,
   MEDIA_BLOCKED,
+  MEDIA_GRAPHIC,
   MEDIA_UNSCANNED,
   normalizeMediaVerdict,
   screenUploadBatch,
   verdictFromPredictions,
+  verdictFromSafety,
   videoSampleTimes
 } from '../../app/media/media-moderation.mjs'
+import {
+  buildNsfwScannerPage,
+  NSFW_LIBRARY_FILE,
+  SAFETY_CORE_FILE,
+  SAFETY_DATA_FILE,
+  SAFETY_SCRIPT_FILE
+} from '../../app/media/nsfw-scanner-page.mjs'
 
 test('media screening refuses a photo however the model divides up its score', () => {
   const at = (scores) => Object.entries(scores).map(([className, probability]) => ({ className, probability }))
@@ -41,6 +54,45 @@ test('media screening says nothing rather than allowing when it has nothing to g
   assert.equal(verdictFromPredictions([]), MEDIA_UNSCANNED)
   assert.equal(verdictFromPredictions(null), MEDIA_UNSCANNED)
   assert.equal(normalizeMediaVerdict('clean'), MEDIA_UNSCANNED)
+})
+
+test('a violent or graphic picture is refused, in its own words', () => {
+  // The safety model's gore class decides it.
+  assert.equal(verdictFromSafety({ NSFL: 0.74, NSFW: 0.04, SFW: 0.22 }), MEDIA_GRAPHIC)
+  assert.equal(verdictFromSafety({ NSFL: GRAPHIC_THRESHOLD, NSFW: 0, SFW: 0.7 }), MEDIA_GRAPHIC)
+  assert.equal(verdictFromSafety({ NSFL: 0.17, NSFW: 0.03, SFW: 0.8 }), MEDIA_ALLOWED)
+  // A model that did not run says nothing, rather than clearing the picture.
+  assert.equal(verdictFromSafety(null), MEDIA_UNSCANNED)
+
+  // Either model refuses; explicit says more, so it wins the words. One that
+  // could not judge leaves it to the other, as before.
+  assert.equal(combineMediaVerdicts(MEDIA_ALLOWED, MEDIA_GRAPHIC), MEDIA_GRAPHIC)
+  assert.equal(combineMediaVerdicts(MEDIA_BLOCKED, MEDIA_GRAPHIC), MEDIA_BLOCKED)
+  assert.equal(combineMediaVerdicts(MEDIA_ALLOWED, MEDIA_UNSCANNED), MEDIA_ALLOWED)
+  assert.equal(combineMediaVerdicts(MEDIA_UNSCANNED, MEDIA_UNSCANNED), MEDIA_UNSCANNED)
+  assert.equal(isRefusedMedia(MEDIA_GRAPHIC), true)
+  assert.equal(isRefusedMedia(MEDIA_UNSCANNED), false)
+  assert.equal(normalizeMediaVerdict(MEDIA_GRAPHIC), MEDIA_GRAPHIC)
+
+  assert.match(describeBlockedUpload('trip.jpg', MEDIA_GRAPHIC), /'trip\.jpg' looks violent or graphic, so it was not sent/)
+  assert.match(describeBlockedUpload('', MEDIA_GRAPHIC), /That file looks violent or graphic/)
+  const decision = screenUploadBatch([{ fileName: 'a.png', verdict: MEDIA_ALLOWED }, { fileName: 'b.png', verdict: MEDIA_GRAPHIC }])
+  assert.equal(decision.allowed, false)
+  assert.match(decision.reason, /'b\.png' looks violent or graphic/)
+})
+
+test('the scanner page runs the safety model on the engine nsfwjs brought', () => {
+  const page = buildNsfwScannerPage()
+  // tf-core has no backends of its own, so it has to come after nsfwjs.
+  const order = [NSFW_LIBRARY_FILE, SAFETY_CORE_FILE, SAFETY_SCRIPT_FILE, SAFETY_DATA_FILE]
+    .map((file) => page.indexOf(`<script src="./${file}"></script>`))
+  assert.ok(order.every((at) => at > -1), 'every script is on the page')
+  assert.deepEqual([...order].sort((a, b) => a - b), order)
+  // Both answers go back with every picture, and a page whose safety model
+  // could not start still checks for explicit pictures and says so.
+  assert.match(page, /reply\(\{ id: request\.id, predictions: results\[0\], safety: results\[1\] \}\)/)
+  assert.match(page, /reply\(\{ ready: true, safety: !!models\[1\], safetyError: safetyError \}\)/)
+  assert.match(page, /return null/)
 })
 
 test('one refused file stops the whole batch', () => {
@@ -134,7 +186,7 @@ test('a classifier that cannot answer never clears an upload', async () => {
     /if \(\(asset\.size \?\? 0\) > MAX_SCANNED_BYTES\) return MEDIA_UNSCANNED/,
     /if \(!liveWebView\) return MEDIA_UNSCANNED/,
     /resolve\(MEDIA_UNSCANNED\)\n {4}\}, SCAN_TIMEOUT_MS\)/,
-    /message\.error \? MEDIA_UNSCANNED : verdictFromPredictions/
+    /message\.error\s*\?\s*MEDIA_UNSCANNED\s*:\s*combineMediaVerdicts\(verdictFromPredictions/
   ]) {
     assert.match(host, guard)
   }
@@ -157,7 +209,9 @@ test('the classifier assets stay on an extension Metro already resolves', async 
   // A new assetExt means a resolver change, and a Metro that has not been
   // restarted then fails the build outright rather than falling back.
   const required = [...host.matchAll(/assets\/nsfw\/([\w.-]+)/g)].map((match) => match[1])
-  assert.equal(required.length, 2)
+  // nsfwjs and its model, then the safety model: its code, its weights and
+  // the TensorFlow.js core it runs on.
+  assert.equal(required.length, 5)
   for (const name of required) {
     assert.ok(name.endsWith('.txt'), `${name} needs an extension Metro already treats as an asset`)
     assert.match(metro, /assetExts\.push\('txt'/)
@@ -246,15 +300,18 @@ test('what arrives is screened too, not only what is sent', async () => {
   assert.match(host, /export async function scanMedia \(/)
   assert.match(host, /setUploadScanner\(\(asset: UploadAsset\) => scanMedia\(asset\)\)/)
 
-  const attachment = screen.slice(screen.indexOf('const [isExplicit'), screen.indexOf('if (mediaUrl && mediaKind === \'image\')'))
+  const attachment = screen.slice(screen.indexOf('const [hiddenAs'), screen.indexOf('if (mediaUrl && mediaKind === \'image\')'))
   assert.match(attachment, /void scanMedia\(\{ uri: mediaUrl/)
   // Your own upload was already screened on the way out.
   assert.match(attachment, /if \(!mediaUrl \|\| item\.self \|\| mediaKind !== 'image'\) return/)
 
   // The picture must not render while the verdict is still outstanding, nor
-  // once it came back explicit unless the reader asked to see it anyway.
-  assert.match(screen, /if \(mediaUrl && mediaKind === 'image' && \(isScreening \|\| \(isExplicit && !isRevealed\)\)\)/)
+  // once it came back explicit, violent or graphic unless the reader asked to
+  // see it anyway.
+  assert.match(attachment, /setHiddenAs\(isRefusedMedia\(verdict\) \? verdict : null\)/)
+  assert.match(screen, /if \(mediaUrl && mediaKind === 'image' && \(isScreening \|\| \(hiddenAs && !isRevealed\)\)\)/)
   assert.match(screen, /Hidden: this looks explicit/)
+  assert.match(screen, /hiddenAs === MEDIA_GRAPHIC \? t\('Hidden: this looks violent or graphic'\)/)
 })
 
 test('an attachment upload can never lock the composer forever', async () => {
@@ -507,7 +564,7 @@ test('a hidden picture can still be opened by whoever wants to', async () => {
 
   // Hiding it is a warning, not a verdict: the classifier is wrong often
   // enough that a reader has to be able to look.
-  assert.match(screen, /isExplicit && !isRevealed/)
+  assert.match(screen, /hiddenAs && !isRevealed/)
   assert.match(screen, /setIsRevealed\(true\)/)
   assert.match(screen, /Show anyway/)
 })

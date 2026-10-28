@@ -146,7 +146,7 @@ import { pickUploads, screenUploadBytes } from '../media/upload-gate'
 import type { UploadAsset, UploadSource } from '../media/upload-gate'
 import { deleteChatPictureCopies, prepareChatPictures } from '../media/chat-picture-copies'
 import { scanMedia } from '../media/NsfwScanner'
-import { MEDIA_BLOCKED } from '../media/media-moderation.mjs'
+import { isRefusedMedia, MEDIA_GRAPHIC } from '../media/media-moderation.mjs'
 import { AppLoading } from '../AppLoading'
 import { MODAL_ORIENTATIONS } from '../modal-orientations'
 import { tapFeedback } from '../haptics'
@@ -2972,7 +2972,7 @@ export function PeerChatScreen ({
                 <Text style={[styles.helper, { color: colors.muted }]}>
                   {tp({ one: 'Spam limit: {count} messages / 10 seconds', other: 'Spam limit: {count} messages / 10 seconds' }, activeRoom.moderation.spamRateLimit)}
                 </Text>
-                <Text style={[styles.helper, { color: colors.muted }]}>{t('Adult-domain links: Always blocked')}</Text>
+                <Text style={[styles.helper, { color: colors.muted }]}>{t('Adult domains, NSFW, and violent/graphic: Always blocked')}</Text>
               </View>
             )}
             {activeRoom.members.length > 0 && (
@@ -4497,6 +4497,7 @@ export function PeerChatScreen ({
                 </View>
                 <Text style={[styles.preferenceState, { color: colors.accent }]}>{roomSpamRateLimit}</Text>
               </Pressable>
+              <Text style={[styles.helper, { color: colors.muted }]}>{t('Adult domains, NSFW, and violent/graphic: Always blocked')}</Text>
               <Pressable
                 accessibilityRole='button'
                 disabled={!profileName.trim() || isBusy}
@@ -5123,7 +5124,8 @@ function PeerChatAttachment ({
       : { width: size.width, height: size.height }))
   }, [item.message])
   const [isOpening, setIsOpening] = useState(false)
-  const [isExplicit, setIsExplicit] = useState(false)
+  // The verdict a picture is hidden for, explicit or violent or graphic.
+  const [hiddenAs, setHiddenAs] = useState<string | null>(null)
   const [isScreening, setIsScreening] = useState(false)
   // Hiding it is a warning, not a verdict. The classifier is wrong often
   // enough that someone who wants to look has to be able to.
@@ -5146,7 +5148,7 @@ function PeerChatAttachment ({
     void scanMedia({ uri: mediaUrl, mimeType: getPeerChatAttachmentMimeType(item.fileName || ''), size: item.fileSize })
       .then((verdict) => {
         if (cancelled) return
-        setIsExplicit(verdict === MEDIA_BLOCKED)
+        setHiddenAs(isRefusedMedia(verdict) ? verdict : null)
         setIsScreening(false)
       })
     return () => { cancelled = true }
@@ -5212,13 +5214,15 @@ function PeerChatAttachment ({
 
   // A picture or video fills its bubble, which keeps only a thin edge, and
   // shows no name and size: it shows itself.
-  if (mediaUrl && mediaKind === 'image' && (isScreening || (isExplicit && !isRevealed))) {
+  if (mediaUrl && mediaKind === 'image' && (isScreening || (hiddenAs && !isRevealed))) {
     return (
       <View style={[styles.inlineMedia, styles.mediaNotice, { backgroundColor: colors.input, width: fit.width }]}>
-        <Text style={[styles.mediaNoticeText, { color: isExplicit ? colors.danger : colors.muted }]}>
-          {isExplicit ? t('Hidden: this looks explicit') : t('Checking this picture')}
+        <Text style={[styles.mediaNoticeText, { color: hiddenAs ? colors.danger : colors.muted }]}>
+          {!hiddenAs
+            ? t('Checking this picture')
+            : hiddenAs === MEDIA_GRAPHIC ? t('Hidden: this looks violent or graphic') : t('Hidden: this looks explicit')}
         </Text>
-        {isExplicit && (
+        {hiddenAs && (
           <Pressable
             accessibilityHint={t('Shows a picture the check hid')}
             accessibilityRole='button'

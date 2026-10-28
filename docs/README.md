@@ -145,7 +145,7 @@
     - Whoever made a room can remove anyone from it, and the removal reaches everyone in the room
     - Removing somebody moves the room to a new key that everyone else follows on their own, so the person removed cannot read on
     - Block or report anyone, from a message or their profile
-    - Groups hold back threats, slurs and adult links, and refuse explicit pictures before they are sent
+    - Groups hold back threats, slurs and adult links, and refuse explicit, violent or graphic pictures before they are sent
   - [x] Works on the same Wi-Fi with no internet
   - [x] The same profile and rooms on your phone and desktops, each device named after you
   - [x] A chat per browser tab

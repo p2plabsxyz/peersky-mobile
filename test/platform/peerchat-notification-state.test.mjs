@@ -343,8 +343,8 @@ test('PeerChat answers the questions a first-time user actually asks', async () 
   for (const { a } of PEERCHAT_QUESTIONS) {
     assert.doesNotMatch(a, /(aren|isn).t detected|not detected|can.t (detect|tell)|undetected/i)
   }
-  assert.match(answer(/send anything they like/), /Nudity in pictures is refused/)
-  assert.match(answer(/send anything they like/), /a picture that looks explicit when it arrives is hidden behind a warning/)
+  assert.match(answer(/send anything they like/), /Pictures with nudity, violence or gore are refused before they’re sent, profile and group pictures included/)
+  assert.match(answer(/send anything they like/), /A picture that looks explicit, violent or graphic when it arrives is hidden behind a warning/)
   // Which checks a group's maker can turn off, and that they run on the phone.
   assert.match(answer(/send anything they like/), /whoever made the group can turn those two filters off/)
   assert.match(answer(/send anything they like/), /All of this happens on your phone, and nothing about it is sent to us/)
