@@ -374,6 +374,22 @@ describe('mobile platform runtime configuration', () => {
     assert.match(indexSource, /\}, \[isBooting, pendingIncomingUrl, pendingRestoredUrl\]\)/)
   })
 
+  // PeerChat opened by a link on a cold start asked the worklet for its chats
+  // before it was running, and said "Worklet is not ready" until something was
+  // tapped. A link, a widget and a notification now wait for it, as a
+  // restored tab already did.
+  it('opens a built-in app from a link, a widget or a notification once the worklet runs', async () => {
+    const indexSource = await readFile(repoFile('app/index.tsx'), 'utf8')
+    assert.match(indexSource, /if \(!browserSessionReady \|\| !pendingIncomingUrl\) return\n(?:\s+\/\/[^\n]*\n)+\s+if \(needsWorklet\(pendingIncomingUrl\) && \(isBooting \|\| !rpcRef\.current\)\) return/)
+    assert.match(indexSource, /\}, \[browserSessionReady, isBooting, pendingIncomingUrl\]\)/)
+    assert.match(indexSource, /shortcut\?\.name === 'open' && shortcut\.target && needsWorklet\(shortcut\.target\) && \(isBooting \|\| !rpcRef\.current\)\) return\n\s+setPendingHomeShortcutUrl\(null\)/)
+    assert.match(indexSource, /\}, \[browserSessionReady, isBooting, pendingHomeShortcutUrl\]\)/)
+    const start = indexSource.indexOf('onOpenRoom: (roomKey) => {')
+    const tap = indexSource.slice(start, indexSource.indexOf('\n    },', start))
+    assert.match(tap, /setPendingIncomingUrl\('peersky:\/\/p2p\/peerchat\/'\)/)
+    assert.doesNotMatch(tap, /loadBrowserUrl/)
+  })
+
   // expo-router parsed every incoming link's query with a decoder a crafted
   // link could keep busy. The browser reads links itself, so the router is
   // only ever told to show "/".

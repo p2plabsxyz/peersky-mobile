@@ -737,7 +737,9 @@ export default function App () {
     isRuntimeReady: Boolean(identityStoragePath),
     onOpenRoom: (roomKey) => {
       setRequestedPeerChatRoomKey(roomKey)
-      void loadBrowserUrl('peersky://p2p/peerchat/')
+      // The way a link opens it, so a tap that started the app waits for the
+      // worklet and goes in front of last time's tabs.
+      setPendingIncomingUrl('peersky://p2p/peerchat/')
     },
     onCallRpc: (command, data = {}) => callRpc(command, data) as Promise<PeerChatResponse>
   })
@@ -1112,6 +1114,9 @@ export default function App () {
     if (!browserSessionReady || !pendingHomeShortcutUrl) return
     const shortcutUrl = pendingHomeShortcutUrl
     const shortcut = parseHomeShortcut(shortcutUrl)
+    // A widget opening PeerChat, PeerTunes or a drive waits for the worklet,
+    // as a link does.
+    if (shortcut?.name === 'open' && shortcut.target && needsWorklet(shortcut.target) && (isBooting || !rpcRef.current)) return
     setPendingHomeShortcutUrl(null)
     settleIncomingUrl(shortcutUrl)
     setBrowserBookmarksVisible(false)
@@ -1164,10 +1169,14 @@ export default function App () {
         if (!createBrowserTab(target)) void loadBrowserUrl(target)
       }).catch(() => setStatus('Unable to read what was copied'))
     }
-  }, [browserSessionReady, pendingHomeShortcutUrl])
+  }, [browserSessionReady, isBooting, pendingHomeShortcutUrl])
 
   useEffect(() => {
     if (!browserSessionReady || !pendingIncomingUrl) return
+    // It waits for the worklet the way a restored tab does. PeerChat opened by
+    // a link on a cold start asked for its chats before the worklet was
+    // running, and said "Worklet is not ready" until something was tapped.
+    if (needsWorklet(pendingIncomingUrl) && (isBooting || !rpcRef.current)) return
 
     const incomingUrl = pendingIncomingUrl
     setPendingIncomingUrl(null)
@@ -1183,7 +1192,7 @@ export default function App () {
     // behind it in the tab's history.
     setPendingRestoredUrl(null)
     void loadBrowserUrl(incomingUrl)
-  }, [browserSessionReady, pendingIncomingUrl])
+  }, [browserSessionReady, isBooting, pendingIncomingUrl])
 
   useEffect(() => {
     if (!isBrowserWebViewSource(browserSource)) return
@@ -1219,10 +1228,7 @@ export default function App () {
     // Built-in apps talk to the Bare worklet as soon as they open, so they have
     // to wait for it exactly like hyper:// does. Without this a restored
     // PeerTunes tab hit "Worklet is not ready" on every cold start.
-    const needsWorklet = isHyperUrl(pendingRestoredUrl) ||
-      getRuntimeAppFromUrl(pendingRestoredUrl) !== null ||
-      parseViewerUrl(pendingRestoredUrl) !== null
-    if (needsWorklet && (isBooting || !rpcRef.current)) return
+    if (needsWorklet(pendingRestoredUrl) && (isBooting || !rpcRef.current)) return
 
     const restoredUrl = pendingRestoredUrl
     setPendingRestoredUrl(null)
@@ -6591,6 +6597,12 @@ function writeBrowserSession (state: BrowserTabsState) {
     console.error('Failed saving browser tabs:', error)
     return false
   }
+}
+
+// Built-in apps, hyper:// pages and a folder's views call the Bare worklet the
+// moment they open, so whatever opens one waits until it is running.
+function needsWorklet (url: string) {
+  return isHyperUrl(url) || getRuntimeAppFromUrl(url) !== null || parseViewerUrl(url) !== null
 }
 
 function isBrowserWebViewSource (

@@ -250,7 +250,8 @@ describe('Opening a hyper:// folder in the viewer', () => {
     const restore = app.slice(app.indexOf('async function loadRestoredBrowserUrl'), app.indexOf('async function loadHyperBrowserUrl'))
     assert.match(restore, /openDriveViewer\(viewerUrl, false\)/)
     assert.match(app, /getRuntimeAppFromUrl\(url\) !== null \|\| parseViewerUrl\(url\) !== null/)
-    assert.match(app, /parseViewerUrl\(pendingRestoredUrl\) !== null/)
+    assert.match(app, /function needsWorklet \(url: string\) \{\n {2}return isHyperUrl\(url\) \|\| getRuntimeAppFromUrl\(url\) !== null \|\| parseViewerUrl\(url\) !== null/)
+    assert.match(app, /if \(needsWorklet\(pendingRestoredUrl\) && \(isBooting \|\| !rpcRef\.current\)\) return/)
     // The viewer's moves change the tab's address in place.
     assert.match(app, /if \(entry\.url !== url\) replaceBrowserEntry\(url, entry\.source\)/)
   })
