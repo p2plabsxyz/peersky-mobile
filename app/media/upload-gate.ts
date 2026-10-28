@@ -10,6 +10,7 @@ import {
   MEDIA_UNSCANNED,
   screenUploadBatch
 } from './media-moderation.mjs'
+import { pickedPhotoName } from './picked-photo-name.mjs'
 import { t } from '../i18n/i18n.mjs'
 import { ensurePermission } from '../permission-prompt'
 
@@ -337,8 +338,10 @@ async function pickFromPhotos (
     return {
       uri: file.uri,
       // The camera roll does not always hand over a name, and a photo with no
-      // name arrives in the room as "undefined".
-      name: asset.fileName || nameFromUri(file.uri, asset.mimeType),
+      // name arrives in the room as "undefined". On Android it hands over a
+      // number in place of one (see picked-photo-name.mjs).
+      name: pickedPhotoName(asset.fileName, { android: Platform.OS === 'android', video: asset.type === 'video' }) ||
+        nameFromUri(file.uri, asset.mimeType),
       size,
       mimeType: asset.mimeType || ''
     }
