@@ -21,6 +21,11 @@ test('a photo from the camera roll is accepted on both platforms', () => {
   assert.equal(accepted('file:///data/user/0/xyz.p2plabs.peersky/cache/ImagePicker/c.jpg'), true)
 })
 
+test('the clean copy of a photo for a chat is accepted on both platforms', () => {
+  assert.equal(accepted('file:///var/mobile/Containers/Data/Application/X/Library/Caches/ImageManipulator/e.jpg'), true)
+  assert.equal(accepted('file:///data/user/0/xyz.p2plabs.peersky/cache/ImageManipulator/f.jpg'), true)
+})
+
 test('a staged folder upload is accepted', () => {
   assert.equal(accepted('file:///data/user/0/xyz.p2plabs.peersky/cache/peersky-upload/d.png'), true)
 })
