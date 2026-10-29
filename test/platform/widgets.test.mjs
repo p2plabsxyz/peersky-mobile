@@ -188,6 +188,18 @@ describe('home screen widgets', () => {
     assert.match(lock, /Image\(name\)\n\s+\.renderingMode\(\.template\)/)
   })
 
+  // The bird sat small in the top left corner of the small widget.
+  test('show the bird large in the middle of the small search widget', async () => {
+    const small = browserWidget.slice(browserWidget.indexOf('private struct SmallSearch'), browserWidget.indexOf('private struct SearchBar'))
+    assert.match(small, /VStack\(spacing: 0\) \{\n\s+Spacer\(minLength: 0\)\n\s+Image\("PeerSkyIcon"\)/)
+    assert.doesNotMatch(small, /alignment: \.leading/)
+    const side = Number(small.match(/Image\("PeerSkyIcon"\)\s+\.resizable\(\)\s+\.frame\(width: (\d+), height: \1\)/)[1])
+    assert.ok(side >= 72, `${side} points`)
+    // Sharp on a three times screen.
+    const { width } = imageSize(await readFile(new URL('PeerSkyIcon.imageset/peersky.png', assets)))
+    assert.ok(width >= side * 3, `${width} pixels for ${side} points`)
+  })
+
   test('send the PeerTunes buttons to the app as the page\'s own commands', async () => {
     const sent = [...intents.matchAll(/@available\(iOS 17\.0, \*\)\nstruct (\w+): AudioPlaybackIntent \{[\s\S]*?PeerTunesWidgetCommand\.send\("(\w+)"\)/g)]
       .map(([, name, command]) => [name, command])
