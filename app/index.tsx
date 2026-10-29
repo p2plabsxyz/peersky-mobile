@@ -194,6 +194,7 @@ import ShieldLockIcon from '../assets/icons/bootstrap/shield-lock.svg'
 import { WelcomeScreen } from './WelcomeScreen'
 import { RestartRequiredScreen } from './RestartRequiredScreen'
 import { emitLinkDeviceProgress } from './settings/link-device-progress'
+import { clearAllP2PData } from './settings/clear-all-p2p-data'
 import { BrowserHomeBackground } from './BrowserHomeBackground'
 import { BurnAnimation } from './BurnAnimation'
 import { applyAppIcon } from './app-icon'
@@ -1115,8 +1116,10 @@ export default function App () {
     const shortcutUrl = pendingHomeShortcutUrl
     const shortcut = parseHomeShortcut(shortcutUrl)
     // A widget opening PeerChat, PeerTunes or a drive waits for the worklet,
-    // as a link does.
-    if (shortcut?.name === 'open' && shortcut.target && needsWorklet(shortcut.target) && (isBooting || !rpcRef.current)) return
+    // as a link does, and so does clearing all P2P data, which the worklet
+    // does.
+    const waitsForWorklet = shortcut?.name === 'clear-p2p-data' || (shortcut?.name === 'open' && !!shortcut.target && needsWorklet(shortcut.target))
+    if (waitsForWorklet && (isBooting || !rpcRef.current)) return
     setPendingHomeShortcutUrl(null)
     settleIncomingUrl(shortcutUrl)
     setBrowserBookmarksVisible(false)
@@ -1141,6 +1144,22 @@ export default function App () {
     } else if (shortcut?.name === 'incognito') {
       setBrowserSettingsVisible(false)
       onBrowserNewIncognitoTab()
+    } else if (shortcut?.name === 'private-search') {
+      setBrowserSettingsVisible(false)
+      onBrowserNewIncognitoTab()
+      setBrowserAddressFocusRequest((count) => count + 1)
+    } else if (shortcut?.name === 'burn') {
+      // Straight to the flames: the lock screen button is there to burn
+      // without a question, where the menu's Burn asks first.
+      setBrowserSettingsVisible(false)
+      setBrowserBurning(true)
+    } else if (shortcut?.name === 'bookmarks') {
+      setBrowserSettingsVisible(false)
+      setBrowserBookmarksVisible(true)
+    } else if (shortcut?.name === 'clear-p2p-data') {
+      // The lock screen's emergency button: no question, as with Burn.
+      setBrowserSettingsVisible(false)
+      void clearAllP2PData({ onCallRpc: (command) => callRpc(command, {}), onRestartRequired })
     } else if (shortcut?.name === 'app-icon') {
       // Where the colours of the logo, and so of the app icon, are picked.
       setBrowserSettingsInitialPage('appearance')
@@ -2378,7 +2397,7 @@ export default function App () {
   // if there is one. Anything else opens in a new tab over what was there.
   function openWidgetTarget (targetUrl: string) {
     const app = getRuntimeAppFromUrl(targetUrl)
-    if (!app && !isWebUrl(targetUrl) && !isHyperUrl(targetUrl)) return
+    if (!app && !isWebUrl(targetUrl) && !isHyperUrl(targetUrl) && !isBrowserP2pUrl(targetUrl)) return
     const tab = app ? findBrowserTabShowingApp(browserTabsStateRef.current, app) : null
     if (tab) {
       onBrowserSwitchTab(tab.id)
@@ -2978,6 +2997,16 @@ export default function App () {
           : 'Tab session reset'
     )
     return { previewCacheCleared, sessionSaved }
+  }
+
+  // Clear all P2P data, Remove my data and a restore all start here, from
+  // Settings or the lock screen button. What the Hyperdrive viewer made of
+  // the drives goes too, the next time it opens.
+  function onRestartRequired () {
+    browserSessionReadyRef.current = false
+    setBrowserSessionReady(false)
+    setRestartRequired(true)
+    bumpHyperdriveViewerEpoch()
   }
 
   // Like DuckDuckGo's Fire Button and Firefox Focus, history goes too, so
@@ -4690,15 +4719,7 @@ export default function App () {
                 if (didNavigate) closeBrowserSettings()
               })
             }}
-            onRestartRequired={() => {
-              browserSessionReadyRef.current = false
-              setBrowserSessionReady(false)
-              setRestartRequired(true)
-              // Clear all P2P data, Remove my data and a restore all start
-              // here. What the Hyperdrive viewer made of the drives goes too,
-              // the next time it opens.
-              bumpHyperdriveViewerEpoch()
-            }}
+            onRestartRequired={onRestartRequired}
           />
         </View>
         <BrowserBackSwipe

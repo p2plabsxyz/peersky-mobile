@@ -101,9 +101,9 @@ test('a picture check keeps no copy, and clearing the chats clears the copies', 
   assert.match(helper, /for \(const name of \['peerchat-save', 'ImageManipulator', 'ImagePicker', 'DocumentPicker', OPEN_COPIES_FOLDER\]\)/)
   assert.match(helper, /new Directory\(Paths\.cache, 'peerchat-save'\)/, 'the folder Save and Share write to')
 
-  const storage = await read('app/settings/P2PStorage.tsx')
-  const clearAll = storage.slice(storage.indexOf('async function clearAllData'), storage.indexOf('async function refreshArchive'))
-  assert.ok(clearAll.indexOf('clearChatFileCopies()') > -1 && clearAll.indexOf('clearChatFileCopies()') < clearAll.indexOf('RPC_HYPER_STORAGE_CLEAR_ALL'))
+  // Clear all P2P data, from Settings or the lock screen button.
+  const clearAll = await read('app/settings/clear-all-p2p-data.ts')
+  assert.ok(clearAll.indexOf('clearChatFileCopies()') > -1 && clearAll.indexOf('clearChatFileCopies()') < clearAll.indexOf('onCallRpc(RPC_HYPER_STORAGE_CLEAR_ALL)'))
 
   const linkDevice = await read('app/settings/LinkDevice.tsx')
   const replace = linkDevice.slice(linkDevice.indexOf('const replaceData = useCallback'), linkDevice.indexOf('const commitRestore'))

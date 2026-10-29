@@ -652,8 +652,9 @@ test('the p2p address lists the P2P sites this phone has opened', async () => {
 
   const { readFile } = await import('node:fs/promises')
   const index = await readFile(new URL('../../app/index.tsx', import.meta.url), 'utf8')
-  // Typed, or restored with the tab: both land on the same screen.
-  assert.equal((index.match(/isBrowserP2pUrl\(/g) || []).length, 2)
+  // Typed, restored with the tab, or opened by the lock screen button: all
+  // land on the same screen.
+  assert.equal((index.match(/isBrowserP2pUrl\(/g) || []).length, 3)
   // The hyper:// sites from history, searchable by title. The apps are on the
   // home screen, where Holesail, a development tool, is not listed.
   const p2pStart = index.indexOf("browserSource.kind === 'p2p'")

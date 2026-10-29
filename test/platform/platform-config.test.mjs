@@ -382,7 +382,7 @@ describe('mobile platform runtime configuration', () => {
     const indexSource = await readFile(repoFile('app/index.tsx'), 'utf8')
     assert.match(indexSource, /if \(!browserSessionReady \|\| !pendingIncomingUrl\) return\n(?:\s+\/\/[^\n]*\n)+\s+if \(needsWorklet\(pendingIncomingUrl\) && \(isBooting \|\| !rpcRef\.current\)\) return/)
     assert.match(indexSource, /\}, \[browserSessionReady, isBooting, pendingIncomingUrl\]\)/)
-    assert.match(indexSource, /shortcut\?\.name === 'open' && shortcut\.target && needsWorklet\(shortcut\.target\) && \(isBooting \|\| !rpcRef\.current\)\) return\n\s+setPendingHomeShortcutUrl\(null\)/)
+    assert.match(indexSource, /const waitsForWorklet = [^\n]*\(shortcut\?\.name === 'open' && !!shortcut\.target && needsWorklet\(shortcut\.target\)\)\n\s+if \(waitsForWorklet && \(isBooting \|\| !rpcRef\.current\)\) return\n\s+setPendingHomeShortcutUrl\(null\)/)
     assert.match(indexSource, /\}, \[browserSessionReady, isBooting, pendingHomeShortcutUrl\]\)/)
     const start = indexSource.indexOf('onOpenRoom: (roomKey) => {')
     const tap = indexSource.slice(start, indexSource.indexOf('\n    },', start))

@@ -206,7 +206,8 @@ test('a restart the platform cannot perform is asked for instead', async () => {
 
   // What is on screen belongs to the data being replaced. It is swapped for a
   // screen that asks for the restart, on both platforms, until it gets one.
-  assert.match(app, /onRestartRequired=\{\(\) => \{[\s\S]*?setRestartRequired\(true\)/)
+  assert.match(app, /onRestartRequired=\{onRestartRequired\}/)
+  assert.match(app, /function onRestartRequired \(\) \{[^}]*setRestartRequired\(true\)/)
   assert.ok(app.indexOf('if (restartRequired) {') < app.indexOf('if (!browserSessionReady) {'))
   assert.match(app, /return <RestartRequiredScreen isDark=\{browserIsDark\} \/>/)
   assert.match(restart, /Close PeerSky to finish/)

@@ -42,7 +42,17 @@ export const WIDGET_TEXT = Object.freeze([
   'Previous song',
   'Next song',
   'Previous Song',
-  'Next Song'
+  'Next Song',
+  // The lock screen buttons' names and lines in the widget gallery.
+  'Private search',
+  'Opens an incognito tab, ready to search.',
+  'Burn Tabs and Data',
+  'Burns your tabs, history and cached data right away.',
+  'Opens your bookmarks.',
+  'P2P sites',
+  'Opens the list of hyper:// sites you have opened',
+  'Clear all P2P data',
+  "Clears all P2P data and this device's identity right away, without asking."
 ])
 
 // Names in the widgets' Swift that stay as they are in every language. Listed
