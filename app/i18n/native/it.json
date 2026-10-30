@@ -12,6 +12,8 @@
   },
   "android": {
     "peerchat_background_text": "Connessione attiva per ricevere i messaggi",
+    "peerchat_background_connecting": "Connessione...",
+    "peerchat_background_offline": "Offline. Tocca per riconnetterti",
     "peerchat_background_channel": "Connessione di PeerChat in background",
     "peerchat_background_channel_description": "Mantiene PeerChat connesso mentre PeerSky è in background"
   }

@@ -12,6 +12,8 @@
   },
   "android": {
     "peerchat_background_text": "กำลังเชื่อมต่อไว้เพื่อให้ข้อความส่งถึงคุณ",
+    "peerchat_background_connecting": "กำลังเชื่อมต่อ...",
+    "peerchat_background_offline": "ออฟไลน์ แตะเพื่อเชื่อมต่ออีกครั้ง",
     "peerchat_background_channel": "การเชื่อมต่อเบื้องหลังของ PeerChat",
     "peerchat_background_channel_description": "ให้ PeerChat เชื่อมต่ออยู่ขณะที่ PeerSky ทำงานในเบื้องหลัง"
   }

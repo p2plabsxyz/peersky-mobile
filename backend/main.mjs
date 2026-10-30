@@ -19,8 +19,9 @@ const { IPC } = BareKit
 
 // The key the app keeps in the Keychain or the Android Keystore, handed over
 // as the backend starts, which locks the private drive key and the names of
-// private files on disk (hyper/sealed-file.mjs).
-setLocalSealKey(Bare.argv[1])
+// private files on disk (hyper/sealed-file.mjs). 'missing' after it says the
+// phone has one the app could not read, so nothing it locks is written.
+setLocalSealKey(Bare.argv[1], { missing: Bare.argv[2] === 'missing' })
 
 // Before anything can open a store: a restore the app was killed in the
 // middle of is undone here, while nothing has its files open, and a Clear all

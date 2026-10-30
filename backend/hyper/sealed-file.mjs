@@ -21,11 +21,19 @@ const MARK = 'peersky-sealed'
 export const LOCAL_SEAL_KEY_BYTES = sodium.crypto_secretbox_KEYBYTES
 
 let sealKey = null
+// A key was made on this phone and the app could not read it this time
+// (app/privacy/local-seal-key-state.mjs). Nothing it would lock is written
+// then: plain, it would be out in the open, and over a locked file, lost.
+let sealKeyMissing = false
 
-/** The key from the app, as hex; anything else leaves files as they were. */
-export function setLocalSealKey (hex) {
+/**
+ * The key from the app, as hex; anything else leaves files as they were.
+ * missing says the phone has a key the app could not read.
+ */
+export function setLocalSealKey (hex, { missing = false } = {}) {
   const value = typeof hex === 'string' ? hex.trim().toLowerCase() : ''
   sealKey = /^[0-9a-f]{64}$/.test(value) ? b4a.from(value, 'hex') : null
+  sealKeyMissing = sealKey === null && missing === true
   return sealKey !== null
 }
 
@@ -54,9 +62,23 @@ function isSealed (parsed) {
   return Boolean(parsed && parsed[MARK] === 1 && typeof parsed.nonce === 'string' && typeof parsed.box === 'string')
 }
 
-/** The text to write for value: locked when there is a key, plain JSON when not. */
+export class SealKeyMissingError extends Error {
+  constructor () {
+    super('This phone\'s secure storage did not give PeerSky its key, so nothing private is saved until it does')
+    this.name = 'SealKeyMissingError'
+    this.code = 'SEAL_KEY_MISSING'
+  }
+}
+
+/**
+ * The text to write for value: locked when there is a key, plain JSON when
+ * the phone has none. Throws when it has one that could not be read.
+ */
 export function sealJson (value) {
-  if (!sealKey) return JSON.stringify(value, null, 2)
+  if (!sealKey) {
+    if (sealKeyMissing) throw new SealKeyMissingError()
+    return JSON.stringify(value, null, 2)
+  }
   const message = b4a.from(JSON.stringify(value))
   const nonce = b4a.alloc(sodium.crypto_secretbox_NONCEBYTES)
   sodium.randombytes_buf(nonce)

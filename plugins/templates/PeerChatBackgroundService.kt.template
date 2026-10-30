@@ -1,5 +1,6 @@
 package __PACKAGE_NAME__
 
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -10,8 +11,16 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import com.facebook.react.ReactApplication
+import com.facebook.react.ReactInstanceEventListener
+import com.facebook.react.bridge.Arguments
+import com.facebook.react.bridge.ReactContext
+import com.facebook.react.bridge.UiThreadUtil
+import com.facebook.react.jstasks.HeadlessJsTaskConfig
+import com.facebook.react.jstasks.HeadlessJsTaskContext
 
 class PeerChatBackgroundService : Service() {
   private val heartbeatHandler = Handler(Looper.getMainLooper())
@@ -22,35 +31,37 @@ class PeerChatBackgroundService : Service() {
     }
   }
 
+  // Still connecting long after the start: whatever was to start PeerChat did
+  // not, and the notice says so rather than waiting forever.
+  private val connectWatch = Runnable {
+    if (status == STATUS_CONNECTING) {
+      status = STATUS_OFFLINE
+      refreshNotification()
+    }
+  }
+
   override fun onCreate() {
     super.onCreate()
     createNotificationChannel()
+    running = this
   }
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-    val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
-    val pendingIntent = launchIntent?.let {
-      PendingIntent.getActivity(
-        this,
-        0,
-        it,
-        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-      )
-    }
-    val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-      .setSmallIcon(R.drawable.notification_icon)
-      .setContentTitle("PeerChat")
-      .setContentText(getString(R.string.peerchat_background_text))
-      .setContentIntent(pendingIntent)
-      .setCategory(NotificationCompat.CATEGORY_SERVICE)
-      .setOngoing(true)
-      .setOnlyAlertOnce(true)
-      .setPriority(NotificationCompat.PRIORITY_LOW)
-      .build()
+    val notification = buildNotification()
     startForeground(NOTIFICATION_ID, notification)
     heartbeatHandler.removeCallbacks(heartbeat)
     heartbeatHandler.post(heartbeat)
     setWanted(this, true)
+    // Nothing in this run has PeerChat going when Android itself started the
+    // service: after the system stopped PeerSky (the service is sticky), a
+    // reboot or an update (PeerChatBootReceiver). Only this notice came back
+    // then, with no PeerChat behind it, so the service starts PeerChat the way
+    // the app does, with no screen (app/peerchat/background-task.ts).
+    if (status != STATUS_CONNECTED) {
+      startPeerChat()
+      heartbeatHandler.removeCallbacks(connectWatch)
+      if (status == STATUS_CONNECTING) heartbeatHandler.postDelayed(connectWatch, CONNECT_WAIT_MS)
+    }
     // Sticky, so a reclaim on a low-memory device is not permanent. Without it
     // one kill took the peer offline until the user happened to reopen the app.
     return START_STICKY
@@ -58,6 +69,8 @@ class PeerChatBackgroundService : Service() {
 
   override fun onDestroy() {
     heartbeatHandler.removeCallbacks(heartbeat)
+    heartbeatHandler.removeCallbacks(connectWatch)
+    if (running === this) running = null
     super.onDestroy()
   }
 
@@ -76,6 +89,86 @@ class PeerChatBackgroundService : Service() {
   }
 
   override fun onBind(intent: Intent?): IBinder? = null
+
+  // The JavaScript side of PeerSky started with no activity, and a headless
+  // task in it that starts the backend and the checks for new messages. No
+  // wake lock: once they are running they go on by themselves, on the
+  // network and the minute tick.
+  private fun startPeerChat() {
+    // A debug build runs whatever JavaScript the dev launcher picks, so
+    // starting it is left to the app there. By build type, not DEBUG: a
+    // release build made debuggable to test it still starts PeerChat.
+    if (BuildConfig.BUILD_TYPE == "debug") return
+    val now = SystemClock.elapsedRealtime()
+    if (taskStartedAt != 0L && now - taskStartedAt < TASK_TIMEOUT_MS) return
+    taskStartedAt = now
+    try {
+      val host = (application as? ReactApplication)?.reactHost ?: return
+      val context = host.currentReactContext
+      if (context != null) {
+        runTask(context)
+        return
+      }
+      host.addReactInstanceEventListener(object : ReactInstanceEventListener {
+        override fun onReactContextInitialized(context: ReactContext) {
+          host.removeReactInstanceEventListener(this)
+          runTask(context)
+        }
+      })
+      host.start()
+    } catch (error: Exception) {
+      Log.w(TAG, "Unable to start PeerChat in the background: " + error.message)
+    }
+  }
+
+  private fun runTask(context: ReactContext) {
+    UiThreadUtil.runOnUiThread {
+      try {
+        HeadlessJsTaskContext.getInstance(context).startTask(
+          HeadlessJsTaskConfig(TASK_KEY, Arguments.createMap(), TASK_TIMEOUT_MS, true)
+        )
+      } catch (error: Exception) {
+        Log.w(TAG, "Unable to start PeerChat in the background: " + error.message)
+      }
+    }
+  }
+
+  // Connecting, connected or offline, from what the app last said. It never
+  // says connected while PeerChat is not running.
+  private fun buildNotification(): Notification {
+    val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
+    val pendingIntent = launchIntent?.let {
+      PendingIntent.getActivity(
+        this,
+        0,
+        it,
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+      )
+    }
+    val text = when (status) {
+      STATUS_CONNECTED -> getString(R.string.peerchat_background_text)
+      STATUS_OFFLINE -> getString(R.string.peerchat_background_offline)
+      else -> getString(R.string.peerchat_background_connecting)
+    }
+    return NotificationCompat.Builder(this, CHANNEL_ID)
+      .setSmallIcon(R.drawable.notification_icon)
+      .setContentTitle("PeerChat")
+      .setContentText(text)
+      .setContentIntent(pendingIntent)
+      .setCategory(NotificationCompat.CATEGORY_SERVICE)
+      .setOngoing(true)
+      .setOnlyAlertOnce(true)
+      .setPriority(NotificationCompat.PRIORITY_LOW)
+      .build()
+  }
+
+  private fun refreshNotification() {
+    try {
+      getSystemService(NotificationManager::class.java)?.notify(NOTIFICATION_ID, buildNotification())
+    } catch (error: Exception) {
+      Log.w(TAG, "Unable to update the notice: " + error.message)
+    }
+  }
 
   // The words are string resources, in the phone's language (or the one
   // picked for PeerSky in Android Settings). Creating the channel again with a
@@ -100,11 +193,37 @@ class PeerChatBackgroundService : Service() {
     private const val TAG = "PeerChatBackground"
     private const val PREFS_NAME = "peerchat-background"
     private const val PREF_WANTED = "wanted"
+    // Registered under this name in index.js.
+    private const val TASK_KEY = "PeerChatBackground"
+    private const val TASK_TIMEOUT_MS = 120_000L
+    private const val CONNECT_WAIT_MS = 180_000L
 
     // Was 5 seconds. Messages arrive over the live connection, so this is only
     // the fallback sweep for unread counts and notifications; a wakeup that
     // often is what Samsung's power manager goes after first.
     private const val HEARTBEAT_INTERVAL_MS = 60_000L
+
+    const val STATUS_CONNECTING = "connecting"
+    const val STATUS_CONNECTED = "connected"
+    const val STATUS_OFFLINE = "offline"
+
+    // What this run of the app has said about PeerChat. A new process starts
+    // from connecting: nothing is running in it yet.
+    @Volatile private var status = STATUS_CONNECTING
+    @Volatile private var running: PeerChatBackgroundService? = null
+    @Volatile private var taskStartedAt = 0L
+
+    // From the app (PeerChatBackgroundModule): PeerChat answered, or the
+    // backend stopped or could not start.
+    fun setStatus(value: String) {
+      if (value != STATUS_CONNECTED && value != STATUS_OFFLINE) return
+      status = value
+      val service = running ?: return
+      service.heartbeatHandler.post {
+        service.heartbeatHandler.removeCallbacks(service.connectWatch)
+        service.refreshNotification()
+      }
+    }
 
     // Survives the process so the boot receiver knows whether the user had the
     // service on, without waiting for React Native to start.

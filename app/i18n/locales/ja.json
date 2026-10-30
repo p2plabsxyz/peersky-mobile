@@ -632,6 +632,7 @@
   "Offline download paused": "オフライン用ダウンロードを一時停止しました",
   "Offline download started": "オフライン用ダウンロードを開始しました",
   "Offline download waiting for Wi-Fi": "オフライン用ダウンロードはWi-Fi待ち",
+  "Offline. Tap to reconnect": "オフライン。タップして再接続",
   "Oldest": "古い順",
   "On": "オン",
   "On the other phone, open Link Device and tap Sync with another device. On PeerSky Desktop, open Link Device in Settings.": "相手のスマートフォンで「デバイスをリンク」を開き、「別のデバイスと同期」をタップします。PeerSky Desktopの場合は「Settings」の「Link Device」を開きます。",

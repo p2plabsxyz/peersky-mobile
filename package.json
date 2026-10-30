@@ -2,7 +2,7 @@
   "private": true,
   "name": "peersky-mobile",
   "description": "PeerSky Browser for iOS and Android",
-  "main": "expo-router/entry",
+  "main": "index.js",
   "scripts": {
     "generate:katex-runtime": "node scripts/generate-katex-runtime.mjs",
     "generate:ieee-runtime": "node scripts/generate-ieee-runtime.mjs",

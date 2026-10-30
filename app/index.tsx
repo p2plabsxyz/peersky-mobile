@@ -27,16 +27,14 @@ import {
   useWindowDimensions,
   View
 } from 'react-native'
-import { Worklet } from 'react-native-bare-kit'
 import * as Crypto from 'expo-crypto'
 import { CameraView, useCameraPermissions } from 'expo-camera'
 import { File, Paths } from 'expo-file-system'
 import { useNetworkState } from 'expo-network'
 import { initialWindowMetrics, SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import b4a from 'b4a'
-import RPC from 'bare-rpc'
+import type RPC from 'bare-rpc'
 import { WebView } from 'react-native-webview'
-import bundle from './app.bundle.mjs'
 import {
   BROWSER_HOME_URL,
   BROWSER_P2P_URL,
@@ -124,7 +122,6 @@ import {
 } from './browser-permissions.mjs'
 import { getBrowserShortcutTitleFontSize } from './browser-home-layout.mjs'
 import { createHyperBridgeScript, withHyperBridgeScript } from './hyper-bridge.mjs'
-import { resumeBareInBackground } from './bare-background.mjs'
 import {
   createHyperBridgeReply,
   createHyperBridgeSettleScript,
@@ -159,7 +156,6 @@ import { languageNamed } from './i18n/languages.mjs'
 import { useT } from './i18n/useT'
 import { getOneOffSearchEngines } from './search/search-suggestions.mjs'
 import { getSiteDataHosts } from './privacy/site-data.mjs'
-import { loadLocalSealKey } from './privacy/local-seal-key'
 import { BrowserToolbar, type AddressBarAction } from './BrowserToolbar'
 import { BrowserNavBar } from './BrowserNavBar'
 import { BrowserBackSwipe } from './BrowserBackSwipe'
@@ -173,7 +169,6 @@ import {
 import { BrowserZoomSheet } from './BrowserZoomSheet'
 import { PublishedLinkSheet } from './PublishedLinkSheet'
 import { hasLinkedIdentity } from './hyperdrive/linked-identity'
-import { useHyperNetworkRefresh } from './useHyperNetworkRefresh'
 import { P2pmdNewNoteSheet } from './P2pmdNewNoteSheet'
 import { P2pmdShareSheet } from './P2pmdShareSheet'
 import {
@@ -280,6 +275,16 @@ import { screenUploadBytes } from './media/upload-gate'
 import { isUsableImageType, sniffBase64ImageType } from './media/media-moderation.mjs'
 import { NsfwScanner } from './media/NsfwScanner'
 import { usePeerChatNotifications } from './peerchat/usePeerChatNotifications'
+import { stopPeerChatNotifier } from './peerchat/notifier'
+import { startPeerChatChecks } from './peerchat/background-task'
+import {
+  callBackend,
+  getBackendRpc,
+  getIdentityStoragePath,
+  onBackendRequest,
+  requireBackendRestart,
+  startBackend
+} from './backend'
 import { PeerTunesScreen } from './peertunes/PeerTunesScreen'
 import { keptFolderUrls } from './peertunes/peertunes-screen.mjs'
 import { peerSkyWebViewNativeConfig } from './downloads/PeerSkyWebView'
@@ -484,10 +489,9 @@ export default function App () {
   const systemColorScheme = useColorScheme()
   const browserInsets = useSafeAreaInsets()
   const { height: browserWindowHeight, width: browserWindowWidth } = useWindowDimensions()
-  const workletRef = useRef<Worklet | null>(null)
+  // The backend's connection once it is up (app/backend.ts), which the
+  // screen waits for before anything that talks to it.
   const rpcRef = useRef<RPC | null>(null)
-  const workletGenerationRef = useRef(0)
-  const stopBareBackgroundRef = useRef<(() => void) | null>(null)
   const appStateRef = useRef(AppState.currentState)
   const browserWebViewRefs = useRef(new Map<string, ComponentRef<typeof WebView>>())
   // The WebViews that have finished a page, by native view tag. One that
@@ -732,7 +736,6 @@ export default function App () {
   const [activeTab, setActiveTab] = useState<RuntimeTab>('hyper')
   const [requestedPeerChatRoomKey, setRequestedPeerChatRoomKey] = useState<string | null>(null)
   const [requestedPeerChatPeerId, setRequestedPeerChatPeerId] = useState<string | null>(null)
-  useHyperNetworkRefresh(Boolean(identityStoragePath), () => callRpc(RPC_HYPER_REFRESH, {}))
   const peerChatNotifications = usePeerChatNotifications({
     isPeerChatVisible: browserSource.kind === 'app' && activeTab === 'peerchat',
     isRuntimeReady: Boolean(identityStoragePath),
@@ -741,8 +744,7 @@ export default function App () {
       // The way a link opens it, so a tap that started the app waits for the
       // worklet and goes in front of last time's tabs.
       setPendingIncomingUrl('peersky://p2p/peerchat/')
-    },
-    onCallRpc: (command, data = {}) => callRpc(command, data) as Promise<PeerChatResponse>
+    }
   })
   const [hsLivePort, setHsLivePort] = useState('8989')
   const [hsLiveHost, setHsLiveHost] = useState('127.0.0.1')
@@ -853,23 +855,29 @@ export default function App () {
     }
   })
 
+  // The backend outlives the screen. Android runs PeerSky without one, both
+  // when its PeerChat service starts the backend on its own and once PeerSky
+  // is swiped away from Recents, where PeerChat stays connected and goes on
+  // showing new messages. The screen takes it up again as it opens
+  // (app/backend.ts).
   useEffect(() => {
-    const generation = ++workletGenerationRef.current
     void startWorklet()
-
-    return () => {
-      const worklet = workletRef.current
-      const rpc = rpcRef.current
-      setTimeout(() => {
-        if (workletGenerationRef.current !== generation) return
-        if (workletRef.current === worklet) workletRef.current = null
-        if (rpcRef.current === rpc) rpcRef.current = null
-        stopBareBackgroundRef.current?.()
-        stopBareBackgroundRef.current = null
-        worklet?.terminate()
-      }, 0)
-    }
   }, [])
+
+  // What the backend tells the app as it happens.
+  useEffect(() => onBackendRequest((request) => {
+    if (request.command === RPC_APP_PEERCHAT_CHANGED) {
+      setPeerChatRevision((value) => value + 1)
+    }
+    if (request.command === RPC_APP_DEVICE_SYNC_CHANGED) {
+      setDeviceSyncRevision((value) => value + 1)
+    }
+    if (request.command === RPC_APP_BACKUP_PROGRESS && request.data) {
+      emitLinkDeviceProgress(typeof request.data === 'string'
+        ? request.data
+        : b4a.toString(request.data as Uint8Array))
+    }
+  }), [])
 
   // Starts meeting this person's other devices once the backend is up, and
   // tells them when the phone is on a cellular connection, so a desktop waits
@@ -1265,60 +1273,26 @@ export default function App () {
   }
 
   async function startWorklet () {
-    if (workletRef.current) return
+    if (rpcRef.current) return
 
     setIsBooting(true)
     setStatus('Starting Bare worklet...')
 
     try {
-      const storageDir = Paths.document?.uri
-        ? `${toBareFsPath(Paths.document.uri)}/hyper-storage`
-        : 'hyper-storage'
-
-      // The key that locks private keys and file names on disk, from the
-      // Keychain or the Android Keystore (privacy/local-seal-key.ts).
-      const sealKey = await loadLocalSealKey()
-      const worklet = new Worklet()
-      worklet.start('/app.bundle', bundle, [storageDir, sealKey || ''])
-
-      // The backend pushes here when PeerChat changes, so a new message shows
-      // the moment it lands instead of waiting for the next poll.
-      const rpc = new RPC(worklet.IPC, (request) => {
-        if (request.command === RPC_APP_PEERCHAT_CHANGED) {
-          setPeerChatRevision((value) => value + 1)
-        }
-        if (request.command === RPC_APP_DEVICE_SYNC_CHANGED) {
-          setDeviceSyncRevision((value) => value + 1)
-        }
-        if (request.command === RPC_APP_BACKUP_PROGRESS && request.data) {
-          emitLinkDeviceProgress(typeof request.data === 'string'
-            ? request.data
-            : b4a.toString(request.data as Uint8Array))
-        }
-        try {
-          request.reply()
-        } catch {}
-      })
-
-      workletRef.current = worklet
-      rpcRef.current = rpc
-      // Without this iOS kills the app half a minute after it leaves the
-      // screen (app/bare-background.mjs).
-      if (Platform.OS === 'ios') stopBareBackgroundRef.current = resumeBareInBackground(worklet, AppState)
-
-      const initResponse = await callRpc(RPC_HYPER_INIT, {})
-
-      if (!initResponse.ok) {
-        throw new Error(initResponse.error || 'Unable to initialize Hyper')
-      }
+      // The one already running when the PeerChat service started it, or a
+      // new one (app/backend.ts).
+      const initResponse = await startBackend({ allowNetwork: hyperOfflineNetworkAllowedRef.current })
+      rpcRef.current = getBackendRpc()
+      // Looking for new PeerChat messages, which goes on without the screen.
+      void startPeerChatChecks()
       // A backend started with the app already behind another one starts away.
       void callRpc(RPC_PEERCHAT_PRESENCE, { idle: appStateRef.current === 'background' }).catch(() => {})
 
-      setIdentityStoragePath(Paths.document?.uri ? toBareFsPath(Paths.document.uri) : storageDir)
+      setIdentityStoragePath(getIdentityStoragePath())
       const lanStatus = initResponse.lan?.available
         ? `; LAN ${initResponse.lan.host}:${initResponse.lan.port}`
         : '; LAN unavailable'
-      setStatus(`Hyper ready (${initResponse.storagePath || storageDir})${lanStatus}`)
+      setStatus(`Hyper ready (${initResponse.storagePath || getIdentityStoragePath()})${lanStatus}`)
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error))
     } finally {
@@ -1327,26 +1301,10 @@ export default function App () {
   }
 
   async function callRpc (command: number, payload: object) {
-    const rpc = rpcRef.current
-
-    if (!rpc) {
-      throw new Error(t('Worklet is not ready'))
-    }
-
-    const request = rpc.request(command)
     const requestPayload = HYPER_OFFLINE_NETWORK_COMMANDS.has(command)
       ? { ...payload, allowNetwork: hyperOfflineNetworkAllowedRef.current }
       : payload
-    request.send(JSON.stringify(requestPayload))
-
-    const reply = await request.reply()
-    if (!reply) return { ok: false, error: t('Missing response') }
-
-    if (typeof reply === 'string') {
-      return JSON.parse(reply)
-    }
-
-    return JSON.parse(b4a.toString(reply as Uint8Array))
+    return callBackend(command, requestPayload)
   }
 
   function commitBrowserEntry (url: string, source: BrowserSource) {
@@ -3007,6 +2965,12 @@ export default function App () {
     setBrowserSessionReady(false)
     setRestartRequired(true)
     bumpHyperdriveViewerEpoch()
+    // The backend outlives the screen, so it is made again as PeerSky opens
+    // next. Nothing asks PeerChat for its chats meanwhile, which would open
+    // it on the data going, and its service stops: its notice would say
+    // connected for a PeerChat that is gone.
+    requireBackendRestart()
+    stopPeerChatNotifier({ disableService: true })
   }
 
   // Like DuckDuckGo's Fire Button and Firefox Focus, history goes too, so
@@ -6482,11 +6446,6 @@ export default function App () {
       )}
     </View>
   )
-}
-
-function toBareFsPath (uri: string) {
-  if (!uri.startsWith('file://')) return uri
-  return decodeURIComponent(new URL(uri).pathname).replace(/\/$/, '')
 }
 
 function getP2pmdProfileFile () {

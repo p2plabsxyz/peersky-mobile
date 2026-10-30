@@ -385,7 +385,7 @@ describe('mobile platform runtime configuration', () => {
     assert.match(indexSource, /const waitsForWorklet = [^\n]*\(shortcut\?\.name === 'open' && !!shortcut\.target && needsWorklet\(shortcut\.target\)\)\n\s+if \(waitsForWorklet && \(isBooting \|\| !rpcRef\.current\)\) return\n\s+setPendingHomeShortcutUrl\(null\)/)
     assert.match(indexSource, /\}, \[browserSessionReady, isBooting, pendingHomeShortcutUrl\]\)/)
     const start = indexSource.indexOf('onOpenRoom: (roomKey) => {')
-    const tap = indexSource.slice(start, indexSource.indexOf('\n    },', start))
+    const tap = indexSource.slice(start, indexSource.indexOf('\n    }', start))
     assert.match(tap, /setPendingIncomingUrl\('peersky:\/\/p2p\/peerchat\/'\)/)
     assert.doesNotMatch(tap, /loadBrowserUrl/)
   })
@@ -501,13 +501,25 @@ describe('mobile platform runtime configuration', () => {
     assert.match(globals, /import 'bare-process\/global'/)
   })
 
+  // One backend for the whole run (app/backend.ts). A remount of the screen,
+  // a swipe-away and back, or the screen opening over a backend the PeerChat
+  // service started all take up the running one: a second would find the
+  // stores' files locked.
   it('does not reopen Hyper storage during a React effect remount', async () => {
     const indexSource = await readFile(repoFile('app/index.tsx'), 'utf8')
+    const backend = await readFile(repoFile('app/backend.ts'), 'utf8')
 
-    assert.match(indexSource, /const generation = \+\+workletGenerationRef\.current/)
-    assert.match(indexSource, /setTimeout\(\(\) => \{/)
-    assert.match(indexSource, /workletGenerationRef\.current !== generation/)
-    assert.match(indexSource, /worklet\?\.terminate\(\)/)
+    assert.match(indexSource, /useEffect\(\(\) => \{\n\s+void startWorklet\(\)\n\s+\}, \[\]\)/)
+    assert.doesNotMatch(indexSource, /\.terminate\(\)/)
+    assert.doesNotMatch(indexSource, /new Worklet\(/)
+    assert.match(indexSource, /const initResponse = await startBackend\(\{ allowNetwork: hyperOfflineNetworkAllowedRef\.current \}\)/)
+
+    // The running one, or the start already under way.
+    assert.match(backend, /if \(ready && rpc\) return Promise\.resolve\(ready\)\n\s+if \(!starting\) \{\n\s+starting = startOnce\(allowNetwork\)/)
+    assert.match(backend, /if \(!worklet\) \{[\s\S]*const next = new Worklet\(\)/)
+    // Stopped only for a new one after a clear or a restore.
+    assert.match(backend, /if \(restartWanted && !starting\) \{\n\s+restartWanted = false\n\s+stopBackend\(\)/)
+    assert.equal(backend.match(/\.terminate\(\)/g)?.length, 1)
   })
 
   it('logs backend cleanup failures during Bare shutdown', async () => {

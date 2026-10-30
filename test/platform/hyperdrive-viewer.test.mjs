@@ -505,7 +505,7 @@ describe('The viewer\'s cache epoch', () => {
     assert.match(burn, /bumpHyperdriveViewerEpoch\(\)/)
     // Clear all P2P data, Remove my data and a restore all put up the restart
     // screen first.
-    assert.match(app, /function onRestartRequired \(\) \{[^}]*setRestartRequired\(true\)\n\s+bumpHyperdriveViewerEpoch\(\)\n {2}\}/)
+    assert.match(app, /function onRestartRequired \(\) \{[^}]*setRestartRequired\(true\)\n\s+bumpHyperdriveViewerEpoch\(\)\n/)
     assert.match(app, /onRestartRequired=\{onRestartRequired\}/)
     assert.match(read('app/settings/clear-all-p2p-data.ts'), /onRestartRequired\(\)\n[\s\S]{0,120}clearChatFileCopies\(\)\n[\s\S]{0,80}RPC_HYPER_STORAGE_CLEAR_ALL/)
     const linkDevice = read('app/settings/LinkDevice.tsx')

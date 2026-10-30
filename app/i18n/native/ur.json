@@ -12,6 +12,8 @@
   },
   "android": {
     "peerchat_background_text": "منسلک رہ کر آپ تک پیغامات پہنچا رہا ہے",
+    "peerchat_background_connecting": "منسلک ہو رہا ہے...",
+    "peerchat_background_offline": "آف لائن۔ دوبارہ جڑنے کے لیے ٹیپ کریں",
     "peerchat_background_channel": "PeerChat پس منظر کنکشن",
     "peerchat_background_channel_description": "PeerSky کے پس منظر میں ہونے پر PeerChat کو منسلک رکھتا ہے"
   }

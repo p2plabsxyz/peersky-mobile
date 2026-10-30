@@ -12,6 +12,8 @@
   },
   "android": {
     "peerchat_background_text": "正在保持連線，以便接收訊息",
+    "peerchat_background_connecting": "正在連線…",
+    "peerchat_background_offline": "離線。點一下即可重新連線",
     "peerchat_background_channel": "PeerChat 背景連線",
     "peerchat_background_channel_description": "PeerSky 在背景執行時保持 PeerChat 連線"
   }

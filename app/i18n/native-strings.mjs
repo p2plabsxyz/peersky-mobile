@@ -65,6 +65,10 @@ export const WIDGET_NAMES = Object.freeze(['PeerSky', 'PeerTunes'])
 // The locales in app.json turn each language's copy into its strings.xml.
 export const ANDROID_TEXT = Object.freeze({
   peerchat_background_text: 'Staying connected so messages reach you',
+  // Before PeerChat has answered, and once it has stopped: the notice never
+  // says connected while it is not.
+  peerchat_background_connecting: 'Connecting...',
+  peerchat_background_offline: 'Offline. Tap to reconnect',
   peerchat_background_channel: 'PeerChat background connection',
   peerchat_background_channel_description: 'Keeps PeerChat connected while PeerSky is in the background'
 })

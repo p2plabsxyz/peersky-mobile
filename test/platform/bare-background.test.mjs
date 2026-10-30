@@ -121,8 +121,8 @@ describe('Bare in the background on iOS', () => {
   })
 
   test('the app wires it for iOS and stops it with the worklet', async () => {
-    const source = await readFile(new URL('../../app/index.tsx', import.meta.url), 'utf8')
-    assert.match(source, /Platform\.OS === 'ios'[\s\S]{0,120}resumeBareInBackground\(worklet, AppState\)/)
-    assert.match(source, /stopBareBackgroundRef\.current\?\.\(\)[\s\S]{0,200}worklet\?\.terminate\(\)/)
+    const source = await readFile(new URL('../../app/backend.ts', import.meta.url), 'utf8')
+    assert.match(source, /Platform\.OS === 'ios'\) stopBareBackground = resumeBareInBackground\(next, AppState\)/)
+    assert.match(source, /stopBareBackground\?\.\(\)[\s\S]{0,200}current\?\.terminate\(\)/)
   })
 })

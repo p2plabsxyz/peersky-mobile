@@ -497,7 +497,23 @@ Message notifications require native notification permission and can be
 disabled globally or suppressed by muting a room. Sound can be disabled without
 disabling the notification itself. On Android, enabling notifications starts a
 visible foreground service so the local PeerChat runtime can remain connected
-while the app is backgrounded. Android and supported iOS launchers receive the
+while the app is backgrounded.
+
+The backend and the check for new messages live outside the screen
+(`app/backend.ts`, `app/peerchat/notifier.ts`), so a swipe from Recents leaves
+PeerChat connected and still showing notifications, and the screen takes up the
+running backend when PeerSky opens again. When Android starts PeerSky by itself,
+after it stopped the app (the service is sticky), a reboot or an update
+(`PeerChatBootReceiver`), the service starts PeerChat with no screen through a
+headless JS task (`app/peerchat/background-task.ts`, registered in `index.js`).
+A new message shows as soon as the backend says PeerChat changed, not on the
+next minute tick. The service's notice says "Connecting..." until PeerChat
+answers, "Staying connected so messages reach you" while it runs, and "Offline.
+Tap to reconnect" when the backend stopped or nothing started it within three
+minutes; it never says connected while PeerChat is not running. A clear or a
+restore stops the service and makes a new backend the next time PeerSky opens.
+
+Android and supported iOS launchers receive the
 current unread badge total, and the PeerChat home shortcut shows the same total.
 On iOS, background delivery is best effort only: messages can arrive until iOS
 suspends PeerSky because PeerChat deliberately has no centralized push server.

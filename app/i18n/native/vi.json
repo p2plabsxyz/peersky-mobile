@@ -12,6 +12,8 @@
   },
   "android": {
     "peerchat_background_text": "Đang duy trì kết nối để bạn nhận được tin nhắn",
+    "peerchat_background_connecting": "Đang kết nối...",
+    "peerchat_background_offline": "Ngoại tuyến. Nhấn để kết nối lại",
     "peerchat_background_channel": "Kết nối nền của PeerChat",
     "peerchat_background_channel_description": "Giữ PeerChat luôn kết nối khi PeerSky chạy trong nền"
   }

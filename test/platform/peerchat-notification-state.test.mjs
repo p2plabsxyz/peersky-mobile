@@ -154,7 +154,7 @@ test('PeerChat only offers notification settings once the system stops asking', 
 })
 
 test('PeerChat keeps its swarm announce fresh while the app sits in the background', async () => {
-  const hook = await readFile(new URL('../../app/peerchat/usePeerChatNotifications.ts', import.meta.url), 'utf8')
+  const hook = await readFile(new URL('../../app/peerchat/notifier.ts', import.meta.url), 'utf8')
   const tick = hook.slice(
     hook.indexOf('const backgroundTickSubscription'),
     hook.indexOf('void preparePeerChatNotifications()')
@@ -176,12 +176,16 @@ test('PeerChat keeps its swarm announce fresh while the app sits in the backgrou
 // first check. The messages were still unread. It stays until their room is
 // opened, and the PeerChat shortcut starts from it rather than from nothing.
 test('the unread count stays on the app icon until the chat is opened', async () => {
-  const hook = await readFile(new URL('../../app/peerchat/usePeerChatNotifications.ts', import.meta.url), 'utf8')
+  const hook = await readFile(new URL('../../app/peerchat/notifier.ts', import.meta.url), 'utf8')
   assert.doesNotMatch(hook, /setPeerChatBadgeCount\(0\)/)
-  assert.doesNotMatch(hook, /setUnreadTotal\(0\)/)
-  const starting = hook.slice(hook.indexOf('if (!isReady || isRuntimeReady) return'), hook.indexOf('if (!isReady || !isRuntimeReady) {'))
-  assert.match(starting, /badgeCountRef\.current = -1/)
-  assert.match(hook, /void getPeerChatBadgeCount\(\)\.then\(\(count\) => \{\s+if \(!cancelled && badgeCountRef\.current === -1 && count > 0\) setUnreadTotal\(count\)/)
+  assert.doesNotMatch(hook, /unreadTotal: 0 \}/)
+  // Starting, or starting again after a clear, the count is left as it was
+  // until the first check says otherwise.
+  const starting = hook.slice(hook.indexOf('export function startPeerChatNotifier'), hook.indexOf('const schedule = () => {'))
+  assert.match(starting, /badgeCount = -1/)
+  const stopping = hook.slice(hook.indexOf('export function stopPeerChatNotifier'), hook.indexOf('export function reportPeerChatOffline'))
+  assert.match(stopping, /badgeCount = -1/)
+  assert.match(hook, /void getPeerChatBadgeCount\(\)\.then\(\(count\) => \{\s+if \(badgeCount === -1 && count > 0\) setState\(\{ unreadTotal: count \}\)/)
 
   // A room's count only clears when that room is opened, and it is saved.
   const service = await readFile(new URL('../../backend/peerchat/service.mjs', import.meta.url), 'utf8')
@@ -226,9 +230,9 @@ test('a chat\'s notifications go once nothing in it is unread', () => {
 })
 
 test('read chats lose their notifications after a check and the moment they are opened', async () => {
-  const hook = await readFile(new URL('../../app/peerchat/usePeerChatNotifications.ts', import.meta.url), 'utf8')
-  const check = hook.slice(hook.indexOf('previousRoomsRef.current = nextRooms'), hook.indexOf('if (!previousRooms) return'))
-  assert.match(check, /shouldClearSeenPeerChatNotifications\(previousRooms, nextRooms\)[\s\S]*dismissPeerChatNotifications\(collectSeenPeerChatNotifications\(\s*await getPresentedPeerChatNotifications\(\),\s*nextRooms/)
+  const hook = await readFile(new URL('../../app/peerchat/notifier.ts', import.meta.url), 'utf8')
+  const check = hook.slice(hook.indexOf('previousRooms = nextRooms'), hook.indexOf('if (!previous) return'))
+  assert.match(check, /shouldClearSeenPeerChatNotifications\(previous, nextRooms\)[\s\S]*dismissPeerChatNotifications\(collectSeenPeerChatNotifications\(\s*await getPresentedPeerChatNotifications\(\),\s*nextRooms/)
 
   const screen = await readFile(new URL('../../app/peerchat/PeerChatScreen.tsx', import.meta.url), 'utf8')
   const opens = screen.match(/RPC_PEERCHAT_SET_ACTIVE, \{ roomKey \}\)[\s\S]{0,400}?dismissPeerChatRoomNotifications\(roomKey\)/g) || []

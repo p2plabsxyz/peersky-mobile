@@ -95,6 +95,13 @@ class PeerChatBackgroundModule(
     }
   }
 
+  // What the service's notice says: PeerChat answered ("connected"), or the
+  // backend stopped or could not start ("offline").
+  @ReactMethod
+  fun setStatus(status: String) {
+    PeerChatBackgroundService.setStatus(status)
+  }
+
   // Doze alone would let a foreground service through. Samsung's own layer on
   // top of it does not, which is why this is asked for separately.
   @ReactMethod

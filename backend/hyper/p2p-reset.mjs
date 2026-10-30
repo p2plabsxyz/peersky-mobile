@@ -43,7 +43,11 @@ export const P2P_IDENTITY_ENTRIES = Object.freeze([
   'peerchat-ui-state.json',
   'p2pmd-profile.json',
   'p2pmd-room-history.json',
-  'hyperdrive-recents.json'
+  'hyperdrive-recents.json',
+  // The check that says a seal key was made here. Nothing it locked is left,
+  // so a phone whose key was lost may make a new one
+  // (app/privacy/local-seal-key-state.mjs).
+  'local-seal-key-check.json'
 ])
 
 // Kept beside each store: what it has published and fetched, and the folders

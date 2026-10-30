@@ -12,6 +12,8 @@
   },
   "android": {
     "peerchat_background_text": "Підтримується з'єднання, щоб повідомлення доходили до вас",
+    "peerchat_background_connecting": "З'єднання...",
+    "peerchat_background_offline": "Офлайн. Торкніться, щоб під'єднатися знову",
     "peerchat_background_channel": "Фонове з'єднання PeerChat",
     "peerchat_background_channel_description": "Підтримує з'єднання PeerChat, поки PeerSky працює у фоновому режимі"
   }
