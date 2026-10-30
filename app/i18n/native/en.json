@@ -14,6 +14,7 @@
     "peerchat_background_text": "Staying connected so messages reach you",
     "peerchat_background_connecting": "Connecting...",
     "peerchat_background_offline": "Offline. Tap to reconnect",
+    "peerchat_background_locked": "Connects when you unlock your phone",
     "peerchat_background_channel": "PeerChat background connection",
     "peerchat_background_channel_description": "Keeps PeerChat connected while PeerSky is in the background"
   }

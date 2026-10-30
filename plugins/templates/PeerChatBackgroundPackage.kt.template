@@ -9,7 +9,7 @@ import com.facebook.react.uimanager.ViewManager
 class PeerChatBackgroundPackage : ReactPackage {
   override fun createNativeModules(
     reactContext: ReactApplicationContext
-  ): List<NativeModule> = listOf(PeerChatBackgroundModule(reactContext))
+  ): List<NativeModule> = listOf(PeerChatBackgroundModule(reactContext), PeerSkyChatKeyModule(reactContext))
 
   override fun createViewManagers(
     reactContext: ReactApplicationContext

@@ -14,6 +14,7 @@
     "peerchat_background_text": "Verbonden blijven zodat berichten je bereiken",
     "peerchat_background_connecting": "Verbinden...",
     "peerchat_background_offline": "Offline. Tik om opnieuw te verbinden",
+    "peerchat_background_locked": "Maakt verbinding zodra je je telefoon ontgrendelt",
     "peerchat_background_channel": "PeerChat-achtergrondverbinding",
     "peerchat_background_channel_description": "Houdt PeerChat verbonden terwijl PeerSky op de achtergrond draait"
   }

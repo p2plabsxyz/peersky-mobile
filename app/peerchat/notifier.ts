@@ -278,6 +278,15 @@ export function reportPeerChatOffline () {
   setPeerChatBackgroundStatus('offline')
 }
 
+/**
+ * Started with the phone locked, PeerChat waits for the key its chats are
+ * locked with, which comes at the unlock (app/privacy/chat-seal-key.ts).
+ */
+export function reportPeerChatLocked () {
+  reportedConnected = false
+  setPeerChatBackgroundStatus('locked')
+}
+
 // The PeerChat service runs while notifications are on and there is a chat,
 // decided once the backend has said how many chats there are. Before that,
 // nothing is known, and a service Android started is left running.

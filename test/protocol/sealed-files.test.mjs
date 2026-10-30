@@ -271,7 +271,7 @@ describe('a seal key made on this phone is never made again', () => {
     // Not read at all, with a key made here before, is missing too.
     assert.match(app, /missing = Boolean\(check\) \|\| lockedFiles/)
 
-    assert.match(read('app/backend.ts'), /\[getBackendStoragePath\(\), sealKey \|\| '', isLocalSealKeyMissing\(\) \? 'missing' : ''\]/)
+    assert.match(read('app/backend.ts'), /\[\s+getBackendStoragePath\(\),\s+sealKey \|\| '',\s+isLocalSealKeyMissing\(\) \? 'missing' : '',/)
     assert.match(read('backend/main.mjs'), /setLocalSealKey\(Bare\.argv\[1\], \{ missing: Bare\.argv\[2\] === 'missing' \}\)/)
     assert.match(read('app/hyperdrive/recents-store.ts'), /if \(!key && isLocalSealKeyMissing\(\)\) return false/)
   })

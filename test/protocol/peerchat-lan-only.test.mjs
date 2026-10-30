@@ -12,6 +12,7 @@ import Hyperswarm from 'hyperswarm'
 import { readSignedMessage } from '../../backend/peerchat/message-signature.mjs'
 import { derivePeerChatTopic } from '../../backend/peerchat/protocol.mjs'
 import { PRE_JOINED_PEERCHAT_ROOM_KEY } from '../../backend/peerchat/rooms.mjs'
+import { roomLogName } from '../../backend/peerchat/room-log.mjs'
 import { PeerChatService } from '../../backend/peerchat/service.mjs'
 
 // PeerChat with no internet at all, only the Wi-Fi, through hyperdht-mdns 2.
@@ -173,7 +174,7 @@ async function expectMessages (device, messages) {
     const message = list.find((candidate) => candidate.id === sent.id)
     assert.equal(message.message, sent.text)
     assert.equal(message.sender, sent.by.id, `"${sent.text}" on ${device.name} should be ${sent.by.name}'s`)
-    const stored = device.logs.get(`chat-${roomKey}`)?.entries.find((entry) => entry.id === sent.id)
+    const stored = device.logs.get(roomLogName(roomKey))?.entries.find((entry) => entry.id === sent.id)
     assert.equal(readSignedMessage(stored, topicOf(roomKey))?.authorId, sent.by.id)
   }
 }

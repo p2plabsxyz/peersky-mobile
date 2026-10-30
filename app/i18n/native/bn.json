@@ -14,6 +14,7 @@
     "peerchat_background_text": "সংযুক্ত থাকছে, যাতে মেসেজ আপনার কাছে পৌঁছায়",
     "peerchat_background_connecting": "সংযুক্ত হচ্ছে...",
     "peerchat_background_offline": "অফলাইন। আবার সংযোগ করতে ট্যাপ করুন",
+    "peerchat_background_locked": "ফোনের লক খুললে সংযুক্ত হবে",
     "peerchat_background_channel": "PeerChat-এর ব্যাকগ্রাউন্ড সংযোগ",
     "peerchat_background_channel_description": "PeerSky ব্যাকগ্রাউন্ডে থাকার সময় PeerChat-কে সংযুক্ত রাখে"
   }

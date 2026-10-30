@@ -1,20 +1,17 @@
-import {
-  mkdirSync,
-  readFileSync,
-  renameSync,
-  statSync,
-  unlinkSync,
-  writeFileSync
-} from 'node:fs'
+import { readFileSync, statSync } from 'node:fs'
 import { getHyperStoragePath } from '../hyper/runtime.mjs'
+import { CHAT_SEAL, openJson, writeSealedJson } from '../hyper/sealed-file.mjs'
 import { PEERTUNES_LOOPBACK_PORT } from '../peertunes/constants.mjs'
 import { HYPERDRIVE_VIEWER_LOOPBACK_PORT } from '../hyperdrive-viewer/constants.mjs'
 
 // The local port each note was last open on, hosted or joined. The desktop
 // keeps a note on one port, and a device that joins it listens on that same
 // port, so the address reads the same everywhere and survives a restart.
-const FILE_NAME = 'p2pmd-ports.json'
-const MAX_FILE_BYTES = 16 * 1024
+// Locked with the chat key, since it lists the notes by key
+// (hyper/sealed-file.mjs).
+export const NOTE_PORTS_FILE = 'p2pmd-ports.json'
+const FILE_NAME = NOTE_PORTS_FILE
+const MAX_FILE_BYTES = 64 * 1024
 // As many as the recent list keeps.
 const MAX_NOTES = 30
 
@@ -48,15 +45,10 @@ export function rememberNotePort (noteKey, port, storagePath = getHyperStoragePa
       .slice(0, MAX_NOTES)
   )
 
-  const filePath = getFilePath(storagePath)
-  const temporaryPath = `${filePath}.tmp`
   try {
-    mkdirSync(storagePath, { recursive: true })
-    writeFileSync(temporaryPath, JSON.stringify({ version: 1, notes: kept }))
-    renameSync(temporaryPath, filePath)
+    writeSealedJson(getFilePath(storagePath), { version: 1, notes: kept }, { seal: CHAT_SEAL })
     return true
   } catch (error) {
-    try { unlinkSync(temporaryPath) } catch {}
     console.error('[p2pmd] Unable to keep the port a note is on:', error)
     return false
   }
@@ -68,7 +60,7 @@ function readPorts (storagePath) {
     const filePath = getFilePath(storagePath)
     const size = Number(statSync(filePath).size)
     if (!Number.isSafeInteger(size) || size < 1 || size > MAX_FILE_BYTES) return {}
-    const parsed = JSON.parse(readFileSync(filePath, 'utf8'))
+    const parsed = openJson(readFileSync(filePath, 'utf8'), filePath).value
     if (parsed?.version !== 1 || !parsed.notes || typeof parsed.notes !== 'object' || Array.isArray(parsed.notes)) return {}
 
     const ports = {}

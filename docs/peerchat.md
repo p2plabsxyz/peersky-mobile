@@ -512,6 +512,12 @@ answers, "Staying connected so messages reach you" while it runs, and "Offline.
 Tap to reconnect" when the backend stopped or nothing started it within three
 minutes; it never says connected while PeerChat is not running. A clear or a
 restore stops the service and makes a new backend the next time PeerSky opens.
+Chats are locked with a key the phone gives only while it is unlocked (see
+Storage and deletion), so a start with the phone locked, as after a night-time
+update, waits for the unlock: the notice says "Connects when you unlock your
+phone", and the service starts PeerChat again when it hears the phone unlocked
+(`ACTION_USER_PRESENT`). A phone that was unlocked when PeerChat started keeps
+it running, and showing messages, while it is locked again.
 
 Android and supported iOS launchers receive the
 current unread badge total, and the PeerChat home shortcut shows the same total.
@@ -524,19 +530,39 @@ PeerChat metadata and writable room feeds live under the shared Hyper storage
 directory. PeerChat deliberately does not expose raw room feeds or room keys as
 ordinary named Hyperdrives in Settings.
 
+Nothing PeerChat keeps on the phone can be read from its files while the phone
+is locked. PeerChat's file (`peerchat-mobile.json`: the profile, every room's
+key, members and the last message of each) and the chat screen's own
+(`peerchat-ui-state.json`: what was typed and not sent, and the chat each tab is
+on) are locked with the chat key, which the system gives only while the phone is
+unlocked (see Chats and notes on the phone in [hyper.md](hyper.md)). Each room's
+messages are in a log only this phone writes, named by a hash of the room key
+(`chat2-...`, `backend/peerchat/room-log.mjs`) where it used to be the key
+itself, and every entry in it is locked with a key kept in PeerChat's file
+(`logKey`), so the log shows neither who said what nor in which room. A log an
+earlier build kept under the room key moves as the room opens, and the logs of
+rooms left earlier right after PeerChat starts: copied, then removed with its
+name and the store's bytes of it (`moveLegacyRoomLog`, which a stop part way
+through starts over). The pictures and files opened to show them, decrypted,
+go before the phone locks: on iOS as the app leaves the screen, on Android as
+the screen goes off, and when the backend starts (`app/peerchat/attachment-cache.ts`).
+What is on screen opens again when the app comes back. PeerChat with its file
+locked and no key does not start, and never writes over the file. Started while
+the phone is locked, it waits for the unlock.
+
 PeerChat settings has **Delete PeerChat profile**. It leaves every room, so each
 one hears this device go, then empties every room feed on the phone, rooms left
 earlier included, frees the files this phone sent, and removes the decrypted
 attachment cache and PeerChat's own state file, and PeerChat opens on the
 welcome screen again (`deletePeerChatProfile` in
 `backend/peerchat/runtime.mjs`). Messages already sent stay on the devices they
-reached. The feeds' names, which hold the rooms' keys, go on the app's next run,
-once nothing can still have the feeds open (`removeEmptiedRoomLogs`, listed in
-`peerchat-emptied-logs.json` until then); a room joined again before that keeps
-its feed. The sent files' drives stay, emptied: the people in the room hold
-copies under the same key. This used to call `purge()`, which throws in
-hypercore 11 before it removes anything, so every message stayed on the phone.
-The chat screen's own saved state, the chat each tab was on, is cleared too.
+reached. The feeds' names go on the app's next run, once nothing can still have
+the feeds open (`removeEmptiedRoomLogs`, listed in `peerchat-emptied-logs.json`
+until then); a room joined again before that keeps its feed. The sent files'
+drives stay, emptied: the people in the room hold copies under the same key.
+This used to call `purge()`, which throws in hypercore 11 before it removes
+anything, so every message stayed on the phone. The chat screen's own saved
+state, the chat each tab was on, is cleared too.
 
 Settings -> P2P Data provides two relevant operations:
 

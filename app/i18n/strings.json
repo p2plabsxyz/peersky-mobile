@@ -282,6 +282,7 @@
     "Connection information",
     "Connection is encrypted",
     "Connection is not encrypted",
+    "Connects when you unlock your phone",
     "Continue",
     "Continue watching",
     "Controls links that open email (mailto:), phone (tel:), messaging (sms:), and map (geo:) apps. Web and Hyper links continue to open in PeerSky. Always allow skips confirmation, so only enable it if you trust the sites you visit.",

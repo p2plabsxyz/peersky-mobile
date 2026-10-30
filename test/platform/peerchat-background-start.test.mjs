@@ -21,6 +21,8 @@ test('the PeerChat service starts PeerChat itself when Android brings PeerSky ba
   // React Native with no activity, and a headless task in it.
   assert.match(task, /\(application as\? ReactApplication\)\?\.reactHost/)
   assert.match(task, /host\.addReactInstanceEventListener[\s\S]*host\.start\(\)/)
+  // A context the screen is still starting waits until it can run a task.
+  assert.match(task, /if \(context != null && context\.hasActiveReactInstance\(\)\) \{\s+runTask\(context\)/)
   assert.match(task, /HeadlessJsTaskContext\.getInstance\(context\)\.startTask\(\s+HeadlessJsTaskConfig\(TASK_KEY, Arguments\.createMap\(\), TASK_TIMEOUT_MS, true\)/)
   // Once is enough while one is starting, and a refusal never takes the app down.
   assert.match(task, /now - taskStartedAt < TASK_TIMEOUT_MS\) return/)
@@ -56,7 +58,7 @@ test('the task starts the backend and the checks for messages, as the screen doe
 
   // The screen takes up the backend and the checks the task started.
   const app = await read('app/index.tsx')
-  assert.match(app, /await startBackend\(\{ allowNetwork: hyperOfflineNetworkAllowedRef\.current \}\)\n\s+rpcRef\.current = getBackendRpc\(\)[\s\S]{0,120}void startPeerChatChecks\(\)/)
+  assert.match(app, /await startBackend\(\{ allowNetwork: hyperOfflineNetworkAllowedRef\.current \}\)\n\s+rpcRef\.current = getBackendRpc\(\)[\s\S]{0,200}await syncChatSealKey\(\)[\s\S]{0,200}void startPeerChatChecks\(\)/)
   const notifier = await read('app/peerchat/notifier.ts')
   assert.match(notifier, /if \(checker\) \{\n\s+checker\.callRpc = callRpc\n\s+return Promise\.resolve\(\)/)
 })

@@ -6,6 +6,7 @@ import path from 'node:path'
 import test from 'node:test'
 import crypto from 'hypercore-crypto'
 
+import { roomLogName } from '../../backend/peerchat/room-log.mjs'
 import { PeerChatService } from '../../backend/peerchat/service.mjs'
 import { derivePeerChatTopic, encryptPeerChatMessage } from '../../backend/peerchat/protocol.mjs'
 import { signMessage } from '../../backend/peerchat/message-signature.mjs'
@@ -39,7 +40,7 @@ function written (pair, text, { id, ts }) {
 async function startService (t, storedEntries) {
   const storagePath = await mkdtemp(path.join(tmpdir(), 'peersky-peerchat-stored-once-'))
   t.after(() => rm(storagePath, { recursive: true, force: true }))
-  const sdk = createFakeSdk({ [`chat-${ROOM}`]: storedEntries })
+  const sdk = createFakeSdk({ [roomLogName(ROOM)]: storedEntries })
   const service = await new PeerChatService({ sdk, storagePath }).start()
   t.after(() => service.close())
   await service.loadSigningKeys()

@@ -5,8 +5,10 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
@@ -14,6 +16,7 @@ import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import com.facebook.react.ReactApplication
 import com.facebook.react.ReactInstanceEventListener
 import com.facebook.react.bridge.Arguments
@@ -40,10 +43,31 @@ class PeerChatBackgroundService : Service() {
     }
   }
 
+  // PeerChat's chats are locked with a key the phone gives only while it is
+  // unlocked (app/privacy/chat-seal-key.ts). Started with the phone locked,
+  // PeerChat waits, and starts at the unlock.
+  private val unlockReceiver = object : BroadcastReceiver() {
+    override fun onReceive(context: Context?, intent: Intent?) {
+      if (intent?.action != Intent.ACTION_USER_PRESENT || status == STATUS_CONNECTED) return
+      taskStartedAt = 0L
+      startPeerChat()
+      heartbeatHandler.removeCallbacks(connectWatch)
+      if (status != STATUS_LOCKED) heartbeatHandler.postDelayed(connectWatch, CONNECT_WAIT_MS)
+    }
+  }
+  private var unlockReceiverRegistered = false
+
   override fun onCreate() {
     super.onCreate()
     createNotificationChannel()
     running = this
+    ContextCompat.registerReceiver(
+      this,
+      unlockReceiver,
+      IntentFilter(Intent.ACTION_USER_PRESENT),
+      ContextCompat.RECEIVER_NOT_EXPORTED
+    )
+    unlockReceiverRegistered = true
   }
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -70,6 +94,12 @@ class PeerChatBackgroundService : Service() {
   override fun onDestroy() {
     heartbeatHandler.removeCallbacks(heartbeat)
     heartbeatHandler.removeCallbacks(connectWatch)
+    if (unlockReceiverRegistered) {
+      try {
+        unregisterReceiver(unlockReceiver)
+      } catch (_: IllegalArgumentException) {}
+      unlockReceiverRegistered = false
+    }
     if (running === this) running = null
     super.onDestroy()
   }
@@ -105,7 +135,11 @@ class PeerChatBackgroundService : Service() {
     try {
       val host = (application as? ReactApplication)?.reactHost ?: return
       val context = host.currentReactContext
-      if (context != null) {
+      // The screen starting at the same moment has a context before it can
+      // run a task, and React refused one then ("CatalystInstance not
+      // available"). Such a start waits for it to be ready, like a cold one.
+      // Both run on the main thread, so it cannot become ready in between.
+      if (context != null && context.hasActiveReactInstance()) {
         runTask(context)
         return
       }
@@ -148,6 +182,7 @@ class PeerChatBackgroundService : Service() {
     val text = when (status) {
       STATUS_CONNECTED -> getString(R.string.peerchat_background_text)
       STATUS_OFFLINE -> getString(R.string.peerchat_background_offline)
+      STATUS_LOCKED -> getString(R.string.peerchat_background_locked)
       else -> getString(R.string.peerchat_background_connecting)
     }
     return NotificationCompat.Builder(this, CHANNEL_ID)
@@ -206,6 +241,7 @@ class PeerChatBackgroundService : Service() {
     const val STATUS_CONNECTING = "connecting"
     const val STATUS_CONNECTED = "connected"
     const val STATUS_OFFLINE = "offline"
+    const val STATUS_LOCKED = "locked"
 
     // What this run of the app has said about PeerChat. A new process starts
     // from connecting: nothing is running in it yet.
@@ -213,10 +249,10 @@ class PeerChatBackgroundService : Service() {
     @Volatile private var running: PeerChatBackgroundService? = null
     @Volatile private var taskStartedAt = 0L
 
-    // From the app (PeerChatBackgroundModule): PeerChat answered, or the
-    // backend stopped or could not start.
+    // From the app (PeerChatBackgroundModule): PeerChat answered, the backend
+    // stopped or could not start, or PeerChat waits for the unlock.
     fun setStatus(value: String) {
-      if (value != STATUS_CONNECTED && value != STATUS_OFFLINE) return
+      if (value != STATUS_CONNECTED && value != STATUS_OFFLINE && value != STATUS_LOCKED) return
       status = value
       val service = running ?: return
       service.heartbeatHandler.post {

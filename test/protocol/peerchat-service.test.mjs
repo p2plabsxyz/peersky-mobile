@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 
+import { roomLogName } from '../../backend/peerchat/room-log.mjs'
 import {
   MAX_PEERCHAT_ROOM_STORAGE_BYTES,
   PeerChatService
@@ -1699,7 +1700,7 @@ test('PeerChat serializes concurrent room joins and removes feed listeners', asy
     service.joinRoom({ roomKey: ROOM_KEY, username: 'Alice' }),
     service.joinRoom({ roomKey: ROOM_KEY, username: 'Alice' })
   ])
-  const feed = feeds.get(`chat-${ROOM_KEY}`)
+  const feed = feeds.get(roomLogName(ROOM_KEY))
 
   assert.equal(firstRoom.roomKey, ROOM_KEY)
   assert.equal(secondRoom.roomKey, ROOM_KEY)
@@ -2138,7 +2139,7 @@ test('PeerChat bounds restored deduplication scans and stored room bytes', async
   }))
 
   const restoredFeed = new FakeFeed(Array.from({ length: 350 }, (_, index) => ({ id: `message-${index}` })))
-  const feeds = new Map([[`chat-${ROOM_KEY}`, restoredFeed]])
+  const feeds = new Map([[roomLogName(ROOM_KEY), restoredFeed]])
   const service = await new PeerChatService({ sdk: createFakeSdk(feeds), storagePath }).start()
   assert.equal(restoredFeed.getCalls, 200)
   await service.close()
@@ -2147,7 +2148,7 @@ test('PeerChat bounds restored deduplication scans and stored room bytes', async
   t.after(() => rm(quotaPath, { recursive: true, force: true }))
   const fullFeed = new FakeFeed([], MAX_PEERCHAT_ROOM_STORAGE_BYTES)
   const quotaService = await new PeerChatService({
-    sdk: createFakeSdk(new Map([[`chat-${ROOM_KEY}`, fullFeed]])),
+    sdk: createFakeSdk(new Map([[roomLogName(ROOM_KEY), fullFeed]])),
     storagePath: quotaPath
   }).start()
   await quotaService.joinRoom({ roomKey: ROOM_KEY, username: 'Alice' })
@@ -2184,7 +2185,7 @@ test('PeerChat rejects a duplicate message replayed after restart', async (t) =>
 
   const restoredFeed = new FakeFeed([duplicate])
   const service = await new PeerChatService({
-    sdk: createFakeSdk(new Map([[`chat-${ROOM_KEY}`, restoredFeed]])),
+    sdk: createFakeSdk(new Map([[roomLogName(ROOM_KEY), restoredFeed]])),
     storagePath
   }).start()
   const peer = createFakePeer('de'.repeat(4), 'Desktop')

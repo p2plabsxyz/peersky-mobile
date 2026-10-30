@@ -1,0 +1,233 @@
+package __PACKAGE_NAME__
+
+import android.app.KeyguardManager
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.os.Build
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyPermanentlyInvalidatedException
+import android.security.keystore.KeyProperties
+import android.util.Base64
+import androidx.core.content.ContextCompat
+import com.facebook.react.bridge.Promise
+import com.facebook.react.bridge.ReactApplicationContext
+import com.facebook.react.bridge.ReactContextBaseJavaModule
+import com.facebook.react.bridge.ReactMethod
+import com.facebook.react.modules.core.DeviceEventManagerModule
+import java.io.File
+import java.security.KeyStore
+import java.security.SecureRandom
+import javax.crypto.Cipher
+import javax.crypto.KeyGenerator
+import javax.crypto.SecretKey
+import javax.crypto.spec.GCMParameterSpec
+import org.json.JSONObject
+
+// The key chats and notes are locked with (backend/hyper/sealed-file.mjs,
+// app/privacy/chat-seal-key.ts). It is 32 random bytes, kept in a file only
+// after an Android Keystore key has encrypted it. From Android 15 that
+// Keystore key works only while the phone is unlocked, so a phone that is
+// locked gives nobody its chats, the forensic tools that read a phone after
+// its first unlock included. Before 15 Google says not to rely on that: a
+// removed screen lock took such keys with it, and a face or a trusted watch
+// unlocked the phone without unlocking them. There the Keystore key has no
+// such condition, and a phone that moves up to 15 has its key wrapped again
+// by one that does. The key itself never changes, so nothing it locked has to
+// be locked again.
+class PeerSkyChatKeyModule(
+  reactContext: ReactApplicationContext
+) : ReactContextBaseJavaModule(reactContext) {
+  @Volatile private var listenerCount = 0
+  private var receiverRegistered = false
+
+  // The screen going off is the phone about to lock. The app removes the
+  // copies of pictures and files it opened to show them then
+  // (app/peerchat/attachment-cache.ts).
+  private val screenReceiver = object : BroadcastReceiver() {
+    override fun onReceive(context: Context?, intent: Intent?) {
+      if (intent?.action != Intent.ACTION_SCREEN_OFF || listenerCount <= 0) return
+      if (!reactApplicationContext.hasActiveReactInstance()) return
+      reactApplicationContext
+        .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+        .emit(SCREEN_OFF_EVENT, null)
+    }
+  }
+
+  override fun getName(): String = "PeerSkyChatKey"
+
+  override fun initialize() {
+    super.initialize()
+    ContextCompat.registerReceiver(
+      reactApplicationContext,
+      screenReceiver,
+      IntentFilter(Intent.ACTION_SCREEN_OFF),
+      ContextCompat.RECEIVER_NOT_EXPORTED
+    )
+    receiverRegistered = true
+  }
+
+  // The key as hex, or null when none was made. Rejects with LOCKED while the
+  // phone is locked, GONE when the Keystore key is gone or can no longer be
+  // used, and UNREADABLE for anything else: never a reason to make another.
+  @ReactMethod
+  fun getKey(promise: Promise) {
+    synchronized(lock) {
+      val file = wrappedFile()
+      if (!file.exists()) {
+        promise.resolve(null)
+        return
+      }
+      try {
+        val wrapped = JSONObject(file.readText())
+        val keyStore = KeyStore.getInstance(KEYSTORE).apply { load(null) }
+        val alias = wrapped.optString("alias", ALIAS)
+        val secret = keyStore.getKey(alias, null) as? SecretKey
+        if (secret == null) {
+          promise.reject("GONE", "The Keystore key the chat key is wrapped with is gone.")
+          return
+        }
+        val cipher = Cipher.getInstance(TRANSFORMATION)
+        cipher.init(
+          Cipher.DECRYPT_MODE,
+          secret,
+          GCMParameterSpec(TAG_BITS, Base64.decode(wrapped.getString("iv"), Base64.NO_WRAP))
+        )
+        val key = cipher.doFinal(Base64.decode(wrapped.getString("data"), Base64.NO_WRAP))
+        if (key.size != KEY_BYTES) {
+          promise.reject("UNREADABLE", "The chat key file is damaged.")
+          return
+        }
+        if (wantsUnlockBound() && !wrapped.optBoolean("unlockBound", false)) {
+          // Android 15 or later now: wrapped again with a key that needs the
+          // phone unlocked. Should that fail, the old wrapping stays.
+          try {
+            writeWrapped(key, nextAlias(alias), true)
+            keyStore.deleteEntry(alias)
+          } catch (_: Exception) {}
+        }
+        promise.resolve(toHex(key))
+      } catch (error: KeyPermanentlyInvalidatedException) {
+        promise.reject("GONE", error.message ?: "The Keystore key can no longer be used.", error)
+      } catch (error: Exception) {
+        val locked = isLocked()
+        promise.reject(if (locked) "LOCKED" else "UNREADABLE", error.message ?: "The chat key could not be read.", error)
+      }
+    }
+  }
+
+  // Makes the key the first time. Never over one there is: rejects EXISTS.
+  @ReactMethod
+  fun makeKey(promise: Promise) {
+    synchronized(lock) {
+      if (wrappedFile().exists()) {
+        promise.reject("EXISTS", "A chat key was made on this phone already.")
+        return
+      }
+      if (wantsUnlockBound() && isLocked()) {
+        promise.reject("LOCKED", "The phone is locked.")
+        return
+      }
+      try {
+        val key = ByteArray(KEY_BYTES).also { SecureRandom().nextBytes(it) }
+        writeWrapped(key, ALIAS, wantsUnlockBound())
+        promise.resolve(toHex(key))
+      } catch (error: Exception) {
+        promise.reject(if (isLocked()) "LOCKED" else "UNAVAILABLE", error.message ?: "The chat key could not be made.", error)
+      }
+    }
+  }
+
+  @ReactMethod
+  fun isDeviceLocked(promise: Promise) {
+    promise.resolve(isLocked())
+  }
+
+  // Written to a new file and moved over the old one only once the key reads
+  // back from it, so the file on disk always opens.
+  private fun writeWrapped(key: ByteArray, alias: String, unlockBound: Boolean) {
+    val keyStore = KeyStore.getInstance(KEYSTORE).apply { load(null) }
+    if (keyStore.containsAlias(alias)) keyStore.deleteEntry(alias)
+    val builder = KeyGenParameterSpec.Builder(
+      alias,
+      KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+    )
+      .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+      .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+      .setKeySize(256)
+    if (unlockBound && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) builder.setUnlockedDeviceRequired(true)
+    val secret = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, KEYSTORE)
+      .apply { init(builder.build()) }
+      .generateKey()
+    val cipher = Cipher.getInstance(TRANSFORMATION)
+    cipher.init(Cipher.ENCRYPT_MODE, secret)
+    val data = cipher.doFinal(key)
+    val wrapped = JSONObject()
+      .put("version", 1)
+      .put("alias", alias)
+      .put("unlockBound", unlockBound)
+      .put("iv", Base64.encodeToString(cipher.iv, Base64.NO_WRAP))
+      .put("data", Base64.encodeToString(data, Base64.NO_WRAP))
+
+    val check = Cipher.getInstance(TRANSFORMATION)
+    check.init(Cipher.DECRYPT_MODE, secret, GCMParameterSpec(TAG_BITS, cipher.iv))
+    if (!check.doFinal(data).contentEquals(key)) throw IllegalStateException("The chat key did not read back.")
+
+    val file = wrappedFile()
+    val temporary = File(file.parentFile, "${file.name}.tmp")
+    temporary.writeText(wrapped.toString())
+    if (!temporary.renameTo(file)) {
+      temporary.delete()
+      throw IllegalStateException("The chat key file could not be written.")
+    }
+  }
+
+  private fun nextAlias(alias: String) = if (alias == ALIAS) "$ALIAS.2" else ALIAS
+
+  private fun wantsUnlockBound() = Build.VERSION.SDK_INT >= UNLOCK_BOUND_FROM
+
+  private fun isLocked(): Boolean {
+    val keyguard = reactApplicationContext.getSystemService(KeyguardManager::class.java)
+    return keyguard?.isDeviceLocked == true
+  }
+
+  // Outside the documents folder, in the folder Android never backs up: it is
+  // of no use anywhere but this phone, with its Keystore.
+  private fun wrappedFile() = File(reactApplicationContext.noBackupFilesDir, FILE_NAME)
+
+  private fun toHex(bytes: ByteArray) = bytes.joinToString("") { "%02x".format(it) }
+
+  @ReactMethod
+  fun addListener(eventName: String) {
+    if (eventName == SCREEN_OFF_EVENT) listenerCount += 1
+  }
+
+  @ReactMethod
+  fun removeListeners(count: Int) {
+    listenerCount = (listenerCount - count).coerceAtLeast(0)
+  }
+
+  override fun invalidate() {
+    if (receiverRegistered) {
+      try {
+        reactApplicationContext.unregisterReceiver(screenReceiver)
+      } catch (_: IllegalArgumentException) {}
+      receiverRegistered = false
+    }
+    super.invalidate()
+  }
+
+  companion object {
+    private const val KEYSTORE = "AndroidKeyStore"
+    private const val ALIAS = "peersky.chat-seal-key"
+    private const val FILE_NAME = "chat-seal-key.json"
+    private const val TRANSFORMATION = "AES/GCM/NoPadding"
+    private const val TAG_BITS = 128
+    private const val KEY_BYTES = 32
+    // Android 15. See the note at the top.
+    private const val UNLOCK_BOUND_FROM = 35
+    private const val SCREEN_OFF_EVENT = "PeerSkyScreenOff"
+    private val lock = Any()
+  }
+}

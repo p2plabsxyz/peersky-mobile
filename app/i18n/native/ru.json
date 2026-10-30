@@ -14,6 +14,7 @@
     "peerchat_background_text": "Подключение поддерживается, чтобы сообщения доходили до вас",
     "peerchat_background_connecting": "Подключение...",
     "peerchat_background_offline": "Офлайн. Нажмите, чтобы подключиться снова",
+    "peerchat_background_locked": "Подключится, когда вы разблокируете телефон",
     "peerchat_background_channel": "Фоновое подключение PeerChat",
     "peerchat_background_channel_description": "Поддерживает подключение PeerChat, пока PeerSky работает в фоновом режиме"
   }

@@ -69,6 +69,9 @@ export const ANDROID_TEXT = Object.freeze({
   // says connected while it is not.
   peerchat_background_connecting: 'Connecting...',
   peerchat_background_offline: 'Offline. Tap to reconnect',
+  // Started with the phone locked: PeerChat's chats open only once it is
+  // unlocked (app/privacy/chat-seal-key.ts).
+  peerchat_background_locked: 'Connects when you unlock your phone',
   peerchat_background_channel: 'PeerChat background connection',
   peerchat_background_channel_description: 'Keeps PeerChat connected while PeerSky is in the background'
 })

@@ -9,6 +9,7 @@ import Corestore from 'corestore'
 import Hyperdrive from 'hyperdrive'
 
 import { attachmentDriveName } from '../../backend/peerchat/attachments.mjs'
+import { legacyRoomLogName, roomLogName } from '../../backend/peerchat/room-log.mjs'
 import { deletePeerChatProfile, removeEmptiedRoomLogs } from '../../backend/peerchat/runtime.mjs'
 import { PeerChatService } from '../../backend/peerchat/service.mjs'
 
@@ -38,12 +39,12 @@ function createSdk (store) {
   }
 }
 
-function feedAlias (store, roomKey) {
-  return { name: `chat-${roomKey}`, namespace: store.ns }
+function feedAlias (store, name) {
+  return { name, namespace: store.ns }
 }
 
-async function logLength (store, roomKey) {
-  const log = store.get({ name: `chat-${roomKey}` })
+async function logLength (store, name) {
+  const log = store.get({ name })
   await log.ready()
   const length = log.length
   await log.close()
@@ -72,8 +73,9 @@ test('deleting the PeerChat profile leaves every room and removes what it kept',
   await service.blockPeer({ peerId: 'cd34cd34', username: 'Mallory' })
   service.persistNow()
 
-  // A room left earlier keeps its log, out of the room list.
-  const leftLog = store.get({ name: `chat-${LEFT_ROOM_KEY}`, valueEncoding: 'json' })
+  // A room left earlier keeps its log, out of the room list, here one an
+  // older build kept under the room's key.
+  const leftLog = store.get({ name: legacyRoomLogName(LEFT_ROOM_KEY), valueEncoding: 'json' })
   await leftLog.append({ id: 'old', ct: 'sealed' })
   await leftLog.close()
 
@@ -103,8 +105,8 @@ test('deleting the PeerChat profile leaves every room and removes what it kept',
   // Each room heard this device go, the way a normal leave sounds.
   assert.ok(leaves.includes(ROOM_KEY))
   // Every message is gone from storage at once, the left room's too.
-  assert.equal(await logLength(store, ROOM_KEY), 0)
-  assert.equal(await logLength(store, LEFT_ROOM_KEY), 0)
+  assert.equal(await logLength(store, roomLogName(ROOM_KEY)), 0)
+  assert.equal(await logLength(store, legacyRoomLogName(LEFT_ROOM_KEY)), 0)
   // The sent file's contents are gone here, and its drive still takes files.
   assert.equal(await sent.blobs.core.has(0), false)
   assert.equal(sent.writable, true)
@@ -120,10 +122,10 @@ test('deleting the PeerChat profile leaves every room and removes what it kept',
 
   // The logs' names, which hold the rooms' keys, go on the app's next run.
   await removeEmptiedRoomLogs(fresh)
-  assert.notEqual(await store.storage.getAlias(feedAlias(store, ROOM_KEY)), null)
+  assert.notEqual(await store.storage.getAlias(feedAlias(store, roomLogName(ROOM_KEY))), null)
   await removeEmptiedRoomLogs(fresh, { run: 'next' })
-  for (const roomKey of [ROOM_KEY, LEFT_ROOM_KEY]) {
-    assert.equal(await store.storage.getAlias(feedAlias(store, roomKey)), null)
+  for (const name of [roomLogName(ROOM_KEY), legacyRoomLogName(LEFT_ROOM_KEY)]) {
+    assert.equal(await store.storage.getAlias(feedAlias(store, name)), null)
   }
   assert.equal(existsSync(path.join(storagePath, 'peerchat-emptied-logs.json')), false)
 })
@@ -140,7 +142,7 @@ test('a room joined again right after a profile delete keeps its new messages', 
   again.setProfile({ username: 'Grace' })
   await again.joinRoom({ roomKey: ROOM_KEY })
   await again.sendMessage({ roomKey: ROOM_KEY, message: 'Back again' })
-  assert.equal(await logLength(holder.store, ROOM_KEY), 1)
+  assert.equal(await logLength(holder.store, roomLogName(ROOM_KEY)), 1)
   await again.close()
 
   // The next run of the app: the room is in use again, so its log stays.
@@ -149,6 +151,6 @@ test('a room joined again right after a profile delete keeps its new messages', 
   const next = await new PeerChatService({ sdk: createSdk(holder.store), storagePath }).start()
   t.after(() => next.close())
   await removeEmptiedRoomLogs(next, { run: 'next' })
-  assert.equal(await logLength(holder.store, ROOM_KEY), 1)
+  assert.equal(await logLength(holder.store, roomLogName(ROOM_KEY)), 1)
   assert.deepEqual(next.listRooms().map((room) => room.roomKey), [ROOM_KEY])
 })

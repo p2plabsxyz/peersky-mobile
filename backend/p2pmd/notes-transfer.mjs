@@ -11,6 +11,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import b4a from 'b4a'
+import { openJson } from '../hyper/sealed-file.mjs'
 import { P2PMD_INCOMING_FILE } from './constants.mjs'
 import { loadP2pmdRoomSnapshot, saveP2pmdRoomSnapshot } from './snapshots.mjs'
 
@@ -177,12 +178,14 @@ function byteLength (text) {
   return b4a.byteLength(text)
 }
 
+// The recent list is locked with the chat key (hyper/private-app-files.mjs),
+// and the others may be after a restore.
 function readJson (path) {
   try {
     if (!existsSync(path)) return null
     const bytes = readFileSync(path)
     if (bytes.byteLength > MAX_FILE_BYTES) return null
-    return JSON.parse(b4a.toString(bytes, 'utf8'))
+    return openJson(b4a.toString(bytes, 'utf8'), path).value
   } catch {
     return null
   }

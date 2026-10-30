@@ -4,11 +4,12 @@ import { Paths } from 'expo-file-system'
 import { AppState, Platform } from 'react-native'
 import { Worklet } from 'react-native-bare-kit'
 
-import { RPC_HYPER_INIT, RPC_HYPER_REFRESH } from '../backend/rpc/commands.mjs'
+import { RPC_CHAT_SEAL_KEY, RPC_HYPER_INIT, RPC_HYPER_REFRESH } from '../backend/rpc/commands.mjs'
 import bundle from './app.bundle.mjs'
 import { resumeBareInBackground } from './bare-background.mjs'
 import { watchHyperNetwork } from './hyper-network-refresh'
 import { t } from './i18n/i18n.mjs'
+import { type ChatSealKeyState, loadChatSealKey } from './privacy/chat-seal-key'
 import { isLocalSealKeyMissing, loadLocalSealKey } from './privacy/local-seal-key'
 import { toBareFsPath } from './settings/link-device-state.mjs'
 
@@ -40,6 +41,9 @@ let starting: Promise<BackendInitResponse> | null = null
 let restartWanted = false
 let stopBareBackground: (() => void) | null = null
 let stopNetworkWatch: (() => void) | null = null
+// What the running backend was last told about the chat key.
+let chatKeyTold: ChatSealKeyState | null = null
+let chatKeySyncing: Promise<{ key: string, state: ChatSealKeyState }> | null = null
 const requestListeners = new Set<(request: BackendRequest) => void>()
 
 /** Where the backend keeps its stores. */
@@ -80,8 +84,18 @@ async function startOnce (allowNetwork: boolean) {
     // says this phone has one that could not be read, so the backend writes
     // nothing it would lock (backend/hyper/sealed-file.mjs).
     const sealKey = await loadLocalSealKey()
+    // Then the key chats and notes are locked with, or why it is not here:
+    // locked, it comes later (syncChatSealKey).
+    const chat = await loadChatSealKey()
     const next = new Worklet()
-    next.start('/app.bundle', bundle, [getBackendStoragePath(), sealKey || '', isLocalSealKeyMissing() ? 'missing' : ''])
+    next.start('/app.bundle', bundle, [
+      getBackendStoragePath(),
+      sealKey || '',
+      isLocalSealKeyMissing() ? 'missing' : '',
+      chat.key,
+      chat.key ? '' : chat.state
+    ])
+    chatKeyTold = chat.state
 
     // The backend pushes here when PeerChat changes, so a new message shows
     // the moment it lands instead of waiting for the next poll.
@@ -128,6 +142,25 @@ export async function callBackend (command: number, payload: object = {}) {
   return JSON.parse(typeof reply === 'string' ? reply : b4a.toString(reply as Uint8Array))
 }
 
+/**
+ * Reads the chat key again if the backend does not have it yet, and hands it
+ * over: at the unlock that follows a start with the phone locked, chats and
+ * notes open from here. Nothing happens once it has the key.
+ */
+export function syncChatSealKey (): Promise<{ key: string, state: ChatSealKeyState }> {
+  if (!chatKeySyncing) {
+    chatKeySyncing = (async () => {
+      const chat = await loadChatSealKey()
+      if (rpc && chat.state !== chatKeyTold) {
+        const reply = await callBackend(RPC_CHAT_SEAL_KEY, { key: chat.key, state: chat.key ? '' : chat.state })
+        if (reply?.ok) chatKeyTold = chat.state
+      }
+      return chat
+    })().finally(() => { chatKeySyncing = null })
+  }
+  return chatKeySyncing
+}
+
 /** What the backend asks of the app: PeerChat changed, Link Device progress. */
 export function onBackendRequest (listener: (request: BackendRequest) => void) {
   requestListeners.add(listener)
@@ -152,5 +185,6 @@ function stopBackend () {
   worklet = null
   rpc = null
   ready = null
+  chatKeyTold = null
   current?.terminate()
 }

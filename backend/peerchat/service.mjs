@@ -1,13 +1,24 @@
 import {
   existsSync,
   mkdirSync,
-  readFileSync,
   renameSync,
   rmSync,
   writeFileSync
 } from 'node:fs'
 import b4a from 'b4a'
 import HyperDHTmDNS from '@p2plabs/hyperdht-mdns'
+
+import { CHAT_SEAL, canSealChats, readSealedJson, sealJson } from '../hyper/sealed-file.mjs'
+import {
+  createLogKey,
+  legacyRoomLogName,
+  listStoredRoomLogs,
+  moveLegacyRoomLog,
+  normalizeLogKey,
+  removeStoredLog,
+  roomLogName,
+  sealedEntryEncoding
+} from './room-log.mjs'
 
 import {
   decodeMessagePayload,
@@ -405,6 +416,13 @@ export class PeerChatService {
     this.undoneMoves = new Map()
     this.movedRoomTimer = null
     this.activeRoomKey = null
+    // What each room's log entries are locked with (room-log.mjs), kept in
+    // this PeerChat's file. saved: the file on disk has it, which it must
+    // before anything is locked with it.
+    this.logKey = ''
+    this.logKeySaved = false
+    // Rooms whose log is moving from its old name, by room. See openRoomLog.
+    this.legacyLogMoves = new Map()
     this.version = 0
     this.persistTimer = null
     this.notifyTimer = null
@@ -418,6 +436,9 @@ export class PeerChatService {
     this.started = true
     this.loadState()
     this.takeIncomingTransfer()
+    // A file from before the chat key, or one a restore left plain, is locked
+    // now rather than at the next change.
+    if (!this.logKeySaved && existsSync(this.stateFilePath)) this.persistNow()
     // Where this person's other devices are found, with or without a room.
     this.joinDevicesTopic()
     this.signingKeysLoading = this.loadSigningKeys().catch(() => {})
@@ -1452,11 +1473,12 @@ export class PeerChatService {
   async openRoomFeed (roomKey) {
     if (this.feeds.has(roomKey)) return false
 
-    const feed = this.sdk.corestore.get({
-      name: `chat-${roomKey}`,
-      valueEncoding: 'json'
-    })
-    await feed.ready()
+    const feed = await this.openRoomLog(roomKey)
+    if (this.feeds.has(roomKey)) {
+      // Opened by another call while this one moved or opened the log.
+      if (this.feeds.get(roomKey) !== feed && feed.close) await feed.close().catch(() => {})
+      return false
+    }
     if (this.closed) {
       if (feed.close) await feed.close().catch(() => {})
       throw new Error('PeerChat service is closed.')
@@ -1485,6 +1507,65 @@ export class PeerChatService {
       this.updateLastMessage(roomKey).catch(() => {})
     }
     return true
+  }
+
+  // A room's log, ready. One kept under its old name, the room key, by an
+  // earlier build moves to its new one first (room-log.mjs). A move that
+  // fails leaves the old log as it was, open as before for this run, and is
+  // tried again at the next start.
+  async openRoomLog (roomKey) {
+    // On disk before anything is locked with it, or the next start could not
+    // open what this one wrote.
+    if (!this.logKeySaved && !this.persistNow()) throw new Error('PeerChat could not save its file.')
+    try {
+      await this.moveLegacyLog(roomKey)
+    } catch (error) {
+      console.warn(`[peerchat] Could not move the log of ${roomKey.slice(0, 8)}:`, error?.message || error)
+      const legacy = this.sdk.corestore.get({ name: legacyRoomLogName(roomKey), valueEncoding: 'json' })
+      await legacy.ready()
+      return legacy
+    }
+    const feed = this.sdk.corestore.get({
+      name: roomLogName(roomKey),
+      valueEncoding: sealedEntryEncoding(this.logKey)
+    })
+    await feed.ready()
+    return feed
+  }
+
+  moveLegacyLog (roomKey) {
+    let move = this.legacyLogMoves.get(roomKey)
+    if (!move) {
+      move = moveLegacyRoomLog(this.sdk.corestore, roomKey, this.logKey)
+      this.legacyLogMoves.set(roomKey, move)
+      // Tried once a run, and again by whatever opens the room after a
+      // failure.
+      move.catch(() => { this.legacyLogMoves.delete(roomKey) })
+    }
+    return move
+  }
+
+  /**
+   * Moves the old logs of rooms that are not on the list any more, which
+   * still hold their messages here, so none is left under its room key. One
+   * at a time, after PeerChat has started, and never while it closes.
+   */
+  async moveLeftRoomLogs () {
+    for (const { name, roomKey, discoveryKey } of await listStoredRoomLogs(this.sdk.corestore)) {
+      if (this.closed) return
+      if (!roomKey || this.rooms.has(roomKey) || this.feeds.has(roomKey)) continue
+      try {
+        const log = this.sdk.corestore.get({ name })
+        await log.ready()
+        const empty = log.length === 0
+        await log.close()
+        // Emptied when a profile was deleted: only its name is left to go.
+        if (empty) await removeStoredLog(this.sdk.corestore, name, discoveryKey)
+        else await this.moveLegacyLog(roomKey)
+      } catch (error) {
+        console.warn('[peerchat] Could not move an old room log:', error?.message || error)
+      }
+    }
   }
 
   // A connection's peer, before its transport: the key the handshake
@@ -3043,7 +3124,7 @@ export class PeerChatService {
     if (!this.incomingPath || !existsSync(this.incomingPath)) return
     try {
       const transfer = normalizeTransfer(
-        JSON.parse(readFileSync(this.incomingPath, 'utf8')),
+        readSealedJson(this.incomingPath)?.value,
         { maxAvatar: MAX_PEERCHAT_AVATAR_LENGTH }
       )
       if (transfer) {
@@ -5213,9 +5294,26 @@ export class PeerChatService {
   }
 
   loadState () {
+    let parsed = null
     try {
-      if (!existsSync(this.stateFilePath)) return
-      const parsed = JSON.parse(readFileSync(this.stateFilePath, 'utf8'))
+      // Locked with the chat key (hyper/sealed-file.mjs), or plain from
+      // before it.
+      const read = readSealedJson(this.stateFilePath)
+      if (read) {
+        parsed = read.value
+        this.logKey = normalizeLogKey(parsed?.logKey)
+        this.logKeySaved = Boolean(this.logKey) && (read.sealed || !canSealChats())
+      }
+    } catch (error) {
+      // Locked, and not opened: PeerChat does not start, and the file stays
+      // as it is. Started empty, it would have written an empty PeerChat over
+      // every chat in it.
+      if (error?.code === 'SEALED_FILE_LOCKED') throw error
+      console.error('[peerchat] Unable to load local state:', error)
+    }
+    if (!this.logKey) this.logKey = createLogKey()
+    if (!parsed) return
+    try {
       const username = normalizePeerChatProfileName(parsed?.profile?.username)
       if (username) {
         const at = parsed?.profile?.at
@@ -5376,16 +5474,18 @@ export class PeerChatService {
     }, PERSIST_DELAY_MS)
   }
 
+  // True once the file is written.
   persistNow ({ final = false } = {}) {
     // A PeerChat that has closed writes once more as it closes, and never
     // after: a request still on its way finished later and wrote what it held
     // back, folder and all, after Clear all P2P data had removed it, so the
     // profile and rooms came back.
-    if (this.closed && !final) return
+    if (this.closed && !final) return false
     const temporaryPath = `${this.stateFilePath}.tmp`
     try {
-      mkdirSync(this.storagePath, { recursive: true })
-      writeFileSync(temporaryPath, JSON.stringify({
+      // Locked with the chat key. Without it nothing is written, plain or
+      // otherwise (hyper/sealed-file.mjs).
+      const text = sealJson({
         version: 1,
         profile: this.profile,
         device: this.device,
@@ -5397,12 +5497,18 @@ export class PeerChatService {
         siblings: [...this.siblings].slice(0, MAX_SIBLINGS),
         rooms: [...this.rooms.values()],
         pendingDirectMessages: this.listPendingDirectMessages(),
-        blockedPeers: this.listBlockedPeers()
-      }), { mode: 0o600 })
+        blockedPeers: this.listBlockedPeers(),
+        logKey: this.logKey
+      }, { seal: CHAT_SEAL })
+      mkdirSync(this.storagePath, { recursive: true })
+      writeFileSync(temporaryPath, text, { mode: 0o600 })
       renameSync(temporaryPath, this.stateFilePath)
+      this.logKeySaved = true
+      return true
     } catch (error) {
       try { rmSync(temporaryPath, { force: true }) } catch {}
       console.error('[peerchat] Unable to save local state:', error)
+      return false
     }
   }
 

@@ -277,13 +277,15 @@ import { NsfwScanner } from './media/NsfwScanner'
 import { usePeerChatNotifications } from './peerchat/usePeerChatNotifications'
 import { stopPeerChatNotifier } from './peerchat/notifier'
 import { startPeerChatChecks } from './peerchat/background-task'
+import { watchPeerChatAttachmentCache } from './peerchat/attachment-cache'
 import {
   callBackend,
   getBackendRpc,
   getIdentityStoragePath,
   onBackendRequest,
   requireBackendRestart,
-  startBackend
+  startBackend,
+  syncChatSealKey
 } from './backend'
 import { PeerTunesScreen } from './peertunes/PeerTunesScreen'
 import { keptFolderUrls } from './peertunes/peertunes-screen.mjs'
@@ -311,9 +313,9 @@ import {
   normalizeP2pmdRoomKey,
   parseP2pmdNoteLink,
   P2PMD_RECENT_SEARCH_AFTER,
-  readP2pmdRoomHistoryFile,
+  parseP2pmdRoomHistory,
   recordP2pmdRoom,
-  writeP2pmdRoomHistoryFile
+  serializeP2pmdRoomHistory
 } from './p2pmd-room-history.mjs'
 import { subscribeP2pmdNotesShared } from './settings/p2pmd-shared-notes'
 import { describeP2pmdNote } from './p2pmd-note-title.mjs'
@@ -358,7 +360,9 @@ import {
   RPC_PEERCHAT_SEND_TO_DEVICES,
   RPC_PEERTUNES_START,
   RPC_HYPERDRIVE_VIEWER_DOWNLOAD,
-  RPC_HYPERDRIVE_VIEWER_START
+  RPC_HYPERDRIVE_VIEWER_START,
+  RPC_PRIVATE_APP_FILE_READ,
+  RPC_PRIVATE_APP_FILE_WRITE
 } from '../backend/rpc/commands.mjs'
 
 type P2pmdRoom = {
@@ -792,8 +796,10 @@ export default function App () {
   // Opened from the navigation bar rather than through the settings list, so
   // back has to leave rather than climb to a list nobody came through.
   const [browserSettingsCloseOnBack, setBrowserSettingsCloseOnBack] = useState(false)
-  const [p2pmdRoomHistory, setP2pmdRoomHistory] = useState<P2pmdRoomHistoryEntry[]>(loadP2pmdRoomHistory)
+  // Empty until the backend has read it (loadP2pmdRoomHistory).
+  const [p2pmdRoomHistory, setP2pmdRoomHistory] = useState<P2pmdRoomHistoryEntry[]>([])
   const p2pmdRoomHistoryRef = useRef(p2pmdRoomHistory)
+  const p2pmdRoomHistoryLoadRef = useRef<Promise<void> | null>(null)
   const [p2pmdParticipants, setP2pmdParticipants] = useState<number | null>(null)
   const [p2pmdViewMode, setP2pmdViewMode] = useState<P2pmdViewMode>('edit')
   const [p2pmdPeerDisplayName, setP2pmdPeerDisplayName] = useState<string | null>(loadP2pmdPeerDisplayName)
@@ -995,6 +1001,26 @@ export default function App () {
     }
   }, [browserPreferencesReady])
 
+  // The recent notes, read once the backend is up. A read that fails, as when
+  // the chat key can no longer be read, is tried again by the next caller.
+  function readP2pmdRoomHistoryOnce () {
+    if (!p2pmdRoomHistoryLoadRef.current) {
+      p2pmdRoomHistoryLoadRef.current = loadP2pmdRoomHistory().then((rooms) => {
+        if (!rooms) {
+          p2pmdRoomHistoryLoadRef.current = null
+          return
+        }
+        p2pmdRoomHistoryRef.current = rooms
+        setP2pmdRoomHistory(rooms)
+      })
+    }
+    return p2pmdRoomHistoryLoadRef.current
+  }
+
+  useEffect(() => {
+    if (identityStoragePath) void readP2pmdRoomHistoryOnce()
+  }, [identityStoragePath])
+
   // P2PMD notes another of this person's devices sent, left here by a Link
   // Device restore. The backend keeps the text of each hosted one as this
   // phone's copy first. The file goes only once the list is saved, so nothing
@@ -1007,6 +1033,8 @@ export default function App () {
 
     async function takeNotesFromDevice () {
       try {
+        // Merged into the list on disk, so not before it is read.
+        await readP2pmdRoomHistoryOnce()
         const response = await callRpc(RPC_P2PMD_TAKE_NOTES, {})
         if (cancelled) return
         const notes = response.ok && Array.isArray(response.notes) ? response.notes : []
@@ -1078,6 +1106,11 @@ export default function App () {
         void callRpc(RPC_HYPER_REFRESH, {}).catch((error) => {
           console.warn('Unable to refresh Hyper networking:', error)
         })
+        // The phone is unlocked with the app in front, so a chat key the
+        // backend still waits for can be read now (app/backend.ts).
+        void syncChatSealKey().catch((error) => {
+          console.warn('Unable to hand the chat key over:', error)
+        })
       }
       // People in a PeerChat room see this phone as away while the app is in
       // the background, a yellow dot and Idle. Not on inactive: iOS passes
@@ -1089,6 +1122,10 @@ export default function App () {
 
     return () => subscription.remove()
   }, [])
+
+  // The pictures and files PeerChat opened to show them go before the phone
+  // locks (peerchat/attachment-cache.ts).
+  useEffect(() => watchPeerChatAttachmentCache(), [])
 
   useEffect(() => subscribeToIncomingUrls((url) => {
     // A quick action from the app icon, or a tap on a widget. It waits for
@@ -1283,6 +1320,11 @@ export default function App () {
       // new one (app/backend.ts).
       const initResponse = await startBackend({ allowNetwork: hyperOfflineNetworkAllowedRef.current })
       rpcRef.current = getBackendRpc()
+      // A backend the PeerChat service started with the phone locked has no
+      // chat key yet. The screen is up, so the phone is unlocked now.
+      await syncChatSealKey().catch((error) => {
+        console.warn('Unable to hand the chat key over:', error)
+      })
       // Looking for new PeerChat messages, which goes on without the screen.
       void startPeerChatChecks()
       // A backend started with the app already behind another one starts away.
@@ -6452,29 +6494,35 @@ function getP2pmdProfileFile () {
   return new File(Paths.document, 'p2pmd-profile.json')
 }
 
-function getP2pmdRoomHistoryFile () {
-  return new File(Paths.document, 'p2pmd-room-history.json')
-}
+// The recent notes, with each note's key, are locked with the chat key in the
+// backend (backend/hyper/private-app-files.mjs). The list is read once the
+// backend is up, and nothing is written before that read, so a list not read
+// yet never goes over the one on disk.
+const P2PMD_ROOM_HISTORY_FILE = 'p2pmd-room-history.json'
+let p2pmdRoomHistoryRead = false
 
-function loadP2pmdRoomHistory (): P2pmdRoomHistoryEntry[] {
+async function loadP2pmdRoomHistory (): Promise<P2pmdRoomHistoryEntry[] | null> {
   try {
-    const file = getP2pmdRoomHistoryFile()
-    return readP2pmdRoomHistoryFile(file) as P2pmdRoomHistoryEntry[]
+    const response = await callBackend(RPC_PRIVATE_APP_FILE_READ, { name: P2PMD_ROOM_HISTORY_FILE })
+    if (!response.ok) throw new Error(response.error || 'Unable to read the recent notes.')
+    p2pmdRoomHistoryRead = true
+    return parseP2pmdRoomHistory(response.text ?? '') as P2pmdRoomHistoryEntry[]
   } catch (error) {
     console.error('Failed loading P2PMD room history:', error)
-    return []
+    return null
   }
 }
 
 function saveP2pmdRoomHistory (rooms: P2pmdRoomHistoryEntry[]) {
-  try {
-    const file = getP2pmdRoomHistoryFile()
-    writeP2pmdRoomHistoryFile(file, rooms)
-    return true
-  } catch (error) {
-    console.error('Failed saving P2PMD room history:', error)
-    return false
-  }
+  if (!p2pmdRoomHistoryRead) return false
+  void callBackend(RPC_PRIVATE_APP_FILE_WRITE, { name: P2PMD_ROOM_HISTORY_FILE, text: serializeP2pmdRoomHistory(rooms) })
+    .then((response) => {
+      if (!response.ok) throw new Error(response.error || 'Unable to save the recent notes.')
+    })
+    .catch((error) => {
+      console.error('Failed saving P2PMD room history:', error)
+    })
+  return true
 }
 
 function normalizeP2pmdPeerDisplayName (value: unknown) {

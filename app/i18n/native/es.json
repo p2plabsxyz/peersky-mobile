@@ -14,6 +14,7 @@
     "peerchat_background_text": "Conectado para que te lleguen los mensajes",
     "peerchat_background_connecting": "Conectando...",
     "peerchat_background_offline": "Sin conexión. Toca para volver a conectar",
+    "peerchat_background_locked": "Se conecta cuando desbloquees el teléfono",
     "peerchat_background_channel": "Conexión de PeerChat en segundo plano",
     "peerchat_background_channel_description": "Mantiene PeerChat conectado mientras PeerSky está en segundo plano"
   }

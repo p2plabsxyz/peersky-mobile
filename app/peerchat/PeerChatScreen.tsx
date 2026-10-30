@@ -110,8 +110,12 @@ import {
   RPC_PEERCHAT_SET_ACTIVE,
   RPC_PEERCHAT_SEND,
   RPC_PEERCHAT_SNAPSHOT,
-  RPC_PEERCHAT_UNBLOCK
+  RPC_PEERCHAT_UNBLOCK,
+  RPC_PRIVATE_APP_FILE_READ,
+  RPC_PRIVATE_APP_FILE_WRITE
 } from '../../backend/rpc/commands.mjs'
+import { callBackend } from '../backend'
+import { usePeerChatAttachmentGeneration } from './attachment-cache'
 import BackIcon from '../../assets/icons/bootstrap/arrow-left.svg'
 import CopyIcon from '../../assets/icons/bootstrap/copy.svg'
 import DownloadIcon from '../../assets/icons/bootstrap/download.svg'
@@ -467,7 +471,12 @@ const EMPTY_UI_STATE: PeerChatUiState = {
   tabRooms: null
 }
 
-const PEERCHAT_UI_STATE_FILE = new File(Paths.document, 'peerchat-ui-state.json')
+// What was typed and not sent in each chat, and the chat each tab is on,
+// locked with the chat key in the backend (backend/hyper/private-app-files.mjs).
+// Written only once it has been read, so a state not read yet never goes over
+// the one on disk.
+const PEERCHAT_UI_STATE_FILE = 'peerchat-ui-state.json'
+let uiStateRead = false
 const UI_STATE_PERSIST_DELAY_MS = 300
 // How long iOS takes to finish dismissing one sheet before it will present
 // another. Shared by the modal handover below and by the attach picker.
@@ -764,8 +773,11 @@ export function PeerChatScreen ({
     async function loadUiState () {
       let restored = EMPTY_UI_STATE
       try {
-        if (PEERCHAT_UI_STATE_FILE.exists && PEERCHAT_UI_STATE_FILE.size <= PEERCHAT_UI_STATE_MAX_BYTES) {
-          restored = parsePeerChatUiState(await PEERCHAT_UI_STATE_FILE.text()) as PeerChatUiState
+        const response = await callBackend(RPC_PRIVATE_APP_FILE_READ, { name: PEERCHAT_UI_STATE_FILE })
+        if (!response.ok) throw new Error(response.error || 'Unable to read the PeerChat UI state.')
+        uiStateRead = true
+        if (typeof response.text === 'string' && response.text.length <= PEERCHAT_UI_STATE_MAX_BYTES) {
+          restored = parsePeerChatUiState(response.text) as PeerChatUiState
         }
       } catch (cause) {
         console.warn('Unable to load PeerChat UI state:', cause)
@@ -5113,6 +5125,9 @@ function PeerChatAttachment ({
   const mediaKind = getPeerChatAttachmentMediaKind(item.fileName || '', item.message)
   const canPreview = isInlinePeerChatMedia(item)
   const [mediaUrl, setMediaUrl] = useState<string | null>(null)
+  // The copy opened to show it goes before the phone locks, and is opened
+  // again when the app comes back (attachment-cache.ts).
+  const attachmentGeneration = usePeerChatAttachmentGeneration()
   // Shown at its own shape, which it says once it loads. See media-fit.mjs.
   const [mediaSize, setMediaSize] = useState(() => inlineMediaSizes.get(item.message) || null)
   const fit = fitPeerChatMedia(mediaSize)
@@ -5181,7 +5196,7 @@ function PeerChatAttachment ({
     return () => {
       cancelled = true
     }
-  }, [canPreview, item.fileEnc, item.fileKey, item.fileName, item.fileSize, item.message, item.roomKey, mediaKind, onCallRpc, roomKey])
+  }, [attachmentGeneration, canPreview, item.fileEnc, item.fileKey, item.fileName, item.fileSize, item.message, item.roomKey, mediaKind, onCallRpc, roomKey])
 
   async function openAttachment () {
     if (isOpening) return
@@ -5964,12 +5979,14 @@ function formatRoomConnection (room: PeerChatRoom, compact = false) {
 }
 
 function persistPeerChatUiState (state: PeerChatUiState) {
-  try {
-    if (!PEERCHAT_UI_STATE_FILE.exists) PEERCHAT_UI_STATE_FILE.create({ intermediates: true })
-    PEERCHAT_UI_STATE_FILE.write(serializePeerChatUiState(state))
-  } catch (cause) {
-    console.warn('Unable to save PeerChat UI state:', cause)
-  }
+  if (!uiStateRead) return
+  void callBackend(RPC_PRIVATE_APP_FILE_WRITE, { name: PEERCHAT_UI_STATE_FILE, text: serializePeerChatUiState(state) })
+    .then((response) => {
+      if (!response.ok) throw new Error(response.error || 'Unable to save the PeerChat UI state.')
+    })
+    .catch((cause) => {
+      console.warn('Unable to save PeerChat UI state:', cause)
+    })
 }
 
 // Matched to the browser shell (browser-appearance.mjs) on purpose. PeerChat

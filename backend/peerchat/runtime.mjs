@@ -2,12 +2,13 @@ import { randomBytes } from 'node:crypto'
 import { readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import b4a from 'b4a'
-import storageKeys from 'hypercore-storage/lib/keys.js'
 import { getHyperRuntime, getHyperStoragePath, waitForHyperStores } from '../hyper/runtime.mjs'
+import { waitForChatSealKey } from '../hyper/sealed-file.mjs'
 import { getExistingNamedDrive } from '../hyper/storage-core.mjs'
 import { getDefaultIdentityStoragePath } from '../backup/device-keys.mjs'
 import { attachmentDriveName, getAttachmentCacheDirectory } from './attachments.mjs'
 import { PEERCHAT_INCOMING_FILE } from './device-link.mjs'
+import { legacyRoomLogName, listStoredRoomLogs, removeStoredLog, roomLogName } from './room-log.mjs'
 import { PeerChatService } from './service.mjs'
 
 let service = null
@@ -28,6 +29,11 @@ export function setPeerChatIdle (value) {
 }
 
 export async function getPeerChatService () {
+  // PeerChat's file and logs are locked with the chat key, which a phone
+  // started while locked gives the app only at the unlock: PeerChat waits for
+  // it then, rather than start with nothing and write that over its chats.
+  // One that can no longer be read throws.
+  if (!service) await waitForChatSealKey()
   if (serviceClosing) await serviceClosing
   // A clear or a restore holds the stores shut while it closes PeerChat and
   // removes or replaces its files, and the store itself stays open a moment
@@ -70,6 +76,11 @@ export async function getPeerChatService () {
         throw new Error('PeerChat service was reset.')
       }
       service = nextService
+      // The logs of rooms that are off the list, moved off their room keys
+      // too, after PeerChat is up.
+      nextService.moveLeftRoomLogs().catch((error) => {
+        console.warn('[peerchat] Could not move old room logs:', error?.message || error)
+      })
       return nextService
     })()
     serviceOpening = opening
@@ -140,16 +151,22 @@ export async function deletePeerChatProfile ({
   const peerChat = await getService()
   const { sdk, stateFilePath, storagePath } = peerChat
   const roomKeys = await peerChat.leaveAllRooms()
-  await closeService()
-
   // Rooms left earlier kept their messages here too, so every room log on
   // the phone goes, not only the rooms in the list.
-  const stored = await storedRoomLogs(sdk.corestore)
+  const known = new Set([...roomKeys, ...peerChat.leftRooms.keys(), ...peerChat.removedRooms.keys()])
+  await closeService()
+
   const emptied = []
-  for (const roomKey of new Set([...roomKeys, ...stored.keys()])) {
-    const discoveryKey = await removePeerChatRoom(sdk, roomKey)
-    if (discoveryKey) emptied.push(discoveryKey)
+  for (const { name, roomKey } of await listStoredRoomLogs(sdk.corestore)) {
+    if (roomKey) known.add(roomKey)
+    try {
+      const discoveryKey = await emptyRoomLog(sdk.corestore, name)
+      if (discoveryKey) emptied.push(discoveryKey)
+    } catch (error) {
+      console.warn('[peerchat] Could not remove a room feed:', error?.message || error)
+    }
   }
+  for (const roomKey of known) await clearRoomDrive(sdk, roomKey)
   if (emptied.length > 0) rememberEmptiedRoomLogs(storagePath, emptied, run)
   removeFile(stateFilePath)
   removeFile(getAttachmentCacheDirectory(storagePath))
@@ -159,44 +176,26 @@ export async function deletePeerChatProfile ({
 // Which run of the app this is. See removeEmptiedRoomLogs.
 const RUN_ID = b4a.toString(randomBytes(8), 'hex')
 const EMPTIED_ROOM_LOGS_FILE = 'peerchat-emptied-logs.json'
-const ROOM_LOG_NAME = /^chat-([0-9a-f]{64})$/
 
-// This used to call purge(), which throws in hypercore 11 before it removes
-// anything, so every room's messages and sent files stayed on the phone.
-// Returns the emptied log's discovery key.
-async function removePeerChatRoom (sdk, roomKey) {
-  let discoveryKey = null
-  try {
-    discoveryKey = await emptyRoomLog(sdk.corestore, roomKey)
-  } catch (error) {
-    console.warn('[peerchat] Could not remove a room feed:', error?.message || error)
-  }
+// The files this phone sent in a room, which the people in it fetch from
+// here. Their contents go and the drive stays: one made again under the same
+// key would clash with the copies those people keep.
+async function clearRoomDrive (sdk, roomKey) {
   try {
     const drive = await getExistingNamedDrive(sdk, { driveName: attachmentDriveName(roomKey) })
-    // The files this phone sent, which the people in the room fetch from
-    // here. Their contents go and the drive stays: one made again under the
-    // same key would clash with the copies those people keep.
     if (drive) await drive.clearAll()
   } catch (error) {
     console.warn('[peerchat] Could not remove a room drive:', error?.message || error)
   }
-  return discoveryKey
-}
-
-async function storedRoomLogs (store) {
-  const logs = new Map()
-  for await (const { alias, discoveryKey } of store.storage.createAliasStream(store.ns)) {
-    const match = ROOM_LOG_NAME.exec(alias?.name || '')
-    if (match) logs.set(match[1], discoveryKey)
-  }
-  return logs
 }
 
 // A room's messages are in one log that only this phone writes. Every one
 // of them goes now, and the log stays, so the room joined again starts it
-// over. Its name goes later, in removeEmptiedRoomLogs.
-async function emptyRoomLog (store, roomKey) {
-  const name = `chat-${roomKey}`
+// over. Its name goes later, in removeEmptiedRoomLogs. This used to call
+// purge(), which throws in hypercore 11 before it removes anything, so every
+// room's messages and sent files stayed on the phone. Returns the emptied
+// log's discovery key.
+async function emptyRoomLog (store, name) {
   if (!await store.storage.getAlias({ name, namespace: store.ns })) return null
   const log = store.get({ name })
   try {
@@ -238,20 +237,15 @@ export async function removeEmptiedRoomLogs (service, { run = RUN_ID } = {}) {
 
   const discoveryKeys = new Set(Array.isArray(emptied?.discoveryKeys) ? emptied.discoveryKeys : [])
   const store = service.sdk.corestore
-  for (const [roomKey, discoveryKey] of await storedRoomLogs(store)) {
-    if (!discoveryKeys.has(b4a.toString(discoveryKey, 'hex'))) continue
-    if (service.rooms.has(roomKey) || service.feeds.has(roomKey)) continue
-    const stored = await store.storage.resumeCore(discoveryKey)
-    if (stored) {
-      try {
-        await store.storage.deleteCore(stored.core)
-      } finally {
-        await stored.close()
-      }
-    }
-    const tx = store.storage.db.write({ autoDestroy: true })
-    tx.tryDelete(storageKeys.store.coreByAlias({ name: `chat-${roomKey}`, namespace: store.ns }))
-    await tx.flush()
+  // A room joined again since keeps its log, under either name.
+  const inUse = new Set()
+  for (const roomKey of new Set([...service.rooms.keys(), ...service.feeds.keys()])) {
+    inUse.add(roomLogName(roomKey))
+    inUse.add(legacyRoomLogName(roomKey))
+  }
+  for (const { name, discoveryKey } of await listStoredRoomLogs(store)) {
+    if (!discoveryKeys.has(b4a.toString(discoveryKey, 'hex')) || inUse.has(name)) continue
+    await removeStoredLog(store, name, discoveryKey)
   }
   rmSync(path, { force: true })
 }

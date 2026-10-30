@@ -10,9 +10,10 @@ type PeerChatBackgroundModule = {
   removeListeners: (count: number) => void
 }
 
-// What the service's notice says: PeerChat answered, so it is connected, or
-// the backend stopped or never started. Until the first, it says connecting.
-export type PeerChatBackgroundStatus = 'connected' | 'offline'
+// What the service's notice says: PeerChat answered, so it is connected, the
+// backend stopped or never started, or PeerChat waits for the phone to be
+// unlocked. Until one of them, it says connecting.
+export type PeerChatBackgroundStatus = 'connected' | 'offline' | 'locked'
 
 const BACKGROUND_TICK_EVENT = 'PeerChatBackgroundTick'
 

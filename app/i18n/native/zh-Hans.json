@@ -14,6 +14,7 @@
     "peerchat_background_text": "正在保持连接，以便接收消息",
     "peerchat_background_connecting": "正在连接…",
     "peerchat_background_offline": "离线。点按以重新连接",
+    "peerchat_background_locked": "解锁手机后连接",
     "peerchat_background_channel": "PeerChat 后台连接",
     "peerchat_background_channel_description": "PeerSky 在后台时保持 PeerChat 连接"
   }
