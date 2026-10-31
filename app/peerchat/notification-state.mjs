@@ -71,6 +71,33 @@ export function collectPeerChatNotificationCandidates (previousRooms, nextRooms)
     }))
 }
 
+// A chat's notifications are taken away once nothing in it is unread, which is
+// when it was opened, or when it was left. Only notifications that name a chat
+// are touched; one for a chat still unread stays.
+export function collectSeenPeerChatNotifications (presented, rooms) {
+  if (!Array.isArray(presented) || presented.length === 0) return []
+  const unread = new Set((Array.isArray(rooms) ? rooms : [])
+    .filter((room) => Number.isSafeInteger(room?.unreadCount) && room.unreadCount > 0)
+    .map((room) => String(room.roomKey).toLowerCase()))
+  return presented
+    .filter((item) => typeof item?.identifier === 'string' &&
+      item.identifier !== '' &&
+      typeof item.roomKey === 'string' &&
+      /^[a-f0-9]{64}$/i.test(item.roomKey) &&
+      !unread.has(item.roomKey.toLowerCase()))
+    .map((item) => item.identifier)
+}
+
+// Worth a look at the notification list: the first check since PeerChat
+// started, when one could be left from before, or a chat that had unread
+// messages has none now.
+export function shouldClearSeenPeerChatNotifications (previousRooms, nextRooms) {
+  if (!Array.isArray(previousRooms)) return true
+  const next = new Map((Array.isArray(nextRooms) ? nextRooms : []).map((room) => [room?.roomKey, room]))
+  return previousRooms.some((room) => Number(room?.unreadCount) > 0 &&
+    !(Number(next.get(room?.roomKey)?.unreadCount) > 0))
+}
+
 export function shouldHandlePeerChatNotificationInApp (isPeerChatVisible, appState) {
   return isPeerChatVisible === true && appState === 'active'
 }

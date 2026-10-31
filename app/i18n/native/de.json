@@ -12,6 +12,9 @@
   },
   "android": {
     "peerchat_background_text": "Verbindung bleibt bestehen, damit dich Nachrichten erreichen",
+    "peerchat_background_connecting": "Wird verbunden...",
+    "peerchat_background_offline": "Offline. Tippe, um dich neu zu verbinden",
+    "peerchat_background_locked": "Verbindet sich, sobald du dein Telefon entsperrst",
     "peerchat_background_channel": "PeerChat-Hintergrundverbindung",
     "peerchat_background_channel_description": "Hält PeerChat verbunden, während PeerSky im Hintergrund läuft"
   }

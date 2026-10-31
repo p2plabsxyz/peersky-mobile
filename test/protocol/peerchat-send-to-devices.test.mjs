@@ -6,6 +6,7 @@ import path from 'node:path'
 import test from 'node:test'
 import crypto from 'hypercore-crypto'
 
+import { roomLogName } from '../../backend/peerchat/room-log.mjs'
 import { PeerChatService } from '../../backend/peerchat/service.mjs'
 
 // The browser's Send to your devices puts the page in your chat with yourself,
@@ -28,7 +29,7 @@ async function startService (t) {
   return { service, feeds }
 }
 
-const written = (feeds, roomKey) => (feeds.get(`chat-${roomKey}`)?.entries || []).filter((entry) => entry.ct)
+const written = (feeds, roomKey) => (feeds.get(roomLogName(roomKey))?.entries || []).filter((entry) => entry.ct)
 
 test('with no other device linked, nothing is sent and the app is told so', async (t) => {
   const { service } = await startService(t)

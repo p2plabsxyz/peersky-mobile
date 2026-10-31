@@ -1,4 +1,4 @@
-import { StyleSheet } from 'react-native'
+import { StatusBar, StyleSheet } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 
 import { AppWelcome, type AppWelcomeContent } from './AppWelcome'
@@ -18,7 +18,7 @@ const QUALITIES = [
     id: 'together',
     Icon: PeopleIcon,
     title: msg('Device to device'),
-    body: msg('What you share goes straight between phones and computers. There is no server. Your phone is the server.')
+    body: msg('Information goes straight between phones and computers. There is no server. Your phone is the server.')
   },
   {
     id: 'product',
@@ -64,6 +64,12 @@ export function WelcomeScreen ({ isDark, onDone }: { isDark: boolean, onDone: ()
       edges={['top', 'left', 'right', 'bottom']}
       style={[styles.screen, { backgroundColor: palette.shell }]}
     >
+      {/* Nothing else has set the bar yet on a first run, and Android's
+          default left white icons on this light screen. */}
+      <StatusBar
+        backgroundColor={palette.shell}
+        barStyle={isDark ? 'light-content' : 'dark-content'}
+      />
       <AppWelcome content={PEERSKY_WELCOME} isDark={isDark} backgroundColor={palette.shell} onDone={onDone} />
     </SafeAreaView>
   )

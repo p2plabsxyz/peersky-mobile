@@ -137,6 +137,69 @@ describe('home screen widgets', () => {
     assert.match(widgetBundle, /URL\(string: "peersky:\/\/shortcut\/open\?url=\\\(encoded\)"\)/)
   })
 
+  // DuckDuckGo-style lock screen buttons, each with a link the app reads.
+  test('put five buttons on the lock screen, each opening what it says', async () => {
+    const lock = await read('targets/widgets/LockScreenWidgets.swift')
+    const widgets = [...lock.matchAll(/struct (\w+): Widget \{[\s\S]*?lockScreenButton\(kind: "(\w+)", link: WidgetLinks\.(\w+), label: "([^"]+)"\)[\s\S]*?\.configurationDisplayName\("([^"]+)"\)/g)]
+      .map(([, type, kind, link, label, name]) => ({ type, kind, link, label, name }))
+    assert.deepEqual(widgets.map(({ link }) => link), ['privateSearch', 'burn', 'bookmarks', 'p2pSites', 'clearP2PData'])
+    for (const widget of widgets) {
+      assert.match(widgetBundle, new RegExp(`\\n {4}${widget.type}\\(\\)\\n`), `${widget.type} is in the bundle`)
+      assert.equal(widget.label, widget.name, 'VoiceOver reads the name the gallery shows')
+    }
+    assert.equal(new Set(widgets.map(({ kind }) => kind)).size, widgets.length)
+
+    // What each link reads as in the app.
+    const links = Object.fromEntries([...widgetBundle.matchAll(/static let (privateSearch|burn|bookmarks|clearP2PData) = URL\(string: "([^"]+)"\)!/g)].map(([, name, url]) => [name, url]))
+    assert.deepEqual(parseHomeShortcut(links.privateSearch), { name: 'private-search' })
+    assert.deepEqual(parseHomeShortcut(links.burn), { name: 'burn' })
+    assert.deepEqual(parseHomeShortcut(links.bookmarks), { name: 'bookmarks' })
+    assert.deepEqual(parseHomeShortcut(links.clearP2PData), { name: 'clear-p2p-data' })
+    assert.match(widgetBundle, /static let p2pSites = open\("peersky:\/\/p2p\/"\)/)
+
+    // Round, on the lock screen's own glass, with nothing behind it.
+    assert.match(lock, /\.supportedFamilies\(\[\.accessoryCircular\]\)/)
+    assert.match(lock, /AccessoryWidgetBackground\(\)/)
+    assert.match(lock, /\.containerBackground\(for: \.widget\) \{ Color\.clear \}/)
+    assert.match(lock, /\.widgetURL\(link\)/)
+  })
+
+  // The icons of the app's own buttons, one picture each.
+  test('show the app\'s own icons on the lock screen buttons', async () => {
+    const lock = await read('targets/widgets/LockScreenWidgets.swift')
+    const icons = Object.fromEntries([...lock.matchAll(/lockScreenButton\(kind: "(\w+)".*\n\s+(?:AppIcon\(name: "(\w+)"\)|Image\(systemName: "([\w.]+)"\))\n/g)]
+      .map(([, kind, asset, symbol]) => [kind, asset || symbol]))
+    assert.deepEqual(icons, {
+      PeerSkyPrivateSearch: 'IncognitoIcon',
+      PeerSkyBurn: 'FireIcon',
+      PeerSkyBookmarks: 'BookmarksIcon',
+      PeerSkyP2PSites: 'point.3.connected.trianglepath.dotted',
+      PeerSkyClearP2PData: 'TrashIcon'
+    })
+    assert.doesNotMatch(lock, /ZStack\(alignment/, 'nothing laid over an icon')
+
+    // Copied unchanged from the icons the app draws, and tinted like a symbol.
+    for (const [asset, file] of [['IncognitoIcon', 'incognito'], ['FireIcon', 'fire'], ['BookmarksIcon', 'bookmarks'], ['TrashIcon', 'trash']]) {
+      const copy = await readFile(new URL(`${asset}.imageset/${file}.svg`, assets))
+      assert.ok(copy.equals(await readFile(new URL(`../../assets/icons/bootstrap/${file}.svg`, import.meta.url))), asset)
+      const contents = JSON.parse(await readFile(new URL(`${asset}.imageset/Contents.json`, assets), 'utf8'))
+      assert.equal(contents.properties['template-rendering-intent'], 'template', asset)
+    }
+    assert.match(lock, /Image\(name\)\n\s+\.renderingMode\(\.template\)/)
+  })
+
+  // The bird sat small in the top left corner of the small widget.
+  test('show the bird large in the middle of the small search widget', async () => {
+    const small = browserWidget.slice(browserWidget.indexOf('private struct SmallSearch'), browserWidget.indexOf('private struct SearchBar'))
+    assert.match(small, /VStack\(spacing: 0\) \{\n\s+Spacer\(minLength: 0\)\n\s+Image\("PeerSkyIcon"\)/)
+    assert.doesNotMatch(small, /alignment: \.leading/)
+    const side = Number(small.match(/Image\("PeerSkyIcon"\)\s+\.resizable\(\)\s+\.frame\(width: (\d+), height: \1\)/)[1])
+    assert.ok(side >= 72, `${side} points`)
+    // Sharp on a three times screen.
+    const { width } = imageSize(await readFile(new URL('PeerSkyIcon.imageset/peersky.png', assets)))
+    assert.ok(width >= side * 3, `${width} pixels for ${side} points`)
+  })
+
   test('send the PeerTunes buttons to the app as the page\'s own commands', async () => {
     const sent = [...intents.matchAll(/@available\(iOS 17\.0, \*\)\nstruct (\w+): AudioPlaybackIntent \{[\s\S]*?PeerTunesWidgetCommand\.send\("(\w+)"\)/g)]
       .map(([, name, command]) => [name, command])

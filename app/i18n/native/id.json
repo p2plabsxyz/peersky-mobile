@@ -12,6 +12,9 @@
   },
   "android": {
     "peerchat_background_text": "Tetap terhubung agar pesan sampai ke Anda",
+    "peerchat_background_connecting": "Menghubungkan...",
+    "peerchat_background_offline": "Offline. Ketuk untuk terhubung lagi",
+    "peerchat_background_locked": "Terhubung saat kunci ponsel dibuka",
     "peerchat_background_channel": "Koneksi latar belakang PeerChat",
     "peerchat_background_channel_description": "Menjaga PeerChat tetap terhubung saat PeerSky berjalan di latar belakang"
   }

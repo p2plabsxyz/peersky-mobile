@@ -12,6 +12,9 @@
   },
   "android": {
     "peerchat_background_text": "कनेक्ट रहकर आप तक मैसेज पहुँचा रहा है",
+    "peerchat_background_connecting": "कनेक्ट हो रहा है...",
+    "peerchat_background_offline": "ऑफ़लाइन। फिर से कनेक्ट करने के लिए टैप करें",
+    "peerchat_background_locked": "फ़ोन अनलॉक करते ही कनेक्ट होगा",
     "peerchat_background_channel": "PeerChat बैकग्राउंड कनेक्शन",
     "peerchat_background_channel_description": "PeerSky के बैकग्राउंड में रहने पर PeerChat को कनेक्ट रखता है"
   }

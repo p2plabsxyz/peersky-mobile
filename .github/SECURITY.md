@@ -45,6 +45,7 @@ Out of scope: third-party websites, and upstream projects such as React Native, 
   - Messages and attachments are end to end encrypted with the room's key. A room opens to a peer only after it proves it holds the key, with an HMAC over the connection's handshake, and the key never crosses the wire. A direct message's key is sealed to the other person's public key.
   - Invite links ask before they join a room or send a request. Blocking someone hides everything they send, everywhere. Reports never include a room key.
   - Messages and reactions are signed by whoever wrote them, so nobody who passes one on can change it or who wrote it. A room made on 0.1.3 or later has a key worked out from its maker's key, so anyone in it can check who made it, and invite links carry that. Removing somebody moves the room to a new key for the people still in it.
+  - On the phone, chats and notes are locked with a key the system gives only while the phone is unlocked: on iPhone, and on Android 15 and later. A locked phone's files show no chat, room key, unsent draft or note. The pictures and files opened to show them go before the phone locks.
 - Links to other apps (`mailto:`, `tel:`, `sms:` and `geo:`) open only after a confirmation. `javascript:`, `data:`, `file:`, `intent:` and `content:` are refused.
 - A download a page starts waits for a yes. A downloaded APK opens in the system's Downloads: PeerSky does not hold the permission to install apps.
 - Keys and chats leave the phone only through Link Device (sealed to the receiving device, after both screens show the same six characters) or a backup file (Argon2id and an authenticated stream cipher, under a passphrase of at least 12 characters). iCloud, computer and Google backups and Android's phone-to-phone copy leave them out.
@@ -56,7 +57,7 @@ These follow from how PeerSky works rather than being open bugs:
 
 - Content published to a public Hyper drive is public. Joining a swarm or a PeerChat room shows your IP address to its peers, and one key identifies this device for browsing, PeerChat and nearby discovery.
 - P2P Republic keeps one key for good, so someone removed from it still holds it. A room made before 0.1.2 keeps its key too, until removing somebody moves it to a new one. In a room made before 0.1.3, who made it is taken from the first device that says so on its own connection, unless the invite said. P2P Republic's maker is pinned in the app.
-- Keys sit in the app's private storage rather than the Keychain or Android Keystore, so anyone with control of an unlocked, rooted or jailbroken device can read them.
+- The keys that lock private drives, chats and notes are kept by the Keychain or the Android Keystore, and other keys sit in the app's private storage, so anyone with control of an unlocked, rooted or jailbroken device can read them. Below Android 15 the key chats and notes are locked with opens any time after the phone's first unlock, since Google says not to rely on keys that need it unlocked there.
 - A link preview is fetched by the sender's phone, so the linked site sees the sender's IP address.
 
 ## Security review

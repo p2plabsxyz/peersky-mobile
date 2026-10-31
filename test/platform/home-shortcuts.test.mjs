@@ -82,6 +82,31 @@ describe('quick actions on the app icon', () => {
     }
   })
 
+  // The lock screen buttons, as DuckDuckGo has them. Each does its one thing
+  // as soon as PeerSky opens: Burn and Clear all P2P data without asking.
+  test('reads each lock screen button and does it straight away', () => {
+    for (const name of ['private-search', 'burn', 'bookmarks', 'clear-p2p-data']) {
+      assert.deepEqual(parseHomeShortcut(`peersky://shortcut/${name}`), { name })
+      assert.equal(parseHomeShortcut(`peersky://shortcut/${name}?url=https%3A%2F%2Fexample.com`), null, name)
+    }
+    assert.deepEqual(parseHomeShortcut(`peersky://shortcut/open?url=${encodeURIComponent('peersky://p2p/')}`), { name: 'open', target: 'peersky://p2p/' })
+
+    const handled = app.slice(app.indexOf('if (!browserSessionReady || !pendingHomeShortcutUrl) return'), app.indexOf('}, [browserSessionReady, isBooting, pendingHomeShortcutUrl])'))
+    const branch = (name) => handled.slice(handled.indexOf(`shortcut?.name === '${name}') {`), handled.indexOf('} else if', handled.indexOf(`shortcut?.name === '${name}') {`)))
+    assert.match(branch('private-search'), /onBrowserNewIncognitoTab\(\)\n\s+setBrowserAddressFocusRequest\(\(count\) => count \+ 1\)/)
+    assert.match(branch('burn'), /setBrowserBurning\(true\)/)
+    assert.doesNotMatch(branch('burn'), /onBrowserBurnTabs|Alert/)
+    assert.match(branch('bookmarks'), /setBrowserBookmarksVisible\(true\)/)
+    assert.match(branch('clear-p2p-data'), /clearAllP2PData\(\{ onCallRpc: \(command\) => callRpc\(command, \{\}\), onRestartRequired \}\)/)
+    assert.doesNotMatch(branch('clear-p2p-data'), /Alert/)
+    // The worklet clears the data, so a cold start waits for it.
+    assert.match(handled, /const waitsForWorklet = shortcut\?\.name === 'clear-p2p-data' \|\|/)
+    assert.match(handled, /if \(waitsForWorklet && \(isBooting \|\| !rpcRef\.current\)\) return/)
+    // The P2P sites page is neither an app nor a web or hyper:// address.
+    const open = app.slice(app.indexOf('function openWidgetTarget'), app.indexOf('function onBrowserNewTab'))
+    assert.match(open, /!isBrowserP2pUrl\(targetUrl\)\) return/)
+  })
+
   // The PeerTunes widget names the song it shows, beside the address, so the
   // PeerTunes tab keeps its plain address and PeerTunes opens that song.
   test('read the song a PeerTunes widget tap asks for, and nothing else', () => {

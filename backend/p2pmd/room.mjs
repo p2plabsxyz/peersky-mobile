@@ -36,6 +36,11 @@ const JOIN_READY_REQUEST_TIMEOUT_MS = 3000
 // How long a shared note is looked for on the person's other devices before
 // this phone hosts its own copy.
 const SHARED_NOTE_LOOK_MS = 8000
+const HOLESAIL_DEFAULT_PORT = 8989
+// How long a join waits for the note's host. Nobody there used to open an
+// empty note after up to 40 seconds of waiting, and what was typed into it
+// was gone once the host came back.
+const HOST_LOOK_MS = 15000
 
 let room = null
 let roomTransition = Promise.resolve()
@@ -166,10 +171,10 @@ export async function joinP2pmdRoom ({
   key,
   udp = false,
   log = false,
-  // Looking for a shared note on the person's other devices. A join is
-  // listening locally whether or not anyone hosts the note, so here a room
-  // that does not answer is reported as nobody there, for the caller to host
-  // its own copy, instead of being joined and retried.
+  // Looking for a shared note on the person's other devices, for less time:
+  // the caller hosts its own copy when nobody answers. A join is listening
+  // locally whether or not anyone hosts the note, so either way a room that
+  // does not answer is reported as nobody there.
   probe = false
 } = {}) {
   return withRoomTransition(async () => {
@@ -199,15 +204,11 @@ export async function joinP2pmdRoom ({
       }
     }
 
-    let warning = null
     try {
-      await waitForJoinedRoomReady(boundPort, token, probe ? SHARED_NOTE_LOOK_MS : null)
-    } catch (error) {
-      if (probe) {
-        await stopHolesail()
-        return { ok: false, noHost: true, error: 'Nobody has this note open right now.' }
-      }
-      warning = `Holesail proxy is listening, but the room did not answer readiness checks yet. The editor will keep retrying. (${getErrorMessage(error)})`
+      await waitForJoinedRoomReady(boundPort, token, probe ? SHARED_NOTE_LOOK_MS : HOST_LOOK_MS)
+    } catch {
+      await stopHolesail()
+      return { ok: false, noHost: true, error: 'Nobody has this note open right now.' }
     }
 
     rememberNotePort(roomKey, boundPort)
@@ -227,8 +228,7 @@ export async function joinP2pmdRoom ({
     return {
       ok: true,
       running: true,
-      room: { ...room },
-      warning
+      room: { ...room }
     }
   })
 }
@@ -240,7 +240,10 @@ export async function joinP2pmdRoom ({
  * picks one instead.
  */
 async function connectOnNotePort ({ key, udp, log, token }) {
-  const saved = findNotePort(key)
+  // A note kept on 8989 got it from Holesail's default, not from its host, so
+  // it is joined on its host's port instead when the host has one.
+  const kept = findNotePort(key)
+  const saved = kept === HOLESAIL_DEFAULT_PORT ? null : kept
   const preferred = await connectHolesail({ key, port: saved, hostPort: true, udp, log, token })
   if (preferred.ok && isUsableNotePort(preferred.info?.port)) return preferred
   if (preferred.ok) await stopHolesail()
@@ -393,8 +396,4 @@ function isReadyStatusResponse (statusCode, payload) {
   if (Array.isArray(payload?.peerList)) return true
 
   return false
-}
-
-function getErrorMessage (error) {
-  return error instanceof Error ? error.message : String(error)
 }

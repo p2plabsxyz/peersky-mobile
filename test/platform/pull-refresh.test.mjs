@@ -122,6 +122,19 @@ test('the script runs once a page, however often it is injected', () => {
   assert.equal(posted.length, 1)
 })
 
+test('a page that replaces JSON.stringify never sees the token: the bridge\'s sealed sender carries the pull', () => {
+  const { touch, window } = page()
+  const leaked = []
+  const sealed = []
+  window.JSON = { stringify: (value) => { leaked.push(value); return '{}' } }
+  window.__peerskyPostNative = (message) => sealed.push(message)
+  touch('touchstart', 100)
+  touch('touchmove', 200)
+  assert.equal(leaked.length, 0)
+  assert.equal(sealed.length, 1)
+  assert.equal(sealed[0].token, TOKEN)
+})
+
 test('only a message with the tab\'s token is a pull, in points', () => {
   const message = (fields) => JSON.stringify({ type: PULL_REFRESH_MESSAGE_TYPE, token: TOKEN, phase: 'move', distance: 300, ...fields })
   assert.deepEqual(parsePullRefreshMessage(message(), TOKEN, 3), { phase: 'move', distance: 100 })

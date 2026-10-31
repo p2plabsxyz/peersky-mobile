@@ -5,8 +5,12 @@
 export const HOME_SHORTCUTS = Object.freeze(['paste', 'new-tab', 'incognito', 'app-icon'])
 
 // "search" puts the cursor in the address bar. "open" carries an address in
-// its url parameter: an app from the widget's row, a bookmark, PeerTunes.
-const WIDGET_SHORTCUTS = Object.freeze(['search', 'open'])
+// its url parameter: an app from the widget's row, a bookmark, PeerTunes, the
+// P2P sites. The rest are the lock screen buttons, each done straight away:
+// "private-search" is search in a new incognito tab, "burn" burns the tabs,
+// "bookmarks" opens them, and "clear-p2p-data" clears all P2P data without
+// asking first.
+const WIDGET_SHORTCUTS = Object.freeze(['search', 'open', 'private-search', 'burn', 'bookmarks', 'clear-p2p-data'])
 
 const MAX_TARGET_LENGTH = 4096
 const OPENABLE_TARGET = /^(https?|hyper|peersky):\/\//i
@@ -16,7 +20,7 @@ const OPENABLE_TARGET = /^(https?|hyper|peersky):\/\//i
  * null for any other link. Only "open" has a target.
  */
 export function parseHomeShortcut (url) {
-  const match = /^peersky:\/\/shortcut\/([a-z-]+)\/?(?:\?([^#]*))?$/i.exec(String(url || '').trim())
+  const match = /^peersky:\/\/shortcut\/([a-z0-9-]+)\/?(?:\?([^#]*))?$/i.exec(String(url || '').trim())
   if (!match) return null
   const name = match[1].toLowerCase()
   const query = match[2]

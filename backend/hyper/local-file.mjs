@@ -10,6 +10,9 @@ const PICKER_CACHE_DIRECTORIES = [
   'documentpicker',
   // A photo or video from the camera roll, or one just taken.
   'imagepicker',
+  // The clean copy of a photo sent in a chat, made without its location (see
+  // app/media/chat-picture-copies.ts).
+  'imagemanipulator',
   // Where a picked folder's contents are staged before upload.
   'peersky-upload'
 ]

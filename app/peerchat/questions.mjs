@@ -87,11 +87,11 @@ export const PEERCHAT_USAGE_QUESTIONS = [
   },
   {
     q: msg('Can people send anything they like?'),
-    a: msg('In groups, some things are blocked for everyone, with nothing to switch on. Nudity in pictures is refused before it’s sent and again when it arrives. Text is filtered for abuse, slurs and adult links, and a link that looks like a scam gets a warning.')
+    a: msg('In groups, some checks are always on. Pictures with nudity, violence or gore are refused before they’re sent, profile and group pictures included. A picture that looks explicit, violent or graphic when it arrives is hidden behind a warning. Links to adult sites are blocked. Text is also filtered for abuse and slurs, and whoever made the group can turn those two filters off. A link that looks like a scam gets a warning. All of this happens on your phone, and nothing about it is sent to us.')
   },
   {
     q: msg('Someone is bothering me. What can I do?'),
-    a: msg('Press and hold one of their messages, or open their profile, and tap Block. Everything they send disappears for you, in every chat, and they can’t message you directly. Report sends the people who build PeerChat an email about it, with the message you reported.')
+    a: msg('Press and hold one of their messages, or open their profile, and tap Block. Everything they send disappears for you, in every chat, and they can’t message you directly. Report sends the people who build PeerChat an email about it, with the message you reported. The email doesn’t let us into your chats, and we can’t delete anything. We can remove people only from P2P Republic, the room we run. In any other group, only whoever made it can do that.')
   },
   {
     q: msg('How do I delete my account?'),

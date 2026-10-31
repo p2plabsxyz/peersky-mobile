@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
+import { removeAllWebsiteData } from '../../app/browser-data.mjs'
 import {
   describeSiteData,
   filterSiteData,
@@ -69,6 +70,28 @@ test('Android expires each cookie for the site and the domains above it, and is 
   assert.match(pkg, /PeerSkyBrowserDataModule\(reactContext\)/)
   const plugin = await read('plugins/with-browser-downloads.js')
   assert.match(plugin, /'PeerSkyBrowserDataModule\.kt',\s+createBrowserDataModule\(packageName\)/)
+})
+
+test('Remove my data and a restore take every website\'s cookies and storage with them', async () => {
+  // Android clears them all at once.
+  const calls = []
+  await removeAllWebsiteData({ removeAllSites: async () => { calls.push('all') } })
+  assert.deepEqual(calls, ['all'])
+  // iOS lists every site but the app's own pages and removes each.
+  const removed = []
+  await removeAllWebsiteData({
+    listSites: async () => [{ name: 'wikipedia.org' }, { name: 'example.com' }, { name: '' }, null],
+    removeSites: async (names) => { removed.push(...names) }
+  })
+  assert.deepEqual(removed, ['wikipedia.org', 'example.com'])
+  assert.equal(await removeAllWebsiteData(undefined), null)
+
+  const module = await read('plugins/templates/PeerSkyBrowserDataModule.kt.template')
+  assert.match(module, /fun removeAllSites\(promise: Promise\) \{[\s\S]*?cookies\.removeAllCookies\([\s\S]*?WebStorage\.getInstance\(\)\.deleteAllData\(\)/)
+  // Only once the data itself is gone: a replace that failed changed nothing.
+  const linkDevice = await read('app/settings/LinkDevice.tsx')
+  const replace = linkDevice.slice(linkDevice.indexOf('const replaceData = useCallback'), linkDevice.indexOf('const commitRestore'))
+  assert.ok(replace.indexOf('removeAllWebsiteData(NativeModules.PeerSkyBrowserData)') > replace.indexOf('if (!response.ok) throw'))
 })
 
 test('Data Clearing leads to the list, and clearing there still keeps cookies', async () => {

@@ -63,7 +63,9 @@ module.exports = function withPeerChatBackground (config) {
       'PeerChatBackgroundModule.kt',
       'PeerChatBackgroundPackage.kt',
       'PeerChatBackgroundService.kt',
-      'PeerChatBootReceiver.kt'
+      'PeerChatBootReceiver.kt',
+      // The key chats and notes are locked with, in the same package.
+      'PeerSkyChatKeyModule.kt'
     ]) {
       const source = fs.readFileSync(path.join(TEMPLATE_DIRECTORY, `${filename}.template`), 'utf8')
         .replaceAll('__PACKAGE_NAME__', packageName)

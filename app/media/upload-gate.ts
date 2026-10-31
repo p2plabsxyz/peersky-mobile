@@ -10,6 +10,7 @@ import {
   MEDIA_UNSCANNED,
   screenUploadBatch
 } from './media-moderation.mjs'
+import { pickedPhotoName } from './picked-photo-name.mjs'
 import { t } from '../i18n/i18n.mjs'
 import { ensurePermission } from '../permission-prompt'
 
@@ -21,6 +22,9 @@ export type UploadAsset = {
   // inside a WebView instead, so that path carries base64 and no uri.
   uri: string
   base64?: string
+  // A file from a picked folder: where it sat in it, the folder's own name
+  // first ("Test Album/Trip 2026"). The drive keeps that layout.
+  folder?: string
 }
 
 export type UploadScanner = (asset: UploadAsset) => Promise<string>
@@ -184,13 +188,13 @@ const MAX_FOLDER_DEPTH = 5
 // cannot open at all.
 const STAGING_FOLDER = 'peersky-upload'
 
-function collectFiles (folder: Directory, depth: number, into: File[]) {
+function collectFiles (folder: Directory, depth: number, into: Array<{ file: File, folder: string }>, path: string) {
   if (depth > MAX_FOLDER_DEPTH || into.length >= MAX_FOLDER_FILES) return
   for (const entry of folder.list()) {
     if (into.length >= MAX_FOLDER_FILES) return
-    if (entry instanceof Directory) collectFiles(entry, depth + 1, into)
+    if (entry instanceof Directory) collectFiles(entry, depth + 1, into, path ? `${path}/${entry.name}` : entry.name)
     // A zero byte entry is nothing worth uploading and breaks the size guard.
-    else if ((entry.size ?? 0) > 0) into.push(entry)
+    else if ((entry.size ?? 0) > 0) into.push({ file: entry, folder: path })
   }
 }
 
@@ -211,8 +215,8 @@ export async function pickUploadFolder (): Promise<UploadAsset[]> {
     return []
   }
 
-  const found: File[] = []
-  collectFiles(folder, 0, found)
+  const found: Array<{ file: File, folder: string }> = []
+  collectFiles(folder, 0, found, folder.name || t('Folder'))
   if (found.length === 0) throw new Error(t('That folder has no files in it.'))
 
   const staging = new Directory(Paths.cache, STAGING_FOLDER)
@@ -220,7 +224,7 @@ export async function pickUploadFolder (): Promise<UploadAsset[]> {
   staging.create()
 
   const assets: UploadAsset[] = []
-  for (const [index, source] of found.entries()) {
+  for (const [index, { file: source, folder: place }] of found.entries()) {
     // Prefixed, so two files with the same name in different subfolders do not
     // overwrite each other on the way through.
     const name = source.name || `file-${index}`
@@ -239,7 +243,8 @@ export async function pickUploadFolder (): Promise<UploadAsset[]> {
       uri: target.uri,
       name,
       size: target.size ?? source.size ?? 0,
-      mimeType: ''
+      mimeType: '',
+      folder: place
     })
   }
 
@@ -333,8 +338,10 @@ async function pickFromPhotos (
     return {
       uri: file.uri,
       // The camera roll does not always hand over a name, and a photo with no
-      // name arrives in the room as "undefined".
-      name: asset.fileName || nameFromUri(file.uri, asset.mimeType),
+      // name arrives in the room as "undefined". On Android it hands over a
+      // number in place of one (see picked-photo-name.mjs).
+      name: pickedPhotoName(asset.fileName, { android: Platform.OS === 'android', video: asset.type === 'video' }) ||
+        nameFromUri(file.uri, asset.mimeType),
       size,
       mimeType: asset.mimeType || ''
     }

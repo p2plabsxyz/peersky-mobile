@@ -13,8 +13,12 @@ import { openSealedForBackup } from '../hyper/sealed-file.mjs'
 // early even when every frame before it authenticated.
 const MAX_HEADER_BYTES = 16 * 1024
 const READ_CHUNK_BYTES = 256 * 1024
-// Locked files are small lists and keys; anything bigger is not one.
-const MAX_SEALED_FILE_BYTES = 4 * 1024 * 1024
+// Locked files are lists and keys, PeerChat's file and P2PMD's copies of
+// notes, which can run to tens of megabytes; anything bigger is not one.
+const MAX_SEALED_FILE_BYTES = 64 * 1024 * 1024
+// How a locked file starts (hyper/sealed-file.mjs), so only one of them is
+// read whole to be unlocked.
+const SEALED_START = b4a.from('{"peersky-sealed":1')
 const ENTRY_TYPES = new Set(['about', 'dir', 'file', 'end'])
 
 export function createArchiveWriter (sink) {
@@ -65,7 +69,7 @@ export function createArchiveWriter (sink) {
         // A file locked with this phone's secure storage goes in unlocked:
         // the backup is encrypted itself, and the phone it is restored on has
         // a key of its own, which locks it again there (sealed-file.mjs).
-        if (size <= MAX_SEALED_FILE_BYTES && name.endsWith('.json')) {
+        if (size <= MAX_SEALED_FILE_BYTES && name.endsWith('.json') && startsSealed(fd)) {
           const unlocked = openSealedForBackup(readFileSync(filePath), name)
           if (unlocked) {
             await writeHeader({ type: 'file', name, size: unlocked.byteLength })
@@ -95,6 +99,11 @@ export function createArchiveWriter (sink) {
       ended = true
     }
   }
+}
+
+function startsSealed (fd) {
+  const start = b4a.alloc(SEALED_START.byteLength)
+  return readSync(fd, start, 0, start.byteLength, 0) === start.byteLength && b4a.equals(start, SEALED_START)
 }
 
 /**

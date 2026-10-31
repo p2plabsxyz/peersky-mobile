@@ -93,8 +93,7 @@ export async function deleteRegisteredP2pAppData (runtime, { appId } = {}) {
   for (const target of getDescriptorDrives(descriptor)) {
     const drive = await getExistingNamedDrive(runtime, target)
     if (!drive) continue
-    await deleteDriveStorage(drive)
-    deleted = true
+    if (await emptyDrive(drive)) deleted = true
   }
 
   return { ok: true, appId: descriptor.id, deleted }
@@ -237,33 +236,24 @@ export async function getExistingNamedDrive (runtime, { driveName, autoJoin = fa
   return runtime.getDrive(driveName, { autoJoin })
 }
 
-async function deleteDriveStorage (drive) {
-  const storage = drive?.corestore?.storage
-  if (!storage || !drive.core?.discoveryKey) {
-    await drive.purge()
-    return
-  }
-
+// Deletes every file and frees the file data this device holds, but keeps the
+// drive itself. Deleting its cores closed a drive the app still held open, so
+// the list right after failed with SESSION_CLOSED, and after a restart the
+// drive no longer opened as this device's own. Made again from nothing under
+// the same key, it would also clash with the copies peers and linked devices
+// hold. A drive this device cannot write is not its own and is left alone.
+async function emptyDrive (drive) {
   await drive.ready()
-  const discoveryKeys = [drive.core.discoveryKey]
-  if (drive.blobs?.core?.discoveryKey) discoveryKeys.push(drive.blobs.core.discoveryKey)
+  if (!drive.writable) return false
 
-  const storedCores = []
-  for await (const entry of storage.createCoreStream()) {
-    if (discoveryKeys.some((key) => bytesEqual(key, entry.discoveryKey))) {
-      storedCores.push(entry.core)
-    }
+  const names = []
+  for await (const entry of drive.list('/')) names.push(entry.key)
+  if (names.length > 0) {
+    const batch = drive.batch()
+    for (const name of names) await batch.del(name)
+    await batch.flush()
   }
-
-  await drive.close()
-  for (const storedCore of storedCores) await storage.deleteCore(storedCore)
-}
-
-function bytesEqual (left, right) {
-  if (!left || !right || left.byteLength !== right.byteLength) return false
-  for (let index = 0; index < left.byteLength; index += 1) {
-    if (left[index] !== right[index]) return false
-  }
+  await drive.clearAll()
   return true
 }
 

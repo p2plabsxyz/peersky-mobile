@@ -303,9 +303,17 @@ Hyperdrive uploads support three visibility modes:
 
 The private drive keys (`private-drive-key.json`, in the identity folder and in the synced private store), the desktop's list of private drive names (`privateHyperdrives.json`), the names and sizes of the files in your other devices' private drives (`device-sync.json`) and the Recent list (`hyperdrive-recents.json`, which names private uploads) are locked with a key the system keeps: the iOS Keychain, or encrypted under an Android Keystore key (`expo-secure-store`, `AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY`, `app/privacy/local-seal-key.ts`). The app hands that key to the backend as it starts (`Bare.argv[1]`), and both lock with the same NaCl secretbox (`backend/hyper/sealed-file.mjs`, `app/privacy/sealed-text.mjs`). A copy of those files taken off the phone shows nothing, and nobody is asked for anything. The key is in no backup and never leaves the phone.
 
-Files from an earlier version are locked at the first start after the update (`sealPrivateFilesAtRest`, at `RPC_HYPER_INIT`), and the Recent list the first time it is read. A locked key file that cannot be opened stops private drives rather than making a new key, which would lose every private drive. A backup or a Link Device transfer packs these files unlocked inside its own encryption (`backend/backup/backup-archive.mjs`), since the phone or desktop it goes to has a key of its own and locks them again there. When the system's secure storage cannot be used, the files stay as they were.
+Files from an earlier version are locked at the first start after the update (`sealPrivateFilesAtRest`, at `RPC_HYPER_INIT`), and the Recent list the first time it is read. A locked key file that cannot be opened stops private drives rather than making a new key, which would lose every private drive. The seal key itself is never made twice: the phone keeps a check made from it (`local-seal-key-check.json`, no key in it), and with that check, or a file that is locked, a key the system does not give back counts as missing (`app/privacy/local-seal-key-state.mjs`). Android's secure storage gives back nothing, and deletes what it held, when its Keystore key is gone or cannot open the value. With the key missing the app makes no new one, tells the backend (`Bare.argv[2]` is `missing`), and nothing the key locks is written, locked or in the open (`SEAL_KEY_MISSING` in `sealed-file.mjs`). Clear all P2P data removes the check with the files. A backup or a Link Device transfer packs these files unlocked inside its own encryption (`backend/backup/backup-archive.mjs`), since the phone or desktop it goes to has a key of its own and locks them again there. When the system's secure storage cannot be used, the files stay as they were.
 
 A file in **This device only** is not encrypted on the phone: that drive is opened with no key. It never leaves the phone, and the phone's own storage protection covers it.
+
+### Chats and notes on the phone
+
+A phone that was unlocked once since it started and is locked now is what forensic tools read, and the key above opens any time after that first unlock. So chats and notes are locked with a second key, one the system gives the app only while the phone is unlocked (`app/privacy/chat-seal-key.ts`): on iOS a Keychain item that is `WHEN_UNLOCKED_THIS_DEVICE_ONLY`, and on Android 32 random bytes kept in a file (`chat-seal-key.json`, in the folder Android never backs up) encrypted by an Android Keystore key with `setUnlockedDeviceRequired(true)` (`plugins/templates/PeerSkyChatKeyModule.kt.template`). Google says to rely on that only from Android 15: before it, removing the screen lock deleted such keys, and a face or a trusted watch unlocked the phone without unlocking them. Below Android 15 the Keystore key has no such condition, so there the key opens after the first unlock like the one above, and a phone that moves up to 15 has its key wrapped again by one that does. The key itself never changes.
+
+What it locks, each marked `"key":"chat"` in its file (`CHAT_SEAL` in `backend/hyper/sealed-file.mjs`): PeerChat's file and the chat screen's (see Storage and deletion in [peerchat.md](peerchat.md)), each room log's entries through a key inside PeerChat's file, P2PMD's copy of each note (`p2pmd-rooms/`, named by a hash of the note's key since a private note's key is what its host's keys are made from), the ports notes were open on (`p2pmd-ports.json`), the seeds of public notes made here (`p2pmd-public-notes.json`) and the recent notes (`p2pmd-room-history.json`). The app reads and writes its own two files through the backend (`RPC_PRIVATE_APP_FILE_READ` = 83 and `RPC_PRIVATE_APP_FILE_WRITE` = 84, `backend/hyper/private-app-files.mjs`), and never writes one before it has read it. What an earlier version left plain is locked when the key arrives (`sealChatFilesAtRest`), and P2PMD's old copies move to their new names.
+
+The app hands the key over as the backend starts (`Bare.argv[3]`), or says why there is none (`Bare.argv[4]`): `locked`, when Android started PeerSky with the phone locked, after which PeerChat and P2PMD wait (`waitForChatSealKey`) and the key comes at the unlock (`RPC_CHAT_SEAL_KEY` = 82, from the app in front or from the PeerChat service's task); `missing`, when a key was made here and can no longer be read, and nothing it locks is opened or written (`CHAT_KEY_MISSING`); or `unavailable`, on a phone whose secure storage cannot keep one, which keeps them plain as it always did. As with the key above, it is never made twice: the phone keeps `chat-seal-key-check.json` (a check made from the key, no key in it), and a read that fails for a reason the system does not give is tried again when the app is next in front, never a reason to make a new one (`app/privacy/chat-seal-key-state.mjs`). Once the backend has the key it keeps it, so PeerChat started with the phone unlocked goes on receiving while it is locked. Backups and Link Device pack these files unlocked inside their own encryption, the logs with their key, and Clear all P2P data removes the check with the files.
 
 ## Private files on your other devices
 
@@ -329,6 +337,12 @@ exactly the ones that can already open each other's private files.
   `HMAC-SHA256(HMAC-SHA256(key, "peersky-private-sync/1 proof key"), "peersky-private-sync/1 proof\n" + handshake hash + "\n" + its own network key)`.
   It is good on that connection alone and cannot be bounced back at its
   sender, the same construction as PeerChat's room proofs.
+- On the local network with hyperdht-mdns 2, the connection's key is made up
+  for that network, so each device first proves its own network key inside
+  the channel with `identityGate` (context `peersky-device-sync`, the private
+  key as the shared secret), and only to a device that holds the same key.
+  The proven key is the one the list of devices goes by. A sync channel the
+  other side opens before this side's gate has finished is held until it has.
 - Only after the other side's proof checks out does a device send its hello:
   `phone` or `desktop`, the private drives it writes (up to 200, a drive made
   under another key with that key), and on the phone whether it is on a
@@ -372,6 +386,26 @@ handshake hash `0e` x64 and sender `0d` x32 give the topic
 `e702b30ef6aaa58eb3694a8888c6ddeda12383813d5121dec0db65df9b9c3cc8` and the
 proof `8beb43aaede8fa35e6b0558e88ebeae7c1b3e809c00a68ec98e698fdae438c6c`.
 
+## Local network
+
+Each Hyper store that goes on the network, the public one and the private one
+shared with your devices, also runs a LAN instance
+(`backend/hyper/lan-discovery.mjs`, `@p2plabs/hyperdht-mdns`), so drives,
+PeerChat and P2PMD work over Wi-Fi with no internet. With hyperdht-mdns 2:
+
+- mDNS says only that a device is at this address and port, under a name made
+  up for the run. Topics are found through the LAN DHT, which talks to local
+  addresses only.
+- The LAN instance connects with a key made up for each network, never the
+  store's key, which is also the PeerChat id. PeerChat and private sync ask for
+  proof inside the channel (`identityGate`).
+- After a network change, instances bound to the old address are closed and
+  made again on the new one, with new keys, and what was joined is joined
+  again (`followNetworkChange`). With no address, as in airplane mode, nothing
+  changes until one comes back.
+- mDNS runs on `multicast-dns` over a Bare UDP socket
+  (`backend/hyper/mobile-mdns.mjs`).
+
 ## Developer notes
 
 Hyperdrive opens its core exclusively, so a second open of one drive waits for
@@ -383,6 +417,19 @@ picture sent earlier), so an open by name first reads the drive's key from a
 session on its core that takes no lock, and shares the open of that key. Before
 that, an upload after a restart could wait forever, and every upload after it
 queued behind.
+
+**Delete** next to an app in P2P Data empties that app's drives in place:
+every file in them is deleted and the file data this phone holds is freed,
+while each drive keeps its address and stays this phone's to write. Peers and
+your other devices see the files go when they next sync, and a copy one of
+them already saved stays with it. Delete used to remove the drives' cores,
+which closed a drive the app still held open, so the list right after failed
+with SESSION_CLOSED, and left the drive's name pointing at nothing, so after a
+restart the drive no longer opened as this phone's own. Made again under the
+same key, it would clash with the copies others hold, and hypercore freezes a
+core it finds two histories for. A drive this phone cannot write is not its
+own and is left alone (`backend/hyper/storage-core.mjs`).
+
 **Clear all P2P data** is broader than **Remove offline**. It closes active P2P
 runtimes and removes local Hyper and PeerChat data from the device, and this
 device's identity with it, the way the desktop's Reset P2P data starts it over

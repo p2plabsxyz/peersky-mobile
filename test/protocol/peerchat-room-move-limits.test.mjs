@@ -6,6 +6,7 @@ import path from 'node:path'
 import test from 'node:test'
 import crypto from 'hypercore-crypto'
 
+import { roomLogName } from '../../backend/peerchat/room-log.mjs'
 import { PeerChatService } from '../../backend/peerchat/service.mjs'
 import { derivePeerChatTopic, encryptPeerChatMessage } from '../../backend/peerchat/protocol.mjs'
 import { newKeyChain } from '../../backend/peerchat/key-chain.mjs'
@@ -213,7 +214,7 @@ function createFakeSdk () {
   const joined = []
   const left = []
   const feed = (roomKey) => {
-    const name = `chat-${roomKey}`
+    const name = roomLogName(roomKey)
     if (!feeds.has(name)) feeds.set(name, new FakeFeed())
     return feeds.get(name)
   }

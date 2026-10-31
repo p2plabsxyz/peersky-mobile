@@ -39,3 +39,21 @@ export function clearWebsiteData ({ platform, browserData, webViews }) {
   }
   return cleared
 }
+
+/**
+ * Every website's cookies and storage, for Remove my data and a restore, so
+ * whoever uses the phone next is not signed in as the last person. Android
+ * keeps no list of its sites and clears them all at once. iOS lists every
+ * site but the app's own loopback pages, and removes each with all it holds.
+ *
+ * @returns what the platform said, or null when there was nothing to do it with.
+ */
+export async function removeAllWebsiteData (browserData) {
+  if (typeof browserData?.removeAllSites === 'function') return browserData.removeAllSites()
+  if (typeof browserData?.listSites !== 'function' || typeof browserData?.removeSites !== 'function') return null
+  const sites = await browserData.listSites([])
+  const names = (Array.isArray(sites) ? sites : [])
+    .map((site) => site?.name)
+    .filter((name) => typeof name === 'string' && name.length > 0)
+  return browserData.removeSites(names)
+}

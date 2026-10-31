@@ -1,21 +1,17 @@
-import {
-  mkdirSync,
-  readFileSync,
-  renameSync,
-  statSync,
-  unlinkSync,
-  writeFileSync
-} from 'node:fs'
+import { readFileSync, statSync } from 'node:fs'
 import { randomBytes } from 'node:crypto'
 import b4a from 'b4a'
 import { getHyperStoragePath } from '../hyper/runtime.mjs'
+import { CHAT_SEAL, openJson, writeSealedJson } from '../hyper/sealed-file.mjs'
 
 // A public note's key is its host's public key, and hosting from that key
 // makes a different note. Only the seed the note came from hosts it again, so
 // this phone keeps the seeds of the public notes it made, and nothing else
 // ever reads them: Link Device sends a note's key, name and text, never this.
-const FILE_NAME = 'p2pmd-public-notes.json'
-const MAX_FILE_BYTES = 64 * 1024
+// Locked with the chat key (hyper/sealed-file.mjs).
+export const PUBLIC_NOTES_FILE = 'p2pmd-public-notes.json'
+const FILE_NAME = PUBLIC_NOTES_FILE
+const MAX_FILE_BYTES = 128 * 1024
 // The recent list keeps thirty notes, and opening one counts as using it, so
 // every public note on the list is among the last thirty used.
 const MAX_PUBLIC_NOTES = 30
@@ -45,15 +41,10 @@ export function rememberPublicNoteSeed (noteKey, seed, storagePath = getHyperSto
       .slice(0, MAX_PUBLIC_NOTES)
   )
 
-  const filePath = getFilePath(storagePath)
-  const temporaryPath = `${filePath}.tmp`
   try {
-    mkdirSync(storagePath, { recursive: true })
-    writeFileSync(temporaryPath, JSON.stringify({ version: 1, notes: kept }))
-    renameSync(temporaryPath, filePath)
+    writeSealedJson(getFilePath(storagePath), { version: 1, notes: kept }, { seal: CHAT_SEAL })
     return true
   } catch (error) {
-    try { unlinkSync(temporaryPath) } catch {}
     console.error('[p2pmd] Unable to keep a public note on this phone:', error)
     return false
   }
@@ -67,7 +58,7 @@ function readNotes (storagePath) {
     const size = Number(statSync(filePath).size)
     if (!Number.isSafeInteger(size) || size < 1 || size > MAX_FILE_BYTES) return {}
 
-    const parsed = JSON.parse(readFileSync(filePath, 'utf8'))
+    const parsed = openJson(readFileSync(filePath, 'utf8'), filePath).value
     if (parsed?.version !== 1 || !parsed.notes || typeof parsed.notes !== 'object' || Array.isArray(parsed.notes)) {
       return {}
     }

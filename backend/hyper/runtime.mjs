@@ -8,6 +8,7 @@ import { create as createSDK } from 'hyper-sdk'
 import {
   getLANDiscoveryStatus,
   attachPrivateLANDiscovery,
+  followNetworkChange,
   resetLANDiscovery,
   startLANDiscovery
 } from './lan-discovery.mjs'
@@ -594,7 +595,14 @@ export function ensureLANDiscovery () {
 
 export function refreshHyperNetworking () {
   if (!networkRefresh) {
-    networkRefresh = withHyperRuntimeOperation(refreshHyperRuntimeNetwork)
+    networkRefresh = withHyperRuntimeOperation(async (runtime) => {
+      // On a new network the LAN instances are made again on its address.
+      // Never fatal: the internet refresh goes on regardless.
+      await followNetworkChange(runtime).catch((error) => {
+        console.warn('[LAN] Could not follow the network change:', error?.message || error)
+      })
+      return refreshHyperRuntimeNetwork(runtime)
+    })
       .finally(() => { networkRefresh = null })
   }
   return networkRefresh

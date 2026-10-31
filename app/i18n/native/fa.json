@@ -12,6 +12,9 @@
   },
   "android": {
     "peerchat_background_text": "در حال حفظ اتصال تا پیام‌ها به شما برسند",
+    "peerchat_background_connecting": "در حال اتصال...",
+    "peerchat_background_offline": "آفلاین. برای اتصال دوباره ضربه بزنید",
+    "peerchat_background_locked": "با باز کردن قفل گوشی وصل می‌شود",
     "peerchat_background_channel": "اتصال پس‌زمینه PeerChat",
     "peerchat_background_channel_description": "اتصال PeerChat را تا وقتی PeerSky در پس‌زمینه است برقرار نگه می‌دارد"
   }

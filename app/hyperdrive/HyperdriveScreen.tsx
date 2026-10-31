@@ -61,6 +61,9 @@ type RecentFilter = 'all' | RecentSource
 type UploadVisibility = 'public' | 'private' | 'device'
 type UploadSource = 'files' | 'folder'
 
+const IOS_ALERT_CLOSE_MS = 400
+const IOS_SHEET_CLOSE_FALLBACK_MS = 1000
+
 type HyperdriveItem = {
   type: 'directory' | 'file'
   name: string
@@ -142,6 +145,22 @@ export function HyperdriveScreen ({ deviceSyncRevision = 0, offlineNetworkAllowe
   // The last upload that can be shared, with where it went, so the sheet can
   // say who is able to open it.
   const [sharedUpload, setSharedUpload] = useState<{ item: HyperdriveItem, visibility: UploadVisibility, count: number } | null>(null)
+  // iOS shows no share sheet over a sheet or an alert that is still closing:
+  // Open it did nothing. An upload opened from one waits until it is gone.
+  const openAfterSheet = useRef<HyperdriveItem | null>(null)
+  function openOnceClosed (item: HyperdriveItem, fromSheet = false) {
+    if (Platform.OS !== 'ios') {
+      onOpenItem(item)
+      return
+    }
+    if (fromSheet) openAfterSheet.current = item
+    // The sheet says when it has closed (onDismiss); this is in case it never does.
+    setTimeout(() => {
+      if (fromSheet && openAfterSheet.current !== item) return
+      openAfterSheet.current = null
+      onOpenItem(item)
+    }, fromSheet ? IOS_SHEET_CLOSE_FALLBACK_MS : IOS_ALERT_CLOSE_MS)
+  }
   const [offlineItem, setOfflineItem] = useState<HyperOfflineItem | null>(null)
   const [offlineBusy, setOfflineBusy] = useState(false)
   const [offlineChecking, setOfflineChecking] = useState(false)
@@ -375,6 +394,8 @@ export function HyperdriveScreen ({ deviceSyncRevision = 0, offlineNetworkAllowe
     setBusyAction('upload')
     try {
       let lastItem = null
+      // A folder gets its own link, which opens it whole.
+      let folderItem: HyperdriveItem | null = null
       for (const [index, asset] of assets.entries()) {
         // A folder can carry fifty files. Without this the spinner is
         // indistinguishable from the app having hung.
@@ -386,6 +407,7 @@ export function HyperdriveScreen ({ deviceSyncRevision = 0, offlineNetworkAllowe
         try {
           response = await onCallRpc(RPC_HYPER_LIBRARY_UPLOAD, {
             name: asset.name,
+            ...(asset.folder ? { folder: asset.folder } : {}),
             fileUri: asset.uri,
             byteLength: asset.size,
             visibility,
@@ -397,8 +419,15 @@ export function HyperdriveScreen ({ deviceSyncRevision = 0, offlineNetworkAllowe
         if (!response.ok || !response.item) throw new Error(response.error || t('Upload failed.'))
         lastItem = { ...response.item, localUri: asset.uri }
         remember(lastItem, 'uploaded')
+        if (!folderItem && asset.folder && typeof response.folderUrl === 'string') {
+          folderItem = { type: 'directory', name: asset.folder.split('/')[0], url: response.folderUrl, visibility }
+        }
       }
       if (!lastItem) return
+      if (folderItem) {
+        remember(folderItem, 'uploaded')
+        lastItem = folderItem
+      }
 
       onStatus(assets.length === 1
         ? t('Uploaded {name}', { name: lastItem.name })
@@ -409,7 +438,7 @@ export function HyperdriveScreen ({ deviceSyncRevision = 0, offlineNetworkAllowe
         const openItem = lastItem
         Alert.alert(t('Saved on this phone'), getUploadSuccessMessage(visibility, lastItem), [
           { text: t('Done') },
-          { text: t('Open'), onPress: () => onOpenItem(openItem) }
+          { text: t('Open'), onPress: () => openOnceClosed(openItem) }
         ])
       } else {
         setSharedUpload({ item: lastItem, visibility, count: assets.length })
@@ -787,6 +816,11 @@ export function HyperdriveScreen ({ deviceSyncRevision = 0, offlineNetworkAllowe
         onOpen={() => {
           const item = sharedUpload?.item
           setSharedUpload(null)
+          if (item) openOnceClosed(item, true)
+        }}
+        onDismiss={() => {
+          const item = openAfterSheet.current
+          openAfterSheet.current = null
           if (item) onOpenItem(item)
         }}
       />

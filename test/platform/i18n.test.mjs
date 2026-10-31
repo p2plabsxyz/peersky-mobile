@@ -241,13 +241,21 @@ test('the first screen is in the language picked, and a switch reaches every scr
   assert.match(apply, /I18nManager\.allowRTL\(true\)\n {4}I18nManager\.forceRTL\(false\)/)
 })
 
-test('Settings has a Language page listing each language under its own name', () => {
+// The last part of General, after Tabs, where it sits best: a page of its
+// own in Settings was one more place to look.
+test('General ends with the languages, each under its own name', () => {
   const screen = read('app/settings/SettingsScreen.tsx')
-  assert.match(screen, /id: 'language',\n {4}title: (?:msg\()?'Language'/)
-  assert.match(screen, /page === 'language' && \(\n {10}<LanguageSettings language=\{props\.language\} onLanguageChange=\{props\.onLanguageChange\} \/>/)
-  const page = read('app/settings/Language.tsx')
-  assert.match(page, /\{ id: SYSTEM_LANGUAGE, title: t\('Phone language'\)/)
-  assert.match(page, /title: entry\.native/)
+  assert.doesNotMatch(screen, /id: 'language'/)
+  assert.match(screen, /id: 'general',\n {4}title: msg\('General'\),\n {4}description: msg\('Search, tabs and language'\)/)
+  assert.match(screen, /page === 'general' && <General \{\.\.\.props\} \/>/)
+  const general = read('app/settings/General.tsx')
+  const tabs = general.indexOf("<SettingsSection title={t('Tabs')}>")
+  const languages = general.indexOf('<LanguageSection language={language} onLanguageChange={onLanguageChange} />')
+  assert.ok(tabs > -1 && languages > tabs, 'after Tabs')
+  assert.equal(general.indexOf('<SettingsSection', languages), -1, 'and nothing after it')
+  const section = read('app/settings/Language.tsx')
+  assert.match(section, /\{ id: SYSTEM_LANGUAGE, title: t\('Phone language'\)/)
+  assert.match(section, /title: entry\.native/)
 })
 
 // Given no buttons, an alert gets the phone's own OK, in the phone's language

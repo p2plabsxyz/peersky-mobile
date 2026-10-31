@@ -2,9 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
-  BackHandler,
   Clipboard,
-  Platform,
   Pressable,
   StyleSheet,
   Switch,
@@ -18,7 +16,6 @@ import {
   RPC_HYPER_OFFLINE_REMOVE,
   RPC_HYPER_OFFLINE_RESUME,
   RPC_HYPER_STORAGE_CLEAR_CACHE,
-  RPC_HYPER_STORAGE_CLEAR_ALL,
   RPC_HYPER_STORAGE_DELETE_APP,
   RPC_HYPER_STORAGE_LIST
 } from '../../backend/rpc/commands.mjs'
@@ -29,7 +26,7 @@ import CopyIcon from '../../assets/icons/bootstrap/copy.svg'
 import { clearHyperdriveRecents } from '../hyperdrive/recents-store'
 import { viewerUrlFor } from '../hyperdrive/viewer-route.mjs'
 import { msg, t, tKey, tp } from '../i18n/i18n.mjs'
-import { clearChatFileCopies } from '../peerchat/media-save'
+import { clearAllP2PData } from './clear-all-p2p-data'
 import { SettingsSection, useSettingsDarkMode } from './SettingsUI'
 
 type P2pAppData = {
@@ -391,11 +388,9 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
     )
   }
 
-  // The same steps as Remove my data from this phone (LinkDevice.tsx). The
-  // restart screen goes up before anything is removed, since what is on screen
-  // belongs to the identity going, and PeerChat writes what it holds as it
-  // closes. It stays until PeerSky starts again. A clear that stops part way
-  // is finished by the backend as it starts.
+  // The steps themselves are shared with the lock screen button
+  // (clear-all-p2p-data.ts). Nothing here is updated after: the restart
+  // screen has replaced it by then.
   async function clearAllData () {
     if (activeActionRef.current) return
     activeActionRef.current = 'all'
@@ -405,24 +400,7 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
 
     // Time for the dialog to close before the screens under it go.
     await new Promise((resolve) => setTimeout(resolve, 450))
-    onRestartRequired()
-    await new Promise((resolve) => setTimeout(resolve, 300))
-    clearChatFileCopies()
-    try {
-      const response = await onCallRpc(RPC_HYPER_STORAGE_CLEAR_ALL)
-      if (!response.ok || !response.cleared) throw new Error(response.error || t('Unable to clear P2P data.'))
-      if (response.warning) {
-        Alert.alert(t('P2P data cleared'), t('{message}\n\nClose PeerSky and open it again to finish.', { message: response.warning }), [{ text: t('OK') }])
-        return
-      }
-      if (Platform.OS === 'android') BackHandler.exitApp()
-    } catch (clearError) {
-      Alert.alert(
-        t('P2P data was not all cleared'),
-        t('{message}\n\nClose PeerSky and open it again to finish.', { message: clearError instanceof Error ? clearError.message : String(clearError) }),
-        [{ text: t('OK') }]
-      )
-    }
+    await clearAllP2PData({ onCallRpc, onRestartRequired })
   }
 
   async function refreshArchive () {

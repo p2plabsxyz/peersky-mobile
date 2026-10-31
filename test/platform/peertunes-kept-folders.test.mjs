@@ -176,7 +176,8 @@ test('deleting app data in P2P Data clears the lists that pointed at it', async 
   // Clear all P2P data asks for a fresh start, and the backend takes these
   // lists with everything else, so they are gone when PeerSky opens again.
   const clearAll = storage.slice(storage.indexOf('async function clearAllData'), storage.indexOf('async function refreshArchive'))
-  assert.match(clearAll, /onRestartRequired\(\)/)
+  assert.match(clearAll, /clearAllP2PData\(\{ onCallRpc, onRestartRequired \}\)/)
+  assert.match(await read('app/settings/clear-all-p2p-data.ts'), /onRestartRequired\(\)/)
   const reset = await read('backend/hyper/p2p-reset.mjs')
   for (const list of ['\'p2pmd-room-history.json\'', '\'hyperdrive-recents.json\'', '\'-offline.json\'']) {
     assert.ok(reset.includes(list), list)

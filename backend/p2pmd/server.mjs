@@ -17,6 +17,7 @@ import {
 import { P2PMD_LOOPBACK_HOST } from './constants.mjs'
 import { createPeerActivityStore, createPeerPresenceStore } from './peers.mjs'
 import { hasSlideBreaks } from './preview.mjs'
+import { lineChangesFromDelta, newerLineAuthor, shiftLineAuthors } from './line-authors.mjs'
 import ieeeBrowserScript from './ieee-runtime.mjs'
 import katexCss from './katex-runtime.mjs'
 import { P2PMD_SCIENTIFIC_STYLES } from './scientific.mjs'
@@ -612,13 +613,7 @@ function getActivePeerKeys () {
 }
 
 function readPeerFromEventRequest (req) {
-  let params
-  try {
-    params = new URL(req.url || '/events', 'http://127.0.0.1').searchParams
-  } catch {
-    params = new URLSearchParams()
-  }
-
+  const params = readQueryParams(req.url)
   const latexMode = params.get('latexModeEnabled')
 
   return {
@@ -704,6 +699,28 @@ function readJsonBody (req) {
   })
 }
 
+// The page sends its name as a form query, where a space is a +. The URL in
+// the phone's runtime left the + in, and "Test Sparrow" joined as
+// "Test+Sparrow". The query is read here as a form is.
+export function readQueryParams (rawUrl) {
+  const params = new Map()
+  const query = String(rawUrl || '').split('#')[0]
+  const start = query.indexOf('?')
+  if (start === -1) return params
+
+  for (const field of query.slice(start + 1).split('&')) {
+    if (!field) continue
+    const sequence = field.replace(/[+]/g, ' ')
+    const split = sequence.indexOf('=')
+    try {
+      const name = decodeURIComponent(split === -1 ? sequence : sequence.slice(0, split))
+      const value = split === -1 ? '' : decodeURIComponent(sequence.slice(split + 1))
+      if (!params.has(name)) params.set(name, value)
+    } catch {}
+  }
+  return params
+}
+
 function createHttpError (statusCode, message) {
   const error = new Error(message)
   error.statusCode = statusCode
@@ -734,6 +751,10 @@ export function getP2pmdEditorPage () {
   // The page runs the very same function the renderer splits with, rather
   // than its own copy of the rule. They drifted apart once already.
   const embeddedSlideBreakCheck = hasSlideBreaks.toString().replace(/<\/script/gi, '<\\/script')
+  const embeddedLineAuthors = [lineChangesFromDelta, shiftLineAuthors, newerLineAuthor]
+    .map((fn) => fn.toString())
+    .join('\n\n')
+    .replace(/<\/script/gi, '<\\/script')
   const serializedSlidesTemplate = JSON.stringify(P2PMD_SLIDES_TEMPLATE).replace(/</g, '\\u003c')
   const serializedFunNameWords = JSON.stringify([FUN_PEER_NAME_ADJECTIVES, FUN_PEER_NAME_ANIMALS]).replace(/</g, '\\u003c')
   const embeddedIeeeBrowserScript = ieeeBrowserScript.replace(/<\/script/gi, '<\\/script')
@@ -780,6 +801,7 @@ export function getP2pmdEditorPage () {
         --local-ink: #b8a95a;
         --remote: #59a6ff;
         --remote-ink: #6aa5ea;
+        --on-peer: #ffffff;
 
         --badge-host-bg: #1d6045;
         --badge-host-ink: #d4f8e8;
@@ -851,6 +873,7 @@ export function getP2pmdEditorPage () {
           --local-ink: #8a6d1f;
           --remote: #1f6fd1;
           --remote-ink: #1a5fb4;
+          --on-peer: #ffffff;
 
           --badge-host-bg: #d4f8e8;
           --badge-host-ink: #12503a;
@@ -895,6 +918,7 @@ export function getP2pmdEditorPage () {
         --local-ink: #8a6d1f;
         --remote: #1f6fd1;
         --remote-ink: #1a5fb4;
+        --on-peer: #ffffff;
 
         --badge-host-bg: #d4f8e8;
         --badge-host-ink: #12503a;
@@ -989,6 +1013,51 @@ export function getP2pmdEditorPage () {
         border-right-color: var(--remote);
         color: var(--remote-ink);
         font-weight: 700;
+      }
+      /* Everyone else's caret, drawn over the editor in the same grid cell. */
+      .editor-frame > #line-gutter-wrap { grid-column: 1; grid-row: 1; }
+      .editor-frame > textarea { grid-column: 2; grid-row: 1; }
+      #peer-carets {
+        position: relative;
+        grid-column: 2;
+        grid-row: 1;
+        min-width: 0;
+        min-height: 0;
+        overflow: hidden;
+        pointer-events: none;
+      }
+      .peer-caret {
+        position: absolute;
+        width: 3px;
+        margin-left: -1px;
+        border-radius: 2px;
+        background: var(--peer-color);
+        transition: opacity .35s ease;
+      }
+      .peer-caret.idle { opacity: .55; }
+      .peer-caret::after {
+        content: attr(data-name);
+        position: absolute;
+        bottom: calc(100% + 2px);
+        left: 0;
+        max-width: 160px;
+        overflow: hidden;
+        padding: 1px 5px;
+        border-radius: 4px;
+        background: var(--peer-color);
+        color: var(--on-peer);
+        font: 700 11px/15px -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .peer-caret.name-below::after { top: calc(100% + 2px); bottom: auto; }
+      #caret-measure {
+        position: fixed;
+        top: 0;
+        left: 0;
+        visibility: hidden;
+        pointer-events: none;
+        white-space: pre;
       }
       textarea {
         box-sizing: border-box;
@@ -1363,7 +1432,9 @@ export function getP2pmdEditorPage () {
         border-radius: 10px;
         background: var(--page);
         color: var(--ink);
-        font: 15px/1 var(--ui-font);
+        /* 16px: the iPhone zooms the page in on a smaller field when it
+           gets the caret, and the note stayed zoomed after a rename. */
+        font: 16px/1 var(--ui-font);
       }
       #peer-display-name-save {
         min-width: 72px;
@@ -1489,6 +1560,11 @@ export function getP2pmdEditorPage () {
       @media (prefers-reduced-motion: reduce) {
         #slides-preview .slide { animation: none; }
         #slides-progress-value { transition: none; }
+      }
+      body.host-away #keyboard-toolbar,
+      body.host-away #formatting-toolbar {
+        opacity: 0.45;
+        pointer-events: none;
       }
       #formatting-toolbar {
         display: flex;
@@ -1683,7 +1759,9 @@ export function getP2pmdEditorPage () {
           <div id="line-gutter-wrap" aria-hidden="true">
             <div id="line-gutter"></div>
           </div>
-          <textarea id="document-input" aria-label="Markdown document" placeholder="Write Markdown here..." wrap="off"></textarea>
+          <textarea id="document-input" aria-label="Markdown document" placeholder="Write Markdown here..." wrap="off" spellcheck="false"></textarea>
+          <div id="peer-carets" aria-hidden="true"></div>
+          <span id="caret-measure" aria-hidden="true"></span>
         </div>
         <article id="preview" aria-label="Markdown preview" hidden></article>
         <section id="slides-preview" aria-label="Presentation slides" hidden>
@@ -1747,6 +1825,8 @@ export function getP2pmdEditorPage () {
       const templateMenu = document.getElementById('template-menu')
       const imageUploadInput = document.getElementById('image-upload-input')
       const lineGutter = document.getElementById('line-gutter')
+      const peerCarets = document.getElementById('peer-carets')
+      const caretMeasure = document.getElementById('caret-measure')
       const peerDashboardBackdrop = document.getElementById('peer-dashboard-backdrop')
       const peerDashboardClose = document.getElementById('peer-dashboard-close')
       const peerDashboardRole = document.getElementById('peer-dashboard-role')
@@ -1763,6 +1843,9 @@ export function getP2pmdEditorPage () {
       const ACTIVE_VIEW_RENDER_DELAY_MS = 120
       const INITIAL_ROOM_RETRY_ATTEMPTS = 20
       const INITIAL_ROOM_RETRY_DELAY_MS = 750
+      // The app says the host is away only once it has been for this long, so
+      // a connection that drops and comes straight back shows nothing.
+      const HOST_AWAY_NOTICE_MS = 3000
       const MAX_PENDING_UPDATE_BYTES = 2 * 1024 * 1024
       const Y_ORIGIN_REMOTE = 'remote-sse'
       const Y_ORIGIN_LOCAL_INPUT = 'local-input'
@@ -1773,6 +1856,12 @@ export function getP2pmdEditorPage () {
       const MAX_PEER_ACTIVITY_ITEMS = 150
       const MAX_PEER_DASHBOARD_ITEMS = 100
       const PEER_TYPING_IDLE_MS = ${EDIT_ACTIVITY_DEBOUNCE_MS}
+      // How long the caret rests before where it is goes out, as on the desktop.
+      const PRESENCE_SEND_DELAY_MS = 220
+      // The height of a name above a caret. On the first line there is no room,
+      // and the name goes under it.
+      const PEER_CARET_NAME_ROOM = 18
+      const CARET_FONT_PROPERTIES = ['font-family', 'font-size', 'font-style', 'font-weight', 'letter-spacing', 'tab-size']
       const templates = ${serializedTemplates}
       const slidesTemplate = ${serializedSlidesTemplate}
       const FUN_NAME_WORDS = ${serializedFunNameWords}
@@ -1819,8 +1908,20 @@ export function getP2pmdEditorPage () {
       let lastSyncedContent = ''
       let lastInputContent = ''
       let ytextSnapshot = ''
+      // What the gutter shows: each line's newest author, from this person's
+      // own lines, everyone else's from the people list, and the host's record
+      // of the note, which keeps people who left.
       let lineAttributions = {}
+      // This person's own lines, kept here and moved with every change. They
+      // used to be read back out of the gutter, so a line stayed theirs after
+      // someone else rewrote it, and stayed on its old number when someone
+      // else added lines above it.
       let localLineAttributions = {}
+      let documentLineAttributions = {}
+      const peerLineAttributionsByClient = new Map()
+      // A reopened note has no own lines here yet. The host's record of them
+      // is taken once, the first time it comes.
+      let ownLinesTaken = false
       let latestPeerList = []
       let peerActivityLog = []
       let peerActivityLoadError = ''
@@ -1834,6 +1935,15 @@ export function getP2pmdEditorPage () {
       const CLIENT_ID_KEY = 'p2pmd-mobile-client-id'
       const clientId = getClientId()
       const roomRole = getRoomRole()
+      // A guest writes only while the host is there. The host holds the note,
+      // and what a guest typed without it reached nobody: it was gone when the
+      // host came back. So a guest's note is read only until the host's copy
+      // is here and the room is live, and again whenever the host goes.
+      let hostReachable = roomRole === 'host'
+      let seededFromHost = roomRole === 'host'
+      let seedingFromHost = false
+      let hostAway = false
+      let hostAwayTimer = null
       let latexModeEnabled = roomRole === 'host' && loadPersistedLatexMode()
       let hasSyncedHostLatexMode = false
       const localAuthor = {
@@ -1891,6 +2001,56 @@ export function getP2pmdEditorPage () {
         }
 
         throw lastError || new Error('Room request failed')
+      }
+
+      function canEdit() {
+        return roomRole === 'host' || (hostReachable && seededFromHost)
+      }
+
+      function updateEditable() {
+        const editable = canEdit()
+        input.readOnly = !editable
+        document.body.classList.toggle('host-away', !editable)
+      }
+
+      function setHostAway(away) {
+        if (roomRole === 'host') return
+        if (!away) {
+          if (hostAwayTimer) {
+            clearTimeout(hostAwayTimer)
+            hostAwayTimer = null
+          }
+          if (!hostAway) return
+          hostAway = false
+          notifyNative('p2pmd-host-away', { away: false })
+          return
+        }
+        // The events stream is tried again every 1.2 s while the host is
+        // gone, and each failure lands here. Starting the wait over each time
+        // meant the three seconds never ran out and the note never showed.
+        if (hostAway || hostAwayTimer) return
+        hostAwayTimer = setTimeout(() => {
+          hostAwayTimer = null
+          if (hostAway || canEdit()) return
+          hostAway = true
+          notifyNative('p2pmd-host-away', { away: true })
+        }, HOST_AWAY_NOTICE_MS)
+      }
+
+      // The host's copy, taken whole, for a guest that has none yet or whose
+      // copy no longer shares a history with the host's. A guest cannot write
+      // without the host, so there is nothing of its own to keep.
+      async function seedFromHost() {
+        if (seedingFromHost || roomRole === 'host') return
+        seedingFromHost = true
+        try {
+          pendingUpdate = null
+          await initializeYjs()
+        } finally {
+          seedingFromHost = false
+        }
+        updateEditable()
+        if (canEdit()) setHostAway(false)
       }
 
       // yjs ships inside this page. It used to come from the room, which ran
@@ -2278,6 +2438,12 @@ export function getP2pmdEditorPage () {
           })
           if (!response.ok) throw new Error('Unable to update username')
           localAuthor.name = nextName
+          for (const line of Object.keys(localLineAttributions)) {
+            localLineAttributions[line] = { ...localLineAttributions[line], name: nextName }
+          }
+          rebuildLineAttributions()
+          renderLineGutter()
+          schedulePresenceSend(true)
           persistPeerDisplayName(nextName)
           latestPeerList = latestPeerList.map((peer) => {
             return peer?.clientId === clientId ? { ...peer, name: nextName } : peer
@@ -2285,7 +2451,7 @@ export function getP2pmdEditorPage () {
           renderPeerDashboard()
 
           try {
-            await requestNativeBridge('peer-profile', { name: nextName })
+            await callNativeBridge('peer-profile', { name: nextName })
             peerProfileHint.textContent = 'Saved'
           } catch {
             peerProfileHint.textContent = 'Updated for this room, but could not save for future rooms.'
@@ -2354,6 +2520,96 @@ export function getP2pmdEditorPage () {
         }
 
         request.resolve(result)
+      }
+
+      // Everyone else's caret, with their name, over the editor, as the desktop
+      // draws them. The editor does not wrap lines, so a caret's line gives
+      // its height, and the text before it on that line how far along it is.
+      let peerCaretsFrame = 0
+      function schedulePeerCarets() {
+        if (peerCaretsFrame || !peerCarets) return
+        peerCaretsFrame = requestAnimationFrame(() => {
+          peerCaretsFrame = 0
+          renderPeerCarets()
+        })
+      }
+
+      function renderPeerCarets() {
+        const peers = viewMode === 'edit' && input.clientWidth > 0
+          ? latestPeerList.filter((peer) => peer && peer.clientId && peer.clientId !== clientId && Number(peer.cursorLine) >= 1)
+          : []
+        if (peers.length === 0) {
+          peerCarets.replaceChildren()
+          return
+        }
+
+        const style = getComputedStyle(input)
+        const lineHeight = parseFloat(style.lineHeight) || 20
+        const paddingTop = parseFloat(style.paddingTop) || 0
+        const paddingLeft = parseFloat(style.paddingLeft) || 0
+        for (const property of CARET_FONT_PROPERTIES) {
+          caretMeasure.style.setProperty(property, style.getPropertyValue(property))
+        }
+        const lines = input.value.split(newline)
+        const fragment = document.createDocumentFragment()
+        for (const peer of peers) {
+          const lineIndex = Math.min(Math.floor(Number(peer.cursorLine)), lines.length) - 1
+          const text = lines[lineIndex] || ''
+          const column = Math.max(1, Math.min(Math.floor(Number(peer.cursorColumn)) || 1, text.length + 1))
+          caretMeasure.textContent = text.slice(0, column - 1)
+          const top = paddingTop + lineIndex * lineHeight - input.scrollTop
+          const left = paddingLeft + caretMeasure.getBoundingClientRect().width - input.scrollLeft
+          if (top + lineHeight < 0 || top > input.clientHeight || left < 0 || left > input.clientWidth) continue
+
+          const caret = document.createElement('div')
+          caret.className = 'peer-caret' +
+            (peer.isTyping === false ? ' idle' : '') +
+            (top < PEER_CARET_NAME_ROOM ? ' name-below' : '')
+          caret.style.top = top + 'px'
+          caret.style.left = left + 'px'
+          caret.style.height = lineHeight + 'px'
+          caret.style.setProperty('--peer-color', peerCaretColor(peer))
+          caret.dataset.name = normalizeDisplayName(peer.name) || 'Peer'
+          fragment.appendChild(caret)
+        }
+        caretMeasure.textContent = ''
+        peerCarets.replaceChildren(fragment)
+      }
+
+      // A colour is whatever the person's editor says it is, so only one that
+      // is plainly a colour is drawn.
+      function peerCaretColor(peer) {
+        const color = typeof peer.color === 'string' ? peer.color.trim() : ''
+        return /^(#[0-9a-f]{3,8}|(rgb|hsl)a?[(][0-9a-z.,%/ ]+[)])$/i.test(color)
+          ? color
+          : colorFromClientId(String(peer.clientId))
+      }
+
+      // Where this person's caret is, for everyone else's editor to draw. It
+      // used to go only with an edit, so a caret moved by a tap stayed where
+      // the last edit left it. Sent a moment after it rests, and only when it
+      // changed.
+      let presenceSendTimer = null
+      let lastPresencePayload = ''
+      function schedulePresenceSend(force = false) {
+        if (presenceSendTimer) clearTimeout(presenceSendTimer)
+        presenceSendTimer = setTimeout(() => {
+          presenceSendTimer = null
+          sendPresenceNow(force)
+        }, force ? 0 : PRESENCE_SEND_DELAY_MS)
+      }
+
+      async function sendPresenceNow(force) {
+        const body = JSON.stringify({ ...getPeerPayload(), peerLineAttributions: localLineAttributions })
+        if (!force && body === lastPresencePayload) return
+        lastPresencePayload = body
+        try {
+          await fetch(roomUrl('/presence'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body
+          })
+        } catch {}
       }
 
       function getPeerPayload() {
@@ -2529,13 +2785,19 @@ export function getP2pmdEditorPage () {
       }
 
       function scheduleDocumentSave() {
+        if (!canEdit()) {
+          // Whatever changed the text while the host is away goes back.
+          const kept = ydoc && ytext ? getYTextSnapshot() : lastInputContent
+          if (input.value !== kept) input.value = kept
+          return
+        }
         if (saveTimer) clearTimeout(saveTimer)
         markLocalPeerTyping()
         const newText = input.value
         const oldText = ydoc && ytext ? getYTextSnapshot() : lastInputContent
         const caret = input.selectionStart === input.selectionEnd ? input.selectionStart : null
         const change = diffTextChange(oldText, newText, caret)
-        const gutterUpdate = markEditedLines(oldText, newText)
+        const gutterUpdate = markEditedLines(oldText, newText, change)
         lastInputContent = newText
         if (gutterUpdate) renderLineGutter(gutterUpdate)
         notifyNative('p2pmd-document-pending', {})
@@ -2885,6 +3147,8 @@ export function getP2pmdEditorPage () {
 
       ${embeddedSlideBreakCheck}
 
+      ${embeddedLineAuthors}
+
       function viewAsSlides() {
         if (!hasSlideBreaks(input.value)) {
           if (input.value.trim() && !window.confirm('This will clear your notes and give you a slides template. Continue?')) {
@@ -2933,7 +3197,7 @@ export function getP2pmdEditorPage () {
       }
 
       function runToolbarButton(button) {
-        if (!button || viewMode !== 'edit') return false
+        if (!button || viewMode !== 'edit' || !canEdit()) return false
         if (button.dataset.menu === 'template') {
           toggleTemplateMenu()
           return true
@@ -3061,12 +3325,12 @@ export function getP2pmdEditorPage () {
       }
 
       function applyLineAttributionsFromDocument(documentState) {
-        lineAttributions = normalizeLineAttributions(
+        documentLineAttributions = normalizeLineAttributions(
           documentState.lineAttributions || documentState.lineAuthors,
           documentState.content || ''
         )
-        localLineAttributions = getLocalLineAttributions(lineAttributions)
-        mergeLineAttributionsFromPeerList(latestPeerList, false)
+        takeOwnLines(documentLineAttributions)
+        rebuildLineAttributions()
         renderLineGutter()
       }
 
@@ -3083,49 +3347,77 @@ export function getP2pmdEditorPage () {
       }
 
       function mergeLineAttributionsFromPeerList(peerList, shouldRender = true) {
-        if (!Array.isArray(peerList) || peerList.length === 0) return
+        if (!Array.isArray(peerList)) return
 
-        let changed = false
         for (const peer of peerList) {
+          // A person's lines come only when they change, so a list without
+          // them keeps what came before.
           if (!peer || typeof peer !== 'object' || !peer.lineAttributions) continue
-
           const peerClientId = typeof peer.clientId === 'string' ? peer.clientId : ''
-          const peerAttributions = normalizeLineAttributions(peer.lineAttributions, input.value)
-          for (const [line, attribution] of Object.entries(peerAttributions)) {
-            const nextAttribution = {
-              ...attribution,
-              clientId: attribution.clientId || peerClientId
-            }
-            const existing = lineAttributions[line]
-            if (
-              existing?.clientId === nextAttribution.clientId &&
-              existing?.color === nextAttribution.color &&
-              existing?.name === nextAttribution.name
-            ) {
-              continue
-            }
+          if (!peerClientId) continue
 
-            lineAttributions[line] = nextAttribution
-            changed = true
+          const claims = {}
+          const normalized = normalizeLineAttributions(peer.lineAttributions, input.value)
+          for (const [line, attribution] of Object.entries(normalized)) {
+            claims[line] = { ...attribution, clientId: attribution.clientId || peerClientId }
           }
+          if (peerClientId === clientId) {
+            takeOwnLines(claims)
+            continue
+          }
+          peerLineAttributionsByClient.set(peerClientId, claims)
         }
 
-        if (!changed) return
-        localLineAttributions = getLocalLineAttributions(lineAttributions)
+        rebuildLineAttributions()
         if (shouldRender) renderLineGutter()
       }
 
-      function getLocalLineAttributions(attributions) {
-        const localAttributions = {}
-
-        Object.keys(attributions || {}).forEach((line) => {
-          const attribution = attributions[line]
-          if (attribution?.clientId === clientId) {
-            localAttributions[line] = attribution
+      function takeOwnLines(attributions) {
+        if (ownLinesTaken) return
+        let found = false
+        for (const [line, attribution] of Object.entries(attributions || {})) {
+          if (attribution?.clientId !== clientId) continue
+          found = true
+          // Under the name and color this person goes by now: the record
+          // keeps the ones from when each line was written.
+          if (!localLineAttributions[line]) {
+            localLineAttributions[line] = { ...attribution, name: localAuthor.name, color: localAuthor.color }
           }
-        })
+        }
+        if (found) ownLinesTaken = true
+      }
 
-        return localAttributions
+      // Each line's newest author, the same rule every editor and host uses.
+      function rebuildLineAttributions(content = input.value) {
+        const count = getLineCount(content)
+        const merged = {}
+        const consider = (line, attribution) => {
+          const lineNumber = Number(line)
+          if (!attribution || !Number.isInteger(lineNumber) || lineNumber < 1 || lineNumber > count) return
+          merged[line] = newerLineAuthor(merged[line], attribution)
+        }
+
+        // The record speaks for people who left. Someone here sends all of
+        // their own lines, so the record's line under them may be one they no
+        // longer have.
+        for (const [line, attribution] of Object.entries(documentLineAttributions)) {
+          if (attribution.clientId === clientId || peerLineAttributionsByClient.has(attribution.clientId)) continue
+          consider(line, attribution)
+        }
+        for (const [peerClientId, claims] of peerLineAttributionsByClient) {
+          if (peerClientId === clientId) continue
+          for (const [line, attribution] of Object.entries(claims)) consider(line, attribution)
+        }
+        for (const [line, attribution] of Object.entries(localLineAttributions)) consider(line, attribution)
+        lineAttributions = merged
+      }
+
+      function moveLineAuthors(moved) {
+        localLineAttributions = shiftLineAuthors(localLineAttributions, moved)
+        documentLineAttributions = shiftLineAuthors(documentLineAttributions, moved)
+        for (const [peerClientId, claims] of peerLineAttributionsByClient) {
+          peerLineAttributionsByClient.set(peerClientId, shiftLineAuthors(claims, moved))
+        }
       }
 
       function normalizeLineAttributions(attributions, content) {
@@ -3173,106 +3465,31 @@ export function getP2pmdEditorPage () {
         return Math.max(String(content || '').split(newline).length, 1)
       }
 
-      function countLineBreaks(text, start = 0, end = text.length) {
-        let count = 0
-        for (let index = start; index < end; index++) {
-          if (text[index] === newline) count += 1
-        }
-        return count
-      }
-
-      function linesMatch(textA, startA, endA, textB, startB, endB) {
-        const length = endA - startA
-        if (length !== endB - startB) return false
-        for (let offset = 0; offset < length; offset++) {
-          if (textA[startA + offset] !== textB[startB + offset]) return false
-        }
-        return true
-      }
-
-      function countMatchingPrefixLines(previousValue, nextValue) {
-        let previousStart = 0
-        let nextStart = 0
-        let count = 0
-        while (previousStart <= previousValue.length && nextStart <= nextValue.length) {
-          const previousBreak = previousValue.indexOf(newline, previousStart)
-          const nextBreak = nextValue.indexOf(newline, nextStart)
-          const previousEnd = previousBreak === -1 ? previousValue.length : previousBreak
-          const nextEnd = nextBreak === -1 ? nextValue.length : nextBreak
-          if (!linesMatch(previousValue, previousStart, previousEnd, nextValue, nextStart, nextEnd)) break
-
-          count += 1
-          previousStart = previousBreak === -1 ? previousValue.length + 1 : previousBreak + 1
-          nextStart = nextBreak === -1 ? nextValue.length + 1 : nextBreak + 1
-        }
-        return count
-      }
-
-      function countMatchingSuffixLines(previousValue, nextValue, availablePrevious, availableNext) {
-        let previousEnd = previousValue.length
-        let nextEnd = nextValue.length
-        let count = 0
-        while (count < availablePrevious && count < availableNext) {
-          const previousStart = previousValue.lastIndexOf(newline, previousEnd - 1) + 1
-          const nextStart = nextValue.lastIndexOf(newline, nextEnd - 1) + 1
-          if (!linesMatch(previousValue, previousStart, previousEnd, nextValue, nextStart, nextEnd)) break
-
-          count += 1
-          previousEnd = previousStart - 1
-          nextEnd = nextStart - 1
-        }
-        return count
-      }
-
-      function markEditedLines(previousContent, nextContent) {
+      function markEditedLines(previousContent, nextContent, change = null) {
         if (previousContent === nextContent) return null
 
         const previousValue = String(previousContent || '')
         const nextValue = String(nextContent || '')
-        const previousLineCount = countLineBreaks(previousValue) + 1
-        const nextLineCount = countLineBreaks(nextValue) + 1
-        const prefixLineCount = countMatchingPrefixLines(previousValue, nextValue)
-        const suffixLineCount = countMatchingSuffixLines(
-          previousValue,
-          nextValue,
-          previousLineCount - prefixLineCount,
-          nextLineCount - prefixLineCount
-        )
-        const nextAttributions = {}
-        const nextLocalAttributions = {}
+        const { prefix, oldSuffix, newSuffix } = change || diffTextChange(previousValue, nextValue)
+        const delta = []
+        if (prefix > 0) delta.push({ retain: prefix })
+        if (oldSuffix > prefix) delta.push({ delete: oldSuffix - prefix })
+        if (newSuffix > prefix) delta.push({ insert: nextValue.slice(prefix, newSuffix) })
 
-        for (const [line, attribution] of Object.entries(lineAttributions)) {
-          const previousLine = Number(line)
-          let nextLine = null
-          if (previousLine <= prefixLineCount) {
-            nextLine = previousLine
-          } else if (previousLine > previousLineCount - suffixLineCount) {
-            nextLine = previousLine + nextLineCount - previousLineCount
-          }
-          if (!nextLine || nextLine < 1 || nextLine > nextLineCount) continue
-
-          nextAttributions[String(nextLine)] = attribution
-          if (attribution.clientId === clientId) {
-            nextLocalAttributions[String(nextLine)] = attribution
-          }
-        }
-
+        const { moved, written, firstLine } = lineChangesFromDelta(previousValue, delta)
+        moveLineAuthors(moved)
         const editedAttribution = { ...localAuthor, updatedAt: Date.now() }
-        const startLine = prefixLineCount + 1
-        const editedEndLine = nextLineCount - suffixLineCount
-        for (let line = startLine; line <= editedEndLine; line++) {
-          nextAttributions[String(line)] = editedAttribution
-          nextLocalAttributions[String(line)] = editedAttribution
-        }
+        for (const line of written) localLineAttributions[String(line)] = editedAttribution
+        rebuildLineAttributions(nextValue)
 
-        lineAttributions = nextAttributions
-        localLineAttributions = nextLocalAttributions
-
+        const previousLineCount = getLineCount(previousValue)
+        const nextLineCount = getLineCount(nextValue)
+        const startLine = Math.max(1, firstLine || 1)
+        let lastWritten = startLine
+        for (const line of written) lastWritten = Math.max(lastWritten, line)
         return {
           startLine,
-          endLine: previousLineCount === nextLineCount
-            ? Math.max(startLine, editedEndLine)
-            : nextLineCount,
+          endLine: previousLineCount === nextLineCount ? lastWritten : nextLineCount,
           lineCount: nextLineCount
         }
       }
@@ -3309,6 +3526,7 @@ export function getP2pmdEditorPage () {
 
       function syncLineGutterScroll() {
         lineGutter.style.transform = 'translateY(-' + input.scrollTop + 'px)'
+        schedulePeerCarets()
       }
 
       function continueListOnEnter(event) {
@@ -3412,7 +3630,14 @@ export function getP2pmdEditorPage () {
           const body = await response.json()
           if (!response.ok || typeof body.yjsState !== 'string') return
           const { shared, missing } = compareWithHost(window.Y, ydoc, base64ToBytes(body.yjsState))
-          if (!shared) return
+          if (!shared) {
+            if (roomRole !== 'host') {
+              seededFromHost = false
+              updateEditable()
+              void seedFromHost()
+            }
+            return
+          }
           queueRemoteYjsUpdate(body.yjsState)
           if (missing) pendingUpdate = pendingUpdate ? window.Y.mergeUpdates([pendingUpdate, missing]) : missing
         } catch {} finally {
@@ -3511,16 +3736,22 @@ export function getP2pmdEditorPage () {
             window.Y.applyUpdate(ydoc, base64ToBytes(result.yjsState), Y_ORIGIN_REMOTE)
             const yjsContent = ytext.toString()
             ytextSnapshot = yjsContent
-            if (yjsContent || !input.value) {
+            // A guest shows the host's note as it is, an empty one too.
+            if (yjsContent || !input.value || roomRole !== 'host') {
               input.value = yjsContent
               lastSyncedContent = yjsContent
               lastInputContent = yjsContent
               mergeLineAttributionsFromPeerList(latestPeerList)
             }
+            if (roomRole !== 'host') seededFromHost = true
           }
-        } catch {}
+        } catch {
+          if (roomRole !== 'host') setHostAway(true)
+        }
 
-        if (!getYTextSnapshot() && input.value) {
+        // Only the host starts the note's history from text it already has. A
+        // guest's own start is a second history, one the host's never merges.
+        if (roomRole === 'host' && !getYTextSnapshot() && input.value) {
           ydoc.transact(() => {
             ytext.insert(0, input.value)
           }, Y_ORIGIN_REMOTE)
@@ -3566,6 +3797,16 @@ export function getP2pmdEditorPage () {
 
           if (newContent === input.value) return
 
+          // Someone else's change: every list moves with it, and a line it
+          // wrote on is no longer this person's.
+          const changes = lineChangesFromDelta(input.value, event.changes.delta)
+          moveLineAuthors(changes.moved)
+          for (const line of changes.written) {
+            const key = String(line)
+            delete localLineAttributions[key]
+            if (documentLineAttributions[key]?.clientId === clientId) delete documentLineAttributions[key]
+          }
+
           let selectionStart = Number.isFinite(input.selectionStart) ? input.selectionStart : 0
           let selectionEnd = Number.isFinite(input.selectionEnd) ? input.selectionEnd : selectionStart
           let position = 0
@@ -3590,8 +3831,9 @@ export function getP2pmdEditorPage () {
             Math.max(0, Math.min(selectionStart, newContent.length)),
             Math.max(0, Math.min(selectionEnd, newContent.length))
           )
-          mergeLineAttributionsFromPeerList(latestPeerList, false)
+          rebuildLineAttributions(newContent)
           renderLineGutter()
+          schedulePresenceSend()
           scheduleActiveViewRender()
           notifyNative('p2pmd-document-updated', {
             contentLength: newContent.length
@@ -3769,6 +4011,7 @@ export function getP2pmdEditorPage () {
         document.body.classList.toggle('slide-mode', viewMode === 'slides')
         input.hidden = viewMode !== 'edit'
         input.parentElement.hidden = viewMode !== 'edit'
+        schedulePeerCarets()
         preview.hidden = viewMode !== 'preview'
         slidesPreview.hidden = viewMode !== 'slides'
         // Desktop keeps "view as slides" on screen in every mode. Hiding the
@@ -3798,6 +4041,47 @@ export function getP2pmdEditorPage () {
         else setViewMode(presenting ? 'slides' : 'preview')
       }
 
+      // The app's share button asks for the note as it is, to offer Export
+      // slides only for a deck and to export what is on screen.
+      function shareInfo(nonce) {
+        notifyNative('p2pmd-share-info', {
+          nonce,
+          content: input.value,
+          slideBreaks: hasSlideBreaks(input.value),
+          latexModeEnabled
+        })
+      }
+
+      // A research paper's pages for Export PDF, laid out here as the preview
+      // lays them out. The page that prints the PDF cannot do it: Android
+      // prints with scripts off, and the layout runs in slices that can end
+      // after the PDF is taken. null for a note that is not a paper.
+      async function paperForExport(nonce) {
+        let html = null
+        try {
+          html = await renderPaperPages(input.value)
+        } catch {}
+        notifyNative('p2pmd-paper', { nonce, html })
+      }
+
+      async function renderPaperPages(content) {
+        if (!window.P2pmdIeee || !latexModeEnabled) return null
+        const result = await callNativeBridge('preview', { content, latexModeEnabled: true })
+        if (result.ieee !== true || typeof result.html !== 'string') return null
+        // The paper and the preview take turns in one layout, so a preview
+        // still being laid out is laid out again after.
+        const previewWasBusy = preview.getAttribute('aria-busy') === 'true'
+        const host = document.createElement('div')
+        host.style.cssText = 'position:fixed;left:-20000px;top:0;width:1000px;visibility:hidden;pointer-events:none'
+        document.body.appendChild(host)
+        try {
+          return await window.P2pmdIeee.render(host, result.html) ? host.innerHTML : null
+        } finally {
+          host.remove()
+          if (previewWasBusy && viewMode === 'preview') renderPreview()
+        }
+      }
+
       // The app hands over a fresh nonce each time someone taps Publish, and
       // only publishes when it comes back.
       function publishToHyper(nonce) {
@@ -3825,7 +4109,11 @@ export function getP2pmdEditorPage () {
             clearTimeout(reconnectTimer)
             reconnectTimer = null
           }
-          void syncWithHost()
+          hostReachable = true
+          if (seededFromHost) void syncWithHost()
+          else void seedFromHost()
+          updateEditable()
+          if (canEdit()) setHostAway(false)
         }
 
         source.addEventListener('peers', (event) => {
@@ -3845,6 +4133,7 @@ export function getP2pmdEditorPage () {
             latestPeerList = peerList
             mergeLineAttributionsFromPeerList(peerList)
             renderPeerDashboard()
+            schedulePeerCarets()
 
             if (roomRole === 'client' && !hasSyncedHostLatexMode) {
               const host = peerList.find((peer) => peer?.role === 'host')
@@ -3906,6 +4195,13 @@ export function getP2pmdEditorPage () {
           } catch {}
 
           if (eventSource === source) eventSource = null
+          if (roomRole !== 'host') {
+            hostReachable = false
+            updateEditable()
+            setHostAway(true)
+            // Nobody is reachable through a host that is gone.
+            notifyNative('p2pmd-peers', { count: 0 })
+          }
           if (reconnectTimer) return
 
           reconnectTimer = setTimeout(() => {
@@ -3916,6 +4212,7 @@ export function getP2pmdEditorPage () {
       }
 
       async function initializeEditor() {
+        updateEditable()
         renderTemplateMenu()
         updateLatexControls()
         peerDisplayName.value = localAuthor.name
@@ -3932,6 +4229,10 @@ export function getP2pmdEditorPage () {
 
       input.addEventListener('input', scheduleDocumentSave)
       input.addEventListener('keydown', continueListOnEnter)
+      input.addEventListener('focus', () => schedulePresenceSend(true))
+      document.addEventListener('selectionchange', () => {
+        if (document.activeElement === input) schedulePresenceSend()
+      })
       input.addEventListener('scroll', syncLineGutterScroll)
       input.addEventListener('contextmenu', preventNativeContextMenu)
       imageUploadInput?.addEventListener('change', handleImageUploadSelection)
@@ -3996,6 +4297,7 @@ export function getP2pmdEditorPage () {
       slidesExit.addEventListener('click', () => setViewMode('edit'))
       window.addEventListener('resize', () => {
         scheduleSlideFit()
+        schedulePeerCarets()
         if (viewMode === 'preview') window.P2pmdIeee?.fitPages(preview)
       })
       slidesContent.addEventListener('load', scheduleSlideFit, true)
@@ -4032,6 +4334,8 @@ export function getP2pmdEditorPage () {
       })
       window.__p2pmdTogglePreview = togglePreview
       window.__p2pmdPublishToHyper = publishToHyper
+      window.__p2pmdShareInfo = shareInfo
+      window.__p2pmdPaperForExport = paperForExport
       window.__p2pmdTogglePeerDashboard = (force) => {
         setPeerDashboardVisible(typeof force === 'boolean' ? force : peerDashboardBackdrop.hidden)
       }

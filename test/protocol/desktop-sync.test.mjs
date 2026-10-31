@@ -17,8 +17,10 @@ import {
   PHONE_BOOKMARKS_FILE,
   PHONE_PRIVATE_DRIVES_FILE,
   PHONE_TABS_FILE,
-  sharedPrivateDrives
+  sharedPrivateDrives,
+  sharedPrivateKey
 } from '../../backend/backup/desktop-sync.mjs'
+import { resetPrivateDriveKeyCache } from '../../backend/hyper/private-keys.mjs'
 import {
   deriveVerificationCode,
   IDENTITY_PAYLOAD_NAME,
@@ -178,6 +180,27 @@ describe('what a phone sends a desktop', () => {
     writeJson(join(storagePath, 'private-drive-key.json'), { version: 3, key: 'd'.repeat(64), encrypted: true, source: 'desktop', entries: [] })
     writeJson(join(synced, 'private-drive-key.json'), { version: 2, key: 'd'.repeat(64), driveId })
     assert.deepEqual(sharedPrivateDrives(synced), [{ driveId, key: 'd'.repeat(64) }])
+  })
+
+  it('sends the key this phone\'s devices share, apart from the key its own drive was made with', async (t) => {
+    const storagePath = await tempDir(t)
+    const synced = join(storagePath, 'hyper-sdk-synced-private')
+    mkdirSync(synced, { recursive: true })
+
+    // Never linked: there is no shared key, only the phone's own.
+    writeJson(join(synced, 'private-drive-key.json'), { version: 2, key: 'a'.repeat(64), driveId: 'e'.repeat(64) })
+    assert.equal(sharedPrivateKey(storagePath), null)
+    assert.equal(collectDesktopSync({ storagePath, syncedPrivatePath: synced }).sharedKey, null)
+
+    // Linked after its drive was made: the drive keeps the phone's key, and
+    // the devices meet under the desktop's.
+    writeJson(join(storagePath, 'private-drive-key.json'), { version: 3, key: 'd'.repeat(64), encrypted: true, source: 'desktop', entries: [] })
+    resetPrivateDriveKeyCache()
+    assert.equal(sharedPrivateKey(storagePath), 'd'.repeat(64))
+    const sync = collectDesktopSync({ storagePath, syncedPrivatePath: synced })
+    assert.equal(sync.sharedKey, 'd'.repeat(64))
+    assert.deepEqual(sync.privateDrives, [{ driveId: 'e'.repeat(64), key: 'a'.repeat(64) }])
+    assert.equal(sharedPrivateKey(null), null)
   })
 
   it('is a desktop identity transfer, sealed to the desktop, with the code both screens show', async (t) => {

@@ -1,4 +1,4 @@
-import { StyleSheet, Text, View } from 'react-native'
+import { StyleSheet, Text } from 'react-native'
 import { BROWSER_PALETTES } from '../browser-appearance.mjs'
 import { deviceLanguageTags } from '../i18n/device-language'
 import { t } from '../i18n/i18n.mjs'
@@ -12,8 +12,9 @@ type LanguageProps = {
 }
 
 // Each language under its own name, which is how somebody who reads it finds
-// it, with its name in the language shown now beneath.
-export function LanguageSettings ({ language, onLanguageChange }: LanguageProps) {
+// it, with its name in the language shown now beneath. The last part of
+// General: a page of its own in Settings was one more place to look.
+export function LanguageSection ({ language, onLanguageChange }: LanguageProps) {
   const isDark = useSettingsDarkMode()
   const phone = languageNamed(matchLanguage(deviceLanguageTags()))
   const options = [
@@ -25,30 +26,23 @@ export function LanguageSettings ({ language, onLanguageChange }: LanguageProps)
   ]
 
   return (
-    <View style={[styles.page, isDark ? styles.pageDark : null]}>
+    <>
       <SettingsSection title={t('Language')}>
         <ChoiceGroup options={options} selected={language} onSelect={onLanguageChange} />
       </SettingsSection>
       <Text style={[styles.note, isDark ? styles.noteDark : null]}>
         {t('Websites show in their own language.')}
       </Text>
-    </View>
+    </>
   )
 }
 
 const styles = StyleSheet.create({
-  page: {
-    backgroundColor: '#f5f8fc',
-    flexGrow: 1,
-    paddingBottom: 24
-  },
-  pageDark: {
-    backgroundColor: BROWSER_PALETTES.dark.shell
-  },
   note: {
     color: '#687086',
     fontSize: 12,
     lineHeight: 17,
+    paddingBottom: 24,
     paddingHorizontal: 20,
     paddingTop: 12
   },

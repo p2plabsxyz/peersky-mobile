@@ -71,6 +71,29 @@ describe('browser downloads', () => {
     assert.match(index, /onBrowserCloseTab\(tabId, browserTabOpenersRef\.current\.get\(tabId\)\)/)
   })
 
+  // A link tapped in a chat opens in a new tab, and back from it went to the
+  // home screen: the tab had no opener to return to.
+  test('back from a tab a link opened, with nowhere further back, returns to the tab it came from', () => {
+    const index = readFileSync(new URL('../../app/index.tsx', import.meta.url), 'utf8')
+    assert.match(index, /function openBrowserUrlInNewTab \(targetUrl: string\) \{\s+const openerTabId = browserTabsStateRef\.current\.activeTabId\s+if \(createBrowserTab\(targetUrl\)\) \{[\s\S]*?browserTabOpenersRef\.current\.set\(browserTabsStateRef\.current\.activeTabId, openerTabId\)/)
+    assert.match(index, /else if \(canBrowserGoBack\) onBrowserBack\(\)\s+else if \(closeTabToOpener\(\)\) return true\s+else return false/)
+    assert.match(index, /function closeTabToOpener \(\) \{[\s\S]*?onBrowserCloseTab\(tabsState\.activeTabId, openerTabId\)/)
+  })
+
+  // Android hands a file over in its own download listener, so the app never
+  // heard of it: an address typed for a file stayed in the tab over the page
+  // still showing, its loading line running for good.
+  test('on Android a tab sent to a file from the address bar steps back too', () => {
+    const manager = readFileSync(new URL('../../plugins/templates/PeerSkyWebViewManager.kt.template', import.meta.url), 'utf8')
+    const listener = manager.slice(manager.indexOf('wrapper.webView.setDownloadListener'), manager.indexOf('confirmDownload(context, name, url, contentLength)'))
+    assert.match(listener, /\.emit\("PeerSkyFileDownload", Arguments\.createMap\(\)\.apply \{\s+putString\("url", url\)\s+putInt\("viewTag", wrapper\.id\)/)
+
+    const index = readFileSync(new URL('../../app/index.tsx', import.meta.url), 'utf8')
+    assert.match(index, /DeviceEventEmitter\.addListener\('PeerSkyFileDownload'/)
+    assert.match(index, /if \(browserTabsStateRef\.current\.activeTabId === tabId\) setBrowserIsLoading\(false\)\s+leaveFileHandoffRef\.current\?\.\(tabId, event\.url, viewTag\)/)
+    assert.match(index, /if \(startTag !== null\) browserWebViewTabsRef\.current\.set\(startTag, tab\.id\)/)
+  })
+
   // iOS fetches a page's file itself now, so it names the file the way the
   // server says.
   test('names a download from Content-Disposition, RFC 5987 first, or from its address', () => {

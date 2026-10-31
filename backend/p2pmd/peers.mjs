@@ -1,3 +1,5 @@
+import { newerLineAuthor } from './line-authors.mjs'
+
 export function createPeerPresenceStore ({ now = Date.now } = {}) {
   const peers = new Map()
   let nextPeerId = 1
@@ -20,12 +22,25 @@ export function createPeerPresenceStore ({ now = Date.now } = {}) {
       : `anonymous-${nextPeerId++}`
     const previous = peers.get(clientId)
     const timestamp = now()
-    const lineAttributions = normalizePeerLineAttributions(
-      payload.peerLineAttributions ?? payload.lineAttributions ?? payload.lineAuthors
-    )
+    // An editor sends all of its own lines, so an empty list means it has
+    // none now, and nothing sent means nothing changed.
+    const sent = payload.peerLineAttributions ?? payload.lineAttributions ?? payload.lineAuthors
+    const lineAttributions = sent && typeof sent === 'object'
+      ? normalizePeerLineAttributions(sent) || {}
+      : null
 
     if (lineAttributions) {
-      removeLineAttributionsFromOtherPeers(clientId, lineAttributions)
+      // A line that stays with the same person keeps the time it became
+      // theirs, which is all a rival claim is weighed against, so typing in it
+      // does not send their lines out again on every key.
+      for (const [line, attribution] of Object.entries(lineAttributions)) {
+        const current = previous?.lineAttributions?.[line]
+        if (current && current.name === attribution.name && current.color === attribution.color &&
+          current.clientId === attribution.clientId && Number(current.updatedAt) > 0) {
+          lineAttributions[line] = current
+        }
+      }
+      settleLineOwners(clientId, lineAttributions)
     }
 
     const nextLineAttributions = lineAttributions || previous?.lineAttributions || null
@@ -95,24 +110,26 @@ export function createPeerPresenceStore ({ now = Date.now } = {}) {
     return count
   }
 
-  function removeLineAttributionsFromOtherPeers (clientId, lineAttributions) {
-    const editedLines = new Set(Object.keys(lineAttributions))
-    if (editedLines.size === 0) return
-
+  // One person to a line: the one whose edit of it is newest. A claim older
+  // than someone else's stays out, so an editor still sending a line it lost
+  // does not take it back.
+  function settleLineOwners (clientId, lineAttributions) {
     for (const [peerKey, peer] of peers.entries()) {
       if (peerKey === clientId || !peer.lineAttributions) continue
 
       let removed = false
-      for (const line of editedLines) {
-        if (!Object.prototype.hasOwnProperty.call(peer.lineAttributions, line)) continue
-        delete peer.lineAttributions[line]
-        removed = true
+      for (const line of Object.keys(lineAttributions)) {
+        const theirs = peer.lineAttributions[line]
+        if (!theirs) continue
+        const claim = { ...lineAttributions[line], clientId: lineAttributions[line].clientId || clientId }
+        if (newerLineAuthor({ ...theirs, clientId: theirs.clientId || peerKey }, claim) === claim) {
+          delete peer.lineAttributions[line]
+          removed = true
+        } else {
+          delete lineAttributions[line]
+        }
       }
       if (removed) markAttributionsChanged(peerKey)
-
-      if (Object.keys(peer.lineAttributions).length === 0) {
-        peer.lineAttributions = null
-      }
     }
   }
 

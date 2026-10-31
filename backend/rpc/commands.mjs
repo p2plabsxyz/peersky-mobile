@@ -105,6 +105,18 @@ export const RPC_HYPERDRIVE_VIEWER_START = 79
 // { url, name }: the address to download one file of a drive through that
 // server, signed for that file alone.
 export const RPC_HYPERDRIVE_VIEWER_DOWNLOAD = 80
+// { content, mode: 'note' | 'slides', latexModeEnabled }: a P2PMD note as one
+// HTML file with its pictures inside, for Export PDF and Export slides.
+export const RPC_P2PMD_EXPORT = 81
+// { key, state }: the key chats and notes are locked with, which the app could
+// read only once the phone was unlocked, or why it still cannot. See
+// hyper/sealed-file.mjs.
+export const RPC_CHAT_SEAL_KEY = 82
+// { name }: one of the app's own files that holds chats or notes, opened with
+// the chat key: { ok, text }, text null when there is none.
+export const RPC_PRIVATE_APP_FILE_READ = 83
+// { name, text }: the same file written, locked with the chat key.
+export const RPC_PRIVATE_APP_FILE_WRITE = 84
 
 // Backend to app pushes. Separate range so they never collide with the
 // app-initiated commands above.

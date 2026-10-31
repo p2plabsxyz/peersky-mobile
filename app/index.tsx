@@ -1,6 +1,5 @@
 import { type ComponentRef, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  ActivityIndicator,
   Alert,
   Animated,
   AppState,
@@ -28,16 +27,14 @@ import {
   useWindowDimensions,
   View
 } from 'react-native'
-import { Worklet } from 'react-native-bare-kit'
 import * as Crypto from 'expo-crypto'
 import { CameraView, useCameraPermissions } from 'expo-camera'
 import { File, Paths } from 'expo-file-system'
 import { useNetworkState } from 'expo-network'
 import { initialWindowMetrics, SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import b4a from 'b4a'
-import RPC from 'bare-rpc'
+import type RPC from 'bare-rpc'
 import { WebView } from 'react-native-webview'
-import bundle from './app.bundle.mjs'
 import {
   BROWSER_HOME_URL,
   BROWSER_P2P_URL,
@@ -54,6 +51,7 @@ import {
   getSearchUrl,
   isHyperUrl,
   isStaleBrowserLoad,
+  isUncommittedNavigationFinish,
   isWebUrl,
   MAX_BROWSER_URL_LENGTH,
   normalizeBrowserAddress,
@@ -81,6 +79,7 @@ import {
   normalizeBrowserPageZoom,
   normalizeBrowserTabTitle,
   parseRecentlyClosedBrowserTabs,
+  PAUSE_TAB_MEDIA_SCRIPT,
   rememberClosedBrowserTabs,
   reopenClosedBrowserTabState,
   setBrowserTabViewModeState,
@@ -157,7 +156,6 @@ import { languageNamed } from './i18n/languages.mjs'
 import { useT } from './i18n/useT'
 import { getOneOffSearchEngines } from './search/search-suggestions.mjs'
 import { getSiteDataHosts } from './privacy/site-data.mjs'
-import { loadLocalSealKey } from './privacy/local-seal-key'
 import { BrowserToolbar, type AddressBarAction } from './BrowserToolbar'
 import { BrowserNavBar } from './BrowserNavBar'
 import { BrowserBackSwipe } from './BrowserBackSwipe'
@@ -171,8 +169,18 @@ import {
 import { BrowserZoomSheet } from './BrowserZoomSheet'
 import { PublishedLinkSheet } from './PublishedLinkSheet'
 import { hasLinkedIdentity } from './hyperdrive/linked-identity'
-import { useHyperNetworkRefresh } from './useHyperNetworkRefresh'
 import { P2pmdNewNoteSheet } from './P2pmdNewNoteSheet'
+import { P2pmdShareSheet } from './P2pmdShareSheet'
+import {
+  createP2pmdShareInfoScript,
+  P2PMD_SHARE_INFO_TYPE,
+  createP2pmdPaperScript,
+  P2PMD_PAPER_TYPE,
+  p2pmdExportFileName,
+  readP2pmdPaper,
+  readP2pmdShareInfo,
+  shareP2pmdExport
+} from './p2pmd-export'
 import { getP2pmdSyncDisplay } from './p2pmd-sync-status.mjs'
 import PencilSquareIcon from '../assets/icons/bootstrap/pencil-square.svg'
 import ShareIcon from '../assets/icons/bootstrap/share.svg'
@@ -181,6 +189,7 @@ import ShieldLockIcon from '../assets/icons/bootstrap/shield-lock.svg'
 import { WelcomeScreen } from './WelcomeScreen'
 import { RestartRequiredScreen } from './RestartRequiredScreen'
 import { emitLinkDeviceProgress } from './settings/link-device-progress'
+import { clearAllP2PData } from './settings/clear-all-p2p-data'
 import { BrowserHomeBackground } from './BrowserHomeBackground'
 import { BurnAnimation } from './BurnAnimation'
 import { applyAppIcon } from './app-icon'
@@ -193,6 +202,7 @@ import {
 } from './browser-print'
 import { StartupScreen } from './StartupScreen'
 import { AppLoading } from './AppLoading'
+import { BrowserWaitPage } from './BrowserWaitPage'
 import { BrowserSiteInfoSheet } from './BrowserSiteInfoSheet'
 import { APP_WELCOME_FILE_NAMES, hasSeenWelcome, markWelcomeSeen, WELCOME_FILE_NAME } from './welcome-state.mjs'
 import { AppWelcome } from './AppWelcome'
@@ -265,6 +275,18 @@ import { screenUploadBytes } from './media/upload-gate'
 import { isUsableImageType, sniffBase64ImageType } from './media/media-moderation.mjs'
 import { NsfwScanner } from './media/NsfwScanner'
 import { usePeerChatNotifications } from './peerchat/usePeerChatNotifications'
+import { stopPeerChatNotifier } from './peerchat/notifier'
+import { startPeerChatChecks } from './peerchat/background-task'
+import { watchPeerChatAttachmentCache } from './peerchat/attachment-cache'
+import {
+  callBackend,
+  getBackendRpc,
+  getIdentityStoragePath,
+  onBackendRequest,
+  requireBackendRestart,
+  startBackend,
+  syncChatSealKey
+} from './backend'
 import { PeerTunesScreen } from './peertunes/PeerTunesScreen'
 import { keptFolderUrls } from './peertunes/peertunes-screen.mjs'
 import { peerSkyWebViewNativeConfig } from './downloads/PeerSkyWebView'
@@ -291,9 +313,9 @@ import {
   normalizeP2pmdRoomKey,
   parseP2pmdNoteLink,
   P2PMD_RECENT_SEARCH_AFTER,
-  readP2pmdRoomHistoryFile,
+  parseP2pmdRoomHistory,
   recordP2pmdRoom,
-  writeP2pmdRoomHistoryFile
+  serializeP2pmdRoomHistory
 } from './p2pmd-room-history.mjs'
 import { subscribeP2pmdNotesShared } from './settings/p2pmd-shared-notes'
 import { describeP2pmdNote } from './p2pmd-note-title.mjs'
@@ -326,6 +348,7 @@ import {
   RPC_P2PMD_IMAGE_UPLOAD,
   RPC_P2PMD_PREVIEW,
   RPC_P2PMD_ROOM_JOIN,
+  RPC_P2PMD_EXPORT,
   RPC_P2PMD_ROOM_PUBLISH,
   RPC_P2PMD_ROOM_STATUS,
   RPC_P2PMD_TAKE_NOTES,
@@ -337,7 +360,9 @@ import {
   RPC_PEERCHAT_SEND_TO_DEVICES,
   RPC_PEERTUNES_START,
   RPC_HYPERDRIVE_VIEWER_DOWNLOAD,
-  RPC_HYPERDRIVE_VIEWER_START
+  RPC_HYPERDRIVE_VIEWER_START,
+  RPC_PRIVATE_APP_FILE_READ,
+  RPC_PRIVATE_APP_FILE_WRITE
 } from '../backend/rpc/commands.mjs'
 
 type P2pmdRoom = {
@@ -356,6 +381,8 @@ type P2pmdViewMode = 'edit' | 'preview' | 'slides'
 
 const PEERTUNES_START_TIMEOUT_MS = 15000
 const DRIVE_VIEWER_START_TIMEOUT_MS = 15000
+// A long research paper takes the editor a while to lay out page by page.
+const P2PMD_PAPER_TIMEOUT_MS = 30000
 
 const HYPER_OFFLINE_NETWORK_COMMANDS = new Set([
   RPC_HYPER_INIT,
@@ -399,7 +426,6 @@ type RpcResponse = {
   port?: number
   localUrl?: string
   room?: P2pmdRoom | null
-  warning?: string | null
   noHost?: boolean
   notes?: P2pmdRoomHistoryEntry[]
   // Offline folders, from RPC_HYPER_OFFLINE_LIST.
@@ -467,9 +493,9 @@ export default function App () {
   const systemColorScheme = useColorScheme()
   const browserInsets = useSafeAreaInsets()
   const { height: browserWindowHeight, width: browserWindowWidth } = useWindowDimensions()
-  const workletRef = useRef<Worklet | null>(null)
+  // The backend's connection once it is up (app/backend.ts), which the
+  // screen waits for before anything that talks to it.
   const rpcRef = useRef<RPC | null>(null)
-  const workletGenerationRef = useRef(0)
   const appStateRef = useRef(AppState.currentState)
   const browserWebViewRefs = useRef(new Map<string, ComponentRef<typeof WebView>>())
   // The WebViews that have finished a page, by native view tag. One that
@@ -479,6 +505,11 @@ export default function App () {
   const browserTabOpenersRef = useRef(new Map<string, string>())
   // What a WebView reports as a page starts to load.
   const browserLoadStartsRef = useRef(new WeakSet<object>())
+  // The tab each WebView is, by native view tag, for what native code reports.
+  const browserWebViewTabsRef = useRef(new Map<number, string>())
+  // On Android, the addresses each tab committed since its last finished page.
+  // See isUncommittedNavigationFinish.
+  const browserCommittedUrlsRef = useRef(new Map<string, Set<string>>())
   const browserFaviconsRef = useRef(new Map<string, string>())
   const browserLastRecordedUrlsRef = useRef(new Map<string, string>())
   const browserMediaTokensRef = useRef(new Map<string, string>())
@@ -486,6 +517,12 @@ export default function App () {
   const p2pmdWebViewRef = useRef<ComponentRef<typeof WebView> | null>(null)
   const p2pmdPublishInFlightRef = useRef(false)
   const p2pmdPublishNonceRef = useRef<string | null>(null)
+  const p2pmdShareNonceRef = useRef<string | null>(null)
+  const p2pmdShareTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // A research paper's pages asked of the editor for Export PDF.
+  const p2pmdPaperRequestRef = useRef<{ nonce: string, finish: (html: string | null) => void } | null>(null)
+  const p2pmdExportInFlightRef = useRef(false)
+  const p2pmdShareSheetActionRef = useRef<(() => void) | null>(null)
   const p2pmdPublishVisibilityRef = useRef<'public' | 'private'>('public')
   const browserLoadSeqRef = useRef(0)
   const browserWebViewGenerationsRef = useRef(new Map<string, number>())
@@ -703,15 +740,15 @@ export default function App () {
   const [activeTab, setActiveTab] = useState<RuntimeTab>('hyper')
   const [requestedPeerChatRoomKey, setRequestedPeerChatRoomKey] = useState<string | null>(null)
   const [requestedPeerChatPeerId, setRequestedPeerChatPeerId] = useState<string | null>(null)
-  useHyperNetworkRefresh(Boolean(identityStoragePath), () => callRpc(RPC_HYPER_REFRESH, {}))
   const peerChatNotifications = usePeerChatNotifications({
     isPeerChatVisible: browserSource.kind === 'app' && activeTab === 'peerchat',
     isRuntimeReady: Boolean(identityStoragePath),
     onOpenRoom: (roomKey) => {
       setRequestedPeerChatRoomKey(roomKey)
-      void loadBrowserUrl('peersky://p2p/peerchat/')
-    },
-    onCallRpc: (command, data = {}) => callRpc(command, data) as Promise<PeerChatResponse>
+      // The way a link opens it, so a tap that started the app waits for the
+      // worklet and goes in front of last time's tabs.
+      setPendingIncomingUrl('peersky://p2p/peerchat/')
+    }
   })
   const [hsLivePort, setHsLivePort] = useState('8989')
   const [hsLiveHost, setHsLiveHost] = useState('127.0.0.1')
@@ -722,6 +759,7 @@ export default function App () {
   const [p2pmdUrl, setP2pmdUrl] = useState<string | null>(null)
   const [peertunesUrl, setPeertunesUrl] = useState<string | null>(null)
   const [peertunesToken, setPeertunesToken] = useState<string | null>(null)
+  const [peertunesResetId, setPeertunesResetId] = useState('')
   const [peertunesLaunchSuffix, setPeertunesLaunchSuffix] = useState('')
   const [peertunesError, setPeertunesError] = useState<string | null>(null)
   // The Hyperdrive viewer's server, and where back and forward stand in the
@@ -758,8 +796,10 @@ export default function App () {
   // Opened from the navigation bar rather than through the settings list, so
   // back has to leave rather than climb to a list nobody came through.
   const [browserSettingsCloseOnBack, setBrowserSettingsCloseOnBack] = useState(false)
-  const [p2pmdRoomHistory, setP2pmdRoomHistory] = useState<P2pmdRoomHistoryEntry[]>(loadP2pmdRoomHistory)
+  // Empty until the backend has read it (loadP2pmdRoomHistory).
+  const [p2pmdRoomHistory, setP2pmdRoomHistory] = useState<P2pmdRoomHistoryEntry[]>([])
   const p2pmdRoomHistoryRef = useRef(p2pmdRoomHistory)
+  const p2pmdRoomHistoryLoadRef = useRef<Promise<void> | null>(null)
   const [p2pmdParticipants, setP2pmdParticipants] = useState<number | null>(null)
   const [p2pmdViewMode, setP2pmdViewMode] = useState<P2pmdViewMode>('edit')
   const [p2pmdPeerDisplayName, setP2pmdPeerDisplayName] = useState<string | null>(loadP2pmdPeerDisplayName)
@@ -778,9 +818,18 @@ export default function App () {
   }, [activeTab, browserSource.kind, isBooting])
   const isP2pmdLandscapeSlides = p2pmdViewMode === 'slides' && browserWindowWidth > browserWindowHeight
   const [p2pmdSyncStatus, setP2pmdSyncStatus] = useState('Ready')
+  // The editor says when a joined note's host has been gone a moment; until
+  // it is back the note is read only.
+  const [p2pmdHostAway, setP2pmdHostAway] = useState(false)
+  // A join waits up to 15 seconds for the host, and the button says so
+  // rather than sitting there greyed out.
+  const [isP2pmdJoining, setIsP2pmdJoining] = useState(false)
   const [p2pmdSetupError, setP2pmdSetupError] = useState<string | null>(null)
   const [p2pmdPublishUrl, setP2pmdPublishUrl] = useState<string | null>(null)
   const [isP2pmdPublishing, setIsP2pmdPublishing] = useState(false)
+  // The note as it was when the share button was tapped, for Export PDF and
+  // Export slides. Null while the share sheet is closed.
+  const [p2pmdShareNote, setP2pmdShareNote] = useState<{ content: string, slides: boolean, latexModeEnabled: boolean } | null>(null)
   const [p2pmdPublishSheet, setP2pmdPublishSheet] = useState<'note' | 'slides' | null>(null)
   const p2pmdPublishedModeRef = useRef<'note' | 'slides'>('note')
   const [p2pmdPublishedVisibility, setP2pmdPublishedVisibility] = useState<'public' | 'private'>('public')
@@ -812,21 +861,29 @@ export default function App () {
     }
   })
 
+  // The backend outlives the screen. Android runs PeerSky without one, both
+  // when its PeerChat service starts the backend on its own and once PeerSky
+  // is swiped away from Recents, where PeerChat stays connected and goes on
+  // showing new messages. The screen takes it up again as it opens
+  // (app/backend.ts).
   useEffect(() => {
-    const generation = ++workletGenerationRef.current
     void startWorklet()
-
-    return () => {
-      const worklet = workletRef.current
-      const rpc = rpcRef.current
-      setTimeout(() => {
-        if (workletGenerationRef.current !== generation) return
-        if (workletRef.current === worklet) workletRef.current = null
-        if (rpcRef.current === rpc) rpcRef.current = null
-        worklet?.terminate()
-      }, 0)
-    }
   }, [])
+
+  // What the backend tells the app as it happens.
+  useEffect(() => onBackendRequest((request) => {
+    if (request.command === RPC_APP_PEERCHAT_CHANGED) {
+      setPeerChatRevision((value) => value + 1)
+    }
+    if (request.command === RPC_APP_DEVICE_SYNC_CHANGED) {
+      setDeviceSyncRevision((value) => value + 1)
+    }
+    if (request.command === RPC_APP_BACKUP_PROGRESS && request.data) {
+      emitLinkDeviceProgress(typeof request.data === 'string'
+        ? request.data
+        : b4a.toString(request.data as Uint8Array))
+    }
+  }), [])
 
   // Starts meeting this person's other devices once the backend is up, and
   // tells them when the phone is on a cellular connection, so a desktop waits
@@ -944,6 +1001,26 @@ export default function App () {
     }
   }, [browserPreferencesReady])
 
+  // The recent notes, read once the backend is up. A read that fails, as when
+  // the chat key can no longer be read, is tried again by the next caller.
+  function readP2pmdRoomHistoryOnce () {
+    if (!p2pmdRoomHistoryLoadRef.current) {
+      p2pmdRoomHistoryLoadRef.current = loadP2pmdRoomHistory().then((rooms) => {
+        if (!rooms) {
+          p2pmdRoomHistoryLoadRef.current = null
+          return
+        }
+        p2pmdRoomHistoryRef.current = rooms
+        setP2pmdRoomHistory(rooms)
+      })
+    }
+    return p2pmdRoomHistoryLoadRef.current
+  }
+
+  useEffect(() => {
+    if (identityStoragePath) void readP2pmdRoomHistoryOnce()
+  }, [identityStoragePath])
+
   // P2PMD notes another of this person's devices sent, left here by a Link
   // Device restore. The backend keeps the text of each hosted one as this
   // phone's copy first. The file goes only once the list is saved, so nothing
@@ -956,6 +1033,8 @@ export default function App () {
 
     async function takeNotesFromDevice () {
       try {
+        // Merged into the list on disk, so not before it is read.
+        await readP2pmdRoomHistoryOnce()
         const response = await callRpc(RPC_P2PMD_TAKE_NOTES, {})
         if (cancelled) return
         const notes = response.ok && Array.isArray(response.notes) ? response.notes : []
@@ -1027,6 +1106,11 @@ export default function App () {
         void callRpc(RPC_HYPER_REFRESH, {}).catch((error) => {
           console.warn('Unable to refresh Hyper networking:', error)
         })
+        // The phone is unlocked with the app in front, so a chat key the
+        // backend still waits for can be read now (app/backend.ts).
+        void syncChatSealKey().catch((error) => {
+          console.warn('Unable to hand the chat key over:', error)
+        })
       }
       // People in a PeerChat room see this phone as away while the app is in
       // the background, a yellow dot and Idle. Not on inactive: iOS passes
@@ -1038,6 +1122,10 @@ export default function App () {
 
     return () => subscription.remove()
   }, [])
+
+  // The pictures and files PeerChat opened to show them go before the phone
+  // locks (peerchat/attachment-cache.ts).
+  useEffect(() => watchPeerChatAttachmentCache(), [])
 
   useEffect(() => subscribeToIncomingUrls((url) => {
     // A quick action from the app icon, or a tap on a widget. It waits for
@@ -1072,6 +1160,11 @@ export default function App () {
     if (!browserSessionReady || !pendingHomeShortcutUrl) return
     const shortcutUrl = pendingHomeShortcutUrl
     const shortcut = parseHomeShortcut(shortcutUrl)
+    // A widget opening PeerChat, PeerTunes or a drive waits for the worklet,
+    // as a link does, and so does clearing all P2P data, which the worklet
+    // does.
+    const waitsForWorklet = shortcut?.name === 'clear-p2p-data' || (shortcut?.name === 'open' && !!shortcut.target && needsWorklet(shortcut.target))
+    if (waitsForWorklet && (isBooting || !rpcRef.current)) return
     setPendingHomeShortcutUrl(null)
     settleIncomingUrl(shortcutUrl)
     setBrowserBookmarksVisible(false)
@@ -1096,6 +1189,22 @@ export default function App () {
     } else if (shortcut?.name === 'incognito') {
       setBrowserSettingsVisible(false)
       onBrowserNewIncognitoTab()
+    } else if (shortcut?.name === 'private-search') {
+      setBrowserSettingsVisible(false)
+      onBrowserNewIncognitoTab()
+      setBrowserAddressFocusRequest((count) => count + 1)
+    } else if (shortcut?.name === 'burn') {
+      // Straight to the flames: the lock screen button is there to burn
+      // without a question, where the menu's Burn asks first.
+      setBrowserSettingsVisible(false)
+      setBrowserBurning(true)
+    } else if (shortcut?.name === 'bookmarks') {
+      setBrowserSettingsVisible(false)
+      setBrowserBookmarksVisible(true)
+    } else if (shortcut?.name === 'clear-p2p-data') {
+      // The lock screen's emergency button: no question, as with Burn.
+      setBrowserSettingsVisible(false)
+      void clearAllP2PData({ onCallRpc: (command) => callRpc(command, {}), onRestartRequired })
     } else if (shortcut?.name === 'app-icon') {
       // Where the colours of the logo, and so of the app icon, are picked.
       setBrowserSettingsInitialPage('appearance')
@@ -1124,10 +1233,14 @@ export default function App () {
         if (!createBrowserTab(target)) void loadBrowserUrl(target)
       }).catch(() => setStatus('Unable to read what was copied'))
     }
-  }, [browserSessionReady, pendingHomeShortcutUrl])
+  }, [browserSessionReady, isBooting, pendingHomeShortcutUrl])
 
   useEffect(() => {
     if (!browserSessionReady || !pendingIncomingUrl) return
+    // It waits for the worklet the way a restored tab does. PeerChat opened by
+    // a link on a cold start asked for its chats before the worklet was
+    // running, and said "Worklet is not ready" until something was tapped.
+    if (needsWorklet(pendingIncomingUrl) && (isBooting || !rpcRef.current)) return
 
     const incomingUrl = pendingIncomingUrl
     setPendingIncomingUrl(null)
@@ -1143,7 +1256,7 @@ export default function App () {
     // behind it in the tab's history.
     setPendingRestoredUrl(null)
     void loadBrowserUrl(incomingUrl)
-  }, [browserSessionReady, pendingIncomingUrl])
+  }, [browserSessionReady, isBooting, pendingIncomingUrl])
 
   useEffect(() => {
     if (!isBrowserWebViewSource(browserSource)) return
@@ -1153,6 +1266,16 @@ export default function App () {
       browserTabsState.activeTabId
     ))
   }, [browserSource.kind, browserTabsState.activeTabId])
+
+  // The tab you leave stays loaded behind the new one, so its sound stops here
+  // rather than playing on where you cannot see it.
+  const frontBrowserTabIdRef = useRef(browserTabsState.activeTabId)
+  useEffect(() => {
+    const leftTabId = frontBrowserTabIdRef.current
+    frontBrowserTabIdRef.current = browserTabsState.activeTabId
+    if (leftTabId === browserTabsState.activeTabId) return
+    browserWebViewRefs.current.get(leftTabId)?.injectJavaScript(PAUSE_TAB_MEDIA_SCRIPT)
+  }, [browserTabsState.activeTabId])
 
   useEffect(() => {
     updateBrowserTabsState((state) => suspendInactiveBrowserTabsState(
@@ -1169,10 +1292,7 @@ export default function App () {
     // Built-in apps talk to the Bare worklet as soon as they open, so they have
     // to wait for it exactly like hyper:// does. Without this a restored
     // PeerTunes tab hit "Worklet is not ready" on every cold start.
-    const needsWorklet = isHyperUrl(pendingRestoredUrl) ||
-      getRuntimeAppFromUrl(pendingRestoredUrl) !== null ||
-      parseViewerUrl(pendingRestoredUrl) !== null
-    if (needsWorklet && (isBooting || !rpcRef.current)) return
+    if (needsWorklet(pendingRestoredUrl) && (isBooting || !rpcRef.current)) return
 
     const restoredUrl = pendingRestoredUrl
     setPendingRestoredUrl(null)
@@ -1190,57 +1310,31 @@ export default function App () {
   }
 
   async function startWorklet () {
-    if (workletRef.current) return
+    if (rpcRef.current) return
 
     setIsBooting(true)
     setStatus('Starting Bare worklet...')
 
     try {
-      const storageDir = Paths.document?.uri
-        ? `${toBareFsPath(Paths.document.uri)}/hyper-storage`
-        : 'hyper-storage'
-
-      // The key that locks private keys and file names on disk, from the
-      // Keychain or the Android Keystore (privacy/local-seal-key.ts).
-      const sealKey = await loadLocalSealKey()
-      const worklet = new Worklet()
-      worklet.start('/app.bundle', bundle, [storageDir, sealKey || ''])
-
-      // The backend pushes here when PeerChat changes, so a new message shows
-      // the moment it lands instead of waiting for the next poll.
-      const rpc = new RPC(worklet.IPC, (request) => {
-        if (request.command === RPC_APP_PEERCHAT_CHANGED) {
-          setPeerChatRevision((value) => value + 1)
-        }
-        if (request.command === RPC_APP_DEVICE_SYNC_CHANGED) {
-          setDeviceSyncRevision((value) => value + 1)
-        }
-        if (request.command === RPC_APP_BACKUP_PROGRESS && request.data) {
-          emitLinkDeviceProgress(typeof request.data === 'string'
-            ? request.data
-            : b4a.toString(request.data as Uint8Array))
-        }
-        try {
-          request.reply()
-        } catch {}
+      // The one already running when the PeerChat service started it, or a
+      // new one (app/backend.ts).
+      const initResponse = await startBackend({ allowNetwork: hyperOfflineNetworkAllowedRef.current })
+      rpcRef.current = getBackendRpc()
+      // A backend the PeerChat service started with the phone locked has no
+      // chat key yet. The screen is up, so the phone is unlocked now.
+      await syncChatSealKey().catch((error) => {
+        console.warn('Unable to hand the chat key over:', error)
       })
-
-      workletRef.current = worklet
-      rpcRef.current = rpc
-
-      const initResponse = await callRpc(RPC_HYPER_INIT, {})
-
-      if (!initResponse.ok) {
-        throw new Error(initResponse.error || 'Unable to initialize Hyper')
-      }
+      // Looking for new PeerChat messages, which goes on without the screen.
+      void startPeerChatChecks()
       // A backend started with the app already behind another one starts away.
       void callRpc(RPC_PEERCHAT_PRESENCE, { idle: appStateRef.current === 'background' }).catch(() => {})
 
-      setIdentityStoragePath(Paths.document?.uri ? toBareFsPath(Paths.document.uri) : storageDir)
+      setIdentityStoragePath(getIdentityStoragePath())
       const lanStatus = initResponse.lan?.available
         ? `; LAN ${initResponse.lan.host}:${initResponse.lan.port}`
         : '; LAN unavailable'
-      setStatus(`Hyper ready (${initResponse.storagePath || storageDir})${lanStatus}`)
+      setStatus(`Hyper ready (${initResponse.storagePath || getIdentityStoragePath()})${lanStatus}`)
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error))
     } finally {
@@ -1249,26 +1343,10 @@ export default function App () {
   }
 
   async function callRpc (command: number, payload: object) {
-    const rpc = rpcRef.current
-
-    if (!rpc) {
-      throw new Error(t('Worklet is not ready'))
-    }
-
-    const request = rpc.request(command)
     const requestPayload = HYPER_OFFLINE_NETWORK_COMMANDS.has(command)
       ? { ...payload, allowNetwork: hyperOfflineNetworkAllowedRef.current }
       : payload
-    request.send(JSON.stringify(requestPayload))
-
-    const reply = await request.reply()
-    if (!reply) return { ok: false, error: t('Missing response') }
-
-    if (typeof reply === 'string') {
-      return JSON.parse(reply)
-    }
-
-    return JSON.parse(b4a.toString(reply as Uint8Array))
+    return callBackend(command, requestPayload)
   }
 
   function commitBrowserEntry (url: string, source: BrowserSource) {
@@ -1796,6 +1874,7 @@ export default function App () {
       }
 
       setPeertunesUrl(response.localUrl)
+      setPeertunesResetId(typeof response.resetId === 'string' ? response.resetId : '')
       // Only the PeerTunes view gets it. A restarted server has a new one,
       // and the view loads the page again with it.
       setPeertunesToken(response.token)
@@ -1974,6 +2053,24 @@ export default function App () {
 
     stepBack()
   }
+
+  // Android hands a file over in native code and the page does not change, so
+  // native code says so (PeerSkyFileDownload in PeerSkyWebViewManager), and a
+  // tab sent to a file from the address bar steps back, as on iOS.
+  const leaveFileHandoffRef = useRef<typeof leaveFileHandoff | null>(null)
+  leaveFileHandoffRef.current = leaveFileHandoff
+  useEffect(() => {
+    if (Platform.OS !== 'android') return
+    const subscription = DeviceEventEmitter.addListener('PeerSkyFileDownload', (event: { url?: unknown, viewTag?: unknown }) => {
+      if (typeof event?.url !== 'string') return
+      const viewTag = typeof event.viewTag === 'number' ? event.viewTag : null
+      const tabId = (viewTag !== null && browserWebViewTabsRef.current.get(viewTag)) || browserTabsStateRef.current.activeTabId
+      if (!tabId) return
+      if (browserTabsStateRef.current.activeTabId === tabId) setBrowserIsLoading(false)
+      leaveFileHandoffRef.current?.(tabId, event.url, viewTag)
+    })
+    return () => subscription.remove()
+  }, [])
 
   // Android keeps the app running for PeerChat after a swipe away, and a tab
   // went on playing with nothing left on screen to stop it.
@@ -2276,15 +2373,31 @@ export default function App () {
   // it over the top loses the chat you were reading or stops the music, so it
   // gets its own tab and the app stays where it was.
   function openBrowserUrlInNewTab (targetUrl: string) {
-    if (createBrowserTab(targetUrl)) return
+    const openerTabId = browserTabsStateRef.current.activeTabId
+    if (createBrowserTab(targetUrl)) {
+      // Back from it, with nowhere further back in it, returns to this tab:
+      // a link tapped in a chat went back to the home screen instead.
+      if (openerTabId) browserTabOpenersRef.current.set(browserTabsStateRef.current.activeTabId, openerTabId)
+      return
+    }
     void loadBrowserUrl(targetUrl)
+  }
+
+  // A tab opened from another, by a link or a page's new window, closes back
+  // to it once there is nowhere further back in it, as other browsers do.
+  function closeTabToOpener () {
+    const tabsState = browserTabsStateRef.current
+    const openerTabId = browserTabOpenersRef.current.get(tabsState.activeTabId)
+    if (!openerTabId || !tabsState.tabs.some((tab) => tab.id === openerTabId)) return false
+    onBrowserCloseTab(tabsState.activeTabId, openerTabId)
+    return true
   }
 
   // A tap on a home screen widget. An app goes back to the tab it is open in,
   // if there is one. Anything else opens in a new tab over what was there.
   function openWidgetTarget (targetUrl: string) {
     const app = getRuntimeAppFromUrl(targetUrl)
-    if (!app && !isWebUrl(targetUrl) && !isHyperUrl(targetUrl)) return
+    if (!app && !isWebUrl(targetUrl) && !isHyperUrl(targetUrl) && !isBrowserP2pUrl(targetUrl)) return
     const tab = app ? findBrowserTabShowingApp(browserTabsStateRef.current, app) : null
     if (tab) {
       onBrowserSwitchTab(tab.id)
@@ -2526,7 +2639,9 @@ export default function App () {
   }) {
     if (item.type !== 'directory') {
       if (item.localUri) {
-        const opened = await openBrowserLocalFile(item.localUri, item.name)
+        // A copy that is gone, or that no app takes, falls through to the
+        // download or the file's own address rather than doing nothing.
+        const opened = await openBrowserLocalFile(item.localUri, item.name).catch(() => false)
         if (opened) {
           setStatus(`Opened ${item.name}`)
           return false
@@ -2721,6 +2836,10 @@ export default function App () {
     removeBrowserTabPreview(tabId)
     browserFaviconsRef.current.delete(tabId)
     browserLastRecordedUrlsRef.current.delete(tabId)
+    browserCommittedUrlsRef.current.delete(tabId)
+    for (const [tag, id] of browserWebViewTabsRef.current) {
+      if (id === tabId) browserWebViewTabsRef.current.delete(tag)
+    }
     browserMediaTokensRef.current.delete(tabId)
     browserTabOpenersRef.current.delete(tabId)
     hyperBridgePendingRef.current.delete(tabId)
@@ -2878,6 +2997,22 @@ export default function App () {
           : 'Tab session reset'
     )
     return { previewCacheCleared, sessionSaved }
+  }
+
+  // Clear all P2P data, Remove my data and a restore all start here, from
+  // Settings or the lock screen button. What the Hyperdrive viewer made of
+  // the drives goes too, the next time it opens.
+  function onRestartRequired () {
+    browserSessionReadyRef.current = false
+    setBrowserSessionReady(false)
+    setRestartRequired(true)
+    bumpHyperdriveViewerEpoch()
+    // The backend outlives the screen, so it is made again as PeerSky opens
+    // next. Nothing asks PeerChat for its chats meanwhile, which would open
+    // it on the data going, and its service stops: its notice would say
+    // connected for a PeerChat that is gone.
+    requireBackendRestart()
+    stopPeerChatNotifier({ disableService: true })
   }
 
   // Like DuckDuckGo's Fire Button and Firefox Focus, history goes too, so
@@ -3489,6 +3624,7 @@ export default function App () {
     setP2pmdEditorHtml(null)
     setP2pmdSetupError(null)
     setP2pmdSyncStatus(t('Joining room...'))
+    setIsP2pmdJoining(true)
 
     try {
       const response = await callRpc(RPC_P2PMD_ROOM_JOIN, {
@@ -3497,7 +3633,9 @@ export default function App () {
       })
 
       if (!response.ok || !response.room) {
-        const message = response.error || t('Failed joining P2PMD room')
+        const message = response.noHost
+          ? t('Nobody has this note open right now. Try again when its host opens it.')
+          : response.error || t('Failed joining P2PMD room')
         setP2pmdSetupError(message)
         setP2pmdSyncStatus('Ready')
         setStatus(message)
@@ -3513,7 +3651,7 @@ export default function App () {
       setP2pmdRoom(response.room)
       setP2pmdUrl(response.room.localUrl)
       rememberP2pmdRoom(response.room.key, 'client')
-      setP2pmdSyncStatus(response.warning || t('Joining room page...'))
+      setP2pmdSyncStatus(t('Joining room page...'))
       setStatus('P2PMD room joined')
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
@@ -3522,6 +3660,7 @@ export default function App () {
       setStatus(message)
     } finally {
       setIsLoading(false)
+      setIsP2pmdJoining(false)
     }
   }
 
@@ -3685,6 +3824,100 @@ export default function App () {
     }
   }
 
+  // The share sheet offers Export slides only for a deck, and exports the note
+  // as it is now, so the page is asked for it first. A page that does not
+  // answer, as one still loading, gets the invite straight away, as before.
+  function onP2pmdSharePress () {
+    if (!p2pmdRoom) return
+    const nonce = createP2pmdNonce(Crypto.getRandomValues(new Uint8Array(16)))
+    p2pmdShareNonceRef.current = nonce
+    if (p2pmdShareTimerRef.current) clearTimeout(p2pmdShareTimerRef.current)
+    p2pmdShareTimerRef.current = setTimeout(() => {
+      p2pmdShareTimerRef.current = null
+      if (p2pmdShareNonceRef.current !== nonce) return
+      p2pmdShareNonceRef.current = null
+      void onP2pmdShareRoom()
+    }, 1500)
+    p2pmdWebViewRef.current?.injectJavaScript(createP2pmdShareInfoScript(nonce))
+  }
+
+  function onP2pmdShareInfo (message: Record<string, unknown>) {
+    const note = readP2pmdShareInfo(message, p2pmdShareNonceRef.current)
+    if (!note) return
+    p2pmdShareNonceRef.current = null
+    if (p2pmdShareTimerRef.current) {
+      clearTimeout(p2pmdShareTimerRef.current)
+      p2pmdShareTimerRef.current = null
+    }
+    setP2pmdShareNote(note)
+  }
+
+  // iOS will not present the share sheet over a modal that is still fading
+  // out, and fails without a word, so the sheet's actions wait for it to
+  // finish leaving, as the browser menu's do. Android runs them straight away.
+  function afterP2pmdShareSheetCloses (action: () => void) {
+    if (Platform.OS === 'ios') p2pmdShareSheetActionRef.current = action
+    setP2pmdShareNote(null)
+    if (Platform.OS !== 'ios') action()
+  }
+
+  function exportP2pmdNote (kind: 'pdf' | 'slides') {
+    const note = p2pmdShareNote
+    if (!note) return
+    afterP2pmdShareSheetCloses(() => { void runP2pmdExport(note, kind) })
+  }
+
+  // A research paper's pages as the editor lays them out, for Export PDF.
+  // null for a note that is not a paper, an editor too old to answer, or one
+  // that takes too long, and the export goes on without them.
+  function requestP2pmdPaper (): Promise<string | null> {
+    p2pmdPaperRequestRef.current?.finish(null)
+    const nonce = createP2pmdNonce(Crypto.getRandomValues(new Uint8Array(16)))
+    return new Promise((resolve) => {
+      const finish = (html: string | null) => {
+        clearTimeout(timer)
+        if (p2pmdPaperRequestRef.current?.nonce === nonce) p2pmdPaperRequestRef.current = null
+        resolve(html)
+      }
+      const timer = setTimeout(() => finish(null), P2PMD_PAPER_TIMEOUT_MS)
+      p2pmdPaperRequestRef.current = { nonce, finish }
+      p2pmdWebViewRef.current?.injectJavaScript(createP2pmdPaperScript(nonce))
+    })
+  }
+
+  // The page a publish makes, with its pictures inside, as a PDF or as a
+  // slides file, handed to the share sheet to save or send.
+  async function runP2pmdExport (note: { content: string, latexModeEnabled: boolean }, kind: 'pdf' | 'slides') {
+    if (!p2pmdRoom || p2pmdExportInFlightRef.current) return
+    p2pmdExportInFlightRef.current = true
+    const statusBefore = p2pmdSyncStatus
+    setP2pmdSyncStatus(t('Exporting...'))
+    try {
+      const paperHtml = kind === 'pdf' && note.latexModeEnabled ? await requestP2pmdPaper() : null
+      const response = await callRpc(RPC_P2PMD_EXPORT, {
+        content: note.content,
+        mode: kind === 'slides' ? 'slides' : 'note',
+        latexModeEnabled: note.latexModeEnabled,
+        ...(paperHtml && { paperHtml })
+      })
+      if (!response.ok || typeof response.html !== 'string') {
+        throw new Error(response.error || t('Unable to export the note'))
+      }
+      const error = await shareP2pmdExport(
+        response.html,
+        p2pmdExportFileName(note.content, kind),
+        kind,
+        response.paper === 'a4' ? 'a4' : undefined
+      )
+      if (error) throw new Error(error)
+      setP2pmdSyncStatus(statusBefore)
+    } catch (error) {
+      setP2pmdSyncStatus(t('Export failed: {error}', { error: error instanceof Error ? error.message : String(error) }))
+    } finally {
+      p2pmdExportInFlightRef.current = false
+    }
+  }
+
   async function onP2pmdShareRoom () {
     if (!p2pmdRoom) return
 
@@ -3829,6 +4062,18 @@ export default function App () {
     setP2pmdPublishSheet(p2pmdPublishedModeRef.current)
   }
 
+  // A name changed in a note's people panel is kept for every note after it,
+  // and the P2PMD screen shows it at once rather than after the next note.
+  function saveP2pmdPeerDisplayNameFromNote (value: unknown): RpcResponse {
+    const saved = saveP2pmdPeerDisplayName(value)
+    if (saved.ok) {
+      const name = loadP2pmdPeerDisplayName()
+      setP2pmdPeerDisplayName(name)
+      if (name) setP2pmdNameDraft(name)
+    }
+    return saved
+  }
+
   async function handleP2pmdBridgeRequest (request: Record<string, unknown>) {
     const requestId = typeof request.requestId === 'string' ? request.requestId : ''
     const action = typeof request.action === 'string' ? request.action : ''
@@ -3845,7 +4090,7 @@ export default function App () {
         : action === 'hyper-image'
           ? await uploadP2pmdImage(payload as Record<string, unknown>)
           : action === 'peer-profile'
-            ? saveP2pmdPeerDisplayName(peerProfileName)
+            ? saveP2pmdPeerDisplayNameFromNote(peerProfileName)
           : { ok: false, error: `Unsupported P2PMD bridge action: ${action}` }
       resolveP2pmdBridgeRequest(requestId, response)
     } catch (error) {
@@ -3896,6 +4141,9 @@ export default function App () {
             setP2pmdParticipants(parsed.count)
           }
           break
+        case 'p2pmd-host-away':
+          setP2pmdHostAway(parsed.away === true)
+          break
         case 'p2pmd-document-loaded':
           setP2pmdSyncStatus('Loaded')
           setStatus('P2PMD document loaded')
@@ -3928,6 +4176,15 @@ export default function App () {
         case 'p2pmd-image-uploaded':
           setP2pmdSyncStatus('Image uploaded')
           break
+        case P2PMD_SHARE_INFO_TYPE:
+          onP2pmdShareInfo(parsed)
+          break
+        case P2PMD_PAPER_TYPE: {
+          const request = p2pmdPaperRequestRef.current
+          const paper = request ? readP2pmdPaper(parsed, request.nonce) : null
+          if (request && paper) request.finish(paper.html)
+          break
+        }
         case 'p2pmd-publish-requested':
           if (!parsed.nonce || parsed.nonce !== p2pmdPublishNonceRef.current) break
           p2pmdPublishNonceRef.current = null
@@ -3988,6 +4245,17 @@ export default function App () {
   // Starts the editor over from its own page. A reload would ask the room's
   // server for it instead.
   const [p2pmdEditorMount, setP2pmdEditorMount] = useState(0)
+  // The name the editor page starts with, kept while the page is open. A name
+  // changed in the note's people panel is already in the page, and a new name
+  // here would be new html, which loads the note again and closes the panel.
+  const p2pmdEditorDisplayName = useMemo(
+    () => p2pmdPeerDisplayName,
+    [p2pmdRoom?.key, p2pmdRoom?.role, p2pmdUrl, p2pmdRoom?.token, p2pmdEditorMount]
+  )
+  // A new editor page starts out knowing nothing of the host, and says so.
+  useEffect(() => {
+    setP2pmdHostAway(false)
+  }, [p2pmdRoom?.key, p2pmdRoom?.role, p2pmdUrl, p2pmdEditorMount])
   const browserBookmarkActionAvailable = canBookmarkBrowserPage(
     browserSource.kind,
     browserCurrentUrl
@@ -4195,6 +4463,7 @@ export default function App () {
     // So is a folder in the Hyperdrive viewer, or a photo open in it.
     else if (browserSource.kind === 'viewer' && driveViewerNavigationRef.current?.goBack()) return true
     else if (canBrowserGoBack) onBrowserBack()
+    else if (closeTabToOpener()) return true
     else return false
 
     return true
@@ -4456,15 +4725,7 @@ export default function App () {
                 if (didNavigate) closeBrowserSettings()
               })
             }}
-            onRestartRequired={() => {
-              browserSessionReadyRef.current = false
-              setBrowserSessionReady(false)
-              setRestartRequired(true)
-              // Clear all P2P data, Remove my data and a restore all start
-              // here. What the Hyperdrive viewer made of the drives goes too,
-              // the next time it opens.
-              bumpHyperdriveViewerEpoch()
-            }}
+            onRestartRequired={onRestartRequired}
           />
         </View>
         <BrowserBackSwipe
@@ -4486,7 +4747,7 @@ export default function App () {
     const p2pmdEditorBaseUrl = createP2pmdEditorUrl(p2pmdEditorRoomBaseUrl, p2pmdRoom.role, p2pmdEditorNonce)
     const p2pmdEditorHtmlWithRoomBase = p2pmdEditorHtml.replace(
       '<head>',
-      `<head><script>window.__P2PMD_ROOM_BASE_URL__=${serializeInlineScriptValue(p2pmdEditorRoomBaseUrl)};window.__P2PMD_ROOM_KEY__=${serializeInlineScriptValue(p2pmdRoom.key)};window.__P2PMD_DISPLAY_NAME__=${serializeInlineScriptValue(p2pmdPeerDisplayName)};</script>`
+      `<head><script>window.__P2PMD_ROOM_BASE_URL__=${serializeInlineScriptValue(p2pmdEditorRoomBaseUrl)};window.__P2PMD_ROOM_KEY__=${serializeInlineScriptValue(p2pmdRoom.key)};window.__P2PMD_DISPLAY_NAME__=${serializeInlineScriptValue(p2pmdEditorDisplayName)};</script>`
     )
 
     browserOverlay = (
@@ -4614,7 +4875,7 @@ export default function App () {
             accessibilityLabel={t('Share note')}
             accessibilityRole='button'
             style={[styles.p2pmdMetaButton, p2pmdTheme?.p2pmdMetaButton, styles.p2pmdMetaIconButton]}
-            onPress={() => void onP2pmdShareRoom()}
+            onPress={onP2pmdSharePress}
             disabled={isBooting || isLoading}
           >
             <ShareIcon width={16} height={16} color={browserIsDark ? '#f1f2f7' : '#1f2a44'} />
@@ -4634,6 +4895,13 @@ export default function App () {
             <Text style={[styles.p2pmdMetaButtonText, p2pmdTheme?.p2pmdMetaButtonText]}>{t('Leave')}</Text>
           </Pressable>
         </View>}
+        {p2pmdHostAway && p2pmdRoom.role !== 'host' && !isP2pmdLandscapeSlides && (
+          <View accessibilityLiveRegion='polite' style={[styles.p2pmdHostAway, p2pmdTheme?.p2pmdHostAway]}>
+            <Text style={[styles.p2pmdHostAwayText, p2pmdTheme?.p2pmdHostAwayText]}>
+              {t('The host is away. You can read the note, and editing comes back when they return.')}
+            </Text>
+          </View>
+        )}
         <View style={styles.p2pmdWorkspaceEditor}>
           <WebView
             key={`${p2pmdEditorBaseUrl}:${p2pmdEditorHtml.length}:${p2pmdEditorMount}`}
@@ -4719,6 +4987,20 @@ export default function App () {
             setP2pmdPublishSheet(null)
             openBrowserUrlInNewTab(url)
           }}
+        />
+        <P2pmdShareSheet
+          visible={p2pmdShareNote !== null}
+          isDark={browserIsDark}
+          slides={p2pmdShareNote?.slides === true}
+          onClose={() => setP2pmdShareNote(null)}
+          onDismissed={() => {
+            const action = p2pmdShareSheetActionRef.current
+            p2pmdShareSheetActionRef.current = null
+            action?.()
+          }}
+          onShareInvite={() => afterP2pmdShareSheetCloses(() => { void onP2pmdShareRoom() })}
+          onExportPdf={() => exportP2pmdNote('pdf')}
+          onExportSlides={() => exportP2pmdNote('slides')}
         />
       </SafeAreaView>
     )
@@ -5519,7 +5801,7 @@ export default function App () {
                           onPress={() => void onP2pmdRoomJoin()}
                           disabled={isBooting || isLoading || !p2pmdJoinKey.trim()}
                         >
-                          <Text style={[styles.p2pmdJoinActionText, p2pmdTheme?.p2pmdJoinActionText]}>{t('Join Note')}</Text>
+                          <Text style={[styles.p2pmdJoinActionText, p2pmdTheme?.p2pmdJoinActionText]}>{isP2pmdJoining ? t('Looking for the host...') : t('Join Note')}</Text>
                         </Pressable>
                       </View>
 
@@ -5650,19 +5932,9 @@ export default function App () {
             ? browserSource.opening
               // A page on its way: blank, with the address bar showing it load.
               ? <View style={[styles.browserRestorePage, { backgroundColor: browserChrome.surface }]} />
-              : (
-                <View style={styles.browserRestorePage}>
-                  <ActivityIndicator size='small' color='#1f6fd1' />
-                  <Text style={styles.browserRestoreText}>{t('Restoring tab...')}</Text>
-                </View>
-                )
+              : <BrowserWaitPage label={t('Restoring tab...')} palette={browserChrome} />
             : !contentBlockingReady && isBrowserWebViewSource(browserSource)
-                ? (
-                  <View style={styles.browserRestorePage}>
-                    <ActivityIndicator size='small' color='#1f6fd1' />
-                    <Text style={styles.browserRestoreText}>{t('Turning on tracker protection...')}</Text>
-                  </View>
-                  )
+                ? <BrowserWaitPage label={t('Turning on tracker protection...')} palette={browserChrome} />
                 : null}
 
         {peertunesMounted && (
@@ -5681,6 +5953,7 @@ export default function App () {
               launchSuffix={peertunesLaunchSuffix}
               localUrl={peertunesUrl}
               serverToken={peertunesToken}
+              resetId={peertunesResetId}
               onEnsureServer={() => void ensurePeerTunesServer()}
               onKeepOffline={keepPeerTunesFolderOffline}
               onKeptFolders={peerTunesKeptFolders}
@@ -5775,11 +6048,21 @@ export default function App () {
 
           const webViewGeneration = browserWebViewGenerations[tab.id] || 0
 
+          // On iOS a tab behind another is moved out of sight, not set to
+          // display: 'none'. Hidden that way, its WebView was taken down and
+          // built again, so every switch reloaded the page and lost the place
+          // in it: a PDF went back to page 1. Android keeps the WebView and
+          // stops drawing it, which a tab out of sight would not.
           return (
             <View
               key={tab.id}
               pointerEvents={isActive ? 'auto' : 'none'}
-              style={[styles.browserWebViewLayer, !isActive ? styles.browserWebViewLayerHidden : null]}
+              style={[
+                styles.browserWebViewLayer,
+                isActive
+                  ? null
+                  : Platform.OS === 'ios' ? styles.browserWebViewLayerOffscreen : styles.browserWebViewLayerHidden
+              ]}
             >
             <View
               ref={(ref) => {
@@ -5871,6 +6154,14 @@ export default function App () {
               }}
               onLoadStart={(event) => {
                 browserLoadStartsRef.current.add(event.nativeEvent)
+                const startTag = getNativeViewTag(event)
+                if (startTag !== null) browserWebViewTabsRef.current.set(startTag, tab.id)
+                // Android starts a load only for a navigation that committed.
+                if (Platform.OS === 'android' && typeof event.nativeEvent.url === 'string') {
+                  const committed = browserCommittedUrlsRef.current.get(tab.id) || new Set<string>()
+                  committed.add(event.nativeEvent.url)
+                  browserCommittedUrlsRef.current.set(tab.id, committed)
+                }
                 browserFaviconsRef.current.delete(tab.id)
                 setBrowserMediaTarget((current) => current?.tabId === tab.id ? null : current)
                 if (
@@ -5919,6 +6210,16 @@ export default function App () {
                 if (entry.source.kind !== 'web') return
                 if (!isCurrentBrowserTabEntry(browserTabsStateRef.current, tab.id, entry)) return
                 if (!isWebUrl(navigationState.url) || navigationState.url.length > MAX_BROWSER_URL_LENGTH) return
+                const isLoadStart = browserLoadStartsRef.current.has(navigationState)
+                if (isUncommittedNavigationFinish({
+                  platform: Platform.OS,
+                  isLoadStart,
+                  committedUrls: browserCommittedUrlsRef.current.get(tab.id),
+                  url: navigationState.url
+                })) return
+                if (Platform.OS === 'android' && !isLoadStart) {
+                  browserCommittedUrlsRef.current.set(tab.id, new Set([navigationState.url]))
+                }
                 // A page that has only started to load is not there yet. iOS
                 // reports the start with loading false, since the page being
                 // left is done, and read as a page that had landed, a link on
@@ -6189,38 +6490,39 @@ export default function App () {
   )
 }
 
-function toBareFsPath (uri: string) {
-  if (!uri.startsWith('file://')) return uri
-  return decodeURIComponent(new URL(uri).pathname).replace(/\/$/, '')
-}
-
 function getP2pmdProfileFile () {
   return new File(Paths.document, 'p2pmd-profile.json')
 }
 
-function getP2pmdRoomHistoryFile () {
-  return new File(Paths.document, 'p2pmd-room-history.json')
-}
+// The recent notes, with each note's key, are locked with the chat key in the
+// backend (backend/hyper/private-app-files.mjs). The list is read once the
+// backend is up, and nothing is written before that read, so a list not read
+// yet never goes over the one on disk.
+const P2PMD_ROOM_HISTORY_FILE = 'p2pmd-room-history.json'
+let p2pmdRoomHistoryRead = false
 
-function loadP2pmdRoomHistory (): P2pmdRoomHistoryEntry[] {
+async function loadP2pmdRoomHistory (): Promise<P2pmdRoomHistoryEntry[] | null> {
   try {
-    const file = getP2pmdRoomHistoryFile()
-    return readP2pmdRoomHistoryFile(file) as P2pmdRoomHistoryEntry[]
+    const response = await callBackend(RPC_PRIVATE_APP_FILE_READ, { name: P2PMD_ROOM_HISTORY_FILE })
+    if (!response.ok) throw new Error(response.error || 'Unable to read the recent notes.')
+    p2pmdRoomHistoryRead = true
+    return parseP2pmdRoomHistory(response.text ?? '') as P2pmdRoomHistoryEntry[]
   } catch (error) {
     console.error('Failed loading P2PMD room history:', error)
-    return []
+    return null
   }
 }
 
 function saveP2pmdRoomHistory (rooms: P2pmdRoomHistoryEntry[]) {
-  try {
-    const file = getP2pmdRoomHistoryFile()
-    writeP2pmdRoomHistoryFile(file, rooms)
-    return true
-  } catch (error) {
-    console.error('Failed saving P2PMD room history:', error)
-    return false
-  }
+  if (!p2pmdRoomHistoryRead) return false
+  void callBackend(RPC_PRIVATE_APP_FILE_WRITE, { name: P2PMD_ROOM_HISTORY_FILE, text: serializeP2pmdRoomHistory(rooms) })
+    .then((response) => {
+      if (!response.ok) throw new Error(response.error || 'Unable to save the recent notes.')
+    })
+    .catch((error) => {
+      console.error('Failed saving P2PMD room history:', error)
+    })
+  return true
 }
 
 function normalizeP2pmdPeerDisplayName (value: unknown) {
@@ -6323,6 +6625,12 @@ function writeBrowserSession (state: BrowserTabsState) {
     console.error('Failed saving browser tabs:', error)
     return false
   }
+}
+
+// Built-in apps, hyper:// pages and a folder's views call the Bare worklet the
+// moment they open, so whatever opens one waits until it is running.
+function needsWorklet (url: string) {
+  return isHyperUrl(url) || getRuntimeAppFromUrl(url) !== null || parseViewerUrl(url) !== null
 }
 
 function isBrowserWebViewSource (

@@ -13,6 +13,10 @@ import HyperDHTmDNS from '@p2plabs/hyperdht-mdns'
 import { create as createSDK } from 'hyper-sdk'
 import { addLANReadinessBarrier, attachPrivateLANDiscovery } from '../../backend/hyper/lan-discovery.mjs'
 
+// hyperdht-mdns 2 makes up a LAN key for each network; version 1 was given
+// the store's.
+const ownLANKeys = typeof HyperDHTmDNS.identityGate === 'function'
+
 test('a private file comes over the LAN with no internet at all', { timeout: 30_000 }, async (t) => {
   const storage = await mkdtemp(path.join(tmpdir(), 'peersky-private-lan-'))
   const bus = new Set()
@@ -69,12 +73,13 @@ test('a private file comes over the LAN with no internet at all', { timeout: 30_
     }
   })
   assert.ok(lan)
-  assert.equal(created.keyPair, phone.swarm.keyPair)
+  if (ownLANKeys) assert.equal(created.keyPair, undefined)
+  else assert.equal(created.keyPair, phone.swarm.keyPair)
   const replica = await phone.getDrive(source.url)
   assert.deepEqual(await replica.get('/movie.bin'), movie)
 })
 
-test('the private LAN swarm uses the store\'s key and a port of its own, and gives up quietly', async () => {
+test('the private LAN swarm gets a port of its own, the store\'s key only on version 1, and gives up quietly', async () => {
   const keyPair = { publicKey: Buffer.alloc(32, 3), secretKey: Buffer.alloc(64, 4) }
   const ports = []
   const warnings = []
@@ -92,9 +97,10 @@ test('the private LAN swarm uses the store\'s key and a port of its own, and giv
     logger,
     createLAN: (options) => {
       ports.push(options.port)
-      assert.equal(options.keyPair, keyPair)
+      assert.equal(options.keyPair, ownLANKeys ? undefined : keyPair)
       assert.equal(options.host, '192.168.1.9')
       assert.equal(typeof options.mdnsOptions.createBonjour, 'function')
+      assert.equal(typeof options.mdnsOptions.createMDNS, 'function')
       return fake()
     },
     attach: async (_runtime, { lan }) => lan

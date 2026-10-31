@@ -19,6 +19,8 @@ type PublishedLinkSheetProps = {
   shareTitle: string
   onClose: () => void
   onOpen?: (url: string) => void
+  // iOS: once the sheet has finished closing.
+  onDismiss?: () => void
 }
 
 // What publishing hands back. It used to be an alert: tap Copy or Done and the
@@ -32,7 +34,8 @@ export function PublishedLinkSheet ({
   url,
   shareTitle,
   onClose,
-  onOpen
+  onOpen,
+  onDismiss
 }: PublishedLinkSheetProps) {
   const [copied, setCopied] = useState(false)
   const palette = isDark ? BROWSER_PALETTES.dark : BROWSER_PALETTES.light
@@ -61,6 +64,7 @@ export function PublishedLinkSheet ({
       transparent={true}
       visible={visible && Boolean(url)}
       onRequestClose={onClose}
+      onDismiss={onDismiss}
     >
       <SafeAreaView style={styles.overlay} edges={['top', 'left', 'right']}>
         <Pressable accessibilityLabel={t('Close')} style={styles.backdrop} onPress={onClose} />

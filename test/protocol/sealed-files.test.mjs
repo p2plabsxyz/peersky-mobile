@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, it } from 'node:test'
@@ -17,17 +18,29 @@ import {
   getPrivateDriveKey,
   getPrivateDriveKeyRecord,
   importPrivateDriveKey,
+  PRIVATE_DRIVE_KEY_FILE,
   resetPrivateDriveKeyCache
 } from '../../backend/hyper/private-keys.mjs'
-import { readPrivateDriveRecords } from '../../backend/hyperdrive-viewer/drive-names.mjs'
+import { PRIVATE_DRIVE_REGISTRY_FILE, readPrivateDriveRecords } from '../../backend/hyperdrive-viewer/drive-names.mjs'
 import {
+  DEVICE_SYNC_FILE,
   readDeviceSyncState,
   recordDeviceHello,
   recordDriveListing,
   resetDeviceSyncStateCache
 } from '../../backend/hyper/device-sync-state.mjs'
+import { P2P_IDENTITY_ENTRIES } from '../../backend/hyper/p2p-reset.mjs'
 import { openText, sealText } from '../../app/privacy/sealed-text.mjs'
 import { isLinkedPrivateKeyFile } from '../../app/hyperdrive/private-upload.mjs'
+import {
+  decideLocalSealKey,
+  LOCAL_SEAL_KEY_CHECK_FILE,
+  LOCAL_SEALED_FILES,
+  localSealKeyCheckFromDigest,
+  localSealKeyCheckInput,
+  parseLocalSealKeyCheck,
+  serializeLocalSealKeyCheck
+} from '../../app/privacy/local-seal-key-state.mjs'
 
 // The private drive key and the names of private files sat in plain files on
 // the phone. They are locked now with a key the system keeps (the Keychain,
@@ -156,5 +169,110 @@ describe('private files locked with the phone\'s secure storage', () => {
     assert.equal(openText(readFileSync(join(dir, 'from-backend.json'), 'utf8'), KEY).text, '{"a":"b"}')
     assert.throws(() => openText(locked, OTHER_KEY))
     assert.equal(openText('[1]', null).sealed, false)
+  })
+})
+
+// Android's secure storage gives back nothing, and deletes what it held, when
+// its Keystore key is gone or cannot open the value. The app made a new key
+// then, which left every file the old one locked shut for good, and the
+// backend, with no key, wrote over them in the open.
+describe('a seal key made on this phone is never made again', () => {
+  let dir
+  const check = (key) => localSealKeyCheckFromDigest(createHash('sha256').update(localSealKeyCheckInput(key)).digest('hex'))
+  const read = (path) => readFileSync(new URL(`../../${path}`, import.meta.url), 'utf8')
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'peersky-seal-key-'))
+    resetPrivateDriveKeyCache()
+    resetDeviceSyncStateCache()
+  })
+
+  afterEach(() => {
+    setLocalSealKey(null)
+    resetPrivateDriveKeyCache()
+    resetDeviceSyncStateCache()
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('makes the first key only where none was made', () => {
+    assert.equal(decideLocalSealKey({ storedKey: null, storedKeyCheck: '', check: null, lockedFiles: false }), 'make')
+    // A check kept, or a file a key locked: one was made here.
+    assert.equal(decideLocalSealKey({ storedKey: null, storedKeyCheck: '', check: check(KEY), lockedFiles: false }), 'missing')
+    assert.equal(decideLocalSealKey({ storedKey: null, storedKeyCheck: '', check: null, lockedFiles: true }), 'missing')
+    assert.equal(decideLocalSealKey({ storedKey: 'not a key', storedKeyCheck: '', check: check(KEY), lockedFiles: false }), 'missing')
+  })
+
+  it('uses the key that comes back, if it is the one the check was made from', () => {
+    assert.equal(decideLocalSealKey({ storedKey: KEY, storedKeyCheck: check(KEY), check: check(KEY), lockedFiles: true }), 'use')
+    // Made before the check was kept: the check is made from it now.
+    assert.equal(decideLocalSealKey({ storedKey: KEY, storedKeyCheck: check(KEY), check: null, lockedFiles: true }), 'use')
+    assert.equal(decideLocalSealKey({ storedKey: OTHER_KEY, storedKeyCheck: check(OTHER_KEY), check: check(KEY), lockedFiles: false }), 'missing')
+  })
+
+  it('keeps a check that says nothing of the key', () => {
+    const text = serializeLocalSealKeyCheck(check(KEY))
+    assert.equal(parseLocalSealKeyCheck(text), check(KEY))
+    assert.ok(!text.includes(KEY))
+    assert.equal(check(KEY).length, 32)
+    assert.notEqual(check(KEY), check(OTHER_KEY))
+    for (const bad of ['', 'x', JSON.stringify({ version: 2, check: check(KEY) }), JSON.stringify({ version: 1, check: 'short' })]) {
+      assert.equal(parseLocalSealKeyCheck(bad), null, bad)
+    }
+  })
+
+  it('looks for the files the backend really locks, and a clear takes the check', () => {
+    for (const name of [
+      PRIVATE_DRIVE_KEY_FILE,
+      PRIVATE_DRIVE_REGISTRY_FILE,
+      DEVICE_SYNC_FILE,
+      'hyperdrive-recents.json',
+      `hyper-sdk-synced-private/${PRIVATE_DRIVE_KEY_FILE}`
+    ]) {
+      assert.ok(LOCAL_SEALED_FILES.includes(name), name)
+    }
+    assert.ok(P2P_IDENTITY_ENTRIES.includes(LOCAL_SEAL_KEY_CHECK_FILE))
+  })
+
+  it('writes nothing it would lock while the key made here is missing', () => {
+    setLocalSealKey(KEY)
+    const keyFile = join(dir, 'private-drive-key.json')
+    getPrivateDriveKey(dir)
+    const drive = '17'.repeat(32)
+    recordDeviceHello(dir, { id: '28'.repeat(32), type: 'desktop', drives: [drive] })
+    const listFile = join(dir, 'device-sync.json')
+    const lockedKey = readFileSync(keyFile)
+    const lockedList = readFileSync(listFile)
+
+    setLocalSealKey('', { missing: true })
+    resetPrivateDriveKeyCache()
+    resetDeviceSyncStateCache()
+    assert.equal(canSeal(), false)
+    assert.throws(() => writeSealedJson(keyFile, { version: 2, key: 'c3'.repeat(32) }), { code: 'SEAL_KEY_MISSING' })
+    assert.throws(() => getPrivateDriveKey(dir))
+    recordDeviceHello(dir, { id: '39'.repeat(32), type: 'desktop', drives: [] })
+    assert.deepEqual(readFileSync(keyFile), lockedKey)
+    assert.deepEqual(readFileSync(listFile), lockedList)
+    assert.throws(() => writeSealedJson(join(dir, 'new.json'), { a: 1 }), { code: 'SEAL_KEY_MISSING' })
+    assert.equal(existsSync(join(dir, 'new.json')), false)
+    assert.deepEqual(sealFilesAtRest([keyFile]), [])
+
+    // A phone with no secure storage at all writes them as it always did.
+    setLocalSealKey('')
+    writeSealedJson(join(dir, 'plain.json'), { b: 1 })
+    assert.deepEqual(JSON.parse(readFileSync(join(dir, 'plain.json'), 'utf8')), { b: 1 })
+  })
+
+  it('the app reads its check first and tells the backend when the key is missing', () => {
+    const app = read('app/privacy/local-seal-key.ts')
+    assert.ok(app.indexOf('const check = readCheck(checkFile)') < app.indexOf('SecureStore.getItemAsync(ITEM, OPTIONS)'))
+    assert.match(app, /if \(decision === 'missing'\) \{\s+missing = true[\s\S]{0,200}return null/)
+    assert.match(app, /if \(decision === 'make'\) \{\s+value = toHex\(getRandomBytes\(32\)\)/)
+    assert.equal(app.match(/getRandomBytes\(32\)/g)?.length, 1)
+    // Not read at all, with a key made here before, is missing too.
+    assert.match(app, /missing = Boolean\(check\) \|\| lockedFiles/)
+
+    assert.match(read('app/backend.ts'), /\[\s+getBackendStoragePath\(\),\s+sealKey \|\| '',\s+isLocalSealKeyMissing\(\) \? 'missing' : '',/)
+    assert.match(read('backend/main.mjs'), /setLocalSealKey\(Bare\.argv\[1\], \{ missing: Bare\.argv\[2\] === 'missing' \}\)/)
+    assert.match(read('app/hyperdrive/recents-store.ts'), /if \(!key && isLocalSealKeyMissing\(\)\) return false/)
   })
 })

@@ -44,6 +44,19 @@ test('PeerChat applies configurable content filters and always blocks adult doma
   assert.match(result.reason, /adult domain/)
 })
 
+test('PeerChat catches a threat however the I is written', () => {
+  for (const text of [
+    "I'll murder you", 'I’ll murder you', 'Ill murder you', 'I will stalk her',
+    "I'm going to murder you", 'I’m going to murder you', 'im going to stalk you',
+    'I am going to murder you', "I'm gonna stalk you",
+    'I am going to kill you', "I'm gonna kill u", 'I’ll stab you', 'I will hurt you'
+  ]) assert.equal(checkPeerChatContent(text, {}).flagged, true, text)
+  for (const text of [
+    "I'll kill it at the gig tonight", 'this traffic is going to kill me',
+    "I'm going to shoot you an email", "it won't hurt you to try", 'I will kill some time'
+  ]) assert.equal(checkPeerChatContent(text, {}).flagged, false, text)
+})
+
 test('PeerChat warns twice, then temporarily blocks a violating live peer', () => {
   const moderator = createPeerChatModerator()
   const options = { now: 1_000, settings: {} }

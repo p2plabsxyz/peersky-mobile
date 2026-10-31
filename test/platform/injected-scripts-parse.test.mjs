@@ -10,7 +10,7 @@ import { createPullRefreshScript } from '../../app/browser-pull-refresh.mjs'
 import { combineBrowserInjectedScripts, createBrowserFaviconScript } from '../../app/bookmarks/browser-favicon.mjs'
 import { createHyperBridgeScript } from '../../app/hyper-bridge.mjs'
 import { createHyperBridgeSettleScript } from '../../app/hyper-bridge-host.mjs'
-import { PEERTUNES_SCAN_BRIDGE_SCRIPT } from '../../app/peertunes/peertunes-screen.mjs'
+import { PEERTUNES_SCAN_BRIDGE_SCRIPT, createPeerTunesLanguageScript } from '../../app/peertunes/peertunes-screen.mjs'
 import { createBrowserContentBlockingScript } from '../../app/privacy/browserContentBlockingScript.mjs'
 
 // Every script below is written as a template literal and handed to a WebView
@@ -47,7 +47,11 @@ const scripts = {
   'media long press': createBrowserMediaLongPressScript({ token: TOKEN }),
   print: createBrowserPrintScript(TOKEN),
   'pull to refresh': createPullRefreshScript(TOKEN),
-  'PeerTunes bridge': PEERTUNES_SCAN_BRIDGE_SCRIPT
+  'PeerTunes bridge': PEERTUNES_SCAN_BRIDGE_SCRIPT,
+  'PeerTunes language': createPeerTunesLanguageScript({
+    language: 'ar',
+    strings: { Music: `الموسيقى${String.fromCharCode(0x2028)}`, '{count} songs': { one: '{count}', other: '{count}' } }
+  })
 }
 
 for (const [name, script] of Object.entries(scripts)) {

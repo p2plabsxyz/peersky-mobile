@@ -16,8 +16,10 @@ import androidx.webkit.UserAgentMetadata
 import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
+import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.ReadableMap
+import com.facebook.react.modules.core.DeviceEventManagerModule
 import com.facebook.react.uimanager.annotations.ReactProp
 import com.facebook.react.uimanager.ThemedReactContext
 import com.facebook.react.uimanager.ViewManagerDelegate
@@ -190,6 +192,15 @@ class PeerSkyWebViewManager : RNCWebViewManager() {
         return@setDownloadListener
       }
       val name = downloads.resolveFilename(url, contentDisposition, mimeType)
+      // The page does not change for a file, so the app is told: a tab sent to
+      // one from the address bar steps back, instead of naming the file over
+      // the page it still shows with its loading line running for good.
+      context
+        .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+        .emit("PeerSkyFileDownload", Arguments.createMap().apply {
+          putString("url", url)
+          putInt("viewTag", wrapper.id)
+        })
       val incognito = privateWebViews.containsKey(wrapper.webView)
       // Read now: the profile is only reachable from the UI thread.
       val incognitoCookies = if (incognito) profileCookies(wrapper.webView) else null

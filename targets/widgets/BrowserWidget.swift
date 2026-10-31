@@ -95,13 +95,15 @@ struct BrowserWidgetView: View {
   }
 }
 
+// The bird large and in the middle, above the bar.
 private struct SmallSearch: View {
   var body: some View {
-    VStack(alignment: .leading, spacing: 0) {
+    VStack(spacing: 0) {
+      Spacer(minLength: 0)
       Image("PeerSkyIcon")
         .resizable()
-        .frame(width: 54, height: 54)
-        .shadow(color: .black.opacity(0.25), radius: 4, y: 2)
+        .frame(width: 76, height: 76)
+        .shadow(color: .black.opacity(0.25), radius: 5, y: 2)
       Spacer(minLength: 0)
       HStack(spacing: 6) {
         Image(systemName: "magnifyingglass")

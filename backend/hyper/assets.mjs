@@ -84,13 +84,16 @@ export async function inlineHyperAssets ({
   fetch,
   assetBaseUrl,
   assetAuthToken,
+  mayLinkDrive = null,
   maxTotalBytes = MAX_INLINE_ASSET_TOTAL_BYTES,
   concurrency = INLINE_ASSET_CONCURRENCY
 }) {
-  const rewrittenDownloads = rewriteHyperDownloadAttributes(html, baseUrl, assetBaseUrl, assetAuthToken)
+  const mayLink = await linkableHyperAssets(html, baseUrl, mayLinkDrive)
+  const rewrittenDownloads = rewriteHyperDownloadAttributes(html, baseUrl, assetBaseUrl, assetAuthToken, mayLink)
   const replacements = new Map()
   const context = createInlineAssetContext(fetch, maxTotalBytes)
   const assetRefs = [...findHyperAssetRefs(rewrittenDownloads, baseUrl)]
+    .filter(([, assetUrl]) => mayLink(assetUrl))
     .slice(0, MAX_INLINE_ASSETS)
 
   await runConcurrent(assetRefs, concurrency, async ([source, assetUrl]) => {
@@ -110,8 +113,40 @@ export async function inlineHyperAssets ({
     rewrittenStyles,
     baseUrl,
     assetBaseUrl,
-    assetAuthToken
+    assetAuthToken,
+    mayLink
   )
+}
+
+// The asset server reads a link with this phone's keys, so a link into
+// someone's private drive would come back decrypted, readable by the page that
+// holds it. Each other drive a page points at is asked about once
+// (mayLinkDrive); a drive it was not asked about gets no link at all.
+async function linkableHyperAssets (html, baseUrl, mayLinkDrive) {
+  if (typeof mayLinkDrive !== 'function') return () => true
+  const pageDrive = hyperUrlDrive(baseUrl)
+  const allowed = new Map()
+  const attributes = /\b(?:src|href|poster)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/gi
+  for (const match of html.matchAll(attributes)) {
+    const drive = hyperUrlDrive(resolveHyperAssetUrl(match[1] ?? match[2] ?? match[3], baseUrl))
+    if (drive && drive !== pageDrive) allowed.set(drive, false)
+  }
+  for (const drive of allowed.keys()) {
+    allowed.set(drive, await Promise.resolve(mayLinkDrive(drive)).then((answer) => answer === true, () => false))
+  }
+  return (assetUrl) => {
+    const drive = hyperUrlDrive(assetUrl)
+    return Boolean(drive) && (drive === pageDrive || allowed.get(drive) === true)
+  }
+}
+
+function hyperUrlDrive (url) {
+  try {
+    const parsed = new URL(String(url || ''))
+    return parsed.protocol === 'hyper:' && parsed.hostname ? parsed.hostname.toLowerCase() : null
+  } catch {
+    return null
+  }
 }
 
 export function rewriteHyperAssetAttributes (html, baseUrl, replacements) {
@@ -128,18 +163,18 @@ export function rewriteHyperAssetAttributes (html, baseUrl, replacements) {
   )
 }
 
-export function rewriteHyperMediaAttributes (html, baseUrl, assetBaseUrl, authToken) {
+export function rewriteHyperMediaAttributes (html, baseUrl, assetBaseUrl, authToken, mayLink = () => true) {
   return html.replace(
     /\b(src|href)(\s*=\s*)(["'])([^"']+)\3/gi,
     (match, name, separator, quote, source) => {
       const assetUrl = resolveHyperAssetUrl(source, baseUrl)
-      if (!assetUrl || !shouldProxyMediaAsset(source, assetUrl)) return match
+      if (!assetUrl || !shouldProxyMediaAsset(source, assetUrl) || !mayLink(assetUrl)) return match
       return `${name}${separator}${quote}${createProxyAssetUrl(assetBaseUrl, assetUrl, authToken)}${quote}`
     }
   )
 }
 
-export function rewriteHyperDownloadAttributes (html, baseUrl, assetBaseUrl, authToken) {
+export function rewriteHyperDownloadAttributes (html, baseUrl, assetBaseUrl, authToken, mayLink = () => true) {
   return html.replace(/<a\b(?:[^"'<>]|"[^"]*"|'[^']*')*>/gi, (tag) => {
     const attributes = parseHtmlTagAttributes(tag)
     const download = attributes.find(({ name }) => name === 'download')
@@ -149,7 +184,7 @@ export function rewriteHyperDownloadAttributes (html, baseUrl, assetBaseUrl, aut
     if (!href || href.valueStart === null || href.valueEnd === null) return tag
 
     const assetUrl = resolveHyperAssetUrl(href.value, baseUrl)
-    if (!assetUrl) return tag
+    if (!assetUrl || !mayLink(assetUrl)) return tag
 
     const proxyUrl = createProxyAssetUrl(assetBaseUrl, assetUrl, authToken, download.value)
     return `${tag.slice(0, href.valueStart)}${proxyUrl}${tag.slice(href.valueEnd)}`

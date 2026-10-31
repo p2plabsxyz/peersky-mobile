@@ -42,7 +42,17 @@ export const WIDGET_TEXT = Object.freeze([
   'Previous song',
   'Next song',
   'Previous Song',
-  'Next Song'
+  'Next Song',
+  // The lock screen buttons' names and lines in the widget gallery.
+  'Private search',
+  'Opens an incognito tab, ready to search.',
+  'Burn Tabs and Data',
+  'Burns your tabs, history and cached data right away.',
+  'Opens your bookmarks.',
+  'P2P sites',
+  'Opens the list of hyper:// sites you have opened',
+  'Clear all P2P data',
+  "Clears all P2P data and this device's identity right away, without asking."
 ])
 
 // Names in the widgets' Swift that stay as they are in every language. Listed
@@ -55,6 +65,13 @@ export const WIDGET_NAMES = Object.freeze(['PeerSky', 'PeerTunes'])
 // The locales in app.json turn each language's copy into its strings.xml.
 export const ANDROID_TEXT = Object.freeze({
   peerchat_background_text: 'Staying connected so messages reach you',
+  // Before PeerChat has answered, and once it has stopped: the notice never
+  // says connected while it is not.
+  peerchat_background_connecting: 'Connecting...',
+  peerchat_background_offline: 'Offline. Tap to reconnect',
+  // Started with the phone locked: PeerChat's chats open only once it is
+  // unlocked (app/privacy/chat-seal-key.ts).
+  peerchat_background_locked: 'Connects when you unlock your phone',
   peerchat_background_channel: 'PeerChat background connection',
   peerchat_background_channel_description: 'Keeps PeerChat connected while PeerSky is in the background'
 })

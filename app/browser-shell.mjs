@@ -206,6 +206,21 @@ export function recordBrowserWebNavigationState (
   return commitBrowserEntryState(state, url, source)
 }
 
+/**
+ * Android's WebView also reports a navigation that never replaced the page, a
+ * 204 or a cancelled download, as a page that finished, with the address it
+ * was going to. Taken as the page, the address bar showed that site over the
+ * one on screen, which a page could set off on its own. Only a navigation that
+ * commits starts a load there, so a finish for an address nothing committed
+ * since the last finished page is not the page on screen.
+ *
+ * @param {{ platform: string, isLoadStart: boolean, committedUrls?: Set<string> | null, url: string }} navigation
+ */
+export function isUncommittedNavigationFinish ({ platform, isLoadStart, committedUrls, url }) {
+  if (platform !== 'android' || isLoadStart || !committedUrls || committedUrls.size === 0) return false
+  return !committedUrls.has(url)
+}
+
 export function getBrowserBackState (state) {
   if (state.historyIndex <= 0) return null
   return buildBrowserState(state.history, state.historyIndex - 1)

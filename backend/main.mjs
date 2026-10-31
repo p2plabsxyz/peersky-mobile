@@ -13,14 +13,20 @@ import { stopHyperdriveViewerServer } from './hyperdrive-viewer/server.mjs'
 import { setAppNotifier } from './rpc/notify.mjs'
 import { routeRpcRequest } from './rpc/router.mjs'
 import { recoverLinkDeviceStorage } from './backup/link-device.mjs'
-import { setLocalSealKey } from './hyper/sealed-file.mjs'
+import { setChatSealKey, setLocalSealKey } from './hyper/sealed-file.mjs'
 
 const { IPC } = BareKit
 
 // The key the app keeps in the Keychain or the Android Keystore, handed over
 // as the backend starts, which locks the private drive key and the names of
-// private files on disk (hyper/sealed-file.mjs).
-setLocalSealKey(Bare.argv[1])
+// private files on disk (hyper/sealed-file.mjs). 'missing' after it says the
+// phone has one the app could not read, so nothing it locks is written.
+setLocalSealKey(Bare.argv[1], { missing: Bare.argv[2] === 'missing' })
+// Then the key chats and notes are locked with, which the system gives only
+// while the phone is unlocked, or why there is none: 'locked' when the
+// backend starts with the phone locked, and the key comes at the unlock
+// (RPC_CHAT_SEAL_KEY).
+setChatSealKey(Bare.argv[3], { state: Bare.argv[4] })
 
 // Before anything can open a store: a restore the app was killed in the
 // middle of is undone here, while nothing has its files open, and a Clear all

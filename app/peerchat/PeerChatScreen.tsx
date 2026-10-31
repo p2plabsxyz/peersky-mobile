@@ -13,6 +13,7 @@ import {
   Clipboard,
   FlatList,
   Image,
+  Keyboard,
   KeyboardAvoidingView,
   Linking,
   Modal,
@@ -57,6 +58,7 @@ import {
 } from './message-search.mjs'
 import { messageFromMentioned, normalizePeerChatMentionSpacing, peerChatMentionNames, splitPeerChatMessageParts } from './message-text.mjs'
 import {
+  dismissPeerChatRoomNotifications,
   isPeerChatNotificationBlocked,
   openPeerChatNotificationSettings
 } from './notifications'
@@ -108,8 +110,12 @@ import {
   RPC_PEERCHAT_SET_ACTIVE,
   RPC_PEERCHAT_SEND,
   RPC_PEERCHAT_SNAPSHOT,
-  RPC_PEERCHAT_UNBLOCK
+  RPC_PEERCHAT_UNBLOCK,
+  RPC_PRIVATE_APP_FILE_READ,
+  RPC_PRIVATE_APP_FILE_WRITE
 } from '../../backend/rpc/commands.mjs'
+import { callBackend } from '../backend'
+import { usePeerChatAttachmentGeneration } from './attachment-cache'
 import BackIcon from '../../assets/icons/bootstrap/arrow-left.svg'
 import CopyIcon from '../../assets/icons/bootstrap/copy.svg'
 import DownloadIcon from '../../assets/icons/bootstrap/download.svg'
@@ -141,9 +147,10 @@ import { PRE_JOINED_PEERCHAT_ROOM_KEY } from '../../backend/peerchat/rooms.mjs'
 import { mentionQueryStart, personName } from '../../backend/peerchat/mentions.mjs'
 import { QrCodeView } from '../settings/QrCodeView'
 import { pickUploads, screenUploadBytes } from '../media/upload-gate'
-import type { UploadSource } from '../media/upload-gate'
+import type { UploadAsset, UploadSource } from '../media/upload-gate'
+import { deleteChatPictureCopies, prepareChatPictures } from '../media/chat-picture-copies'
 import { scanMedia } from '../media/NsfwScanner'
-import { MEDIA_BLOCKED } from '../media/media-moderation.mjs'
+import { isRefusedMedia, MEDIA_GRAPHIC } from '../media/media-moderation.mjs'
 import { AppLoading } from '../AppLoading'
 import { MODAL_ORIENTATIONS } from '../modal-orientations'
 import { tapFeedback } from '../haptics'
@@ -237,6 +244,9 @@ type PeerChatRoom = {
   pendingAcceptance: boolean
   rejected: boolean
   blockedByPeer: boolean
+  // The other person in a direct message left it, as whom.
+  leftByPeer?: boolean
+  leftByName?: string
   isHost: boolean
   isPinned: boolean
   isMuted: boolean
@@ -270,6 +280,8 @@ type PeerChatMember = {
   bio: string
   avatar: string | null
   self: boolean
+  // Another of your devices.
+  own?: boolean
   online: boolean
   // Online but away: their app in the background, or their computer idle.
   idle?: boolean
@@ -357,7 +369,7 @@ export type PeerChatResponse = {
   ok: boolean
   error?: string
   profile?: PeerChatProfile
-  room?: PeerChatRoom
+  room?: PeerChatRoom | null
   rooms?: PeerChatRoom[]
   messages?: PeerChatMessage[] | null
   version?: number
@@ -459,7 +471,12 @@ const EMPTY_UI_STATE: PeerChatUiState = {
   tabRooms: null
 }
 
-const PEERCHAT_UI_STATE_FILE = new File(Paths.document, 'peerchat-ui-state.json')
+// What was typed and not sent in each chat, and the chat each tab is on,
+// locked with the chat key in the backend (backend/hyper/private-app-files.mjs).
+// Written only once it has been read, so a state not read yet never goes over
+// the one on disk.
+const PEERCHAT_UI_STATE_FILE = 'peerchat-ui-state.json'
+let uiStateRead = false
 const UI_STATE_PERSIST_DELAY_MS = 300
 // How long iOS takes to finish dismissing one sheet before it will present
 // another. Shared by the modal handover below and by the attach picker.
@@ -651,7 +668,8 @@ export function PeerChatScreen ({
     composer,
     activeRoom?.members || [],
     messages,
-    profile?.id || ''
+    profile?.id || '',
+    activeRoom?.isDM === true
   )
   const visibleMessages = useMemo(
     () => filterPeerChatMessages(messages, isSearching ? searchQuery : '') as PeerChatMessage[],
@@ -713,6 +731,9 @@ export function PeerChatScreen ({
   const isDirectMessageBlocked = Boolean(
     activeRoom?.isDM && (activeRoom.blockedByPeer || blockedTheDirectMessage)
   )
+  // The other person left the chat, so nothing sent here would reach them.
+  const isDirectMessageLeft = Boolean(activeRoom?.isDM && activeRoom.leftByPeer && !isDirectMessageBlocked)
+  const isDirectMessageClosed = isDirectMessageBlocked || isDirectMessageLeft
   // Nothing sent from here would be passed on, so the composer says so rather
   // than letting messages go nowhere.
   const isRemovedFromRoom = activeRoom?.removedByCreator === true
@@ -752,8 +773,11 @@ export function PeerChatScreen ({
     async function loadUiState () {
       let restored = EMPTY_UI_STATE
       try {
-        if (PEERCHAT_UI_STATE_FILE.exists && PEERCHAT_UI_STATE_FILE.size <= PEERCHAT_UI_STATE_MAX_BYTES) {
-          restored = parsePeerChatUiState(await PEERCHAT_UI_STATE_FILE.text()) as PeerChatUiState
+        const response = await callBackend(RPC_PRIVATE_APP_FILE_READ, { name: PEERCHAT_UI_STATE_FILE })
+        if (!response.ok) throw new Error(response.error || 'Unable to read the PeerChat UI state.')
+        uiStateRead = true
+        if (typeof response.text === 'string' && response.text.length <= PEERCHAT_UI_STATE_MAX_BYTES) {
+          restored = parsePeerChatUiState(response.text) as PeerChatUiState
         }
       } catch (cause) {
         console.warn('Unable to load PeerChat UI state:', cause)
@@ -792,6 +816,14 @@ export function PeerChatScreen ({
     activeRoomRef.current = activeRoom
   }, [activeRoom])
 
+  // Back to the chat list. Android keeps the keyboard up once the message box
+  // it was typing into is gone, so it is put away first, while the box is
+  // still there to let go of it.
+  const showChatList = useCallback(() => {
+    Keyboard.dismiss()
+    setActiveRoom(null)
+  }, [])
+
   // Leaving a chat is a back step of its own. The browser owns the gesture and
   // the Android button, so it is handed a way to take that step first.
   const leaveActiveRoom = useCallback(() => {
@@ -799,9 +831,9 @@ export function PeerChatScreen ({
     setReplyTarget(null)
     setIsSearching(false)
     setSearchQuery('')
-    setActiveRoom(null)
+    showChatList()
     return true
-  }, [])
+  }, [showChatList])
 
   useEffect(() => {
     registerGoBack?.(leaveActiveRoom)
@@ -827,9 +859,11 @@ export function PeerChatScreen ({
 
   useEffect(() => {
     let cancelled = false
-    void callRpc(RPC_PEERCHAT_SET_ACTIVE, { roomKey: activeRoom?.roomKey || null })
+    const roomKey = activeRoom?.roomKey || null
+    void callRpc(RPC_PEERCHAT_SET_ACTIVE, { roomKey })
       .then((response) => {
         if (!cancelled && mountedRef.current && response.ok && response.rooms) setRooms(response.rooms)
+        if (roomKey && response.ok) return dismissPeerChatRoomNotifications(roomKey)
       })
       .catch(() => {})
     return () => {
@@ -859,9 +893,12 @@ export function PeerChatScreen ({
       if (state !== 'active' && uiStateRestoredRef.current) {
         persistPeerChatUiState(uiStateRef.current)
       }
-      void callRpcRef.current(RPC_PEERCHAT_SET_ACTIVE, {
-        roomKey: state === 'active' ? activeRoomRef.current?.roomKey || null : null
-      }).catch(() => {})
+      const roomKey = state === 'active' ? activeRoomRef.current?.roomKey || null : null
+      void callRpcRef.current(RPC_PEERCHAT_SET_ACTIVE, { roomKey })
+        .then((response) => {
+          if (roomKey && response?.ok) return dismissPeerChatRoomNotifications(roomKey)
+        })
+        .catch(() => {})
     })
     return () => subscription.remove()
   }, [])
@@ -873,13 +910,13 @@ export function PeerChatScreen ({
         setSelectedMessageIds(null)
         return true
       }
-      setActiveRoom(null)
+      showChatList()
       setIsSearching(false)
       setSearchQuery('')
       return true
     })
     return () => subscription.remove()
-  }, [activeRoom, selectedMessageIds])
+  }, [activeRoom, selectedMessageIds, showChatList])
 
   // Picking belongs to the room it started in.
   useEffect(() => {
@@ -1057,8 +1094,19 @@ export function PeerChatScreen ({
       // A room that moved answers as the room it went to, so this is where the
       // tab goes on.
       if (response.movedRooms) movedRoomsRef.current = response.movedRooms
-      if (response.room) setActiveRoom(response.room)
       if (response.rooms) setRooms(response.rooms)
+      // Gone from this phone while open: left on another of your devices, or
+      // given up for the copy the other person offered of the same chat.
+      if (response.room === null) {
+        showChatList()
+        setMessages([])
+        setReplyTarget(null)
+        setIsSearching(false)
+        setSearchQuery('')
+        clearReadError()
+        return
+      }
+      if (response.room) setActiveRoom(response.room)
       // A snapshot read before our own message went out would take that
       // message off the screen until the next poll. The refresh queued by the
       // send brings a newer one.
@@ -1911,7 +1959,7 @@ export function PeerChatScreen ({
       const fresh = await callRpc(RPC_PEERCHAT_INIT, {})
       if (!mountedRef.current) return
       setShowPeerChatSettings(false)
-      setActiveRoom(null)
+      showChatList()
       setProfile(fresh.profile || null)
       setProfileName('')
       setProfileBio('')
@@ -1922,6 +1970,9 @@ export function PeerChatScreen ({
       draftsRef.current = {}
       composerRoomKeyRef.current = null
       setComposer('')
+      // The chat every tab was on, kept by its key, goes with the rest.
+      uiStateRef.current = { ...uiStateRef.current, activeRoomKey: null, drafts: {}, tabRooms: {} }
+      persistPeerChatUiState(uiStateRef.current)
       versionRef.current = -1
       onStatus(t('Your PeerChat profile was deleted from this device'))
     })
@@ -2125,7 +2176,7 @@ export function PeerChatScreen ({
     void runAction(async () => {
       // pickUploads bounds the batch and screens every file before any of it
       // is uploaded, so a refusal never leaves half a send in the room.
-      const assets = await pickUploads({
+      const picked = await pickUploads({
         multiple: true,
         source,
         // A room shows a picture to everyone at once, so it is screened. A
@@ -2137,30 +2188,15 @@ export function PeerChatScreen ({
           ? t('Checking {name}', { name: picked[0].name })
           : tp({ one: 'Checking {count} file', other: 'Checking {count} files' }, picked.length))
       })
-      if (assets.length === 0) return
+      if (picked.length === 0) return
 
-      for (const [index, asset] of assets.entries()) {
-        // A video takes a while to encrypt and write, and without this the
-        // spinner is indistinguishable from the app having hung.
-        onStatus(assets.length === 1
-          ? t('Uploading {name}', { name: asset.name })
-          : t('Uploading {number} of {count}: {name}', { number: index + 1, count: assets.length, name: asset.name }))
-        const upload = await withUploadTimeout(callRpc(RPC_PEERCHAT_ATTACHMENT_UPLOAD, {
-          roomKey: activeRoom.roomKey,
-          fileUri: asset.uri,
-          byteLength: asset.size
-        }), asset.name, asset.size)
-        if (!upload.ok || !upload.item) throw new Error(upload.error || t('Unable to upload attachment.'))
-
-        const response = await callRpc(RPC_PEERCHAT_SEND, {
-          roomKey: activeRoom.roomKey,
-          message: upload.item.url,
-          fileName: asset.name,
-          fileSize: upload.item.byteLength ?? asset.size,
-          fileEnc: true,
-          ...(upload.item.fileKey && { fileKey: upload.item.fileKey })
-        })
-        if (!response.ok) throw new Error(response.error || t('Unable to send attachment.'))
+      // Photos go as clean copies: no location from their EXIF, and no HEIC
+      // that a desktop cannot show. See app/media/chat-picture.mjs.
+      const { assets, copies } = await prepareChatPictures(picked, source)
+      try {
+        await sendAttachments(assets)
+      } finally {
+        deleteChatPictureCopies(copies)
       }
 
       versionRef.current = -1
@@ -2170,6 +2206,33 @@ export function PeerChatScreen ({
         ? t('Sent {name}', { name: assets[0].name })
         : tp({ one: 'Sent {count} file', other: 'Sent {count} files' }, assets.length))
     })
+  }
+
+  async function sendAttachments (assets: UploadAsset[]) {
+    if (!activeRoom) return
+    for (const [index, asset] of assets.entries()) {
+      // A video takes a while to encrypt and write, and without this the
+      // spinner is indistinguishable from the app having hung.
+      onStatus(assets.length === 1
+        ? t('Uploading {name}', { name: asset.name })
+        : t('Uploading {number} of {count}: {name}', { number: index + 1, count: assets.length, name: asset.name }))
+      const upload = await withUploadTimeout(callRpc(RPC_PEERCHAT_ATTACHMENT_UPLOAD, {
+        roomKey: activeRoom.roomKey,
+        fileUri: asset.uri,
+        byteLength: asset.size
+      }), asset.name, asset.size)
+      if (!upload.ok || !upload.item) throw new Error(upload.error || t('Unable to upload attachment.'))
+
+      const response = await callRpc(RPC_PEERCHAT_SEND, {
+        roomKey: activeRoom.roomKey,
+        message: upload.item.url,
+        fileName: asset.name,
+        fileSize: upload.item.byteLength ?? asset.size,
+        fileEnc: true,
+        ...(upload.item.fileKey && { fileKey: upload.item.fileKey })
+      })
+      if (!response.ok) throw new Error(response.error || t('Unable to send attachment.'))
+    }
   }
 
   /**
@@ -2231,7 +2294,7 @@ export function PeerChatScreen ({
         setComposer('')
       }
       if (activeRoomRef.current?.roomKey === room.roomKey) {
-        setActiveRoom(null)
+        showChatList()
         setMessages([])
         setReplyTarget(null)
         setIsSearching(false)
@@ -2921,7 +2984,7 @@ export function PeerChatScreen ({
                 <Text style={[styles.helper, { color: colors.muted }]}>
                   {tp({ one: 'Spam limit: {count} messages / 10 seconds', other: 'Spam limit: {count} messages / 10 seconds' }, activeRoom.moderation.spamRateLimit)}
                 </Text>
-                <Text style={[styles.helper, { color: colors.muted }]}>{t('Adult-domain links: Always blocked')}</Text>
+                <Text style={[styles.helper, { color: colors.muted }]}>{t('Adult domains, NSFW, and violent/graphic: Always blocked')}</Text>
               </View>
             )}
             {activeRoom.members.length > 0 && (
@@ -3151,11 +3214,17 @@ export function PeerChatScreen ({
           <Text style={[styles.dmStatus, { color: colors.danger, backgroundColor: colors.surface }]}>{t('This peer declined the message request.')}</Text>
         )}
 
-        {offlineDirectPeer && !isDirectMessageBlocked && !activeRoom.rejected && (
+        {offlineDirectPeer && !isDirectMessageClosed && !activeRoom.rejected && (
           <Text style={[styles.dmStatus, { color: colors.muted, backgroundColor: colors.surface }]}>
             {Platform.OS === 'ios'
               ? t('{name} is offline. Your message arrives the next time you are both online, and iOS suspends apps in the background, so keep PeerSky open.', { name: offlineDirectPeer.username })
               : t('{name} is offline. Your message arrives the next time you are both online, so keep PeerSky running in the background.', { name: offlineDirectPeer.username })}
+          </Text>
+        )}
+
+        {isDirectMessageLeft && (
+          <Text style={[styles.dmStatus, { color: colors.danger, backgroundColor: colors.surface }]}>
+            {t('{name} left this chat.', { name: activeRoom.leftByName || activeRoom.name })}
           </Text>
         )}
 
@@ -3569,7 +3638,7 @@ export function PeerChatScreen ({
           <Pressable
             accessibilityLabel={t('Choose emoji')}
             accessibilityRole='button'
-            disabled={isBusy || activeRoom.pendingAcceptance || activeRoom.rejected || isDirectMessageBlocked || isRemovedFromRoom}
+            disabled={isBusy || activeRoom.pendingAcceptance || activeRoom.rejected || isDirectMessageClosed || isRemovedFromRoom}
             onPress={() => {
               setEmojiSearchQuery('')
               setShowComposerEmoji((current) => !current)
@@ -3581,12 +3650,12 @@ export function PeerChatScreen ({
           <Pressable
             accessibilityLabel={t('Attach file')}
             accessibilityRole='button'
-            disabled={isBusy || activeRoom.pendingAcceptance || activeRoom.rejected || isDirectMessageBlocked || isRemovedFromRoom}
+            disabled={isBusy || activeRoom.pendingAcceptance || activeRoom.rejected || isDirectMessageClosed || isRemovedFromRoom}
             onPress={attachFile}
             style={[
               styles.attachButton,
               { backgroundColor: colors.input },
-              isBusy || activeRoom.pendingAcceptance || activeRoom.rejected || isDirectMessageBlocked || isRemovedFromRoom ? styles.disabled : null
+              isBusy || activeRoom.pendingAcceptance || activeRoom.rejected || isDirectMessageClosed || isRemovedFromRoom ? styles.disabled : null
             ]}
           >
             <Text style={[styles.attachButtonText, { color: colors.accent }]}>+</Text>
@@ -3603,7 +3672,7 @@ export function PeerChatScreen ({
             autoComplete='off'
             importantForAutofill='no'
             textContentType='none'
-            editable={!activeRoom.pendingAcceptance && !activeRoom.rejected && !isDirectMessageBlocked}
+            editable={!activeRoom.pendingAcceptance && !activeRoom.rejected && !isDirectMessageClosed}
             maxLength={64 * 1024}
             style={[
               styles.composerInput,
@@ -3612,12 +3681,12 @@ export function PeerChatScreen ({
           />
           <Pressable
             accessibilityRole='button'
-            disabled={!composer.trim() || isBusy || activeRoom.pendingAcceptance || activeRoom.rejected || isDirectMessageBlocked || isRemovedFromRoom}
+            disabled={!composer.trim() || isBusy || activeRoom.pendingAcceptance || activeRoom.rejected || isDirectMessageClosed || isRemovedFromRoom}
             onPress={sendMessage}
             style={[
               styles.sendButton,
               { backgroundColor: colors.accent },
-              !composer.trim() || isBusy || activeRoom.pendingAcceptance || activeRoom.rejected || isDirectMessageBlocked || isRemovedFromRoom ? styles.disabled : null
+              !composer.trim() || isBusy || activeRoom.pendingAcceptance || activeRoom.rejected || isDirectMessageClosed || isRemovedFromRoom ? styles.disabled : null
             ]}
           >
             <SendIcon width={20} height={20} color='#ffffff' />
@@ -4440,6 +4509,7 @@ export function PeerChatScreen ({
                 </View>
                 <Text style={[styles.preferenceState, { color: colors.accent }]}>{roomSpamRateLimit}</Text>
               </Pressable>
+              <Text style={[styles.helper, { color: colors.muted }]}>{t('Adult domains, NSFW, and violent/graphic: Always blocked')}</Text>
               <Pressable
                 accessibilityRole='button'
                 disabled={!profileName.trim() || isBusy}
@@ -5055,6 +5125,9 @@ function PeerChatAttachment ({
   const mediaKind = getPeerChatAttachmentMediaKind(item.fileName || '', item.message)
   const canPreview = isInlinePeerChatMedia(item)
   const [mediaUrl, setMediaUrl] = useState<string | null>(null)
+  // The copy opened to show it goes before the phone locks, and is opened
+  // again when the app comes back (attachment-cache.ts).
+  const attachmentGeneration = usePeerChatAttachmentGeneration()
   // Shown at its own shape, which it says once it loads. See media-fit.mjs.
   const [mediaSize, setMediaSize] = useState(() => inlineMediaSizes.get(item.message) || null)
   const fit = fitPeerChatMedia(mediaSize)
@@ -5066,7 +5139,8 @@ function PeerChatAttachment ({
       : { width: size.width, height: size.height }))
   }, [item.message])
   const [isOpening, setIsOpening] = useState(false)
-  const [isExplicit, setIsExplicit] = useState(false)
+  // The verdict a picture is hidden for, explicit or violent or graphic.
+  const [hiddenAs, setHiddenAs] = useState<string | null>(null)
   const [isScreening, setIsScreening] = useState(false)
   // Hiding it is a warning, not a verdict. The classifier is wrong often
   // enough that someone who wants to look has to be able to.
@@ -5089,7 +5163,7 @@ function PeerChatAttachment ({
     void scanMedia({ uri: mediaUrl, mimeType: getPeerChatAttachmentMimeType(item.fileName || ''), size: item.fileSize })
       .then((verdict) => {
         if (cancelled) return
-        setIsExplicit(verdict === MEDIA_BLOCKED)
+        setHiddenAs(isRefusedMedia(verdict) ? verdict : null)
         setIsScreening(false)
       })
     return () => { cancelled = true }
@@ -5122,7 +5196,7 @@ function PeerChatAttachment ({
     return () => {
       cancelled = true
     }
-  }, [canPreview, item.fileEnc, item.fileKey, item.fileName, item.fileSize, item.message, item.roomKey, mediaKind, onCallRpc, roomKey])
+  }, [attachmentGeneration, canPreview, item.fileEnc, item.fileKey, item.fileName, item.fileSize, item.message, item.roomKey, mediaKind, onCallRpc, roomKey])
 
   async function openAttachment () {
     if (isOpening) return
@@ -5155,13 +5229,15 @@ function PeerChatAttachment ({
 
   // A picture or video fills its bubble, which keeps only a thin edge, and
   // shows no name and size: it shows itself.
-  if (mediaUrl && mediaKind === 'image' && (isScreening || (isExplicit && !isRevealed))) {
+  if (mediaUrl && mediaKind === 'image' && (isScreening || (hiddenAs && !isRevealed))) {
     return (
       <View style={[styles.inlineMedia, styles.mediaNotice, { backgroundColor: colors.input, width: fit.width }]}>
-        <Text style={[styles.mediaNoticeText, { color: isExplicit ? colors.danger : colors.muted }]}>
-          {isExplicit ? t('Hidden: this looks explicit') : t('Checking this picture')}
+        <Text style={[styles.mediaNoticeText, { color: hiddenAs ? colors.danger : colors.muted }]}>
+          {!hiddenAs
+            ? t('Checking this picture')
+            : hiddenAs === MEDIA_GRAPHIC ? t('Hidden: this looks violent or graphic') : t('Hidden: this looks explicit')}
         </Text>
-        {isExplicit && (
+        {hiddenAs && (
           <Pressable
             accessibilityHint={t('Shows a picture the check hid')}
             accessibilityRole='button'
@@ -5785,7 +5861,8 @@ function getMentionCandidates (
   composer: string,
   members: PeerChatMember[],
   messages: PeerChatMessage[],
-  localId: string
+  localId: string,
+  isDM = false
 ) {
   // Past a device label's "@", so "@Ada@mo" still offers Ada@mobile.
   const atIndex = mentionQueryStart(composer)
@@ -5793,11 +5870,14 @@ function getMentionCandidates (
   const query = composer.slice(atIndex + 1)
   if (query.includes('\n') || Array.from(query).length > 50) return []
 
+  // Never you, on this device or another of yours. A direct chat's members
+  // are the other person's devices and yours, so it offers only theirs.
   const candidates = new Map<string, PeerChatMember>()
   for (const member of members) {
-    if (!member.self && member.id !== localId) candidates.set(member.id, member)
+    if (!member.self && !member.own && member.id !== localId) candidates.set(member.id, member)
   }
   for (const message of messages) {
+    if (isDM) break
     if (message.self || message.sender === localId || candidates.has(message.sender)) continue
     candidates.set(message.sender, {
       id: message.sender,
@@ -5899,12 +5979,14 @@ function formatRoomConnection (room: PeerChatRoom, compact = false) {
 }
 
 function persistPeerChatUiState (state: PeerChatUiState) {
-  try {
-    if (!PEERCHAT_UI_STATE_FILE.exists) PEERCHAT_UI_STATE_FILE.create({ intermediates: true })
-    PEERCHAT_UI_STATE_FILE.write(serializePeerChatUiState(state))
-  } catch (cause) {
-    console.warn('Unable to save PeerChat UI state:', cause)
-  }
+  if (!uiStateRead) return
+  void callBackend(RPC_PRIVATE_APP_FILE_WRITE, { name: PEERCHAT_UI_STATE_FILE, text: serializePeerChatUiState(state) })
+    .then((response) => {
+      if (!response.ok) throw new Error(response.error || 'Unable to save the PeerChat UI state.')
+    })
+    .catch((cause) => {
+      console.warn('Unable to save PeerChat UI state:', cause)
+    })
 }
 
 // Matched to the browser shell (browser-appearance.mjs) on purpose. PeerChat

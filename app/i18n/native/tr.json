@@ -12,6 +12,9 @@
   },
   "android": {
     "peerchat_background_text": "Mesajlar size ulaşsın diye bağlı kalınıyor",
+    "peerchat_background_connecting": "Bağlanıyor...",
+    "peerchat_background_offline": "Çevrimdışı. Yeniden bağlanmak için dokunun",
+    "peerchat_background_locked": "Telefonunuzun kilidini açtığınızda bağlanır",
     "peerchat_background_channel": "PeerChat arka plan bağlantısı",
     "peerchat_background_channel_description": "PeerSky arka plandayken PeerChat'i bağlı tutar"
   }

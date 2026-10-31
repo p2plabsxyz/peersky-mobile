@@ -1,6 +1,6 @@
 import { File, Paths } from 'expo-file-system'
 
-import { getLocalSealKey, localRandomBytes } from '../privacy/local-seal-key'
+import { getLocalSealKey, isLocalSealKeyMissing, localRandomBytes } from '../privacy/local-seal-key'
 import { openText, sealText } from '../privacy/sealed-text.mjs'
 import {
   parseHyperdriveRecents,
@@ -47,6 +47,9 @@ export function persistHyperdriveRecents (recents: unknown[]) {
     if (!recentsFile.exists) recentsFile.create({ intermediates: true })
     const text = serializeHyperdriveRecents(recents)
     const key = getLocalSealKey()
+    // The key made here could not be read: the names stay off the disk
+    // rather than going on it in the open.
+    if (!key && isLocalSealKeyMissing()) return false
     recentsFile.write(key ? sealText(text, key, localRandomBytes) : text)
     return true
   } catch {

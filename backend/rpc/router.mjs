@@ -1,3 +1,4 @@
+import { rmSync } from 'node:fs'
 import {
   RPC_HOLESAIL_CONNECT,
   RPC_HOLESAIL_START_LIVE,
@@ -40,6 +41,7 @@ import {
   RPC_P2PMD_IMAGE_UPLOAD,
   RPC_P2PMD_PREVIEW,
   RPC_P2PMD_ROOM_JOIN,
+  RPC_P2PMD_EXPORT,
   RPC_P2PMD_ROOM_PUBLISH,
   RPC_P2PMD_ROOM_STATUS,
   RPC_P2PMD_TAKE_NOTES,
@@ -73,8 +75,13 @@ import {
   RPC_PEERCHAT_SEARCH,
   RPC_PEERTUNES_START,
   RPC_HYPERDRIVE_VIEWER_DOWNLOAD,
-  RPC_HYPERDRIVE_VIEWER_START
+  RPC_HYPERDRIVE_VIEWER_START,
+  RPC_CHAT_SEAL_KEY,
+  RPC_PRIVATE_APP_FILE_READ,
+  RPC_PRIVATE_APP_FILE_WRITE
 } from './commands.mjs'
+import { setChatSealKey, waitForChatSealKey } from '../hyper/sealed-file.mjs'
+import { readPrivateAppFile, sealChatFilesAtRest, writePrivateAppFile } from '../hyper/private-app-files.mjs'
 import {
   getDefaultIdentityStoragePath,
   getDeviceKeys,
@@ -95,7 +102,7 @@ import {
   stopOutgoingTransfer
 } from '../backup/link-device.mjs'
 
-import { publishMarkdownDocument, readHyperFile, uploadHyperFile } from '../hyper/drive.mjs'
+import { exportMarkdownDocument, publishMarkdownDocument, readHyperFile, uploadHyperFile } from '../hyper/drive.mjs'
 import { listHyperdriveLocation, uploadHyperdriveFile } from '../hyper/library.mjs'
 import { fetchHyper } from '../hyper/fetch.mjs'
 import {
@@ -121,6 +128,7 @@ import {
 } from '../hyper/runtime.mjs'
 import { getOrCreatePairingNonceRecord } from '../backup/pairing-nonce.mjs'
 import { clearAllP2pData, clearP2pCache, deleteP2pAppData, listP2pAppData } from '../hyper/storage.mjs'
+import { readP2pResetId } from '../hyper/p2p-reset.mjs'
 
 import {
   connectHolesail,
@@ -141,7 +149,12 @@ import { startPeerTunesServer } from '../peertunes/server.mjs'
 import { createHyperdriveViewerDownload, startHyperdriveViewerServer } from '../hyperdrive-viewer/server.mjs'
 import { parseJsonMessage, replyJson } from './messages.mjs'
 import { deletePeerChatProfile, getPeerChatService, setPeerChatIdle } from '../peerchat/runtime.mjs'
-import { forwardPeerChatAttachment, openPeerChatAttachment, uploadPeerChatAttachment } from '../peerchat/attachments.mjs'
+import {
+  forwardPeerChatAttachment,
+  getAttachmentCacheDirectory,
+  openPeerChatAttachment,
+  uploadPeerChatAttachment
+} from '../peerchat/attachments.mjs'
 
 export async function routeRpcRequest (req) {
   try {
@@ -154,16 +167,42 @@ export async function routeRpcRequest (req) {
       } catch (error) {
         console.error('[hyper] Could not lock private files:', error)
       }
+      // The pictures and files PeerChat opened to show them, which the app
+      // clears before the phone locks, gone too if the app stopped first.
+      try {
+        rmSync(getAttachmentCacheDirectory(), { recursive: true, force: true })
+      } catch (error) {
+        console.warn('[peerchat] Could not remove opened files:', error?.message || error)
+      }
       replyJson(req, {
         ok: true,
         storagePath: getHyperStoragePath(),
         lan: getLANDiscoveryStatus()
       })
+      lockChatFiles()
       if (options.allowNetwork !== false) {
         resumeWantedHyperOffline().catch((error) => {
           console.error('[hyper] Failed to resume offline downloads:', error)
         })
       }
+      return
+    }
+
+    if (req.command === RPC_CHAT_SEAL_KEY) {
+      const { key, state } = parseJsonMessage(req.data)
+      const accepted = setChatSealKey(key, { state })
+      replyJson(req, { ok: true, accepted })
+      lockChatFiles()
+      return
+    }
+
+    if (req.command === RPC_PRIVATE_APP_FILE_READ) {
+      replyJson(req, await readPrivateAppFile(parseJsonMessage(req.data)))
+      return
+    }
+
+    if (req.command === RPC_PRIVATE_APP_FILE_WRITE) {
+      replyJson(req, await writePrivateAppFile(parseJsonMessage(req.data)))
       return
     }
 
@@ -364,7 +403,10 @@ export async function routeRpcRequest (req) {
       return
     }
 
+    // A note's copy on this phone is locked with the chat key: a note opened
+    // before it is here would start empty and be saved over the copy.
     if (req.command === RPC_P2PMD_ROOM_CREATE) {
+      await waitForChatSealKey()
       replyJson(req, await createP2pmdRoom(parseJsonMessage(req.data)))
       return
     }
@@ -375,11 +417,13 @@ export async function routeRpcRequest (req) {
     }
 
     if (req.command === RPC_P2PMD_ROOM_JOIN) {
+      await waitForChatSealKey()
       replyJson(req, await joinP2pmdRoom(parseJsonMessage(req.data)))
       return
     }
 
     if (req.command === RPC_P2PMD_TAKE_NOTES) {
+      await waitForChatSealKey()
       replyJson(req, takeP2pmdNotes({
         documentsPath: getDefaultIdentityStoragePath(),
         hyperStoragePath: getHyperStoragePath()
@@ -410,6 +454,11 @@ export async function routeRpcRequest (req) {
 
     if (req.command === RPC_P2PMD_ROOM_PUBLISH) {
       replyJson(req, await publishMarkdownDocument(parseJsonMessage(req.data)))
+      return
+    }
+
+    if (req.command === RPC_P2PMD_EXPORT) {
+      replyJson(req, await exportMarkdownDocument(parseJsonMessage(req.data)))
       return
     }
 
@@ -677,7 +726,8 @@ export async function routeRpcRequest (req) {
     }
 
     if (req.command === RPC_PEERTUNES_START) {
-      replyJson(req, await startPeerTunesServer())
+      const started = await startPeerTunesServer()
+      replyJson(req, started?.ok ? { ...started, resetId: readP2pResetId(getDefaultIdentityStoragePath()) } : started)
       return
     }
 
@@ -693,9 +743,28 @@ export async function routeRpcRequest (req) {
 
     replyJson(req, { ok: false, error: `Unsupported command: ${req.command}` })
   } catch (error) {
-    replyJson(req, {
-      ok: false,
-      error: error instanceof Error ? error.message : String(error)
-    })
+    replyError(req, error)
   }
+}
+
+// What a build before the chat key left plain, locked once the key is here
+// (hyper/private-app-files.mjs). After the reply: a big note from before it
+// takes a moment.
+function lockChatFiles () {
+  setTimeout(() => {
+    try {
+      sealChatFilesAtRest()
+    } catch (error) {
+      console.error('[backend] Could not lock chats and notes:', error)
+    }
+  }, 0)
+}
+
+function replyError (req, error) {
+  replyJson(req, {
+    ok: false,
+    error: error instanceof Error ? error.message : String(error),
+    // CHAT_KEY_MISSING, for one: the app says why PeerChat cannot open.
+    ...(typeof error?.code === 'string' && { code: error.code })
+  })
 }

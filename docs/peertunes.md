@@ -13,11 +13,13 @@ window.peerskyProtocols = ['hyper']
 window.peerskyHyperAsset = (url) => '/hyper/asset?url=' + encodeURIComponent(url) + '&token=' + window.peerskyServerToken
 ```
 
-PeerTunes checks for those globals. `peerskyHyperAsset` routes folder listings, tag reads and audio playback through the proxy. `peerskyProtocols` tells it the phone reads `hyper://` only.
+PeerTunes checks for those globals. `peerskyHyperAsset` routes folder listings, tag reads and audio playback through the proxy, and `peerskyHyperWrite` a publish's writes. `peerskyProtocols` tells it the phone reads `hyper://` only.
 
 Reading a drive and keeping songs need the server's token for this run. Any app on the phone can reach the port and fetch the page, so the token is in nothing the server sends: the app hands it to the PeerTunes WebView before the page loads (`injectedJavaScriptBeforeContentLoaded`, `app/server-token.mjs`), and the bridge reads `window.peerskyServerToken` each time the page asks.
 
-To update the app, replace the files under `assets/peertunes/`, update `manifest.json`, and run `npm run generate:peertunes-runtime`.
+PeerTunes shows the language picked in PeerSky. The app hands it `window.peerskyTunes = { language, strings }` the same way, before the page loads: the catalog's text for each English one the player uses, as `app/i18n/peertunes-strings.json` lists them (`createPeerTunesLanguageScript` in `app/peertunes/peertunes-screen.mjs`). When another language is picked, the open page gets the new set through `PT.setLanguage`, which draws its pages again where they are, so a song that plays keeps playing. See [Translations](translations.md).
+
+To update the app, replace the files under `assets/peertunes/`, update `manifest.json`, and run `npm run generate:peertunes-runtime`. Then run `node scripts/i18n.mjs --write` and translate any new text in every catalog.
 
 ## Endpoints
 
@@ -25,9 +27,10 @@ To update the app, replace the files under `assets/peertunes/`, update `manifest
 |---|---|---|
 | `/` and bundled files | `GET`, `HEAD` | The app page, scripts, styles and icons |
 | `/hyper/asset?url=hyper://...&token=...` | `GET`, `HEAD` | Streams a file from a drive with `Range` support. With `Accept: application/json` it returns the folder listing instead. Without this run's token it answers `403` and reads nothing |
+| `/hyper/write?url=hyper://...&token=...` | `POST`, `PUT` | Publishing a playlist, through `window.peerskyHyperWrite`: `POST hyper://localhost/?key=peertunes` gives PeerTunes its drive, made the first time, and `PUT` puts each song and `playlist.json` in it. The writes are made as PeerTunes (`PEERTUNES_SITE`, `peersky-app:peertunes`, a name no page can have) under the rules pages have (`backend/hyper/page-access.mjs`): its drive is named apart from every site's and the app's own, and it writes only to drives it made. A file is read whole and refused over 200 MB (`413`). Without this run's token it answers `403` |
 | `/hyper/keep` | `GET` | For Keep On This Device: each song of a kept playlist as saved, saving or waiting (nobody who has it is online, or Download only on Wi-Fi is on and the phone is on cellular), and a download started for any song not all on the phone yet (`backend/peertunes/song-keeper.mjs`). The page reaches it through `window.peerskyKeepSongs`, which sends `X-PeerTunes-Keep: 1` and this run's token; a request without either is refused, since a tab or an image another page points here cannot send the header, and another app on the phone does not have the token |
 
-Everything else answers `404`, and any write method answers `405`. PeerTunes probes for a writable drive when publishing a share; the `405` makes it show its "publishing needs desktop PeerSky" message, since mobile drives are read-only.
+Everything else answers `404`, and a write anywhere but `/hyper/write` answers `405`. The phone shares a published drive while PeerSky is open: PeerTunes asks for its drive again each time it starts, once it has published, so the links it gave out keep working.
 
 ## Runtime flow
 
@@ -35,6 +38,8 @@ Everything else answers `404`, and any write method answers `405`. PeerTunes pro
 2. The backend starts the loopback server on the fixed port `47317` and falls back to a random port if that one is taken. It makes a new token for each run and returns it with the address.
 3. React Native opens the local URL in a WebView, with the token set before the page loads. A restarted worklet means a new token, and the page loads again with it. A share link such as `peersky://p2p/peertunes/#playlist=hyper%3A%2F%2F...` passes its fragment through once, so the app can offer to import or play the playlist; the tab's address keeps only `peersky://p2p/peertunes/`, so a restart opens the page where it was rather than the playlist again.
 4. Inside the page, `hyper://` reads go to `/hyper/asset`, which uses the read-only Hyper fetch from `backend/hyper/fetch.mjs`.
+
+The library lives in the page's own IndexedDB at the loopback origin, which neither Clear all P2P data nor Burn Tabs and Data reaches, and Burn must keep it. So the page is also handed the device's reset id (`window.peerskyResetId`, from `p2p-reset-id.json` in the documents folder), which every Clear all P2P data replaces (`backend/hyper/p2p-reset.mjs`). The page notes the first id it sees, and when it later sees another it empties the library before listing it: songs, playlists, covers, the queue and the place in the song, and the drive it published, which went with the P2P data. Before this, every song stayed after a clear. Settings in PeerTunes has Clear All Songs for doing the same by hand.
 
 The page keeps its queue and the place in the song, and puts the song back paused at that place when it starts. The home screen widget shows the song playing, and a tap on it carries the song's id (`&song=` beside the address, `parsePeerTunesWidgetTap` in `app/home-shortcuts.mjs`): PeerTunes hands it to the page once it has loaded (`PeerTunes.openNowPlaying(id)`), cold start or warm, and the page opens Now Playing on that song, or says it is no longer in the library.
 

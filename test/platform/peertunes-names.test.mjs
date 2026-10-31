@@ -17,6 +17,23 @@ test('PeerTunes does not use Apple product names', async () => {
   assert.doesNotMatch(runtime, /\bipod\b|click ?wheel|cover ?flow/i)
 })
 
+// Nor in any language PeerSky hands it.
+test('PeerTunes\' words do not use Apple product names in any language', async () => {
+  const list = JSON.parse(await readFile(new URL('../../app/i18n/peertunes-strings.json', import.meta.url), 'utf8'))
+  const keys = [...list.strings, ...list.plurals.map((forms) => forms.other)]
+  const locales = new URL('../../app/i18n/locales/', import.meta.url)
+  const files = (await readdir(locales)).filter((name) => name.endsWith('.json'))
+  assert.ok(files.length >= 24)
+  for (const file of files) {
+    const catalog = JSON.parse(await readFile(new URL(file, locales), 'utf8'))
+    for (const key of keys) {
+      const value = catalog[key]
+      const texts = typeof value === 'string' ? [value] : Object.values(value || {})
+      for (const text of texts) assert.doesNotMatch(text, /ipod|click ?-?wheel|cover ?-?flow|クリックホイール/i, `${file}: ${key}`)
+    }
+  }
+})
+
 // Nor its exact details: the wheel's top shows a menu glyph, not MENU, and
 // the center button is a rounded square inside the round wheel.
 test('the PeerTunes wheel is not the iPod wheel', async () => {

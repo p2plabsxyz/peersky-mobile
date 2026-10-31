@@ -324,3 +324,14 @@ test('Find people scans a code from beside its search', async () => {
   assert.match(screen, /onPress=\{\(\) => replaceModal\(\(\) => setIsDiscoverOpen\(false\), \(\) => \{ void openInviteScanner\(\) \}\)\}/)
   assert.match(screen, /<QrScanIcon width=\{20\} height=\{20\} color=\{colors\.accent\} \/>/)
 })
+
+// On Android the keyboard stayed up over the chat list after the chat's back
+// arrow: the message box it was typing into was gone, so nothing let go of it.
+test('going back to the chat list puts the keyboard away first', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const screen = await readFile(new URL('../../app/peerchat/PeerChatScreen.tsx', import.meta.url), 'utf8')
+  assert.match(screen, /const showChatList = useCallback\(\(\) => \{\s+Keyboard\.dismiss\(\)\s+setActiveRoom\(null\)/)
+  // Every way back to the list goes through it.
+  assert.equal(screen.match(/setActiveRoom\(null\)/g).length, 1)
+  assert.match(screen, /setSearchQuery\(''\)\s+showChatList\(\)\s+return true\s+\}, \[showChatList\]\)/)
+})

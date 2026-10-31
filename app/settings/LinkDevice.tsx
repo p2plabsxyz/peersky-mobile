@@ -12,6 +12,7 @@ import {
   Clipboard,
   KeyboardAvoidingView,
   Modal,
+  NativeModules,
   Platform,
   Pressable,
   ScrollView,
@@ -40,6 +41,7 @@ import {
   RPC_IDENTITY_SEND_STOP
 } from '../../backend/rpc/commands.mjs'
 import { BROWSER_PALETTES } from '../browser-appearance.mjs'
+import { removeAllWebsiteData } from '../browser-data.mjs'
 import { tapFeedback } from '../haptics'
 import { t, tp } from '../i18n/i18n.mjs'
 import { describeLinkedDevice, labelLinkedDevices, sortLinkedDevices } from '../linked-devices.mjs'
@@ -193,6 +195,11 @@ export function LinkDeviceSettings ({ deviceSyncRevision = 0, onCallRpc, onResta
     try {
       const response = await call(command, data)
       if (!response.ok) throw new Error(response.error || t('It did not go through'))
+      // Websites keep their cookies and storage outside PeerSky's own files,
+      // and without this whoever had the phone stayed signed in everywhere.
+      try {
+        await removeAllWebsiteData(NativeModules.PeerSkyBrowserData)
+      } catch {}
       // A restore brings its own preferences, with the Hyperdrive viewer's
       // epoch from wherever they were saved. It moves on from there, so the
       // viewer empties what it kept for the data that was replaced.
@@ -584,6 +591,12 @@ function SyncSheet ({
     setSending(null)
   }
 
+  // Once the other device has it all, nothing more goes from here.
+  function finishSending () {
+    stopSending()
+    close()
+  }
+
   async function openScanner () {
     setError(null)
     if (!permission?.granted) {
@@ -765,7 +778,36 @@ function SyncSheet ({
 
       {busy
         ? <Working title={busy} progress={progress} />
-        : sending
+        : sending && sendDone
+          ? (
+            // The other device has every part of it: the code is all that is
+            // left to check, on that device. The QR stayed up before, and a
+            // send that had worked looked as if it had not.
+            <View style={styles.sheetBlock}>
+              <Text style={[styles.sheetHeading, isDark ? darkStyles.text : null]}>
+                {describeSendProgress(sending.sent, sending.toDesktop)}
+              </Text>
+              <View style={[styles.codeBox, isDark ? darkStyles.codeBox : null]}>
+                <Text style={[styles.codeLabel, isDark ? darkStyles.muted : null]}>
+                  {sending.toDesktop ? t('Both screens show') : t('Both phones show')}
+                </Text>
+                <Text style={[styles.codeValue, isDark ? darkStyles.text : null]}>{sending.code}</Text>
+              </View>
+              <Pressable
+                accessibilityRole='button'
+                style={({ pressed }) => [styles.primaryButton, pressed ? styles.pressed : null]}
+                onPress={finishSending}
+              >
+                <Text style={styles.primaryButtonText}>{t('Done')}</Text>
+              </Pressable>
+              {!sending.toDesktop && (
+                <Text style={[styles.sheetNote, isDark ? darkStyles.muted : null]}>
+                  {t('Moving for good? Once the new phone has everything, remove your data from this one, so the two are not using the same chats.')}
+                </Text>
+              )}
+            </View>
+            )
+          : sending
           ? (
             <View style={styles.sheetBlock}>
               <Text style={[styles.sheetHeading, isDark ? darkStyles.text : null]}>

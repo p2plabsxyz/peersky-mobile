@@ -63,12 +63,46 @@ describe('p2pmd peer presence simulation', () => {
     const host = peers.find((peer) => peer.clientId === 'phone-host')
     const client = peers.find((peer) => peer.clientId === 'desktop-peer')
 
-    assert.equal(host.lineAttributions, null)
+    // Empty, not missing: a list without someone's lines means nothing
+    // changed, so the editors would have kept the phone's line 1.
+    assert.deepEqual(host.lineAttributions, {})
     assert.deepEqual(client.lineAttributions, {
       1: { color: '#59a6ff', name: 'Desktop', clientId: 'desktop-peer', updatedAt: 1234 }
     })
     assert.equal(client.cursorLine, 1)
     assert.equal(client.cursorColumn, 8)
+  })
+
+  // A phone kept sending lines it had lost, and the host gave them back to
+  // it: the phone showed the laptop's lines as its own.
+  it('gives a line to whoever edited it last, whatever order the lists come in', () => {
+    const store = createPeerPresenceStore({ now: createClock() })
+    const laptop = store.upsert({
+      clientId: 'laptop',
+      lineAttributions: { 1: { name: 'Laptop', color: '#1f86c1', updatedAt: 200 } }
+    })
+    const phone = store.upsert({
+      clientId: 'phone',
+      peerLineAttributions: {
+        1: { name: 'Phone', color: '#e345d6', updatedAt: 100 },
+        3: { name: 'Phone', color: '#e345d6', updatedAt: 150 }
+      }
+    })
+
+    const list = store.getPeerList(new Set([laptop, phone]))
+    assert.deepEqual(Object.keys(list.find((peer) => peer.clientId === 'laptop').lineAttributions), ['1'])
+    assert.deepEqual(Object.keys(list.find((peer) => peer.clientId === 'phone').lineAttributions), ['3'])
+
+    // The phone's newer edit of line 1 takes it, and an empty list clears.
+    store.upsert({ clientId: 'phone', peerLineAttributions: { 1: { name: 'Phone', color: '#e345d6', updatedAt: 300 } } })
+    store.upsert({ clientId: 'laptop', lineAttributions: {} })
+    const after = store.getPeerList(new Set([laptop, phone]))
+    assert.deepEqual(after.find((peer) => peer.clientId === 'laptop').lineAttributions, {})
+    assert.deepEqual(Object.keys(after.find((peer) => peer.clientId === 'phone').lineAttributions), ['1'])
+
+    // Presence that says nothing about lines leaves them as they are.
+    store.upsert({ clientId: 'phone', cursorLine: 2 })
+    assert.deepEqual(Object.keys(store.getPeerList(new Set([phone]))[0].lineAttributions), ['1'])
   })
 
   it('prunes stale peer presence after a peer disconnects', () => {

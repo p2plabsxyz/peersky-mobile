@@ -4,6 +4,10 @@
 (function (PT) {
   "use strict";
 
+  // Songs are often called t here, so the words go through msg and tKey.
+  const { msg, tKey } = PT.i18n || require("./i18n.js").i18n;
+  const UNKNOWN_ARTIST = msg("Unknown Artist");
+
   class Player extends EventTarget {
     constructor(audio, library) {
       super();
@@ -243,6 +247,23 @@
       this._emitState();
     }
 
+    // Nothing loaded, as before the first song: the songs it played are gone.
+    forget() {
+      this.audio.pause();
+      this.audio.removeAttribute("src");
+      this.audio.load();
+      if (this._blobUrl) { URL.revokeObjectURL(this._blobUrl); this._blobUrl = null; }
+      this.queue = [];
+      this.baseQueue = [];
+      this.pos = -1;
+      this._cued = false;
+      this._failed = false;
+      this._pendingSeek = null;
+      if ("mediaSession" in navigator) navigator.mediaSession.metadata = null;
+      this._queueChanged();
+      this._emitState();
+    }
+
     async _onEnded() {
       if (this.repeat === "one") {
         this.audio.currentTime = 0;
@@ -331,7 +352,7 @@
       try {
         navigator.mediaSession.metadata = new MediaMetadata({
           title: track.title,
-          artist: track.artist || "Unknown Artist",
+          artist: track.artist || tKey(UNKNOWN_ARTIST),
           album: track.album || "",
           artwork,
         });

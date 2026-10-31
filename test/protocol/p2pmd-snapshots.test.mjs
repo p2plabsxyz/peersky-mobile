@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import test from 'node:test'
 import {
   loadP2pmdRoomSnapshot,
+  p2pmdSnapshotFileName,
   saveP2pmdRoomSnapshot
 } from '../../backend/p2pmd/snapshots.mjs'
 
@@ -33,7 +34,7 @@ test('P2PMD snapshots persist hosted room content and bound retained rooms', asy
   })
   assert.equal((await readdir(join(storagePath, 'p2pmd-rooms'))).length, 35)
 
-  const snapshotPath = join(storagePath, 'p2pmd-rooms', `${'9'.repeat(52)}.json`)
+  const snapshotPath = join(storagePath, 'p2pmd-rooms', p2pmdSnapshotFileName(roomKey('9')))
   await rename(snapshotPath, `${snapshotPath}.previous`)
   assert.equal(loadP2pmdRoomSnapshot(roomKey('9'), storagePath)?.content, 'Room 35')
 })
@@ -54,7 +55,7 @@ test('P2PMD snapshots reject mismatched and oversized stored data', async (t) =>
     updatedAt: 1
   }, storagePath), true)
 
-  const snapshotPath = join(storagePath, 'p2pmd-rooms', `${'a'.repeat(52)}.json`)
+  const snapshotPath = join(storagePath, 'p2pmd-rooms', p2pmdSnapshotFileName(roomKey('a')))
   await writeFile(snapshotPath, JSON.stringify({
     version: 1,
     key: roomKey('b'),

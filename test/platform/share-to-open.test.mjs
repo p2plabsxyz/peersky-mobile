@@ -30,7 +30,7 @@ test('a windowless activity takes text shared to PeerSky, once', () => {
 test('it opens the link in the app as a tapped link would, and is in the build', async () => {
   const activity = await read('plugins/templates/ShareToOpenActivity.kt.template')
   assert.match(activity, /Intent\(Intent\.ACTION_VIEW, Uri\.parse\(link\), this, MainActivity::class\.java\)/)
-  assert.match(activity, /Regex\("\(\?:https\?\|hyper\):\/\/\[\^\\\\s<>\\"\]\+"/)
+  assert.match(activity, /Regex\("\(\?:https\?\|hyper\|peersky\):\/\/\[\^\\\\s<>\\"\]\+"/)
   assert.match(activity, /finish\(\)/)
   const app = JSON.parse(await read('app.json'))
   assert.ok(app.expo.plugins.includes('./plugins/with-share-to-open'))

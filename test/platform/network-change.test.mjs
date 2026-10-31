@@ -30,15 +30,20 @@ test('the swarm is refreshed on a new network, a new address, or coming back onl
 })
 
 test('the app listens for network changes and looks again on the background tick', async () => {
-  const hook = await read('app/useHyperNetworkRefresh.ts')
-  assert.match(hook, /Network\.addNetworkStateListener\(\(\) => \{ void check\(\) \}\)/)
-  assert.match(hook, /addPeerChatBackgroundTickListener\(\(\) => \{ void check\(\) \}\)/)
-  assert.match(hook, /Network\.getIpAddressAsync\(\)/)
-  assert.match(hook, /if \(shouldRefreshForNetwork\(last, next\)\) \{\s*void refreshRef\.current\(\)/)
-  // Both are let go when the app is done with them.
-  assert.match(hook, /networkSubscription\.remove\(\)/)
-  assert.match(hook, /tickSubscription\.remove\(\)/)
+  const watch = await read('app/hyper-network-refresh.ts')
+  assert.match(watch, /Network\.addNetworkStateListener\(\(\) => \{ void check\(\) \}\)/)
+  assert.match(watch, /addPeerChatBackgroundTickListener\(\(\) => \{ void check\(\) \}\)/)
+  assert.match(watch, /Network\.getIpAddressAsync\(\)/)
+  assert.match(watch, /if \(shouldRefreshForNetwork\(last, next\)\) \{\s*void refresh\(\)/)
+  // Both are let go when it stops.
+  assert.match(watch, /networkSubscription\.remove\(\)/)
+  assert.match(watch, /tickSubscription\.remove\(\)/)
 
+  // Started with the backend, so it runs with the screen or without it, as
+  // when Android's PeerChat service started the backend on its own.
+  const backend = await read('app/backend.ts')
+  assert.match(backend, /if \(!stopNetworkWatch\) stopNetworkWatch = watchHyperNetwork\(\(\) => callBackend\(RPC_HYPER_REFRESH, \{\}\)\)/)
+  assert.match(backend, /stopNetworkWatch\?\.\(\)/)
   const app = await read('app/index.tsx')
-  assert.match(app, /useHyperNetworkRefresh\(Boolean\(identityStoragePath\), \(\) => callRpc\(RPC_HYPER_REFRESH, \{\}\)\)/)
+  assert.doesNotMatch(app, /useHyperNetworkRefresh/)
 })

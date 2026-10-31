@@ -6,8 +6,10 @@ import { createRequire } from 'node:module'
 import vm from 'node:vm'
 import { createLoopbackToken } from '../../backend/loopback-request.mjs'
 import * as commands from '../../backend/rpc/commands.mjs'
+import { pageSiteId } from '../../backend/hyper/page-access.mjs'
 import {
   HYPER_BRIDGE_SCRIPT,
+  PEERTUNES_SITE,
   createPeerTunesHttpServer,
   injectHyperBridge,
   resolveStaticAsset,
@@ -103,7 +105,7 @@ describe('PeerTunes loopback server with injectable Node server', () => {
     assert.equal(normalized.status, 200)
   })
 
-  it('rejects writes, so the in-app publish probe fails cleanly', async () => {
+  it('rejects writes anywhere but the publish route', async () => {
     for (const method of ['POST', 'PUT', 'DELETE']) {
       const response = await fetch(`${localUrl}/?key=peertunes`, { method, body: 'x' })
       assert.equal(response.status, 405, method)
@@ -111,6 +113,9 @@ describe('PeerTunes loopback server with injectable Node server', () => {
 
     const assetWrite = await fetch(`${localUrl}/hyper/asset?url=hyper://abc/song.mp3`, { method: 'PUT', body: 'x' })
     assert.equal(assetWrite.status, 405)
+    // This server was given nothing to write with.
+    const publish = await fetch(`${localUrl}/hyper/write?url=${encodeURIComponent('hyper://localhost/?key=peertunes')}&token=${TOKEN}`, { method: 'POST' })
+    assert.equal(publish.status, 404)
 
     const preflight = await fetch(`${localUrl}/`, { method: 'OPTIONS' })
     assert.equal(preflight.status, 204)
@@ -424,6 +429,106 @@ describe('PeerTunes loopback server with injectable Node server', () => {
   })
 })
 
+// PeerTunes on the phone publishes as it does on the desktop: the drive by
+// name, then each song and the playlist file. Its web view cannot fetch
+// hyper://, so the writes come through here.
+describe('PeerTunes publishing from the phone', () => {
+  let server
+  let localUrl
+  let writes
+
+  const write = (url, init) => fetch(`${localUrl}/hyper/write?url=${encodeURIComponent(url)}&token=${TOKEN}`, init)
+
+  beforeEach(async () => {
+    writes = []
+    server = createPeerTunesHttpServer({
+      httpImpl: http,
+      fetch: createFakeHyperFetch([]),
+      write: async (request) => {
+        writes.push(request)
+        if (request.method === 'POST') return { ok: true, status: 200, headers: { location: 'hyper://drive/' }, body: 'hyper://drive/' }
+        if (request.url.includes('elsewhere')) return { ok: false, status: 403, error: 'A page can only write to drives it created' }
+        return { ok: true, status: 201, headers: {}, body: '' }
+      },
+      maxPublishBytes: 64,
+      token: TOKEN
+    })
+    localUrl = await listen(server)
+  })
+
+  afterEach(async () => {
+    await closeServer(server)
+  })
+
+  it('asks for the drive by name and puts each file in it, with its type', async () => {
+    const drive = await write('hyper://localhost/?key=peertunes', { method: 'POST' })
+    assert.equal(drive.status, 200)
+    assert.equal(drive.headers.get('location'), 'hyper://drive/')
+    assert.equal(await drive.text(), 'hyper://drive/')
+
+    const song = await write('hyper://drive/mix-abc123/01 Song.mp3', { method: 'PUT', body: SONG_BYTES, headers: { 'Content-Type': 'audio/mpeg' } })
+    assert.equal(song.status, 201)
+    const list = await write('hyper://drive/mix-abc123/playlist.json', { method: 'PUT', body: '{"tracks":[]}', headers: { 'Content-Type': 'application/json' } })
+    assert.equal(list.status, 201)
+
+    assert.deepEqual(writes.map(({ url, method }) => [method, url]), [
+      ['POST', 'hyper://localhost/?key=peertunes'],
+      ['PUT', 'hyper://drive/mix-abc123/01 Song.mp3'],
+      ['PUT', 'hyper://drive/mix-abc123/playlist.json']
+    ])
+    assert.equal(writes[0].body, null)
+    assert.deepEqual(new Uint8Array(writes[1].body), SONG_BYTES)
+    assert.equal(writes[1].headers['Content-Type'], 'audio/mpeg')
+    assert.equal(Buffer.from(writes[2].body).toString(), '{"tracks":[]}')
+  })
+
+  it('passes a refusal on, and takes no file larger than it can hold', async () => {
+    const refused = await write('hyper://elsewhere/song.mp3', { method: 'PUT', body: 'x' })
+    assert.equal(refused.status, 403)
+    assert.match(await refused.text(), /only write to drives it created/)
+
+    const big = await write('hyper://drive/mix/big.mp3', { method: 'PUT', body: new Uint8Array(65) })
+    assert.equal(big.status, 413)
+    assert.equal(writes.some((request) => request.url.endsWith('big.mp3')), false)
+  })
+
+  it('needs this run\'s token, and only takes POST and PUT', async () => {
+    const url = encodeURIComponent('hyper://localhost/?key=peertunes')
+    assert.equal((await fetch(`${localUrl}/hyper/write?url=${url}`, { method: 'POST' })).status, 403)
+    assert.equal((await fetch(`${localUrl}/hyper/write?url=${url}&token=${createLoopbackToken()}`, { method: 'POST' })).status, 403)
+    assert.equal((await write('hyper://drive/a.mp3', { method: 'GET' })).status, 405)
+    assert.equal((await write('hyper://drive/a.mp3', { method: 'DELETE' })).status, 405)
+    assert.equal(writes.length, 0)
+  })
+
+  it('writes as PeerTunes, under a name no web page can have', async () => {
+    const calls = []
+    const hyper = {
+      ensureFetchGlobals () {},
+      refreshHyperNetworkFor: async () => {},
+      routedHyperFetch: createFakeHyperFetch([]),
+      routedHyperRangeFetch: null,
+      fetchHyper: async (request) => {
+        calls.push(request)
+        return { ok: true, status: 200, headers: {}, body: 'hyper://drive/' }
+      },
+      withHyperRuntimeForAddress: async () => { throw new Error('No drives in this test') },
+      hyperOfflineNetworkAllowed: () => true
+    }
+    try {
+      const run = await startPeerTunesServer({ httpImpl: http, port: 0, hyper })
+      const response = await fetch(`${run.localUrl}/hyper/write?url=${encodeURIComponent('hyper://localhost/?key=peertunes')}&token=${run.token}`, { method: 'POST' })
+      assert.equal(response.status, 200)
+    } finally {
+      await stopPeerTunesServer()
+    }
+    assert.equal(calls.length, 1)
+    assert.equal(calls[0].site, PEERTUNES_SITE)
+    assert.equal(calls[0].method, 'POST')
+    assert.equal(pageSiteId(PEERTUNES_SITE), null)
+  })
+})
+
 describe('PeerTunes server helpers', () => {
   it('resolves only bundled files', () => {
     assert.equal(resolveStaticAsset('/').key, 'index.html')
@@ -457,6 +562,7 @@ describe('PeerTunes server helpers', () => {
     assert.equal(window.peerskyHyperAsset('hyper://abc/a b.mp3'), '/hyper/asset?url=hyper%3A%2F%2Fabc%2Fa%20b.mp3')
     window.peerskyServerToken = TOKEN
     assert.equal(window.peerskyHyperAsset('hyper://abc/a b.mp3'), `/hyper/asset?url=hyper%3A%2F%2Fabc%2Fa%20b.mp3&token=${TOKEN}`)
+    assert.equal(window.peerskyHyperWrite('hyper://localhost/?key=peertunes'), `/hyper/write?url=hyper%3A%2F%2Flocalhost%2F%3Fkey%3Dpeertunes&token=${TOKEN}`)
     const next = createLoopbackToken()
     window.peerskyServerToken = next
     assert.ok(window.peerskyHyperAsset('hyper://abc/a.mp3').endsWith(`&token=${next}`))

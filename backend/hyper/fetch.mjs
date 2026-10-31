@@ -64,6 +64,9 @@ const PAGE_PRIVATE_DRIVE_ERROR = 'A page cannot read private drives'
  * @param {string|null} [options.page] The hyper:// or https:// page that
  *   asked, when the request came through the page bridge rather than from the
  *   app itself.
+ * @param {string|null} [options.site] Who asked, when it is one of the app's
+ *   own pages served from the phone, such as PeerTunes: the same rules as a
+ *   page, under a name no web page has (page-access.mjs).
  */
 export async function fetchHyper ({
   url,
@@ -71,6 +74,7 @@ export async function fetchHyper ({
   body = null,
   headers: requestHeaders = null,
   page = null,
+  site = null,
   inlineAssets = false,
   retries = DEFAULT_HYPER_DISCOVERY_RETRIES,
   retryDelay = DEFAULT_HYPER_DISCOVERY_RETRY_DELAY,
@@ -89,8 +93,8 @@ export async function fetchHyper ({
   // survive the trip. Reads never carried one.
   const requestUrl = createHyperUrl(target.driveAddress, target.pathname) + getHyperSearch(url)
 
-  const pageSite = page === null ? null : pageSiteId(page)
-  if (page !== null && !pageSite) {
+  const pageSite = site || (page === null ? null : pageSiteId(page))
+  if (!site && page !== null && !pageSite) {
     return { ok: false, status: 403, error: 'Only a hyper:// or https:// page can make hyper:// requests' }
   }
 
@@ -175,7 +179,8 @@ export async function fetchHyper ({
             baseUrl: response.url || requestUrl,
             fetch,
             assetBaseUrl: proxyServer.localUrl,
-            assetAuthToken: proxyServer.authToken
+            assetAuthToken: proxyServer.authToken,
+            mayLinkDrive: (drive) => mayPageLinkDrive(target.driveAddress, drive)
           })
         }
 
@@ -270,9 +275,11 @@ async function writeHyper ({ target, requestUrl, method, body, headers, pageSite
 }
 
 // The page hands its body over as base64, because the bridge between the
-// WebView and here carries text.
+// WebView and here carries text. One of the app's own pages served from the
+// phone sends bytes.
 function decodeRequestBody (body) {
   if (body === null || body === undefined || body === '') return { bytes: null }
+  if (body instanceof Uint8Array) return { bytes: body }
   if (typeof body !== 'string') return { error: 'Request body must be base64 text' }
 
   try {
@@ -393,6 +400,15 @@ async function getHyperWriteFetch (runtime) {
 /** Looks for peers of the drive behind url again, as a retry does. */
 export function refreshHyperNetworkFor (url) {
   return withHyperRuntimeForAddress(url, (runtime) => refreshHyperRuntimeNetwork(runtime))
+}
+
+// A page's media and download links are read with this phone's keys, so it
+// gets them for its own drive and public ones, never for a private drive it is
+// not a page of. The bridge refuses the same read with a 403.
+async function mayPageLinkDrive (pageDrive, drive) {
+  const driveId = normalizeDriveAddressId(drive)
+  if (driveId && driveId === normalizeDriveAddressId(pageDrive)) return true
+  return !(await isPrivateHyperAddress(drive))
 }
 
 // What the media links and PeerTunes read through. A song or a picture with

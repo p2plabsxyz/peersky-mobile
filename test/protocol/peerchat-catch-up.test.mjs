@@ -14,6 +14,7 @@ import { roomRotates } from '../../backend/peerchat/key-chain.mjs'
 import { readSignedMessage } from '../../backend/peerchat/message-signature.mjs'
 import { derivePeerChatTopic } from '../../backend/peerchat/protocol.mjs'
 import { PRE_JOINED_PEERCHAT_ROOM_KEY } from '../../backend/peerchat/rooms.mjs'
+import { roomLogName } from '../../backend/peerchat/room-log.mjs'
 import { PeerChatService } from '../../backend/peerchat/service.mjs'
 
 // Catching up after being away, as tested by hand with a phone and three
@@ -143,7 +144,7 @@ const sameIds = (left, right) => left.join() === right.join()
 
 const shown = async (device) => (await device.service.getSnapshot({ roomKey, version: -1 })).messages
   .filter((message) => !message.system)
-const stored = (device) => device.logs.get(`chat-${roomKey}`)?.entries || []
+const stored = (device) => device.logs.get(roomLogName(roomKey))?.entries || []
 
 // Waits until a device shows all of these, then checks each one reads as its
 // author's, as written, and is stored as below.

@@ -33,6 +33,7 @@ export const P2PMD_SCIENTIFIC_STYLES = `
 .ieee-columns > :is(figure, table, pre, blockquote, .katex-block) { break-inside: avoid; }
 .ieee-columns > :is(h1, h2, h3, h4, h5, h6):first-child { column-span: all; margin: 0 0 .4rem; text-align: center; }
 .ieee-columns > :is(h2, h3, h4, h5, h6) { margin: .7rem 0 .2rem; text-align: center; }
+.ieee-columns > :is(section, div) > h2:first-child, .ieee-preview-columns > :is(section, div) > h2:first-child { margin: .7rem 0 .2rem; font-size: 1.17em; text-align: center; }
 .ieee-abstract-block { break-inside: avoid; margin-bottom: .3rem; }
 .ieee-abstract-heading { margin-bottom: .15rem; text-align: center; }
 .ieee-columns p { margin: 0 0 .3rem; text-align: justify; }

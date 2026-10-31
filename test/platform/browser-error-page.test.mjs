@@ -50,6 +50,15 @@ describe('a page that would not load', () => {
     assert.match(blocked.body, /Settings, Privacy/)
   })
 
+  test('a plain http:// page says it is not secure, not that the connection failed', () => {
+    const android = describeBrowserError('http://neverssl.com/', 'net::ERR_CLEARTEXT_NOT_PERMITTED')
+    assert.equal(android.title, 'This page is not secure')
+    assert.match(android.body, /^neverssl\.com uses plain http:\/\//)
+    assert.doesNotMatch(android.body, /connection/)
+    const ios = describeBrowserError('http://example.com/', 'The resource could not be loaded because the App Transport Security policy requires the use of a secure connection.')
+    assert.equal(ios.title, 'This page is not secure')
+  })
+
   test('a peer address that nobody is seeding says so', () => {
     const { title, body } = describeBrowserError(`hyper://${'b'.repeat(64)}/`, 'No peers found')
 

@@ -207,6 +207,7 @@ function wait (delay) {
 
 export async function uploadHyperdriveFile ({
   name,
+  folder,
   contentBase64,
   fileUri,
   byteLength,
@@ -216,6 +217,8 @@ export async function uploadHyperdriveFile ({
 } = {}, options = {}) {
   const filename = normalizeFilename(name)
   if (!filename) return { ok: false, error: 'Invalid file name.' }
+  const folderPath = normalizeFolderPath(folder)
+  if (folderPath === null) return { ok: false, error: 'Invalid folder name.' }
   const uploadTarget = resolveHyperdriveUploadTarget(visibility)
   if (!uploadTarget) return { ok: false, error: 'Choose public or private upload visibility.' }
   const localFile = normalizePickedLocalFile(fileUri, byteLength)
@@ -246,7 +249,7 @@ export async function uploadHyperdriveFile ({
       })
       if (visibility === 'device') rememberDeviceOnlyHyperdrive(drive)
     }
-    const pathname = await uniquePath(drive, `/${filename}`)
+    const pathname = await uniquePath(drive, `${folderPath ? `/${folderPath}` : ''}/${filename}`)
     if (localFile) {
       await writeLocalUpload(drive, pathname, localFile, options)
     } else {
@@ -279,6 +282,8 @@ export async function uploadHyperdriveFile ({
     return {
       ok: true,
       driveUrl: `hyper://${drive.id}/`,
+      // The folder a file from a picked folder went into, to link to it.
+      ...(folderPath && { folderUrl: createHyperUrl(`hyper://${drive.id}/`, `/${folderPath.split('/')[0]}/`) }),
       item: {
         ...item,
         visibility
@@ -429,7 +434,8 @@ function createFileItem (driveAddress, pathname, value) {
 async function uniquePath (drive, pathname) {
   if (!await drive.exists(pathname)) return pathname
 
-  const dot = pathname.lastIndexOf('.')
+  // The file's own extension, not a dot in a folder above it.
+  const dot = pathname.lastIndexOf('.') > pathname.lastIndexOf('/') + 1 ? pathname.lastIndexOf('.') : -1
   const stem = dot > 0 ? pathname.slice(0, dot) : pathname
   const extension = dot > 0 ? pathname.slice(dot) : ''
   for (let suffix = 1; suffix <= 1000; suffix++) {
@@ -437,6 +443,22 @@ async function uniquePath (drive, pathname) {
     if (!await drive.exists(candidate)) return candidate
   }
   throw new Error('Unable to create a unique file name.')
+}
+
+// A file picked from a folder keeps its place in it: the picked folder's own
+// name and any folders under it ("Test Album/Trip 2026"), so a website
+// uploaded from the phone keeps its links. It used to land loose at the top of
+// the drive. Each part is cleaned as a file name is. '' for none, null for one
+// that cannot be used.
+const MAX_FOLDER_PARTS = 8
+
+function normalizeFolderPath (value) {
+  if (value === undefined || value === null || value === '') return ''
+  if (typeof value !== 'string') return null
+  const parts = value.split('/').filter((part) => part !== '')
+  if (!parts.length || parts.length > MAX_FOLDER_PARTS) return null
+  const cleaned = parts.map(normalizeFilename)
+  return cleaned.every(Boolean) ? cleaned.join('/') : null
 }
 
 function normalizeFilename (value) {

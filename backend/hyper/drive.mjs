@@ -84,6 +84,119 @@ export async function uploadHyperFile ({
   })
 }
 
+// A note as a file of its own, for P2PMD's share button: the page a publish
+// makes, to print as a PDF or, for slides, to keep as a presentation. It is
+// opened where hyper:// means nothing, so the pictures go inside it, read the
+// way the phone's preview reads them (readHyperFile, this phone's own drive).
+const MAX_EXPORT_IMAGES = 40
+// A laid out paper is the note's HTML several times over, KaTeX included.
+const MAX_EXPORT_PAPER_LENGTH = 40 * 1024 * 1024
+const MAX_EXPORT_IMAGE_TOTAL_BYTES = 20 * 1024 * 1024
+const EXPORT_IMAGE_SOURCE = /\ssrc="(hyper:\/\/[^"]+)"/g
+
+export async function exportMarkdownDocument ({ content, mode, latexModeEnabled, paperHtml } = {}, options = {}) {
+  if (typeof content !== 'string') {
+    return { ok: false, error: 'Invalid Markdown content. Expected a string.' }
+  }
+  if (b4a.byteLength(content) > MAX_HYPER_FILE_BYTES) {
+    return { ok: false, error: 'Markdown is too large. Maximum size is 10 MB.' }
+  }
+
+  // A research paper prints from the pages the editor laid out, on A4.
+  const paper = mode !== 'slides' && latexModeEnabled === true && hasIeeeMarker(content) &&
+    typeof paperHtml === 'string' && paperHtml.length > 0 && paperHtml.length <= MAX_EXPORT_PAPER_LENGTH
+
+  let html
+  try {
+    html = mode === 'slides'
+      ? createPublishedSlidesHtml(content)
+      : paper
+        ? createExportedPaperHtml(paperHtml)
+        : createPublishedNoteHtml(content, latexModeEnabled === true)
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) }
+  }
+
+  return {
+    ok: true,
+    html: await inlineExportImages(html, options.readFile || readHyperFile),
+    ...(paper && { paper: 'a4' })
+  }
+}
+
+// A research paper as the editor laid it out (paperForExport in
+// backend/p2pmd/server.mjs), a page to a sheet of A4. The page that prints a
+// PDF cannot lay the paper out itself: Android prints with scripts off, and
+// the layout runs in slices that can end after the PDF is taken, so either
+// way the paper came out as a plain note.
+export function createExportedPaperHtml (paperHtml) {
+  const pages = String(paperHtml || '')
+    .replace(/<script\b[\s\S]*?<\/script\s*>/gi, '')
+    // The editor shows pictures through its own server; the export reads them
+    // from their drives, as a published note's are.
+    .replace(/\ssrc="\/hyper\/file\?url=([^"]+)"/g, (whole, encoded) => {
+      try {
+        const url = decodeURIComponent(encoded.replace(/&amp;/g, '&'))
+        return url.startsWith('hyper://') ? ` src="${url.replace(/"/g, '&quot;')}"` : whole
+      } catch {
+        return whole
+      }
+    })
+
+  return `<!doctype html>
+<meta charset="utf-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; font-src data:; img-src data:;" />
+<title>P2PMD Paper</title>
+<style>
+  ${katexCss}
+  ${P2PMD_SCIENTIFIC_STYLES}
+  @page { size: A4; margin: 0; }
+  html, body { margin: 0; padding: 0; background: #ffffff; }
+  .ieee-page-stack { display: block; }
+  .ieee-preview-page {
+    box-shadow: none;
+    margin: 0 !important;
+    width: 210mm;
+    height: 296.5mm;
+    break-after: page;
+    page-break-after: always;
+  }
+  .ieee-preview-page:last-child { break-after: auto; page-break-after: auto; }
+  .ieee-preview-page-inner { transform: none; }
+</style>
+${pages}
+`
+}
+
+export async function inlineExportImages (html, readFile) {
+  const sources = new Map()
+  for (const match of html.matchAll(EXPORT_IMAGE_SOURCE)) {
+    if (sources.size >= MAX_EXPORT_IMAGES) break
+    if (!sources.has(match[1])) sources.set(match[1], null)
+  }
+
+  let totalBytes = 0
+  for (const attribute of sources.keys()) {
+    let result
+    try {
+      result = await readFile({ url: attribute.replace(/&amp;/g, '&') })
+    } catch {
+      continue
+    }
+    if (!result?.ok || typeof result.contentType !== 'string' || !result.contentType.startsWith('image/')) continue
+    const byteLength = result.bytes?.byteLength
+    if (!Number.isSafeInteger(byteLength) || byteLength < 1) continue
+    if (totalBytes + byteLength > MAX_EXPORT_IMAGE_TOTAL_BYTES) continue
+    totalBytes += byteLength
+    sources.set(attribute, `data:${result.contentType};base64,${b4a.toString(result.bytes, 'base64')}`)
+  }
+
+  return html.replace(EXPORT_IMAGE_SOURCE, (whole, attribute) => {
+    const inlined = sources.get(attribute)
+    return inlined ? ` src="${inlined}"` : whole
+  })
+}
+
 export async function publishMarkdownDocument ({ content, mode, latexModeEnabled, visibility } = {}, options = {}) {
   const isPrivate = visibility === 'private'
   if (typeof content !== 'string') {
@@ -407,6 +520,58 @@ window.P2pmdIeee.render(note, note.innerHTML)
   pre code {
     background: transparent;
     padding: 0;
+  }
+  /* Nothing styled tables, so a table printed as loose words with nothing
+     between its rows and columns. */
+  table {
+    border-collapse: collapse;
+    margin: 16px 0;
+    max-width: 100%;
+  }
+  /* Words stay whole. Breaking anywhere let a timesheet's Date and Time
+     columns shrink to a letter a line ("Da/te", "8:/00/A/M") so its Task
+     column could take the page. Each column keeps room for a short time or
+     date, and a long column wraps between its words. */
+  th,
+  td {
+    border: 1px solid #c9ccd1;
+    min-width: 7ch;
+    overflow-wrap: break-word;
+    padding: 6px 10px;
+    text-align: left;
+    vertical-align: top;
+  }
+  /* A link or code can be one long word. Only that breaks anywhere, so the
+     table still fits the page. */
+  th a,
+  th code,
+  td a,
+  td code {
+    overflow-wrap: anywhere;
+  }
+  /* On a screen a table too wide for it scrolls sideways; on paper it keeps
+     to the page. */
+  @media screen {
+    table {
+      display: block;
+      overflow-x: auto;
+    }
+  }
+  th {
+    background: #f2f3f5;
+    font-weight: 700;
+  }
+  thead {
+    display: table-header-group;
+  }
+  tr {
+    break-inside: avoid;
+  }
+  blockquote {
+    border-left: 3px solid #c9ccd1;
+    color: #444444;
+    margin: 16px 0;
+    padding: 2px 0 2px 14px;
   }
 </style>
 <main id="note">${rendered}</main>

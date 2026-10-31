@@ -12,6 +12,9 @@
   },
   "android": {
     "peerchat_background_text": "सन्देशाः भवन्तं प्राप्नुयुः इति संयोगः रक्ष्यते",
+    "peerchat_background_connecting": "संयुज्यते...",
+    "peerchat_background_offline": "अन्तर्जालं विना। पुनः संयोजयितुं स्पृशतु",
+    "peerchat_background_locked": "दूरवाण्याः कीलने मुक्ते सति संयुज्यते",
     "peerchat_background_channel": "PeerChat-पृष्ठभूमिसंयोगः",
     "peerchat_background_channel_description": "PeerSky यावत् पृष्ठभूमौ अस्ति, तावत् PeerChat संयुक्तं रक्षति"
   }

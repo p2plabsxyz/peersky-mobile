@@ -67,14 +67,18 @@ test('Clear all P2P data says in red that this device\'s identity and its links 
 // what it holds as it closes, so the restart screen goes up first, as for
 // Remove my data from this phone.
 test('Clear all P2P data asks for a fresh start, with the restart screen up before anything is removed', () => {
-  const screen = readSource('app/settings/P2PStorage.tsx')
-  const clear = screen.slice(screen.indexOf('async function clearAllData'), screen.indexOf('async function refreshArchive'))
+  // The steps are shared with the lock screen button, which clears without
+  // asking.
+  const clear = readSource('app/settings/clear-all-p2p-data.ts')
   assert.ok(clear.indexOf('onRestartRequired()') > 0)
   assert.ok(clear.indexOf('onRestartRequired()') < clear.indexOf('onCallRpc(RPC_HYPER_STORAGE_CLEAR_ALL)'))
   assert.match(clear, /if \(Platform\.OS === 'android'\) BackHandler\.exitApp\(\)/)
   assert.match(clear, /Close PeerSky and open it again to finish\./)
+  const screen = readSource('app/settings/P2PStorage.tsx')
+  const clearAll = screen.slice(screen.indexOf('async function clearAllData'), screen.indexOf('async function refreshArchive'))
+  assert.match(clearAll, /await clearAllP2PData\(\{ onCallRpc, onRestartRequired \}\)/)
   // Nothing on the screen is updated after: it is gone by then.
-  assert.doesNotMatch(clear, /clearHyperdriveRecents|onP2pmdDataDeleted|refreshArchive\(\)/)
+  assert.doesNotMatch(clearAll + clear, /clearHyperdriveRecents|onP2pmdDataDeleted|refreshArchive\(\)/)
 
   const settings = readSource('app/settings/SettingsScreen.tsx')
   const page = settings.slice(settings.indexOf('<P2PStorage'), settings.indexOf('/>', settings.indexOf('<P2PStorage')))

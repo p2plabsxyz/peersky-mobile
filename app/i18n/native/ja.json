@@ -12,6 +12,9 @@
   },
   "android": {
     "peerchat_background_text": "メッセージを受け取れるよう接続を維持しています",
+    "peerchat_background_connecting": "接続中…",
+    "peerchat_background_offline": "オフライン。タップして再接続",
+    "peerchat_background_locked": "スマートフォンのロックを解除すると接続します",
     "peerchat_background_channel": "PeerChatのバックグラウンド接続",
     "peerchat_background_channel_description": "PeerSkyがバックグラウンドにあるときも、PeerChatの接続を維持します"
   }

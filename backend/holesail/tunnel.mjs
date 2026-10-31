@@ -326,7 +326,9 @@ export class TunnelGuest {
     const advertisedPort = Number.isInteger(advertised?.port) && advertised.port > 0 && advertised.port < 65536
       ? advertised.port
       : null
-    const port = this.port ?? advertisedPort ?? DEFAULT_PORT
+    // With neither, a free port. Holesail's 8989 left a note joined that way
+    // on 8989 here for good, whatever its host's port was.
+    const port = this.port ?? advertisedPort ?? 0
 
     const proxy = net.createServer({ allowHalfOpen: true }, (local) => {
       if (!this.token) {

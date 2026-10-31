@@ -12,6 +12,9 @@
   },
   "android": {
     "peerchat_background_text": "Utrzymywanie połączenia, aby docierały do ciebie wiadomości",
+    "peerchat_background_connecting": "Łączenie...",
+    "peerchat_background_offline": "Offline. Stuknij, aby połączyć ponownie",
+    "peerchat_background_locked": "Połączy się, gdy odblokujesz telefon",
     "peerchat_background_channel": "Połączenie PeerChat w tle",
     "peerchat_background_channel_description": "Utrzymuje połączenie PeerChat, gdy PeerSky działa w tle"
   }

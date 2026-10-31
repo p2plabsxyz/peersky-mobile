@@ -11,6 +11,12 @@ and transport formats as PeerSky Desktop.
 - Create a group or join one with its 64-character room key or an invite link,
   which says who made the room too.
 - Exchange encrypted messages with mobile and desktop peers.
+- On a local network with hyperdht-mdns 2, connect with a key made up for the
+  network and prove this phone's own key inside the encrypted channel only to
+  people it shares a room with (or a direct chat it left) and to the person's
+  other devices (`identifyOnLan` in `backend/peerchat/service.mjs`). Room
+  proofs name the connection's key, as on the internet; the rest goes by the
+  proven key.
 - Rooms and direct messages made on 0.1.2 or later change their message key
   every hour, so a key someone gets later cannot read what came before.
 - Every message is signed by whoever wrote it, and passed on from device to
@@ -83,15 +89,29 @@ Important files:
 ## Moderation
 
 Each phone and desktop filters what it sends and what it receives, on its own.
+Every check runs on the device, and nothing about a check is sent to the
+maintainers or to anyone else: no copy of the message or the picture, no
+result, no report.
+
 In a group, a message with threats, slurs or an adult-domain link is held back
 and a notice takes its place. So is a file whose name has them, since the name
 shows in the chat list, a search and a notification. A picture that looks
-explicit is refused before it is sent. A direct message skips the text filters,
-file names included: it is between two
+explicit, violent or graphic is refused before it is sent, by two models that
+run on the device: one for nudity, one for gore and graphic violence. The
+profile picture and a room's picture go through the same check. Pictures are
+checked again when they arrive, and one that looks explicit, violent or graphic
+is hidden behind a warning the reader can open. The abuse filter and the
+profanity and slur list are on in every new group, and whoever made the group
+can turn either off in Edit room. That choice is signed with their key, like
+the rest of the room's details, so every device knows it came from them. The
+adult-domain check and the picture check stay on in every group.
+
+A direct message skips the text filters, file names included: it is between two
 people, and either can block the other. The spam limit still applies there, and
-a picture that looks explicit arrives hidden behind a warning the reader can
-open. Whether a room is a direct message is worked out on each device, never
-taken from a peer, so no room setting can switch a group's filters off.
+a picture that looks explicit, violent or graphic arrives hidden behind a
+warning the reader can open. Whether a room is a direct message is worked out
+on each device, never taken from a peer, so a group cannot pass itself off as a
+direct message to get out of its filters.
 
 Whoever made a room can remove anyone from it, for good. The creator signs the
 room's removal list with their own key, so anyone in the room can pass it on
@@ -122,8 +142,11 @@ is in the background, and Android can lose its renderer, so the page is loaded
 again when that happens, and a picture goes to the page only once it says it is
 ready. The chat says it is checking a picture while it does. The small JPEG it
 makes of each picture is deleted once read, and Clear all P2P data, Remove my
-data and a restore delete the copies Save and Share made
-(`clearChatFileCopies` in `app/peerchat/media-save.ts`).
+data and a restore delete the copies Save and Share made, the full copies
+the photo and file pickers keep, and the copy of the last file handed to
+another app (`clearChatFileCopies` in `app/peerchat/media-save.ts`). On iOS a
+file is handed to another app under its own name, from a copy in
+`peersky-open`: the picker's and the chat's copies are named by a number.
 
 ## Room-key security
 
@@ -388,6 +411,13 @@ The desktop keeps the same rules in peerchat's `lib/room-details.js`
 
 ## Attachments and link previews
 
+A photo picked from the library or taken with the camera is sent as a fresh
+copy (`app/media/chat-picture.mjs`, `chat-picture-copies.ts`): JPEG, or PNG for
+a PNG, re-encoded by the image manipulator, so none of the original's EXIF
+reaches the room, the place it was taken included, and an iPhone's HEIC arrives
+as something every desktop can show. A GIF and anything picked from Files go as
+they are. The copy is deleted once it is sent.
+
 PeerChat stores attachments in a dedicated Hyperdrive for each room. Before
 upload, file bytes are sealed with AES-256-GCM using a key derived from the room
 key, or in a room made on 0.1.2 or later from a key of the file's own that
@@ -455,7 +485,11 @@ brings it back. Blocking and reporting together is one tap.
 A report goes to the maintainers by email. It names the room by the first 16 hex
 characters of the SHA-256 of its key, never the key, which would let whoever
 reads the email into the room and its whole history. If the phone has no mail
-app, the report can be copied instead.
+app, the report can be copied instead. The email does not let the maintainers
+into the room, and nobody can delete a message from a device it already
+reached. The maintainers can remove someone only from P2P Republic, the public
+room they run, whose creator key is pinned in the app. In any other group, only
+whoever made it can.
 
 ## Notifications
 
@@ -463,7 +497,29 @@ Message notifications require native notification permission and can be
 disabled globally or suppressed by muting a room. Sound can be disabled without
 disabling the notification itself. On Android, enabling notifications starts a
 visible foreground service so the local PeerChat runtime can remain connected
-while the app is backgrounded. Android and supported iOS launchers receive the
+while the app is backgrounded.
+
+The backend and the check for new messages live outside the screen
+(`app/backend.ts`, `app/peerchat/notifier.ts`), so a swipe from Recents leaves
+PeerChat connected and still showing notifications, and the screen takes up the
+running backend when PeerSky opens again. When Android starts PeerSky by itself,
+after it stopped the app (the service is sticky), a reboot or an update
+(`PeerChatBootReceiver`), the service starts PeerChat with no screen through a
+headless JS task (`app/peerchat/background-task.ts`, registered in `index.js`).
+A new message shows as soon as the backend says PeerChat changed, not on the
+next minute tick. The service's notice says "Connecting..." until PeerChat
+answers, "Staying connected so messages reach you" while it runs, and "Offline.
+Tap to reconnect" when the backend stopped or nothing started it within three
+minutes; it never says connected while PeerChat is not running. A clear or a
+restore stops the service and makes a new backend the next time PeerSky opens.
+Chats are locked with a key the phone gives only while it is unlocked (see
+Storage and deletion), so a start with the phone locked, as after a night-time
+update, waits for the unlock: the notice says "Connects when you unlock your
+phone", and the service starts PeerChat again when it hears the phone unlocked
+(`ACTION_USER_PRESENT`). A phone that was unlocked when PeerChat started keeps
+it running, and showing messages, while it is locked again.
+
+Android and supported iOS launchers receive the
 current unread badge total, and the PeerChat home shortcut shows the same total.
 On iOS, background delivery is best effort only: messages can arrive until iOS
 suspends PeerSky because PeerChat deliberately has no centralized push server.
@@ -474,12 +530,39 @@ PeerChat metadata and writable room feeds live under the shared Hyper storage
 directory. PeerChat deliberately does not expose raw room feeds or room keys as
 ordinary named Hyperdrives in Settings.
 
+Nothing PeerChat keeps on the phone can be read from its files while the phone
+is locked. PeerChat's file (`peerchat-mobile.json`: the profile, every room's
+key, members and the last message of each) and the chat screen's own
+(`peerchat-ui-state.json`: what was typed and not sent, and the chat each tab is
+on) are locked with the chat key, which the system gives only while the phone is
+unlocked (see Chats and notes on the phone in [hyper.md](hyper.md)). Each room's
+messages are in a log only this phone writes, named by a hash of the room key
+(`chat2-...`, `backend/peerchat/room-log.mjs`) where it used to be the key
+itself, and every entry in it is locked with a key kept in PeerChat's file
+(`logKey`), so the log shows neither who said what nor in which room. A log an
+earlier build kept under the room key moves as the room opens, and the logs of
+rooms left earlier right after PeerChat starts: copied, then removed with its
+name and the store's bytes of it (`moveLegacyRoomLog`, which a stop part way
+through starts over). The pictures and files opened to show them, decrypted,
+go before the phone locks: on iOS as the app leaves the screen, on Android as
+the screen goes off, and when the backend starts (`app/peerchat/attachment-cache.ts`).
+What is on screen opens again when the app comes back. PeerChat with its file
+locked and no key does not start, and never writes over the file. Started while
+the phone is locked, it waits for the unlock.
+
 PeerChat settings has **Delete PeerChat profile**. It leaves every room, so each
-one hears this device go, then removes the room feeds, the attachment drives,
-the decrypted attachment cache and PeerChat's own state file, and PeerChat opens
-on the welcome screen again (`deletePeerChatProfile` in
+one hears this device go, then empties every room feed on the phone, rooms left
+earlier included, frees the files this phone sent, and removes the decrypted
+attachment cache and PeerChat's own state file, and PeerChat opens on the
+welcome screen again (`deletePeerChatProfile` in
 `backend/peerchat/runtime.mjs`). Messages already sent stay on the devices they
-reached.
+reached. The feeds' names go on the app's next run, once nothing can still have
+the feeds open (`removeEmptiedRoomLogs`, listed in `peerchat-emptied-logs.json`
+until then); a room joined again before that keeps its feed. The sent files'
+drives stay, emptied: the people in the room hold copies under the same key.
+This used to call `purge()`, which throws in hypercore 11 before it removes
+anything, so every message stayed on the phone. The chat screen's own saved
+state, the chat each tab was on, is cleared too.
 
 Settings -> P2P Data provides two relevant operations:
 
@@ -500,9 +583,13 @@ separate and does not clear PeerChat or other P2P data.
 ## Identity transfer
 
 Link Device carries PeerChat between a person's devices: the profile, every
-room with its key, a fixed label for the new device (`ada@mobile`,
-`ada@desktop1`), and a link the devices use to prove to each other that they
-belong to the same person. Each device stays its own member of a room, so
+room with its key, a label for the new device (`ada@mobile`, `ada@desktop`),
+and a link the devices use to prove to each other that they belong to the same
+person. A desktop gets the lowest number none of the person's other devices was
+seen with (`desktop`, `desktop2`, ...). A transfer that is never used takes no
+number, and a desktop sent a transfer again with a lower number than its own
+moves down to it: builds before 1.0 kept a number for every transfer, used or
+not, so a third device could come out as `desktop5`. Each device stays its own member of a room, so
 messages reach all of them, and renames and newly joined rooms follow between
 them, even when they share no room: they also meet under a topic made from the
 link, which nobody without it can work out. See [link-device.md](link-device.md).

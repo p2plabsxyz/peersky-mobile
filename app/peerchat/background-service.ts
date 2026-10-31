@@ -2,12 +2,18 @@ import { NativeEventEmitter, NativeModules, Platform } from 'react-native'
 
 type PeerChatBackgroundModule = {
   setEnabled: (enabled: boolean) => Promise<void>
+  setStatus?: (status: PeerChatBackgroundStatus) => void
   isIgnoringBatteryOptimizations: () => Promise<boolean>
   openBatteryOptimizationSettings: () => Promise<void>
   playSound: (kind: 'send' | 'receive' | 'pop') => void
   addListener: (eventName: string) => void
   removeListeners: (count: number) => void
 }
+
+// What the service's notice says: PeerChat answered, so it is connected, the
+// backend stopped or never started, or PeerChat waits for the phone to be
+// unlocked. Until one of them, it says connecting.
+export type PeerChatBackgroundStatus = 'connected' | 'offline' | 'locked'
 
 const BACKGROUND_TICK_EVENT = 'PeerChatBackgroundTick'
 
@@ -20,6 +26,18 @@ export async function setPeerChatBackgroundEnabled (enabled: boolean) {
   const module = getPeerChatBackgroundModule()
   if (!module?.setEnabled) throw new Error('PeerChat background service is unavailable in this build.')
   await module.setEnabled(enabled)
+}
+
+// The notice never says connected while PeerChat is not running. This also
+// tells the service the app is looking after PeerChat in this run, so it
+// does not start it again on its own.
+export function setPeerChatBackgroundStatus (status: PeerChatBackgroundStatus) {
+  if (Platform.OS !== 'android') return
+  try {
+    getPeerChatBackgroundModule()?.setStatus?.(status)
+  } catch (error) {
+    console.warn('Unable to update the PeerChat background notice:', error)
+  }
 }
 
 // A foreground service survives Doze. It does not survive Samsung's own

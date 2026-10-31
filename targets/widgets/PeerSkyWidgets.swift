@@ -6,6 +6,11 @@ struct PeerSkyWidgets: WidgetBundle {
   var body: some Widget {
     PeerSkyBrowserWidget()
     PeerTunesWidget()
+    PrivateSearchLockScreenWidget()
+    BurnLockScreenWidget()
+    BookmarksLockScreenWidget()
+    P2PSitesLockScreenWidget()
+    ClearP2PDataLockScreenWidget()
   }
 }
 
@@ -13,6 +18,12 @@ struct PeerSkyWidgets: WidgetBundle {
 /// reads in app/home-shortcuts.mjs.
 enum WidgetLinks {
   static let search = URL(string: "peersky://shortcut/search")!
+  // The lock screen buttons, each done as soon as the app opens.
+  static let privateSearch = URL(string: "peersky://shortcut/private-search")!
+  static let burn = URL(string: "peersky://shortcut/burn")!
+  static let bookmarks = URL(string: "peersky://shortcut/bookmarks")!
+  static let p2pSites = open("peersky://p2p/")
+  static let clearP2PData = URL(string: "peersky://shortcut/clear-p2p-data")!
   private static let peerTunesApp = open("peersky://p2p/peertunes/")
 
   /// PeerTunes, and with a song on the widget, Now Playing with that song.

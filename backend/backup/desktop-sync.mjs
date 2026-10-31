@@ -17,7 +17,7 @@ import {
 import { isImportableUrl } from './browser-import.mjs'
 import { PHONE_PEERCHAT_FILE } from '../peerchat/device-link.mjs'
 import { PHONE_P2PMD_FILE } from '../p2pmd/constants.mjs'
-import { getPrivateDriveKeyRecord } from '../hyper/private-keys.mjs'
+import { getPrivateDriveKeyRecord, linkedPrivateDriveKey } from '../hyper/private-keys.mjs'
 import { createStoredZip } from './zip-writer.mjs'
 
 // What a phone sends to PeerSky Desktop: open tabs, bookmarks, favourites, its
@@ -69,7 +69,25 @@ export function collectDesktopSync ({ storagePath, syncedPrivatePath } = {}) {
     }
   }
 
-  return { tabs, bookmarks, privateDrives: sharedPrivateDrives(syncedPrivatePath) }
+  return {
+    tabs,
+    bookmarks,
+    privateDrives: sharedPrivateDrives(syncedPrivatePath),
+    sharedKey: sharedPrivateKey(storagePath)
+  }
+}
+
+/**
+ * The private drive key this phone's devices share, which a desktop sent when
+ * it linked and which they meet under (hyper/device-sync.mjs). A desktop that
+ * has nothing private of its own yet takes it, and joins them. Apart from the
+ * phone's own drive's key, which can be one the phone made before it was
+ * linked. Null on a phone that was never linked.
+ */
+export function sharedPrivateKey (storagePath) {
+  if (!storagePath) return null
+  const key = linkedPrivateDriveKey(storagePath)
+  return key ? b4a.toString(key, 'hex') : null
 }
 
 /**
@@ -117,8 +135,11 @@ export async function createDesktopTransfer ({
     { name: PHONE_TABS_FILE, bytes: jsonBytes({ version: 1, tabs: sync.tabs }) },
     { name: PHONE_BOOKMARKS_FILE, bytes: jsonBytes({ version: 1, bookmarks: sync.bookmarks }) }
   ]
-  if (sync.privateDrives.length > 0) {
-    files.push({ name: PHONE_PRIVATE_DRIVES_FILE, bytes: jsonBytes({ version: 1, drives: sync.privateDrives }) })
+  if (sync.privateDrives.length > 0 || sync.sharedKey) {
+    files.push({
+      name: PHONE_PRIVATE_DRIVES_FILE,
+      bytes: jsonBytes({ version: 1, drives: sync.privateDrives, ...(sync.sharedKey && { sharedKey: sync.sharedKey }) })
+    })
   }
   if (chat) files.push({ name: PHONE_PEERCHAT_FILE, bytes: jsonBytes(chat) })
   if (notes) files.push({ name: PHONE_P2PMD_FILE, bytes: jsonBytes(notes) })
