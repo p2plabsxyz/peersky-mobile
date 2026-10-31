@@ -1,5 +1,6 @@
 package __PACKAGE_NAME__
 
+import android.app.KeyguardManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -30,6 +31,7 @@ class PeerChatBackgroundService : Service() {
   private val heartbeat = object : Runnable {
     override fun run() {
       sendBroadcast(Intent(ACTION_TICK).setPackage(packageName))
+      startAfterUnlock()
       heartbeatHandler.postDelayed(this, HEARTBEAT_INTERVAL_MS)
     }
   }
@@ -53,19 +55,30 @@ class PeerChatBackgroundService : Service() {
       startPeerChat()
       heartbeatHandler.removeCallbacks(connectWatch)
       if (status != STATUS_LOCKED) heartbeatHandler.postDelayed(connectWatch, CONNECT_WAIT_MS)
+      heartbeatHandler.removeCallbacks(unlockRetry)
+      heartbeatHandler.postDelayed(unlockRetry, UNLOCK_RETRY_MS)
     }
   }
   private var unlockReceiverRegistered = false
+
+  // Still waiting for the key with the phone unlocked: the unlock went by
+  // unheard, or the key was not ready the moment it came. Tried again a few
+  // seconds after the unlock, and on each tick after that.
+  private val unlockRetry = Runnable { startAfterUnlock() }
 
   override fun onCreate() {
     super.onCreate()
     createNotificationChannel()
     running = this
+    // Exported, because the unlock comes from System UI, which is an app of
+    // its own: a receiver closed to other apps never heard it, and PeerChat
+    // waited for an unlock that had come. Only the system can send this
+    // broadcast, so no app can fake an unlock through it.
     ContextCompat.registerReceiver(
       this,
       unlockReceiver,
       IntentFilter(Intent.ACTION_USER_PRESENT),
-      ContextCompat.RECEIVER_NOT_EXPORTED
+      ContextCompat.RECEIVER_EXPORTED
     )
     unlockReceiverRegistered = true
   }
@@ -94,6 +107,7 @@ class PeerChatBackgroundService : Service() {
   override fun onDestroy() {
     heartbeatHandler.removeCallbacks(heartbeat)
     heartbeatHandler.removeCallbacks(connectWatch)
+    heartbeatHandler.removeCallbacks(unlockRetry)
     if (unlockReceiverRegistered) {
       try {
         unregisterReceiver(unlockReceiver)
@@ -154,6 +168,16 @@ class PeerChatBackgroundService : Service() {
       Log.w(TAG, "Unable to start PeerChat in the background: " + error.message)
     }
   }
+
+  private fun startAfterUnlock() {
+    if (status != STATUS_LOCKED || isDeviceLocked()) return
+    if (SystemClock.elapsedRealtime() - taskStartedAt < UNLOCK_RETRY_MS) return
+    taskStartedAt = 0L
+    startPeerChat()
+  }
+
+  private fun isDeviceLocked() =
+    getSystemService(KeyguardManager::class.java)?.isDeviceLocked != false
 
   private fun runTask(context: ReactContext) {
     UiThreadUtil.runOnUiThread {
@@ -232,6 +256,7 @@ class PeerChatBackgroundService : Service() {
     private const val TASK_KEY = "PeerChatBackground"
     private const val TASK_TIMEOUT_MS = 120_000L
     private const val CONNECT_WAIT_MS = 180_000L
+    private const val UNLOCK_RETRY_MS = 5_000L
 
     // Was 5 seconds. Messages arrive over the live connection, so this is only
     // the fallback sweep for unread counts and notifications; a wakeup that

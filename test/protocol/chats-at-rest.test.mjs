@@ -556,9 +556,17 @@ describe('the app and the native code around the key', () => {
     assert.match(task, /const chat = await syncChatSealKey\(\)\n\s+if \(chat\.state === 'locked'\) \{\n\s+reportPeerChatLocked\(\)\n\s+return/)
     const service = read('plugins/templates/PeerChatBackgroundService.kt.template')
     assert.match(service, /STATUS_LOCKED -> getString\(R\.string\.peerchat_background_locked\)/)
-    assert.match(service, /IntentFilter\(Intent\.ACTION_USER_PRESENT\)/)
     assert.match(service, /intent\?\.action != Intent\.ACTION_USER_PRESENT \|\| status == STATUS_CONNECTED\) return\n\s+taskStartedAt = 0L\n\s+startPeerChat\(\)/)
     assert.match(service, /value != STATUS_CONNECTED && value != STATUS_OFFLINE && value != STATUS_LOCKED/)
+    // System UI sends the unlock, so a receiver closed to other apps never
+    // heard it, and a phone that came back while it was locked stayed
+    // offline after the unlock.
+    assert.match(service, /IntentFilter\(Intent\.ACTION_USER_PRESENT\),\n\s+ContextCompat\.RECEIVER_EXPORTED\n/)
+    // Tried again a few seconds later, and on each tick while the phone is
+    // unlocked and PeerChat still waits.
+    assert.match(service, /heartbeatHandler\.postDelayed\(unlockRetry, UNLOCK_RETRY_MS\)/)
+    assert.match(service, /sendBroadcast\(Intent\(ACTION_TICK\)\.setPackage\(packageName\)\)\n\s+startAfterUnlock\(\)/)
+    assert.match(service, /private fun startAfterUnlock\(\) \{\n\s+if \(status != STATUS_LOCKED \|\| isDeviceLocked\(\)\) return/)
   })
 
   it('clears the pictures and files opened to show them before the phone locks', () => {
