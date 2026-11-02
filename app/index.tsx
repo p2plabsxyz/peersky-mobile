@@ -242,6 +242,7 @@ import { useBrowserFavourites } from './favourites/useBrowserFavourites'
 import { BrowserFavourites } from './favourites/BrowserFavourites'
 import { MAX_BROWSER_FAVOURITES } from './favourites/browser-favourites.mjs'
 import { HistoryScreen } from './history/HistoryScreen'
+import { isInBrowserHistoryRange } from './history/history-filters.mjs'
 import { getBrowserHistoryDocumentTitle } from './history/browser-history.mjs'
 import { useBrowserHistory } from './history/useBrowserHistory'
 import { P2pSitesPage } from './P2pSitesPage'
@@ -692,6 +693,7 @@ export default function App () {
   } = useBrowserFavourites()
   const {
     clearHistory: clearBrowserHistory,
+    clearHistoryRange: clearBrowserHistoryRange,
     getSuggestions: getBrowserHistorySuggestions,
     isReady: browserHistoryReady,
     items: browserVisitHistory,
@@ -4699,6 +4701,12 @@ export default function App () {
             onClear={() => {
               if (clearBrowserHistory()) setStatus('Browsing history cleared')
               updateRecentlyClosedTabs([])
+            }}
+            onClearRange={(range) => {
+              if (clearBrowserHistoryRange(range)) setStatus('Browsing history cleared')
+              // Tabs closed in that time go too, as all of them go with all of it.
+              const kept = recentlyClosedTabsRef.current.filter((tab) => !isInBrowserHistoryRange(tab.closedAt, range))
+              if (kept.length !== recentlyClosedTabsRef.current.length) updateRecentlyClosedTabs(kept)
             }}
             onClose={() => setBrowserHistoryVisible(false)}
             onOpen={(targetUrl) => {
