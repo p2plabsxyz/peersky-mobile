@@ -56,8 +56,14 @@ import {
   MAX_BROWSER_URL_LENGTH,
   normalizeBrowserAddress,
   recordBrowserWebNavigationState,
-  replaceBrowserEntryState
+  replaceBrowserEntryState,
+  settleLateBrowserPageMove
 } from './browser-shell.mjs'
+import {
+  classifyBrowserPageMove,
+  createBrowserPageMoveScript,
+  parseBrowserPageMoveMessage
+} from './browser-page-moves.mjs'
 import {
   addBackgroundBrowserTabState,
   addBrowserTabState,
@@ -486,6 +492,35 @@ type BrowserTabsState = {
   viewMode: 'grid' | 'list'
 }
 
+// A page's report of what it did to its own address (browser-page-moves.mjs).
+type BrowserPageMoveReport = {
+  kind: 'document' | 'push' | 'replace' | 'traverse'
+  url: string
+  from: string | null
+  length: number
+  navigation: string
+}
+
+// What a report means for the tab (classifyBrowserPageMove): this address in
+// the place of the one at `from`, or a step back or forward.
+type BrowserPageMoveKind = {
+  move: 'replace' | 'traverse'
+  from: string | null
+}
+
+type BrowserPageMove = BrowserPageMoveKind & {
+  url: string
+  generation: number
+  expiresAt: number
+}
+
+// A report about a change within a page comes a moment before or after the
+// WebView's, and one about a new page while it loads.
+const PAGE_MOVE_TTL_MS = 3000
+const DOCUMENT_PAGE_MOVE_TTL_MS = 30000
+const LATE_PAGE_MOVE_MS = 1500
+const MAX_PENDING_PAGE_MOVES = 8
+
 const DESKTOP_BROWSER_USER_AGENT = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 PeerSkyMobile/1.0'
 export default function App () {
   // Every screen hangs off this one, so a new language re-renders them all.
@@ -513,6 +548,12 @@ export default function App () {
   const browserFaviconsRef = useRef(new Map<string, string>())
   const browserLastRecordedUrlsRef = useRef(new Map<string, string>())
   const browserMediaTokensRef = useRef(new Map<string, string>())
+  // What each tab's page said it did to its address (browser-page-moves.mjs),
+  // waiting for the WebView to report the same change, and the page its last
+  // web navigation added, so a report that came after the WebView's can fold
+  // that page back.
+  const browserPageMovesRef = useRef(new Map<string, BrowserPageMove[]>())
+  const browserAddedPagesRef = useRef(new Map<string, { url: string, index: number, at: number }>())
   const browserIncognitoSessionRef = useRef<string | null>(null)
   const p2pmdWebViewRef = useRef<ComponentRef<typeof WebView> | null>(null)
   const p2pmdPublishInFlightRef = useRef(false)
@@ -1361,20 +1402,24 @@ export default function App () {
     url: string,
     source: BrowserSource,
     webNavigation?: { canGoBack: boolean, canGoForward: boolean, loading?: boolean },
-    tabId?: string
+    tabId?: string,
+    pageMove: BrowserPageMoveKind | null = null
   ) {
     const targetTabId = tabId || browserTabsStateRef.current.activeTabId
     const targetTab = browserTabsStateRef.current.tabs.find((tab) => tab.id === targetTabId)
+    const before = targetTab
+      ? { history: targetTab.history, historyIndex: targetTab.historyIndex }
+      : getBrowserState()
     const nextState = recordBrowserWebNavigationState(
-      targetTab
-        ? { history: targetTab.history, historyIndex: targetTab.historyIndex }
-        : getBrowserState(),
+      before,
       url,
       source,
       null,
       webNavigation?.canGoBack,
-      webNavigation?.loading
+      webNavigation?.loading,
+      pageMove
     )
+    noteBrowserAddedPage(targetTabId, before, nextState, url)
     applyBrowserState({
       ...nextState,
       webCanGoBack: webNavigation?.canGoBack,
@@ -1387,6 +1432,77 @@ export default function App () {
       history: browserHistory,
       historyIndex: browserHistoryIndex
     }
+  }
+
+  // The page a web navigation just added to a tab, if it added one: the step
+  // after the page that was on screen, as the newest step.
+  function noteBrowserAddedPage (
+    tabId: string,
+    before: { history: BrowserHistoryEntry[], historyIndex: number },
+    after: { history: BrowserHistoryEntry[], historyIndex: number },
+    url: string
+  ) {
+    const left = before.history[before.historyIndex]?.url
+    const added = left !== url &&
+      after.history[after.historyIndex]?.url === url &&
+      after.historyIndex === after.history.length - 1 &&
+      after.history[after.historyIndex - 1]?.url === left
+    if (added) browserAddedPagesRef.current.set(tabId, { url, index: after.historyIndex, at: Date.now() })
+  }
+
+  // A page's report of what it did to its address. Most come before the
+  // WebView's report of the same change, and wait for it; one that comes after
+  // folds back the page the tab took it for.
+  function onBrowserPageMove (tabId: string, generation: number, report: BrowserPageMoveReport) {
+    const kind = classifyBrowserPageMove(report) as BrowserPageMoveKind | null
+    if (!kind) return
+
+    const now = Date.now()
+    const added = browserAddedPagesRef.current.get(tabId)
+    const tab = browserTabsStateRef.current.tabs.find((item) => item.id === tabId)
+    if (tab && added && now - added.at < LATE_PAGE_MOVE_MS) {
+      const settled = settleLateBrowserPageMove(
+        { history: tab.history, historyIndex: tab.historyIndex },
+        { ...kind, url: report.url },
+        added
+      )
+      if (settled) {
+        browserAddedPagesRef.current.delete(tabId)
+        if (browserTabsStateRef.current.activeTabId === tabId) {
+          applyBrowserState(settled, tabId)
+        } else {
+          updateBrowserTabsState((state) => updateBrowserTabState(state, tabId, {
+            history: settled.history,
+            historyIndex: settled.historyIndex
+          }) as BrowserTabsState)
+        }
+        return
+      }
+    }
+
+    // A new page waits for its load to finish, a change within a page only a moment.
+    const ttl = report.kind === 'document' ? DOCUMENT_PAGE_MOVE_TTL_MS : PAGE_MOVE_TTL_MS
+    const pending = (browserPageMovesRef.current.get(tabId) || [])
+      .filter((item) => item.generation === generation && now < item.expiresAt)
+    pending.push({ ...kind, url: report.url, generation, expiresAt: now + ttl })
+    browserPageMovesRef.current.set(tabId, pending.slice(-MAX_PENDING_PAGE_MOVES))
+  }
+
+  function takeBrowserPageMove (tabId: string, generation: number, url: string) {
+    const pending = browserPageMovesRef.current.get(tabId)
+    if (!pending?.length) return null
+    const now = Date.now()
+    const live = pending.filter((item) => item.generation === generation && now < item.expiresAt)
+    let found: BrowserPageMove | null = null
+    for (let index = live.length - 1; index >= 0; index--) {
+      if (live[index].url === url) {
+        found = live[index]
+        live.splice(index, 1)
+        break
+      }
+    }
+    browserPageMovesRef.current.set(tabId, live)
+    return found ? { move: found.move, from: found.from } : null
   }
 
   function applyBrowserState (nextState: {
@@ -1463,7 +1579,8 @@ export default function App () {
       title?: string
       canGoBack: boolean
       canGoForward: boolean
-    }
+    },
+    pageMove: BrowserPageMoveKind | null = null
   ) {
     if (!isWebUrl(navigationState.url) || navigationState.url.length > MAX_BROWSER_URL_LENGTH) return
 
@@ -1471,11 +1588,17 @@ export default function App () {
       const tab = state.tabs.find((item) => item.id === tabId)
       if (!tab || !isCurrentBrowserTabEntry(state, tabId, expectedEntry)) return state
 
+      const before = { history: tab.history, historyIndex: tab.historyIndex }
       const nextState = recordBrowserWebNavigationState(
-        { history: tab.history, historyIndex: tab.historyIndex },
+        before,
         navigationState.url,
-        { kind: 'web', uri: navigationState.url }
+        { kind: 'web', uri: navigationState.url },
+        null,
+        true,
+        false,
+        pageMove
       )
+      noteBrowserAddedPage(tabId, before, nextState, navigationState.url)
 
       return updateBrowserTabState(state, tabId, {
         title: navigationState.title || navigationState.url,
@@ -1528,6 +1651,8 @@ export default function App () {
 
   async function loadBrowserUrl (rawUrl: string) {
     browserUserInteractedRef.current = true
+    // What the last page said about its address is no use to the next one.
+    browserPageMovesRef.current.delete(browserTabsStateRef.current.activeTabId)
     const nextUrl = normalizeBrowserAddress(
       rawUrl,
       browserPreferences.searchEngine,
@@ -2841,6 +2966,8 @@ export default function App () {
       if (id === tabId) browserWebViewTabsRef.current.delete(tag)
     }
     browserMediaTokensRef.current.delete(tabId)
+    browserPageMovesRef.current.delete(tabId)
+    browserAddedPagesRef.current.delete(tabId)
     browserTabOpenersRef.current.delete(tabId)
     hyperBridgePendingRef.current.delete(tabId)
     browserWebViewGenerationsRef.current.delete(tabId)
@@ -2977,6 +3104,8 @@ export default function App () {
     const tab = nextState.tabs[0]
 
     browserWebViewGenerationsRef.current.clear()
+    browserPageMovesRef.current.clear()
+    browserAddedPagesRef.current.clear()
     setBrowserWebViewGenerations({})
     updateBrowserTabsState(nextState)
     const previewCacheCleared = clearPreviews
@@ -3114,10 +3243,18 @@ export default function App () {
   function onBrowserShouldStartLoad (
     tabId: string,
     expectedEntry: BrowserHistoryEntry,
+    webViewGeneration: number,
     request: { url?: string, isTopFrame?: boolean, navigationType?: string }
   ) {
-    const currentTab = browserTabsStateRef.current.tabs.find((tab) => tab.id === tabId)
-    if (!currentTab || currentTab.history[currentTab.historyIndex] !== expectedEntry) return false
+    // Only the tab's own WebView, the one built for this step. A page that
+    // moves on as soon as it has loaded asks before the tab is drawn again
+    // with the step its load just recorded, and asking for that very step
+    // refused it: a redirect right after load left the page blank. Its other
+    // callbacks already take any web step of the tab as its own.
+    if (
+      (browserWebViewGenerationsRef.current.get(tabId) || 0) !== webViewGeneration ||
+      !isCurrentBrowserTabEntry(browserTabsStateRef.current, tabId, expectedEntry)
+    ) return false
 
     const action = getBrowserRequestAction({
       requestUrl: request.url,
@@ -6038,6 +6175,9 @@ export default function App () {
             // to the real fetch, and the app answers only hyper:// and https://
             // pages, each as a site of its own.
             createHyperBridgeScript(browserMediaToken),
+            // Before the page's own scripts, so it sees the page's first
+            // rewrite of its address too.
+            createBrowserPageMoveScript(browserMediaToken),
             browserAccessibilityScript,
             browserContentBlockingScript,
             browserMediaScript,
@@ -6142,7 +6282,7 @@ export default function App () {
               onRenderProcessGone={() => {
                 browserWebViewRefs.current.get(tab.id)?.reload()
               }}
-              onShouldStartLoadWithRequest={(request) => onBrowserShouldStartLoad(tab.id, entry, request)}
+              onShouldStartLoadWithRequest={(request) => onBrowserShouldStartLoad(tab.id, entry, webViewGeneration, request)}
               onOpenWindow={(event) => onBrowserOpenWindow(tab.id, entry, event.nativeEvent.targetUrl)}
               onFileDownload={(event) => confirmPageDownload(event.nativeEvent.downloadUrl, tab.id, getNativeViewTag(event))}
               scrollEventThrottle={200}
@@ -6240,6 +6380,9 @@ export default function App () {
                   )
                 }
 
+                // What the page said it did to its address, if it said.
+                const pageMove = loading ? null : takeBrowserPageMove(tab.id, webViewGeneration, navigationState.url)
+
                 if (browserTabsStateRef.current.activeTabId === tab.id) {
                   syncBrowserEntry(navigationState.url, {
                     kind: 'web',
@@ -6248,13 +6391,13 @@ export default function App () {
                     canGoBack: navigationState.canGoBack,
                     canGoForward: navigationState.canGoForward,
                     loading
-                  }, tab.id)
+                  }, tab.id, pageMove)
                   const title = normalizeBrowserTabTitle(navigationState.title || navigationState.url)
                   setBrowserTitle(title)
                   updateBrowserTabTitle(tab.id, title)
                   setBrowserIsLoading(loading)
                 } else {
-                  syncBackgroundBrowserTab(tab.id, entry, navigationState)
+                  syncBackgroundBrowserTab(tab.id, entry, navigationState, pageMove)
                 }
               }}
               onMessage={(event) => {
@@ -6267,6 +6410,12 @@ export default function App () {
                     if (browserTabsStateRef.current.activeTabId === tab.id) onBrowserPull(pull)
                     return
                   }
+                }
+
+                const pageMove = parseBrowserPageMoveMessage(event.nativeEvent.data, browserMediaToken) as BrowserPageMoveReport | null
+                if (pageMove) {
+                  if (entry.source.kind === 'web') onBrowserPageMove(tab.id, webViewGeneration, pageMove)
+                  return
                 }
 
                 if (handleHyperBridgeMessage(
