@@ -28,7 +28,7 @@ PeerSky fetches and validates EasyList and EasyPrivacy at build time, then packa
 
 The Privacy settings page provides a global protection switch, the active filter-list status, and a manual update action. Turning protection off is persisted across launches. Manual update failures leave the current validated snapshot active and report the failure in Settings.
 
-The page also provides an independent YouTube-specific switch. When enabled, PeerSky blocks the narrowly scoped `youtubei/v1/player/ad_break` request on HTTPS pages from `youtube.com`, `youtube-nocookie.com`, and their subdomains. EasyList/EasyPrivacy protection and YouTube protection can be enabled or disabled separately.
+The page also provides an independent YouTube-specific switch. YouTube sends its video ads inside the data its player plays from, so blocking requests alone leaves them to play. When the switch is on, PeerSky takes them out of that data on HTTPS pages from `youtube.com`, `youtube-nocookie.com`, and their subdomains, before YouTube's own scripts read it: the ad breaks (`adPlacements`), the ads in them (`playerAds`, `adSlots`) and when to ask for more (`adBreakHeartbeatParams`). It does so for the data a page starts with and for the JSON the page reads as it moves to another video. Sponsored cards in lists and search results are taken out the same way and hidden if one is drawn anyway, and the narrowly scoped `youtubei/v1/player/ad_break` request stays blocked. The script is `app/privacy/youtube-ad-blocking.mjs`. EasyList/EasyPrivacy protection and YouTube protection can be enabled or disabled separately.
 
 The active metadata records the immutable snapshot identifier, update timestamp, source URL, upstream list version, filename, and byte size. Builds generate the packaged first-launch snapshot with:
 
@@ -80,6 +80,7 @@ Unsupported Adblock modifiers, cosmetic rules, and regular-expression filters ar
 - Android uses the network-rule support provided by the pinned `adblock-rust` engine.
 - iOS converts the supported network-rule subset to WebKit JSON. Unsupported modifiers and regex filters are skipped safely.
 - Cosmetic filtering, element hiding, cookie banners, scriptlets, and anti-adblock circumvention are outside this initial implementation. A synthetic blocked response may therefore score differently from browser extensions on visual ad-block test pages.
+- The only page script is the separately controlled YouTube protection described above. When YouTube had an ad ready for a video, it can hold the video back for a few seconds before it starts; the video then plays without the ad.
 - Filter-list updates do not accept custom URLs. This keeps the native parser boundary limited to the reviewed EasyList sources.
 
 ## Validation

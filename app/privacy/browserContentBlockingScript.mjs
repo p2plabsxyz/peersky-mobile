@@ -1,5 +1,5 @@
 import { MAX_BROWSER_URL_LENGTH } from '../browser-shell.mjs'
-import { YOUTUBE_AD_BREAK_PATH } from './youtube-ad-blocking.mjs'
+import { YOUTUBE_AD_BREAK_PATH, createYoutubeAdBlockingScript } from './youtube-ad-blocking.mjs'
 
 export function createBrowserContentBlockingScript ({
   bridgeToken = '',
@@ -14,6 +14,7 @@ export function createBrowserContentBlockingScript ({
 
       const bridge = window.PeerSkyContentBlocker;
       window.__peerskyContentBlockingInstalled = true;
+${youtubeAdBlockingEnabled ? createYoutubeAdBlockingScript() : ''}
 
       const maxUrlLength = ${MAX_BROWSER_URL_LENGTH};
       const originalFetch = window.fetch;

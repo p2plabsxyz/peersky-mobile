@@ -260,7 +260,8 @@ describe('p2pmd mobile editor page routing', () => {
     const html = getP2pmdEditorPage()
 
     assert.match(html, /async function paperForExport\(nonce\) \{[\s\S]*?notifyNative\('p2pmd-paper', \{ nonce, html \}\)/)
-    assert.match(html, /return await window\.P2pmdIeee\.render\(host, result\.html\) \? host\.innerHTML : null/)
+    // Each page's columns as boxes of their own, which an iPhone prints.
+    assert.match(html, /return await window\.P2pmdIeee\.render\(host, result\.html, \{ splitColumns: true \}\) \? host\.innerHTML : null/)
     // A preview the paper interrupted is laid out again.
     assert.match(html, /if \(previewWasBusy && viewMode === 'preview'\) renderPreview\(\)/)
     assert.match(html, /window\.__p2pmdPaperForExport = paperForExport/)

@@ -88,7 +88,7 @@ describe('p2pmd Markdown preview rendering', () => {
   })
 
   it('bounds native bridge preview image inlining', async () => {
-    const content = Array.from({ length: 7 }, (_, index) => {
+    const content = Array.from({ length: 45 }, (_, index) => {
       return `![pic${index}](hyper://example.com/assets/pic${index}.png)`
     }).join('\n')
     const html = renderMarkdownPreview(content)
@@ -103,12 +103,12 @@ describe('p2pmd Markdown preview rendering', () => {
     const dataUrlCount = (inlined.match(/src="data:image\/png;base64,/g) || []).length
     const proxyUrlCount = (inlined.match(/src="\/hyper\/file\?url=/g) || []).length
 
-    assert.equal(dataUrlCount, 5)
-    assert.equal(proxyUrlCount, 2)
+    assert.equal(dataUrlCount, 40)
+    assert.equal(proxyUrlCount, 5)
   })
 
   it('bounds repeated native bridge preview image references too', async () => {
-    const content = Array.from({ length: 7 }, () => {
+    const content = Array.from({ length: 45 }, () => {
       return '![pic](hyper://example.com/assets/pic.png)'
     }).join('\n')
     const html = renderMarkdownPreview(content)
@@ -123,8 +123,8 @@ describe('p2pmd Markdown preview rendering', () => {
     const dataUrlCount = (inlined.match(/src="data:image\/png;base64,/g) || []).length
     const proxyUrlCount = (inlined.match(/src="\/hyper\/file\?url=/g) || []).length
 
-    assert.equal(dataUrlCount, 5)
-    assert.equal(proxyUrlCount, 2)
+    assert.equal(dataUrlCount, 40)
+    assert.equal(proxyUrlCount, 5)
   })
 
   it('keeps oversized native bridge preview images on the proxy path', async () => {

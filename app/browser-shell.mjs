@@ -157,14 +157,21 @@ export function syncBrowserEntryState (state, url, source) {
   return replaceBrowserEntryState(state, url, source)
 }
 
-/** @param {'back' | 'forward' | null} [direction] */
+/**
+ * @param {'back' | 'forward' | null} [direction]
+ * @param {{ move: 'replace' | 'traverse', from: string | null } | null} [pageMove]
+ *   what the page said it did to its address (browser-page-moves.mjs): put
+ *   this address in the place of the one at `from`, or went back or forward
+ *   on its own. A new page is null.
+ */
 export function recordBrowserWebNavigationState (
   state,
   url,
   source,
   direction = null,
   hasNativeBackEntry = true,
-  isLoading = false
+  isLoading = false,
+  pageMove = null
 ) {
   const currentEntry = state.history[state.historyIndex]
   if (currentEntry?.url === url) {
@@ -178,6 +185,24 @@ export function recordBrowserWebNavigationState (
   // stacking on it, and Back went to whatever was before the search.
   if (isLoading) {
     return buildBrowserState(state.history, state.historyIndex)
+  }
+
+  // The page rewrote its address, or put another page in its place: still
+  // one step, as in any browser. Only when the page it replaced is the one the
+  // tab is on: a page that moves on while it is still loading was never a
+  // step, and the one before it stays.
+  if (pageMove?.move === 'replace' && isSameBrowserUrl(pageMove.from, currentEntry?.url)) {
+    return replaceBrowserEntryState(state, url, source)
+  }
+  // The page went back or forward by itself, to the step next to this one.
+  // Anywhere else it is a new step, as it was.
+  if (pageMove?.move === 'traverse' && !direction) {
+    if (state.history[state.historyIndex - 1]?.url === url) {
+      return buildBrowserState(state.history, state.historyIndex - 1)
+    }
+    if (state.history[state.historyIndex + 1]?.url === url) {
+      return buildBrowserState(state.history, state.historyIndex + 1)
+    }
   }
 
   // A WebView with no native back entry has replaced or redirected its first
@@ -206,6 +231,17 @@ export function recordBrowserWebNavigationState (
   return commitBrowserEntryState(state, url, source)
 }
 
+// The same page, however each side wrote its address.
+function isSameBrowserUrl (a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string') return false
+  if (a === b) return true
+  try {
+    return new URL(a).href === new URL(b).href
+  } catch {
+    return false
+  }
+}
+
 /**
  * Android's WebView also reports a navigation that never replaced the page, a
  * 204 or a cancelled download, as a page that finished, with the address it
@@ -219,6 +255,43 @@ export function recordBrowserWebNavigationState (
 export function isUncommittedNavigationFinish ({ platform, isLoadStart, committedUrls, url }) {
   if (platform !== 'android' || isLoadStart || !committedUrls || committedUrls.size === 0) return false
   return !committedUrls.has(url)
+}
+
+/**
+ * A page's word on a move the tab had already taken as a new page. Android can
+ * hand the app the address change before the page's report, so the page just
+ * added is folded back: into the one it rewrote, or, when the page went back,
+ * onto the step it went back to. Only the page the last web navigation added,
+ * and only while it is still the one on screen.
+ *
+ * @param {{ history: { url: string }[], historyIndex: number }} state
+ * @param {{ move: 'replace' | 'traverse', url: string, from?: string | null }} report
+ * @param {{ url: string, index: number } | null} added the page the last web
+ *   navigation added to this tab
+ */
+export function settleLateBrowserPageMove (state, report, added) {
+  const index = state.historyIndex
+  const entry = state.history[index]
+  if (!added || added.index !== index || added.url !== report.url || entry?.url !== report.url) return null
+
+  if (report.move === 'replace') {
+    const previous = state.history[index - 1]
+    if (!previous || !isSameBrowserUrl(report.from, previous.url)) return null
+    return buildBrowserState([
+      ...state.history.slice(0, index - 1),
+      entry,
+      ...state.history.slice(index + 1)
+    ], index - 1)
+  }
+
+  if (report.move === 'traverse') {
+    // [..., T, C] then back to T came in as [..., T, C, T]: it is [..., T, C]
+    // on T, with C ahead.
+    if (state.history[index - 2]?.url !== report.url) return null
+    return buildBrowserState(state.history.slice(0, index), index - 2)
+  }
+
+  return null
 }
 
 export function getBrowserBackState (state) {

@@ -4055,7 +4055,9 @@ export function getP2pmdEditorPage () {
       // A research paper's pages for Export PDF, laid out here as the preview
       // lays them out. The page that prints the PDF cannot do it: Android
       // prints with scripts off, and the layout runs in slices that can end
-      // after the PDF is taken. null for a note that is not a paper.
+      // after the PDF is taken. Each page's two columns are boxes of their
+      // own, since an iPhone prints CSS columns as one. null for a note that
+      // is not a paper.
       async function paperForExport(nonce) {
         let html = null
         try {
@@ -4075,7 +4077,7 @@ export function getP2pmdEditorPage () {
         host.style.cssText = 'position:fixed;left:-20000px;top:0;width:1000px;visibility:hidden;pointer-events:none'
         document.body.appendChild(host)
         try {
-          return await window.P2pmdIeee.render(host, result.html) ? host.innerHTML : null
+          return await window.P2pmdIeee.render(host, result.html, { splitColumns: true }) ? host.innerHTML : null
         } finally {
           host.remove()
           if (previewWasBusy && viewMode === 'preview') renderPreview()

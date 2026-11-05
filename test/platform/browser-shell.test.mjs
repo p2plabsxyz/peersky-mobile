@@ -698,7 +698,7 @@ test('a link on the first page in a tab keeps that page behind it on iOS', async
   const change = app.slice(start, app.indexOf('onMessage={(event) => {', start))
   assert.match(change, /const loading = navigationState\.loading \|\|\s+\(Platform\.OS === 'ios' && browserLoadStartsRef\.current\.has\(navigationState\)\)/)
   assert.doesNotMatch(change, /navigationState\.loading(?! \|\|)/)
-  assert.match(change, /canGoForward: navigationState\.canGoForward,\s+loading\s+\}, tab\.id\)/)
+  assert.match(change, /canGoForward: navigationState\.canGoForward,\s+loading\s+\}, tab\.id, pageMove\)/)
 })
 
 // Android sends a page that moves on its own (history.pushState: a video
