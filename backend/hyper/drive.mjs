@@ -1,10 +1,14 @@
 import b4a from 'b4a'
 import {
   getSyncedPrivateHyperdrive,
+  isPrivateHyperAddress,
   rememberSyncedPrivateHyperdrive,
   withHyperRuntimeOperation,
   withSyncedPrivateHyperRuntimeOperation
 } from './runtime.mjs'
+import { BLOCKED_DRIVE_MESSAGE, isBlockedDrive } from './blocked-drives.mjs'
+import { configureHyperReadTimeout } from './read-policy.mjs'
+import { normalizeDriveAddressId } from './runtime-routing.mjs'
 import { linkedPrivateDriveKey } from './private-keys.mjs'
 import { getDefaultIdentityStoragePath } from '../backup/device-keys.mjs'
 import { parseHyperUrl } from './url.mjs'
@@ -18,6 +22,7 @@ import {
 } from '../p2pmd/scientific.mjs'
 import { hasIeeeMarker } from '../p2pmd/templates.mjs'
 import { recordHyperArchive } from './archive.mjs'
+import { readNoteImages } from '../p2pmd/note-images.mjs'
 
 const MAX_HYPER_FILE_BYTES = 10 * 1024 * 1024
 const MAX_HYPER_IMAGE_BYTES = 5 * 1024 * 1024
@@ -87,8 +92,9 @@ export async function uploadHyperFile ({
 // A note as a file of its own, for P2PMD's share button: the page a publish
 // makes, to print as a PDF or, for slides, to keep as a presentation. It is
 // opened where hyper:// means nothing, so the pictures go inside it, read the
-// way the phone's preview reads them (readHyperFile, this phone's own drive).
+// way the phone's preview reads them (readNoteImage).
 const MAX_EXPORT_IMAGES = 40
+const EXPORT_IMAGE_WAIT_MS = 60000
 // A laid out paper is the note's HTML several times over, KaTeX included.
 const MAX_EXPORT_PAPER_LENGTH = 40 * 1024 * 1024
 const MAX_EXPORT_IMAGE_TOTAL_BYTES = 20 * 1024 * 1024
@@ -119,7 +125,7 @@ export async function exportMarkdownDocument ({ content, mode, latexModeEnabled,
 
   return {
     ok: true,
-    html: await inlineExportImages(html, options.readFile || readHyperFile),
+    html: await inlineExportImages(html, options.readFile || readNoteImage),
     ...(paper && { paper: 'a4' })
   }
 }
@@ -168,21 +174,18 @@ ${pages}
 `
 }
 
-export async function inlineExportImages (html, readFile) {
+export async function inlineExportImages (html, readFile, { waitMs = EXPORT_IMAGE_WAIT_MS } = {}) {
   const sources = new Map()
   for (const match of html.matchAll(EXPORT_IMAGE_SOURCE)) {
     if (sources.size >= MAX_EXPORT_IMAGES) break
     if (!sources.has(match[1])) sources.set(match[1], null)
   }
 
+  const urls = new Map([...sources.keys()].map((attribute) => [attribute, attribute.replace(/&amp;/g, '&')]))
+  const results = await readNoteImages([...urls.values()], readFile, { waitMs })
   let totalBytes = 0
-  for (const attribute of sources.keys()) {
-    let result
-    try {
-      result = await readFile({ url: attribute.replace(/&amp;/g, '&') })
-    } catch {
-      continue
-    }
+  for (const [attribute, url] of urls) {
+    const result = results.get(url)
     if (!result?.ok || typeof result.contentType !== 'string' || !result.contentType.startsWith('image/')) continue
     const byteLength = result.bytes?.byteLength
     if (!Number.isSafeInteger(byteLength) || byteLength < 1) continue
@@ -324,48 +327,7 @@ export async function readHyperFile ({ url } = {}) {
         }
       }
 
-      const entry = await drive.entry(target.pathname, { timeout: HYPER_READ_TIMEOUT_MS })
-
-      if (!entry?.value.blob) {
-        return {
-          ok: false,
-          status: 404,
-          error: `No file found at ${target.pathname}`
-        }
-      }
-
-      if (entry.value.blob.byteLength < 1 || entry.value.blob.byteLength > MAX_HYPER_FILE_BYTES) {
-        return {
-          ok: false,
-          status: 413,
-          error: 'Invalid image size. Maximum size is 10 MB.'
-        }
-      }
-
-      const file = await drive.get(target.pathname, { timeout: HYPER_READ_TIMEOUT_MS })
-      if (!file) {
-        return {
-          ok: false,
-          status: 404,
-          error: `No file found at ${target.pathname}`
-        }
-      }
-
-      const contentType = detectImageContentType(file)
-      if (!contentType) {
-        return {
-          ok: false,
-          status: 415,
-          error: 'Unsupported image format.'
-        }
-      }
-
-      return {
-        ok: true,
-        status: 200,
-        bytes: file,
-        contentType
-      }
+      return readImageFile(drive, target.pathname, HYPER_READ_TIMEOUT_MS)
     })
   } catch (error) {
     return {
@@ -374,6 +336,116 @@ export async function readHyperFile ({ url } = {}) {
       error: error instanceof Error ? error.message : String(error)
     }
   }
+}
+
+// A picture on a drive, if it is one: PNG, JPEG, GIF or WebP by its bytes,
+// within the size cap.
+async function readImageFile (drive, pathname, timeout) {
+  const entry = await drive.entry(pathname, { timeout })
+
+  if (!entry?.value.blob) {
+    return {
+      ok: false,
+      status: 404,
+      error: `No file found at ${pathname}`
+    }
+  }
+
+  if (entry.value.blob.byteLength < 1 || entry.value.blob.byteLength > MAX_HYPER_FILE_BYTES) {
+    return {
+      ok: false,
+      status: 413,
+      error: 'Invalid image size. Maximum size is 10 MB.'
+    }
+  }
+
+  const file = await drive.get(pathname, { timeout })
+  if (!file) {
+    return {
+      ok: false,
+      status: 404,
+      error: `No file found at ${pathname}`
+    }
+  }
+
+  const contentType = detectImageContentType(file)
+  if (!contentType) {
+    return {
+      ok: false,
+      status: 415,
+      error: 'Unsupported image format.'
+    }
+  }
+
+  return {
+    ok: true,
+    status: 200,
+    bytes: file,
+    contentType
+  }
+}
+
+// A note's pictures can be on another device's drive: one dropped in on a
+// desktop goes on that desktop's P2PMD drive, and a phone that joined the
+// note showed none of them, since readHyperFile reads this phone's own drive
+// only. This reads them for this phone's own preview and exports, never for
+// a page or another device: pictures only, from a public drive named by its
+// key, never hyper://localhost, a named drive or a private one, within the
+// same size cap and a shorter wait.
+const NOTE_IMAGE_TIMEOUT_MS = 6000
+// A picture that could not be read is not asked for again for this long, so
+// a note is not held up by the same one each time it is shown.
+const NOTE_IMAGE_RETRY_MS = 2 * 60 * 1000
+const NOTE_IMAGE_CACHE_BYTES = 24 * 1024 * 1024
+const NOTE_IMAGE_CACHE_ENTRIES = 500
+const noteImages = new Map()
+
+export async function readNoteImage ({ url } = {}, options = {}) {
+  const target = parseHyperUrl(url)
+  if (target.error) return { ok: false, status: 400, error: target.error }
+  if (target.pathname === '/' || target.pathname.endsWith('/')) {
+    return { ok: false, status: 400, error: 'Expected a file path.' }
+  }
+  const key = normalizeDriveAddressId(target.driveAddress)
+  if (!key) return { ok: false, status: 403, error: 'A note\'s pictures are read from drives named by their key.' }
+  if (isBlockedDrive(target.driveAddress)) return { ok: false, status: 451, error: BLOCKED_DRIVE_MESSAGE }
+  if (await (options.isPrivate || isPrivateHyperAddress)(target.driveAddress)) {
+    return { ok: false, status: 403, error: 'Pictures on private drives are not shown in notes.' }
+  }
+
+  const id = `${key}${target.pathname}`
+  const known = noteImages.get(id)
+  if (known && (known.result.ok || Date.now() - known.at < NOTE_IMAGE_RETRY_MS)) return known.result
+
+  let result
+  try {
+    result = await runOnPublicRuntime(options, async (runtime) => {
+      const drive = await runtime.getDrive(target.driveAddress)
+      configureHyperReadTimeout(drive, { timeoutMs: NOTE_IMAGE_TIMEOUT_MS })
+      return readImageFile(drive, target.pathname, NOTE_IMAGE_TIMEOUT_MS)
+    })
+  } catch (error) {
+    result = { ok: false, status: 504, error: error instanceof Error ? error.message : String(error) }
+  }
+  rememberNoteImage(id, result)
+  return result
+}
+
+// The pictures read last are kept, within a total size and count.
+function rememberNoteImage (id, result) {
+  noteImages.delete(id)
+  noteImages.set(id, { at: Date.now(), result })
+  let bytes = 0
+  let count = 0
+  for (const [key, { result: kept }] of [...noteImages].reverse()) {
+    bytes += kept.bytes?.byteLength || 0
+    count += 1
+    if (bytes > NOTE_IMAGE_CACHE_BYTES || count > NOTE_IMAGE_CACHE_ENTRIES) noteImages.delete(key)
+  }
+}
+
+export function forgetNoteImages () {
+  noteImages.clear()
 }
 
 function decodeBase64Content (contentBase64) {

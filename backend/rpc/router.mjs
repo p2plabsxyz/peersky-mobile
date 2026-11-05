@@ -102,7 +102,7 @@ import {
   stopOutgoingTransfer
 } from '../backup/link-device.mjs'
 
-import { exportMarkdownDocument, publishMarkdownDocument, readHyperFile, uploadHyperFile } from '../hyper/drive.mjs'
+import { exportMarkdownDocument, publishMarkdownDocument, readNoteImage, uploadHyperFile } from '../hyper/drive.mjs'
 import { listHyperdriveLocation, uploadHyperdriveFile } from '../hyper/library.mjs'
 import { fetchHyper } from '../hyper/fetch.mjs'
 import {
@@ -442,7 +442,7 @@ export async function routeRpcRequest (req) {
     if (req.command === RPC_P2PMD_PREVIEW) {
       const rendered = renderP2pmdPreview(parseJsonMessage(req.data))
       replyJson(req, rendered.ok
-        ? { ...rendered, html: await inlineHyperPreviewImages(rendered.html, readHyperFile) }
+        ? { ...rendered, html: await inlineHyperPreviewImages(rendered.html, readNoteImage) }
         : rendered)
       return
     }
