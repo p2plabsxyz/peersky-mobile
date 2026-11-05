@@ -549,12 +549,24 @@ window.P2pmdIeee.render(note, note.innerHTML)
   td code {
     overflow-wrap: anywhere;
   }
-  /* On a screen a table too wide for it scrolls sideways; on paper it keeps
-     to the page. */
+  /* On a screen a table too wide for it scrolls sideways. On paper there is
+     no scrolling, so a wide table was cut off at the page's edge: there its
+     columns share the page, and a word that is still too long breaks. */
   @media screen {
     table {
       display: block;
       overflow-x: auto;
+    }
+  }
+  @media print {
+    table {
+      table-layout: fixed;
+      width: 100%;
+    }
+    th,
+    td {
+      min-width: 0;
+      overflow-wrap: anywhere;
     }
   }
   th {

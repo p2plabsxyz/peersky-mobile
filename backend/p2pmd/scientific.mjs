@@ -18,6 +18,11 @@ export const P2PMD_SCIENTIFIC_STYLES = `
 .ieee-preview-page-inner { box-sizing: border-box; display: flex; flex-direction: column; width: 210mm; height: 297mm; padding: .75in .625in 1in; overflow: hidden; font: .92rem/1.15 "Times New Roman", Times, serif; transform: scale(var(--ieee-fit-scale, 1)); transform-origin: top left; }
 .ieee-preview-columns { flex: 1; min-height: 0; overflow: hidden; column-count: 2; column-gap: 1.35rem; column-fill: auto; border-top: 0; padding-top: 0; }
 .ieee-preview-page--first .ieee-preview-columns { border-top: 1px solid #000; padding-top: .55rem; }
+.ieee-preview-columns.ieee-preview-columns--split { display: flex; gap: 1.35rem; column-count: auto; }
+.ieee-preview-column { flex: 1 1 0; min-width: 0; overflow: hidden; }
+.ieee-preview-column > :first-child { margin-top: 0; }
+.ieee-preview-column > :is(h2, h3, h4, h5, h6) { margin: .7rem 0 .2rem; text-align: center; }
+.ieee-preview-column > :is(h2, h3, h4, h5, h6):first-child { margin-top: 0; }
 .ieee-paper-layout { box-sizing: border-box; width: 210mm; min-height: 297mm; margin: 0 auto; padding: .75in .625in 1in; background: #fff; color: #111; font: .92rem/1.15 "Times New Roman", Times, serif; }
 .ieee-frontmatter { margin: 0 0 .4rem; text-align: center; }
 .ieee-title { margin: 0 0 .3rem; text-align: center; line-height: 1.15; }
@@ -33,7 +38,7 @@ export const P2PMD_SCIENTIFIC_STYLES = `
 .ieee-columns > :is(figure, table, pre, blockquote, .katex-block) { break-inside: avoid; }
 .ieee-columns > :is(h1, h2, h3, h4, h5, h6):first-child { column-span: all; margin: 0 0 .4rem; text-align: center; }
 .ieee-columns > :is(h2, h3, h4, h5, h6) { margin: .7rem 0 .2rem; text-align: center; }
-.ieee-columns > :is(section, div) > h2:first-child, .ieee-preview-columns > :is(section, div) > h2:first-child { margin: .7rem 0 .2rem; font-size: 1.17em; text-align: center; }
+.ieee-columns > :is(section, div):not(.ieee-preview-column) > h2:first-child, .ieee-preview-column > :is(section, div) > h2:first-child { margin: .7rem 0 .2rem; font-size: 1.17em; text-align: center; }
 .ieee-abstract-block { break-inside: avoid; margin-bottom: .3rem; }
 .ieee-abstract-heading { margin-bottom: .15rem; text-align: center; }
 .ieee-columns p { margin: 0 0 .3rem; text-align: justify; }
@@ -51,6 +56,8 @@ export const P2PMD_SCIENTIFIC_STYLES = `
 .ieee-preview-columns > :is(figure, table, pre, blockquote, .katex-block) { break-inside: avoid; }
 .ieee-preview-columns p { margin: 0 0 .3rem; text-align: justify; }
 .ieee-preview-columns table { width: calc(100% - 2px); border-collapse: collapse; font-size: .82rem; }
+.ieee-columns table.ieee-table-wrap { table-layout: fixed; width: calc(100% - 2px); }
+.ieee-columns table.ieee-table-wrap :is(th, td) { overflow-wrap: anywhere; }
 .ieee-preview-columns th, .ieee-preview-columns td { border: 1px solid #9ca3af; padding: 3px 5px; text-align: left; }
 .ieee-preview-columns img { display: block; max-width: 90%; height: auto; margin: .3rem auto; }
 .ieee-preview-columns pre { overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; }
