@@ -2021,5 +2021,27 @@
   "{count} songs will be removed from this device.": {
     "one": "Se eliminará {count} canción de este dispositivo.",
     "other": "Se eliminarán {count} canciones de este dispositivo."
+  },
+  "Share Song…": "Compartir canción…",
+  "Select Songs…": "Seleccionar canciones…",
+  "Select Songs": "Seleccionar canciones",
+  "Select All": "Seleccionar todo",
+  "Deselect All": "Deseleccionar todo",
+  "Remove from {name}…": "Quitar de {name}…",
+  "{count} Selected": {
+    "one": "{count} seleccionada",
+    "other": "{count} seleccionadas"
+  },
+  "{count} songs": {
+    "one": "{count} canción",
+    "other": "{count} canciones"
+  },
+  "Delete {count} songs?": {
+    "one": "¿Eliminar {count} canción?",
+    "other": "¿Eliminar {count} canciones?"
+  },
+  "Delete {count} Songs…": {
+    "one": "Eliminar {count} canción…",
+    "other": "Eliminar {count} canciones…"
   }
 }

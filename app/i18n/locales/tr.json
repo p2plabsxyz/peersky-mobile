@@ -2021,5 +2021,27 @@
   "{count} songs will be removed from this device.": {
     "one": "{count} şarkı bu cihazdan kaldırılacak.",
     "other": "{count} şarkı bu cihazdan kaldırılacak."
+  },
+  "Share Song…": "Şarkıyı paylaş…",
+  "Select Songs…": "Şarkı seç…",
+  "Select Songs": "Şarkı seç",
+  "Select All": "Tümünü seç",
+  "Deselect All": "Seçimi kaldır",
+  "Remove from {name}…": "{name} listesinden kaldır…",
+  "{count} Selected": {
+    "one": "{count} seçildi",
+    "other": "{count} seçildi"
+  },
+  "{count} songs": {
+    "one": "{count} şarkı",
+    "other": "{count} şarkı"
+  },
+  "Delete {count} songs?": {
+    "one": "{count} şarkı silinsin mi?",
+    "other": "{count} şarkı silinsin mi?"
+  },
+  "Delete {count} Songs…": {
+    "one": "{count} şarkıyı sil…",
+    "other": "{count} şarkıyı sil…"
   }
 }

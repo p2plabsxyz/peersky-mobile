@@ -2080,5 +2080,31 @@
     "one": "अस्मात् उपकरणात् {count} गीतम् अपाकरिष्यते।",
     "two": "अस्मात् उपकरणात् {count} गीते अपाकरिष्येते।",
     "other": "अस्मात् उपकरणात् {count} गीतानि अपाकरिष्यन्ते।"
+  },
+  "Share Song…": "गीतं वितरतु…",
+  "Select Songs…": "गीतानि चिनोतु…",
+  "Select Songs": "गीतानि चिनोतु",
+  "Select All": "सर्वाणि चिनोतु",
+  "Deselect All": "सर्वं चयनं त्यजतु",
+  "Remove from {name}…": "{name} इत्यस्मात् अपाकरोतु…",
+  "{count} Selected": {
+    "one": "{count} चितम्",
+    "two": "{count} चिते",
+    "other": "{count} चितानि"
+  },
+  "{count} songs": {
+    "one": "{count} गीतम्",
+    "two": "{count} गीते",
+    "other": "{count} गीतानि"
+  },
+  "Delete {count} songs?": {
+    "one": "{count} गीतं विलोपयेत् किम्?",
+    "two": "{count} गीते विलोपयेत् किम्?",
+    "other": "{count} गीतानि विलोपयेत् किम्?"
+  },
+  "Delete {count} Songs…": {
+    "one": "{count} गीतं विलोपयतु…",
+    "two": "{count} गीते विलोपयतु…",
+    "other": "{count} गीतानि विलोपयतु…"
   }
 }

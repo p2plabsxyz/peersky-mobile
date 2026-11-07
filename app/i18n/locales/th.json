@@ -1962,5 +1962,23 @@
   },
   "{count} songs will be removed from this device.": {
     "other": "จะลบ {count} เพลงออกจากอุปกรณ์นี้"
+  },
+  "Share Song…": "แชร์เพลง…",
+  "Select Songs…": "เลือกเพลง…",
+  "Select Songs": "เลือกเพลง",
+  "Select All": "เลือกทั้งหมด",
+  "Deselect All": "ยกเลิกการเลือกทั้งหมด",
+  "Remove from {name}…": "ลบออกจาก {name}…",
+  "{count} Selected": {
+    "other": "เลือก {count} รายการ"
+  },
+  "{count} songs": {
+    "other": "{count} เพลง"
+  },
+  "Delete {count} songs?": {
+    "other": "ลบ {count} เพลงใช่ไหม"
+  },
+  "Delete {count} Songs…": {
+    "other": "ลบ {count} เพลง…"
   }
 }

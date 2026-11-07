@@ -1962,5 +1962,23 @@
   },
   "{count} songs will be removed from this device.": {
     "other": "將從此裝置移除 {count} 首歌曲。"
+  },
+  "Share Song…": "分享歌曲…",
+  "Select Songs…": "選取歌曲…",
+  "Select Songs": "選取歌曲",
+  "Select All": "全選",
+  "Deselect All": "取消全選",
+  "Remove from {name}…": "從「{name}」中移除…",
+  "{count} Selected": {
+    "other": "已選取 {count} 首"
+  },
+  "{count} songs": {
+    "other": "{count} 首歌曲"
+  },
+  "Delete {count} songs?": {
+    "other": "要刪除 {count} 首歌曲嗎？"
+  },
+  "Delete {count} Songs…": {
+    "other": "刪除 {count} 首歌曲…"
   }
 }

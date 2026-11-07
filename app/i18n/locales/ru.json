@@ -2139,5 +2139,35 @@
     "few": "{count} песни будут удалены с этого устройства.",
     "many": "{count} песен будет удалено с этого устройства.",
     "other": "{count} песни будет удалено с этого устройства."
+  },
+  "Share Song…": "Поделиться песней…",
+  "Select Songs…": "Выбрать песни…",
+  "Select Songs": "Выбрать песни",
+  "Select All": "Выбрать все",
+  "Deselect All": "Снять выбор",
+  "Remove from {name}…": "Удалить из «{name}»…",
+  "{count} Selected": {
+    "one": "Выбрано: {count}",
+    "few": "Выбрано: {count}",
+    "many": "Выбрано: {count}",
+    "other": "Выбрано: {count}"
+  },
+  "{count} songs": {
+    "one": "{count} песня",
+    "few": "{count} песни",
+    "many": "{count} песен",
+    "other": "{count} песни"
+  },
+  "Delete {count} songs?": {
+    "one": "Удалить {count} песню?",
+    "few": "Удалить {count} песни?",
+    "many": "Удалить {count} песен?",
+    "other": "Удалить {count} песни?"
+  },
+  "Delete {count} Songs…": {
+    "one": "Удалить {count} песню…",
+    "few": "Удалить {count} песни…",
+    "many": "Удалить {count} песен…",
+    "other": "Удалить {count} песни…"
   }
 }

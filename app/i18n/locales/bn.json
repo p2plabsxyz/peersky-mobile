@@ -2021,5 +2021,27 @@
   "{count} songs will be removed from this device.": {
     "one": "এই ডিভাইস থেকে {count}টি গান সরিয়ে দেওয়া হবে।",
     "other": "এই ডিভাইস থেকে {count}টি গান সরিয়ে দেওয়া হবে।"
+  },
+  "Share Song…": "গান শেয়ার করুন…",
+  "Select Songs…": "গান বেছে নিন…",
+  "Select Songs": "গান বেছে নিন",
+  "Select All": "সব বেছে নিন",
+  "Deselect All": "সব বাছাই সরান",
+  "Remove from {name}…": "{name} থেকে সরান…",
+  "{count} Selected": {
+    "one": "{count}টি বাছা হয়েছে",
+    "other": "{count}টি বাছা হয়েছে"
+  },
+  "{count} songs": {
+    "one": "{count}টি গান",
+    "other": "{count}টি গান"
+  },
+  "Delete {count} songs?": {
+    "one": "{count}টি গান মুছবেন?",
+    "other": "{count}টি গান মুছবেন?"
+  },
+  "Delete {count} Songs…": {
+    "one": "{count}টি গান মুছুন…",
+    "other": "{count}টি গান মুছুন…"
   }
 }

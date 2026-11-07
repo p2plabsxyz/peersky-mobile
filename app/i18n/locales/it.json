@@ -2021,5 +2021,27 @@
   "{count} songs will be removed from this device.": {
     "one": "{count} brano verrà rimosso da questo dispositivo.",
     "other": "{count} brani verranno rimossi da questo dispositivo."
+  },
+  "Share Song…": "Condividi brano…",
+  "Select Songs…": "Seleziona brani…",
+  "Select Songs": "Seleziona brani",
+  "Select All": "Seleziona tutto",
+  "Deselect All": "Deseleziona tutto",
+  "Remove from {name}…": "Rimuovi da {name}…",
+  "{count} Selected": {
+    "one": "{count} selezionato",
+    "other": "{count} selezionati"
+  },
+  "{count} songs": {
+    "one": "{count} brano",
+    "other": "{count} brani"
+  },
+  "Delete {count} songs?": {
+    "one": "Eliminare {count} brano?",
+    "other": "Eliminare {count} brani?"
+  },
+  "Delete {count} Songs…": {
+    "one": "Elimina {count} brano…",
+    "other": "Elimina {count} brani…"
   }
 }

@@ -1962,5 +1962,23 @@
   },
   "{count} songs will be removed from this device.": {
     "other": "このデバイスから{count}曲が削除されます。"
+  },
+  "Share Song…": "曲を共有…",
+  "Select Songs…": "曲を選択…",
+  "Select Songs": "曲を選択",
+  "Select All": "すべて選択",
+  "Deselect All": "すべて選択解除",
+  "Remove from {name}…": "「{name}」から削除…",
+  "{count} Selected": {
+    "other": "{count}曲を選択"
+  },
+  "{count} songs": {
+    "other": "{count}曲"
+  },
+  "Delete {count} songs?": {
+    "other": "{count}曲を削除しますか？"
+  },
+  "Delete {count} Songs…": {
+    "other": "{count}曲を削除…"
   }
 }

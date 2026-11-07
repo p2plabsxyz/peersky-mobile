@@ -2021,5 +2021,27 @@
   "{count} songs will be removed from this device.": {
     "one": "इस डिवाइस से {count} गाना हट जाएगा।",
     "other": "इस डिवाइस से {count} गाने हट जाएँगे।"
+  },
+  "Share Song…": "गाना शेयर करें…",
+  "Select Songs…": "गाने चुनें…",
+  "Select Songs": "गाने चुनें",
+  "Select All": "सभी चुनें",
+  "Deselect All": "सभी का चुनाव हटाएँ",
+  "Remove from {name}…": "{name} से हटाएँ…",
+  "{count} Selected": {
+    "one": "{count} चुना गया",
+    "other": "{count} चुने गए"
+  },
+  "{count} songs": {
+    "one": "{count} गाना",
+    "other": "{count} गाने"
+  },
+  "Delete {count} songs?": {
+    "one": "{count} गाना मिटाएँ?",
+    "other": "{count} गाने मिटाएँ?"
+  },
+  "Delete {count} Songs…": {
+    "one": "{count} गाना मिटाएँ…",
+    "other": "{count} गाने मिटाएँ…"
   }
 }

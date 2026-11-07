@@ -2021,5 +2021,27 @@
   "{count} songs will be removed from this device.": {
     "one": "{count} آهنگ از این دستگاه حذف می‌شود.",
     "other": "{count} آهنگ از این دستگاه حذف می‌شود."
+  },
+  "Share Song…": "اشتراک‌گذاری آهنگ…",
+  "Select Songs…": "انتخاب آهنگ‌ها…",
+  "Select Songs": "انتخاب آهنگ‌ها",
+  "Select All": "انتخاب همه",
+  "Deselect All": "لغو انتخاب همه",
+  "Remove from {name}…": "حذف از {name}…",
+  "{count} Selected": {
+    "one": "{count} انتخاب شد",
+    "other": "{count} انتخاب شد"
+  },
+  "{count} songs": {
+    "one": "{count} آهنگ",
+    "other": "{count} آهنگ"
+  },
+  "Delete {count} songs?": {
+    "one": "{count} آهنگ حذف شود؟",
+    "other": "{count} آهنگ حذف شود؟"
+  },
+  "Delete {count} Songs…": {
+    "one": "حذف {count} آهنگ…",
+    "other": "حذف {count} آهنگ…"
   }
 }

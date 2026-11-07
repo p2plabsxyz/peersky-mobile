@@ -1962,5 +1962,23 @@
   },
   "{count} songs will be removed from this device.": {
     "other": "이 기기에서 {count}곡이 삭제돼요."
+  },
+  "Share Song…": "노래 공유…",
+  "Select Songs…": "노래 선택…",
+  "Select Songs": "노래 선택",
+  "Select All": "모두 선택",
+  "Deselect All": "모두 선택 해제",
+  "Remove from {name}…": "'{name}'에서 삭제…",
+  "{count} Selected": {
+    "other": "{count}곡 선택됨"
+  },
+  "{count} songs": {
+    "other": "{count}곡"
+  },
+  "Delete {count} songs?": {
+    "other": "{count}곡을 삭제할까요?"
+  },
+  "Delete {count} Songs…": {
+    "other": "{count}곡 삭제…"
   }
 }

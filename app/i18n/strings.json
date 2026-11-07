@@ -355,6 +355,7 @@
     "Deleting...",
     "Descending",
     "Description (optional)",
+    "Deselect All",
     "Desktop",
     "Desktop View",
     "Desktop view",
@@ -1074,6 +1075,7 @@
     "Remove from list",
     "Remove from recents?",
     "Remove from {name}?",
+    "Remove from {name}…",
     "Remove my data from this phone",
     "Remove offline",
     "Remove offline copy?",
@@ -1189,6 +1191,9 @@
     "Seen just now",
     "Seen on {date}",
     "Select",
+    "Select All",
+    "Select Songs",
+    "Select Songs…",
     "Select several tabs",
     "Select tabs",
     "Select the link below and copy it by hand.",
@@ -1216,6 +1221,7 @@
     "Settings",
     "Share",
     "Share Library…",
+    "Share Song…",
     "Share Sources",
     "Share This Playlist…",
     "Share image link",
@@ -1902,12 +1908,20 @@
       "other": "{count} selected"
     },
     {
+      "one": "{count} Selected",
+      "other": "{count} Selected"
+    },
+    {
       "one": "{count} show",
       "other": "{count} shows"
     },
     {
       "one": "{count} site",
       "other": "{count} sites"
+    },
+    {
+      "one": "{count} song",
+      "other": "{count} songs"
     },
     {
       "one": "{count} song will be removed from this device.",
@@ -1960,6 +1974,14 @@
     {
       "one": "Close a tab first. PeerSky keeps up to {count} open.",
       "other": "Close a tab first. PeerSky keeps up to {count} open."
+    },
+    {
+      "one": "Delete {count} song?",
+      "other": "Delete {count} songs?"
+    },
+    {
+      "one": "Delete {count} Song…",
+      "other": "Delete {count} Songs…"
     },
     {
       "one": "Forwarding {count} message, a moment apart so the chat's spam limit is not reached.",

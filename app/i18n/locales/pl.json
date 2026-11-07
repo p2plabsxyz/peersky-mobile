@@ -2139,5 +2139,35 @@
     "few": "{count} utwory zostaną usunięte z tego urządzenia.",
     "many": "{count} utworów zostanie usuniętych z tego urządzenia.",
     "other": "{count} utworu zostanie usunięte z tego urządzenia."
+  },
+  "Share Song…": "Udostępnij utwór…",
+  "Select Songs…": "Zaznacz utwory…",
+  "Select Songs": "Zaznacz utwory",
+  "Select All": "Zaznacz wszystko",
+  "Deselect All": "Odznacz wszystko",
+  "Remove from {name}…": "Usuń z „{name}”…",
+  "{count} Selected": {
+    "one": "Zaznaczono: {count}",
+    "few": "Zaznaczono: {count}",
+    "many": "Zaznaczono: {count}",
+    "other": "Zaznaczono: {count}"
+  },
+  "{count} songs": {
+    "one": "{count} utwór",
+    "few": "{count} utwory",
+    "many": "{count} utworów",
+    "other": "{count} utworu"
+  },
+  "Delete {count} songs?": {
+    "one": "Usunąć {count} utwór?",
+    "few": "Usunąć {count} utwory?",
+    "many": "Usunąć {count} utworów?",
+    "other": "Usunąć {count} utworu?"
+  },
+  "Delete {count} Songs…": {
+    "one": "Usuń {count} utwór…",
+    "few": "Usuń {count} utwory…",
+    "many": "Usuń {count} utworów…",
+    "other": "Usuń {count} utworu…"
   }
 }

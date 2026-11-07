@@ -1962,5 +1962,23 @@
   },
   "{count} songs will be removed from this device.": {
     "other": "{count} lagu akan dihapus dari perangkat ini."
+  },
+  "Share Song…": "Bagikan Lagu…",
+  "Select Songs…": "Pilih Lagu…",
+  "Select Songs": "Pilih Lagu",
+  "Select All": "Pilih Semua",
+  "Deselect All": "Batalkan Semua Pilihan",
+  "Remove from {name}…": "Hapus dari {name}…",
+  "{count} Selected": {
+    "other": "{count} dipilih"
+  },
+  "{count} songs": {
+    "other": "{count} lagu"
+  },
+  "Delete {count} songs?": {
+    "other": "Hapus {count} lagu?"
+  },
+  "Delete {count} Songs…": {
+    "other": "Hapus {count} Lagu…"
   }
 }

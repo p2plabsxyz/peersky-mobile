@@ -2139,5 +2139,35 @@
     "few": "{count} пісні буде видалено з цього пристрою.",
     "many": "{count} пісень буде видалено з цього пристрою.",
     "other": "{count} пісні буде видалено з цього пристрою."
+  },
+  "Share Song…": "Поділитися піснею…",
+  "Select Songs…": "Вибрати пісні…",
+  "Select Songs": "Вибрати пісні",
+  "Select All": "Вибрати все",
+  "Deselect All": "Зняти вибір",
+  "Remove from {name}…": "Видалити з «{name}»…",
+  "{count} Selected": {
+    "one": "Вибрано: {count}",
+    "few": "Вибрано: {count}",
+    "many": "Вибрано: {count}",
+    "other": "Вибрано: {count}"
+  },
+  "{count} songs": {
+    "one": "{count} пісня",
+    "few": "{count} пісні",
+    "many": "{count} пісень",
+    "other": "{count} пісні"
+  },
+  "Delete {count} songs?": {
+    "one": "Видалити {count} пісню?",
+    "few": "Видалити {count} пісні?",
+    "many": "Видалити {count} пісень?",
+    "other": "Видалити {count} пісні?"
+  },
+  "Delete {count} Songs…": {
+    "one": "Видалити {count} пісню…",
+    "few": "Видалити {count} пісні…",
+    "many": "Видалити {count} пісень…",
+    "other": "Видалити {count} пісні…"
   }
 }

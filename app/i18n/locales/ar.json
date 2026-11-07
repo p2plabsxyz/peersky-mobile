@@ -2257,5 +2257,43 @@
     "few": "ستُزال {count} أغانٍ من هذا الجهاز.",
     "many": "ستُزال {count} أغنية من هذا الجهاز.",
     "other": "ستُزال {count} أغنية من هذا الجهاز."
+  },
+  "Share Song…": "مشاركة الأغنية…",
+  "Select Songs…": "تحديد أغانٍ…",
+  "Select Songs": "تحديد أغانٍ",
+  "Select All": "تحديد الكل",
+  "Deselect All": "إلغاء تحديد الكل",
+  "Remove from {name}…": "إزالة من {name}…",
+  "{count} Selected": {
+    "zero": "تم تحديد {count}",
+    "one": "تم تحديد {count}",
+    "two": "تم تحديد {count}",
+    "few": "تم تحديد {count}",
+    "many": "تم تحديد {count}",
+    "other": "تم تحديد {count}"
+  },
+  "{count} songs": {
+    "zero": "{count} أغنية",
+    "one": "{count} أغنية",
+    "two": "{count} أغنية",
+    "few": "{count} أغانٍ",
+    "many": "{count} أغنية",
+    "other": "{count} أغنية"
+  },
+  "Delete {count} songs?": {
+    "zero": "هل تريد حذف {count} أغنية؟",
+    "one": "هل تريد حذف {count} أغنية؟",
+    "two": "هل تريد حذف {count} أغنية؟",
+    "few": "هل تريد حذف {count} أغانٍ؟",
+    "many": "هل تريد حذف {count} أغنية؟",
+    "other": "هل تريد حذف {count} أغنية؟"
+  },
+  "Delete {count} Songs…": {
+    "zero": "حذف {count} أغنية…",
+    "one": "حذف {count} أغنية…",
+    "two": "حذف {count} أغنية…",
+    "few": "حذف {count} أغانٍ…",
+    "many": "حذف {count} أغنية…",
+    "other": "حذف {count} أغنية…"
   }
 }

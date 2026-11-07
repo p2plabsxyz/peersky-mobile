@@ -1962,5 +1962,23 @@
   },
   "{count} songs will be removed from this device.": {
     "other": "{count} bài hát sẽ bị xóa khỏi thiết bị này."
+  },
+  "Share Song…": "Chia sẻ bài hát…",
+  "Select Songs…": "Chọn bài hát…",
+  "Select Songs": "Chọn bài hát",
+  "Select All": "Chọn tất cả",
+  "Deselect All": "Bỏ chọn tất cả",
+  "Remove from {name}…": "Xóa khỏi {name}…",
+  "{count} Selected": {
+    "other": "Đã chọn {count}"
+  },
+  "{count} songs": {
+    "other": "{count} bài hát"
+  },
+  "Delete {count} songs?": {
+    "other": "Xóa {count} bài hát?"
+  },
+  "Delete {count} Songs…": {
+    "other": "Xóa {count} bài hát…"
   }
 }
