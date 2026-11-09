@@ -89,7 +89,22 @@ function matchesHyperArchiveQuery (item, query) {
     String(item.url || '').toLocaleLowerCase().includes(query)
 }
 
-export function removeHyperArchiveItems (items, { appId, source } = {}) {
+// What a remove button may name: one hyper:// address, of a sane length.
+export function isHyperArchiveEntryUrl (value) {
+  if (typeof value !== 'string' || value.length > 4096 || !value.startsWith('hyper://')) return false
+  const target = parseHyperUrl(value)
+  return !target.error && target.driveAddress !== 'default'
+}
+
+export function removeHyperArchiveItems (items, { appId, source, url } = {}) {
+  // One entry, by its address, from its remove button in Settings, P2P Data.
+  // Addresses are kept one entry each (recordHyperArchiveItem).
+  if (url !== undefined) {
+    const target = parseHyperUrl(url)
+    if (target.error || target.driveAddress === 'default') return items
+    const address = createHyperUrl(target.driveAddress, target.pathname)
+    return items.filter((item) => item.url !== address)
+  }
   if (!appId && !source) return items
 
   return items.filter((item) => {

@@ -20,6 +20,7 @@ import {
   listHyperArchive,
   removeHyperArchive
 } from './archive.mjs'
+import { isHyperArchiveEntryUrl } from './archive-core.mjs'
 import {
   clearDownloadedP2pCores,
   createRoutedP2pStorageRuntime,
@@ -33,6 +34,7 @@ import {
   runP2pIdentityClear
 } from './storage-lifecycle.mjs'
 import { beginP2pReset, finishP2pReset, listP2pResetTargets, recoverP2pReset } from './p2p-reset.mjs'
+import { listP2pStorageParts, measureP2pStorage } from './storage-summary.mjs'
 import { hasPrivateDriveKey, resetPrivateDriveKeyCache } from './private-keys.mjs'
 import { resetLinkedPrivateDrivesCache } from './linked-private-drives.mjs'
 import { resetDeviceSyncStateCache } from './device-sync-state.mjs'
@@ -102,6 +104,33 @@ export async function deleteP2pAppData ({ appId } = {}, options = {}) {
     removeArchive: options.removeArchive || removeHyperArchive,
     appId
   }))
+}
+
+/**
+ * One entry taken off the Hyper archive in Settings, P2P Data, by its remove
+ * button. Only the entry goes: the drive and its files stay, as when the app
+ * clears the archive.
+ */
+export async function removeP2pArchiveEntry ({ url } = {}, options = {}) {
+  if (!isHyperArchiveEntryUrl(url)) return { ok: false, error: 'Choose an entry to remove.' }
+  return withStorageTransition(async () => (
+    await (options.removeArchive || removeHyperArchive)({ url })
+      ? { ok: true }
+      : { ok: false, error: 'Unable to update the archive.' }
+  ))
+}
+
+/** How much space P2P data takes on this phone, by part. */
+export async function measureP2pStorageSummary (options = {}) {
+  const syncedPrivatePath = getSyncedPrivateHyperStoragePath()
+  const summary = await (options.measure || measureP2pStorage)(listP2pStorageParts({
+    identityPath: getDefaultIdentityStoragePath(),
+    publicStore: getHyperStoragePath(),
+    syncedPrivateStore: syncedPrivatePath,
+    adoptedStore: syncedPrivatePath ? adoptedStoragePathFor(syncedPrivatePath) : null,
+    deviceOnlyStore: getPrivateHyperStoragePath()
+  }))
+  return { ok: true, ...summary }
 }
 
 export async function clearP2pCache (options = {}) {

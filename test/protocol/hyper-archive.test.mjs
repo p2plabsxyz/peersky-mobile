@@ -255,3 +255,30 @@ test('a pasted wall of text is bounded before it is used', () => {
   assert.equal(normalizeHyperArchiveQuery('  Mixed Case  '), 'mixed case')
   assert.equal(normalizeHyperArchiveQuery(null), '')
 })
+
+// Settings, P2P Data could only clear the archive by app or source. Each entry
+// now has its own remove button, which takes that one address off.
+test('removes one entry by its address, and nothing for an address it does not hold', async () => {
+  const items = parseHyperArchive(serializeHyperArchive([
+    { url: `${DRIVE_A}one`, name: 'One', source: 'fetched', updatedAt: 3 },
+    { url: `${DRIVE_A}two%20words`, name: 'Two', source: 'published', appId: 'p2pmd', updatedAt: 2 },
+    { url: `${DRIVE_B}three`, name: 'Three', source: 'fetched', updatedAt: 1 }
+  ]))
+  assert.deepEqual(removeHyperArchiveItems(items, { url: `${DRIVE_A}two%20words` }).map((item) => item.name), ['One', 'Three'])
+  assert.deepEqual(removeHyperArchiveItems(items, { url: `${DRIVE_B}missing` }), items)
+  // Not an address at all removes nothing, rather than everything.
+  for (const url of ['', 'https://example.com/', 'hyper://', null]) {
+    assert.deepEqual(removeHyperArchiveItems(items, { url }), items, String(url))
+  }
+
+  const directory = await mkdtemp(join(tmpdir(), 'peersky-hyper-archive-one-'))
+  const storagePath = join(directory, 'hyper-sdk')
+  try {
+    await recordHyperArchive({ url: `${DRIVE_A}keep.txt`, name: 'Keep', source: 'published' }, storagePath)
+    await recordHyperArchive({ url: `${DRIVE_B}go.txt`, name: 'Go', source: 'fetched' }, storagePath)
+    assert.equal(await removeHyperArchive({ url: `${DRIVE_B}go.txt` }, storagePath), true)
+    assert.deepEqual((await listHyperArchive({}, storagePath)).items.map((item) => item.name), ['Keep'])
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})

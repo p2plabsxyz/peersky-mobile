@@ -117,6 +117,12 @@ export const RPC_CHAT_SEAL_KEY = 82
 export const RPC_PRIVATE_APP_FILE_READ = 83
 // { name, text }: the same file written, locked with the chat key.
 export const RPC_PRIVATE_APP_FILE_WRITE = 84
+// { url }: that entry taken off the Hyper archive in Settings, P2P Data. The
+// drive and its files stay. { ok }
+export const RPC_HYPER_ARCHIVE_REMOVE = 85
+// {}: how much space P2P data takes on this phone, by part.
+// { ok, total, parts: { hyper, hyperPrivate, deviceOnly, other } }
+export const RPC_P2P_STORAGE_SUMMARY = 86
 
 // Backend to app pushes. Separate range so they never collide with the
 // app-initiated commands above.

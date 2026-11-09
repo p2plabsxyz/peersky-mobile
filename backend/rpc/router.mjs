@@ -20,6 +20,8 @@ import {
   RPC_HYPER_OFFLINE_RESUME_ALL,
   RPC_HYPER_REFRESH,
   RPC_HYPER_STORAGE_CLEAR_CACHE,
+  RPC_HYPER_ARCHIVE_REMOVE,
+  RPC_P2P_STORAGE_SUMMARY,
   RPC_HYPER_STORAGE_CLEAR_ALL,
   RPC_HYPER_STORAGE_DELETE_APP,
   RPC_HYPER_STORAGE_LIST,
@@ -127,7 +129,7 @@ import {
   sealPrivateFilesAtRest
 } from '../hyper/runtime.mjs'
 import { getOrCreatePairingNonceRecord } from '../backup/pairing-nonce.mjs'
-import { clearAllP2pData, clearP2pCache, deleteP2pAppData, listP2pAppData } from '../hyper/storage.mjs'
+import { clearAllP2pData, clearP2pCache, deleteP2pAppData, listP2pAppData, measureP2pStorageSummary, removeP2pArchiveEntry } from '../hyper/storage.mjs'
 import { readP2pResetId } from '../hyper/p2p-reset.mjs'
 
 import {
@@ -303,6 +305,16 @@ export async function routeRpcRequest (req) {
 
     if (req.command === RPC_HYPER_STORAGE_CLEAR_CACHE) {
       replyJson(req, await clearP2pCache())
+      return
+    }
+
+    if (req.command === RPC_HYPER_ARCHIVE_REMOVE) {
+      replyJson(req, await removeP2pArchiveEntry(parseJsonMessage(req.data)))
+      return
+    }
+
+    if (req.command === RPC_P2P_STORAGE_SUMMARY) {
+      replyJson(req, await measureP2pStorageSummary())
       return
     }
 
