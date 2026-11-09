@@ -494,10 +494,16 @@ test('a picked folder survives Android content uris', async () => {
   const fn = gate.slice(gate.indexOf('export async function pickUploadFolder'), gate.indexOf('* The one place every upload'))
 
   // copy() refuses a content:// uri outright, which is how every folder upload
-  // on Android died. Reading the bytes goes through the same provider.
+  // on Android died. The older copy streams it through the same provider.
   assert.match(fn, /source\.copy\(target\)/)
-  assert.match(fn, /target\.write\(await source\.bytes\(\)\)/)
-  assert.ok(fn.indexOf('source.copy(target)') < fn.indexOf('await source.bytes()'), 'copy is tried first')
+  assert.match(fn, /await copyAsync\(\{ from: source\.uri, to: target\.uri \}\)/)
+  assert.ok(fn.indexOf('source.copy(target)') < fn.indexOf('await copyAsync('), 'copy is tried first')
+  assert.match(gate, /import \{ copyAsync \} from 'expo-file-system\/legacy'/)
+
+  // Never read whole: a file over 2 GB could not be, and a smaller one sat in
+  // memory in full on its way to the staging folder.
+  assert.doesNotMatch(fn, /\.bytes\(\)/)
+  assert.doesNotMatch(fn, /\.base64\(\)/)
 })
 
 test('every storage choice is reachable on Android', async () => {

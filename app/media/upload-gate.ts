@@ -1,6 +1,7 @@
 import * as DocumentPicker from 'expo-document-picker'
 import * as ImagePicker from 'expo-image-picker'
 import { Directory, File, Paths } from 'expo-file-system'
+import { copyAsync } from 'expo-file-system/legacy'
 import { AppState, Platform } from 'react-native'
 
 import {
@@ -233,11 +234,12 @@ export async function pickUploadFolder (): Promise<UploadAsset[]> {
       source.copy(target)
     } catch {
       // On Android a picked folder hands back content:// uris, and copy refuses
-      // those outright: "This method cannot be used with content URIs". Reading
-      // the bytes and writing them goes through the same provider that opened
-      // the folder, so it works where copy does not.
-      if (!target.exists) target.create()
-      target.write(await source.bytes())
+      // those outright: "This method cannot be used with content URIs". The
+      // older copy streams them through the provider that opened the folder.
+      // Reading the bytes whole and writing them failed for a file over 2 GB
+      // and held a smaller one in memory in full.
+      if (target.exists) target.delete()
+      await copyAsync({ from: source.uri, to: target.uri })
     }
     assets.push({
       uri: target.uri,
