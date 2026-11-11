@@ -139,6 +139,42 @@ describe('iOS content blocking', () => {
     assert.match(module, /setYoutubeAdBlockingEnabled/)
   })
 
+  // A trailing "^" was dropped, so a rule matched every URL that only started
+  // with it: "||example.com/log^" blocked the images under example.com/logos/
+  // too.
+  test('a trailing separator means a separator or the end of the URL', () => {
+    const matches = (filter, url) => convertFilterListToWebKitRules(filter)
+      .some((rule) => new RegExp(rule.trigger['url-filter'], 'i').test(url))
+
+    const log = '||example.com/log^$domain=~accounts.example.com'
+    assert.equal(matches(log, 'https://www.example.com/logos/2026/banner-m.png'), false)
+    assert.equal(matches(log, 'https://www.example.com/log?format=json'), true)
+    assert.equal(matches(log, 'https://www.example.com/log'), true)
+    assert.equal(matches(log, 'https://www.example.com/log/'), true)
+
+    // A bare host: what follows it is the path or a port.
+    const [host] = convertFilterListToWebKitRules('||ads.example^')
+    assert.match(host.trigger['url-filter'], /\[\/:\]$/)
+    for (const url of ['https://ads.example/x.js', 'https://ads.example:8443/', 'https://cdn.ads.example/']) {
+      assert.equal(matches('||ads.example^', url), true, url)
+    }
+    for (const url of ['https://ads.example.org/', 'https://ads.examples.com/', 'https://site.com/ads.example/']) {
+      assert.equal(matches('||ads.example^', url), false, url)
+    }
+
+    assert.equal(matches('/banner^', 'https://news.example/banner?size=1'), true)
+    assert.equal(matches('/banner^', 'https://news.example/banner'), true)
+    assert.equal(matches('/banner^', 'https://news.example/bannerads.png'), false)
+    assert.equal(matches('|https://x.example/a^|', 'https://x.example/a/'), true)
+    assert.equal(matches('|https://x.example/a^|', 'https://x.example/a/b'), false)
+
+    // Still nothing WebKit refuses: no "|", and the separator inside a pattern
+    // stays a character class.
+    for (const filter of [log, '||ads.example^', '/banner^', '|https://x.example/a^|', '||a.example^b^']) {
+      for (const rule of convertFilterListToWebKitRules(filter)) assert.doesNotMatch(rule.trigger['url-filter'], /\|/)
+    }
+  })
+
   // EasyPrivacy ships "*$ping,third-party". $ping has no WebKit equivalent, and
   // widening it to "raw" turned that one line into "block every third-party
   // fetch on every page", which is what stopped YouTube playing: the player

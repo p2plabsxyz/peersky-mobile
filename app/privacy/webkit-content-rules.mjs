@@ -5,7 +5,7 @@ export const MAX_WEBKIT_RULES_PER_LIST = 150_000
 // caches are keyed by the filter-list snapshot, which does not move when the
 // converter does. Keep it in step with PeerSkyRuleFormatVersion in
 // plugins/templates/PeerSkyContentBlocker.m.template.
-export const WEBKIT_RULE_FORMAT_VERSION = 3
+export const WEBKIT_RULE_FORMAT_VERSION = 4
 
 const DEFAULT_BATCH_SIZE = 500
 
@@ -41,6 +41,8 @@ const RESOURCE_TYPE_OPTIONS = new Map([
 // falls through to the unsupported branch and the line is skipped.
 const SAFE_FLAG_OPTIONS = new Set(['important'])
 const MAX_FILTER_LINE_LENGTH = 4 * 1024
+// Adblock's "^": any character but a letter, a digit or _ . % -.
+const URL_SEPARATOR = '[^A-Za-z0-9_.%-]'
 const MAX_URL_FILTER_LENGTH = 2 * 1024
 
 export function convertFilterListToWebKitRules (
@@ -251,21 +253,32 @@ function createUrlFilter (pattern) {
 
   // WebKit's url-filter has no alternation at all: any "|" fails to compile with
   // "Disjunctions are not supported yet". The Adblock separator "^" means "a
-  // separator character or the end of the URL", which needs alternation to say
-  // exactly, so approximate it: a trailing separator is dropped (the end of the
-  // pattern already implies the end of the URL) and anywhere else it becomes the
-  // separator character class on its own.
+  // separator character or the end of the URL". Inside a pattern it becomes the
+  // separator character class. Dropped at the end, as it once was, the pattern
+  // matched any URL that only started with it: "||example.com/log^" blocked the
+  // images under example.com/logos/ too. At the end of a bare host,
+  // as in "||ads.example.com^", what follows is always "/" or a port's ":", since
+  // WebKit matches the URL with its path. After a path it is an optional group up
+  // to the end of the URL, which says it exactly without "|". That group costs
+  // WebKit far more to compile, about ten times for the whole lists, so it is
+  // kept to the few patterns that need it.
+  const host = pattern.startsWith('||') && /^[a-z0-9.-]+\^$/i.test(value)
   const characters = [...value]
   let converted = ''
+  let trailingSeparator = false
   for (let index = 0; index < characters.length; index++) {
     const character = characters[index]
     if (character === '*') converted += '.*'
     else if (character === '^') {
-      if (index < characters.length - 1) converted += '[^A-Za-z0-9_.%-]'
+      if (index < characters.length - 1) converted += URL_SEPARATOR
+      else trailingSeparator = true
     } else converted += escapeRegex(character)
   }
+  if (!converted) return null
+  if (trailingSeparator && host && !suffix) suffix = '[/:]'
+  else if (trailingSeparator) suffix = suffix ? `${URL_SEPARATOR}?$` : `(${URL_SEPARATOR}.*)?$`
 
-  return converted ? `${prefix}${converted}${suffix}` : null
+  return `${prefix}${converted}${suffix}`
 }
 
 function escapeRegex (character) {
