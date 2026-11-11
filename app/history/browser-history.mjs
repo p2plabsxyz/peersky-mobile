@@ -130,10 +130,16 @@ export function getBrowserHistorySuggestions (
       return { url: home.url, title, visitedAt: site.visitedAt }
     })
 
-  // A site not in history yet, by name, when history has none for it.
+  // A site not in history yet, by name, when history has none for it. One
+  // visited under another name, as Gmail is at mail.google.com, is history's
+  // own page moved up instead, so it is not listed twice.
   if (homes.length === 0) {
     const known = findKnownSite(normalizedQuery, prefix)
-    if (known) homes.push({ url: known.url, title: known.name, visitedAt: 0, known: true })
+    if (known) {
+      const pages = [sitePages, otherPages].find((list) => list.some((item) => item.url === known.url))
+      if (pages) homes.push(...pages.splice(pages.findIndex((item) => item.url === known.url), 1))
+      else homes.push({ url: known.url, title: known.name, visitedAt: 0, known: true })
+    }
   }
 
   return [...homes, ...sitePages, ...otherPages]

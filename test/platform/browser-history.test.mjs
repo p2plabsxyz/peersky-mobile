@@ -235,6 +235,15 @@ describe('browser history', () => {
     assert.equal(getBrowserHistorySuggestions(phone, 'youtube')[0].url, 'https://m.youtube.com/')
     assert.equal(getBrowserHistorySuggestions(phone, 'youtube').some((item) => item.known), false)
 
+    // Visited under another name: history's own page goes first, once.
+    for (const [typed, url] of [['gmail', 'https://mail.google.com/'], ['maps', 'https://www.google.com/maps'], ['spotify', 'https://open.spotify.com/']]) {
+      const seen = [{ url: 'https://example.com/other', title: `${typed} notes`, visitedAt: 2 }, { url, title: `${typed[0].toUpperCase()}${typed.slice(1)}`, visitedAt: 1 }]
+      const shown = getBrowserHistorySuggestions(seen, typed)
+      assert.deepEqual(shown[0], seen[1], typed)
+      assert.equal(shown.filter((item) => item.url === url).length, 1, typed)
+      assert.equal(shown.some((item) => item.known), false, typed)
+    }
+
     // Pages that match follow the site, within the five.
     const pages = Array.from({ length: 6 }, (_, index) => ({
       url: `https://example.com/youtube-${index}`, title: 'Notes', visitedAt: index
