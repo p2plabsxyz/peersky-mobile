@@ -7,18 +7,35 @@ import {
   listWantedHyperOfflineItems,
   removeWantedHyperOfflineItem
 } from './offline-manifest.mjs'
+import { refreshHyperRuntimeNetwork } from './network-refresh.mjs'
+import {
+  drivePeerCount,
+  isAwaitingFirstPeer,
+  NO_PEERS_CODE,
+  NO_PEERS_ERROR,
+  PEER_WAIT_MS,
+  waitForDrivePeer
+} from './peer-wait.mjs'
 import { withHyperRuntimeForAddress } from './runtime.mjs'
 import { parseHyperUrl } from './url.mjs'
 
 const MAX_OFFLINE_SIZE_ENTRIES = 5000
 const MAX_OFFLINE_PROGRESS_BLOCKS = 100000
 const OFFLINE_PROGRESS_SCAN_BATCH = 256
+const STALL_CHECK_MS = 1000
+const STALLED = Symbol('stalled')
 
 export function createHyperOfflineManager ({
   runWithRuntime,
   addWantedItem,
   listWantedItems,
-  removeWantedItem
+  removeWantedItem,
+  // A download stops with NO_PEERS_ERROR when nobody who has the drive is
+  // reached in peerWaitMs, or when the drive has had no peer for stallMs.
+  peerWaitMs = PEER_WAIT_MS,
+  stallMs = PEER_WAIT_MS,
+  stallCheckMs = STALL_CHECK_MS,
+  refreshNetwork = async () => {}
 }) {
   const activeDownloads = new Map()
   const pausedItems = new Set()
@@ -77,10 +94,7 @@ export function createHyperOfflineManager ({
     pausedItems.add(id)
     failedItems.delete(id)
     const active = activeDownloads.get(id)
-    if (active) {
-      active.cancelled = true
-      active.download?.destroy()
-    }
+    if (active) stopActive(active)
 
     return success(item, 'paused')
   }
@@ -114,8 +128,7 @@ export function createHyperOfflineManager ({
 
       const active = activeDownloads.get(id)
       if (active) {
-        active.cancelled = true
-        active.download?.destroy()
+        stopActive(active)
         await active.promise
       }
 
@@ -210,11 +223,7 @@ export function createHyperOfflineManager ({
         failedItems.delete(id)
         results.push(success(item, 'available', await getAvailableSize(item)))
       } else if (failedItems.has(id)) {
-        results.push({
-          ok: false,
-          error: failedItems.get(id),
-          item: { ...item, status: 'error' }
-        })
+        results.push(failedResult(item, failedItems.get(id)))
       } else {
         results.push(success(item, allowNetwork ? 'paused' : 'waiting-for-wifi'))
       }
@@ -230,10 +239,7 @@ export function createHyperOfflineManager ({
 
   async function stopActiveDownloads () {
     const downloads = [...activeDownloads.values()]
-    for (const active of downloads) {
-      active.cancelled = true
-      active.download?.destroy()
-    }
+    for (const active of downloads) stopActive(active)
     await Promise.allSettled(downloads.map((active) => active.promise))
   }
 
@@ -247,17 +253,40 @@ export function createHyperOfflineManager ({
 
     pausedItems.delete(id)
     failedItems.delete(id)
-    const active = { cancelled: false, download: null, progress: null, promise: null }
+    const active = { cancelled: false, download: null, progress: null, promise: null, stopWaiting: null }
     active.promise = runWithRuntime(`hyper://${item.driveKey}/`, async (runtime) => {
       const drive = await runtime.getDrive(`hyper://${item.driveKey}/`)
       if (await drive.has(item.path)) return success(item, 'available')
       if (active.cancelled) return success(item, 'paused')
 
-      const progress = await createOfflineProgressTracker(drive, item.path, active)
+      // Nobody has said anything about this drive yet. Its first block never
+      // came, so the progress bar said Downloading for good. Look for a peer
+      // for a bounded time, as Fetch does.
+      if (isAwaitingFirstPeer(drive)) {
+        const reached = await waitForDrivePeer(drive, runtime, {
+          timeoutMs: peerWaitMs,
+          refreshNetwork,
+          signal: waitSignal(active)
+        })
+        if (active.cancelled) return success(item, 'paused')
+        if (!reached) throw new Error(NO_PEERS_ERROR)
+      }
+
+      const tracking = createOfflineProgressTracker(drive, item.path, active)
+      const progress = await untilStalled(tracking, drive, active)
+      if (progress === STALLED) {
+        tracking.then((late) => late?.close(), () => {})
+        throw new Error(NO_PEERS_ERROR)
+      }
       try {
         if (active.cancelled) return success(item, 'paused')
         active.download = drive.download(item.path)
-        await active.download.done()
+        // A download only waits for blocks, never gives up on its own, so a
+        // peer that leaves halfway left it waiting too.
+        if (await untilStalled(active.download.done(), drive, active) === STALLED) {
+          active.download.destroy()
+          throw new Error(NO_PEERS_ERROR)
+        }
         if (active.cancelled) return success(item, 'paused')
         if (!await drive.has(item.path)) {
           throw new Error('The offline download did not complete.')
@@ -272,13 +301,63 @@ export function createHyperOfflineManager ({
       if (!active.cancelled) failedItems.set(id, message)
       return active.cancelled
         ? success(item, 'paused')
-        : { ok: false, error: message, item: { ...item, status: 'error' } }
+        : failedResult(item, message)
     }).finally(() => {
       if (activeDownloads.get(id) === active) activeDownloads.delete(id)
     })
 
     activeDownloads.set(id, active)
     return active.promise
+  }
+
+  function stopActive (active) {
+    active.cancelled = true
+    active.stopWaiting?.()
+    active.download?.destroy()
+  }
+
+  function waitSignal (active) {
+    return {
+      get aborted () { return active.cancelled },
+      onAbort (listener) {
+        if (active.cancelled) {
+          listener()
+          return () => {}
+        }
+        active.stopWaiting = listener
+        return () => { if (active.stopWaiting === listener) active.stopWaiting = null }
+      }
+    }
+  }
+
+  // Settles with the promise, or with STALLED once the drive has gone stallMs
+  // with no peer. A drive that can't say how many peers it has never stalls.
+  async function untilStalled (promise, drive, active) {
+    let timer = null
+    let quietSince = null
+    const stalled = new Promise((resolve) => {
+      const check = () => {
+        if (active.cancelled) return
+        const peers = drivePeerCount(drive)
+        if (peers === null) return
+        if (peers > 0) {
+          quietSince = null
+        } else {
+          quietSince ??= Date.now()
+          if (Date.now() - quietSince >= stallMs) {
+            resolve(STALLED)
+            return
+          }
+        }
+        timer = setTimeout(check, stallCheckMs)
+      }
+      timer = setTimeout(check, stallCheckMs)
+    })
+    try {
+      return await Promise.race([promise, stalled])
+    } finally {
+      clearTimeout(timer)
+    }
   }
 
   async function hasItem (item) {
@@ -453,7 +532,8 @@ const manager = createHyperOfflineManager({
   runWithRuntime: (address, task) => withHyperRuntimeForAddress(address, task),
   addWantedItem: addWantedHyperOfflineItem,
   listWantedItems: listWantedHyperOfflineItems,
-  removeWantedItem: removeWantedHyperOfflineItem
+  removeWantedItem: removeWantedHyperOfflineItem,
+  refreshNetwork: refreshHyperRuntimeNetwork
 })
 
 export const closeHyperOfflineDownloads = manager.close
@@ -467,6 +547,12 @@ export const hyperOfflineNetworkAllowed = manager.networkAllowed
 
 function success (item, status, details = {}) {
   return { ok: true, item: { ...item, status, ...details } }
+}
+
+// The app words a drive nobody shares by its code, in the person's language.
+function failedResult (item, message) {
+  const code = message === NO_PEERS_ERROR ? { code: NO_PEERS_CODE } : {}
+  return { ok: false, error: message, ...code, item: { ...item, status: 'error', ...code } }
 }
 
 function failure (error) {

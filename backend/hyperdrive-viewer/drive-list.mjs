@@ -3,6 +3,7 @@ import { BLOCKED_DRIVE_MESSAGE, isBlockedDrive } from '../hyper/blocked-drives.m
 import { isPeerDiscoveryError } from '../hyper/fetch-retry.mjs'
 import { isUnreadableDriveError, PRIVATE_DRIVE_ERROR } from '../hyper/linked-private-drives.mjs'
 import { configureHyperReadTimeout } from '../hyper/read-policy.mjs'
+import { PEER_WAIT_MS, waitForDrivePeer } from '../hyper/peer-wait.mjs'
 import { normalizeDriveAddressId } from '../hyper/runtime-routing.mjs'
 import { parseHyperUrl } from '../hyper/url.mjs'
 
@@ -15,7 +16,7 @@ export const MAX_LISTED_FILES = 50000
 // and a clear or a restore that waits for running reads, for good. A drive
 // whose peer answers slowly gets longer: a big folder over the internet is
 // thousands of block reads, each one bounded on its own (read-policy.mjs).
-export const PEER_WAIT_MS = 30000
+export { PEER_WAIT_MS }
 export const LIST_TIME_MS = 2 * 60 * 1000
 // Longer than any real file's path, and longer than an address can carry.
 const MAX_PATH_LENGTH = 4096
@@ -137,44 +138,11 @@ export async function listHyperdriveFolder (url, {
   }
 }
 
-/**
- * A drive this phone knows nothing about yet has no length until a peer says
- * how long it is. That wait is bounded, and true means there is something to
- * read. The release findingPeers() hands back is what makes update() wait for
- * a peer at all, as the desktop's waitForDriveReady does.
- */
+// The wait itself is shared with Fetch and Keep offline (peer-wait.mjs).
 async function waitForDrive (drive, runtime, { timeoutMs, refreshNetwork, signal }) {
-  if (drive.writable || coreLength(drive) > 0) return true
-
-  const core = drive.core
-  const done = typeof core?.findingPeers === 'function' ? core.findingPeers() : null
-  let timer = null
-  let stopListening = () => {}
-  try {
-    if (done) {
-      const swarm = runtime?.swarm
-      if (typeof swarm?.flush === 'function') Promise.resolve(swarm.flush()).then(done, done)
-      else done()
-    }
-    await Promise.resolve(refreshNetwork(runtime)).catch(() => {})
-    await Promise.race([
-      Promise.resolve(typeof core?.update === 'function' ? core.update({ wait: true }) : null).catch(() => {}),
-      new Promise((resolve) => { timer = setTimeout(resolve, timeoutMs) }),
-      new Promise((resolve) => { if (signal) stopListening = signal.onAbort(resolve) })
-    ])
-  } finally {
-    clearTimeout(timer)
-    stopListening()
-    if (done) done()
-  }
-
+  const ready = await waitForDrivePeer(drive, runtime, { timeoutMs, refreshNetwork, signal })
   if (signal?.aborted) throw abortError()
-  return coreLength(drive) > 0
-}
-
-function coreLength (drive) {
-  const length = drive?.core?.length ?? drive?.db?.core?.length
-  return Number.isSafeInteger(length) ? length : 0
+  return ready
 }
 
 async function collectFiles (drive, folder, { recursive, limit, timeoutMs, signal }) {

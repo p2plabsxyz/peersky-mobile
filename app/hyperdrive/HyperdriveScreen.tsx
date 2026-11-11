@@ -103,6 +103,8 @@ type HyperOfflineItem = {
   downloadedBytes?: number
   totalBytes?: number
   percentage?: number
+  error?: string
+  code?: string
 }
 
 type Props = {
@@ -265,6 +267,8 @@ export function HyperdriveScreen ({ deviceSyncRevision = 0, offlineNetworkAllowe
         item.driveKey === target.driveKey && item.path === target.path
       ))
       setOfflineItem(match || null)
+      // A download that stopped while this page watched it says why.
+      if (!showLoading && match?.status === 'error') setError(hyperErrorText(match, t('Unable to update offline availability.')))
     } catch (offlineError) {
       if (request === offlineRequestRef.current) {
         setError(offlineError instanceof Error ? offlineError.message : String(offlineError))
@@ -307,10 +311,12 @@ export function HyperdriveScreen ({ deviceSyncRevision = 0, offlineNetworkAllowe
         : {
             driveKey: offlineTarget.driveKey,
             path: offlineTarget.path,
-            ...(command === RPC_HYPER_OFFLINE_RESUME ? { wait: false } : {})
+            // The progress row follows the download from here, and its end
+            // (done, or nobody to download from) shows when it comes.
+            ...(command === RPC_HYPER_OFFLINE_RESUME || command === RPC_HYPER_OFFLINE_KEEP ? { wait: false } : {})
           }
       const response = await onCallRpc(command, payload)
-      if (!response.ok) throw new Error(response.error || t('Unable to update offline availability.'))
+      if (!response.ok) throw new Error(hyperErrorText(response, t('Unable to update offline availability.')))
       if (request !== offlineRequestRef.current) return
       setOfflineItem(response.item?.status === 'removed' ? null : response.item || null)
       if (response.warning) setNotice(response.warning)
@@ -463,7 +469,7 @@ export function HyperdriveScreen ({ deviceSyncRevision = 0, offlineNetworkAllowe
     setNotice(null)
     try {
       const response = await onCallRpc(RPC_HYPER_LIBRARY_LIST, { url: normalizedUrl })
-      if (!response.ok || !response.location) throw new Error(response.error || t('Unable to fetch Hyper data.'))
+      if (!response.ok || !response.location) throw new Error(hyperErrorText(response, t('Unable to fetch Hyper data.')))
       if (response.warning) setNotice(response.warning)
       const fetchedItems = Array.isArray(response.items) ? response.items : []
       if (recordRecent) {
@@ -734,7 +740,7 @@ export function HyperdriveScreen ({ deviceSyncRevision = 0, offlineNetworkAllowe
           </Pressable>
         )}
         <Text numberOfLines={1} style={[styles.heading, { color: palette.text }]}>{heading}</Text>
-        {items && offlineTarget && (
+        {items && offlineTarget && (items.length > 0 || offlineItem) && (
           <Pressable
             accessibilityLabel={getOfflineActionLabel(offlineItem)}
             accessibilityRole='button'
@@ -954,6 +960,13 @@ function OfflineProgressBar ({ color, percentage, trackColor }: { color: string,
           )}
     </View>
   )
+}
+
+// A drive nobody who has it is sharing reads as it does in the viewer, in the
+// person's language, for Fetch and for Keep offline alike.
+function hyperErrorText (response: { code?: string, error?: string } | null | undefined, fallback: string) {
+  if (response?.code === 'no-peers') return t('Nobody who has this drive is online. Try again when one of them is.')
+  return response?.error || fallback
 }
 
 function getOfflineActionLabel (item: HyperOfflineItem | null) {

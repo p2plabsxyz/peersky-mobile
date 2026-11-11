@@ -57,7 +57,9 @@ test('retries an empty directory while initial metadata is still being discovere
     '/logos/peer-bird.png': { blob: { byteLength: 12 } }
   })
   const originalList = drive.list
-  drive.core = { length: 0, peers: [] }
+  // A peer answers the wait for the drive's length, but the folder's entries
+  // are not there yet on the first listing.
+  drive.core = { length: 0, peers: [], update: async () => { drive.core.length = 1 } }
   drive.list = (...args) => {
     listAttempt += 1
     if (listAttempt === 1) return (async function * () {})()
@@ -73,6 +75,85 @@ test('retries an empty directory while initial metadata is still being discovere
 
   assert.equal(response.ok, true)
   assert.deepEqual(response.items.map(({ name }) => name), ['peer-bird.png'])
+})
+
+// A drive the phone could not reach said "Nothing here yet", and Keep offline
+// on it then said Downloading for good.
+test('says nobody has the drive when no peer answers in time', async () => {
+  const archiveEntries = []
+  const drive = createDrive({ '/cover.png': { blob: { byteLength: 12 } } })
+  drive.core = { length: 0, peers: [], update: () => new Promise(() => {}) }
+
+  const startedAt = Date.now()
+  const response = await listHyperdriveLocation({ url: DRIVE_URL }, {
+    runtime: { getDrive: async () => drive },
+    refreshRuntime: async () => {},
+    recordArchive: async (entry) => { archiveEntries.push(entry) },
+    peerWaitMs: 20
+  })
+
+  assert.deepEqual(response, {
+    ok: false,
+    code: 'no-peers',
+    error: 'Nobody who has this drive could be reached.'
+  })
+  assert.deepEqual(archiveEntries, [])
+  assert.ok(Date.now() - startedAt < 2000)
+})
+
+test('says nobody has the drive for a file link too, not that the file is missing', async () => {
+  const drive = createDrive({})
+  drive.core = { length: 0, peers: [], update: () => new Promise(() => {}) }
+
+  const response = await listHyperdriveLocation({ url: `${DRIVE_URL}manual.pdf` }, {
+    runtime: { getDrive: async () => drive },
+    refreshRuntime: async () => {},
+    peerWaitMs: 20
+  })
+
+  assert.equal(response.ok, false)
+  assert.equal(response.code, 'no-peers')
+})
+
+test('waits for the first peer before listing a drive it has never read', async () => {
+  const drive = createDrive({ '/cover.png': { blob: { byteLength: 12 } } })
+  let findingPeersDone = 0
+  drive.core = {
+    length: 0,
+    peers: [],
+    findingPeers: () => () => { findingPeersDone += 1 },
+    update: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      drive.core.length = 2
+    }
+  }
+
+  const response = await listHyperdriveLocation({ url: DRIVE_URL }, {
+    runtime: { getDrive: async () => drive },
+    refreshRuntime: async () => {},
+    recordArchive: async () => {}
+  })
+
+  assert.equal(response.ok, true)
+  assert.deepEqual(response.items.map(({ name }) => name), ['cover.png'])
+  // Hypercore's release only counts once, so a second call is harmless.
+  assert.ok(findingPeersDone >= 1)
+})
+
+test('never waits for peers on a drive this phone writes', async () => {
+  const drive = createDrive({})
+  drive.writable = true
+  drive.core = { length: 0, peers: [], update: () => new Promise(() => {}) }
+
+  const response = await listHyperdriveLocation({ url: DRIVE_URL }, {
+    runtime: { getDrive: async () => drive },
+    refreshRuntime: async () => {},
+    recordArchive: async () => {},
+    directoryRetryDelaysMs: [0]
+  })
+
+  assert.equal(response.ok, true)
+  assert.deepEqual(response.items, [])
 })
 
 test('returns a fetched file with bounded metadata', async () => {

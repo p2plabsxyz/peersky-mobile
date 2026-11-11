@@ -369,16 +369,100 @@ test('reports cache cleanup failure without undoing a removed intent', async () 
   assert.deepEqual(harness.items, [])
 })
 
+// A drive nobody shares never sends its first block, and a download only
+// waits for blocks: the progress bar said Downloading for good.
+test('stops with no peers when nobody who has the drive answers', async () => {
+  const drive = createDrive({ has: () => false })
+  drive.core = { length: 0, peers: [], update: () => new Promise(() => {}) }
+  const harness = createHarness(drive, { managerOptions: { peerWaitMs: 20 } })
+
+  const result = await harness.manager.keep({ url: FOLDER_URL })
+
+  assert.equal(result.ok, false)
+  assert.equal(result.code, 'no-peers')
+  assert.equal(result.error, 'Nobody who has this drive could be reached.')
+  assert.equal(result.item.status, 'error')
+  assert.equal(drive.downloadCalls, 0)
+
+  const listed = await harness.manager.list({ driveKey: DRIVE_KEY, path: '/docs/' })
+  assert.equal(listed.items[0].status, 'error')
+  assert.equal(listed.items[0].code, 'no-peers')
+})
+
+test('downloads once the first peer answers the wait', async () => {
+  const drive = createDrive({ has: sequence(false, true) })
+  drive.core = {
+    length: 0,
+    peers: [],
+    update: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      drive.core.length = 4
+      drive.core.peers = [{}]
+    }
+  }
+  const harness = createHarness(drive, { managerOptions: { peerWaitMs: 5000 } })
+
+  const result = await harness.manager.keep({ url: FOLDER_URL })
+
+  assert.equal(result.item.status, 'available')
+  assert.equal(drive.downloadCalls, 1)
+})
+
+test('stops a download once every peer has gone for a while', async () => {
+  const drive = createDrive({ has: () => false, done: () => new Promise(() => {}) })
+  drive.core = { length: 4, peers: [] }
+  const harness = createHarness(drive, { managerOptions: { stallMs: 30, stallCheckMs: 5 } })
+
+  const result = await harness.manager.keep({ url: FOLDER_URL })
+
+  assert.equal(result.ok, false)
+  assert.equal(result.code, 'no-peers')
+  assert.equal(drive.destroyCalls, 1)
+})
+
+test('keeps a slow download going while a peer is there', async () => {
+  const drive = createDrive({
+    has: sequence(false, true),
+    done: () => new Promise((resolve) => setTimeout(resolve, 60))
+  })
+  drive.core = { length: 4, peers: [{}] }
+  const harness = createHarness(drive, { managerOptions: { stallMs: 10, stallCheckMs: 2 } })
+
+  const result = await harness.manager.keep({ url: FOLDER_URL })
+
+  assert.equal(result.item.status, 'available')
+  assert.equal(drive.destroyCalls, 0)
+})
+
+test('pause ends the wait for a first peer at once', async () => {
+  const drive = createDrive({ has: () => false })
+  drive.core = { length: 0, peers: [], update: () => new Promise(() => {}) }
+  const harness = createHarness(drive, { managerOptions: { peerWaitMs: 60000 } })
+
+  const keeping = harness.manager.keep({ url: FOLDER_URL })
+  await waitFor(() => harness.items.length === 1)
+  await new Promise((resolve) => setTimeout(resolve, 5))
+  const startedAt = Date.now()
+  await harness.manager.pause({ driveKey: DRIVE_KEY, path: '/docs/' })
+  const result = await keeping
+
+  assert.equal(result.item.status, 'paused')
+  assert.ok(Date.now() - startedAt < 1000)
+  assert.equal(drive.downloadCalls, 0)
+})
+
 function createHarness (drive, {
   items = [],
   onAdd = () => {},
   onRemove = () => {},
-  removeResult = true
+  removeResult = true,
+  managerOptions = {}
 } = {}) {
   const wanted = [...items]
   let addCalls = 0
   let removeCalls = 0
   const manager = createHyperOfflineManager({
+    ...managerOptions,
     runWithRuntime: (_address, task) => task({
       getDrive: async () => drive
     }),

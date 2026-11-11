@@ -25,6 +25,7 @@ import { createHyperUrl, getHyperFetchPath, parseHyperUrl } from './url.mjs'
 import { recordHyperArchive } from './archive.mjs'
 import { resolveHyperdriveUploadTarget } from './storage-core.mjs'
 import { refreshHyperRuntimeNetwork } from './network-refresh.mjs'
+import { isAwaitingFirstPeer, NO_PEERS_CODE, NO_PEERS_ERROR, PEER_WAIT_MS, waitForDrivePeer } from './peer-wait.mjs'
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 const MAX_UPLOAD_BASE64_LENGTH = Math.ceil(MAX_UPLOAD_BYTES / 3) * 4
@@ -43,6 +44,16 @@ export async function listHyperdriveLocation ({ url } = {}, options = {}) {
   try {
     return await runWithRuntime(options, async (runtime) => {
       const drive = await resolveDriveForAddress(runtime, target.driveAddress, options)
+      // Someone else's drive this phone has never heard from: wait for the
+      // first peer as the viewer does. With nobody there it said "Nothing here
+      // yet", and Keep offline on that empty drive then waited for good.
+      if (isAwaitingFirstPeer(drive)) {
+        const reached = await waitForDrivePeer(drive, runtime, {
+          timeoutMs: resolvePeerWaitMs(options.peerWaitMs),
+          refreshNetwork: options.refreshRuntime || refreshHyperRuntimeNetwork
+        })
+        if (!reached) return { ok: false, code: NO_PEERS_CODE, error: NO_PEERS_ERROR }
+      }
       const divergenceWarning = warningForPrivateDrive(drive)
       const explicitDirectory = target.pathname === '/' || target.pathname.endsWith('/')
       let refreshed = false
@@ -411,6 +422,12 @@ function nextEntry (iterator, timeoutMs) {
       }
     )
   })
+}
+
+function resolvePeerWaitMs (value) {
+  return Number.isSafeInteger(value) && value > 0 && value <= PEER_WAIT_MS
+    ? value
+    : PEER_WAIT_MS
 }
 
 function resolveListTimeMs (value) {
