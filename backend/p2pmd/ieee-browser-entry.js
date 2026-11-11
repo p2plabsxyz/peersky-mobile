@@ -418,13 +418,20 @@ async function render (preview, html, options = {}) {
   staging.appendChild(stack)
   preview.appendChild(staging)
   const complete = await paginate(token, buildLayout(html), stack, options.splitColumns === true)
-  if (!complete || token !== runToken) {
+  // null when a newer layout took over, false when the paper is too long.
+  if (token !== runToken) {
+    staging.remove()
+    return null
+  }
+  if (!complete) {
     staging.remove()
     return false
   }
   const scrollTop = preview.scrollTop
   staging.removeChild(stack)
   preview.replaceChildren(stack)
+  // Sized to the screen before it is drawn, not a frame or two after.
+  fitPages(preview)
   preview.scrollTop = scrollTop
   requestAnimationFrame(() => requestAnimationFrame(() => {
     if (token === runToken) fitPages(preview)

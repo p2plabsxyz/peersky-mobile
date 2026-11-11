@@ -87,17 +87,54 @@ describe('p2pmd mobile editor page routing', () => {
 
     assert.match(html, /aria-label="View as slides" aria-pressed="false"/)
     assert.match(html, /if \(viewMode === 'slides'\) presenting = true/)
-    assert.match(html, /else setViewMode\(presenting \? 'slides' : 'preview'\)/)
+    assert.match(html, /else setViewMode\(presenting && hasSlideBreaks\(input\.value\) \? 'slides' : 'preview'\)/)
     assert.match(html, /mode: presenting && hasSlideBreaks\(input\.value\) \? 'slides' : 'note'/)
     assert.match(html, /slides: presenting/)
     assert.match(html, /if \(presenting && viewMode === 'edit'\) \{\s+presenting = false/)
+  })
+
+  // After a deck, a paper or a doc from the template menu showed in Preview
+  // as one slide holding the whole note, centered, with its code in dark boxes.
+  it('shows a note made from a template as a note after a deck', () => {
+    const html = getP2pmdEditorPage()
+    const apply = html.slice(html.indexOf('function applyTemplate('), html.indexOf('function viewAsSlides('))
+
+    assert.match(apply, /if \(!template\.slideTemplate\) \{\s+presenting = false\s+slidesButton\?\.setAttribute\('aria-pressed', 'false'\)/)
+    assert.ok(apply.indexOf('presenting = false') < apply.indexOf('replaceDocumentRange('))
+  })
+
+  // Export PDF lays a paper out with the paper's own styles only. The plain
+  // note's rules gave the preview's code and figures dark boxes, and moved its
+  // headings and tables, so its pages could break where the PDF's did not.
+  it('lays a paper out in the preview with the styles Export PDF uses', () => {
+    const html = getP2pmdEditorPage()
+    const css = html.slice(html.indexOf('<style>'), html.indexOf('</style>'))
+
+    assert.doesNotMatch(css, /^\s*#preview [^{]/m)
+    assert.match(css, /#preview\.p2pmd-ieee-preview \{ overflow-wrap: normal; color-scheme: light; \}/)
+    assert.match(css, /#preview:not\(\.p2pmd-ieee-preview\) pre \{[^}]*background: var\(--well\)/)
+    assert.match(css, /#preview:not\(\.p2pmd-ieee-preview\) code \{[^}]*color: var\(--ink-code\)/)
+    assert.match(css, /#preview:not\(\.p2pmd-ieee-preview\) table,\s+#slides-preview table \{/)
+  })
+
+  // The note used to go in as plain text first and stay until its pages were
+  // laid out, which on a phone could be seconds.
+  it('swaps a paper\'s pages in only once they are laid out', () => {
+    const html = getP2pmdEditorPage()
+    const render = html.slice(html.indexOf('async function renderPreview('), html.indexOf('async function renderSlides('))
+    const paper = render.slice(render.indexOf('if (result.ieee === true && window.P2pmdIeee)'), render.indexOf('} else {'))
+
+    assert.ok(paper.length > 0)
+    assert.ok(paper.indexOf('P2pmdIeee.render(preview, result.html)') < paper.indexOf('preview.innerHTML = result.html'))
+    assert.match(paper, /if \(laidOut === false && requestId === previewRequestId && viewMode === 'preview'\)/)
+    assert.doesNotMatch(paper.slice(0, paper.indexOf('P2pmdIeee.render(')), /innerHTML|P2pmdIeee\.clear/)
   })
 
   // A page-wide h1 rule left over from the editor's own header made a note's
   // title smaller than its sections.
   it('draws a note\'s headings largest first', () => {
     const html = getP2pmdEditorPage()
-    const size = (tag) => Number(new RegExp(`#preview ${tag} \\{[^}]*font-size: ([0-9.]+)em`).exec(html)?.[1])
+    const size = (tag) => Number(new RegExp(`#preview:not\\(\\.p2pmd-ieee-preview\\) ${tag} \\{[^}]*font-size: ([0-9.]+)em`).exec(html)?.[1])
 
     assert.doesNotMatch(html, /^\s*h1 \{/m)
     assert.ok(size('h1') > size('h2') && size('h2') > size('h3'))

@@ -88,6 +88,22 @@ describe('p2pmd scientific templates', () => {
     assert.match(ieeeBrowserScript, /ieee-preview-columns--split/)
   })
 
+  // The editor keeps the pages it has up while new ones are laid out, and shows
+  // the note as text only when it is too long for pages, not when a newer
+  // layout took over.
+  it('tells a layout that was taken over from a paper too long for pages', async () => {
+    const source = await readFile(
+      new URL('../../backend/p2pmd/ieee-browser-entry.js', import.meta.url),
+      'utf8'
+    )
+    const render = source.slice(source.indexOf('async function render ('), source.indexOf('function clear ('))
+
+    assert.match(render, /if \(token !== runToken\) \{\s+staging\.remove\(\)\s+return null\s+\}\s+if \(!complete\) \{\s+staging\.remove\(\)\s+return false\s+\}/)
+    assert.ok(render.indexOf('preview.replaceChildren(stack)') < render.indexOf('fitPages(preview)'))
+    assert.ok(render.indexOf('fitPages(preview)') < render.indexOf('requestAnimationFrame('))
+    assert.match(ieeeBrowserScript, /return null/)
+  })
+
   // A table wider than its column was cut off at the column's edge, on the
   // screen and in the PDF.
   it('makes a table wider than its column smaller until it fits', async () => {

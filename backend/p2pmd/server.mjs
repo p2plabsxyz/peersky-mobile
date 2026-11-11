@@ -1102,28 +1102,34 @@ export function getP2pmdEditorPage () {
         overflow: visible;
         touch-action: pan-y;
       }
-      #preview h1,
-      #preview h2,
-      #preview h3 {
+      /* A research paper's pages look as Export PDF prints them: the note's own
+         styles below are for a plain note, and they gave its code and figures
+         the editor's dark boxes and moved its headings and tables. The pages
+         are white in both themes, so the browser's own colours are the light
+         ones too: in dark, its links were a pale blue on white. */
+      #preview.p2pmd-ieee-preview { overflow-wrap: normal; color-scheme: light; }
+      #preview:not(.p2pmd-ieee-preview) h1,
+      #preview:not(.p2pmd-ieee-preview) h2,
+      #preview:not(.p2pmd-ieee-preview) h3 {
         letter-spacing: -0.02em;
         line-height: 1.15;
       }
-      #preview h1 { margin: 0.7em 0 0.45em; font-size: 1.75em; }
-      #preview h2 { margin: 0.8em 0 0.4em; font-size: 1.4em; }
-      #preview h3 { margin: 0.8em 0 0.35em; font-size: 1.18em; }
-      #preview > :first-child { margin-top: 0; }
-      #preview > :last-child { margin-bottom: 0; }
-      #preview pre {
+      #preview:not(.p2pmd-ieee-preview) h1 { margin: 0.7em 0 0.45em; font-size: 1.75em; }
+      #preview:not(.p2pmd-ieee-preview) h2 { margin: 0.8em 0 0.4em; font-size: 1.4em; }
+      #preview:not(.p2pmd-ieee-preview) h3 { margin: 0.8em 0 0.35em; font-size: 1.18em; }
+      #preview:not(.p2pmd-ieee-preview) > :first-child { margin-top: 0; }
+      #preview:not(.p2pmd-ieee-preview) > :last-child { margin-bottom: 0; }
+      #preview:not(.p2pmd-ieee-preview) pre {
         padding: 12px;
         border-radius: 8px;
         background: var(--well);
         overflow-x: auto;
       }
-      #preview code {
+      #preview:not(.p2pmd-ieee-preview) code {
         color: var(--ink-code);
         font-family: var(--editor-font);
       }
-      #preview :not(pre) > code {
+      #preview:not(.p2pmd-ieee-preview) :not(pre) > code {
         padding: 0.12rem 0.34rem;
         border: 1px solid var(--line);
         border-radius: 6px;
@@ -1131,24 +1137,24 @@ export function getP2pmdEditorPage () {
         color: var(--ink);
         font-size: 0.92em;
       }
-      #preview pre code {
+      #preview:not(.p2pmd-ieee-preview) pre code {
         padding: 0;
         border: 0;
         background: transparent;
       }
-      #preview blockquote {
+      #preview:not(.p2pmd-ieee-preview) blockquote {
         margin-left: 0;
         padding-left: 14px;
         border-left: 3px solid var(--remote);
         color: var(--ink-muted);
       }
-      #preview img {
+      #preview:not(.p2pmd-ieee-preview) img {
         max-width: 100%;
       }
       /* Nothing styled tables, so a four-column timesheet was squeezed into the
          width of the phone and every heading came out one letter per line. The
          table keeps its own width and scrolls sideways instead. */
-      #preview table,
+      #preview:not(.p2pmd-ieee-preview) table,
       #slides-preview table {
         display: block;
         max-width: 100%;
@@ -1158,8 +1164,8 @@ export function getP2pmdEditorPage () {
         overscroll-behavior-x: contain;
         -webkit-overflow-scrolling: touch;
       }
-      #preview th,
-      #preview td,
+      #preview:not(.p2pmd-ieee-preview) th,
+      #preview:not(.p2pmd-ieee-preview) td,
       #slides-preview th,
       #slides-preview td {
         box-sizing: border-box;
@@ -1171,14 +1177,14 @@ export function getP2pmdEditorPage () {
         overflow-wrap: normal;
       }
       /* Headings name the column, so they set its width rather than wrapping. */
-      #preview th,
+      #preview:not(.p2pmd-ieee-preview) th,
       #slides-preview th {
         background: var(--panel-raised);
         font-weight: 700;
         white-space: nowrap;
       }
       /* A prose column still has to be readable rather than one endless line. */
-      #preview td,
+      #preview:not(.p2pmd-ieee-preview) td,
       #slides-preview td { max-width: 46ch; }
       #slides-preview {
         position: relative;
@@ -3141,6 +3147,11 @@ export function getP2pmdEditorPage () {
         }
 
         if (roomRole === 'host') setLatexMode(true)
+        // A paper or a doc replaces a deck, so the note is no longer slides.
+        if (!template.slideTemplate) {
+          presenting = false
+          slidesButton?.setAttribute('aria-pressed', 'false')
+        }
         setTemplateMenuOpen(false)
         replaceDocumentRange(0, input.value.length, template.content, 0, 0)
       }
@@ -3857,10 +3868,20 @@ export function getP2pmdEditorPage () {
 
           if (requestId !== previewRequestId || viewMode !== 'preview') return
 
-          window.P2pmdIeee?.clear(preview)
-          preview.innerHTML = result.html
-          if (result.ieee === true) {
-            await window.P2pmdIeee.render(preview, result.html)
+          if (result.ieee === true && window.P2pmdIeee) {
+            // A paper's pages are laid out out of sight and swapped in when
+            // ready, so the note never shows unlaid out first, and the pages
+            // already up stay while new ones are made.
+            if (!preview.querySelector(':scope > .ieee-page-stack')) preview.replaceChildren()
+            const laidOut = await window.P2pmdIeee.render(preview, result.html)
+            // Too long for pages: shown as a plain note.
+            if (laidOut === false && requestId === previewRequestId && viewMode === 'preview') {
+              window.P2pmdIeee.clear(preview)
+              preview.innerHTML = result.html
+            }
+          } else {
+            window.P2pmdIeee?.clear(preview)
+            preview.innerHTML = result.html
           }
         } catch (error) {
           if (requestId !== previewRequestId || viewMode !== 'preview') return
@@ -4038,7 +4059,9 @@ export function getP2pmdEditorPage () {
 
       function togglePreview() {
         if (viewMode !== 'edit') setViewMode('edit')
-        else setViewMode(presenting ? 'slides' : 'preview')
+        // A note with no slide breaks left is shown as a note, as Publish
+        // treats it, rather than as one slide holding all of it.
+        else setViewMode(presenting && hasSlideBreaks(input.value) ? 'slides' : 'preview')
       }
 
       // The app's share button asks for the note as it is, to offer Export
