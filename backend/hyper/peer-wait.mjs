@@ -63,6 +63,33 @@ export async function waitForDrivePeer (drive, runtime, {
   return driveCoreLength(drive) > 0
 }
 
+// A drive nobody answered for a moment ago. The next read of it, a page's
+// next file or PeerTunes' folder listing right after its playlist, says so at
+// once instead of waiting all over again. Per drive object, so a new runtime
+// starts clean.
+export const NO_PEERS_MEMORY_MS = 10000
+const recentlyUnreachable = new WeakMap()
+
+/**
+ * waitForDrivePeer for reads that would otherwise come back as a missing
+ * file: true when the drive has something to read, false when nobody who has
+ * it answered in time, or did not a moment ago.
+ */
+export async function waitForFirstPeer (drive, runtime, {
+  timeoutMs = PEER_WAIT_MS,
+  refreshNetwork = async () => {},
+  now = Date.now
+} = {}) {
+  if (!isAwaitingFirstPeer(drive)) return true
+  const failedAt = recentlyUnreachable.get(drive)
+  if (failedAt !== undefined && now() - failedAt < NO_PEERS_MEMORY_MS) return false
+
+  const reached = await waitForDrivePeer(drive, runtime, { timeoutMs, refreshNetwork })
+  if (reached) recentlyUnreachable.delete(drive)
+  else recentlyUnreachable.set(drive, now())
+  return reached
+}
+
 /** How many peers this phone is replicating the drive with right now. */
 export function drivePeerCount (drive) {
   const peers = drive?.core?.peers ?? drive?.db?.core?.peers

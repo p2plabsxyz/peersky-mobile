@@ -74,7 +74,7 @@ export function describeBrowserError (targetUrl, message) {
     }
   }
 
-  if (/peer|swarm|no one|not found on the network|offline/i.test(detail) && isPeerUrl(targetUrl)) {
+  if (/peer|swarm|no one|nobody|not found on the network|offline/i.test(detail) && isPeerUrl(targetUrl)) {
     return {
       title: t('Nobody is sharing this yet'),
       body: t('This address is held by other people’s devices, and none of them are online right now. It will load as soon as one is.')

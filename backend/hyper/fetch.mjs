@@ -30,6 +30,7 @@ import {
   rememberPageDrive
 } from './page-access.mjs'
 import { refreshHyperRuntimeNetwork } from './network-refresh.mjs'
+import { NO_PEERS_CODE, NO_PEERS_ERROR, waitForFirstPeer } from './peer-wait.mjs'
 import { createHyperUrl, getHyperSearch, getHyperVisibility, parseHyperUrl, toHyperFetchUrl } from './url.mjs'
 import { writeHyperResponseToFile } from './binary-response.mjs'
 import { parseMultipartFormData } from './form-data.mjs'
@@ -117,7 +118,13 @@ export async function fetchHyper ({
   }
 
   const read = () => withHyperRuntimeForAddress(target.driveAddress, async (runtime) => {
-    await prepareHyperRead(runtime, target.driveAddress)
+    const drive = await prepareHyperRead(runtime, target.driveAddress)
+    // Someone else's drive this phone has never heard from looks empty, so
+    // with nobody there a page said "This drive answered, but there is
+    // nothing at this address". Look for a peer first, as Fetch does.
+    if (!await waitForFirstPeer(drive, runtime, { refreshNetwork: refreshHyperRuntimeNetwork })) {
+      return { ok: false, status: 503, code: NO_PEERS_CODE, error: NO_PEERS_ERROR }
+    }
     const fetch = await getHyperFetch(runtime)
 
     const result = await withHyperRetry({
@@ -506,6 +513,7 @@ async function probeResponseBody (body) {
 async function prepareHyperRead (runtime, address) {
   const drive = await runtime.getDrive(address)
   configureHyperReadTimeout(drive)
+  return drive
 }
 
 export function ensureFetchGlobals () {
