@@ -50,3 +50,12 @@ test('each archive entry can be taken off the list on its own, after asking', ()
   assert.match(remove, /loadPage\(archivePage, archiveSource, false, archiveQuery\)/)
   assert.match(remove, /if \(activeActionRef\.current\) return/)
 })
+
+// Keep offline for a drive nobody shares ends with the backend's English
+// message, which P2P Data showed as it was.
+test('P2P Data says a drive nobody shares in the person\'s language', () => {
+  const status = between('function formatOfflineStatus', 'function joinNotices')
+  assert.match(status, /if \(item\.status === 'error' && item\.code === 'no-peers'\) return t\('Nobody who has this drive is online\. Try again when one of them is\.'\)/)
+  assert.ok(status.indexOf("item.code === 'no-peers'") < status.indexOf('return item.error'))
+  assert.match(between('type HyperOfflineItem', 'type P2pStorageSummary'), /code\?: string/)
+})

@@ -89,6 +89,7 @@ type HyperOfflineItem = {
   sizeTruncated?: boolean
   sizeUnavailable?: boolean
   error?: string
+  code?: string
 }
 
 // How much space P2P data takes on this phone, by part
@@ -983,6 +984,8 @@ function formatOfflineStatus (item: HyperOfflineItem) {
   }
   if (item.status === 'downloading') return t('Downloading for offline use')
   if (item.status === 'waiting-for-wifi') return t('Waiting for Wi-Fi')
+  // In the person's language, as Hyperdrive words it, not the backend's English.
+  if (item.status === 'error' && item.code === 'no-peers') return t('Nobody who has this drive is online. Try again when one of them is.')
   if (item.status === 'error') return item.error || t('Download failed')
   return t('Paused')
 }
