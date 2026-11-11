@@ -138,5 +138,11 @@
     "copyright": "Akhilesh Thite",
     "url": "",
     "notice": "Granite Lake on the Ten Lakes Trail, Yosemite National Park. Photo by Akhilesh Thite, who gave it to PeerSky."
+  },
+  {
+    "name": "Chromium search engine list",
+    "license": "BSD-3-Clause",
+    "copyright": "2014 The Chromium Authors",
+    "url": "https://chromium.googlesource.com/external/search_engines_data"
   }
 ]

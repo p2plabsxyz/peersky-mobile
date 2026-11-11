@@ -25,6 +25,7 @@ import { RPC_HYPER_LAN_STATUS } from '../../backend/rpc/commands.mjs'
 import { msg, t, tKey, tp } from '../i18n/i18n.mjs'
 import { LinkDeviceSettings } from './LinkDevice'
 import { Appearance } from './Appearance'
+import { SettingsRevealProvider } from './SettingsUI'
 import { ToolbarButtonSettings } from './ToolbarButton'
 import { Accessibility } from './Accessibility'
 import { DataClearing } from './DataClearing'
@@ -577,6 +578,15 @@ function SettingsSubpage({
   children: React.ReactNode
 }) {
   const isDark = useSettingsDarkMode()
+  const scrollRef = useRef<ScrollView>(null)
+  const contentRef = useRef<View>(null)
+  const reveal = useCallback((target: View | null) => {
+    const content = contentRef.current
+    if (!target || !content) return
+    target.measureLayout(content, (_x, y) => {
+      scrollRef.current?.scrollTo({ y: Math.max(0, y - 12), animated: true })
+    }, () => {})
+  }, [])
 
   return (
     <View style={[styles.screen, isDark ? darkStyles.screen : null]}>
@@ -596,10 +606,23 @@ function SettingsSubpage({
         </Pressable>
         <Text style={[styles.subpageTitle, isDark ? darkStyles.primaryText : null]}>{title}</Text>
       </View>
+      {/* A field stays above the keyboard, and a tap on a button with the
+          keyboard up, such as a search engine offered under Custom, does what
+          it says instead of only putting the keyboard away. */}
       {scrollable
         ? (
-          <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
-            {children}
+          <ScrollView
+            automaticallyAdjustKeyboardInsets
+            contentContainerStyle={styles.scrollContent}
+            // Typed as never empty, though it is until the view mounts.
+            innerViewRef={contentRef as React.RefObject<View>}
+            keyboardShouldPersistTaps='handled'
+            ref={scrollRef}
+            style={styles.scroll}
+          >
+            <SettingsRevealProvider value={reveal}>
+              {children}
+            </SettingsRevealProvider>
           </ScrollView>
           )
         : <View style={styles.scroll}>{children}</View>}

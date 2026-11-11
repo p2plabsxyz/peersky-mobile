@@ -10,6 +10,16 @@ export function useSettingsDarkMode () {
   return useContext(SettingsDarkModeContext)
 }
 
+// Scrolls the settings page so the view handed in sits at the top, for
+// something that opens under a field, which the keyboard would cover.
+const SettingsRevealContext = createContext<(target: View | null) => void>(() => {})
+
+export const SettingsRevealProvider = SettingsRevealContext.Provider
+
+export function useSettingsReveal () {
+  return useContext(SettingsRevealContext)
+}
+
 export function ChoiceGroup<T extends string> ({
   options,
   selected,
