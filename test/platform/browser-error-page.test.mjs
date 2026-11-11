@@ -30,6 +30,15 @@ describe('a page that would not load', () => {
     assert.match(describeBrowserError(z32, 'Not Found').body, /^This drive answered, but there is nothing at this address\./)
   })
 
+  // What the phone says when nobody who has a drive answered. It read as
+  // "This drive answered, but there is nothing at this address".
+  test('a drive nobody answered for says nobody is sharing it', () => {
+    const key = 'hyper://smhy768hq9d4kyznaeff97ogsz8arswo1crpdubnpfgjxkpqdjjo/'
+    assert.equal(describeBrowserError(key, 'Nobody who has this drive could be reached.').title, 'Nobody is sharing this yet')
+    // The same words from an ordinary site are not about peers.
+    assert.equal(describeBrowserError('https://example.com/', 'Nobody who has this drive could be reached.').title, 'This page would not load')
+  })
+
   // A name with no spaces in it, like an IPFS address, is wider than a phone.
   // Without a wrap the sentence ran off both edges of the screen.
   test('a long name in the sentence wraps instead of running off the screen', () => {

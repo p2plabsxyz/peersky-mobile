@@ -56,6 +56,7 @@
     "Delete Song…",
     "Delete this song?",
     "Delete {name}?",
+    "Deselect All",
     "Do not disconnect.",
     "Done",
     "Downloading",
@@ -123,6 +124,7 @@
     "Publishing needs PeerTunes inside PeerSky. You can still share your synced folders directly.",
     "Remove",
     "Remove from {name}?",
+    "Remove from {name}…",
     "Removes every song, playlist and cover from this device. Playlists you shared stay shared.",
     "Repeat",
     "Rescan Sources",
@@ -131,10 +133,14 @@
     "Scan QR",
     "Scan QR Code",
     "Select",
+    "Select All",
+    "Select Songs",
+    "Select Songs…",
     "Select the link below and copy it by hand.",
     "Send it to a friend.",
     "Settings",
     "Share Library…",
+    "Share Song…",
     "Share Sources",
     "Share This Playlist…",
     "Share it with other peers!",
@@ -198,6 +204,14 @@
       "other": "{count} of {total} were already in your library."
     },
     {
+      "one": "{count} Selected",
+      "other": "{count} Selected"
+    },
+    {
+      "one": "{count} song",
+      "other": "{count} songs"
+    },
+    {
       "one": "{count} song will be removed from this device.",
       "other": "{count} songs will be removed from this device."
     },
@@ -208,6 +222,14 @@
     {
       "one": "{count} song is on this device",
       "other": "All {count} songs are on this device"
+    },
+    {
+      "one": "Delete {count} song?",
+      "other": "Delete {count} songs?"
+    },
+    {
+      "one": "Delete {count} Song…",
+      "other": "Delete {count} Songs…"
     }
   ]
 }

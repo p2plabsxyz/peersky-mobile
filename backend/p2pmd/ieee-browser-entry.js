@@ -2,6 +2,9 @@
 
 const PAGINATE_SLICE_MS = 10
 const MAX_PAGES = 250
+// A wide table is made at most this much smaller to fit its column. Past
+// that its cells wrap as well.
+const MIN_TABLE_ZOOM = 0.5
 let runToken = 0
 
 function isHeading (node) {
@@ -209,7 +212,11 @@ function buildLayout (html) {
   return layout
 }
 
-function createPage (frontmatter = null) {
+// A page, and the boxes its text goes into in turn: one with CSS columns on
+// screen, or two of its own for a page that is printed. WebKit, which prints
+// the PDF on an iPhone, puts all of a CSS column box's text in its first
+// column and cuts it off at the foot of the page.
+function createPage (frontmatter = null, split = false) {
   const page = document.createElement('section')
   page.className = 'ieee-preview-page'
   if (frontmatter) page.classList.add('ieee-preview-page--first')
@@ -220,7 +227,43 @@ function createPage (frontmatter = null) {
   const columns = document.createElement('section')
   columns.className = 'ieee-columns ieee-preview-columns'
   inner.appendChild(columns)
-  return { page, inner, columns }
+  if (!split) return { page, inner, boxes: [columns] }
+  columns.classList.add('ieee-preview-columns--split')
+  const boxes = [0, 1].map(() => {
+    const box = document.createElement('div')
+    box.className = 'ieee-preview-column'
+    columns.appendChild(box)
+    return box
+  })
+  return { page, inner, boxes }
+}
+
+// The width of one column of a box, a CSS column box's column or the box
+// itself, as getBoundingClientRect measures it: on screen the page is scaled.
+function columnWidth (box) {
+  const style = window.getComputedStyle(box)
+  const count = parseInt(style.columnCount, 10) || 1
+  const gap = count > 1 ? parseFloat(style.columnGap) || 0 : 0
+  const scale = box.clientWidth > 0 ? box.getBoundingClientRect().width / box.clientWidth : 1
+  return (box.clientWidth - gap * (count - 1)) / count * scale
+}
+
+// A table wider than its column is made smaller until it fits, as a paper
+// prints a wide table. It was cut off at the column's edge, on the screen and
+// in the PDF.
+function fitTables (node, box) {
+  if (node?.nodeType !== Node.ELEMENT_NODE) return
+  const tables = node.tagName === 'TABLE' ? [node] : Array.from(node.querySelectorAll('table'))
+  if (!tables.length) return
+  const width = columnWidth(box)
+  tables.forEach((table) => {
+    table.style.removeProperty('zoom')
+    table.classList.remove('ieee-table-wrap')
+    const natural = table.getBoundingClientRect().width
+    if (!(natural > width + 1)) return
+    table.style.zoom = Math.max(MIN_TABLE_ZOOM, width / natural).toFixed(3)
+    if (table.getBoundingClientRect().width > width + 1) table.classList.add('ieee-table-wrap')
+  })
 }
 
 function hasOverflow (inner, columns, node) {
@@ -303,11 +346,12 @@ function yieldToEventLoop () {
   })
 }
 
-async function paginate (token, layout, stack) {
+async function paginate (token, layout, stack, splitColumns = false) {
   const frontmatter = layout.querySelector(':scope > .ieee-frontmatter')
   const source = layout.querySelector(':scope > .ieee-columns')
   if (!source) return false
-  let current = createPage(frontmatter?.cloneNode(true) || null)
+  let current = createPage(frontmatter?.cloneNode(true) || null, splitColumns)
+  let box = 0
   stack.appendChild(current.page)
   let sliceStartedAt = performance.now()
 
@@ -319,23 +363,31 @@ async function paginate (token, layout, stack) {
         await yieldToEventLoop()
         sliceStartedAt = performance.now()
       }
-      current.columns.appendChild(node)
-      if (!hasOverflow(current.inner, current.columns, node)) {
+      const target = current.boxes[box]
+      target.appendChild(node)
+      fitTables(node, target)
+      if (!hasOverflow(current.inner, target, node)) {
         node = null
         break
       }
-      current.columns.removeChild(node)
-      const split = splitParagraph(current.inner, current.columns, node)
+      target.removeChild(node)
+      const split = splitParagraph(current.inner, target, node)
       if (split) {
-        current.columns.appendChild(split.fit)
+        target.appendChild(split.fit)
         node = split.remaining
-      } else if (!current.columns.childNodes.length) {
-        current.columns.appendChild(node)
+      } else if (!target.childNodes.length) {
+        target.appendChild(node)
         node = null
         break
+      }
+      // The second column of the page, then the next page.
+      if (box + 1 < current.boxes.length) {
+        box += 1
+        continue
       }
       if (stack.childElementCount >= MAX_PAGES) return false
-      current = createPage()
+      current = createPage(null, splitColumns)
+      box = 0
       stack.appendChild(current.page)
     }
   }
@@ -355,7 +407,8 @@ function fitPages (preview) {
   preview.scrollLeft = 0
 }
 
-async function render (preview, html) {
+// options.splitColumns lays each page's columns out as two boxes, for a PDF.
+async function render (preview, html, options = {}) {
   const token = ++runToken
   preview.classList.add('p2pmd-ieee-preview')
   const stack = document.createElement('div')
@@ -364,14 +417,21 @@ async function render (preview, html) {
   staging.style.cssText = 'height:0;overflow:hidden;visibility:hidden;pointer-events:none'
   staging.appendChild(stack)
   preview.appendChild(staging)
-  const complete = await paginate(token, buildLayout(html), stack)
-  if (!complete || token !== runToken) {
+  const complete = await paginate(token, buildLayout(html), stack, options.splitColumns === true)
+  // null when a newer layout took over, false when the paper is too long.
+  if (token !== runToken) {
+    staging.remove()
+    return null
+  }
+  if (!complete) {
     staging.remove()
     return false
   }
   const scrollTop = preview.scrollTop
   staging.removeChild(stack)
   preview.replaceChildren(stack)
+  // Sized to the screen before it is drawn, not a frame or two after.
+  fitPages(preview)
   preview.scrollTop = scrollTop
   requestAnimationFrame(() => requestAnimationFrame(() => {
     if (token === runToken) fitPages(preview)

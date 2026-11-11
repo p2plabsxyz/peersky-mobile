@@ -11,18 +11,21 @@ import {
   View
 } from 'react-native'
 import {
+  RPC_HYPER_ARCHIVE_REMOVE,
   RPC_HYPER_OFFLINE_LIST,
   RPC_HYPER_OFFLINE_PAUSE,
   RPC_HYPER_OFFLINE_REMOVE,
   RPC_HYPER_OFFLINE_RESUME,
   RPC_HYPER_STORAGE_CLEAR_CACHE,
   RPC_HYPER_STORAGE_DELETE_APP,
-  RPC_HYPER_STORAGE_LIST
+  RPC_HYPER_STORAGE_LIST,
+  RPC_P2P_STORAGE_SUMMARY
 } from '../../backend/rpc/commands.mjs'
 import { BROWSER_PALETTES } from '../browser-appearance.mjs'
 import { BROWSER_P2P_URL, getHyperDriveListingUrl } from '../browser-shell.mjs'
 import ChevronRightIcon from '../../assets/icons/bootstrap/chevron-right.svg'
 import CopyIcon from '../../assets/icons/bootstrap/copy.svg'
+import RemoveIcon from '../../assets/icons/bootstrap/x-lg.svg'
 import { clearHyperdriveRecents } from '../hyperdrive/recents-store'
 import { viewerUrlFor } from '../hyperdrive/viewer-route.mjs'
 import { msg, t, tKey, tp } from '../i18n/i18n.mjs'
@@ -86,7 +89,19 @@ type HyperOfflineItem = {
   sizeTruncated?: boolean
   sizeUnavailable?: boolean
   error?: string
+  code?: string
 }
+
+// How much space P2P data takes on this phone, by part
+// (backend/hyper/storage-summary.mjs).
+type P2pStorageSummary = {
+  ok: boolean
+  error?: string
+  total?: number
+  parts?: Partial<Record<StoragePartId, number>>
+}
+
+type StoragePartId = 'hyper' | 'hyperPrivate' | 'deviceOnly' | 'other'
 
 type HyperOfflineResponse = {
   ok: boolean
@@ -123,6 +138,29 @@ const ARCHIVE_SOURCE_TITLES: Record<HyperArchiveSource, string> = {
 // Long enough that a search settles while someone is still typing, short enough
 // that it does not feel like a pause.
 const ARCHIVE_SEARCH_DELAY_MS = 250
+// The parts of Storage used, as on the desktop, as far as a phone has them.
+const STORAGE_PARTS: Array<{ id: StoragePartId, title: string, about: string }> = [
+  {
+    id: 'hyper',
+    title: msg('Public Hyper drives and PeerChat'),
+    about: msg('Drives you share in public, Hyper sites and folders you open, PeerChat rooms with their files, and P2PMD notes')
+  },
+  {
+    id: 'hyperPrivate',
+    title: msg('Private Hyper drives'),
+    about: msg('Your private uploads, and the private files from your other devices you opened')
+  },
+  {
+    id: 'deviceOnly',
+    title: msg('This device only'),
+    about: msg('Files kept on this phone only, never synced')
+  },
+  {
+    id: 'other',
+    title: msg('Lists and keys'),
+    about: msg('The lists on this page, what the apps remember, and the keys Link Device uses')
+  }
+]
 
 export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallRpc, onDownloadOnlyOnWifiChange, onOfflineFoldersChanged, onOpenItem, onOpenUrl, onP2pmdDataDeleted, onRestartRequired }: P2PStorageProps) {
   const isDark = useSettingsDarkMode()
@@ -148,6 +186,9 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [offlineError, setOfflineError] = useState<string | null>(null)
+  const summaryRequestSequence = useRef(0)
+  const [summary, setSummary] = useState<P2pStorageSummary | null>(null)
+  const [summaryError, setSummaryError] = useState<string | null>(null)
 
   useEffect(() => {
     void loadPage(archivePage, archiveSource, undefined, archiveQuery)
@@ -171,6 +212,11 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
   useEffect(() => {
     void loadOfflineItems()
     return () => { offlineRequestSequence.current += 1 }
+  }, [])
+
+  useEffect(() => {
+    void loadSummary()
+    return () => { summaryRequestSequence.current += 1 }
   }, [])
 
   useEffect(() => {
@@ -240,6 +286,23 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
     }
   }
 
+  // Adds up the folders, which takes a moment on a big store: the numbers from
+  // before stay on screen until the new ones come. An answer to an older
+  // request never replaces a newer one.
+  async function loadSummary () {
+    const sequence = ++summaryRequestSequence.current
+    setSummaryError(null)
+    try {
+      const response = await onCallRpc(RPC_P2P_STORAGE_SUMMARY) as P2pStorageSummary
+      if (sequence !== summaryRequestSequence.current || !mountedRef.current) return
+      if (!response.ok) throw new Error(response.error || t('Unable to measure P2P data.'))
+      setSummary(response)
+    } catch (summaryLoadError) {
+      if (sequence !== summaryRequestSequence.current || !mountedRef.current) return
+      setSummaryError(summaryLoadError instanceof Error ? summaryLoadError.message : String(summaryLoadError))
+    }
+  }
+
   function confirmRemoveOffline (item: HyperOfflineItem) {
     Alert.alert(
       t('Remove offline copy?'),
@@ -271,6 +334,7 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
       if (!response.ok) throw new Error(response.error || t('Unable to update the offline folder.'))
       if (command === RPC_HYPER_OFFLINE_REMOVE) onOfflineFoldersChanged()
       if (mountedRef.current) {
+        if (command === RPC_HYPER_OFFLINE_REMOVE) void loadSummary()
         setNotice(response.item?.status === 'waiting-for-wifi'
           ? t('Offline download is waiting for Wi-Fi.')
           : response.warning || null)
@@ -318,6 +382,7 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
           : null
       if (mountedRef.current) {
         setNotice(joinNotices(response.warning, recentWarning))
+        void loadSummary()
         await refreshArchive()
       }
     } catch (deleteError) {
@@ -361,6 +426,7 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
           // The English has always said "stores", whatever the count.
           tp({ one: '{count} cached data stores removed.', other: '{count} cached data stores removed.' }, response.clearedCores || 0)
         )
+        void loadSummary()
         await refreshArchive()
       }
     } catch (clearError) {
@@ -419,6 +485,43 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
     setArchiveSource(source)
   }
 
+  // One entry off the archive. Only the entry goes: the drive and its files
+  // stay, so a tap that missed Copy costs nothing it asks first.
+  function confirmRemoveArchiveEntry (item: HyperArchiveItem) {
+    Alert.alert(
+      t('Remove {name} from the list?', { name: item.name }),
+      t('Only this entry goes. The drive and its files stay on this phone.'),
+      [
+        { text: t('Cancel'), style: 'cancel' },
+        { text: t('Remove'), style: 'destructive', onPress: () => void removeArchiveEntry(item) }
+      ]
+    )
+  }
+
+  async function removeArchiveEntry (item: HyperArchiveItem) {
+    if (activeActionRef.current) return
+    const actionId = `archive:${item.url}`
+    activeActionRef.current = actionId
+    setActiveAction(actionId)
+    setError(null)
+    setNotice(null)
+
+    try {
+      const response = await onCallRpc(RPC_HYPER_ARCHIVE_REMOVE, { url: item.url })
+      if (!response.ok) throw new Error(response.error || t('Unable to remove it from the list.'))
+      // The same page, which the backend moves back one if this was its last
+      // entry.
+      if (mountedRef.current) await loadPage(archivePage, archiveSource, false, archiveQuery)
+    } catch (removeError) {
+      if (mountedRef.current) {
+        setError(removeError instanceof Error ? removeError.message : String(removeError))
+      }
+    } finally {
+      activeActionRef.current = null
+      if (mountedRef.current) setActiveAction(null)
+    }
+  }
+
   function copyArchiveUrl (item: HyperArchiveItem) {
     try {
       Clipboard.setString(item.url)
@@ -431,6 +534,30 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
 
   return (
     <>
+      {/* Every part adds up to what Clear all P2P data would free. */}
+      <SettingsSection title={t('Storage used')}>
+        <View style={styles.storageTotalRow}>
+          <Text style={[styles.description, styles.storageTotalAbout, isDark ? darkStyles.secondaryText : null]}>
+            {t('All P2P data on this phone, public and private.')}
+          </Text>
+          <Text style={[styles.storageTotal, isDark ? darkStyles.primaryText : null]}>
+            {summary ? formatBytes(summary.total || 0) : t('Calculating...')}
+          </Text>
+        </View>
+        {STORAGE_PARTS.map((part) => (
+          <View key={part.id} style={[styles.storagePartRow, styles.divider, isDark ? darkStyles.divider : null]}>
+            <View style={styles.copy}>
+              <Text style={[styles.title, isDark ? darkStyles.primaryText : null]}>{tKey(part.title)}</Text>
+              <Text style={[styles.description, isDark ? darkStyles.secondaryText : null]}>{tKey(part.about)}</Text>
+            </View>
+            <Text style={[styles.storagePartSize, isDark ? darkStyles.primaryText : null]}>
+              {summary ? formatBytes(summary.parts?.[part.id] || 0) : '-'}
+            </Text>
+          </View>
+        ))}
+        {summaryError && <Text accessibilityRole='alert' style={styles.error}>{summaryError}</Text>}
+      </SettingsSection>
+
       {/* The list at peersky://p2p, which nothing else in Settings led to. */}
       <SettingsSection title={t('P2P sites')}>
         <Pressable
@@ -699,6 +826,17 @@ export function P2PStorage ({ downloadOnlyOnWifi, offlineNetworkAllowed, onCallR
                 >
                   <CopyIcon width={18} height={18} color={isDark ? BROWSER_PALETTES.dark.selectedControl : BROWSER_PALETTES.light.selectedControl} />
                 </Pressable>
+                <Pressable
+                  accessibilityLabel={t('Remove {name} from the list', { name: item.name })}
+                  accessibilityRole='button'
+                  accessibilityState={{ disabled: activeAction !== null }}
+                  disabled={activeAction !== null}
+                  hitSlop={6}
+                  onPress={() => confirmRemoveArchiveEntry(item)}
+                  style={({ pressed }) => [styles.archiveAction, pressed ? styles.buttonPressed : null, activeAction !== null ? styles.disabled : null]}
+                >
+                  <RemoveIcon width={16} height={16} color={isDark ? BROWSER_PALETTES.dark.mutedText : '#8190a7'} />
+                </Pressable>
               </View>
             ))}
 
@@ -804,7 +942,8 @@ function formatBytes (bytes: number) {
   if (!Number.isFinite(bytes) || bytes <= 0) return t('{size} B', { size: 0 })
   if (bytes < 1024) return t('{size} B', { size: bytes })
   if (bytes < 1024 * 1024) return t('{size} KB', { size: (bytes / 1024).toFixed(1) })
-  return t('{size} MB', { size: (bytes / (1024 * 1024)).toFixed(1) })
+  if (bytes < 1024 * 1024 * 1024) return t('{size} MB', { size: (bytes / (1024 * 1024)).toFixed(1) })
+  return t('{size} GB', { size: (bytes / (1024 * 1024 * 1024)).toFixed(2) })
 }
 
 // A count that was cut short is at least that many, and says so with a plus.
@@ -845,6 +984,8 @@ function formatOfflineStatus (item: HyperOfflineItem) {
   }
   if (item.status === 'downloading') return t('Downloading for offline use')
   if (item.status === 'waiting-for-wifi') return t('Waiting for Wi-Fi')
+  // In the person's language, as Hyperdrive words it, not the backend's English.
+  if (item.status === 'error' && item.code === 'no-peers') return t('Nobody who has this drive is online. Try again when one of them is.')
   if (item.status === 'error') return item.error || t('Download failed')
   return t('Paused')
 }
@@ -923,7 +1064,36 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     height: 42,
     justifyContent: 'center',
-    width: 42
+    width: 36
+  },
+  storageTotalRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 12,
+    paddingHorizontal: 18,
+    paddingVertical: 16
+  },
+  storageTotalAbout: {
+    flex: 1
+  },
+  storageTotal: {
+    color: '#1f2a44',
+    fontSize: 22,
+    fontVariant: ['tabular-nums'],
+    fontWeight: '800'
+  },
+  storagePartRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 12,
+    paddingHorizontal: 18,
+    paddingVertical: 12
+  },
+  storagePartSize: {
+    color: '#1f2a44',
+    fontSize: 13,
+    fontVariant: ['tabular-nums'],
+    fontWeight: '700'
   },
   copy: {
     flex: 1,

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
 import { describe, test } from 'node:test'
 import {
   addBrowserHistoryItem,
@@ -12,6 +13,7 @@ import {
   removeBrowserHistoryItem,
   serializeBrowserHistory
 } from '../../app/history/browser-history.mjs'
+import { KNOWN_SITES } from '../../app/search/known-sites.mjs'
 
 describe('browser history', () => {
   test('round-trips valid web and Hyper visits', () => {
@@ -206,5 +208,68 @@ describe('browser history', () => {
       'PeerSky & Hyper'
     )
     assert.equal(getBrowserHistoryDocumentTitle('<p>No title</p>', 'hyper://site/'), 'hyper://site/')
+  })
+
+  // Typing "youtube" before YouTube was ever opened offered only searches, so
+  // getting there took a search and then a tap on the result.
+  test('offers a site from the list by name when history has none for it', () => {
+    const youtube = { url: 'https://www.youtube.com/', title: 'YouTube', visitedAt: 0, known: true }
+    for (const typed of ['youtube', 'YouTube', 'yo', 'youtube.com', 'www.youtube', 'https://you']) {
+      assert.deepEqual(getBrowserHistorySuggestions([], typed)[0], youtube, typed)
+    }
+    // Other names it goes by, and the most used of two that fit.
+    assert.equal(getBrowserHistorySuggestions([], 'twitter')[0].url, 'https://x.com/')
+    assert.equal(getBrowserHistorySuggestions([], 'gmail')[0].url, 'https://mail.google.com/')
+    assert.equal(getBrowserHistorySuggestions([], 'go')[0].url, 'https://www.google.com/')
+    assert.equal(getBrowserHistorySuggestions([], 'flip')[0].url, 'https://www.flipkart.com/')
+
+    // Not from one letter, a sentence, a path, a drive, or a name no site has.
+    for (const typed of ['y', 'youtube music', 'youtube.com/watch', 'hyper://you', 'qqzzy']) {
+      assert.equal(getBrowserHistorySuggestions([], typed).some((item) => item.known), false, typed)
+    }
+
+    // History's own site comes first, and the list does not add another.
+    const visited = [{ url: 'https://www.yoga.example/', title: 'Yoga', visitedAt: 5 }]
+    assert.deepEqual(getBrowserHistorySuggestions(visited, 'yo'), [visited[0]])
+    const phone = [{ url: 'https://m.youtube.com/watch?v=a', title: 'A video', visitedAt: 4 }]
+    assert.equal(getBrowserHistorySuggestions(phone, 'youtube')[0].url, 'https://m.youtube.com/')
+    assert.equal(getBrowserHistorySuggestions(phone, 'youtube').some((item) => item.known), false)
+
+    // Visited under another name: history's own page goes first, once.
+    for (const [typed, url] of [['gmail', 'https://mail.google.com/'], ['maps', 'https://www.google.com/maps'], ['spotify', 'https://open.spotify.com/']]) {
+      const seen = [{ url: 'https://example.com/other', title: `${typed} notes`, visitedAt: 2 }, { url, title: `${typed[0].toUpperCase()}${typed.slice(1)}`, visitedAt: 1 }]
+      const shown = getBrowserHistorySuggestions(seen, typed)
+      assert.deepEqual(shown[0], seen[1], typed)
+      assert.equal(shown.filter((item) => item.url === url).length, 1, typed)
+      assert.equal(shown.some((item) => item.known), false, typed)
+    }
+
+    // Pages that match follow the site, within the five.
+    const pages = Array.from({ length: 6 }, (_, index) => ({
+      url: `https://example.com/youtube-${index}`, title: 'Notes', visitedAt: index
+    }))
+    const shown = getBrowserHistorySuggestions(pages, 'youtube')
+    assert.equal(shown.length, 5)
+    assert.equal(shown[0].known, true)
+  })
+
+  test('lists each site once, as an https home page with a name', () => {
+    const urls = new Set()
+    for (const site of KNOWN_SITES) {
+      const url = new URL(site.url)
+      assert.equal(url.protocol, 'https:', site.url)
+      assert.equal(url.search + url.hash, '', site.url)
+      assert.ok(site.name.trim(), site.url)
+      assert.ok(!urls.has(site.url), site.url)
+      urls.add(site.url)
+      for (const name of site.also || []) assert.match(name, /^[a-z0-9.]+$/, site.url)
+    }
+  })
+
+  test('marks a site from the list with a globe, not a clock', async () => {
+    const source = await readFile(new URL('../../app/history/HistorySuggestions.tsx', import.meta.url), 'utf8')
+
+    assert.match(source, /item\.known\s+\? <GlobeIcon/)
+    assert.match(source, /item\.known\s+\? t\('Open \{name\}', \{ name: item\.title \}\)/)
   })
 })

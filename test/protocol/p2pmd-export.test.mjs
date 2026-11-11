@@ -53,8 +53,15 @@ test('a table keeps the words in its cells whole, so short columns keep their wi
   assert.doesNotMatch(cells, /anywhere/)
   // Only a link or code, which can be one long word, breaks anywhere.
   assert.match(result.html, /th a,\s+th code,\s+td a,\s+td code \{\s+overflow-wrap: anywhere;/)
-  // A screen scrolls a wide table; paper keeps it to the page.
+  // A screen scrolls a wide table.
   assert.match(result.html, /@media screen \{\s+table \{\s+display: block;\s+overflow-x: auto;/)
+})
+
+// Paper does not scroll, so a table too wide for it was cut off at the edge
+// of the page. In print its columns share the page.
+test('a table too wide for the page fits it in print', async () => {
+  const result = await exportMarkdownDocument({ content: '| A | B |\n|---|---|\n| 1 | 2 |', mode: 'note' }, { readFile: files({}).readFile })
+  assert.match(result.html, /@media print \{\s+table \{\s+table-layout: fixed;\s+width: 100%;\s+\}\s+th,\s+td \{\s+min-width: 0;\s+overflow-wrap: anywhere;/)
 })
 
 test('a research paper prints from the pages the editor laid out, a page to a sheet of A4', async () => {

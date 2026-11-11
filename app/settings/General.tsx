@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Alert,
+  Keyboard,
   Linking,
   Platform,
   Pressable,
@@ -17,12 +18,14 @@ import {
 } from '../browser-shell.mjs'
 import { t, tKey } from '../i18n/i18n.mjs'
 import { SEARCH_ENGINES } from './browser-preferences.mjs'
+import { findSearchEngines, searchEngineForUrl } from './search-engine-match.mjs'
 import { LanguageSection } from './Language'
 import {
   ChoiceGroup,
   SettingCopy,
   SettingsSection,
-  useSettingsDarkMode
+  useSettingsDarkMode,
+  useSettingsReveal
 } from './SettingsUI'
 import type { SearchEngine } from './useBrowserPreferences'
 
@@ -77,6 +80,19 @@ export function General ({
       searchEngine !== 'custom'
     )
   )
+  // A name typed instead of a URL: the engines it could be, to pick one.
+  // Nothing once what is there is the URL already saved.
+  const engineMatches = isCustomSearchSaved ? [] : findSearchEngines(draftUrl)
+  const typedName = draftUrl.trim() !== '' && !normalizedDraftUrl && !/[/:%]/.test(draftUrl)
+  const savedEngine = searchEngine === 'custom' ? searchEngineForUrl(customSearchUrl) : null
+  // The engines open under the field, where the keyboard is, so the page
+  // moves up to show the field and them together.
+  const reveal = useSettingsReveal()
+  const customSearchRef = useRef<View>(null)
+  const hasEngineMatches = engineMatches.length > 0
+  useEffect(() => {
+    if (hasEngineMatches) reveal(customSearchRef.current)
+  }, [hasEngineMatches, reveal])
 
   function selectSearchEngine (nextSearchEngine: SearchEngine) {
     setSelectedEngine(nextSearchEngine)
@@ -86,6 +102,11 @@ export function General ({
 
   function saveCustomSearchUrl () {
     const normalizedUrl = normalizeCustomSearchUrl(draftUrl)
+    // A name and Save: the best fit, the first one listed.
+    if (!normalizedUrl && engineMatches.length > 0) {
+      pickSearchEngine(engineMatches[0].url)
+      return
+    }
     if (!normalizedUrl) {
       setValidationError(t('Enter a valid HTTPS search URL, for example {example}', {
         example: `https://www.ecosia.org/search?q=${CUSTOM_SEARCH_QUERY_PLACEHOLDER}`
@@ -96,6 +117,13 @@ export function General ({
     if (!onCustomSearchSave(normalizedUrl)) return
     setDraftUrl(normalizedUrl)
     setValidationError(null)
+  }
+
+  function pickSearchEngine (url: string) {
+    Keyboard.dismiss()
+    setDraftUrl(url)
+    setValidationError(null)
+    onCustomSearchSave(url)
   }
 
   async function openDefaultBrowserSettings () {
@@ -174,18 +202,19 @@ export function General ({
           onSelect={selectSearchEngine}
         />
         {selectedEngine === 'custom' && (
-          <View style={[styles.customSearch, isDark ? styles.customSearchDark : null]}>
+          <View ref={customSearchRef} style={[styles.customSearch, isDark ? styles.customSearchDark : null]}>
             <Text style={[styles.label, isDark ? styles.primaryTextDark : null]}>
-              {t('Search URL')}
+              {t('Name or search URL')}
             </Text>
             <Text style={[styles.description, isDark ? styles.secondaryTextDark : null]}>
-              {t('Use {placeholder} where the search text should appear.', { placeholder: CUSTOM_SEARCH_QUERY_PLACEHOLDER })}
+              {t("Type a search engine's name and pick it, or enter its search URL with {placeholder} where the search text goes.", { placeholder: CUSTOM_SEARCH_QUERY_PLACEHOLDER })}
             </Text>
+            {/* Not the URL keyboard: it has no space bar, and most people
+                type a name here now. */}
             <TextInput
               autoCapitalize='none'
               autoCorrect={false}
-              keyboardType='url'
-              placeholder={`https://example.com/search?q=${CUSTOM_SEARCH_QUERY_PLACEHOLDER}`}
+              placeholder='Brave, Qwant, Mojeek'
               placeholderTextColor={isDark ? '#7f8ba3' : '#8190a7'}
               style={[styles.input, isDark ? styles.inputDark : null]}
               value={draftUrl}
@@ -194,6 +223,40 @@ export function General ({
                 if (validationError) setValidationError(null)
               }}
             />
+            {engineMatches.length > 0 && (
+              <View style={styles.engineMatches}>
+                {engineMatches.map((engine, index) => (
+                  <Pressable
+                    accessibilityRole='button'
+                    key={engine.url}
+                    onPress={() => pickSearchEngine(engine.url)}
+                    style={({ pressed }) => [
+                      styles.engineMatch,
+                      isDark ? styles.engineMatchDark : null,
+                      index === engineMatches.length - 1 ? styles.engineMatchLast : null,
+                      pressed ? styles.pressed : null
+                    ]}
+                  >
+                    <Text numberOfLines={1} style={[styles.engineName, isDark ? styles.primaryTextDark : null]}>
+                      {engine.name}
+                    </Text>
+                    <Text numberOfLines={1} style={[styles.engineHost, isDark ? styles.secondaryTextDark : null]}>
+                      {engine.host}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            )}
+            {typedName && engineMatches.length === 0 && !validationError && (
+              <Text style={[styles.fallback, isDark ? styles.secondaryTextDark : null]}>
+                {t('No search engine by that name. Enter its search URL instead.')}
+              </Text>
+            )}
+            {isCustomSearchSaved && savedEngine && (
+              <Text style={[styles.fallback, isDark ? styles.secondaryTextDark : null]}>
+                {t('Searching with {name}', { name: savedEngine.name })}
+              </Text>
+            )}
             {validationError && <Text style={styles.validationError}>{validationError}</Text>}
             {!customSearchUrl && !validationError && (
               <Text style={[styles.fallback, isDark ? styles.secondaryTextDark : null]}>
@@ -274,6 +337,36 @@ const styles = StyleSheet.create({
   },
   customSearchDark: {
     borderTopColor: '#343949'
+  },
+  engineMatches: {
+    borderColor: '#cad3e1',
+    borderRadius: 10,
+    borderWidth: 1,
+    overflow: 'hidden'
+  },
+  engineMatch: {
+    backgroundColor: '#ffffff',
+    borderBottomColor: '#e6ecf5',
+    borderBottomWidth: 1,
+    gap: 2,
+    paddingHorizontal: 12,
+    paddingVertical: 10
+  },
+  engineMatchDark: {
+    backgroundColor: '#202531',
+    borderBottomColor: '#343949'
+  },
+  engineMatchLast: {
+    borderBottomWidth: 0
+  },
+  engineName: {
+    color: '#1f2a44',
+    fontSize: 15,
+    fontWeight: '600'
+  },
+  engineHost: {
+    color: '#687086',
+    fontSize: 12
   },
   suggestionsRow: {
     borderTopColor: '#e6ecf5',

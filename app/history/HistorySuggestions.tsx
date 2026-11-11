@@ -2,6 +2,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import ArrowUpLeftIcon from '../../assets/icons/bootstrap/arrow-up-left.svg'
 import HistoryIcon from '../../assets/icons/bootstrap/clock-history.svg'
+import GlobeIcon from '../../assets/icons/bootstrap/globe.svg'
 import SearchIcon from '../../assets/icons/bootstrap/search.svg'
 import { t } from '../i18n/i18n.mjs'
 import type { BrowserHistoryItem } from './useBrowserHistory'
@@ -20,9 +21,9 @@ export type OneOffSearchEngine = {
 }
 
 /**
- * What the address bar offers while you type: pages from history, then what
- * the search engine suggests, then the other engines to search with just
- * this once.
+ * What the address bar offers while you type: a site by its name, pages from
+ * history, then what the search engine suggests, then the other engines to
+ * search with just this once.
  */
 export function HistorySuggestions ({
   background,
@@ -83,12 +84,17 @@ export function HistorySuggestions ({
         {items.map((item) => (
           <Pressable
             key={item.url}
-            accessibilityLabel={t('Open history suggestion {name}', { name: item.title })}
+            accessibilityLabel={item.known
+              ? t('Open {name}', { name: item.title })
+              : t('Open history suggestion {name}', { name: item.title })}
             accessibilityRole='link'
             style={({ pressed }) => [styles.row, pressed ? { backgroundColor: palette.button } : null]}
             onPress={() => onOpen(item.url)}
           >
-            <HistoryIcon width={17} height={17} color={palette.mutedText} />
+            {/* A clock is for somewhere you have been. */}
+            {item.known
+              ? <GlobeIcon width={17} height={17} color={palette.mutedText} />
+              : <HistoryIcon width={17} height={17} color={palette.mutedText} />}
             <View style={styles.copy}>
               <Text numberOfLines={1} style={[styles.title, { color: palette.text }]}>{item.title}</Text>
               <Text numberOfLines={1} style={[styles.url, { color: palette.mutedText }]}>{item.url}</Text>

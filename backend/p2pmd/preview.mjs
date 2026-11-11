@@ -6,11 +6,17 @@ import {
   renderP2pmdMarkdown
 } from './scientific.mjs'
 import { hasIeeeMarker } from './templates.mjs'
+import { readNoteImages } from './note-images.mjs'
 
 const P2PMD_PREVIEW_IMAGE_SRC_PATTERN = /src="\/hyper\/file\?url=([^"]+)"/g
-const MAX_INLINE_PREVIEW_IMAGES = 5
+// A picture not put inside the preview is asked for from the note's room, and
+// a room hosted on a desktop has nothing at that address. So every picture
+// goes inside, up to these limits.
+const MAX_INLINE_PREVIEW_IMAGES = 40
 const MAX_INLINE_PREVIEW_IMAGE_BYTES = 5 * 1024 * 1024
 const MAX_INLINE_PREVIEW_IMAGE_TOTAL_BYTES = 10 * 1024 * 1024
+// The editor gives up on a preview after 30 s.
+const PREVIEW_IMAGE_WAIT_MS = 15000
 const SLIDE_DELIMITER = '<!-- slide -->'
 const markdownRenderer = createP2pmdMarkdownRenderer()
 const defaultImageRenderer = markdownRenderer.renderer.rules.image || function (tokens, idx, options, env, self) {
@@ -168,32 +174,27 @@ function stripSpeakerNotes (content) {
   return content.replace(/<!--[\s\S]*?-->/g, '')
 }
 
-export async function inlineHyperPreviewImages (html, readFile) {
+export async function inlineHyperPreviewImages (html, readFile, { waitMs = PREVIEW_IMAGE_WAIT_MS } = {}) {
   const imageSources = Array.from(html.matchAll(P2PMD_PREVIEW_IMAGE_SRC_PATTERN))
   if (imageSources.length === 0) return html
 
-  const replacements = new Map()
-
+  const urls = new Map()
   for (const match of imageSources) {
     const encodedUrl = match[1]
-    if (replacements.has(encodedUrl)) continue
-    if (replacements.size >= MAX_INLINE_PREVIEW_IMAGES) break
+    if (urls.has(encodedUrl)) continue
+    if (urls.size >= MAX_INLINE_PREVIEW_IMAGES) break
 
-    let url
     try {
-      url = decodeURIComponent(encodedUrl)
-    } catch {
-      continue
-    }
+      urls.set(encodedUrl, decodeURIComponent(encodedUrl))
+    } catch {}
+  }
 
-    let result
-    try {
-      result = await readFile({ url })
-    } catch {
-      continue
-    }
+  const results = await readNoteImages([...urls.values()], readFile, { waitMs })
+  const replacements = new Map()
 
-    if (!result.ok) continue
+  for (const [encodedUrl, url] of urls) {
+    const result = results.get(url)
+    if (!result?.ok) continue
     if (!result.bytes || typeof result.bytes.byteLength !== 'number') continue
     if (typeof result.contentType !== 'string' || !result.contentType.startsWith('image/')) continue
     if (result.bytes.byteLength < 1 || result.bytes.byteLength > MAX_INLINE_PREVIEW_IMAGE_BYTES) continue

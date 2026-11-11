@@ -56,6 +56,7 @@ import {
   PEERCHAT_SEARCH_QUERY_MAX_CHARACTERS,
   splitPeerChatSearchMatch
 } from './message-search.mjs'
+import { holdPeerChatMemberOrder, peerChatMemberKey } from './member-order.mjs'
 import { messageFromMentioned, normalizePeerChatMentionSpacing, peerChatMentionNames, splitPeerChatMessageParts } from './message-text.mjs'
 import {
   dismissPeerChatRoomNotifications,
@@ -618,6 +619,9 @@ export function PeerChatScreen ({
   // modal is presented over another, and a back button reads better anyway.
   const [settingsPage, setSettingsPage] = useState<'main' | 'about'>('main')
   const [showRoomInfo, setShowRoomInfo] = useState(false)
+  // The order Room info's people had when it opened, for the room it opened
+  // on. See member-order.mjs.
+  const roomInfoOrderRef = useRef<{ roomKey: string, keys: string[] } | null>(null)
   const pendingModalRef = useRef<(() => void) | null>(null)
   const pendingModalTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [memberSearchQuery, setMemberSearchQuery] = useState('')
@@ -709,8 +713,13 @@ export function PeerChatScreen ({
     ) as PeerChatMember[]
     : []
   const myInviteUrl = buildPeerChatDirectInviteUrl(profile?.key || '')
+  const heldOrder = activeRoom && roomInfoOrderRef.current?.roomKey === activeRoom.roomKey
+    ? roomInfoOrderRef.current.keys
+    : null
+  const roomInfoMembers = holdPeerChatMemberOrder(heldOrder, activeRoom?.members || [])
+  roomInfoOrderRef.current = activeRoom ? { roomKey: activeRoom.roomKey, keys: roomInfoMembers.keys } : null
   const visibleMembers = filterPeerChatMembers(
-    activeRoom?.members || [],
+    roomInfoMembers.members,
     memberSearchQuery
   ) as PeerChatMember[]
   const visibleEmoji = useMemo(
@@ -1722,9 +1731,15 @@ export function PeerChatScreen ({
     })
   }
 
+  // Sorted afresh each time it opens, and held while it is open.
+  function openRoomInfo () {
+    roomInfoOrderRef.current = null
+    setShowRoomInfo(true)
+  }
+
   function openHeaderDetails () {
     if (!activeRoom?.isDM) {
-      setShowRoomInfo(true)
+      openRoomInfo()
       return
     }
     const peer = activeRoom.members.find((member) => !member.self && (
@@ -1745,7 +1760,7 @@ export function PeerChatScreen ({
       })
       return
     }
-    setShowRoomInfo(true)
+    openRoomInfo()
   }
 
   /**
@@ -3006,7 +3021,7 @@ export function PeerChatScreen ({
                   <Pressable
                     accessibilityHint={t('Opens peer profile')}
                     accessibilityRole='button'
-                    key={member.id}
+                    key={peerChatMemberKey(member)}
                     onPress={() => replaceModal(() => setShowRoomInfo(false), () => setProfileTarget(member))}
                     style={[styles.memberRow, { backgroundColor: colors.input }]}
                   >

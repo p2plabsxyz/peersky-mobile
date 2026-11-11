@@ -4,8 +4,10 @@ import { readFile } from 'node:fs/promises'
 import {
   assertRenderedMarkdownSize,
   createP2pmdMarkdownRenderer,
+  P2PMD_SCIENTIFIC_STYLES,
   renderP2pmdMarkdown
 } from '../../backend/p2pmd/scientific.mjs'
+import ieeeBrowserScript from '../../backend/p2pmd/ieee-runtime.mjs'
 import {
   getP2pmdTemplate,
   hasIeeeMarker,
@@ -64,6 +66,59 @@ describe('p2pmd scientific templates', () => {
     assert.match(source, /range\.cloneContents\(\)/)
     assert.doesNotMatch(source, /fit\.textContent\s*=/)
     assert.doesNotMatch(source, /remaining\.textContent\s*=/)
+  })
+
+  // An iPhone prints CSS columns as one: all the text in the first, the rest
+  // cut off at the foot of the page. The pages a PDF is made from have their
+  // two columns as boxes of their own, filled one after the other.
+  it('lays a paper out for print with each page\'s columns as boxes of their own', async () => {
+    const source = await readFile(
+      new URL('../../backend/p2pmd/ieee-browser-entry.js', import.meta.url),
+      'utf8'
+    )
+
+    assert.match(source, /async function render \(preview, html, options = \{\}\)/)
+    assert.match(source, /paginate\(token, buildLayout\(html\), stack, options\.splitColumns === true\)/)
+    assert.match(source, /columns\.classList\.add\('ieee-preview-columns--split'\)/)
+    assert.match(source, /box\.className = 'ieee-preview-column'/)
+    // The page's second column, then the next page.
+    assert.match(source, /if \(box \+ 1 < current\.boxes\.length\) \{\s+box \+= 1\s+continue\s+\}/)
+    assert.match(P2PMD_SCIENTIFIC_STYLES, /\.ieee-preview-columns\.ieee-preview-columns--split \{ display: flex; gap: 1\.35rem; column-count: auto; \}/)
+    assert.match(P2PMD_SCIENTIFIC_STYLES, /\.ieee-preview-column > :is\(h2, h3, h4, h5, h6\) \{ margin: \.7rem 0 \.2rem; text-align: center; \}/)
+    assert.match(ieeeBrowserScript, /ieee-preview-columns--split/)
+  })
+
+  // The editor keeps the pages it has up while new ones are laid out, and shows
+  // the note as text only when it is too long for pages, not when a newer
+  // layout took over.
+  it('tells a layout that was taken over from a paper too long for pages', async () => {
+    const source = await readFile(
+      new URL('../../backend/p2pmd/ieee-browser-entry.js', import.meta.url),
+      'utf8'
+    )
+    const render = source.slice(source.indexOf('async function render ('), source.indexOf('function clear ('))
+
+    assert.match(render, /if \(token !== runToken\) \{\s+staging\.remove\(\)\s+return null\s+\}\s+if \(!complete\) \{\s+staging\.remove\(\)\s+return false\s+\}/)
+    assert.ok(render.indexOf('preview.replaceChildren(stack)') < render.indexOf('fitPages(preview)'))
+    assert.ok(render.indexOf('fitPages(preview)') < render.indexOf('requestAnimationFrame('))
+    assert.match(ieeeBrowserScript, /return null/)
+  })
+
+  // A table wider than its column was cut off at the column's edge, on the
+  // screen and in the PDF.
+  it('makes a table wider than its column smaller until it fits', async () => {
+    const source = await readFile(
+      new URL('../../backend/p2pmd/ieee-browser-entry.js', import.meta.url),
+      'utf8'
+    )
+
+    assert.match(source, /const MIN_TABLE_ZOOM = 0\.5/)
+    assert.match(source, /target\.appendChild\(node\)\s+fitTables\(node, target\)/)
+    assert.match(source, /table\.style\.zoom = Math\.max\(MIN_TABLE_ZOOM, width \/ natural\)/)
+    // Past that, its cells wrap as well.
+    assert.match(source, /table\.classList\.add\('ieee-table-wrap'\)/)
+    assert.match(P2PMD_SCIENTIFIC_STYLES, /\.ieee-columns table\.ieee-table-wrap \{ table-layout: fixed; width: calc\(100% - 2px\); \}/)
+    assert.match(ieeeBrowserScript, /ieee-table-wrap/)
   })
 
   // Older WebKit leaves "<" unescaped in attributes when it serializes, so

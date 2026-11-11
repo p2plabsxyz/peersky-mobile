@@ -12,12 +12,15 @@ import {
   readBrowserHistoryFile,
   replaceBrowserHistoryFile
 } from './browser-history-storage.mjs'
+import { clearBrowserHistoryRange } from './history-filters.mjs'
 import { t } from '../i18n/i18n.mjs'
 
 export type BrowserHistoryItem = {
   url: string
   title: string
   visitedAt: number
+  // A site offered by name from the app's list, not from history.
+  known?: boolean
 }
 
 export function useBrowserHistory () {
@@ -136,6 +139,12 @@ export function useBrowserHistory () {
     isReady,
     persistenceError,
     clearHistory: () => persistItems([], true),
+    // The pages visited in that time, as the History screen's trash button
+    // offers: true when they went, or none were there.
+    clearHistoryRange: (range: { from: number, to: number }) => {
+      const nextItems = clearBrowserHistoryRange(itemsRef.current, range) as BrowserHistoryItem[]
+      return nextItems === itemsRef.current || persistItems(nextItems, true)
+    },
     getSuggestions: (query: string) => getBrowserHistorySuggestions(itemsRef.current, query) as BrowserHistoryItem[],
     recordVisit: ({
       url,
