@@ -3,6 +3,7 @@ import {
   isWebUrl,
   MAX_BROWSER_URL_LENGTH
 } from '../browser-shell.mjs'
+import { KNOWN_SITES } from '../search/known-sites.mjs'
 
 export const MAX_BROWSER_HISTORY_ITEMS = 500
 export const MAX_BROWSER_HISTORY_TITLE_LENGTH = 256
@@ -129,8 +130,30 @@ export function getBrowserHistorySuggestions (
       return { url: home.url, title, visitedAt: site.visitedAt }
     })
 
+  // A site not in history yet, by name, when history has none for it.
+  if (homes.length === 0) {
+    const known = findKnownSite(normalizedQuery, prefix)
+    if (known) homes.push({ url: known.url, title: known.name, visitedAt: 0, known: true })
+  }
+
   return [...homes, ...sitePages, ...otherPages]
     .slice(0, Math.min(limit, MAX_BROWSER_HISTORY_SUGGESTIONS))
+}
+
+// Two letters before a site is offered from the list, as search suggestions
+// wait for two: one letter fits too many sites to mean any of them.
+const MIN_KNOWN_SITE_PREFIX_LENGTH = 2
+const KNOWN_SITE_NAMES = KNOWN_SITES.map((site) => [
+  getSiteName(new URL(site.url).host),
+  ...(site.also || [])
+])
+
+// The first site in the list whose address or other name starts with what was
+// typed. Not for a hyper:// address, which names a drive, not a site.
+function findKnownSite (query, prefix) {
+  if (!prefix || prefix.length < MIN_KNOWN_SITE_PREFIX_LENGTH || query.startsWith('hyper:')) return null
+  const index = KNOWN_SITE_NAMES.findIndex((names) => names.some((name) => name.startsWith(prefix)))
+  return index === -1 ? null : KNOWN_SITES[index]
 }
 
 // What was typed, as the start of a site's name: "https://www.you" is "you".

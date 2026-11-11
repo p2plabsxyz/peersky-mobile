@@ -19,6 +19,8 @@ export type BrowserHistoryItem = {
   url: string
   title: string
   visitedAt: number
+  // A site offered by name from the app's list, not from history.
+  known?: boolean
 }
 
 export function useBrowserHistory () {
