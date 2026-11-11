@@ -124,3 +124,12 @@ test('the app asks the backend through two commands of their own', async () => {
   assert.match(router, /req\.command === RPC_HYPER_ARCHIVE_REMOVE\) \{\n\s+replyJson\(req, await removeP2pArchiveEntry\(parseJsonMessage\(req\.data\)\)\)/)
   assert.match(router, /req\.command === RPC_P2P_STORAGE_SUMMARY\) \{\n\s+replyJson\(req, await measureP2pStorageSummary\(\)\)/)
 })
+
+// Pictures from other people's drives that notes showed are kept in memory,
+// and went on showing after the downloaded cache was cleared.
+test('clearing the downloaded P2P cache forgets the pictures notes showed', () => {
+  assert.match(storage, /import \{ forgetNoteImages \} from '\.\/drive\.mjs'/)
+  const clear = storage.slice(storage.indexOf('async function performP2pCacheClear'), storage.indexOf('function performAllP2pDataClear'))
+  assert.match(clear, /try \{\s+return await runP2pCacheClear\(/)
+  assert.match(clear, /\} finally \{[^}]*forgetNoteImages\(\)\s+\}/)
+})

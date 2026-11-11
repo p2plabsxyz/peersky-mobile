@@ -38,6 +38,7 @@ import { listP2pStorageParts, measureP2pStorage } from './storage-summary.mjs'
 import { hasPrivateDriveKey, resetPrivateDriveKeyCache } from './private-keys.mjs'
 import { resetLinkedPrivateDrivesCache } from './linked-private-drives.mjs'
 import { resetDeviceSyncStateCache } from './device-sync-state.mjs'
+import { forgetNoteImages } from './drive.mjs'
 import { closePeerChatService } from '../peerchat/runtime.mjs'
 import { closeHyperOfflineDownloads } from './offline-manager.mjs'
 import { getDefaultIdentityStoragePath } from '../backup/device-keys.mjs'
@@ -208,17 +209,23 @@ async function performP2pCacheClear (options) {
   const createStore = options.createStore || ((storagePath) => new Corestore(storagePath))
 
   const storagePath = options.storagePath || getHyperStoragePath()
-  return runP2pCacheClear({
-    getRuntime,
-    storagePath,
-    stopAssetServer,
-    closeServices,
-    closeRuntime,
-    resetFetch,
-    createStore,
-    clearStore: clearDownloadedP2pCores,
-    removeArchive: () => (options.removeArchive || removeHyperArchive)({ source: 'fetched' })
-  })
+  try {
+    return await runP2pCacheClear({
+      getRuntime,
+      storagePath,
+      stopAssetServer,
+      closeServices,
+      closeRuntime,
+      resetFetch,
+      createStore,
+      clearStore: clearDownloadedP2pCores,
+      removeArchive: () => (options.removeArchive || removeHyperArchive)({ source: 'fetched' })
+    })
+  } finally {
+    // Pictures from other people's drives that notes showed are downloaded
+    // P2P data too, kept in memory, and went on showing until a restart.
+    forgetNoteImages()
+  }
 }
 
 function performAllP2pDataClear (options, plan) {
