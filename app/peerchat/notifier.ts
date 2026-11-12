@@ -24,6 +24,7 @@ import {
   setPeerChatBadgeCount
 } from './notifications'
 import { playPeerChatSound } from './sounds'
+import { incomingChatSound } from './sound-gate.mjs'
 import {
   addPeerChatBackgroundTickListener,
   setPeerChatBackgroundEnabled,
@@ -359,12 +360,16 @@ async function poll (current: Checker): Promise<void> {
     }
     if (!state.preferences.notifications || !await hasPeerChatNotificationPermission()) return
 
+    // A burst sounds once: the first of these, unless a chat sound has just
+    // played. The others still show, quietly (sound-gate.mjs).
+    let sound = state.preferences.sounds && incomingChatSound.allow()
     for (const candidate of candidates) {
       if (current.cancelled) return
       await presentPeerChatNotification({
         ...candidate,
-        sounds: state.preferences.sounds
+        sounds: sound
       })
+      sound = false
     }
   } catch (error) {
     if (!current.cancelled && !warned) {
