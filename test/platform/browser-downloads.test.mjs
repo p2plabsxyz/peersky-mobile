@@ -4,6 +4,7 @@ import { describe, test } from 'node:test'
 import { createRequire } from 'node:module'
 import {
   addDownloadUrlFingerprint,
+  AWAITED_DOWNLOAD_MS,
   describeBrowserDownload,
   downloadFilenameFromHeaders,
   findCompletedHyperDownload,
@@ -12,6 +13,7 @@ import {
   createUniqueDownloadFilename,
   normalizeBrowserDownloads,
   normalizeBrowserDownloadUrl,
+  settleAwaitedDownloads,
   sortBrowserDownloads
 } from '../../app/downloads/browser-downloads.mjs'
 import { BROWSER_HOME_URL, getFileHandoffAction } from '../../app/browser-shell.mjs'
@@ -519,5 +521,34 @@ describe('browser downloads', () => {
     assert.match(nativeConfigSource, /requireNativeComponent/)
     assert.match(nativeConfigSource, /PeerSkyWebView/)
     assert.match(nativeConfigSource, /hasViewManagerConfig/)
+  })
+})
+
+// Download image opens the Downloads screen at once, before Android has a
+// record of the file: it works out the name and type first. The screen
+// looked once, found nothing running, and stopped, so it stayed empty until
+// it was refreshed by hand.
+describe('a download just asked for', () => {
+  test('is waited for until Android lists it', () => {
+    const url = 'https://example.com/photo.jpg'
+    const awaited = new Map([[url, 10_000]])
+
+    assert.equal(settleAwaitedDownloads(awaited, [], 10_500), true)
+    // A record of an earlier download of the same file is not this one.
+    assert.equal(settleAwaitedDownloads(awaited, [{ sourceUrl: url, createdAt: 1_000, status: 'complete' }], 11_000), true)
+    assert.equal(settleAwaitedDownloads(awaited, [{ sourceUrl: url, createdAt: 11_200, status: 'complete' }], 11_500), false)
+    assert.equal(awaited.size, 0)
+
+    // One that never comes stops the wait in the end.
+    const lost = new Map([[url, 10_000]])
+    assert.equal(settleAwaitedDownloads(lost, [], 10_000 + AWAITED_DOWNLOAD_MS - 1), true)
+    assert.equal(settleAwaitedDownloads(lost, [], 10_000 + AWAITED_DOWNLOAD_MS + 1), false)
+  })
+
+  test('keeps the Downloads screen checking, not only while something runs', () => {
+    const hook = readFileSync(new URL('../../app/downloads/useBrowserDownloads.ts', import.meta.url), 'utf8')
+    assert.match(hook, /const awaiting = settleAwaitedDownloads\(awaitedDownloads\.current, records\)\s*if \(!awaiting && !hasActiveDownload\(records\)\) return/)
+    assert.match(hook, /\}, \[enabled, refresh, pollRequest\]\)/)
+    assert.match(hook, /if \(accepted\) \{\s*awaitedDownloads\.current\.set\(normalizedUrl, Date\.now\(\)\)\s*setPollRequest\(\(request\) => request \+ 1\)/)
   })
 })
