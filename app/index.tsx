@@ -2816,6 +2816,7 @@ export default function App () {
 
   function updateActiveBrowserZoom (nextZoom: number) {
     const activeTabId = browserTabsStateRef.current.activeTabId
+    const activeTab = browserTabsStateRef.current.tabs.find((tab) => tab.id === activeTabId)
     const zoom = normalizeBrowserPageZoom(nextZoom)
 
     updateBrowserTabsState((state) => updateBrowserTabState(
@@ -2825,6 +2826,7 @@ export default function App () {
     ) as BrowserTabsState)
     browserWebViewRefs.current.get(activeTabId)?.injectJavaScript(createBrowserAccessibilityScript({
       applyTextScale: Platform.OS === 'ios',
+      desktopView: activeTab?.desktopView === true,
       enforceManualPageZoom: browserPreferences.enforceManualPageZoom,
       pageZoom: zoom,
       websiteTextScale: browserPreferences.websiteTextScale
