@@ -160,6 +160,15 @@ export function BrowserToolbar ({
     return () => clearTimeout(timer)
   }, [focusRequest])
 
+  // A tap on the bar selects the whole address, as in Safari and Chrome, so
+  // what is typed replaces it. The caret landed where the finger did. Asked
+  // for once the box shows the whole address, which it swaps in as it gets
+  // the focus, and after the tap has put its caret down.
+  useEffect(() => {
+    if (!isAddressFocused) return
+    addressInputRef.current?.setSelection(0, address.length)
+  }, [isAddressFocused])
+
   return (
     // The bar and the list it opens are siblings in a stack with no padding of
     // its own, so "sit on the bar's edge" is the bar's measured height and
