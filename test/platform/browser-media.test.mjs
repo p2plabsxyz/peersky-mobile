@@ -203,3 +203,20 @@ describe('iOS link menu', () => {
     for (const action of [...sent, 'open']) assert.match(app, new RegExp(`action === '${action}'`))
   })
 })
+
+describe('media that plays on its own', () => {
+  // Safari plays a muted video without a tap, a site's background or the clip
+  // at the top of a page, and waits for one only for sound. react-native-webview
+  // held every video for a tap, and WebKit did not even load one held that
+  // way, so those videos stayed blank.
+  test('on iOS a muted video plays by itself and sound still waits for a tap', async () => {
+    const manager = await readFile(new URL('../../plugins/templates/PeerSkyWebViewManager.m.template', import.meta.url), 'utf8')
+    const setup = /- \(WKWebViewConfiguration \*\)setUpWkWebViewConfig\s*\{([\s\S]*?)\n\}/.exec(manager)?.[1] || ''
+    assert.match(setup, /\[super setUpWkWebViewConfig\];[\s\S]*configuration\.mediaTypesRequiringUserActionForPlayback = WKAudiovisualMediaTypeAudio;/)
+    assert.doesNotMatch(manager, /WKAudiovisualMediaTypeNone|WKAudiovisualMediaTypeAll/)
+
+    // And react-native-webview is not told to hold media again on top.
+    const app = await readFile(new URL('../../app/index.tsx', import.meta.url), 'utf8')
+    assert.doesNotMatch(app, /mediaPlaybackRequiresUserAction/)
+  })
+})

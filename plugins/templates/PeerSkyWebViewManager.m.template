@@ -246,6 +246,11 @@ static NSString *PeerSkyBrowserApplicationName(void)
   // In place of WebKit's own name, not after it. Desktop view's user agent
   // replaces the whole string, this included.
   configuration.applicationNameForUserAgent = PeerSkyBrowserApplicationName();
+  // As in Safari, a video plays on its own while it is muted, like a site's
+  // background or a clip at the top of a page, and only sound waits for a
+  // tap. react-native-webview held all media for one, and WebKit did not
+  // even load a video held that way, so those videos stayed blank.
+  configuration.mediaTypesRequiringUserActionForPlayback = WKAudiovisualMediaTypeAudio;
   if (self.incognito && PeerSkyIsIncognitoSession(self.incognitoSession)) {
     configuration.websiteDataStore = PeerSkyIncognitoStoreForSession(self.incognitoSession);
   } else if (self.hyperSession) {
