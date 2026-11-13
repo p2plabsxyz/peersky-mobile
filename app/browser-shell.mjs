@@ -1,4 +1,4 @@
-import { parseExternalAppLink } from './browser-permissions.mjs'
+import { getIntentFallbackUrl, parseAppLink, parseExternalAppLink } from './browser-permissions.mjs'
 
 export const BROWSER_HOME_URL = 'peersky://home'
 // The index of the built-in apps. It used to resolve to nothing and come back
@@ -416,12 +416,15 @@ export function getFileHandoffAction ({ history, historyIndex, fileUrl, showedPa
   return { action: 'stay' }
 }
 
+// tapped: the person's tap started the request. iOS says a link was clicked,
+// and Android that a gesture came with it.
 export function getBrowserRequestAction ({
   requestUrl,
   currentSourceKind,
   currentUrl = '',
   navigationType = '',
-  isTopFrame = true
+  isTopFrame = true,
+  tapped = false
 }) {
   const url = String(requestUrl || '')
 
@@ -465,6 +468,18 @@ export function getBrowserRequestAction ({
       action: 'open-external',
       ...externalLink
     }
+  }
+
+  // A link to another app's own scheme goes to that app only when the person
+  // tapped it, and after asking, never on a page's say alone. It used to go
+  // nowhere at all, without a word. An intent:// link with a web page of its
+  // own to fall back on opens that page in the tab instead.
+  const appLink = parseAppLink(url)
+  if (appLink) {
+    if (!isTopFrame || !tapped) return { action: 'block' }
+    const fallbackUrl = getIntentFallbackUrl(url)
+    if (fallbackUrl) return { action: 'load-fallback', url: fallbackUrl }
+    return { action: 'open-external', ...appLink }
   }
 
   if (!isWebUrl(url)) {

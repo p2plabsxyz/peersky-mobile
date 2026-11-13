@@ -128,6 +128,7 @@ import {
   formatExternalLinkForPrompt,
   getExternalAppName,
   getExternalLinkTarget,
+  parseAppLink,
   getExternalLinkBehaviorAction,
   parseExternalAppLink
 } from './browser-permissions.mjs'
@@ -3484,7 +3485,7 @@ export default function App () {
     tabId: string,
     expectedEntry: BrowserHistoryEntry,
     webViewGeneration: number,
-    request: { url?: string, isTopFrame?: boolean, navigationType?: string }
+    request: { url?: string, isTopFrame?: boolean, navigationType?: string, hasGesture?: boolean }
   ) {
     // Only the tab's own WebView, the one built for this step. A page that
     // moves on as soon as it has loaded asks before the tab is drawn again
@@ -3515,7 +3516,10 @@ export default function App () {
       currentSourceKind: expectedEntry.source.kind,
       currentUrl: expectedEntry.source.kind === 'hyper' ? expectedEntry.source.baseUrl : '',
       navigationType: request.navigationType,
-      isTopFrame: request.isTopFrame !== false
+      isTopFrame: request.isTopFrame !== false,
+      // A link the person tapped: iOS calls it a click, and Android says a
+      // gesture came with it (PeerSkyWebViewClient).
+      tapped: request.navigationType === 'click' || request.hasGesture === true
     })
     const isActive = browserTabsStateRef.current.activeTabId === tabId
 
@@ -3528,6 +3532,12 @@ export default function App () {
       action.scheme
     ) {
       if (isActive) openExternalAppLink(action.url)
+      return false
+    }
+
+    // An intent:// link's own web page, in this tab.
+    if (action.action === 'load-fallback' && action.url) {
+      if (isActive) void loadBrowserUrl(action.url)
       return false
     }
 
@@ -3604,9 +3614,13 @@ export default function App () {
     setStatus('Popup opened in new tab')
   }
 
+  // Mail, phone, messages and maps, which Settings can let open without
+  // asking, or another app's own link, which always asks. iOS has no use for
+  // an intent:// link.
   function openExternalAppLink (targetUrl: string) {
-    const externalLink = parseExternalAppLink(targetUrl)
-    if (!externalLink) {
+    const knownLink = parseExternalAppLink(targetUrl)
+    const externalLink = knownLink || parseAppLink(targetUrl)
+    if (!externalLink || (Platform.OS === 'ios' && externalLink.scheme === 'intent')) {
       setStatus('Unsupported external app link')
       return
     }
@@ -3628,7 +3642,7 @@ export default function App () {
 
     lastExternalLinkPromptAtRef.current = now
 
-    if (behaviorAction === 'open') {
+    if (behaviorAction === 'open' && knownLink) {
       launchExternalAppLink(externalLink.url)
       return
     }
@@ -3657,7 +3671,8 @@ export default function App () {
   }
 
   function launchExternalAppLink (targetUrl: string) {
-    const externalLink = parseExternalAppLink(targetUrl)
+    const knownLink = parseExternalAppLink(targetUrl)
+    const externalLink = knownLink || parseAppLink(targetUrl)
     if (!externalLink) {
       externalLinkPromptOpenRef.current = false
       setStatus('Unsupported external app link')
@@ -3665,7 +3680,18 @@ export default function App () {
     }
 
     externalLinkPromptOpenRef.current = true
-    void Linking.openURL(externalLink.url)
+    // On Android another app's link opens as Chrome opens one, an intent://
+    // link included, which Linking cannot read (openAppLink in
+    // PeerSkyBrowserDataModule).
+    const openAppLink = Platform.OS === 'android' && !knownLink
+      ? (NativeModules.PeerSkyBrowserData as { openAppLink?: (url: string) => Promise<boolean> } | undefined)?.openAppLink
+      : undefined
+    const opened = openAppLink
+      ? openAppLink(externalLink.url).then((done) => {
+        if (!done) throw new Error('No app takes this link')
+      })
+      : Linking.openURL(externalLink.url)
+    void opened
       .catch(() => offerExternalLinkFallback(externalLink.scheme, externalLink.url))
       .finally(() => {
         externalLinkPromptOpenRef.current = false

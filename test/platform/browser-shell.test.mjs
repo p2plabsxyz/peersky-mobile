@@ -987,3 +987,61 @@ describe('a page that would not load', () => {
     assert.doesNotMatch(onError, /replaceBrowserEntry\(failedUrl/)
   })
 })
+
+// Another app's link goes to the "Open another app?" prompt only when the
+// person tapped it, never on a page's say alone.
+describe('a link to another app', () => {
+  const spotify = 'spotify:track:4uLU6hMCjMI75M1A2tKUQC'
+
+  test('is offered to the app when tapped, and blocked otherwise', () => {
+    assert.deepEqual(getBrowserRequestAction({ requestUrl: spotify, currentSourceKind: 'web', tapped: true }), {
+      action: 'open-external',
+      scheme: 'spotify',
+      url: spotify
+    })
+    assert.deepEqual(getBrowserRequestAction({ requestUrl: spotify, currentSourceKind: 'web' }), { action: 'block' })
+    assert.deepEqual(getBrowserRequestAction({ requestUrl: spotify, currentSourceKind: 'web', tapped: true, isTopFrame: false }), { action: 'block' })
+    assert.deepEqual(getBrowserRequestAction({ requestUrl: 'itms-apps://apps.apple.com/app/id1', currentSourceKind: 'hyper', tapped: true }).action, 'open-external')
+    // Mail and the phone go as they did.
+    assert.deepEqual(getBrowserRequestAction({ requestUrl: 'tel:+15550100', currentSourceKind: 'web' }).action, 'open-external')
+  })
+
+  test('opens an intent:// link\'s own web page in the tab when it names one', () => {
+    const fallback = 'https://example.com/app'
+    const link = `intent://open/#Intent;package=com.example;S.browser_fallback_url=${encodeURIComponent(fallback)};end`
+    assert.deepEqual(getBrowserRequestAction({ requestUrl: link, currentSourceKind: 'web', tapped: true }), { action: 'load-fallback', url: fallback })
+    assert.deepEqual(getBrowserRequestAction({ requestUrl: link, currentSourceKind: 'web' }), { action: 'block' })
+    assert.deepEqual(getBrowserRequestAction({ requestUrl: 'intent://open/#Intent;package=com.example;end', currentSourceKind: 'web', tapped: true }).action, 'open-external')
+  })
+
+  test('typed into the address bar, a host and port is still a page', () => {
+    assert.equal(normalizeBrowserAddress('localhost:3000'), 'http://localhost:3000')
+    assert.equal(normalizeBrowserAddress('example.com:8080'), 'https://example.com:8080')
+  })
+
+  test('the app asks first, and Android opens it as Chrome does', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const app = await readFile(new URL('../../app/index.tsx', import.meta.url), 'utf8')
+    assert.match(app, /tapped: request\.navigationType === 'click' \|\| request\.hasGesture === true/)
+    assert.match(app, /if \(action\.action === 'load-fallback' && action\.url\) \{\s+if \(isActive\) void loadBrowserUrl\(action\.url\)/)
+    const open = app.slice(app.indexOf('function openExternalAppLink ('), app.indexOf('function launchExternalAppLink ('))
+    // Settings can let mail and the phone open without asking; another app
+    // is always asked about.
+    assert.match(open, /if \(behaviorAction === 'open' && knownLink\) \{/)
+    const launch = app.slice(app.indexOf('function launchExternalAppLink ('), app.indexOf('function offerExternalLinkFallback ('))
+    assert.match(launch, /Platform\.OS === 'android' && !knownLink/)
+    assert.match(launch, /NativeModules\.PeerSkyBrowserData/)
+
+    const client = await readFile(new URL('../../plugins/templates/PeerSkyWebViewClient.kt.template', import.meta.url), 'utf8')
+    assert.match(client, /requestGesture = request\.hasGesture\(\)/)
+    assert.match(client, /requestGesture\?\.let \{ event\.putBoolean\("hasGesture", it\) \}/)
+    const module = await readFile(new URL('../../plugins/templates/PeerSkyBrowserDataModule.kt.template', import.meta.url), 'utf8')
+    const openAppLink = module.slice(module.indexOf('fun openAppLink('), module.indexOf('private fun siteHosts('))
+    assert.match(openAppLink, /Intent\.parseUri\(url, Intent\.URI_INTENT_SCHEME\)/)
+    assert.match(openAppLink, /intent\.addCategory\(Intent\.CATEGORY_BROWSABLE\)/)
+    assert.match(openAppLink, /intent\.component = null/)
+    assert.match(openAppLink, /intent\.selector = null/)
+    assert.match(openAppLink, /intent\.flags = \(intent\.flags and URI_GRANTS\.inv\(\)\)/)
+    assert.match(openAppLink, /intent\.`package` == reactApplicationContext\.packageName/)
+  })
+})

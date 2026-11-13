@@ -1,5 +1,8 @@
 package __PACKAGE_NAME__
 
+import android.content.ActivityNotFoundException
+import android.content.Intent
+import android.net.Uri
 import android.webkit.CookieManager
 import android.webkit.ValueCallback
 import android.webkit.WebStorage
@@ -96,6 +99,40 @@ class PeerSkyBrowserDataModule(
     }
   }
 
+  // Another app's link, once the person tapped it and said Open. It opens as
+  // Chrome opens one: only in an activity that takes links from a browser,
+  // whichever one the link names, with no access to this app's files and
+  // never into this app itself. An intent:// link names what it opens.
+  // Resolves false when no app on the phone takes it.
+  @ReactMethod
+  fun openAppLink(url: String, promise: Promise) {
+    UiThreadUtil.runOnUiThread {
+      try {
+        val intent = if (url.startsWith("intent:", ignoreCase = true)) {
+          Intent.parseUri(url, Intent.URI_INTENT_SCHEME)
+        } else {
+          Intent(Intent.ACTION_VIEW, Uri.parse(url))
+        }
+        intent.addCategory(Intent.CATEGORY_BROWSABLE)
+        intent.component = null
+        intent.selector = null
+        intent.flags = (intent.flags and URI_GRANTS.inv()) or Intent.FLAG_ACTIVITY_NEW_TASK
+        val dataScheme = intent.data?.scheme?.lowercase()
+        if (intent.`package` == reactApplicationContext.packageName || dataScheme == "file" || dataScheme == "content") {
+          promise.resolve(false)
+          return@runOnUiThread
+        }
+        val activity = reactApplicationContext.currentActivity
+        if (activity != null) activity.startActivity(intent) else reactApplicationContext.startActivity(intent)
+        promise.resolve(true)
+      } catch (error: ActivityNotFoundException) {
+        promise.resolve(false)
+      } catch (error: Exception) {
+        promise.reject("ERR_APP_LINK", error.message, error)
+      }
+    }
+  }
+
   private fun siteHosts(hosts: ReadableArray): List<String> {
     val result = LinkedHashSet<String>()
     for (index in 0 until hosts.size()) {
@@ -130,6 +167,10 @@ class PeerSkyBrowserDataModule(
 
   companion object {
     const val NAME = "PeerSkyBrowserData"
+    private const val URI_GRANTS = Intent.FLAG_GRANT_READ_URI_PERMISSION or
+      Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+      Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or
+      Intent.FLAG_GRANT_PREFIX_URI_PERMISSION
     private const val MAX_SITES = 500
     private val HOST = Regex("^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$")
   }
