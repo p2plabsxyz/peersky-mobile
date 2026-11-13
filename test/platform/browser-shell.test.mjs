@@ -11,6 +11,7 @@ import {
   getBrowserRequestAction,
   getBrowserTraversal,
   getHyperSiteId,
+  recordBrowserErrorState,
   getWebSiteId,
   isBridgeSiteId,
   getBrowserWebViewKey,
@@ -940,5 +941,49 @@ describe('a load the app started', () => {
     // Back, Forward and a WebView built again leave nothing of it behind.
     assert.match(app.slice(app.indexOf('function startBrowserWebViewTraversal ('), app.indexOf('function clearBrowserTraversal (')), /browserStartedLoadsRef\.current\.delete\(tabId\)/)
     assert.match(app.slice(app.indexOf('function remountBrowserWebView ('), app.indexOf('function getBrowserWebViewInstanceKey (')), /browserStartedLoadsRef\.current\.delete\(tabId\)/)
+  })
+})
+
+// A link to a site that is not there took the place of the page it was on,
+// and the error page named that page: "could not reach" the page still open.
+describe('a page that would not load', () => {
+  const web = (url) => ({ url, source: { kind: 'web', uri: url } })
+  const error = { kind: 'error', html: '<p>failed</p>' }
+  const page = 'https://example.com/'
+  const dead = 'https://does-not-exist.example/'
+
+  test('is a step of its own after the page a link left', () => {
+    const state = recordBrowserErrorState({ history: [web('https://start.example/'), web(page)], historyIndex: 1 }, dead, error)
+    assert.deepEqual(state.history.map((entry) => entry.url), ['https://start.example/', page, dead])
+    assert.equal(state.history[2].source, error)
+    assert.equal(getBrowserBackState(state).currentUrl, page)
+  })
+
+  test('is the step itself when that step failed', () => {
+    // An address typed, or a reload.
+    const state = recordBrowserErrorState({ history: [web(page), web(dead)], historyIndex: 1 }, dead, error)
+    assert.deepEqual(state.history.map((entry) => entry.url), [page, dead])
+    assert.equal(state.history[1].source, error)
+  })
+
+  test('is the step Back or Forward was going to', () => {
+    const state = recordBrowserErrorState({ history: [web(dead), web(page)], historyIndex: 1 }, dead, error, 'back')
+    assert.equal(state.historyIndex, 0)
+    assert.deepEqual(state.history.map((entry) => entry.url), [dead, page])
+    assert.equal(state.history[0].source, error)
+    assert.equal(state.canGoForward, true)
+  })
+
+  test('names the address that failed, which iOS gives apart', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const patch = await readFile(new URL('../../patches/react-native-webview+13.16.0.patch', import.meta.url), 'utf8')
+    assert.match(patch, /\+ {4}id failingURL = error\.userInfo\[NSURLErrorFailingURLErrorKey\];/)
+    assert.match(patch, /\+ {6}event\[@"failingUrl"\] = failingUrl;/)
+    const app = await readFile(new URL('../../app/index.tsx', import.meta.url), 'utf8')
+    const onError = app.slice(app.indexOf('              onError={(event) => {'), app.indexOf('            />', app.indexOf('              onError={(event) => {')))
+    assert.match(onError, /const failingUrl = \(event\.nativeEvent as \{ failingUrl\?: unknown \}\)\.failingUrl/)
+    assert.match(onError, /const candidateUrl = \(typeof failingUrl === 'string' && failingUrl\) \|\| event\.nativeEvent\.url \|\| entry\.url/)
+    assert.match(onError, /applyBrowserState\(recordBrowserErrorState\(/)
+    assert.doesNotMatch(onError, /replaceBrowserEntry\(failedUrl/)
   })
 })

@@ -307,6 +307,26 @@ function traverseBrowserHistoryState (state, url, source, direction) {
   return buildBrowserState(bounded, bounded.length - 1 - fromEnd)
 }
 
+/**
+ * Where a page that would not load goes in the tab's history. The page on
+ * screen stays a step of its own: a link that failed is the next step, under
+ * the address that failed, where it took the page's place and its name, so
+ * Back went past the page it came from. A failed load of the step itself, as
+ * a reload or an address typed, is that step, and Back or Forward that failed
+ * is the step it was going to.
+ *
+ * @param {'back' | 'forward' | null} direction Back or Forward that was on its way
+ */
+export function recordBrowserErrorState (state, failedUrl, source, direction = null) {
+  if (direction === 'back' || direction === 'forward') {
+    return traverseBrowserHistoryState(state, failedUrl, source, direction)
+  }
+  if (isSameBrowserUrl(state.history[state.historyIndex]?.url, failedUrl)) {
+    return replaceBrowserEntryState(state, failedUrl, source)
+  }
+  return commitBrowserEntryState(state, failedUrl, source)
+}
+
 // The same page, however each side wrote its address.
 function isSameBrowserUrl (a, b) {
   if (typeof a !== 'string' || typeof b !== 'string') return false

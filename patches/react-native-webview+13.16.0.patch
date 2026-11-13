@@ -98,3 +98,23 @@ index 07f73fd..6629ab6 100644
  
          if (ContextCompat.checkSelfPermission(this.mWebView.getThemedReactContext(), Manifest.permission.ACCESS_FINE_LOCATION)
                  != PackageManager.PERMISSION_GRANTED) {
+diff --git a/node_modules/react-native-webview/apple/RNCWebViewImpl.m b/node_modules/react-native-webview/apple/RNCWebViewImpl.m
+index 7f5c24d..ed92427 100644
+--- a/node_modules/react-native-webview/apple/RNCWebViewImpl.m
++++ b/node_modules/react-native-webview/apple/RNCWebViewImpl.m
+@@ -1509,6 +1509,15 @@ - (void)               webView:(WKWebView *)webView
+       @"code": @(error.code),
+       @"description": error.localizedDescription,
+     }];
++    // PeerSky: the address that failed. The event's url is the page still on
++    // screen when a link fails, as the WebView never left it.
++    id failingURL = error.userInfo[NSURLErrorFailingURLErrorKey];
++    NSString *failingUrl = [failingURL isKindOfClass:[NSURL class]]
++      ? [(NSURL *)failingURL absoluteString]
++      : error.userInfo[NSURLErrorFailingURLStringErrorKey];
++    if ([failingUrl isKindOfClass:[NSString class]] && failingUrl.length > 0) {
++      event[@"failingUrl"] = failingUrl;
++    }
+     _onLoadingError(event);
+   }
+ }

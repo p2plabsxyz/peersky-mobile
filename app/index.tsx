@@ -58,6 +58,7 @@ import {
   isWebUrl,
   MAX_BROWSER_URL_LENGTH,
   normalizeBrowserAddress,
+  recordBrowserErrorState,
   recordBrowserWebNavigationState,
   replaceBrowserEntryState,
   settleLateBrowserPageMove
@@ -6801,10 +6802,16 @@ export default function App () {
               }}
               onError={(event) => {
                 if (!isCurrentBrowserTabEntry(browserTabsStateRef.current, tab.id, entry)) return
+                // Back or Forward that failed failed at the page it went to.
+                const direction = browserTraversalsRef.current.get(tab.id)?.direction ?? null
                 clearBrowserTraversal(tab.id)
                 browserStartedLoadsRef.current.delete(tab.id)
 
-                const candidateUrl = event.nativeEvent.url || entry.url
+                // The address that failed. iOS says it apart, as failingUrl
+                // (patches/react-native-webview): its url is the page still on
+                // screen when a link fails, which the error page then named.
+                const failingUrl = (event.nativeEvent as { failingUrl?: unknown }).failingUrl
+                const candidateUrl = (typeof failingUrl === 'string' && failingUrl) || event.nativeEvent.url || entry.url
                 const failedUrl = candidateUrl.length <= MAX_BROWSER_URL_LENGTH
                   ? candidateUrl
                   : entry.url
@@ -6814,11 +6821,34 @@ export default function App () {
                 }
 
                 if (browserTabsStateRef.current.activeTabId === tab.id) {
-                  replaceBrowserEntry(failedUrl, errorSource)
+                  const current = browserTabsStateRef.current.tabs.find((item) => item.id === tab.id)
+                  if (!current) return
+                  applyBrowserState(recordBrowserErrorState(
+                    { history: current.history, historyIndex: current.historyIndex },
+                    failedUrl,
+                    errorSource,
+                    direction
+                  ), tab.id)
                   setBrowserTitle(t('Page failed'))
                   setStatus(event.nativeEvent.description)
                 } else {
-                  updateBackgroundBrowserEntry(tab.id, entry, failedUrl, errorSource, true)
+                  updateBrowserTabsState((state) => {
+                    const background = state.tabs.find((item) => item.id === tab.id)
+                    if (!background || !isCurrentBrowserTabEntry(state, tab.id, entry)) return state
+                    const nextState = recordBrowserErrorState(
+                      { history: background.history, historyIndex: background.historyIndex },
+                      failedUrl,
+                      errorSource,
+                      direction
+                    )
+                    return updateBrowserTabState(state, tab.id, {
+                      title: getBrowserEntryTitle({ url: failedUrl, source: errorSource }),
+                      history: nextState.history,
+                      historyIndex: nextState.historyIndex,
+                      webCanGoBack: false,
+                      webCanGoForward: false
+                    }) as BrowserTabsState
+                  })
                 }
               }}
             />
