@@ -1,8 +1,8 @@
 diff --git a/node_modules/react-native-webview/android/src/main/java/com/reactnativecommunity/webview/RNCWebChromeClient.java b/node_modules/react-native-webview/android/src/main/java/com/reactnativecommunity/webview/RNCWebChromeClient.java
-index 07f73fd..6629ab6 100644
+index 07f73fd..69defc0 100644
 --- a/node_modules/react-native-webview/android/src/main/java/com/reactnativecommunity/webview/RNCWebChromeClient.java
 +++ b/node_modules/react-native-webview/android/src/main/java/com/reactnativecommunity/webview/RNCWebChromeClient.java
-@@ -3,6 +3,7 @@ package com.reactnativecommunity.webview;
+@@ -3,9 +3,12 @@ package com.reactnativecommunity.webview;
  import android.Manifest;
  import android.annotation.TargetApi;
  import android.app.Activity;
@@ -10,7 +10,58 @@ index 07f73fd..6629ab6 100644
  import android.content.pm.PackageManager;
  import android.net.Uri;
  import android.os.Build;
-@@ -142,8 +143,77 @@ public class RNCWebChromeClient extends WebChromeClient implements LifecycleEven
++import android.os.Handler;
++import android.os.Looper;
+ import android.os.Message;
+ import android.view.Gravity;
+ import android.view.View;
+@@ -85,15 +88,31 @@ public class RNCWebChromeClient extends WebChromeClient implements LifecycleEven
+         this.mWebView = webView;
+     }
+ 
++    // PeerSky: the WebView made here only catches the address the new window
++    // goes to, for the app to open in a tab, and is never shown. It is
++    // destroyed once it has that address, or after a minute without one,
++    // where each window.open left one behind for as long as the app ran.
++    private static final long NEW_WINDOW_TIMEOUT_MS = 60000;
++
+     @Override
+     public boolean onCreateWindow(WebView view, boolean isDialog, boolean isUserGesture, Message resultMsg) {
+ 
+         final WebView newWebView = new WebView(view.getContext());
++        final Handler handler = new Handler(Looper.getMainLooper());
++        final boolean[] destroyed = { false };
++        final Runnable destroy = () -> {
++            if (destroyed[0]) return;
++            destroyed[0] = true;
++            handler.removeCallbacksAndMessages(null);
++            newWebView.stopLoading();
++            newWebView.destroy();
++        };
+ 
+         if(mHasOnOpenWindowEvent) {
+             newWebView.setWebViewClient(new WebViewClient(){
+             @Override
+             public boolean shouldOverrideUrlLoading (WebView subview, String url) {
++                if (destroyed[0]) return true;
+                 WritableMap event = Arguments.createMap();
+                 event.putString("targetUrl", url);
+ 
+@@ -102,10 +121,13 @@ public class RNCWebChromeClient extends WebChromeClient implements LifecycleEven
+                     new TopOpenWindowEvent(RNCWebViewWrapper.getReactTagFromWebView(view), event)
+                 );
+ 
++                // Not from inside its own callback.
++                handler.post(destroy);
+                 return true;
+             }
+             });
+         }
++        handler.postDelayed(destroy, NEW_WINDOW_TIMEOUT_MS);
+ 
+         final WebView.WebViewTransport transport = (WebView.WebViewTransport) resultMsg.obj;
+         transport.setWebView(newWebView);
+@@ -142,8 +164,77 @@ public class RNCWebChromeClient extends WebChromeClient implements LifecycleEven
          UIManagerHelper.getEventDispatcherForReactTag(this.mWebView.getThemedReactContext(), reactTag).dispatchEvent(new TopLoadingProgressEvent(reactTag, event));
      }
  
@@ -88,7 +139,7 @@ index 07f73fd..6629ab6 100644
  
          grantedPermissions = new ArrayList<>();
  
-@@ -193,8 +263,7 @@ public class RNCWebChromeClient extends WebChromeClient implements LifecycleEven
+@@ -193,8 +284,7 @@ public class RNCWebChromeClient extends WebChromeClient implements LifecycleEven
      }
  
  

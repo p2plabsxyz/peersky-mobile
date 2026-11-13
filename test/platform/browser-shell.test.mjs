@@ -1120,3 +1120,14 @@ describe('an http:// page', () => {
     }
   })
 })
+
+// react-native-webview made a WebView for every window.open on Android to
+// catch the address, and never let it go.
+test('the WebView Android makes for a new window goes once it has the address', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const patch = await readFile(new URL('../../patches/react-native-webview+13.16.0.patch', import.meta.url), 'utf8')
+  const created = patch.slice(patch.indexOf('public boolean onCreateWindow('))
+  assert.match(created, /\+ {12}newWebView\.destroy\(\);/)
+  assert.match(created, /\+ {16}handler\.post\(destroy\);\n {17}return true;/)
+  assert.match(created, /\+ {8}handler\.postDelayed\(destroy, NEW_WINDOW_TIMEOUT_MS\);/)
+})
