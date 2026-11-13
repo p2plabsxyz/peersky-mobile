@@ -2,7 +2,7 @@
   "expo": {
     "name": "PeerSky",
     "slug": "peersky-mobile",
-    "version": "1.0.1",
+    "version": "1.1.0",
     "orientation": "default",
     "scheme": "peersky",
     "icon": "./assets/images/icon.png",
@@ -10,7 +10,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "xyz.p2plabs.peersky",
-      "buildNumber": "7",
+      "buildNumber": "8",
       "appleTeamId": "PP6D6HB667",
       "entitlements": {
         "com.apple.developer.networking.multicast": true,
@@ -82,7 +82,7 @@
         "backgroundImage": "./assets/app-icons/android/background-cyan.png"
       },
       "package": "xyz.p2plabs.peersky",
-      "versionCode": 6,
+      "versionCode": 7,
       "softwareKeyboardLayoutMode": "resize",
       "permissions": [
         "android.permission.ACCESS_COARSE_LOCATION",
