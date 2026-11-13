@@ -86,7 +86,7 @@ import {
   normalizeBrowserPageZoom,
   normalizeBrowserTabTitle,
   parseRecentlyClosedBrowserTabs,
-  PAUSE_TAB_MEDIA_SCRIPT,
+  createPauseTabMediaScript,
   rememberClosedBrowserTabs,
   reopenClosedBrowserTabState,
   setBrowserTabViewModeState,
@@ -1322,14 +1322,15 @@ export default function App () {
     ))
   }, [browserSource.kind, browserTabsState.activeTabId])
 
-  // The tab you leave stays loaded behind the new one, so its sound stops here
-  // rather than playing on where you cannot see it.
+  // The tab you leave stays loaded behind the new one, so its media is paused
+  // here the way the browser would pause a hidden tab's: its videos, while
+  // its sound plays on.
   const frontBrowserTabIdRef = useRef(browserTabsState.activeTabId)
   useEffect(() => {
     const leftTabId = frontBrowserTabIdRef.current
     frontBrowserTabIdRef.current = browserTabsState.activeTabId
     if (leftTabId === browserTabsState.activeTabId) return
-    browserWebViewRefs.current.get(leftTabId)?.injectJavaScript(PAUSE_TAB_MEDIA_SCRIPT)
+    browserWebViewRefs.current.get(leftTabId)?.injectJavaScript(createPauseTabMediaScript(Platform.OS))
   }, [browserTabsState.activeTabId])
 
   useEffect(() => {
