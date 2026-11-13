@@ -6566,7 +6566,7 @@ export default function App () {
                   : entry.url
                 const errorSource: BrowserSource = {
                   kind: 'error',
-                  html: createBrowserErrorHtml(failedUrl, event.nativeEvent.description, browserIsDark)
+                  html: createBrowserErrorHtml(failedUrl, event.nativeEvent.description, browserIsDark, event.nativeEvent.code)
                 }
 
                 if (browserTabsStateRef.current.activeTabId === tab.id) {
