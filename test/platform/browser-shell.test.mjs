@@ -9,6 +9,7 @@ import {
   getBrowserMessagePageUrl,
   getHyperBridgeSite,
   getBrowserRequestAction,
+  getBrowserTraversal,
   getHyperSiteId,
   getWebSiteId,
   isBridgeSiteId,
@@ -698,7 +699,7 @@ test('a link on the first page in a tab keeps that page behind it on iOS', async
   const change = app.slice(start, app.indexOf('onMessage={(event) => {', start))
   assert.match(change, /const loading = navigationState\.loading \|\|\s+\(Platform\.OS === 'ios' && browserLoadStartsRef\.current\.has\(navigationState\)\)/)
   assert.doesNotMatch(change, /navigationState\.loading(?! \|\|)/)
-  assert.match(change, /canGoForward: navigationState\.canGoForward,\s+loading\s+\}, tab\.id, pageMove\)/)
+  assert.match(change, /canGoForward: navigationState\.canGoForward,\s+loading\s+\}, tab\.id, pageMove, traversal\)/)
 })
 
 // Android sends a page that moves on its own (history.pushState: a video
@@ -718,4 +719,182 @@ test('a page that moves on its own is a step back on Android', () => {
   state = recordBrowserWebNavigationState(state, video, web(video), null, true, false)
   assert.deepEqual(state.history.map((entry) => entry.url), [BROWSER_HOME_URL, youtube, video])
   assert.equal(getBrowserBackState(state).currentUrl, youtube)
+})
+
+// Back and Forward loaded the page again in a new WebView every time, so a
+// page came back at the top, with what was typed in it gone, its own history
+// gone and a form's result posted again. Safari and Chrome bring the page back
+// as it was left. The tab's WebView does that when it has the page.
+describe('Back and Forward in the tab\'s own WebView', () => {
+  const VIEW = 41
+  const page = (url, view = VIEW) => ({ url, source: { kind: 'web', uri: url, ...(view === null ? {} : { view }) } })
+  const home = { url: BROWSER_HOME_URL, source: { kind: 'home' } }
+  const hyper = { url: 'hyper://site/', source: { kind: 'restore', url: 'hyper://site/' } }
+  const A = 'https://example.com/a'
+  const B = 'https://example.com/b'
+  const C = 'https://example.com/c'
+  const said = (canGoBack = false, canGoForward = false, view = VIEW) => ({ view, canGoBack, canGoForward })
+
+  test('steps in the WebView to a page it showed', () => {
+    const state = { history: [home, page(A), page(B), page(C)], historyIndex: 2 }
+    assert.deepEqual(getBrowserTraversal(state, 'back', said()), { mode: 'webview' })
+    assert.deepEqual(getBrowserTraversal(state, 'forward', said()), { mode: 'webview' })
+  })
+
+  test('builds the page again when the WebView never had it', () => {
+    // After a restart the steps are there and the WebView is new: none of
+    // them came from it.
+    const restored = { history: [page(A, null), page(B, null), page(C)], historyIndex: 2 }
+    const back = getBrowserTraversal(restored, 'back', said())
+    assert.equal(back.mode, 'rebuild')
+    assert.equal(back.state.currentUrl, B)
+    // A WebView built again since, for a step built again or a hyper:// page
+    // in between, is another WebView with a list of its own.
+    const rebuilt = { history: [page(A, 7), page(B, 7), page(C)], historyIndex: 1 }
+    assert.equal(getBrowserTraversal({ ...rebuilt, historyIndex: 2 }, 'back', said()).mode, 'rebuild')
+    // Home, a hyper:// site and a page of the app's own are never in it.
+    assert.equal(getBrowserTraversal({ history: [home, page(A)], historyIndex: 1 }, 'back', said()).mode, 'rebuild')
+    assert.equal(getBrowserTraversal({ history: [hyper, page(A)], historyIndex: 1 }, 'back', said()).mode, 'rebuild')
+    assert.equal(getBrowserTraversal({ history: [page(A), hyper], historyIndex: 1 }, 'back', said(true)).mode, 'rebuild')
+    // A WebView that has said nothing yet, or another tab's, has nothing.
+    assert.equal(getBrowserTraversal({ history: [page(A), page(B)], historyIndex: 1 }, 'back', null).mode, 'rebuild')
+    assert.equal(getBrowserTraversal({ history: [page(A), page(B)], historyIndex: 1 }, 'back', said(true, false, 9)).mode, 'rebuild')
+    assert.equal(getBrowserTraversal({ history: [page(A, null), page(B, null)], historyIndex: 1 }, 'back', said(true, false, null)).mode, 'rebuild')
+    // Nowhere to go at all.
+    assert.equal(getBrowserTraversal({ history: [page(A)], historyIndex: 0 }, 'back', said()), null)
+  })
+
+  test('takes the WebView\'s yes for a step only it has', () => {
+    // A menu a page opened under its own address: the tab kept one step, the
+    // WebView two, and Back closes the menu.
+    const state = { history: [home, page(A)], historyIndex: 1 }
+    assert.deepEqual(getBrowserTraversal(state, 'back', said(true)), { mode: 'webview' })
+    assert.deepEqual(getBrowserTraversal({ history: [hyper, page(A)], historyIndex: 1 }, 'back', said(true)), { mode: 'webview' })
+    // Its no is not believed over the tab on iOS: WKWebView has said it
+    // cannot go forward with a page ahead of it. Android's is.
+    assert.deepEqual(getBrowserTraversal({ history: [page(A), page(B)], historyIndex: 0 }, 'forward', said(false, false)), { mode: 'webview' })
+    const believed = getBrowserTraversal({ history: [page(A), page(B)], historyIndex: 0 }, 'forward', said(false, false), true)
+    assert.equal(believed.mode, 'rebuild')
+    assert.equal(believed.state.currentUrl, B)
+  })
+
+  test('lands on the page the WebView went to, past steps it did not keep', () => {
+    // A page that sent the tab on before it loaded stayed a step in the tab,
+    // and the WebView, like Safari, went past it.
+    const state = { history: [page(A), page('https://example.com/refresh'), page(C)], historyIndex: 2 }
+    const back = recordBrowserWebNavigationState(state, A, { kind: 'web', uri: A, view: VIEW }, 'back')
+    assert.equal(back.historyIndex, 0)
+    assert.equal(back.history.length, 3)
+    assert.equal(back.history[2].url, C)
+    const forward = recordBrowserWebNavigationState(back, C, { kind: 'web', uri: C, view: VIEW }, 'forward')
+    assert.equal(forward.historyIndex, 2)
+    assert.equal(forward.history.length, 3)
+  })
+
+  test('takes the address as the WebView has it', () => {
+    // Typed without its slash: handed to the WebView as it was, it would go
+    // there again as a new page.
+    const state = { history: [page('https://example.com', null), page(B)], historyIndex: 1 }
+    const back = recordBrowserWebNavigationState(state, 'https://example.com/', { kind: 'web', uri: 'https://example.com/', view: VIEW }, 'back')
+    assert.equal(back.historyIndex, 0)
+    assert.deepEqual(back.history[0], { url: 'https://example.com/', source: { kind: 'web', uri: 'https://example.com/', view: VIEW } })
+    // The same page as it was stays the same step.
+    const same = { history: [page(A), page(B)], historyIndex: 1 }
+    assert.equal(recordBrowserWebNavigationState(same, A, page(A).source, 'back').history[0], same.history[0])
+  })
+
+  test('puts a page only the WebView kept next to the step it came from', () => {
+    const back = recordBrowserWebNavigationState({ history: [page(A), page(C)], historyIndex: 1 }, B, page(B).source, 'back')
+    assert.deepEqual(back.history.map((entry) => entry.url), [A, B, C])
+    assert.equal(back.historyIndex, 1)
+    const forward = recordBrowserWebNavigationState({ history: [page(A), page(C)], historyIndex: 0 }, B, page(B).source, 'forward')
+    assert.deepEqual(forward.history.map((entry) => entry.url), [A, B, C])
+    assert.equal(forward.historyIndex, 1)
+    // The WebView's list starts after the tab's last page that was not on
+    // the web, so an older step with the address is not the one, and nor is
+    // one another WebView showed.
+    const across = recordBrowserWebNavigationState({ history: [page(A), hyper, page(C)], historyIndex: 2 }, A, page(A).source, 'back')
+    assert.deepEqual(across.history.map((entry) => entry.url), [A, 'hyper://site/', A, C])
+    assert.equal(across.historyIndex, 2)
+    const other = recordBrowserWebNavigationState({ history: [page(A, 9), page(C)], historyIndex: 1 }, A, page(A).source, 'back')
+    assert.deepEqual(other.history.map((entry) => [entry.url, entry.source.view]), [[A, 9], [A, VIEW], [C, VIEW]])
+    assert.equal(other.historyIndex, 1)
+  })
+
+  test('a step back to the same address closes what the page opened, and stays', () => {
+    const state = { history: [home, page(A)], historyIndex: 1 }
+    const back = recordBrowserWebNavigationState(state, A, page(A).source, 'back')
+    assert.equal(back.historyIndex, 1)
+    assert.equal(back.history.length, 2)
+  })
+
+  test('keeps to the bound, dropping the step furthest from the new one', () => {
+    let history = [home]
+    for (let index = 1; index < MAX_BROWSER_HISTORY_ENTRIES; index++) history.push(page(`https://example.com/${index}`))
+    const back = recordBrowserWebNavigationState({ history, historyIndex: 1 }, 'https://example.com/0', page('https://example.com/0').source, 'back')
+    assert.equal(back.history.length, MAX_BROWSER_HISTORY_ENTRIES)
+    assert.equal(back.historyIndex, 1)
+    assert.equal(back.currentUrl, 'https://example.com/0')
+    assert.equal(back.history.at(-1).url, `https://example.com/${MAX_BROWSER_HISTORY_ENTRIES - 2}`)
+
+    history = [home]
+    for (let index = 1; index < MAX_BROWSER_HISTORY_ENTRIES; index++) history.push(page(`https://example.com/${index}`))
+    const forward = recordBrowserWebNavigationState({ history, historyIndex: history.length - 1 }, 'https://example.com/next', page('https://example.com/next').source, 'forward')
+    assert.equal(forward.history.length, MAX_BROWSER_HISTORY_ENTRIES)
+    assert.equal(forward.currentUrl, 'https://example.com/next')
+    assert.equal(forward.history[0].url, BROWSER_HOME_URL)
+    assert.equal(forward.historyIndex, MAX_BROWSER_HISTORY_ENTRIES - 1)
+  })
+
+  test('the app steps in the WebView and keeps the tab in step with it', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const app = await readFile(new URL('../../app/index.tsx', import.meta.url), 'utf8')
+    const body = (name) => app.slice(app.indexOf(`function ${name} (`), app.indexOf('\n  }\n', app.indexOf(`function ${name} (`)))
+    for (const [name, direction] of [['onBrowserBack', 'back'], ['onBrowserForward', 'forward']]) {
+      const step = body(name)
+      assert.match(step, new RegExp(`if \\(queueBrowserStep\\(tabId, '${direction}'\\)\\) return`))
+      assert.match(step, new RegExp(`getBrowserTraversal\\([\\s\\S]*?'${direction}',\\s+getLiveBrowserWebHistory\\(tabId\\),[^\\n]*\\n[^\\n]*\\n\\s+Platform\\.OS === 'android'`))
+      assert.match(step, new RegExp(`traversal\\?\\.mode === 'webview' && startBrowserWebViewTraversal\\(tabId, '${direction}'\\)`))
+      assert.match(step, /rebuildBrowserStep\(tabId, /)
+      assert.doesNotMatch(step, /remountBrowserWebView\(/)
+    }
+    // Only a step built again gets a new WebView.
+    assert.match(body('rebuildBrowserStep'), /remountBrowserWebView\(tabId\)/)
+    const start = body('startBrowserWebViewTraversal')
+    assert.match(start, /if \(direction === 'back'\) webView\.goBack\(\)\s+else webView\.goForward\(\)/)
+    assert.match(start, /setTimeout\(\(\) => \{[\s\S]*?traversal\.moved\) return[\s\S]*?rebuildBrowserStep\(/)
+    // Where it went comes from the WebView, with the WebView it was seen in.
+    const change = app.slice(app.indexOf('onNavigationStateChange={(navigationState) => {'), app.indexOf('onMessage={(event) => {', app.indexOf('onNavigationStateChange={(navigationState) => {')))
+    assert.match(change, /const view = getNativeViewTag\(\{ nativeEvent: navigationState \}\)\s+browserWebHistoryRef\.current\.set\(tab\.id, \{\s+key: webViewKey,\s+view,/)
+    assert.match(change, /const traversal = takeBrowserTraversal\(tab\.id, webViewGeneration, loading\)/)
+    assert.match(change, /uri: navigationState\.url,\s+\.\.\.\(view !== null \? \{ view \} : \{\}\)/)
+    assert.match(change, /syncBackgroundBrowserTab\(tab\.id, entry, navigationState, pageMove, traversal\)/)
+    // The WebView is known by the key it is drawn with.
+    assert.match(app, /const webViewKey = getBrowserWebViewInstanceKey\(tab, entry, webViewGeneration\)/)
+    assert.match(app, /<WebView\s+key=\{webViewKey\}/)
+    assert.match(body('getLiveBrowserWebHistory'), /record\.key === getBrowserWebViewInstanceKey\(tab, entry, generation\)/)
+    // A step only the WebView has can be taken too.
+    assert.match(app, /const canBrowserGoBack = browserCanGoBack \|\| activeBrowserWebHistory\?\.canGoBack === true/)
+  })
+
+  // WebKit ends a page Back brings back from its cache in another process
+  // with a cancelled load, and react-native-webview said nothing of it: the
+  // page was back and the app still named the one left.
+  test('on iOS a page that fails once it is on screen is heard as finished', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const template = await readFile(new URL('../../plugins/templates/PeerSkyWebViewManager.m.template', import.meta.url), 'utf8')
+    assert.match(template, /- \(void\)webView:\(WKWebView \*\)webView didFailNavigation:\(WKNavigation \*\)navigation withError:\(NSError \*\)error\n\{\n {2}if \(self\.onLoadingFinish\) self\.onLoadingFinish\(\[self baseEvent\]\);\n\}/)
+  })
+
+  test('a page\'s WebView is never saved with its tab', async () => {
+    const { restoreBrowserTabsState, serializeBrowserTabsState } = await import('../../app/browser-tabs.mjs')
+    const state = {
+      tabs: [{ id: 'tab-1', title: 'A', desktopView: false, history: [page(A), page(B)], historyIndex: 1, pageZoom: 100, webCanGoBack: true, webCanGoForward: false }],
+      activeTabId: 'tab-1',
+      nextTabIndex: 2,
+      viewMode: 'grid'
+    }
+    const restored = restoreBrowserTabsState(serializeBrowserTabsState(state))
+    assert.deepEqual(restored.tabs[0].history.map((entry) => entry.source), [{ kind: 'web', uri: A }, { kind: 'web', uri: B }])
+  })
 })

@@ -49,6 +49,7 @@ import {
   getBrowserMessagePageUrl,
   getHyperBridgeSite,
   getBrowserRequestAction,
+  getBrowserTraversal,
   getBrowserWebViewKey,
   getSearchUrl,
   isHyperUrl,
@@ -447,7 +448,10 @@ type BrowserSource =
   | { kind: 'home' }
   | { kind: 'p2p' }
   | { kind: 'app', app: RuntimeTab }
-  | { kind: 'web', uri: string }
+  // view: the native tag of the WebView the page was seen in, which is the
+  // WebView that can go back or forward to it (browser-shell.mjs,
+  // getBrowserTraversal). Never saved: a WebView does not outlive the app.
+  | { kind: 'web', uri: string, view?: number }
   // private: from a private drive, so no picture of it is kept for the tab list.
   | { kind: 'hyper', html: string, baseUrl: string, private?: boolean }
   // A hyper:// folder's Files, Photos or Videos view, under its
@@ -525,6 +529,37 @@ const DOCUMENT_PAGE_MOVE_TTL_MS = 30000
 const LATE_PAGE_MOVE_MS = 1500
 const MAX_PENDING_PAGE_MOVES = 8
 
+// Back or Forward asked of a tab's WebView, until the WebView says where it
+// went. One that has not moved at all by BROWSER_TRAVERSAL_FALLBACK_MS never
+// will, and the step is built again from the tab's history instead. One that
+// started but never landed is let go after BROWSER_TRAVERSAL_TTL_MS, so it
+// can't be taken for whatever the page does next. Presses that come before it
+// lands wait in queued, and go once it has: asked for at once, a second step
+// started before the tab drew the first, and the WebView loaded the first
+// page again over it as a new one.
+type BrowserTraversal = {
+  direction: 'back' | 'forward'
+  generation: number
+  startedAt: number
+  moved: boolean
+  // Android: the WebView has the page now. A link the page started before
+  // that came from the page being left.
+  started: boolean
+  queued: Array<'back' | 'forward'>
+  timer: ReturnType<typeof setTimeout> | null
+}
+const BROWSER_TRAVERSAL_FALLBACK_MS = 2500
+const BROWSER_TRAVERSAL_TTL_MS = 60000
+
+// A tab's WebView: its key and native tag, which no WebView built since
+// shares, and what it last said it can go back or forward to.
+type BrowserWebHistory = {
+  key: string
+  view: number | null
+  canGoBack: boolean
+  canGoForward: boolean
+}
+
 const DESKTOP_BROWSER_USER_AGENT = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 PeerSkyMobile/1.0'
 export default function App () {
   // Every screen hangs off this one, so a new language re-renders them all.
@@ -558,6 +593,11 @@ export default function App () {
   // that page back.
   const browserPageMovesRef = useRef(new Map<string, BrowserPageMove[]>())
   const browserAddedPagesRef = useRef(new Map<string, { url: string, index: number, at: number }>())
+  const browserWebHistoryRef = useRef(new Map<string, BrowserWebHistory>())
+  const browserTraversalsRef = useRef(new Map<string, BrowserTraversal>())
+  // Back and Forward pressed while one was on its way, by tab, for once the
+  // tab has drawn the step it landed on.
+  const browserQueuedStepsRef = useRef(new Map<string, Array<'back' | 'forward'>>())
   const browserIncognitoSessionRef = useRef<string | null>(null)
   const p2pmdWebViewRef = useRef<ComponentRef<typeof WebView> | null>(null)
   const p2pmdPublishInFlightRef = useRef(false)
@@ -1348,6 +1388,10 @@ export default function App () {
       state,
       browserLiveTabIds
     ) as BrowserTabsState)
+    // A tab no longer kept loaded has lost its WebView, and its back list.
+    for (const tabId of [...browserWebHistoryRef.current.keys()]) {
+      if (!browserLiveTabIds.includes(tabId)) browserWebHistoryRef.current.delete(tabId)
+    }
   }, [browserLiveTabIds])
 
   useEffect(() => {
@@ -1458,7 +1502,8 @@ export default function App () {
     source: BrowserSource,
     webNavigation?: { canGoBack: boolean, canGoForward: boolean, loading?: boolean },
     tabId?: string,
-    pageMove: BrowserPageMoveKind | null = null
+    pageMove: BrowserPageMoveKind | null = null,
+    traversal: BrowserTraversal['direction'] | null = null
   ) {
     const targetTabId = tabId || browserTabsStateRef.current.activeTabId
     const targetTab = browserTabsStateRef.current.tabs.find((tab) => tab.id === targetTabId)
@@ -1469,7 +1514,7 @@ export default function App () {
       before,
       url,
       source,
-      null,
+      traversal,
       webNavigation?.canGoBack,
       webNavigation?.loading,
       pageMove
@@ -1635,7 +1680,8 @@ export default function App () {
       canGoBack: boolean
       canGoForward: boolean
     },
-    pageMove: BrowserPageMoveKind | null = null
+    pageMove: BrowserPageMoveKind | null = null,
+    traversal: BrowserTraversal['direction'] | null = null
   ) {
     if (!isWebUrl(navigationState.url) || navigationState.url.length > MAX_BROWSER_URL_LENGTH) return
 
@@ -1644,11 +1690,12 @@ export default function App () {
       if (!tab || !isCurrentBrowserTabEntry(state, tabId, expectedEntry)) return state
 
       const before = { history: tab.history, historyIndex: tab.historyIndex }
+      const view = getNativeViewTag({ nativeEvent: navigationState })
       const nextState = recordBrowserWebNavigationState(
         before,
         navigationState.url,
-        { kind: 'web', uri: navigationState.url },
-        null,
+        { kind: 'web', uri: navigationState.url, ...(view !== null ? { view } : {}) },
+        traversal,
         true,
         false,
         pageMove
@@ -1706,8 +1753,10 @@ export default function App () {
 
   async function loadBrowserUrl (rawUrl: string) {
     browserUserInteractedRef.current = true
-    // What the last page said about its address is no use to the next one.
+    // What the last page said about its address is no use to the next one,
+    // and nor is a Back or Forward still on its way.
     browserPageMovesRef.current.delete(browserTabsStateRef.current.activeTabId)
+    clearBrowserTraversal(browserTabsStateRef.current.activeTabId)
     const nextUrl = normalizeBrowserAddress(
       rawUrl,
       browserPreferences.searchEngine,
@@ -2188,17 +2237,21 @@ export default function App () {
     const currentEntry = activeBrowserTab?.history[activeBrowserTab.historyIndex]
     if (!activeBrowserTab || !currentEntry) return
 
-    const nextState = getBrowserBackState({
-      history: activeBrowserTab.history,
-      historyIndex: activeBrowserTab.historyIndex
-    })
+    if (queueBrowserStep(tabId, 'back')) return
+
+    const traversal = getBrowserTraversal(
+      { history: activeBrowserTab.history, historyIndex: activeBrowserTab.historyIndex },
+      'back',
+      getLiveBrowserWebHistory(tabId),
+      // Android's WebView says rightly when it cannot go there.
+      Platform.OS === 'android'
+    )
     const stepBack = () => {
-      if (!nextState) return
-      const entry = nextState.history[nextState.historyIndex]
-      remountBrowserWebView(tabId)
-      applyBrowserState(nextState)
-      setBrowserTitle(getBrowserEntryTitle(entry))
-      setActiveTab(entry.source.kind === 'app' ? entry.source.app : 'hyper')
+      if (traversal?.mode === 'webview' && startBrowserWebViewTraversal(tabId, 'back')) return
+      const nextState = traversal?.mode === 'rebuild'
+        ? traversal.state
+        : getBrowserBackState({ history: activeBrowserTab.history, historyIndex: activeBrowserTab.historyIndex })
+      if (nextState) rebuildBrowserStep(tabId, nextState)
     }
 
     // Settings, Bookmarks and History are sheets over the tab, not entries in
@@ -2375,6 +2428,111 @@ export default function App () {
     const generation = (browserWebViewGenerationsRef.current.get(tabId) || 0) + 1
     browserWebViewGenerationsRef.current.set(tabId, generation)
     setBrowserWebViewGenerations((current) => ({ ...current, [tabId]: generation }))
+    // The new WebView has a list of its own, empty, and nothing it was asked.
+    browserWebHistoryRef.current.delete(tabId)
+    clearBrowserTraversal(tabId)
+  }
+
+  // The WebView key a tab's step is shown with. A WebView built under another
+  // key, for another kind of page, a new desktop view setting, new blocking
+  // rules or a step built again, is a new WebView with an empty back list.
+  function getBrowserWebViewInstanceKey (tab: BrowserTab, entry: BrowserHistoryEntry, generation: number) {
+    return `${getBrowserWebViewKey(tab.id, entry.source.kind)}:${tab.desktopView === true ? 'desktop' : 'mobile'}:${contentBlockingGeneration}:${generation}`
+  }
+
+  // What the tab's WebView on screen said it can go back or forward to, or
+  // null when that WebView has said nothing yet.
+  function getLiveBrowserWebHistory (tabId: string) {
+    const record = browserWebHistoryRef.current.get(tabId)
+    const tab = browserTabsStateRef.current.tabs.find((item) => item.id === tabId)
+    const entry = tab?.history[tab.historyIndex]
+    if (!record || !tab || !entry || !browserWebViewRefs.current.has(tabId)) return null
+    const generation = browserWebViewGenerationsRef.current.get(tabId) || 0
+    return record.key === getBrowserWebViewInstanceKey(tab, entry, generation) ? record : null
+  }
+
+  // A step built again from the tab's history, in a new WebView, which loads
+  // its page as new. For anything the WebView on screen does not have.
+  function rebuildBrowserStep (tabId: string, nextState: ReturnType<typeof getBrowserBackState>) {
+    if (!nextState) return
+    const entry = nextState.history[nextState.historyIndex]
+    remountBrowserWebView(tabId)
+    applyBrowserState({ ...nextState, webCanGoBack: false, webCanGoForward: false }, tabId)
+    setBrowserTitle(getBrowserEntryTitle(entry))
+    setActiveTab(entry.source.kind === 'app' ? entry.source.app : 'hyper')
+  }
+
+  // Back or Forward in the tab's own WebView, which has the page as it was
+  // left. The tab's history moves when the WebView says where it went, in
+  // onNavigationStateChange. A WebView that does not move at all never had
+  // the page, and the step is built again after all.
+  function startBrowserWebViewTraversal (tabId: string, direction: BrowserTraversal['direction']) {
+    const webView = browserWebViewRefs.current.get(tabId)
+    if (!webView) return false
+    clearBrowserTraversal(tabId)
+    const traversal: BrowserTraversal = {
+      direction,
+      generation: browserWebViewGenerationsRef.current.get(tabId) || 0,
+      startedAt: Date.now(),
+      moved: false,
+      started: false,
+      queued: [],
+      timer: null
+    }
+    traversal.timer = setTimeout(() => {
+      if (browserTraversalsRef.current.get(tabId) !== traversal || traversal.moved) return
+      browserTraversalsRef.current.delete(tabId)
+      browserWebHistoryRef.current.delete(tabId)
+      const tab = browserTabsStateRef.current.tabs.find((item) => item.id === tabId)
+      if (!tab || browserTabsStateRef.current.activeTabId !== tabId) return
+      const state = { history: tab.history, historyIndex: tab.historyIndex }
+      rebuildBrowserStep(tabId, direction === 'back' ? getBrowserBackState(state) : getBrowserForwardState(state))
+    }, BROWSER_TRAVERSAL_FALLBACK_MS)
+    browserTraversalsRef.current.set(tabId, traversal)
+    if (direction === 'back') webView.goBack()
+    else webView.goForward()
+    return true
+  }
+
+  // Let go of a Back or Forward on its way, and of any pressed after it.
+  function clearBrowserTraversal (tabId: string) {
+    const traversal = browserTraversalsRef.current.get(tabId)
+    if (traversal?.timer) clearTimeout(traversal.timer)
+    browserTraversalsRef.current.delete(tabId)
+    browserQueuedStepsRef.current.delete(tabId)
+  }
+
+  // A press while a step is on its way waits for it.
+  function queueBrowserStep (tabId: string, direction: BrowserTraversal['direction']) {
+    const traversal = browserTraversalsRef.current.get(tabId)
+    if (!traversal || Date.now() - traversal.startedAt > BROWSER_TRAVERSAL_TTL_MS) return false
+    traversal.queued.push(direction)
+    return true
+  }
+
+  // The Back or Forward this tab's WebView was asked for, once its page has
+  // landed: the report that says where it went. A page on its way only says
+  // the WebView moved. Presses that waited for it go once the tab has drawn
+  // where it landed.
+  function takeBrowserTraversal (tabId: string, generation: number, loading: boolean) {
+    const traversal = browserTraversalsRef.current.get(tabId)
+    if (!traversal) return null
+    if (traversal.generation !== generation || Date.now() - traversal.startedAt > BROWSER_TRAVERSAL_TTL_MS) {
+      clearBrowserTraversal(tabId)
+      return null
+    }
+    traversal.moved = true
+    if (loading) return null
+    clearBrowserTraversal(tabId)
+    if (traversal.queued.length > 0) browserQueuedStepsRef.current.set(tabId, traversal.queued)
+    return traversal.direction
+  }
+
+  function noteBrowserTraversalMoved (tabId: string, started = false) {
+    const traversal = browserTraversalsRef.current.get(tabId)
+    if (!traversal) return
+    traversal.moved = true
+    if (started) traversal.started = true
   }
 
   function onBrowserForward () {
@@ -2388,17 +2546,19 @@ export default function App () {
     const currentEntry = activeBrowserTab?.history[activeBrowserTab.historyIndex]
     if (!activeBrowserTab || !currentEntry) return
 
-    const nextState = getBrowserForwardState({
-      history: activeBrowserTab.history,
-      historyIndex: activeBrowserTab.historyIndex
-    })
-    if (!nextState) return
+    if (queueBrowserStep(tabId, 'forward')) return
 
-    const entry = nextState.history[nextState.historyIndex]
-    remountBrowserWebView(tabId)
-    applyBrowserState(nextState)
-    setBrowserTitle(getBrowserEntryTitle(entry))
-    setActiveTab(entry.source.kind === 'app' ? entry.source.app : 'hyper')
+    const traversal = getBrowserTraversal(
+      { history: activeBrowserTab.history, historyIndex: activeBrowserTab.historyIndex },
+      'forward',
+      getLiveBrowserWebHistory(tabId),
+      // Android's WebView says rightly when it cannot go there.
+      Platform.OS === 'android'
+    )
+    if (traversal?.mode === 'webview' && startBrowserWebViewTraversal(tabId, 'forward')) return
+    rebuildBrowserStep(tabId, traversal?.mode === 'rebuild'
+      ? traversal.state
+      : getBrowserForwardState({ history: activeBrowserTab.history, historyIndex: activeBrowserTab.historyIndex }))
   }
 
   function onBrowserReload () {
@@ -3025,6 +3185,8 @@ export default function App () {
     browserMediaTokensRef.current.delete(tabId)
     browserPageMovesRef.current.delete(tabId)
     browserAddedPagesRef.current.delete(tabId)
+    browserWebHistoryRef.current.delete(tabId)
+    clearBrowserTraversal(tabId)
     browserTabOpenersRef.current.delete(tabId)
     hyperBridgePendingRef.current.delete(tabId)
     browserWebViewGenerationsRef.current.delete(tabId)
@@ -3163,6 +3325,8 @@ export default function App () {
     browserWebViewGenerationsRef.current.clear()
     browserPageMovesRef.current.clear()
     browserAddedPagesRef.current.clear()
+    browserWebHistoryRef.current.clear()
+    for (const id of [...browserTraversalsRef.current.keys()]) clearBrowserTraversal(id)
     setBrowserWebViewGenerations({})
     updateBrowserTabsState(nextState)
     const previewCacheCleared = clearPreviews
@@ -3312,6 +3476,20 @@ export default function App () {
       (browserWebViewGenerationsRef.current.get(tabId) || 0) !== webViewGeneration ||
       !isCurrentBrowserTabEntry(browserTabsStateRef.current, tabId, expectedEntry)
     ) return false
+
+    // A link or a form the person used while Back or Forward was on its way
+    // takes its place, as in Safari. iOS names the kind of navigation, and a
+    // page sending itself on can be the page Back went to. Android names
+    // none, and tells no navigation of Back or Forward here, so one from a
+    // page before Back's page is there came from the page being left.
+    const traversal = browserTraversalsRef.current.get(tabId)
+    if (
+      traversal &&
+      request.isTopFrame !== false &&
+      (Platform.OS === 'android'
+        ? !traversal.started
+        : ['click', 'formsubmit', 'formresubmit', 'reload'].includes(request.navigationType || ''))
+    ) clearBrowserTraversal(tabId)
 
     const action = getBrowserRequestAction({
       requestUrl: request.url,
@@ -4400,8 +4578,12 @@ export default function App () {
   // The Hyperdrive viewer's own folders come first, as a page's history does.
   const driveViewerCanGoBack = browserSource.kind === 'viewer' && driveViewerHistory.canGoBack
   const driveViewerCanGoForward = browserSource.kind === 'viewer' && driveViewerHistory.canGoForward
-  const canBrowserGoBack = browserCanGoBack
-  const canBrowserGoForward = browserCanGoForward || driveViewerCanGoForward
+  // A web page's WebView can have more behind or ahead of it than the tab
+  // keeps, such as a menu a page opened under its own address, which Back
+  // closes in Safari and Chrome.
+  const activeBrowserWebHistory = getLiveBrowserWebHistory(browserTabsState.activeTabId)
+  const canBrowserGoBack = browserCanGoBack || activeBrowserWebHistory?.canGoBack === true
+  const canBrowserGoForward = browserCanGoForward || driveViewerCanGoForward || activeBrowserWebHistory?.canGoForward === true
   const browserIncognitoSession = getBrowserIncognitoSession(browserTabsState.tabs)
   const browserIsDark = resolveBrowserDarkMode(browserPreferences.theme, systemColorScheme)
   // What browser://theme/ answers in the tabs (browser-theme.mjs), made again
@@ -4684,6 +4866,22 @@ export default function App () {
     browserZoomVisible,
     canBrowserGoBack
   ])
+
+  // A Back or Forward pressed while the last one was on its way goes now that
+  // the tab has drawn the step it landed on.
+  useEffect(() => {
+    const tabId = browserTabsState.activeTabId
+    const queued = browserQueuedStepsRef.current.get(tabId)
+    if (!queued?.length || browserTraversalsRef.current.has(tabId)) return
+    browserQueuedStepsRef.current.delete(tabId)
+    const [direction, ...rest] = queued
+    if (direction === 'back') onBrowserBack()
+    else onBrowserForward()
+    if (rest.length === 0) return
+    const traversal = browserTraversalsRef.current.get(tabId)
+    if (traversal) traversal.queued.push(...rest)
+    else browserQueuedStepsRef.current.set(tabId, rest)
+  }, [browserHistory, browserHistoryIndex, browserTabsState.activeTabId])
 
   // Before every other screen. Link Device lives in Settings, and when this
   // came after the Settings screen the restart screen never showed: the old
@@ -6250,6 +6448,7 @@ export default function App () {
           )
 
           const webViewGeneration = browserWebViewGenerations[tab.id] || 0
+          const webViewKey = getBrowserWebViewInstanceKey(tab, entry, webViewGeneration)
 
           // On iOS a tab behind another is moved out of sight, not set to
           // display: 'none'. Hidden that way, its WebView was taken down and
@@ -6279,7 +6478,7 @@ export default function App () {
               style={styles.browserWebViewCapture}
             >
             <WebView
-              key={`${getBrowserWebViewKey(tab.id, entry.source.kind)}:${tabDesktopView ? 'desktop' : 'mobile'}:${contentBlockingGeneration}:${webViewGeneration}`}
+              key={webViewKey}
               ref={(ref) => {
                 if (ref) {
                   browserWebViewRefs.current.set(tab.id, ref)
@@ -6355,6 +6554,7 @@ export default function App () {
               onScroll={isKeyboardVisible ? onBrowserPageScroll : undefined}
               onLoadStart={(event) => {
                 browserLoadStartsRef.current.add(event.nativeEvent)
+                noteBrowserTraversalMoved(tab.id, true)
                 const startTag = getNativeViewTag(event)
                 if (startTag !== null) browserWebViewTabsRef.current.set(startTag, tab.id)
                 // Android starts a load only for a navigation that committed.
@@ -6379,6 +6579,9 @@ export default function App () {
               onLoadProgress={(event) => {
                 if (browserTabsStateRef.current.activeTabId !== tab.id) return
                 const progress = Math.min(1, event.nativeEvent.progress)
+                // Android says nothing else of a step back until its page
+                // answers, which can take a while.
+                if (progress < 1) noteBrowserTraversalMoved(tab.id)
                 // Android's WebView tells the start of a load only once the
                 // server answers, so a slow site showed nothing for seconds
                 // after Go. Its progress starts at once, and is what says it.
@@ -6411,6 +6614,14 @@ export default function App () {
                 if (entry.source.kind !== 'web') return
                 if (!isCurrentBrowserTabEntry(browserTabsStateRef.current, tab.id, entry)) return
                 if (!isWebUrl(navigationState.url) || navigationState.url.length > MAX_BROWSER_URL_LENGTH) return
+                // Which WebView this is, so Back and Forward can step in it.
+                const view = getNativeViewTag({ nativeEvent: navigationState })
+                browserWebHistoryRef.current.set(tab.id, {
+                  key: webViewKey,
+                  view,
+                  canGoBack: navigationState.canGoBack === true,
+                  canGoForward: navigationState.canGoForward === true
+                })
                 const isLoadStart = browserLoadStartsRef.current.has(navigationState)
                 if (isUncommittedNavigationFinish({
                   platform: Platform.OS,
@@ -6443,22 +6654,25 @@ export default function App () {
 
                 // What the page said it did to its address, if it said.
                 const pageMove = loading ? null : takeBrowserPageMove(tab.id, webViewGeneration, navigationState.url)
+                // Where Back or Forward went, when this is the page it went to.
+                const traversal = takeBrowserTraversal(tab.id, webViewGeneration, loading)
 
                 if (browserTabsStateRef.current.activeTabId === tab.id) {
                   syncBrowserEntry(navigationState.url, {
                     kind: 'web',
-                    uri: navigationState.url
+                    uri: navigationState.url,
+                    ...(view !== null ? { view } : {})
                   }, {
                     canGoBack: navigationState.canGoBack,
                     canGoForward: navigationState.canGoForward,
                     loading
-                  }, tab.id, pageMove)
+                  }, tab.id, pageMove, traversal)
                   const title = normalizeBrowserTabTitle(navigationState.title || navigationState.url)
                   setBrowserTitle(title)
                   updateBrowserTabTitle(tab.id, title)
                   setBrowserIsLoading(loading)
                 } else {
-                  syncBackgroundBrowserTab(tab.id, entry, navigationState, pageMove)
+                  syncBackgroundBrowserTab(tab.id, entry, navigationState, pageMove, traversal)
                 }
               }}
               onMessage={(event) => {
@@ -6559,6 +6773,7 @@ export default function App () {
               }}
               onError={(event) => {
                 if (!isCurrentBrowserTabEntry(browserTabsStateRef.current, tab.id, entry)) return
+                clearBrowserTraversal(tab.id)
 
                 const candidateUrl = event.nativeEvent.url || entry.url
                 const failedUrl = candidateUrl.length <= MAX_BROWSER_URL_LENGTH

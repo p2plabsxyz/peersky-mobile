@@ -322,6 +322,17 @@ static NSString *PeerSkyBrowserApplicationName(void)
   }];
 }
 
+// react-native-webview says nothing of a page that fails once it is on
+// screen. WebKit ends that way a page Back or Forward brings back from its
+// cache in another process, as a search result's site going back to the
+// search: the page is back, and its load is cancelled. The app never heard
+// where Back had gone, so its address bar and history named the page left.
+// A page that got this far is the one on screen, and the app hears so.
+- (void)webView:(WKWebView *)webView didFailNavigation:(WKNavigation *)navigation withError:(NSError *)error
+{
+  if (self.onLoadingFinish) self.onLoadingFinish([self baseEvent]);
+}
+
 // A held link got the system's menu for links, whose Open Link went to Safari.
 // Without a menu from here WebKit falls back to that one, so a link the app can
 // open gets the app's own instead, with what its long-press sheet on Android
