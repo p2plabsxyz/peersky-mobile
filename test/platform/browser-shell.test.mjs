@@ -10,6 +10,7 @@ import {
   getHyperBridgeSite,
   getBrowserRequestAction,
   getBrowserTraversal,
+  getHttpsUpgradeUrl,
   getHyperSiteId,
   recordBrowserErrorState,
   getWebSiteId,
@@ -1043,5 +1044,79 @@ describe('a link to another app', () => {
     assert.match(openAppLink, /intent\.selector = null/)
     assert.match(openAppLink, /intent\.flags = \(intent\.flags and URI_GRANTS\.inv\(\)\)/)
     assert.match(openAppLink, /intent\.`package` == reactApplicationContext\.packageName/)
+  })
+})
+
+// Plain http:// is never opened, and a typed or linked http:// address showed
+// "This page is not secure" for sites that answer over https:// too.
+describe('an http:// page', () => {
+  test('is tried over https:// first, on the web', () => {
+    assert.equal(getHttpsUpgradeUrl('http://example.com/'), 'https://example.com/')
+    assert.equal(getHttpsUpgradeUrl('http://example.com:80/a?b=1#c'), 'https://example.com/a?b=1#c')
+    assert.equal(getHttpsUpgradeUrl('http://neverssl.com'), 'https://neverssl.com/')
+    assert.equal(getHttpsUpgradeUrl('http://93.184.215.14/'), 'https://93.184.215.14/')
+  })
+
+  test('is left as it is on this phone and the local network', () => {
+    for (const url of [
+      'https://example.com/', 'hyper://site/', 'http://localhost:3000/', 'http://localhost/',
+      'http://127.0.0.1:18777/a', 'http://10.0.2.2/', 'http://192.168.1.1/', 'http://172.20.0.4/',
+      'http://169.254.1.1/', 'http://100.64.0.1/', 'http://[::1]/', 'http://[fd00::1]/', 'http://[fe80::1]/',
+      'http://router/', 'http://printer.local/', 'http://nas.lan/', 'http://box.home.arpa/', 'http://app.localhost/',
+      'http://example.com:8080/', 'http://user:pass@example.com/', 'not a url', ''
+    ]) {
+      assert.equal(getHttpsUpgradeUrl(url), null, url)
+    }
+  })
+
+  test('that would not load over https:// shows why the http:// page is not opened', () => {
+    const web = (url) => ({ url, source: { kind: 'web', uri: url } })
+    const error = { kind: 'error', html: '<p>not secure</p>' }
+    const state = recordBrowserErrorState(
+      { history: [web('https://start.example/'), web('https://neverssl.com/')], historyIndex: 1 },
+      'https://neverssl.com/',
+      error,
+      null,
+      'http://neverssl.com/'
+    )
+    assert.deepEqual(state.history.map((entry) => entry.url), ['https://start.example/', 'http://neverssl.com/'])
+    assert.equal(state.history[1].source, error)
+    assert.equal(state.address, 'http://neverssl.com/')
+  })
+
+  test('the app sends the WebView to https:// in its place, typed, restored or linked', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const app = await readFile(new URL('../../app/index.tsx', import.meta.url), 'utf8')
+    const typedLoad = app.slice(app.indexOf('    if (isWebUrl(nextUrl)) {'), app.indexOf('    cancelPendingBrowserLoad()\n    showBrowserError(nextUrl'))
+    assert.match(typedLoad, /const webUrl = upgradeBrowserUrl\(tabId, nextUrl\)/)
+    const restored = app.slice(app.indexOf('async function loadRestoredBrowserUrl'), app.indexOf('async function loadHyperBrowserUrl'))
+    assert.match(restored, /const webUrl = upgradeBrowserUrl\(tabId, url\)/)
+    const start = app.slice(app.indexOf('  function onBrowserShouldStartLoad ('), app.indexOf('  function onBrowserOpenWindow ('))
+    assert.match(start, /if \(action\.action === 'allow'\) \{[\s\S]*?upgradeBrowserUrl\(tabId, requestUrl\)[\s\S]*?browserStartedLoadsRef\.current\.set\(tabId, webUrl\)[\s\S]*?return false\s+\}/)
+    assert.match(start, /const webUrl = upgradeBrowserUrl\(tabId, action\.url\)/)
+    // A redirect to http:// in a load the app started, a step built again
+    // included, is that step, not one of its own.
+    assert.match(start, /const sameStep = stepUrl === requestUrl \|\| \(Boolean\(stepUrl\) && browserStartedLoadsRef\.current\.get\(tabId\) === stepUrl\)/)
+    assert.match(app.slice(app.indexOf('function rebuildBrowserStep ('), app.indexOf('function startBrowserWebViewTraversal (')), /if \(entry\.source\.kind === 'web'\) browserStartedLoadsRef\.current\.set\(tabId, entry\.url\)/)
+    assert.match(restored, /browserStartedLoadsRef\.current\.set\(tabId, webUrl\)/)
+    const upgrade = app.slice(app.indexOf('function upgradeBrowserUrl ('), app.indexOf('\n  }\n', app.indexOf('function upgradeBrowserUrl (')))
+    // Sent straight back to http://, it is not tried again.
+    assert.match(upgrade, /if \(last && last\.httpUrl === url && Date\.now\(\) - last\.at < HTTPS_UPGRADE_LOOP_MS\) return url/)
+    // https:// that sends the page straight back to http:// shows why it
+    // does not open, at once, in the step that tried.
+    assert.match(start, /upgrade\?\.httpUrl === requestUrl &&\s+Date\.now\(\) - upgrade\.at < HTTPS_UPGRADE_LOOP_MS/)
+    assert.match(start, /createBrowserErrorHtml\(requestUrl, INSECURE_PAGE_MESSAGE, browserIsDark\)/)
+    assert.match(start, /\(tryingStep \? replaceBrowserEntryState : commitBrowserEntryState\)\(state, requestUrl, errorSource\)/)
+    const onError = app.slice(app.indexOf('              onError={(event) => {'), app.indexOf('            />', app.indexOf('              onError={(event) => {')))
+    assert.match(onError, /const insecureUrl = upgrade\?\.httpsUrl === failedUrl \? upgrade\.httpUrl : null/)
+    // A load the app started that failed after a redirect fails in its step.
+    assert.match(onError, /startedUrl && tabState\.history\[tabState\.historyIndex\]\?\.url === startedUrl \? startedUrl : failedUrl/)
+    assert.match(onError, /insecureUrl \? INSECURE_PAGE_MESSAGE : event\.nativeEvent\.description/)
+    // The words the error page knows for a plain http:// page.
+    const { describeBrowserError } = await import('../../app/browser-error-copy.mjs')
+    for (const message of ['net::ERR_CLEARTEXT_NOT_PERMITTED', 'The resource could not be loaded because the App Transport Security policy requires the use of a secure connection.']) {
+      assert.equal(describeBrowserError('http://neverssl.com/', message).title, 'This page is not secure')
+      assert.ok(app.includes(message), message)
+    }
   })
 })

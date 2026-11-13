@@ -51,6 +51,7 @@ import {
   getBrowserRequestAction,
   getBrowserTraversal,
   getBrowserWebViewKey,
+  getHttpsUpgradeUrl,
   getSearchUrl,
   isHyperUrl,
   isStaleBrowserLoad,
@@ -562,6 +563,15 @@ type BrowserWebHistory = {
   canGoForward: boolean
 }
 
+// How long an http:// address tried over https:// is remembered, so one sent
+// straight back to http:// is not tried again and again.
+const HTTPS_UPGRADE_LOOP_MS = 10000
+// The words each system uses for a page refused for being plain http://,
+// which the error page knows (browser-error-copy.mjs).
+const INSECURE_PAGE_MESSAGE = Platform.OS === 'ios'
+  ? 'The resource could not be loaded because the App Transport Security policy requires the use of a secure connection.'
+  : 'net::ERR_CLEARTEXT_NOT_PERMITTED'
+
 const DESKTOP_BROWSER_USER_AGENT = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 PeerSkyMobile/1.0'
 export default function App () {
   // Every screen hangs off this one, so a new language re-renders them all.
@@ -605,6 +615,10 @@ export default function App () {
   // tab on to www.google.com, or http:// to https://, is one step, as in
   // Safari and Chrome, where it was two and Back had to be pressed twice.
   const browserStartedLoadsRef = useRef(new Map<string, string>())
+  // The http:// address each tab was last sent to over https:// instead, so a
+  // failed https:// page says why the http:// one did not open, and the same
+  // address sent back to http:// is not tried again.
+  const browserHttpsUpgradesRef = useRef(new Map<string, { httpUrl: string, httpsUrl: string, at: number }>())
   const browserIncognitoSessionRef = useRef<string | null>(null)
   const p2pmdWebViewRef = useRef<ComponentRef<typeof WebView> | null>(null)
   const p2pmdPublishInFlightRef = useRef(false)
@@ -1828,12 +1842,14 @@ export default function App () {
 
     if (isWebUrl(nextUrl)) {
       cancelPendingBrowserLoad()
-      commitBrowserEntry(nextUrl, {
+      const tabId = browserTabsStateRef.current.activeTabId
+      const webUrl = upgradeBrowserUrl(tabId, nextUrl)
+      commitBrowserEntry(webUrl, {
         kind: 'web',
-        uri: nextUrl
+        uri: webUrl
       })
-      browserStartedLoadsRef.current.set(browserTabsStateRef.current.activeTabId, nextUrl)
-      setBrowserTitle(nextUrl)
+      browserStartedLoadsRef.current.set(tabId, webUrl)
+      setBrowserTitle(webUrl)
       return
     }
 
@@ -1885,8 +1901,11 @@ export default function App () {
     }
 
     if (isWebUrl(url)) {
-      replaceBrowserEntry(url, { kind: 'web', uri: url })
-      setBrowserTitle(url)
+      const tabId = browserTabsStateRef.current.activeTabId
+      const webUrl = upgradeBrowserUrl(tabId, url)
+      replaceBrowserEntry(webUrl, { kind: 'web', uri: webUrl })
+      browserStartedLoadsRef.current.set(tabId, webUrl)
+      setBrowserTitle(webUrl)
       return
     }
 
@@ -2466,6 +2485,7 @@ export default function App () {
     if (!nextState) return
     const entry = nextState.history[nextState.historyIndex]
     remountBrowserWebView(tabId)
+    if (entry.source.kind === 'web') browserStartedLoadsRef.current.set(tabId, entry.url)
     applyBrowserState({ ...nextState, webCanGoBack: false, webCanGoForward: false }, tabId)
     setBrowserTitle(getBrowserEntryTitle(entry))
     setActiveTab(entry.source.kind === 'app' ? entry.source.app : 'hyper')
@@ -2510,6 +2530,20 @@ export default function App () {
     if (traversal?.timer) clearTimeout(traversal.timer)
     browserTraversalsRef.current.delete(tabId)
     browserQueuedStepsRef.current.delete(tabId)
+  }
+
+  // An http:// page on the web, tried over https:// first, as Safari and
+  // Chrome do. Plain http:// is not opened at all, so it showed "This page is
+  // not secure" for sites that had https:// all along. The same address back
+  // as http:// within a moment, from a site that sends https:// back to
+  // http://, goes as it is, to that page.
+  function upgradeBrowserUrl (tabId: string, url: string) {
+    const httpsUrl = getHttpsUpgradeUrl(url)
+    if (!httpsUrl) return url
+    const last = browserHttpsUpgradesRef.current.get(tabId)
+    if (last && last.httpUrl === url && Date.now() - last.at < HTTPS_UPGRADE_LOOP_MS) return url
+    browserHttpsUpgradesRef.current.set(tabId, { httpUrl: url, httpsUrl, at: Date.now() })
+    return httpsUrl
   }
 
   // The load the app started in this tab, once a page has landed: that page
@@ -3523,7 +3557,59 @@ export default function App () {
     })
     const isActive = browserTabsStateRef.current.activeTabId === tabId
 
-    if (action.action === 'allow') return true
+    if (action.action === 'allow') {
+      const requestUrl = request.url || ''
+      // An http:// page whose https:// address sent the tab straight back to
+      // it has no https:// page. It shows why it does not open, in the step
+      // that tried, rather than going to plain http:// as a load that hangs
+      // or is refused.
+      const upgrade = browserHttpsUpgradesRef.current.get(tabId)
+      if (
+        request.isTopFrame !== false &&
+        expectedEntry.source.kind === 'web' &&
+        upgrade?.httpUrl === requestUrl &&
+        Date.now() - upgrade.at < HTTPS_UPGRADE_LOOP_MS
+      ) {
+        const tab = browserTabsStateRef.current.tabs.find((item) => item.id === tabId)
+        if (!tab) return false
+        const stepUrl = tab.history[tab.historyIndex]?.url
+        const tryingStep = stepUrl === upgrade.httpsUrl || browserStartedLoadsRef.current.get(tabId) === stepUrl
+        browserStartedLoadsRef.current.delete(tabId)
+        const errorSource: BrowserSource = {
+          kind: 'error',
+          html: createBrowserErrorHtml(requestUrl, INSECURE_PAGE_MESSAGE, browserIsDark)
+        }
+        if (isActive) {
+          const state = { history: tab.history, historyIndex: tab.historyIndex }
+          applyBrowserState((tryingStep ? replaceBrowserEntryState : commitBrowserEntryState)(state, requestUrl, errorSource), tabId)
+          setBrowserTitle(t('Page failed'))
+        } else {
+          updateBackgroundBrowserEntry(tabId, expectedEntry, requestUrl, errorSource, tryingStep)
+        }
+        return false
+      }
+
+      // A link or a redirect to an http:// page, over https:// first. The
+      // WebView is sent there in its place, as a step of its own, or as this
+      // step when this is the WebView loading the step itself.
+      const webUrl = request.isTopFrame !== false && expectedEntry.source.kind === 'web'
+        ? upgradeBrowserUrl(tabId, requestUrl)
+        : requestUrl
+      if (webUrl === requestUrl) return true
+      // A redirect in a load the app started is that load's step.
+      const tab = browserTabsStateRef.current.tabs.find((item) => item.id === tabId)
+      const stepUrl = tab?.history[tab.historyIndex]?.url
+      const sameStep = stepUrl === requestUrl || (Boolean(stepUrl) && browserStartedLoadsRef.current.get(tabId) === stepUrl)
+      browserStartedLoadsRef.current.set(tabId, webUrl)
+      if (isActive) {
+        if (sameStep) replaceBrowserEntry(webUrl, { kind: 'web', uri: webUrl })
+        else commitBrowserEntry(webUrl, { kind: 'web', uri: webUrl })
+        setBrowserTitle(webUrl)
+      } else {
+        updateBackgroundBrowserEntry(tabId, expectedEntry, webUrl, { kind: 'web', uri: webUrl }, sameStep)
+      }
+      return false
+    }
 
     if (
       action.action === 'open-external' &&
@@ -3554,16 +3640,19 @@ export default function App () {
     }
 
     if (action.action === 'commit-web' && action.url && action.source) {
+      const webUrl = upgradeBrowserUrl(tabId, action.url)
+      const webSource: BrowserSource = { kind: 'web', uri: webUrl }
+      browserStartedLoadsRef.current.set(tabId, webUrl)
       if (isActive) {
         cancelPendingBrowserLoad()
-        commitBrowserEntry(action.url, action.source as BrowserSource)
-        setBrowserTitle(action.url)
+        commitBrowserEntry(webUrl, webSource)
+        setBrowserTitle(webUrl)
       } else {
         updateBackgroundBrowserEntry(
           tabId,
           expectedEntry,
-          action.url,
-          action.source as BrowserSource
+          webUrl,
+          webSource
         )
       }
       return false
@@ -6828,8 +6917,10 @@ export default function App () {
               }}
               onError={(event) => {
                 if (!isCurrentBrowserTabEntry(browserTabsStateRef.current, tab.id, entry)) return
-                // Back or Forward that failed failed at the page it went to.
+                // Back or Forward that failed failed at the page it went to,
+                // and a load the app started, redirected or not, at its step.
                 const direction = browserTraversalsRef.current.get(tab.id)?.direction ?? null
+                const startedUrl = browserStartedLoadsRef.current.get(tab.id)
                 clearBrowserTraversal(tab.id)
                 browserStartedLoadsRef.current.delete(tab.id)
 
@@ -6841,19 +6932,35 @@ export default function App () {
                 const failedUrl = candidateUrl.length <= MAX_BROWSER_URL_LENGTH
                   ? candidateUrl
                   : entry.url
+                // An http:// page tried over https:// that would not load
+                // that way is the http:// page, and why it does not open.
+                const upgrade = browserHttpsUpgradesRef.current.get(tab.id)
+                const insecureUrl = upgrade?.httpsUrl === failedUrl ? upgrade.httpUrl : null
+                const shownUrl = insecureUrl || failedUrl
                 const errorSource: BrowserSource = {
                   kind: 'error',
-                  html: createBrowserErrorHtml(failedUrl, event.nativeEvent.description, browserIsDark, event.nativeEvent.code)
+                  html: createBrowserErrorHtml(
+                    shownUrl,
+                    insecureUrl ? INSECURE_PAGE_MESSAGE : event.nativeEvent.description,
+                    browserIsDark,
+                    // The https:// attempt's own error would name the wrong
+                    // page: what is shown is the http:// page, not secure.
+                    insecureUrl ? undefined : event.nativeEvent.code
+                  )
                 }
+
+                const placeUrl = (tabState: { history: BrowserHistoryEntry[], historyIndex: number }) =>
+                  startedUrl && tabState.history[tabState.historyIndex]?.url === startedUrl ? startedUrl : failedUrl
 
                 if (browserTabsStateRef.current.activeTabId === tab.id) {
                   const current = browserTabsStateRef.current.tabs.find((item) => item.id === tab.id)
                   if (!current) return
                   applyBrowserState(recordBrowserErrorState(
                     { history: current.history, historyIndex: current.historyIndex },
-                    failedUrl,
+                    placeUrl(current),
                     errorSource,
-                    direction
+                    direction,
+                    shownUrl
                   ), tab.id)
                   setBrowserTitle(t('Page failed'))
                   setStatus(event.nativeEvent.description)
@@ -6863,12 +6970,13 @@ export default function App () {
                     if (!background || !isCurrentBrowserTabEntry(state, tab.id, entry)) return state
                     const nextState = recordBrowserErrorState(
                       { history: background.history, historyIndex: background.historyIndex },
-                      failedUrl,
+                      placeUrl(background),
                       errorSource,
-                      direction
+                      direction,
+                      shownUrl
                     )
                     return updateBrowserTabState(state, tab.id, {
-                      title: getBrowserEntryTitle({ url: failedUrl, source: errorSource }),
+                      title: getBrowserEntryTitle({ url: shownUrl, source: errorSource }),
                       history: nextState.history,
                       historyIndex: nextState.historyIndex,
                       webCanGoBack: false,

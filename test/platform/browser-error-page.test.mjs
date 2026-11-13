@@ -91,7 +91,9 @@ describe('a page that would not load', () => {
   test('the WebView\'s error code reaches the page', async () => {
     const { readFile } = await import('node:fs/promises')
     const app = await readFile(new URL('../../app/index.tsx', import.meta.url), 'utf8')
-    assert.match(app, /createBrowserErrorHtml\(failedUrl, event\.nativeEvent\.description, browserIsDark, event\.nativeEvent\.code\)/)
+    // Except for an http:// page whose https:// try failed: that page is
+    // the http:// one, and says it is not secure.
+    assert.match(app, /createBrowserErrorHtml\(\s*shownUrl,\s*insecureUrl \? INSECURE_PAGE_MESSAGE : event\.nativeEvent\.description,\s*browserIsDark,[\s\S]{0,200}?insecureUrl \? undefined : event\.nativeEvent\.code\s*\)/)
   })
 
   test('a plain http:// page says it is not secure, not that the connection failed', () => {

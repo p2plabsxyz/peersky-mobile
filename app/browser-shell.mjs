@@ -99,6 +99,45 @@ export function normalizeCustomSearchUrl (customSearchUrl) {
   }
 }
 
+/**
+ * The https:// address to try first for an http:// page, as Safari and Chrome
+ * do. Only for a page on the web, at the usual port: this phone, the local
+ * network and a name only it knows stay as they are, as does an address on
+ * another port. Null when there is nothing to try.
+ */
+export function getHttpsUpgradeUrl (url) {
+  let parsed
+  try {
+    parsed = new URL(String(url || ''))
+  } catch {
+    return null
+  }
+  if (parsed.protocol !== 'http:' || parsed.username || parsed.password) return null
+  if (parsed.port && parsed.port !== '80') return null
+  if (isLocalNetworkHost(parsed.hostname)) return null
+  parsed.protocol = 'https:'
+  parsed.port = ''
+  return parsed.href
+}
+
+function isLocalNetworkHost (hostname) {
+  const host = String(hostname || '').toLowerCase().replace(/^\[|\]$/g, '')
+  if (!host) return true
+  const ipv4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host)
+  if (ipv4) {
+    const [a, b] = [Number(ipv4[1]), Number(ipv4[2])]
+    return a === 0 || a === 10 || a === 127 || (a === 100 && b >= 64 && b <= 127) ||
+      (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168)
+  }
+  if (host.includes(':')) {
+    return host === '::1' || host === '::' || /^f[cd]/.test(host) || /^fe[89ab]/.test(host) ||
+      /^::ffff:(0|10|127|169\.254|172\.(1[6-9]|2\d|3[01])|192\.168)\./.test(host)
+  }
+  // A single name, as a router or a printer has, and names that are only
+  // ever on the local network.
+  return !host.includes('.') || /\.(localhost|local|lan|home\.arpa|internal)$/.test(host)
+}
+
 export function isWebUrl (targetUrl) {
   return /^https?:\/\//i.test(String(targetUrl || ''))
 }
@@ -316,15 +355,19 @@ function traverseBrowserHistoryState (state, url, source, direction) {
  * is the step it was going to.
  *
  * @param {'back' | 'forward' | null} direction Back or Forward that was on its way
+ * @param {string} [shownUrl] the address the step is shown under, when it is
+ *   not the one that failed: the http:// page an https:// try was for
  */
-export function recordBrowserErrorState (state, failedUrl, source, direction = null) {
+export function recordBrowserErrorState (state, failedUrl, source, direction = null, shownUrl = failedUrl) {
+  let nextState
   if (direction === 'back' || direction === 'forward') {
-    return traverseBrowserHistoryState(state, failedUrl, source, direction)
+    nextState = traverseBrowserHistoryState(state, failedUrl, source, direction)
+  } else if (isSameBrowserUrl(state.history[state.historyIndex]?.url, failedUrl)) {
+    nextState = replaceBrowserEntryState(state, failedUrl, source)
+  } else {
+    nextState = commitBrowserEntryState(state, failedUrl, source)
   }
-  if (isSameBrowserUrl(state.history[state.historyIndex]?.url, failedUrl)) {
-    return replaceBrowserEntryState(state, failedUrl, source)
-  }
-  return commitBrowserEntryState(state, failedUrl, source)
+  return shownUrl === failedUrl ? nextState : replaceBrowserEntryState(nextState, shownUrl, source)
 }
 
 // The same page, however each side wrote its address.
