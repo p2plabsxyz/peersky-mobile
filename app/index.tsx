@@ -30,6 +30,7 @@ import {
 } from 'react-native'
 import * as Crypto from 'expo-crypto'
 import { CameraView, useCameraPermissions } from 'expo-camera'
+import CookieManager from '@preeternal/react-native-cookie-manager'
 import { File, Paths } from 'expo-file-system'
 import { useNetworkState } from 'expo-network'
 import { initialWindowMetrics, SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -1156,6 +1157,15 @@ export default function App () {
       appStateRef.current = nextState
       if (nextState !== 'active' && browserSessionReadyRef.current) {
         writeBrowserSession(browserTabsStateRef.current)
+      }
+      // Android's WebView writes cookies to disk on its own only about every
+      // half a minute, so a sign-in made just before PeerSky went to the
+      // background was gone if Android then stopped the app for memory.
+      // Chrome writes them out as it goes to the background, and so does this.
+      if (Platform.OS === 'android' && nextState === 'background') {
+        void CookieManager.flush().catch((error: unknown) => {
+          console.warn('Unable to write cookies to disk:', error)
+        })
       }
       if (nextState === 'active' && previousState !== 'active' && rpcRef.current) {
         void callRpc(RPC_HYPER_REFRESH, {}).catch((error) => {
