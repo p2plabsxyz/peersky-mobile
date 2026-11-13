@@ -898,3 +898,47 @@ describe('Back and Forward in the tab\'s own WebView', () => {
     assert.deepEqual(restored.tabs[0].history.map((entry) => entry.source), [{ kind: 'web', uri: A }, { kind: 'web', uri: B }])
   })
 })
+
+// Typed google.com lands on www.google.com, and http:// on https://: two steps
+// in the tab where the WebView had one, so Back had to be pressed twice, and
+// after a restart it went to google.com, which sent the tab on again.
+describe('a load the app started', () => {
+  const web = (url) => ({ kind: 'web', uri: url })
+  const typed = 'https://google.com'
+  const landed = 'https://www.google.com/?zx=1'
+
+  test('is one step, under the address it lands on', () => {
+    let state = commitBrowserEntryState(
+      { history: [{ url: 'https://example.com/', source: web('https://example.com/') }], historyIndex: 0 },
+      typed,
+      web(typed)
+    )
+    // The WebView has the page before it, so this is no first page.
+    state = recordBrowserWebNavigationState(state, landed, web(landed), null, true, false, { move: 'replace', from: typed })
+    assert.deepEqual(state.history.map((entry) => entry.url), ['https://example.com/', landed])
+    assert.equal(getBrowserBackState(state).currentUrl, 'https://example.com/')
+  })
+
+  test('only takes the step it made', () => {
+    // A link tapped on the page still on screen landed first: the typed
+    // step is gone, and the link is a step of its own.
+    const state = { history: [{ url: 'https://example.com/', source: web('https://example.com/') }], historyIndex: 0 }
+    const linked = recordBrowserWebNavigationState(state, landed, web(landed), null, true, false, { move: 'replace', from: typed })
+    assert.deepEqual(linked.history.map((entry) => entry.url), ['https://example.com/', landed])
+  })
+
+  test('the app marks the load it started and takes it as the first page lands', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const app = await readFile(new URL('../../app/index.tsx', import.meta.url), 'utf8')
+    const typedLoad = app.slice(app.indexOf('    if (isWebUrl(nextUrl)) {'), app.indexOf('    cancelPendingBrowserLoad()\n    showBrowserError(nextUrl'))
+    assert.match(typedLoad, /browserStartedLoadsRef\.current\.set\(/)
+    const take = app.slice(app.indexOf('function takeBrowserStartedLoad ('), app.indexOf('\n  }\n', app.indexOf('function takeBrowserStartedLoad (')))
+    assert.match(take, /browserStartedLoadsRef\.current\.delete\(tabId\)/)
+    assert.match(take, /return url \? \{ move: 'replace' as const, from: url \} : null/)
+    const change = app.slice(app.indexOf('onNavigationStateChange={(navigationState) => {'), app.indexOf('onMessage={(event) => {', app.indexOf('onNavigationStateChange={(navigationState) => {')))
+    assert.match(change, /const landedLoad = loading \? null : takeBrowserStartedLoad\(tab\.id\)/)
+    // Back, Forward and a WebView built again leave nothing of it behind.
+    assert.match(app.slice(app.indexOf('function startBrowserWebViewTraversal ('), app.indexOf('function clearBrowserTraversal (')), /browserStartedLoadsRef\.current\.delete\(tabId\)/)
+    assert.match(app.slice(app.indexOf('function remountBrowserWebView ('), app.indexOf('function getBrowserWebViewInstanceKey (')), /browserStartedLoadsRef\.current\.delete\(tabId\)/)
+  })
+})

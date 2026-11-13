@@ -598,6 +598,11 @@ export default function App () {
   // Back and Forward pressed while one was on its way, by tab, for once the
   // tab has drawn the step it landed on.
   const browserQueuedStepsRef = useRef(new Map<string, Array<'back' | 'forward'>>())
+  // The address the app sent each tab's WebView to, until a page lands. The
+  // first page it lands on takes that step's place, so google.com sending the
+  // tab on to www.google.com, or http:// to https://, is one step, as in
+  // Safari and Chrome, where it was two and Back had to be pressed twice.
+  const browserStartedLoadsRef = useRef(new Map<string, string>())
   const browserIncognitoSessionRef = useRef<string | null>(null)
   const p2pmdWebViewRef = useRef<ComponentRef<typeof WebView> | null>(null)
   const p2pmdPublishInFlightRef = useRef(false)
@@ -1825,6 +1830,7 @@ export default function App () {
         kind: 'web',
         uri: nextUrl
       })
+      browserStartedLoadsRef.current.set(browserTabsStateRef.current.activeTabId, nextUrl)
       setBrowserTitle(nextUrl)
       return
     }
@@ -2430,6 +2436,7 @@ export default function App () {
     setBrowserWebViewGenerations((current) => ({ ...current, [tabId]: generation }))
     // The new WebView has a list of its own, empty, and nothing it was asked.
     browserWebHistoryRef.current.delete(tabId)
+    browserStartedLoadsRef.current.delete(tabId)
     clearBrowserTraversal(tabId)
   }
 
@@ -2470,6 +2477,7 @@ export default function App () {
     const webView = browserWebViewRefs.current.get(tabId)
     if (!webView) return false
     clearBrowserTraversal(tabId)
+    browserStartedLoadsRef.current.delete(tabId)
     const traversal: BrowserTraversal = {
       direction,
       generation: browserWebViewGenerationsRef.current.get(tabId) || 0,
@@ -2500,6 +2508,14 @@ export default function App () {
     if (traversal?.timer) clearTimeout(traversal.timer)
     browserTraversalsRef.current.delete(tabId)
     browserQueuedStepsRef.current.delete(tabId)
+  }
+
+  // The load the app started in this tab, once a page has landed: that page
+  // takes the step the load made.
+  function takeBrowserStartedLoad (tabId: string) {
+    const url = browserStartedLoadsRef.current.get(tabId)
+    browserStartedLoadsRef.current.delete(tabId)
+    return url ? { move: 'replace' as const, from: url } : null
   }
 
   // A press while a step is on its way waits for it.
@@ -3186,6 +3202,7 @@ export default function App () {
     browserPageMovesRef.current.delete(tabId)
     browserAddedPagesRef.current.delete(tabId)
     browserWebHistoryRef.current.delete(tabId)
+    browserStartedLoadsRef.current.delete(tabId)
     clearBrowserTraversal(tabId)
     browserTabOpenersRef.current.delete(tabId)
     hyperBridgePendingRef.current.delete(tabId)
@@ -3326,6 +3343,7 @@ export default function App () {
     browserPageMovesRef.current.clear()
     browserAddedPagesRef.current.clear()
     browserWebHistoryRef.current.clear()
+    browserStartedLoadsRef.current.clear()
     for (const id of [...browserTraversalsRef.current.keys()]) clearBrowserTraversal(id)
     setBrowserWebViewGenerations({})
     updateBrowserTabsState(nextState)
@@ -6652,8 +6670,11 @@ export default function App () {
                   )
                 }
 
-                // What the page said it did to its address, if it said.
-                const pageMove = loading ? null : takeBrowserPageMove(tab.id, webViewGeneration, navigationState.url)
+                // What the page said it did to its address, if it said, or
+                // the load the app started here landing, which takes its step.
+                const reportedMove = loading ? null : takeBrowserPageMove(tab.id, webViewGeneration, navigationState.url)
+                const landedLoad = loading ? null : takeBrowserStartedLoad(tab.id)
+                const pageMove = reportedMove || landedLoad
                 // Where Back or Forward went, when this is the page it went to.
                 const traversal = takeBrowserTraversal(tab.id, webViewGeneration, loading)
 
@@ -6774,6 +6795,7 @@ export default function App () {
               onError={(event) => {
                 if (!isCurrentBrowserTabEntry(browserTabsStateRef.current, tab.id, entry)) return
                 clearBrowserTraversal(tab.id)
+                browserStartedLoadsRef.current.delete(tab.id)
 
                 const candidateUrl = event.nativeEvent.url || entry.url
                 const failedUrl = candidateUrl.length <= MAX_BROWSER_URL_LENGTH
