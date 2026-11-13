@@ -4691,7 +4691,14 @@ export default function App () {
     browserDownloadsVisible ||
     browserSettingsVisible ||
     peerChatRoomOpen
-  const browserBackAvailable = browserOverPage || canBrowserGoBack || driveViewerCanGoBack
+  // A tab a link opened goes back to the tab that opened it once there is
+  // nowhere further back in it (closeTabToOpener). Counted only by the
+  // Android button, the arrow and the edge swipe did nothing on iOS, where
+  // Safari's Back closes the tab and shows the page that opened it.
+  const browserOpenerTabId = browserTabOpenersRef.current.get(browserTabsState.activeTabId)
+  const browserCanCloseToOpener = Boolean(browserOpenerTabId) &&
+    browserTabsState.tabs.some((tab) => tab.id === browserOpenerTabId)
+  const browserBackAvailable = browserOverPage || canBrowserGoBack || driveViewerCanGoBack || browserCanCloseToOpener
   browserCanGoBackRef.current = browserBackAvailable
   goBrowserBackRef.current = goBrowserBack
   // Forward only ever means the page you came back from. With a sheet or a
