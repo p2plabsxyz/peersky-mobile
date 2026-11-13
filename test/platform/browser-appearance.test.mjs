@@ -5,6 +5,7 @@ import {
   BROWSER_PALETTES,
   formatBrowserAddress,
   getBrowserStatusBarStyle,
+  getWebsiteColorScheme,
   resolveBrowserDarkMode
 } from '../../app/browser-appearance.mjs'
 
@@ -30,6 +31,28 @@ describe('browser appearance helpers', () => {
     assert.equal(resolveBrowserDarkMode('system', 'dark'), true)
     assert.equal(resolveBrowserDarkMode('system', 'light'), false)
     assert.equal(resolveBrowserDarkMode('unexpected', 'dark'), true)
+  })
+
+  // With PeerSky dark and the phone light, sites were told light: only Force
+  // dark mode reached them. Safari's pages follow the system, Chrome's its own
+  // theme, so a site follows the theme PeerSky shows.
+  test('websites are told the theme picked in PeerSky, or the system\'s', async () => {
+    assert.equal(getWebsiteColorScheme('dark'), 'dark')
+    assert.equal(getWebsiteColorScheme('light'), 'light')
+    assert.equal(getWebsiteColorScheme('system'), 'unspecified')
+    assert.equal(getWebsiteColorScheme(undefined), 'unspecified')
+
+    // iOS: each tab's WebView, which WebKit asks.
+    const manager = await readFile(new URL('../../plugins/templates/PeerSkyWebViewManager.m.template', import.meta.url), 'utf8')
+    assert.match(manager, /RCT_EXPORT_VIEW_PROPERTY\(colorScheme, NSString\)/)
+    assert.match(manager, /- \(void\)setColorScheme:\(NSString \*\)colorScheme\s*\{[^}]*\[self applyInterfaceStyle\];/)
+    assert.match(manager, /- \(void\)setForceDarkScheme:\(BOOL\)forceDarkScheme\s*\{[^}]*\[self applyInterfaceStyle\];/)
+    assert.match(manager, /\[self\.colorScheme isEqualToString:@"light"\]\) \{\s*self\.overrideUserInterfaceStyle = UIUserInterfaceStyleLight;/)
+    assert.match(manager, /\} else \{\s*self\.overrideUserInterfaceStyle = UIUserInterfaceStyleUnspecified;/)
+
+    // Android: the WebView takes the app's theme, so the app takes PeerSky's.
+    const app = await readFile(new URL('../../app/index.tsx', import.meta.url), 'utf8')
+    assert.match(app, /if \(Platform\.OS !== 'android'\) return\s*Appearance\.setColorScheme\(getWebsiteColorScheme\(browserPreferences\.theme\)\)\s*\}, \[browserPreferences\.theme\]\)/)
   })
 
   test('keeps the dark browser chrome aligned with PeerSky Desktop', () => {

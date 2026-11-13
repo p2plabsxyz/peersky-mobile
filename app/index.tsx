@@ -2,6 +2,7 @@ import { type ComponentRef, type ReactNode, useCallback, useEffect, useMemo, use
 import {
   Alert,
   Animated,
+  Appearance,
   AppState,
   BackHandler,
   Button,
@@ -113,6 +114,7 @@ import {
   BROWSER_PALETTES,
   getBrowserPalette,
   getBrowserStatusBarStyle,
+  getWebsiteColorScheme,
   resolveBrowserDarkMode
 } from './browser-appearance.mjs'
 import { createBrowserAccessibilityScript } from './browser-accessibility.mjs'
@@ -1121,6 +1123,14 @@ export default function App () {
     if (!browserPreferencesReady) return
     applyYoutubeAdBlockingEnabled(browserPreferences.youtubeAdBlockingEnabled)
   }, [browserPreferencesReady, browserPreferences.youtubeAdBlockingEnabled])
+
+  // Android's WebView tells pages the theme of the app around it, as Chrome
+  // tells them its own, so the app takes the theme picked in Settings: dark
+  // or light, or the system's for System. iOS tells each tab instead.
+  useEffect(() => {
+    if (Platform.OS !== 'android') return
+    Appearance.setColorScheme(getWebsiteColorScheme(browserPreferences.theme))
+  }, [browserPreferences.theme])
 
   useEffect(() => {
     if (!browserSessionReady) return
@@ -6142,9 +6152,15 @@ export default function App () {
                 // Incognito cookies live apart from normal tabs, in one store
                 // (on Android a WebView profile) for each run of incognito tabs.
                 tabIncognito && browserIncognitoSession ? { incognitoSession: browserIncognitoSession } : {},
-                // Pages are told dark is preferred, so a site's own dark theme
-                // wins over the inverting script.
-                Platform.OS === 'ios' ? { forceDarkScheme: browserPreferences.forceDarkWebsites } : {},
+                // Pages are told the theme picked in PeerSky, and dark while
+                // Force dark mode is on, so a site's own dark theme wins over
+                // the inverting script.
+                Platform.OS === 'ios'
+                  ? {
+                      colorScheme: getWebsiteColorScheme(browserPreferences.theme),
+                      forceDarkScheme: browserPreferences.forceDarkWebsites
+                    }
+                  : {},
                 // A hyper:// page keeps what it stores for as long as the app
                 // runs, apart from websites, so burning the tabs clears it too.
                 Platform.OS === 'ios' && entry.source.kind === 'hyper' ? { hyperSession: true } : {})

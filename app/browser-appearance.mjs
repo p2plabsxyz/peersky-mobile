@@ -42,6 +42,16 @@ export function resolveBrowserDarkMode (theme, systemColorScheme) {
 }
 
 /**
+ * What websites are told about the theme, as prefers-color-scheme: the one
+ * picked in PeerSky, or the system's for System. Safari's pages follow the
+ * system and Chrome's follow Chrome's own theme. With PeerSky dark and the
+ * phone light, every site stayed light.
+ */
+export function getWebsiteColorScheme (theme) {
+  return theme === 'dark' || theme === 'light' ? theme : 'unspecified'
+}
+
+/**
  * The status bar's colour. Set to one colour, iOS kept it through a switch
  * between light and dark in the system's settings, so it stayed dark on a dark
  * page until PeerSky restarted. Following the system, iOS now picks it

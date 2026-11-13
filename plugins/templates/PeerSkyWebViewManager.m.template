@@ -18,6 +18,7 @@ static const WKNavigationActionPolicy PeerSkyAllowWithoutOpeningApp = (WKNavigat
 
 @interface PeerSkyWebViewImpl : RNCWebViewImpl
 @property (nonatomic, copy) NSString *incognitoSession;
+@property (nonatomic, copy) NSString *colorScheme;
 @property (nonatomic, assign) BOOL forceDarkScheme;
 @property (nonatomic, assign) BOOL hyperSession;
 @property (nonatomic, copy) NSString *mediaLongPressToken;
@@ -210,13 +211,33 @@ static NSString *PeerSkyBrowserApplicationName(void)
 
 @implementation PeerSkyWebViewImpl
 
-// With Force dark mode on, pages are told the reader prefers dark, so a site
-// with a dark theme of its own, like YouTube, uses it. Only sites without one
-// are left to the inverting script, which does worse on a site built to change.
+// Pages are told the theme picked in PeerSky, as Safari's are told the
+// system's: dark or light, or the system's own for System. With PeerSky dark
+// and the phone light, sites stayed light. With Force dark mode on, pages are
+// told dark whatever the theme, so a site with a dark theme of its own, like
+// YouTube, uses it. Only sites without one are left to the inverting script,
+// which does worse on a site built to change.
+- (void)setColorScheme:(NSString *)colorScheme
+{
+  _colorScheme = [colorScheme copy];
+  [self applyInterfaceStyle];
+}
+
 - (void)setForceDarkScheme:(BOOL)forceDarkScheme
 {
   _forceDarkScheme = forceDarkScheme;
-  self.overrideUserInterfaceStyle = forceDarkScheme ? UIUserInterfaceStyleDark : UIUserInterfaceStyleUnspecified;
+  [self applyInterfaceStyle];
+}
+
+- (void)applyInterfaceStyle
+{
+  if (self.forceDarkScheme || [self.colorScheme isEqualToString:@"dark"]) {
+    self.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
+  } else if ([self.colorScheme isEqualToString:@"light"]) {
+    self.overrideUserInterfaceStyle = UIUserInterfaceStyleLight;
+  } else {
+    self.overrideUserInterfaceStyle = UIUserInterfaceStyleUnspecified;
+  }
 }
 
 - (WKWebViewConfiguration *)setUpWkWebViewConfig
@@ -485,6 +506,7 @@ RCT_EXPORT_METHOD(removeSites:(NSArray *)names
 RCT_EXPORT_MODULE(PeerSkyWebView)
 
 RCT_EXPORT_VIEW_PROPERTY(incognitoSession, NSString)
+RCT_EXPORT_VIEW_PROPERTY(colorScheme, NSString)
 RCT_EXPORT_VIEW_PROPERTY(forceDarkScheme, BOOL)
 RCT_EXPORT_VIEW_PROPERTY(hyperSession, BOOL)
 RCT_EXPORT_VIEW_PROPERTY(mediaLongPressToken, NSString)
