@@ -14,7 +14,8 @@ const meta = workspace.slice(workspace.indexOf('styles.p2pmdWorkspaceMeta'))
 // and then the tab list. The tabs sit in the header as on the toolbar.
 test('an open note has the tabs button beside its menu', () => {
   assert.match(header, /accessibilityLabel=\{tp\(\{ one: 'Open tabs, \{count\} open', other: 'Open tabs, \{count\} open' \}, browserTabsState\.tabs\.length\)\}/)
-  assert.match(header, /onPress=\{\(\) => \{\s+browserUserInteractedRef\.current = true\s+setBrowserTabsVisible\(true\)/)
+  assert.match(header, /onPress=\{openBrowserTabList\}/)
+  assert.match(screen, /function openBrowserTabList \(\) \{\s+browserUserInteractedRef\.current = true[\s\S]*?setBrowserTabsVisible\(true\)/)
   assert.ok(header.indexOf('Open tabs') < header.indexOf('<BrowserOverflowMenu'))
   // The tab list is drawn under the note, which steps aside while it is open.
   assert.match(screen, /if \(!browserOverlay && !browserTabsVisible && activeTab === 'p2pmd' && p2pmdWorkspaceReady/)

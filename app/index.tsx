@@ -890,6 +890,8 @@ export default function App () {
     setCaptureLayout: setBrowserPreviewLayout,
     setCaptureView: setBrowserPreviewView
   } = useBrowserTabPreviews<BrowserHistoryEntry>({
+    // Only the tab in front is drawn.
+    canCapture: (tabId) => browserTabsStateRef.current.activeTabId === tabId,
     getEntryKey: (entry) => entry.url,
     isCurrentEntry: (tabId, entry) => {
       const tab = browserTabsStateRef.current.tabs.find((item) => item.id === tabId)
@@ -1355,11 +1357,41 @@ export default function App () {
   function updateBrowserTabsState (
     update: BrowserTabsState | ((state: BrowserTabsState) => BrowserTabsState)
   ) {
+    const previousState = browserTabsStateRef.current
     const nextState = typeof update === 'function'
-      ? update(browserTabsStateRef.current)
+      ? update(previousState)
       : update
+    // The tab list shows each tab as it was left, so a tab going behind
+    // another is pictured now, while it is still on screen.
+    if (
+      nextState.activeTabId !== previousState.activeTabId &&
+      nextState.tabs.some((tab) => tab.id === previousState.activeTabId)
+    ) {
+      captureBrowserTabPreview(previousState.activeTabId)
+    }
     browserTabsStateRef.current = nextState
     setBrowserTabsState(nextState)
+  }
+
+  // A picture of the tab for the tab list, taken as the list opens and as the
+  // tab is left. It was taken while the page scrolled, about once a second,
+  // and drawing a page into a picture on the main thread made Android's
+  // scrolling stutter.
+  function captureBrowserTabPreview (tabId: string) {
+    const tab = browserTabsStateRef.current.tabs.find((item) => item.id === tabId)
+    const entry = tab?.history[tab.historyIndex]
+    if (entry && isBrowserWebViewSource(entry.source)) scheduleBrowserTabPreview(tabId, entry, 0)
+  }
+
+  // Only handed to the WebViews while the keyboard is up.
+  function onBrowserPageScroll () {
+    Keyboard.dismiss()
+  }
+
+  function openBrowserTabList () {
+    browserUserInteractedRef.current = true
+    captureBrowserTabPreview(browserTabsStateRef.current.activeTabId)
+    setBrowserTabsVisible(true)
   }
 
   async function startWorklet () {
@@ -4959,10 +4991,7 @@ export default function App () {
             accessibilityLabel={tp({ one: 'Open tabs, {count} open', other: 'Open tabs, {count} open' }, browserTabsState.tabs.length)}
             accessibilityRole='button'
             style={styles.p2pmdTabsButton}
-            onPress={() => {
-              browserUserInteractedRef.current = true
-              setBrowserTabsVisible(true)
-            }}
+            onPress={openBrowserTabList}
           >
             <View style={[styles.browserTabCountIcon, { borderColor: p2pmdHeaderIconColor }]}>
               <Text style={[styles.browserTabCountText, { color: p2pmdHeaderIconColor }]}>{browserTabsState.tabs.length}</Text>
@@ -5324,10 +5353,7 @@ export default function App () {
         setBrowserSettingsCloseOnBack(false)
         setBrowserSettingsVisible(true)
       }}
-      onOpenTabs={() => {
-        browserUserInteractedRef.current = true
-        setBrowserTabsVisible(true)
-      }}
+      onOpenTabs={openBrowserTabList}
       onOpenZoom={() => setBrowserZoomVisible(true)}
       onPrintPage={onBrowserPrintPage}
       onReaderView={onBrowserReaderView}
@@ -6311,13 +6337,11 @@ export default function App () {
               onShouldStartLoadWithRequest={(request) => onBrowserShouldStartLoad(tab.id, entry, webViewGeneration, request)}
               onOpenWindow={(event) => onBrowserOpenWindow(tab.id, entry, event.nativeEvent.targetUrl)}
               onFileDownload={(event) => confirmPageDownload(event.nativeEvent.downloadUrl, tab.id, getNativeViewTag(event))}
+              // A scroll puts the keyboard away. The WebView reports scrolls
+              // only while it is up: on Android each one, about once a frame,
+              // crossed to JavaScript for nothing the rest of the time.
               scrollEventThrottle={200}
-              onScroll={() => {
-                Keyboard.dismiss()
-                if (isCurrentBrowserTabEntry(browserTabsStateRef.current, tab.id, entry)) {
-                  scheduleBrowserTabPreview(tab.id, entry)
-                }
-              }}
+              onScroll={isKeyboardVisible ? onBrowserPageScroll : undefined}
               onLoadStart={(event) => {
                 browserLoadStartsRef.current.add(event.nativeEvent)
                 const startTag = getNativeViewTag(event)

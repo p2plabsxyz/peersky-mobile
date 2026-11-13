@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
 import { describe, test } from 'node:test'
 import {
   getBrowserTabPreviewFilename,
@@ -136,5 +137,37 @@ describe('browser tab preview cache helpers', () => {
       [...selectRetainedBrowserTabPreviewUris(entries, 2, 1000)],
       ['file:///4.jpg', 'file:///3.jpg']
     )
+  })
+})
+
+// A picture of the tab was taken while its page scrolled, about once a
+// second. Drawing a page into a picture runs on the main thread, and on
+// Android the median frame while scrolling Wikipedia was 33 ms, Chrome's 16.7.
+describe('when a tab is pictured', () => {
+  test('never while its page scrolls', async () => {
+    const app = await readFile(new URL('../../app/index.tsx', import.meta.url), 'utf8')
+    assert.match(app, /onScroll=\{isKeyboardVisible \? onBrowserPageScroll : undefined\}/)
+    const scroll = /function onBrowserPageScroll \(\) \{([\s\S]*?)\n {2}\}/.exec(app)?.[1] || ''
+    assert.match(scroll, /Keyboard\.dismiss\(\)/)
+    assert.doesNotMatch(scroll, /Preview/)
+  })
+
+  test('as the tab list opens and as a tab is left, while it is still in front', async () => {
+    const app = await readFile(new URL('../../app/index.tsx', import.meta.url), 'utf8')
+    // Both ways into the tab list picture the tab in front first.
+    assert.equal(app.match(/onPress=\{openBrowserTabList\}|onOpenTabs=\{openBrowserTabList\}/g).length, 2)
+    assert.doesNotMatch(app, /setBrowserTabsVisible\(true\)\s*\}\}/)
+    assert.match(app, /function openBrowserTabList \(\) \{[^}]*captureBrowserTabPreview\(browserTabsStateRef\.current\.activeTabId\)\s*setBrowserTabsVisible\(true\)/)
+
+    // Any change of the tab in front pictures the one going behind, before
+    // the change is made.
+    const update = /function updateBrowserTabsState \([\s\S]*?\n {2}\}\n/.exec(app)?.[0] || ''
+    assert.match(update, /nextState\.activeTabId !== previousState\.activeTabId[\s\S]*captureBrowserTabPreview\(previousState\.activeTabId\)[\s\S]*browserTabsStateRef\.current = nextState/)
+    assert.match(app, /canCapture: \(tabId\) => browserTabsStateRef\.current\.activeTabId === tabId/)
+
+    // At once, not after a timer that would find the tab already behind.
+    const hook = await readFile(new URL('../../app/tabs/useBrowserTabPreviews.ts', import.meta.url), 'utf8')
+    assert.match(hook, /if \(wait === 0\) \{\s*captureTimersRef\.current\.delete\(tabId\)\s*void capturePreview\(tabId, pendingCapture\)\s*return\s*\}/)
+    assert.match(hook, /\(canCaptureRef\.current && !canCaptureRef\.current\(tabId\)\)\s*\) return/)
   })
 })
