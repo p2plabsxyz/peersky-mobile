@@ -96,6 +96,28 @@ export function normalizeBrowserDownloads (downloads) {
   return disambiguateBrowserDownloadNames(normalized)
 }
 
+// How long the Downloads screen waits for Android to list a download it was
+// asked for. The record appears once the app has worked out the file's name
+// and type, a moment after the request; one that never comes has failed with
+// a message of its own.
+export const AWAITED_DOWNLOAD_MS = 30_000
+// Records carry the phone's own time, which the request was stamped with too.
+const AWAITED_DOWNLOAD_SLACK_MS = 2_000
+
+// Drops the awaited downloads that are now listed, or have waited too long,
+// and says whether any is still to come. awaited maps an address to the time
+// it was asked for.
+export function settleAwaitedDownloads (awaited, downloads, now = Date.now()) {
+  for (const [url, requestedAt] of awaited) {
+    const listed = Array.isArray(downloads) && downloads.some((download) =>
+      download?.sourceUrl === url &&
+      Number(download.createdAt) >= requestedAt - AWAITED_DOWNLOAD_SLACK_MS
+    )
+    if (listed || now - requestedAt > AWAITED_DOWNLOAD_MS) awaited.delete(url)
+  }
+  return awaited.size > 0
+}
+
 export function findCompletedHyperDownload (downloads, { url } = {}) {
   if (!Array.isArray(downloads) || typeof url !== 'string') return null
 

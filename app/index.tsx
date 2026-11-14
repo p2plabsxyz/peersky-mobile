@@ -2,6 +2,7 @@ import { type ComponentRef, type ReactNode, useCallback, useEffect, useMemo, use
 import {
   Alert,
   Animated,
+  Appearance,
   AppState,
   BackHandler,
   Button,
@@ -29,6 +30,7 @@ import {
 } from 'react-native'
 import * as Crypto from 'expo-crypto'
 import { CameraView, useCameraPermissions } from 'expo-camera'
+import CookieManager from '@preeternal/react-native-cookie-manager'
 import { File, Paths } from 'expo-file-system'
 import { useNetworkState } from 'expo-network'
 import { initialWindowMetrics, SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -47,7 +49,9 @@ import {
   getBrowserMessagePageUrl,
   getHyperBridgeSite,
   getBrowserRequestAction,
+  getBrowserTraversal,
   getBrowserWebViewKey,
+  getHttpsUpgradeUrl,
   getSearchUrl,
   isHyperUrl,
   isStaleBrowserLoad,
@@ -55,6 +59,7 @@ import {
   isWebUrl,
   MAX_BROWSER_URL_LENGTH,
   normalizeBrowserAddress,
+  recordBrowserErrorState,
   recordBrowserWebNavigationState,
   replaceBrowserEntryState,
   settleLateBrowserPageMove
@@ -85,7 +90,7 @@ import {
   normalizeBrowserPageZoom,
   normalizeBrowserTabTitle,
   parseRecentlyClosedBrowserTabs,
-  PAUSE_TAB_MEDIA_SCRIPT,
+  createPauseTabMediaScript,
   rememberClosedBrowserTabs,
   reopenClosedBrowserTabState,
   setBrowserTabViewModeState,
@@ -113,6 +118,7 @@ import {
   BROWSER_PALETTES,
   getBrowserPalette,
   getBrowserStatusBarStyle,
+  getWebsiteColorScheme,
   resolveBrowserDarkMode
 } from './browser-appearance.mjs'
 import { createBrowserAccessibilityScript } from './browser-accessibility.mjs'
@@ -123,6 +129,7 @@ import {
   formatExternalLinkForPrompt,
   getExternalAppName,
   getExternalLinkTarget,
+  parseAppLink,
   getExternalLinkBehaviorAction,
   parseExternalAppLink
 } from './browser-permissions.mjs'
@@ -363,6 +370,7 @@ import {
   RPC_APP_DEVICE_SYNC_CHANGED,
   RPC_APP_PEERCHAT_CHANGED,
   RPC_DEVICE_SYNC_NETWORK,
+  RPC_DEVICE_SYNC_STATUS,
   RPC_PEERCHAT_PRESENCE,
   RPC_PEERCHAT_SEND_TO_DEVICES,
   RPC_PEERTUNES_START,
@@ -444,7 +452,10 @@ type BrowserSource =
   | { kind: 'home' }
   | { kind: 'p2p' }
   | { kind: 'app', app: RuntimeTab }
-  | { kind: 'web', uri: string }
+  // view: the native tag of the WebView the page was seen in, which is the
+  // WebView that can go back or forward to it (browser-shell.mjs,
+  // getBrowserTraversal). Never saved: a WebView does not outlive the app.
+  | { kind: 'web', uri: string, view?: number }
   // private: from a private drive, so no picture of it is kept for the tab list.
   | { kind: 'hyper', html: string, baseUrl: string, private?: boolean }
   // A hyper:// folder's Files, Photos or Videos view, under its
@@ -522,6 +533,46 @@ const DOCUMENT_PAGE_MOVE_TTL_MS = 30000
 const LATE_PAGE_MOVE_MS = 1500
 const MAX_PENDING_PAGE_MOVES = 8
 
+// Back or Forward asked of a tab's WebView, until the WebView says where it
+// went. One that has not moved at all by BROWSER_TRAVERSAL_FALLBACK_MS never
+// will, and the step is built again from the tab's history instead. One that
+// started but never landed is let go after BROWSER_TRAVERSAL_TTL_MS, so it
+// can't be taken for whatever the page does next. Presses that come before it
+// lands wait in queued, and go once it has: asked for at once, a second step
+// started before the tab drew the first, and the WebView loaded the first
+// page again over it as a new one.
+type BrowserTraversal = {
+  direction: 'back' | 'forward'
+  generation: number
+  startedAt: number
+  moved: boolean
+  // Android: the WebView has the page now. A link the page started before
+  // that came from the page being left.
+  started: boolean
+  queued: Array<'back' | 'forward'>
+  timer: ReturnType<typeof setTimeout> | null
+}
+const BROWSER_TRAVERSAL_FALLBACK_MS = 2500
+const BROWSER_TRAVERSAL_TTL_MS = 60000
+
+// A tab's WebView: its key and native tag, which no WebView built since
+// shares, and what it last said it can go back or forward to.
+type BrowserWebHistory = {
+  key: string
+  view: number | null
+  canGoBack: boolean
+  canGoForward: boolean
+}
+
+// How long an http:// address tried over https:// is remembered, so one sent
+// straight back to http:// is not tried again and again.
+const HTTPS_UPGRADE_LOOP_MS = 10000
+// The words each system uses for a page refused for being plain http://,
+// which the error page knows (browser-error-copy.mjs).
+const INSECURE_PAGE_MESSAGE = Platform.OS === 'ios'
+  ? 'The resource could not be loaded because the App Transport Security policy requires the use of a secure connection.'
+  : 'net::ERR_CLEARTEXT_NOT_PERMITTED'
+
 const DESKTOP_BROWSER_USER_AGENT = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 PeerSkyMobile/1.0'
 export default function App () {
   // Every screen hangs off this one, so a new language re-renders them all.
@@ -555,6 +606,20 @@ export default function App () {
   // that page back.
   const browserPageMovesRef = useRef(new Map<string, BrowserPageMove[]>())
   const browserAddedPagesRef = useRef(new Map<string, { url: string, index: number, at: number }>())
+  const browserWebHistoryRef = useRef(new Map<string, BrowserWebHistory>())
+  const browserTraversalsRef = useRef(new Map<string, BrowserTraversal>())
+  // Back and Forward pressed while one was on its way, by tab, for once the
+  // tab has drawn the step it landed on.
+  const browserQueuedStepsRef = useRef(new Map<string, Array<'back' | 'forward'>>())
+  // The address the app sent each tab's WebView to, until a page lands. The
+  // first page it lands on takes that step's place, so google.com sending the
+  // tab on to www.google.com, or http:// to https://, is one step, as in
+  // Safari and Chrome, where it was two and Back had to be pressed twice.
+  const browserStartedLoadsRef = useRef(new Map<string, string>())
+  // The http:// address each tab was last sent to over https:// instead, so a
+  // failed https:// page says why the http:// one did not open, and the same
+  // address sent back to http:// is not tried again.
+  const browserHttpsUpgradesRef = useRef(new Map<string, { httpUrl: string, httpsUrl: string, at: number }>())
   const browserIncognitoSessionRef = useRef<string | null>(null)
   const p2pmdWebViewRef = useRef<ComponentRef<typeof WebView> | null>(null)
   const p2pmdPublishInFlightRef = useRef(false)
@@ -888,6 +953,8 @@ export default function App () {
     setCaptureLayout: setBrowserPreviewLayout,
     setCaptureView: setBrowserPreviewView
   } = useBrowserTabPreviews<BrowserHistoryEntry>({
+    // Only the tab in front is drawn.
+    canCapture: (tabId) => browserTabsStateRef.current.activeTabId === tabId,
     getEntryKey: (entry) => entry.url,
     isCurrentEntry: (tabId, entry) => {
       const tab = browserTabsStateRef.current.tabs.find((item) => item.id === tabId)
@@ -938,6 +1005,22 @@ export default function App () {
       console.warn('[device sync] Unable to report the network:', error)
     })
   }, [deviceSyncMetered, identityStoragePath])
+
+  // What this person's other devices added in Hyperdrive since the Hyperdrive
+  // screen last showed it, counted on its shortcut like PeerChat's unread.
+  // Read again whenever the backend says something changed, the screen
+  // showing the files included; an older answer never replaces a newer one.
+  const [hyperdriveNewCount, setHyperdriveNewCount] = useState(0)
+  const hyperdriveCountRequest = useRef(0)
+  useEffect(() => {
+    if (!identityStoragePath) return
+    const request = ++hyperdriveCountRequest.current
+    void callRpc(RPC_DEVICE_SYNC_STATUS, {}).then((response) => {
+      if (request !== hyperdriveCountRequest.current || !response?.ok) return
+      const count = Number(response.newCount)
+      setHyperdriveNewCount(Number.isSafeInteger(count) && count > 0 ? count : 0)
+    }).catch(() => {})
+  }, [deviceSyncRevision, identityStoragePath])
 
   useEffect(() => {
     if (!browserPreferencesReady || !identityStoragePath) return
@@ -1122,6 +1205,14 @@ export default function App () {
     applyYoutubeAdBlockingEnabled(browserPreferences.youtubeAdBlockingEnabled)
   }, [browserPreferencesReady, browserPreferences.youtubeAdBlockingEnabled])
 
+  // Android's WebView tells pages the theme of the app around it, as Chrome
+  // tells them its own, so the app takes the theme picked in Settings: dark
+  // or light, or the system's for System. iOS tells each tab instead.
+  useEffect(() => {
+    if (Platform.OS !== 'android') return
+    Appearance.setColorScheme(getWebsiteColorScheme(browserPreferences.theme))
+  }, [browserPreferences.theme])
+
   useEffect(() => {
     if (!browserSessionReady) return
 
@@ -1144,6 +1235,15 @@ export default function App () {
       appStateRef.current = nextState
       if (nextState !== 'active' && browserSessionReadyRef.current) {
         writeBrowserSession(browserTabsStateRef.current)
+      }
+      // Android's WebView writes cookies to disk on its own only about every
+      // half a minute, so a sign-in made just before PeerSky went to the
+      // background was gone if Android then stopped the app for memory.
+      // Chrome writes them out as it goes to the background, and so does this.
+      if (Platform.OS === 'android' && nextState === 'background') {
+        void CookieManager.flush().catch((error: unknown) => {
+          console.warn('Unable to write cookies to disk:', error)
+        })
       }
       if (nextState === 'active' && previousState !== 'active' && rpcRef.current) {
         void callRpc(RPC_HYPER_REFRESH, {}).catch((error) => {
@@ -1310,14 +1410,15 @@ export default function App () {
     ))
   }, [browserSource.kind, browserTabsState.activeTabId])
 
-  // The tab you leave stays loaded behind the new one, so its sound stops here
-  // rather than playing on where you cannot see it.
+  // The tab you leave stays loaded behind the new one, so its media is paused
+  // here the way the browser would pause a hidden tab's: its videos, while
+  // its sound plays on.
   const frontBrowserTabIdRef = useRef(browserTabsState.activeTabId)
   useEffect(() => {
     const leftTabId = frontBrowserTabIdRef.current
     frontBrowserTabIdRef.current = browserTabsState.activeTabId
     if (leftTabId === browserTabsState.activeTabId) return
-    browserWebViewRefs.current.get(leftTabId)?.injectJavaScript(PAUSE_TAB_MEDIA_SCRIPT)
+    browserWebViewRefs.current.get(leftTabId)?.injectJavaScript(createPauseTabMediaScript(Platform.OS))
   }, [browserTabsState.activeTabId])
 
   useEffect(() => {
@@ -1325,6 +1426,10 @@ export default function App () {
       state,
       browserLiveTabIds
     ) as BrowserTabsState)
+    // A tab no longer kept loaded has lost its WebView, and its back list.
+    for (const tabId of [...browserWebHistoryRef.current.keys()]) {
+      if (!browserLiveTabIds.includes(tabId)) browserWebHistoryRef.current.delete(tabId)
+    }
   }, [browserLiveTabIds])
 
   useEffect(() => {
@@ -1345,11 +1450,41 @@ export default function App () {
   function updateBrowserTabsState (
     update: BrowserTabsState | ((state: BrowserTabsState) => BrowserTabsState)
   ) {
+    const previousState = browserTabsStateRef.current
     const nextState = typeof update === 'function'
-      ? update(browserTabsStateRef.current)
+      ? update(previousState)
       : update
+    // The tab list shows each tab as it was left, so a tab going behind
+    // another is pictured now, while it is still on screen.
+    if (
+      nextState.activeTabId !== previousState.activeTabId &&
+      nextState.tabs.some((tab) => tab.id === previousState.activeTabId)
+    ) {
+      captureBrowserTabPreview(previousState.activeTabId)
+    }
     browserTabsStateRef.current = nextState
     setBrowserTabsState(nextState)
+  }
+
+  // A picture of the tab for the tab list, taken as the list opens and as the
+  // tab is left. It was taken while the page scrolled, about once a second,
+  // and drawing a page into a picture on the main thread made Android's
+  // scrolling stutter.
+  function captureBrowserTabPreview (tabId: string) {
+    const tab = browserTabsStateRef.current.tabs.find((item) => item.id === tabId)
+    const entry = tab?.history[tab.historyIndex]
+    if (entry && isBrowserWebViewSource(entry.source)) scheduleBrowserTabPreview(tabId, entry, 0)
+  }
+
+  // Only handed to the WebViews while the keyboard is up.
+  function onBrowserPageScroll () {
+    Keyboard.dismiss()
+  }
+
+  function openBrowserTabList () {
+    browserUserInteractedRef.current = true
+    captureBrowserTabPreview(browserTabsStateRef.current.activeTabId)
+    setBrowserTabsVisible(true)
   }
 
   async function startWorklet () {
@@ -1405,7 +1540,8 @@ export default function App () {
     source: BrowserSource,
     webNavigation?: { canGoBack: boolean, canGoForward: boolean, loading?: boolean },
     tabId?: string,
-    pageMove: BrowserPageMoveKind | null = null
+    pageMove: BrowserPageMoveKind | null = null,
+    traversal: BrowserTraversal['direction'] | null = null
   ) {
     const targetTabId = tabId || browserTabsStateRef.current.activeTabId
     const targetTab = browserTabsStateRef.current.tabs.find((tab) => tab.id === targetTabId)
@@ -1416,7 +1552,7 @@ export default function App () {
       before,
       url,
       source,
-      null,
+      traversal,
       webNavigation?.canGoBack,
       webNavigation?.loading,
       pageMove
@@ -1582,7 +1718,8 @@ export default function App () {
       canGoBack: boolean
       canGoForward: boolean
     },
-    pageMove: BrowserPageMoveKind | null = null
+    pageMove: BrowserPageMoveKind | null = null,
+    traversal: BrowserTraversal['direction'] | null = null
   ) {
     if (!isWebUrl(navigationState.url) || navigationState.url.length > MAX_BROWSER_URL_LENGTH) return
 
@@ -1591,11 +1728,12 @@ export default function App () {
       if (!tab || !isCurrentBrowserTabEntry(state, tabId, expectedEntry)) return state
 
       const before = { history: tab.history, historyIndex: tab.historyIndex }
+      const view = getNativeViewTag({ nativeEvent: navigationState })
       const nextState = recordBrowserWebNavigationState(
         before,
         navigationState.url,
-        { kind: 'web', uri: navigationState.url },
-        null,
+        { kind: 'web', uri: navigationState.url, ...(view !== null ? { view } : {}) },
+        traversal,
         true,
         false,
         pageMove
@@ -1653,8 +1791,10 @@ export default function App () {
 
   async function loadBrowserUrl (rawUrl: string) {
     browserUserInteractedRef.current = true
-    // What the last page said about its address is no use to the next one.
+    // What the last page said about its address is no use to the next one,
+    // and nor is a Back or Forward still on its way.
     browserPageMovesRef.current.delete(browserTabsStateRef.current.activeTabId)
+    clearBrowserTraversal(browserTabsStateRef.current.activeTabId)
     const nextUrl = normalizeBrowserAddress(
       rawUrl,
       browserPreferences.searchEngine,
@@ -1719,11 +1859,14 @@ export default function App () {
 
     if (isWebUrl(nextUrl)) {
       cancelPendingBrowserLoad()
-      commitBrowserEntry(nextUrl, {
+      const tabId = browserTabsStateRef.current.activeTabId
+      const webUrl = upgradeBrowserUrl(tabId, nextUrl)
+      commitBrowserEntry(webUrl, {
         kind: 'web',
-        uri: nextUrl
+        uri: webUrl
       })
-      setBrowserTitle(nextUrl)
+      browserStartedLoadsRef.current.set(tabId, webUrl)
+      setBrowserTitle(webUrl)
       return
     }
 
@@ -1775,8 +1918,11 @@ export default function App () {
     }
 
     if (isWebUrl(url)) {
-      replaceBrowserEntry(url, { kind: 'web', uri: url })
-      setBrowserTitle(url)
+      const tabId = browserTabsStateRef.current.activeTabId
+      const webUrl = upgradeBrowserUrl(tabId, url)
+      replaceBrowserEntry(webUrl, { kind: 'web', uri: webUrl })
+      browserStartedLoadsRef.current.set(tabId, webUrl)
+      setBrowserTitle(webUrl)
       return
     }
 
@@ -2135,17 +2281,21 @@ export default function App () {
     const currentEntry = activeBrowserTab?.history[activeBrowserTab.historyIndex]
     if (!activeBrowserTab || !currentEntry) return
 
-    const nextState = getBrowserBackState({
-      history: activeBrowserTab.history,
-      historyIndex: activeBrowserTab.historyIndex
-    })
+    if (queueBrowserStep(tabId, 'back')) return
+
+    const traversal = getBrowserTraversal(
+      { history: activeBrowserTab.history, historyIndex: activeBrowserTab.historyIndex },
+      'back',
+      getLiveBrowserWebHistory(tabId),
+      // Android's WebView says rightly when it cannot go there.
+      Platform.OS === 'android'
+    )
     const stepBack = () => {
-      if (!nextState) return
-      const entry = nextState.history[nextState.historyIndex]
-      remountBrowserWebView(tabId)
-      applyBrowserState(nextState)
-      setBrowserTitle(getBrowserEntryTitle(entry))
-      setActiveTab(entry.source.kind === 'app' ? entry.source.app : 'hyper')
+      if (traversal?.mode === 'webview' && startBrowserWebViewTraversal(tabId, 'back')) return
+      const nextState = traversal?.mode === 'rebuild'
+        ? traversal.state
+        : getBrowserBackState({ history: activeBrowserTab.history, historyIndex: activeBrowserTab.historyIndex })
+      if (nextState) rebuildBrowserStep(tabId, nextState)
     }
 
     // Settings, Bookmarks and History are sheets over the tab, not entries in
@@ -2322,6 +2472,136 @@ export default function App () {
     const generation = (browserWebViewGenerationsRef.current.get(tabId) || 0) + 1
     browserWebViewGenerationsRef.current.set(tabId, generation)
     setBrowserWebViewGenerations((current) => ({ ...current, [tabId]: generation }))
+    // The new WebView has a list of its own, empty, and nothing it was asked.
+    browserWebHistoryRef.current.delete(tabId)
+    browserStartedLoadsRef.current.delete(tabId)
+    clearBrowserTraversal(tabId)
+  }
+
+  // The WebView key a tab's step is shown with. A WebView built under another
+  // key, for another kind of page, a new desktop view setting, new blocking
+  // rules or a step built again, is a new WebView with an empty back list.
+  function getBrowserWebViewInstanceKey (tab: BrowserTab, entry: BrowserHistoryEntry, generation: number) {
+    return `${getBrowserWebViewKey(tab.id, entry.source.kind)}:${tab.desktopView === true ? 'desktop' : 'mobile'}:${contentBlockingGeneration}:${generation}`
+  }
+
+  // What the tab's WebView on screen said it can go back or forward to, or
+  // null when that WebView has said nothing yet.
+  function getLiveBrowserWebHistory (tabId: string) {
+    const record = browserWebHistoryRef.current.get(tabId)
+    const tab = browserTabsStateRef.current.tabs.find((item) => item.id === tabId)
+    const entry = tab?.history[tab.historyIndex]
+    if (!record || !tab || !entry || !browserWebViewRefs.current.has(tabId)) return null
+    const generation = browserWebViewGenerationsRef.current.get(tabId) || 0
+    return record.key === getBrowserWebViewInstanceKey(tab, entry, generation) ? record : null
+  }
+
+  // A step built again from the tab's history, in a new WebView, which loads
+  // its page as new. For anything the WebView on screen does not have.
+  function rebuildBrowserStep (tabId: string, nextState: ReturnType<typeof getBrowserBackState>) {
+    if (!nextState) return
+    const entry = nextState.history[nextState.historyIndex]
+    remountBrowserWebView(tabId)
+    if (entry.source.kind === 'web') browserStartedLoadsRef.current.set(tabId, entry.url)
+    applyBrowserState({ ...nextState, webCanGoBack: false, webCanGoForward: false }, tabId)
+    setBrowserTitle(getBrowserEntryTitle(entry))
+    setActiveTab(entry.source.kind === 'app' ? entry.source.app : 'hyper')
+  }
+
+  // Back or Forward in the tab's own WebView, which has the page as it was
+  // left. The tab's history moves when the WebView says where it went, in
+  // onNavigationStateChange. A WebView that does not move at all never had
+  // the page, and the step is built again after all.
+  function startBrowserWebViewTraversal (tabId: string, direction: BrowserTraversal['direction']) {
+    const webView = browserWebViewRefs.current.get(tabId)
+    if (!webView) return false
+    clearBrowserTraversal(tabId)
+    browserStartedLoadsRef.current.delete(tabId)
+    const traversal: BrowserTraversal = {
+      direction,
+      generation: browserWebViewGenerationsRef.current.get(tabId) || 0,
+      startedAt: Date.now(),
+      moved: false,
+      started: false,
+      queued: [],
+      timer: null
+    }
+    traversal.timer = setTimeout(() => {
+      if (browserTraversalsRef.current.get(tabId) !== traversal || traversal.moved) return
+      browserTraversalsRef.current.delete(tabId)
+      browserWebHistoryRef.current.delete(tabId)
+      const tab = browserTabsStateRef.current.tabs.find((item) => item.id === tabId)
+      if (!tab || browserTabsStateRef.current.activeTabId !== tabId) return
+      const state = { history: tab.history, historyIndex: tab.historyIndex }
+      rebuildBrowserStep(tabId, direction === 'back' ? getBrowserBackState(state) : getBrowserForwardState(state))
+    }, BROWSER_TRAVERSAL_FALLBACK_MS)
+    browserTraversalsRef.current.set(tabId, traversal)
+    if (direction === 'back') webView.goBack()
+    else webView.goForward()
+    return true
+  }
+
+  // Let go of a Back or Forward on its way, and of any pressed after it.
+  function clearBrowserTraversal (tabId: string) {
+    const traversal = browserTraversalsRef.current.get(tabId)
+    if (traversal?.timer) clearTimeout(traversal.timer)
+    browserTraversalsRef.current.delete(tabId)
+    browserQueuedStepsRef.current.delete(tabId)
+  }
+
+  // An http:// page on the web, tried over https:// first, as Safari and
+  // Chrome do. Plain http:// is not opened at all, so it showed "This page is
+  // not secure" for sites that had https:// all along. The same address back
+  // as http:// within a moment, from a site that sends https:// back to
+  // http://, goes as it is, to that page.
+  function upgradeBrowserUrl (tabId: string, url: string) {
+    const httpsUrl = getHttpsUpgradeUrl(url)
+    if (!httpsUrl) return url
+    const last = browserHttpsUpgradesRef.current.get(tabId)
+    if (last && last.httpUrl === url && Date.now() - last.at < HTTPS_UPGRADE_LOOP_MS) return url
+    browserHttpsUpgradesRef.current.set(tabId, { httpUrl: url, httpsUrl, at: Date.now() })
+    return httpsUrl
+  }
+
+  // The load the app started in this tab, once a page has landed: that page
+  // takes the step the load made.
+  function takeBrowserStartedLoad (tabId: string) {
+    const url = browserStartedLoadsRef.current.get(tabId)
+    browserStartedLoadsRef.current.delete(tabId)
+    return url ? { move: 'replace' as const, from: url } : null
+  }
+
+  // A press while a step is on its way waits for it.
+  function queueBrowserStep (tabId: string, direction: BrowserTraversal['direction']) {
+    const traversal = browserTraversalsRef.current.get(tabId)
+    if (!traversal || Date.now() - traversal.startedAt > BROWSER_TRAVERSAL_TTL_MS) return false
+    traversal.queued.push(direction)
+    return true
+  }
+
+  // The Back or Forward this tab's WebView was asked for, once its page has
+  // landed: the report that says where it went. A page on its way only says
+  // the WebView moved. Presses that waited for it go once the tab has drawn
+  // where it landed.
+  function takeBrowserTraversal (tabId: string, generation: number, loading: boolean) {
+    const traversal = browserTraversalsRef.current.get(tabId)
+    if (!traversal) return null
+    if (traversal.generation !== generation || Date.now() - traversal.startedAt > BROWSER_TRAVERSAL_TTL_MS) {
+      clearBrowserTraversal(tabId)
+      return null
+    }
+    traversal.moved = true
+    if (loading) return null
+    clearBrowserTraversal(tabId)
+    if (traversal.queued.length > 0) browserQueuedStepsRef.current.set(tabId, traversal.queued)
+    return traversal.direction
+  }
+
+  function noteBrowserTraversalMoved (tabId: string, started = false) {
+    const traversal = browserTraversalsRef.current.get(tabId)
+    if (!traversal) return
+    traversal.moved = true
+    if (started) traversal.started = true
   }
 
   function onBrowserForward () {
@@ -2335,17 +2615,19 @@ export default function App () {
     const currentEntry = activeBrowserTab?.history[activeBrowserTab.historyIndex]
     if (!activeBrowserTab || !currentEntry) return
 
-    const nextState = getBrowserForwardState({
-      history: activeBrowserTab.history,
-      historyIndex: activeBrowserTab.historyIndex
-    })
-    if (!nextState) return
+    if (queueBrowserStep(tabId, 'forward')) return
 
-    const entry = nextState.history[nextState.historyIndex]
-    remountBrowserWebView(tabId)
-    applyBrowserState(nextState)
-    setBrowserTitle(getBrowserEntryTitle(entry))
-    setActiveTab(entry.source.kind === 'app' ? entry.source.app : 'hyper')
+    const traversal = getBrowserTraversal(
+      { history: activeBrowserTab.history, historyIndex: activeBrowserTab.historyIndex },
+      'forward',
+      getLiveBrowserWebHistory(tabId),
+      // Android's WebView says rightly when it cannot go there.
+      Platform.OS === 'android'
+    )
+    if (traversal?.mode === 'webview' && startBrowserWebViewTraversal(tabId, 'forward')) return
+    rebuildBrowserStep(tabId, traversal?.mode === 'rebuild'
+      ? traversal.state
+      : getBrowserForwardState({ history: activeBrowserTab.history, historyIndex: activeBrowserTab.historyIndex }))
   }
 
   function onBrowserReload () {
@@ -2816,6 +3098,7 @@ export default function App () {
 
   function updateActiveBrowserZoom (nextZoom: number) {
     const activeTabId = browserTabsStateRef.current.activeTabId
+    const activeTab = browserTabsStateRef.current.tabs.find((tab) => tab.id === activeTabId)
     const zoom = normalizeBrowserPageZoom(nextZoom)
 
     updateBrowserTabsState((state) => updateBrowserTabState(
@@ -2825,6 +3108,7 @@ export default function App () {
     ) as BrowserTabsState)
     browserWebViewRefs.current.get(activeTabId)?.injectJavaScript(createBrowserAccessibilityScript({
       applyTextScale: Platform.OS === 'ios',
+      desktopView: activeTab?.desktopView === true,
       enforceManualPageZoom: browserPreferences.enforceManualPageZoom,
       pageZoom: zoom,
       websiteTextScale: browserPreferences.websiteTextScale
@@ -2970,6 +3254,9 @@ export default function App () {
     browserMediaTokensRef.current.delete(tabId)
     browserPageMovesRef.current.delete(tabId)
     browserAddedPagesRef.current.delete(tabId)
+    browserWebHistoryRef.current.delete(tabId)
+    browserStartedLoadsRef.current.delete(tabId)
+    clearBrowserTraversal(tabId)
     browserTabOpenersRef.current.delete(tabId)
     hyperBridgePendingRef.current.delete(tabId)
     browserWebViewGenerationsRef.current.delete(tabId)
@@ -3108,6 +3395,9 @@ export default function App () {
     browserWebViewGenerationsRef.current.clear()
     browserPageMovesRef.current.clear()
     browserAddedPagesRef.current.clear()
+    browserWebHistoryRef.current.clear()
+    browserStartedLoadsRef.current.clear()
+    for (const id of [...browserTraversalsRef.current.keys()]) clearBrowserTraversal(id)
     setBrowserWebViewGenerations({})
     updateBrowserTabsState(nextState)
     const previewCacheCleared = clearPreviews
@@ -3246,7 +3536,7 @@ export default function App () {
     tabId: string,
     expectedEntry: BrowserHistoryEntry,
     webViewGeneration: number,
-    request: { url?: string, isTopFrame?: boolean, navigationType?: string }
+    request: { url?: string, isTopFrame?: boolean, navigationType?: string, hasGesture?: boolean }
   ) {
     // Only the tab's own WebView, the one built for this step. A page that
     // moves on as soon as it has loaded asks before the tab is drawn again
@@ -3258,16 +3548,85 @@ export default function App () {
       !isCurrentBrowserTabEntry(browserTabsStateRef.current, tabId, expectedEntry)
     ) return false
 
+    // A link or a form the person used while Back or Forward was on its way
+    // takes its place, as in Safari. iOS names the kind of navigation, and a
+    // page sending itself on can be the page Back went to. Android names
+    // none, and tells no navigation of Back or Forward here, so one from a
+    // page before Back's page is there came from the page being left.
+    const traversal = browserTraversalsRef.current.get(tabId)
+    if (
+      traversal &&
+      request.isTopFrame !== false &&
+      (Platform.OS === 'android'
+        ? !traversal.started
+        : ['click', 'formsubmit', 'formresubmit', 'reload'].includes(request.navigationType || ''))
+    ) clearBrowserTraversal(tabId)
+
     const action = getBrowserRequestAction({
       requestUrl: request.url,
       currentSourceKind: expectedEntry.source.kind,
       currentUrl: expectedEntry.source.kind === 'hyper' ? expectedEntry.source.baseUrl : '',
       navigationType: request.navigationType,
-      isTopFrame: request.isTopFrame !== false
+      isTopFrame: request.isTopFrame !== false,
+      // A link the person tapped: iOS calls it a click, and Android says a
+      // gesture came with it (PeerSkyWebViewClient).
+      tapped: request.navigationType === 'click' || request.hasGesture === true
     })
     const isActive = browserTabsStateRef.current.activeTabId === tabId
 
-    if (action.action === 'allow') return true
+    if (action.action === 'allow') {
+      const requestUrl = request.url || ''
+      // An http:// page whose https:// address sent the tab straight back to
+      // it has no https:// page. It shows why it does not open, in the step
+      // that tried, rather than going to plain http:// as a load that hangs
+      // or is refused.
+      const upgrade = browserHttpsUpgradesRef.current.get(tabId)
+      if (
+        request.isTopFrame !== false &&
+        expectedEntry.source.kind === 'web' &&
+        upgrade?.httpUrl === requestUrl &&
+        Date.now() - upgrade.at < HTTPS_UPGRADE_LOOP_MS
+      ) {
+        const tab = browserTabsStateRef.current.tabs.find((item) => item.id === tabId)
+        if (!tab) return false
+        const stepUrl = tab.history[tab.historyIndex]?.url
+        const tryingStep = stepUrl === upgrade.httpsUrl || browserStartedLoadsRef.current.get(tabId) === stepUrl
+        browserStartedLoadsRef.current.delete(tabId)
+        const errorSource: BrowserSource = {
+          kind: 'error',
+          html: createBrowserErrorHtml(requestUrl, INSECURE_PAGE_MESSAGE, browserIsDark)
+        }
+        if (isActive) {
+          const state = { history: tab.history, historyIndex: tab.historyIndex }
+          applyBrowserState((tryingStep ? replaceBrowserEntryState : commitBrowserEntryState)(state, requestUrl, errorSource), tabId)
+          setBrowserTitle(t('Page failed'))
+        } else {
+          updateBackgroundBrowserEntry(tabId, expectedEntry, requestUrl, errorSource, tryingStep)
+        }
+        return false
+      }
+
+      // A link or a redirect to an http:// page, over https:// first. The
+      // WebView is sent there in its place, as a step of its own, or as this
+      // step when this is the WebView loading the step itself.
+      const webUrl = request.isTopFrame !== false && expectedEntry.source.kind === 'web'
+        ? upgradeBrowserUrl(tabId, requestUrl)
+        : requestUrl
+      if (webUrl === requestUrl) return true
+      // A redirect in a load the app started is that load's step.
+      const tab = browserTabsStateRef.current.tabs.find((item) => item.id === tabId)
+      const stepUrl = tab?.history[tab.historyIndex]?.url
+      const sameStep = stepUrl === requestUrl || (Boolean(stepUrl) && browserStartedLoadsRef.current.get(tabId) === stepUrl)
+      browserStartedLoadsRef.current.set(tabId, webUrl)
+      if (isActive) {
+        if (sameStep) replaceBrowserEntry(webUrl, { kind: 'web', uri: webUrl })
+        else commitBrowserEntry(webUrl, { kind: 'web', uri: webUrl })
+        setBrowserTitle(webUrl)
+      } else {
+        updateBackgroundBrowserEntry(tabId, expectedEntry, webUrl, { kind: 'web', uri: webUrl }, sameStep)
+      }
+      return false
+    }
 
     if (
       action.action === 'open-external' &&
@@ -3276,6 +3635,12 @@ export default function App () {
       action.scheme
     ) {
       if (isActive) openExternalAppLink(action.url)
+      return false
+    }
+
+    // An intent:// link's own web page, in this tab.
+    if (action.action === 'load-fallback' && action.url) {
+      if (isActive) void loadBrowserUrl(action.url)
       return false
     }
 
@@ -3292,16 +3657,19 @@ export default function App () {
     }
 
     if (action.action === 'commit-web' && action.url && action.source) {
+      const webUrl = upgradeBrowserUrl(tabId, action.url)
+      const webSource: BrowserSource = { kind: 'web', uri: webUrl }
+      browserStartedLoadsRef.current.set(tabId, webUrl)
       if (isActive) {
         cancelPendingBrowserLoad()
-        commitBrowserEntry(action.url, action.source as BrowserSource)
-        setBrowserTitle(action.url)
+        commitBrowserEntry(webUrl, webSource)
+        setBrowserTitle(webUrl)
       } else {
         updateBackgroundBrowserEntry(
           tabId,
           expectedEntry,
-          action.url,
-          action.source as BrowserSource
+          webUrl,
+          webSource
         )
       }
       return false
@@ -3352,9 +3720,13 @@ export default function App () {
     setStatus('Popup opened in new tab')
   }
 
+  // Mail, phone, messages and maps, which Settings can let open without
+  // asking, or another app's own link, which always asks. iOS has no use for
+  // an intent:// link.
   function openExternalAppLink (targetUrl: string) {
-    const externalLink = parseExternalAppLink(targetUrl)
-    if (!externalLink) {
+    const knownLink = parseExternalAppLink(targetUrl)
+    const externalLink = knownLink || parseAppLink(targetUrl)
+    if (!externalLink || (Platform.OS === 'ios' && externalLink.scheme === 'intent')) {
       setStatus('Unsupported external app link')
       return
     }
@@ -3376,7 +3748,7 @@ export default function App () {
 
     lastExternalLinkPromptAtRef.current = now
 
-    if (behaviorAction === 'open') {
+    if (behaviorAction === 'open' && knownLink) {
       launchExternalAppLink(externalLink.url)
       return
     }
@@ -3405,7 +3777,8 @@ export default function App () {
   }
 
   function launchExternalAppLink (targetUrl: string) {
-    const externalLink = parseExternalAppLink(targetUrl)
+    const knownLink = parseExternalAppLink(targetUrl)
+    const externalLink = knownLink || parseAppLink(targetUrl)
     if (!externalLink) {
       externalLinkPromptOpenRef.current = false
       setStatus('Unsupported external app link')
@@ -3413,7 +3786,18 @@ export default function App () {
     }
 
     externalLinkPromptOpenRef.current = true
-    void Linking.openURL(externalLink.url)
+    // On Android another app's link opens as Chrome opens one, an intent://
+    // link included, which Linking cannot read (openAppLink in
+    // PeerSkyBrowserDataModule).
+    const openAppLink = Platform.OS === 'android' && !knownLink
+      ? (NativeModules.PeerSkyBrowserData as { openAppLink?: (url: string) => Promise<boolean> } | undefined)?.openAppLink
+      : undefined
+    const opened = openAppLink
+      ? openAppLink(externalLink.url).then((done) => {
+        if (!done) throw new Error('No app takes this link')
+      })
+      : Linking.openURL(externalLink.url)
+    void opened
       .catch(() => offerExternalLinkFallback(externalLink.scheme, externalLink.url))
       .finally(() => {
         externalLinkPromptOpenRef.current = false
@@ -4345,8 +4729,12 @@ export default function App () {
   // The Hyperdrive viewer's own folders come first, as a page's history does.
   const driveViewerCanGoBack = browserSource.kind === 'viewer' && driveViewerHistory.canGoBack
   const driveViewerCanGoForward = browserSource.kind === 'viewer' && driveViewerHistory.canGoForward
-  const canBrowserGoBack = browserCanGoBack
-  const canBrowserGoForward = browserCanGoForward || driveViewerCanGoForward
+  // A web page's WebView can have more behind or ahead of it than the tab
+  // keeps, such as a menu a page opened under its own address, which Back
+  // closes in Safari and Chrome.
+  const activeBrowserWebHistory = getLiveBrowserWebHistory(browserTabsState.activeTabId)
+  const canBrowserGoBack = browserCanGoBack || activeBrowserWebHistory?.canGoBack === true
+  const canBrowserGoForward = browserCanGoForward || driveViewerCanGoForward || activeBrowserWebHistory?.canGoForward === true
   const browserIncognitoSession = getBrowserIncognitoSession(browserTabsState.tabs)
   const browserIsDark = resolveBrowserDarkMode(browserPreferences.theme, systemColorScheme)
   // What browser://theme/ answers in the tabs (browser-theme.mjs), made again
@@ -4436,7 +4824,14 @@ export default function App () {
     browserDownloadsVisible ||
     browserSettingsVisible ||
     peerChatRoomOpen
-  const browserBackAvailable = browserOverPage || canBrowserGoBack || driveViewerCanGoBack
+  // A tab a link opened goes back to the tab that opened it once there is
+  // nowhere further back in it (closeTabToOpener). Counted only by the
+  // Android button, the arrow and the edge swipe did nothing on iOS, where
+  // Safari's Back closes the tab and shows the page that opened it.
+  const browserOpenerTabId = browserTabOpenersRef.current.get(browserTabsState.activeTabId)
+  const browserCanCloseToOpener = Boolean(browserOpenerTabId) &&
+    browserTabsState.tabs.some((tab) => tab.id === browserOpenerTabId)
+  const browserBackAvailable = browserOverPage || canBrowserGoBack || driveViewerCanGoBack || browserCanCloseToOpener
   browserCanGoBackRef.current = browserBackAvailable
   goBrowserBackRef.current = goBrowserBack
   // Forward only ever means the page you came back from. With a sheet or a
@@ -4629,6 +5024,22 @@ export default function App () {
     browserZoomVisible,
     canBrowserGoBack
   ])
+
+  // A Back or Forward pressed while the last one was on its way goes now that
+  // the tab has drawn the step it landed on.
+  useEffect(() => {
+    const tabId = browserTabsState.activeTabId
+    const queued = browserQueuedStepsRef.current.get(tabId)
+    if (!queued?.length || browserTraversalsRef.current.has(tabId)) return
+    browserQueuedStepsRef.current.delete(tabId)
+    const [direction, ...rest] = queued
+    if (direction === 'back') onBrowserBack()
+    else onBrowserForward()
+    if (rest.length === 0) return
+    const traversal = browserTraversalsRef.current.get(tabId)
+    if (traversal) traversal.queued.push(...rest)
+    else browserQueuedStepsRef.current.set(tabId, rest)
+  }, [browserHistory, browserHistoryIndex, browserTabsState.activeTabId])
 
   // Before every other screen. Link Device lives in Settings, and when this
   // came after the Settings screen the restart screen never showed: the old
@@ -4947,10 +5358,7 @@ export default function App () {
             accessibilityLabel={tp({ one: 'Open tabs, {count} open', other: 'Open tabs, {count} open' }, browserTabsState.tabs.length)}
             accessibilityRole='button'
             style={styles.p2pmdTabsButton}
-            onPress={() => {
-              browserUserInteractedRef.current = true
-              setBrowserTabsVisible(true)
-            }}
+            onPress={openBrowserTabList}
           >
             <View style={[styles.browserTabCountIcon, { borderColor: p2pmdHeaderIconColor }]}>
               <Text style={[styles.browserTabCountText, { color: p2pmdHeaderIconColor }]}>{browserTabsState.tabs.length}</Text>
@@ -5312,10 +5720,7 @@ export default function App () {
         setBrowserSettingsCloseOnBack(false)
         setBrowserSettingsVisible(true)
       }}
-      onOpenTabs={() => {
-        browserUserInteractedRef.current = true
-        setBrowserTabsVisible(true)
-      }}
+      onOpenTabs={openBrowserTabList}
       onOpenZoom={() => setBrowserZoomVisible(true)}
       onPrintPage={onBrowserPrintPage}
       onReaderView={onBrowserReaderView}
@@ -5503,6 +5908,13 @@ export default function App () {
                           <View style={styles.browserShortcutBadge}>
                             <Text style={styles.browserShortcutBadgeText}>
                               {peerChatNotifications.unreadTotal > 99 ? '99+' : peerChatNotifications.unreadTotal}
+                            </Text>
+                          </View>
+                        )}
+                        {app.id === 'hyper' && hyperdriveNewCount > 0 && (
+                          <View style={styles.browserShortcutBadge}>
+                            <Text style={styles.browserShortcutBadgeText}>
+                              {hyperdriveNewCount > 99 ? '99+' : hyperdriveNewCount}
                             </Text>
                           </View>
                         )}
@@ -6140,9 +6552,15 @@ export default function App () {
                 // Incognito cookies live apart from normal tabs, in one store
                 // (on Android a WebView profile) for each run of incognito tabs.
                 tabIncognito && browserIncognitoSession ? { incognitoSession: browserIncognitoSession } : {},
-                // Pages are told dark is preferred, so a site's own dark theme
-                // wins over the inverting script.
-                Platform.OS === 'ios' ? { forceDarkScheme: browserPreferences.forceDarkWebsites } : {},
+                // Pages are told the theme picked in PeerSky, and dark while
+                // Force dark mode is on, so a site's own dark theme wins over
+                // the inverting script.
+                Platform.OS === 'ios'
+                  ? {
+                      colorScheme: getWebsiteColorScheme(browserPreferences.theme),
+                      forceDarkScheme: browserPreferences.forceDarkWebsites
+                    }
+                  : {},
                 // A hyper:// page keeps what it stores for as long as the app
                 // runs, apart from websites, so burning the tabs clears it too.
                 Platform.OS === 'ios' && entry.source.kind === 'hyper' ? { hyperSession: true } : {})
@@ -6195,6 +6613,7 @@ export default function App () {
           )
 
           const webViewGeneration = browserWebViewGenerations[tab.id] || 0
+          const webViewKey = getBrowserWebViewInstanceKey(tab, entry, webViewGeneration)
 
           // On iOS a tab behind another is moved out of sight, not set to
           // display: 'none'. Hidden that way, its WebView was taken down and
@@ -6224,7 +6643,7 @@ export default function App () {
               style={styles.browserWebViewCapture}
             >
             <WebView
-              key={`${getBrowserWebViewKey(tab.id, entry.source.kind)}:${tabDesktopView ? 'desktop' : 'mobile'}:${contentBlockingGeneration}:${webViewGeneration}`}
+              key={webViewKey}
               ref={(ref) => {
                 if (ref) {
                   browserWebViewRefs.current.set(tab.id, ref)
@@ -6293,15 +6712,14 @@ export default function App () {
               onShouldStartLoadWithRequest={(request) => onBrowserShouldStartLoad(tab.id, entry, webViewGeneration, request)}
               onOpenWindow={(event) => onBrowserOpenWindow(tab.id, entry, event.nativeEvent.targetUrl)}
               onFileDownload={(event) => confirmPageDownload(event.nativeEvent.downloadUrl, tab.id, getNativeViewTag(event))}
+              // A scroll puts the keyboard away. The WebView reports scrolls
+              // only while it is up: on Android each one, about once a frame,
+              // crossed to JavaScript for nothing the rest of the time.
               scrollEventThrottle={200}
-              onScroll={() => {
-                Keyboard.dismiss()
-                if (isCurrentBrowserTabEntry(browserTabsStateRef.current, tab.id, entry)) {
-                  scheduleBrowserTabPreview(tab.id, entry)
-                }
-              }}
+              onScroll={isKeyboardVisible ? onBrowserPageScroll : undefined}
               onLoadStart={(event) => {
                 browserLoadStartsRef.current.add(event.nativeEvent)
+                noteBrowserTraversalMoved(tab.id, true)
                 const startTag = getNativeViewTag(event)
                 if (startTag !== null) browserWebViewTabsRef.current.set(startTag, tab.id)
                 // Android starts a load only for a navigation that committed.
@@ -6326,6 +6744,9 @@ export default function App () {
               onLoadProgress={(event) => {
                 if (browserTabsStateRef.current.activeTabId !== tab.id) return
                 const progress = Math.min(1, event.nativeEvent.progress)
+                // Android says nothing else of a step back until its page
+                // answers, which can take a while.
+                if (progress < 1) noteBrowserTraversalMoved(tab.id)
                 // Android's WebView tells the start of a load only once the
                 // server answers, so a slow site showed nothing for seconds
                 // after Go. Its progress starts at once, and is what says it.
@@ -6358,6 +6779,14 @@ export default function App () {
                 if (entry.source.kind !== 'web') return
                 if (!isCurrentBrowserTabEntry(browserTabsStateRef.current, tab.id, entry)) return
                 if (!isWebUrl(navigationState.url) || navigationState.url.length > MAX_BROWSER_URL_LENGTH) return
+                // Which WebView this is, so Back and Forward can step in it.
+                const view = getNativeViewTag({ nativeEvent: navigationState })
+                browserWebHistoryRef.current.set(tab.id, {
+                  key: webViewKey,
+                  view,
+                  canGoBack: navigationState.canGoBack === true,
+                  canGoForward: navigationState.canGoForward === true
+                })
                 const isLoadStart = browserLoadStartsRef.current.has(navigationState)
                 if (isUncommittedNavigationFinish({
                   platform: Platform.OS,
@@ -6388,24 +6817,30 @@ export default function App () {
                   )
                 }
 
-                // What the page said it did to its address, if it said.
-                const pageMove = loading ? null : takeBrowserPageMove(tab.id, webViewGeneration, navigationState.url)
+                // What the page said it did to its address, if it said, or
+                // the load the app started here landing, which takes its step.
+                const reportedMove = loading ? null : takeBrowserPageMove(tab.id, webViewGeneration, navigationState.url)
+                const landedLoad = loading ? null : takeBrowserStartedLoad(tab.id)
+                const pageMove = reportedMove || landedLoad
+                // Where Back or Forward went, when this is the page it went to.
+                const traversal = takeBrowserTraversal(tab.id, webViewGeneration, loading)
 
                 if (browserTabsStateRef.current.activeTabId === tab.id) {
                   syncBrowserEntry(navigationState.url, {
                     kind: 'web',
-                    uri: navigationState.url
+                    uri: navigationState.url,
+                    ...(view !== null ? { view } : {})
                   }, {
                     canGoBack: navigationState.canGoBack,
                     canGoForward: navigationState.canGoForward,
                     loading
-                  }, tab.id, pageMove)
+                  }, tab.id, pageMove, traversal)
                   const title = normalizeBrowserTabTitle(navigationState.title || navigationState.url)
                   setBrowserTitle(title)
                   updateBrowserTabTitle(tab.id, title)
                   setBrowserIsLoading(loading)
                 } else {
-                  syncBackgroundBrowserTab(tab.id, entry, navigationState, pageMove)
+                  syncBackgroundBrowserTab(tab.id, entry, navigationState, pageMove, traversal)
                 }
               }}
               onMessage={(event) => {
@@ -6506,22 +6941,72 @@ export default function App () {
               }}
               onError={(event) => {
                 if (!isCurrentBrowserTabEntry(browserTabsStateRef.current, tab.id, entry)) return
+                // Back or Forward that failed failed at the page it went to,
+                // and a load the app started, redirected or not, at its step.
+                const direction = browserTraversalsRef.current.get(tab.id)?.direction ?? null
+                const startedUrl = browserStartedLoadsRef.current.get(tab.id)
+                clearBrowserTraversal(tab.id)
+                browserStartedLoadsRef.current.delete(tab.id)
 
-                const candidateUrl = event.nativeEvent.url || entry.url
+                // The address that failed. iOS says it apart, as failingUrl
+                // (patches/react-native-webview): its url is the page still on
+                // screen when a link fails, which the error page then named.
+                const failingUrl = (event.nativeEvent as { failingUrl?: unknown }).failingUrl
+                const candidateUrl = (typeof failingUrl === 'string' && failingUrl) || event.nativeEvent.url || entry.url
                 const failedUrl = candidateUrl.length <= MAX_BROWSER_URL_LENGTH
                   ? candidateUrl
                   : entry.url
+                // An http:// page tried over https:// that would not load
+                // that way is the http:// page, and why it does not open.
+                const upgrade = browserHttpsUpgradesRef.current.get(tab.id)
+                const insecureUrl = upgrade?.httpsUrl === failedUrl ? upgrade.httpUrl : null
+                const shownUrl = insecureUrl || failedUrl
                 const errorSource: BrowserSource = {
                   kind: 'error',
-                  html: createBrowserErrorHtml(failedUrl, event.nativeEvent.description, browserIsDark)
+                  html: createBrowserErrorHtml(
+                    shownUrl,
+                    insecureUrl ? INSECURE_PAGE_MESSAGE : event.nativeEvent.description,
+                    browserIsDark,
+                    // The https:// attempt's own error would name the wrong
+                    // page: what is shown is the http:// page, not secure.
+                    insecureUrl ? undefined : event.nativeEvent.code
+                  )
                 }
 
+                const placeUrl = (tabState: { history: BrowserHistoryEntry[], historyIndex: number }) =>
+                  startedUrl && tabState.history[tabState.historyIndex]?.url === startedUrl ? startedUrl : failedUrl
+
                 if (browserTabsStateRef.current.activeTabId === tab.id) {
-                  replaceBrowserEntry(failedUrl, errorSource)
+                  const current = browserTabsStateRef.current.tabs.find((item) => item.id === tab.id)
+                  if (!current) return
+                  applyBrowserState(recordBrowserErrorState(
+                    { history: current.history, historyIndex: current.historyIndex },
+                    placeUrl(current),
+                    errorSource,
+                    direction,
+                    shownUrl
+                  ), tab.id)
                   setBrowserTitle(t('Page failed'))
                   setStatus(event.nativeEvent.description)
                 } else {
-                  updateBackgroundBrowserEntry(tab.id, entry, failedUrl, errorSource, true)
+                  updateBrowserTabsState((state) => {
+                    const background = state.tabs.find((item) => item.id === tab.id)
+                    if (!background || !isCurrentBrowserTabEntry(state, tab.id, entry)) return state
+                    const nextState = recordBrowserErrorState(
+                      { history: background.history, historyIndex: background.historyIndex },
+                      placeUrl(background),
+                      errorSource,
+                      direction,
+                      shownUrl
+                    )
+                    return updateBrowserTabState(state, tab.id, {
+                      title: getBrowserEntryTitle({ url: shownUrl, source: errorSource }),
+                      history: nextState.history,
+                      historyIndex: nextState.historyIndex,
+                      webCanGoBack: false,
+                      webCanGoForward: false
+                    }) as BrowserTabsState
+                  })
                 }
               }}
             />

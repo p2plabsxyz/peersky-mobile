@@ -10,7 +10,8 @@ import {
   describeBrowserDownload,
   downloadFilenameFromHeaders,
   normalizeBrowserDownloads,
-  normalizeBrowserDownloadUrl
+  normalizeBrowserDownloadUrl,
+  settleAwaitedDownloads
 } from './browser-downloads.mjs'
 import { t } from '../i18n/i18n.mjs'
 import { localPathInAppFolder, OPEN_COPIES_FOLDER, openCopyName } from './open-copy.mjs'
@@ -64,6 +65,11 @@ export function useBrowserDownloads ({ enabled = false } = {}) {
   const iosTransfers = useRef(new Map<string, IosTransfer>())
   const progressTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const refreshSequence = useRef(0)
+  // Android downloads asked for here that Android has not listed yet, by
+  // address. Download image opens the screen at once, and the list used to
+  // check once, find nothing running, and stop, so it stayed empty.
+  const awaitedDownloads = useRef(new Map<string, number>())
+  const [pollRequest, setPollRequest] = useState(0)
 
   const refresh = useCallback(async () => {
     const sequence = ++refreshSequence.current
@@ -98,7 +104,9 @@ export function useBrowserDownloads ({ enabled = false } = {}) {
 
     const poll = async () => {
       const records = await refresh()
-      if (cancelled || !hasActiveDownload(records)) return
+      if (cancelled) return
+      const awaiting = settleAwaitedDownloads(awaitedDownloads.current, records)
+      if (!awaiting && !hasActiveDownload(records)) return
       pollTimer = setTimeout(() => void poll(), DOWNLOAD_POLL_INTERVAL_MS)
     }
 
@@ -107,7 +115,7 @@ export function useBrowserDownloads ({ enabled = false } = {}) {
       cancelled = true
       if (pollTimer) clearTimeout(pollTimer)
     }
-  }, [enabled, refresh])
+  }, [enabled, refresh, pollRequest])
 
   // An incognito tab's download sends none of the cookies every other tab
   // shares, which would tell the site who it is.
@@ -122,6 +130,10 @@ export function useBrowserDownloads ({ enabled = false } = {}) {
       try {
         const accepted = await getAndroidDownloads().requestDownload(normalizedUrl, incognito)
         setError(accepted ? null : t('Unable to start this download.'))
+        if (accepted) {
+          awaitedDownloads.current.set(normalizedUrl, Date.now())
+          setPollRequest((request) => request + 1)
+        }
         return accepted
       } catch (downloadError) {
         console.error('Failed requesting Android download:', downloadError)

@@ -20,6 +20,15 @@ export function createBrowserAccessibilityScript ({
     ? 'width|initial-scale|minimum-scale|user-scalable|maximum-scale'
     : 'user-scalable|maximum-scale'
 
+  // A page with no viewport tag is laid out 980 px wide and zoomed out to fit
+  // the screen, the way Safari and Chrome show it. A tag of PeerSky's own, set
+  // to the phone's width, cut such a page off at the right, so one is added
+  // only for Desktop View. Zoom that is let through needs none: a page without
+  // a tag can always be zoomed.
+  //
+  // The script also runs as a page starts, before its head exists, so a tag
+  // added then goes on the root, and the page's own tag, read later, is the
+  // one changed from then on.
   return `(() => {
     const root = document.documentElement
     if (root && ${shouldApplyTextScale}) {
@@ -27,29 +36,32 @@ export function createBrowserAccessibilityScript ({
     }
 
     const marker = 'data-peersky-original-content'
-    let viewport = document.querySelector('meta[name="viewport"]')
+    const added = 'data-peersky-viewport'
+    const viewports = Array.from(document.querySelectorAll('meta[name="viewport"]'))
+    let viewport = viewports.find((meta) => !meta.hasAttribute(added)) || viewports[0] || null
 
-    if (!viewport) {
-      viewport = document.createElement('meta')
-      viewport.setAttribute('name', 'viewport')
-      viewport.setAttribute(marker, '')
-      viewport.setAttribute('content', 'width=device-width, initial-scale=1')
-      document.head.appendChild(viewport)
+    if (!viewport && ${shouldUseDesktopView}) {
+      const parent = document.head || root
+      if (parent) {
+        viewport = document.createElement('meta')
+        viewport.setAttribute('name', 'viewport')
+        viewport.setAttribute(added, '')
+        viewport.setAttribute(marker, '')
+        parent.appendChild(viewport)
+      }
     }
 
-    if (${shouldUseDesktopView} || ${shouldEnforceZoom}) {
+    if (viewport && (${shouldUseDesktopView} || ${shouldEnforceZoom})) {
       if (!viewport.hasAttribute(marker)) {
         viewport.setAttribute(marker, viewport.getAttribute('content') || '')
       }
 
       const original = viewport.getAttribute(marker) || ''
-      const mobileViewport = 'width=device-width, initial-scale=1'
-      const sourceViewport = original || (${shouldUseDesktopView} ? '' : mobileViewport)
       const overriddenViewportPattern = new RegExp(
         '^(${overriddenViewportFields})\\\\s*=',
         'i'
       )
-      const preserved = sourceViewport.split(',').map((part) => part.trim()).filter((part) => {
+      const preserved = original.split(',').map((part) => part.trim()).filter((part) => {
         return part && !overriddenViewportPattern.test(part)
       })
 
@@ -80,9 +92,7 @@ export function createBrowserAccessibilityScript ({
       window.addEventListener('pageshow', applyViewport, { once: true })
       window.addEventListener('orientationchange', () => setTimeout(applyViewport, 80), { once: true })
     } else if (viewport && viewport.hasAttribute(marker)) {
-      const original = viewport.getAttribute(marker) || ''
-      if (original) viewport.setAttribute('content', original)
-      else viewport.setAttribute('content', 'width=device-width, initial-scale=1')
+      viewport.setAttribute('content', viewport.getAttribute(marker) || '')
     }
 
     true

@@ -115,6 +115,8 @@
   - [x] Keep a folder offline, with pause, resume and progress, and an option to download only on Wi-Fi
   - [x] Recent, with what you uploaded and fetched
   - [x] From your devices: private files from your other devices show up here on their own, and this phone's show up there, with a copy kept on your desktop
+  - [x] What your other devices add shows New, with a count on the Hyperdrive shortcut until you look
+  - [x] Show files, folders or both, and search by name once a list passes ten
 
 - [x] P2PMD (`peersky://p2p/p2pmd/`):
 

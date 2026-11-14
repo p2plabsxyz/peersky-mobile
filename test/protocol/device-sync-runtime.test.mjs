@@ -13,6 +13,7 @@ import {
   ensureDeviceSync,
   forgetDeviceSyncDevice,
   getDeviceSyncSnapshot,
+  markDeviceSyncFilesSeen,
   setDeviceSyncMetered
 } from '../../backend/hyper/runtime.mjs'
 import { recordDeviceHello, recordDriveListing } from '../../backend/hyper/device-sync-state.mjs'
@@ -41,7 +42,7 @@ test.after(async () => {
 test('a phone no desktop has linked starts nothing and opens no store', async () => {
   assert.equal(await ensureDeviceSync(), false)
   assert.equal(existsSync(path.join(dir, 'hyper-sdk-synced-private')), false)
-  assert.deepEqual(getDeviceSyncSnapshot(), { linked: false, running: false, devices: [], files: [] })
+  assert.deepEqual(getDeviceSyncSnapshot(), { linked: false, running: false, devices: [], files: [], newCount: 0 })
 })
 
 test('a linked phone meets its devices on the private store, and stops with it', async () => {
@@ -78,8 +79,35 @@ test('a linked phone meets its devices on the private store, and stops with it',
     deviceId: desktop,
     deviceType: 'desktop',
     driveId: drive,
-    url: `hyper://${drive}/notes.pdf`
+    url: `hyper://${drive}/notes.pdf`,
+    new: false
   }])
+  assert.equal(snapshot.newCount, 0)
+
+  // The desktop shares another file: new on the Hyperdrive shortcut until
+  // the Hyperdrive screen shows it.
+  recordDriveListing(dir, drive, {
+    items: [
+      { type: 'file', name: 'scan.pdf', path: '/scan.pdf', byteLength: 10, seq: 9 },
+      { type: 'file', name: 'notes.pdf', path: '/notes.pdf', byteLength: 2048, seq: 2 }
+    ],
+    version: 10
+  })
+  recordDriveListing(dir, drive, {
+    items: [
+      { type: 'file', name: 'new.jpg', path: '/new.jpg', byteLength: 5, seq: 10 },
+      { type: 'file', name: 'scan.pdf', path: '/scan.pdf', byteLength: 10, seq: 9 },
+      { type: 'file', name: 'notes.pdf', path: '/notes.pdf', byteLength: 2048, seq: 2 }
+    ],
+    version: 11
+  })
+  snapshot = getDeviceSyncSnapshot()
+  assert.equal(snapshot.newCount, 1)
+  assert.deepEqual(snapshot.files.map((file) => [file.name, file.new]), [['new.jpg', true], ['scan.pdf', false], ['notes.pdf', false]])
+  assert.equal(snapshot.files.some((file) => 'addedAt' in file || 'seq' in file), false)
+  assert.equal(markDeviceSyncFilesSeen(), true)
+  assert.equal(getDeviceSyncSnapshot().newCount, 0)
+  assert.equal(markDeviceSyncFilesSeen(), false)
 
   assert.equal(forgetDeviceSyncDevice(desktop), true)
   assert.deepEqual(getDeviceSyncSnapshot().devices, [])

@@ -59,6 +59,43 @@ describe('a page that would not load', () => {
     assert.match(blocked.body, /Settings, Privacy/)
   })
 
+  // An expired certificate read like a network fault: "PeerSky could not
+  // reach expired.badssl.com. Check your connection". Safari and Chrome say
+  // the connection is not private.
+  test('a certificate that cannot be trusted says the connection is not private', () => {
+    // iOS, by code, since its words come in the phone's language.
+    for (const code of [-1201, -1202, -1203, -1204]) {
+      const { title, body } = describeBrowserError('https://expired.badssl.com/', 'The certificate for this server is invalid.', code)
+      assert.equal(title, 'This connection is not private', String(code))
+      assert.match(body, /^expired\.badssl\.com sent a certificate that has expired or is not trusted, so PeerSky cannot tell this is the real site\./)
+    }
+    // Android, as react-native-webview words it.
+    for (const detail of ['SSL error: The certificate has expired', 'SSL error: Hostname mismatch', 'SSL error: The certificate authority is not trusted']) {
+      assert.equal(describeBrowserError('https://wrong.host.badssl.com/', detail, 1).title, 'This connection is not private', detail)
+    }
+    // A site that wants a certificate from the phone is another matter.
+    for (const code of [-1205, -1206]) {
+      const { title, body } = describeBrowserError('https://client.badssl.com/', 'The server requires a client certificate.', code)
+      assert.equal(title, 'This site asks for a certificate')
+      assert.match(body, /^client\.badssl\.com only opens on devices that have a certificate it gave out/)
+    }
+    // No other code is taken for one, and no code at all changes nothing.
+    assert.equal(describeBrowserError('https://example.com/', 'The Internet connection appears to be offline.', -1009).title, 'This page would not load')
+    assert.equal(describeBrowserError('https://example.com/', 'The request timed out.', -1001).title, 'This site took too long')
+    assert.equal(describeBrowserError('https://example.com/', 'Not Found').title, 'This page is missing')
+
+    // The page gets the code from the WebView.
+    assert.match(createBrowserErrorHtml('https://expired.badssl.com/', 'invalid', false, -1201), /<h1>This connection is not private<\/h1>/)
+  })
+
+  test('the WebView\'s error code reaches the page', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const app = await readFile(new URL('../../app/index.tsx', import.meta.url), 'utf8')
+    // Except for an http:// page whose https:// try failed: that page is
+    // the http:// one, and says it is not secure.
+    assert.match(app, /createBrowserErrorHtml\(\s*shownUrl,\s*insecureUrl \? INSECURE_PAGE_MESSAGE : event\.nativeEvent\.description,\s*browserIsDark,[\s\S]{0,200}?insecureUrl \? undefined : event\.nativeEvent\.code\s*\)/)
+  })
+
   test('a plain http:// page says it is not secure, not that the connection failed', () => {
     const android = describeBrowserError('http://neverssl.com/', 'net::ERR_CLEARTEXT_NOT_PERMITTED')
     assert.equal(android.title, 'This page is not secure')

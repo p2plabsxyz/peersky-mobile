@@ -1,4 +1,4 @@
-import { parseExternalAppLink } from './browser-permissions.mjs'
+import { getIntentFallbackUrl, parseAppLink, parseExternalAppLink } from './browser-permissions.mjs'
 
 export const BROWSER_HOME_URL = 'peersky://home'
 // The index of the built-in apps. It used to resolve to nothing and come back
@@ -99,6 +99,45 @@ export function normalizeCustomSearchUrl (customSearchUrl) {
   }
 }
 
+/**
+ * The https:// address to try first for an http:// page, as Safari and Chrome
+ * do. Only for a page on the web, at the usual port: this phone, the local
+ * network and a name only it knows stay as they are, as does an address on
+ * another port. Null when there is nothing to try.
+ */
+export function getHttpsUpgradeUrl (url) {
+  let parsed
+  try {
+    parsed = new URL(String(url || ''))
+  } catch {
+    return null
+  }
+  if (parsed.protocol !== 'http:' || parsed.username || parsed.password) return null
+  if (parsed.port && parsed.port !== '80') return null
+  if (isLocalNetworkHost(parsed.hostname)) return null
+  parsed.protocol = 'https:'
+  parsed.port = ''
+  return parsed.href
+}
+
+function isLocalNetworkHost (hostname) {
+  const host = String(hostname || '').toLowerCase().replace(/^\[|\]$/g, '')
+  if (!host) return true
+  const ipv4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host)
+  if (ipv4) {
+    const [a, b] = [Number(ipv4[1]), Number(ipv4[2])]
+    return a === 0 || a === 10 || a === 127 || (a === 100 && b >= 64 && b <= 127) ||
+      (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168)
+  }
+  if (host.includes(':')) {
+    return host === '::1' || host === '::' || /^f[cd]/.test(host) || /^fe[89ab]/.test(host) ||
+      /^::ffff:(0|10|127|169\.254|172\.(1[6-9]|2\d|3[01])|192\.168)\./.test(host)
+  }
+  // A single name, as a router or a printer has, and names that are only
+  // ever on the local network.
+  return !host.includes('.') || /\.(localhost|local|lan|home\.arpa|internal)$/.test(host)
+}
+
 export function isWebUrl (targetUrl) {
   return /^https?:\/\//i.test(String(targetUrl || ''))
 }
@@ -158,7 +197,46 @@ export function syncBrowserEntryState (state, url, source) {
 }
 
 /**
- * @param {'back' | 'forward' | null} [direction]
+ * How Back or Forward goes from the step on screen. A web page steps in its
+ * own WebView, which keeps the page it goes to as it was left: where it was
+ * scrolled, what was typed in it, its own history and a form's result, as
+ * Safari and Chrome do. That WebView holds only the pages it showed itself,
+ * which the tab knows by the WebView each step was recorded from (a web
+ * source's view): not the pages before the tab last showed something else,
+ * a hyper:// site, an app, Home or an error, nor any from before the WebView
+ * was built again, as after a restart. Any other step builds its page again
+ * from the tab's history.
+ *
+ * The WebView's own word counts too, for a step it has and the tab does not,
+ * such as a menu a page opened under its own address, which Back closes. Its
+ * no counts only where it can be believed (believeNo), as on Android:
+ * WKWebView has said it cannot go forward with a page ahead of it.
+ *
+ * @param {'back' | 'forward'} direction
+ * @param {{ view: number | null, canGoBack: boolean, canGoForward: boolean } | null} webView
+ *   the tab's WebView on screen, and what it last said it can go to, or null
+ *   when it has said nothing yet
+ * @param {boolean} [believeNo]
+ * @returns {{ mode: 'webview' } | { mode: 'rebuild', state: NonNullable<ReturnType<typeof getBrowserBackState>> } | null}
+ */
+export function getBrowserTraversal (state, direction, webView, believeNo = false) {
+  const step = direction === 'back' ? -1 : 1
+  const entry = state.history[state.historyIndex]
+  const next = state.history[state.historyIndex + step]
+  const view = webView?.view
+  if (typeof view === 'number' && entry?.source?.kind === 'web' && entry.source.view === view) {
+    const kept = next?.source?.kind === 'web' && next.source.view === view
+    const said = direction === 'back' ? webView.canGoBack : webView.canGoForward
+    if (said === true || (kept && !(believeNo && said === false))) return { mode: 'webview' }
+  }
+
+  const nextState = direction === 'back' ? getBrowserBackState(state) : getBrowserForwardState(state)
+  return nextState ? { mode: 'rebuild', state: nextState } : null
+}
+
+/**
+ * @param {'back' | 'forward' | null} [direction] Back or Forward the tab asked
+ *   its WebView for, which the page reported here is where it went
  * @param {{ move: 'replace' | 'traverse', from: string | null } | null} [pageMove]
  *   what the page said it did to its address (browser-page-moves.mjs): put
  *   this address in the place of the one at `from`, or went back or forward
@@ -187,6 +265,10 @@ export function recordBrowserWebNavigationState (
     return buildBrowserState(state.history, state.historyIndex)
   }
 
+  if (direction === 'back' || direction === 'forward') {
+    return traverseBrowserHistoryState(state, url, source, direction)
+  }
+
   // The page rewrote its address, or put another page in its place: still
   // one step, as in any browser. Only when the page it replaced is the one the
   // tab is on: a page that moves on while it is still loading was never a
@@ -196,7 +278,7 @@ export function recordBrowserWebNavigationState (
   }
   // The page went back or forward by itself, to the step next to this one.
   // Anywhere else it is a new step, as it was.
-  if (pageMove?.move === 'traverse' && !direction) {
+  if (pageMove?.move === 'traverse') {
     if (state.history[state.historyIndex - 1]?.url === url) {
       return buildBrowserState(state.history, state.historyIndex - 1)
     }
@@ -207,28 +289,85 @@ export function recordBrowserWebNavigationState (
 
   // A WebView with no native back entry has replaced or redirected its first
   // page. Keep that transition out of browser history so Back can reach Home.
-  if (!direction && !hasNativeBackEntry) {
-    return replaceBrowserEntryState(state, url, source)
-  }
-
-  const adjacentIndex = direction === 'back'
-    ? state.historyIndex - 1
-    : direction === 'forward'
-      ? state.historyIndex + 1
-      : -1
-
-  if (state.history[adjacentIndex]?.url === url) {
-    return buildBrowserState(state.history, adjacentIndex)
-  }
-
-  // Native WebView history can be deeper than our bounded restorable history.
-  // Do not append an older native target as a new forward entry: doing that
-  // makes repeated Back alternate between pages once the bound is crossed.
-  if (direction) {
+  if (!hasNativeBackEntry) {
     return replaceBrowserEntryState(state, url, source)
   }
 
   return commitBrowserEntryState(state, url, source)
+}
+
+/**
+ * Where Back or Forward in the WebView went. The page it lands on is the
+ * nearest step that way with its address, which skips a step the tab kept and
+ * the WebView did not, such as a page that sent the tab on before it had
+ * loaded. The WebView only has the pages it showed itself, so nothing past a
+ * page that was not on the web, or one another WebView showed, is looked at.
+ * A page the WebView kept and the tab did not goes in next to the step it came
+ * from, where the WebView has it. The step takes the address exactly as the
+ * WebView reports it, so the WebView is never sent to that page again as a
+ * new one.
+ */
+function traverseBrowserHistoryState (state, url, source, direction) {
+  const step = direction === 'back' ? -1 : 1
+  for (
+    let index = state.historyIndex + step;
+    index >= 0 && index < state.history.length;
+    index += step
+  ) {
+    const entry = state.history[index]
+    if (entry?.source?.kind !== 'web') break
+    if (typeof entry.source.view === 'number' && typeof source.view === 'number' && entry.source.view !== source.view) break
+    if (isSameBrowserUrl(entry.url, url)) {
+      if (entry.url === url && entry.source.uri === source.uri && entry.source.view === source.view) {
+        return buildBrowserState(state.history, index)
+      }
+      const history = state.history.slice()
+      history[index] = { url, source }
+      return buildBrowserState(history, index)
+    }
+  }
+
+  const at = direction === 'back' ? state.historyIndex : state.historyIndex + 1
+  const history = [
+    ...state.history.slice(0, at),
+    { url, source },
+    ...state.history.slice(at)
+  ]
+  if (history.length <= MAX_BROWSER_HISTORY_ENTRIES) {
+    return buildBrowserState(history, at)
+  }
+  // Over the bound, the step furthest from the new one goes: the last when
+  // it went in going back, the oldest (keeping Home) going forward.
+  if (direction === 'back') {
+    return buildBrowserState(history.slice(0, MAX_BROWSER_HISTORY_ENTRIES), at)
+  }
+  const fromEnd = history.length - 1 - at
+  const bounded = boundBrowserHistory(history)
+  return buildBrowserState(bounded, bounded.length - 1 - fromEnd)
+}
+
+/**
+ * Where a page that would not load goes in the tab's history. The page on
+ * screen stays a step of its own: a link that failed is the next step, under
+ * the address that failed, where it took the page's place and its name, so
+ * Back went past the page it came from. A failed load of the step itself, as
+ * a reload or an address typed, is that step, and Back or Forward that failed
+ * is the step it was going to.
+ *
+ * @param {'back' | 'forward' | null} direction Back or Forward that was on its way
+ * @param {string} [shownUrl] the address the step is shown under, when it is
+ *   not the one that failed: the http:// page an https:// try was for
+ */
+export function recordBrowserErrorState (state, failedUrl, source, direction = null, shownUrl = failedUrl) {
+  let nextState
+  if (direction === 'back' || direction === 'forward') {
+    nextState = traverseBrowserHistoryState(state, failedUrl, source, direction)
+  } else if (isSameBrowserUrl(state.history[state.historyIndex]?.url, failedUrl)) {
+    nextState = replaceBrowserEntryState(state, failedUrl, source)
+  } else {
+    nextState = commitBrowserEntryState(state, failedUrl, source)
+  }
+  return shownUrl === failedUrl ? nextState : replaceBrowserEntryState(nextState, shownUrl, source)
 }
 
 // The same page, however each side wrote its address.
@@ -320,12 +459,15 @@ export function getFileHandoffAction ({ history, historyIndex, fileUrl, showedPa
   return { action: 'stay' }
 }
 
+// tapped: the person's tap started the request. iOS says a link was clicked,
+// and Android that a gesture came with it.
 export function getBrowserRequestAction ({
   requestUrl,
   currentSourceKind,
   currentUrl = '',
   navigationType = '',
-  isTopFrame = true
+  isTopFrame = true,
+  tapped = false
 }) {
   const url = String(requestUrl || '')
 
@@ -369,6 +511,18 @@ export function getBrowserRequestAction ({
       action: 'open-external',
       ...externalLink
     }
+  }
+
+  // A link to another app's own scheme goes to that app only when the person
+  // tapped it, and after asking, never on a page's say alone. It used to go
+  // nowhere at all, without a word. An intent:// link with a web page of its
+  // own to fall back on opens that page in the tab instead.
+  const appLink = parseAppLink(url)
+  if (appLink) {
+    if (!isTopFrame || !tapped) return { action: 'block' }
+    const fallbackUrl = getIntentFallbackUrl(url)
+    if (fallbackUrl) return { action: 'load-fallback', url: fallbackUrl }
+    return { action: 'open-external', ...appLink }
   }
 
   if (!isWebUrl(url)) {

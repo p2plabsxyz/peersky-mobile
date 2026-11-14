@@ -559,15 +559,27 @@ export function touchLiveBrowserTabIds (tabIds, tabId) {
 }
 
 // Run in a tab as another comes to the front. The tab stays loaded behind it,
-// so a video or song in it would otherwise play on out of sight.
-export const PAUSE_TAB_MEDIA_SCRIPT = `(function () {
+// where nothing else stops its media, so this does what the browser does with
+// a tab it hides. Chrome pauses a hidden tab's video and plays its sound on,
+// so a song or a podcast keeps going: on Android a video with a picture is
+// paused, and an audio element, or a video element that only carries sound,
+// is not. Safari keeps everything with sound playing in a tab behind and
+// pauses only a video that makes none, muted or without a sound track, which
+// is what iOS does. Both used to pause everything.
+export function createPauseTabMediaScript (platform) {
+  const keepsPlaying = platform === 'ios'
+    ? '!(video.muted || video.volume === 0 || (video.readyState >= 1 && video.audioTracks && video.audioTracks.length === 0))'
+    : '(video.readyState >= 1 && !video.videoWidth)'
+  return `(function () {
   try {
-    document.querySelectorAll('video, audio').forEach(function (media) {
-      if (!media.paused) media.pause();
+    document.querySelectorAll('video').forEach(function (video) {
+      if (video.paused || ${keepsPlaying}) return;
+      video.pause();
     });
   } catch (_) {}
 })();
 true;`
+}
 
 export function suspendInactiveBrowserTabsState (state, liveTabIds) {
   const liveIds = new Set(liveTabIds)

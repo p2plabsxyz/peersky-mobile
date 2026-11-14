@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from 'react'
 import {
   ActivityIndicator,
   Alert,
+  AppState,
   Platform,
   Animated,
   Clipboard,
@@ -26,6 +27,7 @@ import CheckIcon from '../../assets/icons/bootstrap/check2.svg'
 import DownloadIcon from '../../assets/icons/bootstrap/download.svg'
 import PauseIcon from '../../assets/icons/bootstrap/pause-fill.svg'
 import UploadIcon from '../../assets/icons/bootstrap/arrow-bar-up.svg'
+import ClearIcon from '../../assets/icons/bootstrap/x-lg.svg'
 
 import {
   RPC_DEVICE_SYNC_STATUS,
@@ -53,11 +55,14 @@ import { PublishedLinkSheet } from '../PublishedLinkSheet'
 import { hasLinkedIdentity } from './linked-identity'
 import { describeDeviceFile, numberLinkedDevices } from '../linked-devices.mjs'
 import { msg, t, tKey, tp } from '../i18n/i18n.mjs'
+import { itemMatches, showsSearch } from './list-filter.mjs'
 
 const hyperdriveIcon = require('../../assets/images/hyperdrive.png')
 
 type RecentSource = 'fetched' | 'uploaded'
-type RecentFilter = 'all' | RecentSource
+type ItemKind = 'file' | 'folder'
+type RecentFilter = 'all' | RecentSource | ItemKind
+type FolderFilter = 'all' | ItemKind
 type UploadVisibility = 'public' | 'private' | 'device'
 type UploadSource = 'files' | 'folder'
 
@@ -78,6 +83,8 @@ type HyperdriveItem = {
   children?: HyperdriveItem[]
   // On which of your other devices it is, for a file from one of them.
   device?: { type: string, number: number | null }
+  // Added there since you last looked.
+  isNew?: boolean
 }
 
 // A file or folder at the top of a private drive one of your other devices
@@ -90,6 +97,7 @@ type DeviceFile = {
   byteLength: number
   deviceId: string
   deviceType: 'phone' | 'desktop'
+  new?: boolean
 }
 
 // How many show above Recent before See all.
@@ -124,8 +132,21 @@ type Palette = typeof lightPalette
 const RECENT_FILTERS: Array<{ id: RecentFilter, label: string }> = [
   { id: 'all', label: msg('All') },
   { id: 'uploaded', label: msg('Uploaded') },
-  { id: 'fetched', label: msg('Fetched') }
+  { id: 'fetched', label: msg('Fetched') },
+  { id: 'file', label: msg('Files') },
+  { id: 'folder', label: msg('Folders') }
 ]
+
+// A folder, or everything from your devices, shows files, folders or both.
+const FOLDER_FILTERS: Array<{ id: FolderFilter, label: string }> = [
+  { id: 'all', label: msg('All') },
+  { id: 'file', label: msg('Files') },
+  { id: 'folder', label: msg('Folders') }
+]
+
+function kindOfItem (item: HyperdriveItem): ItemKind {
+  return item.type === 'directory' ? 'folder' : 'file'
+}
 
 export function HyperdriveScreen ({ deviceSyncRevision = 0, offlineNetworkAllowed, isDark, onCallRpc, onOpenItem, onOpenLinkDevice, onOpenUrl, onStatus }: Props) {
   const insets = useSafeAreaInsets()
@@ -139,6 +160,15 @@ export function HyperdriveScreen ({ deviceSyncRevision = 0, offlineNetworkAllowe
   const [listingTruncated, setListingTruncated] = useState(false)
   const [recentFilter, setRecentFilter] = useState<RecentFilter>('all')
   const [filterVisible, setFilterVisible] = useState(false)
+  // A folder's own filter and the search, both cleared for the next list.
+  const [folderFilter, setFolderFilter] = useState<FolderFilter>('all')
+  const [folderFilterVisible, setFolderFilterVisible] = useState(false)
+  const [query, setQuery] = useState('')
+  useEffect(() => {
+    setQuery('')
+    setFolderFilter('all')
+    setFolderFilterVisible(false)
+  }, [location?.url])
   const [fetchUrl, setFetchUrl] = useState('')
   const [busyAction, setBusyAction] = useState<'upload' | 'fetch' | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -170,9 +200,23 @@ export function HyperdriveScreen ({ deviceSyncRevision = 0, offlineNetworkAllowe
   const scanHandledRef = useRef(false)
   const [cameraPermission, requestCameraPermission] = useCameraPermissions()
   const palette = isDark ? darkPalette : lightPalette
-  const visibleItems = items ?? recents.filter((item) => recentFilter === 'all' || item.source === recentFilter)
+  // The list before the search: a folder's, or Recent from where it came.
+  const listedItems = items ?? recents.filter((item) => (
+    recentFilter === 'all' || recentFilter === 'file' || recentFilter === 'folder' || item.source === recentFilter
+  ))
+  const kindFilter: FolderFilter = items
+    ? folderFilter
+    : recentFilter === 'file' || recentFilter === 'folder' ? recentFilter : 'all'
+  // The search box comes up once the list passes ten, and stays while it
+  // has something in it (list-filter.mjs).
+  const searchShown = showsSearch(listedItems.length, query)
+  const visibleItems = listedItems.filter((item) => itemMatches(
+    { kind: kindOfItem(item), name: item.name },
+    { kind: kindFilter, query: searchShown ? query : '' }
+  ))
   const heading = items ? location?.name || t('Files') : t('Recent')
   const filterLabel = tKey(RECENT_FILTERS.find((filter) => filter.id === recentFilter)?.label || RECENT_FILTERS[0].label)
+  const folderFilterLabel = tKey(FOLDER_FILTERS.find((filter) => filter.id === folderFilter)?.label || FOLDER_FILTERS[0].label)
   const offlineTarget = getOfflineTarget(location)
 
   // Private files from this person's other devices, which show up here on
@@ -181,12 +225,28 @@ export function HyperdriveScreen ({ deviceSyncRevision = 0, offlineNetworkAllowe
   const [deviceFiles, setDeviceFiles] = useState<HyperdriveItem[]>([])
   const onCallRpcRef = useRef(onCallRpc)
   onCallRpcRef.current = onCallRpc
+  // What your devices added since you last looked shows New, and keeps the
+  // mark while this screen stays open once the backend has it as seen. Seen
+  // only with the app in front: the screen stays put with PeerSky in the
+  // background, and a file arriving then is not looked at.
+  const seenNewFiles = useRef(new Set<string>())
+  const [inFront, setInFront] = useState(0)
+  useEffect(() => {
+    const listener = AppState.addEventListener('change', (state) => {
+      if (state === 'active') setInFront((value) => value + 1)
+    })
+    return () => listener.remove()
+  }, [])
   useEffect(() => {
     let cancelled = false
-    void onCallRpcRef.current(RPC_DEVICE_SYNC_STATUS, {}).then((response) => {
+    const markSeen = AppState.currentState === 'active'
+    void onCallRpcRef.current(RPC_DEVICE_SYNC_STATUS, { markSeen }).then((response) => {
       if (cancelled || !response?.ok) return
       const numbered = numberLinkedDevices(Array.isArray(response.devices) ? response.devices : [])
       const files: DeviceFile[] = Array.isArray(response.files) ? response.files : []
+      if (response.seen === true) {
+        for (const file of files) if (file.new === true) seenNewFiles.current.add(file.url)
+      }
       setDeviceFiles(files.map((file) => ({
         type: file.type,
         name: file.name,
@@ -194,11 +254,12 @@ export function HyperdriveScreen ({ deviceSyncRevision = 0, offlineNetworkAllowe
         url: file.url,
         byteLength: file.byteLength,
         visibility: 'private',
-        device: numbered.get(file.deviceId) || { type: file.deviceType === 'phone' ? 'phone' : 'desktop', number: null }
+        device: numbered.get(file.deviceId) || { type: file.deviceType === 'phone' ? 'phone' : 'desktop', number: null },
+        isNew: file.new === true || seenNewFiles.current.has(file.url)
       })))
     }).catch(() => {})
     return () => { cancelled = true }
-  }, [deviceSyncRevision])
+  }, [deviceSyncRevision, inFront])
   // The full list, open as if it were a folder, keeps up as files arrive.
   useEffect(() => {
     if (location?.url === DEVICE_FILES_URL) setItems(deviceFiles)
@@ -573,9 +634,9 @@ export function HyperdriveScreen ({ deviceSyncRevision = 0, offlineNetworkAllowe
       <View key={item.url} style={[styles.item, { backgroundColor: palette.surface, borderColor: palette.border }]}>
         <Pressable
           accessibilityRole='button'
-          accessibilityLabel={item.type === 'directory'
+          accessibilityLabel={withNew(item, item.type === 'directory'
             ? t('Folder {name}', { name: item.name })
-            : t('File {name}', { name: item.name })}
+            : t('File {name}', { name: item.name }))}
           onLongPress={() => {
             tapFeedback()
             removeRecent(item)
@@ -585,7 +646,7 @@ export function HyperdriveScreen ({ deviceSyncRevision = 0, offlineNetworkAllowe
         >
           {item.type === 'directory' ? <FolderIcon color={palette.folder} /> : <FilePreview item={item} palette={palette} />}
           <View style={styles.itemCopy}>
-            <Text numberOfLines={1} style={[styles.itemName, { color: palette.text }]}>{item.name}</Text>
+            <ItemName item={item} palette={palette} />
             <Text numberOfLines={1} style={[styles.itemMeta, { color: palette.muted }]}>
               {items ? formatItemMeta(item) : formatRecentMeta(item)}
             </Text>
@@ -610,13 +671,22 @@ export function HyperdriveScreen ({ deviceSyncRevision = 0, offlineNetworkAllowe
         )}
       </View>
     ))
-    : (
-      <View style={styles.empty}>
-        <Image source={hyperdriveIcon} style={styles.emptyIcon} />
-        <Text style={[styles.emptyTitle, { color: palette.text }]}>{t('Nothing here yet')}</Text>
-        <Text style={[styles.emptyCopy, { color: palette.muted }]}>{t('Upload a file or fetch a Hyper URL to get started.')}</Text>
-      </View>
-      )
+    : listedItems.length > 0
+      ? (
+        // Nothing left after the search or the filter, rather than nothing at all.
+        <Text accessibilityLiveRegion='polite' style={[styles.noMatches, { color: palette.muted }]}>
+          {searchShown && query.trim()
+            ? t('Nothing here matches "{query}".', { query: query.trim() })
+            : kindFilter === 'folder' ? t('No folders here.') : t('No files here.')}
+        </Text>
+        )
+      : (
+        <View style={styles.empty}>
+          <Image source={hyperdriveIcon} style={styles.emptyIcon} />
+          <Text style={[styles.emptyTitle, { color: palette.text }]}>{t('Nothing here yet')}</Text>
+          <Text style={[styles.emptyCopy, { color: palette.muted }]}>{t('Upload a file or fetch a Hyper URL to get started.')}</Text>
+        </View>
+        )
 
   const pageContent = (
     <>
@@ -705,15 +775,15 @@ export function HyperdriveScreen ({ deviceSyncRevision = 0, offlineNetworkAllowe
             <View key={item.url} style={[styles.item, { backgroundColor: palette.surface, borderColor: palette.border }]}>
               <Pressable
                 accessibilityRole='button'
-                accessibilityLabel={item.type === 'directory'
+                accessibilityLabel={withNew(item, item.type === 'directory'
                   ? t('Folder {name}, {details}', { name: item.name, details: formatItemMeta(item) })
-                  : t('File {name}, {details}', { name: item.name, details: formatItemMeta(item) })}
+                  : t('File {name}, {details}', { name: item.name, details: formatItemMeta(item) }))}
                 onPress={() => void openDeviceFile(item)}
                 style={({ pressed }) => [styles.itemOpen, pressed ? styles.pressed : null]}
               >
                 {item.type === 'directory' ? <FolderIcon color={palette.folder} /> : <FilePreview item={item} palette={palette} />}
                 <View style={styles.itemCopy}>
-                  <Text numberOfLines={1} style={[styles.itemName, { color: palette.text }]}>{item.name}</Text>
+                  <ItemName item={item} palette={palette} />
                   <Text numberOfLines={1} style={[styles.itemMeta, { color: palette.muted }]}>{formatItemMeta(item)}</Text>
                 </View>
                 <ChevronRightIcon width={18} height={18} color={palette.muted} style={styles.privateItemChevron} />
@@ -805,6 +875,68 @@ export function HyperdriveScreen ({ deviceSyncRevision = 0, offlineNetworkAllowe
           </Text>
         </View>
       )}
+      {((items && items.length > 0) || searchShown) && (
+        <View style={styles.listTools}>
+          {searchShown && (
+            <View style={[styles.searchBox, { backgroundColor: palette.surface, borderColor: palette.border }]}>
+              <TextInput
+                accessibilityLabel={t('Search by name')}
+                autoCapitalize='none'
+                autoCorrect={false}
+                clearButtonMode='never'
+                onChangeText={setQuery}
+                placeholder={t('Search by name')}
+                placeholderTextColor={palette.placeholder}
+                returnKeyType='search'
+                style={[styles.searchInput, { color: palette.text }]}
+                value={query}
+              />
+              {query.length > 0 && (
+                <Pressable
+                  accessibilityLabel={t('Clear search')}
+                  accessibilityRole='button'
+                  hitSlop={8}
+                  onPress={() => setQuery('')}
+                  style={({ pressed }) => [styles.clearSearch, pressed ? styles.pressed : null]}
+                >
+                  <ClearIcon width={14} height={14} color={palette.muted} />
+                </Pressable>
+              )}
+            </View>
+          )}
+          {items && items.length > 0 && (
+            <View style={[styles.dropdownWrap, searchShown ? null : styles.toolsEnd]}>
+              <Pressable
+                accessibilityLabel={t('Filter the list, currently {filter}', { filter: folderFilterLabel })}
+                accessibilityRole='button'
+                accessibilityState={{ expanded: folderFilterVisible }}
+                onPress={() => setFolderFilterVisible((visible) => !visible)}
+                style={({ pressed }) => [styles.filterButton, { backgroundColor: palette.surface, borderColor: palette.border }, pressed ? styles.pressed : null]}
+              >
+                <Text style={[styles.filterLabel, { color: palette.text }]}>{folderFilterLabel}</Text>
+                <ChevronRightIcon width={14} height={14} color={palette.muted} style={styles.dropdownChevron} />
+              </Pressable>
+              {folderFilterVisible && (
+                <View style={[styles.filterMenu, { backgroundColor: palette.surface, borderColor: palette.border }]}>
+                  {FOLDER_FILTERS.map((filter) => (
+                    <Pressable
+                      accessibilityRole='button'
+                      key={filter.id}
+                      onPress={() => {
+                        setFolderFilter(filter.id)
+                        setFolderFilterVisible(false)
+                      }}
+                      style={({ pressed }) => [styles.filterOption, pressed ? styles.pressed : null]}
+                    >
+                      <Text style={[styles.filterOptionLabel, { color: filter.id === folderFilter ? palette.accent : palette.text }]}>{tKey(filter.label)}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              )}
+            </View>
+          )}
+        </View>
+      )}
       {listingTruncated && <Text style={[styles.limitNote, { color: palette.muted }]}>{t('Showing a partial directory listing.')}</Text>}
 
       <View style={styles.listContent}>{libraryItems}</View>
@@ -874,7 +1006,7 @@ export function HyperdriveScreen ({ deviceSyncRevision = 0, offlineNetworkAllowe
   // while it is open the page keeps room for it under the last file.
   return (
     <ScrollView
-      contentContainerStyle={[styles.page, filterVisible ? styles.pageMenuRoom : null]}
+      contentContainerStyle={[styles.page, filterVisible || folderFilterVisible ? styles.pageMenuRoom : null]}
       keyboardDismissMode='on-drag'
       keyboardShouldPersistTaps='handled'
       style={[styles.pageScroll, { backgroundColor: palette.background }]}
@@ -1005,6 +1137,24 @@ function getOfflineTarget (item: HyperdriveItem | null) {
   return { driveKey, path }
 }
 
+// What a screen reader says of a row, with New after it when it is.
+function withNew (item: HyperdriveItem, label: string) {
+  return item.isNew ? `${label}${t(', ')}${t('New')}` : label
+}
+
+function ItemName ({ item, palette }: { item: HyperdriveItem, palette: Palette }) {
+  return (
+    <View style={styles.itemNameRow}>
+      <Text numberOfLines={1} style={[styles.itemName, styles.itemNameText, { color: palette.text }]}>{item.name}</Text>
+      {item.isNew && (
+        <View style={[styles.newBadge, { backgroundColor: palette.accent }]}>
+          <Text style={styles.newBadgeText}>{t('New')}</Text>
+        </View>
+      )}
+    </View>
+  )
+}
+
 function formatItemMeta (item: HyperdriveItem) {
   const size = item.type === 'directory' ? t('Folder') : formatBytes(item.byteLength || 0)
   return item.device ? describeDeviceFile(item.device, size) : size
@@ -1091,6 +1241,16 @@ const styles = StyleSheet.create({
   itemOpen: { alignItems: 'center', flex: 1, flexDirection: 'row', minHeight: 60, paddingLeft: 12, paddingVertical: 8 },
   itemCopy: { flex: 1, gap: 4, marginHorizontal: 13 },
   itemName: { fontSize: 15, fontWeight: '600' },
+  itemNameRow: { alignItems: 'center', flexDirection: 'row', gap: 8 },
+  itemNameText: { flexShrink: 1 },
+  newBadge: { borderRadius: 8, paddingHorizontal: 7, paddingVertical: 2 },
+  newBadgeText: { color: '#ffffff', fontSize: 11, fontWeight: '800' },
+  listTools: { alignItems: 'center', flexDirection: 'row', gap: 10, zIndex: 19 },
+  toolsEnd: { marginLeft: 'auto' },
+  searchBox: { alignItems: 'center', borderRadius: 10, borderWidth: 1, flex: 1, flexDirection: 'row', minHeight: 44, paddingLeft: 12 },
+  searchInput: { flex: 1, fontSize: 14, paddingVertical: 10 },
+  clearSearch: { alignItems: 'center', justifyContent: 'center', minHeight: 44, paddingHorizontal: 12 },
+  noMatches: { fontSize: 14, lineHeight: 20, paddingVertical: 24, textAlign: 'center' },
   itemMeta: { fontSize: 12 },
   privateItemChevron: { marginRight: 16 },
   copyButton: { alignItems: 'center', height: 44, justifyContent: 'center', width: 44 },

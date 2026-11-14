@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { describe, test } from 'node:test'
 
-import { convertFilterListToWebKitRules } from '../../app/privacy/webkit-content-rules.mjs'
+import { convertFilterListsToWebKitRules } from '../../app/privacy/webkit-content-rules.mjs'
 
 // Cover Your Tracks, linked from Settings, Privacy, asks two things about
 // blocking. Its test page loads a hidden iframe for each, and answers Yes only
@@ -54,7 +54,8 @@ function webkitBlocks (rules, { url, type, page }) {
 
 describe('Cover Your Tracks says Yes, Yes', () => {
   test('on iOS, the shipped lists block both of its tracker frames', async () => {
-    const lists = await Promise.all(LISTS.map(async (name) => convertFilterListToWebKitRules(await readList(name))))
+    // As the phone builds them, each list ending with the exceptions of both.
+    const lists = convertFilterListsToWebKitRules(await Promise.all(LISTS.map(readList)))
     // Each list is compiled and attached on its own, so either can block.
     const blocks = (request) => lists.some((rules) => webkitBlocks(rules, request))
 

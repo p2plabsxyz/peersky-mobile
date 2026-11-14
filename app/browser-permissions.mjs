@@ -23,6 +23,57 @@ export function parseExternalAppLink (url) {
   }
 }
 
+// The browser's own schemes, and ones that name a file or a document on the
+// phone, which a page never hands to another app.
+const NOT_APP_SCHEMES = new Set([
+  'about:', 'agregore:', 'android-app:', 'blob:', 'browser:', 'chrome:', 'content:',
+  'data:', 'file:', 'filesystem:', 'hs:', 'http:', 'https:', 'hyper:', 'ipfs:',
+  'ipns:', 'javascript:', 'peersky:', 'ws:', 'wss:'
+])
+const APP_LINK_SCHEME = /^([a-z][a-z0-9+.-]*):/i
+
+/**
+ * A link to another app: mail, phone, messages and maps (parseExternalAppLink),
+ * or an app's own scheme, as App Store (itms-apps:), WhatsApp, Spotify, Maps and
+ * Play Store (market:) links are, and Android's intent:// links. Null for the
+ * browser's own schemes and anything that is not a link.
+ */
+export function parseAppLink (url) {
+  const known = parseExternalAppLink(url)
+  if (known) return known
+  if (typeof url !== 'string' || url.length < 1 || url.length > MAX_EXTERNAL_LINK_LENGTH) return null
+  // No link an app is handed has a space or a control character in it.
+  for (let index = 0; index < url.length; index++) {
+    const code = url.charCodeAt(index)
+    if (code <= 32 || code === 127) return null
+  }
+  const match = APP_LINK_SCHEME.exec(url)
+  if (!match) return null
+  const scheme = match[1].toLowerCase()
+  if (NOT_APP_SCHEMES.has(`${scheme}:`)) return null
+  return { scheme, url }
+}
+
+/**
+ * The web page an Android intent:// link says to open when no app is there to
+ * take it (S.browser_fallback_url), if it names an http:// or https:// one.
+ */
+export function getIntentFallbackUrl (url) {
+  const value = String(url || '')
+  if (!/^intent:/i.test(value)) return null
+  const start = value.indexOf('#Intent;')
+  if (start < 0) return null
+  const field = value.slice(start + '#Intent;'.length).split(';')
+    .find((part) => part.startsWith('S.browser_fallback_url='))
+  if (!field) return null
+  try {
+    const fallback = new URL(decodeURIComponent(field.slice('S.browser_fallback_url='.length)))
+    return fallback.protocol === 'https:' || fallback.protocol === 'http:' ? fallback.href : null
+  } catch {
+    return null
+  }
+}
+
 export function getExternalAppName (scheme) {
   if (scheme === 'mailto') return t('your email app')
   if (scheme === 'tel') return t('your phone app')

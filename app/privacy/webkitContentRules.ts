@@ -2,7 +2,9 @@ import { Directory, File, type FileHandle } from 'expo-file-system'
 import type { FilterListState } from './filterListStore'
 import { getFilterListFiles } from './filterListStore'
 import {
+  collectWebKitExceptionsAsync,
   convertFilterListToWebKitRulesAsync,
+  mergeExceptions,
   serializeWebKitContentRuleChunks,
   WEBKIT_RULE_FORMAT_VERSION
 } from './webkit-content-rules.mjs'
@@ -22,12 +24,22 @@ export async function getWebKitContentRuleFiles (state: FilterListState) {
   // wrong rule file unreachable; this is what stops it sitting there, because
   // each one runs to several megabytes.
   removeStaleRuleFiles(sourceFiles[0]?.parentDirectory, ruleFiles)
+  if (ruleFiles.every((ruleFile) => ruleFile.exists && ruleFile.size > 0)) return ruleFiles
+
+  // An exception in either list undoes a block from the other too, as in an
+  // ad blocker, so each list's rules end with the exceptions of both. WebKit
+  // applies them only to the list they are compiled into.
+  const contents = await Promise.all(sourceFiles.map((sourceFile) => sourceFile.text()))
+  const exceptions = []
+  for (const text of contents) exceptions.push(await collectWebKitExceptionsAsync(text))
 
   for (let index = 0; index < sourceFiles.length; index++) {
     const ruleFile = ruleFiles[index]
     if (ruleFile.exists && ruleFile.size > 0) continue
 
-    const rules = await convertFilterListToWebKitRulesAsync(await sourceFiles[index].text())
+    const rules = await convertFilterListToWebKitRulesAsync(contents[index], {
+      sharedExceptions: mergeExceptions(exceptions.filter((_, other) => other !== index))
+    })
     if (rules.length < MIN_WEBKIT_RULES_PER_LIST) {
       throw new Error('Filter list produced too few supported WebKit rules.')
     }

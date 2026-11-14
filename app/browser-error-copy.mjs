@@ -8,7 +8,7 @@ import { t } from './i18n/i18n.mjs'
  * suggests the one thing worth trying. The raw message stays, underneath and
  * out of the way, because when it does matter it matters a lot.
  */
-export function describeBrowserError (targetUrl, message) {
+export function describeBrowserError (targetUrl, message, code) {
   const { host, drive } = describeSite(targetUrl)
   // A host stays as written: "example.com answered". The page or the drive is
   // said one way inside a sentence and another at its start: "This drive
@@ -43,6 +43,25 @@ export function describeBrowserError (targetUrl, message) {
     return {
       title: t('This page is not secure'),
       body: t('{site} uses plain http://, which anyone on the network can read or change, so PeerSky does not open it. If it has an https:// address, use that instead.', { site: Site })
+    }
+  }
+
+  // A certificate the phone could not trust: expired, made out to another
+  // name, or from nobody it knows. Safari and Chrome say the connection is
+  // not private, and PeerSky said to check the connection. iOS gives these
+  // codes in any language; Android's come through react-native-webview as
+  // "SSL error: ..." in English.
+  const errorCode = Number(code)
+  if (CLIENT_CERTIFICATE_ERRORS.has(errorCode)) {
+    return {
+      title: t('This site asks for a certificate'),
+      body: t('{site} only opens on devices that have a certificate it gave out, which PeerSky cannot send.', { site: Site })
+    }
+  }
+  if (SERVER_CERTIFICATE_ERRORS.has(errorCode) || /^SSL error:|\bERR_CERT_/i.test(detail)) {
+    return {
+      title: t('This connection is not private'),
+      body: t('{site} sent a certificate that has expired or is not trusted, so PeerSky cannot tell this is the real site. Someone may be pretending to be it, so the page was not opened.', { site: Site })
     }
   }
 
@@ -86,6 +105,12 @@ export function describeBrowserError (targetUrl, message) {
     body: t('PeerSky could not reach {site}. Check your connection, then try again.', { site })
   }
 }
+
+// NSURLErrorDomain: the server's certificate has a bad date, is untrusted,
+// has an unknown root or is not yet valid (-1201 to -1204), or the server
+// rejected or asked for a certificate from the device (-1205, -1206).
+const SERVER_CERTIFICATE_ERRORS = new Set([-1201, -1202, -1203, -1204])
+const CLIENT_CERTIFICATE_ERRORS = new Set([-1205, -1206])
 
 function isPeerUrl (targetUrl) {
   return /^(?:hyper|hs|ipfs|ipns):\/\//i.test(String(targetUrl || ''))

@@ -53,3 +53,15 @@ test('Appearance opens the address bar button page, and back returns there', asy
   assert.match(page, /accessibilityRole='radio'/)
   assert.match(page, /onPress=\{\(\) => onSelect\(button\.id as AddressBarButton\)\}/)
 })
+
+// Safari and Chrome select the whole address when the bar is tapped, so what
+// is typed replaces it. In PeerSky the caret landed where the finger did, and
+// typing went into the middle of the old address.
+test('a tap on the address bar selects the whole address', async () => {
+  const toolbar = await read('app/BrowserToolbar.tsx')
+  const effect = /useEffect\(\(\) => \{\s*if \(!isAddressFocused\) return\s*addressInputRef\.current\?\.setSelection\(0, address\.length\)\s*\}, \[isAddressFocused\]\)/
+  assert.match(toolbar, effect)
+  // While the box is not being typed in, it shows the start of the address.
+  assert.match(toolbar, /selection=\{isAddressFocused \? undefined : \{ start: 0, end: 0 \}\}/)
+  assert.match(toolbar, /value=\{isAddressFocused \? address : formatBrowserAddress\(address, showFullAddress\)\}/)
+})
