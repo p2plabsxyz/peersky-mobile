@@ -370,6 +370,7 @@ import {
   RPC_APP_DEVICE_SYNC_CHANGED,
   RPC_APP_PEERCHAT_CHANGED,
   RPC_DEVICE_SYNC_NETWORK,
+  RPC_DEVICE_SYNC_STATUS,
   RPC_PEERCHAT_PRESENCE,
   RPC_PEERCHAT_SEND_TO_DEVICES,
   RPC_PEERTUNES_START,
@@ -1004,6 +1005,22 @@ export default function App () {
       console.warn('[device sync] Unable to report the network:', error)
     })
   }, [deviceSyncMetered, identityStoragePath])
+
+  // What this person's other devices added in Hyperdrive since the Hyperdrive
+  // screen last showed it, counted on its shortcut like PeerChat's unread.
+  // Read again whenever the backend says something changed, the screen
+  // showing the files included; an older answer never replaces a newer one.
+  const [hyperdriveNewCount, setHyperdriveNewCount] = useState(0)
+  const hyperdriveCountRequest = useRef(0)
+  useEffect(() => {
+    if (!identityStoragePath) return
+    const request = ++hyperdriveCountRequest.current
+    void callRpc(RPC_DEVICE_SYNC_STATUS, {}).then((response) => {
+      if (request !== hyperdriveCountRequest.current || !response?.ok) return
+      const count = Number(response.newCount)
+      setHyperdriveNewCount(Number.isSafeInteger(count) && count > 0 ? count : 0)
+    }).catch(() => {})
+  }, [deviceSyncRevision, identityStoragePath])
 
   useEffect(() => {
     if (!browserPreferencesReady || !identityStoragePath) return
@@ -5891,6 +5908,13 @@ export default function App () {
                           <View style={styles.browserShortcutBadge}>
                             <Text style={styles.browserShortcutBadgeText}>
                               {peerChatNotifications.unreadTotal > 99 ? '99+' : peerChatNotifications.unreadTotal}
+                            </Text>
+                          </View>
+                        )}
+                        {app.id === 'hyper' && hyperdriveNewCount > 0 && (
+                          <View style={styles.browserShortcutBadge}>
+                            <Text style={styles.browserShortcutBadgeText}>
+                              {hyperdriveNewCount > 99 ? '99+' : hyperdriveNewCount}
                             </Text>
                           </View>
                         )}
