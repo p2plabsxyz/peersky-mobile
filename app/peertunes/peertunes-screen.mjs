@@ -249,6 +249,64 @@ export function createPeerTunesLanguageScript ({ language, strings } = {}) {
   return `window.peerskyTunes = ${json}; window.PT && window.PT.setLanguage && window.PT.setLanguage(window.peerskyTunes); true;`
 }
 
+// iOS only. A song in a WebView plays at full volume there whatever the page
+// sets, so turning PeerTunes' wheel on Now Playing did nothing while a song
+// played. The page asks native to move the phone's own volume by a step, as
+// the side buttons do, and gets back { volume } from 0 to 1, or null when there
+// is no volume to set (a simulator). An answer that never comes is null after
+// VOLUME_ANSWER_MS, so the wheel cannot stay waiting.
+const VOLUME_ANSWER_MS = 2000
+export const PEERTUNES_VOLUME_BRIDGE_SCRIPT = `(function () {
+  var pending = {};
+  var next = 0;
+  window.__peerskyResolveVolume = function (id, value) {
+    var resolve = pending[id];
+    if (!resolve) return;
+    delete pending[id];
+    resolve(value && typeof value === 'object' ? value : null);
+  };
+  window.peerskyVolume = {
+    change: function (step) {
+      return new Promise(function (resolve) {
+        if (!window.ReactNativeWebView) return resolve(null);
+        var id = 'volume-' + (++next);
+        pending[id] = resolve;
+        setTimeout(function () { window.__peerskyResolveVolume(id, null); }, ${VOLUME_ANSWER_MS});
+        window.ReactNativeWebView.postMessage(JSON.stringify({
+          type: 'peertunes-volume',
+          requestId: id,
+          step: Number(step) || 0
+        }));
+      });
+    }
+  };
+})(); true;`
+
+// The step a page asked the phone's volume to move by, from -1 to 1, or null
+// when the message is not a volume request.
+export function parsePeerTunesVolumeRequest (raw) {
+  try {
+    const parsed = JSON.parse(String(raw || ''))
+    if (parsed?.type !== 'peertunes-volume') return null
+    const requestId = parsed.requestId
+    if (typeof requestId !== 'string' || !/^volume-\d{1,12}$/.test(requestId)) return null
+    const step = Number(parsed.step)
+    if (!Number.isFinite(step)) return null
+    return { requestId, step: Math.min(1, Math.max(-1, step)) }
+  } catch {
+    return null
+  }
+}
+
+// What goes back to the page for a volume request: the phone's volume, or
+// null when native had none to give.
+export function createPeerTunesVolumeAnswerScript (requestId, volume) {
+  const answer = typeof volume === 'number' && Number.isFinite(volume)
+    ? { volume: Math.min(1, Math.max(0, volume)) }
+    : null
+  return `window.__peerskyResolveVolume && window.__peerskyResolveVolume(${serializeScanResult(requestId)}, ${serializeScanResult(answer)}); true;`
+}
+
 /**
  * Tells the page whether sound is going to a Bluetooth device, for its
  * Bluetooth mark. A WebView cannot see the audio outputs itself.

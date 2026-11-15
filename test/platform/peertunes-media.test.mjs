@@ -221,7 +221,7 @@ test('the Android media session sends the buttons back as commands', async () =>
   assert.match(module, /session\.isActive = true/)
   // On both: Android's media session and the iOS widget read what it says.
   const screen = await read('app/peertunes/PeerTunesScreen.tsx')
-  assert.match(screen, /const PEERTUNES_BEFORE_LOAD_SCRIPT = `\$\{PEERTUNES_SCAN_BRIDGE_SCRIPT\}\\n\$\{PEERTUNES_MEDIA_BRIDGE_SCRIPT\}`/)
+  assert.match(screen, /const PEERTUNES_BEFORE_LOAD_SCRIPT = \[\n\s+PEERTUNES_SCAN_BRIDGE_SCRIPT,\n\s+PEERTUNES_MEDIA_BRIDGE_SCRIPT,\n/)
   assert.match(screen, /audioRoute\?\.setNowPlaying\?\.\(\s+nowPlaying\.playing,\s+nowPlaying\.title,\s+nowPlaying\.artist,\s+nowPlaying\.album,\s+readArtworkBase64\(nowPlaying\.artwork\) \?\? ''\s+\)\s+updatePeerTunesWidget\(nowPlaying\)/)
   assert.match(screen, /mediaCommandEvents\.addListener\('PeerSkyMediaCommand'/)
 })

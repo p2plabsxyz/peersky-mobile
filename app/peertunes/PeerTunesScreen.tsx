@@ -8,11 +8,13 @@ import {
   PEERTUNES_MEDIA_BRIDGE_SCRIPT,
   PEERTUNES_MEDIA_REPORT_SCRIPT,
   PEERTUNES_SCAN_BRIDGE_SCRIPT,
+  PEERTUNES_VOLUME_BRIDGE_SCRIPT,
   createAudioRouteScript,
   createPeerTunesLanguageScript,
   createPeerTunesMediaCommandScript,
   createPeerTunesNowPlayingScript,
   createPeerTunesPageUrl,
+  createPeerTunesVolumeAnswerScript,
   isPeerTunesDataRequest,
   isPeerTunesPageRequest,
   parsePeerTunesHapticRequest,
@@ -20,6 +22,7 @@ import {
   parsePeerTunesKeptFoldersRequest,
   parsePeerTunesNowPlaying,
   parsePeerTunesScanRequest,
+  parsePeerTunesVolumeRequest,
   peertunesEntries,
   peertunesStringKeys,
   serializeScanResult
@@ -45,13 +48,21 @@ const audioRoute = NativeModules.PeerSkyAudioRoute as {
   // Android only: the view the session sends the buttons to itself.
   setPeerTunesView?: (tag: number) => void
   clearNowPlaying?: () => void
+  // iOS only: moves the phone's volume by a step for PeerTunes' wheel and
+  // answers where it is now, or null with no volume to set.
+  changeVolume?: (step: number) => Promise<number | null>
 } | undefined
 // PeerTunes is handed these texts of the catalog in force and nothing more:
 // the ones its scripts translate, as scripts/i18n.mjs lists them.
 const PEERTUNES_STRING_KEYS = peertunesStringKeys(peertunesStrings)
 // What is playing, for the Android media session and the iOS home screen
 // widget. iOS gives a WebView's media to Control Center itself.
-const PEERTUNES_BEFORE_LOAD_SCRIPT = `${PEERTUNES_SCAN_BRIDGE_SCRIPT}\n${PEERTUNES_MEDIA_BRIDGE_SCRIPT}`
+// On iOS the wheel's volume is the phone's own (PEERTUNES_VOLUME_BRIDGE_SCRIPT).
+const PEERTUNES_BEFORE_LOAD_SCRIPT = [
+  PEERTUNES_SCAN_BRIDGE_SCRIPT,
+  PEERTUNES_MEDIA_BRIDGE_SCRIPT,
+  Platform.OS === 'ios' ? PEERTUNES_VOLUME_BRIDGE_SCRIPT : ''
+].join('\n')
 // Android's media session sends its buttons as plain device events. On iOS
 // the widget's buttons come through the module, which only sends them while
 // something listens through it.
@@ -251,6 +262,15 @@ export function PeerTunesScreen ({
 
   // PeerSky downloads a hyper folder when asked; the page asks on behalf of a
   // playlist that was just imported, so it plays with the network off.
+  // A turn of the wheel on Now Playing, on iOS: the phone's volume moves.
+  const changeVolume = useCallback(async (requestId: string, step: number) => {
+    let volume: number | null = null
+    try {
+      volume = (await audioRoute?.changeVolume?.(step)) ?? null
+    } catch {}
+    webViewRef.current?.injectJavaScript(createPeerTunesVolumeAnswerScript(requestId, volume))
+  }, [])
+
   const keepOffline = useCallback(async (requestId: string, url: string) => {
     let answer: { ok: boolean, status?: string, error?: string }
     try {
@@ -359,6 +379,11 @@ export function PeerTunesScreen ({
           const weight = parsePeerTunesHapticRequest(event.nativeEvent.data)
           if (weight) {
             tapFeedback(weight)
+            return
+          }
+          const volume = parsePeerTunesVolumeRequest(event.nativeEvent.data)
+          if (volume) {
+            void changeVolume(volume.requestId, volume.step)
             return
           }
           const keep = parsePeerTunesKeepOfflineRequest(event.nativeEvent.data)

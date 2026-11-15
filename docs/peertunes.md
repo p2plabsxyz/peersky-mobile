@@ -51,6 +51,10 @@ A drive the phone has never read answers its first listing with 404 "Peers Not F
 
 A WebView cannot list audio outputs, so the app reads the route natively (`plugins/with-audio-route.js`: `AVAudioSession.currentRoute` on iOS, `AudioManager.getDevices` on Android, neither needing a permission). `PeerTunesScreen` checks it every few seconds and whenever the page loads, and sets `window.peerskyAudioRoute = { external }` with a `peersky-audio-route` event when the answer changes. PeerTunes prefers that over its own guess.
 
+## The volume on iOS
+
+iOS plays a song in a WebView at full volume whatever the page sets: `audio.volume` reads back the new value and returns to 1 a moment later while a song plays. So on an iPhone the wheel on Now Playing moves the phone's own volume, as the side buttons do. `PeerTunesScreen` gives the page `window.peerskyVolume.change(step)` on iOS only (`PEERTUNES_VOLUME_BRIDGE_SCRIPT`), and `PeerSkyAudioRoute.changeVolume` sets it through the slider of an `MPVolumeView` kept out of sight in the window while the wheel turns, starting from `AVAudioSession.outputVolume`. It answers `{ volume }`, which the bar shows. A simulator has no volume and its `MPVolumeView` no slider, so the answer is `null` there and PeerTunes moves the song's volume, as on Android and the desktop, where `audio.volume` works.
+
 The port is fixed on purpose. The WebView origin is `host:port`, and the music library lives in that origin's IndexedDB, so a stable port is what keeps the library between launches. When the fallback port is used the app still works, but that session's library does not carry over.
 
 ## Sources the player can load
@@ -90,3 +94,4 @@ The page publishes track, artist, album and artwork through the Media Session AP
 
 - `test/protocol/peertunes-http.test.mjs` covers the endpoint contract with an injectable Node HTTP server and a fake Hyper fetch: bridge injection, content types, path rejection, write rejection, the run's token (refused without it, a new one each run, never served or logged), URL validation, JSON listings, and range streaming.
 - `test/platform/internal-apps-registry.test.mjs` covers the `peersky://p2p/peertunes/` route, share link matching, and the WebView origin guard.
+- `test/platform/peertunes-volume.test.mjs` covers the iOS volume bridge: the request and its answer, an answer that never comes, the iOS-only script, and the native method.
