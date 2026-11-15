@@ -354,6 +354,16 @@ exactly the ones that can already open each other's private files.
   A file downloads when it is opened. A desktop drive the phone adopted at a
   transfer is read from this live copy rather than the frozen one, which
   would show the drive as it was on the day of the transfer.
+- What another device writes after the phone first met it shows as **New**
+  on the Hyperdrive screen and as a count on the Hyperdrive shortcut on the
+  home screen, until the Hyperdrive screen shows it with the app in front
+  (`RPC_DEVICE_SYNC_STATUS` with `markSeen`, which tells the app the count
+  changed). Each listed entry keeps when the phone first saw it written
+  (`addedAt`), and a listing keeps how long the drive was (`version`): an
+  entry at that place or later was written since, so an older file that only
+  comes into a listing cut short at 100 is not new. What a device has when it
+  is first met is not new; a drive a known device starts listing later is new
+  in full. PeerSky Desktop keeps the same marks for its home page.
 - The desktop adds the phone's drive to its private drives as
   `Private files from your phone`, read-only, and copies every file in it, so
   they open on the desktop with the phone asleep, which on iOS is most of the

@@ -79,6 +79,7 @@ Unsupported Adblock modifiers, cosmetic rules, and regular-expression filters ar
 - Hyper, PeerSky internal pages, localhost, Android emulator loopback, P2PMD, and Holesail traffic are excluded from filtering.
 - Android uses the network-rule support provided by the pinned `adblock-rust` engine.
 - iOS converts the supported network-rule subset to WebKit JSON. Unsupported modifiers and regex filters are skipped safely.
+- WebKit applies an exception only to the blocks before it in the same compiled list, and each list is compiled on its own. Ad blockers apply an exception to every list, so on iOS each list's rules are its blocks, then the exceptions of both lists, then its `$important` blocks, which no exception undoes.
 - Cosmetic filtering, element hiding, cookie banners, scriptlets, and anti-adblock circumvention are outside this initial implementation. A synthetic blocked response may therefore score differently from browser extensions on visual ad-block test pages.
 - The only page script is the separately controlled YouTube protection described above. When YouTube had an ad ready for a video, it can hold the video back for a few seconds before it starts; the video then plays without the ad.
 - Filter-list updates do not accept custom URLs. This keeps the native parser boundary limited to the reviewed EasyList sources.

@@ -352,7 +352,8 @@ describe('the app and page moves', () => {
     assert.match(message, /const pageMove = parseBrowserPageMoveMessage\(event\.nativeEvent\.data, browserMediaToken\)[^\n]*\n\s+if \(pageMove\) \{\n\s+if \(entry\.source\.kind === 'web'\) onBrowserPageMove\(tab\.id, webViewGeneration, pageMove\)\n\s+return\n/)
     // A report is used only for the change it was about, once a page is there.
     const change = app.slice(start, app.indexOf('onMessage={(event) => {', start))
-    assert.match(change, /const pageMove = loading \? null : takeBrowserPageMove\(tab\.id, webViewGeneration, navigationState\.url\)/)
+    assert.match(change, /const reportedMove = loading \? null : takeBrowserPageMove\(tab\.id, webViewGeneration, navigationState\.url\)/)
+    assert.match(change, /const pageMove = reportedMove \|\| landedLoad/)
   })
 
   test('a page that redirects as soon as it loads is let through, by its own WebView only', async () => {

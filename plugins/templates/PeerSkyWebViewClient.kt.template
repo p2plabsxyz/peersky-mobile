@@ -6,6 +6,7 @@ import android.webkit.JavascriptInterface
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
+import com.facebook.react.bridge.WritableMap
 import com.reactnativecommunity.webview.RNCWebViewClient
 import java.io.ByteArrayInputStream
 import java.util.Locale
@@ -61,7 +62,24 @@ class PeerSkyWebViewClient : RNCWebViewClient() {
   // app keeps for iOS frames (getBrowserRequestAction in browser-shell.mjs).
   override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
     if (!request.isForMainFrame) return !frameMayLoad(request.url)
-    return super.shouldOverrideUrlLoading(view, request)
+    requestGesture = request.hasGesture()
+    try {
+      return super.shouldOverrideUrlLoading(view, request)
+    } finally {
+      requestGesture = null
+    }
+  }
+
+  // Whether the person's tap came with the navigation the app is asked
+  // about: a page may hand a link to another app only then
+  // (getBrowserRequestAction in browser-shell.mjs). iOS says the same by
+  // calling the navigation a click.
+  private var requestGesture: Boolean? = null
+
+  override fun createWebViewEvent(webView: WebView?, url: String?): WritableMap {
+    val event = super.createWebViewEvent(webView, url)
+    requestGesture?.let { event.putBoolean("hasGesture", it) }
+    return event
   }
 
   override fun shouldInterceptRequest(

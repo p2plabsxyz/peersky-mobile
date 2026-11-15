@@ -8,6 +8,8 @@ import {
   getExternalAppName,
   getExternalLinkBehaviorAction,
   getExternalLinkTarget,
+  getIntentFallbackUrl,
+  parseAppLink,
   parseExternalAppLink
 } from '../../app/browser-permissions.mjs'
 
@@ -82,5 +84,43 @@ describe('browser external app permissions', () => {
     assert.equal(getExternalLinkTarget('tel:+15550100'), '+15550100')
     assert.equal(getExternalLinkTarget('https://example.com'), null)
     assert.equal(getExternalLinkTarget(''), null)
+  })
+})
+
+// App Store, WhatsApp, Spotify, Maps and Play Store links went nowhere, with no
+// word: only mail, phone, messages and maps were let through.
+describe('links to other apps', () => {
+  test('knows an app\'s own link from the browser\'s schemes', () => {
+    for (const url of [
+      'itms-apps://apps.apple.com/app/id284882215',
+      'whatsapp://send?text=hello',
+      'spotify:track:4uLU6hMCjMI75M1A2tKUQC',
+      'maps://?q=coffee',
+      'market://details?id=org.mozilla.firefox',
+      'intent://scan/#Intent;scheme=zxing;package=com.google.zxing.client.android;end'
+    ]) {
+      assert.equal(parseAppLink(url)?.url, url, url)
+    }
+    assert.deepEqual(parseAppLink('Spotify:track:1'), { scheme: 'spotify', url: 'Spotify:track:1' })
+    assert.deepEqual(parseAppLink('mailto:a@example.com'), { scheme: 'mailto', url: 'mailto:a@example.com' })
+    for (const url of [
+      'https://example.com', 'http://example.com', 'hyper://site/', 'hs://key', 'peersky://p2p',
+      'javascript:alert(1)', 'data:text/html,hi', 'blob:https://example.com/x', 'about:blank',
+      'file:///etc/hosts', 'content://media/external/images/1', 'browser://theme/vars.css',
+      'whatsapp://send?text=two words', 'whats app://x', 'not a link', '', null,
+      `whatsapp://send?text=${'a'.repeat(MAX_EXTERNAL_LINK_LENGTH)}`
+    ]) {
+      assert.equal(parseAppLink(url), null, String(url))
+    }
+  })
+
+  test('reads an intent:// link\'s web page to fall back on', () => {
+    const fallback = 'https://example.com/scan?x=1'
+    const link = `intent://scan/#Intent;scheme=zxing;package=com.example;S.browser_fallback_url=${encodeURIComponent(fallback)};end`
+    assert.equal(getIntentFallbackUrl(link), fallback)
+    assert.equal(getIntentFallbackUrl('intent://scan/#Intent;scheme=zxing;end'), null)
+    assert.equal(getIntentFallbackUrl(`intent://x/#Intent;S.browser_fallback_url=${encodeURIComponent('javascript:alert(1)')};end`), null)
+    assert.equal(getIntentFallbackUrl(`intent://x/#Intent;S.browser_fallback_url=${encodeURIComponent('market://details?id=x')};end`), null)
+    assert.equal(getIntentFallbackUrl(`spotify:x#Intent;S.browser_fallback_url=${encodeURIComponent(fallback)};end`), null)
   })
 })

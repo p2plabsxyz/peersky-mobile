@@ -1,6 +1,8 @@
 #import <AVFoundation/AVFoundation.h>
+#import <MediaPlayer/MediaPlayer.h>
 #import <React/RCTBridgeModule.h>
 #import <React/RCTEventEmitter.h>
+#import <React/RCTUtils.h>
 
 // Whether sound is going somewhere wireless: Bluetooth, AirPlay or a car.
 // PeerTunes shows its Bluetooth mark from this, because a WebView cannot see
@@ -10,12 +12,45 @@
 // run in the app as audio App Intents (targets/widgets/_shared), which post
 // PeerSkyMediaCommand, and the page gets them the way Android's media session
 // buttons reach it.
+//
+// And it moves the phone's volume for the PeerTunes wheel on Now Playing. iOS
+// plays a song in a WebView at full volume whatever the page sets, so the wheel
+// did nothing while a song played. An app sets the volume through the slider of
+// an MPVolumeView in a window, as the side buttons would. The view goes in only
+// while the wheel turns: while it is in the window, iOS shows no volume pill
+// for the side buttons either. A simulator has no volume, and its MPVolumeView
+// no slider, so the answer there is null and the page keeps the song's volume.
 @interface PeerSkyAudioRoute : RCTEventEmitter <RCTBridgeModule>
 @end
 
 static NSString *const PeerSkyMediaCommandName = @"PeerSkyMediaCommand";
 
+// How long the volume view stays in the window after the last turn.
+static const NSTimeInterval PeerSkyVolumeViewSeconds = 3.0;
+// A slider just put in a window can miss a value set straight away.
+static const NSTimeInterval PeerSkyVolumeViewSettleSeconds = 0.15;
+// How long the volume this module set counts over the system's reading, which
+// catches up a moment later. Without it, quick turns started from the old
+// volume and steps were lost.
+static const NSTimeInterval PeerSkyVolumeSetSeconds = 1.0;
+
+static UISlider *PeerSkyFindSlider(UIView *view)
+{
+  for (UIView *child in view.subviews) {
+    if ([child isKindOfClass:[UISlider class]]) return (UISlider *)child;
+    UISlider *found = PeerSkyFindSlider(child);
+    if (found) return found;
+  }
+  return nil;
+}
+
 @implementation PeerSkyAudioRoute
+{
+  MPVolumeView *_volumeView;
+  NSUInteger _volumeTurns;
+  float _volumeSet;
+  CFAbsoluteTime _volumeSetAt;
+}
 
 RCT_EXPORT_MODULE(PeerSkyAudioRoute)
 
@@ -67,6 +102,66 @@ RCT_EXPORT_METHOD(getRoute:(RCTPromiseResolveBlock)resolve
     }
   }
   resolve(@{ @"external": @(external) });
+}
+
+// Moves the phone's volume by step, from -1 to 1, and answers where it is now;
+// a step of 0 only reads it. Null when there is no volume to set.
+RCT_EXPORT_METHOD(changeVolume:(double)step
+                  resolve:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject)
+{
+  dispatch_async(dispatch_get_main_queue(), ^{
+    BOOL settling = self->_volumeView.window == nil;
+    UISlider *slider = [self volumeSlider];
+    if (!slider) {
+      resolve([NSNull null]);
+      return;
+    }
+    NSTimeInterval wait = settling ? PeerSkyVolumeViewSettleSeconds : 0;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(wait * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+      resolve(@([self moveVolume:slider by:step]));
+      [self removeVolumeViewLater];
+    });
+  });
+}
+
+- (float)moveVolume:(UISlider *)slider by:(double)step
+{
+  CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
+  float from = now - _volumeSetAt < PeerSkyVolumeSetSeconds
+    ? _volumeSet
+    : [AVAudioSession sharedInstance].outputVolume;
+  if (step == 0) return from;
+  float to = MIN(1.0f, MAX(0.0f, from + (float)step));
+  [slider setValue:to animated:NO];
+  [slider sendActionsForControlEvents:UIControlEventValueChanged];
+  _volumeSet = to;
+  _volumeSetAt = now;
+  return to;
+}
+
+// The slider of the volume view, put in the key window, out of sight.
+- (UISlider *)volumeSlider
+{
+  if (!_volumeView) {
+    _volumeView = [[MPVolumeView alloc] initWithFrame:CGRectMake(-2000, -2000, 160, 40)];
+  }
+  if (!_volumeView.window) {
+    UIWindow *window = RCTKeyWindow();
+    if (!window) return nil;
+    [window addSubview:_volumeView];
+  }
+  UISlider *slider = PeerSkyFindSlider(_volumeView);
+  if (!slider) [_volumeView removeFromSuperview];
+  return slider;
+}
+
+- (void)removeVolumeViewLater
+{
+  NSUInteger turn = ++_volumeTurns;
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(PeerSkyVolumeViewSeconds * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    if (turn == self->_volumeTurns) [self->_volumeView removeFromSuperview];
+  });
 }
 
 @end

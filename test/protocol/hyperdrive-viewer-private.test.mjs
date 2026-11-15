@@ -30,6 +30,10 @@ globalThis.Bare = { argv: [path.join(dir, 'device')] }
 
 const WINDOW = 4 * 1024 * 1024
 const TOKEN = 'a1b2c3d4'.repeat(8)
+// Closing the stores tells the public DHT this phone has left, so it takes as
+// long as the network does: a few seconds on a good connection, past 10 on a
+// slow CI runner. A store that is stuck never closes at all.
+const CLOSE_WAIT_MS = 60_000
 
 test('a private drive\'s files answer a range with 206, and its video seeks', async (t) => {
   let server = null
@@ -38,7 +42,7 @@ test('a private drive\'s files answer a range with 206, and its video seeks', as
       server.closeAllConnections?.()
       await new Promise((resolve) => server.close(() => resolve()))
     }
-    const closed = await within(closeHyperRuntime(), 10_000, 'closing the stores').then(() => true, () => false)
+    const closed = await within(closeHyperRuntime(), CLOSE_WAIT_MS, 'closing the stores').then(() => true, () => false)
     await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
     if (!closed) setTimeout(() => process.exit(1), 500)
   })

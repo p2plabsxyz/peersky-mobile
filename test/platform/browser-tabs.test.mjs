@@ -21,7 +21,7 @@ import {
   moveBrowserTabState,
   normalizeBrowserPageZoom,
   parseRecentlyClosedBrowserTabs,
-  PAUSE_TAB_MEDIA_SCRIPT,
+  createPauseTabMediaScript,
   rememberClosedBrowserTabs,
   reopenClosedBrowserTabState,
   restoreBrowserTabsState,
@@ -421,14 +421,41 @@ describe('browser tab state helpers', () => {
     assert.match(hidden, /display: 'none'/)
 
     const left = index.slice(index.indexOf('const frontBrowserTabIdRef'), index.indexOf('}, [browserTabsState.activeTabId])', index.indexOf('const frontBrowserTabIdRef')))
-    assert.match(left, /browserWebViewRefs\.current\.get\(leftTabId\)\?\.injectJavaScript\(PAUSE_TAB_MEDIA_SCRIPT\)/)
+    assert.match(left, /browserWebViewRefs\.current\.get\(leftTabId\)\?\.injectJavaScript\(createPauseTabMediaScript\(Platform\.OS\)\)/)
 
-    const paused = []
-    const media = [{ paused: false, pause () { this.paused = true; paused.push('video') } }, { paused: true, pause () { paused.push('stopped audio') } }]
     const { runInNewContext } = await import('node:vm')
-    runInNewContext(PAUSE_TAB_MEDIA_SCRIPT, { document: { querySelectorAll: (selector) => (selector === 'video, audio' ? media : []) } })
-    assert.deepEqual(paused, ['video'])
-    assert.doesNotThrow(() => runInNewContext(PAUSE_TAB_MEDIA_SCRIPT, { document: { querySelectorAll: () => { throw new Error('no page') } } }))
+    assert.doesNotThrow(() => runInNewContext(createPauseTabMediaScript('android'), { document: { querySelectorAll: () => { throw new Error('no page') } } }))
+  })
+
+  // Chrome keeps a hidden tab's sound playing and pauses its video, and
+  // Safari keeps anything with sound playing. Switching tabs used to stop a
+  // song or a podcast on both.
+  test('a tab going behind another pauses what the browser would, and its sound plays on', async () => {
+    const { runInNewContext } = await import('node:vm')
+    const media = () => ({
+      audio: { tagName: 'AUDIO', paused: false, readyState: 4 },
+      clip: { tagName: 'VIDEO', paused: false, readyState: 4, videoWidth: 640, muted: false, volume: 1, audioTracks: { length: 1 } },
+      mutedClip: { tagName: 'VIDEO', paused: false, readyState: 4, videoWidth: 640, muted: true, volume: 1, audioTracks: { length: 1 } },
+      silentClip: { tagName: 'VIDEO', paused: false, readyState: 4, videoWidth: 640, muted: false, volume: 1, audioTracks: { length: 0 } },
+      podcast: { tagName: 'VIDEO', paused: false, readyState: 4, videoWidth: 0, muted: false, volume: 1, audioTracks: { length: 1 } },
+      stopped: { tagName: 'VIDEO', paused: true, readyState: 4, videoWidth: 640, muted: false, volume: 1, audioTracks: { length: 1 } }
+    })
+    const pausedOn = (platform) => {
+      const page = media()
+      const paused = []
+      for (const [name, element] of Object.entries(page)) element.pause = () => { element.paused = true; paused.push(name) }
+      const document = {
+        querySelectorAll: (selector) => Object.values(page).filter((element) =>
+          selector.split(',').map((part) => part.trim().toUpperCase()).includes(element.tagName))
+      }
+      runInNewContext(createPauseTabMediaScript(platform), { document })
+      return paused
+    }
+
+    // Chrome: videos with a picture.
+    assert.deepEqual(pausedOn('android'), ['clip', 'mutedClip', 'silentClip'])
+    // Safari: videos that make no sound.
+    assert.deepEqual(pausedOn('ios'), ['mutedClip', 'silentClip'])
   })
 
   test('releases rendered state for inactive Hyper tabs', () => {

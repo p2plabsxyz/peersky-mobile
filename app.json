@@ -2,7 +2,7 @@
   "expo": {
     "name": "PeerSky",
     "slug": "peersky-mobile",
-    "version": "1.0.1",
+    "version": "1.1.0",
     "orientation": "default",
     "scheme": "peersky",
     "icon": "./assets/images/icon.png",
@@ -10,7 +10,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "xyz.p2plabs.peersky",
-      "buildNumber": "7",
+      "buildNumber": "8",
       "appleTeamId": "PP6D6HB667",
       "entitlements": {
         "com.apple.developer.networking.multicast": true,
@@ -82,7 +82,7 @@
         "backgroundImage": "./assets/app-icons/android/background-cyan.png"
       },
       "package": "xyz.p2plabs.peersky",
-      "versionCode": 6,
+      "versionCode": 7,
       "softwareKeyboardLayoutMode": "resize",
       "permissions": [
         "android.permission.ACCESS_COARSE_LOCATION",
@@ -91,11 +91,11 @@
         "android.permission.CAMERA",
         "android.permission.CHANGE_WIFI_MULTICAST_STATE",
         "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
         "android.permission.FOREGROUND_SERVICE_REMOTE_MESSAGING",
         "android.permission.RECORD_AUDIO"
       ],
       "blockedPermissions": [
-        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.REQUEST_INSTALL_PACKAGES",
         "android.permission.SYSTEM_ALERT_WINDOW",

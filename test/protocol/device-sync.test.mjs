@@ -9,7 +9,7 @@ import createTestnet from 'hyperdht/testnet.js'
 import Hyperdrive from 'hyperdrive'
 import { attachDeviceSync, listDriveTop } from '../../backend/hyper/device-sync.mjs'
 import { deviceSyncTopic } from '../../backend/hyper/device-sync-protocol.mjs'
-import { readDeviceSyncState, resetDeviceSyncStateCache } from '../../backend/hyper/device-sync-state.mjs'
+import { newDeviceFileCount, readDeviceSyncState, resetDeviceSyncStateCache } from '../../backend/hyper/device-sync-state.mjs'
 
 const hex = (buffer) => Buffer.from(buffer).toString('hex')
 
@@ -122,12 +122,17 @@ test('a phone and a desktop with one private key find each other and keep each o
   // What is in the other's private drive, without opening anything by hand.
   await until(() => listing(phone, desktop.id).some((item) => item.name === 'report.pdf'), { what: 'the desktop file on the phone' })
   await until(() => listing(desktop, phone.id).some((item) => item.name === 'hello.txt'), { what: 'the phone file on the desktop' })
-  assert.deepEqual(listing(desktop, phone.id)[0], { type: 'file', name: 'hello.txt', path: '/hello.txt', byteLength: 14 })
+  assert.deepEqual(listing(desktop, phone.id)[0], { type: 'file', name: 'hello.txt', path: '/hello.txt', byteLength: 14, addedAt: 0 })
+  // What the phone had when they met is not new to the desktop.
+  assert.equal(newDeviceFileCount(desktop.stateDirectory), 0)
 
   // A new private upload shows up on its own, newest first.
   const photo = randomBytes(64 * 1024)
   await phone.drive.put('/photo.jpg', photo)
   await until(() => listing(desktop, phone.id)[0]?.name === 'photo.jpg', { what: 'a new phone upload on the desktop' })
+  // A new one is, until the desktop's Hyperdrive app shows it.
+  assert.equal(newDeviceFileCount(desktop.stateDirectory), 1)
+  assert.deepEqual(listing(desktop, phone.id).map((item) => [item.name, item.addedAt > 0]), [['photo.jpg', true], ['hello.txt', false]])
 
   // The desktop keeps a copy of the phone's files, to open with the phone gone.
   const copyOnDesktop = await desktop.opened.get(phone.id)
@@ -246,6 +251,16 @@ test('the top of a drive lists newest first and stops at its limits', async (t) 
   const limited = await listDriveTop(drive, { maxItems: 2 })
   assert.equal(limited.items.length, 2)
   assert.equal(limited.truncated, true)
+
+  // Where each item sits in the drive, and how long the drive was: what is
+  // written after a listing sits at its version or later.
+  const before = await listDriveTop(drive, { keepSeq: true })
+  assert.equal(before.version, drive.version)
+  assert.ok(before.items.every((item) => item.seq < before.version))
+  await drive.put('/c.txt', Buffer.from('c'))
+  const after = await listDriveTop(drive, { keepSeq: true })
+  assert.ok(after.items.find((item) => item.name === 'c.txt').seq >= before.version)
+  assert.ok(after.items.find((item) => item.name === 'b.txt').seq < before.version)
 })
 
 test('two devices that join at the same moment still find each other', { timeout: 60000 }, async (t) => {

@@ -5,7 +5,7 @@ export const MAX_WEBKIT_RULES_PER_LIST = 150_000
 // caches are keyed by the filter-list snapshot, which does not move when the
 // converter does. Keep it in step with PeerSkyRuleFormatVersion in
 // plugins/templates/PeerSkyContentBlocker.m.template.
-export const WEBKIT_RULE_FORMAT_VERSION = 4
+export const WEBKIT_RULE_FORMAT_VERSION = 5
 
 const DEFAULT_BATCH_SIZE = 500
 
@@ -40,61 +40,160 @@ const RESOURCE_TYPE_OPTIONS = new Map([
 // googlevideo.com over fetch. A beacon rule is not worth that, so $ping now
 // falls through to the unsupported branch and the line is skipped.
 const SAFE_FLAG_OPTIONS = new Set(['important'])
-const MAX_FILTER_LINE_LENGTH = 4 * 1024
+// Long lines are filters for a long list of sites, like EasyPrivacy's
+// exception that lets Google Tag Manager run on some 450 of them. Lines over
+// 4 KB were skipped, which dropped that exception and blocked the script on
+// every one of those sites. The url-filter keeps its own cap below.
+const MAX_FILTER_LINE_LENGTH = 64 * 1024
 // Adblock's "^": any character but a letter, a digit or _ . % -.
 const URL_SEPARATOR = '[^A-Za-z0-9_.%-]'
 const MAX_URL_FILTER_LENGTH = 2 * 1024
 
+// WebKit applies a list's rules in order, and an exception, which WebKit
+// calls ignore-previous-rules, undoes only the blocks before it in the same
+// list. Each filter list is compiled as a list of its own, so an exception in
+// EasyList never undid a block in EasyPrivacy, and the other way round. Ad
+// blockers apply an exception to every list, and let nothing undo a block
+// marked $important. So a list's rules are its blocks, then the exceptions of
+// both lists, then its $important blocks, then any $important exceptions.
+//
+// sharedExceptions holds the other lists' exceptions (collectWebKitExceptions).
+/**
+ * @typedef {{ exceptions: object[], importantExceptions: object[] }} WebKitExceptions
+ * @param {string} contents
+ * @param {{ maxRules?: number, sharedExceptions?: WebKitExceptions | null }} [options]
+ */
 export function convertFilterListToWebKitRules (
   contents,
-  { maxRules = MAX_WEBKIT_RULES_PER_LIST } = {}
+  { maxRules = MAX_WEBKIT_RULES_PER_LIST, sharedExceptions } = {}
 ) {
   if (typeof contents !== 'string') throw new TypeError('Filter list must be text.')
   if (!Number.isSafeInteger(maxRules) || maxRules < 1) {
     throw new TypeError('Invalid WebKit rule limit.')
   }
 
-  const blocking = []
-  const exceptions = []
-
+  const groups = createRuleGroups()
   for (const rawLine of contents.split(/\r?\n/)) {
-    if (blocking.length + exceptions.length >= maxRules * 2) break
-    for (const rule of convertLine(rawLine)) {
-      ;(rule.action.type === 'ignore-previous-rules' ? exceptions : blocking).push(rule)
-    }
+    if (countRules(groups) >= maxRules * 2) break
+    addLine(groups, rawLine)
   }
-
-  const keptExceptions = exceptions.slice(0, maxRules)
-  const keptBlocking = blocking.slice(0, maxRules - keptExceptions.length)
-  return [...keptBlocking, ...keptExceptions]
+  return assembleRules(groups, maxRules, sharedExceptions)
 }
 
+/**
+ * @param {string} contents
+ * @param {{ maxRules?: number, batchSize?: number, yieldControl?: () => Promise<unknown>, sharedExceptions?: WebKitExceptions | null }} [options]
+ */
 export async function convertFilterListToWebKitRulesAsync (
   contents,
   {
     maxRules = MAX_WEBKIT_RULES_PER_LIST,
     batchSize = DEFAULT_BATCH_SIZE,
-    yieldControl = yieldToEventLoop
+    yieldControl = yieldToEventLoop,
+    sharedExceptions
   } = {}
 ) {
   if (typeof contents !== 'string') throw new TypeError('Filter list must be text.')
   validateBatchOptions(maxRules, batchSize, yieldControl)
 
-  const blocking = []
-  const exceptions = []
+  const groups = createRuleGroups()
   const lines = contents.split(/\r?\n/)
 
   for (let index = 0; index < lines.length; index++) {
-    if (blocking.length + exceptions.length >= maxRules * 2) break
-    for (const rule of convertLine(lines[index])) {
-      ;(rule.action.type === 'ignore-previous-rules' ? exceptions : blocking).push(rule)
-    }
+    if (countRules(groups) >= maxRules * 2) break
+    addLine(groups, lines[index])
     if ((index + 1) % batchSize === 0) await yieldControl()
   }
+  return assembleRules(groups, maxRules, sharedExceptions)
+}
 
-  const keptExceptions = exceptions.slice(0, maxRules)
-  const keptBlocking = blocking.slice(0, maxRules - keptExceptions.length)
-  return [...keptBlocking, ...keptExceptions]
+// A list's exceptions alone, to be added to the other lists.
+export function collectWebKitExceptions (contents) {
+  if (typeof contents !== 'string') throw new TypeError('Filter list must be text.')
+  const groups = createRuleGroups()
+  for (const rawLine of contents.split(/\r?\n/)) {
+    if (rawLine.trimStart().startsWith('@@')) addLine(groups, rawLine)
+  }
+  return { exceptions: groups.exceptions, importantExceptions: groups.importantExceptions }
+}
+
+export async function collectWebKitExceptionsAsync (
+  contents,
+  { batchSize = DEFAULT_BATCH_SIZE, yieldControl = yieldToEventLoop } = {}
+) {
+  if (typeof contents !== 'string') throw new TypeError('Filter list must be text.')
+  validateBatchOptions(1, batchSize, yieldControl)
+
+  const groups = createRuleGroups()
+  const lines = contents.split(/\r?\n/)
+  for (let index = 0; index < lines.length; index++) {
+    if (lines[index].trimStart().startsWith('@@')) addLine(groups, lines[index])
+    if ((index + 1) % batchSize === 0) await yieldControl()
+  }
+  return { exceptions: groups.exceptions, importantExceptions: groups.importantExceptions }
+}
+
+// Every list's rules, each ending with the exceptions of all of them.
+export function convertFilterListsToWebKitRules (lists, options = {}) {
+  const exceptions = lists.map((contents) => collectWebKitExceptions(contents))
+  return lists.map((contents, index) => convertFilterListToWebKitRules(contents, {
+    ...options,
+    sharedExceptions: mergeExceptions(exceptions.filter((_, other) => other !== index))
+  }))
+}
+
+export function mergeExceptions (collected) {
+  return {
+    exceptions: collected.flatMap((item) => item?.exceptions || []),
+    importantExceptions: collected.flatMap((item) => item?.importantExceptions || [])
+  }
+}
+
+function createRuleGroups () {
+  return { blocking: [], exceptions: [], importantBlocking: [], importantExceptions: [] }
+}
+
+function countRules (groups) {
+  return groups.blocking.length + groups.exceptions.length +
+    groups.importantBlocking.length + groups.importantExceptions.length
+}
+
+function addLine (groups, rawLine) {
+  const converted = convertLine(rawLine)
+  if (!converted) return
+  const { rules, exception, important } = converted
+  const group = exception
+    ? (important ? groups.importantExceptions : groups.exceptions)
+    : (important ? groups.importantBlocking : groups.blocking)
+  for (const rule of rules) group.push(rule)
+}
+
+// Exceptions and $important rules are few and always kept. Past the limit,
+// the last ordinary blocks are what goes.
+function assembleRules (groups, maxRules, sharedExceptions) {
+  const exceptions = withoutRepeats(groups.exceptions, sharedExceptions?.exceptions)
+  const importantExceptions = withoutRepeats(groups.importantExceptions, sharedExceptions?.importantExceptions)
+  const keptImportantExceptions = importantExceptions.slice(0, maxRules)
+  let room = maxRules - keptImportantExceptions.length
+  const keptImportantBlocking = groups.importantBlocking.slice(0, room)
+  room -= keptImportantBlocking.length
+  const keptExceptions = exceptions.slice(0, room)
+  room -= keptExceptions.length
+  const keptBlocking = groups.blocking.slice(0, room)
+  return [...keptBlocking, ...keptExceptions, ...keptImportantBlocking, ...keptImportantExceptions]
+}
+
+function withoutRepeats (own, shared) {
+  if (!shared?.length) return own
+  const seen = new Set(own.map((rule) => JSON.stringify(rule)))
+  const merged = own.slice()
+  for (const rule of shared) {
+    const key = JSON.stringify(rule)
+    if (seen.has(key)) continue
+    seen.add(key)
+    merged.push(rule)
+  }
+  return merged
 }
 
 export async function serializeWebKitContentRuleChunks (
@@ -122,9 +221,9 @@ export function serializeWebKitContentRules (contents, options) {
 
 function convertLine (rawLine) {
   const line = rawLine.trim()
-  if (!line || line.length > MAX_FILTER_LINE_LENGTH) return []
-  if (line.startsWith('!') || line.startsWith('[')) return []
-  if (line.includes('##') || line.includes('#@#') || line.includes('#?#')) return []
+  if (!line || line.length > MAX_FILTER_LINE_LENGTH) return null
+  if (line.startsWith('!') || line.startsWith('[')) return null
+  if (line.includes('##') || line.includes('#@#') || line.includes('#?#')) return null
 
   const exception = line.startsWith('@@')
   const body = exception ? line.slice(2) : line
@@ -132,8 +231,10 @@ function convertLine (rawLine) {
   const pattern = separator >= 0 ? body.slice(0, separator) : body
   const optionText = separator >= 0 ? body.slice(separator + 1) : ''
   const type = exception ? 'ignore-previous-rules' : 'block'
+  const important = optionText.split(',').some((option) => option.toLowerCase() === 'important')
 
-  return createTriggers(pattern, optionText).map((trigger) => ({ trigger, action: { type } }))
+  const rules = createTriggers(pattern, optionText).map((trigger) => ({ trigger, action: { type } }))
+  return rules.length ? { rules, exception, important } : null
 }
 
 function createTriggers (pattern, optionText) {

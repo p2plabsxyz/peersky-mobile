@@ -57,11 +57,14 @@ describe('device sync state', () => {
     recordDriveListing(directory, OTHER_DRIVE, { items: [{ type: 'file', name: 'b.pdf', path: '/b.pdf', byteLength: 1 }] })
     let state = readDeviceSyncState(directory)
     assert.deepEqual(Object.keys(state.listings), [DRIVE])
-    assert.deepEqual(state.listings[DRIVE].items, [{ type: 'file', name: 'a.pdf', path: '/a.pdf', byteLength: 12 }])
+    assert.deepEqual(state.listings[DRIVE].items, [{ type: 'file', name: 'a.pdf', path: '/a.pdf', byteLength: 12, addedAt: 0 }])
 
     recordDeviceHello(directory, { id: DESKTOP, type: 'desktop', drives: [OTHER_DRIVE], now: 2000 })
     state = readDeviceSyncState(directory)
-    assert.deepEqual(Object.keys(state.listings), [])
+    // The drive it listed before goes, with its files. The one it lists now
+    // waits empty, so all it holds counts as new once it is listed.
+    assert.deepEqual(Object.keys(state.listings), [OTHER_DRIVE])
+    assert.deepEqual(state.listings[OTHER_DRIVE].items, [])
   })
 
   test('going offline keeps the device, with when it was last seen', () => {
@@ -102,10 +105,10 @@ describe('device sync state', () => {
   test('a damaged or hand-edited file reads as nothing rather than breaking', () => {
     directory = folder()
     writeFileSync(join(directory, DEVICE_SYNC_FILE), '{"version":1,"devices":[{"id":"zz","type":"desktop"},{"id":"' + DESKTOP + '","type":"toaster"}],"listings":{"x":{}}}')
-    assert.deepEqual(readDeviceSyncState(directory), { version: 1, devices: [], listings: {} })
+    assert.deepEqual(readDeviceSyncState(directory), { version: 1, devices: [], listings: {}, seenAt: 0 })
     resetDeviceSyncStateCache()
     writeFileSync(join(directory, DEVICE_SYNC_FILE), 'not json')
-    assert.deepEqual(readDeviceSyncState(directory), { version: 1, devices: [], listings: {} })
+    assert.deepEqual(readDeviceSyncState(directory), { version: 1, devices: [], listings: {}, seenAt: 0 })
     // Bad input to the writers changes nothing.
     assert.deepEqual(recordDeviceHello(directory, { id: 'short', type: 'desktop' }).added, [])
     assert.deepEqual(recordDeviceHello(directory, { id: DESKTOP, type: 'tablet' }).added, [])

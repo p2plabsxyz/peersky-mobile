@@ -19,6 +19,11 @@ const dir = await mkdtemp(path.join(tmpdir(), 'peersky-private-first-open-'))
 // are running in Bare.
 globalThis.Bare = { argv: [path.join(dir, 'device')] }
 
+// Closing the stores tells the public DHT this phone has left, so it takes as
+// long as the network does: a few seconds on a good connection, past 10 on a
+// slow CI runner. A store that is stuck never closes at all.
+const CLOSE_WAIT_MS = 60_000
+
 function within (promise, ms, what) {
   let timer
   return Promise.race([
@@ -31,7 +36,7 @@ function within (promise, ms, what) {
 
 test('P2P data gets the private drive when nothing has opened the private store yet', async (t) => {
   t.after(async () => {
-    const closed = await within(closeHyperRuntime(), 10_000, 'closing the stores').then(() => true, () => false)
+    const closed = await within(closeHyperRuntime(), CLOSE_WAIT_MS, 'closing the stores').then(() => true, () => false)
     await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
     // A store stuck opening never closes, and its sockets would keep this
     // file, and the whole run, waiting instead of failing.

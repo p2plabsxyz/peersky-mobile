@@ -16,3 +16,15 @@ test('the back arrow takes the same step back as the button and the swipe', () =
   assert.ok(back.indexOf('peerChatGoBackRef.current?.()') < back.indexOf('onBrowserBack()'))
   assert.match(app, /const browserBackAvailable = browserOverPage \|\| canBrowserGoBack/)
 })
+
+// Safari's Back in a tab that a link opened closes it and shows the page that
+// opened it. PeerSky did that only for the Android button: on iOS the arrow
+// was greyed out and the edge swipe did nothing.
+test('Back in a tab a link opened goes back to the tab that opened it', () => {
+  assert.match(app, /const browserOpenerTabId = browserTabOpenersRef\.current\.get\(browserTabsState\.activeTabId\)/)
+  assert.match(app, /const browserCanCloseToOpener = Boolean\(browserOpenerTabId\) &&\s+browserTabsState\.tabs\.some\(\(tab\) => tab\.id === browserOpenerTabId\)/)
+  assert.match(app, /const browserBackAvailable = browserOverPage \|\| canBrowserGoBack \|\| driveViewerCanGoBack \|\| browserCanCloseToOpener/)
+  // The arrow and the swipe both go by it, and what they do is the same back.
+  assert.match(app, /browserCanGoBackRef\.current = browserBackAvailable/)
+  assert.match(app, /else if \(closeTabToOpener\(\)\) return true/)
+})

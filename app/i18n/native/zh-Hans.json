@@ -16,6 +16,11 @@
     "peerchat_background_offline": "离线。点按以重新连接",
     "peerchat_background_locked": "解锁手机后连接",
     "peerchat_background_channel": "PeerChat 后台连接",
-    "peerchat_background_channel_description": "PeerSky 在后台时保持 PeerChat 连接"
+    "peerchat_background_channel_description": "PeerSky 在后台时保持 PeerChat 连接",
+    "peertunes_playback_channel": "正在播放",
+    "peertunes_play": "播放",
+    "peertunes_pause": "暂停",
+    "peertunes_previous": "上一首",
+    "peertunes_next": "下一首"
   }
 }

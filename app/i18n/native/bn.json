@@ -16,6 +16,11 @@
     "peerchat_background_offline": "অফলাইন। আবার সংযোগ করতে ট্যাপ করুন",
     "peerchat_background_locked": "ফোনের লক খুললে সংযুক্ত হবে",
     "peerchat_background_channel": "PeerChat-এর ব্যাকগ্রাউন্ড সংযোগ",
-    "peerchat_background_channel_description": "PeerSky ব্যাকগ্রাউন্ডে থাকার সময় PeerChat-কে সংযুক্ত রাখে"
+    "peerchat_background_channel_description": "PeerSky ব্যাকগ্রাউন্ডে থাকার সময় PeerChat-কে সংযুক্ত রাখে",
+    "peertunes_playback_channel": "এখন চলছে",
+    "peertunes_play": "চালান",
+    "peertunes_pause": "পজ করুন",
+    "peertunes_previous": "আগের গান",
+    "peertunes_next": "পরের গান"
   }
 }

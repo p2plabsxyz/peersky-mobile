@@ -16,6 +16,11 @@
     "peerchat_background_offline": "ออฟไลน์ แตะเพื่อเชื่อมต่ออีกครั้ง",
     "peerchat_background_locked": "จะเชื่อมต่อเมื่อคุณปลดล็อกโทรศัพท์",
     "peerchat_background_channel": "การเชื่อมต่อเบื้องหลังของ PeerChat",
-    "peerchat_background_channel_description": "ให้ PeerChat เชื่อมต่ออยู่ขณะที่ PeerSky ทำงานในเบื้องหลัง"
+    "peerchat_background_channel_description": "ให้ PeerChat เชื่อมต่ออยู่ขณะที่ PeerSky ทำงานในเบื้องหลัง",
+    "peertunes_playback_channel": "กำลังเล่น",
+    "peertunes_play": "เล่น",
+    "peertunes_pause": "หยุดชั่วคราว",
+    "peertunes_previous": "เพลงก่อนหน้า",
+    "peertunes_next": "เพลงถัดไป"
   }
 }

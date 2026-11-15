@@ -1,10 +1,13 @@
 import { createAudioPlayer, type AudioSource } from 'expo-audio'
 
 import { playAndroidPeerChatSound } from './background-service'
+import { incomingChatSound } from './sound-gate.mjs'
 
 const SOUND_RELEASE_TIMEOUT_MS = 5000
 
 export function playPeerChatSound (kind: 'send' | 'receive' | 'pop', source: AudioSource | string | number) {
+  // What arrives in a burst sounds once (sound-gate.mjs); a send always does.
+  if (kind !== 'send' && !incomingChatSound.allow()) return
   if (playAndroidPeerChatSound(kind)) return
   let player: ReturnType<typeof createAudioPlayer> | null = null
   let subscription: { remove: () => void } | null = null

@@ -40,8 +40,14 @@ function createHyperDirectoryHtml (body, targetUrl, isDark) {
   }
 }
 
-export function createBrowserErrorHtml (targetUrl, message, isDark = false) {
-  const { title, body } = describeBrowserError(targetUrl, message)
+/**
+ * @param {string} targetUrl
+ * @param {string} message
+ * @param {boolean} [isDark]
+ * @param {number} [code] the WebView's error code, which names a certificate error on iOS
+ */
+export function createBrowserErrorHtml (targetUrl, message, isDark = false, code) {
+  const { title, body } = describeBrowserError(targetUrl, message, code)
   const detail = String(message || '').trim()
 
   // The raw message goes in a details element rather than a box on the page.

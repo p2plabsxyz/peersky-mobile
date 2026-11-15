@@ -73,3 +73,21 @@ describe('browser data clearing', () => {
     assert.doesNotMatch(clearAll, /WKWebsiteDataTypeCookies|allWebsiteDataTypes/)
   })
 })
+
+// Android's WebView writes its cookies to disk about every half a minute. A
+// sign-in made just before PeerSky went to the background was lost when
+// Android stopped the app for memory, as it does with apps out of sight.
+describe('cookies kept when Android stops the app', () => {
+  test('are written to disk as PeerSky goes to the background', async () => {
+    const app = await read('app/index.tsx')
+    assert.match(app, /^import CookieManager from '@preeternal\/react-native-cookie-manager'$/m)
+    const listener = /AppState\.addEventListener\('change', \(nextState\) => \{([\s\S]*?)\n {4}\}\)/.exec(app)?.[1] || ''
+    assert.match(listener, /if \(Platform\.OS === 'android' && nextState === 'background'\) \{\s*void CookieManager\.flush\(\)\.catch\(/)
+
+    // The library writes Android's own cookie store, the one every tab but
+    // the incognito ones uses.
+    const module = await read('node_modules/@preeternal/react-native-cookie-manager/android/src/main/java/com/preeternal/reactnativecookiemanager/CookieManagerModule.kt')
+    assert.match(module, /override fun flush\(promise: Promise\) \{\s*try \{\s*getCookieManager\(\)\.flush\(\)/)
+    assert.match(module, /val cookieManager = CookieManager\.getInstance\(\)/)
+  })
+})

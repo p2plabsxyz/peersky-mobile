@@ -3,8 +3,11 @@ import { createRequire } from 'node:module'
 import { describe, test } from 'node:test'
 import {
   MAX_WEBKIT_RULES_PER_LIST,
+  collectWebKitExceptions,
+  collectWebKitExceptionsAsync,
   convertFilterListToWebKitRules,
   convertFilterListToWebKitRulesAsync,
+  convertFilterListsToWebKitRules,
   serializeWebKitContentRuleChunks,
   serializeWebKitContentRules,
   WEBKIT_RULE_FORMAT_VERSION
@@ -12,6 +15,78 @@ import {
 
 const require = createRequire(import.meta.url)
 const plugin = require('../../plugins/with-browser-downloads')
+
+function site (host) {
+  return host.split('.').slice(-2).join('.')
+}
+
+function domainMatches (pattern, host) {
+  if (pattern.startsWith('*')) {
+    const domain = pattern.slice(1)
+    return host === domain || host.endsWith(`.${domain}`)
+  }
+  return host === pattern
+}
+
+// The longest run of plain characters in a url-filter. Any address the
+// filter matches has it, so most filters are passed over without a RegExp.
+function literalOf (filter) {
+  let longest = ''
+  let run = ''
+  const end = () => {
+    if (run.length > longest.length) longest = run
+    run = ''
+  }
+  for (let index = 0; index < filter.length; index++) {
+    const character = filter[index]
+    if (character === '\\') {
+      run += filter[++index] || ''
+    } else if (character === '[' || character === '(') {
+      end()
+      const close = character === '[' ? ']' : ')'
+      while (index < filter.length && filter[index] !== close) index += filter[index] === '\\' ? 2 : 1
+    } else if ('.*+?^$|)]{}'.includes(character)) {
+      end()
+    } else {
+      run += character
+    }
+  }
+  end()
+  return longest.toLowerCase()
+}
+
+const filters = new WeakMap()
+
+// What WebKit does with one compiled list: rules in order, and an
+// ignore-previous-rules undoes the blocks before it, in that list only.
+function webkitBlocks (rules, { url, type, page }) {
+  const host = new URL(url).hostname
+  const pageHost = new URL(page).hostname
+  const party = site(host) === site(pageHost) ? 'first-party' : 'third-party'
+  const address = url.toLowerCase()
+  let blocked = false
+
+  for (const rule of rules) {
+    const { trigger, action } = rule
+    if (!trigger['resource-type'].includes(type)) continue
+    if (trigger['load-type'] && !trigger['load-type'].includes(party)) continue
+    if (trigger['if-domain'] && !trigger['if-domain'].some((domain) => domainMatches(domain, pageHost))) continue
+    if (trigger['unless-domain']?.some((domain) => domainMatches(domain, pageHost))) continue
+    let filter = filters.get(rule)
+    if (!filter) {
+      filter = { literal: literalOf(trigger['url-filter']), source: trigger['url-filter'], regex: null }
+      filters.set(rule, filter)
+    }
+    if (filter.literal && !address.includes(filter.literal)) continue
+    filter.regex ||= new RegExp(filter.source, 'i')
+    if (!filter.regex.test(url)) continue
+    blocked = action.type === 'block'
+  }
+  return blocked
+}
+
+// Each list is compiled and attached on its own, so either one can block.
+const blockedByAny = (lists, request) => lists.some((rules) => webkitBlocks(rules, request))
 
 describe('iOS content blocking', () => {
   test('converts supported network filters without blocking documents', () => {
@@ -291,5 +366,162 @@ describe('iOS content blocking', () => {
       blocker,
       /removeAllContentRuleLists\];\s*if \(enabled\)/
     )
+  })
+  // EasyPrivacy lets Google Tag Manager run on some 450 sites in one 6.5 KB
+  // line. Lines over 4 KB were skipped, so it was blocked on all of them.
+  test('a filter for a long list of sites is kept', async () => {
+    const sites = Array.from({ length: 450 }, (_, index) => `site-${index}.example`)
+    const line = `@@||googletagmanager.com/gtm.js$domain=${sites.join('|')}`
+    assert.ok(line.length > 4096)
+
+    const rules = convertFilterListToWebKitRules(line)
+    assert.equal(rules.length, 2)
+    for (const rule of rules) {
+      assert.equal(rule.action.type, 'ignore-previous-rules')
+      assert.equal(rule.trigger['if-domain'].length, 450)
+    }
+
+    // The url-filter keeps its own limit.
+    assert.deepEqual(convertFilterListToWebKitRules(`||${'a'.repeat(2100)}.example^`), [])
+  })
+
+  // WebKit compiles each list on its own, and an exception undoes only the
+  // blocks before it in its own list. Ad blockers let one undo a block from
+  // any list, so 27 exceptions the lists wrote never worked on iPhones.
+  test('an exception in one list undoes a block from the other', () => {
+    const easylist = [
+      '||ads.example^',
+      '@@||ads.example/allowed.js$script,domain=news.example'
+    ].join('\n')
+    const easyprivacy = [
+      '||tracker.example^$third-party',
+      '@@||tracker.example/consent.js$script,domain=shop.example'
+    ].join('\n')
+    const lists = convertFilterListsToWebKitRules([easylist, easyprivacy])
+
+    // Each list's blocks first, then the exceptions of both.
+    assert.deepEqual(lists.map((rules) => rules.map((rule) => rule.action.type)), [
+      ['block', 'block', 'ignore-previous-rules', 'ignore-previous-rules'],
+      ['block', 'block', 'ignore-previous-rules', 'ignore-previous-rules']
+    ])
+
+    const consent = { url: 'https://tracker.example/consent.js', type: 'script', page: 'https://shop.example/' }
+    assert.equal(blockedByAny(lists, consent), false)
+    // Where the exception does not reach, the block stands.
+    assert.equal(blockedByAny(lists, { ...consent, page: 'https://other.example/' }), true)
+    assert.equal(blockedByAny(lists, { url: 'https://tracker.example/pixel.gif', type: 'image', page: 'https://shop.example/' }), true)
+
+    const ad = { url: 'https://ads.example/allowed.js', type: 'script', page: 'https://news.example/' }
+    assert.equal(blockedByAny(lists, ad), false)
+    assert.equal(blockedByAny(lists, { url: 'https://ads.example/banner.js', type: 'script', page: 'https://news.example/' }), true)
+
+    // The same exception in both lists goes in once.
+    const shared = '@@||cdn.example/lib.js$script'
+    const [first] = convertFilterListsToWebKitRules([`||cdn.example^\n${shared}`, `||x.example^\n${shared}`])
+    assert.equal(first.filter((rule) => rule.action.type === 'ignore-previous-rules').length, 1)
+  })
+
+  // An ad blocker lets no exception undo a block marked $important. Placed
+  // with the other blocks, an exception after it undid it, and the long
+  // exception above names two sites EasyPrivacy blocks Tag Manager on that way.
+  test('nothing undoes an $important block, from either list', () => {
+    const easyprivacy = [
+      '||googletagmanager.com^$third-party',
+      '||googletagmanager.com/gtm.js$important,domain=games.example',
+      '@@||googletagmanager.com/gtm.js$domain=games.example|shop.example'
+    ].join('\n')
+    const easylist = '@@||googletagmanager.com/gtm.js$domain=games.example'
+    const lists = convertFilterListsToWebKitRules([easylist, easyprivacy])
+
+    // Its blocks, the exceptions of both lists, then the $important block,
+    // each with its twin for frames.
+    assert.deepEqual(lists[1].map((rule) => rule.action.type), [
+      'block', 'block',
+      'ignore-previous-rules', 'ignore-previous-rules', 'ignore-previous-rules', 'ignore-previous-rules',
+      'block', 'block'
+    ])
+    const gtm = 'https://www.googletagmanager.com/gtm.js?id=GTM-1'
+    assert.equal(blockedByAny(lists, { url: gtm, type: 'script', page: 'https://games.example/' }), true)
+    assert.equal(blockedByAny(lists, { url: gtm, type: 'script', page: 'https://shop.example/' }), false)
+    assert.equal(blockedByAny(lists, { url: gtm, type: 'script', page: 'https://elsewhere.example/' }), true)
+
+    // An $important exception still has the last word, as in an ad blocker.
+    const [rules] = convertFilterListsToWebKitRules([[
+      '||cdn.example^$important',
+      '@@||cdn.example/app.js$important,script'
+    ].join('\n')])
+    assert.deepEqual(rules.map((rule) => rule.action.type), ['block', 'block', 'ignore-previous-rules'])
+    assert.equal(webkitBlocks(rules, { url: 'https://cdn.example/app.js', type: 'script', page: 'https://a.example/' }), false)
+  })
+
+  test('collecting exceptions, at once or a batch at a time, finds the same rules', async () => {
+    const contents = [
+      '||ads.example^',
+      '@@||ads.example/ok.js$script',
+      '  @@||cdn.example^$important',
+      '! @@ in a comment'
+    ].join('\n')
+    const collected = collectWebKitExceptions(contents)
+    assert.equal(collected.exceptions.length, 1)
+    assert.equal(collected.importantExceptions.length, 2)
+    assert.deepEqual(await collectWebKitExceptionsAsync(contents, { batchSize: 1, yieldControl: async () => {} }), collected)
+  })
+
+  test('the bundled lists keep every block, gain only the other list\'s exceptions, and fit WebKit', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const contents = await Promise.all(['easylist', 'easyprivacy'].map((list) => readFile(
+      new URL(`../../assets/content-blocking/${list}.txt`, import.meta.url),
+      'utf8'
+    )))
+    const alone = contents.map((text) => convertFilterListToWebKitRules(text))
+    const lists = convertFilterListsToWebKitRules(contents)
+    const of = (rules, type) => rules.filter((rule) => rule.action.type === type)
+    const keys = (rules) => rules.map((rule) => JSON.stringify(rule))
+
+    for (let index = 0; index < lists.length; index++) {
+      const rules = lists[index]
+      assert.ok(rules.length <= MAX_WEBKIT_RULES_PER_LIST)
+      // The same blocks, in the same order.
+      assert.equal(JSON.stringify(of(rules, 'block')), JSON.stringify(of(alone[index], 'block')))
+
+      const exceptions = keys(of(rules, 'ignore-previous-rules'))
+      assert.equal(new Set(exceptions).size, exceptions.length)
+      assert.deepEqual(new Set(exceptions), new Set([
+        ...keys(of(alone[index], 'ignore-previous-rules')),
+        ...keys(of(alone[1 - index], 'ignore-previous-rules'))
+      ]))
+    }
+
+    // Trackers and ads are still blocked on an ordinary page.
+    const page = 'https://news.example.org/story'
+    for (const [url, type] of [
+      ['https://www.google-analytics.com/analytics.js', 'script'],
+      ['https://www.googletagmanager.com/gtag/js?id=G-TEST', 'script'],
+      ['https://www.googletagmanager.com/gtm.js?id=GTM-TEST', 'script'],
+      ['https://securepubads.g.doubleclick.net/tag/js/gpt.js', 'script'],
+      ['https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js', 'script'],
+      ['https://connect.facebook.net/en_US/fbevents.js', 'script'],
+      ['https://static.hotjar.com/c/hotjar-1234.js', 'script'],
+      ['https://bat.bing.com/bat.js', 'script']
+    ]) {
+      assert.equal(blockedByAny(lists, { url, type, page }), true, url)
+    }
+
+    // EasyPrivacy's long exception for Tag Manager now works, except where an
+    // $important block says otherwise.
+    const gtmLine = contents[1].split(/\r?\n/).find((line) => line.startsWith('@@||googletagmanager.com/gtm.js$domain='))
+    if (gtmLine) {
+      assert.ok(gtmLine.length > 4096)
+      const important = new Set(contents[1].split(/\r?\n/)
+        .filter((line) => /^\|\|googletagmanager\.com\/gtm\.js\$important,domain=/.test(line))
+        .flatMap((line) => line.split('domain=')[1].split('|')))
+      const sites = gtmLine.split('domain=')[1].split('|').filter((name) => !name.startsWith('~'))
+      const gtm = 'https://www.googletagmanager.com/gtm.js?id=GTM-TEST'
+      const allowed = sites.find((name) => !important.has(name))
+      assert.equal(blockedByAny(lists, { url: gtm, type: 'script', page: `https://${allowed}/` }), false, allowed)
+      for (const name of important) {
+        if (sites.includes(name)) assert.equal(blockedByAny(lists, { url: gtm, type: 'script', page: `https://${name}/` }), true, name)
+      }
+    }
   })
 })

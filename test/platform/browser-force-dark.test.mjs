@@ -167,9 +167,10 @@ describe('force dark mode', () => {
     const { readFile } = await import('node:fs/promises')
     const manager = await readFile(new URL('../../plugins/templates/PeerSkyWebViewManager.m.template', import.meta.url), 'utf8')
     assert.match(manager, /RCT_EXPORT_VIEW_PROPERTY\(forceDarkScheme, BOOL\)/)
-    assert.match(manager, /self\.overrideUserInterfaceStyle = forceDarkScheme \? UIUserInterfaceStyleDark : UIUserInterfaceStyleUnspecified;/)
+    // Dark whatever theme PeerSky has.
+    assert.match(manager, /if \(self\.forceDarkScheme \|\| \[self\.colorScheme isEqualToString:@"dark"\]\) \{\s*self\.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;/)
     const app = await readFile(new URL('../../app/index.tsx', import.meta.url), 'utf8')
-    assert.match(app, /Platform\.OS === 'ios' \? \{ forceDarkScheme: browserPreferences\.forceDarkWebsites \} : \{\}/)
+    assert.match(app, /Platform\.OS === 'ios'\s*\?\s*\{\s*colorScheme: getWebsiteColorScheme\(browserPreferences\.theme\),\s*forceDarkScheme: browserPreferences\.forceDarkWebsites\s*\}\s*:\s*\{\}/)
   })
 
   // YouTube marks its own dark theme on the root, and a Short is nothing but

@@ -55,6 +55,17 @@ current URL, title, history entry, back/forward state, favicon, and tab preview.
 The Android system Back action first consumes WebView or tab history before it
 can leave the app.
 
+A WebView is sent to an address only when the app sends the tab somewhere: an
+address typed, a link the app takes over, or a step built again. A step the
+page made itself, a link, a redirect or its own Back, is recorded where the
+page went, and the WebView keeps the address it was last sent to
+(`getBrowserWebViewSource` in `app/browser-shell.mjs`). Sent the recorded
+address instead, a page that had moved on by the time it arrived was pulled
+back: a search box that steps back off its own history entry as it starts a
+search landed on the page it stepped back to. The address the WebView was last sent
+to, asked for again after the page went on from there, goes in a new WebView,
+since the same address would not move it.
+
 The native WebView component is exposed through
 `app/downloads/PeerSkyWebView.ts`. It falls back to the stock WebView when the
 generated native view is unavailable. Native integration supplies downloads,

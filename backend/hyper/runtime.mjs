@@ -59,6 +59,8 @@ import { createHyperUrl } from './url.mjs'
 import {
   DEVICE_SYNC_FILE,
   forgetSyncedDevice,
+  markDeviceFilesSeen,
+  newDeviceFileCount,
   readDeviceSyncState,
   resetDeviceSyncStateCache
 } from './device-sync-state.mjs'
@@ -737,15 +739,30 @@ export function getDeviceSyncSnapshot () {
     files: state.devices.flatMap((device) => device.drives.flatMap((driveId) => {
       const listing = state.listings[driveId]
       if (!listing) return []
-      return listing.items.map((item) => ({
+      return listing.items.map(({ addedAt, ...item }) => ({
         ...item,
         deviceId: device.id,
         deviceType: device.type,
         driveId,
-        url: createHyperUrl(`hyper://${driveId}/`, item.path)
+        url: createHyperUrl(`hyper://${driveId}/`, item.path),
+        // Added on that device since the Hyperdrive screen last showed it.
+        new: addedAt > state.seenAt
       }))
-    }))
+    })),
+    // What the Hyperdrive shortcut on the home screen counts.
+    newCount: newDeviceFileCount(identityStoragePath)
   }
+}
+
+/**
+ * The Hyperdrive screen showed the files from the other devices. The app
+ * hears of it like any change, so the count on the home screen's Hyperdrive
+ * shortcut goes, whatever order the answers come in.
+ */
+export function markDeviceSyncFilesSeen () {
+  const marked = markDeviceFilesSeen(getDefaultIdentityStoragePath())
+  if (marked) notifyApp(RPC_APP_DEVICE_SYNC_CHANGED, {})
+  return marked
 }
 
 /** The phone moved to another network or came back to the front. */

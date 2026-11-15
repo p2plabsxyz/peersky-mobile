@@ -27,8 +27,8 @@ describe('linked devices in the app', () => {
   })
 
   test('Hyperdrive shows the other devices\' private files above Recent, with See all', () => {
-    assert.match(hyperdrive, /onCallRpcRef\.current\(RPC_DEVICE_SYNC_STATUS, \{\}\)/)
-    assert.match(hyperdrive, /\[deviceSyncRevision\]/)
+    assert.match(hyperdrive, /onCallRpcRef\.current\(RPC_DEVICE_SYNC_STATUS, \{ markSeen \}\)/)
+    assert.match(hyperdrive, /\[deviceSyncRevision, inFront\]/)
     assert.match(hyperdrive, /!items && deviceFiles\.length > 0 &&/)
     assert.match(hyperdrive, />\{t\('From your devices'\)\}</)
     assert.match(hyperdrive, /deviceFiles\.slice\(0, DEVICE_FILES_SHOWN\)/)
@@ -48,7 +48,7 @@ describe('linked devices in the app', () => {
     assert.doesNotMatch(index, /isLandscape=/)
     // A short page still fills the screen, and the filter's menu, which hangs
     // below its button, has room under the last file while it is open.
-    assert.match(hyperdrive, /contentContainerStyle=\{\[styles\.page, filterVisible \? styles\.pageMenuRoom : null\]\}/)
+    assert.match(hyperdrive, /contentContainerStyle=\{\[styles\.page, filterVisible \|\| folderFilterVisible \? styles\.pageMenuRoom : null\]\}/)
     assert.match(hyperdrive, /page: \{ flexGrow: 1,/)
   })
 
@@ -58,5 +58,20 @@ describe('linked devices in the app', () => {
     assert.match(index, /callRpc\(RPC_DEVICE_SYNC_NETWORK, \{ metered: deviceSyncMetered \}\)/)
     assert.match(index, /\[deviceSyncMetered, identityStoragePath\]/)
     assert.match(index, /deviceSyncRevision=\{deviceSyncRevision\}/)
+  })
+
+  test('the Hyperdrive shortcut counts what the other devices added until the Hyperdrive screen shows it', () => {
+    // Read again on every change the backend tells of, the screen marking
+    // the files seen included; an older answer never replaces a newer one.
+    assert.match(index, /const request = \+\+hyperdriveCountRequest\.current\n\s+void callRpc\(RPC_DEVICE_SYNC_STATUS, \{\}\)/)
+    assert.match(index, /if \(request !== hyperdriveCountRequest\.current \|\| !response\?\.ok\) return/)
+    assert.match(index, /\}, \[deviceSyncRevision, identityStoragePath\]\)/)
+    assert.match(index, /\{app\.id === 'hyper' && hyperdriveNewCount > 0 && \(/)
+    assert.match(index, /\{hyperdriveNewCount > 99 \? '99\+' : hyperdriveNewCount\}/)
+    // Seen only with the app in front, and the New mark stays on screen.
+    assert.match(hyperdrive, /const markSeen = AppState\.currentState === 'active'/)
+    assert.match(hyperdrive, /if \(response\.seen === true\) \{\n\s+for \(const file of files\) if \(file\.new === true\) seenNewFiles\.current\.add\(file\.url\)/)
+    assert.match(hyperdrive, /isNew: file\.new === true \|\| seenNewFiles\.current\.has\(file\.url\)/)
+    assert.match(hyperdrive, /if \(state === 'active'\) setInFront\(\(value\) => value \+ 1\)/)
   })
 })

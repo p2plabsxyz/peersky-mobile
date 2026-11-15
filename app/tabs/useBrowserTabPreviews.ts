@@ -12,6 +12,9 @@ import {
 } from './browser-tab-preview.mjs'
 
 type BrowserTabPreviewOptions<Entry> = {
+  // Whether the tab is on screen to be pictured now. A tab behind another is
+  // not drawn, so a picture of it would come out blank or old.
+  canCapture?: (tabId: string) => boolean
   getEntryKey: (entry: Entry) => string
   isCurrentEntry: (tabId: string, entry: Entry) => boolean
 }
@@ -41,6 +44,7 @@ type PendingCapture<Entry> = {
 }
 
 export function useBrowserTabPreviews<Entry> ({
+  canCapture,
   getEntryKey,
   isCurrentEntry
 }: BrowserTabPreviewOptions<Entry>) {
@@ -53,12 +57,14 @@ export function useBrowserTabPreviews<Entry> ({
   const capturePendingRef = useRef(new Map<string, PendingCapture<Entry>>())
   const captureTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>())
   const captureViewRefs = useRef(new Map<string, ComponentRef<typeof View>>())
+  const canCaptureRef = useRef(canCapture)
   const getEntryKeyRef = useRef(getEntryKey)
   const isCurrentEntryRef = useRef(isCurrentEntry)
   const mountedRef = useRef(true)
   const previewsRef = useRef(new Map<string, BrowserTabPreview>())
   const [previews, setPreviews] = useState(new Map<string, BrowserTabPreview>())
 
+  canCaptureRef.current = canCapture
   getEntryKeyRef.current = getEntryKey
   isCurrentEntryRef.current = isCurrentEntry
 
@@ -116,6 +122,14 @@ export function useBrowserTabPreviews<Entry> ({
         PREVIEW_CAPTURE_MIN_INTERVAL_MS
     )
     const wait = Math.max(0, delay, nextAllowedAt - now)
+    // Asked for at once, it is taken at once, before whatever asked for it
+    // changes the screen: a tab going behind another is pictured while it is
+    // still in front.
+    if (wait === 0) {
+      captureTimersRef.current.delete(tabId)
+      void capturePreview(tabId, pendingCapture)
+      return
+    }
     const timer = setTimeout(() => {
       captureTimersRef.current.delete(tabId)
       void capturePreview(tabId, pendingCapture)
@@ -132,7 +146,8 @@ export function useBrowserTabPreviews<Entry> ({
       !mountedRef.current ||
       epoch !== captureEpochRef.current ||
       generation !== captureGenerationRef.current.get(tabId) ||
-      !isCurrentEntryRef.current(tabId, expectedEntry)
+      !isCurrentEntryRef.current(tabId, expectedEntry) ||
+      (canCaptureRef.current && !canCaptureRef.current(tabId))
     ) return
 
     const previewView = captureViewRefs.current.get(tabId)

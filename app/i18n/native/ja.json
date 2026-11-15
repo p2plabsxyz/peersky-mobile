@@ -16,6 +16,11 @@
     "peerchat_background_offline": "オフライン。タップして再接続",
     "peerchat_background_locked": "スマートフォンのロックを解除すると接続します",
     "peerchat_background_channel": "PeerChatのバックグラウンド接続",
-    "peerchat_background_channel_description": "PeerSkyがバックグラウンドにあるときも、PeerChatの接続を維持します"
+    "peerchat_background_channel_description": "PeerSkyがバックグラウンドにあるときも、PeerChatの接続を維持します",
+    "peertunes_playback_channel": "再生中",
+    "peertunes_play": "再生",
+    "peertunes_pause": "一時停止",
+    "peertunes_previous": "前の曲",
+    "peertunes_next": "次の曲"
   }
 }

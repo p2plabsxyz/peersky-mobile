@@ -177,11 +177,15 @@ test('a translation that holds a quote, a backslash or a line break goes into iO
   assert.equal(stringsValue('one\ntwo'), 'one\\ntwo')
 })
 
-test('Android\'s PeerChat notification takes its words from string resources, English by default', async () => {
-  const service = read('plugins/templates/PeerChatBackgroundService.kt.template')
+test('Android\'s notifications take their words from string resources, English by default', async () => {
+  // PeerChat's connection notice and PeerTunes' song with its buttons.
+  const services = [
+    read('plugins/templates/PeerChatBackgroundService.kt.template'),
+    read('plugins/templates/PeerTunesPlaybackService.kt.template')
+  ].join('\n')
   for (const [name, text] of Object.entries(ANDROID_TEXT)) {
-    assert.ok(service.includes(`getString(R.string.${name})`), name)
-    assert.ok(!service.includes(text), text)
+    assert.match(services, new RegExp(`R\\.string\\.${name}\\b`), name)
+    assert.ok(!services.includes(`"${text}"`), text)
   }
   // The default strings.xml gets the English the way Expo writes each language.
   const { addPeerChatBackgroundStrings } = await import('../../plugins/with-peerchat-background.js')

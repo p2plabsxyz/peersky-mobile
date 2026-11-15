@@ -120,6 +120,7 @@ import {
   ensureLANDiscovery,
   forgetDeviceSyncDevice,
   getDeviceSyncSnapshot,
+  markDeviceSyncFilesSeen,
   getHyperStoragePath,
   getLANDiscoveryStatus,
   refreshDeviceSync,
@@ -244,7 +245,11 @@ export async function routeRpcRequest (req) {
       await ensureDeviceSync().catch((error) => {
         console.warn('[device sync] Did not start:', error?.message || error)
       })
-      replyJson(req, { ok: true, ...getDeviceSyncSnapshot() })
+      // The list as it was, with what is new marked, and then, when the
+      // Hyperdrive screen shows it, nothing new any more.
+      const snapshot = getDeviceSyncSnapshot()
+      const seen = parseJsonMessage(req.data)?.markSeen === true && markDeviceSyncFilesSeen()
+      replyJson(req, { ok: true, ...snapshot, seen })
       return
     }
 

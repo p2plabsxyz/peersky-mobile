@@ -16,6 +16,11 @@
     "peerchat_background_offline": "ऑफलाइन. पुन्हा कनेक्ट करण्यासाठी टॅप करा",
     "peerchat_background_locked": "फोन अनलॉक केल्यावर कनेक्ट होईल",
     "peerchat_background_channel": "PeerChat बॅकग्राउंड कनेक्शन",
-    "peerchat_background_channel_description": "PeerSky बॅकग्राउंडमध्ये असताना PeerChat कनेक्ट ठेवते"
+    "peerchat_background_channel_description": "PeerSky बॅकग्राउंडमध्ये असताना PeerChat कनेक्ट ठेवते",
+    "peertunes_playback_channel": "आता वाजत आहे",
+    "peertunes_play": "प्ले करा",
+    "peertunes_pause": "थांबवा",
+    "peertunes_previous": "मागील गाणे",
+    "peertunes_next": "पुढील गाणे"
   }
 }

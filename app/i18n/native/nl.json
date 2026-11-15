@@ -16,6 +16,11 @@
     "peerchat_background_offline": "Offline. Tik om opnieuw te verbinden",
     "peerchat_background_locked": "Maakt verbinding zodra je je telefoon ontgrendelt",
     "peerchat_background_channel": "PeerChat-achtergrondverbinding",
-    "peerchat_background_channel_description": "Houdt PeerChat verbonden terwijl PeerSky op de achtergrond draait"
+    "peerchat_background_channel_description": "Houdt PeerChat verbonden terwijl PeerSky op de achtergrond draait",
+    "peertunes_playback_channel": "Speelt nu",
+    "peertunes_play": "Afspelen",
+    "peertunes_pause": "Pauzeren",
+    "peertunes_previous": "Vorig nummer",
+    "peertunes_next": "Volgend nummer"
   }
 }
