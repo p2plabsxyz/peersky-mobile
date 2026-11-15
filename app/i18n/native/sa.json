@@ -16,6 +16,11 @@
     "peerchat_background_offline": "अन्तर्जालं विना। पुनः संयोजयितुं स्पृशतु",
     "peerchat_background_locked": "दूरवाण्याः कीलने मुक्ते सति संयुज्यते",
     "peerchat_background_channel": "PeerChat-पृष्ठभूमिसंयोगः",
-    "peerchat_background_channel_description": "PeerSky यावत् पृष्ठभूमौ अस्ति, तावत् PeerChat संयुक्तं रक्षति"
+    "peerchat_background_channel_description": "PeerSky यावत् पृष्ठभूमौ अस्ति, तावत् PeerChat संयुक्तं रक्षति",
+    "peertunes_playback_channel": "इदानीं वाद्यते",
+    "peertunes_play": "वादयतु",
+    "peertunes_pause": "स्थगयतु",
+    "peertunes_previous": "पूर्वतनं गीतम्",
+    "peertunes_next": "अग्रिमं गीतम्"
   }
 }

@@ -16,6 +16,11 @@
     "peerchat_background_offline": "Çevrimdışı. Yeniden bağlanmak için dokunun",
     "peerchat_background_locked": "Telefonunuzun kilidini açtığınızda bağlanır",
     "peerchat_background_channel": "PeerChat arka plan bağlantısı",
-    "peerchat_background_channel_description": "PeerSky arka plandayken PeerChat'i bağlı tutar"
+    "peerchat_background_channel_description": "PeerSky arka plandayken PeerChat'i bağlı tutar",
+    "peertunes_playback_channel": "Şimdi çalıyor",
+    "peertunes_play": "Oynat",
+    "peertunes_pause": "Duraklat",
+    "peertunes_previous": "Önceki şarkı",
+    "peertunes_next": "Sonraki şarkı"
   }
 }

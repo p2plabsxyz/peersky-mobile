@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
+import { createRequire } from 'node:module'
 import { test } from 'node:test'
 import vm from 'node:vm'
 
@@ -221,8 +222,82 @@ test('the Android media session sends the buttons back as commands', async () =>
   // On both: Android's media session and the iOS widget read what it says.
   const screen = await read('app/peertunes/PeerTunesScreen.tsx')
   assert.match(screen, /const PEERTUNES_BEFORE_LOAD_SCRIPT = `\$\{PEERTUNES_SCAN_BRIDGE_SCRIPT\}\\n\$\{PEERTUNES_MEDIA_BRIDGE_SCRIPT\}`/)
-  assert.match(screen, /audioRoute\?\.setNowPlaying\?\.\(nowPlaying\.playing, nowPlaying\.title, nowPlaying\.artist\)\s+updatePeerTunesWidget\(nowPlaying\)/)
+  assert.match(screen, /audioRoute\?\.setNowPlaying\?\.\(\s+nowPlaying\.playing,\s+nowPlaying\.title,\s+nowPlaying\.artist,\s+nowPlaying\.album,\s+readArtworkBase64\(nowPlaying\.artwork\) \?\? ''\s+\)\s+updatePeerTunesWidget\(nowPlaying\)/)
   assert.match(screen, /mediaCommandEvents\.addListener\('PeerSkyMediaCommand'/)
+})
+
+// On Android a song stopped once PeerSky was in the background: Android froze
+// the app about a minute after another app came to the front. A media playback
+// service now holds it up while a song plays, and shows the song with its
+// buttons on the lock screen.
+test('Android keeps a song playing in the background, with the song on the lock screen', async () => {
+  const require = createRequire(import.meta.url)
+  const { addPeerTunesPlaybackManifest } = require('../../plugins/with-audio-route.js')
+  const manifest = addPeerTunesPlaybackManifest({ application: [{ service: [{ $: { 'android:name': '.Other' } }] }] })
+  assert.deepEqual(
+    manifest['uses-permission'].map((entry) => entry.$['android:name']),
+    ['android.permission.FOREGROUND_SERVICE', 'android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK']
+  )
+  assert.deepEqual(manifest.application[0].service.at(-1).$, {
+    'android:name': '.PeerTunesPlaybackService',
+    'android:exported': 'false',
+    'android:foregroundServiceType': 'mediaPlayback'
+  })
+  assert.equal(manifest.application[0].service.length, 2)
+  // Run twice, as a prebuild over a prebuild does: still one of each.
+  const again = addPeerTunesPlaybackManifest(manifest)
+  assert.equal(again.application[0].service.length, 2)
+  assert.equal(again['uses-permission'].length, 2)
+
+  const service = await read('plugins/templates/PeerTunesPlaybackService.kt.template')
+  assert.match(service, /startForeground\(NOTIFICATION_ID, notification\(\), ServiceInfo\.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK\)/)
+  // Never started again by Android with nothing to play.
+  assert.match(service, /return START_NOT_STICKY/)
+  assert.doesNotMatch(service, /START_STICKY\b(?!_)/)
+  // Paused for a while, it lets go of the foreground and keeps the
+  // notification. Not at once: the page says it stopped at the end of each
+  // song, and Android does not let an app in the background come back into
+  // the foreground for the next one.
+  assert.match(service, /if \(!PeerTunesNowPlaying\.playing && intent\?\.action != ACTION_PLAY\) demoteSoon\(PAUSE_GRACE_MS\)/)
+  assert.match(service, /service\?\.refresh\(\)\s+service\?\.demoteSoon\(PAUSE_GRACE_MS\)\s+\}/)
+  const grace = service.match(/PAUSE_GRACE_MS = ([0-9_]+)L/)
+  assert.ok(grace && Number(grace[1].replaceAll('_', '')) >= 15_000, 'too short to cover the gap between two songs')
+  assert.match(service, /stopForeground\(STOP_FOREGROUND_DETACH\)/)
+  // Already in the foreground, a song that plays only brings the
+  // notification up to date, so nothing asks Android for a start it can refuse.
+  assert.match(service, /if \(service != null && service\.inForeground\) \{[\s\S]{0,120}service\.refresh\(\)\s+return/)
+  // The lock screen and the shade show the media session, buttons and all.
+  assert.match(service, /style\.setMediaSession\(it\)/)
+  assert.match(service, /\.setCategory\(Notification\.CATEGORY_TRANSPORT\)/)
+  assert.match(service, /\.setOngoing\(playing\)/)
+  for (const label of ['peertunes_play', 'peertunes_pause', 'peertunes_previous', 'peertunes_next', 'peertunes_playback_channel']) {
+    assert.match(service, new RegExp(`R\\.string\\.${label}\\b`))
+  }
+  // A swipe from Recents closes the page, so the song and the notice go too.
+  assert.match(service, /override fun onTaskRemoved[\s\S]{0,200}TASK_REMOVED_ACTION[\s\S]{0,120}finish\(\)/)
+  // A notification left from an ended run plays nothing and goes.
+  assert.match(service, /if \(controls == null\) \{[\s\S]{0,120}finish\(\)/)
+
+  const module = await read('plugins/templates/PeerSkyAudioRouteModule.kt.template')
+  assert.match(module, /PeerTunesNowPlaying\.playing = playing[\s\S]{0,300}PeerTunesPlaybackService\.sync\(reactApplicationContext\)/)
+  assert.match(module, /private fun releaseMediaSession\(\) \{\s+PeerTunesPlaybackService\.stop\(\)/)
+  assert.match(module, /it\.setSessionActivity\(PeerTunesPlaybackService\.openPeerTunes\(reactApplicationContext\)\)/)
+  assert.match(module, /putBitmap\(MediaMetadata\.METADATA_KEY_ART, cover\)/)
+
+  // The buttons reach the page with the app in the background: the session
+  // runs the command in PeerTunes' WebView itself, where a script sent
+  // through React Native waited until the app was on screen again. Once.
+  assert.match(module, /webView\.evaluateJavascript\("window\.__peerskyMediaCommand && window\.__peerskyMediaCommand\(\\"\$name\\"\); true;", null\)\s+reactApplicationContext\.emitDeviceEvent\(COMMAND_SENT_EVENT, name\)/)
+  assert.match(module, /if \(webView == null\) \{\s+reactApplicationContext\.emitDeviceEvent\(COMMAND_EVENT, name\)/)
+  const screen = await read('app/peertunes/PeerTunesScreen.tsx')
+  assert.match(screen, /audioRoute\?\.setPeerTunesView\?\.\(findNodeHandle\(webViewBoxRef\.current\) \?\? 0\)/)
+  // Not the WebView's ref, which React Native cannot name: that crashed the
+  // app as the page loaded. A view around it that is never flattened away.
+  assert.doesNotMatch(screen, /findNodeHandle\(webViewRef/)
+  assert.match(screen, /<View ref=\{webViewBoxRef\} collapsable=\{false\} style=\{styles\.webViewBox\}>\s+<WebView/)
+  assert.match(screen, /DeviceEventEmitter\.addListener\('PeerSkyMediaCommandSent', afterCommand\)/)
+  const sentHandler = screen.slice(screen.indexOf("'PeerSkyMediaCommandSent'"), screen.indexOf("'PeerSkyMediaCommandSent'") + 60)
+  assert.doesNotMatch(sentHandler, /injectJavaScript/)
 })
 
 // iOS sends the widget's buttons through the module, which only passes on

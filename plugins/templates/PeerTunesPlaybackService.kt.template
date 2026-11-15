@@ -1,0 +1,264 @@
+package __PACKAGE_NAME__
+
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.Service
+import android.content.Context
+import android.content.Intent
+import android.content.pm.ServiceInfo
+import android.graphics.Bitmap
+import android.graphics.drawable.Icon
+import android.media.session.MediaController
+import android.media.session.MediaSession
+import android.net.Uri
+import android.os.Build
+import android.os.Handler
+import android.os.IBinder
+import android.os.Looper
+import androidx.core.content.ContextCompat
+
+// What PeerTunes is playing, kept by its media session (PeerSkyAudioRouteModule)
+// and shown by the service below. Both run on the main thread.
+object PeerTunesNowPlaying {
+  var session: MediaSession? = null
+  var playing = false
+  var title = ""
+  var artist = ""
+  var album = ""
+  var artwork: Bitmap? = null
+}
+
+// Keeps PeerTunes playing with the screen off or another app in front.
+// Android freezes an app that has nothing in the foreground, and the song in
+// its WebView stops with it. While a song plays this service holds the app in
+// the foreground, typed mediaPlayback, and its notification carries the media
+// session, so the lock screen and the notification shade show the song and its
+// buttons. Paused for half a minute, it leaves the foreground and keeps the
+// notification, so the song can start again from there. It goes when
+// PeerTunes closes.
+class PeerTunesPlaybackService : Service() {
+
+  private val handler = Handler(Looper.getMainLooper())
+  private val demoteLater = Runnable { if (!PeerTunesNowPlaying.playing) demote() }
+  private var inForeground = false
+
+  override fun onBind(intent: Intent?): IBinder? = null
+
+  override fun onCreate() {
+    super.onCreate()
+    running = this
+  }
+
+  override fun onDestroy() {
+    handler.removeCallbacksAndMessages(null)
+    if (running === this) running = null
+    super.onDestroy()
+  }
+
+  override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+    // The notification swiped away, which it can be only while paused.
+    if (intent?.action == ACTION_DISMISS) {
+      PeerTunesNowPlaying.session?.controller?.transportControls?.pause()
+      finish()
+      return START_NOT_STICKY
+    }
+    // Every other start comes through startForegroundService, from the app or
+    // from a button in the notification, so the service goes into the
+    // foreground first, as Android requires within seconds.
+    if (!promote()) return START_NOT_STICKY
+    val controls = PeerTunesNowPlaying.session?.controller?.transportControls
+    if (controls == null) {
+      // A notification left from a run that has ended: nothing can play.
+      finish()
+      return START_NOT_STICKY
+    }
+    when (intent?.action) {
+      ACTION_PLAY -> {
+        controls.play()
+        // The page says it plays, and the service stays. A page that never
+        // answers does not keep the app in the foreground.
+        demoteSoon(PLAY_ANSWER_MS)
+      }
+      ACTION_PAUSE -> controls.pause()
+      ACTION_NEXT -> controls.skipToNext()
+      ACTION_PREVIOUS -> controls.skipToPrevious()
+    }
+    // A song that is not playing does not hold the app up for long.
+    if (!PeerTunesNowPlaying.playing && intent?.action != ACTION_PLAY) demoteSoon(PAUSE_GRACE_MS)
+    return START_NOT_STICKY
+  }
+
+  // A swipe from Recents closes PeerTunes, and its page with the song.
+  override fun onTaskRemoved(rootIntent: Intent?) {
+    sendBroadcast(Intent("$packageName${PeerSkyAudioRouteModule.TASK_REMOVED_ACTION}").setPackage(packageName))
+    finish()
+    super.onTaskRemoved(rootIntent)
+  }
+
+  private fun promote(): Boolean {
+    return try {
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        startForeground(NOTIFICATION_ID, notification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
+      } else {
+        startForeground(NOTIFICATION_ID, notification())
+      }
+      inForeground = true
+      true
+    } catch (error: Exception) {
+      stopSelf()
+      false
+    }
+  }
+
+  // Out of the foreground, with the notification left to start again from.
+  fun demote() {
+    handler.removeCallbacks(demoteLater)
+    inForeground = false
+    try {
+      stopForeground(STOP_FOREGROUND_DETACH)
+      notificationManager().notify(NOTIFICATION_ID, notification())
+    } catch (error: Exception) {
+    }
+  }
+
+  // Paused, or between two songs, which looks the same from here: the page
+  // says it stopped when a song ends and plays again as the next one starts.
+  // The app stays in the foreground for a while, because Android does not let
+  // an app in the background come back into it.
+  fun demoteSoon(delay: Long) {
+    handler.removeCallbacks(demoteLater)
+    handler.postDelayed(demoteLater, delay)
+  }
+
+  fun refresh() {
+    try {
+      notificationManager().notify(NOTIFICATION_ID, notification())
+    } catch (error: Exception) {
+    }
+  }
+
+  fun finish() {
+    handler.removeCallbacks(demoteLater)
+    inForeground = false
+    try {
+      stopForeground(STOP_FOREGROUND_REMOVE)
+    } catch (error: Exception) {
+    }
+    notificationManager().cancel(NOTIFICATION_ID)
+    stopSelf()
+  }
+
+  private fun notification(): Notification {
+    ensureChannel()
+    val playing = PeerTunesNowPlaying.playing
+    val title = PeerTunesNowPlaying.title.ifBlank { "PeerTunes" }
+    val text = listOf(PeerTunesNowPlaying.artist, PeerTunesNowPlaying.album).filter { it.isNotBlank() }.joinToString(" · ")
+    val playPause = if (playing) {
+      action(android.R.drawable.ic_media_pause, R.string.peertunes_pause, ACTION_PAUSE)
+    } else {
+      action(android.R.drawable.ic_media_play, R.string.peertunes_play, ACTION_PLAY)
+    }
+    val style = Notification.MediaStyle().setShowActionsInCompactView(0, 1, 2)
+    PeerTunesNowPlaying.session?.sessionToken?.let { style.setMediaSession(it) }
+    return Notification.Builder(this, CHANNEL_ID)
+      .setSmallIcon(R.drawable.notification_icon)
+      .setContentTitle(title)
+      .setContentText(text)
+      .setLargeIcon(PeerTunesNowPlaying.artwork)
+      .setContentIntent(openPeerTunes(this))
+      .setDeleteIntent(dismissIntent(this))
+      .setCategory(Notification.CATEGORY_TRANSPORT)
+      .setVisibility(Notification.VISIBILITY_PUBLIC)
+      .setOnlyAlertOnce(true)
+      .setShowWhen(false)
+      .setOngoing(playing)
+      .addAction(action(android.R.drawable.ic_media_previous, R.string.peertunes_previous, ACTION_PREVIOUS))
+      .addAction(playPause)
+      .addAction(action(android.R.drawable.ic_media_next, R.string.peertunes_next, ACTION_NEXT))
+      .setStyle(style)
+      .build()
+  }
+
+  private fun action(icon: Int, label: Int, name: String): Notification.Action {
+    return Notification.Action.Builder(Icon.createWithResource(this, icon), getString(label), serviceIntent(this, name)).build()
+  }
+
+  private fun ensureChannel() {
+    val manager = notificationManager()
+    if (manager.getNotificationChannel(CHANNEL_ID) != null) return
+    manager.createNotificationChannel(
+      NotificationChannel(CHANNEL_ID, getString(R.string.peertunes_playback_channel), NotificationManager.IMPORTANCE_LOW).apply {
+        setShowBadge(false)
+        enableVibration(false)
+        setSound(null, null)
+      }
+    )
+  }
+
+  private fun notificationManager() = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+  companion object {
+    private const val CHANNEL_ID = "peertunes-playback"
+    private const val NOTIFICATION_ID = 4802
+    private const val ACTION_PLAY = "peertunes.play"
+    private const val ACTION_PAUSE = "peertunes.pause"
+    private const val ACTION_NEXT = "peertunes.next"
+    private const val ACTION_PREVIOUS = "peertunes.previous"
+    private const val ACTION_DISMISS = "peertunes.dismiss"
+    private const val ACTION_SHOW = "peertunes.show"
+    private const val PLAY_ANSWER_MS = 10_000L
+    private const val PAUSE_GRACE_MS = 30_000L
+    // Opens the tab PeerTunes is in, as the home screen widget does.
+    private const val PEERTUNES_LINK = "peersky://shortcut/open?url=peersky%3A%2F%2Fp2p%2Fpeertunes%2F"
+
+    private var running: PeerTunesPlaybackService? = null
+
+    // Says what the media session now holds. A song that plays starts the
+    // service in the foreground, or keeps it there. Android can refuse the
+    // start to an app in the background, and then the notification is
+    // brought up to date without it.
+    fun sync(context: Context) {
+      val service = running
+      if (PeerTunesNowPlaying.playing) {
+        if (service != null && service.inForeground) {
+          service.handler.removeCallbacks(service.demoteLater)
+          service.refresh()
+          return
+        }
+        try {
+          ContextCompat.startForegroundService(context, Intent(context, PeerTunesPlaybackService::class.java).setAction(ACTION_SHOW))
+          return
+        } catch (error: Exception) {
+        }
+        service?.refresh()
+        return
+      }
+      service?.refresh()
+      service?.demoteSoon(PAUSE_GRACE_MS)
+    }
+
+    fun stop() {
+      running?.finish()
+    }
+
+    fun openPeerTunes(context: Context): PendingIntent {
+      val intent = Intent(Intent.ACTION_VIEW, Uri.parse(PEERTUNES_LINK)).setPackage(context.packageName)
+        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+      return PendingIntent.getActivity(context, 0, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+    }
+
+    // A plain start: Android need not let a swipe bring the service forward,
+    // and it is only going away.
+    private fun dismissIntent(context: Context): PendingIntent {
+      val intent = Intent(context, PeerTunesPlaybackService::class.java).setAction(ACTION_DISMISS)
+      return PendingIntent.getService(context, ACTION_DISMISS.hashCode(), intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+    }
+
+    private fun serviceIntent(context: Context, action: String): PendingIntent {
+      val intent = Intent(context, PeerTunesPlaybackService::class.java).setAction(action)
+      return PendingIntent.getForegroundService(context, action.hashCode(), intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+    }
+  }
+}

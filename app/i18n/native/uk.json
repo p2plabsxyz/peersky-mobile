@@ -16,6 +16,11 @@
     "peerchat_background_offline": "Офлайн. Торкніться, щоб під'єднатися знову",
     "peerchat_background_locked": "Під'єднається, коли ви розблокуєте телефон",
     "peerchat_background_channel": "Фонове з'єднання PeerChat",
-    "peerchat_background_channel_description": "Підтримує з'єднання PeerChat, поки PeerSky працює у фоновому режимі"
+    "peerchat_background_channel_description": "Підтримує з'єднання PeerChat, поки PeerSky працює у фоновому режимі",
+    "peertunes_playback_channel": "Зараз грає",
+    "peertunes_play": "Відтворити",
+    "peertunes_pause": "Пауза",
+    "peertunes_previous": "Попередня пісня",
+    "peertunes_next": "Наступна пісня"
   }
 }

@@ -16,6 +16,11 @@
     "peerchat_background_offline": "Offline. Tocca per riconnetterti",
     "peerchat_background_locked": "Si connette quando sblocchi il telefono",
     "peerchat_background_channel": "Connessione di PeerChat in background",
-    "peerchat_background_channel_description": "Mantiene PeerChat connesso mentre PeerSky è in background"
+    "peerchat_background_channel_description": "Mantiene PeerChat connesso mentre PeerSky è in background",
+    "peertunes_playback_channel": "In riproduzione",
+    "peertunes_play": "Riproduci",
+    "peertunes_pause": "Pausa",
+    "peertunes_previous": "Brano precedente",
+    "peertunes_next": "Brano successivo"
   }
 }

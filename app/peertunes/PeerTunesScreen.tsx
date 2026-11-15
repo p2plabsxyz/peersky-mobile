@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AppState, DeviceEventEmitter, Linking, Modal, NativeEventEmitter, NativeModules, Platform, Pressable, StyleSheet, Text, View } from 'react-native'
+import { AppState, DeviceEventEmitter, Linking, Modal, NativeEventEmitter, NativeModules, Platform, Pressable, StyleSheet, Text, View, findNodeHandle } from 'react-native'
 import { CameraView, useCameraPermissions } from 'expo-camera'
 import { initialWindowMetrics, SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context'
 import { WebView } from 'react-native-webview'
@@ -35,11 +35,15 @@ import { createResetIdScript, createServerTokenScript } from '../server-token.mj
 import { WEBVIEW_DECELERATION_RATE } from '../webview-scroll.mjs'
 import { tapFeedback } from '../haptics'
 import { forgetPeerTunesWidgetState, idlePeerTunesWidget, updatePeerTunesWidget } from '../widgets'
+import { readArtworkBase64 } from '../widget-data.mjs'
 
 const audioRoute = NativeModules.PeerSkyAudioRoute as {
   getRoute: () => Promise<{ external: boolean }>
-  // Android only: the media session headset buttons talk to.
-  setNowPlaying?: (playing: boolean, title: string, artist: string) => void
+  // Android only: the media session headset buttons and the lock screen talk
+  // to. The cover goes as base64, as the widget gets it.
+  setNowPlaying?: (playing: boolean, title: string, artist: string, album: string, artwork: string) => void
+  // Android only: the view the session sends the buttons to itself.
+  setPeerTunesView?: (tag: number) => void
   clearNowPlaying?: () => void
 } | undefined
 // PeerTunes is handed these texts of the catalog in force and nothing more:
@@ -121,6 +125,9 @@ export function PeerTunesScreen ({
   const [scanRequestId, setScanRequestId] = useState<string | null>(null)
   const [cameraPermission, requestCameraPermission] = useCameraPermissions()
   const webViewRef = useRef<WebView | null>(null)
+  // The view around the WebView, which Android's media session finds the page
+  // by. The WebView's own ref is not a view React Native can name.
+  const webViewBoxRef = useRef<View | null>(null)
   const scanHandledRef = useRef(false)
   const pageLoadedRef = useRef(false)
 
@@ -177,25 +184,33 @@ export function PeerTunesScreen ({
   // running for PeerChat with nothing left on screen to stop the music.
   useEffect(() => {
     let reportTimer: ReturnType<typeof setTimeout> | null = null
-    const commands = mediaCommandEvents.addListener('PeerSkyMediaCommand', (command: unknown) => {
-      const script = createPeerTunesMediaCommandScript(command)
-      if (!script) return
-      webViewRef.current?.injectJavaScript(script)
-      // The widget showed the press before the page acted on it. Ask the page
-      // what it is doing now, so the widget ends up right either way.
+    // The widget showed the press before the page acted on it. Ask the page
+    // what it is doing now, so the widget ends up right either way.
+    const afterCommand = () => {
       forgetPeerTunesWidgetState()
       if (reportTimer) clearTimeout(reportTimer)
       reportTimer = setTimeout(() => {
         webViewRef.current?.injectJavaScript(PEERTUNES_MEDIA_REPORT_SCRIPT)
       }, MEDIA_REPORT_DELAY_MS)
+    }
+    const commands = mediaCommandEvents.addListener('PeerSkyMediaCommand', (command: unknown) => {
+      const script = createPeerTunesMediaCommandScript(command)
+      if (!script) return
+      webViewRef.current?.injectJavaScript(script)
+      afterCommand()
     })
+    // Android's session hands the buttons to the page itself, which works with
+    // the app in the background, and says so here.
+    const sent = DeviceEventEmitter.addListener('PeerSkyMediaCommandSent', afterCommand)
     const removed = DeviceEventEmitter.addListener('PeerSkyTaskRemoved', () => {
       webViewRef.current?.injectJavaScript(PAUSE_ALL_MEDIA_SCRIPT)
     })
     return () => {
       if (reportTimer) clearTimeout(reportTimer)
       commands.remove()
+      sent.remove()
       removed.remove()
+      audioRoute?.setPeerTunesView?.(0)
       audioRoute?.clearNowPlaying?.()
       idlePeerTunesWidget()
     }
@@ -314,81 +329,92 @@ export function PeerTunesScreen ({
 
   return (
     <>
-    <WebView
-      key={`${pageUrl}:${reloadNonce}:${tokenRun.run}`}
-      ref={webViewRef}
-      source={{ uri: pageUrl }}
-      // This view only ever shows the loopback app, so pin it. The navigation
-      // handler below is the real gate; this is the second layer behind it.
-      originWhitelist={[localUrl]}
-      // Left unset, react-native-webview gives iOS a deceleration of 0, and a
-      // swipe through the library stopped the moment the finger lifted.
-      decelerationRate={WEBVIEW_DECELERATION_RATE}
-      // The token goes in before the page's own scripts run. The server never
-      // sends it, so only this view has it.
-      injectedJavaScriptBeforeContentLoaded={`${createServerTokenScript(serverToken)}\n${createResetIdScript(resetId)}\n${languageScript}\n${PEERTUNES_BEFORE_LOAD_SCRIPT}`}
-      onMessage={(event) => {
-        const nowPlaying = parsePeerTunesNowPlaying(event.nativeEvent.data)
-        if (nowPlaying) {
-          audioRoute?.setNowPlaying?.(nowPlaying.playing, nowPlaying.title, nowPlaying.artist)
-          updatePeerTunesWidget(nowPlaying)
-          return
-        }
-        const weight = parsePeerTunesHapticRequest(event.nativeEvent.data)
-        if (weight) {
-          tapFeedback(weight)
-          return
-        }
-        const keep = parsePeerTunesKeepOfflineRequest(event.nativeEvent.data)
-        if (keep) {
-          void keepOffline(keep.requestId, keep.url)
-          return
-        }
-        const kept = parsePeerTunesKeptFoldersRequest(event.nativeEvent.data)
-        if (kept) {
-          void keptFolders(kept.requestId, kept.urls)
-          return
-        }
-        const requestId = parsePeerTunesScanRequest(event.nativeEvent.data)
-        if (requestId) void beginScan(requestId)
-      }}
-      allowsInlineMediaPlayback={true}
-      allowsProtectedMedia={true}
-      androidLayerType='hardware'
-      cacheEnabled={false}
-      domStorageEnabled={true}
-      mediaCapturePermissionGrantType='prompt'
-      mediaPlaybackRequiresUserAction={false}
-      setBuiltInZoomControls={false}
-      textZoom={100}
-      style={styles.webView}
-      onShouldStartLoadWithRequest={(request) => {
-        if (isPeerTunesDataRequest(request.url, localUrl)) return false
-        if (isPeerTunesPageRequest(request.url, localUrl)) return true
-        // Only a real top-frame navigation should leave PeerTunes. A subframe
-        // pointing elsewhere used to take the whole tab with it and stop the
-        // music, without the user touching anything.
-        if (request.isTopFrame === false) return false
-        onOpenUrl(request.url)
-        return false
-      }}
-      onOpenWindow={(event) => {
-        if (isPeerTunesDataRequest(event.nativeEvent.targetUrl, localUrl)) return
-        onOpenUrl(event.nativeEvent.targetUrl)
-      }}
-      onLoadStart={() => { pageLoadedRef.current = false }}
-      onLoadEnd={() => {
-        audioExternalRef.current = null
-        void pushAudioRoute()
-        pageLoadedRef.current = true
-        showWidgetSong()
-      }}
-      onRenderProcessGone={() => recover(t('PeerTunes reloaded after a renderer restart'))}
-      onContentProcessDidTerminate={() => recover(t('PeerTunes reloaded after a renderer restart'))}
-      onError={(event) => {
-        recover(t('PeerTunes reloaded after a load failure ({error})', { error: event.nativeEvent.description }))
-      }}
-    />
+    <View ref={webViewBoxRef} collapsable={false} style={styles.webViewBox}>
+      <WebView
+        key={`${pageUrl}:${reloadNonce}:${tokenRun.run}`}
+        ref={webViewRef}
+        source={{ uri: pageUrl }}
+        // This view only ever shows the loopback app, so pin it. The navigation
+        // handler below is the real gate; this is the second layer behind it.
+        originWhitelist={[localUrl]}
+        // Left unset, react-native-webview gives iOS a deceleration of 0, and a
+        // swipe through the library stopped the moment the finger lifted.
+        decelerationRate={WEBVIEW_DECELERATION_RATE}
+        // The token goes in before the page's own scripts run. The server never
+        // sends it, so only this view has it.
+        injectedJavaScriptBeforeContentLoaded={`${createServerTokenScript(serverToken)}\n${createResetIdScript(resetId)}\n${languageScript}\n${PEERTUNES_BEFORE_LOAD_SCRIPT}`}
+        onMessage={(event) => {
+          const nowPlaying = parsePeerTunesNowPlaying(event.nativeEvent.data)
+          if (nowPlaying) {
+            audioRoute?.setNowPlaying?.(
+              nowPlaying.playing,
+              nowPlaying.title,
+              nowPlaying.artist,
+              nowPlaying.album,
+              readArtworkBase64(nowPlaying.artwork) ?? ''
+            )
+            updatePeerTunesWidget(nowPlaying)
+            return
+          }
+          const weight = parsePeerTunesHapticRequest(event.nativeEvent.data)
+          if (weight) {
+            tapFeedback(weight)
+            return
+          }
+          const keep = parsePeerTunesKeepOfflineRequest(event.nativeEvent.data)
+          if (keep) {
+            void keepOffline(keep.requestId, keep.url)
+            return
+          }
+          const kept = parsePeerTunesKeptFoldersRequest(event.nativeEvent.data)
+          if (kept) {
+            void keptFolders(kept.requestId, kept.urls)
+            return
+          }
+          const requestId = parsePeerTunesScanRequest(event.nativeEvent.data)
+          if (requestId) void beginScan(requestId)
+        }}
+        allowsInlineMediaPlayback={true}
+        allowsProtectedMedia={true}
+        androidLayerType='hardware'
+        cacheEnabled={false}
+        domStorageEnabled={true}
+        mediaCapturePermissionGrantType='prompt'
+        mediaPlaybackRequiresUserAction={false}
+        setBuiltInZoomControls={false}
+        textZoom={100}
+        style={styles.webView}
+        onShouldStartLoadWithRequest={(request) => {
+          if (isPeerTunesDataRequest(request.url, localUrl)) return false
+          if (isPeerTunesPageRequest(request.url, localUrl)) return true
+          // Only a real top-frame navigation should leave PeerTunes. A subframe
+          // pointing elsewhere used to take the whole tab with it and stop the
+          // music, without the user touching anything.
+          if (request.isTopFrame === false) return false
+          onOpenUrl(request.url)
+          return false
+        }}
+        onOpenWindow={(event) => {
+          if (isPeerTunesDataRequest(event.nativeEvent.targetUrl, localUrl)) return
+          onOpenUrl(event.nativeEvent.targetUrl)
+        }}
+        onLoadStart={() => { pageLoadedRef.current = false }}
+        onLoadEnd={() => {
+          audioExternalRef.current = null
+          void pushAudioRoute()
+          try {
+            audioRoute?.setPeerTunesView?.(findNodeHandle(webViewBoxRef.current) ?? 0)
+          } catch {}
+          pageLoadedRef.current = true
+          showWidgetSong()
+        }}
+        onRenderProcessGone={() => recover(t('PeerTunes reloaded after a renderer restart'))}
+        onContentProcessDidTerminate={() => recover(t('PeerTunes reloaded after a renderer restart'))}
+        onError={(event) => {
+          recover(t('PeerTunes reloaded after a load failure ({error})', { error: event.nativeEvent.description }))
+        }}
+      />
+    </View>
     <Modal
       supportedOrientations={MODAL_ORIENTATIONS}
       animationType='fade'
@@ -486,6 +512,9 @@ const styles = StyleSheet.create({
   },
   webView: {
     backgroundColor: '#0a0b0d',
+    flex: 1
+  },
+  webViewBox: {
     flex: 1
   }
 })

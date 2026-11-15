@@ -4,11 +4,17 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.media.MediaMetadata
 import android.media.session.MediaSession
 import android.media.session.PlaybackState
+import android.util.Base64
+import android.view.View
+import android.view.ViewGroup
+import android.webkit.WebView
 import androidx.core.content.ContextCompat
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
@@ -16,6 +22,7 @@ import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 import com.facebook.react.bridge.UiThreadUtil
+import com.facebook.react.uimanager.UIManagerHelper
 
 // Whether a Bluetooth output is connected. PeerTunes shows its Bluetooth mark
 // from this, because a WebView cannot see the audio outputs itself. Reading
@@ -24,12 +31,20 @@ import com.facebook.react.bridge.UiThreadUtil
 // Also PeerTunes' media session. A WebView never hands its audio to Android,
 // so play and pause from earbuds or a car had nowhere to go. The page says
 // what is playing, this session says so to the system, and the buttons come
-// back to the page as commands.
+// back to the page as commands. PeerTunesPlaybackService shows the session on
+// the lock screen and keeps the app running while a song plays.
 class PeerSkyAudioRouteModule(
   reactContext: ReactApplicationContext
 ) : ReactContextBaseJavaModule(reactContext) {
 
   private var mediaSession: MediaSession? = null
+  // PeerTunes' WebView, by its React tag. The buttons go to its page from
+  // here: a script sent through React Native waits until the app is on screen
+  // again, so a pause from the lock screen came only once PeerSky was opened.
+  private var peerTunesView = 0
+  // The cover as it came, and as a picture, so one cover is read only once.
+  private var artworkSource = ""
+  private var artwork: Bitmap? = null
 
   // The PeerChat service keeps the app running after a swipe away, and
   // PeerTunes kept playing with nothing on screen to stop it.
@@ -74,11 +89,14 @@ class PeerSkyAudioRouteModule(
     }
   }
 
+  // artwork: the cover as base64 JPEG or PNG, checked and kept small by the
+  // page's report (readArtworkBase64), or empty.
   @ReactMethod
-  fun setNowPlaying(playing: Boolean, title: String?, artist: String?) {
+  fun setNowPlaying(playing: Boolean, title: String?, artist: String?, album: String?, artwork: String?) {
     UiThreadUtil.runOnUiThread {
       try {
         val session = mediaSession ?: MediaSession(reactApplicationContext, "PeerTunes").also {
+          it.setSessionActivity(PeerTunesPlaybackService.openPeerTunes(reactApplicationContext))
           it.setCallback(object : MediaSession.Callback() {
             override fun onPlay() = command("play")
             override fun onPause() = command("pause")
@@ -88,10 +106,13 @@ class PeerSkyAudioRouteModule(
           })
           mediaSession = it
         }
+        val cover = cover(artwork.orEmpty())
         session.setMetadata(
           MediaMetadata.Builder()
             .putString(MediaMetadata.METADATA_KEY_TITLE, title.orEmpty())
             .putString(MediaMetadata.METADATA_KEY_ARTIST, artist.orEmpty())
+            .putString(MediaMetadata.METADATA_KEY_ALBUM, album.orEmpty())
+            .apply { if (cover != null) putBitmap(MediaMetadata.METADATA_KEY_ART, cover) }
             .build()
         )
         session.setPlaybackState(
@@ -105,9 +126,33 @@ class PeerSkyAudioRouteModule(
             .build()
         )
         session.isActive = true
+        PeerTunesNowPlaying.session = session
+        PeerTunesNowPlaying.playing = playing
+        PeerTunesNowPlaying.title = title.orEmpty()
+        PeerTunesNowPlaying.artist = artist.orEmpty()
+        PeerTunesNowPlaying.album = album.orEmpty()
+        PeerTunesNowPlaying.artwork = cover
+        PeerTunesPlaybackService.sync(reactApplicationContext)
       } catch (error: Exception) {
       }
     }
+  }
+
+  private fun cover(source: String): Bitmap? {
+    if (source == artworkSource) return artwork
+    artworkSource = source
+    artwork = if (source.isEmpty()) null else try {
+      val bytes = Base64.decode(source, Base64.DEFAULT)
+      BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+    } catch (error: Exception) {
+      null
+    }
+    return artwork
+  }
+
+  @ReactMethod
+  fun setPeerTunesView(tag: Double) {
+    peerTunesView = tag.toInt()
   }
 
   @ReactMethod
@@ -115,11 +160,45 @@ class PeerSkyAudioRouteModule(
     UiThreadUtil.runOnUiThread { releaseMediaSession() }
   }
 
+  // name is one of the four the callback above sends, never the page's text.
   private fun command(name: String) {
-    reactApplicationContext.emitDeviceEvent(COMMAND_EVENT, name)
+    UiThreadUtil.runOnUiThread {
+      val webView = peerTunesWebView()
+      if (webView == null) {
+        reactApplicationContext.emitDeviceEvent(COMMAND_EVENT, name)
+        return@runOnUiThread
+      }
+      webView.evaluateJavascript("window.__peerskyMediaCommand && window.__peerskyMediaCommand(\"$name\"); true;", null)
+      reactApplicationContext.emitDeviceEvent(COMMAND_SENT_EVENT, name)
+    }
+  }
+
+  private fun peerTunesWebView(): WebView? {
+    val tag = peerTunesView
+    if (tag == 0) return null
+    return try {
+      findWebView(UIManagerHelper.getUIManagerForReactTag(reactApplicationContext, tag)?.resolveView(tag))
+    } catch (error: Exception) {
+      null
+    }
+  }
+
+  private fun findWebView(view: View?): WebView? {
+    if (view is WebView) return view
+    if (view !is ViewGroup) return null
+    for (index in 0 until view.childCount) {
+      findWebView(view.getChildAt(index))?.let { return it }
+    }
+    return null
   }
 
   private fun releaseMediaSession() {
+    PeerTunesPlaybackService.stop()
+    PeerTunesNowPlaying.session = null
+    PeerTunesNowPlaying.playing = false
+    PeerTunesNowPlaying.artwork = null
+    artworkSource = ""
+    artwork = null
     mediaSession?.let {
       it.isActive = false
       it.release()
@@ -129,6 +208,8 @@ class PeerSkyAudioRouteModule(
 
   companion object {
     private const val COMMAND_EVENT = "PeerSkyMediaCommand"
+    // The command already reached the page: what is left is the app's own.
+    private const val COMMAND_SENT_EVENT = "PeerSkyMediaCommandSent"
     private const val TASK_REMOVED_EVENT = "PeerSkyTaskRemoved"
     // Sent by PeerChatBackgroundService, after the package name.
     const val TASK_REMOVED_ACTION = ".TASK_REMOVED"

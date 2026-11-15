@@ -16,6 +16,11 @@
     "peerchat_background_offline": "Offline. Ketuk untuk terhubung lagi",
     "peerchat_background_locked": "Terhubung saat kunci ponsel dibuka",
     "peerchat_background_channel": "Koneksi latar belakang PeerChat",
-    "peerchat_background_channel_description": "Menjaga PeerChat tetap terhubung saat PeerSky berjalan di latar belakang"
+    "peerchat_background_channel_description": "Menjaga PeerChat tetap terhubung saat PeerSky berjalan di latar belakang",
+    "peertunes_playback_channel": "Sedang diputar",
+    "peertunes_play": "Putar",
+    "peertunes_pause": "Jeda",
+    "peertunes_previous": "Lagu sebelumnya",
+    "peertunes_next": "Lagu berikutnya"
   }
 }

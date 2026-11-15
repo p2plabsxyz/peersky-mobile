@@ -16,6 +16,11 @@
     "peerchat_background_offline": "دون اتصال. اضغط لإعادة الاتصال",
     "peerchat_background_locked": "يتصل عند فتح قفل هاتفك",
     "peerchat_background_channel": "اتصال PeerChat في الخلفية",
-    "peerchat_background_channel_description": "يُبقي PeerChat متصلًا أثناء عمل PeerSky في الخلفية"
+    "peerchat_background_channel_description": "يُبقي PeerChat متصلًا أثناء عمل PeerSky في الخلفية",
+    "peertunes_playback_channel": "قيد التشغيل الآن",
+    "peertunes_play": "تشغيل",
+    "peertunes_pause": "إيقاف مؤقت",
+    "peertunes_previous": "الأغنية السابقة",
+    "peertunes_next": "الأغنية التالية"
   }
 }

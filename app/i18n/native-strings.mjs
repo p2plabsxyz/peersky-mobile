@@ -73,5 +73,12 @@ export const ANDROID_TEXT = Object.freeze({
   // unlocked (app/privacy/chat-seal-key.ts).
   peerchat_background_locked: 'Connects when you unlock your phone',
   peerchat_background_channel: 'PeerChat background connection',
-  peerchat_background_channel_description: 'Keeps PeerChat connected while PeerSky is in the background'
+  peerchat_background_channel_description: 'Keeps PeerChat connected while PeerSky is in the background',
+  // PeerTunes' notification while a song plays, with its buttons
+  // (PeerTunesPlaybackService), in the words its widget uses.
+  peertunes_playback_channel: 'Now playing',
+  peertunes_play: 'Play',
+  peertunes_pause: 'Pause',
+  peertunes_previous: 'Previous song',
+  peertunes_next: 'Next song'
 })

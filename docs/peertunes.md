@@ -70,7 +70,11 @@ LAN discovery is wired into the shared Hyper SDK in `backend/hyper/runtime.mjs`,
 
 ## Background playback
 
-PeerTunes plays through its WebView. iOS declares the `audio` background mode in `app.json`, so playback continues when PeerSky leaves the foreground. Android's WebView keeps playing on its own, so the app declares no media playback service there (`expo-audio` runs with `enableBackgroundPlayback: false`, and the permission is blocked). The page publishes track, artist, album and artwork through the Media Session API, which is what the system player shows.
+PeerTunes plays through its WebView. iOS declares the `audio` background mode in `app.json`, so playback continues when PeerSky leaves the foreground.
+
+On Android the song stopped once the app was in the background: Android freezes an app with nothing in the foreground about a minute after another app comes to the front, the phone locked from the home screen included. So while a song plays, `PeerTunesPlaybackService` keeps PeerSky in the foreground as a `mediaPlayback` service (`plugins/with-audio-route.js`). Its notification carries PeerTunes' media session, so the lock screen and the notification shade show the song with its cover and its buttons, which reach the page as earbuds' buttons do. Paused, the service leaves the foreground and the notification stays, to play again from. Swiping it away or closing PeerTunes ends it. `expo-audio` still runs with `enableBackgroundPlayback: false`, since PeerTunes does not play through it. The Play Console asks for the `mediaPlayback` type to be declared.
+
+The page publishes track, artist, album and artwork through the Media Session API, which is what the system player shows.
 
 ## Safety notes
 
