@@ -1,0 +1,29 @@
+diff --git a/node_modules/dht-rpc/lib/io.js b/node_modules/dht-rpc/lib/io.js
+index e2c6f23..50adea0 100644
+--- a/node_modules/dht-rpc/lib/io.js
++++ b/node_modules/dht-rpc/lib/io.js
+@@ -166,8 +166,13 @@ module.exports = class IO {
+ 
+   async _destroy() {
+     // simplifies timing to await the bind here also, although it might be unneeded
+-    await this.bind()
+-    await this._clear(false)
++    try {
++      await this.bind()
++    } finally {
++      // A failed bind closed its own sockets, but the network watcher started
++      // with this IO still runs, and it keeps the process alive for good
++      await this._clear(false)
++    }
+   }
+ 
+   async _clear(suspended) {
+@@ -190,7 +195,7 @@ module.exports = class IO {
+       req.onerror(suspended ? IO_SUSPENDED() : REQUEST_DESTROYED(), req)
+     }
+ 
+-    await Promise.allSettled([this.serverSocket.close(), this.clientSocket.close()])
++    await Promise.allSettled([this.serverSocket?.close(), this.clientSocket?.close()])
+ 
+     this.networkInterfaces.destroy()
+   }
