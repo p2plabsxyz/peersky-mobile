@@ -28,7 +28,9 @@ import {
   recordBrowserWebNavigationState,
   normalizeCustomSearchUrl,
   replaceBrowserEntryState,
-  syncBrowserEntryState
+  syncBrowserEntryState,
+  getBrowserWebViewSource,
+  needsNewBrowserWebView
 } from '../../app/browser-shell.mjs'
 import {
   INTERNAL_APPS,
@@ -942,6 +944,88 @@ describe('a load the app started', () => {
     // Back, Forward and a WebView built again leave nothing of it behind.
     assert.match(app.slice(app.indexOf('function startBrowserWebViewTraversal ('), app.indexOf('function clearBrowserTraversal (')), /browserStartedLoadsRef\.current\.delete\(tabId\)/)
     assert.match(app.slice(app.indexOf('function remountBrowserWebView ('), app.indexOf('function getBrowserWebViewInstanceKey (')), /browserStartedLoadsRef\.current\.delete\(tabId\)/)
+  })
+})
+
+// A search typed in a site's own search box landed on the page the box was
+// on. The box pushes an entry of its own as it opens; Go steps back off it and
+// starts the search a moment later. Following that step back, the tab gave
+// the WebView the page's address again, which arrived after the search had
+// started and sent the WebView back there.
+describe('a page that moves itself', () => {
+  const key = 'tab-1:web:mobile:0:0'
+  const view = 41
+  const app = (url) => ({ kind: 'web', uri: url })
+  const page = (url) => ({ kind: 'web', uri: url, view })
+  const typed = 'https://example.com'
+  const home = 'https://www.example.com/'
+  const box = 'https://www.example.com/#search'
+  const search = 'https://www.example.com/search?q=weather'
+
+  test('keeps the address its WebView was given through a search box that steps back', () => {
+    const given = []
+    const stepUris = []
+    let sent
+    const show = (state, built = true) => {
+      const source = state.history[state.historyIndex].source
+      sent = getBrowserWebViewSource(sent, key, source, built)
+      given.push(sent.uri)
+      stepUris.push(source.uri)
+      return state
+    }
+
+    let state = show(commitBrowserEntryState({ history: [{ url: BROWSER_HOME_URL, source: { kind: 'home' } }], historyIndex: 0 }, typed, app(typed)), false)
+    state = show(recordBrowserWebNavigationState(state, home, page(home), null, false, false, { move: 'replace', from: typed }))
+    state = show(recordBrowserWebNavigationState(state, box, page(box), null, true, false, null))
+    // The step back: the tab is on the page again, as the page is.
+    state = show(recordBrowserWebNavigationState(state, home, page(home), null, true, false, { move: 'traverse', from: null }))
+    assert.equal(state.history[state.historyIndex].url, home)
+    state = show(recordBrowserWebNavigationState(state, search, page(search), null, true, false, null))
+
+    // Given each step's own address, the WebView was sent to the page
+    // again at the step back: the load that beat the search.
+    assert.deepEqual(stepUris.slice(2, 4), [box, home])
+    // Now it was given one address, the one the app sent it to.
+    assert.deepEqual([...new Set(given)], [typed])
+    assert.deepEqual(state.history.map((entry) => entry.url), [BROWSER_HOME_URL, home, search])
+    assert.equal(getBrowserBackState(state).currentUrl, home)
+  })
+
+  test('a step the app sends the tab to is given its own address', () => {
+    const sent = { key, uri: typed }
+    assert.deepEqual(getBrowserWebViewSource(sent, key, app(search), true), { key, uri: search })
+  })
+
+  test('a WebView built again, or not built yet, is given the step\'s address', () => {
+    const sent = { key, uri: typed }
+    assert.deepEqual(getBrowserWebViewSource(sent, 'tab-1:web:desktop:0:0', page(search), true), { key: 'tab-1:web:desktop:0:0', uri: search })
+    assert.deepEqual(getBrowserWebViewSource(sent, key, page(search), false), { key, uri: search })
+    assert.deepEqual(getBrowserWebViewSource(undefined, key, page(search), true), { key, uri: search })
+  })
+
+  test('the address the WebView was given, asked for again from elsewhere, needs a new WebView', () => {
+    const sent = { key, uri: typed }
+    assert.equal(needsNewBrowserWebView(sent, { url: search, source: page(search) }, typed), true)
+    // Somewhere else, or where the page already is, the address given does the work.
+    assert.equal(needsNewBrowserWebView(sent, { url: search, source: page(search) }, 'https://example.com/'), false)
+    assert.equal(needsNewBrowserWebView(sent, { url: typed, source: page(typed) }, typed), false)
+    // A step that is not a web page has no WebView of that kind on screen.
+    assert.equal(needsNewBrowserWebView(sent, { url: BROWSER_HOME_URL, source: { kind: 'home' } }, typed), false)
+  })
+
+  test('the app gives each WebView its address through them', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const source = await readFile(new URL('../../app/index.tsx', import.meta.url), 'utf8')
+    assert.match(source, /\? \{ uri: getBrowserWebViewUri\(tab\.id, webViewKey, entry\.source\) \}/)
+    assert.doesNotMatch(source, /\? \{ uri: entry\.source\.uri \}/)
+    const typedLoad = source.slice(source.indexOf('    if (isWebUrl(nextUrl)) {'), source.indexOf('    cancelPendingBrowserLoad()\n    showBrowserError(nextUrl'))
+    assert.match(typedLoad, /prepareBrowserWebViewLoad\(tabId, webUrl\)\s+commitBrowserEntry\(webUrl/)
+    const start = source.slice(source.indexOf('function onBrowserShouldStartLoad ('), source.indexOf('function onBrowserOpenWindow ('))
+    assert.equal(start.match(/prepareBrowserWebViewLoad\(tabId, webUrl\)/g)?.length, 2)
+    for (const name of ['function remountBrowserWebView (', 'function forgetBrowserTabResources (']) {
+      const body = source.slice(source.indexOf(name), source.indexOf('\n  }\n', source.indexOf(name)))
+      assert.match(body, /browserWebViewUrisRef\.current\.delete\(tabId\)/, name)
+    }
   })
 })
 

@@ -197,6 +197,38 @@ export function syncBrowserEntryState (state, url, source) {
 }
 
 /**
+ * The address a tab's WebView is given to load, from what it was given last.
+ * A step the WebView reported itself (its source names a WebView) is where
+ * the page already went, so the WebView keeps the address it was last given.
+ * Given the step's own address, a page that had moved on by the time it
+ * arrived was sent back there: a search box that steps back off its own
+ * history entry and starts the search a moment later had the tab, following
+ * that step back, send the WebView to the page before the search as the
+ * search began. A step the app sent the tab to, or a WebView just built, is
+ * given the step's address.
+ *
+ * @param {{ key: string, uri: string } | undefined} sent what the WebView
+ *   under this key was given last
+ * @param {string} key the key of the WebView the step is shown in
+ * @param {{ uri: string, view?: number }} source the step's web source
+ * @param {boolean} built whether that WebView is already built
+ * @returns {{ key: string, uri: string }}
+ */
+export function getBrowserWebViewSource (sent, key, source, built) {
+  if (built && sent?.key === key && typeof source.view === 'number') return sent
+  return { key, uri: source.uri }
+}
+
+/**
+ * Whether the app sending a tab to url needs a new WebView: the WebView was
+ * last given url and its page has gone on from there, so giving it url again
+ * changes nothing and it would not move.
+ */
+export function needsNewBrowserWebView (sent, entry, url) {
+  return entry?.source?.kind === 'web' && entry.url !== url && sent?.uri === url
+}
+
+/**
  * How Back or Forward goes from the step on screen. A web page steps in its
  * own WebView, which keeps the page it goes to as it was left: where it was
  * scrolled, what was typed in it, its own history and a form's result, as

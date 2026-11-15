@@ -51,6 +51,7 @@ import {
   getBrowserRequestAction,
   getBrowserTraversal,
   getBrowserWebViewKey,
+  getBrowserWebViewSource,
   getHttpsUpgradeUrl,
   getSearchUrl,
   isHyperUrl,
@@ -58,6 +59,7 @@ import {
   isUncommittedNavigationFinish,
   isWebUrl,
   MAX_BROWSER_URL_LENGTH,
+  needsNewBrowserWebView,
   normalizeBrowserAddress,
   recordBrowserErrorState,
   recordBrowserWebNavigationState,
@@ -607,6 +609,9 @@ export default function App () {
   const browserPageMovesRef = useRef(new Map<string, BrowserPageMove[]>())
   const browserAddedPagesRef = useRef(new Map<string, { url: string, index: number, at: number }>())
   const browserWebHistoryRef = useRef(new Map<string, BrowserWebHistory>())
+  // The address each tab's WebView was last sent to, under the key of the
+  // WebView it was sent to. See getBrowserWebViewUri.
+  const browserWebViewUrisRef = useRef(new Map<string, { key: string, uri: string }>())
   const browserTraversalsRef = useRef(new Map<string, BrowserTraversal>())
   // Back and Forward pressed while one was on its way, by tab, for once the
   // tab has drawn the step it landed on.
@@ -1430,6 +1435,9 @@ export default function App () {
     for (const tabId of [...browserWebHistoryRef.current.keys()]) {
       if (!browserLiveTabIds.includes(tabId)) browserWebHistoryRef.current.delete(tabId)
     }
+    for (const tabId of [...browserWebViewUrisRef.current.keys()]) {
+      if (!browserLiveTabIds.includes(tabId)) browserWebViewUrisRef.current.delete(tabId)
+    }
   }, [browserLiveTabIds])
 
   useEffect(() => {
@@ -1861,6 +1869,7 @@ export default function App () {
       cancelPendingBrowserLoad()
       const tabId = browserTabsStateRef.current.activeTabId
       const webUrl = upgradeBrowserUrl(tabId, nextUrl)
+      prepareBrowserWebViewLoad(tabId, webUrl)
       commitBrowserEntry(webUrl, {
         kind: 'web',
         uri: webUrl
@@ -2474,8 +2483,31 @@ export default function App () {
     setBrowserWebViewGenerations((current) => ({ ...current, [tabId]: generation }))
     // The new WebView has a list of its own, empty, and nothing it was asked.
     browserWebHistoryRef.current.delete(tabId)
+    browserWebViewUrisRef.current.delete(tabId)
     browserStartedLoadsRef.current.delete(tabId)
     clearBrowserTraversal(tabId)
+  }
+
+  // The address a tab's WebView is given to load (getBrowserWebViewSource).
+  // A WebView that is not built yet has nothing in browserWebViewRefs: its
+  // ref is let go as it is taken down.
+  function getBrowserWebViewUri (tabId: string, key: string, source: { uri: string, view?: number }) {
+    const sent = getBrowserWebViewSource(
+      browserWebViewUrisRef.current.get(tabId),
+      key,
+      source,
+      browserWebViewRefs.current.has(tabId)
+    )
+    browserWebViewUrisRef.current.set(tabId, sent)
+    return sent.uri
+  }
+
+  // Before the app sends a tab's WebView somewhere (needsNewBrowserWebView).
+  function prepareBrowserWebViewLoad (tabId: string, url: string) {
+    const tab = browserTabsStateRef.current.tabs.find((item) => item.id === tabId)
+    if (needsNewBrowserWebView(browserWebViewUrisRef.current.get(tabId), tab?.history[tab.historyIndex], url)) {
+      remountBrowserWebView(tabId)
+    }
   }
 
   // The WebView key a tab's step is shown with. A WebView built under another
@@ -3255,6 +3287,7 @@ export default function App () {
     browserPageMovesRef.current.delete(tabId)
     browserAddedPagesRef.current.delete(tabId)
     browserWebHistoryRef.current.delete(tabId)
+    browserWebViewUrisRef.current.delete(tabId)
     browserStartedLoadsRef.current.delete(tabId)
     clearBrowserTraversal(tabId)
     browserTabOpenersRef.current.delete(tabId)
@@ -3617,6 +3650,7 @@ export default function App () {
       const tab = browserTabsStateRef.current.tabs.find((item) => item.id === tabId)
       const stepUrl = tab?.history[tab.historyIndex]?.url
       const sameStep = stepUrl === requestUrl || (Boolean(stepUrl) && browserStartedLoadsRef.current.get(tabId) === stepUrl)
+      prepareBrowserWebViewLoad(tabId, webUrl)
       browserStartedLoadsRef.current.set(tabId, webUrl)
       if (isActive) {
         if (sameStep) replaceBrowserEntry(webUrl, { kind: 'web', uri: webUrl })
@@ -3659,6 +3693,7 @@ export default function App () {
     if (action.action === 'commit-web' && action.url && action.source) {
       const webUrl = upgradeBrowserUrl(tabId, action.url)
       const webSource: BrowserSource = { kind: 'web', uri: webUrl }
+      prepareBrowserWebViewLoad(tabId, webUrl)
       browserStartedLoadsRef.current.set(tabId, webUrl)
       if (isActive) {
         cancelPendingBrowserLoad()
@@ -6652,7 +6687,7 @@ export default function App () {
                 }
               }}
               source={entry.source.kind === 'web'
-                ? { uri: entry.source.uri }
+                ? { uri: getBrowserWebViewUri(tab.id, webViewKey, entry.source) }
                 : {
                     html: entry.source.html,
                     // A hyper:// page is shown under its own address, so its
