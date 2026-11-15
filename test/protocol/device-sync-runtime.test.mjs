@@ -23,6 +23,11 @@ const dir = await mkdtemp(path.join(tmpdir(), 'peersky-device-sync-runtime-'))
 // mean they are running in Bare.
 globalThis.Bare = { argv: [path.join(dir, 'hyper-storage')] }
 
+// Closing the stores tells the public DHT this phone has left, so it takes as
+// long as the network does: a few seconds on a good connection, past 10 on a
+// slow CI runner. A store that is stuck never closes at all.
+const CLOSE_WAIT_MS = 60_000
+
 function within (promise, ms, what) {
   let timer
   return Promise.race([
@@ -34,7 +39,7 @@ function within (promise, ms, what) {
 }
 
 test.after(async () => {
-  const closed = await within(closeHyperRuntime(), 10_000, 'closing the stores').then(() => true, () => false)
+  const closed = await within(closeHyperRuntime(), CLOSE_WAIT_MS, 'closing the stores').then(() => true, () => false)
   await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
   if (!closed) setTimeout(() => process.exit(1), 500)
 })
@@ -112,6 +117,6 @@ test('a linked phone meets its devices on the private store, and stops with it',
   assert.equal(forgetDeviceSyncDevice(desktop), true)
   assert.deepEqual(getDeviceSyncSnapshot().devices, [])
 
-  await within(closeHyperRuntime(), 10_000, 'closing the stores')
+  await within(closeHyperRuntime(), CLOSE_WAIT_MS, 'closing the stores')
   assert.equal(getDeviceSyncSnapshot().running, false)
 })
